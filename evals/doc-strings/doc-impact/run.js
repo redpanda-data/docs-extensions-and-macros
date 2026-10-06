@@ -21,14 +21,19 @@ const lib = require('./lib')
 const HERE = __dirname
 const DEFAULT_ITEMS = path.join(HERE, 'items.json')
 const CONTROLS = path.join(HERE, 'controls.json')
-const FIXTURES = path.join(HERE, 'fixtures')
-const RECORDINGS = path.join(HERE, 'recordings')
+// An item set keeps its frozen inputs and recordings beside it, so a set
+// from a private repository can live in a private location and still run
+// from this checkout with --items.
+const dataDirs = (itemsFile) => ({ fixtures: path.join(path.dirname(itemsFile), 'fixtures'), recordings: path.join(path.dirname(itemsFile), 'recordings') })
+let FIXTURES = path.join(HERE, 'fixtures')
+let RECORDINGS = path.join(HERE, 'recordings')
 const TOOLS_SNAPSHOT = path.join(HERE, 'mcp-tools.json')
 const REPLAY_SERVER = path.join(HERE, 'replay-server.js')
 const RESULTS = path.join(HERE, '..', 'results')
 
 const USAGE = `Usage: node evals/doc-strings/run-evals.js --doc-impact [options]
-  --items <file>          item file (default evals/doc-strings/doc-impact/items.json)
+  --items <file>          item file (default evals/doc-strings/doc-impact/items.json);
+                          its fixtures/ and recordings/ are read beside it
   --controls              run the positive and negative controls instead of items
   --case <id>[,<id>]      run only these items
   --mcp replay|record|live
@@ -162,7 +167,12 @@ function refreshItem (item, wf, cloneRoot) {
   const body = sh('git', ['-C', dir, 'diff', '--no-color', '--no-ext-diff', range, '--', '.', ...excludes])
   const diff = capDiff(diffHeader(leftOut) + body, byteLimit)
 
-  const lint = spawnSync('node', [evalLib.DOC_TOOLS, 'lint-strings', '--repo', dir, '--diff', item.base_sha, '--format', 'json'], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 })
+  // The caller workflow in the engineering repo picks the surfaces it lints,
+  // so read them from its own copy at head_sha, as the run did.
+  const surfaces = callerSurfaces(dir)
+  const lintArgs = [evalLib.DOC_TOOLS, 'lint-strings', '--repo', dir, '--diff', item.base_sha, '--format', 'json']
+  if (surfaces) lintArgs.push('--surface', surfaces)
+  const lint = spawnSync('node', lintArgs, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 })
   if (lint.error) throw lint.error
   if (lint.status !== 0 || !lint.stdout.trim()) throw new Error(`lint-strings exited ${lint.status}: ${(lint.stderr || '').slice(0, 2000)}`)
   const findings = JSON.parse(lint.stdout)
@@ -173,7 +183,27 @@ function refreshItem (item, wf, cloneRoot) {
   fs.writeFileSync(path.join(out, 'lint-findings.json'), JSON.stringify(findings, null, 2) + '\n')
   const decls = (findings.summary && findings.summary.totalDeclarations) || 0
   const removals = (findings.summary && findings.summary.removedSurfaceLines) || 0
-  return { bytes: Buffer.byteLength(diff), leftOut, decls, removals }
+  return { bytes: Buffer.byteLength(diff), leftOut, decls, removals, surfaces }
+}
+
+const CALLER = '.github/workflows/doc-strings-review.yml'
+
+/** The `surfaces:` input in a doc-strings-review caller workflow, or null. */
+function parseSurfaces (text) {
+  const m = String(text || '').match(/^\s+surfaces:\s*['"]?([a-z0-9,_-]+)['"]?\s*$/m)
+  return m ? m[1] : null
+}
+
+/**
+ * The surfaces the repo's own caller lints: its copy at head_sha, or, for a
+ * PR older than the caller, the default branch's copy (what the review
+ * would lint if the PR were opened today). null lints every surface.
+ */
+function callerSurfaces (dir) {
+  const file = path.join(dir, CALLER)
+  if (fs.existsSync(file)) return parseSurfaces(fs.readFileSync(file, 'utf8'))
+  const r = spawnSync('git', ['-C', dir, 'show', `refs/remotes/origin/HEAD:${CALLER}`], { encoding: 'utf8' })
+  return r.status === 0 ? parseSurfaces(r.stdout) : null
 }
 
 // ---------------------------------------------------------------------------
@@ -260,6 +290,16 @@ function runClaude (prompt, { cwd, model, settings, mcpConfig, timeoutMs = 60000
   }
 }
 
+// The docs server's refusal text for its anonymous tool-call quota and its
+// HTTP rate limit. Matched loosely so a reworded refusal still stops a save.
+const QUOTA_REFUSAL = /(tool[- ]call limit|rate.?limit|quota|too many requests|reconnect|sign in)/i
+const blockText = (content) => lib.contentBlocks(content).map((b) => b.text || '').join('\n')
+
+/** MCP calls the server refused for its quota or rate limit. */
+function quotaRefusals (mcpCalls) {
+  return (mcpCalls || []).filter((c) => c.isError && QUOTA_REFUSAL.test(blockText(c.content)))
+}
+
 function runItem (item, ctx) {
   const { options, prompts, settings, filter, caseDir } = ctx
   const ev = { id: item.id, label: item.label, status: 'OK', flagged: false, pages: [], names: [], mcp_calls: 0, replay_nearest: 0, replay_misses: 0, notes: [] }
@@ -316,6 +356,13 @@ function runItem (item, ctx) {
       ev.replay_nearest = lines.filter((l) => l.match === 'nearest').length
       ev.replay_misses = lines.filter((l) => l.match === 'miss').length
       fs.copyFileSync(replayLog, path.join(caseDir, 'replay-log.jsonl'))
+    }
+    // A refusal from the server's anonymous quota or rate limit is not a
+    // docs answer. Saving it would replay the refusal on every later run,
+    // and scoring it would grade the quota, not the pass.
+    const refused = quotaRefusals(parsed.mcpCalls)
+    if (refused.length && options.mcp !== 'replay') {
+      return { ...ev, status: 'HARNESS_ERROR', notes: [`${refused.length} MCP call(s) refused by the server's limit${options.mcp === 'record' ? '; recording not saved' : ''}: ${blockText(refused[0].content).slice(0, 200)}`] }
     }
     if (options.mcp === 'record') {
       fs.mkdirSync(RECORDINGS, { recursive: true })
@@ -437,6 +484,7 @@ async function main (argv) {
     }
     items = items.filter((i) => options.cases.includes(i.id))
   }
+  if (!options.controls) ({ fixtures: FIXTURES, recordings: RECORDINGS } = dataDirs(options.items))
   const skipped = options.controls || options.includeUnconfirmed ? [] : items.filter((i) => !lib.isConfirmed(i))
   items = items.filter((i) => !skipped.includes(i))
 
@@ -446,7 +494,7 @@ async function main (argv) {
     for (const item of items.filter((i) => !i.fixture)) {
       try {
         const r = refreshItem(item, wf, cloneRoot)
-        process.stdout.write(`froze ${item.id}: diff ${r.bytes} bytes (${r.leftOut} file(s) left out), ${r.decls} declaration(s), ${r.removals} removed surface line(s)\n`)
+        process.stdout.write(`froze ${item.id}: diff ${r.bytes} bytes (${r.leftOut} file(s) left out), ${r.decls} declaration(s), ${r.removals} removed surface line(s), surfaces ${r.surfaces || 'all'}\n`)
       } catch (err) {
         failed++
         process.stdout.write(`FAILED ${item.id}: ${err.message.split('\n')[0]}\n`)
@@ -536,4 +584,4 @@ async function main (argv) {
   return runs.some((r) => r.status !== 'OK') ? 2 : 0
 }
 
-module.exports = { main, materializeControl, controlVerdict }
+module.exports = { main, materializeControl, controlVerdict, callerSurfaces, parseSurfaces, quotaRefusals }

@@ -267,17 +267,67 @@ replay log and `evidence.json`, plus a `summary.json` for the run.
 |`base_sha`, `head_sha` |Full SHAs: the PR's base and the head that was reviewed.
 |`title`, `body` |The PR title and description, frozen.
 |`label` |`needs_docs` or `no_change`.
-|`label_strength` |`strong` or `weak`.
-|`confirmed_by` |Who confirmed a weak label, or `null`.
+|`label_strength` |How good the evidence is: `strong` (a merged docs PR
+edited a non-generated page, or a ticket the pass opened for this PR was
+accepted), `medium`, `weak`, `pending` or `provisional`. See the header of
+`doc-impact/mine-candidates.js` for each.
+|`confirmed_by` |Who confirmed a label that is not `strong`, or `null`.
 |`expected_pages` |For `needs_docs`: the `https://docs.redpanda.com/` pages a
 writer actually edited. Empty for `no_change`.
+|`expected_partials` |Optional: edited partials, as
+`partial:<repo>:<path>`. Not scored, because a finding names pages.
 |`reason` |One line on why the label holds.
 |`stacked_on` |Optional: the id of the item this PR is stacked on or follows
-up, for the duplicate rate.
+up, for the duplicate rate. A backport is stacked on its original.
 |===
+
+Seeded items also carry provenance the harness does not read:
+`merge_base_sha`, `state`, `backport`, `review_ran` (whether the review
+workflow ran on the PR at all), `production_dispatched` (whether the
+production pass opened or updated a ticket), and `evidence`.
 
 Only items with `label_strength: strong` or a `confirmed_by` value run and
 count by default. `--include-unconfirmed` runs and scores the rest.
+
+An item file keeps its frozen inputs and recordings beside it, in
+`fixtures/<id>/` and `recordings/<id>.json` next to the file. Pass
+`--items <file>` to run a set kept somewhere else.
+
+==== Private repositories
+
+This repository is public. An item carries its PR's title and
+description, its fixture carries the PR's source diff, and its recording
+carries docs answers to questions about that diff, so items from a private
+repository such as streaming-enterprise never go in
+`doc-impact/items.json`. Keep them in a private location of their own and
+run them with `--items <private-dir>/items.json`.
+
+==== Seeding items from past PRs
+
+`doc-impact/mine-candidates.js` finds engineering PRs where the review
+workflow ran, joins them to DOC tickets and to docs and cloud-docs PRs that
+reference them, and proposes a label and strength for each. Its header
+comment lists what it needs (a `gh` login that can read the repositories,
+and a Jira export) and how each label is decided.
+
+[source,bash]
+----
+node evals/doc-strings/doc-impact/mine-candidates.js \
+  --jira jira-export.json --out <scratch-dir> --provisional
+node evals/doc-strings/doc-impact/mine-candidates.js \
+  --to-items <scratch-dir>/candidates.json \
+  --items-out evals/doc-strings/doc-impact/items.json \
+  --private-out <private-dir>/items.json
+----
+
+Keep `--out` outside the repository: it holds an API cache and
+`candidates.csv`, the sheet writers fill in to confirm labels. `--to-items`
+asks GitHub which repositories are private and refuses to run without
+`--private-out` when any are. It keeps items a writer has confirmed
+(`confirmed_by` set) and replaces the rest. The candidates are proposals:
+a ticket-based `strong` label means a writer accepted a ticket the pass
+itself opened, so it is not independent of the pass, and every other
+strength needs a writer's `confirmed_by` before it counts.
 
 Freeze an item's inputs once, with network access:
 
@@ -288,7 +338,9 @@ node evals/doc-strings/run-evals.js --doc-impact --refresh-diffs --case <id>
 
 This makes a partial clone with `gh repo clone` (private repos work with
 your `gh` login), checks out `head_sha`, runs this checkout's
-`doc-tools lint-strings --diff <base_sha>`, and writes the merge-base source
+`doc-tools lint-strings --diff <base_sha>` on the surfaces the repository's
+own `doc-strings-review.yml` caller passes (its copy at `head_sha`, or the
+default branch's when the PR predates the caller), and writes the merge-base source
 diff with the workflow's own pathspec excludes and size cap. The output
 lands in `doc-impact/fixtures/<id>/`. Clones are cached under the system
 temp directory, and the command prints where; delete it when you finish,
@@ -325,9 +377,11 @@ not see the docs it asked for: re-record that item. An item with no
 recording is a harness error in replay mode.
 * `--mcp live` calls the live server and saves nothing.
 
-Anonymous access to the docs MCP server is limited to a few tool calls per
-day per network address. Record a large item set from a signed-in MCP
-config, or over several days.
+Anonymous access to the docs MCP server can be limited per network
+address. A recording run treats a tool call the server refused for its
+limit as a harness error and does not save that item's recording, so a
+refusal is never replayed as a docs answer. Re-record those items from a
+signed-in MCP config (`--mcp-config`) or later.
 
 === Scoring
 
@@ -350,6 +404,41 @@ flagged: the share that repeat a page or a finding name of that item.
 
 Items with a harness or model error are excluded from every score and make
 the run exit `2`.
+
+=== Baseline and prompt changes
+
+The baseline is the score of the current workflow prompt over the frozen,
+recorded items, replayed so that only the model's own variance moves it.
+
+[source,bash]
+----
+# Record once per item set (live docs MCP), then replay.
+node evals/doc-strings/run-evals.js --doc-impact --mcp record --include-unconfirmed
+node evals/doc-strings/run-evals.js --doc-impact --json > baseline-1.json
+node evals/doc-strings/run-evals.js --doc-impact --json > baseline-2.json
+node evals/doc-strings/run-evals.js --doc-impact --include-unconfirmed --json > baseline-all.json
+# The same for a private set, with --items <private-dir>/items.json.
+----
+
+The default model is `sonnet`, the workflow's non-gateway default. The
+engineering repositories' callers run the review through the ADP gateway
+with their own `gateway_model`, so add `--model <model>` to match a
+caller. A recording made with one model replays to another through the
+nearest-match tier, so check the near and miss counts when you switch.
+
+Run the replay at least twice: the per-item flips between two runs of the
+same prompt are the noise floor, and a change smaller than that is not a
+result. The default run covers only `strong` items. While every `strong`
+item is `needs_docs`, it reports flag recall alone and refuses the
+headline; `--include-unconfirmed` adds the `no_change` items, scored on
+labels no writer has confirmed yet.
+
+A PR that changes the PUBLISHED-CONTENT IMPACT section of
+`doc-strings-review.yml` should run the controls and both baselines on its
+branch and on its base, and report the deltas in its description: flag
+recall, abstention recall, the headline, page precision and recall, and
+the items that flipped. The deltas are advisory. Nothing in CI runs this
+eval, because it drives live model calls.
 
 === Controls
 

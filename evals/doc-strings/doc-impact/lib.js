@@ -24,7 +24,11 @@ const DISPATCH_STEP = 'Dispatch doc-impact'
 const MCP_SERVER = 'redpanda-docs'
 
 const LABELS = ['needs_docs', 'no_change']
-const STRENGTHS = ['strong', 'weak']
+// strong counts by default. The rest come from mine-candidates.js and need a
+// writer's confirmed_by: medium (an open docs PR), weak (no evidence either
+// way after the settle window), pending (an untriaged ticket the pass itself
+// raised), provisional (too recent to have settled).
+const STRENGTHS = ['strong', 'medium', 'weak', 'pending', 'provisional']
 
 // ---------------------------------------------------------------------------
 // Production workflow extraction

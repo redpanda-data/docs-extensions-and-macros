@@ -14,7 +14,8 @@ const path = require('path')
 const { spawn } = require('child_process')
 
 const lib = require('../../evals/doc-strings/doc-impact/lib')
-const { materializeControl, controlVerdict } = require('../../evals/doc-strings/doc-impact/run')
+const { materializeControl, controlVerdict, parseSurfaces, quotaRefusals } = require('../../evals/doc-strings/doc-impact/run')
+const { toItems } = require('../../evals/doc-strings/doc-impact/mine-candidates')
 
 const DIR = path.join(__dirname, '../../evals/doc-strings/doc-impact')
 
@@ -292,5 +293,60 @@ describe('controls', () => {
     expect(controlVerdict(good, controls)).toEqual([])
     good[0].replay_misses = 1
     expect(controlVerdict(good, controls)).toHaveLength(1)
+  })
+})
+
+describe('seeding and freezing', () => {
+  const candidate = (id, extra = {}) => ({
+    id,
+    repo: 'redpanda-data/redpanda-operator',
+    pr_url: `https://github.com/redpanda-data/redpanda-operator/pull/${id.split('-').pop()}`,
+    title: 'operator: add a thing',
+    body: '',
+    proposed_label: 'needs_docs',
+    label_strength: 'strong',
+    pages: ['https://docs.redpanda.com/streaming/current/manage/a/', 'partial:docs:modules/manage/partials/b.adoc'],
+    reason: 'merged docs PR',
+    base_sha: 'a'.repeat(40),
+    merge_base_sha: 'b'.repeat(40),
+    head_sha: 'c'.repeat(40),
+    backport: false,
+    evidence: [],
+    ...extra
+  })
+
+  test('candidates become valid items; partials stay out of expected_pages; backports stack on their original', () => {
+    const items = toItems([
+      candidate('redpanda-operator-1'),
+      candidate('redpanda-operator-2', { title: '[release/v26.1.x] operator: add a thing (#1)', backport: true }),
+      candidate('redpanda-operator-3', { title: 'operator: tidy logs', proposed_label: 'no_change', label_strength: 'provisional', pages: [] })
+    ], [])
+    for (const i of items) expect(() => lib.validateItem(i)).not.toThrow()
+    expect(items[0].expected_pages).toEqual(['https://docs.redpanda.com/streaming/current/manage/a/'])
+    expect(items[0].expected_partials).toEqual(['partial:docs:modules/manage/partials/b.adoc'])
+    expect(items[1].stacked_on).toBe('redpanda-operator-1')
+    expect(items[0].stacked_on).toBeUndefined()
+    expect(items.map((i) => i.confirmed_by)).toEqual([null, null, null])
+    expect(lib.isConfirmed(items[2])).toBe(false)
+  })
+
+  test('a writer-confirmed item survives a reseed unchanged', () => {
+    const confirmed = { ...toItems([candidate('redpanda-operator-1')], [])[0], label: 'no_change', expected_pages: [], confirmed_by: 'a writer' }
+    const [again] = toItems([candidate('redpanda-operator-1')], [confirmed])
+    expect(again).toBe(confirmed)
+  })
+
+  test('surfaces come from the caller workflow input', () => {
+    expect(parseSurfaces('jobs:\n  review:\n    with:\n      surfaces: helm,crd\n')).toBe('helm,crd')
+    expect(parseSurfaces('jobs:\n  review:\n    with:\n      model: x\n')).toBeNull()
+  })
+
+  test('a quota refusal is detected; an ordinary tool error is not', () => {
+    const calls = [
+      { tool: 'ask_redpanda_question', isError: true, content: [{ type: 'text', text: 'Anonymous tool-call limit reached. Reconnect to sign in.' }] },
+      { tool: 'ask_redpanda_question', isError: true, content: [{ type: 'text', text: 'Invalid arguments: question is required' }] },
+      { tool: 'ask_redpanda_question', isError: false, content: [{ type: 'text', text: 'The rate limit for produce requests is set by...' }] }
+    ]
+    expect(quotaRefusals(calls)).toEqual([calls[0]])
   })
 })

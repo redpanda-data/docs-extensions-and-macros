@@ -1,0 +1,2810 @@
+# Source diff of this PR against its merge base.
+# Left out (generated docs, lockfiles, vendored code, test data): 6 file(s).
+
+diff --git a/.changes/unreleased/charts-redpanda-Fixed-20261005-120000.yaml b/.changes/unreleased/charts-redpanda-Fixed-20261005-120000.yaml
+new file mode 100644
+index 00000000..b9e7f08c
+--- /dev/null
++++ b/.changes/unreleased/charts-redpanda-Fixed-20261005-120000.yaml
+@@ -0,0 +1,8 @@
++project: charts/redpanda
++kind: Fixed
++body: |-
++    Client `Certificate`s now respect `tls.certs.<name>.issuerRef.group`.
++    Previously the group was forced to `cert-manager.io`, so with an external
++    issuer (e.g. Google CAS) and `requireClientAuth: true` the client
++    Certificate was never issued.
++time: 2026-10-05T12:00:00.000000-07:00
+diff --git a/.changes/unreleased/charts-redpanda-Fixed-20261005-120001.yaml b/.changes/unreleased/charts-redpanda-Fixed-20261005-120001.yaml
+new file mode 100644
+index 00000000..0e6c620c
+--- /dev/null
++++ b/.changes/unreleased/charts-redpanda-Fixed-20261005-120001.yaml
+@@ -0,0 +1,8 @@
++project: charts/redpanda
++kind: Fixed
++body: |-
++    With `tls.certs.<name>.caEnabled: false`, the CA reference the chart
++    provides to the operator and Console now points at the serving
++    certificate's `tls.crt`. It previously pointed at a nonexistent
++    `cert.crt` key, so those clients couldn't verify the cluster.
++time: 2026-10-05T12:00:01.000000-07:00
+diff --git a/.changes/unreleased/charts-redpanda-Fixed-20261005-120002.yaml b/.changes/unreleased/charts-redpanda-Fixed-20261005-120002.yaml
+new file mode 100644
+index 00000000..e6acbc51
+--- /dev/null
++++ b/.changes/unreleased/charts-redpanda-Fixed-20261005-120002.yaml
+@@ -0,0 +1,8 @@
++project: charts/redpanda
++kind: Fixed
++body: |-
++    When the admin listener sets `requireClientAuth: true`, the StatefulSet's
++    admin API `curl` calls now verify the server with the listener's
++    `trustStore`, or with the server certificate's CA, instead of always
++    using `ca.crt` from the client certificate's Secret.
++time: 2026-10-05T12:00:02.000000-07:00
+diff --git a/.changes/unreleased/operator-Fixed-20261005-120001.yaml b/.changes/unreleased/operator-Fixed-20261005-120001.yaml
+new file mode 100644
+index 00000000..55d0db80
+--- /dev/null
++++ b/.changes/unreleased/operator-Fixed-20261005-120001.yaml
+@@ -0,0 +1,8 @@
++project: operator
++kind: Fixed
++body: |-
++    Redpanda clusters whose certificates set `caEnabled: false` are now
++    reachable over TLS from the operator, from Console, and from Pipelines
++    that reference the cluster. Each previously read the CA from a
++    nonexistent `cert.crt` Secret key.
++time: 2026-10-05T12:00:01.000000-07:00
+diff --git a/charts/redpanda/chart/cert_issuers.go b/charts/redpanda/chart/cert_issuers.go
+index 41fb802b..0d30c37a 100644
+--- a/charts/redpanda/chart/cert_issuers.go
++++ b/charts/redpanda/chart/cert_issuers.go
+@@ -100,7 +100,7 @@ func certIssuersAndCAs(state *RenderState) ([]*certmanagerv1.Issuer, []*certmana
+ 					Annotations: FullAnnotations(state),
+ 				},
+ 				Spec: certmanagerv1.CertificateSpec{
+-					Duration:   helmette.MustDuration(helmette.Default("43800h", data.Duration)),
++					Duration:   helmette.MustDuration(helmette.Default(defaultCertDuration, data.Duration)),
+ 					IsCA:       true,
+ 					CommonName: fmt.Sprintf(`%s-%s-root-certificate`, Fullname(state), name),
+ 					SecretName: fmt.Sprintf(`%s-%s-root-certificate`, Fullname(state), name),
+diff --git a/charts/redpanda/chart/certs.go b/charts/redpanda/chart/certs.go
+index 5b3ff83b..df26c258 100644
+--- a/charts/redpanda/chart/certs.go
++++ b/charts/redpanda/chart/certs.go
+@@ -14,15 +14,21 @@ import (
+ 	"fmt"
+ 	"strings"
+ 
+-	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+ 	cmmetav1 "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
+-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	corev1 "k8s.io/api/core/v1"
+ 	"k8s.io/utils/ptr"
+ 
++	"github.com/redpanda-data/redpanda-operator/charts/redpanda/v25"
+ 	"github.com/redpanda-data/redpanda-operator/gotohelm/helmette"
+ )
+ 
+-func ClientCerts(state *RenderState) []*certmanagerv1.Certificate {
++// defaultCertDuration is a managed certificate's lifetime absent a values
++// override: five years.
++const defaultCertDuration = "43800h"
++
++// PKI resolves this chart's values into an authoritative certificate set. When
++// possible, use the PKI rather than going through Values.
++func PKI(state *RenderState) redpanda.PKI {
+ 	fullname := Fullname(state)
+ 	service := ServiceName(state)
+ 	ns := state.Release.Namespace
+@@ -30,73 +36,45 @@ func ClientCerts(state *RenderState) []*certmanagerv1.Certificate {
+ 	// So we trim it when generating certificates.
+ 	domain := strings.TrimSuffix(state.Values.ClusterDomain, ".")
+ 
+-	var certs []*certmanagerv1.Certificate
++	// external.domain is templated, so expand it once rather than per cert.
++	var externalDomain string
++	if state.Values.External.Domain != nil {
++		externalDomain = helmette.Tpl(state.Dot, *state.Values.External.Domain, state.Dot)
++	}
++
++	certs := map[string]redpanda.Certificate{}
++
+ 	for _, name := range state.Values.Listeners.InUseServerCerts(&state.Values.TLS) {
+ 		data := state.Values.TLS.Certs.MustGet(name)
+ 
+-		// Don't generate server Certificates if a secret is provided.
+-		if !helmette.Empty(data.SecretRef) {
+-			continue
+-		}
+-
+-		var names []string
+-		if data.IssuerRef == nil || ptr.Deref(data.ApplyInternalDNSNames, false) {
+-			names = append(names, fmt.Sprintf("%s-cluster.%s.%s.svc.%s", fullname, service, ns, domain))
+-			names = append(names, fmt.Sprintf("%s-cluster.%s.%s.svc", fullname, service, ns))
+-			names = append(names, fmt.Sprintf("%s-cluster.%s.%s", fullname, service, ns))
+-			names = append(names, fmt.Sprintf("*.%s-cluster.%s.%s.svc.%s", fullname, service, ns, domain))
+-			names = append(names, fmt.Sprintf("*.%s-cluster.%s.%s.svc", fullname, service, ns))
+-			names = append(names, fmt.Sprintf("*.%s-cluster.%s.%s", fullname, service, ns))
+-			names = append(names, fmt.Sprintf("%s.%s.svc.%s", service, ns, domain))
+-			names = append(names, fmt.Sprintf("%s.%s.svc", service, ns))
+-			names = append(names, fmt.Sprintf("%s.%s", service, ns))
+-			names = append(names, fmt.Sprintf("*.%s.%s.svc.%s", service, ns, domain))
+-			names = append(names, fmt.Sprintf("*.%s.%s.svc", service, ns))
+-			names = append(names, fmt.Sprintf("*.%s.%s", service, ns))
++		// NB: caEnabled declares that the serving Secret carries a trustworthy
++		// ca.crt. Absent it the chart falls back to the serving certificate
++		// itself, so there's no key.
++		var ca *string
++		if data.CAEnabled {
++			ca = ptr.To("ca.crt")
+ 		}
+ 
+-		if state.Values.External.Domain != nil {
+-			names = append(names, helmette.Tpl(state.Dot, *state.Values.External.Domain, state.Dot))
+-			names = append(names, fmt.Sprintf("*.%s", helmette.Tpl(state.Dot, *state.Values.External.Domain, state.Dot)))
++		// A provided secretRef means the keypair already exists; only the
++		// generated ones are issued.
++		var request *redpanda.CertificateRequest
++		if helmette.Empty(data.SecretRef) {
++			request = &redpanda.CertificateRequest{
++				ObjectName: fmt.Sprintf("%s-%s-cert", fullname, name),
++				DNSNames:   serverSANs(state, name, fullname, service, ns, domain, externalDomain),
++				Duration:   helmette.MustDuration(helmette.Default(defaultCertDuration, data.Duration)),
++				IssuerRef:  certIssuerRef(fullname, name, data),
++			}
+ 		}
+ 
+-		// Gateway API: a TLS-passthrough listener presents this managed cert
+-		// directly to clients, who connect using the listener's host/hostTemplate
+-		// SNI names. Those names are not covered by the internal service DNS or the
+-		// external.domain wildcard above, so add them here to avoid post-bootstrap
+-		// hostname-verification failures.
+-		names = append(names, gatewayServerCertDNSNames(state, name)...)
+-
+-		duration := helmette.Default("43800h", data.Duration)
+-		issuerRef := ptr.Deref(data.IssuerRef, cmmetav1.ObjectReference{
+-			Kind:  "Issuer",
+-			Group: "cert-manager.io",
+-			Name:  fmt.Sprintf("%s-%s-root-issuer", fullname, name),
+-		})
+-
+-		certs = append(certs, &certmanagerv1.Certificate{
+-			TypeMeta: metav1.TypeMeta{
+-				APIVersion: "cert-manager.io/v1",
+-				Kind:       "Certificate",
++		certs[name] = redpanda.Certificate{
++			Server: redpanda.Keypair{
++				Name:    name,
++				CA:      ca,
++				Secret:  corev1.LocalObjectReference{Name: data.ServerSecretName(state, name)},
++				Request: request,
+ 			},
+-			ObjectMeta: metav1.ObjectMeta{
+-				Name:        fmt.Sprintf("%s-%s-cert", fullname, name),
+-				Labels:      FullLabels(state),
+-				Namespace:   state.Release.Namespace,
+-				Annotations: FullAnnotations(state),
+-			},
+-			Spec: certmanagerv1.CertificateSpec{
+-				DNSNames:   names,
+-				Duration:   helmette.MustDuration(duration),
+-				IsCA:       false,
+-				IssuerRef:  issuerRef,
+-				SecretName: data.ServerSecretName(state, name),
+-				PrivateKey: &certmanagerv1.CertificatePrivateKey{
+-					Algorithm: "ECDSA",
+-					Size:      256,
+-				},
+-			},
+-		})
++		}
+ 	}
+ 
+ 	for _, name := range state.Values.Listeners.InUseClientCerts(&state.Values.TLS) {
+@@ -106,50 +84,64 @@ func ClientCerts(state *RenderState) []*certmanagerv1.Certificate {
+ 			panic(fmt.Sprintf(".clientSecretRef MUST be set if .secretRef is set and require_client_auth is true: Cert %q", name))
+ 		}
+ 
+-		// Don't generate a client Certificate if a client secret is provided.
+-		if data.ClientSecretRef != nil {
+-			continue
++		var request *redpanda.CertificateRequest
++		if data.ClientSecretRef == nil {
++			request = &redpanda.CertificateRequest{
++				ObjectName: fmt.Sprintf("%s-%s-client", fullname, name),
++				CommonName: fmt.Sprintf("%s--%s-client", fullname, name),
++				Duration:   helmette.MustDuration(helmette.Default(defaultCertDuration, data.Duration)),
++				IssuerRef:  certIssuerRef(fullname, name, data),
++			}
+ 		}
+ 
+-		issuerRef := cmmetav1.ObjectReference{
+-			Group: "cert-manager.io",
+-			Kind:  "Issuer",
+-			Name:  fmt.Sprintf("%s-%s-root-issuer", fullname, name),
++		// NB: the client certs are a subset of the server certs, so the entry
++		// always exists. Map values aren't addressable, hence the write back.
++		cert := certs[name]
++		cert.Client = &redpanda.Keypair{
++			Name:    fmt.Sprintf("%s-client", name),
++			Secret:  corev1.LocalObjectReference{Name: data.ClientSecretName(state, name)},
++			Request: request,
+ 		}
++		certs[name] = cert
++	}
+ 
+-		if data.IssuerRef != nil {
+-			issuerRef = *data.IssuerRef
+-			issuerRef.Group = "cert-manager.io"
+-		}
++	return redpanda.PKI{
++		Namespace:    ns,
++		Labels:       FullLabels(state),
++		Annotations:  FullAnnotations(state),
++		Certificates: certs,
++	}
++}
+ 
+-		duration := helmette.Default("43800h", data.Duration)
++// serverSANs is the chart's SAN set. Brokers here are subdomains of the
++// headless Service, so it needs neither the namespace wildcards nor the
++// per-broker names the operator adds.
++func serverSANs(state *RenderState, name, fullname, service, ns, domain, externalDomain string) []string {
++	var names []string
+ 
+-		certs = append(certs, &certmanagerv1.Certificate{
+-			TypeMeta: metav1.TypeMeta{
+-				APIVersion: "cert-manager.io/v1",
+-				Kind:       "Certificate",
+-			},
+-			ObjectMeta: metav1.ObjectMeta{
+-				Name:        fmt.Sprintf("%s-%s-client", fullname, name),
+-				Namespace:   state.Release.Namespace,
+-				Labels:      FullLabels(state),
+-				Annotations: FullAnnotations(state),
+-			},
+-			Spec: certmanagerv1.CertificateSpec{
+-				CommonName: fmt.Sprintf("%s--%s-client", fullname, name),
+-				Duration:   helmette.MustDuration(duration),
+-				IsCA:       false,
+-				SecretName: data.ClientSecretName(state, name),
+-				PrivateKey: &certmanagerv1.CertificatePrivateKey{
+-					Algorithm: "ECDSA",
+-					Size:      256,
+-				},
+-				IssuerRef: issuerRef,
+-			},
+-		})
++	data := state.Values.TLS.Certs.MustGet(name)
++	if data.IssuerRef == nil || ptr.Deref(data.ApplyInternalDNSNames, false) {
++		names = append(names, redpanda.ServiceSANs(fullname, service, ns, domain)...)
+ 	}
+ 
+-	return certs
++	names = append(names, redpanda.DomainSANs(externalDomain)...)
++
++	// A TLS-passthrough Gateway listener presents this cert directly under
++	// its host/hostTemplate SNI names, which neither the internal service DNS
++	// nor the external.domain wildcard covers.
++	names = append(names, gatewayServerCertDNSNames(state, name)...)
++
++	return names
++}
++
++// certIssuerRef falls back to the per-certificate root issuer this chart
++// bootstraps in cert_issuers.go.
++func certIssuerRef(fullname, name string, data *TLSCert) cmmetav1.ObjectReference {
++	return ptr.Deref(data.IssuerRef, cmmetav1.ObjectReference{
++		Kind:  "Issuer",
++		Group: "cert-manager.io",
++		Name:  fmt.Sprintf("%s-%s-root-issuer", fullname, name),
++	})
+ }
+ 
+ // gatewayServerCertDNSNames returns the Gateway API SNI hostnames that the
+diff --git a/charts/redpanda/chart/chart.go b/charts/redpanda/chart/chart.go
+index 982e190c..61c1d74c 100644
+--- a/charts/redpanda/chart/chart.go
++++ b/charts/redpanda/chart/chart.go
+@@ -146,7 +146,8 @@ func renderResources(state *RenderState) []kube.Object {
+ 		manifests = append(manifests, obj)
+ 	}
+ 
+-	for _, obj := range ClientCerts(state) {
++	pki := PKI(state)
++	for _, obj := range pki.Render() {
+ 		manifests = append(manifests, obj)
+ 	}
+ 
+diff --git a/charts/redpanda/chart/configmap.tpl.go b/charts/redpanda/chart/configmap.tpl.go
+index 92de5a19..2f1d017c 100644
+--- a/charts/redpanda/chart/configmap.tpl.go
++++ b/charts/redpanda/chart/configmap.tpl.go
+@@ -455,13 +455,15 @@ func rpkKafkaClientTLSConfiguration(state *RenderState) map[string]any {
+ 		return map[string]any{}
+ 	}
+ 
++	pki := PKI(state)
++
+ 	result := map[string]any{
+-		"ca_file": tls.ServerCAPath(&state.Values.TLS),
++		"ca_file": tls.ServerCAPath(&pki),
+ 	}
+ 
+-	if tls.RequireClientAuth {
+-		result["cert_file"] = fmt.Sprintf("%s/tls.crt", tls.ClientMountPoint(&state.Values.TLS))
+-		result["key_file"] = fmt.Sprintf("%s/tls.key", tls.ClientMountPoint(&state.Values.TLS))
++	if kp := tls.ClientKeypair(&pki); kp != nil {
++		result["cert_file"] = kp.CertFile()
++		result["key_file"] = kp.KeyFile()
+ 	}
+ 
+ 	return result
+@@ -477,13 +479,15 @@ func rpkAdminAPIClientTLSConfiguration(state *RenderState) map[string]any {
+ 		return map[string]any{}
+ 	}
+ 
++	pki := PKI(state)
++
+ 	result := map[string]any{
+-		"ca_file": tls.ServerCAPath(&state.Values.TLS),
++		"ca_file": tls.ServerCAPath(&pki),
+ 	}
+ 
+-	if tls.RequireClientAuth {
+-		result["cert_file"] = fmt.Sprintf("%s/tls.crt", tls.ClientMountPoint(&state.Values.TLS))
+-		result["key_file"] = fmt.Sprintf("%s/tls.key", tls.ClientMountPoint(&state.Values.TLS))
++	if kp := tls.ClientKeypair(&pki); kp != nil {
++		result["cert_file"] = kp.CertFile()
++		result["key_file"] = kp.KeyFile()
+ 	}
+ 
+ 	return result
+@@ -499,13 +503,15 @@ func rpkSchemaRegistryClientTLSConfiguration(state *RenderState) map[string]any
+ 		return map[string]any{}
+ 	}
+ 
++	pki := PKI(state)
++
+ 	result := map[string]any{
+-		"ca_file": tls.ServerCAPath(&state.Values.TLS),
++		"ca_file": tls.ServerCAPath(&pki),
+ 	}
+ 
+-	if tls.RequireClientAuth {
+-		result["cert_file"] = fmt.Sprintf("%s/tls.crt", tls.ClientMountPoint(&state.Values.TLS))
+-		result["key_file"] = fmt.Sprintf("%s/tls.key", tls.ClientMountPoint(&state.Values.TLS))
++	if kp := tls.ClientKeypair(&pki); kp != nil {
++		result["cert_file"] = kp.CertFile()
++		result["key_file"] = kp.KeyFile()
+ 	}
+ 
+ 	return result
+@@ -548,18 +554,19 @@ func kafkaClient(state *RenderState, clientType string) map[string]any {
+ 
+ 	var brokerTLS map[string]any
+ 	if state.Values.Listeners.Kafka.TLS.IsEnabled(&state.Values.TLS) {
++		pki := PKI(state)
+ 		brokerTLS = map[string]any{
+ 			"enabled":             true,
+ 			"require_client_auth": kafkaTLS.RequireClientAuth,
+ 			// NB: truststore_file here is synonymous with ca_file in the RPK
+ 			// configuration. The difference being that redpanda does NOT read
+ 			// the ca_file key.
+-			"truststore_file": kafkaTLS.ServerCAPath(&state.Values.TLS),
++			"truststore_file": kafkaTLS.ServerCAPath(&pki),
+ 		}
+ 
+-		if kafkaTLS.RequireClientAuth {
+-			brokerTLS["cert_file"] = fmt.Sprintf("%s/tls.crt", kafkaTLS.ClientMountPoint(&state.Values.TLS))
+-			brokerTLS["key_file"] = fmt.Sprintf("%s/tls.key", kafkaTLS.ClientMountPoint(&state.Values.TLS))
++		if kp := kafkaTLS.ClientKeypair(&pki); kp != nil {
++			brokerTLS["cert_file"] = kp.CertFile()
++			brokerTLS["key_file"] = kp.KeyFile()
+ 		}
+ 
+ 	}
+@@ -580,6 +587,8 @@ func configureListeners(redpanda map[string]any, state *RenderState) {
+ 		defaultKafkaAuth = ptr.To(SASLKafkaAuthenticationMethod)
+ 	}
+ 
++	pki := PKI(state)
++
+ 	redpanda["admin"] = state.Values.Listeners.Admin.Listeners(nil /* No auth on admin API */)
+ 	redpanda["kafka_api"] = state.Values.Listeners.Kafka.Listeners(defaultKafkaAuth)
+ 	redpanda["rpc_server"] = rpcListeners(state)
+@@ -588,12 +597,12 @@ func configureListeners(redpanda map[string]any, state *RenderState) {
+ 	// slice, they should instead be nil.
+ 
+ 	redpanda["admin_api_tls"] = nil
+-	if tls := state.Values.Listeners.Admin.ListenersTLS(&state.Values.TLS); len(tls) > 0 {
++	if tls := state.Values.Listeners.Admin.ListenersTLS(&pki, &state.Values.TLS); len(tls) > 0 {
+ 		redpanda["admin_api_tls"] = tls
+ 	}
+ 
+ 	redpanda["kafka_api_tls"] = nil
+-	if tls := state.Values.Listeners.Kafka.ListenersTLS(&state.Values.TLS); len(tls) > 0 {
++	if tls := state.Values.Listeners.Kafka.ListenersTLS(&pki, &state.Values.TLS); len(tls) > 0 {
+ 		redpanda["kafka_api_tls"] = tls
+ 	}
+ 
+@@ -611,9 +620,11 @@ func pandaProxyListener(state *RenderState) map[string]any {
+ 		pandaProxyAuth = ptr.To(BasicHTTPAuthenticationMethod)
+ 	}
+ 
++	pki := PKI(state)
++
+ 	pandaProxy["pandaproxy_api"] = state.Values.Listeners.HTTP.Listeners(pandaProxyAuth)
+ 	pandaProxy["pandaproxy_api_tls"] = nil
+-	if tls := state.Values.Listeners.HTTP.ListenersTLS(&state.Values.TLS); len(tls) > 0 {
++	if tls := state.Values.Listeners.HTTP.ListenersTLS(&pki, &state.Values.TLS); len(tls) > 0 {
+ 		pandaProxy["pandaproxy_api_tls"] = tls
+ 	}
+ 	return pandaProxy
+@@ -621,9 +632,10 @@ func pandaProxyListener(state *RenderState) map[string]any {
+ 
+ func schemaRegistry(state *RenderState) map[string]any {
+ 	schemaReg := map[string]any{}
++	pki := PKI(state)
+ 	schemaReg["schema_registry_api"] = state.Values.Listeners.SchemaRegistry.Listeners(nil /* No auth on admin API */)
+ 	schemaReg["schema_registry_api_tls"] = nil
+-	if tls := state.Values.Listeners.SchemaRegistry.ListenersTLS(&state.Values.TLS); len(tls) > 0 {
++	if tls := state.Values.Listeners.SchemaRegistry.ListenersTLS(&pki, &state.Values.TLS); len(tls) > 0 {
+ 		schemaReg["schema_registry_api_tls"] = tls
+ 	}
+ 	return schemaReg
+@@ -636,12 +648,15 @@ func rpcListenersTLS(state *RenderState) map[string]any {
+ 		return map[string]any{}
+ 	}
+ 
++	pki := PKI(state)
++	kp := pki.ServerKeypair(r.TLS.Cert)
++
+ 	return map[string]any{
+ 		"enabled":             true,
+-		"cert_file":           fmt.Sprintf("%s/tls.crt", r.TLS.ServerMountPoint(&state.Values.TLS)),
+-		"key_file":            fmt.Sprintf("%s/tls.key", r.TLS.ServerMountPoint(&state.Values.TLS)),
++		"cert_file":           kp.CertFile(),
++		"key_file":            kp.KeyFile(),
+ 		"require_client_auth": r.TLS.RequireClientAuth,
+-		"truststore_file":     r.TLS.TrustStoreFilePath(&state.Values.TLS),
++		"truststore_file":     r.TLS.TrustStoreFilePath(&pki),
+ 	}
+ }
+ 
+@@ -652,19 +667,20 @@ func rpcListeners(state *RenderState) map[string]any {
+ 	}
+ }
+ 
+-// First parameter defaultTLSEnabled must come from `state.Values.tls.enabled`.
+-func createInternalListenerTLSCfg(tls *TLS, internal InternalTLS) map[string]any {
++func createInternalListenerTLSCfg(pki *redpanda.PKI, tls *TLS, internal InternalTLS) map[string]any {
+ 	if !internal.IsEnabled(tls) {
+ 		return map[string]any{}
+ 	}
+ 
++	kp := pki.ServerKeypair(internal.Cert)
++
+ 	return map[string]any{
+ 		"name":                "internal",
+ 		"enabled":             true,
+-		"cert_file":           fmt.Sprintf("%s/tls.crt", internal.ServerMountPoint(tls)),
+-		"key_file":            fmt.Sprintf("%s/tls.key", internal.ServerMountPoint(tls)),
++		"cert_file":           kp.CertFile(),
++		"key_file":            kp.KeyFile(),
+ 		"require_client_auth": internal.RequireClientAuth,
+-		"truststore_file":     internal.TrustStoreFilePath(tls),
++		"truststore_file":     internal.TrustStoreFilePath(pki),
+ 	}
+ }
+ 
+diff --git a/charts/redpanda/chart/helpers.go b/charts/redpanda/chart/helpers.go
+index f80a50ed..73b11fae 100644
+--- a/charts/redpanda/chart/helpers.go
++++ b/charts/redpanda/chart/helpers.go
+@@ -17,7 +17,6 @@ import (
+ 	corev1 "k8s.io/api/core/v1"
+ 	applycorev1 "k8s.io/client-go/applyconfigurations/core/v1"
+ 	applymetav1 "k8s.io/client-go/applyconfigurations/meta/v1"
+-	"k8s.io/utils/ptr"
+ 
+ 	"github.com/redpanda-data/redpanda-operator/gotohelm/helmette"
+ )
+@@ -134,25 +133,9 @@ func CommonMounts(state *RenderState) []corev1.VolumeMount {
+ 		})
+ 	}
+ 
+-	for _, name := range state.Values.Listeners.InUseServerCerts(&state.Values.TLS) {
+-		cert := state.Values.TLS.Certs.MustGet(name)
+-
+-		mounts = append(mounts, corev1.VolumeMount{
+-			Name:      cert.ServerVolumeName(name),
+-			MountPath: cert.ServerMountPoint(name),
+-		})
+-	}
+-
+-	// mTLS for any potentially in use listeners (kafka, admin, schema?)
+-	for _, name := range state.Values.Listeners.InUseClientCerts(&state.Values.TLS) {
+-		cert := state.Values.TLS.Certs.MustGet(name)
+-
+-		mounts = append(mounts, corev1.VolumeMount{
+-			Name:      cert.ClientVolumeName(name),
+-			MountPath: cert.ClientMountPoint(name),
+-		})
+-
+-	}
++	// Server certs, then the client certs of any listener requiring mTLS.
++	pki := PKI(state)
++	mounts = append(mounts, pki.Mounts()...)
+ 
+ 	return mounts
+ }
+@@ -176,34 +159,9 @@ func DefaultVolumes(state *RenderState) []corev1.Volume {
+ func CommonVolumes(state *RenderState) []corev1.Volume {
+ 	volumes := []corev1.Volume{}
+ 
+-	for _, name := range state.Values.Listeners.InUseServerCerts(&state.Values.TLS) {
+-		cert := state.Values.TLS.Certs.MustGet(name)
+-
+-		volumes = append(volumes, corev1.Volume{
+-			// Intentionally use static names for VolumeNames to make overrides easier.
+-			Name: cert.ServerVolumeName(name),
+-			VolumeSource: corev1.VolumeSource{
+-				Secret: &corev1.SecretVolumeSource{
+-					SecretName:  cert.ServerSecretName(state, name),
+-					DefaultMode: ptr.To[int32](0o440),
+-				},
+-			},
+-		})
+-	}
+-
+-	for _, name := range state.Values.Listeners.InUseClientCerts(&state.Values.TLS) {
+-		cert := state.Values.TLS.Certs.MustGet(name)
+-
+-		volumes = append(volumes, corev1.Volume{
+-			Name: cert.ClientVolumeName(name),
+-			VolumeSource: corev1.VolumeSource{
+-				Secret: &corev1.SecretVolumeSource{
+-					SecretName:  cert.ClientSecretName(state, name),
+-					DefaultMode: ptr.To[int32](0o440),
+-				},
+-			},
+-		})
+-	}
++	// Volume names are intentionally static to make overrides easier.
++	pki := PKI(state)
++	volumes = append(volumes, pki.Volumes()...)
+ 
+ 	if sasl := state.Values.Auth.SASL; sasl.Enabled && sasl.SecretRef != "" {
+ 		volumes = append(volumes, corev1.Volume{
+diff --git a/charts/redpanda/chart/render_state.go b/charts/redpanda/chart/render_state.go
+index a5440366..d3ba54b1 100644
+--- a/charts/redpanda/chart/render_state.go
++++ b/charts/redpanda/chart/render_state.go
+@@ -119,6 +119,7 @@ func (r *RenderState) FetchStatefulSetPodSelector() {
+ func (r *RenderState) AsStaticConfigSource() ir.StaticConfigurationSource {
+ 	username := r.Values.Auth.SASL.BootstrapUser.Username()
+ 	passwordRef := r.Values.Auth.SASL.BootstrapUser.SecretKeySelector(Fullname(r))
++	pki := PKI(r)
+ 
+ 	// Kafka API configuration
+ 	kafkaSpec := &ir.KafkaAPISpec{
+@@ -127,7 +128,7 @@ func (r *RenderState) AsStaticConfigSource() ir.StaticConfigurationSource {
+ 
+ 	// Add TLS configuration for Kafka if enabled
+ 	if r.Values.Listeners.Kafka.TLS.IsEnabled(&r.Values.TLS) {
+-		kafkaSpec.TLS = r.Values.Listeners.Kafka.TLS.ToCommonTLS(r, &r.Values.TLS)
++		kafkaSpec.TLS = r.Values.Listeners.Kafka.TLS.ToCommonTLS(r, &pki)
+ 	}
+ 
+ 	// TODO This check may need to be more complex.
+@@ -152,7 +153,7 @@ func (r *RenderState) AsStaticConfigSource() ir.StaticConfigurationSource {
+ 	adminSchema := "http"
+ 	if r.Values.Listeners.Admin.TLS.IsEnabled(&r.Values.TLS) {
+ 		adminSchema = "https"
+-		adminTLS = r.Values.Listeners.Admin.TLS.ToCommonTLS(r, &r.Values.TLS)
++		adminTLS = r.Values.Listeners.Admin.TLS.ToCommonTLS(r, &pki)
+ 	}
+ 
+ 	var adminAuth *ir.AdminAuth
+@@ -186,7 +187,7 @@ func (r *RenderState) AsStaticConfigSource() ir.StaticConfigurationSource {
+ 		schemaSchema := "http"
+ 		if r.Values.Listeners.SchemaRegistry.TLS.IsEnabled(&r.Values.TLS) {
+ 			schemaSchema = "https"
+-			schemaTLS = r.Values.Listeners.SchemaRegistry.TLS.ToCommonTLS(r, &r.Values.TLS)
++			schemaTLS = r.Values.Listeners.SchemaRegistry.TLS.ToCommonTLS(r, &pki)
+ 		}
+ 
+ 		var schemaURLs []string
+diff --git a/charts/redpanda/chart/secrets.go b/charts/redpanda/chart/secrets.go
+index a1836c32..eee1bcd3 100644
+--- a/charts/redpanda/chart/secrets.go
++++ b/charts/redpanda/chart/secrets.go
+@@ -392,13 +392,13 @@ func adminTLSCurlFlags(state *RenderState) string {
+ 		return ""
+ 	}
+ 
+-	if state.Values.Listeners.Admin.TLS.RequireClientAuth {
+-		path := state.Values.Listeners.Admin.TLS.ClientMountPoint(&state.Values.TLS)
+-		return fmt.Sprintf("--cacert %s/ca.crt --cert %s/tls.crt --key %s/tls.key", path, path, path)
+-	}
++	pki := PKI(state)
+ 
+-	path := state.Values.Listeners.Admin.TLS.ServerCAPath(&state.Values.TLS)
+-	return fmt.Sprintf("--cacert %s", path)
++	flags := fmt.Sprintf("--cacert %s", state.Values.Listeners.Admin.TLS.ServerCAPath(&pki))
++	if kp := state.Values.Listeners.Admin.TLS.ClientKeypair(&pki); kp != nil {
++		flags = fmt.Sprintf("%s --cert %s --key %s", flags, kp.CertFile(), kp.KeyFile())
++	}
++	return flags
+ }
+ 
+ func externalAdvertiseAddress(state *RenderState) string {
+diff --git a/charts/redpanda/chart/templates/__redpanda.pki.tpl b/charts/redpanda/chart/templates/__redpanda.pki.tpl
+new file mode 100644
+index 00000000..90443ab4
+Binary files /dev/null and b/charts/redpanda/chart/templates/__redpanda.pki.tpl differ
+diff --git a/charts/redpanda/chart/templates/_certs.go.tpl b/charts/redpanda/chart/templates/_certs.go.tpl
+index 4fa0b84c..1dc452b0 100644
+Binary files a/charts/redpanda/chart/templates/_certs.go.tpl and b/charts/redpanda/chart/templates/_certs.go.tpl differ
+diff --git a/charts/redpanda/chart/templates/_chart.go.tpl b/charts/redpanda/chart/templates/_chart.go.tpl
+index d6a74dc9..7d4f40a0 100644
+Binary files a/charts/redpanda/chart/templates/_chart.go.tpl and b/charts/redpanda/chart/templates/_chart.go.tpl differ
+diff --git a/charts/redpanda/chart/templates/_configmap.go.tpl b/charts/redpanda/chart/templates/_configmap.go.tpl
+index f883d973..d685b1a8 100644
+Binary files a/charts/redpanda/chart/templates/_configmap.go.tpl and b/charts/redpanda/chart/templates/_configmap.go.tpl differ
+diff --git a/charts/redpanda/chart/templates/_helpers.go.tpl b/charts/redpanda/chart/templates/_helpers.go.tpl
+index aa6aeb02..a6fea6bb 100644
+Binary files a/charts/redpanda/chart/templates/_helpers.go.tpl and b/charts/redpanda/chart/templates/_helpers.go.tpl differ
+diff --git a/charts/redpanda/chart/templates/_render_state.go.tpl b/charts/redpanda/chart/templates/_render_state.go.tpl
+index 11cd6e1d..0606aacc 100644
+Binary files a/charts/redpanda/chart/templates/_render_state.go.tpl and b/charts/redpanda/chart/templates/_render_state.go.tpl differ
+diff --git a/charts/redpanda/chart/templates/_secrets.go.tpl b/charts/redpanda/chart/templates/_secrets.go.tpl
+index 23bd6f6d..069ba700 100644
+Binary files a/charts/redpanda/chart/templates/_secrets.go.tpl and b/charts/redpanda/chart/templates/_secrets.go.tpl differ
+diff --git a/charts/redpanda/chart/templates/_values.go.tpl b/charts/redpanda/chart/templates/_values.go.tpl
+index 45d561ac..2ebcc931 100644
+Binary files a/charts/redpanda/chart/templates/_values.go.tpl and b/charts/redpanda/chart/templates/_values.go.tpl differ
+diff --git a/charts/redpanda/chart/values.go b/charts/redpanda/chart/values.go
+index 95595c1c..6137de7a 100644
+--- a/charts/redpanda/chart/values.go
++++ b/charts/redpanda/chart/values.go
+@@ -13,6 +13,8 @@ package chart
+ 
+ import (
+ 	"fmt"
++	"maps"
++	"slices"
+ 	"strings"
+ 
+ 	cmmetav1 "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
+@@ -29,6 +31,7 @@ import (
+ 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+ 
+ 	consolechart "github.com/redpanda-data/redpanda-operator/charts/console/v3/chart"
++	"github.com/redpanda-data/redpanda-operator/charts/redpanda/v25"
+ 	"github.com/redpanda-data/redpanda-operator/gotohelm/helmette"
+ 	"github.com/redpanda-data/redpanda-operator/pkg/clusterconfiguration"
+ 	"github.com/redpanda-data/redpanda-operator/pkg/ir"
+@@ -1124,7 +1127,7 @@ func (l *Listeners) TrustStoreVolume(tls *TLS) *corev1.Volume {
+ 
+ 	var sources []corev1.VolumeProjection
+ 
+-	for _, name := range helmette.SortedKeys(cmSources) {
++	for _, name := range slices.Sorted(maps.Keys(cmSources)) {
+ 		keys := cmSources[name]
+ 		sources = append(sources, corev1.VolumeProjection{
+ 			ConfigMap: &corev1.ConfigMapProjection{
+@@ -1136,7 +1139,7 @@ func (l *Listeners) TrustStoreVolume(tls *TLS) *corev1.Volume {
+ 		})
+ 	}
+ 
+-	for _, name := range helmette.SortedKeys(secretSources) {
++	for _, name := range slices.Sorted(maps.Keys(secretSources)) {
+ 		keys := secretSources[name]
+ 		sources = append(sources, corev1.VolumeProjection{
+ 			Secret: &corev1.SecretProjection{
+@@ -1377,30 +1380,6 @@ type TLSCert struct {
+ 	ClientSecretRef       *corev1.LocalObjectReference `json:"clientSecretRef"`
+ }
+ 
+-func (c *TLSCert) ServerVolumeName(name string) string {
+-	// NB: Volume names are intentionally hardcoded to redpanda to make
+-	// overrides easier.
+-	return fmt.Sprintf("redpanda-%s-cert", name)
+-}
+-
+-func (c *TLSCert) ClientVolumeName(name string) string {
+-	// NB: Volume names are intentionally hardcoded to redpanda to make
+-	// overrides easier.
+-	return fmt.Sprintf("redpanda-%s-client-cert", name)
+-}
+-
+-func (c *TLSCert) ServerMountPoint(name string) string {
+-	// NB: The path here is intentionally hardcoded to discourage manual
+-	// construct of this mount point.
+-	return fmt.Sprintf("/etc/tls/certs/%s", name)
+-}
+-
+-func (c *TLSCert) ClientMountPoint(name string) string {
+-	// NB: The path here is intentionally hardcoded to discourage manual
+-	// construct of this mount point.
+-	return fmt.Sprintf("/etc/tls/certs/%s-client", name)
+-}
+-
+ func (c *TLSCert) ServerSecretName(state *RenderState, name string) string {
+ 	if c.SecretRef != nil {
+ 		return c.SecretRef.Name
+@@ -1609,14 +1588,13 @@ func (t *InternalTLS) IsEnabled(tls *TLS) bool {
+ 	return ptr.Deref(t.Enabled, tls.Enabled) && t.Cert != ""
+ }
+ 
+-func (t *InternalTLS) TrustStoreFilePath(tls *TLS) string {
++func (t *InternalTLS) TrustStoreFilePath(pki *redpanda.PKI) string {
+ 	if t.TrustStore != nil {
+ 		return t.TrustStore.TrustStoreFilePath()
+ 	}
+ 
+-	cert := tls.Certs.MustGet(t.Cert)
+-	if cert.CAEnabled {
+-		return fmt.Sprintf("%s/ca.crt", cert.ServerMountPoint(t.Cert))
++	if kp := pki.ServerKeypair(t.Cert); kp.CA != nil {
++		return kp.CAFile()
+ 	}
+ 
+ 	return defaultTruststorePath
+@@ -1624,47 +1602,35 @@ func (t *InternalTLS) TrustStoreFilePath(tls *TLS) string {
+ 
+ // ServerCAPath returns the path on disk to a certificate that may be used to
+ // verify a connection with this server.
+-func (t *InternalTLS) ServerCAPath(tls *TLS) string {
++func (t *InternalTLS) ServerCAPath(pki *redpanda.PKI) string {
+ 	if t.TrustStore != nil {
+ 		return t.TrustStore.TrustStoreFilePath()
+ 	}
+ 
+-	cert := tls.Certs.MustGet(t.Cert)
+-	if cert.CAEnabled {
+-		return fmt.Sprintf("%s/ca.crt", cert.ServerMountPoint(t.Cert))
+-	}
+-
+-	// Strange but technically correct, if CAEnabled is false, we can't safely
+-	// assume that a ca.crt file will exist. So we fallback to using the
+-	// server's certificate itself.
+-	// Other options would be: failing or falling back to the container's
+-	// default truststore.
+-	return fmt.Sprintf("%s/tls.crt", cert.ServerMountPoint(t.Cert))
+-}
+-
+-// ServerMountPoint is a helper to call [TLSCert.ServerMountPoint] on the
+-// configure certificate.
+-func (t *InternalTLS) ServerMountPoint(tls *TLS) string {
+-	cert := tls.Certs.MustGet(t.Cert)
+-	return cert.ServerMountPoint(t.Cert)
++	kp := pki.ServerKeypair(t.Cert)
++	return kp.CAOrCertFile()
+ }
+ 
+-// ClientMountPoint is a helper to call [TLSCert.ClientMountPoint] on the
+-// configure certificate.
+-func (t *InternalTLS) ClientMountPoint(tls *TLS) string {
+-	cert := tls.Certs.MustGet(t.Cert)
+-	return cert.ClientMountPoint(t.Cert)
++// ClientKeypair returns the keypair this listener presents when it requires
++// mTLS, or nil when it doesn't.
++func (t *InternalTLS) ClientKeypair(pki *redpanda.PKI) *redpanda.Keypair {
++	// NB: gated on the listener, not the certificate. [redpanda.PKI] is keyed
++	// by certificate name and issues a client keypair when *any* listener
++	// sharing that certificate requires mTLS, so its keypair is non-nil for
++	// listeners that don't -- which must not present one.
++	if !t.RequireClientAuth {
++		return nil
++	}
++	return pki.ClientKeypair(t.Cert)
+ }
+ 
+ // ToCommonTLS converts InternalTLS configuration to ir.CommonTLS format with proper secret references.
+-func (t *InternalTLS) ToCommonTLS(state *RenderState, tls *TLS) *ir.CommonTLS {
+-	if !t.IsEnabled(tls) {
++func (t *InternalTLS) ToCommonTLS(state *RenderState, pki *redpanda.PKI) *ir.CommonTLS {
++	if !t.IsEnabled(&state.Values.TLS) {
+ 		return nil
+ 	}
+ 
+ 	spec := &ir.CommonTLS{}
+-	cert := tls.Certs.MustGet(t.Cert)
+-	secretName := cert.ServerSecretName(state, t.Cert)
+ 
+ 	if t.TrustStore != nil {
+ 		// Only one of ConfigMapKeyRef or SecretKeyRef should actually be set.
+@@ -1674,45 +1640,32 @@ func (t *InternalTLS) ToCommonTLS(state *RenderState, tls *TLS) *ir.CommonTLS {
+ 			ConfigMapKeyRef: t.TrustStore.ConfigMapKeyRef,
+ 			SecretKeyRef:    t.TrustStore.SecretKeyRef,
+ 		}
+-	} else if cert.CAEnabled {
+-		spec.CaCert = &ir.ValueSource{
+-			Namespace: state.Release.Namespace,
+-			SecretKeyRef: &corev1.SecretKeySelector{
+-				LocalObjectReference: corev1.LocalObjectReference{
+-					Name: secretName,
+-				},
+-				Key: "ca.crt",
+-			},
+-		}
+ 	} else {
++		// NB: mirrors [redpanda.Keypair.CAOrCertFile].
++		server := pki.ServerKeypair(t.Cert)
+ 		spec.CaCert = &ir.ValueSource{
+ 			Namespace: state.Release.Namespace,
+ 			SecretKeyRef: &corev1.SecretKeySelector{
+-				LocalObjectReference: corev1.LocalObjectReference{
+-					Name: secretName,
+-				},
+-				Key: "cert.crt",
++				LocalObjectReference: server.Secret,
++				Key:                  ptr.Deref(server.CA, corev1.TLSCertKey),
+ 			},
+ 		}
+ 	}
+ 
+-	// Add client certificate and key if client auth is required
+-	if t.RequireClientAuth {
+-		clientSecretName := cert.ClientSecretName(state, t.Cert)
+-
++	if kp := t.ClientKeypair(pki); kp != nil {
+ 		spec.Cert = &ir.ValueSource{
+ 			Namespace: state.Release.Namespace,
+ 			SecretKeyRef: &corev1.SecretKeySelector{
+-				LocalObjectReference: corev1.LocalObjectReference{Name: clientSecretName},
+-				Key:                  "tls.crt",
++				LocalObjectReference: kp.Secret,
++				Key:                  corev1.TLSCertKey,
+ 			},
+ 		}
+ 
+ 		spec.Key = &ir.ValueSource{
+ 			Namespace: state.Release.Namespace,
+ 			SecretKeyRef: &corev1.SecretKeySelector{
+-				LocalObjectReference: corev1.LocalObjectReference{Name: clientSecretName},
+-				Key:                  "tls.key",
++				LocalObjectReference: kp.Secret,
++				Key:                  corev1.TLSPrivateKeyKey,
+ 			},
+ 		}
+ 	}
+@@ -1742,14 +1695,13 @@ func (t *ExternalTLS) GetCertName(i *InternalTLS) string {
+ 	return ptr.Deref(t.Cert, i.Cert)
+ }
+ 
+-func (t *ExternalTLS) TrustStoreFilePath(i *InternalTLS, tls *TLS) string {
++func (t *ExternalTLS) TrustStoreFilePath(i *InternalTLS, pki *redpanda.PKI) string {
+ 	if t.TrustStore != nil {
+ 		return t.TrustStore.TrustStoreFilePath()
+ 	}
+ 
+-	name := t.GetCertName(i)
+-	if cert := t.GetCert(i, tls); cert.CAEnabled {
+-		return fmt.Sprintf("%s/ca.crt", cert.ServerMountPoint(name))
++	if kp := pki.ServerKeypair(t.GetCertName(i)); kp.CA != nil {
++		return kp.CAFile()
+ 	}
+ 
+ 	return defaultTruststorePath
+@@ -1903,10 +1855,10 @@ func (l *ListenerConfig[T]) Listeners(auth *T) []map[string]any {
+ 	return listeners
+ }
+ 
+-func (l *ListenerConfig[T]) ListenersTLS(tls *TLS) []map[string]any {
++func (l *ListenerConfig[T]) ListenersTLS(pki *redpanda.PKI, tls *TLS) []map[string]any {
+ 	pp := []map[string]any{}
+ 
+-	internal := createInternalListenerTLSCfg(tls, l.TLS)
++	internal := createInternalListenerTLSCfg(pki, tls, l.TLS)
+ 	if len(internal) > 0 {
+ 		pp = append(pp, internal)
+ 	}
+@@ -1916,16 +1868,15 @@ func (l *ListenerConfig[T]) ListenersTLS(tls *TLS) []map[string]any {
+ 			continue
+ 		}
+ 
+-		certName := lis.TLS.GetCertName(&l.TLS)
+-		cert := tls.Certs.MustGet(certName)
++		kp := pki.ServerKeypair(lis.TLS.GetCertName(&l.TLS))
+ 
+ 		pp = append(pp, map[string]any{
+ 			"name":                k,
+ 			"enabled":             true,
+-			"cert_file":           fmt.Sprintf("%s/tls.crt", cert.ServerMountPoint(certName)),
+-			"key_file":            fmt.Sprintf("%s/tls.key", cert.ServerMountPoint(certName)),
++			"cert_file":           kp.CertFile(),
++			"key_file":            kp.KeyFile(),
+ 			"require_client_auth": ptr.Deref(lis.TLS.RequireClientAuth, false),
+-			"truststore_file":     lis.TLS.TrustStoreFilePath(&l.TLS, tls),
++			"truststore_file":     lis.TLS.TrustStoreFilePath(&l.TLS, pki),
+ 		})
+ 	}
+ 	return pp
+diff --git a/charts/redpanda/chart/values.yaml b/charts/redpanda/chart/values.yaml
+index 03640ae2..63934032 100644
+--- a/charts/redpanda/chart/values.yaml
++++ b/charts/redpanda/chart/values.yaml
+@@ -214,9 +214,12 @@ tls:
+     default:
+       # -- To use a custom pre-installed Issuer,
+       # add its name and kind to the `issuerRef` object.
++      # For an external issuer, such as Google CAS, also set its `group`.
++      # The server and client Certificates both use this issuer.
+       # issuerRef:
+       #   name: redpanda-default-root-issuer
+-      #   kind: Issuer   # Can be Issuer or ClusterIssuer
++      #   kind: Issuer   # Can be Issuer, ClusterIssuer, or an external issuer's kind
++      #   group: cert-manager.io   # Defaults to cert-manager.io
+       # -- To use a secret with custom tls files,
+       # secretRef:
+       #  name: my-tls-secret
+@@ -238,9 +241,12 @@ tls:
+     external:
+       # -- To use a custom pre-installed Issuer,
+       # add its name and kind to the `issuerRef` object.
++      # For an external issuer, such as Google CAS, also set its `group`.
++      # The server and client Certificates both use this issuer.
+       # issuerRef:
+       #   name: redpanda-default-root-issuer
+-      #   kind: Issuer   # Can be Issuer or ClusterIssuer
++      #   kind: Issuer   # Can be Issuer, ClusterIssuer, or an external issuer's kind
++      #   group: cert-manager.io   # Defaults to cert-manager.io
+       # -- To use a secret with custom tls files,
+       # secretRef:
+       #   name: my-tls-secret
+diff --git a/charts/redpanda/chart/values_test.go b/charts/redpanda/chart/values_test.go
+index 04168c8e..7cae3162 100644
+--- a/charts/redpanda/chart/values_test.go
++++ b/charts/redpanda/chart/values_test.go
+@@ -519,8 +519,7 @@ func TestListeners_TrustStoreVolumes(t *testing.T) {
+ 
+ 	for _, tc := range cases {
+ 		t.Run(tc.Name, func(t *testing.T) {
+-			vol := tc.Listeners.TrustStoreVolume(&tls)
+-			require.Equal(t, tc.Out, vol)
++			require.Equal(t, tc.Out, tc.Listeners.TrustStoreVolume(&tls))
+ 		})
+ 	}
+ }
+diff --git a/charts/redpanda/pki.go b/charts/redpanda/pki.go
+new file mode 100644
+index 00000000..ec033209
+--- /dev/null
++++ b/charts/redpanda/pki.go
+@@ -0,0 +1,380 @@
++// Copyright 2026 Redpanda Data, Inc.
++//
++// Use of this software is governed by the Business Source License
++// included in the file licenses/BSL.md
++//
++// As of the Change Date specified in that file, in accordance with
++// the Business Source License, use of this software will be governed
++// by the Apache License, Version 2.0
++
++package redpanda
++
++import (
++	"fmt"
++	"maps"
++	"slices"
++
++	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
++	cmmetav1 "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
++	corev1 "k8s.io/api/core/v1"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	"k8s.io/utils/ptr"
++)
++
++const (
++	// certMountRoot is the root of every certificate mount. Go through
++	// [Keypair]'s methods rather than formatting paths by hand.
++	certMountRoot = "/etc/tls/certs"
++
++	certVolumeDefaultMode = 0o440
++
++	certPrivateKeyAlgorithm = certmanagerv1.ECDSAKeyAlgorithm
++	certPrivateKeySize      = 256
++)
++
++// PKI is a cluster's TLS material: what a broker mounts, and which of
++// it cert-manager has to issue. Issuers and CA bootstrapping are excluded.
++type PKI struct {
++	Namespace   string
++	Labels      map[string]string
++	Annotations map[string]string
++
++	// Certificates is every certificate in use, keyed by certificate name.
++	Certificates map[string]Certificate
++}
++
++// ServerKeypair is the named certificate's serving keypair.
++func (p *PKI) ServerKeypair(name string) Keypair {
++	cert, ok := p.Certificates[name]
++	if !ok {
++		panic(fmt.Sprintf("certificate %q is not in use", name))
++	}
++	return cert.Server
++}
++
++// ClientKeypair is the named certificate's client keypair, or nil when no
++// listener requires mTLS on it.
++func (p *PKI) ClientKeypair(name string) *Keypair {
++	if cert, ok := p.Certificates[name]; ok {
++		return cert.Client
++	}
++	return nil
++}
++
++// names returns the certificate names in a stable order.
++func (p *PKI) names() []string {
++	return slices.Sorted(maps.Keys(p.Certificates))
++}
++
++// Render returns a cert-manager Certificate per keypair carrying a
++// [CertificateRequest].
++func (p *PKI) Render() []*certmanagerv1.Certificate {
++	// NB: Performed in two separate loops to preserve historical ordering.
++	var certs []*certmanagerv1.Certificate
++
++	for _, name := range p.names() {
++		cert := p.Certificates[name]
++		if cert.Server.Request != nil {
++			certs = append(certs, p.serverCertificate(&cert.Server))
++		}
++	}
++
++	for _, name := range p.names() {
++		cert := p.Certificates[name]
++		if cert.Client != nil && cert.Client.Request != nil {
++			certs = append(certs, p.clientCertificate(cert.Client))
++		}
++	}
++
++	return certs
++}
++
++// Mounts returns every serving and client keypairs' mount.
++func (p *PKI) Mounts() []corev1.VolumeMount {
++	var mounts []corev1.VolumeMount
++
++	for _, name := range p.names() {
++		cert := p.Certificates[name]
++		mounts = append(mounts, cert.Server.Mount())
++	}
++
++	for _, name := range p.names() {
++		cert := p.Certificates[name]
++		if cert.Client == nil {
++			continue
++		}
++		mounts = append(mounts, cert.Client.Mount())
++	}
++
++	return mounts
++}
++
++// Volumes returns the Volumes pairing with [PKI.Mounts], same order.
++func (p *PKI) Volumes() []corev1.Volume {
++	var volumes []corev1.Volume
++
++	for _, name := range p.names() {
++		cert := p.Certificates[name]
++		volumes = append(volumes, cert.Server.Volume())
++	}
++
++	for _, name := range p.names() {
++		cert := p.Certificates[name]
++		if cert.Client == nil {
++			continue
++		}
++		volumes = append(volumes, cert.Client.Volume())
++	}
++
++	return volumes
++}
++
++func (p *PKI) serverCertificate(k *Keypair) *certmanagerv1.Certificate {
++	// NB: separate from clientCertificate because a serving keypair is
++	// identified by its SANs and a client keypair by its common name. Setting
++	// both would emit the unused one as an explicit null: gotohelm writes a key
++	// for every field in a struct literal, where Go's omitempty drops it.
++	return &certmanagerv1.Certificate{
++		TypeMeta: metav1.TypeMeta{
++			APIVersion: "cert-manager.io/v1",
++			Kind:       "Certificate",
++		},
++		ObjectMeta: metav1.ObjectMeta{
++			Name:        k.Request.ObjectName,
++			Namespace:   p.Namespace,
++			Labels:      p.Labels,
++			Annotations: p.Annotations,
++		},
++		Spec: certmanagerv1.CertificateSpec{
++			DNSNames:   k.Request.DNSNames,
++			Duration:   k.Request.Duration,
++			IsCA:       false,
++			IssuerRef:  k.Request.IssuerRef,
++			SecretName: k.Secret.Name,
++			PrivateKey: &certmanagerv1.CertificatePrivateKey{
++				Algorithm: certPrivateKeyAlgorithm,
++				Size:      certPrivateKeySize,
++			},
++		},
++	}
++}
++
++func (p *PKI) clientCertificate(k *Keypair) *certmanagerv1.Certificate {
++	return &certmanagerv1.Certificate{
++		TypeMeta: metav1.TypeMeta{
++			APIVersion: "cert-manager.io/v1",
++			Kind:       "Certificate",
++		},
++		ObjectMeta: metav1.ObjectMeta{
++			Name:        k.Request.ObjectName,
++			Namespace:   p.Namespace,
++			Labels:      p.Labels,
++			Annotations: p.Annotations,
++		},
++		Spec: certmanagerv1.CertificateSpec{
++			CommonName: k.Request.CommonName,
++			Duration:   k.Request.Duration,
++			IsCA:       false,
++			SecretName: k.Secret.Name,
++			PrivateKey: &certmanagerv1.CertificatePrivateKey{
++				Algorithm: certPrivateKeyAlgorithm,
++				Size:      certPrivateKeySize,
++			},
++
++			IssuerRef: k.Request.IssuerRef,
++		},
++	}
++}
++
++// Certificate pairs the keypairs (server and client) associated with a given
++// certificate name.
++//
++// Client is nil if nothing using this certificate requires mTLS.
++type Certificate struct {
++	Server Keypair
++	Client *Keypair
++}
++
++// Keypair is one mountable TLS keypair.
++type Keypair struct {
++	// Name is the keypair's mount name: the certificate's name for a serving
++	// keypair, suffixed "-client" for a client one.
++	Name string
++
++	// Secret is the name of the Secret holding tls.crt and tls.key.
++	Secret corev1.LocalObjectReference
++
++	// Request asks cert-manager to issue this keypair. nil if this Keypair is
++	// user supplied.
++	Request *CertificateRequest
++
++	// CA is the key within Secret holding the issuing CA bundle, or nil when
++	// it ships none.
++	//
++	// While cert-manager usually includes a ca.crt, we don't explicitly rely
++	// on it.
++	CA *string
++}
++
++// MountPath is where the keypair mounts.
++func (k *Keypair) MountPath() string {
++	return fmt.Sprintf("%s/%s", certMountRoot, k.Name)
++}
++
++// VolumeName is the Volume projecting the keypair.
++func (k *Keypair) VolumeName() string {
++	return fmt.Sprintf("redpanda-%s-cert", k.Name)
++}
++
++// CertFile is the path on Pod to tls.crt
++func (k *Keypair) CertFile() string {
++	return fmt.Sprintf("%s/%s", k.MountPath(), corev1.TLSCertKey)
++}
++
++// KeyFile is the path on Pod to tls.key
++func (k *Keypair) KeyFile() string {
++	return fmt.Sprintf("%s/%s", k.MountPath(), corev1.TLSPrivateKeyKey)
++}
++
++// CAFile is the issuing CA's path on Pod, or "" when [Keypair.CA] is nil.
++func (k *Keypair) CAFile() string {
++	if k.CA == nil {
++		return ""
++	}
++	return fmt.Sprintf("%s/%s", k.MountPath(), *k.CA)
++}
++
++// CAOrCertFile is the path on Pod to the certificate a peer verifies this
++// certificate against. If a CA is not specified, the serving certificate
++// itself is returned.
++//
++// This method is largely for backward compatibility. An explicit truststore
++// should be preferred.
++func (k *Keypair) CAOrCertFile() string {
++	// NB: absent a CA we can't assume a ca.crt was written, so the serving
++	// certificate is the only thing guaranteed to be on disk.
++	if k.CA != nil {
++		return k.CAFile()
++	}
++	return k.CertFile()
++}
++
++// Volume returns the [corev1.Volume] to project the keypair's Secret at [Keypair.MountPath].
++func (k *Keypair) Volume() corev1.Volume {
++	return corev1.Volume{
++		Name: k.VolumeName(),
++		VolumeSource: corev1.VolumeSource{
++			Secret: &corev1.SecretVolumeSource{
++				SecretName:  k.Secret.Name,
++				DefaultMode: ptr.To[int32](certVolumeDefaultMode),
++			},
++		},
++	}
++}
++
++// Mount returns the [corev1.VolumeMount] to project the keypair's Secret at [Keypair.MountPath].
++func (k *Keypair) Mount() corev1.VolumeMount {
++	return corev1.VolumeMount{
++		Name:      k.VolumeName(),
++		MountPath: k.MountPath(),
++	}
++}
++
++// CertificateRequest represents the configurable fields of a
++// [certmanagerv1.Certificate].
++type CertificateRequest struct {
++	// ObjectName is the Certificate's metadata.name. Resolved, not derived:
++	// the chart keys it on the release fullname, the operator on the per-pool
++	// fullname so two pools sharing a certificate name don't collide.
++	ObjectName string `json:"objectName"`
++
++	// DNSNames identifies a serving keypair. Build it with the SANs helpers
++	// below.
++	DNSNames []string `json:"dnsNames,omitempty"`
++
++	// CommonName identifies a client keypair.
++	CommonName string `json:"commonName,omitempty"`
++
++	// Duration is the certificate's lifetime.
++	Duration *metav1.Duration `json:"duration,omitempty"`
++
++	// IssuerRef is a reference to the Issuer or ClusterIssuer that will mint
++	// this Certificate.
++	IssuerRef cmmetav1.ObjectReference `json:"issuerRef"`
++}
++
++// ServiceSANs returns the names a broker is reachable under as a subdomain of
++// its headless Service: "<fullname>-cluster.<service>.<ns>" and
++// "<service>.<ns>" in FQDN, .svc, and bare forms, each plus a wildcard.
++//
++// clusterDomain must arrive with any trailing dot trimmed; trailing dots break
++// TLS/SNI (RFC 6066 section 3).
++func ServiceSANs(fullname, service, namespace, clusterDomain string) []string {
++	bootstrap := fmt.Sprintf("%s-cluster.%s.%s", fullname, service, namespace)
++	svc := fmt.Sprintf("%s.%s", service, namespace)
++
++	// NB: Order here is historical. Changing it will cause golden churn.
++	return []string{
++		fmt.Sprintf("%s.svc.%s", bootstrap, clusterDomain),
++		fmt.Sprintf("%s.svc", bootstrap),
++		bootstrap,
++		fmt.Sprintf("*.%s.svc.%s", bootstrap, clusterDomain),
++		fmt.Sprintf("*.%s.svc", bootstrap),
++		fmt.Sprintf("*.%s", bootstrap),
++		fmt.Sprintf("%s.svc.%s", svc, clusterDomain),
++		fmt.Sprintf("%s.svc", svc),
++		svc,
++		fmt.Sprintf("*.%s.svc.%s", svc, clusterDomain),
++		fmt.Sprintf("*.%s.svc", svc),
++		fmt.Sprintf("*.%s", svc),
++	}
++}
++
++// NamespaceSANs returns the namespace-wide wildcards followed by one
++// "<broker>.<ns>" name per broker.
++//
++// Only callers whose brokers get standalone per-pod Services -- siblings of
++// the headless Service rather than subdomains of it -- need these. Note the
++// absence of "*.<ns>": a wildcard on a single-label parent (RFC 6125 section
++// 6.4.3), which OpenSSL >= 3.0 rejects. The per-broker names cover the
++// two-label form instead, matching the hostnames written into seed_servers and
++// advertised_rpc_api; without them the RPC handshake fails strict hostname
++// verification and the cluster can't reach quorum.
++func NamespaceSANs(namespace, clusterDomain string, brokers []string) []string {
++	names := []string{
++		fmt.Sprintf("*.%s.svc.%s", namespace, clusterDomain),
++		fmt.Sprintf("*.%s.svc", namespace),
++	}
++
++	for _, broker := range brokers {
++		names = append(names, fmt.Sprintf("%s.%s", broker, namespace))
++	}
++
++	return names
++}
++
++// ClusterSetSANs returns the multi-cluster services clusterset.local names:
++// cluster and service level, plus one per broker.
++func ClusterSetSANs(fullname, service, namespace string, brokers []string) []string {
++	names := []string{
++		fmt.Sprintf("%s-cluster.%s.%s.svc.clusterset.local", fullname, service, namespace),
++		fmt.Sprintf("*.%s-cluster.%s.%s.svc.clusterset.local", fullname, service, namespace),
++		fmt.Sprintf("%s.%s.svc.clusterset.local", service, namespace),
++		fmt.Sprintf("*.%s.%s.svc.clusterset.local", service, namespace),
++	}
++
++	for _, broker := range brokers {
++		names = append(names, fmt.Sprintf("%s.%s.svc.clusterset.local", broker, namespace))
++	}
++
++	return names
++}
++
++// DomainSANs returns "<domain>" and "*.<domain>", or nothing for an empty
++// domain. The domain must arrive already template-expanded.
++func DomainSANs(domain string) []string {
++	if domain == "" {
++		return nil
++	}
++	return []string{domain, fmt.Sprintf("*.%s", domain)}
++}
+diff --git a/charts/redpanda/pki_test.go b/charts/redpanda/pki_test.go
+new file mode 100644
+index 00000000..96b1b70f
+--- /dev/null
++++ b/charts/redpanda/pki_test.go
+@@ -0,0 +1,212 @@
++// Copyright 2026 Redpanda Data, Inc.
++//
++// Use of this software is governed by the Business Source License
++// included in the file licenses/BSL.md
++//
++// As of the Change Date specified in that file, in accordance with
++// the Business Source License, use of this software will be governed
++// by the Apache License, Version 2.0
++
++package redpanda
++
++import (
++	"testing"
++	"time"
++
++	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
++	cmmetav1 "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
++	"github.com/stretchr/testify/require"
++	corev1 "k8s.io/api/core/v1"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	"k8s.io/utils/ptr"
++)
++
++// TestSANHelpers pins each block's contents and shape. Callers concatenate
++// them, so a change here silently rotates every broker certificate.
++func TestSANHelpers(t *testing.T) {
++	require.Equal(t, []string{
++		"rp-cluster.rp.ns.svc.cluster.local",
++		"rp-cluster.rp.ns.svc",
++		"rp-cluster.rp.ns",
++		"*.rp-cluster.rp.ns.svc.cluster.local",
++		"*.rp-cluster.rp.ns.svc",
++		"*.rp-cluster.rp.ns",
++		"rp.ns.svc.cluster.local",
++		"rp.ns.svc",
++		"rp.ns",
++		"*.rp.ns.svc.cluster.local",
++		"*.rp.ns.svc",
++		"*.rp.ns",
++	}, ServiceSANs("rp", "rp", "ns", "cluster.local"))
++
++	// Wildcards first, then one two-label name per broker. No "*.ns": a
++	// wildcard on a single-label parent, which OpenSSL >= 3.0 rejects.
++	nsSANs := NamespaceSANs("ns", "cluster.local", []string{"rp-0", "rp-1"})
++	require.Equal(t, []string{
++		"*.ns.svc.cluster.local",
++		"*.ns.svc",
++		"rp-0.ns",
++		"rp-1.ns",
++	}, nsSANs)
++	require.NotContains(t, nsSANs, "*.ns")
++
++	require.Equal(t, []string{
++		"rp-cluster.rp.ns.svc.clusterset.local",
++		"*.rp-cluster.rp.ns.svc.clusterset.local",
++		"rp.ns.svc.clusterset.local",
++		"*.rp.ns.svc.clusterset.local",
++		"rp-0.ns.svc.clusterset.local",
++	}, ClusterSetSANs("rp", "rp", "ns", []string{"rp-0"}))
++
++	require.Equal(t, []string{"rp.example.com", "*.rp.example.com"}, DomainSANs("rp.example.com"))
++	require.Nil(t, DomainSANs(""))
++}
++
++// TestPKIRender asserts a Certificate object is emitted only where a keypair
++// carries a request, every serving one before any client one, each targeting
++// the right Secret.
++func TestPKIRender(t *testing.T) {
++	issuer := cmmetav1.ObjectReference{Kind: "Issuer", Group: "cert-manager.io", Name: "rp-default-root-issuer"}
++	duration := &metav1.Duration{Duration: 43800 * time.Hour}
++
++	pki := PKI{
++		Namespace: "ns",
++		Labels:    map[string]string{"app": "redpanda"},
++		Certificates: map[string]Certificate{
++			"default": {
++				Server: Keypair{
++					Name:   "default",
++					Secret: corev1.LocalObjectReference{Name: "rp-default-cert"},
++					Request: &CertificateRequest{
++						ObjectName: "rp-default-cert",
++						DNSNames:   []string{"rp.ns"},
++						Duration:   duration,
++						IssuerRef:  issuer,
++					},
++				},
++				Client: &Keypair{
++					Name:   "default-client",
++					Secret: corev1.LocalObjectReference{Name: "rp-default-client-cert"},
++					Request: &CertificateRequest{
++						ObjectName: "rp-default-client",
++						CommonName: "rp--default-client",
++						Duration:   duration,
++						IssuerRef:  issuer,
++					},
++				},
++			},
++			// User supplied: mounted, never issued.
++			"byo": {
++				Server: Keypair{Name: "byo", Secret: corev1.LocalObjectReference{Name: "my-own-secret"}},
++			},
++		},
++	}
++
++	certs := pki.Render()
++	require.Len(t, certs, 2)
++
++	server := certs[0]
++	require.Equal(t, "rp-default-cert", server.Name)
++	require.Equal(t, "ns", server.Namespace)
++	require.Equal(t, map[string]string{"app": "redpanda"}, server.Labels)
++	require.Equal(t, "cert-manager.io/v1", server.APIVersion)
++	require.Equal(t, "rp-default-cert", server.Spec.SecretName)
++	require.Equal(t, []string{"rp.ns"}, server.Spec.DNSNames)
++	require.Empty(t, server.Spec.CommonName)
++	require.False(t, server.Spec.IsCA)
++	require.Equal(t, issuer, server.Spec.IssuerRef)
++	require.Equal(t, certmanagerv1.ECDSAKeyAlgorithm, server.Spec.PrivateKey.Algorithm)
++	require.Equal(t, 256, server.Spec.PrivateKey.Size)
++
++	client := certs[1]
++	require.Equal(t, "rp-default-client", client.Name)
++	require.Equal(t, "rp-default-client-cert", client.Spec.SecretName)
++	require.Equal(t, "rp--default-client", client.Spec.CommonName)
++	require.Empty(t, client.Spec.DNSNames)
++}
++
++// TestKeypairPaths pins the derived names and paths. Both callers had their
++// own copies of these format strings; a divergence silently unmounts
++// certificates rather than failing to render.
++func TestKeypairPaths(t *testing.T) {
++	server := Keypair{Name: "default"}
++	require.Equal(t, "/etc/tls/certs/default", server.MountPath())
++	require.Equal(t, "redpanda-default-cert", server.VolumeName())
++	require.Equal(t, "/etc/tls/certs/default/tls.crt", server.CertFile())
++	require.Equal(t, "/etc/tls/certs/default/tls.key", server.KeyFile())
++
++	// The client keypair's name carries the suffix, so one set of formatters
++	// covers both halves.
++	client := Keypair{Name: "default-client"}
++	require.Equal(t, "/etc/tls/certs/default-client", client.MountPath())
++	require.Equal(t, "redpanda-default-client-cert", client.VolumeName())
++	require.Equal(t, "/etc/tls/certs/default-client/tls.crt", client.CertFile())
++	require.Equal(t, "/etc/tls/certs/default-client/tls.key", client.KeyFile())
++}
++
++// TestKeypairCAFile asserts CAFile keys on the CA key, not on cert-manager's
++// convention of always writing a ca.crt.
++func TestKeypairCAFile(t *testing.T) {
++	var noCA Keypair
++	noCA.Name = "default"
++	require.Empty(t, noCA.CAFile())
++
++	withCA := Keypair{Name: "default", CA: ptr.To("ca.crt")}
++	require.Equal(t, "/etc/tls/certs/default/ca.crt", withCA.CAFile())
++
++	// The key is taken from CA, not assumed.
++	otherKey := Keypair{Name: "default", CA: ptr.To("bundle.pem")}
++	require.Equal(t, "/etc/tls/certs/default/bundle.pem", otherKey.CAFile())
++}
++
++// TestKeypairCAOrCertFile pins the fallback absent an explicit truststore: we
++// can't assume a ca.crt was written.
++func TestKeypairCAOrCertFile(t *testing.T) {
++	pki := PKI{Certificates: map[string]Certificate{
++		"withCA": {Server: Keypair{Name: "withCA", CA: ptr.To("ca.crt")}},
++		"noCA":   {Server: Keypair{Name: "noCA"}},
++	}}
++
++	withCA := pki.ServerKeypair("withCA")
++	require.Equal(t, "/etc/tls/certs/withCA/ca.crt", withCA.CAOrCertFile())
++
++	noCA := pki.ServerKeypair("noCA")
++	require.Equal(t, "/etc/tls/certs/noCA/tls.crt", noCA.CAOrCertFile())
++}
++
++// TestPKIVolumesAndMounts asserts every serving keypair precedes any client
++// one, and that a client pair appears only for a Certificate carrying one.
++// Pod templates merge by volume name, so the order is observable in rendered
++// output.
++func TestPKIVolumesAndMounts(t *testing.T) {
++	pki := PKI{Certificates: map[string]Certificate{
++		"default": {
++			Server: Keypair{Name: "default", Secret: corev1.LocalObjectReference{Name: "release-default-cert"}},
++			Client: &Keypair{
++				Name:   "default-client",
++				Secret: corev1.LocalObjectReference{Name: "release-default-client-cert"},
++			},
++		},
++		"external": {
++			Server: Keypair{Name: "external", Secret: corev1.LocalObjectReference{Name: "release-external-cert"}},
++		},
++	}}
++
++	mounts := pki.Mounts()
++	require.Len(t, mounts, 3)
++	require.Equal(t, "redpanda-default-cert", mounts[0].Name)
++	require.Equal(t, "redpanda-external-cert", mounts[1].Name)
++	require.Equal(t, "redpanda-default-client-cert", mounts[2].Name)
++
++	volumes := pki.Volumes()
++	require.Len(t, volumes, 3)
++	require.Equal(t, "redpanda-default-cert", volumes[0].Name)
++	require.Equal(t, "release-default-cert", volumes[0].Secret.SecretName)
++	require.Equal(t, "redpanda-external-cert", volumes[1].Name)
++	require.Equal(t, "redpanda-default-client-cert", volumes[2].Name)
++	require.Equal(t, "release-default-client-cert", volumes[2].Secret.SecretName)
++
++	var empty PKI
++	require.Nil(t, empty.Volumes())
++	require.Nil(t, empty.Mounts())
++}
+diff --git a/operator/api/applyconfiguration/redpanda/v1alpha2/podspecapplyconfiguration.go b/operator/api/applyconfiguration/redpanda/v1alpha2/podspecapplyconfiguration.go
+index fe70a7d3..c07b43f4 100644
+--- a/operator/api/applyconfiguration/redpanda/v1alpha2/podspecapplyconfiguration.go
++++ b/operator/api/applyconfiguration/redpanda/v1alpha2/podspecapplyconfiguration.go
+@@ -12,13 +12,13 @@
+ package v1alpha2
+ 
+ import (
+-	v1 "k8s.io/client-go/applyconfigurations/core/v1"
++	applycorev1 "k8s.io/client-go/applyconfigurations/core/v1"
+ )
+ 
+ // PodSpecApplyConfigurationApplyConfiguration represents a declarative configuration of the PodSpecApplyConfiguration type for use
+ // with apply.
+ type PodSpecApplyConfigurationApplyConfiguration struct {
+-	v1.PodSpecApplyConfiguration `json:",inline"`
++	applycorev1.PodSpecApplyConfiguration `json:",inline"`
+ }
+ 
+ // PodSpecApplyConfigurationApplyConfiguration constructs a declarative configuration of the PodSpecApplyConfiguration type for use with
+diff --git a/operator/api/applyconfiguration/redpanda/v1alpha2/postinstalljob.go b/operator/api/applyconfiguration/redpanda/v1alpha2/postinstalljob.go
+index 6e9c916a..36f98d56 100644
+--- a/operator/api/applyconfiguration/redpanda/v1alpha2/postinstalljob.go
++++ b/operator/api/applyconfiguration/redpanda/v1alpha2/postinstalljob.go
+@@ -12,18 +12,18 @@
+ package v1alpha2
+ 
+ import (
+-	v1 "k8s.io/api/core/v1"
++	corev1 "k8s.io/api/core/v1"
+ )
+ 
+ // PostInstallJobApplyConfiguration represents a declarative configuration of the PostInstallJob type for use
+ // with apply.
+ type PostInstallJobApplyConfiguration struct {
+-	Resources       *v1.ResourceRequirements       `json:"resources,omitempty"`
++	Resources       *corev1.ResourceRequirements   `json:"resources,omitempty"`
+ 	Annotations     map[string]string              `json:"annotations,omitempty"`
+ 	Enabled         *bool                          `json:"enabled,omitempty"`
+ 	Labels          map[string]string              `json:"labels,omitempty"`
+-	Affinity        *v1.Affinity                   `json:"affinity,omitempty"`
+-	SecurityContext *v1.SecurityContext            `json:"securityContext,omitempty"`
++	Affinity        *corev1.Affinity               `json:"affinity,omitempty"`
++	SecurityContext *corev1.SecurityContext        `json:"securityContext,omitempty"`
+ 	PodTemplate     *PodTemplateApplyConfiguration `json:"podTemplate,omitempty"`
+ }
+ 
+@@ -36,7 +36,7 @@ func PostInstallJob() *PostInstallJobApplyConfiguration {
+ // WithResources sets the Resources field in the declarative configuration to the given value
+ // and returns the receiver, so that objects can be built by chaining "With" function invocations.
+ // If called multiple times, the Resources field is set to the value of the last call.
+-func (b *PostInstallJobApplyConfiguration) WithResources(value v1.ResourceRequirements) *PostInstallJobApplyConfiguration {
++func (b *PostInstallJobApplyConfiguration) WithResources(value corev1.ResourceRequirements) *PostInstallJobApplyConfiguration {
+ 	b.Resources = &value
+ 	return b
+ }
+@@ -80,7 +80,7 @@ func (b *PostInstallJobApplyConfiguration) WithLabels(entries map[string]string)
+ // WithAffinity sets the Affinity field in the declarative configuration to the given value
+ // and returns the receiver, so that objects can be built by chaining "With" function invocations.
+ // If called multiple times, the Affinity field is set to the value of the last call.
+-func (b *PostInstallJobApplyConfiguration) WithAffinity(value v1.Affinity) *PostInstallJobApplyConfiguration {
++func (b *PostInstallJobApplyConfiguration) WithAffinity(value corev1.Affinity) *PostInstallJobApplyConfiguration {
+ 	b.Affinity = &value
+ 	return b
+ }
+@@ -88,7 +88,7 @@ func (b *PostInstallJobApplyConfiguration) WithAffinity(value v1.Affinity) *Post
+ // WithSecurityContext sets the SecurityContext field in the declarative configuration to the given value
+ // and returns the receiver, so that objects can be built by chaining "With" function invocations.
+ // If called multiple times, the SecurityContext field is set to the value of the last call.
+-func (b *PostInstallJobApplyConfiguration) WithSecurityContext(value v1.SecurityContext) *PostInstallJobApplyConfiguration {
++func (b *PostInstallJobApplyConfiguration) WithSecurityContext(value corev1.SecurityContext) *PostInstallJobApplyConfiguration {
+ 	b.SecurityContext = &value
+ 	return b
+ }
+diff --git a/operator/api/applyconfiguration/redpanda/v1alpha2/postupgradejob.go b/operator/api/applyconfiguration/redpanda/v1alpha2/postupgradejob.go
+index c36184a1..3d5f3453 100644
+--- a/operator/api/applyconfiguration/redpanda/v1alpha2/postupgradejob.go
++++ b/operator/api/applyconfiguration/redpanda/v1alpha2/postupgradejob.go
+@@ -12,7 +12,7 @@
+ package v1alpha2
+ 
+ import (
+-	v1 "k8s.io/api/core/v1"
++	corev1 "k8s.io/api/core/v1"
+ )
+ 
+ // PostUpgradeJobApplyConfiguration represents a declarative configuration of the PostUpgradeJob type for use
+@@ -21,12 +21,12 @@ type PostUpgradeJobApplyConfiguration struct {
+ 	Annotations     map[string]string              `json:"annotations,omitempty"`
+ 	Enabled         *bool                          `json:"enabled,omitempty"`
+ 	Labels          map[string]string              `json:"labels,omitempty"`
+-	ExtraEnv        []v1.EnvVar                    `json:"extraEnv,omitempty"`
+-	ExtraEnvFrom    []v1.EnvFromSource             `json:"extraEnvFrom,omitempty"`
+-	Resources       *v1.ResourceRequirements       `json:"resources,omitempty"`
++	ExtraEnv        []corev1.EnvVar                `json:"extraEnv,omitempty"`
++	ExtraEnvFrom    []corev1.EnvFromSource         `json:"extraEnvFrom,omitempty"`
++	Resources       *corev1.ResourceRequirements   `json:"resources,omitempty"`
+ 	BackoffLimit    *int32                         `json:"backoffLimit,omitempty"`
+-	Affinity        *v1.Affinity                   `json:"affinity,omitempty"`
+-	SecurityContext *v1.SecurityContext            `json:"securityContext,omitempty"`
++	Affinity        *corev1.Affinity               `json:"affinity,omitempty"`
++	SecurityContext *corev1.SecurityContext        `json:"securityContext,omitempty"`
+ 	PodTemplate     *PodTemplateApplyConfiguration `json:"podTemplate,omitempty"`
+ }
+ 
+@@ -75,7 +75,7 @@ func (b *PostUpgradeJobApplyConfiguration) WithLabels(entries map[string]string)
+ // WithExtraEnv adds the given value to the ExtraEnv field in the declarative configuration
+ // and returns the receiver, so that objects can be build by chaining "With" function invocations.
+ // If called multiple times, values provided by each call will be appended to the ExtraEnv field.
+-func (b *PostUpgradeJobApplyConfiguration) WithExtraEnv(values ...v1.EnvVar) *PostUpgradeJobApplyConfiguration {
++func (b *PostUpgradeJobApplyConfiguration) WithExtraEnv(values ...corev1.EnvVar) *PostUpgradeJobApplyConfiguration {
+ 	for i := range values {
+ 		b.ExtraEnv = append(b.ExtraEnv, values[i])
+ 	}
+@@ -85,7 +85,7 @@ func (b *PostUpgradeJobApplyConfiguration) WithExtraEnv(values ...v1.EnvVar) *Po
+ // WithExtraEnvFrom adds the given value to the ExtraEnvFrom field in the declarative configuration
+ // and returns the receiver, so that objects can be build by chaining "With" function invocations.
+ // If called multiple times, values provided by each call will be appended to the ExtraEnvFrom field.
+-func (b *PostUpgradeJobApplyConfiguration) WithExtraEnvFrom(values ...v1.EnvFromSource) *PostUpgradeJobApplyConfiguration {
++func (b *PostUpgradeJobApplyConfiguration) WithExtraEnvFrom(values ...corev1.EnvFromSource) *PostUpgradeJobApplyConfiguration {
+ 	for i := range values {
+ 		b.ExtraEnvFrom = append(b.ExtraEnvFrom, values[i])
+ 	}
+@@ -95,7 +95,7 @@ func (b *PostUpgradeJobApplyConfiguration) WithExtraEnvFrom(values ...v1.EnvFrom
+ // WithResources sets the Resources field in the declarative configuration to the given value
+ // and returns the receiver, so that objects can be built by chaining "With" function invocations.
+ // If called multiple times, the Resources field is set to the value of the last call.
+-func (b *PostUpgradeJobApplyConfiguration) WithResources(value v1.ResourceRequirements) *PostUpgradeJobApplyConfiguration {
++func (b *PostUpgradeJobApplyConfiguration) WithResources(value corev1.ResourceRequirements) *PostUpgradeJobApplyConfiguration {
+ 	b.Resources = &value
+ 	return b
+ }
+@@ -111,7 +111,7 @@ func (b *PostUpgradeJobApplyConfiguration) WithBackoffLimit(value int32) *PostUp
+ // WithAffinity sets the Affinity field in the declarative configuration to the given value
+ // and returns the receiver, so that objects can be built by chaining "With" function invocations.
+ // If called multiple times, the Affinity field is set to the value of the last call.
+-func (b *PostUpgradeJobApplyConfiguration) WithAffinity(value v1.Affinity) *PostUpgradeJobApplyConfiguration {
++func (b *PostUpgradeJobApplyConfiguration) WithAffinity(value corev1.Affinity) *PostUpgradeJobApplyConfiguration {
+ 	b.Affinity = &value
+ 	return b
+ }
+@@ -119,7 +119,7 @@ func (b *PostUpgradeJobApplyConfiguration) WithAffinity(value v1.Affinity) *Post
+ // WithSecurityContext sets the SecurityContext field in the declarative configuration to the given value
+ // and returns the receiver, so that objects can be built by chaining "With" function invocations.
+ // If called multiple times, the SecurityContext field is set to the value of the last call.
+-func (b *PostUpgradeJobApplyConfiguration) WithSecurityContext(value v1.SecurityContext) *PostUpgradeJobApplyConfiguration {
++func (b *PostUpgradeJobApplyConfiguration) WithSecurityContext(value corev1.SecurityContext) *PostUpgradeJobApplyConfiguration {
+ 	b.SecurityContext = &value
+ 	return b
+ }
+diff --git a/operator/api/applyconfiguration/redpanda/v1alpha2/resources.go b/operator/api/applyconfiguration/redpanda/v1alpha2/resources.go
+index 21169082..6d6c4cfc 100644
+--- a/operator/api/applyconfiguration/redpanda/v1alpha2/resources.go
++++ b/operator/api/applyconfiguration/redpanda/v1alpha2/resources.go
+@@ -12,17 +12,17 @@
+ package v1alpha2
+ 
+ import (
+-	v1 "k8s.io/api/core/v1"
++	corev1 "k8s.io/api/core/v1"
+ 	resource "k8s.io/apimachinery/pkg/api/resource"
+ )
+ 
+ // ResourcesApplyConfiguration represents a declarative configuration of the Resources type for use
+ // with apply.
+ type ResourcesApplyConfiguration struct {
+-	Limits   *map[v1.ResourceName]resource.Quantity `json:"limits,omitempty"`
+-	Requests *map[v1.ResourceName]resource.Quantity `json:"requests,omitempty"`
+-	CPU      *CPUApplyConfiguration                 `json:"cpu,omitempty"`
+-	Memory   *MemoryApplyConfiguration              `json:"memory,omitempty"`
++	Limits   *map[corev1.ResourceName]resource.Quantity `json:"limits,omitempty"`
++	Requests *map[corev1.ResourceName]resource.Quantity `json:"requests,omitempty"`
++	CPU      *CPUApplyConfiguration                     `json:"cpu,omitempty"`
++	Memory   *MemoryApplyConfiguration                  `json:"memory,omitempty"`
+ }
+ 
+ // ResourcesApplyConfiguration constructs a declarative configuration of the Resources type for use with
+@@ -34,7 +34,7 @@ func Resources() *ResourcesApplyConfiguration {
+ // WithLimits sets the Limits field in the declarative configuration to the given value
+ // and returns the receiver, so that objects can be built by chaining "With" function invocations.
+ // If called multiple times, the Limits field is set to the value of the last call.
+-func (b *ResourcesApplyConfiguration) WithLimits(value map[v1.ResourceName]resource.Quantity) *ResourcesApplyConfiguration {
++func (b *ResourcesApplyConfiguration) WithLimits(value map[corev1.ResourceName]resource.Quantity) *ResourcesApplyConfiguration {
+ 	b.Limits = &value
+ 	return b
+ }
+@@ -42,7 +42,7 @@ func (b *ResourcesApplyConfiguration) WithLimits(value map[v1.ResourceName]resou
+ // WithRequests sets the Requests field in the declarative configuration to the given value
+ // and returns the receiver, so that objects can be built by chaining "With" function invocations.
+ // If called multiple times, the Requests field is set to the value of the last call.
+-func (b *ResourcesApplyConfiguration) WithRequests(value map[v1.ResourceName]resource.Quantity) *ResourcesApplyConfiguration {
++func (b *ResourcesApplyConfiguration) WithRequests(value map[corev1.ResourceName]resource.Quantity) *ResourcesApplyConfiguration {
+ 	b.Requests = &value
+ 	return b
+ }
+diff --git a/operator/api/applyconfiguration/redpanda/v1alpha2/tuning.go b/operator/api/applyconfiguration/redpanda/v1alpha2/tuning.go
+index 5ca3f09c..9009d470 100644
+--- a/operator/api/applyconfiguration/redpanda/v1alpha2/tuning.go
++++ b/operator/api/applyconfiguration/redpanda/v1alpha2/tuning.go
+@@ -12,21 +12,21 @@
+ package v1alpha2
+ 
+ import (
+-	v1 "k8s.io/api/core/v1"
++	corev1 "k8s.io/api/core/v1"
+ )
+ 
+ // TuningApplyConfiguration represents a declarative configuration of the Tuning type for use
+ // with apply.
+ type TuningApplyConfiguration struct {
+-	ExtraVolumeMounts *string                  `json:"extraVolumeMounts,omitempty"`
+-	Resources         *v1.ResourceRequirements `json:"resources,omitempty"`
+-	BallastFilePath   *string                  `json:"ballast_file_path,omitempty"`
+-	BallastFileSize   *string                  `json:"ballast_file_size,omitempty"`
+-	TuneAioEvents     *bool                    `json:"tune_aio_events,omitempty"`
+-	TuneBallastFile   *bool                    `json:"tune_ballast_file,omitempty"`
+-	TuneClockSource   *bool                    `json:"tune_clocksource,omitempty"`
+-	WellKnownIo       *string                  `json:"well_known_io,omitempty"`
+-	ApplyHostTuners   *bool                    `json:"apply_host_tuners,omitempty"`
++	ExtraVolumeMounts *string                      `json:"extraVolumeMounts,omitempty"`
++	Resources         *corev1.ResourceRequirements `json:"resources,omitempty"`
++	BallastFilePath   *string                      `json:"ballast_file_path,omitempty"`
++	BallastFileSize   *string                      `json:"ballast_file_size,omitempty"`
++	TuneAioEvents     *bool                        `json:"tune_aio_events,omitempty"`
++	TuneBallastFile   *bool                        `json:"tune_ballast_file,omitempty"`
++	TuneClockSource   *bool                        `json:"tune_clocksource,omitempty"`
++	WellKnownIo       *string                      `json:"well_known_io,omitempty"`
++	ApplyHostTuners   *bool                        `json:"apply_host_tuners,omitempty"`
+ }
+ 
+ // TuningApplyConfiguration constructs a declarative configuration of the Tuning type for use with
+@@ -46,7 +46,7 @@ func (b *TuningApplyConfiguration) WithExtraVolumeMounts(value string) *TuningAp
+ // WithResources sets the Resources field in the declarative configuration to the given value
+ // and returns the receiver, so that objects can be built by chaining "With" function invocations.
+ // If called multiple times, the Resources field is set to the value of the last call.
+-func (b *TuningApplyConfiguration) WithResources(value v1.ResourceRequirements) *TuningApplyConfiguration {
++func (b *TuningApplyConfiguration) WithResources(value corev1.ResourceRequirements) *TuningApplyConfiguration {
+ 	b.Resources = &value
+ 	return b
+ }
+diff --git a/operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go b/operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go
+index 6ef7eaae..0c734f8e 100644
+--- a/operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go
++++ b/operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go
+@@ -482,8 +482,12 @@ type Certificate struct {
+ type IssuerRef struct {
+ 	// Specifies the name of the resource.
+ 	Name *string `json:"name,omitempty"`
+-	// Specifies the kind of resource. One of `Issuer` or `ClusterIssuer`.
+-	Kind  *string `json:"kind,omitempty"`
++	// Kind specifies the kind of resource: `Issuer`, `ClusterIssuer`, or the
++	// kind of an external issuer, such as `GoogleCASClusterIssuer`.
++	Kind *string `json:"kind,omitempty"`
++	// Group specifies the API group of the issuer. Set this when using an
++	// external issuer, such as `cas-issuer.jetstack.io`. Defaults to
++	// `cert-manager.io`.
+ 	Group *string `json:"group,omitempty"`
+ }
+ 
+diff --git a/operator/api/redpanda/v1alpha2/stretch_cluster_helpers.go b/operator/api/redpanda/v1alpha2/stretch_cluster_helpers.go
+index e9dd8402..5f583caa 100644
+--- a/operator/api/redpanda/v1alpha2/stretch_cluster_helpers.go
++++ b/operator/api/redpanda/v1alpha2/stretch_cluster_helpers.go
+@@ -19,6 +19,8 @@ import (
+ 	"k8s.io/apimachinery/pkg/api/resource"
+ 	"k8s.io/apimachinery/pkg/runtime"
+ 	"k8s.io/utils/ptr"
++
++	"github.com/redpanda-data/redpanda-operator/charts/redpanda/v25"
+ )
+ 
+ // NOTE: this file contains helper methods for the StretchClusterSpec and related types.
+@@ -683,16 +685,6 @@ func (l *StretchListeners) TrustStoreVolume(tls *TLS) *corev1.Volume {
+ 	}
+ }
+ 
+-// sortedKeys returns sorted keys of a map.
+-func sortedKeys[V any](m map[string]V) []string {
+-	keys := make([]string, 0, len(m))
+-	for k := range m {
+-		keys = append(keys, k)
+-	}
+-	sort.Strings(keys)
+-	return keys
+-}
+-
+ // dedupKeyToPaths deduplicates KeyToPath entries by key.
+ func dedupKeyToPaths(items []corev1.KeyToPath) []corev1.KeyToPath {
+ 	seen := map[string]bool{}
+@@ -707,21 +699,34 @@ func dedupKeyToPaths(items []corev1.KeyToPath) []corev1.KeyToPath {
+ 	return deduped
+ }
+ 
++// sortedKeys returns sorted keys of a map.
++func sortedKeys[V any](m map[string]V) []string {
++	keys := make([]string, 0, len(m))
++	for k := range m {
++		keys = append(keys, k)
++	}
++	sort.Strings(keys)
++	return keys
++}
++
+ // --- ListenerTLS truststore helpers ---
+ 
+ // ServerCAPath returns the path to the CA/truststore file for this listener.
+ // If a TrustStore is configured, its path takes precedence.
+-// Otherwise falls back to the cert-based path from TLS.CertServerCAPath.
++// Otherwise falls back to the certificate's CA, else its serving certificate.
+ // Safe to call on nil receiver.
+-func (l *StretchListenerTLS) ServerCAPath(tls *TLS) string {
++func (l *StretchListenerTLS) ServerCAPath(pki *redpanda.PKI) string {
+ 	if l != nil && l.TrustStore != nil {
+ 		return l.TrustStore.TrustStoreFilePath()
+ 	}
++
+ 	certName := l.GetCert()
+ 	if certName == "" {
+ 		return ""
+ 	}
+-	return tls.CertServerCAPath(certName)
++
++	kp := pki.ServerKeypair(certName)
++	return kp.CAOrCertFile()
+ }
+ 
+ // --- TLS (parameterized helpers) ---
+@@ -752,20 +757,6 @@ func (t *TLS) CertClientSecretName(fullname, certName string) string {
+ 	return fmt.Sprintf("%s-%s-client-cert", fullname, certName)
+ }
+ 
+-// CertServerCAPath returns the CA path for the given cert's server mount.
+-// Safe to call on nil receiver.
+-func (t *TLS) CertServerCAPath(certName string) string {
+-	mountPoint := fmt.Sprintf("/etc/tls/certs/%s", certName)
+-	if t != nil {
+-		if cert, ok := t.Certs[certName]; ok {
+-			if cert.IsCAEnabled() {
+-				return fmt.Sprintf("%s/ca.crt", mountPoint)
+-			}
+-		}
+-	}
+-	return fmt.Sprintf("%s/tls.crt", mountPoint)
+-}
+-
+ // CertificatesFor returns the server cert secret name, cert key, and client cert secret name
+ // for the given TLS certificate. Safe to call on nil receiver.
+ //
+diff --git a/operator/api/redpanda/v1alpha2/stretch_cluster_helpers_test.go b/operator/api/redpanda/v1alpha2/stretch_cluster_helpers_test.go
+index c094a7e8..14017652 100644
+--- a/operator/api/redpanda/v1alpha2/stretch_cluster_helpers_test.go
++++ b/operator/api/redpanda/v1alpha2/stretch_cluster_helpers_test.go
+@@ -20,6 +20,7 @@ import (
+ 	"k8s.io/apimachinery/pkg/runtime"
+ 	"k8s.io/utils/ptr"
+ 
++	"github.com/redpanda-data/redpanda-operator/charts/redpanda/v25"
+ 	redpandav1alpha2 "github.com/redpanda-data/redpanda-operator/operator/api/redpanda/v1alpha2"
+ )
+ 
+@@ -208,22 +209,6 @@ func TestTLS(t *testing.T) {
+ 		})
+ 	})
+ 
+-	t.Run("CertServerCAPath", func(t *testing.T) {
+-		t.Run("nil TLS falls back to tls.crt", func(t *testing.T) {
+-			assert.Equal(t, "/etc/tls/certs/default/tls.crt", (*redpandav1alpha2.TLS)(nil).CertServerCAPath("default"))
+-		})
+-
+-		t.Run("CA enabled uses ca.crt", func(t *testing.T) {
+-			tls := &redpandav1alpha2.TLS{Certs: map[string]*redpandav1alpha2.Certificate{"my-cert": {CAEnabled: ptr.To(true)}}}
+-			assert.Equal(t, "/etc/tls/certs/my-cert/ca.crt", tls.CertServerCAPath("my-cert"))
+-		})
+-
+-		t.Run("CA disabled uses tls.crt", func(t *testing.T) {
+-			tls := &redpandav1alpha2.TLS{Certs: map[string]*redpandav1alpha2.Certificate{"my-cert": {CAEnabled: ptr.To(false)}}}
+-			assert.Equal(t, "/etc/tls/certs/my-cert/tls.crt", tls.CertServerCAPath("my-cert"))
+-		})
+-	})
+-
+ 	t.Run("CertificatesFor", func(t *testing.T) {
+ 		t.Run("nil TLS returns defaults", func(t *testing.T) {
+ 			certSecret, certKey, clientSecret := (*redpandav1alpha2.TLS)(nil).CertificatesFor("release", "default")
+@@ -378,18 +363,17 @@ func TestStretchListenerTLS(t *testing.T) {
+ 	})
+ 
+ 	t.Run("ServerCAPath", func(t *testing.T) {
+-		tls := &redpandav1alpha2.TLS{
+-			Enabled: ptr.To(true),
+-			Certs:   map[string]*redpandav1alpha2.Certificate{"default": {CAEnabled: ptr.To(true)}},
+-		}
++		pki := &redpanda.PKI{Certificates: map[string]redpanda.Certificate{
++			"default": {Server: redpanda.Keypair{Name: "default", CA: ptr.To("ca.crt")}},
++		}}
+ 
+ 		t.Run("nil listener returns empty", func(t *testing.T) {
+-			assert.Equal(t, "", (*redpandav1alpha2.StretchListenerTLS)(nil).ServerCAPath(tls))
++			assert.Equal(t, "", (*redpandav1alpha2.StretchListenerTLS)(nil).ServerCAPath(pki))
+ 		})
+ 
+ 		t.Run("no truststore falls back to cert-based path", func(t *testing.T) {
+ 			lt := &redpandav1alpha2.StretchListenerTLS{Cert: ptr.To("default")}
+-			assert.Equal(t, "/etc/tls/certs/default/ca.crt", lt.ServerCAPath(tls))
++			assert.Equal(t, "/etc/tls/certs/default/ca.crt", lt.ServerCAPath(pki))
+ 		})
+ 
+ 		t.Run("truststore takes precedence", func(t *testing.T) {
+@@ -402,12 +386,12 @@ func TestStretchListenerTLS(t *testing.T) {
+ 					},
+ 				},
+ 			}
+-			assert.Equal(t, "/etc/truststores/secrets/custom-ca-ca.crt", lt.ServerCAPath(tls))
++			assert.Equal(t, "/etc/truststores/secrets/custom-ca-ca.crt", lt.ServerCAPath(pki))
+ 		})
+ 
+ 		t.Run("no cert name returns empty", func(t *testing.T) {
+ 			lt := &redpandav1alpha2.StretchListenerTLS{}
+-			assert.Equal(t, "", lt.ServerCAPath(tls))
++			assert.Equal(t, "", lt.ServerCAPath(pki))
+ 		})
+ 	})
+ }
+diff --git a/operator/config/crd/bases/cluster.redpanda.com_redpandabrokerpools.yaml b/operator/config/crd/bases/cluster.redpanda.com_redpandabrokerpools.yaml
+index 8efa5482..afe2a7cd 100644
+--- a/operator/config/crd/bases/cluster.redpanda.com_redpandabrokerpools.yaml
++++ b/operator/config/crd/bases/cluster.redpanda.com_redpandabrokerpools.yaml
+@@ -10717,10 +10717,15 @@ spec:
+                             See https://cert-manager.io/v1.1-docs.
+                           properties:
+                             group:
++                              description: |-
++                                Group specifies the API group of the issuer. Set this when using an
++                                external issuer, such as `cas-issuer.jetstack.io`. Defaults to
++                                `cert-manager.io`.
+                               type: string
+                             kind:
+-                              description: Specifies the kind of resource. One of
+-                                `Issuer` or `ClusterIssuer`.
++                              description: |-
++                                Kind specifies the kind of resource: `Issuer`, `ClusterIssuer`, or the
++                                kind of an external issuer, such as `GoogleCASClusterIssuer`.
+                               type: string
+                             name:
+                               description: Specifies the name of the resource.
+diff --git a/operator/config/crd/bases/cluster.redpanda.com_redpandas.yaml b/operator/config/crd/bases/cluster.redpanda.com_redpandas.yaml
+index d4411cd2..8c8d788e 100644
+--- a/operator/config/crd/bases/cluster.redpanda.com_redpandas.yaml
++++ b/operator/config/crd/bases/cluster.redpanda.com_redpandas.yaml
+@@ -33702,10 +33702,15 @@ spec:
+                                 Requires cert-manager. See https://cert-manager.io/v1.1-docs.
+                               properties:
+                                 group:
++                                  description: |-
++                                    Group specifies the API group of the issuer. Set this when using an
++                                    external issuer, such as `cas-issuer.jetstack.io`. Defaults to
++                                    `cert-manager.io`.
+                                   type: string
+                                 kind:
+-                                  description: Specifies the kind of resource. One
+-                                    of `Issuer` or `ClusterIssuer`.
++                                  description: |-
++                                    Kind specifies the kind of resource: `Issuer`, `ClusterIssuer`, or the
++                                    kind of an external issuer, such as `GoogleCASClusterIssuer`.
+                                   type: string
+                                 name:
+                                   description: Specifies the name of the resource.
+@@ -67859,10 +67864,15 @@ spec:
+                                 Requires cert-manager. See https://cert-manager.io/v1.1-docs.
+                               properties:
+                                 group:
++                                  description: |-
++                                    Group specifies the API group of the issuer. Set this when using an
++                                    external issuer, such as `cas-issuer.jetstack.io`. Defaults to
++                                    `cert-manager.io`.
+                                   type: string
+                                 kind:
+-                                  description: Specifies the kind of resource. One
+-                                    of `Issuer` or `ClusterIssuer`.
++                                  description: |-
++                                    Kind specifies the kind of resource: `Issuer`, `ClusterIssuer`, or the
++                                    kind of an external issuer, such as `GoogleCASClusterIssuer`.
+                                   type: string
+                                 name:
+                                   description: Specifies the name of the resource.
+diff --git a/operator/internal/controller/pipeline/cluster.go b/operator/internal/controller/pipeline/cluster.go
+index 8890c225..28c49d07 100644
+--- a/operator/internal/controller/pipeline/cluster.go
++++ b/operator/internal/controller/pipeline/cluster.go
+@@ -391,7 +391,7 @@ func (c *Controller) resolveClusterSource(ctx context.Context, pipeline *redpand
+ // honored:
+ //
+ //   - a Secret-backed CA (cert-manager issued, key ca.crt — or the server
+-//     cert itself under cert.crt when the bundle carries no CA)
++//     cert itself under tls.crt when the bundle carries no CA)
+ //   - a ConfigMap-backed truststore (listeners.kafka.tls.trustStore)
+ //   - client cert + key Secrets when the listener sets requireClientAuth
+ //     (mTLS) — dropping these would dial an mTLS listener without a client
+diff --git a/operator/multicluster/certificates.go b/operator/multicluster/certificates.go
+new file mode 100644
+index 00000000..5e22bdf3
+--- /dev/null
++++ b/operator/multicluster/certificates.go
+@@ -0,0 +1,89 @@
++// Copyright 2026 Redpanda Data, Inc.
++//
++// Use of this software is governed by the Business Source License
++// included in the file licenses/BSL.md
++//
++// As of the Change Date specified in that file, in accordance with
++// the Business Source License, use of this software will be governed
++// by the Apache License, Version 2.0
++
++package multicluster
++
++import (
++	"fmt"
++
++	corev1 "k8s.io/api/core/v1"
++	"k8s.io/utils/ptr"
++
++	"github.com/redpanda-data/redpanda-operator/charts/redpanda/v25"
++	redpandav1alpha2 "github.com/redpanda-data/redpanda-operator/operator/api/redpanda/v1alpha2"
++)
++
++// poolPKI resolves a pool's certificates and their keypairs.
++//
++// Issuance requests are layered on by [certificatesForPool], which needs
++// template expansion and validation and so can fail. Everything here is
++// infallible, which is what lets the volume, mount, and config paths -- none
++// of which return errors -- share one constructor.
++func poolPKI(state *RenderState, pool *redpandav1alpha2.RedpandaBrokerPool) redpanda.PKI {
++	return redpanda.PKI{
++		Namespace:    state.namespace,
++		Labels:       state.commonLabels(),
++		Certificates: poolCertificates(&pool.Spec, state.poolFullname(pool)),
++	}
++}
++
++// poolCertificates resolves a pool's in-use certificates into the shared
++// package's [redpanda.Certificate] set, which never sees a broker pool.
++//
++// The server certs in sorted order, with Client populated for those a listener
++// requires mTLS on -- replacing two independent walks of InUseServerCerts and
++// InUseClientCerts.
++func poolCertificates(spec *redpandav1alpha2.BrokerPoolSpec, poolFullname string) map[string]redpanda.Certificate {
++	clientCerts := map[string]bool{}
++	for _, name := range spec.InUseClientCerts() {
++		clientCerts[name] = true
++	}
++
++	certs := map[string]redpanda.Certificate{}
++	for _, name := range spec.InUseServerCerts() {
++		certs[name] = certificateFor(spec, poolFullname, name, clientCerts[name])
++	}
++
++	return certs
++}
++
++// certificateFor resolves one of the pool's certificates. Secret names are
++// keyed on poolFullname so two pools using cert name "default" don't collide.
++func certificateFor(spec *redpandav1alpha2.BrokerPoolSpec, poolFullname, name string, withClient bool) redpanda.Certificate {
++	// NB: nil-tolerant on spec; the TLS helpers below are nil-safe on their
++	// own receiver.
++	var tls *redpandav1alpha2.TLS
++	if spec != nil {
++		tls = spec.TLS
++	}
++
++	var ca *string
++	if tls != nil {
++		if data, ok := tls.Certs[name]; ok && data.IsCAEnabled() {
++			ca = ptr.To("ca.crt")
++		}
++	}
++
++	var client *redpanda.Keypair
++	if withClient {
++		client = &redpanda.Keypair{
++			Name:   fmt.Sprintf("%s-client", name),
++			Secret: corev1.LocalObjectReference{Name: tls.CertClientSecretName(poolFullname, name)},
++		}
++	}
++
++	return redpanda.Certificate{
++		Server: redpanda.Keypair{
++			Name:   name,
++			CA:     ca,
++			Secret: corev1.LocalObjectReference{Name: tls.CertServerSecretName(poolFullname, name)},
++		},
++		Client: client,
++	}
++}
+diff --git a/operator/multicluster/certs.go b/operator/multicluster/certs.go
+index 26f95881..f6bc8824 100644
+--- a/operator/multicluster/certs.go
++++ b/operator/multicluster/certs.go
+@@ -18,6 +18,7 @@ import (
+ 	cmmetav1 "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
+ 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+ 
++	"github.com/redpanda-data/redpanda-operator/charts/redpanda/v25"
+ 	redpandav1alpha2 "github.com/redpanda-data/redpanda-operator/operator/api/redpanda/v1alpha2"
+ 	"github.com/redpanda-data/redpanda-operator/operator/pkg/tplutil"
+ )
+@@ -50,6 +51,8 @@ func certificatesForPool(state *RenderState, pool *redpandav1alpha2.RedpandaBrok
+ 		return nil, nil
+ 	}
+ 
++	pki := poolPKI(state, pool)
++
+ 	fullname := state.fullname()
+ 	poolFullname := state.poolFullname(pool)
+ 	// Headless Service is cluster-wide and always named after the cluster.
+@@ -58,145 +61,82 @@ func certificatesForPool(state *RenderState, pool *redpandav1alpha2.RedpandaBrok
+ 	// Trailing dots don't play nice with TLS/SNI.
+ 	domain := strings.TrimSuffix(poolSpec.GetClusterDomain(), ".")
+ 
+-	var certs []*certmanagerv1.Certificate
++	// external.domain is templated, so expand it once rather than per cert.
++	externalDomain := ""
++	if ext := poolSpec.External; ext != nil && ext.Domain != nil {
++		expanded, err := tplutil.Tpl(*ext.Domain, state.tplData())
++		if err != nil {
++			return nil, fmt.Errorf("expanding external domain template: %w", err)
++		}
++		externalDomain = expanded
++	}
+ 
+-	// Server certificates.
+-	for _, name := range poolSpec.InUseServerCerts() {
+-		cert := tlsCfg.Certs[name]
++	brokers := perPodHosts(state)
++	isMCS := state.Spec().Networking.IsMCS()
+ 
+-		// Don't generate server certs if a secret is provided.
+-		if cert != nil && cert.SecretRef != nil {
+-			continue
+-		}
++	// NB: map values aren't addressable, so each certificate is copied out,
++	// given its requests, and written back.
++	issuing := map[string]redpanda.Certificate{}
++	for name, cert := range pki.Certificates {
++		data := tlsCfg.Certs[name]
+ 
+-		var names []string
+-		if cert == nil || cert.IssuerRef == nil || cert.ShouldApplyInternalDNSNames() {
+-			names = append(names,
+-				fmt.Sprintf("%s-cluster.%s.%s.svc.%s", fullname, service, ns, domain),
+-				fmt.Sprintf("%s-cluster.%s.%s.svc", fullname, service, ns),
+-				fmt.Sprintf("%s-cluster.%s.%s", fullname, service, ns),
+-				fmt.Sprintf("*.%s-cluster.%s.%s.svc.%s", fullname, service, ns, domain),
+-				fmt.Sprintf("*.%s-cluster.%s.%s.svc", fullname, service, ns),
+-				fmt.Sprintf("*.%s-cluster.%s.%s", fullname, service, ns),
+-				fmt.Sprintf("%s.%s.svc.%s", service, ns, domain),
+-				fmt.Sprintf("%s.%s.svc", service, ns),
+-				fmt.Sprintf("%s.%s", service, ns),
+-				fmt.Sprintf("*.%s.%s.svc.%s", service, ns, domain),
+-				fmt.Sprintf("*.%s.%s.svc", service, ns),
+-				fmt.Sprintf("*.%s.%s", service, ns),
+-				// Per-pod service names are standalone services in the namespace,
+-				// not subdomains of the headless service. Namespace-wide
+-				// wildcards cover the FQDN and 3-label forms of those services.
+-				// The 2-label form `<pod>.<ns>` is covered by the explicit
+-				// per-broker SANs below — a `*.<ns>` wildcard would be on a
+-				// single-label parent (RFC 6125 §6.4.3) which OpenSSL ≥3.0
+-				// rejects with "hostname mismatch", so emitting one would
+-				// add noise without buying anything.
+-				fmt.Sprintf("*.%s.svc.%s", ns, domain),
+-				fmt.Sprintf("*.%s.svc", ns),
+-			)
+-			// In flat & MCS modes the operator writes 2-label hostnames
+-			// (`<pod>.<ns>`) into seed_servers / advertised_rpc_api, which
+-			// only a single-label-parent wildcard could match — and that's
+-			// the RFC violation noted above. Enumerate one well-formed SAN
+-			// per broker so the RPC handshake doesn't fail under strict
+-			// hostname verification and the cluster can actually reach
+-			// quorum (see #1499).
+-			for _, p := range state.Pools() {
+-				for i := int32(0); i < p.GetReplicas(); i++ {
+-					podName := PerPodServiceName(state.poolFullname(p), i)
+-					names = append(names, fmt.Sprintf("%s.%s", podName, ns))
+-				}
+-			}
++		if cert.Client != nil && data != nil && data.SecretRef != nil && data.ClientSecretRef == nil {
++			return nil, fmt.Errorf(".clientSecretRef MUST be set if .secretRef is set and require_client_auth is true: Cert %q", name)
+ 		}
+ 
+-		// MCS networking is cluster-wide; add clusterset.local SANs.
+-		if state.Spec().Networking.IsMCS() {
+-			names = append(names,
+-				fmt.Sprintf("%s-cluster.%s.%s.svc.clusterset.local", fullname, service, ns),
+-				fmt.Sprintf("*.%s-cluster.%s.%s.svc.clusterset.local", fullname, service, ns),
+-				fmt.Sprintf("%s.%s.svc.clusterset.local", service, ns),
+-				fmt.Sprintf("*.%s.%s.svc.clusterset.local", service, ns),
+-			)
+-			for _, p := range state.Pools() {
+-				for i := int32(0); i < p.GetReplicas(); i++ {
+-					podName := PerPodServiceName(state.poolFullname(p), i)
+-					names = append(names, fmt.Sprintf("%s.%s.svc.clusterset.local", podName, ns))
+-				}
++		// A provided secretRef means the keypair already exists; only the
++		// generated ones are issued.
++		if data == nil || data.SecretRef == nil {
++			cert.Server.Request = &redpanda.CertificateRequest{
++				ObjectName: fmt.Sprintf("%s-%s-cert", poolFullname, name),
++				DNSNames:   poolSANs(data, fullname, service, ns, domain, externalDomain, brokers, isMCS),
++				Duration:   &metav1.Duration{Duration: certDuration(data)},
++				IssuerRef:  certIssuerRef(fullname, name, data),
+ 			}
+ 		}
+ 
+-		if ext := poolSpec.External; ext != nil && ext.Domain != nil {
+-			expandedDomain, err := tplutil.Tpl(*ext.Domain, state.tplData())
+-			if err != nil {
+-				return nil, fmt.Errorf("expanding external domain template: %w", err)
++		if cert.Client != nil && (data == nil || data.ClientSecretRef == nil) {
++			client := *cert.Client
++			client.Request = &redpanda.CertificateRequest{
++				ObjectName: fmt.Sprintf("%s-%s-client", poolFullname, name),
++				CommonName: fmt.Sprintf("%s--%s-client", poolFullname, name),
++				Duration:   &metav1.Duration{Duration: certDuration(data)},
++				IssuerRef:  certIssuerRef(fullname, name, data),
+ 			}
+-			names = append(names, expandedDomain)
+-			names = append(names, fmt.Sprintf("*.%s", expandedDomain))
++			cert.Client = &client
+ 		}
+ 
+-		certs = append(certs, &certmanagerv1.Certificate{
+-			TypeMeta: metav1.TypeMeta{
+-				APIVersion: "cert-manager.io/v1",
+-				Kind:       "Certificate",
+-			},
+-			ObjectMeta: metav1.ObjectMeta{
+-				Name:      fmt.Sprintf("%s-%s-cert", poolFullname, name),
+-				Labels:    state.commonLabels(),
+-				Namespace: state.namespace,
+-			},
+-			Spec: certmanagerv1.CertificateSpec{
+-				DNSNames:   names,
+-				Duration:   &metav1.Duration{Duration: certDuration(cert)},
+-				IsCA:       false,
+-				IssuerRef:  certIssuerRef(fullname, name, cert),
+-				SecretName: tlsCfg.CertServerSecretName(poolFullname, name),
+-				PrivateKey: &certmanagerv1.CertificatePrivateKey{
+-					Algorithm: "ECDSA",
+-					Size:      256,
+-				},
+-			},
+-		})
++		issuing[name] = cert
+ 	}
+ 
+-	// Client certificates.
+-	for _, name := range poolSpec.InUseClientCerts() {
+-		cert := tlsCfg.Certs[name]
++	pki.Certificates = issuing
+ 
+-		if cert != nil {
+-			if cert.SecretRef != nil && cert.ClientSecretRef == nil {
+-				return nil, fmt.Errorf(".clientSecretRef MUST be set if .secretRef is set and require_client_auth is true: Cert %q", name)
+-			}
+-			if cert.ClientSecretRef != nil {
+-				continue
+-			}
+-		}
++	return pki.Render(), nil
++}
+ 
+-		certs = append(certs, &certmanagerv1.Certificate{
+-			TypeMeta: metav1.TypeMeta{
+-				APIVersion: "cert-manager.io/v1",
+-				Kind:       "Certificate",
+-			},
+-			ObjectMeta: metav1.ObjectMeta{
+-				Name:      fmt.Sprintf("%s-%s-client", poolFullname, name),
+-				Namespace: state.namespace,
+-				Labels:    state.commonLabels(),
+-			},
+-			Spec: certmanagerv1.CertificateSpec{
+-				CommonName: fmt.Sprintf("%s--%s-client", poolFullname, name),
+-				Duration:   &metav1.Duration{Duration: certDuration(cert)},
+-				IsCA:       false,
+-				SecretName: tlsCfg.CertClientSecretName(poolFullname, name),
+-				PrivateKey: &certmanagerv1.CertificatePrivateKey{
+-					Algorithm: "ECDSA",
+-					Size:      256,
+-				},
+-				IssuerRef: certIssuerRef(fullname, name, cert),
+-			},
+-		})
++// poolSANs is the operator's SAN set. Per-pod Services are standalone in the
++// namespace rather than subdomains of the headless Service, hence the
++// namespace wildcards and per-broker names; see [redpanda.NamespaceSANs].
++func poolSANs(
++	data *redpandav1alpha2.Certificate,
++	fullname, service, ns, domain, externalDomain string,
++	brokers []string,
++	isMCS bool,
++) []string {
++	var names []string
++
++	if data == nil || data.IssuerRef == nil || data.ShouldApplyInternalDNSNames() {
++		names = append(names, redpanda.ServiceSANs(fullname, service, ns, domain)...)
++		names = append(names, redpanda.NamespaceSANs(ns, domain, brokers)...)
+ 	}
+ 
+-	return certs, nil
++	if isMCS {
++		names = append(names, redpanda.ClusterSetSANs(fullname, service, ns, brokers)...)
++	}
++
++	names = append(names, redpanda.DomainSANs(externalDomain)...)
++
++	return names
+ }
+ 
+ // certDuration returns the certificate duration, falling back to defaultCertDuration.
+@@ -223,3 +163,14 @@ func certIssuerRef(fullname, certName string, cert *redpandav1alpha2.Certificate
+ 		Name:  fmt.Sprintf("%s-%s-root-issuer", fullname, certName),
+ 	}
+ }
++
++// perPodHosts returns every broker's per-pod Service name across all pools.
++func perPodHosts(state *RenderState) []string {
++	var hosts []string
++	for _, p := range state.Pools() {
++		for i := int32(0); i < p.GetReplicas(); i++ {
++			hosts = append(hosts, PerPodServiceName(state.poolFullname(p), i))
++		}
++	}
++	return hosts
++}
+diff --git a/operator/multicluster/configmap_pandaproxy.go b/operator/multicluster/configmap_pandaproxy.go
+index eef1d8e0..230cd175 100644
+--- a/operator/multicluster/configmap_pandaproxy.go
++++ b/operator/multicluster/configmap_pandaproxy.go
+@@ -29,7 +29,9 @@ func pandaProxyConfig(state *RenderState, pool *redpandav1alpha2.RedpandaBrokerP
+ 		authMethod = "http_basic"
+ 	}
+ 
+-	configureAPIListener(cfg, pool, http, "pandaproxy_api", "pandaproxy_api_tls",
++	pki := poolPKI(state, pool)
++
++	configureAPIListener(cfg, &pki, pool, http, "pandaproxy_api", "pandaproxy_api_tls",
+ 		pool.Spec.HTTPPort(), redpandav1alpha2.DefaultExternalHTTPPort, authMethod)
+ 
+ 	return cfg
+diff --git a/operator/multicluster/configmap_redpanda.go b/operator/multicluster/configmap_redpanda.go
+index 7bdb0fe7..81002c95 100644
+--- a/operator/multicluster/configmap_redpanda.go
++++ b/operator/multicluster/configmap_redpanda.go
+@@ -10,10 +10,10 @@
+ package multicluster
+ 
+ import (
+-	"fmt"
+ 	"strconv"
+ 	"strings"
+ 
++	"github.com/redpanda-data/redpanda-operator/charts/redpanda/v25"
+ 	redpandav1alpha2 "github.com/redpanda-data/redpanda-operator/operator/api/redpanda/v1alpha2"
+ 	"github.com/redpanda-data/redpanda-operator/operator/pkg/tplutil"
+ )
+@@ -57,7 +57,7 @@ func redpandaConfigFile(state *RenderState, includeSeedServers bool, pool *redpa
+ 
+ 	redpandaYaml := map[string]any{
+ 		"redpanda":        redpanda,
+-		"schema_registry": schemaRegistryConfig(pool),
++		"schema_registry": schemaRegistryConfig(state, pool),
+ 		"pandaproxy":      pandaProxyConfig(state, pool),
+ 		"config_file":     redpandaConfigMountPath + "/redpanda.yaml",
+ 	}
+@@ -90,8 +90,9 @@ func redpandaConfigFile(state *RenderState, includeSeedServers bool, pool *redpa
+ 
+ // configureListeners populates the listener entries in the redpanda config
+ // section using the pool's listener and TLS configuration.
+-func configureListeners(redpanda map[string]any, state *RenderState, pool *redpandav1alpha2.RedpandaBrokerPool) {
++func configureListeners(cfg map[string]any, state *RenderState, pool *redpandav1alpha2.RedpandaBrokerPool) {
+ 	l := pool.Spec.Listeners
++	pki := poolPKI(state, pool)
+ 
+ 	var admin, kafka *redpandav1alpha2.StretchAPIListener
+ 	if l != nil {
+@@ -100,28 +101,28 @@ func configureListeners(redpanda map[string]any, state *RenderState, pool *redpa
+ 	}
+ 
+ 	// Admin listener.
+-	configureAPIListener(redpanda, pool, admin, "admin", "admin_api_tls", pool.Spec.AdminPort(), redpandav1alpha2.DefaultExternalAdminPort, "")
++	configureAPIListener(cfg, &pki, pool, admin, "admin", "admin_api_tls", pool.Spec.AdminPort(), redpandav1alpha2.DefaultExternalAdminPort, "")
+ 
+ 	// Kafka listener.
+ 	authMethod := ""
+ 	if state.Spec().Auth.IsSASLEnabled() {
+ 		authMethod = "sasl"
+ 	}
+-	configureAPIListener(redpanda, pool, kafka, "kafka_api", "kafka_api_tls", pool.Spec.KafkaPort(), redpandav1alpha2.DefaultExternalKafkaPort, authMethod)
++	configureAPIListener(cfg, &pki, pool, kafka, "kafka_api", "kafka_api_tls", pool.Spec.KafkaPort(), redpandav1alpha2.DefaultExternalKafkaPort, authMethod)
+ 
+ 	// RPC listener.
+-	redpanda["rpc_server"] = map[string]any{
++	cfg["rpc_server"] = map[string]any{
+ 		"address": "0.0.0.0",
+ 		"port":    pool.Spec.RPCPort(),
+ 	}
+ 	if l != nil && l.RPC.IsTLSEnabled(pool.Spec.TLS) && l.RPC.TLS != nil && l.RPC.TLS.GetCert() != "" {
+-		certName := l.RPC.TLS.GetCert()
+-		redpanda["rpc_server_tls"] = map[string]any{
++		kp := pki.ServerKeypair(l.RPC.TLS.GetCert())
++		cfg["rpc_server_tls"] = map[string]any{
+ 			"enabled":             true,
+-			"cert_file":           fmt.Sprintf("%s/tls.crt", certServerMountPoint(certName)),
+-			"key_file":            fmt.Sprintf("%s/tls.key", certServerMountPoint(certName)),
++			"cert_file":           kp.CertFile(),
++			"key_file":            kp.KeyFile(),
+ 			"require_client_auth": l.RPC.TLS.RequiresClientAuth(),
+-			"truststore_file":     l.RPC.TLS.ServerCAPath(pool.Spec.TLS),
++			"truststore_file":     l.RPC.TLS.ServerCAPath(&pki),
+ 		}
+ 	}
+ }
+@@ -130,7 +131,8 @@ func configureListeners(redpanda map[string]any, state *RenderState, pool *redpa
+ // listeners: creates the internal listener entry, adds TLS if enabled, iterates external
+ // listeners, and sets the results on the redpanda config map.
+ func configureAPIListener(
+-	redpanda map[string]any,
++	cfg map[string]any,
++	pki *redpanda.PKI,
+ 	pool *redpandav1alpha2.RedpandaBrokerPool,
+ 	listener *redpandav1alpha2.StretchAPIListener,
+ 	listenerKey, tlsKey string,
+@@ -149,7 +151,7 @@ func configureAPIListener(
+ 
+ 	if listener != nil {
+ 		if listener.IsTLSEnabled(pool.Spec.TLS) && listener.TLS.GetCert() != "" {
+-			tlsEntries = append(tlsEntries, listenerTLSEntry(pool, internalListenerName, listener.TLS))
++			tlsEntries = append(tlsEntries, listenerTLSEntry(pki, pool, internalListenerName, listener.TLS))
+ 		}
+ 		forEachEnabledExternal(listener.External, func(name string, ext *redpandav1alpha2.StretchExternalListener) {
+ 			entry := map[string]any{
+@@ -167,27 +169,28 @@ func configureAPIListener(
+ 			// (InUseServerCerts), the broker then crashloops reading
+ 			// /etc/tls/certs/external/* files that nothing mounts.
+ 			if ext.TLS.IsTLSEnabled(pool.Spec.TLS) && ext.TLS.GetCert() != "" {
+-				tlsEntries = append(tlsEntries, listenerTLSEntry(pool, name, ext.TLS))
++				tlsEntries = append(tlsEntries, listenerTLSEntry(pki, pool, name, ext.TLS))
+ 			}
+ 		})
+ 	}
+ 
+-	redpanda[listenerKey] = listeners
++	cfg[listenerKey] = listeners
+ 	if len(tlsEntries) > 0 {
+-		redpanda[tlsKey] = tlsEntries
++		cfg[tlsKey] = tlsEntries
+ 	}
+ }
+ 
+ // listenerTLSEntry returns the TLS config map for a named listener using the
+ // pool's TLS configuration.
+-func listenerTLSEntry(pool *redpandav1alpha2.RedpandaBrokerPool, name string, tls *redpandav1alpha2.StretchListenerTLS) map[string]any {
++func listenerTLSEntry(pki *redpanda.PKI, pool *redpandav1alpha2.RedpandaBrokerPool, name string, tls *redpandav1alpha2.StretchListenerTLS) map[string]any {
+ 	certName := tls.GetCert()
++	kp := pki.ServerKeypair(certName)
+ 	return map[string]any{
+ 		"name":                name,
+ 		"enabled":             true,
+-		"cert_file":           fmt.Sprintf("%s/tls.crt", certServerMountPoint(certName)),
+-		"key_file":            fmt.Sprintf("%s/tls.key", certServerMountPoint(certName)),
++		"cert_file":           kp.CertFile(),
++		"key_file":            kp.KeyFile(),
+ 		"require_client_auth": pool.Spec.Listeners.CertRequiresClientAuth(certName),
+-		"truststore_file":     tls.ServerCAPath(pool.Spec.TLS),
++		"truststore_file":     tls.ServerCAPath(pki),
+ 	}
+ }
+diff --git a/operator/multicluster/configmap_rpk.go b/operator/multicluster/configmap_rpk.go
+index 22d057da..ccb50a71 100644
+--- a/operator/multicluster/configmap_rpk.go
++++ b/operator/multicluster/configmap_rpk.go
+@@ -29,6 +29,7 @@ func rpkNodeConfig(state *RenderState, pool *redpandav1alpha2.RedpandaBrokerPool
+ 	flags := redpandaAdditionalStartFlags(state, pool)
+ 
+ 	l := pool.Spec.Listeners
++	pki := poolPKI(state, pool)
+ 
+ 	result := map[string]any{
+ 		"additional_start_flags": flags,
+@@ -36,15 +37,15 @@ func rpkNodeConfig(state *RenderState, pool *redpandav1alpha2.RedpandaBrokerPool
+ 		"enable_memory_locking":  pool.Spec.GetEnableMemoryLocking(),
+ 		"kafka_api": map[string]any{
+ 			"brokers": state.kafkaApiBrokerList(),
+-			"tls":     rpkListenerTLS(pool, l.Kafka),
++			"tls":     rpkListenerTLS(&pki, pool, l.Kafka),
+ 		},
+ 		"admin_api": map[string]any{
+ 			"addresses": state.adminApiBrokerList(),
+-			"tls":       rpkListenerTLS(pool, l.Admin),
++			"tls":       rpkListenerTLS(&pki, pool, l.Admin),
+ 		},
+ 		"schema_registry": map[string]any{
+ 			"addresses": state.schemaRegistryBrokerList(),
+-			"tls":       rpkListenerTLS(pool, l.SchemaRegistry),
++			"tls":       rpkListenerTLS(&pki, pool, l.SchemaRegistry),
+ 		},
+ 	}
+ 
+@@ -74,23 +75,21 @@ func rpkNodeConfig(state *RenderState, pool *redpandav1alpha2.RedpandaBrokerPool
+ 
+ // rpkListenerTLS returns the rpk client TLS config for a listener, or nil if
+ // TLS is not enabled or no cert is configured.
+-func rpkListenerTLS(pool *redpandav1alpha2.RedpandaBrokerPool, listener *redpandav1alpha2.StretchAPIListener) map[string]any {
++func rpkListenerTLS(pki *redpanda.PKI, pool *redpandav1alpha2.RedpandaBrokerPool, listener *redpandav1alpha2.StretchAPIListener) map[string]any {
+ 	if listener == nil || !listener.IsTLSEnabled(pool.Spec.TLS) || listener.TLS.GetCert() == "" {
+ 		return nil
+ 	}
+-	return rpkClientTLSConfig(pool, listener.TLS)
++	return rpkClientTLSConfig(pki, listener.TLS)
+ }
+ 
+ // rpkClientTLSConfig returns the TLS config map for rpk client connections.
+-func rpkClientTLSConfig(pool *redpandav1alpha2.RedpandaBrokerPool, tls *redpandav1alpha2.StretchListenerTLS) map[string]any {
+-	certName := tls.GetCert()
++func rpkClientTLSConfig(pki *redpanda.PKI, tls *redpandav1alpha2.StretchListenerTLS) map[string]any {
+ 	result := map[string]any{
+-		"ca_file": tls.ServerCAPath(pool.Spec.TLS),
++		"ca_file": tls.ServerCAPath(pki),
+ 	}
+-	if pool.Spec.Listeners.CertRequiresClientAuth(certName) {
+-		clientPath := certClientMountPoint(certName)
+-		result["cert_file"] = fmt.Sprintf("%s/tls.crt", clientPath)
+-		result["key_file"] = fmt.Sprintf("%s/tls.key", clientPath)
++	if kp := pki.ClientKeypair(tls.GetCert()); kp != nil {
++		result["cert_file"] = kp.CertFile()
++		result["key_file"] = kp.KeyFile()
+ 	}
+ 	return result
+ }
+@@ -98,6 +97,7 @@ func rpkClientTLSConfig(pool *redpandav1alpha2.RedpandaBrokerPool, tls *redpanda
+ // kafkaClientConfig generates the pandaproxy_client / schema_registry_client / audit_log_client
+ // section of the redpanda.yaml template. clientType is "pandaproxy", "schema_registry", or "audit_log".
+ func kafkaClientConfig(state *RenderState, pool *redpandav1alpha2.RedpandaBrokerPool, clientType string) map[string]any {
++	pki := poolPKI(state, pool)
+ 	var brokerList []map[string]any
+ 
+ 	// Check if use_localhost is set in node config.
+@@ -131,12 +131,11 @@ func kafkaClientConfig(state *RenderState, pool *redpandav1alpha2.RedpandaBroker
+ 		brokerTLS := map[string]any{
+ 			"enabled":             true,
+ 			"require_client_auth": pool.Spec.Listeners.CertRequiresClientAuth(certName),
+-			"truststore_file":     tls.ServerCAPath(pool.Spec.TLS),
++			"truststore_file":     tls.ServerCAPath(&pki),
+ 		}
+-		if pool.Spec.Listeners.CertRequiresClientAuth(certName) {
+-			clientPath := certClientMountPoint(certName)
+-			brokerTLS["cert_file"] = fmt.Sprintf("%s/tls.crt", clientPath)
+-			brokerTLS["key_file"] = fmt.Sprintf("%s/tls.key", clientPath)
++		if kp := pki.ClientKeypair(certName); kp != nil {
++			brokerTLS["cert_file"] = kp.CertFile()
++			brokerTLS["key_file"] = kp.KeyFile()
+ 		}
+ 		cfg["broker_tls"] = brokerTLS
+ 	}
+diff --git a/operator/multicluster/configmap_schema_registry.go b/operator/multicluster/configmap_schema_registry.go
+index c2c2b0ef..83ccde34 100644
+--- a/operator/multicluster/configmap_schema_registry.go
++++ b/operator/multicluster/configmap_schema_registry.go
+@@ -15,7 +15,7 @@ import (
+ 
+ // schemaRegistryConfig generates the schema_registry section of the redpanda.yaml
+ // template for the given pool.
+-func schemaRegistryConfig(pool *redpandav1alpha2.RedpandaBrokerPool) map[string]any {
++func schemaRegistryConfig(state *RenderState, pool *redpandav1alpha2.RedpandaBrokerPool) map[string]any {
+ 	cfg := map[string]any{}
+ 
+ 	var sr *redpandav1alpha2.StretchAPIListener
+@@ -23,7 +23,9 @@ func schemaRegistryConfig(pool *redpandav1alpha2.RedpandaBrokerPool) map[string]
+ 		sr = l.SchemaRegistry
+ 	}
+ 
+-	configureAPIListener(cfg, pool, sr, "schema_registry_api", "schema_registry_api_tls",
++	pki := poolPKI(state, pool)
++
++	configureAPIListener(cfg, &pki, pool, sr, "schema_registry_api", "schema_registry_api_tls",
+ 		pool.Spec.SchemaRegistryPort(), redpandav1alpha2.DefaultExternalSchemaRegistryPort, "")
+ 
+ 	return cfg
+diff --git a/operator/multicluster/helpers.go b/operator/multicluster/helpers.go
+index 630241b3..25ce2d43 100644
+--- a/operator/multicluster/helpers.go
++++ b/operator/multicluster/helpers.go
+@@ -124,23 +124,3 @@ func setPtr[T any](dst map[string]any, key string, val *T) {
+ 		dst[key] = *val
+ 	}
+ }
+-
+-// certServerVolumeName returns the volume name for a server cert.
+-func certServerVolumeName(certName string) string {
+-	return fmt.Sprintf("redpanda-%s-cert", certName)
+-}
+-
+-// certClientVolumeName returns the volume name for a client cert.
+-func certClientVolumeName(certName string) string {
+-	return fmt.Sprintf("redpanda-%s-client-cert", certName)
+-}
+-
+-// certServerMountPoint returns the mount path for a server cert.
+-func certServerMountPoint(certName string) string {
+-	return fmt.Sprintf("/etc/tls/certs/%s", certName)
+-}
+-
+-// certClientMountPoint returns the mount path for a client cert.
+-func certClientMountPoint(certName string) string {
+-	return fmt.Sprintf("/etc/tls/certs/%s-client", certName)
+-}
+diff --git a/operator/multicluster/scripts.go b/operator/multicluster/scripts.go
+index a0d7f905..59dcf691 100644
+--- a/operator/multicluster/scripts.go
++++ b/operator/multicluster/scripts.go
+@@ -89,8 +89,10 @@ func scriptInternalAdvertiseAddress(state *RenderState, pool *redpandav1alpha2.R
+ // given pool. The lifecycle scripts are mounted per-pool so admin URL / TLS
+ // flags / protocol come from this pool's TLS/Listeners/ClusterDomain.
+ func scriptParamsForLifecycle(state *RenderState, pool *redpandav1alpha2.RedpandaBrokerPool) ScriptParams {
++	pki := poolPKI(state, pool)
++
+ 	return ScriptParams{
+-		AdminCurlFlags:           poolAdminTLSCurlFlags(pool),
++		AdminCurlFlags:           poolAdminTLSCurlFlags(&pki, pool),
+ 		CurlURL:                  pool.Spec.AdminInternalURL(state.fullname(), state.namespace),
+ 		TotalReplicas:            state.totalReplicas(),
+ 		AdminHTTPProtocol:        pool.Spec.AdminInternalHTTPProtocol(),
+@@ -100,8 +102,10 @@ func scriptParamsForLifecycle(state *RenderState, pool *redpandav1alpha2.Redpand
+ }
+ 
+ func scriptParamsFromState(state *RenderState, pool *redpandav1alpha2.RedpandaBrokerPool) ScriptParams {
++	pki := poolPKI(state, pool)
++
+ 	p := ScriptParams{
+-		AdminCurlFlags:              poolAdminTLSCurlFlags(pool),
++		AdminCurlFlags:              poolAdminTLSCurlFlags(&pki, pool),
+ 		CurlURL:                     pool.Spec.AdminInternalURL(state.fullname(), state.namespace),
+ 		TotalReplicas:               state.totalReplicas(),
+ 		InternalAdvertiseAddress:    scriptInternalAdvertiseAddress(state, pool),
+@@ -228,7 +232,7 @@ func livenessProbeScript(p ScriptParams) string {
+ 
+ // poolAdminTLSCurlFlags returns curl flags for the pool's admin listener TLS.
+ // Reads TLS and Listeners from the pool's spec.
+-func poolAdminTLSCurlFlags(pool *redpandav1alpha2.RedpandaBrokerPool) string {
++func poolAdminTLSCurlFlags(pki *redpanda.PKI, pool *redpandav1alpha2.RedpandaBrokerPool) string {
+ 	if !pool.Spec.IsAdminTLSEnabled() {
+ 		return ""
+ 	}
+@@ -238,10 +242,11 @@ func poolAdminTLSCurlFlags(pool *redpandav1alpha2.RedpandaBrokerPool) string {
+ 		return ""
+ 	}
+ 
+-	if pool.Spec.Listeners.CertRequiresClientAuth(certName) {
+-		path := certClientMountPoint(certName)
++	if kp := pki.ClientKeypair(certName); kp != nil {
++		path := kp.MountPath()
+ 		return fmt.Sprintf("--cacert %s/ca.crt --cert %s/tls.crt --key %s/tls.key", path, path, path)
+ 	}
+ 
+-	return fmt.Sprintf("--cacert %s", pool.Spec.TLS.CertServerCAPath(certName))
++	kp := pki.ServerKeypair(certName)
++	return fmt.Sprintf("--cacert %s", kp.CAOrCertFile())
+ }
+diff --git a/operator/multicluster/statefulset_volumes.go b/operator/multicluster/statefulset_volumes.go
+index 7d0448f1..ad38edc2 100644
+--- a/operator/multicluster/statefulset_volumes.go
++++ b/operator/multicluster/statefulset_volumes.go
+@@ -35,17 +35,15 @@ func (r *RenderState) commonMounts(pool *redpandav1alpha2.RedpandaBrokerPool) []
+ 			})
+ 		}
+ 	}
++	// NB: listener order rather than [redpanda.PKI.Mounts]' name order;
++	// reordering changes the pod template and rolls every broker.
++	pki := poolPKI(r, pool)
+ 	for _, name := range pool.Spec.InUseServerCerts() {
+-		mounts = append(mounts, corev1.VolumeMount{
+-			Name:      certServerVolumeName(name),
+-			MountPath: certServerMountPoint(name),
+-		})
++		kp := pki.ServerKeypair(name)
++		mounts = append(mounts, kp.Mount())
+ 	}
+ 	for _, name := range pool.Spec.InUseClientCerts() {
+-		mounts = append(mounts, corev1.VolumeMount{
+-			Name:      certClientVolumeName(name),
+-			MountPath: certClientMountPoint(name),
+-		})
++		mounts = append(mounts, pki.ClientKeypair(name).Mount())
+ 	}
+ 	return mounts
+ }
+@@ -55,29 +53,16 @@ func (r *RenderState) commonMounts(pool *redpandav1alpha2.RedpandaBrokerPool) []
+ // the pool fullname so two pools using cert name "default" don't collide);
+ // SASL stays cluster-wide via Auth.
+ func (r *RenderState) commonVolumes(pool *redpandav1alpha2.RedpandaBrokerPool) []corev1.Volume {
+-	poolFullname := r.poolFullname(pool)
+ 	var volumes []corev1.Volume
++	// NB: listener order rather than [redpanda.PKI.Volumes]' name order;
++	// reordering changes the pod template and rolls every broker.
++	pki := poolPKI(r, pool)
+ 	for _, name := range pool.Spec.InUseServerCerts() {
+-		volumes = append(volumes, corev1.Volume{
+-			Name: certServerVolumeName(name),
+-			VolumeSource: corev1.VolumeSource{
+-				Secret: &corev1.SecretVolumeSource{
+-					SecretName:  pool.Spec.TLS.CertServerSecretName(poolFullname, name),
+-					DefaultMode: ptr.To[int32](0o440),
+-				},
+-			},
+-		})
++		kp := pki.ServerKeypair(name)
++		volumes = append(volumes, kp.Volume())
+ 	}
+ 	for _, name := range pool.Spec.InUseClientCerts() {
+-		volumes = append(volumes, corev1.Volume{
+-			Name: certClientVolumeName(name),
+-			VolumeSource: corev1.VolumeSource{
+-				Secret: &corev1.SecretVolumeSource{
+-					SecretName:  pool.Spec.TLS.CertClientSecretName(poolFullname, name),
+-					DefaultMode: ptr.To[int32](0o440),
+-				},
+-			},
+-		})
++		volumes = append(volumes, pki.ClientKeypair(name).Volume())
+ 	}
+ 	if r.Spec().Auth.IsSASLEnabled() {
+ 		sasl := r.Spec().Auth.SASL
