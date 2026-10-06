@@ -404,9 +404,35 @@ You can optionally display pages only if they match the component and version of
 
 == Redpanda Connect tag modifier
 
-This extension sources the Redpanda Connect reference partials (field reference, examples, metadata, descriptions, config snippets, and the Bloblang reference) from the `docs/` directory of the connect repository, at the latest Connect release.
+This extension adds the Redpanda Connect generated reference docs (field reference, examples, metadata, descriptions, config snippets, the Bloblang reference, and `platforms/catalog.json`) to the `connect` component that rp-connect-docs provides, from a Connect release.
 
-Add the connect repository as a content source next to rp-connect-docs:
+Every Connect release publishes the generated tree as a release asset named `redpanda-connect-docs.tar.gz`, at `\https://github.com/redpanda-data/connect/releases/download/<tag>/redpanda-connect-docs.tar.gz`. The playbook does not list the connect repository as a content source.
+
+At build time, when the playbook has the `connect` component, the extension:
+
+. Picks the release: the latest stable `vX.Y.Z` release by default, so the site never shows fields from unreleased code on connect's `main` branch. It asks the GitHub API for the latest release and falls back to the highest stable `vX.Y.Z` tag from `git ls-remote`. If neither works, the build stops with an error. The `tag` option picks a specific release instead.
+. Downloads that release's `redpanda-connect-docs.tar.gz` asset. No token is needed.
+. Adds `modules/components/partials/**` as partials and `modules/components/examples/**` as examples of the `components` module, in every version of the `connect` component. A file that another source, such as rp-connect-docs, already provides is skipped and counted in the log, so rp-connect-docs can keep committing its own copies until it stops.
+
+A release from before the asset existed has none, and the download returns 404. The extension logs this and adds nothing. If connector pages then have no field partials, the `generate-rp-connect-info` extension stops the build. Any other failure, such as a network error or a corrupt archive, stops the build, because building without the reference would publish connector pages with no fields.
+
+The extension shares the release it used, so `generate-rp-connect-info` reads `catalog.json` and `info.csv` for the same release as the reference docs. It adds its files before any other `contentClassified` listener runs, wherever it is listed in the playbook.
+
+=== Preview unreleased Connect changes
+
+To build with reference docs that are not released yet, generate them in a connect checkout and point `REDPANDA_CONNECT_DOCS_DIR` at the result:
+
+[,bash]
+----
+export REDPANDA_CONNECT_DOCS_DIR=/path/to/connect/docs
+npx antora --fetch local-antora-playbook.yml
+----
+
+The value is a directory that contains `modules/` (a connect checkout's `docs/` directory after running its docs generator, or the checkout root), or a local copy of a `redpanda-connect-docs.tar.gz` file. It wins over the `tag` option and the latest release, and nothing is downloaded. Set `tag` as well to choose the release that `generate-rp-connect-info` reads `info.csv` from.
+
+=== Playbooks that list the connect repository
+
+A playbook that still lists the connect repository as a content source keeps the earlier behavior, and the extension downloads no asset:
 
 ```yaml
 content:
@@ -416,27 +442,30 @@ content:
     start_path: docs
 ```
 
-At build time the extension:
+* A source that sets `tags: latest` as its only ref is pinned to the latest Connect release tag and its branches are cleared. A source with any other refs, such as a PR branch, is left as configured.
+* Only the `modules/components/partials/` and `modules/components/examples/` files of the `connect` component are kept from that source. Any file that another source already provides is skipped, and so is content from older Connect tags that name their component `redpanda-connect`.
 
-* Pins a source that sets `tags: latest` to the latest Connect release tag and clears its branches (a source with any other refs, such as a PR branch for a preview, is left as configured), so the site never shows fields from unreleased code on connect's `main` branch. It asks the GitHub API for the latest release and falls back to the highest stable `vX.Y.Z` tag from `git ls-remote`. If neither works, the build stops with an error.
-* Keeps only the `modules/components/partials/` and `modules/components/examples/` files of the `connect` component from that source. Any file that another source, such as rp-connect-docs, already provides is skipped, and so is content from older Connect tags that name their component `redpanda-connect`. Antora fails the build on a duplicate page or partial, so you can add the source to a playbook before or after rp-connect-docs stops committing its own generated copies.
-
-A local clone whose directory is named `connect` is filtered the same way but not pinned, so a local playbook can use `branches: HEAD` to test uncommitted changes.
+A local clone whose directory is named `connect` is filtered the same way but not pinned. `REDPANDA_CONNECT_DOCS_DIR` is ignored in this mode.
 
 === Environment variables
 
-- `REDPANDA_GITHUB_TOKEN` (optional): A GitHub token for the release lookup. Without it, the extension sends unauthenticated API requests, which GitHub can rate limit. The `git ls-remote` fallback needs no token.
+- `REDPANDA_CONNECT_DOCS_DIR` (optional): A local directory, or a local `redpanda-connect-docs.tar.gz` file, to read the reference docs from instead of a release. See <<Preview unreleased Connect changes>>.
+- `REDPANDA_GITHUB_TOKEN` (optional): A GitHub token for the latest release lookup. Without it, the extension sends unauthenticated API requests, which GitHub can rate limit. The `git ls-remote` fallback and the asset download need no token.
 
 === Configuration options
 
-There are no configurable options for this extension.
+`tag` (optional):: A Connect release tag, such as `v4.113.0`, to use instead of the latest stable release. A missing `v` prefix is added. Ignored when the playbook lists the connect repository as a content source.
 
 === Registration
+
+Register this extension together with `generate-rp-connect-info`:
 
 ```yaml
 antora:
   extensions:
     - require: '@redpanda-data/docs-extensions-and-macros/extensions/modify-connect-tag-playbook'
+      # tag: v4.113.0 # optional: a specific release instead of the latest
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/generate-rp-connect-info'
 ```
 
 == Version fetcher
