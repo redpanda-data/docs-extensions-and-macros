@@ -88,14 +88,19 @@ async function downloadAsset (tag, { fetchImpl = globalThis.fetch, logger } = {}
   let lastError = null
   for (let attempt = 1; attempt <= DOWNLOAD_ATTEMPTS; attempt++) {
     let response
+    let body
     try {
       response = await fetchImpl(url, { redirect: 'follow', signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS), headers: { 'User-Agent': 'Redpanda Docs' } })
+      // Read the body inside the try, so a connection that drops or times
+      // out mid-download is retried like a failed request.
+      if (response.ok) body = Buffer.from(await response.arrayBuffer())
     } catch (error) {
+      response = undefined
       lastError = new Error(`could not download ${url}: ${error.message}`)
     }
+    if (body) return body
     if (response) {
       if (response.status === 404) return null
-      if (response.ok) return Buffer.from(await response.arrayBuffer())
       lastError = new Error(`could not download ${url}: HTTP ${response.status} ${response.statusText || ''}`.trim())
       // A client error other than 404 will not change on a retry.
       if (response.status < 500 && response.status !== 429) break

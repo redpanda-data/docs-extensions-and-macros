@@ -12,12 +12,20 @@ const page = (relative) => ({ src: { component: 'connect', module: 'components',
 const partial = (relative) => ({ src: { component: 'connect', module: 'components', family: 'partial', relative } })
 
 describe('assertConnectReferencePresent', () => {
-  it('passes when connector pages and field partials are both present', () => {
-    expect(() => assertConnectReferencePresent(catalog([page('inputs/kafka.adoc'), partial('fields/inputs/kafka.adoc')]))).not.toThrow()
+  it('passes when connector pages, field partials, and description partials are present', () => {
+    expect(() => assertConnectReferencePresent(catalog([page('inputs/kafka.adoc'), partial('fields/inputs/kafka.adoc'), partial('descriptions/inputs/kafka.adoc')]))).not.toThrow()
+  })
+  it('fails when connector pages have fields but no description partials', () => {
+    expect(() => assertConnectReferencePresent(catalog([page('inputs/kafka.adoc'), partial('fields/inputs/kafka.adoc')])))
+      .toThrow(/components:partial\$descriptions\/\*/)
+  })
+  it('names both missing sets when neither is present', () => {
+    expect(() => assertConnectReferencePresent(catalog([page('inputs/kafka.adoc')])))
+      .toThrow(/components:partial\$fields\/\* or components:partial\$descriptions\/\*/)
   })
   it('fails when connector pages have no field partials', () => {
     expect(() => assertConnectReferencePresent(catalog([page('inputs/kafka.adoc'), partial('secret_warning.adoc')])))
-      .toThrow(/no generated field partials/)
+      .toThrow(/no generated components:partial\$fields\/\*/)
   })
   it('explains the release asset setup in its error', () => {
     const run = () => assertConnectReferencePresent(catalog([page('inputs/kafka.adoc')]))

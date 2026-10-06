@@ -89,7 +89,12 @@ afterEach(() => {
   catalogUtil.setResolvedConnectRef(null)
 })
 
-const fieldsPartial = (origin) => connectPartial('fields/inputs/http_server.adoc', origin)
+// The generated reference a connector page needs: its fields and its
+// description meta. The guard requires both.
+const referencePartials = (origin) => [
+  connectPartial('fields/inputs/http_server.adoc', origin),
+  connectPartial('descriptions/inputs/http_server.adoc', origin)
+]
 
 describe('sticky-bar availability attributes', () => {
   const pages = () => ({
@@ -104,7 +109,7 @@ describe('sticky-bar availability attributes', () => {
 
   it('decides the self-managed-only badge per type, not per connector', async () => {
     const p = pages()
-    await run([...Object.values(p), fieldsPartial({ url: CONNECT_URL })], { csvpath: csvFile })
+    await run([...Object.values(p), ...referencePartials({ url: CONNECT_URL })], { csvpath: csvFile })
     expect(p.httpOut.asciidoc.attributes['page-self-managed-only']).toBe('true')
     expect(p.httpOut.asciidoc.attributes['page-cloud-available']).toBeUndefined()
     expect(p.httpIn.asciidoc.attributes['page-cloud-available']).toBe('true')
@@ -115,7 +120,7 @@ describe('sticky-bar availability attributes', () => {
 
   it('treats GPU-only components as Cloud-available and flags them', async () => {
     const p = pages()
-    await run([...Object.values(p), fieldsPartial({ url: CONNECT_URL })], { csvpath: csvFile })
+    await run([...Object.values(p), ...referencePartials({ url: CONNECT_URL })], { csvpath: csvFile })
     const attrs = p.ollama.asciidoc.attributes
     expect(attrs['page-self-managed-only']).toBeUndefined()
     expect(attrs['page-cloud-available']).toBe('true')
@@ -127,7 +132,7 @@ describe('sticky-bar availability attributes', () => {
 
   it('flags components that are not in GPU pipelines', async () => {
     const p = pages()
-    await run([...Object.values(p), fieldsPartial({ url: CONNECT_URL })], { csvpath: csvFile })
+    await run([...Object.values(p), ...referencePartials({ url: CONNECT_URL })], { csvpath: csvFile })
     expect(p.jira.asciidoc.attributes['page-cloud-no-gpu']).toBe('true')
     expect(p.cloudJira.asciidoc.attributes['page-cloud-no-gpu']).toBe('true')
     expect(p.jira.asciidoc.attributes['page-cloud-gpu-only']).toBeUndefined()
@@ -135,7 +140,7 @@ describe('sticky-bar availability attributes', () => {
   })
 
   it('adds the flags to the translated rows', async () => {
-    const { csvData } = await run([fieldsPartial({ url: CONNECT_URL })], { csvpath: csvFile })
+    const { csvData } = await run([...referencePartials({ url: CONNECT_URL })], { csvpath: csvFile })
     const byKey = Object.fromEntries(csvData.data.map((r) => [`${r.connector}:${r.type}`, r]))
     expect(byKey['ollama_chat:processor']).toMatchObject({ is_cloud_supported: 'n', cloud_ai: 'y', gpu_only: 'y', no_gpu: 'n' })
     expect(byKey['jira:input']).toMatchObject({ is_cloud_supported: 'y', cloud_ai: 'n', gpu_only: 'n', no_gpu: 'y' })
@@ -151,7 +156,7 @@ describe('catalog source', () => {
 
   it('reads catalog.json from the connect content source and adds only the SQL drivers from info.csv', async () => {
     const files = [
-      fieldsPartial({ url: CONNECT_URL, reftype: 'tag', tag: 'v4.200.0' }),
+      ...referencePartials({ url: CONNECT_URL, reftype: 'tag', tag: 'v4.200.0' }),
       connectPartial('platforms/catalog.json', { url: CONNECT_URL, reftype: 'tag', tag: 'v4.200.0' }, catalogJson)
     ]
     const { csvData, logs } = await run(files, { csvpath: csvFile })
@@ -165,7 +170,7 @@ describe('catalog source', () => {
   })
 
   it('falls back to info.csv when catalog.json is not valid', async () => {
-    const files = [fieldsPartial({ url: CONNECT_URL }), connectPartial('platforms/catalog.json', { url: CONNECT_URL }, '{"not":"an array"}')]
+    const files = [...referencePartials({ url: CONNECT_URL }), connectPartial('platforms/catalog.json', { url: CONNECT_URL }, '{"not":"an array"}')]
     const { csvData, logs } = await run(files, { csvpath: csvFile })
     expect(csvData.data.map((r) => r.connector)).toContain('timeplus')
     expect(logs.some(([l, m]) => l === 'warn' && /falling back to info\.csv/.test(m))).toBe(true)
@@ -173,7 +178,7 @@ describe('catalog source', () => {
 
   it('keeps the catalog rows when info.csv cannot be fetched', async () => {
     octokit.rest.repos.getContent.mockRejectedValue(new Error('rate limited'))
-    const files = [fieldsPartial({ url: CONNECT_URL }), connectPartial('platforms/catalog.json', { url: CONNECT_URL }, catalogJson)]
+    const files = [...referencePartials({ url: CONNECT_URL }), connectPartial('platforms/catalog.json', { url: CONNECT_URL }, catalogJson)]
     const { csvData, logs } = await run(files)
     expect(csvData.data.map((r) => r.connector)).toEqual(['http_server', 'kafka', 'zmq4'])
     expect(logs.some(([l, m]) => l === 'warn' && /SQL driver/.test(m))).toBe(true)
@@ -181,7 +186,7 @@ describe('catalog source', () => {
 
   it('uses every catalog commercial name that differs from the connector name', async () => {
     const files = [
-      fieldsPartial({ url: CONNECT_URL }),
+      ...referencePartials({ url: CONNECT_URL }),
       connectPartial('platforms/catalog.json', { url: CONNECT_URL }, JSON.stringify([
         { type: 'input', name: 'kafka', status: 'stable', cloud: true, cloud_ai: true, support: 'certified', commercial_names: ['Kafka', 'Apache Kafka'] }
       ])),
@@ -197,29 +202,29 @@ describe('info.csv ref', () => {
 
   it('reads info.csv at the tag modify-connect-tag-playbook resolved', async () => {
     catalogUtil.setResolvedConnectRef('v4.111.1')
-    const { logs } = await run([fieldsPartial({ url: CONNECT_URL, reftype: 'tag', tag: 'v4.0.0' })])
+    const { logs } = await run([...referencePartials({ url: CONNECT_URL, reftype: 'tag', tag: 'v4.0.0' })])
     expect(refOf()).toMatchObject({ owner: 'redpanda-data', repo: 'connect', path: 'internal/plugins/info.csv', ref: 'v4.111.1' })
     expect(logs.some(([l, m]) => l === 'warn' && /connect main/.test(m))).toBe(false)
   })
 
   it('falls back to the ref of the connect content source', async () => {
-    await run([fieldsPartial({ url: CONNECT_URL, reftype: 'tag', refname: 'v4.110.0', tag: 'v4.110.0' })])
+    await run([...referencePartials({ url: CONNECT_URL, reftype: 'tag', refname: 'v4.110.0', tag: 'v4.110.0' })])
     expect(refOf()).toMatchObject({ ref: 'v4.110.0' })
   })
 
   it('reads a fork from its own repository', async () => {
-    await run([fieldsPartial({ url: 'https://github.com/someone/connect.git', reftype: 'branch', refname: 'fix', branch: 'fix' })])
+    await run([...referencePartials({ url: 'https://github.com/someone/connect.git', reftype: 'branch', refname: 'fix', branch: 'fix' })])
     expect(refOf()).toMatchObject({ owner: 'someone', repo: 'connect', ref: 'fix' })
   })
 
   it('uses latest-connect-version from antora.yml next', async () => {
     fs.writeFileSync(path.join(tmp, 'antora.yml'), 'name: connect\nasciidoc:\n  attributes:\n    latest-connect-version: 4.109.0\n')
-    await run([fieldsPartial({ url: CONNECT_URL, worktree: '/src/connect', reftype: 'branch', branch: 'wip' })])
+    await run([...referencePartials({ url: CONNECT_URL, worktree: '/src/connect', reftype: 'branch', branch: 'wip' })])
     expect(refOf()).toMatchObject({ ref: 'v4.109.0' })
   })
 
   it('warns when it has to fall back to main', async () => {
-    const { logs, csvData } = await run([fieldsPartial({ url: CONNECT_URL, worktree: '/src/connect', reftype: 'branch', branch: 'wip' })])
+    const { logs, csvData } = await run([...referencePartials({ url: CONNECT_URL, worktree: '/src/connect', reftype: 'branch', branch: 'wip' })])
     expect(refOf()).toMatchObject({ ref: 'main' })
     expect(logs.some(([l, m]) => l === 'warn' && /read from connect main/.test(m))).toBe(true)
     expect(csvData.data.length).toBe(6)

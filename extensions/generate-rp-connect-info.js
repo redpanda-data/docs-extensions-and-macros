@@ -13,11 +13,14 @@ const DEFAULTS = {
   githubRepo: 'connect'
 }
 
-// Connector pages include the generated field reference, which the
-// modify-connect-tag-playbook extension adds from the redpanda-connect-docs.tar.gz
-// asset of a connect release. If a playbook has the Connect pages but none of
-// those partials, every connector page would publish without its fields, and
-// Antora only logs the missing includes. Fail the build instead so the
+const REQUIRED_PARTIAL_DIRS = ['fields', 'descriptions']
+
+// Connector pages include the generated field reference and description
+// meta, which the modify-connect-tag-playbook extension adds from the
+// redpanda-connect-docs.tar.gz asset of a connect release. If a playbook has
+// the Connect pages but either set is missing, every connector page would
+// publish without its fields or its description, and Antora only logs the
+// missing includes. Fail the build instead so the
 // playbook gets fixed before anything is published.
 function assertConnectReferencePresent (contentCatalog) {
   const component = contentCatalog.getComponents().find((c) => c.name === 'connect')
@@ -27,11 +30,14 @@ function assertConnectReferencePresent (contentCatalog) {
   const pages = contentCatalog.findBy({ component: 'connect', module: 'components', family: 'page' })
     .filter((p) => p.src.relative.includes('/'))
   if (!pages.length) return
-  const fields = contentCatalog.findBy({ component: 'connect', module: 'components', family: 'partial' })
-    .filter((f) => f.src.relative.startsWith('fields/'))
-  if (fields.length) return
+  // Connector pages include both the field reference and the description
+  // meta (the page's :description:). A missing set only shows up as empty
+  // sections or missing descriptions, so require each one.
+  const partials = contentCatalog.findBy({ component: 'connect', module: 'components', family: 'partial' })
+  const missing = REQUIRED_PARTIAL_DIRS.filter((dir) => !partials.some((f) => f.src.relative.startsWith(`${dir}/`)))
+  if (!missing.length) return
   throw new Error(
-    'The connect component has connector pages but no generated field partials (components:partial$fields/*). ' +
+    `The connect component has connector pages but no generated ${missing.map((d) => `components:partial$${d}/*`).join(' or ')} partials. ` +
     'These come from the redpanda-connect-docs.tar.gz asset of a Redpanda Connect release, which the ' +
     'modify-connect-tag-playbook extension downloads. Register that extension and check its log: ' +
     'the release it used (the latest stable release, or the one in its `tag` config) may have no asset. ' +

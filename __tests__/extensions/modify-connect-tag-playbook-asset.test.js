@@ -31,6 +31,7 @@ const CATALOG_JSON = JSON.stringify([
 const LONG_NAME = `${'very_long_component_name_'.repeat(5)}.adoc`
 const TREE = {
   'modules/components/partials/fields/inputs/kafka.adoc': '// fields of kafka',
+  'modules/components/partials/descriptions/inputs/kafka.adoc': '// description of kafka',
   'modules/components/partials/examples/inputs/kafka.adoc': '// examples of kafka',
   'modules/components/partials/platforms/catalog.json': CATALOG_JSON,
   [`modules/components/partials/fields/processors/${LONG_NAME}`]: '// a path longer than 100 bytes',
@@ -187,8 +188,8 @@ describe('modify-connect-tag-playbook with the release asset', () => {
     expect(catalog.getById({ component: 'connect', version: '', module: 'components', family: 'example', relative: 'common/inputs/kafka.yaml' })).toBeTruthy()
     // The page in the tarball is not part of the reference.
     expect(fromConnect(catalog).map((f) => f.src.family)).not.toContain('page')
-    expect(fromConnect(catalog)).toHaveLength(5)
-    expect(logs).toContainEqual(['info', expect.stringMatching(/added 5 files .* skipped 0 already provided by another source and 1 outside/)])
+    expect(fromConnect(catalog)).toHaveLength(6)
+    expect(logs).toContainEqual(['info', expect.stringMatching(/added 6 files .* skipped 0 already provided by another source and 1 outside/)])
   })
 
   it('resolves includes of the added partials through the content catalog', async () => {
@@ -229,7 +230,7 @@ describe('modify-connect-tag-playbook with the release asset', () => {
     expect(logs).toContainEqual(['info', expect.stringMatching(/v4\.112\.0 has no redpanda-connect-docs\.tar\.gz release asset \(404\)/)])
     expect(fromConnect(catalog)).toHaveLength(0)
     expect(global.fetch).toHaveBeenCalledTimes(1)
-    expect(error.message).toMatch(/no generated field partials/)
+    expect(error.message).toMatch(/no generated components:partial\$fields\/\*/)
     expect(error.message).toMatch(/REDPANDA_CONNECT_DOCS_DIR/)
     expect(error.message).toMatch(/`tag`/)
   })
@@ -261,12 +262,12 @@ describe('modify-connect-tag-playbook with the release asset', () => {
     const fields = catalog.getById({ component: 'connect', version: '', module: 'components', family: 'partial', relative: 'fields/inputs/kafka.adoc' })
     expect(fields.contents.toString()).toBe('// committed copy')
     expect(fields.src.origin.url).toBe(DOCS_URL)
-    expect(logs).toContainEqual(['info', expect.stringMatching(/added 4 files .* skipped 1 already provided by another source/)])
+    expect(logs).toContainEqual(['info', expect.stringMatching(/added 5 files .* skipped 1 already provided by another source/)])
   })
 
   it('reads a local directory from REDPANDA_CONNECT_DOCS_DIR over the tag and the latest release', async () => {
     const local = path.join(tmp, 'local')
-    writeTree(local, { 'modules/components/partials/fields/inputs/kafka.adoc': '// local fields' })
+    writeTree(local, { 'modules/components/partials/fields/inputs/kafka.adoc': '// local fields', 'modules/components/partials/descriptions/inputs/kafka.adoc': '// local description' })
     process.env[ENV] = local
     const { catalog, error } = await build({ config: { tag: 'v4.200.0' } })
     expect(error).toBeNull()
@@ -290,7 +291,7 @@ describe('modify-connect-tag-playbook with the release asset', () => {
     process.env[ENV] = file
     const { catalog, error } = await build()
     expect(error).toBeNull()
-    expect(fromConnect(catalog)).toHaveLength(5)
+    expect(fromConnect(catalog)).toHaveLength(6)
     expect(global.fetch).not.toHaveBeenCalled()
   })
 
@@ -319,7 +320,7 @@ describe('modify-connect-tag-playbook with a connect content source', () => {
   it('keeps pinning and filtering the git source and adds no asset files', async () => {
     const sources = [{ url: DOCS_URL, branches: 'main' }, { url: 'https://github.com/redpanda-data/connect', tags: 'latest', start_path: 'docs' }]
     process.env[ENV] = path.join(tmp, 'tree')
-    const catalog = makeCatalog([['partial', 'fields/inputs/kafka.adoc', '// from rp-connect-docs']])
+    const catalog = makeCatalog([['partial', 'fields/inputs/kafka.adoc', '// from rp-connect-docs'], ['partial', 'descriptions/inputs/kafka.adoc', '// from rp-connect-docs']])
     const { error, logs } = await build({ sources, catalog })
     expect(error).toBeNull()
     expect(sources[1]).toMatchObject({ tags: ['v4.113.0'], branches: [] })
@@ -331,10 +332,29 @@ describe('modify-connect-tag-playbook with a connect content source', () => {
 
   it('keeps a local clone named connect as a content source', async () => {
     const sources = [{ url: DOCS_URL, branches: 'main' }, { url: '/Users/me/repos/connect', branches: 'HEAD', start_path: 'docs' }]
-    const catalog = makeCatalog([['partial', 'fields/inputs/kafka.adoc', '// x']])
+    const catalog = makeCatalog([['partial', 'fields/inputs/kafka.adoc', '// x'], ['partial', 'descriptions/inputs/kafka.adoc', '// x']])
     const { error } = await build({ sources, catalog })
     expect(error).toBeNull()
     expect(global.fetch).not.toHaveBeenCalled()
     expect(getLatestConnectTag).not.toHaveBeenCalled()
+  })
+})
+
+describe('connect-docs-asset download', () => {
+  it('retries when the connection drops while reading the body', async () => {
+    const dropped = { ...response(200), arrayBuffer: async () => { throw new Error('terminated') } }
+    const fetchImpl = jest.fn()
+      .mockResolvedValueOnce(dropped)
+      .mockResolvedValueOnce(response(200, archive))
+    const body = await asset.downloadAsset('v4.200.0', { fetchImpl })
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    expect(Buffer.compare(body, archive)).toBe(0)
+  })
+
+  it('fails with the body error after every attempt drops', async () => {
+    const dropped = { ...response(200), arrayBuffer: async () => { throw new Error('terminated') } }
+    const fetchImpl = jest.fn(async () => dropped)
+    await expect(asset.downloadAsset('v4.200.0', { fetchImpl })).rejects.toThrow(/could not download .*: terminated/)
+    expect(fetchImpl.mock.calls.length).toBeGreaterThan(1)
   })
 })
