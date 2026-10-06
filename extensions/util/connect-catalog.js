@@ -2,9 +2,11 @@
 
 // Shared Redpanda Connect catalog helpers.
 //
-// The connect repo publishes its reference content (partials and examples)
-// through a content source that modify-connect-tag-playbook pins to the latest
-// release tag. Catalog data (support level, deprecation, Cloud availability)
+// The connect repo publishes its reference content (partials and examples) as
+// a release asset that modify-connect-tag-playbook adds to the content catalog
+// (or, in older playbooks, through a content source that it pins to the latest
+// release tag). Either way the files carry a connect origin with the tag.
+// Catalog data (support level, deprecation, Cloud availability)
 // must come from the same ref, or the badges and catalog drift from the
 // reference content as soon as connect's main branch changes a flag before a
 // release. This module carries that ref between the extensions and turns the
@@ -13,6 +15,7 @@
 
 // Matches the GitHub URL (with or without .git) and a local clone whose
 // directory is named connect, which is how the source looks in local builds.
+// Files added from the release asset carry the GitHub URL.
 function isConnectSource (url) {
   return typeof url === 'string' && /(^|[/:])(redpanda-data\/)?connect(\.git)?\/?$/.test(url)
 }
@@ -42,7 +45,8 @@ function githubRepoOf (url) {
   return m ? { owner: m[1], repo: m[2] } : null
 }
 
-// The ref of the connect content source as Antora aggregated it. Only refs
+// The ref of the connect files in the content catalog: the release asset tag,
+// or the ref of the connect content source as Antora aggregated it. Only refs
 // that exist on the remote count: a tag, or a branch fetched from the remote.
 // A branch of a local clone may exist only on disk, so it is not used.
 function connectOriginRef (contentCatalog) {
@@ -64,7 +68,8 @@ function connectOriginRef (contentCatalog) {
 const CATALOG_RELATIVE = 'platforms/catalog.json'
 
 // The generated catalog.json in the content catalog, preferring the copy
-// from the connect content source over one another source provides.
+// from connect (the release asset or a connect content source) over one
+// another source provides.
 function findConnectCatalogFile (contentCatalog) {
   if (!contentCatalog || typeof contentCatalog.findBy !== 'function') return null
   const candidates = contentCatalog

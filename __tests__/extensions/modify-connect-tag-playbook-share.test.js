@@ -19,7 +19,7 @@ function start (sources) {
     on: (event, fn) => { handlers[event] = fn },
     updateVariables: noop
   }
-  ext.register.call(ctx)
+  ext.register.call(ctx, { config: {} })
   const playbook = { content: { sources } }
   return handlers.contextStarted({ playbook }).then(() => playbook)
 }

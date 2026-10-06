@@ -13,11 +13,12 @@ const DEFAULTS = {
   githubRepo: 'connect'
 }
 
-// Connector pages include the generated field reference from the connect repo
-// (see the modify-connect-tag-playbook extension). If a playbook has the
-// Connect pages but none of those partials, every connector page would publish
-// without its fields, and Antora only logs the missing includes. Fail the
-// build instead so the playbook gets fixed before anything is published.
+// Connector pages include the generated field reference, which the
+// modify-connect-tag-playbook extension adds from the redpanda-connect-docs.tar.gz
+// asset of a connect release. If a playbook has the Connect pages but none of
+// those partials, every connector page would publish without its fields, and
+// Antora only logs the missing includes. Fail the build instead so the
+// playbook gets fixed before anything is published.
 function assertConnectReferencePresent (contentCatalog) {
   const component = contentCatalog.getComponents().find((c) => c.name === 'connect')
   if (!component) return
@@ -31,8 +32,11 @@ function assertConnectReferencePresent (contentCatalog) {
   if (fields.length) return
   throw new Error(
     'The connect component has connector pages but no generated field partials (components:partial$fields/*). ' +
-    'Add the connect repository as a content source (url: https://github.com/redpanda-data/connect, tags: latest, start_path: docs) ' +
-    'and register the modify-connect-tag-playbook extension, or check that the latest Connect release includes docs/modules/components.'
+    'These come from the redpanda-connect-docs.tar.gz asset of a Redpanda Connect release, which the ' +
+    'modify-connect-tag-playbook extension downloads. Register that extension and check its log: ' +
+    'the release it used (the latest stable release, or the one in its `tag` config) may have no asset. ' +
+    'Set `tag` to a release that has the asset, or set REDPANDA_CONNECT_DOCS_DIR to a local directory that contains ' +
+    'modules/ (for example a connect checkout\'s docs/ after running its docs generator).'
   )
 }
 
@@ -132,8 +136,9 @@ module.exports.register = function ({ config }) {
 
   // Raw catalog rows (info.csv column names) for this build.
   //
-  // The generated partials/platforms/catalog.json from the connect content
-  // source comes first: it is pinned to the same ref as the reference content
+  // The generated partials/platforms/catalog.json from connect (the release
+  // asset, or a connect content source) comes first: it is from the same ref
+  // as the reference content
   // and carries status, categories, and cgo data that info.csv lacks. info.csv
   // still supplies the SQL driver rows, which are not components and so are
   // not in the catalog. Without catalog.json, info.csv supplies every row.
@@ -186,8 +191,9 @@ module.exports.register = function ({ config }) {
   }
 
   // The ref to read info.csv from, in order:
-  // 1. the tag modify-connect-tag-playbook resolved for the connect content source
-  // 2. the ref of the connect content source in the content catalog
+  // 1. the tag modify-connect-tag-playbook resolved (for the release asset or
+  //    the connect content source)
+  // 2. the ref of the connect files in the content catalog
   // 3. latest-connect-version in antora.yml in the working directory
   // 4. main, with a warning, because the catalog can then disagree with the
   //    reference content
@@ -201,9 +207,9 @@ module.exports.register = function ({ config }) {
     const normalizedVersion = connectVersion ? String(connectVersion).trim().replace(/^v/, '') : ''
     if (normalizedVersion) return { ...base, ref: `v${normalizedVersion}`, source: 'latest-connect-version in antora.yml' }
     logger.warn(
-      'No connect content source or latest-connect-version found, so info.csv is read from connect main. ' +
-      'Catalog badges can then disagree with the reference content. Add the connect content source and the ' +
-      'modify-connect-tag-playbook extension to the playbook.'
+      'No resolved connect release or latest-connect-version found, so info.csv is read from connect main. ' +
+      'Catalog badges can then disagree with the reference content. Register the modify-connect-tag-playbook ' +
+      'extension, or set its `tag` config when REDPANDA_CONNECT_DOCS_DIR is set.'
     )
     return { ...base, ref: 'main', source: 'fallback' }
   }

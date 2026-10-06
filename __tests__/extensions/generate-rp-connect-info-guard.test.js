@@ -19,6 +19,13 @@ describe('assertConnectReferencePresent', () => {
     expect(() => assertConnectReferencePresent(catalog([page('inputs/kafka.adoc'), partial('secret_warning.adoc')])))
       .toThrow(/no generated field partials/)
   })
+  it('explains the release asset setup in its error', () => {
+    const run = () => assertConnectReferencePresent(catalog([page('inputs/kafka.adoc')]))
+    expect(run).toThrow(/redpanda-connect-docs\.tar\.gz/)
+    expect(run).toThrow(/`tag`/)
+    expect(run).toThrow(/REDPANDA_CONNECT_DOCS_DIR/)
+    expect(run).not.toThrow(/Add the connect repository as a content source/)
+  })
   it('ignores overview pages, which include no field partials', () => {
     expect(() => assertConnectReferencePresent(catalog([page('about.adoc')]))).not.toThrow()
   })

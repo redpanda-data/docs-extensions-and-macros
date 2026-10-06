@@ -1,38 +1,59 @@
 'use strict';
 
-// Sources the Redpanda Connect reference partials from the connect repo.
+// Sources the Redpanda Connect generated reference docs (field reference,
+// examples, metadata, descriptions, config snippets, Bloblang reference, and
+// platforms/catalog.json) for the `connect` component.
 //
-// A playbook lists the connect repo as a content source:
+// The default: the playbook has no connect content source. Every connect
+// release publishes the generated tree as a redpanda-connect-docs.tar.gz
+// release asset (util/connect-docs-asset). In contentClassified, the extension
+// resolves the release to use, downloads that asset, and adds its partials and
+// examples to the `connect` component that rp-connect-docs provides:
+//
+// - The latest stable vX.Y.Z release by default, so the docs never show fields
+//   from unreleased code on connect's main branch.
+// - The `tag` extension config key picks a specific release instead.
+// - The REDPANDA_CONNECT_DOCS_DIR environment variable points at a local copy
+//   of the tree (a directory that contains modules/, such as a connect
+//   checkout's docs/ after running its generator, or a local copy of the
+//   tarball) to preview unreleased connect changes. It wins over everything.
+//
+// A release without the asset (404) adds nothing, and the guard in
+// generate-rp-connect-info stops the build if connector pages then have no
+// field partials. Any other download or archive failure stops the build here.
+// A file another source already provides (rp-connect-docs still commits its
+// own copies until it migrates) is skipped.
+//
+// Backward compatibility: a playbook that still lists the connect repo as a
+// content source keeps the previous behavior, and no asset is downloaded:
 //
 //   - url: https://github.com/redpanda-data/connect
 //     tags: latest        # replaced with the latest release tag at build time
 //     start_path: docs
 //
-// The extension does two things:
+// 1. A source with `tags: latest` as its only ref is pinned to the latest
+//    connect release tag.
+// 2. Only the generated modules/components/partials and
+//    modules/components/examples trees of the `connect` component are kept
+//    from that source, and any file another source already provides is
+//    dropped, because Antora fails the build on a duplicate page or partial.
 //
-// 1. Pins the source to the latest connect release tag, so the docs never
-//    show fields from unreleased code on connect's main branch.
-// 2. Filters what the source contributes: only the generated
-//    modules/components/partials and modules/components/examples trees of the
-//    `connect` component are kept, and any file another source (rp-connect-docs)
-//    already provides is dropped. Antora fails the build on a duplicate page or
-//    partial, so this makes it safe to add the source to a playbook before or
-//    after rp-connect-docs stops committing its own generated copies, and it
-//    ignores the full pages that older connect tags still carry.
-//
-// It also shares the tag it resolves (util/connect-catalog), so
-// generate-rp-connect-info reads info.csv from the same ref as the reference
-// content.
+// Either way it shares the tag it resolves (util/connect-catalog), so
+// generate-rp-connect-info reads info.csv and catalog.json from the same ref
+// as the reference content.
 
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
 const getLatestConnectTag = require('./version-fetcher/get-latest-connect')
 const { getGitHubApiToken } = require('../cli-utils/github-token')
 const { isConnectSource, isConnectOrigin, githubRepoOf, setResolvedConnectRef } = require('./util/connect-catalog')
+const asset = require('./util/connect-docs-asset')
 
 const OWNER = 'redpanda-data'
 const REPO = 'connect'
 const COMPONENT = 'connect'
 const KEPT_PATHS = ['modules/components/partials/', 'modules/components/examples/']
+const CONNECT_URL = `https://github.com/${OWNER}/${REPO}`
+const LOCAL_DIR_ENV = 'REDPANDA_CONNECT_DOCS_DIR'
 
 // HTTPS, SSH (ssh://), and scp-style (git@host:owner/repo) URLs are all
 // remote content sources in Antora.
@@ -143,34 +164,87 @@ function filterConnectContent (contentAggregate) {
   return report
 }
 
-module.exports.register = function () {
+// True when the playbook lists the connect repo (or a local clone named
+// connect) as a content source, which keeps the git source behavior.
+function hasConnectSource (playbook) {
+  const sources = (playbook && playbook.content && playbook.content.sources) || []
+  return sources.some((source) => isConnectSource(source.url))
+}
+
+// The latest stable connect release tag: the GitHub API first, then the
+// highest stable vX.Y.Z tag from git ls-remote. Null when both fail.
+async function resolveLatestTag (url, logger) {
+  let tag = null
+  try {
+    const { Octokit } = await import('@octokit/rest')
+    const { retry } = await import('@octokit/plugin-retry')
+    const token = getGitHubApiToken()
+    const github = new (Octokit.plugin(retry))({ userAgent: 'Redpanda Docs', auth: token || undefined, retry: { doNotRetry: [403, 404, 429] } })
+    tag = toTag(await getLatestConnectTag(github, OWNER, REPO, logger))
+  } catch (error) {
+    logger.warn(`GitHub API lookup of the latest Redpanda Connect release failed: ${error.message}`)
+  }
+  if (!tag) {
+    try {
+      tag = latestTagFromGit(url)
+      if (tag) logger.info(`Resolved the latest Redpanda Connect release from git tags: ${tag}`)
+    } catch (error) {
+      logger.warn(redact(`git ls-remote of ${url} failed: ${error.message}`))
+    }
+  }
+  return tag
+}
+
+// Adds the generated files to every version of the connect component.
+// Mutates the content catalog and returns what it added and skipped.
+function addConnectDocs (contentCatalog, files, origin) {
+  const report = { added: 0, providedElsewhere: 0, outsideGenerated: 0, versions: [] }
+  const component = contentCatalog.getComponent(COMPONENT)
+  if (!component) return report
+  report.versions = component.versions.map((v) => v.version)
+  for (const entry of files) {
+    const resource = asset.toResource(entry.path)
+    if (!resource) {
+      report.outsideGenerated++
+      continue
+    }
+    for (const version of report.versions) {
+      const src = { component: COMPONENT, version, module: asset.MODULE, family: resource.family, relative: resource.relative }
+      if (contentCatalog.getById(src)) {
+        report.providedElsewhere++
+        continue
+      }
+      contentCatalog.addFile({
+        path: resource.path,
+        contents: Buffer.from(entry.contents),
+        src: { ...src, path: resource.path, origin },
+      })
+      report.added++
+    }
+  }
+  return report
+}
+
+module.exports.register = function ({ config }) {
   raiseListenerLimit(this)
   const logger = this.getLogger('modify-connect-tag-playbook-extension')
+  const configuredTag = toTag(config && config.tag ? String(config.tag).trim() : null)
+  // Set in contextStarted: true when the playbook still lists the connect repo
+  // as a content source.
+  let gitSourceMode = false
 
   this.on('contextStarted', async ({ playbook }) => {
     const sources = (playbook && playbook.content && playbook.content.sources) || []
     // Clear a ref left over from an earlier build in the same process.
     setResolvedConnectRef(null)
+    gitSourceMode = hasConnectSource(playbook)
+    if (!gitSourceMode) return
+    if ((process.env[LOCAL_DIR_ENV] || '').trim()) {
+      logger.warn(`${LOCAL_DIR_ENV} is ignored because the playbook lists the connect repo as a content source`)
+    }
     const source = sources.find(wantsLatest)
     if (!source) return
-    let tag = null
-    try {
-      const { Octokit } = await import('@octokit/rest')
-      const { retry } = await import('@octokit/plugin-retry')
-      const token = getGitHubApiToken()
-      const github = new (Octokit.plugin(retry))({ userAgent: 'Redpanda Docs', auth: token || undefined, retry: { doNotRetry: [403, 404, 429] } })
-      tag = toTag(await getLatestConnectTag(github, OWNER, REPO, logger))
-    } catch (error) {
-      logger.warn(`GitHub API lookup of the latest Redpanda Connect release failed: ${error.message}`)
-    }
-    if (!tag) {
-      try {
-        tag = latestTagFromGit(source.url)
-        if (tag) logger.info(`Resolved the latest Redpanda Connect release from git tags: ${tag}`)
-      } catch (error) {
-        logger.warn(redact(`git ls-remote of ${source.url} failed: ${error.message}`))
-      }
-    }
+    const tag = await resolveLatestTag(source.url, logger)
     if (!tag) {
       // Guessing would let Antora's default branch patterns pull in connect's
       // branches, whose docs are unreleased or missing, so stop the build.
@@ -183,6 +257,7 @@ module.exports.register = function () {
   })
 
   this.on('contentAggregated', ({ contentAggregate }) => {
+    if (!gitSourceMode) return
     const r = filterConnectContent(contentAggregate)
     if (r.kept + r.outsideGenerated + r.providedElsewhere + r.otherComponents === 0) return
     logger.info(
@@ -190,6 +265,67 @@ module.exports.register = function () {
       `${r.outsideGenerated} outside the generated partials and examples, and ${r.otherComponents} from other components`
     )
   })
+
+  // Antora runs listeners of an event one at a time, in registration order,
+  // which follows the order of the playbook's extension list. Prepending puts
+  // this listener first wherever the extension is listed, so the files exist
+  // before generate-rp-connect-info's guard and any other contentClassified
+  // listener reads the connect partials.
+  const subscribe = typeof this.prependListener === 'function' ? this.prependListener : this.on
+  subscribe.call(this, 'contentClassified', async ({ contentCatalog }) => {
+    if (gitSourceMode) return
+    if (!contentCatalog.getComponent(COMPONENT)) return
+    const localDir = (process.env[LOCAL_DIR_ENV] || '').trim()
+    let files
+    let origin
+    let from
+    if (localDir) {
+      setResolvedConnectRef(configuredTag)
+      try {
+        files = await asset.readLocal(localDir)
+      } catch (error) {
+        throw new Error(`Could not read the Redpanda Connect reference docs from ${LOCAL_DIR_ENV} (${localDir}): ${error.message}`)
+      }
+      origin = { type: 'local', url: CONNECT_URL, startPath: 'docs', localDir }
+      from = `${LOCAL_DIR_ENV} (${localDir})`
+    } else {
+      const tag = configuredTag || (await resolveLatestTag(`${CONNECT_URL}.git`, logger))
+      if (!tag) {
+        throw new Error(
+          'Could not resolve the latest Redpanda Connect release, so the connect reference docs cannot be downloaded. ' +
+          `Set a GitHub token, check network access, or set the \`tag\` config of this extension or ${LOCAL_DIR_ENV}.`
+        )
+      }
+      setResolvedConnectRef(tag)
+      let archive
+      try {
+        archive = await asset.downloadAsset(tag, { logger })
+      } catch (error) {
+        throw new Error(`Could not download the Redpanda Connect reference docs for ${tag}: ${error.message}`)
+      }
+      if (!archive) {
+        logger.info(`Redpanda Connect ${tag} has no ${asset.ASSET_NAME} release asset (404), so no generated reference docs were added from it`)
+        return
+      }
+      try {
+        files = await asset.readTarGz(archive)
+      } catch (error) {
+        throw new Error(`The ${asset.ASSET_NAME} release asset of Redpanda Connect ${tag} is corrupt: ${error.message}`)
+      }
+      origin = { type: 'release-asset', url: CONNECT_URL, startPath: 'docs', reftype: 'tag', refname: tag, tag, asset: asset.assetUrl(tag) }
+      from = `the ${tag} ${asset.ASSET_NAME} release asset`
+    }
+    if (!files.some((f) => asset.toResource(f.path))) {
+      throw new Error(`${from} has no files under modules/components/partials or modules/components/examples`)
+    }
+    const r = addConnectDocs(contentCatalog, files, origin)
+    const versions = r.versions.filter(Boolean)
+    logger.info(
+      `Redpanda Connect reference docs from ${from}: added ${r.added} files to the ${COMPONENT} component` +
+      `${versions.length ? ` (${versions.join(', ')})` : ''}; ` +
+      `skipped ${r.providedElsewhere} already provided by another source and ${r.outsideGenerated} outside the generated partials and examples`
+    )
+  })
 }
 
-module.exports._internal = { isRemote, isUpstreamConnect, redact, isConnectSource, isConnectOrigin, toTag, highestStableTag, wantsLatest, pinConnectSource, filterConnectContent }
+module.exports._internal = { isRemote, isUpstreamConnect, redact, isConnectSource, isConnectOrigin, toTag, highestStableTag, wantsLatest, pinConnectSource, filterConnectContent, hasConnectSource, addConnectDocs, LOCAL_DIR_ENV }
