@@ -8,6 +8,9 @@ workflows delegate to Claude. The deterministic tools themselves
 covered by the jest suite and are NOT re-tested here - they are the
 *measuring instruments* these evals use to grade the model.
 
+A separate `--doc-impact` mode scores the workflow's published-content
+impact pass against labeled PRs; see <<_doc_impact_assessment>>.
+
 toc::[]
 
 == The philosophy: execute, never grade prose
@@ -194,3 +197,183 @@ mechanical assertion to make a case pass. Comparator changes are only
 acceptable when the assertion was measuring something the contract
 explicitly permits (for example, clang-format re-wrapping), and must keep
 every genuine token change failing.
+
+== Doc-impact assessment
+
+The PUBLISHED-CONTENT IMPACT pass of `doc-strings-review.yml` decides, per
+engineering PR, whether a published page outside the generated references
+is now wrong or missing. When it is, the pass writes `doc-impact.json` and
+the workflow dispatches it to the docs team's Jira router, which opens a
+ticket. The `--doc-impact` mode scores that decision against labeled PRs.
+
+=== What a run does
+
+For each item, the harness:
+
+. Writes the frozen inputs into an empty working directory:
+  `pr-diff.patch` and `lint-findings.json` (built the way the workflow
+  builds them) and `pr-view.json` (the PR title and description).
+. Builds the prompt from the live workflow: the input description (from
+  "You are reviewing" to INLINE SUGGESTIONS) and the PUBLISHED-CONTENT
+  IMPACT section, cut from `doc-strings-review.yml` at run time, plus one
+  HARNESS NOTE paragraph saying only the impact pass runs and that `gh` is
+  unavailable. Rewording the workflow retests the new text; deleting or
+  renaming the section is a harness error.
+. Runs `claude -p` with the workflow's model default, `--max-turns`,
+  redpanda-docs MCP tools, `Read` and `Write`, and its disallowed tools.
+  `Bash` is withheld because there is no checkout and no `gh`. The run uses
+  `--setting-sources project` and `--strict-mcp-config`, so your own
+  settings, plugins, hooks and MCP servers never reach it.
+. Counts the item as flagged only when the run left a `doc-impact.json`
+  that the dispatch step's own `jq` gate accepts. The gate is cut from the
+  workflow's `Dispatch doc-impact` step, so a report production would
+  discard is not a flag here either.
+
+An item whose `lint-findings.json` has no declarations and no removed
+surface lines is scored as not flagged without a model call, because the
+workflow skips the pass in that case.
+
+=== Running
+
+[source,bash]
+----
+npm run eval:doc-impact                          # every confirmed item, replayed MCP
+node evals/doc-strings/run-evals.js --doc-impact --controls
+node evals/doc-strings/run-evals.js --doc-impact --case <id>[,<id>]
+node evals/doc-strings/run-evals.js --doc-impact --json > scores.json
+node evals/doc-strings/run-evals.js --doc-impact --include-unconfirmed
+----
+
+Other options: `--items <file>`, `--model <model>` (default `sonnet`, the
+workflow's non-gateway model), `--keep-temp`. You need the `claude` CLI,
+`jq`, and the property-extractor venv for the controls.
+
+Exit codes: `0` the run completed (with `--controls`: both controls
+behaved), `1` a control failed or a refresh failed, `2` harness or model
+error on any item (its scores are incomplete), `3` skipped (no `claude`).
+
+Each run writes `results/<timestamp>-doc-impact/<item>/` with the prompt,
+the inputs, the full `stream-json` transcript, any `doc-impact.json`, the
+replay log and `evidence.json`, plus a `summary.json` for the run.
+
+=== Items
+
+`doc-impact/items.json` is an array of objects:
+
+[cols="1,3"]
+|===
+|`id` |Lowercase slug; also the name of the item's fixture and recording.
+|`repo`, `pr_url` |`owner/name` and the pull request URL.
+|`base_sha`, `head_sha` |Full SHAs: the PR's base and the head that was reviewed.
+|`title`, `body` |The PR title and description, frozen.
+|`label` |`needs_docs` or `no_change`.
+|`label_strength` |`strong` or `weak`.
+|`confirmed_by` |Who confirmed a weak label, or `null`.
+|`expected_pages` |For `needs_docs`: the `https://docs.redpanda.com/` pages a
+writer actually edited. Empty for `no_change`.
+|`reason` |One line on why the label holds.
+|`stacked_on` |Optional: the id of the item this PR is stacked on or follows
+up, for the duplicate rate.
+|===
+
+Only items with `label_strength: strong` or a `confirmed_by` value run and
+count by default. `--include-unconfirmed` runs and scores the rest.
+
+Freeze an item's inputs once, with network access:
+
+[source,bash]
+----
+node evals/doc-strings/run-evals.js --doc-impact --refresh-diffs --case <id>
+----
+
+This makes a partial clone with `gh repo clone` (private repos work with
+your `gh` login), checks out `head_sha`, runs this checkout's
+`doc-tools lint-strings --diff <base_sha>`, and writes the merge-base source
+diff with the workflow's own pathspec excludes and size cap. The output
+lands in `doc-impact/fixtures/<id>/`. Clones are cached under the system
+temp directory, and the command prints where; delete it when you finish,
+because clones of the large repos take real disk space. The workflow can
+also skip declarations reviewed on earlier pushes; a frozen item always
+covers the whole PR.
+
+=== Recording and replaying the docs MCP server
+
+The pass makes up to four redpanda-docs MCP calls against
+docs.redpanda.com. Published pages change, so live calls make scores drift.
+Runs therefore replay recorded responses by default.
+
+* `--mcp record` runs against the live server (the workflow's
+  `--mcp-config`, or your own with `--mcp-config <json|file>`), saves the
+  item's MCP calls and results from the transcript to
+  `doc-impact/recordings/<id>.json`, and snapshots the server's tool list
+  to `doc-impact/mcp-tools.json`. Recording overwrites the item's previous
+  recording.
+* `--mcp replay` (the default) registers `doc-impact/replay-server.js`, a
+  small stdio MCP server, under the production server name. It serves the
+  snapshot tool list and answers each call from the item's recording:
+** *exact*: same tool and arguments, ignoring case, whitespace, and the
+   free-text `context` argument;
+** *nearest*: the recorded call to the same tool whose search text shares
+   the most tokens, when it shares at least half the tokens of the shorter
+   query. The model rephrases its queries from run to run, and every call
+   in one recording was made for the same PR;
+** *miss*: an explicit `NO RECORDING` tool error.
++
+Every call lands in the item's `replay-log.jsonl` with its match kind, and
+the table shows nearest and miss counts per item. A miss means the run did
+not see the docs it asked for: re-record that item. An item with no
+recording is a harness error in replay mode.
+* `--mcp live` calls the live server and saves nothing.
+
+Anonymous access to the docs MCP server is limited to a few tool calls per
+day per network address. Record a large item set from a signed-in MCP
+config, or over several days.
+
+=== Scoring
+
+[cols="1,3"]
+|===
+|Flag recall F |Share of `needs_docs` items that were flagged.
+|Abstention recall A |Share of `no_change` items that were not flagged.
+|Headline |`2·F·A / (F + A)`. A pass that flags everything or nothing
+scores 0. The harness refuses the headline when only one class is present.
+|Page precision and recall |On correctly flagged items with
+`expected_pages`: the overlap between the report's `affected_pages` and
+`expected_pages`, micro-averaged. URLs are compared after normalization:
+`https`, lowercase host without `www`, no query, fragment, trailing slash,
+`.html` or `index`, and docs version segments (`current`, `beta`, `25.3`)
+collapsed to one token. Redirects are not followed, so a moved page counts
+as a different URL.
+|Duplicate rate |Among flagged items whose `stacked_on` item was also
+flagged: the share that repeat a page or a finding name of that item.
+|===
+
+Items with a harness or model error are excluded from every score and make
+the run exit `2`.
+
+=== Controls
+
+`doc-impact/controls.json` holds two synthetic items that prove the harness
+can fail. Their inputs are not frozen: the property lint fixture is
+materialized, edited, committed, and passed through the real
+`lint-strings --diff` and `git diff`, like the other cases in this suite.
+
+* `control-needs-docs` renames `enable_rack_awareness`, which published
+  guides tell you to set by name. It must be flagged with at least one
+  expected page.
+* `control-no-change` is the wording-only rewording from
+  `negative-property-diff`. It must not be flagged.
+
+`--controls` exits `0` only when both hold and no replay call missed. A
+harness that always flags fails the negative control; one that never
+flags, or loses the docs responses, fails the positive one. Run the controls
+after any change to the prompt, the harness, or the recordings.
+
+=== Self-test
+
+`__tests__/evals/doc-impact.test.js` runs in the jest suite without the
+`claude` CLI. It covers prompt, tool and gate extraction from the live
+workflow, item validation, URL normalization, the scoring math (including
+flag-everything and flag-nothing scoring 0 and the one-class refusal),
+`stream-json` parsing, the replay server over stdio, and control
+materialization with the real lint.

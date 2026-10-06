@@ -33,6 +33,7 @@
     "test:cgo": "node __tests__/tools/cgo-detection.test.js",
     "test:all": "npm run test && npm run test:python && npm run test:cgo",
     "eval:doc-strings": "node evals/doc-strings/run-evals.js",
+    "eval:doc-impact": "node evals/doc-strings/run-evals.js --doc-impact",
     "generate:cli-docs": "node tools/generate-cli-docs.js",
     "bundle:admin": "doc-tools generate bundle-openapi --surface admin",
     "bundle:connect": "doc-tools generate bundle-openapi --surface connect",
