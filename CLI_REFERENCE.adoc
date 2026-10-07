@@ -40,6 +40,9 @@ display help for command
 * `mcp-version` - Show MCP server version and configuration information
 * `lint-strings` - Lint user-facing doc strings embedded in engineering source code (properties, metrics, ...)
 * `lint-screenshots` - Lint image macros and image files in a docs repo against the screenshot standard (alt text, size, format, width)
+* `check-build-log` - Check an Antora JSON build log: fail on error or fatal records or too few pages, print a Markdown summary
+* `check-rendered-html` - Scan rendered Antora HTML for unconverted AsciiDoc (literal backticks, xref:, include::, attributes, tables, empty sections)
+* `connect-docs-diff` - Diff two generated Connect docs trees and map each changed partial or example to its published page
 * `preview-string` - Render one embedded doc string (property, rpk command/flag, metric, helm key, CRD field, connect field) as it will publish
 * `generate` - Run docs automations
 * `validate` - Validate docs data against internal sources of truth
@@ -690,6 +693,137 @@ npx doc-tools lint-screenshots --files changed.txt --format json --output review
 
 # Adopt the stricter items as blocking
 npx doc-tools lint-screenshots --warnings-as-errors
+----
+
+== check-build-log
+
+Check an Antora JSON log (`antora --log-format json`): exit 1 when any record is at level error or fatal, and, with --min-pages and --site-dir, when fewer HTML pages were written than expected. Prints a Markdown summary (counts by level, then the error and warning messages grouped and deduplicated, with file and line) for $GITHUB_STEP_SUMMARY. Warnings never fail the check. With --blocking-sources, only errors from those repositories (or with no source) fail it, so a broken page in another content source of the playbook is reported without blocking.
+
+*Why use it:*
+
+Antora's --log-failure-level fails the build but explains nothing in a job summary, and cannot catch a build that exits 0 having written no files, which is what Antora does on an unsupported Node version. The Connect docs PR check runs Antora with --log-failure-level=fatal so this command, not Antora, decides.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools check-build-log [options] <log>
+----
+
+*Options:*
+
+`--site-dir <dir>`::
+Output directory to count HTML pages in (with --min-pages)
+
+`--min-pages <n>`::
+Fail when fewer than <n> HTML pages were written under --site-dir
+
+`--blocking-sources <repos>`::
+Comma-separated owner/name repositories whose errors block (default: all). Errors with no source always block; others are listed only
+
+`--format <format>`::
+Output format: markdown or json (default: "markdown")
+
+`--output <path>`::
+Also write the output to this file
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+npx antora --log-format json --log-failure-level=fatal antora-playbook.yml > build.ndjson
+npx doc-tools check-build-log build.ndjson --site-dir build/site/connect --min-pages 400 >> "$GITHUB_STEP_SUMMARY"
+
+# Block only on errors from these repositories; list the rest
+npx doc-tools check-build-log build.ndjson --blocking-sources redpanda-data/rp-connect-docs,redpanda-data/connect
+----
+
+== check-rendered-html
+
+Scan the rendered HTML of one Antora component for AsciiDoc that did not convert: literal backticks outside code, literal `xref:` or `include::` text, leftover {page-*} or {env-*} attribute references, `|===` table markup, Asciidoctor's "Unresolved include directive" text, links with the `unresolved` class, and empty sections (a heading followed directly by a heading of the same or higher level). Only the page body is scanned. Reports findings per page and exits 0 unless --strict.
+
+*Why use it:*
+
+These defects reach readers without a single line in the Antora log: two backticks for an empty enum option, or a backtick glued to the next word, render as literal backticks on the published page.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools check-rendered-html [options] <site-dir>
+----
+
+*Options:*
+
+`--component <name>`::
+Component output directory to scan under <site-dir> (default: "connect")
+
+`--pages <file>`::
+Only scan the pages listed in <file>, one path relative to <site-dir> per line
+
+`--format <format>`::
+Output format: markdown or json (default: "markdown")
+
+`--output <path>`::
+Also write the output to this file
+
+`--strict`::
+Exit 1 when any finding exists (default: always exit 0)
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+npx doc-tools check-rendered-html build/site --component connect >> "$GITHUB_STEP_SUMMARY"
+
+# Fail on any finding
+npx doc-tools check-rendered-html build/site --strict
+----
+
+== connect-docs-diff
+
+Compare two trees written by connect's docs generator, for example a PR's merge base and its head, and map each added, removed, or changed partial or example to the docs.redpanda.com page that includes it. Prints a Markdown table of changed pages with links, then a unified diff per file in collapsible blocks, capped in size. A tree root can be connect's docs/ directory, its modules/ directory, or the components/ directory.
+
+*Why use it:*
+
+Writers review Go string literals today and never see the page. The generated output is the published change: connect strings, benthos strings from a go.mod bump, and generator changes all show up here.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools connect-docs-diff [options] <base-dir> <head-dir>
+----
+
+*Options:*
+
+`--format <format>`::
+Output format: markdown or json (default: "markdown")
+
+`--site-url <url>`::
+Docs site the page links point at (default: "https://docs.redpanda.com")
+
+`--max-bytes <n>`::
+Cap on the Markdown output size; diffs past it are counted, not shown (default: "60000")
+
+`--output <path>`::
+Also write the output to this file
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+npx doc-tools connect-docs-diff base/modules head/modules >> "$GITHUB_STEP_SUMMARY"
+npx doc-tools connect-docs-diff base/modules head/modules --format json
 ----
 
 == preview-string
