@@ -140,17 +140,17 @@ describe('clusterSectionByArea', () => {
   const clustered = [
     '== v26.2.9 (2026-11-01)', '',
     '=== Bug fixes', '',
-    'Security:: Alpha.', '',
-    'Security:: Gamma.', '',
+    'Cloud Topics:: Delta.', '',
     'Kafka API:: Beta.', '',
     'Kafka API:: Epsilon.', '',
-    'Cloud Topics:: Delta.', '',
+    'Security:: Alpha.', '',
+    'Security:: Gamma.', '',
     '=== Improvements', '',
     'rpk:: Zeta.', '',
     'Security:: Theta.', '',
   ].join('\n');
 
-  it('clusters same-area entries by first appearance, stable within an area', () => {
+  it('clusters same-area entries alphabetically by area, stable within an area', () => {
     expect(clusterSectionByArea(scattered)).toBe(clustered);
   });
 

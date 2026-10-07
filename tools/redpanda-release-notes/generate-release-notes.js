@@ -133,13 +133,14 @@ function insertReleaseSection(pageContent, sectionText) {
 
 /**
  * Reorders the entries within each `=== category` of a curated section so that
- * entries sharing an `Area::` label sit together, matching the ADP convention of
- * keeping same-area items adjacent. The sort is STABLE and keyed by each area's
- * FIRST appearance: areas keep the order in which they first appear, and entries
- * keep their order within an area. The label is repeated per entry (not merged
- * into one heading), so the page format is unchanged — only the order of entries
- * within a category changes. Running it on an already-clustered section is a
- * no-op, so it is safe to apply on every release and on a backfill.
+ * entries sharing an `Area::` label sit together. Areas are ordered
+ * ALPHABETICALLY (case-insensitive), so a given area sits in the same place on
+ * every release instead of moving with the source's merge order; entries keep
+ * their source order within an area, so the sort is stable. The label is
+ * repeated per entry (not merged into one heading), so the page format is
+ * unchanged — only the order of entries within a category changes. Running it on
+ * an already-clustered section is a no-op, so it is safe to apply on every
+ * release and on a backfill.
  *
  * Only the clean single-line `Area:: description` definition-list form is
  * reordered. A category whose entries are not all of that form — a phase-1
@@ -191,6 +192,9 @@ function clusterSectionByArea(sectionText) {
         if (!groups.has(key)) { groups.set(key, []); order.push(key); }
         groups.get(key).push(entry);
       }
+      // Areas alphabetical (case-insensitive), so an area lands in the same
+      // place on every release; entries keep their source order within an area.
+      order.sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }));
       for (const key of order) {
         for (const entry of groups.get(key)) out.push(entry);
       }
