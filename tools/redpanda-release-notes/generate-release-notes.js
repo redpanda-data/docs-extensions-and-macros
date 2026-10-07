@@ -154,8 +154,11 @@ function insertReleaseSection(pageContent, sectionText) {
 function clusterSectionByArea(sectionText) {
   // The area label is the text up to the first `:: ` (double-colon + space),
   // which is the AsciiDoc definition-list term separator. A lazy match stops at
-  // that first separator, so a `::` later in the description is left alone.
-  const ENTRY_RE = /^(.+?)::\s/;
+  // that first separator, so a `::` later in the description is left alone. A
+  // leading list marker (`*`, `-`, `.`) is rejected so a plain bullet that
+  // happens to carry a `::` — a phase-1 candidate line — is not mistaken for an
+  // area entry; its category then bails and is left untouched.
+  const ENTRY_RE = /^(?![*.\-]+\s)(.+?)::\s/;
 
   // Tokenize into paragraphs: maximal runs of non-blank lines. In this format
   // every heading and every entry is one such paragraph.

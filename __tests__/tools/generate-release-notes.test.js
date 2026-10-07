@@ -185,6 +185,19 @@ describe('clusterSectionByArea', () => {
     // Order preserved (no reorder), so the unlabeled entry stays between them.
     expect(clusterSectionByArea(mixed)).toBe(mixed);
   });
+
+  it('bails on bullet-form entries that carry a :: (a leading list marker is not an area)', () => {
+    // A plain `*` bullet that happens to contain `::` must not be mistaken for
+    // an area entry and reordered — the whole bullet list is left untouched.
+    const bulletsWithColons = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Bug fixes', '',
+      '* Security:: First.', '',
+      '* Kafka API:: Beta.', '',
+      '* Security:: Gamma.', '',
+    ].join('\n');
+    expect(clusterSectionByArea(bulletsWithColons)).toBe(bulletsWithColons);
+  });
 });
 
 describe('assertSectionMatchesTag (finding 1)', () => {
