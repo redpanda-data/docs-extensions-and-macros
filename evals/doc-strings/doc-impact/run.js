@@ -50,13 +50,16 @@ const USAGE = `Usage: node evals/doc-strings/run-evals.js --doc-impact [options]
                           MCP config for record/live (default: the workflow's)
   --include-unconfirmed   also run and score weak, unconfirmed items
   --model <model>         default sonnet, the workflow's non-gateway model
+  --workflow <file>       read the prompt, tools and dispatch gate from this
+                          copy of doc-strings-review.yml instead of this
+                          checkout's (for example, the base branch's copy)
   --json                  print the scored summary as JSON on stdout
   --keep-temp             keep each item's working directory
   --refresh-diffs         freeze pr-diff.patch and lint-findings.json for
                           each item via gh and git (network), then exit`
 
 function parseArgs (argv) {
-  const o = { items: DEFAULT_ITEMS, controls: false, cases: null, mcp: 'replay', mcpConfig: null, merge: false, includeUnconfirmed: false, model: 'sonnet', json: false, keepTemp: false, refresh: false }
+  const o = { items: DEFAULT_ITEMS, controls: false, cases: null, mcp: 'replay', mcpConfig: null, merge: false, includeUnconfirmed: false, model: 'sonnet', workflow: null, json: false, keepTemp: false, refresh: false }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--items') o.items = path.resolve(argv[++i])
@@ -67,6 +70,7 @@ function parseArgs (argv) {
     else if (a === '--merge') o.merge = true
     else if (a === '--include-unconfirmed') o.includeUnconfirmed = true
     else if (a === '--model') o.model = argv[++i]
+    else if (a === '--workflow') o.workflow = path.resolve(argv[++i])
     else if (a === '--json') o.json = true
     else if (a === '--keep-temp') o.keepTemp = true
     else if (a === '--refresh-diffs') o.refresh = true
@@ -489,7 +493,7 @@ async function main (argv) {
   let filter
   try {
     items = options.controls ? lib.loadItems(CONTROLS, { synthetic: true }) : lib.loadItems(options.items)
-    wf = lib.loadWorkflow()
+    wf = lib.loadWorkflow(options.workflow || undefined)
     prompts = lib.extractImpactPrompt(wf.prompt)
     settings = lib.extractClaudeSettings(wf.claudeArgs)
     filter = lib.extractDispatchFilter(wf.dispatchScript)
@@ -580,6 +584,7 @@ async function main (argv) {
   const controlProblems = options.controls ? controlVerdict(runs, items) : null
   const summary = {
     model: options.model,
+    workflow: path.relative(process.cwd(), options.workflow || lib.WORKFLOW_PATH),
     mcp: options.mcp,
     controls: options.controls,
     include_unconfirmed: options.includeUnconfirmed,
@@ -608,4 +613,4 @@ async function main (argv) {
   return runs.some((r) => r.status !== 'OK' && r.status !== 'GATE_CLOSED') ? 2 : 0
 }
 
-module.exports = { main, runItem, useItemsFile, materializeControl, controlVerdict, callerSurfaces, parseSurfaces, quotaRefusals }
+module.exports = { main, parseArgs, runItem, useItemsFile, materializeControl, controlVerdict, callerSurfaces, parseSurfaces, quotaRefusals }

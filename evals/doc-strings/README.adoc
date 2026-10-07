@@ -245,7 +245,9 @@ node evals/doc-strings/run-evals.js --doc-impact --include-unconfirmed
 ----
 
 Other options: `--items <file>`, `--model <model>` (default `sonnet`, the
-workflow's non-gateway model), `--keep-temp`. You need the `claude` CLI,
+workflow's non-gateway model), `--workflow <file>` (cut the prompt, tools
+and dispatch gate from another copy of `doc-strings-review.yml`, such as the
+base branch's), `--keep-temp`. You need the `claude` CLI,
 `jq`, and the property-extractor venv for the controls.
 
 Exit codes: `0` the run completed (with `--controls`: both controls
@@ -457,8 +459,55 @@ A PR that changes the PUBLISHED-CONTENT IMPACT section of
 `doc-strings-review.yml` should run the controls and both baselines on its
 branch and on its base, and report the deltas in its description: flag
 recall, abstention recall, the headline, page precision and recall, and
-the items that flipped. The deltas are advisory. Nothing in CI runs this
-eval, because it drives live model calls.
+the items that flipped. The deltas are advisory. The CI job below runs one
+replay per side for you; run the rest locally.
+
+=== In CI
+
+`.github/workflows/doc-impact-eval.yml` runs on every pull request that
+changes `doc-strings-review.yml`, anything under `evals/doc-strings/doc-impact/`,
+or the job's own file, and on `workflow_dispatch` (against `main`). It runs
+the replay twice in parallel over every committed item
+(`--include-unconfirmed`), so both classes are present and the headline is
+defined:
+
+* *head*: the prompt in the PR's merge ref, so the PR applied to the
+  current base;
+* *base*: the base branch's copy of `doc-strings-review.yml`, passed with
+  `--workflow`.
+
+Both sides use the PR's harness, items and recordings. Only the workflow
+file differs, so the delta measures the prompt change. Then
+`doc-impact/compare.js` writes the job summary: each score on both sides
+with its delta, the `GATE_CLOSED`, `REPLAY_INCOMPLETE` and error counts,
+and the items whose outcome changed. Each side's `summary.json`, log and
+`results/` directory are uploaded as artifacts. The job posts nothing to
+the PR.
+
+The model is the one the engineering repositories' callers pin for the
+review (`MODEL` in the job), reached through the ADP AI Gateway with the
+`doc-strings-review` agent's credential, which this repository reads over
+its OIDC role. The credential steps run after the install steps, and only
+the short-lived gateway token reaches the eval step. A pull request from a
+fork gets no credentials, so the job skips it and says so; run it with
+`workflow_dispatch` from a branch here instead.
+
+The check is advisory. A lower score never fails it. It fails only when
+the numbers cannot be trusted as a whole:
+
+* the head run left no summary, because the harness could not start (for
+  example, its prompt no longer has a PUBLISHED-CONTENT IMPACT section), or
+* an item on either side ended in `HARNESS_ERROR` or `MODEL_ERROR` (for
+  example, the gateway refused the model or a recording holds a quota
+  refusal).
+
+`REPLAY_INCOMPLETE` items raise a warning instead: the model asked the
+docs server something no recording answers, so re-record those items. A
+base run that leaves no summary is reported, not failed, because a PR that
+adds or renames the impact section has no base prompt to run.
+
+One replay per side is not a noise floor. Treat a single flipped item as
+variance until the local baseline runs above show the same change.
 
 === Controls
 
@@ -487,4 +536,5 @@ flag-everything and flag-nothing scoring 0 and the one-class refusal),
 `stream-json` parsing, the replay server over stdio, recording merges,
 quota-refusal detection against the server's real refusal body, the
 `GATE_CLOSED` and poisoned-recording paths of an item run, the miner's
-ticket rules, and control materialization with the real lint.
+ticket rules, control materialization with the real lint, `--workflow`,
+and the CI comparison's deltas and exit rules.

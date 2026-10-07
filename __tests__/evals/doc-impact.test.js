@@ -456,3 +456,93 @@ describe('seeding and freezing', () => {
     expect(toItems([candidate('redpanda-operator-1')], [])[0].reviewed_head_sha).toBeNull()
   })
 })
+
+describe('base-prompt runs and the CI delta', () => {
+  const { parseArgs, main } = require('../../evals/doc-strings/doc-impact/run')
+  const { renderComparison, readSummary } = require('../../evals/doc-strings/doc-impact/compare')
+  const YAML = require('yaml')
+
+  test('--workflow reads the prompt from another copy of the review workflow', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-impact-wf-'))
+    const copy = path.join(tmp, 'doc-strings-review.yml')
+    const text = fs.readFileSync(lib.WORKFLOW_PATH, 'utf8')
+    fs.writeFileSync(copy, text.replace('PUBLISHED-CONTENT IMPACT:', 'PUBLISHED-CONTENT IMPACT:\n            BASE-COPY MARKER.'))
+    expect(parseArgs(['--workflow', copy]).workflow).toBe(copy)
+    expect(parseArgs([]).workflow).toBeNull()
+    const p = lib.extractImpactPrompt(lib.loadWorkflow(copy).prompt)
+    expect(p.impact).toContain('BASE-COPY MARKER.')
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  test('a base copy without the impact section is a harness error before any model call', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-impact-wf-'))
+    const copy = path.join(tmp, 'doc-strings-review.yml')
+    fs.writeFileSync(copy, fs.readFileSync(lib.WORKFLOW_PATH, 'utf8').replace('PUBLISHED-CONTENT IMPACT:', 'IMPACT NOTES:'))
+    const err = jest.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(await main(['--workflow', copy])).toBe(2)
+      expect(err.mock.calls.flat().join('\n')).toMatch(/HARNESS_ERROR: PUBLISHED-CONTENT IMPACT section not found/)
+    } finally {
+      err.mockRestore()
+      fs.rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  const summary = (over = {}, items = []) => {
+    const runs = items.map(([id, label, status, flagged]) => ({ item: item(id, label), status, flagged, pages: [], names: [] }))
+    return { model: 'm', mcp: 'replay', include_unconfirmed: true, ...lib.score(runs), items: runs.map((r) => ({ id: r.item.id, status: r.status, notes: [`${r.status} detail`] })), ...over }
+  }
+  const base = summary({}, [['p1', 'needs_docs', 'OK', true], ['p2', 'needs_docs', 'OK', false], ['n1', 'no_change', 'OK', false], ['g', 'needs_docs', 'GATE_CLOSED', false]])
+
+  test('the delta table, the flipped items, and a clean exit on a score drop', () => {
+    const head = summary({}, [['p1', 'needs_docs', 'OK', false], ['p2', 'needs_docs', 'OK', false], ['n1', 'no_change', 'OK', false], ['g', 'needs_docs', 'GATE_CLOSED', false]])
+    const r = renderComparison({ head, base, headLabel: 'this PR', baseLabel: 'main' })
+    expect(r.errors).toEqual([])
+    expect(r.markdown).toContain('| Flag recall F | 50.0% | 0.0% | -50.0 pt |')
+    expect(r.markdown).toContain('| Abstention recall A | 100.0% | 100.0% | 0 |')
+    expect(r.markdown).toContain('| Headline 2FA/(F+A) | 0.667 | 0.000 | -0.667 |')
+    expect(r.markdown).toContain('| GATE_CLOSED | 1 | 1 | 0 |')
+    expect(r.markdown).toContain('| `p1` | needs_docs | flagged (correct) | not flagged (wrong) |')
+    expect(r.markdown).not.toContain('`p2`')
+  })
+
+  test('an item error on either side is an error; an incomplete replay is only a warning', () => {
+    const head = summary({}, [['p1', 'needs_docs', 'MODEL_ERROR', false], ['p2', 'needs_docs', 'REPLAY_INCOMPLETE', false], ['n1', 'no_change', 'OK', false]])
+    const r = renderComparison({ head, base })
+    expect(r.errors).toEqual(['head: p1 MODEL_ERROR: MODEL_ERROR detail'])
+    expect(r.warnings.join('\n')).toMatch(/head: 1 item\(s\) REPLAY_INCOMPLETE/)
+    expect(r.markdown).toContain('| REPLAY_INCOMPLETE | 0 | 1 | +1 |')
+    expect(r.markdown).toContain('| Errors (harness or model) | 0 | 1 | +1 |')
+  })
+
+  test('no head summary fails; no base summary shows the head numbers alone', () => {
+    expect(renderComparison({ head: null, base }).errors).toHaveLength(1)
+    const r = renderComparison({ head: base, base: null })
+    expect(r.errors).toEqual([])
+    expect(r.markdown).toContain('| Flag recall F | 50.0% |')
+    expect(r.markdown).not.toContain('| Delta |')
+  })
+
+  test('a non-JSON or empty run output reads as no summary', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-impact-cmp-'))
+    fs.writeFileSync(path.join(tmp, 'skipped.json'), 'SKIPPED: the claude CLI is not available on PATH.\n')
+    fs.writeFileSync(path.join(tmp, 'empty.json'), '')
+    expect(readSummary(path.join(tmp, 'skipped.json'))).toBeNull()
+    expect(readSummary(path.join(tmp, 'empty.json'))).toBeNull()
+    expect(readSummary(path.join(tmp, 'absent.json'))).toBeNull()
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  test('the CI workflow keeps credentials out of checkouts and the eval step', () => {
+    const wf = YAML.parse(fs.readFileSync(path.join(__dirname, '../../.github/workflows/doc-impact-eval.yml'), 'utf8'))
+    expect(wf.permissions).toEqual({ contents: 'read' })
+    const steps = Object.values(wf.jobs).flatMap((j) => j.steps)
+    for (const s of steps.filter((x) => String(x.uses || '').startsWith('actions/checkout@'))) {
+      expect(s.with['persist-credentials']).toBe(false)
+    }
+    const run = wf.jobs.eval.steps.find((s) => s.name === 'Run the replay')
+    expect(JSON.stringify(run)).not.toMatch(/secrets\./)
+    expect(run.run).toContain('rm -f "$RUNNER_TEMP/gateway-token"')
+    expect(wf.jobs.compare.permissions).toEqual({ contents: 'read' })
+  })
+})
