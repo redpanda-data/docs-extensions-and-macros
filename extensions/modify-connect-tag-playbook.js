@@ -18,7 +18,14 @@
 //   checkout's docs/ after running its generator, or a local copy of the
 //   tarball) to preview unreleased connect changes. It wins over everything.
 //
-// A release without the asset (404) adds nothing, and the guard in
+// Connect publishes a release first and attaches the asset later, in a
+// separate job that can also fail. So when the latest release has no asset
+// (404), the extension falls back to the newest older stable release that has
+// one, and logs a warning that names both. It checks the asset lists from the
+// GitHub releases API (at most FALLBACK_RELEASE_LIMIT releases), or, without
+// the API, probes the downloads of the next FALLBACK_PROBE_LIMIT lower stable
+// tags from git ls-remote. A release picked with the `tag` config never falls
+// back. When no release has the asset, nothing is added, and the guard in
 // generate-rp-connect-info stops the build if connector pages then have no
 // field partials. Any other download or archive failure stops the build here.
 // A file another source already provides (rp-connect-docs still commits its
@@ -44,7 +51,8 @@
 
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
 const getLatestConnectTag = require('./version-fetcher/get-latest-connect')
-const { getGitHubApiToken } = require('../cli-utils/github-token')
+const listConnectReleases = require('./version-fetcher/list-connect-releases')
+const { createGitHub } = require('./util/connect-github')
 const { isConnectSource, isConnectOrigin, githubRepoOf, setResolvedConnectRef } = require('./util/connect-catalog')
 const asset = require('./util/connect-docs-asset')
 
@@ -54,6 +62,10 @@ const COMPONENT = 'connect'
 const KEPT_PATHS = ['modules/components/partials/', 'modules/components/examples/']
 const CONNECT_URL = `https://github.com/${OWNER}/${REPO}`
 const LOCAL_DIR_ENV = 'REDPANDA_CONNECT_DOCS_DIR'
+// How many releases the API fallback looks at, and how many lower git tags
+// the probe fallback tries, when the latest release has no asset yet.
+const FALLBACK_RELEASE_LIMIT = 10
+const FALLBACK_PROBE_LIMIT = 3
 
 // HTTPS, SSH (ssh://), and scp-style (git@host:owner/repo) URLs are all
 // remote content sources in Antora.
@@ -75,23 +87,40 @@ function redact (text) {
   return String(text || '').replace(/([a-z][a-z+.-]*:\/\/)[^@/\s]*@/gi, '$1')
 }
 
+// [major, minor, patch] of a stable vX.Y.Z tag, or null for anything else,
+// such as a prerelease.
+function stableVersion (tag) {
+  const m = /^v(\d+)\.(\d+)\.(\d+)$/.exec(tag || '')
+  return m ? m.slice(1).map(Number) : null
+}
+
+function compareVersions (a, b) {
+  return a[0] - b[0] || a[1] - b[1] || a[2] - b[2]
+}
+
+// Stable vX.Y.Z tags from `git ls-remote` output, highest first.
+function stableTags (lsRemoteOutput) {
+  const tags = new Set()
+  for (const line of String(lsRemoteOutput || '').split('\n')) {
+    const m = line.match(/refs\/tags\/(v\d+\.\d+\.\d+)$/)
+    if (m) tags.add(m[1])
+  }
+  return [...tags].sort((a, b) => compareVersions(stableVersion(b), stableVersion(a)))
+}
+
 // Highest stable vX.Y.Z tag from `git ls-remote` output. Used when the GitHub
 // API is unavailable, for example when an unauthenticated build is rate limited.
 function highestStableTag (lsRemoteOutput) {
-  const newer = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]
-  let best = null
-  for (const line of String(lsRemoteOutput || '').split('\n')) {
-    const m = line.match(/refs\/tags\/(v(\d+)\.(\d+)\.(\d+))$/)
-    if (!m) continue
-    const v = m.slice(2, 5).map(Number)
-    if (!best || newer(v, best.v) > 0) best = { tag: m[1], v }
-  }
-  return best && best.tag
+  return stableTags(lsRemoteOutput)[0] || null
+}
+
+function gitTags (url) {
+  const { execFileSync } = require('child_process')
+  return execFileSync('git', ['ls-remote', '--tags', '--refs', url], { encoding: 'utf8', timeout: 60000 })
 }
 
 function latestTagFromGit (url) {
-  const { execFileSync } = require('child_process')
-  return highestStableTag(execFileSync('git', ['ls-remote', '--tags', '--refs', url], { encoding: 'utf8', timeout: 60000 }))
+  return highestStableTag(gitTags(url))
 }
 
 function toTag (tagName) {
@@ -176,11 +205,7 @@ function hasConnectSource (playbook) {
 async function resolveLatestTag (url, logger) {
   let tag = null
   try {
-    const { Octokit } = await import('@octokit/rest')
-    const { retry } = await import('@octokit/plugin-retry')
-    const token = getGitHubApiToken()
-    const github = new (Octokit.plugin(retry))({ userAgent: 'Redpanda Docs', auth: token || undefined, retry: { doNotRetry: [403, 404, 429] } })
-    tag = toTag(await getLatestConnectTag(github, OWNER, REPO, logger))
+    tag = toTag(await getLatestConnectTag(await createGitHub(), OWNER, REPO, logger))
   } catch (error) {
     logger.warn(`GitHub API lookup of the latest Redpanda Connect release failed: ${error.message}`)
   }
@@ -193,6 +218,59 @@ async function resolveLatestTag (url, logger) {
     }
   }
   return tag
+}
+
+// Downloads the asset of a release. Null on a 404; throws on any other failure.
+async function downloadRelease (tag, logger) {
+  try {
+    return await asset.downloadAsset(tag, { logger })
+  } catch (error) {
+    throw new Error(`Could not download the Redpanda Connect reference docs for ${tag}: ${error.message}`)
+  }
+}
+
+// The newest stable release older than `latestTag` that has the asset, as
+// { tag, archive }, or null when none has it. The GitHub releases API lists
+// the most recent releases with their assets, so only the chosen release is
+// downloaded. Without the API, it probes the downloads of the next few lower
+// stable tags from git ls-remote instead.
+async function findOlderReleaseWithAsset (latestTag, url, logger) {
+  const latest = stableVersion(latestTag)
+  const isOlder = (tag) => {
+    const v = stableVersion(tag)
+    return !!v && (!latest || compareVersions(v, latest) < 0)
+  }
+  let releases = null
+  try {
+    releases = await listConnectReleases(await createGitHub(), OWNER, REPO, FALLBACK_RELEASE_LIMIT)
+  } catch (error) {
+    logger.warn(`GitHub API listing of Redpanda Connect releases failed: ${error.message}; probing the next ${FALLBACK_PROBE_LIMIT} lower release tags from git instead`)
+  }
+  if (releases) {
+    const found = releases
+      .filter((r) => r && !r.draft && !r.prerelease && isOlder(r.tag_name))
+      .sort((a, b) => compareVersions(stableVersion(b.tag_name), stableVersion(a.tag_name)))
+      .find((r) => (r.assets || []).some((a) => a && a.name === asset.ASSET_NAME))
+    if (!found) {
+      logger.info(`None of the ${releases.length} most recent Redpanda Connect releases has a ${asset.ASSET_NAME} release asset`)
+      return null
+    }
+    const archive = await downloadRelease(found.tag_name, logger)
+    return archive ? { tag: found.tag_name, archive } : null
+  }
+  let tags
+  try {
+    tags = stableTags(gitTags(url)).filter(isOlder).slice(0, FALLBACK_PROBE_LIMIT)
+  } catch (error) {
+    logger.warn(redact(`git ls-remote of ${url} failed: ${error.message}`))
+    return null
+  }
+  for (const tag of tags) {
+    const archive = await downloadRelease(tag, logger)
+    if (archive) return { tag, archive }
+  }
+  if (tags.length) logger.info(`None of the next ${tags.length} lower Redpanda Connect release tags (${tags.join(', ')}) has a ${asset.ASSET_NAME} release asset`)
+  return null
 }
 
 // Adds the generated files to every version of the connect component.
@@ -289,7 +367,7 @@ module.exports.register = function ({ config }) {
       origin = { type: 'local', url: CONNECT_URL, startPath: 'docs', localDir }
       from = `${LOCAL_DIR_ENV} (${localDir})`
     } else {
-      const tag = configuredTag || (await resolveLatestTag(`${CONNECT_URL}.git`, logger))
+      let tag = configuredTag || (await resolveLatestTag(`${CONNECT_URL}.git`, logger))
       if (!tag) {
         throw new Error(
           'Could not resolve the latest Redpanda Connect release, so the connect reference docs cannot be downloaded. ' +
@@ -297,11 +375,17 @@ module.exports.register = function ({ config }) {
         )
       }
       setResolvedConnectRef(tag)
-      let archive
-      try {
-        archive = await asset.downloadAsset(tag, { logger })
-      } catch (error) {
-        throw new Error(`Could not download the Redpanda Connect reference docs for ${tag}: ${error.message}`)
+      let archive = await downloadRelease(tag, logger)
+      // The latest release can be published before its asset is attached, or
+      // its asset job can fail. An explicit `tag` means that release only.
+      if (!archive && !configuredTag) {
+        const older = await findOlderReleaseWithAsset(tag, `${CONNECT_URL}.git`, logger)
+        if (older) {
+          logger.warn(`Redpanda Connect ${tag} has no ${asset.ASSET_NAME} asset yet; using ${older.tag}`)
+          tag = older.tag
+          archive = older.archive
+          setResolvedConnectRef(tag)
+        }
       }
       if (!archive) {
         logger.info(`Redpanda Connect ${tag} has no ${asset.ASSET_NAME} release asset (404), so no generated reference docs were added from it`)
@@ -328,4 +412,4 @@ module.exports.register = function ({ config }) {
   })
 }
 
-module.exports._internal = { isRemote, isUpstreamConnect, redact, isConnectSource, isConnectOrigin, toTag, highestStableTag, wantsLatest, pinConnectSource, filterConnectContent, hasConnectSource, addConnectDocs, LOCAL_DIR_ENV }
+module.exports._internal = { isRemote, isUpstreamConnect, redact, isConnectSource, isConnectOrigin, toTag, highestStableTag, stableTags, findOlderReleaseWithAsset, resolveLatestTag, FALLBACK_RELEASE_LIMIT, FALLBACK_PROBE_LIMIT, wantsLatest, pinConnectSource, filterConnectContent, hasConnectSource, addConnectDocs, LOCAL_DIR_ENV }

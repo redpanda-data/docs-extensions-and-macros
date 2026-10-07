@@ -414,9 +414,13 @@ At build time, when the playbook has the `connect` component, the extension:
 . Downloads that release's `redpanda-connect-docs.tar.gz` asset. No token is needed.
 . Adds `modules/components/partials/**` as partials and `modules/components/examples/**` as examples of the `components` module, in every version of the `connect` component. A file that another source, such as rp-connect-docs, already provides is skipped and counted in the log, so rp-connect-docs can keep committing its own copies until it stops.
 
-A release from before the asset existed has none, and the download returns 404. The extension logs this and adds nothing. If connector pages then have no field partials or no description partials, the `generate-rp-connect-info` extension stops the build. Any other failure, such as a network error or a corrupt archive, stops the build, because building without the reference would publish connector pages with no fields.
+A release from before the asset existed has none, and the download returns 404. A new release can also be missing it for a while: Connect publishes the release first and attaches the asset 15 to 20 minutes later in a separate job, which can fail.
 
-The extension shares the release it used, so `generate-rp-connect-info` reads `catalog.json` and `info.csv` for the same release as the reference docs. It adds its files before any other `contentClassified` listener runs, wherever it is listed in the playbook.
+So when the latest release has no asset, the extension falls back to the newest older stable `vX.Y.Z` release that has one, and logs a warning that names both, such as `Redpanda Connect v4.114.0 has no redpanda-connect-docs.tar.gz asset yet; using v4.113.0`. It reads the asset lists of the 10 most recent releases from the GitHub releases API, so it downloads only the release it picks. If the API is unavailable, it tries the downloads of the next 3 lower stable tags from `git ls-remote` instead. A release picked with the `tag` option never falls back: if it has no asset, the extension adds nothing.
+
+When no release it checks has the asset, the extension logs this and adds nothing. If connector pages then have no field partials or no description partials, the `generate-rp-connect-info` extension stops the build. Any other failure, such as a network error or a corrupt archive, stops the build, because building without the reference would publish connector pages with no fields.
+
+The extension shares the release it used, including a fallback release, so `generate-rp-connect-info` reads `catalog.json` and `info.csv` for the same release as the reference docs. It adds its files before any other `contentClassified` listener runs, wherever it is listed in the playbook.
 
 === Preview unreleased Connect changes
 
@@ -450,11 +454,11 @@ A local clone whose directory is named `connect` is filtered the same way but no
 === Environment variables
 
 - `REDPANDA_CONNECT_DOCS_DIR` (optional): A local directory, or a local `redpanda-connect-docs.tar.gz` file, to read the reference docs from instead of a release. See <<Preview unreleased Connect changes>>.
-- `REDPANDA_GITHUB_TOKEN` (optional): A GitHub token for the latest release lookup. Without it, the extension sends unauthenticated API requests, which GitHub can rate limit. The `git ls-remote` fallback and the asset download need no token.
+- `REDPANDA_GITHUB_TOKEN` (optional): A GitHub token for the latest release lookup and the fallback release listing. Without it, the extension sends unauthenticated API requests, which GitHub can rate limit. The `git ls-remote` fallback and the asset download need no token.
 
 === Configuration options
 
-`tag` (optional):: A Connect release tag, such as `v4.113.0`, to use instead of the latest stable release. A missing `v` prefix is added. Ignored when the playbook lists the connect repository as a content source.
+`tag` (optional):: A Connect release tag, such as `v4.113.0`, to use instead of the latest stable release. A missing `v` prefix is added. An explicit tag never falls back to an older release when its asset is missing. Ignored when the playbook lists the connect repository as a content source.
 
 === Registration
 

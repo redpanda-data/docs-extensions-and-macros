@@ -13,10 +13,18 @@ jest.mock('child_process', () => ({
   ...jest.requireActual('child_process'),
   execFileSync: jest.fn(() => 'abc\trefs/tags/v4.113.0\n')
 }))
+// The releases listing the fallback reads when the latest release has no
+// asset. Each test that reaches the fallback sets its own releases.
+jest.mock('../../extensions/version-fetcher/list-connect-releases', () => jest.fn(async () => []))
+// Dynamic imports fail under Jest, so the API client is a stand-in; the
+// lookups that use it are mocked above.
+jest.mock('../../extensions/util/connect-github', () => ({ createGitHub: jest.fn(async () => ({})) }))
 jest.mock('../../cli-utils/octokit-client', () => ({ rest: { repos: { getContent: jest.fn() } } }))
 
 const ContentCatalog = require('@antora/content-classifier/content-catalog')
 const getLatestConnectTag = require('../../extensions/version-fetcher/get-latest-connect')
+const listConnectReleases = require('../../extensions/version-fetcher/list-connect-releases')
+const { execFileSync } = require('child_process')
 const octokit = require('../../cli-utils/octokit-client')
 const catalogUtil = require('../../extensions/util/connect-catalog')
 const asset = require('../../extensions/util/connect-docs-asset')
@@ -127,6 +135,11 @@ beforeEach(() => {
   delete process.env[ENV]
   catalogUtil.setResolvedConnectRef(null)
   getLatestConnectTag.mockClear()
+  getLatestConnectTag.mockImplementation(async () => '4.113.0')
+  listConnectReleases.mockReset()
+  listConnectReleases.mockResolvedValue([])
+  execFileSync.mockClear()
+  execFileSync.mockImplementation(() => 'abc\trefs/tags/v4.113.0\n')
   octokit.rest.repos.getContent.mockReset()
   octokit.rest.repos.getContent.mockResolvedValue({ data: { content: Buffer.from('name,type\nsql_driver_postgres,sql_driver\n').toString('base64') } })
 })
@@ -356,5 +369,133 @@ describe('connect-docs-asset download', () => {
     const fetchImpl = jest.fn(async () => dropped)
     await expect(asset.downloadAsset('v4.200.0', { fetchImpl })).rejects.toThrow(/could not download .*: terminated/)
     expect(fetchImpl.mock.calls.length).toBeGreaterThan(1)
+  })
+})
+
+// A release as the GitHub releases API lists it.
+const release = (tag, { withAsset = false, prerelease = false, draft = false } = {}) => ({
+  tag_name: tag,
+  prerelease,
+  draft,
+  assets: withAsset ? [{ name: 'redpanda-connect-docs.tar.gz' }, { name: 'redpanda-connect_linux_amd64.tar.gz' }] : [{ name: 'redpanda-connect_linux_amd64.tar.gz' }]
+})
+// fetch that answers 404 for the release tags given and serves the archive
+// for every other release.
+const notFoundFor = (...tags) => jest.fn(async (url) => (tags.some((t) => url.includes(`/download/${t}/`)) ? response(404) : response(200, archive)))
+const downloadedTags = () => global.fetch.mock.calls.map(([url]) => url.match(/\/download\/([^/]+)\//)[1])
+
+describe('modify-connect-tag-playbook falls back when the latest release has no asset yet', () => {
+  it('uses the newest older stable release that has the asset, and warns naming both', async () => {
+    global.fetch = notFoundFor('v4.113.0')
+    listConnectReleases.mockResolvedValue([
+      // A backport published after v4.112.0 is listed first but is older.
+      release('v4.110.5', { withAsset: true }),
+      release('v4.113.0'),
+      release('v4.113.0-rc1', { withAsset: true, prerelease: true }),
+      release('v4.112.1', { withAsset: true, draft: true }),
+      release('v4.112.0', { withAsset: true }),
+      release('v4.111.0', { withAsset: true })
+    ])
+    const { catalog, error, logs } = await build()
+    expect(error).toBeNull()
+    expect(listConnectReleases).toHaveBeenCalledWith(expect.anything(), 'redpanda-data', 'connect', 10)
+    // Only the latest and the chosen release are downloaded.
+    expect(downloadedTags()).toEqual(['v4.113.0', 'v4.112.0'])
+    expect(logs).toContainEqual(['warn', 'Redpanda Connect v4.113.0 has no redpanda-connect-docs.tar.gz asset yet; using v4.112.0'])
+    expect(fromConnect(catalog)).toHaveLength(6)
+    expect(logs).toContainEqual(['info', expect.stringMatching(/^Redpanda Connect reference docs from the v4\.112\.0 redpanda-connect-docs\.tar\.gz release asset: added 6 files/)])
+  })
+
+  it('shares the fallback release, and generate-rp-connect-info reads catalog.json and info.csv for it', async () => {
+    global.fetch = notFoundFor('v4.113.0')
+    listConnectReleases.mockResolvedValue([release('v4.113.0'), release('v4.112.0', { withAsset: true })])
+    const { catalog, error, logs } = await build()
+    expect(error).toBeNull()
+    expect(catalogUtil.getResolvedConnectRef()).toBe('v4.112.0')
+    expect(catalogUtil.connectOriginRef(catalog)).toEqual({ ref: 'v4.112.0', owner: 'redpanda-data', repo: 'connect' })
+    const fields = catalog.getById({ component: 'connect', version: '', module: 'components', family: 'partial', relative: 'fields/inputs/kafka.adoc' })
+    expect(fields.src.origin).toMatchObject({ type: 'release-asset', tag: 'v4.112.0', refname: 'v4.112.0', asset: asset.assetUrl('v4.112.0') })
+    expect(catalogUtil.findConnectCatalogFile(catalog).src.origin).toMatchObject({ tag: 'v4.112.0' })
+    expect(logs).toContainEqual(['info', 'Loaded 1 components from connect:components:partial$platforms/catalog.json (v4.112.0)'])
+    expect(octokit.rest.repos.getContent).toHaveBeenCalledWith(expect.objectContaining({ ref: 'v4.112.0', path: 'internal/plugins/info.csv' }))
+    expect(octokit.rest.repos.getContent).not.toHaveBeenCalledWith(expect.objectContaining({ ref: 'v4.113.0' }))
+  })
+
+  it('never falls back from a release picked with the tag config', async () => {
+    global.fetch = notFoundFor('v4.113.0')
+    listConnectReleases.mockResolvedValue([release('v4.113.0'), release('v4.112.0', { withAsset: true })])
+    const { catalog, error, logs } = await build({ config: { tag: 'v4.113.0' } })
+    expect(listConnectReleases).not.toHaveBeenCalled()
+    expect(execFileSync).not.toHaveBeenCalled()
+    expect(downloadedTags()).toEqual(['v4.113.0'])
+    expect(logs.filter(([level]) => level === 'warn')).toEqual([])
+    expect(fromConnect(catalog)).toHaveLength(0)
+    expect(catalogUtil.getResolvedConnectRef()).toBe('v4.113.0')
+    expect(error.message).toMatch(/no generated components:partial\$fields\/\*/)
+  })
+
+  it('adds nothing when no listed release has the asset, and the guard stops the build', async () => {
+    global.fetch = jest.fn(async () => response(404))
+    listConnectReleases.mockResolvedValue([release('v4.113.0'), release('v4.112.0'), release('v4.111.0')])
+    const { catalog, error, logs } = await build()
+    expect(downloadedTags()).toEqual(['v4.113.0'])
+    expect(execFileSync).not.toHaveBeenCalled()
+    expect(logs).toContainEqual(['info', 'None of the 3 most recent Redpanda Connect releases has a redpanda-connect-docs.tar.gz release asset'])
+    expect(logs).toContainEqual(['info', expect.stringMatching(/v4\.113\.0 has no redpanda-connect-docs\.tar\.gz release asset \(404\)/)])
+    expect(logs.filter(([level]) => level === 'warn')).toEqual([])
+    expect(fromConnect(catalog)).toHaveLength(0)
+    expect(catalogUtil.getResolvedConnectRef()).toBe('v4.113.0')
+    expect(error.message).toMatch(/no generated components:partial\$fields\/\*/)
+  })
+
+  it('probes the next lower stable git tags when the releases API fails', async () => {
+    getLatestConnectTag.mockImplementation(async () => null)
+    listConnectReleases.mockRejectedValue(new Error('API rate limit exceeded'))
+    execFileSync.mockImplementation(() => [
+      'a\trefs/tags/v4.113.0', 'b\trefs/tags/v4.113.0-rc1', 'c\trefs/tags/v4.112.0', 'd\trefs/tags/v4.111.0', 'e\trefs/tags/v4.110.0', 'f\trefs/tags/v4.9.0'
+    ].join('\n'))
+    global.fetch = notFoundFor('v4.113.0', 'v4.112.0')
+    const { catalog, error, logs } = await build()
+    expect(error).toBeNull()
+    expect(downloadedTags()).toEqual(['v4.113.0', 'v4.112.0', 'v4.111.0'])
+    expect(logs).toContainEqual(['warn', expect.stringMatching(/GitHub API listing of Redpanda Connect releases failed: API rate limit exceeded; probing the next 3 lower release tags from git/)])
+    expect(logs).toContainEqual(['warn', 'Redpanda Connect v4.113.0 has no redpanda-connect-docs.tar.gz asset yet; using v4.111.0'])
+    expect(catalogUtil.getResolvedConnectRef()).toBe('v4.111.0')
+    expect(catalogUtil.connectOriginRef(catalog)).toEqual({ ref: 'v4.111.0', owner: 'redpanda-data', repo: 'connect' })
+    expect(octokit.rest.repos.getContent).toHaveBeenCalledWith(expect.objectContaining({ ref: 'v4.111.0', path: 'internal/plugins/info.csv' }))
+  })
+
+  it('stops probing git tags after the limit and adds nothing when none has the asset', async () => {
+    listConnectReleases.mockRejectedValue(new Error('API rate limit exceeded'))
+    execFileSync.mockImplementation(() => ['v4.113.0', 'v4.112.0', 'v4.111.0', 'v4.110.0', 'v4.109.0'].map((t) => `x\trefs/tags/${t}`).join('\n'))
+    global.fetch = jest.fn(async () => response(404))
+    const { catalog, error, logs } = await build()
+    expect(downloadedTags()).toEqual(['v4.113.0', 'v4.112.0', 'v4.111.0', 'v4.110.0'])
+    expect(logs).toContainEqual(['info', 'None of the next 3 lower Redpanda Connect release tags (v4.112.0, v4.111.0, v4.110.0) has a redpanda-connect-docs.tar.gz release asset'])
+    expect(fromConnect(catalog)).toHaveLength(0)
+    expect(catalogUtil.getResolvedConnectRef()).toBe('v4.113.0')
+    expect(error.message).toMatch(/no generated components:partial\$fields\/\*/)
+  })
+
+  it('fails the build, naming the fallback release, when its download fails', async () => {
+    global.fetch = jest.fn(async (url) => response(url.includes('/v4.113.0/') ? 404 : 502))
+    listConnectReleases.mockResolvedValue([release('v4.113.0'), release('v4.112.0', { withAsset: true })])
+    const { error } = await build()
+    expect(error.message).toMatch(/Could not download the Redpanda Connect reference docs for v4\.112\.0: .*HTTP 502/)
+  })
+})
+
+describe('list-connect-releases', () => {
+  const list = jest.requireActual('../../extensions/version-fetcher/list-connect-releases')
+  it('asks for one page of at most the limit and never returns more', async () => {
+    const listReleases = jest.fn(async () => ({ data: Array.from({ length: 12 }, (_, i) => release(`v4.${100 - i}.0`)) }))
+    const releases = await list({ rest: { repos: { listReleases } } }, 'redpanda-data', 'connect', 10)
+    expect(listReleases).toHaveBeenCalledTimes(1)
+    expect(listReleases).toHaveBeenCalledWith({ owner: 'redpanda-data', repo: 'connect', per_page: 10 })
+    expect(releases).toHaveLength(10)
+  })
+  it('throws when the API fails, so the caller can probe git tags', async () => {
+    const listReleases = jest.fn(async () => { throw new Error('Bad credentials') })
+    await expect(list({ rest: { repos: { listReleases } } }, 'redpanda-data', 'connect', 10)).rejects.toThrow(/Bad credentials/)
   })
 })
