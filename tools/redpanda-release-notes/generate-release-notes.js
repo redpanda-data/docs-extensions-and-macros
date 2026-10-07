@@ -145,8 +145,11 @@ function insertReleaseSection(pageContent, sectionText) {
  * Only the clean single-line `Area:: description` definition-list form is
  * reordered. A category whose entries are not all of that form — a phase-1
  * candidate's plain `*` bullets, or a multi-line entry — is left in its original
- * order, so this is a safe no-op on anything it does not recognize. Headings and
- * any prose outside a category are passed through untouched.
+ * order, so this is a safe no-op on anything it does not recognize. A curated
+ * category (one with at least one `Area::` entry) that bails logs a warning, since
+ * it then ships unclustered. Area keys are trimmed for grouping, so `Kafka API`
+ * and `Kafka API ` are one area. Headings and any prose outside a category are
+ * passed through untouched.
  *
  * @param {string} sectionText - A rendered release section.
  * @return {string} The section with each category's entries clustered by area,
@@ -179,16 +182,25 @@ function clusterSectionByArea(sectionText) {
   const out = [];
   let categoryEntries = null; // entry paragraphs of the open `=== category`
   let categoryBail = false;   // the open category has an unrecognized entry
+  let categoryTitle = '';     // the open category's heading text, for warnings
 
   const flushCategory = () => {
     if (!categoryEntries) return;
     if (categoryBail) {
+      // A phase-1 bullet category is expected to bail. A curated one (it has at
+      // least one `Area::` entry) bailing means some entry spans several lines,
+      // so the whole category ships unclustered — say so rather than fail quietly.
+      if (categoryEntries.some((entry) => ENTRY_RE.test(entry[0]))) {
+        console.warn(`${LOG_TAG} WARN: "${categoryTitle}" not grouped by area: an entry is not a single-line \`Area:: description\` (for example a \`+\` continuation or a code block).`);
+      }
       for (const entry of categoryEntries) out.push(entry);
     } else {
       const order = [];
       const groups = new Map();
       for (const entry of categoryEntries) {
-        const key = entry[0].match(ENTRY_RE)[1];
+        // Trimmed, so a stray space before `::` does not split one area in two.
+        // Only the grouping key is trimmed; the entry text is emitted verbatim.
+        const key = entry[0].match(ENTRY_RE)[1].trim();
         if (!groups.has(key)) { groups.set(key, []); order.push(key); }
         groups.get(key).push(entry);
       }
@@ -211,6 +223,7 @@ function clusterSectionByArea(sectionText) {
       out.push(para);
       categoryEntries = [];
       categoryBail = false;
+      categoryTitle = first.replace(/^===\s+/, '').trim();
     } else if (/^==\s/.test(first)) {
       // The release heading (or any other top-level heading) closes the open
       // category; entries do not cross it.

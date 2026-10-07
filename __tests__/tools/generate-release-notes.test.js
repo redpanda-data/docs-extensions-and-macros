@@ -211,6 +211,58 @@ describe('clusterSectionByArea', () => {
     ].join('\n');
     expect(clusterSectionByArea(indentedBullets)).toBe(indentedBullets);
   });
+
+  it('trims the area key, so a stray space before :: does not split one area', () => {
+    const spaced = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Bug fixes', '',
+      'Kafka API:: One.', '',
+      'Security:: Two.', '',
+      'Kafka API :: Three.', '',
+    ].join('\n');
+    const expected = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Bug fixes', '',
+      'Kafka API:: One.', '',
+      'Kafka API :: Three.', '', // grouped with Kafka API; text left verbatim
+      'Security:: Two.', '',
+    ].join('\n');
+    expect(clusterSectionByArea(spaced)).toBe(expected);
+  });
+
+  describe('bail warning', () => {
+    let warn;
+    beforeEach(() => { warn = jest.spyOn(console, 'warn').mockImplementation(() => {}); });
+    afterEach(() => { warn.mockRestore(); });
+
+    it('warns, naming the category, when a curated category bails', () => {
+      const multiLine = [
+        '== v26.2.9 (2026-11-01)', '',
+        '=== Bug fixes', '',
+        'Security:: One.', '',
+        'Kafka API:: Two,\n+\ncontinued.', '',
+      ].join('\n');
+      expect(clusterSectionByArea(multiLine)).toBe(multiLine); // left unclustered
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toMatch(/\[release-notes\] WARN: "Bug fixes" not grouped by area/);
+    });
+
+    it('stays silent when a phase-1 bullet category bails', () => {
+      const bullets = [
+        '== v26.2.9 (2026-11-01)', '',
+        '=== Features', '',
+        '* First.', '',
+        '* Second.', '',
+      ].join('\n');
+      clusterSectionByArea(bullets);
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('stays silent when a curated category clusters normally', () => {
+      clusterSectionByArea('== v26.2.9 (2026-11-01)\n\n=== Bug fixes\n\nSecurity:: A.\n\nKafka API:: B.\n');
+      expect(warn).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('assertSectionMatchesTag (finding 1)', () => {
