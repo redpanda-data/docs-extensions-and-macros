@@ -84,7 +84,9 @@ function hasClass (node, cls) {
  * Check one HTML document. Returns { findings: { ruleId: { count, samples } } }.
  */
 function checkHtml (html, { contextChars = DEFAULTS.contextChars, maxSamples = DEFAULTS.maxSamples } = {}) {
-  const cheerio = require('cheerio')
+  // cheerio/slim parses with htmlparser2 and leaves out the fetch helpers,
+  // whose undici dependency needs Node.js 20 or later.
+  const cheerio = require('cheerio/slim')
   const $ = cheerio.load(html)
   const article = $('article.doc').get(0) || $('body').get(0) || $.root().get(0)
   const findings = {}
