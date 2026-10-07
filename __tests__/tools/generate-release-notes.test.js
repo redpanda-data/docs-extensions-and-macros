@@ -198,6 +198,19 @@ describe('clusterSectionByArea', () => {
     ].join('\n');
     expect(clusterSectionByArea(bulletsWithColons)).toBe(bulletsWithColons);
   });
+
+  it('bails on indented bullet entries carrying a :: (the marker may be indented)', () => {
+    // A leading list marker is rejected whether at column zero or indented, so
+    // an indented bullet list carrying `::` is left untouched too.
+    const indentedBullets = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Bug fixes', '',
+      '  * Security:: First.', '',
+      '  * Kafka API:: Beta.', '',
+      '  * Security:: Gamma.', '',
+    ].join('\n');
+    expect(clusterSectionByArea(indentedBullets)).toBe(indentedBullets);
+  });
 });
 
 describe('assertSectionMatchesTag (finding 1)', () => {
