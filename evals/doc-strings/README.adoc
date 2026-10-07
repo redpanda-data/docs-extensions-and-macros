@@ -402,6 +402,15 @@ a recording that holds a refused call is a harness error before the model
 runs. Record from a signed-in MCP config (`--mcp-config`), or record a
 set larger than the anonymous limit over several windows with `--case`.
 
+To record with your own docs sign-in, add a user-scoped server under the
+harness's name (`claude mcp add -s user --transport http redpanda-docs
+https://docs.redpanda.com/mcp`) and sign in to it through `/mcp`. The
+headless `claude -p` the harness starts reuses that sign-in only while its
+access token is fresh: it does not renew an expired token, and it cannot
+read the token at all from a sandboxed shell that has no keychain access.
+So sign in again through `/mcp` right before a record run, and run the
+command from your own shell.
+
 === Scoring
 
 [cols="1,3"]
