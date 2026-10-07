@@ -21,18 +21,18 @@ function start (sources) {
   }
   ext.register.call(ctx, { config: {} })
   const playbook = { content: { sources } }
-  return handlers.contextStarted({ playbook }).then(() => playbook)
+  return Promise.resolve(handlers.contextStarted({ playbook })).then(() => playbook)
 }
 
 describe('modify-connect-tag-playbook shares the resolved ref', () => {
-  it('shares the tag it pins the connect source to', async () => {
-    catalogUtil.setResolvedConnectRef(null)
+  it('removes the latest connect source and leaves the ref for the release asset step', async () => {
+    catalogUtil.setResolvedConnectRef('v4.100.0')
     const playbook = await start([{ url: 'https://github.com/redpanda-data/connect', tags: 'latest', start_path: 'docs' }])
-    expect(playbook.content.sources[0].tags).toEqual(['v4.111.1'])
-    expect(catalogUtil.getResolvedConnectRef()).toBe('v4.111.1')
+    expect(playbook.content.sources).toEqual([])
+    expect(catalogUtil.getResolvedConnectRef()).toBeNull()
   })
 
-  it('clears a ref left from an earlier build when the playbook pins nothing', async () => {
+  it('clears a ref left from an earlier build when the playbook keeps a connect source', async () => {
     catalogUtil.setResolvedConnectRef('v4.100.0')
     await start([{ url: 'https://github.com/redpanda-data/connect', branches: 'my-fix', start_path: 'docs' }])
     expect(catalogUtil.getResolvedConnectRef()).toBeNull()

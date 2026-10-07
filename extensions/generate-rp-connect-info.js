@@ -13,37 +13,58 @@ const DEFAULTS = {
   githubRepo: 'connect'
 }
 
-const REQUIRED_PARTIAL_DIRS = ['fields', 'descriptions']
+// Generated sets that connector pages include, by Antora family. Each one
+// must be present, or pages publish with unresolved includes.
+const REQUIRED_PARTIAL_DIRS = ['fields', 'descriptions', 'availability']
+const REQUIRED_EXAMPLE_DIRS = ['common', 'advanced']
 
-// Connector pages include the generated field reference and description
-// meta, which the modify-connect-tag-playbook extension adds from the
-// redpanda-connect-docs.tar.gz asset of a connect release. If a playbook has
-// the Connect pages but either set is missing, every connector page would
-// publish without its fields or its description, and Antora only logs the
-// missing includes. Fail the build instead so the
-// playbook gets fixed before anything is published.
-function assertConnectReferencePresent (contentCatalog) {
+// Connector pages include the generated field reference, description meta,
+// availability, and config examples, which the modify-connect-tag-playbook
+// extension adds from the redpanda-connect-docs.tar.gz asset of a connect
+// release. If a playbook has the Connect pages but any set is missing (an
+// incomplete asset, or a connect source whose ref lacks them), connector
+// pages would publish with unresolved includes, and Antora only logs them.
+// Fail the build instead so the playbook gets fixed before anything is
+// published.
+//
+// `connectSources` are the connect content sources still in the playbook,
+// which means no release asset was downloaded.
+function assertConnectReferencePresent (contentCatalog, { connectSources = [] } = {}) {
   const component = contentCatalog.getComponents().find((c) => c.name === 'connect')
   if (!component) return
-  // Only connector pages (inputs/kafka.adoc and so on) include field
-  // partials. Overview pages at the module root don't.
+  // Only connector pages (inputs/kafka.adoc and so on) include the generated
+  // sets. Overview pages at the module root don't.
   const pages = contentCatalog.findBy({ component: 'connect', module: 'components', family: 'page' })
     .filter((p) => p.src.relative.includes('/'))
   if (!pages.length) return
-  // Connector pages include both the field reference and the description
-  // meta (the page's :description:). A missing set only shows up as empty
-  // sections or missing descriptions, so require each one.
-  const partials = contentCatalog.findBy({ component: 'connect', module: 'components', family: 'partial' })
-  const missing = REQUIRED_PARTIAL_DIRS.filter((dir) => !partials.some((f) => f.src.relative.startsWith(`${dir}/`)))
+  const missingIn = (family, dirs) => {
+    const files = contentCatalog.findBy({ component: 'connect', module: 'components', family })
+    return dirs.filter((dir) => !files.some((f) => f.src.relative.startsWith(`${dir}/`)))
+      .map((dir) => `components:${family}$${dir}/*`)
+  }
+  const missing = [...missingIn('partial', REQUIRED_PARTIAL_DIRS), ...missingIn('example', REQUIRED_EXAMPLE_DIRS)]
   if (!missing.length) return
+  const sourceHint = connectSources.length
+    ? `The playbook lists a connect content source (${connectSources.join(', ')}), so no release asset was downloaded and these files must come from that source's refs. ` +
+      'Point it at a ref that has the generated docs, or remove it to use the release asset. '
+    : ''
   throw new Error(
-    `The connect component has connector pages but no generated ${missing.map((d) => `components:partial$${d}/*`).join(' or ')} partials. ` +
+    `The connect component has connector pages but no generated ${missing.join(' or ')} files. ` +
+    sourceHint +
     'These come from the redpanda-connect-docs.tar.gz asset of a Redpanda Connect release, which the ' +
     'modify-connect-tag-playbook extension downloads. Register that extension and check its log: ' +
-    'the release it used (the latest stable release, or the one in its `tag` config) may have no asset. ' +
+    'the release it used (the latest stable release, or the one in its `tag` config) may have no asset or an incomplete one. ' +
     'Set `tag` to a release that has the asset, or set REDPANDA_CONNECT_DOCS_DIR to a local directory that contains ' +
     'modules/ (for example a connect checkout\'s docs/ after running its docs generator).'
   )
+}
+
+// The connect content sources in a playbook, with credentials removed.
+function connectSourcesOf (playbook) {
+  const sources = (playbook && playbook.content && playbook.content.sources) || []
+  return sources
+    .filter((s) => catalogUtil.isConnectSource(s.url))
+    .map((s) => String(s.url).replace(/([a-z][a-z+.-]*:\/\/)[^@/\s]*@/gi, '$1'))
 }
 
 module.exports.assertConnectReferencePresent = assertConnectReferencePresent
@@ -73,8 +94,8 @@ module.exports.register = function ({ config }) {
   let translatedRows = null
 
   // Use 'on' and return the promise so Antora waits for async completion
-  this.on('contentClassified', ({ contentCatalog }) => {
-    assertConnectReferencePresent(contentCatalog)
+  this.on('contentClassified', ({ contentCatalog, playbook }) => {
+    assertConnectReferencePresent(contentCatalog, { connectSources: connectSourcesOf(playbook) })
     return processContent(contentCatalog)
   })
 

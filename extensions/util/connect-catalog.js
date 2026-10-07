@@ -4,8 +4,8 @@
 //
 // The connect repo publishes its reference content (partials and examples) as
 // a release asset that modify-connect-tag-playbook adds to the content catalog
-// (or, in older playbooks, through a content source that it pins to the latest
-// release tag). Either way the files carry a connect origin with the tag.
+// (or, to preview a connect branch, through a content source with explicit
+// refs). Either way the files carry a connect origin with the ref.
 // Catalog data (support level, deprecation, Cloud availability)
 // must come from the same ref, or the badges and catalog drift from the
 // reference content as soon as connect's main branch changes a flag before a

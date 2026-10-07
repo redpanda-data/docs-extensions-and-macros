@@ -10,18 +10,47 @@ function catalog (files, components = ['connect']) {
 }
 const page = (relative) => ({ src: { component: 'connect', module: 'components', family: 'page', relative } })
 const partial = (relative) => ({ src: { component: 'connect', module: 'components', family: 'partial', relative } })
+const example = (relative) => ({ src: { component: 'connect', module: 'components', family: 'example', relative } })
+// Every generated set a connector page includes.
+const complete = () => [
+  partial('fields/inputs/kafka.adoc'),
+  partial('descriptions/inputs/kafka.adoc'),
+  partial('availability/inputs/kafka.adoc'),
+  example('common/inputs/kafka.yaml'),
+  example('advanced/inputs/kafka.yaml'),
+]
+const without = (relativePrefix) => complete().filter((f) => !f.src.relative.startsWith(relativePrefix))
 
 describe('assertConnectReferencePresent', () => {
-  it('passes when connector pages, field partials, and description partials are present', () => {
-    expect(() => assertConnectReferencePresent(catalog([page('inputs/kafka.adoc'), partial('fields/inputs/kafka.adoc'), partial('descriptions/inputs/kafka.adoc')]))).not.toThrow()
+  it('passes when connector pages and every generated set are present', () => {
+    expect(() => assertConnectReferencePresent(catalog([page('inputs/kafka.adoc'), ...complete()]))).not.toThrow()
   })
   it('fails when connector pages have fields but no description partials', () => {
-    expect(() => assertConnectReferencePresent(catalog([page('inputs/kafka.adoc'), partial('fields/inputs/kafka.adoc')])))
-      .toThrow(/components:partial\$descriptions\/\*/)
+    expect(() => assertConnectReferencePresent(catalog([page('inputs/kafka.adoc'), ...without('descriptions/')])))
+      .toThrow(/no generated components:partial\$descriptions\/\* files/)
   })
-  it('names both missing sets when neither is present', () => {
+  it('fails when the availability partials are missing', () => {
+    expect(() => assertConnectReferencePresent(catalog([page('inputs/kafka.adoc'), ...without('availability/')])))
+      .toThrow(/no generated components:partial\$availability\/\* files/)
+  })
+  it('fails when the common or advanced examples are missing', () => {
+    expect(() => assertConnectReferencePresent(catalog([page('inputs/kafka.adoc'), ...without('common/')])))
+      .toThrow(/no generated components:example\$common\/\* files/)
+    expect(() => assertConnectReferencePresent(catalog([page('inputs/kafka.adoc'), ...without('advanced/')])))
+      .toThrow(/no generated components:example\$advanced\/\* files/)
+  })
+  it('does not count a partial named like an example directory as the examples', () => {
+    expect(() => assertConnectReferencePresent(catalog([page('inputs/kafka.adoc'), ...without('common/'), partial('common/x.adoc')])))
+      .toThrow(/components:example\$common\/\*/)
+  })
+  it('names every missing set when none is present', () => {
     expect(() => assertConnectReferencePresent(catalog([page('inputs/kafka.adoc')])))
-      .toThrow(/components:partial\$fields\/\* or components:partial\$descriptions\/\*/)
+      .toThrow(/components:partial\$fields\/\* or components:partial\$descriptions\/\* or components:partial\$availability\/\* or components:example\$common\/\* or components:example\$advanced\/\* files/)
+  })
+  it('mentions a connect content source that is still in the playbook', () => {
+    const run = (opts) => () => assertConnectReferencePresent(catalog([page('inputs/kafka.adoc')]), opts)
+    expect(run({ connectSources: ['https://github.com/redpanda-data/connect'] })).toThrow(/lists a connect content source \(https:\/\/github\.com\/redpanda-data\/connect\), so no release asset was downloaded/)
+    expect(run()).not.toThrow(/lists a connect content source/)
   })
   it('fails when connector pages have no field partials', () => {
     expect(() => assertConnectReferencePresent(catalog([page('inputs/kafka.adoc'), partial('secret_warning.adoc')])))

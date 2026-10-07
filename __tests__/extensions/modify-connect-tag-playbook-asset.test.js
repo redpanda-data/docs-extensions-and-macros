@@ -40,10 +40,12 @@ const LONG_NAME = `${'very_long_component_name_'.repeat(5)}.adoc`
 const TREE = {
   'modules/components/partials/fields/inputs/kafka.adoc': '// fields of kafka',
   'modules/components/partials/descriptions/inputs/kafka.adoc': '// description of kafka',
+  'modules/components/partials/availability/inputs/kafka.adoc': '// availability of kafka',
   'modules/components/partials/examples/inputs/kafka.adoc': '// examples of kafka',
   'modules/components/partials/platforms/catalog.json': CATALOG_JSON,
   [`modules/components/partials/fields/processors/${LONG_NAME}`]: '// a path longer than 100 bytes',
   'modules/components/examples/common/inputs/kafka.yaml': 'input:\n  kafka: {}\n',
+  'modules/components/examples/advanced/inputs/kafka.yaml': 'input:\n  kafka: {}\n',
   'modules/components/pages/inputs/kafka.adoc': '= Not part of the reference'
 }
 
@@ -95,6 +97,24 @@ function makeCatalog (extraFiles = []) {
   return catalog
 }
 
+// Every generated set the guard requires, as committed copies in
+// rp-connect-docs, for builds that add nothing from the release asset.
+const COMMITTED_SETS = [
+  ['partial', 'fields/inputs/kafka.adoc', '// committed'],
+  ['partial', 'descriptions/inputs/kafka.adoc', '// committed'],
+  ['partial', 'availability/inputs/kafka.adoc', '// committed'],
+  ['example', 'common/inputs/kafka.yaml', '# committed'],
+  ['example', 'advanced/inputs/kafka.yaml', '# committed']
+]
+// A local tree with every set the guard requires.
+const LOCAL_TREE = {
+  'modules/components/partials/fields/inputs/kafka.adoc': '// local fields',
+  'modules/components/partials/descriptions/inputs/kafka.adoc': '// local description',
+  'modules/components/partials/availability/inputs/kafka.adoc': '// local availability',
+  'modules/components/examples/common/inputs/kafka.yaml': '# local common',
+  'modules/components/examples/advanced/inputs/kafka.yaml': '# local advanced'
+}
+
 // Registers both extensions and runs a build up to contentClassified.
 // generate-rp-connect-info is registered first, which is the wrong order in a
 // playbook, to show the asset files still arrive before its guard.
@@ -105,14 +125,14 @@ async function build ({ sources = [{ url: DOCS_URL, branches: 'main' }], config 
   if (infoFirst) { registerInfo(); registerTag() } else { registerTag(); registerInfo() }
   const playbook = { content: { sources } }
   await ctx.notify('contextStarted', { playbook })
-  await ctx.notify('contentAggregated', { contentAggregate: [] })
+  await ctx.notify('contentAggregated', { playbook, contentAggregate: [] })
   let error = null
   try {
-    await ctx.notify('contentClassified', { contentCatalog: catalog })
+    await ctx.notify('contentClassified', { playbook, contentCatalog: catalog })
   } catch (e) {
     error = e
   }
-  return { catalog, logs: ctx.logs, error }
+  return { catalog, logs: ctx.logs, error, playbook }
 }
 
 const fromConnect = (catalog) => catalog.findBy({ component: 'connect' }).filter((f) => catalogUtil.isConnectOrigin(f.src.origin))
@@ -201,8 +221,8 @@ describe('modify-connect-tag-playbook with the release asset', () => {
     expect(catalog.getById({ component: 'connect', version: '', module: 'components', family: 'example', relative: 'common/inputs/kafka.yaml' })).toBeTruthy()
     // The page in the tarball is not part of the reference.
     expect(fromConnect(catalog).map((f) => f.src.family)).not.toContain('page')
-    expect(fromConnect(catalog)).toHaveLength(6)
-    expect(logs).toContainEqual(['info', expect.stringMatching(/added 6 files .* skipped 0 already provided by another source and 1 outside/)])
+    expect(fromConnect(catalog)).toHaveLength(8)
+    expect(logs).toContainEqual(['info', expect.stringMatching(/added 8 files .* skipped 0 already provided by another source and 1 outside/)])
   })
 
   it('resolves includes of the added partials through the content catalog', async () => {
@@ -237,15 +257,35 @@ describe('modify-connect-tag-playbook with the release asset', () => {
     expect(catalogUtil.getResolvedConnectRef()).toBe('v4.200.0')
   })
 
-  it('treats a 404 as a release without the asset: logs it, adds nothing, and the guard stops the build', async () => {
+  it('fails the build when the release picked with the tag config has no asset (404)', async () => {
     global.fetch = jest.fn(async () => response(404))
-    const { catalog, error, logs } = await build({ config: { tag: 'v4.112.0' } })
-    expect(logs).toContainEqual(['info', expect.stringMatching(/v4\.112\.0 has no redpanda-connect-docs\.tar\.gz release asset \(404\)/)])
+    const { catalog, error } = await build({ config: { tag: 'v4.112.0' } })
+    expect(error.message).toMatch(/^Redpanda Connect release v4\.112\.0 has no redpanda-connect-docs\.tar\.gz asset/)
+    expect(error.message).toMatch(/`tag`/)
     expect(fromConnect(catalog)).toHaveLength(0)
     expect(global.fetch).toHaveBeenCalledTimes(1)
-    expect(error.message).toMatch(/no generated components:partial\$fields\/\*/)
-    expect(error.message).toMatch(/REDPANDA_CONNECT_DOCS_DIR/)
-    expect(error.message).toMatch(/`tag`/)
+    expect(listConnectReleases).not.toHaveBeenCalled()
+  })
+
+  it('rejects `tag: latest`, which is the default and would become vlatest', () => {
+    for (const tag of ['latest', ' Latest ']) {
+      const ctx = new Context()
+      expect(() => tagExt.register.call(ctx, { config: { tag } })).toThrow(/`tag` config of modify-connect-tag-playbook is `latest`.*remove `tag`/)
+    }
+    expect(global.fetch).not.toHaveBeenCalled()
+  })
+
+  it('stops the build when the asset is incomplete, naming every missing set', async () => {
+    const partial = path.join(tmp, 'partial-tree')
+    writeTree(partial, {
+      'modules/components/partials/fields/inputs/kafka.adoc': '// fields',
+      'modules/components/partials/descriptions/inputs/kafka.adoc': '// description'
+    })
+    global.fetch = jest.fn(async () => response(200, makeTarGz(partial)))
+    const { error } = await build()
+    expect(error.message).toMatch(/no generated components:partial\$availability\/\* or components:example\$common\/\* or components:example\$advanced\/\* files/)
+    expect(error.message).not.toMatch(/partial\$fields/)
+    expect(error.message).not.toMatch(/lists a connect content source/)
   })
 
   it('fails the build on a server error after retrying', async () => {
@@ -275,12 +315,12 @@ describe('modify-connect-tag-playbook with the release asset', () => {
     const fields = catalog.getById({ component: 'connect', version: '', module: 'components', family: 'partial', relative: 'fields/inputs/kafka.adoc' })
     expect(fields.contents.toString()).toBe('// committed copy')
     expect(fields.src.origin.url).toBe(DOCS_URL)
-    expect(logs).toContainEqual(['info', expect.stringMatching(/added 5 files .* skipped 1 already provided by another source/)])
+    expect(logs).toContainEqual(['info', expect.stringMatching(/added 7 files .* skipped 1 already provided by another source/)])
   })
 
   it('reads a local directory from REDPANDA_CONNECT_DOCS_DIR over the tag and the latest release', async () => {
     const local = path.join(tmp, 'local')
-    writeTree(local, { 'modules/components/partials/fields/inputs/kafka.adoc': '// local fields', 'modules/components/partials/descriptions/inputs/kafka.adoc': '// local description' })
+    writeTree(local, LOCAL_TREE)
     process.env[ENV] = local
     const { catalog, error } = await build({ config: { tag: 'v4.200.0' } })
     expect(error).toBeNull()
@@ -294,6 +334,22 @@ describe('modify-connect-tag-playbook with the release asset', () => {
     expect(catalogUtil.getResolvedConnectRef()).toBe('v4.200.0')
   })
 
+  it('replaces files another source provides with the REDPANDA_CONNECT_DOCS_DIR copies and counts them', async () => {
+    const local = path.join(tmp, 'local')
+    writeTree(local, LOCAL_TREE)
+    process.env[ENV] = local
+    const catalog = makeCatalog([['partial', 'fields/inputs/kafka.adoc', '// committed copy'], ['partial', 'secret_warning.adoc', '// only in rp-connect-docs']])
+    const { error, logs } = await build({ catalog })
+    expect(error).toBeNull()
+    const fields = catalog.getById({ component: 'connect', version: '', module: 'components', family: 'partial', relative: 'fields/inputs/kafka.adoc' })
+    expect(fields.contents.toString()).toBe('// local fields')
+    expect(fields.src.origin).toMatchObject({ type: 'local', localDir: local })
+    expect(catalog.findBy({ component: 'connect', family: 'partial' }).filter((f) => f.src.relative === 'fields/inputs/kafka.adoc')).toHaveLength(1)
+    // Files only rp-connect-docs has stay.
+    expect(catalog.getById({ component: 'connect', version: '', module: 'components', family: 'partial', relative: 'secret_warning.adoc' })).toBeTruthy()
+    expect(logs).toContainEqual(['info', expect.stringMatching(/added 4 files .*; replaced 1 provided by another source; skipped 0 outside/)])
+  })
+
   it('accepts a connect checkout root and a local tarball in REDPANDA_CONNECT_DOCS_DIR', async () => {
     const checkout = path.join(tmp, 'connect')
     writeTree(path.join(checkout, 'docs'))
@@ -304,7 +360,7 @@ describe('modify-connect-tag-playbook with the release asset', () => {
     process.env[ENV] = file
     const { catalog, error } = await build()
     expect(error).toBeNull()
-    expect(fromConnect(catalog)).toHaveLength(6)
+    expect(fromConnect(catalog)).toHaveLength(8)
     expect(global.fetch).not.toHaveBeenCalled()
   })
 
@@ -330,26 +386,56 @@ describe('modify-connect-tag-playbook with the release asset', () => {
 })
 
 describe('modify-connect-tag-playbook with a connect content source', () => {
-  it('keeps pinning and filtering the git source and adds no asset files', async () => {
-    const sources = [{ url: DOCS_URL, branches: 'main' }, { url: 'https://github.com/redpanda-data/connect', tags: 'latest', start_path: 'docs' }]
-    process.env[ENV] = path.join(tmp, 'tree')
-    const catalog = makeCatalog([['partial', 'fields/inputs/kafka.adoc', '// from rp-connect-docs'], ['partial', 'descriptions/inputs/kafka.adoc', '// from rp-connect-docs']])
-    const { error, logs } = await build({ sources, catalog })
+  it('removes the upstream connect source with tags: latest, warns, and uses the release asset', async () => {
+    const connect = { url: 'https://github.com/redpanda-data/connect', tags: 'latest', start_path: 'docs' }
+    const sources = [{ url: DOCS_URL, branches: 'main' }, connect]
+    const ctx = new Context()
+    const updated = jest.spyOn(ctx, 'updateVariables')
+    tagExt.register.call(ctx, { config: {} })
+    const playbook = { content: { sources } }
+    await ctx.notify('contextStarted', { playbook })
+    expect(playbook.content.sources).toEqual([{ url: DOCS_URL, branches: 'main' }])
+    expect(updated).toHaveBeenCalledWith({ playbook })
+    expect(ctx.logs).toContainEqual(['warn', expect.stringMatching(/content source \(https:\/\/github\.com\/redpanda-data\/connect with tags: latest\) is no longer needed and was removed .*release asset/)])
+
+    const { catalog, error, logs } = await build({ sources: [{ url: DOCS_URL, branches: 'main' }, { ...connect }] })
     expect(error).toBeNull()
-    expect(sources[1]).toMatchObject({ tags: ['v4.113.0'], branches: [] })
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    expect(fromConnect(catalog)).toHaveLength(8)
     expect(catalogUtil.getResolvedConnectRef()).toBe('v4.113.0')
-    expect(global.fetch).not.toHaveBeenCalled()
-    expect(fromConnect(catalog)).toHaveLength(0)
-    expect(logs).toContainEqual(['warn', expect.stringMatching(/REDPANDA_CONNECT_DOCS_DIR is ignored/)])
+    expect(logs).toContainEqual(['info', expect.stringMatching(/from the v4\.113\.0 redpanda-connect-docs\.tar\.gz release asset: added 8 files/)])
+  })
+
+  it('keeps a connect source with explicit refs, filters it, and adds no asset files', async () => {
+    const pr = { url: 'https://github.com/redpanda-data/connect', branches: ['docs/some-change'], start_path: 'docs' }
+    const fork = { url: 'https://github.com/someone/connect', tags: 'latest', start_path: 'docs' }
+    for (const source of [pr, fork, { url: 'https://github.com/redpanda-data/connect', tags: 'v4.110.0', start_path: 'docs' }]) {
+      process.env[ENV] = path.join(tmp, 'tree')
+      const sources = [{ url: DOCS_URL, branches: 'main' }, { ...source }]
+      const { error, logs, playbook } = await build({ sources, catalog: makeCatalog(COMMITTED_SETS) })
+      expect(error).toBeNull()
+      expect(playbook.content.sources).toEqual([{ url: DOCS_URL, branches: 'main' }, source])
+      expect(global.fetch).not.toHaveBeenCalled()
+      expect(getLatestConnectTag).not.toHaveBeenCalled()
+      expect(logs).toContainEqual(['warn', expect.stringMatching(/REDPANDA_CONNECT_DOCS_DIR is ignored/)])
+      expect(logs).not.toContainEqual(['warn', expect.stringMatching(/no longer needed/)])
+    }
   })
 
   it('keeps a local clone named connect as a content source', async () => {
     const sources = [{ url: DOCS_URL, branches: 'main' }, { url: '/Users/me/repos/connect', branches: 'HEAD', start_path: 'docs' }]
-    const catalog = makeCatalog([['partial', 'fields/inputs/kafka.adoc', '// x'], ['partial', 'descriptions/inputs/kafka.adoc', '// x']])
-    const { error } = await build({ sources, catalog })
+    const { error, playbook } = await build({ sources, catalog: makeCatalog(COMMITTED_SETS) })
     expect(error).toBeNull()
+    expect(playbook.content.sources).toHaveLength(2)
     expect(global.fetch).not.toHaveBeenCalled()
     expect(getLatestConnectTag).not.toHaveBeenCalled()
+  })
+
+  it('names the connect source in the guard error when its ref lacks the generated docs', async () => {
+    const sources = [{ url: DOCS_URL, branches: 'main' }, { url: 'https://x-access-token:s3cret@github.com/redpanda-data/connect', branches: 'my-fix', start_path: 'docs' }]
+    const { error } = await build({ sources })
+    expect(error.message).toMatch(/lists a connect content source \(https:\/\/github\.com\/redpanda-data\/connect\), so no release asset was downloaded/)
+    expect(error.message).not.toMatch(/s3cret/)
   })
 })
 
@@ -402,8 +488,8 @@ describe('modify-connect-tag-playbook falls back when the latest release has no 
     // Only the latest and the chosen release are downloaded.
     expect(downloadedTags()).toEqual(['v4.113.0', 'v4.112.0'])
     expect(logs).toContainEqual(['warn', 'Redpanda Connect v4.113.0 has no redpanda-connect-docs.tar.gz asset yet; using v4.112.0'])
-    expect(fromConnect(catalog)).toHaveLength(6)
-    expect(logs).toContainEqual(['info', expect.stringMatching(/^Redpanda Connect reference docs from the v4\.112\.0 redpanda-connect-docs\.tar\.gz release asset: added 6 files/)])
+    expect(fromConnect(catalog)).toHaveLength(8)
+    expect(logs).toContainEqual(['info', expect.stringMatching(/^Redpanda Connect reference docs from the v4\.112\.0 redpanda-connect-docs\.tar\.gz release asset: added 8 files/)])
   })
 
   it('shares the fallback release, and generate-rp-connect-info reads catalog.json and info.csv for it', async () => {
@@ -430,8 +516,7 @@ describe('modify-connect-tag-playbook falls back when the latest release has no 
     expect(downloadedTags()).toEqual(['v4.113.0'])
     expect(logs.filter(([level]) => level === 'warn')).toEqual([])
     expect(fromConnect(catalog)).toHaveLength(0)
-    expect(catalogUtil.getResolvedConnectRef()).toBe('v4.113.0')
-    expect(error.message).toMatch(/no generated components:partial\$fields\/\*/)
+    expect(error.message).toMatch(/^Redpanda Connect release v4\.113\.0 has no redpanda-connect-docs\.tar\.gz asset/)
   })
 
   it('adds nothing when no listed release has the asset, and the guard stops the build', async () => {

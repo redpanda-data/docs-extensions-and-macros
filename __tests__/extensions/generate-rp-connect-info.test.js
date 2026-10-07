@@ -89,11 +89,19 @@ afterEach(() => {
   catalogUtil.setResolvedConnectRef(null)
 })
 
-// The generated reference a connector page needs: its fields and its
-// description meta. The guard requires both.
+const connectExample = (relative, origin) => ({
+  src: { component: 'connect', module: 'components', family: 'example', relative, origin },
+  contents: Buffer.from('')
+})
+
+// The generated reference a connector page needs: its fields, description
+// meta, availability, and config examples. The guard requires each set.
 const referencePartials = (origin) => [
   connectPartial('fields/inputs/http_server.adoc', origin),
-  connectPartial('descriptions/inputs/http_server.adoc', origin)
+  connectPartial('descriptions/inputs/http_server.adoc', origin),
+  connectPartial('availability/inputs/http_server.adoc', origin),
+  connectExample('common/inputs/http_server.yaml', origin),
+  connectExample('advanced/inputs/http_server.yaml', origin)
 ]
 
 describe('sticky-bar availability attributes', () => {

@@ -16,7 +16,8 @@
 // - The REDPANDA_CONNECT_DOCS_DIR environment variable points at a local copy
 //   of the tree (a directory that contains modules/, such as a connect
 //   checkout's docs/ after running its generator, or a local copy of the
-//   tarball) to preview unreleased connect changes. It wins over everything.
+//   tarball) to preview unreleased connect changes. It wins over everything,
+//   and its files replace any copy another source provides.
 //
 // Connect publishes a release first and attaches the asset later, in a
 // separate job that can also fail. So when the latest release has no asset
@@ -25,27 +26,33 @@
 // GitHub releases API (at most FALLBACK_RELEASE_LIMIT releases), or, without
 // the API, probes the downloads of the next FALLBACK_PROBE_LIMIT lower stable
 // tags from git ls-remote. A release picked with the `tag` config never falls
-// back. When no release has the asset, nothing is added, and the guard in
+// back: a release picked with `tag` that has no asset stops the build. When
+// no release has the asset, nothing is added, and the guard in
 // generate-rp-connect-info stops the build if connector pages then have no
-// field partials. Any other download or archive failure stops the build here.
-// A file another source already provides (rp-connect-docs still commits its
-// own copies until it migrates) is skipped.
+// generated partials. Any other download or archive failure stops the build
+// here. A file another source already provides (rp-connect-docs still commits
+// its own copies until it migrates) is skipped.
 //
-// Backward compatibility: a playbook that still lists the connect repo as a
-// content source keeps the previous behavior, and no asset is downloaded:
+// Playbooks that still list the upstream connect repo with `tags: latest` as
+// its only ref (the setup from before the release asset):
 //
 //   - url: https://github.com/redpanda-data/connect
-//     tags: latest        # replaced with the latest release tag at build time
+//     tags: latest
 //     start_path: docs
 //
-// 1. A source with `tags: latest` as its only ref is pinned to the latest
-//    connect release tag.
-// 2. Only the generated modules/components/partials and
-//    modules/components/examples trees of the `connect` component are kept
-//    from that source, and any file another source already provides is
-//    dropped, because Antora fails the build on a duplicate page or partial.
+// That source is removed from the playbook in contextStarted, with a warning,
+// and the build continues with the release asset. Connect releases no longer
+// ship docs/antora.yml, so Antora could not aggregate it anyway.
 //
-// Either way it shares the tag it resolves (util/connect-catalog), so
+// A connect source with explicit refs (a branch, a specific tag, a fork, or a
+// local clone named connect) is how people preview a connect branch, so it is
+// kept, and no asset is downloaded. Only the generated
+// modules/components/partials and modules/components/examples trees of the
+// `connect` component are kept from that source, and any file another source
+// already provides is dropped, because Antora fails the build on a duplicate
+// page or partial.
+//
+// The release asset tag is shared (util/connect-catalog), so
 // generate-rp-connect-info reads info.csv and catalog.json from the same ref
 // as the reference content.
 
@@ -128,9 +135,10 @@ function toTag (tagName) {
   return tagName.startsWith('v') ? tagName : `v${tagName}`
 }
 
-// The upstream connect source asks to be pinned with `tags: latest` as its
-// only ref. A source with any other refs, such as a fork or a PR branch used
-// to preview a connect change, keeps what the playbook says.
+// The upstream connect source with `tags: latest` as its only ref: the setup
+// from before the release asset. A source with any other refs, such as a fork
+// or a PR branch used to preview a connect change, keeps what the playbook
+// says.
 function wantsLatest (source) {
   if (!isRemote(source.url) || !isConnectSource(source.url) || !isUpstreamConnect(source.url)) return false
   const tags = Array.isArray(source.tags) ? source.tags : [source.tags]
@@ -138,20 +146,17 @@ function wantsLatest (source) {
   return tags.length === 1 && tags[0] === 'latest' && branches.length === 0
 }
 
-// Rewrites the connect content sources that ask for the latest release to
-// use `tag`. Returns true when a source was updated.
-function pinConnectSource (playbook, tag) {
+// Removes the upstream connect sources that ask for the latest release, which
+// the release asset replaces. Mutates the playbook's source list in place and
+// returns the removed sources.
+function removeLatestConnectSources (playbook) {
   const sources = playbook && playbook.content && playbook.content.sources
-  if (!Array.isArray(sources) || !tag) return false
-  let updated = false
-  for (const source of sources) {
-    if (!wantsLatest(source)) continue
-    source.tags = [tag]
-    // Without this, Antora's default branch patterns also pull in main.
-    source.branches = []
-    updated = true
+  if (!Array.isArray(sources)) return []
+  const removed = []
+  for (let i = sources.length - 1; i >= 0; i--) {
+    if (wantsLatest(sources[i])) removed.unshift(...sources.splice(i, 1))
   }
-  return updated
+  return removed
 }
 
 // Removes connect-sourced files that must not be published. Mutates the
@@ -194,7 +199,8 @@ function filterConnectContent (contentAggregate) {
 }
 
 // True when the playbook lists the connect repo (or a local clone named
-// connect) as a content source, which keeps the git source behavior.
+// connect) as a content source, which keeps the git source behavior. Run it
+// after removeLatestConnectSources.
 function hasConnectSource (playbook) {
   const sources = (playbook && playbook.content && playbook.content.sources) || []
   return sources.some((source) => isConnectSource(source.url))
@@ -274,9 +280,12 @@ async function findOlderReleaseWithAsset (latestTag, url, logger) {
 }
 
 // Adds the generated files to every version of the connect component.
-// Mutates the content catalog and returns what it added and skipped.
-function addConnectDocs (contentCatalog, files, origin) {
-  const report = { added: 0, providedElsewhere: 0, outsideGenerated: 0, versions: [] }
+// Mutates the content catalog and returns what it added, replaced, and
+// skipped. A file another source already provides is skipped, unless
+// `replace` is set (a local directory, which previews unreleased changes and
+// so wins over committed copies).
+function addConnectDocs (contentCatalog, files, origin, { replace = false } = {}) {
+  const report = { added: 0, replaced: 0, providedElsewhere: 0, outsideGenerated: 0, versions: [] }
   const component = contentCatalog.getComponent(COMPONENT)
   if (!component) return report
   report.versions = component.versions.map((v) => v.version)
@@ -288,16 +297,19 @@ function addConnectDocs (contentCatalog, files, origin) {
     }
     for (const version of report.versions) {
       const src = { component: COMPONENT, version, module: asset.MODULE, family: resource.family, relative: resource.relative }
-      if (contentCatalog.getById(src)) {
+      const existing = contentCatalog.getById(src)
+      if (existing && !replace) {
         report.providedElsewhere++
         continue
       }
+      if (existing) contentCatalog.removeFile(existing)
       contentCatalog.addFile({
         path: resource.path,
         contents: Buffer.from(entry.contents),
         src: { ...src, path: resource.path, origin },
       })
-      report.added++
+      if (existing) report.replaced++
+      else report.added++
     }
   }
   return report
@@ -306,32 +318,31 @@ function addConnectDocs (contentCatalog, files, origin) {
 module.exports.register = function ({ config }) {
   raiseListenerLimit(this)
   const logger = this.getLogger('modify-connect-tag-playbook-extension')
-  const configuredTag = toTag(config && config.tag ? String(config.tag).trim() : null)
-  // Set in contextStarted: true when the playbook still lists the connect repo
-  // as a content source.
+  const rawTag = config && config.tag != null ? String(config.tag).trim() : ''
+  // `latest` is the default; as a tag it would become the nonexistent vlatest.
+  if (rawTag.toLowerCase() === 'latest') {
+    throw new Error('The `tag` config of modify-connect-tag-playbook is `latest`. The latest stable Redpanda Connect release is the default, so remove `tag`, or set it to a release tag such as v4.113.0.')
+  }
+  const configuredTag = toTag(rawTag || null)
+  // Set in contextStarted: true when the playbook still lists a connect
+  // content source with explicit refs.
   let gitSourceMode = false
 
-  this.on('contextStarted', async ({ playbook }) => {
-    const sources = (playbook && playbook.content && playbook.content.sources) || []
+  this.on('contextStarted', ({ playbook }) => {
     // Clear a ref left over from an earlier build in the same process.
     setResolvedConnectRef(null)
+    const removed = removeLatestConnectSources(playbook)
+    if (removed.length) {
+      this.updateVariables({ playbook })
+      logger.warn(
+        `The Redpanda Connect content source (${removed.map((s) => redact(s.url)).join(', ')} with tags: latest) is no longer needed and was removed from the playbook, ` +
+        `so the reference docs come from the ${asset.ASSET_NAME} release asset. Remove that source from the playbook.`
+      )
+    }
     gitSourceMode = hasConnectSource(playbook)
-    if (!gitSourceMode) return
-    if ((process.env[LOCAL_DIR_ENV] || '').trim()) {
+    if (gitSourceMode && (process.env[LOCAL_DIR_ENV] || '').trim()) {
       logger.warn(`${LOCAL_DIR_ENV} is ignored because the playbook lists the connect repo as a content source`)
     }
-    const source = sources.find(wantsLatest)
-    if (!source) return
-    const tag = await resolveLatestTag(source.url, logger)
-    if (!tag) {
-      // Guessing would let Antora's default branch patterns pull in connect's
-      // branches, whose docs are unreleased or missing, so stop the build.
-      throw new Error('Could not resolve the latest Redpanda Connect release tag for the connect content source. Set a GitHub token or check network access.')
-    }
-    pinConnectSource(playbook, tag)
-    setResolvedConnectRef(tag)
-    this.updateVariables({ playbook })
-    logger.info(`Sourcing Redpanda Connect reference content from ${tag}`)
   })
 
   this.on('contentAggregated', ({ contentAggregate }) => {
@@ -387,6 +398,12 @@ module.exports.register = function ({ config }) {
           setResolvedConnectRef(tag)
         }
       }
+      if (!archive && configuredTag) {
+        throw new Error(
+          `Redpanda Connect release ${tag} has no ${asset.ASSET_NAME} asset (404). ` +
+          `Set the \`tag\` config of modify-connect-tag-playbook to a release that has it, or remove \`tag\` to use the latest release.`
+        )
+      }
       if (!archive) {
         logger.info(`Redpanda Connect ${tag} has no ${asset.ASSET_NAME} release asset (404), so no generated reference docs were added from it`)
         return
@@ -402,14 +419,17 @@ module.exports.register = function ({ config }) {
     if (!files.some((f) => asset.toResource(f.path))) {
       throw new Error(`${from} has no files under modules/components/partials or modules/components/examples`)
     }
-    const r = addConnectDocs(contentCatalog, files, origin)
+    const r = addConnectDocs(contentCatalog, files, origin, { replace: !!localDir })
     const versions = r.versions.filter(Boolean)
     logger.info(
       `Redpanda Connect reference docs from ${from}: added ${r.added} files to the ${COMPONENT} component` +
       `${versions.length ? ` (${versions.join(', ')})` : ''}; ` +
-      `skipped ${r.providedElsewhere} already provided by another source and ${r.outsideGenerated} outside the generated partials and examples`
+      (localDir
+        ? `replaced ${r.replaced} provided by another source; skipped ${r.outsideGenerated}`
+        : `skipped ${r.providedElsewhere} already provided by another source and ${r.outsideGenerated}`) +
+      ' outside the generated partials and examples'
     )
   })
 }
 
-module.exports._internal = { isRemote, isUpstreamConnect, redact, isConnectSource, isConnectOrigin, toTag, highestStableTag, stableTags, findOlderReleaseWithAsset, resolveLatestTag, FALLBACK_RELEASE_LIMIT, FALLBACK_PROBE_LIMIT, wantsLatest, pinConnectSource, filterConnectContent, hasConnectSource, addConnectDocs, LOCAL_DIR_ENV }
+module.exports._internal = { isRemote, isUpstreamConnect, redact, isConnectSource, isConnectOrigin, toTag, highestStableTag, stableTags, findOlderReleaseWithAsset, resolveLatestTag, FALLBACK_RELEASE_LIMIT, FALLBACK_PROBE_LIMIT, wantsLatest, removeLatestConnectSources, filterConnectContent, hasConnectSource, addConnectDocs, LOCAL_DIR_ENV }

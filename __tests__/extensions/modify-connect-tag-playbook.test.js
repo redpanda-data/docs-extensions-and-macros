@@ -1,7 +1,7 @@
 const { describe, it, expect } = require('@jest/globals')
 const { _internal } = require('../../extensions/modify-connect-tag-playbook.js')
 
-const { isConnectSource, isRemote, redact, wantsLatest, toTag, pinConnectSource, filterConnectContent } = _internal
+const { isConnectSource, isRemote, redact, wantsLatest, toTag, removeLatestConnectSources, filterConnectContent } = _internal
 
 const connectOrigin = { url: 'https://github.com/redpanda-data/connect', startPath: 'docs' }
 const docsOrigin = { url: 'https://github.com/redpanda-data/rp-connect-docs', startPath: '' }
@@ -64,31 +64,40 @@ describe('modify-connect-tag-playbook', () => {
     })
   })
 
-  describe('pinConnectSource', () => {
-    it('pins the remote connect source to the tag and clears branches', () => {
-      const playbook = { content: { sources: [
-        { url: 'https://github.com/redpanda-data/rp-connect-docs', branches: ['main'] },
+  describe('removeLatestConnectSources', () => {
+    it('removes the upstream connect source with tags: latest and keeps the rest', () => {
+      const docs = { url: 'https://github.com/redpanda-data/rp-connect-docs', branches: ['main'] }
+      const sources = [
         { url: 'https://github.com/redpanda-data/connect', tags: ['latest'], startPath: 'docs' },
-      ] } }
-      expect(pinConnectSource(playbook, 'v4.110.0')).toBe(true)
-      expect(playbook.content.sources[1]).toMatchObject({ tags: ['v4.110.0'], branches: [] })
-      expect(playbook.content.sources[0].branches).toEqual(['main'])
+        docs,
+        { url: 'git@github.com:redpanda-data/connect.git', tags: 'latest' },
+      ]
+      const playbook = { content: { sources } }
+      expect(removeLatestConnectSources(playbook).map((s) => s.url)).toEqual(['https://github.com/redpanda-data/connect', 'git@github.com:redpanda-data/connect.git'])
+      // In place, so anything holding the list sees the change.
+      expect(playbook.content.sources).toBe(sources)
+      expect(sources).toEqual([docs])
     })
-    it('pins a source whose tags is the latest placeholder as a string', () => {
-      const playbook = { content: { sources: [{ url: 'https://github.com/redpanda-data/connect', tags: 'latest' }] } }
-      pinConnectSource(playbook, 'v4.110.0')
-      expect(playbook.content.sources[0].tags).toEqual(['v4.110.0'])
+    it('keeps a source with explicit refs, such as a PR branch or a specific tag', () => {
+      const sources = [
+        { url: 'https://github.com/redpanda-data/connect', branches: ['docs/some-change'] },
+        { url: 'https://github.com/redpanda-data/connect', tags: ['v4.110.0'] },
+        { url: 'https://github.com/redpanda-data/connect', tags: 'latest', branches: ['main'] },
+      ]
+      expect(removeLatestConnectSources({ content: { sources } })).toEqual([])
+      expect(sources).toHaveLength(3)
     })
-    it('leaves a source with explicit refs alone, such as a PR branch', () => {
-      const source = { url: 'https://github.com/redpanda-data/connect', branches: ['docs/some-change'] }
-      const playbook = { content: { sources: [source] } }
-      expect(pinConnectSource(playbook, 'v4.110.0')).toBe(false)
-      expect(playbook.content.sources[0]).toEqual({ url: 'https://github.com/redpanda-data/connect', branches: ['docs/some-change'] })
+    it('keeps a fork and a local clone', () => {
+      const sources = [
+        { url: 'https://github.com/someone/connect', tags: 'latest' },
+        { url: '/Users/me/repos/connect', branches: 'HEAD', tags: 'latest' },
+      ]
+      expect(removeLatestConnectSources({ content: { sources } })).toEqual([])
+      expect(sources).toHaveLength(2)
     })
-    it('leaves a local clone alone', () => {
-      const playbook = { content: { sources: [{ url: '/Users/me/repos/connect', branches: 'HEAD', tags: 'latest' }] } }
-      expect(pinConnectSource(playbook, 'v4.110.0')).toBe(false)
-      expect(playbook.content.sources[0]).toEqual({ url: '/Users/me/repos/connect', branches: 'HEAD', tags: 'latest' })
+    it('tolerates a playbook without sources', () => {
+      expect(removeLatestConnectSources({})).toEqual([])
+      expect(removeLatestConnectSources(undefined)).toEqual([])
     })
   })
 
