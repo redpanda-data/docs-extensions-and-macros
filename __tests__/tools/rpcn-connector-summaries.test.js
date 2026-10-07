@@ -56,6 +56,59 @@ describe('capToTwoSentences - xref and filename protection', () => {
 
     expect(capToTwoSentences(description)).toBe('First sentence. Second sentence.');
   });
+
+  test('stops at a list so a table cell never holds half of one', () => {
+    // connect 4.111.1 inputs/oracledb_cdc logminer.window_strategy: the old
+    // cap kept the lead-in plus the first bullet and dropped the second.
+    const description = 'Controls how the SCN range mined per cycle is sized:\n\n- `scn_window` (default): Grows and shrinks a fixed SCN increment.\n- `redo_volume`: Sizes the range by a fixed redo-volume budget.'
+
+    expect(capToTwoSentences(description)).toBe('Controls how the SCN range mined per cycle is sized.')
+  })
+
+  test('stops at a list that follows without a blank line', () => {
+    expect(capToTwoSentences('Accepts one of:\n- `a`: first.\n- `b`: second.')).toBe('Accepts one of.')
+  })
+
+  test('keeps two sentences of a first paragraph and drops the next paragraph', () => {
+    expect(capToTwoSentences('One. Two.\n\nThree.')).toBe('One. Two.')
+  })
+});
+
+describe('whats-new field tables prefer short descriptions', () => {
+  const longDesc = 'Controls how the SCN range mined per cycle is sized:\n\n- `scn_window` (default): Grows.\n- `redo_volume`: Sizes.'
+  const shortDesc = 'Sizes each mining cycle by an adaptive SCN window or by redo volume.'
+
+  test('generateConnectorDiffJson carries short_description into new fields', () => {
+    const comp = (children) => ({ inputs: [{ name: 'oracledb_cdc', type: 'input', config: { children } }] })
+    const oldIndex = comp([{ name: 'dsn', type: 'string', description: 'DSN.' }])
+    const newIndex = comp([
+      { name: 'dsn', type: 'string', description: 'DSN.' },
+      { name: 'window_strategy', type: 'string', description: longDesc, short_description: shortDesc }
+    ])
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, { oldVersion: '4.111.0', newVersion: '4.111.1' })
+    const field = diff.details.newFields.find(f => f.field === 'window_strategy')
+
+    expect(field.shortDescription).toBe(shortDesc)
+    expect(field.description).toBe(longDesc)
+  })
+
+  test('buildFieldsTable uses shortDescription when present', () => {
+    const table = buildFieldsTable([
+      { component: 'inputs:oracledb_cdc', field: 'logminer.window_strategy', description: longDesc, shortDescription: shortDesc, introducedIn: '4.111.1' }
+    ], capToTwoSentences, { showIntroducedIn: true })
+
+    expect(table).toContain(`|${shortDesc}\n`)
+    expect(table).not.toContain('scn_window')
+  })
+
+  test('buildFieldsTable falls back to the capped description', () => {
+    const table = buildFieldsTable([
+      { component: 'inputs:oracledb_cdc', field: 'logminer.window_strategy', description: longDesc, introducedIn: '4.111.1' }
+    ], capToTwoSentences, { showIntroducedIn: true })
+
+    expect(table).toContain('|Controls how the SCN range mined per cycle is sized.\n')
+    expect(table).not.toContain('- `scn_window`')
+  })
 });
 
 describe('augmentConnectorData - config components', () => {

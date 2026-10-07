@@ -47,6 +47,16 @@ function capToTwoSentences (description) {
     /\bNo\./gi
   ]
 
+  // A table cell takes one paragraph of plain text. Keep only the text before
+  // the first blank line or list item, so a description such as
+  // "Controls how X is sized:\n\n- `a`: ...\n- `b`: ..." does not leak half a
+  // list into the cell. A lead-in that ends with a colon then reads as a
+  // sentence of its own.
+  const firstBlock = description.split(/\n\s*\n|\n(?=\s*(?:[-*]|\d+\.)\s)/)[0].trim()
+  if (firstBlock && firstBlock !== description.trim() && !/^(?:[=#]|```|----)/.test(firstBlock)) {
+    description = firstBlock.replace(/:$/, '.')
+  }
+
   let normalized = description
   const placeholders = []
 
@@ -592,7 +602,7 @@ function buildFieldsTable (fields, capFn, opts = {}) {
     if (!byField[key]) {
       byField[key] = {
         field: field.field,
-        description: field.description,
+        description: field.shortDescription || field.description,
         introducedIn: field.introducedIn,
         components: []
       }
@@ -655,7 +665,7 @@ function buildChangedDefaultsTable (changedDefaults, capFn) {
         field: change.field,
         oldDefault: change.oldDefault,
         newDefault: change.newDefault,
-        description: change.description,
+        description: change.shortDescription || change.description,
         components: []
       }
     }
