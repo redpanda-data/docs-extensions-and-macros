@@ -10,7 +10,7 @@ async function createGitHub () {
   const { Octokit } = await import('@octokit/rest')
   const { retry } = await import('@octokit/plugin-retry')
   const token = getGitHubApiToken()
-  return new (Octokit.plugin(retry))({ userAgent: 'Redpanda Docs', auth: token || undefined, retry: { doNotRetry: [403, 404, 429] } })
+  return new (Octokit.plugin(retry))({ userAgent: 'Redpanda Docs', auth: token || undefined, retry: { doNotRetry: [401, 403, 404, 429] } })
 }
 
 module.exports = { createGitHub }
