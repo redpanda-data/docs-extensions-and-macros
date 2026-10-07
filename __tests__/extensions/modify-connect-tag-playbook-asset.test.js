@@ -92,7 +92,8 @@ function makeCatalog (extraFiles = []) {
     const p = `modules/components/${dir}/${relative}`
     catalog.addFile({ path: p, contents: Buffer.from(contents), src: { component: 'connect', version: '', module: 'components', family, relative, path: p, origin } })
   }
-  add('page', 'inputs/kafka.adoc', '= Kafka\n\ninclude::components:partial$fields/inputs/kafka.adoc[]\n')
+  // A connector page that includes every generated set, as the migrated pages do.
+  add('page', 'inputs/kafka.adoc', '= Kafka\n\ninclude::connect:components:partial$descriptions/inputs/kafka.adoc[tag=meta]\ninclude::connect:components:partial$availability/inputs/kafka.adoc[]\ninclude::components:example$common/inputs/kafka.yaml[]\ninclude::components:example$advanced/inputs/kafka.yaml[]\ninclude::connect:components:partial$fields/inputs/kafka.adoc[]\n')
   for (const [family, relative, contents] of extraFiles) add(family, relative, contents)
   return catalog
 }

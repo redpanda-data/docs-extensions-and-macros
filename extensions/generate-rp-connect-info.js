@@ -15,8 +15,28 @@ const DEFAULTS = {
 
 // Generated sets that connector pages include, by Antora family. Each one
 // must be present, or pages publish with unresolved includes.
-const REQUIRED_PARTIAL_DIRS = ['fields', 'descriptions', 'availability']
-const REQUIRED_EXAMPLE_DIRS = ['common', 'advanced']
+// The generated partial and example directories that connector pages include,
+// read from the pages themselves, so the guard asks for exactly what the pages
+// in this build use (rp-connect-docs pages gain availability includes, for
+// example, when they move to the generated docs).
+const PARTIAL_INCLUDE = /include::connect:components:partial\$([a-z0-9_-]+)\//g
+const EXAMPLE_INCLUDE = /include::(?:connect:)?components:example\$([a-z0-9_-]+)\//g
+
+function includedDirs (pages) {
+  const partial = new Set()
+  const example = new Set()
+  for (const page of pages) {
+    const text = page.contents ? page.contents.toString() : ''
+    for (const m of text.matchAll(PARTIAL_INCLUDE)) partial.add(m[1])
+    for (const m of text.matchAll(EXAMPLE_INCLUDE)) example.add(m[1])
+  }
+  // Name the core sets first, in a fixed order, so the error reads the same
+  // way every time.
+  const order = ['fields', 'descriptions', 'availability', 'metadata', 'examples', 'common', 'advanced']
+  const rank = (d) => (order.includes(d) ? order.indexOf(d) : order.length)
+  const sorted = (set) => [...set].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
+  return { partial: sorted(partial), example: sorted(example) }
+}
 
 // Connector pages include the generated field reference, description meta,
 // availability, and config examples, which the modify-connect-tag-playbook
@@ -42,7 +62,8 @@ function assertConnectReferencePresent (contentCatalog, { connectSources = [] } 
     return dirs.filter((dir) => !files.some((f) => f.src.relative.startsWith(`${dir}/`)))
       .map((dir) => `components:${family}$${dir}/*`)
   }
-  const missing = [...missingIn('partial', REQUIRED_PARTIAL_DIRS), ...missingIn('example', REQUIRED_EXAMPLE_DIRS)]
+  const wanted = includedDirs(pages)
+  const missing = [...missingIn('partial', wanted.partial), ...missingIn('example', wanted.example)]
   if (!missing.length) return
   const sourceHint = connectSources.length
     ? `The playbook lists a connect content source (${connectSources.join(', ')}), so no release asset was downloaded and these files must come from that source's refs. ` +

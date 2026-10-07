@@ -8,7 +8,9 @@ function catalog (files, components = ['connect']) {
     findBy: (q) => files.filter((f) => Object.entries(q).every(([k, v]) => f.src[k] === v)),
   }
 }
-const page = (relative) => ({ src: { component: 'connect', module: 'components', family: 'page', relative } })
+// A connector page that includes every generated set, as the migrated pages do.
+const ALL_INCLUDES = '= Page\n\ninclude::connect:components:partial$descriptions/inputs/kafka.adoc[tag=meta]\ninclude::connect:components:partial$availability/inputs/kafka.adoc[]\ninclude::components:example$common/inputs/kafka.yaml[]\ninclude::components:example$advanced/inputs/kafka.yaml[]\ninclude::connect:components:partial$fields/inputs/kafka.adoc[]\n'
+const page = (relative, contents = ALL_INCLUDES) => ({ contents: Buffer.from(contents), src: { component: 'connect', module: 'components', family: 'page', relative } })
 const partial = (relative) => ({ src: { component: 'connect', module: 'components', family: 'partial', relative } })
 const example = (relative) => ({ src: { component: 'connect', module: 'components', family: 'example', relative } })
 // Every generated set a connector page includes.
@@ -69,5 +71,17 @@ describe('assertConnectReferencePresent', () => {
   it('skips playbooks without the connect component or its pages', () => {
     expect(() => assertConnectReferencePresent(catalog([], ['streaming']))).not.toThrow()
     expect(() => assertConnectReferencePresent(catalog([partial('secret_warning.adoc')]))).not.toThrow()
+  })
+  it('requires only the sets the connector pages include', () => {
+    // rp-connect-docs main includes no availability partials yet, so their
+    // absence must not stop its builds.
+    const unmigrated = '= Kafka\n\ninclude::connect:components:partial$fields/inputs/kafka.adoc[]\ninclude::components:example$common/inputs/kafka.yaml[]\n'
+    const example = (relative) => ({ src: { component: 'connect', module: 'components', family: 'example', relative } })
+    expect(() => assertConnectReferencePresent(catalog([page('inputs/kafka.adoc', unmigrated), partial('fields/inputs/kafka.adoc'), example('common/inputs/kafka.yaml')]))).not.toThrow()
+    expect(() => assertConnectReferencePresent(catalog([page('inputs/kafka.adoc', unmigrated), example('common/inputs/kafka.yaml')])))
+      .toThrow(/components:partial\$fields\/\*/)
+  })
+  it('requires nothing from pages that include no generated sets', () => {
+    expect(() => assertConnectReferencePresent(catalog([page('inputs/custom.adoc', '= Custom\n\nHand-written only.\n')]))).not.toThrow()
   })
 })
