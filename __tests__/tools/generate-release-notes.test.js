@@ -3,6 +3,7 @@ const path = require('path');
 const {
   generateReleaseNotes,
   buildReleaseSection,
+  clusterSectionByArea,
   assertSectionMatchesTag,
   insertReleaseSection,
   compareVersions,
@@ -122,6 +123,70 @@ describe('insertReleaseSection', () => {
   });
 });
 
+describe('clusterSectionByArea', () => {
+  const scattered = [
+    '== v26.2.9 (2026-11-01)', '',
+    '=== Bug fixes', '',
+    'Security:: Alpha.', '',
+    'Kafka API:: Beta.', '',
+    'Security:: Gamma.', '',
+    'Cloud Topics:: Delta.', '',
+    'Kafka API:: Epsilon.', '',
+    '=== Improvements', '',
+    'rpk:: Zeta.', '',
+    'Security:: Theta.', '',
+  ].join('\n');
+
+  const clustered = [
+    '== v26.2.9 (2026-11-01)', '',
+    '=== Bug fixes', '',
+    'Security:: Alpha.', '',
+    'Security:: Gamma.', '',
+    'Kafka API:: Beta.', '',
+    'Kafka API:: Epsilon.', '',
+    'Cloud Topics:: Delta.', '',
+    '=== Improvements', '',
+    'rpk:: Zeta.', '',
+    'Security:: Theta.', '',
+  ].join('\n');
+
+  it('clusters same-area entries by first appearance, stable within an area', () => {
+    expect(clusterSectionByArea(scattered)).toBe(clustered);
+  });
+
+  it('is idempotent: clustering a clustered section changes nothing', () => {
+    expect(clusterSectionByArea(clustered)).toBe(clustered);
+  });
+
+  it('does not move entries across a category boundary', () => {
+    // The Bug fixes "Security" entries do not absorb the Improvements "Security".
+    const out = clusterSectionByArea(scattered);
+    expect(out.indexOf('Security:: Theta.')).toBeGreaterThan(out.indexOf('=== Improvements'));
+  });
+
+  it('leaves a category of plain bullets (a phase-1 candidate) untouched', () => {
+    const bullets = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Features', '',
+      '* First.', '',
+      '* Second.', '',
+    ].join('\n');
+    expect(clusterSectionByArea(bullets)).toBe(bullets);
+  });
+
+  it('bails on a category that mixes an Area:: entry with a non-labeled one', () => {
+    const mixed = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Bug fixes', '',
+      'Security:: One.', '',
+      '* Unlabeled.', '',
+      'Security:: Two.', '',
+    ].join('\n');
+    // Order preserved (no reorder), so the unlabeled entry stays between them.
+    expect(clusterSectionByArea(mixed)).toBe(mixed);
+  });
+});
+
 describe('assertSectionMatchesTag (finding 1)', () => {
   it('accepts a section whose single heading matches the tag', () => {
     expect(() => assertSectionMatchesTag('== v26.2.3 (2026-09-15)\n\n=== Features\n\n* X.\n', '26.2.3')).not.toThrow();
@@ -197,12 +262,17 @@ describe('generateReleaseNotes (real fixture, newer tag)', () => {
 //   '__tests__/fixtures/release-notes/expected/'+t+'-candidate.adoc',\
 //   buildReleaseSection({body:fs.readFileSync('__tests__/fixtures/release-notes/'+t+'-streaming-enterprise.md','utf8'),version:t,date:d}))"
 describe('generateReleaseNotes phase 2 (insert a curated section)', () => {
-  it('inserts a pre-curated section verbatim, newest-first, under the guards', () => {
+  it('inserts the curated section newest-first, clustering its entries by area', () => {
     const res = generateReleaseNotes({ section: CURATED_V2623, tag: 'v26.2.3', pageContent: page() });
     expect(res.status).toBe('ok');
-    expect(res.section).toBe(CURATED_V2623); // used as-is, not rebuilt from a body
+    // Curated labels are kept (proves it used the curated section, not rebuilt
+    // from a body — a rebuild would carry no Area:: labels).
     expect(res.content).toContain('Cluster:: Reconnection logic is hardened');
     expect(res.content.indexOf('== v26.2.3')).toBeLessThan(res.content.indexOf('== v26.2.2'));
+    // The scattered fixture is clustered on the way in: the order changed, and
+    // the result is itself cluster-stable.
+    expect(res.section).not.toBe(CURATED_V2623);
+    expect(clusterSectionByArea(res.section)).toBe(res.section);
   });
 
   it('applies the floor guard on the section path too', () => {
