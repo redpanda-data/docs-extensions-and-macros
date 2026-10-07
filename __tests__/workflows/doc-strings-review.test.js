@@ -540,6 +540,120 @@ describe('doc-strings-review workflow: source diff (executed)', () => {
   })
 })
 
+describe('doc-strings-review workflow: diff base (executed)', () => {
+  // The checkout is refs/pull/N/merge, GitHub's merge of the PR into the base
+  // branch as it is now. pull_request.base.sha is the base as of the event,
+  // so once the base branch moves on, base.sha..HEAD also carries the other
+  // PRs that arrived through the merge. This repo reproduces that shape: the
+  // PR branches from `stale`, main then gains another PR's commit, and HEAD
+  // is the merge of the PR into the new main tip.
+  const step = stepNamed('Resolve the diff base')
+  let root
+  let repo
+  let stale
+  let tip
+  const gitIn = (cwd, ...args) => {
+    const r = spawnSync('git', args, { cwd, encoding: 'utf8' })
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`)
+    return r.stdout.trim()
+  }
+  const write = (dir, file, body) => {
+    fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true })
+    fs.writeFileSync(path.join(dir, file), body)
+  }
+  const run = (cwd, env) => {
+    const out = path.join(root, `out-${Math.random().toString(16).slice(2)}`)
+    fs.writeFileSync(out, '')
+    const r = spawnSync('/bin/bash', ['-e', '-c', step.run], {
+      cwd,
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, HOME: root, GITHUB_OUTPUT: out, REF: '', PR_BASE_SHA: '', DEFAULT_BRANCH: '', ...env }
+    })
+    const outputs = Object.fromEntries(fs.readFileSync(out, 'utf8').split('\n').filter(Boolean).map((l) => l.split('=')))
+    return { ...r, outputs }
+  }
+  const changed = (cwd, base) => gitIn(cwd, 'diff', '--name-only', `${base}...HEAD`).split('\n').filter(Boolean).sort()
+
+  beforeAll(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-base-'))
+    repo = path.join(root, 'repo')
+    fs.mkdirSync(repo)
+    const git = (...args) => gitIn(repo, ...args)
+    git('init', '--quiet', '-b', 'main')
+    git('config', 'user.email', 'dsr-test@example.invalid')
+    git('config', 'user.name', 'dsr test')
+    write(repo, 'src/v/config/a.cc', 'a("old")\n')
+    write(repo, 'src/v/config/b.cc', 'b("old")\n')
+    git('add', '.')
+    git('commit', '--quiet', '-m', 'base')
+    stale = git('rev-parse', 'HEAD')
+    git('checkout', '--quiet', '-b', 'pr')
+    write(repo, 'src/v/config/a.cc', 'a("this PR")\n')
+    git('commit', '--quiet', '-am', 'this PR')
+    git('checkout', '--quiet', 'main')
+    write(repo, 'src/v/config/b.cc', 'b("another PR")\n')
+    git('commit', '--quiet', '-am', 'another PR')
+    tip = git('rev-parse', 'HEAD')
+    git('checkout', '--quiet', '-b', 'merge')
+    git('merge', '--quiet', '--no-ff', '--no-edit', 'pr')
+  })
+
+  afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
+
+  test('a merge checkout diffs against the first parent, not the stale base.sha', () => {
+    const r = run(repo, { REF: 'refs/pull/7/merge', PR_BASE_SHA: stale })
+    expect(r.status).toBe(0)
+    expect(r.outputs.base).toBe(tip)
+    expect(changed(repo, r.outputs.base)).toEqual(['src/v/config/a.cc'])
+    // Negative control: the old base attributes the other PR's file to this one.
+    expect(changed(repo, stale)).toEqual(['src/v/config/a.cc', 'src/v/config/b.cc'])
+  })
+
+  test('a merge checkout without its parents fails loudly', () => {
+    const shallow = path.join(root, 'shallow')
+    gitIn(root, 'clone', '--quiet', '--depth', '1', '--branch', 'merge', `file://${repo}`, shallow)
+    const r = run(shallow, { REF: 'refs/pull/7/merge', PR_BASE_SHA: stale })
+    expect(r.status).not.toBe(0)
+    expect(r.stdout + r.stderr).toMatch(/::error::.*no merge parents/)
+    expect(r.outputs.base).toBeUndefined()
+  })
+
+  test('a non-merge checkout falls back to the merge base with the PR base', () => {
+    const head = path.join(root, 'head')
+    gitIn(root, 'clone', '--quiet', '--branch', 'pr', `file://${repo}`, head)
+    const r = run(head, { REF: 'refs/heads/pr', PR_BASE_SHA: tip })
+    expect(r.status).toBe(0)
+    expect(r.outputs.base).toBe(stale)
+    expect(changed(head, r.outputs.base)).toEqual(['src/v/config/a.cc'])
+  })
+
+  test('with no PR it falls back to the default branch', () => {
+    const head = path.join(root, 'dispatch')
+    gitIn(root, 'clone', '--quiet', '--branch', 'pr', `file://${repo}`, head)
+    const r = run(head, { REF: 'refs/heads/pr', DEFAULT_BRANCH: 'main' })
+    expect(r.status).toBe(0)
+    expect(r.outputs.base).toBe(stale)
+  })
+
+  test('with nothing to diff against it fails rather than diffing against nothing', () => {
+    const r = run(repo, { REF: 'refs/heads/merge' })
+    expect(r.status).not.toBe(0)
+    expect(r.stdout + r.stderr).toMatch(/::error::No merge ref, PR base or default branch/)
+  })
+
+  test('every diff in the job takes its base from this step', () => {
+    const order = job.steps.map((s) => s.name)
+    expect(order.indexOf('Resolve the diff base')).toBeLessThan(order.indexOf('Lint doc strings in the diff'))
+    expect(stepNamed('Lint doc strings in the diff').env.BASE).toBe('${{ steps.diffbase.outputs.base }}')
+    expect(stepNamed('Save the source diff for the review').env.BASE).toBe('${{ steps.diffbase.outputs.base }}')
+    const checkout = job.steps.find((s) => (s.uses || '').startsWith('actions/checkout@'))
+    expect(checkout.with['fetch-depth']).not.toBe(1)
+    // base.sha may still feed the fallback, but nothing else reads it.
+    const readers = job.steps.filter((s) => JSON.stringify(s).includes('pull_request.base.sha')).map((s) => s.name)
+    expect(readers).toEqual(['Resolve the diff base'])
+  })
+})
+
 describe('doc-strings-review workflow: writing-standard fetch (executed)', () => {
   const step = stepNamed('Fetch the writing standard')
   const STANDARD = 'embedded-reference-strings.md'

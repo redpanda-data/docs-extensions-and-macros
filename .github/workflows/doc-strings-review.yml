@@ -275,6 +275,58 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      # The commit every diff in this job is taken from. On pull_request the
+      # checkout is refs/pull/N/merge: GitHub's merge of the PR head into the
+      # base branch as it is now. pull_request.base.sha is NOT that merge's
+      # base. It is the base branch as of the event, so on a re-run, or
+      # whenever the base branch moves before the merge ref is rebuilt, a
+      # diff from base.sha to HEAD also carries every change that reached the
+      # base branch since, and lint findings, suggestions and doc-impact
+      # tickets get attributed to a PR that never touched those strings. The
+      # merge commit's first parent is the base it was built on, so
+      # HEAD^1..HEAD is exactly the PR's own change. fetch-depth: 0 above is
+      # what makes that parent present; a missing parent fails the job
+      # rather than diffing against nothing. Any other checkout falls back
+      # to the merge base with the PR base, or with the default branch when
+      # there is no PR (workflow_dispatch).
+      - name: Resolve the diff base
+        id: diffbase
+        env:
+          REF: ${{ github.ref }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          case "$REF" in
+            refs/pull/*/merge)
+              # Both parents must be present: a shallow checkout shows the
+              # merge commit with no parents at all, and a non-merge HEAD on a
+              # merge ref means the checkout is not what this step assumes.
+              if ! base=$(git rev-parse --verify --quiet 'HEAD^1^{commit}') \
+                || ! git rev-parse --verify --quiet 'HEAD^2^{commit}' > /dev/null; then
+                echo "::error::HEAD ($REF) has no merge parents in this checkout. The diff base is the merge commit's first parent, so the checkout needs fetch-depth of at least 2."
+                exit 1
+              fi
+              echo "Merge checkout: diffing against the merge commit's first parent."
+              ;;
+            *)
+              if [ -n "$PR_BASE_SHA" ]; then
+                against="$PR_BASE_SHA"
+              elif [ -n "$DEFAULT_BRANCH" ]; then
+                against="origin/$DEFAULT_BRANCH"
+              else
+                echo "::error::No merge ref, PR base or default branch to diff against ($REF)."
+                exit 1
+              fi
+              if ! base=$(git merge-base "$against" HEAD); then
+                echo "::error::No merge base between $against and HEAD in this checkout."
+                exit 1
+              fi
+              echo "Not a merge checkout ($REF): diffing against the merge base with $against."
+              ;;
+          esac
+          echo "Diff base: $base"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -401,7 +453,7 @@ jobs:
       - name: Lint doc strings in the diff
         id: lint
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
+          BASE: ${{ steps.diffbase.outputs.base }}
           SURFACES: ${{ inputs.surfaces }}
           PKG: ${{ steps.pkg.outputs.pkg }}
           STATE_DIR: ${{ runner.temp }}/doc-strings-review-state
@@ -477,15 +529,15 @@ jobs:
       # The review reads the diff from a file, not `gh pr diff`: the API
       # refuses a diff over 300 files with HTTP 406, which regenerated-docs
       # PRs exceed routinely, and the model then lost all diff context
-      # without saying so. The local diff is the same merge-base diff the
-      # lint ran on, filtered to source: generated docs, lockfiles, vendored
-      # code and test data are left out, and listed by name at the top so
-      # the model knows they exist.
+      # without saying so. The local diff is the same diff the lint ran on
+      # (see Resolve the diff base), filtered to source: generated docs,
+      # lockfiles, vendored code and test data are left out, and listed by
+      # name at the top so the model knows they exist.
       - name: Save the source diff for the review
         if: steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0'
         continue-on-error: true
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
+          BASE: ${{ steps.diffbase.outputs.base }}
         run: |
           set -uo pipefail
           EXCLUDE=(
@@ -502,7 +554,7 @@ jobs:
           left_out=$(git diff --name-only "$BASE"...HEAD | grep -cvxFf <(git diff --name-only "$BASE"...HEAD -- . "${EXCLUDE[@]}") || true)
           status=0
           {
-            echo "# Source diff of this PR against its merge base."
+            echo "# Source diff of this PR against its base."
             echo "# Left out (generated docs, lockfiles, vendored code, test data): ${left_out:-0} file(s)."
             echo
             git diff --no-color --no-ext-diff "$BASE"...HEAD -- . "${EXCLUDE[@]}"
