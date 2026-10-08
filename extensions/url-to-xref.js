@@ -362,6 +362,9 @@ const HEADING_RX = /^(={1,6})\s+(\S.*)$/
  * which still displays sensibly.
  */
 function linkTextFor (label, fragment, page, resolveInclude) {
+  // A trailing ^ opens a URL link in a new window; an xref would print it.
+  // A label that is only ^ counts as no label.
+  label = (label || '').replace(/\^$/, '')
   if (label) return label
   if (!fragment) return ''
   const contents = page && page.contents && page.contents.toString()
