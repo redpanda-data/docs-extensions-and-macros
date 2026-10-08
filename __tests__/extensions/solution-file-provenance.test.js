@@ -63,6 +63,7 @@ const EXAMPLES = new Map([
     exampleFile('steps/build-leaderboard/expected/leaderboard.txt', 'player-7  1240\n'),
   ],
   ['steps/build-leaderboard/commands.sh', exampleFile('steps/build-leaderboard/commands.sh', MAKEFILE)],
+  ['services/steps/main.go', exampleFile('services/steps/main.go', GO)],
 ])
 
 const contentCatalog = {
@@ -167,9 +168,17 @@ describe('solution snippet provenance', () => {
     expect(html).not.toContain('sol-snippet')
   })
 
-  renderTest('a step command source next to it is still downloadable', () => {
-    const [block] = listings(render('[,bash]\n----\ninclude::example$steps/build-leaderboard/commands.sh[tag=topics]\n----\n'))
-    expect(block).toMatchObject({ file: 'steps/build-leaderboard/commands.sh', tag: 'topics' })
+  // A step's commands.sh is shown inline and run by Doc Detective; it is
+  // harness scaffolding, not a source the reader takes away.
+  renderTest('a step command source is not a downloadable snippet', () => {
+    const html = render('[,bash]\n----\ninclude::example$steps/build-leaderboard/commands.sh[tag=topics]\n----\n')
+    expect(html).not.toContain('data-solution-file')
+    expect(html).not.toContain('sol-snippet')
+  })
+
+  renderTest('a source whose path merely contains "steps" deeper down is still downloadable', () => {
+    const [block] = listings(render('[,go]\n----\ninclude::example$services/steps/main.go[]\n----\n'))
+    expect(block).toMatchObject({ file: 'services/steps/main.go' })
   })
 
   renderTest('an existing role on the block survives', () => {
