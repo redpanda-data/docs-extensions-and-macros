@@ -10,6 +10,9 @@ const {
   prose,
   verifyChecks,
   findLeaks,
+  partialResolver,
+  selectTagged,
+  MAX_INCLUDE_DEPTH,
 } = require('../../extensions/solutions-catalog/agent-companion')
 
 // The flagship solution's real pages and verify script, copied verbatim from
@@ -259,5 +262,48 @@ describe('agent companion: solutions without rules', () => {
 
   test('no index page is an error', () => {
     expect(() => generateAgentCompanion({ slug: 'tiny', pages: {} })).toThrow(/no index page/)
+  })
+})
+
+describe('agent companion: include helpers', () => {
+  const text = [
+    'untagged',
+    '// tag::a[]',
+    'in a',
+    '// tag::b[]',
+    'in a and b',
+    '// end::b[]',
+    '// end::a[]',
+    '# tag::c[]',
+    'in c',
+    '# end::c[]',
+  ].join('\n')
+
+  test.each([
+    [{}, ['untagged', 'in a', 'in a and b', 'in c']],
+    [{ tag: 'a' }, ['in a', 'in a and b']],
+    [{ tag: 'b' }, ['in a and b']],
+    [{ tags: 'b;c' }, ['in a and b', 'in c']],
+    [{ tags: 'a;!b' }, ['in a']],
+    [{ tags: '!a' }, ['untagged', 'in c']],
+    [{ tags: '*' }, ['in a', 'in a and b', 'in c']],
+    [{ tags: '**' }, ['untagged', 'in a', 'in a and b', 'in c']],
+  ])('selectTagged %j', (attrs, expected) => {
+    expect(selectTagged(text, attrs)).toEqual({ lines: expected, missing: [] })
+  })
+
+  test('selectTagged names the tags it could not find', () => {
+    expect(selectTagged(text, { tags: 'a;zz' }).missing).toEqual(['zz'])
+  })
+
+  test('partialResolver resolves only this solution module\'s partials', () => {
+    const resolve = partialResolver({ 'production/x.adoc': 'X' }, { module: 'tiny' })
+    expect(resolve('partial$production/x.adoc')).toBe('X')
+    expect(resolve('tiny:partial$production/x.adoc')).toBe('X')
+    expect(resolve('solutions:tiny:partial$production/x.adoc')).toBe('X')
+    expect(resolve('other:partial$production/x.adoc')).toBeUndefined()
+    expect(resolve('streaming:tiny:partial$production/x.adoc')).toBeUndefined()
+    expect(resolve('partial$production/y.adoc')).toBeUndefined()
+    expect(resolve('example$production/x.adoc')).toBeUndefined()
   })
 })

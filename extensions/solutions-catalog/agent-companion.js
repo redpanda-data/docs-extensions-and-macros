@@ -14,13 +14,19 @@
  *                "After completing ... able to:"  -> What the system must do
  *                == What you build                 -> System map
  *                == Architecture (+ === Why Redpanda) -> Data flow, platform capabilities
- *                == Production considerations table -> Production gaps
  *                :page-solution-related-docs:      -> Canonical docs
  *   <step>.adoc  :page-solution-rule:              -> Rules, Design contract, Acceptance
  *                :page-solution-adapt:             -> Adapt, Design contract
  *                == Why / == Why Redpanda / == In production -> Design contract
  *                == Verify, prose after the expected output -> Reference build: failure modes
+ *                == Production considerations table -> Production gaps (overview)
  *   scripts/verify.sh  "# N." comments             -> Reference build: acceptance checks
+ *
+ * `include::partial$...[]` lines are spliced in before anything is read, with
+ * their tag= and tags= regions honored, through the caller's resolveInclude
+ * (see partialResolver). Any other include (example$, attachment$, code) is
+ * dropped with the block it feeds. A partial nobody can resolve is reported in
+ * `leaks`, because the prose it carries would otherwise vanish without a trace.
  *
  * A step with neither a rule nor an adapt line is reference-build detail: its
  * judgment is about the demo stack, so it is reported under Reference build
@@ -34,6 +40,9 @@
 const DEFAULT_SITE_URL = 'https://docs.redpanda.com'
 const FILE_NAME = 'agent-companion.md'
 const OUTCOMES_RX = /^After completing this solution, you will be able to:$/m
+const MAX_INCLUDE_DEPTH = 8
+const INCLUDE_RX = /^include::(\S+?)\[(.*)\]\s*$/
+const TAG_MARKER_RX = /\b(tag|end)::([^[\s]+)\[\]/
 
 /**
  * Antora resource ID -> published URL on the live site. Only three component
@@ -92,6 +101,114 @@ function inline (s, ctx) {
     .replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s.,:;)]|$)/g, '$1**$2**')
     .replace(/(^|[\s(])_([^_\s][^_]*?)_(?=[\s.,:;)]|$)/g, '$1*$2*')
     .replace(/\{nbsp\}/g, ' ')
+}
+
+/**
+ * The parts of a partial include target: `[version@][component:][module:]partial$relative`.
+ * Returns null for any other family (example$, attachment$, a page-relative path).
+ */
+function parsePartialTarget (target) {
+  const m = String(target).match(/^(?:[^@:$\s]+@)?((?:[^:$\s]+:){0,2})partial\$(.+)$/)
+  if (!m) return null
+  const coords = m[1].split(':').filter(Boolean)
+  const [component, module] = coords.length === 2 ? coords : [undefined, coords[0]]
+  return { component, module, relative: m[2] }
+}
+
+/**
+ * A resolveInclude over one solution module's partials, keyed by their path
+ * under partials/ (`production/compaction.adoc`). It returns the whole file:
+ * tag selection happens in the companion, so the extension (content catalog)
+ * and the solutions repository's runner (files on disk) resolve the same way.
+ * A target in another module or component is not this solution's, and resolves
+ * to undefined.
+ *
+ * @param {Object<string,string>} partials - partial source by relative path
+ * @param {{ module: string, component?: string }} where
+ * @returns {(target: string) => string|undefined}
+ */
+function partialResolver (partials, { module, component = 'solutions' } = {}) {
+  return (target) => {
+    const t = parsePartialTarget(target)
+    if (!t || (t.component && t.component !== component) || (t.module && t.module !== module)) return undefined
+    const text = partials && Object.prototype.hasOwnProperty.call(partials, t.relative) ? partials[t.relative] : undefined
+    return typeof text === 'string' ? text : undefined
+  }
+}
+
+/** The attribute list of an include directive -> { name: value }. */
+function includeAttrs (list) {
+  const attrs = {}
+  for (const m of String(list || '').matchAll(/([\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^,]*))/g)) {
+    attrs[m[1]] = (m[2] ?? m[3] ?? m[4] ?? '').trim()
+  }
+  return attrs
+}
+
+/**
+ * The lines of an included file that a tag= or tags= selection keeps, with
+ * every tag marker dropped. Follows Asciidoctor: `*` is every tagged region,
+ * `**` every line, `!name` excludes a region, and a selection of only
+ * exclusions starts from every line. Returns the names asked for but absent.
+ */
+function selectTagged (text, attrs) {
+  const lines = String(text).replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n')
+  const spec = attrs.tags !== undefined ? attrs.tags : attrs.tag
+  const names = String(spec || '').split(/[;,]/).map((n) => n.trim()).filter(Boolean)
+  const wanted = names.filter((n) => !n.startsWith('!'))
+  const unwanted = names.filter((n) => n.startsWith('!')).map((n) => n.slice(1))
+  const everyLine = !wanted.length || wanted.includes('**')
+  const everyTagged = wanted.includes('*')
+  const open = []
+  const seen = new Set()
+  const out = []
+  for (const line of lines) {
+    const marker = line.match(TAG_MARKER_RX)
+    if (marker) {
+      const [, kind, name] = marker
+      if (kind === 'tag') { open.push(name); seen.add(name) } else {
+        const at = open.lastIndexOf(name)
+        if (at >= 0) open.splice(at, 1)
+      }
+      continue
+    }
+    if (open.some((t) => unwanted.includes(t))) continue
+    if (everyLine || (everyTagged && open.length) || open.some((t) => wanted.includes(t))) out.push(line)
+  }
+  const missing = wanted.filter((n) => n !== '*' && n !== '**' && !seen.has(n))
+  return { lines: out, missing }
+}
+
+/**
+ * Splice every `include::partial$...[]` of a page with the lines it selects,
+ * recursively up to MAX_INCLUDE_DEPTH. Other includes stay for prose() to
+ * drop. Problems (an unresolved partial, a missing tag, runaway nesting) are
+ * appended to `problems` and the directive line is kept, so it is dropped like
+ * any other include.
+ */
+function expandIncludes (text, resolveInclude, problems, where, depth = 0) {
+  const out = []
+  for (const line of String(text || '').replace(/\r\n/g, '\n').split('\n')) {
+    const m = line.match(INCLUDE_RX)
+    if (!m || !parsePartialTarget(m[1])) { out.push(line); continue }
+    const [, target, list] = m
+    if (depth >= MAX_INCLUDE_DEPTH) {
+      problems.push(`include nested deeper than ${MAX_INCLUDE_DEPTH}: ${target} (in ${where})`)
+      out.push(line)
+      continue
+    }
+    const attrs = includeAttrs(list)
+    const source = typeof resolveInclude === 'function' ? resolveInclude(target, attrs) : undefined
+    if (typeof source !== 'string') {
+      problems.push(`unresolved include: ${target} (in ${where})`)
+      out.push(line)
+      continue
+    }
+    const { lines, missing } = selectTagged(source, attrs)
+    for (const name of missing) problems.push(`include tag not found: ${name} in ${target} (in ${where})`)
+    out.push(...expandIncludes(lines.join('\n'), resolveInclude, problems, where, depth + 1))
+  }
+  return out
 }
 
 /**
@@ -261,19 +378,24 @@ function findLeaks (markdown) {
  * @param {string} [input.siteUrl] - origin of the live links (default https://docs.redpanda.com)
  * @param {(resourceId: string) => string|undefined} [input.titleOf] - title of a page outside this
  *   solution, for labeling an xref written with empty text
+ * @param {(target: string, attrs: Object<string,string>) => string|undefined} [input.resolveInclude] - the
+ *   whole source of an `include::partial$...[]` target, or undefined when there is none (see
+ *   partialResolver). Without it, every partial include is reported in `leaks`.
  * @returns {{ markdown: string, rules: Array<{step, title, rule, adapt}>, referenceSteps: string[], missingSteps: string[], leaks: string[] }}
  */
-function generateAgentCompanion ({ slug, pages, verifyScript, siteUrl = DEFAULT_SITE_URL, titleOf }) {
+function generateAgentCompanion ({ slug, pages, verifyScript, siteUrl = DEFAULT_SITE_URL, titleOf, resolveInclude }) {
   if (!slug) throw new Error('agent-companion: slug is required')
   if (!pages || !pages.index) throw new Error(`agent-companion: ${slug} has no index page`)
   siteUrl = String(siteUrl || DEFAULT_SITE_URL).replace(/\/+$/, '')
-  const index = parsePage(pages.index)
+  const includeProblems = []
+  const read = (id) => parsePage(expandIncludes(pages[id], resolveInclude, includeProblems, id).join('\n'))
+  const index = read('index')
   const stepIds = String(index.attrs['page-solution-steps'] || '').split(',').map((s) => s.trim()).filter(Boolean)
   const steps = []
   const missingSteps = []
   for (const id of stepIds) {
     if (!pages[id]) { missingSteps.push(id); continue }
-    steps.push({ id, page: parsePage(pages[id]) })
+    steps.push({ id, page: read(id) })
   }
   const titles = Object.fromEntries(steps.map((s) => [s.id, s.page.title]))
   const ctx = { slug, siteUrl, titles, titleOf }
@@ -413,7 +535,7 @@ function generateAgentCompanion ({ slug, pages, verifyScript, siteUrl = DEFAULT_
   }
 
   const markdown = md.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\s*—\s*/g, ', ').trim() + '\n'
-  return { markdown, rules, referenceSteps, missingSteps, leaks: findLeaks(markdown) }
+  return { markdown, rules, referenceSteps, missingSteps, leaks: [...findLeaks(markdown), ...includeProblems] }
 }
 
 function pushJudgment (md, page, ctx) {
@@ -432,7 +554,12 @@ module.exports = {
   DEFAULT_SITE_URL,
   FILE_NAME,
   LEAK_PATTERNS,
+  MAX_INCLUDE_DEPTH,
   generateAgentCompanion,
+  partialResolver,
+  parsePartialTarget,
+  expandIncludes,
+  selectTagged,
   resourceUrl,
   inline,
   parsePage,
