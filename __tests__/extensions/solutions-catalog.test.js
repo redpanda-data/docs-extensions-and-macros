@@ -88,11 +88,20 @@ const OVERVIEW_HTML = (title, extra = '') =>
   `<article class="doc"><h1>${title}</h1><p>Lede.</p>` +
   '<h2 id="architecture">Architecture</h2><p>Diagram.</p>' +
   '<h2 id="prerequisites">Prerequisites</h2><p>Docker.</p>' +
-  '<h2 id="production-considerations">Production considerations</h2><p>Table.</p>' +
   `${extra}</article>`
 
 const STEP_HTML = (title, verify = '<h2 id="verify">Verify the result</h2><p>rpk topic list</p>') =>
   `<article class="doc"><h1>${title}</h1><p>Do the thing.</p>${verify}</article>`
+
+// The complete production section as Asciidoctor renders it on the last step.
+const PRODUCTION_TOPICS = ['Brokers and replication', 'Security', 'Partitions', 'Consumer scaling', 'Data retention']
+const PRODUCTION_SECTION = (topics = PRODUCTION_TOPICS) =>
+  '<div class="sect1"><h2 id="production-considerations">Production considerations</h2><div class="sectionbody">' +
+  '<div class="paragraph"><p>This solution runs on a single broker.</p></div>' +
+  topics.map((t) => `<div class="sect2"><h3 id="prod-${t.toLowerCase().replace(/\W+/g, '-')}">${t}</h3><div class="paragraph"><p>Detail.</p></div></div>`).join('') +
+  '</div></div>'
+const LAST_STEP_HTML = (title, production = PRODUCTION_SECTION()) =>
+  `<article class="doc"><h1>${title}</h1><p>Do the thing.</p><h2 id="verify">Verify the result</h2><p>rpk topic list</p>${production}</article>`
 
 const OVERVIEW_ATTRS = {
   'page-layout': 'solution',
@@ -131,7 +140,7 @@ function makeSolution (id, { attrs = {}, steps, overviewHtml, stepHtml, title, v
     relative: `${stepId}.adoc`,
     title: `Step ${stepId}`,
     attrs: { 'page-layout': 'solution-step', description: `Step ${stepId}`, ...(i === 0 ? { 'page-solution-step-duration': '5' } : {}) },
-    html: (stepHtml && stepHtml[stepId]) || STEP_HTML(`Step ${stepId}`),
+    html: (stepHtml && stepHtml[stepId]) || (i === stepIds.length - 1 ? LAST_STEP_HTML(`Step ${stepId}`) : STEP_HTML(`Step ${stepId}`)),
   }))
   return {
     pages: [overview, ...stepPages],
@@ -620,14 +629,14 @@ describe('solutions-catalog: step bijection', () => {
 })
 
 describe('solutions-catalog: section checks on converted HTML', () => {
-  test.each(['Architecture', 'Prerequisites', 'Production considerations'])('published overview without h2 %s', async (missing) => {
+  test.each(['Architecture', 'Prerequisites'])('published overview without h2 %s', async (missing) => {
     const html = OVERVIEW_HTML('Solution leaderboard', '<a href="_attachments/docker-compose.yml">c</a>').replace(`>${missing}</h2>`, '>Something else</h2>')
     const solution = makeSolution('leaderboard', { overviewHtml: html })
     await expect(run({ solutions: [solution] })).rejects.toThrow(new RegExp(`missing an h2 "${missing}"`))
   })
 
   test('heading text is normalized (case, whitespace, trailing punctuation)', async () => {
-    const html = OVERVIEW_HTML('x').replace('>Production considerations</h2>', '>  PRODUCTION\n Considerations:  </h2>')
+    const html = OVERVIEW_HTML('x').replace('>Prerequisites</h2>', '>  PREREQUISITES\n :  </h2>')
     const solution = makeSolution('leaderboard', { overviewHtml: html })
     await expect(run({ solutions: [solution] })).resolves.toBeTruthy()
   })
@@ -683,6 +692,76 @@ describe('solutions-catalog: section checks on converted HTML', () => {
     const html = '<a href="../_attachments/a%20b.yml">1</a><a href="/solutions/leaderboard/_attachments/c.yml#x">2</a><a href="/solutions/zzz/_attachments/d.yml">3</a><a href="mailto:x@y">4</a>'
     expect(validate.attachmentLinkTargets(html, { pageUrl: '/solutions/leaderboard/step/', attachmentPrefix: '/solutions/leaderboard/_attachments/' })).toEqual(['a b.yml', 'c.yml'])
     expect(validate.attachmentLinkTargets(html, {})).toEqual([])
+  })
+})
+
+describe('solutions-catalog: production considerations', () => {
+  const warningsOf = (result) => result.logger.warn.mock.calls.map((c) => c[0]).join('\n')
+  const NOTE = (link = '<a href="../verify-end-to-end/#prod-security" class="xref page">Production considerations: security</a>') =>
+    '<h2 id="in-production">In production</h2><div class="openblock production-note"><div class="title">In production</div>' +
+    `<div class="content"><div class="paragraph"><p>Turn on SASL. For the full picture, see ${link}.</p></div></div></div>`
+
+  test('the overview no longer needs the section', async () => {
+    await expect(run()).resolves.toBeTruthy()
+    expect(validate.REQUIRED_OVERVIEW_H2).toEqual(['architecture', 'prerequisites'])
+  })
+
+  test('a published last step without the section is fatal', async () => {
+    const solution = makeSolution('leaderboard', { stepHtml: { 'verify-end-to-end': STEP_HTML('v') } })
+    await expect(run({ solutions: [solution] })).rejects.toThrow(/last step verify-end-to-end needs an h2 "Production considerations"/)
+  })
+
+  test('the last step follows page-solution-steps, not the alphabet', async () => {
+    // verify-end-to-end sorts last alphabetically but is listed first here.
+    const solution = makeSolution('leaderboard', {
+      attrs: { 'page-solution-steps': 'verify-end-to-end, build-leaderboard, start-environment' },
+      steps: ['verify-end-to-end', 'build-leaderboard', 'start-environment'],
+    })
+    await expect(run({ solutions: [solution] })).resolves.toBeTruthy()
+    const misplaced = makeSolution('leaderboard', {
+      attrs: { 'page-solution-steps': 'verify-end-to-end, build-leaderboard, start-environment' },
+      steps: ['verify-end-to-end', 'build-leaderboard', 'start-environment'],
+      stepHtml: { 'verify-end-to-end': LAST_STEP_HTML('v'), 'start-environment': STEP_HTML('s') },
+    })
+    await expect(run({ solutions: [misplaced] })).rejects.toThrow(/last step start-environment needs an h2/)
+  })
+
+  test('fewer than five topics is fatal once published', async () => {
+    const solution = makeSolution('leaderboard', { stepHtml: { 'verify-end-to-end': LAST_STEP_HTML('v', PRODUCTION_SECTION(PRODUCTION_TOPICS.slice(0, 4))) } })
+    await expect(run({ solutions: [solution] })).rejects.toThrow(/"Production considerations" has 4 topics \(h3\); it needs at least 5/)
+  })
+
+  test('without the .sect1 wrapper the h3s up to the next h2 count', () => {
+    const html = '<h2>Production considerations</h2><h3>a</h3><div><h3>b</h3></div><h2>Clean up</h2><h3>not a topic</h3>'
+    expect(validate.productionTopics(html)).toEqual(['a', 'b'])
+    expect(validate.productionTopics('<h2>Verify</h2>')).toBeNull()
+  })
+
+  test('a draft gets warnings, and the build goes on', async () => {
+    const draft = makeSolution('sandbox', {
+      attrs: { 'page-solution-status': 'draft' },
+      stepHtml: { 'verify-end-to-end': STEP_HTML('v'), 'build-leaderboard': STEP_HTML('b', NOTE('nowhere')) },
+    })
+    const result = await run({ solutions: [makeSolution('live'), draft], config: { include_drafts: true } })
+    expect(warningsOf(result)).toMatch(/sandbox: last step verify-end-to-end needs an h2 "Production considerations"/)
+    expect(warningsOf(result)).toMatch(/sandbox: build-leaderboard\.adoc has 1 \[\.production-note\] block with no link/)
+  })
+
+  test('a production note must link to its topic', async () => {
+    const linked = makeSolution('leaderboard', { stepHtml: { 'build-leaderboard': STEP_HTML('b', NOTE() + '<h2 id="verify">Verify</h2>') } })
+    await expect(run({ solutions: [linked] })).resolves.toBeTruthy()
+    const unlinked = makeSolution('leaderboard', { stepHtml: { 'build-leaderboard': STEP_HTML('b', NOTE('the last step') + '<h2 id="verify">Verify</h2>') } })
+    await expect(run({ solutions: [unlinked] })).rejects.toThrow(/build-leaderboard\.adoc has 1 \[\.production-note\] block with no link/)
+  })
+
+  test('the section on the overview or an earlier step is a warning pointing at the last step', async () => {
+    const solution = makeSolution('leaderboard', {
+      overviewHtml: OVERVIEW_HTML('x', PRODUCTION_SECTION()),
+      stepHtml: { 'build-leaderboard': STEP_HTML('b') + PRODUCTION_SECTION() },
+    })
+    const result = await run({ solutions: [solution] })
+    expect(warningsOf(result)).toMatch(/leaderboard: the overview has an h2 "Production considerations"; it belongs at the end of the last step \(verify-end-to-end\)/)
+    expect(warningsOf(result)).toMatch(/leaderboard: step build-leaderboard has an h2 "Production considerations"; only the last step \(verify-end-to-end\)/)
   })
 })
 
@@ -1725,18 +1804,18 @@ describe('solutions-catalog: link fragments', () => {
   const warnings = (result) => result.logger.warn.mock.calls.map((c) => c[0]).join('\n')
 
   test('a published fragment that matches no id is fatal, with the site-style id as the fix', async () => {
-    await expect(run({ solutions: [withLink('../#_production_considerations')] })).rejects.toThrow(
-      /build-leaderboard\.adoc links to \/solutions\/leaderboard\/#_production_considerations, but that page has no id "_production_considerations"; use #production-considerations/
+    await expect(run({ solutions: [withLink('../verify-end-to-end/#_production_considerations')] })).rejects.toThrow(
+      /build-leaderboard\.adoc links to \/solutions\/leaderboard\/verify-end-to-end\/#_production_considerations, but that page has no id "_production_considerations"; use #production-considerations/
     )
   })
 
   test('a draft gets the same finding as a warning, and the build goes on', async () => {
-    const result = await run({ solutions: [makeSolution('live'), withLink('../#_production_considerations', 'draft')] })
-    expect(warnings(result)).toMatch(/leaderboard: build-leaderboard\.adoc links to \/solutions\/leaderboard\/#_production_considerations.*use #production-considerations/)
+    const result = await run({ solutions: [makeSolution('live'), withLink('../verify-end-to-end/#_production_considerations', 'draft')] })
+    expect(warnings(result)).toMatch(/leaderboard: build-leaderboard\.adoc links to \/solutions\/leaderboard\/verify-end-to-end\/#_production_considerations.*use #production-considerations/)
   })
 
   test('a fragment that matches a section id passes', async () => {
-    const result = await run({ solutions: [withLink('../#production-considerations')] })
+    const result = await run({ solutions: [withLink('../verify-end-to-end/#production-considerations')] })
     expect(warnings(result)).not.toMatch(/has no id/)
   })
 

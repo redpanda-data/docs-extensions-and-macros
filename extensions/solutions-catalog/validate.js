@@ -19,7 +19,11 @@ const yaml = require('js-yaml')
 const DURATION_MIN = 5
 const DURATION_MAX = 600
 const DESCRIPTION_MAX = 200
-const REQUIRED_OVERVIEW_H2 = ['architecture', 'prerequisites', 'production considerations']
+const REQUIRED_OVERVIEW_H2 = ['architecture', 'prerequisites']
+// The complete production section lives at the end of the last step, once the
+// reader has the whole stack running, with one h3 per topic.
+const PRODUCTION_H2 = 'production considerations'
+const PRODUCTION_MIN_TOPICS = 5
 // A related doc must be a fully qualified page ID: component:module:path.adoc
 const FQ_RESOURCE_RX = /^(?:[^@:\s]+@)?[A-Za-z0-9_-]+:[A-Za-z0-9_-]*:[^\s]+\.adoc$/
 
@@ -48,6 +52,36 @@ function hasVerifySection (contents) {
   const root = parseHtml(contents)
   if (root.querySelector('.solution-verify')) return true
   return root.querySelectorAll('h2,h3').some((h) => normalizeHeading(h.text).startsWith('verify'))
+}
+
+/**
+ * The h3 topics under the "Production considerations" h2 of a page, or null
+ * when the page has no such h2. Asciidoctor wraps the section in a .sect1, so
+ * its h3s are the topics; without the wrapper (hand-built HTML) the h3s up to
+ * the next h2 count.
+ */
+function productionTopics (contents) {
+  const root = parseHtml(contents)
+  const h2 = root.querySelectorAll('h2').find((h) => normalizeHeading(h.text) === PRODUCTION_H2)
+  if (!h2) return null
+  const parent = h2.parentNode
+  if (parent && /(^|\s)sect1(\s|$)/.test(parent.getAttribute ? parent.getAttribute('class') || '' : '')) {
+    return parent.querySelectorAll('h3').map((h) => normalizeHeading(h.text))
+  }
+  const topics = []
+  let node = h2.nextElementSibling
+  while (node && node.tagName !== 'H2') {
+    if (node.tagName === 'H3') topics.push(normalizeHeading(node.text))
+    else topics.push(...node.querySelectorAll('h3').map((h) => normalizeHeading(h.text)))
+    node = node.nextElementSibling
+  }
+  return topics
+}
+
+/** Number of `.production-note` blocks on a page that contain no link. */
+function unlinkedProductionNotes (contents) {
+  const root = parseHtml(contents)
+  return root.querySelectorAll('.production-note').filter((note) => !note.querySelector('a[href]')).length
 }
 
 /**
@@ -405,6 +439,35 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
     }
   }
 
+  // Production considerations: the complete section is the last step's, and
+  // every in-context note on a step links to its topic there. Fatal once
+  // published, a warning while a draft.
+  {
+    const report = record.status === 'published' ? err : warn
+    const present = new Map(record.steps.map((s) => [s.id, s.page]))
+    const lastId = [...record.stepIds].reverse().find((sid) => present.has(sid))
+    if (lastId) {
+      const topics = productionTopics(present.get(lastId).contents)
+      if (topics === null) {
+        report(`last step ${lastId} needs an h2 "Production considerations" (include::partial$production/_all.adoc[])`)
+      } else if (topics.length < PRODUCTION_MIN_TOPICS) {
+        report(`last step ${lastId}: "Production considerations" has ${topics.length} topic${topics.length === 1 ? '' : 's'} (h3); it needs at least ${PRODUCTION_MIN_TOPICS}`)
+      }
+    }
+    if (productionTopics(record.overview.contents) !== null) {
+      warn(`the overview has an h2 "Production considerations"; it belongs at the end of the last step${lastId ? ` (${lastId})` : ''}, with a pointer under Prerequisites`)
+    }
+    for (const step of record.steps) {
+      if (step.id !== lastId && productionTopics(step.page.contents) !== null) {
+        warn(`step ${step.id} has an h2 "Production considerations"; only the last step${lastId ? ` (${lastId})` : ''} carries the complete section`)
+      }
+    }
+    for (const { id: pageId, page } of [{ id: 'index', page: record.overview }, ...record.steps]) {
+      const unlinked = unlinkedProductionNotes(page.contents)
+      if (unlinked) report(`${pageId}.adoc has ${unlinked} [.production-note] block${unlinked === 1 ? '' : 's'} with no link to the topic under Production considerations`)
+    }
+  }
+
   // Links into this module's attachments must point at files that exist
   const attachmentNames = new Set(record.attachments.map((a) => a.name))
   const attachmentPrefix = attachmentPrefixOf(record.overview.pub && record.overview.pub.url)
@@ -542,6 +605,9 @@ module.exports = {
   DURATION_MAX,
   DESCRIPTION_MAX,
   REQUIRED_OVERVIEW_H2,
+  PRODUCTION_MIN_TOPICS,
+  productionTopics,
+  unlinkedProductionNotes,
   normalizeHeading,
   headingTexts,
   hasVerifySection,
