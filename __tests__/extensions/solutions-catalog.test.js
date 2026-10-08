@@ -1891,3 +1891,41 @@ describe('solutions-catalog: zero-match categories warn', () => {
     expect(warningsOf(result)).toMatch(/leaderboard: page-categories rpk matches no eligible doc page/)
   })
 })
+
+describe('solutions-catalog: ranking among explicit edges', () => {
+  test('equal scores break on shared leaf categories before dates and titles', async () => {
+    // Both list the page explicitly (1.0). alpha shares one leaf with the doc,
+    // zulu two, so zulu ranks first despite the alphabet and an older date.
+    const alpha = makeSolution('alpha', { attrs: { 'page-categories': 'Clients, Iceberg', 'page-solution-featured': 'false', 'page-git-modified-date': '2026-09-01' } })
+    const zulu = makeSolution('zulu', { attrs: { 'page-categories': 'Clients, Stream Processing', 'page-solution-featured': 'false', 'page-git-modified-date': '2026-01-01' } })
+    const result = await run({ solutions: [alpha, zulu], relationshipsText: 'relationships: []' })
+    expect(json(result.docs[0], 'page-related-solutions').map((r) => r.id)).toEqual(['zulu', 'alpha'])
+  })
+
+  test('an explicit edge cut by max_related stays in the graph and warns', async () => {
+    const solutions = ['alpha', 'bravo', 'charlie', 'delta'].map((id) => makeSolution(id, { attrs: { 'page-solution-featured': 'false', 'page-git-modified-date': '2026-01-01' } }))
+    const result = await run({ solutions, relationshipsText: 'relationships: []' })
+    expect(json(result.docs[0], 'page-related-solutions').map((r) => r.id)).toEqual(['alpha', 'bravo', 'charlie'])
+    const delta = addedFile(result.siteCatalog, 'solutions-graph.json').edges.find((e) => e.solution === 'delta')
+    expect(delta).toMatchObject({ provenance: 'explicit', shown: false })
+    expect(warningsOf(result)).toMatch(/streaming:develop:consumer-offsets\.adoc: 4 solutions list this page in page-solution-related-docs but max_related is 3; hidden: delta/)
+  })
+
+  test('a category edge cut by max_related does not warn', async () => {
+    const solutions = ['alpha', 'bravo', 'charlie', 'delta'].map((id) => noRelatedDocs(makeSolution(id, { attrs: { 'page-solution-featured': 'false' } })))
+    const result = await run({ solutions, relationshipsText: 'relationships: []' })
+    expect(warningsOf(result)).not.toMatch(/max_related is 3; hidden/)
+  })
+
+  test('computeRelatedSolutions returns the warning for a direct caller', () => {
+    const sol = (id) => ({ id, title: id, url: `/${id}/`, status: 'published', featured: false, categories: [], platforms: ['self-managed'], technologies: [], relatedDocKeys: new Set(['d']) })
+    const { warnings } = relationships.computeRelatedSolutions({
+      docs: [{ key: 'd', url: '/d/', categories: [], deployment: '' }],
+      solutions: [sol('a'), sol('b')],
+      relationships: [],
+      categoryMap: null,
+      maxRelated: 1,
+    })
+    expect(warnings).toEqual(['d: 2 solutions list this page in page-solution-related-docs but max_related is 1; hidden: b'])
+  })
+})

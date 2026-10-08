@@ -383,7 +383,7 @@ module.exports.register = function ({ config = {} } = {}) {
       return { key: collect.pageKey(page), page, url: page.pub && page.pub.url, categories, deployment: getDeploymentType(attrs) }
     })
     const graphInput = categoryMap ? docs : docs.map((d) => ({ ...d, categories: [] }))
-    const { related, edges } = relationships.computeRelatedSolutions({
+    const { related, edges, warnings: rankWarnings } = relationships.computeRelatedSolutions({
       docs: graphInput,
       solutions: active,
       relationships: rel.entries,
@@ -391,6 +391,7 @@ module.exports.register = function ({ config = {} } = {}) {
       maxRelated: settings.maxRelated,
       minScore: settings.minScore,
     })
+    for (const w of rankWarnings || []) logger.warn(`solutions-catalog: ${w}`)
     let decorated = 0
     for (const doc of docs) {
       const items = related.get(doc.key)

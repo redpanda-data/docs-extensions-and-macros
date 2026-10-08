@@ -114,6 +114,12 @@ function round (n) {
 function compareCandidates (a, b) {
   if (b.score !== a.score) return b.score - a.score
   if (a.solution.featured !== b.solution.featured) return a.solution.featured ? -1 : 1
+  // Equal scores are common: every explicit edge scores 1.0. The number of
+  // leaf categories the solution shares with the page is the semantic signal
+  // left, so it decides before dates and the alphabet do.
+  const al = a.sharedLeaves || 0
+  const bl = b.sharedLeaves || 0
+  if (al !== bl) return bl - al
   const am = a.solution.lastModified || ''
   const bm = b.solution.lastModified || ''
   if (am !== bm) return am < bm ? 1 : -1
@@ -132,13 +138,15 @@ function compareCandidates (a, b) {
  * @param {Object} input.categoryMap
  * @param {number} [input.maxRelated=3]
  * @param {number} [input.minScore=0.3]
- * @returns {{related: Map<string, Array<Object>>, edges: Array<Object>}}
+ * @returns {{related: Map<string, Array<Object>>, edges: Array<Object>, warnings: Array<string>}}
  *   `related` maps doc key to the shown recommendation items in rank order;
- *   `edges` is every (doc, solution) pair with any signal, for solutions-graph.json.
+ *   `edges` is every (doc, solution) pair with any signal, for solutions-graph.json;
+ *   `warnings` names every doc where max_related hid an explicit edge.
  */
 function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap, maxRelated = 3, minScore = DEFAULT_MIN_SCORE }) {
   const related = new Map()
   const edges = []
+  const warnings = []
 
   const relByPair = new Map()
   for (const rel of relationships || []) {
@@ -203,11 +211,12 @@ function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap,
         edges.push(edge)
         continue
       }
-      candidates.push({ edge, solution, score })
+      candidates.push({ edge, solution, score, sharedLeaves: cat.sharedLeaves.length })
     }
 
     candidates.sort(compareCandidates)
     const shown = []
+    const cutExplicit = []
     candidates.forEach((c, i) => {
       if (i < maxRelated) {
         c.edge.shown = true
@@ -215,14 +224,19 @@ function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap,
         shown.push(toRecommendation(c.solution, c.edge))
       } else {
         c.edge.reason = `${c.edge.reason}; hidden: rank ${i + 1} exceeds max_related ${maxRelated}`
+        if (c.edge.provenance === 'explicit') cutExplicit.push(c.solution.id)
       }
       edges.push(c.edge)
     })
     if (shown.length) related.set(doc.key, shown)
+    if (cutExplicit.length) {
+      const explicitCount = candidates.filter((c) => c.edge.provenance === 'explicit').length
+      warnings.push(`${doc.key}: ${explicitCount} solutions list this page in page-solution-related-docs but max_related is ${maxRelated}; hidden: ${cutExplicit.join(', ')}`)
+    }
   }
 
   edges.sort((a, b) => a.doc.localeCompare(b.doc) || a.solution.localeCompare(b.solution))
-  return { related, edges }
+  return { related, edges, warnings }
 }
 
 /**
