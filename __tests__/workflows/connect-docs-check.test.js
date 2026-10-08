@@ -157,6 +157,21 @@ describe('connect-docs-check workflow: no token in the Antora step', () => {
     expect(stepNamed(DROP).if).toBe('always()')
   })
 
+  test('the preview credentials are dropped after the preview and before the PR comment', () => {
+    const drop = 'Drop the preview credentials from the job environment'
+    expect(indexOf(drop)).toBeGreaterThan(indexOf('Publish the deploy preview'))
+    expect(indexOf(drop)).toBeGreaterThan(indexOf('Fetch the preview token from Secrets Manager'))
+    expect(indexOf(drop)).toBeLessThan(indexOf(COMMENT))
+    expect(stepNamed(drop).if).toBe('always()')
+    const envFile = path.join(os.tmpdir(), `cdc-env2-${process.pid}`)
+    const r = execRun(stepNamed(drop), { env: { GITHUB_ENV: envFile } })
+    expect(r.status).toBe(0)
+    const env = fs.readFileSync(envFile, 'utf8')
+    for (const v of ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'DOCS_NETLIFY_PREVIEW_AUTH_TOKEN', 'DOCS_NETLIFY_PREVIEW_SITE_ID']) {
+      expect(env).toContain(`${v}=\n`)
+    }
+  })
+
   test('the drop step blanks the token and the AWS session credentials', () => {
     const r = execRun(stepNamed(DROP), { env: { GITHUB_ENV: path.join(os.tmpdir(), `cdc-env-${process.pid}`) } })
     expect(r.status).toBe(0)

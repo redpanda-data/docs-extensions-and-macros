@@ -512,6 +512,16 @@ jobs:
             -f description="Rendered Connect docs built from this pull request" \
             -f target_url="$URL" > /dev/null
 
+      # The preview steps exported the role session credentials and the
+      # Netlify token into the job environment again. Blank them before the
+      # comment step, which processes PR-derived page data.
+      - name: Drop the preview credentials from the job environment
+        if: always()
+        run: |
+          set -euo pipefail
+          for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN DOCS_NETLIFY_PREVIEW_AUTH_TOKEN DOCS_NETLIFY_PREVIEW_SITE_ID; do
+            echo "$v=" >> "$GITHUB_ENV"
+          done
       # One sticky comment per PR: whether the docs build passed, the preview,
       # and the published pages the PR changes, so the author and the docs
       # team review rendered pages, not Go strings. A PR that changes no
