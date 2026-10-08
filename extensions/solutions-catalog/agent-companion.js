@@ -181,18 +181,38 @@ function selectTagged (text, attrs) {
 }
 
 /**
- * Splice every `include::partial$...[]` of a page with the lines it selects,
- * recursively up to MAX_INCLUDE_DEPTH. Other includes stay for prose() to
- * drop. Problems (an unresolved partial, a missing tag, runaway nesting) are
- * appended to `problems` and the directive line is kept, so it is dropped like
- * any other include.
+ * An include target written inside a partial -> the target to resolve. A
+ * resource ID (anything with a `$` family) or a URL is left alone; a plain path
+ * is relative to the including partial's directory under partials/.
  */
-function expandIncludes (text, resolveInclude, problems, where, depth = 0) {
+function siblingPartial (target, dir) {
+  if (/\$|^[a-z][\w+.-]*:\/\/|^\{/i.test(target)) return target
+  const parts = []
+  for (const seg of (dir ? dir + '/' + target : target).split('/')) {
+    if (seg === '..') parts.pop()
+    else if (seg && seg !== '.') parts.push(seg)
+  }
+  return 'partial$' + parts.join('/')
+}
+
+/**
+ * Splice every `include::partial$...[]` of a page with the lines it selects,
+ * recursively up to MAX_INCLUDE_DEPTH. Inside an included partial, a plain
+ * relative path (`include::compaction.adoc[]`) is a sibling partial, as in
+ * Antora, and resolves as `partial$<dir>/<path>`. Other includes stay for
+ * prose() to drop. Problems (an unresolved partial, a missing tag, runaway
+ * nesting) are appended to `problems` and the directive line is kept, so it is
+ * dropped like any other include.
+ */
+function expandIncludes (text, resolveInclude, problems, where, depth = 0, base = null) {
   const out = []
   for (const line of String(text || '').replace(/\r\n/g, '\n').split('\n')) {
     const m = line.match(INCLUDE_RX)
-    if (!m || !parsePartialTarget(m[1])) { out.push(line); continue }
-    const [, target, list] = m
+    if (!m) { out.push(line); continue }
+    const list = m[2]
+    const target = base !== null ? siblingPartial(m[1], base) : m[1]
+    const parsed = parsePartialTarget(target)
+    if (!parsed) { out.push(line); continue }
     if (depth >= MAX_INCLUDE_DEPTH) {
       problems.push(`include nested deeper than ${MAX_INCLUDE_DEPTH}: ${target} (in ${where})`)
       out.push(line)
@@ -207,7 +227,8 @@ function expandIncludes (text, resolveInclude, problems, where, depth = 0) {
     }
     const { lines, missing } = selectTagged(source, attrs)
     for (const name of missing) problems.push(`include tag not found: ${name} in ${target} (in ${where})`)
-    out.push(...expandIncludes(lines.join('\n'), resolveInclude, problems, where, depth + 1))
+    const dir = parsed.relative.includes('/') ? parsed.relative.replace(/\/[^/]*$/, '') : ''
+    out.push(...expandIncludes(lines.join('\n'), resolveInclude, problems, where, depth + 1, dir))
   }
   return out
 }

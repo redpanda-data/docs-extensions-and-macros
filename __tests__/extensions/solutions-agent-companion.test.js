@@ -450,6 +450,30 @@ describe('agent companion: single-sourced production content', () => {
     expect(r.leaks).toEqual([`include nested deeper than ${MAX_INCLUDE_DEPTH}: partial$loop.adoc (in index)`])
   })
 
+  test('a plain relative include inside a partial resolves as a sibling partial', () => {
+    const nested = {
+      'production/_all.adoc': '=== Compaction\ninclude::compaction.adoc[tag=detail]\n\n=== Security\ninclude::../shared/security.adoc[]',
+      'production/compaction.adoc': '// tag::detail[]\nCompact it.\n// end::detail[]',
+      'shared/security.adoc': 'Lock it.',
+    }
+    const r = generateAgentCompanion({
+      slug: 'tiny',
+      pages: { index: index + '\n\n== Production considerations\n\ninclude::partial$production/_all.adoc[]' },
+      resolveInclude: partialResolver(nested, { module: 'tiny' }),
+    })
+    expect(r.leaks).toEqual([])
+    expect(r.markdown).toContain('### Compaction\n\nCompact it.\n\n### Security\n\nLock it.')
+  })
+
+  test('a relative include inside a partial that does not exist is reported, not dropped', () => {
+    const r = generateAgentCompanion({
+      slug: 'tiny',
+      pages: { index: index + '\n\n== Production considerations\n\ninclude::partial$production/_all.adoc[]' },
+      resolveInclude: partialResolver({ 'production/_all.adoc': 'include::gone.adoc[]' }, { module: 'tiny' }),
+    })
+    expect(r.leaks).toEqual(['unresolved include: partial$production/gone.adoc (in index)'])
+  })
+
   test('example$ and attachment$ includes are still dropped and never resolved', () => {
     const seen = []
     generate({ resolveInclude: (t) => { seen.push(t); return partialResolver(partials, { module: 'tiny' })(t) } })
