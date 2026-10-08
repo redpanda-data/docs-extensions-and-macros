@@ -214,15 +214,15 @@ function ghRaw(args, { retries = 4, allowFail = false } = {}) {
   }
 }
 function ghJson(args, opts = {}) {
-  const key = JSON.stringify(args);
-  const f = cacheFile(key);
-  if (!opts.noCache && fs.existsSync(f) && Date.now() - fs.statSync(f).mtimeMs < CACHE_MAX_AGE_MS) {
+  // A caller that loads this module without running main() has no cache.
+  const f = CACHE_DIR ? cacheFile(JSON.stringify(args)) : null;
+  if (f && !opts.noCache && fs.existsSync(f) && Date.now() - fs.statSync(f).mtimeMs < CACHE_MAX_AGE_MS) {
     return JSON.parse(fs.readFileSync(f, 'utf8'));
   }
   const out = ghRaw(args, opts);
   if (out === null) return null;
   const val = out.trim() ? JSON.parse(out) : null;
-  fs.writeFileSync(f, JSON.stringify(val));
+  if (f) fs.writeFileSync(f, JSON.stringify(val));
   return val;
 }
 // Page through a REST list endpoint. `pick` extracts the array from a page.
@@ -301,7 +301,7 @@ function dispatchOutcome(repo, jobId) {
     else outcome = 'dispatched';
   }
   const val = { outcome };
-  fs.writeFileSync(f, JSON.stringify(val));
+  if (f) fs.writeFileSync(f, JSON.stringify(val));
   return val;
 }
 

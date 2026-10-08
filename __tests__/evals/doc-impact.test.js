@@ -16,6 +16,7 @@ const { spawn } = require('child_process')
 const lib = require('../../evals/doc-strings/doc-impact/lib')
 const { materializeControl, controlVerdict, parseSurfaces, quotaRefusals, runItem, useItemsFile } = require('../../evals/doc-strings/doc-impact/run')
 const { toItems, publicItem, refPatterns, classifyTickets } = require('../../evals/doc-strings/doc-impact/mine-candidates')
+const predate = require('../../evals/doc-strings/doc-impact/predate-recordings')
 
 const DIR = path.join(__dirname, '../../evals/doc-strings/doc-impact')
 
@@ -695,5 +696,209 @@ describe('production recordings (--from-production)', () => {
     expect(lib.isProductionRecording(path.join(dir, 'live.json'))).toBe(false)
     expect(lib.isProductionRecording(path.join(dir, 'bad.json'))).toBe(false)
     expect(lib.isProductionRecording(path.join(dir, 'absent.json'))).toBe(false)
+  })
+})
+
+describe('predated recordings (predate-recordings.js)', () => {
+  const BASE = 'https://docs.redpanda.com/streaming/current/manage/kubernetes'
+  const NEW_PAGE = `${BASE}/k-new-feature/`
+  const EDITED = `${BASE}/k-shadow-linking/`
+  const OTHER = `${BASE}/k-unrelated/`
+
+  // The edited page as the server renders it today, with the change in it.
+  const editedToday = [
+    '# Streaming > Current > Manage > Kubernetes > Shadow Linking',
+    '## Create a shadow link',
+    '',
+    '- Operator',
+    '- Helm',
+    '',
+    '||When using `clusterRef`, the operator handles authentication automatically. For clusters that are not managed by the same operator, use `staticConfiguration` instead.|',
+    '',
+    'By default, a `clusterRef` resolves in the same namespace as the `ShadowLink` resource. Set the `namespace` field on the source cluster’s `clusterRef` for a cross-namespace source.',
+    '',
+    '```',
+    'sourceCluster:',
+    '  clusterRef:',
+    '    name: redpanda-source',
+    '    namespace: <source-namespace>',
+    '```',
+    '',
+    'See [the new feature](https://docs.redpanda.com/streaming/26.1/manage/kubernetes/k-new-feature/#setup) for details.',
+    '',
+    'Create a shadow link with explicit connection details:'
+  ].join('\n')
+
+  const changes = [
+    { url: NEW_PAGE, created: true, added: ['= New feature', 'Brand new page.'], existing: [] },
+    {
+      url: EDITED,
+      created: false,
+      existing: [
+        '= Shadow Linking',
+        '== Create a shadow link',
+        'When using `clusterRef`, the operator handles authentication automatically. For cross-namespace or external clusters, use `staticConfiguration` instead.',
+        'Create a shadow link with explicit connection details:',
+        'Operator::',
+        'Helm::'
+      ],
+      added: [
+        'When using `clusterRef`, the operator handles authentication automatically. For clusters that are not managed by the same operator, use `staticConfiguration` instead.',
+        '+',
+        'By default, a `clusterRef` resolves in the same namespace as the `ShadowLink` resource. Set the `namespace` field on the source cluster\'s `clusterRef` for a cross-namespace source.',
+        '[,yaml]',
+        '----',
+        'sourceCluster:',
+        '  clusterRef:',
+        '    name: redpanda-source',
+        '    namespace: <source-namespace>',
+        '----',
+        'Create a shadow link with explicit connection details:'
+      ]
+    }
+  ]
+
+  const section = (source_url, content) => ({ source_url, content })
+  const call = (question, results) => ({
+    tool: 'ask_redpanda_question',
+    arguments: { question },
+    content: [{ type: 'text', text: JSON.stringify({ results }) }]
+  })
+  const resultsOf = (c) => JSON.parse(c.content[0].text).results
+  const unrelated = '# Streaming > Current > Unrelated\n## Topics\n\nCreate a shadow link with explicit connection details:\n\nBy default, a `clusterRef` resolves in the same namespace.'
+
+  function recording () {
+    return {
+      item: 'redpanda-operator-1',
+      recorded_at: '2026-10-07T00:00:00.000Z',
+      calls: [
+        call('shadow link namespace', [
+          section(`${NEW_PAGE}#setup`, '# Streaming > New feature\n## Setup\n\nBrand new page.'),
+          section(`${EDITED}#create-a-shadow-link`, editedToday),
+          section(`${OTHER}#topics`, unrelated)
+        ]),
+        call('nothing relevant', [section(`${OTHER}#topics`, unrelated)])
+      ]
+    }
+  }
+
+  test('removes every section of a page the change created, in any version', () => {
+    const rec = recording()
+    rec.calls[0] = call('q', [
+      section(`${NEW_PAGE}#setup`, 'x'),
+      section(NEW_PAGE.replace('/current/', '/26.1/'), 'y'),
+      section(`${OTHER}#topics`, unrelated)
+    ])
+    const { recording: out } = predate.predateRecording(rec, changes)
+    expect(resultsOf(out.calls[0]).map((r) => r.source_url)).toEqual([`${OTHER}#topics`])
+    expect(out.predated.sections_removed).toBe(2)
+  })
+
+  test('removes the passages the change added and keeps what the page held before', () => {
+    const { recording: out } = predate.predateRecording(recording(), changes)
+    const edited = resultsOf(out.calls[0]).find((r) => r.source_url.startsWith(EDITED)).content
+    // The reworded sentence goes; the older sentence on the same line stays,
+    // with its table cell markup.
+    expect(edited).toContain('||When using `clusterRef`, the operator handles authentication automatically.|')
+    expect(edited).not.toMatch(/not managed by the same operator/)
+    expect(edited).not.toMatch(/resolves in the same namespace/)
+    // A code block the change added goes whole, fences included.
+    expect(edited).not.toMatch(/source-namespace|sourceCluster|```/)
+    // A sentence linking to the created page goes, in any version.
+    expect(edited).not.toMatch(/k-new-feature/)
+    // An added line the file held before the change stays.
+    expect(edited).toContain('Create a shadow link with explicit connection details:')
+    expect(edited).toContain('- Operator\n- Helm')
+    expect(edited).not.toMatch(/\n\n\n/)
+    expect(out.predated).toEqual({ sections_removed: 1, passages_removed: 5 })
+    // The edited result text keeps the server's compact JSON format.
+    const text = out.calls[0].content[0].text
+    expect(text).toBe(JSON.stringify(JSON.parse(text)))
+  })
+
+  test('leaves other pages, calls and fields byte-identical', () => {
+    const before = recording()
+    const { recording: out } = predate.predateRecording(before, changes)
+    expect(resultsOf(out.calls[0]).find((r) => r.source_url.startsWith(OTHER)).content).toBe(unrelated)
+    expect(out.calls[1]).toBe(before.calls[1])
+    expect(out.calls[1].content[0].text).toBe(JSON.stringify({ results: [section(`${OTHER}#topics`, unrelated)] }))
+    const { calls, predated, ...rest } = out
+    const { calls: c0, ...rest0 } = before
+    expect(rest).toEqual(rest0)
+    // With nothing to remove, the section is the same object and text.
+    const plain = predate.stripPassages(unrelated, [predate.buildMatcher({ added: ['Totally different text here.'], existing: [] })])
+    expect(plain).toEqual({ content: unrelated, removed: 0 })
+  })
+
+  test('a section the change wrote goes even after later rewording, and a renamed heading keeps its body', () => {
+    const m = predate.buildMatcher({
+      existing: ['Old body sentence that predates the change.', 'Another old sentence that stays.'],
+      added: ['== Brand new section heading', 'First new sentence of the section.', 'Second new sentence of the section.', 'Third new sentence of the section.']
+    })
+    const reworded = '# Crumb\n## Brand new section heading\n\nFirst new sentence of the section.\n\nSecond sentence, reworded later by someone.\n\nThird new sentence of the section.'
+    expect(predate.stripPassages(reworded, [m]).section).toBe(true)
+    const renamed = '# Crumb\n## Brand new section heading\n\nOld body sentence that predates the change.\n\nAnother old sentence that stays.'
+    const r = predate.stripPassages(renamed, [m])
+    expect(r.section).toBeUndefined()
+    expect(r.content).toBe('# Crumb\n\nOld body sentence that predates the change.\n\nAnother old sentence that stays.')
+  })
+
+  test('edits a multi-cell table row cell by cell and drops it when its cells empty', () => {
+    const m = predate.buildMatcher({
+      existing: ['| `name` | The name of the resource.'],
+      added: ['| `replicas` | The number of pipeline replicas to run.', '| `name` | The name of the resource. Required since this release.']
+    })
+    const table = '|Field|Description|\n|---|---|\n|**`name`** *string*|The name of the resource. Required since this release.|\n|**`replicas`** *integer*|The number of pipeline replicas to run.|'
+    const r = predate.stripPassages(table, [m])
+    expect(r.content).toBe('|Field|Description|\n|---|---|\n|**`name`** *string*|The name of the resource.|')
+    expect(r.removed).toBe(2)
+  })
+
+  test('normalizes AsciiDoc and Markdown to the same text', () => {
+    const n = predate.normalize
+    expect(n('Set `max_size` to *true* in the `ShadowLink`.')).toBe(n('Set max_size to true in the ShadowLink.'))
+    expect(n('* `clusterRef.namespace`: see xref:manage:x.adoc[the guide].')).toBe(n('- `clusterRef.namespace`: see [the guide](https://docs.redpanda.com/x/).'))
+    expect(n('<1> The name of the Gateway.')).toBe(n('|**1**|The name of the Gateway.|'))
+    expect(n('NOTE: The operator\'s default.')).toBe(n('||The operator’s default.|'))
+    const wild = predate.buildMatcher({ added: ['Requires Redpanda Operator {latest-operator-version} or later.'], existing: [] })
+    expect(wild.isNew(n('Requires Redpanda Operator v26.2.1 or later.'))).toBe(true)
+    expect(wild.isNew(n('Requires Redpanda Console or later.'))).toBe(false)
+  })
+
+  test('apply skips production and already-predated recordings and stamps the rest', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-impact-predate-'))
+    const write = (id, rec) => fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(rec, null, 2) + '\n')
+    write('a', recording())
+    write('b', { ...recording(), source: 'production' })
+    write('c', { ...recording(), predated: { sections_removed: 0, passages_removed: 0 } })
+    const changesFile = path.join(dir, 'changes.json')
+    fs.writeFileSync(changesFile, JSON.stringify({ items: { a: changes, b: changes, c: changes, d: changes } }))
+    const before = { b: fs.readFileSync(path.join(dir, 'b.json'), 'utf8'), c: fs.readFileSync(path.join(dir, 'c.json'), 'utf8') }
+    const summary = predate.apply(changesFile, dir)
+    expect(summary.map((s) => s.skipped || 'predated')).toEqual(['predated', 'production recording', 'already predated', 'no recording'])
+    const a = JSON.parse(fs.readFileSync(path.join(dir, 'a.json'), 'utf8'))
+    expect(a.predated).toEqual({ sections_removed: 1, passages_removed: 5 })
+    expect(JSON.stringify(a)).not.toMatch(/github\.com/)
+    expect(fs.readFileSync(path.join(dir, 'b.json'), 'utf8')).toBe(before.b)
+    expect(fs.readFileSync(path.join(dir, 'c.json'), 'utf8')).toBe(before.c)
+    // A second run changes nothing.
+    const once = fs.readFileSync(path.join(dir, 'a.json'), 'utf8')
+    predate.apply(changesFile, dir)
+    expect(fs.readFileSync(path.join(dir, 'a.json'), 'utf8')).toBe(once)
+  })
+
+  test('the committed predated recordings stay valid and name no private change', () => {
+    const recDir = path.join(DIR, 'recordings')
+    const files = fs.readdirSync(recDir).filter((f) => f.endsWith('.json'))
+    const predated = files.map((f) => [f, JSON.parse(fs.readFileSync(path.join(recDir, f), 'utf8'))]).filter(([, r]) => r.predated)
+    for (const [f, r] of predated) {
+      expect(Object.keys(r.predated).sort()).toEqual(['passages_removed', 'sections_removed'])
+      for (const c of r.calls) for (const part of c.content) {
+        const doc = JSON.parse(part.text)
+        expect(Array.isArray(doc.results)).toBe(true)
+        expect(JSON.stringify(doc)).toBe(part.text)
+      }
+      expect(fs.readFileSync(path.join(recDir, f), 'utf8')).not.toMatch(/redpanda-data\/docs\/pull|DOC-\d|partial:/)
+    }
   })
 })

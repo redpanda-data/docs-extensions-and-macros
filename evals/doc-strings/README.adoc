@@ -465,6 +465,49 @@ the live server on purpose. An item with no production recording still
 needs a live one; read its results knowing the docs may already include
 the fix.
 
+===== Predated recordings
+
+An item reviewed before the review saved its own docs calls, or whose
+artifact has expired, can only have a live recording. For those items,
+`doc-impact/predate-recordings.js` takes the writer's docs change back out
+of the live recording, so it shows the docs as they were before the fix:
+
+* a result section from a page the docs change created is removed, as is
+  a section whose heading and body the change wrote;
+* on a page the change edited, the sentences, lines, code blocks and table
+  cells the change added are removed where they match the rendered text
+  after normalization (AsciiDoc and Markdown markup, attribute references,
+  xrefs and links reduced to their text). Partials apply to every section,
+  because the pages that include them are not known. A line the change
+  added that the file already held before the change stays;
+* a sentence or list item linking to a page the change created is removed.
+
+Everything else stays byte-identical, and each edited recording gets
+`predated: {sections_removed, passages_removed}`. Production recordings
+and recordings already predated are left alone.
+
+The docs changes live in a private repository, so the script never names
+them. It runs in two steps; keep the intermediate file outside any public
+repository:
+
+[source,bash]
+----
+node evals/doc-strings/doc-impact/predate-recordings.js \
+  --prepare <private-candidates.json> --docs <docs-checkout> \
+  --items evals/doc-strings/doc-impact/items.json --out <changes.json>
+node evals/doc-strings/doc-impact/predate-recordings.js --apply <changes.json>
+----
+
+`--prepare` reads each `needs_docs` item's merged docs PRs from the
+private candidates file, and uses `gh` and `git show`/`git diff` on the
+checkout, without changing it. Fetch the checkout first.
+
+The result is an approximation. Text the change reworded is removed, not
+restored to its earlier wording, and text a later docs change rewrote no
+longer matches and stays. Generated reference pages that changed in a
+separate PR, such as the CRD reference, are not touched. Prefer a
+production recording whenever one exists.
+
 === Scoring
 
 [cols="1,3"]
@@ -600,4 +643,4 @@ flag-everything and flag-nothing scoring 0 and the one-class refusal),
 quota-refusal detection against the server's real refusal body, the
 `GATE_CLOSED` and poisoned-recording paths of an item run, the miner's
 ticket rules, control materialization with the real lint, `--workflow`,
-and the CI comparison's deltas and exit rules.
+the CI comparison's deltas and exit rules, and predating a recording.
