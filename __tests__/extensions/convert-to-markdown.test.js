@@ -576,7 +576,7 @@ describe('solution files in Markdown frontmatter', () => {
   })
 })
 
-// The landing page's Markdown twin is a catalogue for agents: the cards, not
+// The landing page's Markdown twin is a catalog for agents: the cards, not
 // the filter form, its counts, or the empty states that wait for script.
 describe('solutions landing in Markdown', () => {
   const { isUnwantedNode } = require('../../extensions/convert-to-markdown')

@@ -165,21 +165,21 @@ function applyPageAttributes (record, publicRecord, nav) {
 }
 
 /**
- * Keep only the facet values that actually narrow the catalogue.
+ * Keep only the facet values that actually narrow the catalog.
  *
  * A value carried by every solution filters nothing: ticking "Runs on: Cloud"
  * when all of them run on Cloud returns the same list, so it is noise in the
  * sidebar rather than a filter. Everything else stays, including a value held
  * by a single solution: that is a narrowing from many to one, which is the
- * whole point of a facet, and it is how a small catalogue grows into a large
+ * whole point of a facet, and it is how a small catalog grows into a large
  * one without the UI needing to change.
  *
  * A group left with no values renders nothing (every template gates on
- * `.length`), which is also what a one-solution catalogue gets: with nothing
+ * `.length`), which is also what a one-solution catalog gets: with nothing
  * to narrow, every value is on every solution.
  *
  * @param {Array<{value: string, count: number}>} values
- * @param {number} total number of solutions in the catalogue
+ * @param {number} total number of solutions in the catalog
  * @returns {Array<{value: string, count: number}>} the values that discriminate
  */
 function discriminating (values, total) {
@@ -254,7 +254,7 @@ function buildCatalog (publicRecords, { siteUrl = '', generatedAt = new Date().t
     solutions,
     // A facet only earns a place when it discriminates. discriminating()
     // drops values that match every solution, because they filter nothing, so
-    // the UI needs no change as the catalogue grows from five to fifty. A
+    // the UI needs no change as the catalog grows from five to fifty. A
     // group left with no values is still published, as an empty list.
     facets: {
       industries: discriminating(countValues(solutions, (r) => r.industries), solutions.length),

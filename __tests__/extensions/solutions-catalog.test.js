@@ -802,7 +802,7 @@ describe('solutions-catalog: status handling', () => {
     // catalog JSON and component attribute
     const catalog = addedFile(result.siteCatalog, 'solutions.json')
     expect(catalog.solutions.map((s) => [s.id, s.status, s.draft])).toEqual([['sandbox', 'draft', true]])
-    // Empty because a one-solution catalogue has nothing to narrow, not
+    // Empty because a one-solution catalog has nothing to narrow, not
     // because drafts are treated differently: they are counted like any other.
     expect(catalog.facets.difficulty).toEqual([])
     const attrCatalog = JSON.parse(result.catalog.getComponent('home').versions[0].asciidoc.attributes['solutions-catalog'])
@@ -1728,7 +1728,7 @@ describe('solutions-catalog: facets only appear when they discriminate', () => {
     expect(discriminating([], 4)).toEqual([])
   })
 
-  test('a one-solution catalogue has nothing to narrow, so every group empties', () => {
+  test('a one-solution catalog has nothing to narrow, so every group empties', () => {
     expect(discriminating([{ value: 'a', count: 1 }, { value: 'b', count: 1 }], 1)).toEqual([])
   })
 })
