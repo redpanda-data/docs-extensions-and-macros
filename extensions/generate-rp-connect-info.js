@@ -205,7 +205,8 @@ module.exports.register = function ({ config }) {
     let csvRows = []
     try {
       const csvText = await fetchCSV(localCsvPath, contentCatalog)
-      csvRows = Papa.parse(csvText, { header: true, skipEmptyLines: true }).data
+      // connect's info.csv pads every column with spaces, headers included
+      csvRows = Papa.parse(csvText, { header: true, skipEmptyLines: true, transformHeader: (h) => h.trim() }).data
     } catch (error) {
       if (!catalogRows) throw error
       logger.warn(`Could not fetch info.csv for the SQL driver rows, so the SQL driver support list is empty: ${error.message}`)

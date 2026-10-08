@@ -177,6 +177,19 @@ describe('catalog source', () => {
     expect(logs.some(([l, m]) => l === 'info' && /Loaded 3 components from connect:components:partial\$platforms\/catalog\.json \(v4\.200\.0\)/.test(m))).toBe(true)
   })
 
+  it('keeps the SQL drivers when info.csv pads its columns, as connect\'s does', async () => {
+    const padded = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rpcn-csv-')), 'info.csv')
+    fs.writeFileSync(padded, [
+      'name                  ,type      ,commercial_name     ,support    ,deprecated ,cloud ,cloud_with_gpu ,cloud_unsupported_reason',
+      'http_server           ,input     ,http_server         ,certified  ,n          ,y     ,y              ,',
+      'sql_driver_clickhouse ,sql_driver,ClickHouse          ,community  ,n          ,y     ,y              ,'
+    ].join('\n'))
+    const files = [...referencePartials({ url: CONNECT_URL }), connectPartial('platforms/catalog.json', { url: CONNECT_URL }, catalogJson)]
+    const { csvData } = await run(files, { csvpath: padded })
+    const driver = csvData.data.find((r) => r.connector === 'sql_driver_clickhouse')
+    expect(driver).toMatchObject({ type: 'sql_driver', commercial_name: 'ClickHouse', support_level: 'community' })
+  })
+
   it('falls back to info.csv when catalog.json is not valid', async () => {
     const files = [...referencePartials({ url: CONNECT_URL }), connectPartial('platforms/catalog.json', { url: CONNECT_URL }, '{"not":"an array"}')]
     const { csvData, logs } = await run(files, { csvpath: csvFile })
