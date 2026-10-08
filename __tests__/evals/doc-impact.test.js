@@ -820,7 +820,9 @@ describe('predated recordings (predate-recordings.js)', () => {
     const before = recording()
     const { recording: out } = predate.predateRecording(before, changes)
     expect(resultsOf(out.calls[0]).find((r) => r.source_url.startsWith(OTHER)).content).toBe(unrelated)
-    expect(out.calls[1]).toBe(before.calls[1])
+    expect(out.calls[1].content).toEqual(before.calls[1].content)
+    expect(out.calls[1].content[0]).toBe(before.calls[1].content[0])
+    expect(out.calls[1].predated).toEqual({ sections_removed: 0, passages_removed: 0 })
     expect(out.calls[1].content[0].text).toBe(JSON.stringify({ results: [section(`${OTHER}#topics`, unrelated)] }))
     const { calls, predated, ...rest } = out
     const { calls: c0, ...rest0 } = before
@@ -865,26 +867,69 @@ describe('predated recordings (predate-recordings.js)', () => {
     expect(wild.isNew(n('Requires Redpanda Console or later.'))).toBe(false)
   })
 
-  test('apply skips production and already-predated recordings and stamps the rest', () => {
+  test('apply predates and marks every call, skips production recordings, and a second run changes nothing', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-impact-predate-'))
     const write = (id, rec) => fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(rec, null, 2) + '\n')
     write('a', recording())
     write('b', { ...recording(), source: 'production' })
-    write('c', { ...recording(), predated: { sections_removed: 0, passages_removed: 0 } })
     const changesFile = path.join(dir, 'changes.json')
-    fs.writeFileSync(changesFile, JSON.stringify({ items: { a: changes, b: changes, c: changes, d: changes } }))
-    const before = { b: fs.readFileSync(path.join(dir, 'b.json'), 'utf8'), c: fs.readFileSync(path.join(dir, 'c.json'), 'utf8') }
+    fs.writeFileSync(changesFile, JSON.stringify({ items: { a: changes, b: changes, d: changes } }))
+    const productionBefore = fs.readFileSync(path.join(dir, 'b.json'), 'utf8')
     const summary = predate.apply(changesFile, dir)
-    expect(summary.map((s) => s.skipped || 'predated')).toEqual(['predated', 'production recording', 'already predated', 'no recording'])
+    expect(summary.map((s) => s.skipped || `predated ${s.calls_predated}`)).toEqual(['predated 2', 'production recording', 'no recording'])
     const a = JSON.parse(fs.readFileSync(path.join(dir, 'a.json'), 'utf8'))
     expect(a.predated).toEqual({ sections_removed: 1, passages_removed: 5 })
+    expect(a.calls.map((c) => c.predated)).toEqual([{ sections_removed: 1, passages_removed: 5 }, { sections_removed: 0, passages_removed: 0 }])
     expect(JSON.stringify(a)).not.toMatch(/github\.com/)
-    expect(fs.readFileSync(path.join(dir, 'b.json'), 'utf8')).toBe(before.b)
-    expect(fs.readFileSync(path.join(dir, 'c.json'), 'utf8')).toBe(before.c)
-    // A second run changes nothing.
+    expect(fs.readFileSync(path.join(dir, 'b.json'), 'utf8')).toBe(productionBefore)
     const once = fs.readFileSync(path.join(dir, 'a.json'), 'utf8')
-    predate.apply(changesFile, dir)
+    // A run with nothing to do leaves the file alone, not even rewritten.
+    const stamp = new Date('2000-01-01T00:00:00Z')
+    fs.utimesSync(path.join(dir, 'a.json'), stamp, stamp)
+    expect(predate.apply(changesFile, dir)[0].calls_predated).toBe(0)
+    expect(fs.statSync(path.join(dir, 'a.json')).mtimeMs).toBe(stamp.getTime())
     expect(fs.readFileSync(path.join(dir, 'a.json'), 'utf8')).toBe(once)
+  })
+
+  test('after a merge, only the new call is predated and the old calls stay as they were', () => {
+    const { recording: first } = predate.predateRecording(recording(), changes)
+    // A later --mcp record --merge adds a call from today's docs.
+    const fresh = {
+      item: 'redpanda-operator-1',
+      recorded_at: '2026-10-09T00:00:00.000Z',
+      calls: [
+        first.calls[0],
+        call('new feature setup', [section(`${NEW_PAGE}#setup`, 'Brand new page.'), section(`${OTHER}#topics`, unrelated)])
+      ]
+    }
+    const merged = lib.mergeRecording(first, fresh)
+    expect(merged.added).toBe(1)
+    // The merge keeps the old calls' marks but not the recording-level sum.
+    expect(merged.recording.predated).toBeUndefined()
+    const { recording: second, processed } = predate.predateRecording(merged.recording, changes)
+    expect(processed).toBe(1)
+    expect(second.calls.slice(0, 2)).toEqual(first.calls)
+    expect(second.calls[0]).toBe(merged.recording.calls[0])
+    expect(resultsOf(second.calls[2]).map((r) => r.source_url)).toEqual([`${OTHER}#topics`])
+    expect(second.calls[2].predated).toEqual({ sections_removed: 1, passages_removed: 0 })
+    expect(second.predated).toEqual({ sections_removed: 2, passages_removed: 5 })
+    const again = predate.predateRecording(second, changes)
+    expect(again.processed).toBe(0)
+    expect(JSON.stringify(again.recording)).toBe(JSON.stringify(second))
+  })
+
+  test('a recording predated before calls were marked is migrated without a content change', () => {
+    // Already predated, so it still holds text the matchers would remove
+    // if they ran again; migration must not run them.
+    const legacy = { ...recording(), predated: { sections_removed: 3, passages_removed: 7 } }
+    const { recording: out, processed } = predate.predateRecording(legacy, changes)
+    expect(processed).toBe(0)
+    expect(out.calls.map((c) => c.content)).toEqual(legacy.calls.map((c) => c.content))
+    expect(out.calls.map((c) => c.predated)).toEqual([{ sections_removed: 3, passages_removed: 7 }, { sections_removed: 0, passages_removed: 0 }])
+    expect(out.predated).toEqual({ sections_removed: 3, passages_removed: 7 })
+    const { calls, ...rest } = out
+    const { calls: c0, ...rest0 } = legacy
+    expect(rest).toEqual(rest0)
   })
 
   test('the committed predated recordings stay valid and name no private change', () => {
@@ -893,6 +938,14 @@ describe('predated recordings (predate-recordings.js)', () => {
     const predated = files.map((f) => [f, JSON.parse(fs.readFileSync(path.join(recDir, f), 'utf8'))]).filter(([, r]) => r.predated)
     for (const [f, r] of predated) {
       expect(Object.keys(r.predated).sort()).toEqual(['passages_removed', 'sections_removed'])
+      // Every call is marked, and the marks sum to the recording's totals.
+      const sum = { sections_removed: 0, passages_removed: 0 }
+      for (const c of r.calls) {
+        expect(Object.keys(c.predated).sort()).toEqual(['passages_removed', 'sections_removed'])
+        sum.sections_removed += c.predated.sections_removed
+        sum.passages_removed += c.predated.passages_removed
+      }
+      expect(sum).toEqual(r.predated)
       for (const c of r.calls) for (const part of c.content) {
         const doc = JSON.parse(part.text)
         expect(Array.isArray(doc.results)).toBe(true)

@@ -482,9 +482,12 @@ of the live recording, so it shows the docs as they were before the fix:
   added that the file already held before the change stays;
 * a sentence or list item linking to a page the change created is removed.
 
-Everything else stays byte-identical, and each edited recording gets
-`predated: {sections_removed, passages_removed}`. Production recordings
-and recordings already predated are left alone.
+Everything else stays byte-identical. Each call the script processes gets
+`predated: {sections_removed, passages_removed}`, and the recording's own
+`predated` is the sum over its calls. A marked call is never processed
+again, so a second `--apply` changes nothing, and after `--mcp record
+--merge` adds calls to a predated recording, `--apply` predates only the
+new calls. Production recordings are left alone.
 
 The docs changes live in a private repository, so the script never names
 them. It runs in two steps; keep the intermediate file outside any public

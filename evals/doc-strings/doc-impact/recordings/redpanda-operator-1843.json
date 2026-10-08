@@ -18,7 +18,11 @@
           "text": "{\"results\":[]}"
         }
       ],
-      "is_error": false
+      "is_error": false,
+      "predated": {
+        "sections_removed": 3,
+        "passages_removed": 0
+      }
     }
   ],
   "merged_from": [

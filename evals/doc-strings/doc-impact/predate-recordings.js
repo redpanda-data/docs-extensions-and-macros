@@ -23,8 +23,8 @@
  *   created is removed.
  *
  * Everything else stays byte-identical. Production recordings, which hold
- * what the docs said at review time, and recordings already predated are
- * left alone.
+ * what the docs said at review time, are left alone, and so is any call
+ * already predated (see predateRecording).
  *
  * Two steps, so neither the script nor the repository names a docs change
  * that lives in a private repository:
@@ -39,8 +39,9 @@
  *       output outside any public repository.
  *
  *   node predate-recordings.js --apply <changes.json> [--recordings <dir>]
- *       Edits the recordings beside items.json (or in <dir>) and stamps
- *       each edited one with predated: {sections_removed, passages_removed}.
+ *       Edits the recordings beside items.json (or in <dir>): predates each
+ *       call not yet predated and marks it, and sums the marks into the
+ *       recording's predated: {sections_removed, passages_removed}.
  */
 
 const fs = require('fs')
@@ -291,8 +292,20 @@ function pageKey (url) {
 }
 
 /**
- * Predate one recording in place (returns a new object).
- * changes: [{ url|null, created, added, existing }] for the item.
+ * Predate the calls of one recording that are not predated yet (returns a
+ * new object). changes: [{ url|null, created, added, existing }] for the
+ * item.
+ *
+ * Each processed call gets predated: {sections_removed, passages_removed},
+ * even when nothing in it matched, and a marked call is never processed
+ * again. So after `--mcp record --merge` adds calls to a predated
+ * recording, a second apply predates only the new calls. The recording's
+ * own predated field is the sum over its calls.
+ *
+ * A recording predated before calls were marked carries only that
+ * recording-level field. Its calls are all processed already, so they are
+ * marked without any content change: the first call takes the old totals
+ * and the rest take zeros, which keeps the sum.
  */
 function predateRecording (recording, changes) {
   const created = new Set(changes.filter((c) => c.created && c.url).map((c) => pageKey(c.url)))
@@ -306,53 +319,68 @@ function predateRecording (recording, changes) {
     if (!byPage.has(k)) byPage.set(k, [])
     byPage.get(k).push(m)
   }
-  let sectionsRemoved = 0
-  let passagesRemoved = 0
   const report = []
-  const calls = recording.calls.map((call) => {
-    if (!Array.isArray(call.content)) return call
-    let changed = false
-    const content = call.content.map((part) => {
-      if (part.type !== 'text') return part
-      let doc
-      try { doc = JSON.parse(part.text) } catch { return part }
-      if (!doc || !Array.isArray(doc.results)) return part
-      let touched = false
-      const results = []
-      for (const r of doc.results) {
-        const k = pageKey(r.source_url || '')
-        if (created.has(k)) {
-          sectionsRemoved++
-          touched = true
-          report.push({ kind: 'section', source_url: r.source_url })
-          continue
+  let processed = 0
+
+  function predateCall (call) {
+    let sections = 0
+    let passages = 0
+    const content = !Array.isArray(call.content)
+      ? call.content
+      : call.content.map((part) => {
+        if (part.type !== 'text') return part
+        let doc
+        try { doc = JSON.parse(part.text) } catch { return part }
+        if (!doc || !Array.isArray(doc.results)) return part
+        let touched = false
+        const results = []
+        for (const r of doc.results) {
+          const k = pageKey(r.source_url || '')
+          if (created.has(k)) {
+            sections++
+            touched = true
+            report.push({ kind: 'section', source_url: r.source_url })
+            continue
+          }
+          const matchers = [...(byPage.get(k) || []), ...everywhere]
+          const { content: c, removed, section } = stripPassages(r.content || '', matchers, created)
+          if (section || (removed && !c.split('\n').some((l) => l.trim() && !/^# /.test(l)))) {
+            // Nothing but the breadcrumb left: the change added the section.
+            sections++
+            touched = true
+            report.push({ kind: 'section', source_url: r.source_url })
+          } else if (removed) {
+            passages += removed
+            touched = true
+            report.push({ kind: 'passages', source_url: r.source_url, removed })
+            results.push({ ...r, content: c })
+          } else {
+            results.push(r)
+          }
         }
-        const matchers = [...(byPage.get(k) || []), ...everywhere]
-        const { content: c, removed, section } = stripPassages(r.content || '', matchers, created)
-        if (section || (removed && !c.split('\n').some((l) => l.trim() && !/^# /.test(l)))) {
-          // Nothing but the breadcrumb left: the change added the section.
-          sectionsRemoved++
-          touched = true
-          report.push({ kind: 'section', source_url: r.source_url })
-        } else if (removed) {
-          passagesRemoved += removed
-          touched = true
-          report.push({ kind: 'passages', source_url: r.source_url, removed })
-          results.push({ ...r, content: c })
-        } else {
-          results.push(r)
-        }
-      }
-      if (!touched) return part
-      changed = true
-      return { ...part, text: JSON.stringify({ ...doc, results }) }
-    })
-    return changed ? { ...call, content } : call
-  })
-  return {
-    recording: { ...recording, calls, predated: { sections_removed: sectionsRemoved, passages_removed: passagesRemoved } },
-    report
+        return touched ? { ...part, text: JSON.stringify({ ...doc, results }) } : part
+      })
+    return { ...call, content, predated: { sections_removed: sections, passages_removed: passages } }
   }
+
+  const legacy = Boolean(recording.predated) && !recording.calls.some((c) => c.predated)
+  const zero = { sections_removed: 0, passages_removed: 0 }
+  const calls = recording.calls.map((call, i) => {
+    if (call.predated) return call
+    if (legacy) {
+      const old = recording.predated
+      return { ...call, predated: i === 0 ? { sections_removed: old.sections_removed || 0, passages_removed: old.passages_removed || 0 } : { ...zero } }
+    }
+    processed++
+    return predateCall(call)
+  })
+  const predated = { ...zero }
+  for (const c of calls) {
+    if (!c.predated || c.predated === true) continue
+    predated.sections_removed += c.predated.sections_removed || 0
+    predated.passages_removed += c.predated.passages_removed || 0
+  }
+  return { recording: { ...recording, calls, predated }, report, processed }
 }
 
 function apply (changesFile, recordingsDir) {
@@ -361,12 +389,13 @@ function apply (changesFile, recordingsDir) {
   for (const [id, list] of Object.entries(changes.items || {})) {
     const file = path.join(recordingsDir, `${id}.json`)
     if (!fs.existsSync(file)) { summary.push({ id, skipped: 'no recording' }); continue }
-    const rec = JSON.parse(fs.readFileSync(file, 'utf8'))
+    const raw = fs.readFileSync(file, 'utf8')
+    const rec = JSON.parse(raw)
     if (rec.source === 'production') { summary.push({ id, skipped: 'production recording' }); continue }
-    if (rec.predated) { summary.push({ id, skipped: 'already predated' }); continue }
-    const { recording, report } = predateRecording(rec, list)
-    fs.writeFileSync(file, JSON.stringify(recording, null, 2) + '\n')
-    summary.push({ id, ...recording.predated, report })
+    const { recording, report, processed } = predateRecording(rec, list)
+    const out = JSON.stringify(recording, null, 2) + '\n'
+    if (out !== raw) fs.writeFileSync(file, out)
+    summary.push({ id, calls_predated: processed, ...recording.predated, report })
   }
   return summary
 }
