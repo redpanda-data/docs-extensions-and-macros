@@ -312,6 +312,9 @@ module.exports.register = function ({ config = {} } = {}) {
     // agent companion, and the generated companions waiting for beforePublish.
     companionSources: new Map(),
     companions: [],
+    // included page key -> keys of the pages in other components that include
+    // it, read from sources at contentClassified (see collectSingleSourcedTwins)
+    twins: new Map(),
   }
   let validator = null
   const getValidator = () => (validator = validator || relationships.createRelationshipsValidator())
@@ -325,6 +328,9 @@ module.exports.register = function ({ config = {} } = {}) {
     const errors = validate.validateStructure(collected)
 
     state.facetsFile = collected.facetsFile || null
+    // Page sources are only AsciiDoc until conversion, so the single-sourcing
+    // map that lets Cloud twins inherit explicit edges is read now.
+    state.twins = collect.collectSingleSourcedTwins(contentCatalog)
 
     if (collected.relationshipsFile) {
       try {
@@ -373,11 +379,17 @@ module.exports.register = function ({ config = {} } = {}) {
       if (landingLayout !== collect.LAYOUTS.home) errors.push(`solutions: ROOT/pages/index.adoc must set :page-layout: ${collect.LAYOUTS.home} (found "${landingLayout || ''}")`)
     }
 
+    const isCloudPage = (page) => Boolean(page && page.asciidoc) && getDeploymentType(page.asciidoc.attributes) === 'Redpanda Cloud'
+    const cloudTwinsOf = (key) => [...(state.twins.get(key) || [])].filter((twinKey) => isCloudPage(resolveDoc(twinKey)))
     for (const record of collected.solutions) {
-      const result = validate.validateSolution(record, { categoryMap, facetVocab, resolveDoc, solutionIds, pageByUrl })
+      collect.resolveRelatedDocLines(record, pageByUrl)
+      const result = validate.validateSolution(record, {
+        categoryMap, facetVocab, resolveDoc, solutionIds, pageByUrl, umbrellaLayouts: UMBRELLA_LAYOUTS, isCloudPage, cloudTwinsOf,
+      })
       errors.push(...result.errors)
       warnings.push(...result.warnings)
     }
+    warnings.push(...validate.validateCatalog(collected.solutions))
 
     const rel = validate.validateRelationships(state.relationshipsData || { relationships: [] }, {
       validate: getValidator(), solutionIds, resolveDoc, keyOf: collect.pageKey,
@@ -426,6 +438,14 @@ module.exports.register = function ({ config = {} } = {}) {
     for (const record of active) {
       record.relatedDocKeys = new Set()
       record.relatedDocs = []
+      // Reader-facing reasons, from the overview's Related docs sentences.
+      record.relatedDocWhy = new Map()
+      for (const line of record.relatedDocLines || []) {
+        if (line.key && !record.relatedDocWhy.has(line.key)) record.relatedDocWhy.set(line.key, line.text)
+      }
+      // Cloud twin key -> the related doc it single-sources
+      record.relatedDocTwins = new Map()
+      const runsOnCloud = record.platforms.includes('cloud')
       for (const ref of record.relatedDocRefs) {
         const page = resolveDoc(collect.stripVersion(ref))
         if (!page) continue
@@ -436,6 +456,17 @@ module.exports.register = function ({ config = {} } = {}) {
         }
         record.relatedDocKeys.add(key)
         record.relatedDocs.push({ id: key, title: collect.plainTitle(page.asciidoc && page.asciidoc.doctitle), url: page.pub && page.pub.url, provenance: 'explicit' })
+        // A solution that runs on Cloud reaches Cloud readers through the
+        // Cloud page that single-sources this one. The twin gets the explicit
+        // edge (and the same reason), but not a second entry in relatedDocs:
+        // the overview lists each doc once.
+        if (!runsOnCloud) continue
+        for (const twinKey of cloudTwinsOf(key)) {
+          if (record.relatedDocKeys.has(twinKey) || rejectedPairs.has(`${record.id} ${twinKey}`)) continue
+          record.relatedDocKeys.add(twinKey)
+          record.relatedDocTwins.set(twinKey, key)
+          if (record.relatedDocWhy.has(key) && !record.relatedDocWhy.has(twinKey)) record.relatedDocWhy.set(twinKey, record.relatedDocWhy.get(key))
+        }
       }
       record.relatedSolutions = record.relatedSolutionIds
         .map((id) => activeById.get(id))
@@ -451,7 +482,7 @@ module.exports.register = function ({ config = {} } = {}) {
       return { key: collect.pageKey(page), page, url: page.pub && page.pub.url, categories, deployment: getDeploymentType(attrs) }
     })
     const graphInput = categoryMap ? docs : docs.map((d) => ({ ...d, categories: [] }))
-    const { related, edges } = relationships.computeRelatedSolutions({
+    const { related, edges, warnings: rankWarnings } = relationships.computeRelatedSolutions({
       docs: graphInput,
       solutions: active,
       relationships: rel.entries,
@@ -459,6 +490,7 @@ module.exports.register = function ({ config = {} } = {}) {
       maxRelated: settings.maxRelated,
       minScore: settings.minScore,
     })
+    for (const w of rankWarnings || []) logger.warn(`solutions-catalog: ${w}`)
     let decorated = 0
     for (const doc of docs) {
       const items = related.get(doc.key)
@@ -472,6 +504,11 @@ module.exports.register = function ({ config = {} } = {}) {
     const coverage = relationships.computeCoverage({ docs: graphInput, solutions: active, categoryMap })
     for (const [slug, entry] of Object.entries(coverage.solutions)) {
       logger.info(relationships.formatCoverageLine(slug, entry))
+      // A category no eligible page carries is one the solution can never be
+      // recommended through: say so where authors look, not only at info.
+      if (entry.zeroMatch.length) {
+        logger.warn(`solutions-catalog: ${slug}: page-categories ${entry.zeroMatch.join(', ')} match${entry.zeroMatch.length === 1 ? 'es' : ''} no eligible doc page; no recommendation can come from ${entry.zeroMatch.length === 1 ? 'it' : 'them'}`)
+      }
     }
     logger.info(`solutions-catalog: ${decorated} doc pages decorated, ${coverage.uncategorizedEligiblePages} eligible doc pages without categories`)
 

@@ -104,12 +104,16 @@ function sourceLinesOf (file) {
   }
 }
 
-// Captured command output is not code a reader can run, so a Download control
-// on it would offer a file that only makes sense next to the test that wrote
-// it. tools/capture-expected.sh puts these under a step's expected/ directory,
-// which is how the solutions repo distinguishes them from sources.
-function isCapturedOutput (relative) {
-  return String(relative).split('/').includes('expected')
+// Everything under steps/ is per-step scaffolding, not a source a reader
+// takes away: tools/capture-expected.sh writes captured output to a step's
+// expected/ directory, and a step's commands.sh holds the tagged commands the
+// page shows inline and Doc Detective runs. A Download control on either
+// offers a file that only makes sense beside the harness that uses it, so
+// nothing whose first path segment is `steps` is stamped. An expected/
+// directory anywhere else is captured output too.
+function isStepScaffolding (relative) {
+  const segments = String(relative).split('/')
+  return segments[0] === 'steps' || segments.includes('expected')
 }
 
 function register (registry, context = {}) {
@@ -127,7 +131,7 @@ function register (registry, context = {}) {
       for (const block of doc.findBy({ context: 'listing' })) {
         const src = includedSrcOf(block)
         if (!src || src.family !== EXAMPLE_FAMILY || !src.relative) continue
-        if (isCapturedOutput(src.relative)) continue
+        if (isStepScaffolding(src.relative)) continue
         const marker = `${MARKER_PREFIX}${stamped.size + 1}`
         stamped.set(marker, { path: src.relative, tag: tagFromDirective(includeDirectiveLine(block, file, pageLines)) })
         const role = block.getAttribute('role')

@@ -11,15 +11,26 @@
 
 const { parse } = require('node-html-parser')
 const {
-  RESERVED_IDS, LAYOUTS, ENUMS, SLUG_RX, VERSION_RX, VERIFICATION_FILE, stripVersion,
+  RESERVED_IDS, LAYOUTS, ENUMS, SLUG_RX, VERSION_RX, VERIFICATION_FILE, COMPONENT, stripVersion, pageKey,
 } = require('./collect')
 const { normalizeCategories, isLeafCategory } = require('../../extension-utils/categories')
 const yaml = require('js-yaml')
 
 const DURATION_MIN = 5
 const DURATION_MAX = 600
-const DESCRIPTION_MAX = 200
-const REQUIRED_OVERVIEW_H2 = ['architecture', 'prerequisites', 'production considerations']
+// The landing card shows the description in three clamped lines; 140
+// characters is what fits them.
+const DESCRIPTION_MAX = 140
+// page-solution-technologies names what a reader needs beyond Redpanda
+// itself: other systems, languages, formats, and separately deployed Redpanda
+// products. Tools every solution uses say nothing about any one of them, and
+// a value that is also a category belongs in page-categories.
+const TECHNOLOGY_DENY_LIST = ['rpk', 'curl', 'docker', 'docker compose', 'redpanda', 'redpanda console']
+const REQUIRED_OVERVIEW_H2 = ['architecture', 'prerequisites']
+// The complete production section lives at the end of the last step, once the
+// reader has the whole stack running, with one h3 per topic.
+const PRODUCTION_H2 = 'production considerations'
+const PRODUCTION_MIN_TOPICS = 5
 // A related doc must be a fully qualified page ID: component:module:path.adoc
 const FQ_RESOURCE_RX = /^(?:[^@:\s]+@)?[A-Za-z0-9_-]+:[A-Za-z0-9_-]*:[^\s]+\.adoc$/
 
@@ -48,6 +59,36 @@ function hasVerifySection (contents) {
   const root = parseHtml(contents)
   if (root.querySelector('.solution-verify')) return true
   return root.querySelectorAll('h2,h3').some((h) => normalizeHeading(h.text).startsWith('verify'))
+}
+
+/**
+ * The h3 topics under the "Production considerations" h2 of a page, or null
+ * when the page has no such h2. Asciidoctor wraps the section in a .sect1, so
+ * its h3s are the topics; without the wrapper (hand-built HTML) the h3s up to
+ * the next h2 count.
+ */
+function productionTopics (contents) {
+  const root = parseHtml(contents)
+  const h2 = root.querySelectorAll('h2').find((h) => normalizeHeading(h.text) === PRODUCTION_H2)
+  if (!h2) return null
+  const parent = h2.parentNode
+  if (parent && /(^|\s)sect1(\s|$)/.test(parent.getAttribute ? parent.getAttribute('class') || '' : '')) {
+    return parent.querySelectorAll('h3').map((h) => normalizeHeading(h.text))
+  }
+  const topics = []
+  let node = h2.nextElementSibling
+  while (node && node.tagName !== 'H2') {
+    if (node.tagName === 'H3') topics.push(normalizeHeading(node.text))
+    else topics.push(...node.querySelectorAll('h3').map((h) => normalizeHeading(h.text)))
+    node = node.nextElementSibling
+  }
+  return topics
+}
+
+/** Number of `.production-note` blocks on a page that contain no link. */
+function unlinkedProductionNotes (contents) {
+  const root = parseHtml(contents)
+  return root.querySelectorAll('.production-note').filter((note) => !note.querySelector('a[href]')).length
 }
 
 /**
@@ -194,6 +235,58 @@ function isIsoTimestamp (value) {
   return !Number.isNaN(Date.parse(value.trim()))
 }
 
+/** Latest page-git-modified-date across a solution's overview and steps. */
+function contentModifiedDate (record) {
+  const dates = [record.overview, ...(record.steps || []).map((s) => s.page)]
+    .map((p) => p && p.asciidoc && p.asciidoc.attributes && p.asciidoc.attributes['page-git-modified-date'])
+    .filter((d) => typeof d === 'string' && !Number.isNaN(Date.parse(d)))
+  if (record.lastModified && !Number.isNaN(Date.parse(record.lastModified))) dates.push(String(record.lastModified))
+  return dates.sort().pop() || null
+}
+
+const HEX_RX = /^[0-9a-f]+$/i
+
+/**
+ * Warnings about the verification manifest itself. Never fatal: the manifest
+ * is evidence the monorepo writes, and a stale or partial one should be
+ * visible in the build log without stopping the docs from publishing.
+ */
+function verificationWarnings (record) {
+  const warnings = []
+  const v = record.verified || {}
+  const runAt = v.runAt
+  if (runAt === undefined) warnings.push(`${VERIFICATION_FILE} has no run_at`)
+  else if (!isIsoTimestamp(runAt)) warnings.push(`${VERIFICATION_FILE} run_at "${runAt}" is not an ISO 8601 timestamp`)
+  else {
+    // Day granularity: page-git-modified-date carries no time, so a commit
+    // on the same day as the run cannot be ordered against it.
+    const modified = contentModifiedDate(record)
+    if (modified && String(runAt).slice(0, 10) < String(modified).slice(0, 10)) {
+      warnings.push(`${VERIFICATION_FILE} run_at ${runAt} is older than the solution's pages (last modified ${modified}); rerun the verification so the evidence matches what readers see`)
+    }
+  }
+  if (v.platforms !== undefined) {
+    const list = Array.isArray(v.platforms) ? v.platforms : null
+    const unknown = list ? list.filter((p) => !ENUMS.platforms.includes(p)) : []
+    if (!list) warnings.push(`${VERIFICATION_FILE} platforms must be an array of ${ENUMS.platforms.join(', ')}`)
+    else if (unknown.length) warnings.push(`${VERIFICATION_FILE} platforms contains unknown values: ${unknown.join(', ')}`)
+    else {
+      const missing = (record.platforms || []).filter((p) => !list.includes(p))
+      if (missing.length) warnings.push(`page-solution-platforms includes ${missing.join(', ')} but ${VERIFICATION_FILE} verified only ${list.join(', ') || 'nothing'}`)
+    }
+  }
+  if (v.contentRev !== undefined) {
+    const rev = v.contentRev
+    const ok = rev && typeof rev === 'object' && !Array.isArray(rev) &&
+      ['solution', 'docs'].every((k) => typeof rev[k] === 'string' && HEX_RX.test(rev[k]))
+    if (!ok) warnings.push(`${VERIFICATION_FILE} content_rev must be {"solution": <git tree hash>, "docs": <git tree hash>}`)
+  }
+  if (v.stackSha256 !== undefined && !(typeof v.stackSha256 === 'string' && /^[0-9a-f]{64}$/i.test(v.stackSha256))) {
+    warnings.push(`${VERIFICATION_FILE} stack_sha256 must be a 64-character hex SHA-256 digest`)
+  }
+  return warnings
+}
+
 /**
  * Validate one collected solution record after conversion.
  *
@@ -211,9 +304,12 @@ function isIsoTimestamp (value) {
  * @param {Set<string>} [ctx.solutionIds] - all module names in the component
  * @param {(pathname: string) => Object|null|undefined} [ctx.pageByUrl] - a published URL
  *   path to its page; when absent, link fragments are not checked
+ * @param {Array<string>} [ctx.umbrellaLayouts] - layouts that never show recommendations
+ * @param {(page: Object) => boolean} [ctx.isCloudPage] - when absent, Cloud reach is not checked
+ * @param {(key: string) => Array<string>} [ctx.cloudTwinsOf] - Cloud pages that single-source a doc
  * @returns {{errors: Array<string>, warnings: Array<string>}}
  */
-function validateSolution (record, { categoryMap, facetVocab, resolveDoc, solutionIds, pageByUrl } = {}) {
+function validateSolution (record, { categoryMap, facetVocab, resolveDoc, solutionIds, pageByUrl, umbrellaLayouts, isCloudPage, cloudTwinsOf } = {}) {
   const errors = []
   const warnings = []
   const id = record.id
@@ -238,7 +334,7 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
 
   // Required scalars and enums
   if (!record.description) err('description is required')
-  else if (record.description.length > DESCRIPTION_MAX) warn(`description is ${record.description.length} characters; keep it under ${DESCRIPTION_MAX}`)
+  else if (record.description.length > DESCRIPTION_MAX) err(`description is ${record.description.length} characters; the landing card fits ${DESCRIPTION_MAX}`)
 
   if (!record.version) err('page-solution-version is required (vX.Y.Z)')
   else if (!VERSION_RX.test(record.version)) err(`page-solution-version "${record.version}" must match vX.Y.Z`)
@@ -258,6 +354,17 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
   if (badPlatforms.length) err(`page-solution-platforms contains unknown values: ${badPlatforms.join(', ')} (allowed: ${ENUMS.platforms.join(', ')})`)
 
   if (!record.technologies.length) err('page-solution-technologies is required')
+  const denied = record.technologies.filter((t) => TECHNOLOGY_DENY_LIST.includes(t.toLowerCase()))
+  if (denied.length) {
+    err(`page-solution-technologies must not list ${denied.join(', ')}: it names what a reader needs beyond Redpanda and its everyday tools (other systems, languages, formats, and separately deployed products such as Redpanda Connect)`)
+  }
+  if (categoryMap) {
+    const categoryNames = new Map([...categoryMap.categories, ...categoryMap.subcategories].map((c) => [c.toLowerCase(), c]))
+    const asCategory = record.technologies.filter((t) => categoryNames.has(t.toLowerCase()) && !denied.includes(t))
+    if (asCategory.length) {
+      err(`page-solution-technologies lists ${asCategory.join(', ')}, which ${asCategory.length === 1 ? 'is a category' : 'are categories'}; put ${asCategory.length === 1 ? 'it' : 'them'} in page-categories instead`)
+    }
+  }
 
   // Verification manifest: the build-side twin of the monorepo's check-metadata.
   // Nothing is inferred when it is absent or unreadable, so say so instead.
@@ -267,9 +374,7 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
     warn(`no ${VERIFICATION_FILE} attachment; readers get no verification evidence`)
   }
   if (record.verified) {
-    const runAt = record.verified.runAt
-    if (runAt === undefined) warn(`${VERIFICATION_FILE} has no run_at`)
-    else if (!isIsoTimestamp(runAt)) warn(`${VERIFICATION_FILE} run_at "${runAt}" is not an ISO 8601 timestamp`)
+    for (const w of verificationWarnings(record)) warn(w)
   }
 
   if (record.status === 'deprecated' && !record.supersededBy) err('page-solution-superseded-by is required when status is deprecated')
@@ -328,15 +433,68 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
     if (!listed.has(stepId)) err(`pages/${stepId}.adoc exists but is not listed in page-solution-steps`)
   }
 
+  // Duration: when every step is timed, the steps are the whole story.
+  const stepMinutes = record.stepIds.map((sid) => {
+    const step = record.steps.find((s) => s.id === sid)
+    const value = step && step.page.asciidoc && step.page.asciidoc.attributes && step.page.asciidoc.attributes['page-solution-step-duration']
+    return value !== undefined && value !== '' && isInteger(value) ? Number(value) : null
+  })
+  if (stepMinutes.length && stepMinutes.every((m) => m !== null) && isInteger(record.duration)) {
+    const total = stepMinutes.reduce((a, b) => a + b, 0)
+    if (total !== Number(record.duration)) {
+      warn(`page-solution-duration is ${record.duration} but the steps' page-solution-step-duration values add up to ${total}`)
+    }
+  }
+
   // Related docs: warn when absent, fatal when malformed or unresolved
   if (!record.relatedDocRefs.length) warn('page-solution-related-docs is empty; readers get no explicit Product Docs links')
+  const relatedKeys = new Map()
+  let cloudReach = false
   for (const ref of record.relatedDocRefs) {
     if (!FQ_RESOURCE_RX.test(ref)) {
       err(`page-solution-related-docs entry "${ref}" must be a fully qualified page ID (component:module:path.adoc)`)
       continue
     }
-    if (resolveDoc && !resolveDoc(stripVersion(ref))) err(`page-solution-related-docs entry "${ref}" does not resolve to a page in this build`)
+    const page = resolveDoc ? resolveDoc(stripVersion(ref)) : null
+    if (resolveDoc && !page) {
+      err(`page-solution-related-docs entry "${ref}" does not resolve to a page in this build`)
+      continue
+    }
+    if (!page) continue
+    const key = pageKey(page)
+    relatedKeys.set(key, ref)
+    const attrs = (page.asciidoc && page.asciidoc.attributes) || {}
+    if (umbrellaLayouts && (umbrellaLayouts.includes(attrs['page-layout']) || umbrellaLayouts.includes(attrs['page-role']))) {
+      warn(`page-solution-related-docs entry "${ref}" is a landing or index page (layout ${attrs['page-layout'] || attrs['page-role']}), which never shows recommendations; link the article it summarizes`)
+    }
+    if (isCloudPage && (isCloudPage(page) || (cloudTwinsOf && cloudTwinsOf(key).length))) cloudReach = true
   }
+  if (isCloudPage && record.platforms.includes('cloud') && record.relatedDocRefs.length && !cloudReach) {
+    warn('page-solution-platforms includes cloud but no page-solution-related-docs entry is a Cloud page or has a single-sourced Cloud twin; Cloud readers get no explicit recommendation')
+  }
+
+  // The overview's Related docs list and the attribute say the same thing
+  // twice: the list is what readers of the overview see, the attribute is
+  // what makes the doc page recommend the solution back. A doc in the list
+  // but not the attribute is a one-way link (fatal once published); a doc in
+  // the attribute with no sentence in the list leaves the recommendation on
+  // that page with no reason to give.
+  if (Array.isArray(record.relatedDocLines)) {
+    const report = record.status === 'published' ? err : warn
+    const authored = new Set()
+    for (const line of record.relatedDocLines) {
+      if (!line.key || line.component === COMPONENT) continue
+      authored.add(line.key)
+      if (!relatedKeys.has(line.key)) {
+        report(`== Related docs links ${line.key} but page-solution-related-docs does not list it, so that page does not recommend this solution; add it to the attribute`)
+      }
+    }
+    for (const [key, ref] of relatedKeys) {
+      if (!authored.has(key)) warn(`page-solution-related-docs entry "${ref}" has no item in == Related docs; the recommendation on that page has no reason to show`)
+    }
+  }
+
+  if (!record.relatedSolutionIds.length) warn('page-solution-related-solutions is empty; the overview points readers at no other solution')
   for (const other of record.relatedSolutionIds) {
     if (other === id) err('page-solution-related-solutions must not list the solution itself')
     else if (solutionIds && !solutionIds.has(other)) err(`page-solution-related-solutions entry "${other}" is not a solution in this build`)
@@ -352,6 +510,35 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
       if (!hasVerifySection(step.page.contents)) {
         err(`published step ${step.id} needs an h2/h3 starting with "Verify" or a [.solution-verify] block`)
       }
+    }
+  }
+
+  // Production considerations: the complete section is the last step's, and
+  // every in-context note on a step links to its topic there. Fatal once
+  // published, a warning while a draft.
+  {
+    const report = record.status === 'published' ? err : warn
+    const present = new Map(record.steps.map((s) => [s.id, s.page]))
+    const lastId = [...record.stepIds].reverse().find((sid) => present.has(sid))
+    if (lastId) {
+      const topics = productionTopics(present.get(lastId).contents)
+      if (topics === null) {
+        report(`last step ${lastId} needs an h2 "Production considerations" (include::partial$production/_all.adoc[])`)
+      } else if (topics.length < PRODUCTION_MIN_TOPICS) {
+        report(`last step ${lastId}: "Production considerations" has ${topics.length} topic${topics.length === 1 ? '' : 's'} (h3); it needs at least ${PRODUCTION_MIN_TOPICS}`)
+      }
+    }
+    if (productionTopics(record.overview.contents) !== null) {
+      warn(`the overview has an h2 "Production considerations"; it belongs at the end of the last step${lastId ? ` (${lastId})` : ''}, with a pointer under Prerequisites`)
+    }
+    for (const step of record.steps) {
+      if (step.id !== lastId && productionTopics(step.page.contents) !== null) {
+        warn(`step ${step.id} has an h2 "Production considerations"; only the last step${lastId ? ` (${lastId})` : ''} carries the complete section`)
+      }
+    }
+    for (const { id: pageId, page } of [{ id: 'index', page: record.overview }, ...record.steps]) {
+      const unlinked = unlinkedProductionNotes(page.contents)
+      if (unlinked) report(`${pageId}.adoc has ${unlinked} [.production-note] block${unlinked === 1 ? '' : 's'} with no link to the topic under Production considerations`)
     }
   }
 
@@ -382,6 +569,36 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
   }
 
   return { errors, warnings }
+}
+
+/**
+ * Checks across solutions: the related-solutions graph should be symmetric,
+ * and two solutions that point at each other should share a use case, or the
+ * landing page's Use case filter separates what the overviews join.
+ *
+ * @param {Array<Object>} records - collected records
+ * @returns {Array<string>} warnings
+ */
+function validateCatalog (records) {
+  const warnings = []
+  const byId = new Map((records || []).map((r) => [r.id, r]))
+  const reportedPairs = new Set()
+  for (const record of records || []) {
+    for (const otherId of record.relatedSolutionIds || []) {
+      const other = byId.get(otherId)
+      if (!other || other === record) continue
+      if (!(other.relatedSolutionIds || []).includes(record.id)) {
+        warnings.push(`${otherId}: ${record.id} lists it in page-solution-related-solutions but ${otherId} does not list ${record.id} back`)
+      }
+      const pair = [record.id, otherId].sort().join(' ')
+      const shared = (record.useCases || []).filter((u) => (other.useCases || []).includes(u))
+      if ((record.useCases || []).length && (other.useCases || []).length && !shared.length && !reportedPairs.has(pair)) {
+        reportedPairs.add(pair)
+        warnings.push(`${record.id}: page-solution-related-solutions lists ${otherId}, but the two share no page-solution-use-cases value`)
+      }
+    }
+  }
+  return warnings
 }
 
 /**
@@ -486,10 +703,15 @@ function formatErrors (errors) {
 
 module.exports = {
   isIsoTimestamp,
+  verificationWarnings,
+  contentModifiedDate,
   DURATION_MIN,
   DURATION_MAX,
   DESCRIPTION_MAX,
   REQUIRED_OVERVIEW_H2,
+  PRODUCTION_MIN_TOPICS,
+  productionTopics,
+  unlinkedProductionNotes,
   normalizeHeading,
   headingTexts,
   hasVerifySection,
@@ -501,6 +723,8 @@ module.exports = {
   validateStructure,
   validateSolution,
   validateRelationships,
+  validateCatalog,
+  TECHNOLOGY_DENY_LIST,
   formatErrors,
   parseFacetVocab,
 }

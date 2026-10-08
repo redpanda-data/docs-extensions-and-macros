@@ -88,11 +88,20 @@ const OVERVIEW_HTML = (title, extra = '') =>
   `<article class="doc"><h1>${title}</h1><p>Lede.</p>` +
   '<h2 id="architecture">Architecture</h2><p>Diagram.</p>' +
   '<h2 id="prerequisites">Prerequisites</h2><p>Docker.</p>' +
-  '<h2 id="production-considerations">Production considerations</h2><p>Table.</p>' +
   `${extra}</article>`
 
 const STEP_HTML = (title, verify = '<h2 id="verify">Verify the result</h2><p>rpk topic list</p>') =>
   `<article class="doc"><h1>${title}</h1><p>Do the thing.</p>${verify}</article>`
+
+// The complete production section as Asciidoctor renders it on the last step.
+const PRODUCTION_TOPICS = ['Brokers and replication', 'Security', 'Partitions', 'Consumer scaling', 'Data retention']
+const PRODUCTION_SECTION = (topics = PRODUCTION_TOPICS) =>
+  '<div class="sect1"><h2 id="production-considerations">Production considerations</h2><div class="sectionbody">' +
+  '<div class="paragraph"><p>This solution runs on a single broker.</p></div>' +
+  topics.map((t) => `<div class="sect2"><h3 id="prod-${t.toLowerCase().replace(/\W+/g, '-')}">${t}</h3><div class="paragraph"><p>Detail.</p></div></div>`).join('') +
+  '</div></div>'
+const LAST_STEP_HTML = (title, production = PRODUCTION_SECTION()) =>
+  `<article class="doc"><h1>${title}</h1><p>Do the thing.</p><h2 id="verify">Verify the result</h2><p>rpk topic list</p>${production}</article>`
 
 const OVERVIEW_ATTRS = {
   'page-layout': 'solution',
@@ -131,7 +140,7 @@ function makeSolution (id, { attrs = {}, steps, overviewHtml, stepHtml, title, v
     relative: `${stepId}.adoc`,
     title: `Step ${stepId}`,
     attrs: { 'page-layout': 'solution-step', description: `Step ${stepId}`, ...(i === 0 ? { 'page-solution-step-duration': '5' } : {}) },
-    html: (stepHtml && stepHtml[stepId]) || STEP_HTML(`Step ${stepId}`),
+    html: (stepHtml && stepHtml[stepId]) || (i === stepIds.length - 1 ? LAST_STEP_HTML(`Step ${stepId}`) : STEP_HTML(`Step ${stepId}`)),
   }))
   return {
     pages: [overview, ...stepPages],
@@ -622,14 +631,14 @@ describe('solutions-catalog: step bijection', () => {
 })
 
 describe('solutions-catalog: section checks on converted HTML', () => {
-  test.each(['Architecture', 'Prerequisites', 'Production considerations'])('published overview without h2 %s', async (missing) => {
+  test.each(['Architecture', 'Prerequisites'])('published overview without h2 %s', async (missing) => {
     const html = OVERVIEW_HTML('Solution leaderboard', '<a href="_attachments/docker-compose.yml">c</a>').replace(`>${missing}</h2>`, '>Something else</h2>')
     const solution = makeSolution('leaderboard', { overviewHtml: html })
     await expect(run({ solutions: [solution] })).rejects.toThrow(new RegExp(`missing an h2 "${missing}"`))
   })
 
   test('heading text is normalized (case, whitespace, trailing punctuation)', async () => {
-    const html = OVERVIEW_HTML('x').replace('>Production considerations</h2>', '>  PRODUCTION\n Considerations:  </h2>')
+    const html = OVERVIEW_HTML('x').replace('>Prerequisites</h2>', '>  PREREQUISITES\n :  </h2>')
     const solution = makeSolution('leaderboard', { overviewHtml: html })
     await expect(run({ solutions: [solution] })).resolves.toBeTruthy()
   })
@@ -688,6 +697,76 @@ describe('solutions-catalog: section checks on converted HTML', () => {
   })
 })
 
+describe('solutions-catalog: production considerations', () => {
+  const warningsOf = (result) => result.logger.warn.mock.calls.map((c) => c[0]).join('\n')
+  const NOTE = (link = '<a href="../verify-end-to-end/#prod-security" class="xref page">Production considerations: security</a>') =>
+    '<h2 id="in-production">In production</h2><div class="openblock production-note"><div class="title">In production</div>' +
+    `<div class="content"><div class="paragraph"><p>Turn on SASL. For the full picture, see ${link}.</p></div></div></div>`
+
+  test('the overview no longer needs the section', async () => {
+    await expect(run()).resolves.toBeTruthy()
+    expect(validate.REQUIRED_OVERVIEW_H2).toEqual(['architecture', 'prerequisites'])
+  })
+
+  test('a published last step without the section is fatal', async () => {
+    const solution = makeSolution('leaderboard', { stepHtml: { 'verify-end-to-end': STEP_HTML('v') } })
+    await expect(run({ solutions: [solution] })).rejects.toThrow(/last step verify-end-to-end needs an h2 "Production considerations"/)
+  })
+
+  test('the last step follows page-solution-steps, not the alphabet', async () => {
+    // verify-end-to-end sorts last alphabetically but is listed first here.
+    const solution = makeSolution('leaderboard', {
+      attrs: { 'page-solution-steps': 'verify-end-to-end, build-leaderboard, start-environment' },
+      steps: ['verify-end-to-end', 'build-leaderboard', 'start-environment'],
+    })
+    await expect(run({ solutions: [solution] })).resolves.toBeTruthy()
+    const misplaced = makeSolution('leaderboard', {
+      attrs: { 'page-solution-steps': 'verify-end-to-end, build-leaderboard, start-environment' },
+      steps: ['verify-end-to-end', 'build-leaderboard', 'start-environment'],
+      stepHtml: { 'verify-end-to-end': LAST_STEP_HTML('v'), 'start-environment': STEP_HTML('s') },
+    })
+    await expect(run({ solutions: [misplaced] })).rejects.toThrow(/last step start-environment needs an h2/)
+  })
+
+  test('fewer than five topics is fatal once published', async () => {
+    const solution = makeSolution('leaderboard', { stepHtml: { 'verify-end-to-end': LAST_STEP_HTML('v', PRODUCTION_SECTION(PRODUCTION_TOPICS.slice(0, 4))) } })
+    await expect(run({ solutions: [solution] })).rejects.toThrow(/"Production considerations" has 4 topics \(h3\); it needs at least 5/)
+  })
+
+  test('without the .sect1 wrapper the h3s up to the next h2 count', () => {
+    const html = '<h2>Production considerations</h2><h3>a</h3><div><h3>b</h3></div><h2>Clean up</h2><h3>not a topic</h3>'
+    expect(validate.productionTopics(html)).toEqual(['a', 'b'])
+    expect(validate.productionTopics('<h2>Verify</h2>')).toBeNull()
+  })
+
+  test('a draft gets warnings, and the build goes on', async () => {
+    const draft = makeSolution('sandbox', {
+      attrs: { 'page-solution-status': 'draft' },
+      stepHtml: { 'verify-end-to-end': STEP_HTML('v'), 'build-leaderboard': STEP_HTML('b', NOTE('nowhere')) },
+    })
+    const result = await run({ solutions: [makeSolution('live'), draft], config: { include_drafts: true } })
+    expect(warningsOf(result)).toMatch(/sandbox: last step verify-end-to-end needs an h2 "Production considerations"/)
+    expect(warningsOf(result)).toMatch(/sandbox: build-leaderboard\.adoc has 1 \[\.production-note\] block with no link/)
+  })
+
+  test('a production note must link to its topic', async () => {
+    const linked = makeSolution('leaderboard', { stepHtml: { 'build-leaderboard': STEP_HTML('b', NOTE() + '<h2 id="verify">Verify</h2>') } })
+    await expect(run({ solutions: [linked] })).resolves.toBeTruthy()
+    const unlinked = makeSolution('leaderboard', { stepHtml: { 'build-leaderboard': STEP_HTML('b', NOTE('the last step') + '<h2 id="verify">Verify</h2>') } })
+    await expect(run({ solutions: [unlinked] })).rejects.toThrow(/build-leaderboard\.adoc has 1 \[\.production-note\] block with no link/)
+  })
+
+  test('the section on the overview or an earlier step is a warning pointing at the last step', async () => {
+    const solution = makeSolution('leaderboard', {
+      overviewHtml: OVERVIEW_HTML('x', PRODUCTION_SECTION()),
+      stepHtml: { 'build-leaderboard': STEP_HTML('b') + PRODUCTION_SECTION() },
+    })
+    const result = await run({ solutions: [solution] })
+    expect(warningsOf(result)).toMatch(/leaderboard: the overview has an h2 "Production considerations"; it belongs at the end of the last step \(verify-end-to-end\)/)
+    expect(warningsOf(result)).toMatch(/leaderboard: step build-leaderboard has an h2 "Production considerations"; only the last step \(verify-end-to-end\)/)
+  })
+})
+
 // ---------------------------------------------------------------------------
 
 describe('solutions-catalog: status handling', () => {
@@ -725,7 +804,7 @@ describe('solutions-catalog: status handling', () => {
     // catalog JSON and component attribute
     const catalog = addedFile(result.siteCatalog, 'solutions.json')
     expect(catalog.solutions.map((s) => [s.id, s.status, s.draft])).toEqual([['sandbox', 'draft', true]])
-    // Empty because a one-solution catalogue has nothing to narrow, not
+    // Empty because a one-solution catalog has nothing to narrow, not
     // because drafts are treated differently: they are counted like any other.
     expect(catalog.facets.difficulty).toEqual([])
     const attrCatalog = JSON.parse(result.catalog.getComponent('home').versions[0].asciidoc.attributes['solutions-catalog'])
@@ -1310,6 +1389,52 @@ describe('solutions-catalog: verification manifest', () => {
     expect(json(solution.pages[0], 'page-solution').verified.media).toBe(0)
   })
 
+  const TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+  const STACK = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+
+  test('carries platforms, content_rev, and stack_sha256 through to the record', async () => {
+    const extra = { platforms: ['self-managed', 'cloud'], content_rev: { solution: TREE, docs: TREE }, stack_sha256: STACK }
+    const solution = makeSolution('leaderboard', { verification: JSON.stringify({ ...MANIFEST, ...extra }) })
+    const result = await run({ solutions: [solution] })
+    expect(json(solution.pages[0], 'page-solution').verified).toEqual({
+      ...EXPECTED, platforms: ['self-managed', 'cloud'], contentRev: { solution: TREE, docs: TREE }, stackSha256: STACK,
+    })
+    expect(warningsOf(result)).not.toMatch(/verification\.json/)
+  })
+
+  test('warns when the run covered fewer platforms than the page claims', async () => {
+    const solution = makeSolution('leaderboard', { verification: JSON.stringify({ ...MANIFEST, platforms: ['self-managed'] }) })
+    const result = await run({ solutions: [solution] })
+    expect(warningsOf(result)).toMatch(/page-solution-platforms includes cloud but verification\.json verified only self-managed/)
+  })
+
+  test.each([
+    ['platforms not an array', { platforms: 'cloud' }, /platforms must be an array/],
+    ['an unknown platform', { platforms: ['mainframe'] }, /platforms contains unknown values: mainframe/],
+    ['content_rev not an object of hashes', { content_rev: 'abc' }, /content_rev must be/],
+    ['content_rev missing docs', { content_rev: { solution: 'abc123' } }, /content_rev must be/],
+    ['stack_sha256 not a digest', { stack_sha256: 'xyz' }, /stack_sha256 must be a 64-character hex/],
+  ])('warns on %s, and keeps the manifest', async (_name, extra, rx) => {
+    const solution = makeSolution('leaderboard', { verification: JSON.stringify({ ...MANIFEST, ...extra }) })
+    const result = await run({ solutions: [solution] })
+    expect(json(solution.pages[0], 'page-solution').verified.specs).toBe(11)
+    expect(warningsOf(result)).toMatch(rx)
+  })
+
+  test('warns when the run is older than the pages it verified', async () => {
+    const solution = makeSolution('leaderboard')
+    // A step changed after the run on 2026-09-14.
+    solution.pages[2].asciidoc.attributes['page-git-modified-date'] = '2026-09-20'
+    const result = await run({ solutions: [solution] })
+    expect(warningsOf(result)).toMatch(/leaderboard: verification\.json run_at 2026-09-14T09:12:00Z is older than the solution's pages \(last modified 2026-09-20\)/)
+  })
+
+  test('a page changed on the day of the run is not called stale', async () => {
+    const solution = makeSolution('leaderboard', { attrs: { 'page-git-modified-date': '2026-09-14' } })
+    const result = await run({ solutions: [solution] })
+    expect(warningsOf(result)).not.toMatch(/is older than the solution's pages/)
+  })
+
   test('parseVerification is pure over the file', () => {
     expect(collect.parseVerification(undefined)).toEqual({ verified: null, error: null })
     expect(collect.parseVerification({ contents: Buffer.from(JSON.stringify(MANIFEST)) }).verified).toEqual(EXPECTED)
@@ -1762,7 +1887,7 @@ describe('solutions-catalog: facets only appear when they discriminate', () => {
     expect(discriminating([], 4)).toEqual([])
   })
 
-  test('a one-solution catalogue has nothing to narrow, so every group empties', () => {
+  test('a one-solution catalog has nothing to narrow, so every group empties', () => {
     expect(discriminating([{ value: 'a', count: 1 }, { value: 'b', count: 1 }], 1)).toEqual([])
   })
 })
@@ -1838,18 +1963,18 @@ describe('solutions-catalog: link fragments', () => {
   const warnings = (result) => result.logger.warn.mock.calls.map((c) => c[0]).join('\n')
 
   test('a published fragment that matches no id is fatal, with the site-style id as the fix', async () => {
-    await expect(run({ solutions: [withLink('../#_production_considerations')] })).rejects.toThrow(
-      /build-leaderboard\.adoc links to \/solutions\/leaderboard\/#_production_considerations, but that page has no id "_production_considerations"; use #production-considerations/
+    await expect(run({ solutions: [withLink('../verify-end-to-end/#_production_considerations')] })).rejects.toThrow(
+      /build-leaderboard\.adoc links to \/solutions\/leaderboard\/verify-end-to-end\/#_production_considerations, but that page has no id "_production_considerations"; use #production-considerations/
     )
   })
 
   test('a draft gets the same finding as a warning, and the build goes on', async () => {
-    const result = await run({ solutions: [makeSolution('live'), withLink('../#_production_considerations', 'draft')] })
-    expect(warnings(result)).toMatch(/leaderboard: build-leaderboard\.adoc links to \/solutions\/leaderboard\/#_production_considerations.*use #production-considerations/)
+    const result = await run({ solutions: [makeSolution('live'), withLink('../verify-end-to-end/#_production_considerations', 'draft')] })
+    expect(warnings(result)).toMatch(/leaderboard: build-leaderboard\.adoc links to \/solutions\/leaderboard\/verify-end-to-end\/#_production_considerations.*use #production-considerations/)
   })
 
   test('a fragment that matches a section id passes', async () => {
-    const result = await run({ solutions: [withLink('../#production-considerations')] })
+    const result = await run({ solutions: [withLink('../verify-end-to-end/#production-considerations')] })
     expect(warnings(result)).not.toMatch(/has no id/)
   })
 
@@ -1870,5 +1995,270 @@ describe('solutions-catalog: link fragments', () => {
     const page = { pub: { url: '/p/' }, contents: Buffer.from('<a href="../t/#metrics">a</a><a href="../t/#anchor">b</a><a href="../t/#_metrics">c</a>') }
     const found = validate.brokenFragments(page, (u) => (u === '/t/' ? target : null))
     expect(found).toEqual([{ href: '../t/#_metrics', fragment: '_metrics', target: '/t/', suggestion: 'metrics' }])
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+const warningsOf = (result) => result.logger.warn.mock.calls.map((c) => c[0]).join('\n')
+const noRelatedDocs = (s) => { delete s.pages[0].asciidoc.attributes['page-solution-related-docs']; return s }
+// The overview's Related docs list as Asciidoctor renders it.
+const RELATED_DOCS = (items) =>
+  '<div class="sect1"><h2 id="related-docs">Related docs</h2><div class="sectionbody"><div class="ulist"><ul>' +
+  items.map(([href, title, rest]) => `<li><p><a href="${href}" class="xref page">${title}</a> ${rest}</p></li>`).join('') +
+  '</ul></div></div></div>'
+const OFFSETS_HREF = '../../streaming/26.2/develop/consumer-offsets/'
+
+describe('solutions-catalog: the Category facet does not repeat another axis', () => {
+  const rec = (id, { categories = [], useCases = [], technologies = [] } = {}) =>
+    ({ id, status: 'published', categories, useCases, technologies, industries: [], platforms: [], difficulty: 'beginner' })
+
+  test('a category selecting the same solutions as a use case or technology is dropped', () => {
+    const catalog = outputs.buildCatalog([
+      rec('a', { categories: ['Iceberg', 'Clients'], useCases: ['Data lakehouse'], technologies: ['Postgres'] }),
+      rec('b', { categories: ['Schema Registry', 'Clients'], useCases: ['Gaming'], technologies: ['Go'] }),
+      rec('c', { categories: ['Kafka Migration'], useCases: ['Migration'], technologies: ['Go'] }),
+    ])
+    // Iceberg = {a} = Data lakehouse; Schema Registry = {b} = Gaming;
+    // Kafka Migration = {c} = Migration. Clients = {a, b} matches nothing else.
+    expect(catalog.facets.categories.map((f) => f.value)).toEqual(['Clients'])
+    // The other axes are untouched.
+    expect(catalog.facets.useCases.map((f) => f.value)).toEqual(['Data lakehouse', 'Gaming', 'Migration'])
+  })
+
+  test('two categories with the same solutions are both kept', () => {
+    const catalog = outputs.buildCatalog([
+      rec('a', { categories: ['X', 'Y'], useCases: ['U'], technologies: ['T'] }),
+      rec('b', { categories: ['Z'], useCases: ['U'], technologies: ['T'] }),
+    ])
+    expect(catalog.facets.categories.map((f) => f.value)).toEqual(['X', 'Y', 'Z'])
+  })
+
+  test('redundantValues keeps counts and order', () => {
+    const records = [rec('a', { categories: ['P', 'Q'], technologies: ['Go'] }), rec('b', { categories: ['P'], technologies: ['Rust'] })]
+    const pick = (r) => r.categories
+    expect(outputs.redundantValues([{ value: 'P', count: 2 }, { value: 'Q', count: 1 }], records, pick, [(r) => r.technologies]))
+      .toEqual([{ value: 'P', count: 2 }])
+  })
+})
+
+describe('solutions-catalog: zero-match categories warn', () => {
+  test('a category no eligible page carries is a warning, not only an info line', async () => {
+    const solution = noRelatedDocs(makeSolution('leaderboard', { attrs: { 'page-categories': 'rpk, Iceberg' } }))
+    const docs = [makeDoc({ relative: 'iceberg.adoc', attrs: { 'page-categories': 'Iceberg' } })]
+    const result = await run({ solutions: [solution], docs, relationshipsText: 'relationships: []' })
+    expect(warningsOf(result)).toMatch(/leaderboard: page-categories rpk matches no eligible doc page/)
+  })
+})
+
+describe('solutions-catalog: ranking among explicit edges', () => {
+  test('equal scores break on shared leaf categories before dates and titles', async () => {
+    // Both list the page explicitly (1.0). alpha shares one leaf with the doc,
+    // zulu two, so zulu ranks first despite the alphabet and an older date.
+    const alpha = makeSolution('alpha', { attrs: { 'page-categories': 'Clients, Iceberg', 'page-solution-featured': 'false', 'page-git-modified-date': '2026-09-01' } })
+    const zulu = makeSolution('zulu', { attrs: { 'page-categories': 'Clients, Stream Processing', 'page-solution-featured': 'false', 'page-git-modified-date': '2026-01-01' } })
+    const result = await run({ solutions: [alpha, zulu], relationshipsText: 'relationships: []' })
+    expect(json(result.docs[0], 'page-related-solutions').map((r) => r.id)).toEqual(['zulu', 'alpha'])
+  })
+
+  test('an explicit edge cut by max_related stays in the graph and warns', async () => {
+    const solutions = ['alpha', 'bravo', 'charlie', 'delta'].map((id) => makeSolution(id, { attrs: { 'page-solution-featured': 'false', 'page-git-modified-date': '2026-01-01' } }))
+    const result = await run({ solutions, relationshipsText: 'relationships: []' })
+    expect(json(result.docs[0], 'page-related-solutions').map((r) => r.id)).toEqual(['alpha', 'bravo', 'charlie'])
+    const delta = addedFile(result.siteCatalog, 'solutions-graph.json').edges.find((e) => e.solution === 'delta')
+    expect(delta).toMatchObject({ provenance: 'explicit', shown: false })
+    expect(warningsOf(result)).toMatch(/streaming:develop:consumer-offsets\.adoc: 4 solutions list this page in page-solution-related-docs but max_related is 3; hidden: delta/)
+  })
+
+  test('a category edge cut by max_related does not warn', async () => {
+    const solutions = ['alpha', 'bravo', 'charlie', 'delta'].map((id) => noRelatedDocs(makeSolution(id, { attrs: { 'page-solution-featured': 'false' } })))
+    const result = await run({ solutions, relationshipsText: 'relationships: []' })
+    expect(warningsOf(result)).not.toMatch(/max_related is 3; hidden/)
+  })
+
+  test('computeRelatedSolutions returns the warning for a direct caller', () => {
+    const sol = (id) => ({ id, title: id, url: `/${id}/`, status: 'published', featured: false, categories: [], platforms: ['self-managed'], technologies: [], relatedDocKeys: new Set(['d']) })
+    const { warnings } = relationships.computeRelatedSolutions({
+      docs: [{ key: 'd', url: '/d/', categories: [], deployment: '' }],
+      solutions: [sol('a'), sol('b')],
+      relationships: [],
+      categoryMap: null,
+      maxRelated: 1,
+    })
+    expect(warnings).toEqual(['d: 2 solutions list this page in page-solution-related-docs but max_related is 1; hidden: b'])
+  })
+})
+
+describe('solutions-catalog: the reader-facing why', () => {
+  test('an explicit edge carries the overview\'s Related docs sentence', async () => {
+    const solution = makeSolution('leaderboard', {
+      overviewHtml: OVERVIEW_HTML('x', RELATED_DOCS([[OFFSETS_HREF, 'Consumer Offsets', 'explains the <code>group</code> mechanics every step relies on.']])),
+    })
+    const result = await run({ solutions: [solution] })
+    const [rec] = json(result.docs[0], 'page-related-solutions')
+    expect(rec.why).toBe('Consumer Offsets explains the group mechanics every step relies on.')
+    expect(rec.reason).toBe('listed in page-solution-related-docs')
+    expect(warningsOf(result)).not.toMatch(/has no item in == Related docs/)
+  })
+
+  test('without a sentence the explicit edge falls back to the relationships.yml reason, and warns', async () => {
+    const text = 'relationships:\n  - solution: leaderboard\n    doc: streaming:develop:consumer-offsets.adoc\n    status: approved\n    reason: the leaderboard resumes from committed offsets\n'
+    const result = await run({ relationshipsText: text })
+    expect(json(result.docs[0], 'page-related-solutions')[0].why).toBe('the leaderboard resumes from committed offsets')
+    expect(warningsOf(result)).toMatch(/leaderboard: page-solution-related-docs entry "streaming:develop:consumer-offsets\.adoc" has no item in == Related docs/)
+  })
+
+  test('a category edge says which leaf categories it uses; an approved edge gives its reason', async () => {
+    const category = noRelatedDocs(makeSolution('category-one'))
+    const approved = noRelatedDocs(makeSolution('approved-one', { attrs: { 'page-categories': 'rpk' } }))
+    const text = 'relationships:\n  - solution: approved-one\n    doc: streaming:develop:consumer-offsets.adoc\n    status: approved\n    reason: same failure mode\n'
+    const result = await run({ solutions: [category, approved], relationshipsText: text })
+    const recs = json(result.docs[0], 'page-related-solutions')
+    expect(recs.find((r) => r.id === 'category-one').why).toBe('Uses Stream Processing, Clients')
+    expect(recs.find((r) => r.id === 'approved-one').why).toBe('same failure mode')
+    expect(relationships.formatCategoryWhy({ sharedLeaves: [], sharedParents: ['Development'] })).toBe('')
+  })
+
+  test('relatedDocLines reads the list items, their first link, and their own text', () => {
+    const html = OVERVIEW_HTML('x', RELATED_DOCS([[OFFSETS_HREF, 'A', 'is one.'], ['#streaming:develop:gone.adoc', 'B', 'is unresolved.']]))
+    expect(collect.relatedDocLines(html, '/solutions/leaderboard/')).toEqual([
+      { pathname: '/streaming/26.2/develop/consumer-offsets/', text: 'A is one.' },
+      { pathname: null, text: 'B is unresolved.' },
+    ])
+    expect(collect.relatedDocLines('<h2>Other</h2><ul><li>x</li></ul>')).toEqual([])
+  })
+})
+
+describe('solutions-catalog: Related docs list and attribute agree', () => {
+  const other = makeDoc({ relative: 'other.adoc', attrs: { 'page-categories': 'rpk' } })
+  const listed = (status = 'published') => makeSolution('leaderboard', {
+    attrs: { 'page-solution-status': status },
+    overviewHtml: OVERVIEW_HTML('x', RELATED_DOCS([
+      [OFFSETS_HREF, 'Consumer Offsets', 'is listed in both.'],
+      ['../../streaming/26.2/develop/other/', 'Other', 'is only in the list.'],
+      ['build-leaderboard/', 'Build', 'is a step of this solution, not a related doc.'],
+    ])),
+  })
+
+  test('a doc in the list but not the attribute is fatal once published', async () => {
+    await expect(run({ solutions: [listed()], docs: [makeDoc(), other] })).rejects.toThrow(
+      /== Related docs links streaming:develop:other\.adoc but page-solution-related-docs does not list it/
+    )
+  })
+
+  test('on a draft it is a warning, and links to the solution\'s own steps never count', async () => {
+    const result = await run({ solutions: [makeSolution('live'), listed('draft')], docs: [makeDoc(), other], config: { include_drafts: true } })
+    expect(warningsOf(result)).toMatch(/leaderboard: == Related docs links streaming:develop:other\.adoc/)
+    expect(warningsOf(result)).not.toMatch(/links solutions:/)
+  })
+})
+
+describe('solutions-catalog: Cloud readers', () => {
+  const cloudComponent = () => {
+    const v = { version: '', asciidoc: { attributes: { 'env-cloud': true } } }
+    return { name: 'cloud', title: 'Cloud', latest: v, versions: [v] }
+  }
+  const stub = (relative, include) => {
+    const page = makeDoc({ component: 'cloud', version: '', module: 'develop', relative, attrs: { 'env-cloud': true, 'page-categories': 'rpk' } })
+    // At contentClassified a page's contents are still its AsciiDoc source.
+    page.contents = Buffer.from(`= Stub\n:description: x\n\n${include}\n`)
+    return page
+  }
+  const offsetsStub = () => stub('consume-data/consumer-offsets.adoc', 'include::streaming:develop:consumer-offsets.adoc[tag=single-source]')
+
+  test('the single-sourced Cloud twin of an explicit doc gets the explicit edge, the same why, and no relatedDocs entry', async () => {
+    const twin = offsetsStub()
+    const solution = makeSolution('leaderboard', {
+      overviewHtml: OVERVIEW_HTML('x', RELATED_DOCS([[OFFSETS_HREF, 'Consumer Offsets', 'explains the mechanics.']])),
+    })
+    const result = await run({ solutions: [solution], docs: [makeDoc(), twin], components: makeComponents([cloudComponent()]) })
+    const [rec] = json(twin, 'page-related-solutions')
+    expect(rec).toMatchObject({ id: 'leaderboard', provenance: 'explicit', score: 1, why: 'Consumer Offsets explains the mechanics.' })
+    expect(rec.reason).toBe('listed in page-solution-related-docs as streaming:develop:consumer-offsets.adoc, which this page single-sources')
+    expect(json(solution.pages[0], 'page-solution').relatedDocs.map((d) => d.id)).toEqual(['streaming:develop:consumer-offsets.adoc'])
+    expect(warningsOf(result)).not.toMatch(/Cloud readers get no explicit recommendation/)
+  })
+
+  test('a self-managed-only solution does not reach the twin', async () => {
+    const twin = offsetsStub()
+    const solution = makeSolution('leaderboard', { attrs: { 'page-solution-platforms': 'self-managed' } })
+    await run({ solutions: [solution], docs: [makeDoc(), twin], components: makeComponents([cloudComponent()]) })
+    expect(attr(twin, 'page-related-solutions')).toBeUndefined()
+  })
+
+  test('a Cloud solution whose related docs reach no Cloud page warns', async () => {
+    const result = await run({ components: makeComponents([cloudComponent()]) })
+    expect(warningsOf(result)).toMatch(/leaderboard: page-solution-platforms includes cloud but no page-solution-related-docs entry is a Cloud page or has a single-sourced Cloud twin/)
+  })
+
+  test('listing the Cloud page itself also counts', async () => {
+    const cloudPage = stub('consume-data/consumer-offsets.adoc', 'Body.')
+    const solution = makeSolution('leaderboard', { attrs: { 'page-solution-related-docs': 'streaming:develop:consumer-offsets.adoc, cloud:develop:consume-data/consumer-offsets.adoc' } })
+    const result = await run({ solutions: [solution], docs: [makeDoc(), cloudPage], components: makeComponents([cloudComponent()]) })
+    expect(warningsOf(result)).not.toMatch(/Cloud readers get no explicit recommendation/)
+  })
+
+  test('collectSingleSourcedTwins maps an included page to the pages in other components that include it', () => {
+    const source = makeDoc()
+    const twin = offsetsStub()
+    const local = makeDoc({ relative: 'local.adoc' })
+    local.contents = Buffer.from('include::streaming:develop:consumer-offsets.adoc[]\n')
+    const partialOnly = stub('p.adoc', 'include::partial$x.adoc[]\ninclude::streaming:develop:missing.adoc[]')
+    const catalog = makeCatalog({ pages: [source, twin, local, partialOnly], components: makeComponents([cloudComponent()]) })
+    const twins = collect.collectSingleSourcedTwins(catalog)
+    expect([...twins.entries()].map(([k, v]) => [k, [...v]])).toEqual([
+      ['streaming:develop:consumer-offsets.adoc', ['cloud:develop:consume-data/consumer-offsets.adoc']],
+    ])
+  })
+})
+
+describe('solutions-catalog: authoring drift', () => {
+  test.each([
+    ['a description over 140 characters', { description: 'x'.repeat(141) }, /description is 141 characters; the landing card fits 140/],
+    ['an everyday tool in technologies', { 'page-solution-technologies': 'Go, rpk, Docker Compose' }, /page-solution-technologies must not list rpk, Docker Compose/],
+    ['Redpanda itself in technologies', { 'page-solution-technologies': 'Redpanda, Redpanda Console, Go' }, /must not list Redpanda, Redpanda Console/],
+    ['a category in technologies', { 'page-solution-technologies': 'Go, Schema Registry' }, /page-solution-technologies lists Schema Registry, which is a category; put it in page-categories instead/],
+  ])('%s is fatal', async (_name, attrs, rx) => {
+    await expect(run({ solutions: [makeSolution('leaderboard', { attrs })] })).rejects.toThrow(rx)
+  })
+
+  test('140 characters exactly is fine', async () => {
+    await expect(run({ solutions: [makeSolution('leaderboard', { attrs: { description: 'x'.repeat(140) } })] })).resolves.toBeTruthy()
+    expect(validate.DESCRIPTION_MAX).toBe(140)
+  })
+
+  test('a separately deployed Redpanda product is a technology', async () => {
+    await expect(run({ solutions: [makeSolution('leaderboard', { attrs: { 'page-solution-technologies': 'Redpanda Migrator, Redpanda Operator, Go' } })] })).resolves.toBeTruthy()
+  })
+
+  test('step durations that do not add up to the total warn, only when every step is timed', async () => {
+    const partly = await run()
+    expect(warningsOf(partly)).not.toMatch(/add up to/)
+    const solution = makeSolution('leaderboard')
+    for (const page of solution.pages.slice(1)) page.asciidoc.attributes['page-solution-step-duration'] = '10'
+    const timed = await run({ solutions: [solution] })
+    expect(warningsOf(timed)).toMatch(/leaderboard: page-solution-duration is 45 but the steps' page-solution-step-duration values add up to 30/)
+  })
+
+  test('a landing or index page in related docs warns', async () => {
+    const index = makeDoc({ relative: 'index.adoc', attrs: { 'page-layout': 'index' } })
+    const solution = makeSolution('leaderboard', { attrs: { 'page-solution-related-docs': 'streaming:develop:consumer-offsets.adoc, streaming:develop:index.adoc' } })
+    const result = await run({ solutions: [solution], docs: [makeDoc(), index] })
+    expect(warningsOf(result)).toMatch(/page-solution-related-docs entry "streaming:develop:index\.adoc" is a landing or index page \(layout index\)/)
+  })
+
+  test('related solutions: empty, one-way, and sharing no use case each warn', async () => {
+    const facetsText = 'industries: [Gaming]\nuse_cases: [Change data capture, Data lakehouse, Real-time analytics]\n'
+    const a = makeSolution('alpha', { attrs: { 'page-solution-related-solutions': 'bravo', 'page-solution-use-cases': 'Change data capture' } })
+    const b = makeSolution('bravo', { attrs: { 'page-solution-use-cases': 'Data lakehouse', 'page-solution-featured': 'false' } })
+    const c = makeSolution('charlie', { attrs: { 'page-solution-related-solutions': 'delta', 'page-solution-use-cases': 'Real-time analytics', 'page-solution-featured': 'false' } })
+    const d = makeSolution('delta', { attrs: { 'page-solution-related-solutions': 'charlie', 'page-solution-use-cases': 'Real-time analytics', 'page-solution-featured': 'false' } })
+    const result = await run({ solutions: [a, b, c, d], facetsText })
+    const w = warningsOf(result)
+    expect(w).toMatch(/bravo: page-solution-related-solutions is empty/)
+    expect(w).toMatch(/bravo: alpha lists it in page-solution-related-solutions but bravo does not list alpha back/)
+    expect(w).toMatch(/alpha: page-solution-related-solutions lists bravo, but the two share no page-solution-use-cases value/)
+    // A symmetric pair that shares a use case is quiet.
+    expect(w).not.toMatch(/charlie lists it|delta lists it|charlie.*share no|delta.*share no/)
   })
 })

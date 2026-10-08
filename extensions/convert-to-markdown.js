@@ -145,6 +145,9 @@ function buildSolutionMetadata(page) {
       verify_script: record.verified.verifyScript,
       redpanda_version: record.verified.redpandaVersion,
       run_at: record.verified.runAt,
+      platforms: record.verified.platforms,
+      content_rev: record.verified.contentRev,
+      stack_sha256: record.verified.stackSha256,
     })
     if (Object.keys(verified).length) block.verified = verified
   }
@@ -235,6 +238,11 @@ function generateFrontmatter(page) {
 
     // Only include attributes in our allowlist or learning objectives
     if (!allowedAttributes.includes(key) && !isLearningObjective) return
+
+    // The edit link of a page from a private repository is a 404 for every
+    // reader. The default UI hides it for the same reason, and the same
+    // variable that forces it back on there forces it back on here.
+    if (key === 'page-edit-url' && page.src?.origin?.private && !process.env.FORCE_SHOW_EDIT_PAGE_LINK) return
 
     // Only include page-beta-text if page-beta is true
     if (key === 'page-beta-text' && !attrs['page-beta']) {
@@ -433,7 +441,64 @@ function createEnterpriseFeatureRules () {
   return { enterpriseFeature, betaBadge }
 }
 
+/**
+ * True for elements the Markdown twin drops: site chrome (footers, modals,
+ * feedback, navigation), tracking images, and anything the page renders with
+ * the `hidden` attribute. A hidden element is UI waiting for script (an empty
+ * state, a resume prompt, a filter chip), not content the reader sees, so it
+ * has no place in the text an agent reads.
+ */
+function isUnwantedNode (node) {
+  if (!node || !node.getAttribute) return false
+
+  const classAttr = (node.getAttribute('class') || '').toLowerCase()
+  const idAttr = (node.getAttribute('id') || '').toLowerCase()
+  const tag = node.nodeName.toLowerCase()
+
+  // UI rendered hidden until script reveals it
+  if (typeof node.hasAttribute === 'function' && node.hasAttribute('hidden')) return true
+
+  // Remove by tag
+  if (['script', 'style', 'footer', 'nav'].includes(tag)) return true
+
+  // Remove tracking or hidden images
+  if (
+    tag === 'img' &&
+    (classAttr.includes('tracking') ||
+      idAttr.includes('scarf') ||
+      node.getAttribute('role') === 'presentation' ||
+      node.style?.display === 'none')
+  ) {
+    return true
+  }
+
+  // Remove by class or id
+  const toRemove = [
+    'thumbs',
+    'back-to-top',
+    'contributors-modal',
+    'feedback-section',
+    'feedback-toast',
+    'pagination',
+    'footer',
+    'nav-expand',
+    'banner-container',
+    'markdown-dropdown',
+    'version-selector',        // Version dropdown (not relevant for LLMs)
+    'component-indicator',     // Component header bar
+    'product-switcher',        // Product switcher dropdown
+    'breadcrumb',              // Breadcrumb navigation
+    'chat-panel',              // AI chat interface
+    'kapa',                    // Kapa AI widget
+    'sol-filters',             // Solutions landing filter form and facet counts
+  ]
+  return toRemove.some(
+    (x) => classAttr.includes(x) || idAttr.includes(x)
+  )
+}
+
 module.exports.generateFrontmatter = generateFrontmatter
+module.exports.isUnwantedNode = isUnwantedNode
 module.exports.buildSolutionMetadata = buildSolutionMetadata
 module.exports.createEnterpriseFeatureRules = createEnterpriseFeatureRules
 module.exports.formatStatusMarker = formatStatusMarker
@@ -459,50 +524,7 @@ module.exports.register = function () {
 
     // Remove unwanted global elements (footers, modals, feedback, etc.)
     td.addRule('remove-unwanted', {
-      filter: (node) => {
-        if (!node || !node.getAttribute) return false
-
-        const classAttr = (node.getAttribute('class') || '').toLowerCase()
-        const idAttr = (node.getAttribute('id') || '').toLowerCase()
-        const tag = node.nodeName.toLowerCase()
-
-        // Remove by tag
-        if (['script', 'style', 'footer', 'nav'].includes(tag)) return true
-
-        // Remove tracking or hidden images
-        if (
-          tag === 'img' &&
-          (classAttr.includes('tracking') ||
-            idAttr.includes('scarf') ||
-            node.getAttribute('role') === 'presentation' ||
-            node.style?.display === 'none')
-        ) {
-          return true
-        }
-
-        // Remove by class or id
-        const toRemove = [
-          'thumbs',
-          'back-to-top',
-          'contributors-modal',
-          'feedback-section',
-          'feedback-toast',
-          'pagination',
-          'footer',
-          'nav-expand',
-          'banner-container',
-          'markdown-dropdown',
-          'version-selector',        // Version dropdown (not relevant for LLMs)
-          'component-indicator',     // Component header bar
-          'product-switcher',        // Product switcher dropdown
-          'breadcrumb',              // Breadcrumb navigation
-          'chat-panel',              // AI chat interface
-          'kapa',                    // Kapa AI widget
-        ]
-        return toRemove.some(
-          (x) => classAttr.includes(x) || idAttr.includes(x)
-        )
-      },
+      filter: isUnwantedNode,
       replacement: () => '',
     })
 
