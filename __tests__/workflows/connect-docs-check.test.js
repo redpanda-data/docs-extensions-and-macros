@@ -124,9 +124,10 @@ describe('connect-docs-check workflow: no token in the Antora step', () => {
     expect(indexOf(DROP)).toBeGreaterThan(indexOf(CLONE))
     expect(indexOf(DROP)).toBeLessThan(indexOf('Install Antora and docs-extensions-and-macros'))
     expect(indexOf(DROP)).toBeLessThan(indexOf(BUILD))
-    // Secrets Manager and the AWS role export into the job env; those steps
-    // must come before the drop.
-    const exporters = job.steps.filter((s) => s.uses && /aws-actions\//.test(s.uses))
+    // Secrets Manager and the AWS role export into the job env; the ones that
+    // read the bot token must come before the drop. The preview's own come
+    // after the build (see the deploy preview tests).
+    const exporters = job.steps.filter((s) => s.uses && /aws-actions\//.test(s.uses) && !/preview/.test(s.name))
     expect(exporters).toHaveLength(2)
     for (const s of exporters) expect(job.steps.indexOf(s)).toBeLessThan(indexOf(DROP))
     expect(stepNamed(DROP).if).toBe('always()')
@@ -279,5 +280,71 @@ exit \${NPX_EXIT:-0}
     expect(fs.existsSync(path.join(work, 'changed-pages', 'connect', 'components', 'inputs', 'kafka', 'index.html'))).toBe(true)
     expect(fs.readFileSync(sum, 'utf8')).toContain('## diff')
     expect(stepNamed(DIFF).if).toMatch(/inputs\.base_docs_artifact != ''/)
+  })
+})
+
+describe('connect-docs-check workflow: deploy preview', () => {
+  const FETCH = 'Fetch the preview token from Secrets Manager'
+  const ASSUME = 'Assume the AWS role that can read the preview token'
+  const PUBLISH = 'Publish the deploy preview'
+  const LINK = 'Link the deploy preview from the commit'
+
+  function siteDir () {
+    const work = fs.mkdtempSync(path.join(os.tmpdir(), 'cdc-prev-'))
+    fs.mkdirSync(path.join(work, 'site', 'connect', 'home'), { recursive: true })
+    fs.writeFileSync(path.join(work, 'site', 'connect', 'home', 'index.html'), '<html></html>')
+    fs.mkdirSync(path.join(work, 'site', '_'))
+    fs.mkdirSync(path.join(work, 'site', 'self-managed'))
+    return work
+  }
+  const NETLIFY_STUB = `#!/bin/bash
+printf '%s\\n' "$*" >> "$HOME/npx-argv"
+cp -R "$4" "$HOME/deployed" 2>/dev/null || true
+echo '{"deploy_url":"https://connect-pr-42--redpanda-connect.netlify.app"}'
+`
+
+  test('the preview token is fetched only after Antora, the checks, and the credential drop', () => {
+    for (const later of [ASSUME, FETCH, PUBLISH, LINK]) {
+      for (const earlier of [DROP, BUILD, LOG_CHECK, HTML_CHECK, DIFF]) {
+        expect(indexOf(later)).toBeGreaterThan(indexOf(earlier))
+      }
+    }
+  })
+
+  test('a caller without the secret skips the preview instead of failing', () => {
+    expect(stepNamed(ASSUME)['continue-on-error']).toBe(true)
+    expect(stepNamed(FETCH)['continue-on-error']).toBe(true)
+    const r = execRun(stepNamed(PUBLISH), { env: { WORK: siteDir(), PR_NUMBER: '42' }, stubs: { npx: 'touch "$HOME/npx-called"; exit 1' } })
+    expect(r.status).toBe(0)
+    expect(r.all).toMatch(/no deploy preview/)
+    expect(r.exists('npx-called')).toBe(false)
+  })
+
+  test('deploys only the Connect sections as a draft with a per-PR alias, never to production', () => {
+    expect(stepNamed(PUBLISH).run).not.toMatch(/--prod/)
+    const work = siteDir()
+    const r = execRun(stepNamed(PUBLISH), {
+      env: { WORK: work, PR_NUMBER: '42', HEAD_SHA: 'abcdef1234567', NETLIFY_AUTH_TOKEN: 't', NETLIFY_SITE_ID: 's', GITHUB_STEP_SUMMARY: path.join(work, 'summary.md') },
+      stubs: { npx: NETLIFY_STUB }
+    })
+    expect(r.status).toBe(0)
+    const argv = r.read('npx-argv')
+    expect(argv).toMatch(/netlify-cli@\d+\.\d+\.\d+ deploy/)
+    expect(argv).toMatch(/--alias connect-pr-42/)
+    expect(argv).not.toMatch(/--prod/)
+    expect(fs.existsSync(path.join(work, 'preview', 'connect', 'home', 'index.html'))).toBe(true)
+    expect(fs.existsSync(path.join(work, 'preview', 'self-managed'))).toBe(false)
+    expect(fs.readFileSync(path.join(work, 'preview', 'robots.txt'), 'utf8')).toMatch(/Disallow: \//)
+    expect(r.outputs.url).toBe('https://connect-pr-42--redpanda-connect.netlify.app/connect/home/')
+  })
+
+  test('links the preview with a commit status, not a comment', () => {
+    const r = execRun(stepNamed(LINK), {
+      env: { URL: 'https://x.netlify.app/connect/home/', REPO: 'redpanda-data/connect', HEAD_SHA: 'abc', GH_TOKEN: 't' },
+      stubs: { gh: 'printf "%s\\n" "$*" >> "$HOME/gh-argv"' }
+    })
+    expect(r.status).toBe(0)
+    expect(r.read('gh-argv')).toMatch(/repos\/redpanda-data\/connect\/statuses\/abc .*context=Connect docs preview .*target_url=https:\/\/x\.netlify\.app\/connect\/home\//)
+    expect(job.permissions.statuses).toBe('write')
   })
 })

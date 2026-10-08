@@ -43,6 +43,8 @@
 #       permissions:
 #         contents: read
 #         id-token: write
+#         # The "Connect docs preview" commit status with the preview link.
+#         statuses: write
 #       uses: redpanda-data/docs-extensions-and-macros/.github/workflows/connect-docs-check.yml@<commit-sha> # v<version>
 #       with:
 #         docs_artifact: connect-docs-head
@@ -109,6 +111,10 @@ on:
         description: "Secrets Manager id holding the org bot token."
         type: string
         default: "sdlc/prod/github/actions_bot_token"
+      preview_secret_id:
+        description: "Secrets Manager id holding the Netlify token and site ID for the deploy preview (JSON keys DOCS_NETLIFY_PREVIEW_AUTH_TOKEN and DOCS_NETLIFY_PREVIEW_SITE_ID). When the caller can't read it, the preview is skipped. Empty turns the preview off."
+        type: string
+        default: "sdlc/prod/github/docs_netlify_preview"
     secrets:
       aws_cred_account_id:
         description: "AWS account id owning the OIDC role. Required on the OIDC path."
@@ -133,8 +139,10 @@ jobs:
       cancel-in-progress: true
     permissions:
       contents: read
-      # The OIDC role assumption that reads the bot token.
+      # The OIDC role assumption that reads the bot token and the preview token.
       id-token: write
+      # The "Connect docs preview" commit status with the preview link.
+      statuses: write
     env:
       WORK: ${{ github.workspace }}/connect-docs-check
     steps:
@@ -360,3 +368,87 @@ jobs:
           name: connect-docs-changed-pages
           path: connect-docs-check/changed-pages
           retention-days: 14
+      # The preview publishes the build as a Netlify draft deploy and links it
+      # from a commit status. Its token is fetched only now, after Antora and
+      # every check have run, so no build step or dependency can see it. A
+      # caller that can't read the secret skips the preview.
+      - name: Assume the AWS role that can read the preview token
+        id: preview_credentials
+        if: >-
+          ${{ !cancelled() && github.event_name == 'pull_request' && inputs.preview_secret_id != '' &&
+          inputs.aws_region != '' && inputs.aws_role_name_prefix != '' && steps.build.outputs.exit_code == '0' }}
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: arn:aws:iam::${{ secrets.aws_cred_account_id }}:role/${{ inputs.aws_role_name_prefix }}${{ github.event.repository.name }}
+      - name: Fetch the preview token from Secrets Manager
+        id: preview_secret
+        if: ${{ !cancelled() && steps.preview_credentials.outcome == 'success' }}
+        continue-on-error: true
+        uses: aws-actions/aws-secretsmanager-get-secrets@v3
+        with:
+          secret-ids: |
+            ,${{ inputs.preview_secret_id }}
+          parse-json-secrets: true
+      - name: Publish the deploy preview
+        id: preview
+        if: ${{ !cancelled() && steps.preview_secret.outcome == 'success' }}
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ env.DOCS_NETLIFY_PREVIEW_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ env.DOCS_NETLIFY_PREVIEW_SITE_ID }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NETLIFY_AUTH_TOKEN:-}" ] || [ -z "${NETLIFY_SITE_ID:-}" ]; then
+            echo "::notice::The preview secret has no token or site ID yet, so no deploy preview."
+            exit 0
+          fi
+          # Only the Connect sections and the UI assets they load. Links into
+          # the rest of the docs site 404 on the preview.
+          dir="$WORK/preview"
+          mkdir -p "$dir/cloud-data-platform/develop"
+          cp -R "$WORK/site/connect" "$dir/"
+          if [ -d "$WORK/site/cloud-data-platform/develop/connect" ]; then
+            cp -R "$WORK/site/cloud-data-platform/develop/connect" "$dir/cloud-data-platform/develop/"
+          fi
+          for f in _ assets blobl.wasm 404.html index.html; do
+            [ -e "$WORK/site/$f" ] && cp -R "$WORK/site/$f" "$dir/"
+          done
+          # Previews must never be indexed.
+          printf 'User-agent: *\nDisallow: /\n' > "$dir/robots.txt"
+          # A draft deploy with a per-PR alias, never a production one, so it
+          # never changes the site's published deploy.
+          npx --yes netlify-cli@27.11.2 deploy \
+            --dir "$dir" \
+            --site "$NETLIFY_SITE_ID" \
+            --alias "connect-pr-$PR_NUMBER" \
+            --message "Connect docs preview for redpanda-data/connect PR $PR_NUMBER at ${HEAD_SHA:0:9}" \
+            --json > "$WORK/netlify-deploy.json"
+          url=$(jq -r '.deploy_url // empty' "$WORK/netlify-deploy.json")
+          if [ -z "$url" ]; then
+            echo "::error::netlify deploy returned no deploy_url."
+            exit 1
+          fi
+          echo "url=$url/connect/home/" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Docs preview"
+            echo
+            echo "$url/connect/home/"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Link the deploy preview from the commit
+        if: ${{ !cancelled() && steps.preview.outputs.url != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          URL: ${{ steps.preview.outputs.url }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/statuses/$HEAD_SHA" \
+            -f state=success \
+            -f context="Connect docs preview" \
+            -f description="Rendered Connect docs built from this pull request" \
+            -f target_url="$URL" > /dev/null
+
