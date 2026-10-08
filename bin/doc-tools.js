@@ -2882,6 +2882,43 @@ programCli
   })
 
 /**
+ * doc-impact-recording
+ *
+ * @description
+ * Extracts every redpanda-docs MCP call and its result from a Claude Code
+ * transcript (the claude-code-action execution file, or `claude -p
+ * --output-format stream-json` output) and writes them as a doc-impact eval
+ * recording. Only the tool name, arguments and result content are kept.
+ * Writes nothing when the session made no docs calls.
+ *
+ * @why
+ * The doc-impact eval replays docs answers per PR. Answers recorded later
+ * come from docs that may already contain the writer's fix, so the eval
+ * would score a correct "already documented" as a miss. The doc-strings
+ * review saves what the docs server told it at review time, and the eval
+ * miner turns that into the item's recording.
+ *
+ * @example
+ * # What the doc-strings review runs after its Claude step
+ * npx doc-tools doc-impact-recording --execution-file "$RUNNER_TEMP/claude-execution-output.json" \
+ *   --output recording.json --item redpanda-operator-1615 --server-url https://docs.redpanda.com/mcp
+ */
+programCli
+  .command('doc-impact-recording')
+  .description('Extract the docs MCP calls from a Claude Code transcript into a doc-impact eval recording')
+  .requiredOption('--execution-file <path>', 'Transcript: a JSON array of SDK messages or stream-json lines')
+  .requiredOption('--output <path>', 'Recording file to write (not written when there are no docs calls)')
+  .option('--item <id>', 'Item id to store in the recording')
+  .option('--server <name>', 'MCP server name in the transcript tool names', 'redpanda-docs')
+  .option('--server-url <url>', 'URL of that MCP server, stored in the recording')
+  .option('--model <name>', 'Model to store (default: the model in the transcript init message)')
+  .option('--recorded-at <iso>', 'Timestamp to store (default: now)')
+  .action((options) => {
+    const { runCli } = require('../tools/doc-impact-recording')
+    process.exit(runCli(options))
+  })
+
+/**
  * lint-screenshots
  *
  * @description

@@ -39,6 +39,7 @@ display help for command
 * `sync-schemas` - Sync this package's docs-data/*.schema.json into a content repo's docs-data/
 * `mcp-version` - Show MCP server version and configuration information
 * `lint-strings` - Lint user-facing doc strings embedded in engineering source code (properties, metrics, ...)
+* `doc-impact-recording` - Extract the docs MCP calls from a Claude Code transcript into a doc-impact eval recording
 * `lint-screenshots` - Lint image macros and image files in a docs repo against the screenshot standard (alt text, size, format, width)
 * `preview-string` - Render one embedded doc string (property, rpk command/flag, metric, helm key, CRD field, connect field) as it will publish
 * `generate` - Run docs automations
@@ -628,6 +629,56 @@ npx doc-tools lint-strings --repo ~/redpanda --surface properties --format json
 
 # PR mode: only declarations whose span intersects the diff
 npx doc-tools lint-strings --repo ~/redpanda --diff origin/dev
+----
+
+== doc-impact-recording
+
+Extracts every redpanda-docs MCP call and its result from a Claude Code transcript (the claude-code-action execution file, or `claude -p --output-format stream-json` output) and writes them as a doc-impact eval recording. Only the tool name, arguments and result content are kept. Writes nothing when the session made no docs calls.
+
+*Why use it:*
+
+The doc-impact eval replays docs answers per PR. Answers recorded later come from docs that may already contain the writer's fix, so the eval would score a correct "already documented" as a miss. The doc-strings review saves what the docs server told it at review time, and the eval miner turns that into the item's recording.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools doc-impact-recording [options]
+----
+
+*Options:*
+
+`--execution-file <path>`::
+Transcript: a JSON array of SDK messages or stream-json lines
+
+`--output <path>`::
+Recording file to write (not written when there are no docs calls)
+
+`--item <id>`::
+Item id to store in the recording
+
+`--server <name>`::
+MCP server name in the transcript tool names (default: "redpanda-docs")
+
+`--server-url <url>`::
+URL of that MCP server, stored in the recording
+
+`--model <name>`::
+Model to store (default: the model in the transcript init message)
+
+`--recorded-at <iso>`::
+Timestamp to store (default: now)
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# What the doc-strings review runs after its Claude step
+npx doc-tools doc-impact-recording --execution-file "$RUNNER_TEMP/claude-execution-output.json" \
+  --output recording.json --item redpanda-operator-1615 --server-url https://docs.redpanda.com/mcp
 ----
 
 == lint-screenshots

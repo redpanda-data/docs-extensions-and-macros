@@ -14,6 +14,8 @@
 #      prose-quality pass over the clean strings, and a published-content
 #      impact check against docs.redpanda.com (public MCP),
 #   4. doc-impact dispatch to the docs team's Jira router.
+#   5. a workflow artifact holding the docs MCP calls the review made and
+#      the answers it got, for the doc-impact eval (see the step).
 #
 # Each string is reviewed once. lint-strings fingerprints every declaration
 # (surface, name, text), the fingerprints a review has seen are kept in the
@@ -1042,6 +1044,52 @@ jobs:
         with:
           path: ${{ runner.temp }}/doc-strings-review-state
           key: doc-strings-review-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
+      # Keep what the docs MCP server told this review, for the doc-impact
+      # eval. The eval replays docs answers per PR, and answers fetched later
+      # come from docs that may already hold the writer's fix, so a correct
+      # "already documented" would score as a miss. The artifact holds only
+      # each call's tool name, arguments and result content, never tokens,
+      # headers or identity. It is stored in the CALLER's repository, so a
+      # private caller's artifact is private too. A doc-tools release older
+      # than the doc-impact-recording command just skips with a notice.
+      - name: Extract the docs MCP calls for the doc-impact eval
+        id: mcp_recording
+        if: always() && steps.review.outputs.execution_file != ''
+        continue-on-error: true
+        env:
+          PKG: ${{ steps.pkg.outputs.pkg }}
+          EXECUTION_FILE: ${{ steps.review.outputs.execution_file }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          # Same server the review step's --mcp-config names.
+          DOCS_MCP_URL: https://docs.redpanda.com/mcp
+          OUT_DIR: ${{ runner.temp }}/doc-impact-mcp
+        run: |
+          set -euo pipefail
+          rm -rf "$OUT_DIR"
+          mkdir -p "$OUT_DIR"
+          if ! npx --yes --package="$PKG" doc-tools doc-impact-recording \
+              --execution-file "$EXECUTION_FILE" \
+              --output "$OUT_DIR/recording.json" \
+              --item "${REPO##*/}-$PR" \
+              --server-url "$DOCS_MCP_URL"; then
+            echo "::notice::Could not extract the docs MCP calls with $PKG; no doc-impact recording saved."
+            exit 0
+          fi
+          if [ -s "$OUT_DIR/recording.json" ]; then
+            echo "saved=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::The review made no docs MCP calls; no doc-impact recording saved."
+          fi
+      - name: Upload the docs MCP recording
+        if: always() && steps.mcp_recording.outputs.saved == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: doc-impact-mcp-${{ github.event.pull_request.number }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/doc-impact-mcp/recording.json
+          retention-days: 90
+          if-no-files-found: ignore
       - name: Dispatch doc-impact
         if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0')
         continue-on-error: true
