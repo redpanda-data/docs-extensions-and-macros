@@ -1838,3 +1838,56 @@ describe('solutions-catalog: link fragments', () => {
     expect(found).toEqual([{ href: '../t/#_metrics', fragment: '_metrics', target: '/t/', suggestion: 'metrics' }])
   })
 })
+
+// ---------------------------------------------------------------------------
+
+const warningsOf = (result) => result.logger.warn.mock.calls.map((c) => c[0]).join('\n')
+const noRelatedDocs = (s) => { delete s.pages[0].asciidoc.attributes['page-solution-related-docs']; return s }
+// The overview's Related docs list as Asciidoctor renders it.
+const RELATED_DOCS = (items) =>
+  '<div class="sect1"><h2 id="related-docs">Related docs</h2><div class="sectionbody"><div class="ulist"><ul>' +
+  items.map(([href, title, rest]) => `<li><p><a href="${href}" class="xref page">${title}</a> ${rest}</p></li>`).join('') +
+  '</ul></div></div></div>'
+const OFFSETS_HREF = '../../streaming/26.2/develop/consumer-offsets/'
+
+describe('solutions-catalog: the Category facet does not repeat another axis', () => {
+  const rec = (id, { categories = [], useCases = [], technologies = [] } = {}) =>
+    ({ id, status: 'published', categories, useCases, technologies, industries: [], platforms: [], difficulty: 'beginner' })
+
+  test('a category selecting the same solutions as a use case or technology is dropped', () => {
+    const catalog = outputs.buildCatalog([
+      rec('a', { categories: ['Iceberg', 'Clients'], useCases: ['Data lakehouse'], technologies: ['Postgres'] }),
+      rec('b', { categories: ['Schema Registry', 'Clients'], useCases: ['Gaming'], technologies: ['Go'] }),
+      rec('c', { categories: ['Kafka Migration'], useCases: ['Migration'], technologies: ['Go'] }),
+    ])
+    // Iceberg = {a} = Data lakehouse; Schema Registry = {b} = Gaming;
+    // Kafka Migration = {c} = Migration. Clients = {a, b} matches nothing else.
+    expect(catalog.facets.categories.map((f) => f.value)).toEqual(['Clients'])
+    // The other axes are untouched.
+    expect(catalog.facets.useCases.map((f) => f.value)).toEqual(['Data lakehouse', 'Gaming', 'Migration'])
+  })
+
+  test('two categories with the same solutions are both kept', () => {
+    const catalog = outputs.buildCatalog([
+      rec('a', { categories: ['X', 'Y'], useCases: ['U'], technologies: ['T'] }),
+      rec('b', { categories: ['Z'], useCases: ['U'], technologies: ['T'] }),
+    ])
+    expect(catalog.facets.categories.map((f) => f.value)).toEqual(['X', 'Y', 'Z'])
+  })
+
+  test('redundantValues keeps counts and order', () => {
+    const records = [rec('a', { categories: ['P', 'Q'], technologies: ['Go'] }), rec('b', { categories: ['P'], technologies: ['Rust'] })]
+    const pick = (r) => r.categories
+    expect(outputs.redundantValues([{ value: 'P', count: 2 }, { value: 'Q', count: 1 }], records, pick, [(r) => r.technologies]))
+      .toEqual([{ value: 'P', count: 2 }])
+  })
+})
+
+describe('solutions-catalog: zero-match categories warn', () => {
+  test('a category no eligible page carries is a warning, not only an info line', async () => {
+    const solution = noRelatedDocs(makeSolution('leaderboard', { attrs: { 'page-categories': 'rpk, Iceberg' } }))
+    const docs = [makeDoc({ relative: 'iceberg.adoc', attrs: { 'page-categories': 'Iceberg' } })]
+    const result = await run({ solutions: [solution], docs, relationshipsText: 'relationships: []' })
+    expect(warningsOf(result)).toMatch(/leaderboard: page-categories rpk matches no eligible doc page/)
+  })
+})

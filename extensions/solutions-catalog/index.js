@@ -404,6 +404,11 @@ module.exports.register = function ({ config = {} } = {}) {
     const coverage = relationships.computeCoverage({ docs: graphInput, solutions: active, categoryMap })
     for (const [slug, entry] of Object.entries(coverage.solutions)) {
       logger.info(relationships.formatCoverageLine(slug, entry))
+      // A category no eligible page carries is one the solution can never be
+      // recommended through: say so where authors look, not only at info.
+      if (entry.zeroMatch.length) {
+        logger.warn(`solutions-catalog: ${slug}: page-categories ${entry.zeroMatch.join(', ')} match${entry.zeroMatch.length === 1 ? 'es' : ''} no eligible doc page; no recommendation can come from ${entry.zeroMatch.length === 1 ? 'it' : 'them'}`)
+      }
     }
     logger.info(`solutions-catalog: ${decorated} doc pages decorated, ${coverage.uncategorizedEligiblePages} eligible doc pages without categories`)
 

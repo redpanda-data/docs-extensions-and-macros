@@ -186,6 +186,30 @@ function discriminating (values, total) {
   return values.filter((v) => v.count < total)
 }
 
+/** Sorted ids of the records carrying `value` under `pick`, as one string. */
+function idSetOf (records, pick, value) {
+  return records.filter((r) => (pick(r) || []).includes(value)).map((r) => r.id).sort().join('\n')
+}
+
+/**
+ * Drop facet values that select exactly the record set some value of another
+ * axis already selects. Order and counts of the kept values are unchanged.
+ *
+ * @param {Array<{value: string, count: number}>} values - the facet being cleaned
+ * @param {Array<Object>} records
+ * @param {(r: Object) => Array<string>} pick - the facet's own accessor
+ * @param {Array<(r: Object) => Array<string>>} otherAxes - accessors of the axes it must not repeat
+ */
+function redundantValues (values, records, pick, otherAxes) {
+  const taken = new Set()
+  for (const other of otherAxes) {
+    const seen = new Set()
+    for (const r of records) for (const v of other(r) || []) seen.add(v)
+    for (const v of seen) taken.add(idSetOf(records, other, v))
+  }
+  return values.filter((v) => !taken.has(idSetOf(records, pick, v.value)))
+}
+
 function countValues (records, pick) {
   const counts = new Map()
   for (const r of records) {
@@ -213,6 +237,11 @@ function countValues (records, pick) {
  * product area" and would repeat what the Technology facet already shows.
  * Every leaf is also in `categories`, so filtering records on a facet value
  * still works. A solution missing from the map falls back to `categories`.
+ *
+ * A Category value that selects exactly the same solutions as a Use case or
+ * Technology value is the same filter under a second name, so it is dropped
+ * from the facet (see redundantValues). Two categories that select the same
+ * solutions are both kept: neither repeats a different axis.
  */
 function buildCatalog (publicRecords, { siteUrl = '', generatedAt = new Date().toISOString(), categoryLeaves } = {}) {
   const solutions = publicRecords
@@ -230,7 +259,12 @@ function buildCatalog (publicRecords, { siteUrl = '', generatedAt = new Date().t
     facets: {
       industries: discriminating(countValues(solutions, (r) => r.industries), solutions.length),
       useCases: discriminating(countValues(solutions, (r) => r.useCases), solutions.length),
-      categories: discriminating(countValues(solutions, facetCategories), solutions.length),
+      categories: redundantValues(
+        discriminating(countValues(solutions, facetCategories), solutions.length),
+        solutions,
+        facetCategories,
+        [(r) => r.useCases, (r) => r.technologies]
+      ),
       technologies: discriminating(countValues(solutions, (r) => r.technologies), solutions.length),
       difficulty: discriminating(countValues(solutions, (r) => [r.difficulty]), solutions.length),
       platforms: discriminating(countValues(solutions, (r) => r.platforms), solutions.length),
@@ -265,4 +299,5 @@ module.exports = {
   buildGraph,
   toJsonBuffer,
   discriminating,
+  redundantValues,
 }
