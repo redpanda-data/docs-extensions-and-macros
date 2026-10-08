@@ -224,6 +224,29 @@ describe('convertContent', () => {
     )
   })
 
+  // `^` at the end of link text means "open in a new window" on a URL link,
+  // but an xref has no such shorthand and would render the caret. An internal
+  // page opens in the same window.
+  test('drops the new-window caret from the link text', () => {
+    const url =
+      'https://docs.redpanda.com/streaming/current/reference/properties/cluster-properties/#kafka_batch_max_bytes'
+    expect(convert(`${url}[Batch size^]`).content).toBe(
+      'xref:streaming:reference:properties/cluster-properties.adoc#kafka_batch_max_bytes[Batch size]'
+    )
+    expect(convert('link:https://docs.redpanda.com/connect/configuration/secrets/[Secrets^]').content).toBe(
+      'xref:connect:configuration:secrets.adoc[Secrets]'
+    )
+  })
+
+  test('treats a caret-only label as no label', () => {
+    const url =
+      'https://docs.redpanda.com/streaming/current/reference/properties/cluster-properties/#kafka_batch_max_bytes'
+    expect(convert(`${url}[^]`).content).toBe(convert(url).content)
+    expect(convert('https://docs.redpanda.com/connect/configuration/secrets/[^]').content).toBe(
+      'xref:connect:configuration:secrets.adoc[]'
+    )
+  })
+
   // An xref with a fragment and no link text renders the raw resource id, so
   // the extension has to supply text of its own.
   test('labels an unlabeled fragment URL with the heading it points at', () => {

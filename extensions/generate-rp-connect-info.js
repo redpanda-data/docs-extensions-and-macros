@@ -13,27 +13,79 @@ const DEFAULTS = {
   githubRepo: 'connect'
 }
 
-// Connector pages include the generated field reference from the connect repo
-// (see the modify-connect-tag-playbook extension). If a playbook has the
-// Connect pages but none of those partials, every connector page would publish
-// without its fields, and Antora only logs the missing includes. Fail the
-// build instead so the playbook gets fixed before anything is published.
-function assertConnectReferencePresent (contentCatalog) {
+// Generated sets that connector pages include, by Antora family. Each one
+// must be present, or pages publish with unresolved includes.
+// The generated partial and example directories that connector pages include,
+// read from the pages themselves, so the guard asks for exactly what the pages
+// in this build use (rp-connect-docs pages gain availability includes, for
+// example, when they move to the generated docs).
+const PARTIAL_INCLUDE = /include::connect:components:partial\$([a-z0-9_-]+)\//g
+const EXAMPLE_INCLUDE = /include::(?:connect:)?components:example\$([a-z0-9_-]+)\//g
+
+function includedDirs (pages) {
+  const partial = new Set()
+  const example = new Set()
+  for (const page of pages) {
+    const text = page.contents ? page.contents.toString() : ''
+    for (const m of text.matchAll(PARTIAL_INCLUDE)) partial.add(m[1])
+    for (const m of text.matchAll(EXAMPLE_INCLUDE)) example.add(m[1])
+  }
+  // Name the core sets first, in a fixed order, so the error reads the same
+  // way every time.
+  const order = ['fields', 'descriptions', 'availability', 'metadata', 'examples', 'common', 'advanced']
+  const rank = (d) => (order.includes(d) ? order.indexOf(d) : order.length)
+  const sorted = (set) => [...set].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
+  return { partial: sorted(partial), example: sorted(example) }
+}
+
+// Connector pages include the generated field reference, description meta,
+// availability, and config examples, which the modify-connect-tag-playbook
+// extension adds from the redpanda-connect-docs.tar.gz asset of a connect
+// release. If a playbook has the Connect pages but any set is missing (an
+// incomplete asset, or a connect source whose ref lacks them), connector
+// pages would publish with unresolved includes, and Antora only logs them.
+// Fail the build instead so the playbook gets fixed before anything is
+// published.
+//
+// `connectSources` are the connect content sources still in the playbook,
+// which means no release asset was downloaded.
+function assertConnectReferencePresent (contentCatalog, { connectSources = [] } = {}) {
   const component = contentCatalog.getComponents().find((c) => c.name === 'connect')
   if (!component) return
-  // Only connector pages (inputs/kafka.adoc and so on) include field
-  // partials. Overview pages at the module root don't.
+  // Only connector pages (inputs/kafka.adoc and so on) include the generated
+  // sets. Overview pages at the module root don't.
   const pages = contentCatalog.findBy({ component: 'connect', module: 'components', family: 'page' })
     .filter((p) => p.src.relative.includes('/'))
   if (!pages.length) return
-  const fields = contentCatalog.findBy({ component: 'connect', module: 'components', family: 'partial' })
-    .filter((f) => f.src.relative.startsWith('fields/'))
-  if (fields.length) return
+  const missingIn = (family, dirs) => {
+    const files = contentCatalog.findBy({ component: 'connect', module: 'components', family })
+    return dirs.filter((dir) => !files.some((f) => f.src.relative.startsWith(`${dir}/`)))
+      .map((dir) => `components:${family}$${dir}/*`)
+  }
+  const wanted = includedDirs(pages)
+  const missing = [...missingIn('partial', wanted.partial), ...missingIn('example', wanted.example)]
+  if (!missing.length) return
+  const sourceHint = connectSources.length
+    ? `The playbook lists a connect content source (${connectSources.join(', ')}), so no release asset was downloaded and these files must come from that source's refs. ` +
+      'Point it at a ref that has the generated docs, or remove it to use the release asset. '
+    : ''
   throw new Error(
-    'The connect component has connector pages but no generated field partials (components:partial$fields/*). ' +
-    'Add the connect repository as a content source (url: https://github.com/redpanda-data/connect, tags: latest, start_path: docs) ' +
-    'and register the modify-connect-tag-playbook extension, or check that the latest Connect release includes docs/modules/components.'
+    `The connect component has connector pages but no generated ${missing.join(' or ')} files. ` +
+    sourceHint +
+    'These come from the redpanda-connect-docs.tar.gz asset of a Redpanda Connect release, which the ' +
+    'modify-connect-tag-playbook extension downloads. Register that extension and check its log: ' +
+    'the release it used (the latest stable release, or the one in its `tag` config) may have no asset or an incomplete one. ' +
+    'Set `tag` to a release that has the asset, or set REDPANDA_CONNECT_DOCS_DIR to a local directory that contains ' +
+    'modules/ (for example a connect checkout\'s docs/ after running its docs generator).'
   )
+}
+
+// The connect content sources in a playbook, with credentials removed.
+function connectSourcesOf (playbook) {
+  const sources = (playbook && playbook.content && playbook.content.sources) || []
+  return sources
+    .filter((s) => catalogUtil.isConnectSource(s.url))
+    .map((s) => String(s.url).replace(/([a-z][a-z+.-]*:\/\/)[^@/\s]*@/gi, '$1'))
 }
 
 module.exports.assertConnectReferencePresent = assertConnectReferencePresent
@@ -63,8 +115,8 @@ module.exports.register = function ({ config }) {
   let translatedRows = null
 
   // Use 'on' and return the promise so Antora waits for async completion
-  this.on('contentClassified', ({ contentCatalog }) => {
-    assertConnectReferencePresent(contentCatalog)
+  this.on('contentClassified', ({ contentCatalog, playbook }) => {
+    assertConnectReferencePresent(contentCatalog, { connectSources: connectSourcesOf(playbook) })
     return processContent(contentCatalog)
   })
 
@@ -132,8 +184,9 @@ module.exports.register = function ({ config }) {
 
   // Raw catalog rows (info.csv column names) for this build.
   //
-  // The generated partials/platforms/catalog.json from the connect content
-  // source comes first: it is pinned to the same ref as the reference content
+  // The generated partials/platforms/catalog.json from connect (the release
+  // asset, or a connect content source) comes first: it is from the same ref
+  // as the reference content
   // and carries status, categories, and cgo data that info.csv lacks. info.csv
   // still supplies the SQL driver rows, which are not components and so are
   // not in the catalog. Without catalog.json, info.csv supplies every row.
@@ -152,7 +205,8 @@ module.exports.register = function ({ config }) {
     let csvRows = []
     try {
       const csvText = await fetchCSV(localCsvPath, contentCatalog)
-      csvRows = Papa.parse(csvText, { header: true, skipEmptyLines: true }).data
+      // connect's info.csv pads every column with spaces, headers included
+      csvRows = Papa.parse(csvText, { header: true, skipEmptyLines: true, transformHeader: (h) => h.trim() }).data
     } catch (error) {
       if (!catalogRows) throw error
       logger.warn(`Could not fetch info.csv for the SQL driver rows, so the SQL driver support list is empty: ${error.message}`)
@@ -186,8 +240,9 @@ module.exports.register = function ({ config }) {
   }
 
   // The ref to read info.csv from, in order:
-  // 1. the tag modify-connect-tag-playbook resolved for the connect content source
-  // 2. the ref of the connect content source in the content catalog
+  // 1. the tag modify-connect-tag-playbook resolved (for the release asset or
+  //    the connect content source)
+  // 2. the ref of the connect files in the content catalog
   // 3. latest-connect-version in antora.yml in the working directory
   // 4. main, with a warning, because the catalog can then disagree with the
   //    reference content
@@ -201,9 +256,9 @@ module.exports.register = function ({ config }) {
     const normalizedVersion = connectVersion ? String(connectVersion).trim().replace(/^v/, '') : ''
     if (normalizedVersion) return { ...base, ref: `v${normalizedVersion}`, source: 'latest-connect-version in antora.yml' }
     logger.warn(
-      'No connect content source or latest-connect-version found, so info.csv is read from connect main. ' +
-      'Catalog badges can then disagree with the reference content. Add the connect content source and the ' +
-      'modify-connect-tag-playbook extension to the playbook.'
+      'No resolved connect release or latest-connect-version found, so info.csv is read from connect main. ' +
+      'Catalog badges can then disagree with the reference content. Register the modify-connect-tag-playbook ' +
+      'extension, or set its `tag` config when REDPANDA_CONNECT_DOCS_DIR is set.'
     )
     return { ...base, ref: 'main', source: 'fallback' }
   }
