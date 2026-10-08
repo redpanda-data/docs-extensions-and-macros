@@ -42,9 +42,15 @@ function toResource (entryPath) {
 // corrupt or truncated archive rather than returning a partial list.
 async function readTarGz (buffer) {
   let tarBuffer
+  // The real asset unpacks to a few tens of MB. The cap turns a bad asset
+  // into a clear error instead of running the build out of memory.
+  const limit = module.exports.maxUnpackedBytes
   try {
-    tarBuffer = zlib.gunzipSync(buffer)
+    tarBuffer = zlib.gunzipSync(buffer, { maxOutputLength: limit })
   } catch (error) {
+    if (error.code === 'ERR_BUFFER_TOO_LARGE') {
+      throw new Error(`the archive unpacks to more than ${limit} bytes, which no real reference docs asset does`)
+    }
     throw new Error(`not a valid gzip archive: ${error.message}`)
   }
   // A complete tar ends with two zero blocks. Without them the archive was cut
@@ -144,4 +150,4 @@ async function readLocal (location) {
 }
 
 // retryDelayMs is a property so tests can shorten the backoff.
-module.exports = { OWNER, REPO, ASSET_NAME, MODULE, retryDelayMs: 1000, assetUrl, toResource, readTarGz, downloadAsset, readLocal }
+module.exports = { OWNER, REPO, ASSET_NAME, MODULE, retryDelayMs: 1000, maxUnpackedBytes: 512 * 1024 * 1024, assetUrl, toResource, readTarGz, downloadAsset, readLocal }

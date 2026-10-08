@@ -181,6 +181,13 @@ describe('connect-docs-asset tar reader', () => {
 
   it('rejects data that is not gzip, gzip that is not tar, and a truncated archive', async () => {
     await expect(asset.readTarGz(Buffer.from('not gzip'))).rejects.toThrow(/not a valid gzip archive/)
+    const limit = asset.maxUnpackedBytes
+    asset.maxUnpackedBytes = 1000
+    try {
+      await expect(asset.readTarGz(zlib.gzipSync(Buffer.alloc(4096)))).rejects.toThrow(/unpacks to more than 1000 bytes/)
+    } finally {
+      asset.maxUnpackedBytes = limit
+    }
     await expect(asset.readTarGz(zlib.gzipSync(Buffer.from('x'.repeat(4096))))).rejects.toThrow(/not a valid tar archive/)
     const tarBytes = zlib.gunzipSync(archive)
     // Cut at an entry boundary and mid-entry, inside an intact gzip stream
