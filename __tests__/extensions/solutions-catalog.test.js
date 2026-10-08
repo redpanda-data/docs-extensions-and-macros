@@ -1929,3 +1929,126 @@ describe('solutions-catalog: ranking among explicit edges', () => {
     expect(warnings).toEqual(['d: 2 solutions list this page in page-solution-related-docs but max_related is 1; hidden: b'])
   })
 })
+
+describe('solutions-catalog: the reader-facing why', () => {
+  test('an explicit edge carries the overview\'s Related docs sentence', async () => {
+    const solution = makeSolution('leaderboard', {
+      overviewHtml: OVERVIEW_HTML('x', RELATED_DOCS([[OFFSETS_HREF, 'Consumer Offsets', 'explains the <code>group</code> mechanics every step relies on.']])),
+    })
+    const result = await run({ solutions: [solution] })
+    const [rec] = json(result.docs[0], 'page-related-solutions')
+    expect(rec.why).toBe('Consumer Offsets explains the group mechanics every step relies on.')
+    expect(rec.reason).toBe('listed in page-solution-related-docs')
+    expect(warningsOf(result)).not.toMatch(/has no item in == Related docs/)
+  })
+
+  test('without a sentence the explicit edge falls back to the relationships.yml reason, and warns', async () => {
+    const text = 'relationships:\n  - solution: leaderboard\n    doc: streaming:develop:consumer-offsets.adoc\n    status: approved\n    reason: the leaderboard resumes from committed offsets\n'
+    const result = await run({ relationshipsText: text })
+    expect(json(result.docs[0], 'page-related-solutions')[0].why).toBe('the leaderboard resumes from committed offsets')
+    expect(warningsOf(result)).toMatch(/leaderboard: page-solution-related-docs entry "streaming:develop:consumer-offsets\.adoc" has no item in == Related docs/)
+  })
+
+  test('a category edge says which leaf categories it uses; an approved edge gives its reason', async () => {
+    const category = noRelatedDocs(makeSolution('category-one'))
+    const approved = noRelatedDocs(makeSolution('approved-one', { attrs: { 'page-categories': 'rpk' } }))
+    const text = 'relationships:\n  - solution: approved-one\n    doc: streaming:develop:consumer-offsets.adoc\n    status: approved\n    reason: same failure mode\n'
+    const result = await run({ solutions: [category, approved], relationshipsText: text })
+    const recs = json(result.docs[0], 'page-related-solutions')
+    expect(recs.find((r) => r.id === 'category-one').why).toBe('Uses Stream Processing, Clients')
+    expect(recs.find((r) => r.id === 'approved-one').why).toBe('same failure mode')
+    expect(relationships.formatCategoryWhy({ sharedLeaves: [], sharedParents: ['Development'] })).toBe('')
+  })
+
+  test('relatedDocLines reads the list items, their first link, and their own text', () => {
+    const html = OVERVIEW_HTML('x', RELATED_DOCS([[OFFSETS_HREF, 'A', 'is one.'], ['#streaming:develop:gone.adoc', 'B', 'is unresolved.']]))
+    expect(collect.relatedDocLines(html, '/solutions/leaderboard/')).toEqual([
+      { pathname: '/streaming/26.2/develop/consumer-offsets/', text: 'A is one.' },
+      { pathname: null, text: 'B is unresolved.' },
+    ])
+    expect(collect.relatedDocLines('<h2>Other</h2><ul><li>x</li></ul>')).toEqual([])
+  })
+})
+
+describe('solutions-catalog: Related docs list and attribute agree', () => {
+  const other = makeDoc({ relative: 'other.adoc', attrs: { 'page-categories': 'rpk' } })
+  const listed = (status = 'published') => makeSolution('leaderboard', {
+    attrs: { 'page-solution-status': status },
+    overviewHtml: OVERVIEW_HTML('x', RELATED_DOCS([
+      [OFFSETS_HREF, 'Consumer Offsets', 'is listed in both.'],
+      ['../../streaming/26.2/develop/other/', 'Other', 'is only in the list.'],
+      ['build-leaderboard/', 'Build', 'is a step of this solution, not a related doc.'],
+    ])),
+  })
+
+  test('a doc in the list but not the attribute is fatal once published', async () => {
+    await expect(run({ solutions: [listed()], docs: [makeDoc(), other] })).rejects.toThrow(
+      /== Related docs links streaming:develop:other\.adoc but page-solution-related-docs does not list it/
+    )
+  })
+
+  test('on a draft it is a warning, and links to the solution\'s own steps never count', async () => {
+    const result = await run({ solutions: [makeSolution('live'), listed('draft')], docs: [makeDoc(), other], config: { include_drafts: true } })
+    expect(warningsOf(result)).toMatch(/leaderboard: == Related docs links streaming:develop:other\.adoc/)
+    expect(warningsOf(result)).not.toMatch(/links solutions:/)
+  })
+})
+
+describe('solutions-catalog: Cloud readers', () => {
+  const cloudComponent = () => {
+    const v = { version: '', asciidoc: { attributes: { 'env-cloud': true } } }
+    return { name: 'cloud', title: 'Cloud', latest: v, versions: [v] }
+  }
+  const stub = (relative, include) => {
+    const page = makeDoc({ component: 'cloud', version: '', module: 'develop', relative, attrs: { 'env-cloud': true, 'page-categories': 'rpk' } })
+    // At contentClassified a page's contents are still its AsciiDoc source.
+    page.contents = Buffer.from(`= Stub\n:description: x\n\n${include}\n`)
+    return page
+  }
+  const offsetsStub = () => stub('consume-data/consumer-offsets.adoc', 'include::streaming:develop:consumer-offsets.adoc[tag=single-source]')
+
+  test('the single-sourced Cloud twin of an explicit doc gets the explicit edge, the same why, and no relatedDocs entry', async () => {
+    const twin = offsetsStub()
+    const solution = makeSolution('leaderboard', {
+      overviewHtml: OVERVIEW_HTML('x', RELATED_DOCS([[OFFSETS_HREF, 'Consumer Offsets', 'explains the mechanics.']])),
+    })
+    const result = await run({ solutions: [solution], docs: [makeDoc(), twin], components: makeComponents([cloudComponent()]) })
+    const [rec] = json(twin, 'page-related-solutions')
+    expect(rec).toMatchObject({ id: 'leaderboard', provenance: 'explicit', score: 1, why: 'Consumer Offsets explains the mechanics.' })
+    expect(rec.reason).toBe('listed in page-solution-related-docs as streaming:develop:consumer-offsets.adoc, which this page single-sources')
+    expect(json(solution.pages[0], 'page-solution').relatedDocs.map((d) => d.id)).toEqual(['streaming:develop:consumer-offsets.adoc'])
+    expect(warningsOf(result)).not.toMatch(/Cloud readers get no explicit recommendation/)
+  })
+
+  test('a self-managed-only solution does not reach the twin', async () => {
+    const twin = offsetsStub()
+    const solution = makeSolution('leaderboard', { attrs: { 'page-solution-platforms': 'self-managed' } })
+    await run({ solutions: [solution], docs: [makeDoc(), twin], components: makeComponents([cloudComponent()]) })
+    expect(attr(twin, 'page-related-solutions')).toBeUndefined()
+  })
+
+  test('a Cloud solution whose related docs reach no Cloud page warns', async () => {
+    const result = await run({ components: makeComponents([cloudComponent()]) })
+    expect(warningsOf(result)).toMatch(/leaderboard: page-solution-platforms includes cloud but no page-solution-related-docs entry is a Cloud page or has a single-sourced Cloud twin/)
+  })
+
+  test('listing the Cloud page itself also counts', async () => {
+    const cloudPage = stub('consume-data/consumer-offsets.adoc', 'Body.')
+    const solution = makeSolution('leaderboard', { attrs: { 'page-solution-related-docs': 'streaming:develop:consumer-offsets.adoc, cloud:develop:consume-data/consumer-offsets.adoc' } })
+    const result = await run({ solutions: [solution], docs: [makeDoc(), cloudPage], components: makeComponents([cloudComponent()]) })
+    expect(warningsOf(result)).not.toMatch(/Cloud readers get no explicit recommendation/)
+  })
+
+  test('collectSingleSourcedTwins maps an included page to the pages in other components that include it', () => {
+    const source = makeDoc()
+    const twin = offsetsStub()
+    const local = makeDoc({ relative: 'local.adoc' })
+    local.contents = Buffer.from('include::streaming:develop:consumer-offsets.adoc[]\n')
+    const partialOnly = stub('p.adoc', 'include::partial$x.adoc[]\ninclude::streaming:develop:missing.adoc[]')
+    const catalog = makeCatalog({ pages: [source, twin, local, partialOnly], components: makeComponents([cloudComponent()]) })
+    const twins = collect.collectSingleSourcedTwins(catalog)
+    expect([...twins.entries()].map(([k, v]) => [k, [...v]])).toEqual([
+      ['streaming:develop:consumer-offsets.adoc', ['cloud:develop:consume-data/consumer-offsets.adoc']],
+    ])
+  })
+})

@@ -11,7 +11,7 @@
 
 const { parse } = require('node-html-parser')
 const {
-  RESERVED_IDS, LAYOUTS, ENUMS, SLUG_RX, VERSION_RX, VERIFICATION_FILE, stripVersion,
+  RESERVED_IDS, LAYOUTS, ENUMS, SLUG_RX, VERSION_RX, VERIFICATION_FILE, COMPONENT, stripVersion, pageKey,
 } = require('./collect')
 const { normalizeCategories, isLeafCategory } = require('../../extension-utils/categories')
 const yaml = require('js-yaml')
@@ -297,9 +297,12 @@ function verificationWarnings (record) {
  * @param {Set<string>} [ctx.solutionIds] - all module names in the component
  * @param {(pathname: string) => Object|null|undefined} [ctx.pageByUrl] - a published URL
  *   path to its page; when absent, link fragments are not checked
+ * @param {Array<string>} [ctx.umbrellaLayouts] - layouts that never show recommendations
+ * @param {(page: Object) => boolean} [ctx.isCloudPage] - when absent, Cloud reach is not checked
+ * @param {(key: string) => Array<string>} [ctx.cloudTwinsOf] - Cloud pages that single-source a doc
  * @returns {{errors: Array<string>, warnings: Array<string>}}
  */
-function validateSolution (record, { categoryMap, facetVocab, resolveDoc, solutionIds, pageByUrl } = {}) {
+function validateSolution (record, { categoryMap, facetVocab, resolveDoc, solutionIds, pageByUrl, umbrellaLayouts, isCloudPage, cloudTwinsOf } = {}) {
   const errors = []
   const warnings = []
   const id = record.id
@@ -414,13 +417,53 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
 
   // Related docs: warn when absent, fatal when malformed or unresolved
   if (!record.relatedDocRefs.length) warn('page-solution-related-docs is empty; readers get no explicit Product Docs links')
+  const relatedKeys = new Map()
+  let cloudReach = false
   for (const ref of record.relatedDocRefs) {
     if (!FQ_RESOURCE_RX.test(ref)) {
       err(`page-solution-related-docs entry "${ref}" must be a fully qualified page ID (component:module:path.adoc)`)
       continue
     }
-    if (resolveDoc && !resolveDoc(stripVersion(ref))) err(`page-solution-related-docs entry "${ref}" does not resolve to a page in this build`)
+    const page = resolveDoc ? resolveDoc(stripVersion(ref)) : null
+    if (resolveDoc && !page) {
+      err(`page-solution-related-docs entry "${ref}" does not resolve to a page in this build`)
+      continue
+    }
+    if (!page) continue
+    const key = pageKey(page)
+    relatedKeys.set(key, ref)
+    const attrs = (page.asciidoc && page.asciidoc.attributes) || {}
+    if (umbrellaLayouts && (umbrellaLayouts.includes(attrs['page-layout']) || umbrellaLayouts.includes(attrs['page-role']))) {
+      warn(`page-solution-related-docs entry "${ref}" is a landing or index page (layout ${attrs['page-layout'] || attrs['page-role']}), which never shows recommendations; link the article it summarizes`)
+    }
+    if (isCloudPage && (isCloudPage(page) || (cloudTwinsOf && cloudTwinsOf(key).length))) cloudReach = true
   }
+  if (isCloudPage && record.platforms.includes('cloud') && record.relatedDocRefs.length && !cloudReach) {
+    warn('page-solution-platforms includes cloud but no page-solution-related-docs entry is a Cloud page or has a single-sourced Cloud twin; Cloud readers get no explicit recommendation')
+  }
+
+  // The overview's Related docs list and the attribute say the same thing
+  // twice: the list is what readers of the overview see, the attribute is
+  // what makes the doc page recommend the solution back. A doc in the list
+  // but not the attribute is a one-way link (fatal once published); a doc in
+  // the attribute with no sentence in the list leaves the recommendation on
+  // that page with no reason to give.
+  if (Array.isArray(record.relatedDocLines)) {
+    const report = record.status === 'published' ? err : warn
+    const authored = new Set()
+    for (const line of record.relatedDocLines) {
+      if (!line.key || line.component === COMPONENT) continue
+      authored.add(line.key)
+      if (!relatedKeys.has(line.key)) {
+        report(`== Related docs links ${line.key} but page-solution-related-docs does not list it, so that page does not recommend this solution; add it to the attribute`)
+      }
+    }
+    for (const [key, ref] of relatedKeys) {
+      if (!authored.has(key)) warn(`page-solution-related-docs entry "${ref}" has no item in == Related docs; the recommendation on that page has no reason to show`)
+    }
+  }
+
+  if (!record.relatedSolutionIds.length) warn('page-solution-related-solutions is empty; the overview points readers at no other solution')
   for (const other of record.relatedSolutionIds) {
     if (other === id) err('page-solution-related-solutions must not list the solution itself')
     else if (solutionIds && !solutionIds.has(other)) err(`page-solution-related-solutions entry "${other}" is not a solution in this build`)

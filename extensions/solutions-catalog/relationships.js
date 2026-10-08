@@ -16,7 +16,13 @@
  *                    Kubernetes/Linux/Docker doc -> platforms includes self-managed
  *   threshold        min_score (default 0.6): a category-only edge needs two shared leaf
  *                    categories; parent-only or single-leaf overlap never shows
- *   rank             score desc, featured desc, lastModified desc, title asc; cap max_related
+ *   rank             score desc, featured desc, shared leaf categories desc, lastModified desc,
+ *                    title asc; cap max_related. An explicit edge cut by the cap is kept in the
+ *                    graph (shown: false) and reported as a warning, because an author asked for it
+ *   why              reader-facing reason on every recommendation: explicit edges take the
+ *                    overview's Related docs sentence for the doc (fallback: the relationships.yml
+ *                    reason), editor-approved edges the relationships.yml reason, category edges
+ *                    "Uses <shared leaf categories>"
  *   excluded         solution status != published (a draft built with include_drafts counts as published)
  *
  * Everything here is pure so the ranking can be unit tested without Antora.
@@ -94,6 +100,15 @@ function formatCategoryReason ({ sharedLeaves, sharedParents }) {
 }
 
 /**
+ * Reader-facing reason for a category edge: the leaf categories the page and
+ * the solution share. Parents say only "same product area", so they are left
+ * out; an edge with no shared leaf gets no reason rather than a vague one.
+ */
+function formatCategoryWhy ({ sharedLeaves }) {
+  return sharedLeaves.length ? `Uses ${sharedLeaves.join(', ')}` : ''
+}
+
+/**
  * Platform filter for category edges. A doc with no deployment marker matches
  * every solution.
  *
@@ -132,7 +147,9 @@ function compareCandidates (a, b) {
  * @param {Object} input
  * @param {Array<{key: string, url: string, categories: Array<string>, deployment: string}>} input.docs
  * @param {Array<Object>} input.solutions - validated records with normalized `categories`
- *   and `relatedDocKeys` (Set of doc keys resolved from page-solution-related-docs)
+ *   and `relatedDocKeys` (Set of doc keys resolved from page-solution-related-docs). Optional:
+ *   `relatedDocWhy` (Map doc key -> the overview's Related docs sentence) and
+ *   `relatedDocTwins` (Map Cloud twin key -> the related doc key it single-sources)
  * @param {Array<{solutionId: string, docKey: string, status: string, confidence: number|null, reason: string}>} input.relationships
  *   resolved approved/rejected entries (pending already dropped)
  * @param {Object} input.categoryMap
@@ -165,18 +182,25 @@ function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap,
       let provenance
       let score
       let reason
+      let why
       if (explicit) {
         provenance = 'explicit'
         score = SCORE_EXPLICIT
-        reason = 'listed in page-solution-related-docs'
+        const twinOf = solution.relatedDocTwins && solution.relatedDocTwins.get(doc.key)
+        reason = twinOf
+          ? `listed in page-solution-related-docs as ${twinOf}, which this page single-sources`
+          : 'listed in page-solution-related-docs'
+        why = (solution.relatedDocWhy && solution.relatedDocWhy.get(doc.key)) || (rel && rel.reason) || ''
       } else if (rel && rel.status === 'approved') {
         provenance = 'editor-approved'
         score = Math.max(SCORE_APPROVED_FLOOR, rel.confidence || 0)
         reason = rel.reason ? `approved in relationships.yml: ${rel.reason}` : 'approved in relationships.yml'
+        why = rel.reason || ''
       } else {
         provenance = 'category'
         score = cat.score
         reason = formatCategoryReason(cat)
+        why = formatCategoryWhy(cat)
       }
 
       const edge = {
@@ -188,6 +212,7 @@ function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap,
         shown: false,
         rank: null,
         reason,
+        why,
       }
 
       if (rel && rel.status === 'rejected') {
@@ -301,6 +326,8 @@ function toRecommendation (solution, edge) {
     provenance: edge.provenance,
     score: edge.score,
     reason: edge.reason,
+    // For the reader, unlike `reason`, which explains the ranking to authors.
+    why: edge.why || '',
   }
 }
 
@@ -317,6 +344,7 @@ module.exports = {
   parseRelationships,
   categoryScore,
   formatCategoryReason,
+  formatCategoryWhy,
   platformCompatible,
   computeRelatedSolutions,
   computeCoverage,

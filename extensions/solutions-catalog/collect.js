@@ -188,6 +188,80 @@ function collectSnippetFiles (pages) {
   return [...files].sort()
 }
 
+/**
+ * The items of the overview's `== Related docs` list, from converted HTML.
+ *
+ * Each item opens with an xref to the doc and goes on to say why the doc
+ * matters to this solution; that sentence is what a reader of the doc page
+ * sees as the reason for the recommendation. Returns one entry per top-level
+ * list item: the pathname its first link resolves to (against `pageUrl`), and
+ * the item's text with whitespace collapsed. Items without a link, and
+ * Antora's unresolved xrefs (href "#..."), have no pathname.
+ *
+ * @param {string|Buffer} contents - converted overview HTML
+ * @param {string} [pageUrl='/'] - the overview's pub.url
+ * @returns {Array<{pathname: string|null, text: string}>}
+ */
+function relatedDocLines (contents, pageUrl = '/') {
+  const { parse } = require('node-html-parser')
+  const html = Buffer.isBuffer(contents) ? contents.toString('utf8') : String(contents || '')
+  const root = parse(html)
+  const heading = root.querySelectorAll('h2').find((h) => {
+    return String(h.text || '').replace(/\s+/g, ' ').trim().replace(/[\s.:!?]+$/, '').toLowerCase() === 'related docs'
+  })
+  if (!heading) return []
+  // Asciidoctor wraps the section in .sect1; without it, the list is the
+  // heading's next sibling.
+  const parent = heading.parentNode
+  const scope = parent && /(^|\s)sect1(\s|$)/.test(parent.getAttribute ? parent.getAttribute('class') || '' : '')
+    ? parent
+    : heading.nextElementSibling
+  const list = scope && (scope.tagName === 'UL' || scope.tagName === 'OL' ? scope : scope.querySelector('ul, ol'))
+  if (!list) return []
+  const base = new URL(pageUrl, 'https://site.invalid')
+  return list.childNodes
+    .filter((n) => n.tagName === 'LI')
+    .map((li) => {
+      // Asciidoctor puts the item's own text in its first <p>; anything after
+      // it (a nested list, a continuation) is not the sentence.
+      const own = li.childNodes.find((n) => n.tagName === 'P') || li
+      const text = decode(String(own.text || '')).replace(/\s+/g, ' ').trim()
+      const a = own.querySelector('a[href]')
+      const href = a ? a.getAttribute('href') || '' : ''
+      let pathname = null
+      if (href && !href.startsWith('#')) {
+        try {
+          const url = new URL(href, base)
+          if (url.origin === base.origin) pathname = url.pathname
+        } catch {}
+      }
+      return { pathname, text }
+    })
+    .filter((l) => l.text)
+}
+
+/**
+ * Resolve the overview's Related docs items to doc keys, for validation and
+ * for the reader-facing `why` on recommendations. Sets
+ * `record.relatedDocLines` to `[{ key, component, text }]`, where `key` is
+ * null when the item's link lands on no page in this build.
+ *
+ * @param {Object} record
+ * @param {(pathname: string) => Object|null|undefined} pageByUrl
+ */
+function resolveRelatedDocLines (record, pageByUrl) {
+  if (!record.overview || !record.overview.contents || typeof pageByUrl !== 'function') {
+    record.relatedDocLines = []
+    return record.relatedDocLines
+  }
+  const pageUrl = (record.overview.pub && record.overview.pub.url) || '/'
+  record.relatedDocLines = relatedDocLines(record.overview.contents, pageUrl).map(({ pathname, text }) => {
+    const page = pathname ? pageByUrl(pathname) : null
+    return { key: page ? pageKey(page) : null, component: page && page.src ? page.src.component : null, text }
+  })
+  return record.relatedDocLines
+}
+
 /** Step id for a page of a solution module: the file stem relative to pages/. */
 function stepIdOf (page) {
   return String(page.src.relative || '').replace(/\.adoc$/, '')
@@ -300,6 +374,49 @@ function buildRecord (mod, modulePages, moduleAttachments, { version }) {
   }
 }
 
+// A qualified include of another component's page: the single-sourcing
+// pattern, where a Cloud page is a stub around include::streaming:...[].
+const PAGE_INCLUDE_RX = /^include::((?:[^@:\[\s$]+@)?[A-Za-z0-9_-]+:[A-Za-z0-9_-]*:[^\[\s$]+\.adoc)\[/gm
+
+/**
+ * Map every page that another component's page includes to the pages that
+ * include it: `included key -> Set(including key)`. Read from page sources,
+ * so it must run while `contents` is still AsciiDoc (contentClassified).
+ * Pages of `skipComponent` are not scanned.
+ *
+ * @param {Object} contentCatalog
+ * @param {Object} [options]
+ * @param {string} [options.skipComponent='solutions']
+ * @returns {Map<string, Set<string>>}
+ */
+function collectSingleSourcedTwins (contentCatalog, { skipComponent = COMPONENT } = {}) {
+  const twins = new Map()
+  if (typeof contentCatalog.resolveResource !== 'function') return twins
+  const resolved = new Map()
+  for (const page of contentCatalog.findBy({ family: 'page' }) || []) {
+    if (!page.src || page.src.component === skipComponent || !page.contents) continue
+    const source = Buffer.isBuffer(page.contents) ? page.contents.toString('utf8') : String(page.contents)
+    if (!source.includes('include::')) continue
+    PAGE_INCLUDE_RX.lastIndex = 0
+    let match
+    while ((match = PAGE_INCLUDE_RX.exec(source))) {
+      const spec = match[1]
+      const cacheKey = `${page.src.version}|${spec}`
+      if (!resolved.has(cacheKey)) {
+        let target = null
+        try { target = contentCatalog.resolveResource(spec, page.src, 'page', ['page']) || null } catch {}
+        resolved.set(cacheKey, target)
+      }
+      const target = resolved.get(cacheKey)
+      if (!target || !target.src || target.src.component === page.src.component) continue
+      const key = pageKey(target)
+      if (!twins.has(key)) twins.set(key, new Set())
+      twins.get(key).add(pageKey(page))
+    }
+  }
+  return twins
+}
+
 module.exports = {
   COMPONENT,
   RESERVED_IDS,
@@ -312,6 +429,9 @@ module.exports = {
   VERIFICATION_FIELDS,
   parseVerification,
   collectSnippetFiles,
+  relatedDocLines,
+  resolveRelatedDocLines,
+  collectSingleSourcedTwins,
   parseList,
   parseFlag,
   deriveRepo,

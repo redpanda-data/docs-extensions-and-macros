@@ -247,6 +247,9 @@ module.exports.register = function ({ config = {} } = {}) {
     records: [],
     draftUrls: [],
     facetsFile: null,
+    // included page key -> keys of the pages in other components that include
+    // it, read from sources at contentClassified (see collectSingleSourcedTwins)
+    twins: new Map(),
   }
   let validator = null
   const getValidator = () => (validator = validator || relationships.createRelationshipsValidator())
@@ -260,6 +263,9 @@ module.exports.register = function ({ config = {} } = {}) {
     const errors = validate.validateStructure(collected)
 
     state.facetsFile = collected.facetsFile || null
+    // Page sources are only AsciiDoc until conversion, so the single-sourcing
+    // map that lets Cloud twins inherit explicit edges is read now.
+    state.twins = collect.collectSingleSourcedTwins(contentCatalog)
 
     if (collected.relationshipsFile) {
       try {
@@ -305,8 +311,13 @@ module.exports.register = function ({ config = {} } = {}) {
       if (landingLayout !== collect.LAYOUTS.home) errors.push(`solutions: ROOT/pages/index.adoc must set :page-layout: ${collect.LAYOUTS.home} (found "${landingLayout || ''}")`)
     }
 
+    const isCloudPage = (page) => Boolean(page && page.asciidoc) && getDeploymentType(page.asciidoc.attributes) === 'Redpanda Cloud'
+    const cloudTwinsOf = (key) => [...(state.twins.get(key) || [])].filter((twinKey) => isCloudPage(resolveDoc(twinKey)))
     for (const record of collected.solutions) {
-      const result = validate.validateSolution(record, { categoryMap, facetVocab, resolveDoc, solutionIds, pageByUrl })
+      collect.resolveRelatedDocLines(record, pageByUrl)
+      const result = validate.validateSolution(record, {
+        categoryMap, facetVocab, resolveDoc, solutionIds, pageByUrl, umbrellaLayouts: UMBRELLA_LAYOUTS, isCloudPage, cloudTwinsOf,
+      })
       errors.push(...result.errors)
       warnings.push(...result.warnings)
     }
@@ -358,6 +369,14 @@ module.exports.register = function ({ config = {} } = {}) {
     for (const record of active) {
       record.relatedDocKeys = new Set()
       record.relatedDocs = []
+      // Reader-facing reasons, from the overview's Related docs sentences.
+      record.relatedDocWhy = new Map()
+      for (const line of record.relatedDocLines || []) {
+        if (line.key && !record.relatedDocWhy.has(line.key)) record.relatedDocWhy.set(line.key, line.text)
+      }
+      // Cloud twin key -> the related doc it single-sources
+      record.relatedDocTwins = new Map()
+      const runsOnCloud = record.platforms.includes('cloud')
       for (const ref of record.relatedDocRefs) {
         const page = resolveDoc(collect.stripVersion(ref))
         if (!page) continue
@@ -368,6 +387,17 @@ module.exports.register = function ({ config = {} } = {}) {
         }
         record.relatedDocKeys.add(key)
         record.relatedDocs.push({ id: key, title: collect.plainTitle(page.asciidoc && page.asciidoc.doctitle), url: page.pub && page.pub.url, provenance: 'explicit' })
+        // A solution that runs on Cloud reaches Cloud readers through the
+        // Cloud page that single-sources this one. The twin gets the explicit
+        // edge (and the same reason), but not a second entry in relatedDocs:
+        // the overview lists each doc once.
+        if (!runsOnCloud) continue
+        for (const twinKey of cloudTwinsOf(key)) {
+          if (record.relatedDocKeys.has(twinKey) || rejectedPairs.has(`${record.id} ${twinKey}`)) continue
+          record.relatedDocKeys.add(twinKey)
+          record.relatedDocTwins.set(twinKey, key)
+          if (record.relatedDocWhy.has(key) && !record.relatedDocWhy.has(twinKey)) record.relatedDocWhy.set(twinKey, record.relatedDocWhy.get(key))
+        }
       }
       record.relatedSolutions = record.relatedSolutionIds
         .map((id) => activeById.get(id))
