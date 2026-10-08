@@ -1,0 +1,607 @@
+---
+# Reusable Connect docs PR check.
+#
+# connect calls this on same-repo, non-draft PRs, after its docs job has
+# generated the reference docs. It builds rp-connect-docs with the PR's
+# generated tree and reports what the PR changes on the published pages:
+#
+#   1. Antora build with a trimmed playbook (tools/connect-docs/ci-playbook.yml)
+#      and REDPANDA_CONNECT_DOCS_DIR pointing at the PR's tree.
+#   2. doc-tools check-build-log. BLOCKS on any Antora log record at level
+#      error or fatal from rp-connect-docs or the connect generated tree (or
+#      with no source, such as an extension error), on a page count below
+#      min_pages, and on Antora exiting non-zero. Errors from the other
+#      sources (docs, cloud-docs, docs-site, redpanda-labs main) are listed
+#      but do not block: a connect PR cannot cause them, and a break on docs
+#      main must not turn every connect PR red. Antora runs with
+#      --log-failure-level=fatal, so this check, not Antora, decides, and the
+#      job summary says why. It also BLOCKS when the build did not read every
+#      file of the PR's tree through REDPANDA_CONNECT_DOCS_DIR.
+#   3. doc-tools connect-docs-diff against the merge base tree, when the
+#      caller passes one: the changed pages with links and per-file diffs, in
+#      the job summary. The rendered HTML of those pages is uploaded as an
+#      artifact.
+#   4. doc-tools check-rendered-html over the Connect and Cloud connect pages:
+#      unconverted markup, broken anchors, and links to pages that don't
+#      exist. With the diff, findings on a page the PR changes BLOCK and the
+#      rest are listed; without it, nothing blocks.
+#   5. A Netlify draft deploy preview, linked from a commit status.
+#   6. One sticky PR comment with the result, the preview, and the changed
+#      pages, the notify_label, and a one-time review request to notify_team,
+#      whenever the PR changes a published page or breaks the build.
+#
+# CALLER CONTRACT
+#
+# The caller's docs job generates and uploads two artifacts in the same run:
+# the PR head's docs/modules directory and, for the diff, the same directory
+# generated at the PR's merge base (git merge-base of the base and head
+# SHAs). The baseline is regenerated in that job, not taken from an artifact
+# of a main push: diffing against main would also show changes that landed on
+# main after the PR branched. Upload each with the directory itself as the
+# path (`path: docs/modules`), so the artifact root holds components/.
+#
+#   jobs:
+#     docs-check:
+#       needs: docs
+#       if: >-
+#         github.event_name == 'pull_request' &&
+#         !github.event.pull_request.draft &&
+#         github.event.pull_request.head.repo.full_name == github.repository
+#       permissions:
+#         contents: read
+#         id-token: write
+#         # The "Connect docs preview" commit status with the preview link.
+#         statuses: write
+#         # The sticky PR comment and the notify label.
+#         pull-requests: write
+#       uses: redpanda-data/docs-extensions-and-macros/.github/workflows/connect-docs-check.yml@<commit-sha> # v<version>
+#       with:
+#         docs_artifact: connect-docs-head
+#         base_docs_artifact: connect-docs-base
+#         aws_region: ${{ vars.RP_AWS_CRED_REGION }}
+#         aws_role_name_prefix: ${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}
+#       secrets:
+#         aws_cred_account_id: ${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}
+#
+# Credentials. rp-connect-docs, docs, cloud-docs, and docs-site are private,
+# so cloning them needs a token with read access to all four (redpanda-labs
+# is public and is cloned with the same token): the org bot
+# token. The pattern is the one doc-strings-review.yml uses. Engineering
+# repos do not hold it as a GitHub secret; they assume their per-repo OIDC
+# role (RP_AWS_CRED_* above, which needs id-token: write) and read
+# sdlc/prod/github/actions_bot_token from Secrets Manager. connect's role is
+# granted that secret in devprod-infra (aws-oidc/repo_secrets.auto.tfvars.json).
+# A repo that holds the token as a GitHub secret passes it as
+# actions_bot_token instead. With neither, the clone step fails with an
+# error that says so: the check cannot run without the private sources.
+#
+# The token is used in exactly one step. The clone step hands it to git
+# through GIT_CONFIG_* environment variables (never argv, never .git/config),
+# and the step after it blanks the token and the AWS session credentials
+# from the job environment, so the install, Antora, and check steps never
+# see them. A fork PR has no secrets, which is why the job skips forks.
+#
+# Pin a commit SHA, annotated with its tag, for the same reasons given in
+# doc-strings-review.yml. The build installs docs-extensions-and-macros
+# from this workflow's own commit (job.workflow_sha), so the extensions, the
+# playbook, and the check commands always match the workflow that runs them.
+name: connect-docs-check (reusable)
+on:
+  workflow_call:
+    inputs:
+      docs_artifact:
+        description: "Artifact holding the PR's generated docs tree (connect's docs/modules, uploaded with that directory as the path)."
+        type: string
+        required: true
+      base_docs_artifact:
+        description: "Artifact holding the same tree generated at the PR's merge base. Empty skips the diff and the changed-pages artifact."
+        type: string
+        default: ""
+      min_pages:
+        description: >-
+          Fewest HTML pages the connect component may produce. Below it the
+          check fails, which also catches a build that exits 0 with no files.
+          The component had 440 pages in October 2026.
+        type: number
+        default: 400
+      rp_connect_docs_ref:
+        description: "Branch of rp-connect-docs to build."
+        type: string
+        default: "main"
+      aws_region:
+        description: "AWS region for the OIDC role that reads the bot token. Empty skips the OIDC path and relies on the actions_bot_token secret."
+        type: string
+        default: ""
+      aws_role_name_prefix:
+        description: "Base IAM role name; the calling repository's name is appended. Empty skips the OIDC path."
+        type: string
+        default: ""
+      bot_token_secret_id:
+        description: "Secrets Manager id holding the org bot token."
+        type: string
+        default: "sdlc/prod/github/actions_bot_token"
+      preview_secret_id:
+        description: "Secrets Manager id holding the Netlify token and site ID for the deploy preview (JSON keys DOCS_NETLIFY_PREVIEW_AUTH_TOKEN and DOCS_NETLIFY_PREVIEW_SITE_ID). When the caller can't read it, the preview is skipped. Empty turns the preview off."
+        type: string
+        default: "sdlc/prod/github/docs_netlify_preview"
+      notify_label:
+        description: "Label added to a PR that changes a published page or breaks the docs build. Empty adds no label."
+        type: string
+        default: "documentation"
+      notify_team:
+        description: "Org team (slug) asked to review a PR that changes a published page or breaks the docs build, once per PR. The request uses the org bot token, because GITHUB_TOKEN cannot request team reviews. Empty requests no review."
+        type: string
+        default: "documentation"
+    secrets:
+      aws_cred_account_id:
+        description: "AWS account id owning the OIDC role. Required on the OIDC path."
+        required: false
+      actions_bot_token:
+        description: "Org bot token with read access to rp-connect-docs, docs, cloud-docs, and docs-site. Only where the token is a GitHub secret."
+        required: false
+jobs:
+  connect-docs-check:
+    # Forks get no secrets and drafts are not ready for review; the caller
+    # gates on both too, this is the backstop.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (!github.event.pull_request.draft &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # A newer push makes an older build moot. Named so a caller's own
+    # concurrency group cannot collide with it.
+    concurrency:
+      group: connect-docs-check-${{ github.repository }}-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      # The OIDC role assumption that reads the bot token and the preview token.
+      id-token: write
+      # The "Connect docs preview" commit status with the preview link.
+      statuses: write
+      # The sticky PR comment and the notify label.
+      pull-requests: write
+    env:
+      WORK: ${{ github.workspace }}/connect-docs-check
+    steps:
+      - name: Download the PR's generated docs
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.docs_artifact }}
+          path: connect-docs-check/head/modules
+      - name: Download the merge base's generated docs
+        if: inputs.base_docs_artifact != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.base_docs_artifact }}
+          path: connect-docs-check/base/modules
+      - name: Check the generated tree
+        run: |
+          set -euo pipefail
+          # REDPANDA_CONNECT_DOCS_DIR needs a directory holding
+          # modules/components. An artifact uploaded from docs/ instead of
+          # docs/modules nests one level deeper; accept both.
+          for side in head base; do
+            dir="$WORK/$side/modules"
+            [ -d "$dir" ] || continue
+            if [ ! -d "$dir/components" ] && [ -d "$dir/modules/components" ]; then
+              mv "$dir" "$WORK/$side.tmp" && mv "$WORK/$side.tmp/modules" "$dir" && rm -rf "$WORK/$side.tmp"
+            fi
+          done
+          if [ ! -d "$WORK/head/modules/components/partials" ]; then
+            echo "::error::The docs artifact has no components/partials directory. Upload connect's docs/modules directory."
+            exit 1
+          fi
+          echo "Generated files: $(find "$WORK/head/modules/components" -type f | wc -l)"
+      - name: Check out docs-extensions-and-macros at this workflow's commit
+        uses: actions/checkout@v4
+        with:
+          repository: redpanda-data/docs-extensions-and-macros
+          ref: ${{ job.workflow_sha || github.workflow_sha }}
+          path: connect-docs-check/dem
+          persist-credentials: false
+      - name: Assume the AWS role that can read the bot token
+        id: aws_credentials
+        if: inputs.aws_region != '' && inputs.aws_role_name_prefix != ''
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: arn:aws:iam::${{ secrets.aws_cred_account_id }}:role/${{ inputs.aws_role_name_prefix }}${{ github.event.repository.name }}
+      - name: Fetch the bot token from Secrets Manager
+        if: steps.aws_credentials.outcome == 'success'
+        uses: aws-actions/aws-secretsmanager-get-secrets@v3
+        with:
+          secret-ids: |
+            ,${{ inputs.bot_token_secret_id }}
+          parse-json-secrets: true
+      - name: Clone the private doc sources
+        env:
+          TOKEN: ${{ env.ACTIONS_BOT_TOKEN || secrets.actions_bot_token }}
+          RPCN_REF: ${{ inputs.rp_connect_docs_ref }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TOKEN:-}" ]; then
+            echo "::error::No token to clone rp-connect-docs, docs, cloud-docs, and docs-site. Pass the aws_* inputs (OIDC) or the actions_bot_token secret."
+            exit 1
+          fi
+          auth=$(printf 'x-access-token:%s' "$TOKEN" | base64 | tr -d '\n')
+          echo "::add-mask::$auth"
+          mkdir -p "$WORK/sources"
+          # The header reaches git through GIT_CONFIG_* for this one command,
+          # so it is never in argv and never written to .git/config, where
+          # the Antora step (which reads these clones) could find it.
+          clone() {
+            GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" \
+              git clone --quiet --depth 1 --single-branch --branch "$2" \
+                "https://github.com/redpanda-data/$1.git" "$WORK/sources/$1"
+            echo "Cloned redpanda-data/$1@$2 ($(git -C "$WORK/sources/$1" rev-parse --short HEAD))"
+          }
+          clone rp-connect-docs "$RPCN_REF"
+          clone docs main
+          clone cloud-docs main
+          clone docs-site main
+          # Public, but cloned the same way so every source is local.
+          clone redpanda-labs main
+          if grep -rqs extraheader "$WORK"/sources/*/.git/config; then
+            echo "::error::A clone persisted credentials in .git/config."
+            exit 1
+          fi
+      # aws-secretsmanager-get-secrets and configure-aws-credentials export
+      # into the JOB environment, which every later step inherits. Blank
+      # them before anything runs Antora or a dependency's code.
+      - name: Drop credentials from the job environment
+        if: always()
+        run: |
+          set -euo pipefail
+          for v in ACTIONS_BOT_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+            echo "$v=" >> "$GITHUB_ENV"
+          done
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: connect-docs-check/sources/rp-connect-docs/package-lock.json
+      - name: Install Antora and docs-extensions-and-macros
+        run: |
+          set -euo pipefail
+          cd "$WORK/sources/rp-connect-docs"
+          # rp-connect-docs pins Antora and the Asciidoctor extensions in its
+          # lockfile; the docs-extensions-and-macros it pins is replaced with
+          # the one at this workflow's commit. No install scripts: nothing the
+          # build loads needs one.
+          npm ci --ignore-scripts --no-audit --no-fund
+          tarball=$(cd "$WORK/dem" && npm pack --silent --pack-destination "$WORK")
+          npm install --no-save --ignore-scripts --no-audit --no-fund "$WORK/$tarball"
+          cp "$WORK/dem/tools/connect-docs/ci-playbook.yml" connect-docs-check-playbook.yml
+          npx --no-install antora --version
+      - name: Compute the Antora cache key
+        id: cachekey
+        run: |
+          set -euo pipefail
+          echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+      # The cache holds the UI bundle (the playbook sets snapshot: false).
+      # A weekly key picks up new docs-ui releases within a week.
+      - name: Cache the Antora cache directory
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/antora-cache
+          key: connect-docs-check-antora-${{ runner.os }}-${{ steps.cachekey.outputs.week }}
+      - name: Build the docs with the PR's generated tree
+        id: build
+        env:
+          REDPANDA_CONNECT_DOCS_DIR: ${{ github.workspace }}/connect-docs-check/head
+          CACHE_DIR: ${{ runner.temp }}/antora-cache
+        run: |
+          set -uo pipefail
+          cd "$WORK/sources/rp-connect-docs"
+          # --log-failure-level=fatal: Antora fails only on a fatal record,
+          # so it writes every page it can and the log check below decides.
+          # The runner adds -e, so a failure is captured with || rather than
+          # read from $? afterwards, which -e would never reach.
+          # Antora appends to --log-file; start from an empty one.
+          : > "$WORK/antora.ndjson"
+          rc=0
+          npx --no-install antora \
+            --cache-dir "$CACHE_DIR" \
+            --to-dir "$WORK/site" \
+            --log-format json \
+            --log-level info \
+            --log-failure-level fatal \
+            --log-file "$WORK/antora.ndjson" \
+            connect-docs-check-playbook.yml || rc=$?
+          echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
+          echo "Antora exited $rc"
+      - name: Check the build log (blocking)
+        id: log_check
+        if: ${{ !cancelled() && steps.build.outputs.exit_code != '' }}
+        env:
+          ANTORA_EXIT: ${{ steps.build.outputs.exit_code }}
+          MIN_PAGES: ${{ inputs.min_pages }}
+        run: |
+          set -uo pipefail
+          cd "$WORK/sources/rp-connect-docs"
+          # The build must have used the PR's tree. A docs-extensions-and-macros
+          # that ignores REDPANDA_CONNECT_DOCS_DIR, or a playbook without the
+          # extension, would build the released docs instead and pass.
+          expected=$(find "$WORK/head/modules/components" -type f | wc -l | tr -d ' ')
+          added=$(jq -r 'select((.msg // "") | startswith("Redpanda Connect reference docs from REDPANDA_CONNECT_DOCS_DIR")) | .msg' "$WORK/antora.ndjson" \
+            | sed -n 's/.*: added \([0-9][0-9]*\) files.*/\1/p' | head -1)
+          if [ -z "$added" ]; then
+            echo "::error::The build did not read the PR's generated docs: no REDPANDA_CONNECT_DOCS_DIR record in the Antora log. The installed docs-extensions-and-macros or the playbook does not support it."
+            exit 1
+          fi
+          if [ "$added" != "$expected" ]; then
+            echo "::error::The build added $added of the PR's $expected generated files."
+            exit 1
+          fi
+          echo "The build used all $added of the PR's generated files."
+          rc=0
+          npx --no-install doc-tools check-build-log "$WORK/antora.ndjson" \
+            --site-dir "$WORK/site/connect" --min-pages "$MIN_PAGES" \
+            --blocking-sources redpanda-data/rp-connect-docs,redpanda-data/connect \
+            --output "$WORK/build-log.md" || rc=$?
+          cat "$WORK/build-log.md" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          # A crash that logged nothing (out of memory, a killed process)
+          # would pass the log check, so Antora's own exit code counts too.
+          if [ "$ANTORA_EXIT" != "0" ]; then
+            echo "::error::Antora exited $ANTORA_EXIT."
+            exit 1
+          fi
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::The Antora build log has errors or too few pages. See the job summary."
+            exit 1
+          fi
+      - name: Diff the generated docs against the merge base
+        id: diff
+        if: ${{ !cancelled() && inputs.base_docs_artifact != '' && steps.build.outputs.exit_code != '' }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          cd "$WORK/sources/rp-connect-docs"
+          npx --no-install doc-tools connect-docs-diff "$WORK/base/modules" "$WORK/head/modules" \
+            --output "$WORK/diff.md" > /dev/null
+          npx --no-install doc-tools connect-docs-diff "$WORK/base/modules" "$WORK/head/modules" \
+            --format json --output "$WORK/diff.json" > /dev/null
+          cat "$WORK/diff.md" >> "$GITHUB_STEP_SUMMARY"
+          # Stage the rendered HTML of every changed page that was built.
+          mkdir -p "$WORK/changed-pages"
+          count=0
+          while IFS= read -r page; do
+            [ -n "$page" ] || continue
+            if [ -f "$WORK/site/$page" ]; then
+              mkdir -p "$WORK/changed-pages/$(dirname "$page")"
+              cp "$WORK/site/$page" "$WORK/changed-pages/$page"
+              count=$((count + 1))
+            fi
+          done < <(jq -r '.pages[].sitePath' "$WORK/diff.json")
+          echo "pages=$count" >> "$GITHUB_OUTPUT"
+      # Connect and Cloud connect pages: unconverted markup, broken anchors,
+      # and links to pages that don't exist. With the merge-base diff, a
+      # finding on a page this PR changes BLOCKS; findings on other pages were
+      # already on the site and are only listed. Without the diff nothing
+      # blocks, as before.
+      - name: Check the rendered HTML
+        id: html_check
+        if: ${{ !cancelled() && steps.build.outputs.exit_code != '' }}
+        run: |
+          set -uo pipefail
+          cd "$WORK/sources/rp-connect-docs"
+          args=(--component connect --component cloud-data-platform/develop/connect)
+          [ -f "$WORK/diff.json" ] && args+=(--changed-pages "$WORK/diff.json" --strict)
+          rc=0
+          npx --no-install doc-tools check-rendered-html "$WORK/site" "${args[@]}" \
+            --format json --output "$WORK/html-check.json" > /dev/null || rc=$?
+          npx --no-install doc-tools check-rendered-html "$WORK/site" "${args[@]}" \
+            --output "$WORK/html-check.md" > /dev/null || true
+          cat "$WORK/html-check.md" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          if [ "$rc" -gt 1 ] || ! jq -e .total "$WORK/html-check.json" > /dev/null 2>&1; then
+            echo "::warning::The rendered HTML check could not run."
+            exit 0
+          fi
+          total=$(jq -r '.total' "$WORK/html-check.json")
+          changed=$(jq -r '.changed.total // 0' "$WORK/html-check.json")
+          echo "changed_findings=$changed" >> "$GITHUB_OUTPUT"
+          if [ "$rc" -eq 1 ] && [ -f "$WORK/diff.json" ]; then
+            echo "::error::$changed rendered-HTML findings on pages this PR changes. See the job summary."
+            exit 1
+          fi
+          if [ "$total" != "0" ]; then
+            echo "::warning::The rendered Connect pages have $total findings, none on a page this PR changes. See the job summary."
+          fi
+      - name: Upload the rendered HTML of the changed pages
+        if: ${{ !cancelled() && steps.diff.outputs.pages != '' && steps.diff.outputs.pages != '0' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: connect-docs-changed-pages
+          path: connect-docs-check/changed-pages
+          retention-days: 14
+      # The preview publishes the build as a Netlify draft deploy and links it
+      # from a commit status. Its token is fetched only now, after Antora and
+      # every check have run, so no build step or dependency can see it. A
+      # caller that can't read the secret skips the preview.
+      - name: Assume the AWS role that can read the preview token
+        id: preview_credentials
+        if: >-
+          ${{ !cancelled() && github.event_name == 'pull_request' && inputs.preview_secret_id != '' &&
+          inputs.aws_region != '' && inputs.aws_role_name_prefix != '' && steps.build.outputs.exit_code == '0' }}
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: arn:aws:iam::${{ secrets.aws_cred_account_id }}:role/${{ inputs.aws_role_name_prefix }}${{ github.event.repository.name }}
+      - name: Fetch the preview token from Secrets Manager
+        id: preview_secret
+        if: ${{ !cancelled() && steps.preview_credentials.outcome == 'success' }}
+        continue-on-error: true
+        uses: aws-actions/aws-secretsmanager-get-secrets@v3
+        with:
+          secret-ids: |
+            ,${{ inputs.preview_secret_id }}
+          parse-json-secrets: true
+      # A Netlify failure must not fail the docs check: the preview is a
+      # convenience, the build and log checks above are the gate.
+      - name: Publish the deploy preview
+        id: preview
+        if: ${{ !cancelled() && steps.preview_secret.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ env.DOCS_NETLIFY_PREVIEW_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ env.DOCS_NETLIFY_PREVIEW_SITE_ID }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # netlify-cli is third-party code fetched at run time: it gets the
+          # Netlify token and nothing else. The role session credentials stay
+          # out of its environment.
+          AWS_ACCESS_KEY_ID: ""
+          AWS_SECRET_ACCESS_KEY: ""
+          AWS_SESSION_TOKEN: ""
+        run: |
+          set -euo pipefail
+          if [ -z "${NETLIFY_AUTH_TOKEN:-}" ] || [ -z "${NETLIFY_SITE_ID:-}" ]; then
+            echo "::notice::The preview secret has no token or site ID yet, so no deploy preview."
+            exit 0
+          fi
+          # Only the Connect sections and the UI assets they load. Links into
+          # the rest of the docs site 404 on the preview.
+          dir="$WORK/preview"
+          mkdir -p "$dir/cloud-data-platform/develop"
+          cp -R "$WORK/site/connect" "$dir/"
+          if [ -d "$WORK/site/cloud-data-platform/develop/connect" ]; then
+            cp -R "$WORK/site/cloud-data-platform/develop/connect" "$dir/cloud-data-platform/develop/"
+          fi
+          for f in _ assets blobl.wasm 404.html index.html; do
+            [ -e "$WORK/site/$f" ] && cp -R "$WORK/site/$f" "$dir/"
+          done
+          # Previews must never be indexed.
+          printf 'User-agent: *\nDisallow: /\n' > "$dir/robots.txt"
+          # A draft deploy with a per-PR alias, never a production one, so it
+          # never changes the site's published deploy.
+          npx --yes netlify-cli@27.11.2 deploy \
+            --dir "$dir" \
+            --site "$NETLIFY_SITE_ID" \
+            --alias "connect-pr-$PR_NUMBER" \
+            --message "Connect docs preview for redpanda-data/connect PR $PR_NUMBER at ${HEAD_SHA:0:9}" \
+            --json > "$WORK/netlify-deploy.json"
+          url=$(jq -r '.deploy_url // empty' "$WORK/netlify-deploy.json")
+          if [ -z "$url" ]; then
+            echo "::error::netlify deploy returned no deploy_url."
+            exit 1
+          fi
+          echo "url=$url/connect/home/" >> "$GITHUB_OUTPUT"
+          echo "base=$url" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Docs preview"
+            echo
+            echo "$url/connect/home/"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Link the deploy preview from the commit
+        if: ${{ !cancelled() && steps.preview.outputs.url != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          URL: ${{ steps.preview.outputs.url }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/statuses/$HEAD_SHA" \
+            -f state=success \
+            -f context="Connect docs preview" \
+            -f description="Rendered Connect docs built from this pull request" \
+            -f target_url="$URL" > /dev/null
+
+      # The preview steps exported the role session credentials and the
+      # Netlify token into the job environment again. Blank them before the
+      # comment step, which processes PR-derived page data.
+      - name: Drop the preview credentials from the job environment
+        if: always()
+        run: |
+          set -euo pipefail
+          for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN DOCS_NETLIFY_PREVIEW_AUTH_TOKEN DOCS_NETLIFY_PREVIEW_SITE_ID; do
+            echo "$v=" >> "$GITHUB_ENV"
+          done
+      # One sticky comment per PR: whether the docs build passed, the preview,
+      # and the published pages the PR changes, so the author and the docs
+      # team review rendered pages, not Go strings. A PR that changes no
+      # published page and passes gets no comment (an existing one is
+      # updated, so it never goes stale).
+      - name: Comment on the PR
+        id: comment
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && steps.build.outputs.exit_code != '' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          LOG_OUTCOME: ${{ steps.log_check.outcome }}
+          HTML_FINDINGS: ${{ steps.html_check.outputs.changed_findings }}
+          PREVIEW: ${{ steps.preview.outputs.base }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          LABEL: ${{ inputs.notify_label }}
+        run: |
+          set -euo pipefail
+          build=fail
+          [ "$LOG_OUTCOME" = success ] && build=pass
+          diff_args=()
+          [ -f "$WORK/diff.json" ] && diff_args=(--diff "$WORK/diff.json")
+          notify=$(node "$WORK/dem/tools/connect-docs/pr-comment.js" --build "$build" "${diff_args[@]}" \
+            --html-findings "${HTML_FINDINGS:-0}" --preview "$PREVIEW" --run-url "$RUN_URL" --sha "$HEAD_SHA" --output "$WORK/comment.md" | jq -r .notify)
+          existing=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate \
+            --jq '.[] | select(.user.type == "Bot" and (.body | startswith("<!-- connect-docs-check -->"))) | .id' | head -1)
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$existing" -F body=@"$WORK/comment.md" > /dev/null
+            echo "Updated comment $existing."
+          elif [ "$notify" = true ]; then
+            gh api "repos/$REPO/issues/$PR_NUMBER/comments" -F body=@"$WORK/comment.md" > /dev/null
+            echo "Posted a comment."
+          else
+            echo "No published page changes and the build passed, so no comment."
+          fi
+          if [ "$notify" = true ] && [ -n "$LABEL" ]; then
+            gh api "repos/$REPO/issues/$PR_NUMBER/labels" -f "labels[]=$LABEL" > /dev/null
+          fi
+          echo "notify=$notify" >> "$GITHUB_OUTPUT"
+          # The team is asked once per PR: on the run that posts the comment.
+          [ -z "$existing" ] && [ "$notify" = true ] && echo "first=true" >> "$GITHUB_OUTPUT"
+          exit 0
+      # GITHUB_TOKEN cannot request a team review, so this uses the org bot
+      # token, fetched only now and only for this request.
+      - name: Assume the AWS role that can read the bot token for the review request
+        id: review_credentials
+        if: >-
+          ${{ !cancelled() && steps.comment.outputs.first == 'true' && inputs.notify_team != '' &&
+          inputs.aws_region != '' && inputs.aws_role_name_prefix != '' }}
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: arn:aws:iam::${{ secrets.aws_cred_account_id }}:role/${{ inputs.aws_role_name_prefix }}${{ github.event.repository.name }}
+      - name: Fetch the bot token for the review request
+        id: review_secret
+        if: ${{ !cancelled() && steps.review_credentials.outcome == 'success' }}
+        continue-on-error: true
+        uses: aws-actions/aws-secretsmanager-get-secrets@v3
+        with:
+          secret-ids: |
+            ,${{ inputs.bot_token_secret_id }}
+          parse-json-secrets: true
+      - name: Ask the docs team to review
+        if: >-
+          ${{ !cancelled() && steps.comment.outputs.first == 'true' && inputs.notify_team != '' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ env.ACTIONS_BOT_TOKEN || secrets.actions_bot_token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          TEAM: ${{ inputs.notify_team }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::notice::No bot token for the review request, so $TEAM was not asked to review."
+            exit 0
+          fi
+          gh api "repos/$REPO/pulls/$PR_NUMBER/requested_reviewers" -f "team_reviewers[]=$TEAM" > /dev/null
+          echo "Asked $TEAM to review."
