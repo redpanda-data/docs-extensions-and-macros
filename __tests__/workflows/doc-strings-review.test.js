@@ -482,6 +482,12 @@ describe('doc-strings-review workflow: source diff (executed)', () => {
   beforeAll(() => {
     repo = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-diff-'))
     git('init', '--quiet')
+    // The second commit adds ~322 files, which makes git start its automatic
+    // housekeeping (gc --auto / maintenance). That detaches and keeps writing
+    // into .git after the commit returns, so afterAll's rmSync races it and
+    // fails with ENOTEMPTY. Turn it off for this throwaway repo.
+    git('config', 'gc.auto', '0')
+    git('config', 'maintenance.auto', 'false')
     git('config', 'user.email', 'dsr-test@example.invalid')
     git('config', 'user.name', 'dsr test')
     fs.mkdirSync(path.join(repo, 'internal/impl/kafka'), { recursive: true })
@@ -503,7 +509,9 @@ describe('doc-strings-review workflow: source diff (executed)', () => {
     git('commit', '--quiet', '-m', 'change')
   })
 
-  afterAll(() => fs.rmSync(repo, { recursive: true, force: true }))
+  // Retries cover any other late writer, so a slow runner cannot fail the suite
+  // after every test in it has passed.
+  afterAll(() => fs.rmSync(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }))
 
   test('a PR over 300 files yields the source diff, with generated files counted, not included', () => {
     const r = run({ BASE: base })
