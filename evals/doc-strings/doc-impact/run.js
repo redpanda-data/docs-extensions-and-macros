@@ -380,7 +380,12 @@ function runItem (item, ctx) {
     if (refused.length) {
       return { ...ev, status: 'HARNESS_ERROR', notes: [`${refused.length} MCP call(s) refused by the docs server's limit${options.mcp === 'record' ? '; recording not saved' : ''}: ${lib.limitRefusal(refused[0]).slice(0, 200)}`] }
     }
-    if (options.mcp === 'record') {
+    // A production recording holds what the docs said when the review ran.
+    // A live answer from today may already include the writer's fix, so
+    // replacing or merging into it would undo the point of having it.
+    if (options.mcp === 'record' && lib.isProductionRecording(recordingFile)) {
+      ev.notes.push('kept the production recording; delete it first to re-record from the live server')
+    } else if (options.mcp === 'record') {
       fs.mkdirSync(RECORDINGS, { recursive: true })
       let rec = lib.buildRecording(item, parsed.mcpCalls, { recordedAt: new Date().toISOString(), serverUrl: (mcpConfig.mcpServers[lib.MCP_SERVER] || {}).url || null, model: options.model })
       if (options.merge && fs.existsSync(recordingFile)) {

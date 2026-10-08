@@ -353,6 +353,19 @@ function mergeRecording (existing, fresh) {
   return { added, recording: { ...fresh, calls, ...(merged_from.length ? { merged_from } : {}) } }
 }
 
+/**
+ * True when the file is a recording of what the production review got
+ * from the docs server (mine-candidates.js --from-production). Record mode
+ * leaves those alone. A missing or unreadable file is not one.
+ */
+function isProductionRecording (file) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8')).source === 'production'
+  } catch {
+    return false
+  }
+}
+
 // Error codes in the JSON body the docs server returns when it refuses a
 // tool call for its anonymous quota or its rate limit. The server sends
 // these as an ordinary tool result, not as an MCP error, so isError is no
@@ -562,6 +575,7 @@ module.exports = {
   replayKey,
   buildRecording,
   mergeRecording,
+  isProductionRecording,
   limitRefusal,
   limitRefusals,
   NOT_SCORED,

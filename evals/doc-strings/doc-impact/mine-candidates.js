@@ -60,6 +60,23 @@
  * source. Freeze the inputs afterwards with `run-evals.js --doc-impact
  * --refresh-diffs --include-unconfirmed [--items <private-dir>/items.json]`.
  *
+ * Time-correct recordings from production (no Jira, no cache):
+ *   node evals/doc-strings/doc-impact/mine-candidates.js \
+ *     --from-production evals/doc-strings/doc-impact/items.json \
+ *     [--recordings <dir>]
+ *
+ * --from-production replaces an item's recording with the docs MCP answers
+ * the production review got when it reviewed the item's reviewed_head_sha.
+ * The review uploads them as the workflow artifact
+ * doc-impact-mcp-<pr>-<run attempt>; this finds the newest run on that head
+ * that has one, downloads it with gh, and writes it as
+ * <recordings>/<id>.json (default: recordings/ beside the items file, so a
+ * private item's recording stays beside its private items file) with
+ * source "production" and the recorded_at the run wrote. Items with no
+ * reviewed_head_sha, no run on it, or no artifact (runs older than the
+ * artifact step, or past its retention) keep the recording they have. The
+ * report lists both.
+ *
  * Outputs in --out:
  *   candidates.json  every item, with the frozen inputs (base, merge-base and
  *                    head SHAs, title, body) and the evidence behind its label
@@ -124,6 +141,8 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const os = require('os');
+const { limitRefusals } = require('./lib');
 
 // ---------- args ----------
 function parseArgs(argv) {
@@ -142,6 +161,8 @@ function parseArgs(argv) {
     else if (k === '--to-items') a.toItems = v();
     else if (k === '--items-out') a.itemsOut = v();
     else if (k === '--private-out') a.privateOut = v();
+    else if (k === '--from-production') a.fromProduction = v();
+    else if (k === '--recordings') a.recordings = v();
     else if (k === '-h' || k === '--help') { a.help = true; }
     else { throw new Error(`unknown argument: ${k}`); }
   }
@@ -470,9 +491,103 @@ function publicItem(item) {
   return { ...rest, reason: reason || 'label mined from history' };
 }
 
+// ---------- production recordings ----------
+// Plain gh calls, uncached: an artifact can appear (a re-run) or expire
+// between two invocations, and this mode makes few calls.
+const liveGh = {
+  json(args) {
+    const out = ghRaw(['api', ...args], { allowFail: true });
+    if (out == null) return null;
+    try { return JSON.parse(out); } catch { return null; }
+  },
+  download(repo, runId, name, dir) {
+    return ghRaw(['run', 'download', String(runId), '-R', repo, '-n', name, '-D', dir], { allowFail: true }) !== null;
+  },
+};
+
+function prNumberOf(item) {
+  const m = /\/pull\/(\d+)/.exec(item.pr_url || '');
+  return m ? Number(m[1]) : null;
+}
+
+// A recording is usable when every call has the shape the replay server
+// reads. Anything else is reported, never written.
+function validRecording(rec) {
+  return Boolean(rec && Array.isArray(rec.calls) && rec.calls.length && rec.calls.every((c) =>
+    c && typeof c.tool === 'string' && c.arguments && typeof c.arguments === 'object' && Array.isArray(c.content)));
+}
+
+/**
+ * The production recording for one item, or why there is none. Looks at
+ * every doc-strings-review run on the item's reviewed head, newest first,
+ * and takes the first one with a doc-impact-mcp artifact for this PR (the
+ * highest run attempt when a run was re-run). Later runs on the same head
+ * often skip the model (each string is reviewed once), so the newest run
+ * is not always the one that saved docs answers.
+ */
+function productionRecording(item, { gh = liveGh, tmpDir } = {}) {
+  const sha = item.reviewed_head_sha;
+  const number = prNumberOf(item);
+  if (!sha) return { reason: 'no reviewed_head_sha (the review never ran the model on this PR)' };
+  if (!number) return { reason: 'no PR number in pr_url' };
+  const res = gh.json([`repos/${item.repo}/actions/workflows/${WORKFLOW}/runs?head_sha=${sha}&per_page=100`]);
+  if (!res) return { reason: 'could not list workflow runs' };
+  const runs = (res.workflow_runs || [])
+    .filter((r) => r.head_sha === sha && (!(r.pull_requests || []).length || r.pull_requests.some((p) => p.number === number)))
+    .sort((a, b) => String(b.run_started_at || b.created_at).localeCompare(String(a.run_started_at || a.created_at)));
+  if (!runs.length) return { reason: `no ${WORKFLOW} run on ${sha.slice(0, 7)}` };
+  const pattern = new RegExp(`^doc-impact-mcp-${number}-(\\d+)$`);
+  for (const run of runs) {
+    const arts = (gh.json([`repos/${item.repo}/actions/runs/${run.id}/artifacts?per_page=100`]) || {}).artifacts || [];
+    const named = arts
+      .filter((a) => !a.expired && pattern.test(a.name))
+      .sort((a, b) => Number(pattern.exec(b.name)[1]) - Number(pattern.exec(a.name)[1]));
+    if (!named.length) continue;
+    const dir = fs.mkdtempSync(path.join(tmpDir || os.tmpdir(), 'doc-impact-mcp-'));
+    if (!gh.download(item.repo, run.id, named[0].name, dir)) return { reason: `could not download ${named[0].name} from run ${run.id}` };
+    const file = fs.readdirSync(dir).find((f) => f.endsWith('.json'));
+    let rec = null;
+    try { rec = file ? JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8')) : null; } catch { rec = null; }
+    if (!validRecording(rec)) return { reason: `${named[0].name} from run ${run.id} is not a usable recording` };
+    const refused = limitRefusals(rec.calls);
+    if (refused.length) return { reason: `${named[0].name} holds ${refused.length} call(s) the docs server refused for its limit` };
+    return {
+      run,
+      artifact: named[0].name,
+      recording: {
+        ...rec,
+        item: item.id,
+        recorded_at: rec.recorded_at || run.run_started_at || run.created_at,
+        source: 'production',
+        production_run: run.html_url || null,
+      },
+    };
+  }
+  return { reason: `no doc-impact-mcp artifact on ${runs.length} run(s) for ${sha.slice(0, 7)} (older than the artifact step, or expired)` };
+}
+
+/** Write production recordings for every item that has one; report the rest. */
+function fromProduction(items, { recordingsDir, gh = liveGh, tmpDir } = {}) {
+  const report = { production: [], kept: [] };
+  fs.mkdirSync(recordingsDir, { recursive: true });
+  for (const item of items) {
+    const got = productionRecording(item, { gh, tmpDir });
+    if (!got.recording) { report.kept.push({ id: item.id, reason: got.reason }); continue; }
+    fs.writeFileSync(path.join(recordingsDir, `${item.id}.json`), JSON.stringify(got.recording, null, 2) + '\n');
+    report.production.push({ id: item.id, calls: got.recording.calls.length, recorded_at: got.recording.recorded_at, artifact: got.artifact });
+  }
+  return report;
+}
+
 // ---------- main ----------
 function main() {
   const args = parseArgs(process.argv);
+  if (args.fromProduction) {
+    const items = JSON.parse(fs.readFileSync(args.fromProduction, 'utf8'));
+    const recordingsDir = args.recordings || path.join(path.dirname(path.resolve(args.fromProduction)), 'recordings');
+    console.log(JSON.stringify(fromProduction(items, { recordingsDir }), null, 2));
+    return;
+  }
   if (args.toItems) {
     if (!args.itemsOut) { console.error('--to-items needs --items-out <file>'); process.exit(2); }
     const candidates = JSON.parse(fs.readFileSync(args.toItems, 'utf8'));
@@ -505,7 +620,7 @@ function main() {
     return;
   }
   if (args.help || !args.out) {
-    console.error('usage: node mine-candidates.js --jira jira-export.json --out <dir> [--cache <dir>] [--cache-hours 12] [--settle-days 14] [--provisional] [--no-search]\n       node mine-candidates.js --to-items <candidates.json> --items-out <items.json>');
+    console.error('usage: node mine-candidates.js --jira jira-export.json --out <dir> [--cache <dir>] [--cache-hours 12] [--settle-days 14] [--provisional] [--no-search]\n       node mine-candidates.js --to-items <candidates.json> --items-out <items.json>\n       node mine-candidates.js --from-production <items.json> [--recordings <dir>]');
     process.exit(args.help ? 0 : 2);
   }
   if (!(args.cacheHours >= 0)) { console.error('--cache-hours must be a number >= 0'); process.exit(2); }
@@ -759,4 +874,4 @@ if (require.main === module) {
   try { main(); } catch (e) { console.error(e.stack || String(e)); process.exit(1); }
 }
 
-module.exports = { toItems, publicItem, refPatterns, engRefs, isContent, adocToUrl, parseArgs, classifyTickets };
+module.exports = { toItems, publicItem, refPatterns, engRefs, isContent, adocToUrl, parseArgs, classifyTickets, productionRecording, fromProduction };

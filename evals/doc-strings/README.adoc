@@ -418,6 +418,53 @@ read the token at all from a sandboxed shell that has no keychain access.
 So sign in again through `/mcp` right before a record run, and run the
 command from your own shell.
 
+==== Time-correct recordings
+
+A recording should hold what the docs said when the review looked at the
+PR, not what they say when someone records it. Once a writer documents a
+change, docs.redpanda.com already covers it, and a pass run against those
+docs correctly answers "already documented". Scored against a
+`needs_docs` label, that correct answer counts as a miss. The older the
+PR, the more likely a recording made from the live server is to carry the
+fix, so live recordings make the eval look worse on exactly the items
+that matter most.
+
+The production review saves its own docs calls. After the Claude step,
+`doc-strings-review.yml` runs `doc-tools doc-impact-recording` on the
+step's transcript and uploads the result as the workflow artifact
+`doc-impact-mcp-<pr>-<run attempt>`, kept for 90 days. The artifact holds
+each call's tool name, arguments and result content, in the recording
+shape above, and nothing else from the session. It is stored in the
+repository where the review ran, so a private repository's artifacts are
+only readable to people with access to that repository.
+
+To turn those artifacts into recordings:
+
+[source,bash]
+----
+node evals/doc-strings/doc-impact/mine-candidates.js \
+  --from-production evals/doc-strings/doc-impact/items.json
+----
+
+For each item with a `reviewed_head_sha`, this finds the newest
+`doc-strings-review.yml` run on that commit that saved an artifact for the
+PR, downloads it with `gh`, and writes it to the item's recording with
+`source: "production"`, the `recorded_at` the run wrote, and a link to the
+run. Recordings go beside the items file (or to `--recordings <dir>`), so a
+private item set keeps its recordings private. The report lists which
+items got a production recording and why the rest kept theirs: no
+`reviewed_head_sha` (the review never ran the model on that PR), no run on
+that commit, or no artifact (runs older than the artifact step, or past
+retention).
+Run it within 90 days of a review, before the artifact expires, and commit
+the recordings it writes.
+
+`--mcp record` leaves a production recording alone, with a note, because a
+live answer would undo it. Delete the file first to re-record an item from
+the live server on purpose. An item with no production recording still
+needs a live one; read its results knowing the docs may already include
+the fix.
+
 === Scoring
 
 [cols="1,3"]

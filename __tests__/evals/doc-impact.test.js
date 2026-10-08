@@ -563,3 +563,137 @@ describe('base-prompt runs and the CI delta', () => {
     expect(wf.jobs.compare.permissions).toEqual({ contents: 'read' })
   })
 })
+
+describe('production recordings (--from-production)', () => {
+  const { productionRecording, fromProduction } = require('../../evals/doc-strings/doc-impact/mine-candidates')
+  // What the review's extract step uploads, made by doc-tools
+  // doc-impact-recording from a fixture transcript.
+  const FIXTURE = path.join(__dirname, 'fixtures', 'doc-impact-production', 'recording.json')
+  const fixture = JSON.parse(fs.readFileSync(FIXTURE, 'utf8'))
+  const SHA = 'd'.repeat(40)
+  const REPO = 'redpanda-data/redpanda-operator'
+  const item = (id, extra = {}) => ({ id, repo: REPO, pr_url: `https://github.com/${REPO}/pull/${id.split('-').pop()}`, reviewed_head_sha: SHA, ...extra })
+  const run = (id, at, pr, extra = {}) => ({ id, head_sha: SHA, run_started_at: at, created_at: at, html_url: `https://github.com/${REPO}/actions/runs/${id}`, pull_requests: pr ? [{ number: pr }] : [], ...extra })
+
+  // A gh double serving runs, artifacts and downloads from tables. Each
+  // artifact name maps to the recording its download yields.
+  function fakeGh ({ runs = [], artifacts = {}, files = {} }) {
+    const calls = []
+    return {
+      calls,
+      json ([endpoint]) {
+        calls.push(endpoint)
+        if (/\/actions\/workflows\/doc-strings-review\.yml\/runs\?head_sha=/.test(endpoint)) return { workflow_runs: runs }
+        const m = /\/actions\/runs\/(\d+)\/artifacts/.exec(endpoint)
+        if (m) return { artifacts: artifacts[m[1]] || [] }
+        return null
+      },
+      download (repo, runId, name, dir) {
+        calls.push(`download ${runId} ${name}`)
+        if (!(name in files)) return false
+        fs.writeFileSync(path.join(dir, 'recording.json'), JSON.stringify(files[name]))
+        return true
+      }
+    }
+  }
+
+  const tmpDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'from-production-'))
+
+  test('takes the newest run on the reviewed head that saved docs answers, and its last attempt', () => {
+    const attempt1 = { ...fixture, calls: fixture.calls.slice(0, 1) }
+    const gh = fakeGh({
+      runs: [
+        run(10, '2026-09-10T00:00:00Z', 1615),
+        // Newer, same head, but the model did not run (every string was
+        // already reviewed), so it saved nothing.
+        run(12, '2026-09-14T00:00:00Z', 1615),
+        // Same head, another PR: never this item's answers.
+        run(13, '2026-09-15T00:00:00Z', 9999)
+      ],
+      artifacts: {
+        10: [{ name: 'doc-impact-mcp-1615-1', expired: false }, { name: 'doc-impact-mcp-1615-2', expired: false }],
+        13: [{ name: 'doc-impact-mcp-9999-1', expired: false }]
+      },
+      files: { 'doc-impact-mcp-1615-1': attempt1, 'doc-impact-mcp-1615-2': fixture, 'doc-impact-mcp-9999-1': fixture }
+    })
+    const got = productionRecording(item('redpanda-operator-1615'), { gh, tmpDir: tmpDir() })
+    expect(got.artifact).toBe('doc-impact-mcp-1615-2')
+    expect(got.run.id).toBe(10)
+    expect(got.recording).toMatchObject({
+      item: 'redpanda-operator-1615',
+      source: 'production',
+      recorded_at: '2026-09-12T10:00:00.000Z',
+      production_run: `https://github.com/${REPO}/actions/runs/10`
+    })
+    expect(got.recording.calls).toEqual(fixture.calls)
+    expect(gh.calls).not.toContain('download 13 doc-impact-mcp-9999-1')
+    // The harness replays it like any other recording.
+    const lookup = lib.createReplayer(got.recording)
+    expect(lookup('ask_redpanda_question', fixture.calls[0].arguments).match).toBe('exact')
+  })
+
+  test('an artifact without recorded_at takes the run start time', () => {
+    const { recorded_at, ...noTime } = fixture
+    const gh = fakeGh({
+      runs: [run(10, '2026-09-10T00:00:00Z', 1615)],
+      artifacts: { 10: [{ name: 'doc-impact-mcp-1615-1', expired: false }] },
+      files: { 'doc-impact-mcp-1615-1': noTime }
+    })
+    expect(productionRecording(item('redpanda-operator-1615'), { gh, tmpDir: tmpDir() }).recording.recorded_at).toBe('2026-09-10T00:00:00Z')
+  })
+
+  test('older runs, expired artifacts, refused calls and missing heads keep the existing recording', () => {
+    const refusal = { ...fixture, calls: [{ tool: 'ask_redpanda_question', arguments: { question: 'q' }, is_error: false, content: [{ type: 'text', text: '{"error":"anonymous_quota_exhausted"}' }] }] }
+    const gh = fakeGh({
+      runs: [run(20, '2026-08-01T00:00:00Z', 1562), run(21, '2026-08-02T00:00:00Z', 1843), run(22, '2026-08-03T00:00:00Z', 1615)],
+      artifacts: {
+        20: [],
+        21: [{ name: 'doc-impact-mcp-1843-1', expired: true }],
+        22: [{ name: 'doc-impact-mcp-1615-1', expired: false }]
+      },
+      files: { 'doc-impact-mcp-1843-1': fixture, 'doc-impact-mcp-1615-1': refusal }
+    })
+    const dir = tmpDir()
+    const recordings = path.join(dir, 'recordings')
+    fs.mkdirSync(recordings)
+    const today = { item: 'redpanda-operator-1562', recorded_at: '2026-10-06T00:00:00Z', calls: [] }
+    fs.writeFileSync(path.join(recordings, 'redpanda-operator-1562.json'), JSON.stringify(today))
+    const report = fromProduction([
+      item('redpanda-operator-1562'),
+      item('redpanda-operator-1843'),
+      item('redpanda-operator-1615'),
+      item('redpanda-operator-1329', { reviewed_head_sha: null })
+    ], { recordingsDir: recordings, gh, tmpDir: dir })
+    expect(report.production).toEqual([])
+    expect(report.kept.map((k) => k.id)).toEqual(['redpanda-operator-1562', 'redpanda-operator-1843', 'redpanda-operator-1615', 'redpanda-operator-1329'])
+    expect(report.kept[0].reason).toMatch(/no doc-impact-mcp artifact/)
+    expect(report.kept[1].reason).toMatch(/no doc-impact-mcp artifact/)
+    expect(report.kept[2].reason).toMatch(/refused for its limit/)
+    expect(report.kept[3].reason).toMatch(/no reviewed_head_sha/)
+    expect(JSON.parse(fs.readFileSync(path.join(recordings, 'redpanda-operator-1562.json'), 'utf8'))).toEqual(today)
+    expect(fs.readdirSync(recordings)).toEqual(['redpanda-operator-1562.json'])
+  })
+
+  test('writes the recording beside the items and reports it', () => {
+    const gh = fakeGh({
+      runs: [run(10, '2026-09-10T00:00:00Z', 1615)],
+      artifacts: { 10: [{ name: 'doc-impact-mcp-1615-1', expired: false }] },
+      files: { 'doc-impact-mcp-1615-1': fixture }
+    })
+    const dir = tmpDir()
+    const report = fromProduction([item('redpanda-operator-1615')], { recordingsDir: path.join(dir, 'recordings'), gh, tmpDir: dir })
+    expect(report.production).toEqual([{ id: 'redpanda-operator-1615', calls: 2, recorded_at: '2026-09-12T10:00:00.000Z', artifact: 'doc-impact-mcp-1615-1' }])
+    const written = path.join(dir, 'recordings', 'redpanda-operator-1615.json')
+    expect(lib.isProductionRecording(written)).toBe(true)
+  })
+
+  test('record mode recognizes a production recording and nothing else', () => {
+    const dir = tmpDir()
+    fs.writeFileSync(path.join(dir, 'live.json'), JSON.stringify({ item: 'x', calls: [] }))
+    fs.writeFileSync(path.join(dir, 'bad.json'), '{')
+    expect(lib.isProductionRecording(FIXTURE)).toBe(true)
+    expect(lib.isProductionRecording(path.join(dir, 'live.json'))).toBe(false)
+    expect(lib.isProductionRecording(path.join(dir, 'bad.json'))).toBe(false)
+    expect(lib.isProductionRecording(path.join(dir, 'absent.json'))).toBe(false)
+  })
+})
