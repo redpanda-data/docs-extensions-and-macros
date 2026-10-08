@@ -826,7 +826,7 @@ On the overview (`pages/index.adoc`):
 
 | `description`
 | yes
-| Warns above 200 characters.
+| Fatal above 140 characters. It is the landing card's text, which shows three clamped lines.
 
 | `page-solution-version`
 | yes
@@ -850,7 +850,7 @@ On the overview (`pages/index.adoc`):
 
 | `page-solution-technologies`
 | yes
-| Comma list.
+| Comma list of what a reader needs beyond Redpanda itself: other systems, languages, and formats (`Go`, `Postgres`, `Protobuf`), plus separately deployed Redpanda products (`Redpanda Connect`, `Redpanda Migrator`, `Redpanda Operator`). Fatal when it lists an everyday tool or Redpanda itself (`rpk`, `curl`, `Docker`, `Docker Compose`, `Redpanda`, `Redpanda Console`, case-insensitive) or a value that is also a category in `valid-categories.yml`; a category belongs in `page-categories`.
 
 | `page-categories`
 | yes
@@ -874,20 +874,22 @@ On the overview (`pages/index.adoc`):
 
 | `page-solution-related-docs`
 | no (warns if empty)
-| Fully qualified page IDs (`component:module:path.adoc`). Each must resolve in the build (fatal otherwise).
+| Fully qualified page IDs (`component:module:path.adoc`). Each must resolve in the build (fatal otherwise). Must agree with the overview's `== Related docs` list, whose item for each doc is the reader-facing `why` on that doc's recommendation (see <<Related docs list>>). Warns on a landing or index page, which never shows recommendations, and, when `page-solution-platforms` includes `cloud`, when no entry is a Cloud page or has a single-sourced Cloud twin.
 
 | `page-solution-related-solutions`
-| no
-| Other solution ids in the build; not itself.
+| no (warns if empty)
+| Other solution ids in the build; not itself. Warns when the other solution does not list this one back, and when the two share no `page-solution-use-cases` value.
 
 | `page-solution-superseded-by`
 | when deprecated
 | Solution id the reader should use instead.
 |===
 
-On a step page: `page-layout` must be `solution-step`; `description` is the step's own; `page-solution-step-duration` (optional) is an integer number of minutes.
+On a step page: `page-layout` must be `solution-step`; `description` is the step's own; `page-solution-step-duration` (optional) is an integer number of minutes. When every step sets it, the build warns if they do not add up to `page-solution-duration`.
 
-Published solutions must also pass the section checks on the converted HTML: the overview needs `h2` headings `Architecture`, `Prerequisites`, and `Production considerations` (matched after lower-casing, collapsing whitespace, and dropping trailing punctuation); every step needs an `h2`/`h3` whose text starts with `Verify` or a block with the `solution-verify` role. Every link into this module's own attachments (`link:{attachmentsdir}/...`, or any href that resolves under `/solutions/<slug>/_attachments/` once resolved against the page URL) must point at a file that exists in the module. Links to another module's or another component's attachments are not checked here.
+Published solutions must also pass the section checks on the converted HTML: the overview needs `h2` headings `Architecture` and `Prerequisites` (matched after lower-casing, collapsing whitespace, and dropping trailing punctuation); every step needs an `h2`/`h3` whose text starts with `Verify` or a block with the `solution-verify` role.
+
+Production considerations live at the end of the last step in `page-solution-steps`, where the reader has the whole stack running, not on the overview. The last step needs an `h2` `Production considerations` with at least five `h3` topics under it (the content repo assembles it with `include::partial$production/_all.adoc[]`, one `[#prod-<topic>]` `=== <Topic>` per partial). Every `[.production-note]` block on any page of the solution (the in-context `== In production` note on a step) must contain a link, which points at its topic on the last step. Both checks are fatal for a published solution and warnings for a draft. The section left on the overview or on an earlier step is a warning. Every link into this module's own attachments (`link:{attachmentsdir}/...`, or any href that resolves under `/solutions/<slug>/_attachments/` once resolved against the page URL) must point at a file that exists in the module. Links to another module's or another component's attachments are not checked here.
 
 Every link on a solution page that carries a `#fragment` and lands on a page in this build (the same page, another solution page, or a Product Docs page) must name an id in that page's converted HTML. This site renders headings with no id prefix and hyphens (`idprefix` empty, `idseparator` `-`), so `#_production_considerations` misses and `#production-considerations` hits; the message suggests the hyphenated id when the target has it. A miss is fatal for a published or deprecated solution and a warning for a draft. Links to attachments, to URLs that are not pages in the build, and off-site links are not checked.
 
@@ -900,7 +902,7 @@ Written on the overview and every step page (complex values are JSON strings, re
 | Attribute | Value
 
 | `page-solution`
-| The full record: `id`, `title`, `description`, `url`, `version`, `tag`, `asset`, `repo` (only with `public_repo: true`), `status`, `draft` (true only for a draft built with `include_drafts`), `featured`, `difficulty`, `duration`, `download`, `platforms`, `technologies`, `categories`, `useCases`, `files` (see <<Snippet provenance and the download allowlist>>), `personas`, `steps[{id, title, url, order, duration}]`, `relatedDocs[{id, title, url, provenance}]`, `relatedSolutions[{id, title, url}]`, `attachments[{name, url}]`, `supersededBy`, `lastModified`, and `verified{suite, specs, steps, commands, checks, media, verifyScript, redpandaVersion, runAt}` when the solution ships a verification manifest (see <<Verification>>). Keys the manifest did not carry are absent, and a solution with no manifest has no `verified` key at all.
+| The full record: `id`, `title`, `description`, `url`, `version`, `tag`, `asset`, `repo` (only with `public_repo: true`), `status`, `draft` (true only for a draft built with `include_drafts`), `featured`, `difficulty`, `duration`, `download`, `platforms`, `technologies`, `categories`, `useCases`, `files` (see <<Snippet provenance and the download allowlist>>), `personas`, `steps[{id, title, url, order, duration}]`, `relatedDocs[{id, title, url, provenance}]`, `relatedSolutions[{id, title, url}]`, `attachments[{name, url}]`, `supersededBy`, `lastModified`, and `verified{suite, specs, steps, commands, checks, media, verifyScript, redpandaVersion, runAt, platforms, contentRev, stackSha256}` when the solution ships a verification manifest (see <<Verification>>). Keys the manifest did not carry are absent, and a solution with no manifest has no `verified` key at all.
 
 | `page-solution-nav`
 | `{ home: {title, url}, overview: {title, url}, steps: [{id, title, url, order, duration}] }`. Every title in the JSON outputs is plain text: inline markup in the document title (`<code>`, entities) is stripped before it enters `page-solution`, the nav, `relatedDocs`, or `relatedSolutions`.
@@ -923,7 +925,7 @@ Written on the overview and every step page (complex values are JSON strings, re
 
 Derived, never authored: `page-solution-id` is the module name; `page-solution-repo` is `owner/name` from the page's git origin URL (https, ssh, and scp forms; a local `file://` origin yields an empty string); `page-solution-tag` is `<id>/<version>`; `page-solution-asset` is `<id>-<version>.zip`.
 
-Eligible Product Docs pages receive `page-related-solutions`, only when non-empty: `[{id, title, url, description, difficulty, duration, technologies, provenance, score, reason}]` in rank order. Eligible means: a published page (`page.out`) in the latest version of its component, the component is not `solutions`, `home`, `shared`, `search`, `data-platform`, `self-managed`, or `labs`, the layout or role is not an umbrella or index layout (`home`, `component-home-v3`, `data-platform`, `labs-home`, `labs-search`, `search`, `404`, `index`, `index-list`, `solutions-home`, `solution`, `solution-step`), and the page does not set `page-exclude-related-solutions`. Labs are excluded because they are the content solutions replace; section index pages because they carry an area's broad categories and would match every solution in that area.
+Eligible Product Docs pages receive `page-related-solutions`, only when non-empty: `[{id, title, url, description, difficulty, duration, technologies, provenance, score, reason, why}]` in rank order. `reason` explains the ranking to authors; `why` is for the reader (see <<Scoring>>) and is an empty string when there is nothing truthful to say. Eligible means: a published page (`page.out`) in the latest version of its component, the component is not `solutions`, `home`, `shared`, `search`, `data-platform`, `self-managed`, or `labs`, the layout or role is not an umbrella or index layout (`home`, `component-home-v3`, `data-platform`, `labs-home`, `labs-search`, `search`, `404`, `index`, `index-list`, `solutions-home`, `solution`, `solution-step`), and the page does not set `page-exclude-related-solutions`. Labs are excluded because they are the content solutions replace; section index pages because they carry an area's broad categories and would match every solution in that area.
 
 === Snippet provenance and the download allowlist
 
@@ -931,6 +933,8 @@ Every code block on a solution page is single-sourced from the solution's own co
 
 * Each listing block rendered from an `example$` include gets `data-solution-file="<path>"` in the HTML, plus `data-solution-tag="<tag>"` when the include selected exactly one tagged region, and the `sol-snippet` role. A hand-written listing gets none of these. This is the `add-solution-file-provenance` AsciiDoc extension (see <<Solution snippet provenance>>), which must be registered in `asciidoc.extensions`.
 * The record's `files` is the deduplicated, sorted set of those paths across the solution's overview and step pages: exactly the set a reader may download and nothing more. The download endpoint rejects any path that is not in it.
+
+Nothing under the module's `examples/steps/` directory is stamped, and so nothing there is downloadable: a step's `commands.sh` holds the tagged commands the page shows inline and Doc Detective runs, and `steps/<step>/expected/` holds captured output (as does an `expected/` directory anywhere else). Both are scaffolding that only makes sense beside the harness that uses them.
 
 `files` is read back out of the rendered HTML rather than by re-reading the AsciiDoc, which is what keeps the two in step: a snippet a reader can see is in the list, and a path no page renders cannot be. A solution whose pages render no includes has an empty list.
 
@@ -943,17 +947,20 @@ A solution's Doc Detective evidence comes from `verification.json`, an attachmen
 [,json]
 ----
 {"suite":"doc-detective","specs":11,"steps":50,"commands":34,"checks":23,"media":2,
- "verify_script":"PASS (9/9)","redpanda_version":"v26.2.2","run_at":"2026-09-14T09:12:00Z"}
+ "verify_script":"PASS (9/9)","redpanda_version":"v26.2.2","run_at":"2026-09-14T09:12:00Z",
+ "platforms":["self-managed"],
+ "content_rev":{"solution":"<git tree hash of solutions/<slug>>","docs":"<git tree hash of docs/modules/<slug>>"},
+ "stack_sha256":"<hex SHA-256 of the stack the run started>"}
 ----
 
-The file is read from the content catalog, mapped onto the record's `verified` (the manifest's `verify_script`, `redpanda_version`, and `run_at` become `verifyScript`, `redpandaVersion`, and `runAt`), and mirrored as `page-solution-verified-at` and `page-solution-verified-version` so a step page template can show when the solution was last verified without parsing JSON. Because it is machine evidence rather than build-along scaffolding, it is left out of the record's `attachments` list.
+`platforms` says which `page-solution-platforms` values the run covered, `content_rev` pins the exact content it verified, and `stack_sha256` the stack it ran. The file is read from the content catalog, mapped onto the record's `verified` (the manifest's `verify_script`, `redpanda_version`, `run_at`, `content_rev`, and `stack_sha256` become `verifyScript`, `redpandaVersion`, `runAt`, `contentRev`, and `stackSha256`), projected into the Markdown frontmatter under the manifest's own key names, and mirrored as `page-solution-verified-at` and `page-solution-verified-version` so a step page template can show when the solution was last verified without parsing JSON. Because it is machine evidence rather than build-along scaffolding, it is left out of the record's `attachments` list.
 
-Nothing about verification is inferred. A solution with no manifest has no `verified` key, and the build warns when that solution is published, which is the build-side twin of the monorepo's `check-metadata`. A manifest that does not parse, is not a JSON object, or carries none of the known fields produces no key either, plus a warning naming the file and the reason. `run_at` is never synthesised from a git date: when it is missing or not an ISO 8601 timestamp the build warns and the value is published exactly as the manifest wrote it, so the disagreement is visible rather than papered over.
+Nothing about verification is inferred. A solution with no manifest has no `verified` key, and the build warns when that solution is published, which is the build-side twin of the monorepo's `check-metadata`. A manifest that does not parse, is not a JSON object, or carries none of the known fields produces no key either, plus a warning naming the file and the reason. `run_at` is never synthesized from a git date: when it is missing or not an ISO 8601 timestamp the build warns and the value is published exactly as the manifest wrote it, so the disagreement is visible rather than papered over. The build also warns when the run is a day or more older than the newest `page-git-modified-date` across the overview and steps (the evidence predates what readers see), when `platforms` covers fewer platforms than `page-solution-platforms` claims, and when `platforms`, `content_rev`, or `stack_sha256` is malformed. None of these is fatal.
 
 === Status
 
 draft::
-Unpublished unless `include_drafts` or `SOLUTIONS_INCLUDE_DRAFTS=true`: `out` is deleted on the module's pages, aliases, attachments, and images, and the page and alias URLs are added to `siteCatalog.unpublishedPages` (re-asserted at `navigationBuilt` and `beforePublish`, so the list survives `unpublish-pages` resetting it if that runs later). When drafts are included (previews, local builds) they behave as published for every output: they are in `solutions.json`, the `solutions-catalog` attribute, the graph, `page-related-solutions`, and the nav, so the preview shows the real landing page and recommendations. The record keeps `status: "draft"` and adds `draft: true`, which is what the UI's status chip reads. The build still warns that drafts are being built, and the release check skips them. Never in the catalog or the graph when unpublished; when built, it is in the graph with `shown: false` and the build warns that drafts are being built. Section checks are skipped for drafts.
+Unpublished unless `include_drafts` or `SOLUTIONS_INCLUDE_DRAFTS=true`: `out` is deleted on the module's pages, aliases, attachments, and images, and the page and alias URLs are added to `siteCatalog.unpublishedPages` (re-asserted at `navigationBuilt` and `beforePublish`, so the list survives `unpublish-pages` resetting it if that runs later). When drafts are included (previews, local builds) they behave as published for every output: they are in `solutions.json`, the `solutions-catalog` attribute, the graph, `page-related-solutions`, and the nav, so the preview shows the real landing page and recommendations. The record keeps `status: "draft"` and adds `draft: true`, which is what the UI's status chip reads. The build still warns that drafts are being built, and the release check skips them. Never in the catalog or the graph when unpublished; when built, it is in the graph with `shown: false` and the build warns that drafts are being built. Section checks are skipped for drafts, except that the production considerations and Related docs checks report as warnings.
 
 published::
 Everything applies.
@@ -970,7 +977,7 @@ Every (doc, solution) pair with any signal becomes an edge with provenance:
 | Provenance | Signal | Score
 
 | `explicit`
-| The doc is listed in the solution's `page-solution-related-docs`.
+| The doc is listed in the solution's `page-solution-related-docs`, or, for a solution whose platforms include `cloud`, the doc is the Cloud page that single-sources one that is listed (see <<Cloud twins>>).
 | `1.0`
 
 | `editor-approved`
@@ -990,15 +997,29 @@ A category is a leaf when it is a subcategory, or a top-level category that has 
 
 Why the threshold sits at two leaves: an audit of the demo build's edges found that pages sharing one broad subcategory such as `Clients` with a solution were not relevant to it, while pages sharing two or more were. One leaf is too weak a signal in practice, and a parent bonus can never carry an edge over the line on its own. Where a single page is genuinely the right companion, `page-solution-related-docs` (explicit, `1.0`) is the tool; `relationships.yml` (`approved`) covers the cases an editor confirms after the fact.
 
-`pending` entries are ignored (they are Stage 2 ML output awaiting review); the build logs how many there are. The platform filter applies to category edges only: a Cloud doc (`page-cloud` or `env-cloud`) needs `cloud` in the solution's platforms; a Kubernetes, Linux, or Docker doc needs `self-managed`; a doc with no marker matches everything. Edges below `min_score`, edges to non-published solutions, and edges past `max_related` stay in the graph with `shown: false` and a reason. Ranking is score descending, then featured first, then `lastModified` descending (from `add-git-dates`), then title ascending, so the output is the same on every build.
+`pending` entries are ignored (they are Stage 2 ML output awaiting review); the build logs how many there are. The platform filter applies to category edges only: a Cloud doc (`page-cloud` or `env-cloud`) needs `cloud` in the solution's platforms; a Kubernetes, Linux, or Docker doc needs `self-managed`; a doc with no marker matches everything. Edges below `min_score`, edges to non-published solutions, and edges past `max_related` stay in the graph with `shown: false` and a reason. Ranking is score descending, then featured first, then the number of leaf categories the solution shares with the doc descending, then `lastModified` descending (from `add-git-dates`), then title ascending, so the output is the same on every build. Every explicit edge scores `1.0`, so the shared-leaf count is what decides between several solutions that all list the same page, before dates and the alphabet do. An explicit edge that `max_related` still hides is a build warning naming the doc and the hidden solutions: an author asked for that link, so the cut should be a decision, not a surprise.
+
+Each recommendation carries `why`, the reason a reader sees:
+
+* `explicit`: the overview's `== Related docs` item for the doc (see <<Related docs list>>), falling back to the `relationships.yml` reason for the pair, else empty.
+* `editor-approved`: the `relationships.yml` reason, else empty.
+* `category`: `Uses <shared leaf categories>`, for example `Uses Stream Processing, Clients`. Parents are left out.
+
+==== Related docs list
+
+The overview's `== Related docs` section is a list with one item per doc: an xref to the doc, then what it does for this solution. The build reads each item from the converted HTML (its first paragraph, whitespace collapsed) and maps it to the doc its first link lands on. That text becomes the `why`. The list and `page-solution-related-docs` must agree: a doc in the list but not the attribute is a one-way link, because the doc page does not recommend the solution back, and is fatal once published (a warning on a draft); an attribute entry with no item warns, because its recommendation has no reason to show. Links to the solution's own steps are ignored.
+
+==== Cloud twins
+
+Product Docs pages are single-sourced into the Cloud component through stub pages that `include::` the Self-Managed page (`include::streaming:develop:consume-data/consumer-offsets.adoc[tag=single-source]`). At `contentClassified`, while page contents are still AsciiDoc, the extension maps every page that another component's page includes to the pages that include it. For a solution whose `page-solution-platforms` includes `cloud`, each listed doc's includers that are Cloud pages (`env-cloud` or `page-cloud`) get the explicit edge too, with the same `why` and a `reason` naming the doc they single-source. The twin is not added to the overview's `relatedDocs`, so the overview lists each doc once. The match is by include, not by path: paths diverge between the components.
 
 === Outputs
 
 `assets/data/solutions.json`::
-`{ generatedAt, siteUrl, solutions[], facets: { industries, useCases, categories, technologies, difficulty, platforms } }`. `solutions` holds the public record of every published and deprecated solution, sorted by id. Each facet is `[{ value, count }]` sorted by value, and a value carried by every solution is dropped because it narrows nothing. The `categories` facet counts the categories each solution's author wrote that are leaves of the taxonomy (a subcategory, or a top-level category with no subcategories). Parent categories are left out of the facet, including the ones the build adds, though they stay in each record's `categories`. The same JSON is set as the `solutions-catalog` attribute on every component version. In Handlebars the precise path is `page.componentVersion.asciidoc.attributes['solutions-catalog']` (the version the page belongs to). docs-ui's `get-index-data.js` reads `page.component.asciidoc.attributes[...]` instead; that also works because Antora's component object exposes `asciidoc` as a getter onto `component.latest.asciidoc`, and the attribute is set on every version including the latest. Either path returns the same string; `componentVersion` is the one to prefer in new helpers because it does not depend on which version is latest.
+`{ generatedAt, siteUrl, solutions[], facets: { industries, useCases, categories, technologies, difficulty, platforms } }`. `solutions` holds the public record of every published and deprecated solution, sorted by id. Each facet is `[{ value, count }]` sorted by value, and a value carried by every solution is dropped because it narrows nothing. The `categories` facet counts the categories each solution's author wrote that are leaves of the taxonomy (a subcategory, or a top-level category with no subcategories). Parent categories are left out of the facet, including the ones the build adds, though they stay in each record's `categories`. A category value that selects exactly the same solutions as a `useCases` or `technologies` value is also dropped from the facet: it is the same filter under a second name. Two categories that select the same solutions are both kept, since neither repeats another axis. The same JSON is set as the `solutions-catalog` attribute on every component version. In Handlebars the precise path is `page.componentVersion.asciidoc.attributes['solutions-catalog']` (the version the page belongs to). docs-ui's `get-index-data.js` reads `page.component.asciidoc.attributes[...]` instead; that also works because Antora's component object exposes `asciidoc` as a getter onto `component.latest.asciidoc`, and the attribute is set on every version including the latest. Either path returns the same string; `componentVersion` is the one to prefer in new helpers because it does not depend on which version is latest.
 
 `assets/data/solutions-graph.json`::
-`{ generatedAt, siteUrl, settings: { maxRelated, minScore }, edges: [{ doc, docUrl, solution, provenance, score, shown, rank, reason }], coverage }`. Every recommendation a reader sees is explained here, and so is every one they do not. `coverage` is the category coverage report: `{ solutions: { <slug>: { categories: { <category>: { pages, level: 'sub'|'top' } }, zeroMatch: [...] } }, uncategorizedEligiblePages, uncategorizedSample: [first 20 URLs] }`, where `pages` counts eligible doc pages (the same set recommendations use) that carry the category after normalization, and `zeroMatch` lists the solution's categories no doc page shares.
+`{ generatedAt, siteUrl, settings: { maxRelated, minScore }, edges: [{ doc, docUrl, solution, provenance, score, shown, rank, reason, why }], coverage }`. Every recommendation a reader sees is explained here, and so is every one they do not. `coverage` is the category coverage report: `{ solutions: { <slug>: { categories: { <category>: { pages, level: 'sub'|'top' } }, zeroMatch: [...] } }, uncategorizedEligiblePages, uncategorizedSample: [first 20 URLs] }`, where `pages` counts eligible doc pages (the same set recommendations use) that carry the category after normalization, and `zeroMatch` lists the solution's categories no doc page shares.
 
 === Coverage report
 
@@ -1010,7 +1031,7 @@ solutions-catalog: multiplayer-gaming reach: Stream Processing=19 (sub), Clients
 solutions-catalog: 47 doc pages decorated, 312 eligible doc pages without categories
 ----
 
-A category in `zero-match` reaches nobody: either the Product Docs pages that should carry it are missing `page-categories`, or the solution is categorized wrongly. The summary's second number is the size of the opportunity: eligible doc pages that can never receive a category recommendation until they are categorized. The same data is in `solutions-graph.json` under `coverage`.
+A category in `zero-match` reaches nobody, so the build also warns about it: either the Product Docs pages that should carry it are missing `page-categories`, or the solution is categorized wrongly. The summary's second number is the size of the opportunity: eligible doc pages that can never receive a category recommendation until they are categorized. The same data is in `solutions-graph.json` under `coverage`.
 
 === relationships.yml
 
@@ -1034,7 +1055,7 @@ Unknown keys, a bad `status`, a `solution` that is not a slug, or a `doc` that i
 
 === Warnings
 
-Missing `page-solution-related-docs`; a published solution with no `verification.json`; an unreadable `verification.json`; a `run_at` that is absent or not an ISO 8601 timestamp; a description over 200 characters; no published solution featured; orphaned relationships; pending relationships (count); drafts being built; `page-valid-categories` unavailable (category validation and category edges are skipped); a release or asset missing on GitHub when `network_checks` runs.
+Missing `page-solution-related-docs`; a related doc with no item in `== Related docs`; a landing or index page in related docs; a Cloud solution that reaches no Cloud page; an explicit edge hidden by `max_related`; empty, one-way, or no-shared-use-case `page-solution-related-solutions`; step durations that do not add up to `page-solution-duration`; a category no eligible doc page carries; a published solution with no `verification.json`; an unreadable `verification.json`; a `run_at` that is absent, not an ISO 8601 timestamp, or older than the pages; `platforms`, `content_rev`, or `stack_sha256` malformed or covering fewer platforms than the page claims; Production considerations on the overview or an earlier step; on a draft, the production considerations and Related docs findings that are fatal once published; no published solution featured; orphaned relationships; pending relationships (count); drafts being built; `page-valid-categories` unavailable (category validation and category edges are skipped); a release or asset missing on GitHub when `network_checks` runs.
 
 == Solution snippet provenance
 
@@ -1584,7 +1605,12 @@ The extension exports these attributes to YAML frontmatter:
 - `page-categories`: Categories
 - `page-topic-type`: Topic type (tutorial, how-to, concept, reference)
 - `page-personas`: Target audience
+- `page-edit-url`: Edit link, left out when the page comes from a private content source (`page.src.origin.private`), because it is a 404 for every reader. Set `FORCE_SHOW_EDIT_PAGE_LINK`, the same variable the default UI honors, to keep it.
 - Custom attributes from allowlist
+
+=== What is left out of the Markdown
+
+Site chrome (footers, feedback, navigation, breadcrumbs, the version selector, the chat panel) and any element rendered with the `hidden` attribute are dropped: a hidden element is UI waiting for script, such as an empty state, a resume prompt, or a filter chip, not content a reader sees. The Solutions landing page's filter form (`.sol-filters`, with its search box and facet counts) is dropped too, so its twin is the hero, the result count, and the cards.
 
 === Example output
 
@@ -1668,6 +1694,12 @@ solution:
     verify_script: PASS (9/9)
     redpanda_version: v26.2.2
     run_at: '2026-09-14T09:12:00Z'
+    platforms:
+      - self-managed
+    content_rev:
+      solution: <git tree hash>
+      docs: <git tree hash>
+    stack_sha256: <hex digest>
 ----
 
 A solution with no manifest, or one whose manifest could not be read, has no `verified` key. Only the fields the manifest carried are emitted.
