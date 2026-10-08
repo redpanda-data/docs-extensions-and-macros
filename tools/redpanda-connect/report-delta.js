@@ -77,7 +77,8 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
         // span being compared: inputs:oracledb_cdc/snapshot_mode reports
         // 4.99.0 in the 4.98.0 to 4.103.1 diff.
         introducedIn: (rawFieldObj && (rawFieldObj.introducedInVersion || rawFieldObj.version)) || opts.newVersion || null,
-        description: rawFieldObj && rawFieldObj.description
+        description: rawFieldObj && rawFieldObj.description,
+        shortDescription: rawFieldObj && rawFieldObj.short_description
       });
     });
   });
@@ -193,7 +194,8 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
         deprecatedFields.push({
           component: cKey,
           field: fName,
-          description: newFieldObj && newFieldObj.description
+          description: newFieldObj && newFieldObj.description,
+            shortDescription: newFieldObj && newFieldObj.short_description
         });
       }
 
@@ -212,7 +214,8 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
             field: fName,
             oldDefault: oldDefault,
             newDefault: newDefault,
-            description: newFieldObj && newFieldObj.description
+            description: newFieldObj && newFieldObj.description,
+            shortDescription: newFieldObj && newFieldObj.short_description
           });
         }
       }

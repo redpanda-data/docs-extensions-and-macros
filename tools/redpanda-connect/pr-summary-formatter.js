@@ -323,7 +323,8 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
       lines.push('|-----------|-------|-------------|');
 
       newFields.forEach(field => {
-        const desc = field.description ? truncateToSentence(field.description, 1).replace(/\|/g, '\\|') : '_No description_';
+        const text = field.shortDescription || field.description;
+        const desc = text ? truncateToSentence(text, 1).replace(/\|/g, '\\|') : '_No description_';
         lines.push(`| \`${field.component}\` | \`${field.field}\` | ${desc} |`);
       });
       lines.push('');
@@ -436,7 +437,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
       allDeprecatedFields.push({
         component: field.component,
         field: field.field,
-        description: field.description,
+        description: field.shortDescription || field.description,
         version: release.toVersion
       });
     });
