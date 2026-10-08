@@ -11,8 +11,7 @@
     "expected_pages": [
       "https://docs.redpanda.com/streaming/current/deploy/console/kubernetes/deploy/"
     ],
-    "expected_partials": [],
-    "reason": "merged docs PR https://github.com/redpanda-data/docs/pull/1825 edited non-generated pages",
+    "reason": "a merged docs PR edited non-generated pages",
     "base_sha": "bd4604e3c6019caeaf9485930adb5e7e8d50c9be",
     "merge_base_sha": "bd4604e3c6019caeaf9485930adb5e7e8d50c9be",
     "head_sha": "2bddb468cd7675389e1c8655fb2e4a07f3170255",
@@ -20,11 +19,7 @@
     "state": "merged",
     "backport": false,
     "review_ran": false,
-    "production_dispatched": false,
-    "evidence": [
-      "https://github.com/redpanda-data/docs/pull/1825 [merged, via body, 1/2 non-generated files]",
-      "review: 0 gated run(s), 0 dispatched"
-    ]
+    "production_dispatched": false
   },
   {
     "id": "redpanda-operator-1547",
@@ -38,8 +33,7 @@
     "expected_pages": [
       "https://docs.redpanda.com/streaming/current/manage/kubernetes/k-rolling-restart/"
     ],
-    "expected_partials": [],
-    "reason": "merged docs PR https://github.com/redpanda-data/docs/pull/1826 edited non-generated pages",
+    "reason": "a merged docs PR edited non-generated pages",
     "base_sha": "7e5f4a8ca978ab2e421640ef831dc9fa9c11b27b",
     "merge_base_sha": "7e5f4a8ca978ab2e421640ef831dc9fa9c11b27b",
     "head_sha": "f4c76293fca336a0b8d7c9211a13a3b7cf2782c8",
@@ -47,11 +41,7 @@
     "state": "merged",
     "backport": false,
     "review_ran": false,
-    "production_dispatched": false,
-    "evidence": [
-      "https://github.com/redpanda-data/docs/pull/1826 [merged, via body, 1/2 non-generated files]",
-      "review: 0 gated run(s), 0 dispatched"
-    ]
+    "production_dispatched": false
   },
   {
     "id": "redpanda-operator-1562",
@@ -65,8 +55,7 @@
     "expected_pages": [
       "https://docs.redpanda.com/streaming/current/manage/kubernetes/shadowing/k-shadow-linking/"
     ],
-    "expected_partials": [],
-    "reason": "merged docs PR https://github.com/redpanda-data/docs/pull/1793 edited non-generated pages",
+    "reason": "a merged docs PR edited non-generated pages",
     "base_sha": "010c5ab24cf0c0e1b7e11ff31447c165e2e47858",
     "merge_base_sha": "010c5ab24cf0c0e1b7e11ff31447c165e2e47858",
     "head_sha": "0ef5b7223ec32343cf766e164b07354b4382abe3",
@@ -74,11 +63,7 @@
     "state": "merged",
     "backport": false,
     "review_ran": false,
-    "production_dispatched": false,
-    "evidence": [
-      "https://github.com/redpanda-data/docs/pull/1793 [merged, via body, 1/1 non-generated files]",
-      "review: 0 gated run(s), 0 dispatched"
-    ]
+    "production_dispatched": false
   },
   {
     "id": "redpanda-operator-1615",
@@ -93,8 +78,7 @@
       "https://docs.redpanda.com/streaming/current/manage/kubernetes/networking/external/",
       "https://docs.redpanda.com/streaming/current/manage/kubernetes/networking/external/k-gateway-api/"
     ],
-    "expected_partials": [],
-    "reason": "merged docs PR https://github.com/redpanda-data/docs/pull/1787 edited non-generated pages",
+    "reason": "a merged docs PR edited non-generated pages",
     "base_sha": "7be59fd7a593cd40159ea4ad24694b8dd4b745f9",
     "merge_base_sha": "e9e70de71d2b5ab0603951e6132c1525e0000728",
     "head_sha": "60df32c1d6491354f0c0f077237f8fcc9a1ba16d",
@@ -102,11 +86,7 @@
     "state": "merged",
     "backport": false,
     "review_ran": false,
-    "production_dispatched": false,
-    "evidence": [
-      "https://github.com/redpanda-data/docs/pull/1787 [merged, via body, 2/4 non-generated files]",
-      "review: 0 gated run(s), 0 dispatched"
-    ]
+    "production_dispatched": false
   },
   {
     "id": "redpanda-operator-1663",
@@ -120,9 +100,8 @@
     "expected_pages": [
       "https://docs.redpanda.com/streaming/current/manage/kubernetes/shadowing/k-shadow-linking/"
     ],
-    "expected_partials": [],
     "stacked_on": "redpanda-operator-1562",
-    "reason": "merged docs PR https://github.com/redpanda-data/docs/pull/1794, https://github.com/redpanda-data/docs/pull/1793 edited non-generated pages",
+    "reason": "merged docs PRs edited non-generated pages",
     "base_sha": "29db7eca1e49a0438347a577211d25499cef68a8",
     "merge_base_sha": "29db7eca1e49a0438347a577211d25499cef68a8",
     "head_sha": "83066372db4cf9f1c5c279711b7d9d771de89ddc",
@@ -130,12 +109,7 @@
     "state": "merged",
     "backport": true,
     "review_ran": false,
-    "production_dispatched": false,
-    "evidence": [
-      "https://github.com/redpanda-data/docs/pull/1794 [merged, via body, 1/1 non-generated files]",
-      "https://github.com/redpanda-data/docs/pull/1793 [merged, via body, 1/1 non-generated files]",
-      "review: 0 gated run(s), 0 dispatched"
-    ]
+    "production_dispatched": false
   },
   {
     "id": "redpanda-operator-1677",
@@ -152,8 +126,7 @@
       "https://docs.redpanda.com/streaming/current/manage/kubernetes/k-connect-pipelines/",
       "https://docs.redpanda.com/streaming/current/manage/kubernetes/k-manage-connectors/"
     ],
-    "expected_partials": [],
-    "reason": "merged docs PR https://github.com/redpanda-data/docs/pull/1808 edited non-generated pages",
+    "reason": "a merged docs PR edited non-generated pages",
     "base_sha": "28b00fe72dc79246851a2e1cd5dc2f423ee89535",
     "merge_base_sha": "28b00fe72dc79246851a2e1cd5dc2f423ee89535",
     "head_sha": "46a40e26b556bb8628aeab58c7e9b804370d59bf",
@@ -161,12 +134,7 @@
     "state": "merged",
     "backport": false,
     "review_ran": false,
-    "production_dispatched": false,
-    "evidence": [
-      "https://github.com/redpanda-data/docs/pull/1830 [merged, via body, 0/1 non-generated files]",
-      "https://github.com/redpanda-data/docs/pull/1808 [merged, via body, 4/8 non-generated files]",
-      "review: 0 gated run(s), 0 dispatched"
-    ]
+    "production_dispatched": false
   },
   {
     "id": "redpanda-operator-1752",
@@ -181,10 +149,7 @@
       "https://docs.redpanda.com/streaming/current/deploy/redpanda/kubernetes/k-production-deployment/",
       "https://docs.redpanda.com/streaming/current/manage/kubernetes/monitoring/k-monitor-stretch-clusters/"
     ],
-    "expected_partials": [
-      "partial:docs:modules/manage/partials/monitor-redpanda.adoc"
-    ],
-    "reason": "merged docs PR https://github.com/redpanda-data/docs/pull/1975 edited non-generated pages",
+    "reason": "a merged docs PR edited non-generated pages",
     "base_sha": "ee5d41b4ea336ecf85ad91add54659ad179066af",
     "merge_base_sha": "ee5d41b4ea336ecf85ad91add54659ad179066af",
     "head_sha": "704ec2ef7f1dc2c83ab65b09e137c6188e9e98fb",
@@ -192,11 +157,7 @@
     "state": "merged",
     "backport": false,
     "review_ran": false,
-    "production_dispatched": false,
-    "evidence": [
-      "https://github.com/redpanda-data/docs/pull/1975 [merged, via body, 3/4 non-generated files]",
-      "review: 0 gated run(s), 0 dispatched"
-    ]
+    "production_dispatched": false
   },
   {
     "id": "redpanda-operator-1758",
@@ -211,10 +172,7 @@
       "https://docs.redpanda.com/streaming/current/deploy/redpanda/kubernetes/k-production-deployment/",
       "https://docs.redpanda.com/streaming/current/manage/kubernetes/monitoring/k-monitor-stretch-clusters/"
     ],
-    "expected_partials": [
-      "partial:docs:modules/manage/partials/monitor-redpanda.adoc"
-    ],
-    "reason": "merged docs PR https://github.com/redpanda-data/docs/pull/1975 edited non-generated pages",
+    "reason": "a merged docs PR edited non-generated pages",
     "base_sha": "ee5d41b4ea336ecf85ad91add54659ad179066af",
     "merge_base_sha": "ee5d41b4ea336ecf85ad91add54659ad179066af",
     "head_sha": "7d2c81b6bb0a6dfafb69d829f8931ace554d9e59",
@@ -222,11 +180,7 @@
     "state": "merged",
     "backport": false,
     "review_ran": false,
-    "production_dispatched": false,
-    "evidence": [
-      "https://github.com/redpanda-data/docs/pull/1975 [merged, via body, 3/4 non-generated files]",
-      "review: 0 gated run(s), 0 dispatched"
-    ]
+    "production_dispatched": false
   },
   {
     "id": "redpanda-operator-1803",
@@ -241,10 +195,7 @@
       "https://docs.redpanda.com/streaming/current/deploy/redpanda/kubernetes/k-production-deployment/",
       "https://docs.redpanda.com/streaming/current/manage/kubernetes/monitoring/k-monitor-stretch-clusters/"
     ],
-    "expected_partials": [
-      "partial:docs:modules/manage/partials/monitor-redpanda.adoc"
-    ],
-    "reason": "merged docs PR https://github.com/redpanda-data/docs/pull/1975 edited non-generated pages",
+    "reason": "a merged docs PR edited non-generated pages",
     "base_sha": "71229281897d7dcbe69f5bebbd42507563c461a3",
     "merge_base_sha": "71229281897d7dcbe69f5bebbd42507563c461a3",
     "head_sha": "dd2c73ec599544e016236e4d3b0021c5e65623e0",
@@ -252,11 +203,7 @@
     "state": "merged",
     "backport": true,
     "review_ran": false,
-    "production_dispatched": false,
-    "evidence": [
-      "https://github.com/redpanda-data/docs/pull/1975 [merged, via body, 3/4 non-generated files]",
-      "review: 0 gated run(s), 0 dispatched"
-    ]
+    "production_dispatched": false
   },
   {
     "id": "redpanda-operator-1843",
@@ -272,10 +219,7 @@
       "https://docs.redpanda.com/streaming/current/deploy/redpanda/kubernetes/get-started-dev/",
       "https://docs.redpanda.com/streaming/current/deploy/redpanda/kubernetes/k-deployment-overview/"
     ],
-    "expected_partials": [
-      "partial:docs:modules/deploy/partials/kubernetes/guides/create-storageclass.adoc"
-    ],
-    "reason": "merged docs PR https://github.com/redpanda-data/docs/pull/2081 edited non-generated pages",
+    "reason": "a merged docs PR edited non-generated pages",
     "base_sha": "c01d6d3837e235d04891e20427406b5d7da167d1",
     "merge_base_sha": "c01d6d3837e235d04891e20427406b5d7da167d1",
     "head_sha": "e9077ff9fbbe96a5d74b0e12b15a418692757c15",
@@ -283,11 +227,7 @@
     "state": "merged",
     "backport": false,
     "review_ran": false,
-    "production_dispatched": false,
-    "evidence": [
-      "https://github.com/redpanda-data/docs/pull/2081 [merged, via body, 4/5 non-generated files]",
-      "review: 0 gated run(s), 0 dispatched"
-    ]
+    "production_dispatched": false
   },
   {
     "id": "redpanda-operator-1852",
@@ -299,10 +239,7 @@
     "label_strength": "strong",
     "confirmed_by": null,
     "expected_pages": [],
-    "expected_partials": [
-      "partial:docs:modules/deploy/partials/requirements.adoc"
-    ],
-    "reason": "merged docs PR https://github.com/redpanda-data/docs/pull/2041 edited non-generated pages",
+    "reason": "a merged docs PR edited non-generated pages",
     "base_sha": "3dc574c496a39483511e04c59e30e0854ac31ba9",
     "merge_base_sha": "0ed3bcba7e87b2a0f0c853f8ce5bc294d394df77",
     "head_sha": "e1373a62050748049adbfa3ec4041794816bc240",
@@ -310,11 +247,7 @@
     "state": "merged",
     "backport": false,
     "review_ran": false,
-    "production_dispatched": false,
-    "evidence": [
-      "https://github.com/redpanda-data/docs/pull/2041 [merged, via body, 1/1 non-generated files]",
-      "review: 0 gated run(s), 0 dispatched"
-    ]
+    "production_dispatched": false
   },
   {
     "id": "redpanda-operator-1924",
@@ -326,8 +259,7 @@
     "label_strength": "weak",
     "confirmed_by": null,
     "expected_pages": [],
-    "expected_partials": [],
-    "reason": "DOC-2545 closed Will not implement only because the PR was closed unmerged; the finding itself was not rejected",
+    "reason": "a DOC ticket closed Will not implement only because the PR was closed unmerged; the finding itself was not rejected",
     "base_sha": "fd5b1cf58fc072e1d1fbb81c5941ea15bd66d2e9",
     "merge_base_sha": "fd5b1cf58fc072e1d1fbb81c5941ea15bd66d2e9",
     "head_sha": "44122f918abecae421afea0415ea9b07a52d739e",
@@ -335,11 +267,7 @@
     "state": "closed",
     "backport": false,
     "review_ran": true,
-    "production_dispatched": true,
-    "evidence": [
-      "DOC-2545 [Will not implement, auto-doc-impact]",
-      "review: 2 gated run(s), 1 dispatched"
-    ]
+    "production_dispatched": true
   },
   {
     "id": "redpanda-operator-1891",
@@ -351,7 +279,6 @@
     "label_strength": "provisional",
     "confirmed_by": null,
     "expected_pages": [],
-    "expected_partials": [],
     "reason": "review touched declarations, open, not merged, no DOC ticket or docs PR yet",
     "base_sha": "d41037557730b4534a074b33d6c98d8e35e4da5d",
     "merge_base_sha": "e5676e1ffcdd2de5b0a72308800c2bf36d550ba3",
@@ -360,10 +287,7 @@
     "state": "open",
     "backport": false,
     "review_ran": true,
-    "production_dispatched": false,
-    "evidence": [
-      "review: 2 gated run(s), 0 dispatched"
-    ]
+    "production_dispatched": false
   },
   {
     "id": "redpanda-operator-1909",
@@ -375,7 +299,6 @@
     "label_strength": "provisional",
     "confirmed_by": null,
     "expected_pages": [],
-    "expected_partials": [],
     "reason": "review touched declarations, merged 2026-10-01, under 14 days ago, no DOC ticket or docs PR yet",
     "base_sha": "9fc30a5f02078fcfa7e43a46d2e247dd23d49ea8",
     "merge_base_sha": "fafa2036764fdaa80da8667077979184425c1c4f",
@@ -384,9 +307,6 @@
     "state": "merged",
     "backport": false,
     "review_ran": true,
-    "production_dispatched": false,
-    "evidence": [
-      "review: 2 gated run(s), 0 dispatched"
-    ]
+    "production_dispatched": false
   }
 ]

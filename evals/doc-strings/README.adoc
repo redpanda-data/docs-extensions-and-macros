@@ -276,8 +276,8 @@ accepted), `medium`, `weak`, `pending` or `provisional`. See the header of
 |`confirmed_by` |Who confirmed a label that is not `strong`, or `null`.
 |`expected_pages` |For `needs_docs`: the `https://docs.redpanda.com/` pages a
 writer actually edited. Empty for `no_change`.
-|`expected_partials` |Optional: edited partials, as
-`partial:<repo>:<path>`. Not scored, because a finding names pages.
+|`expected_partials` |Optional, private item sets only: edited partials,
+as `partial:<repo>:<path>`. Not scored, because a finding names pages.
 |`reason` |One line on why the label holds.
 |`stacked_on` |Optional: the id of the item this PR is stacked on or follows
 up, for the duplicate rate. A backport is stacked on its original.
@@ -287,7 +287,14 @@ Seeded items also carry provenance the harness does not read:
 `merge_base_sha`, `reviewed_head_sha` (the head of the last production
 review that reached the model), `state`, `backport`, `review_ran` (whether
 the review workflow ran on the PR at all), `production_dispatched`
-(whether the production pass opened or updated a ticket), and `evidence`.
+(whether the production pass opened or updated a ticket), and, in a
+private item set, `evidence`.
+
+The public `items.json` leaves out anything that points into a private
+repository or Jira. When `--to-items` writes it, `evidence` and
+`expected_partials` are dropped, and docs PR links and ticket keys in
+`reason` become "a docs PR" and "a DOC ticket". The PR's own URL, title and
+body and the published `docs.redpanda.com` pages stay.
 A production run lints the range its own trigger hands it, which is not
 always the PR's merge-base diff, so `production_dispatched` is context for
 a reader, not a reference verdict.

@@ -15,7 +15,7 @@ const { spawn } = require('child_process')
 
 const lib = require('../../evals/doc-strings/doc-impact/lib')
 const { materializeControl, controlVerdict, parseSurfaces, quotaRefusals, runItem, useItemsFile } = require('../../evals/doc-strings/doc-impact/run')
-const { toItems, refPatterns, classifyTickets } = require('../../evals/doc-strings/doc-impact/mine-candidates')
+const { toItems, publicItem, refPatterns, classifyTickets } = require('../../evals/doc-strings/doc-impact/mine-candidates')
 
 const DIR = path.join(__dirname, '../../evals/doc-strings/doc-impact')
 
@@ -345,6 +345,23 @@ describe('seeding and freezing', () => {
     expect(items[0].stacked_on).toBeUndefined()
     expect(items.map((i) => i.confirmed_by)).toEqual([null, null, null])
     expect(lib.isConfirmed(items[2])).toBe(false)
+  })
+
+  test('a public item drops private evidence and keeps its own PR URL', () => {
+    const own = 'https://github.com/redpanda-data/redpanda-operator/pull/1'
+    const [item] = toItems([candidate('redpanda-operator-1', {
+      reason: `merged docs PR https://github.com/redpanda-data/docs/pull/9, https://github.com/redpanda-data/docs/pull/8 edited non-generated pages; see DOC-1234 and ${own}`,
+      evidence: ['https://github.com/redpanda-data/docs/pull/9 [merged]', 'DOC-1234 [Done]']
+    })], [])
+    const pub = publicItem(item)
+    expect(pub.evidence).toBeUndefined()
+    expect(pub.expected_partials).toBeUndefined()
+    expect(pub.reason).toBe(`merged docs PRs edited non-generated pages; see a DOC ticket and ${own}`)
+    expect(JSON.stringify(pub)).not.toMatch(/redpanda-data\/docs\/pull|DOC-\d|partial:/)
+    expect(pub.expected_pages).toEqual(item.expected_pages)
+    expect(() => lib.validateItem(pub)).not.toThrow()
+    // A private item keeps everything: it never goes in this repository.
+    expect(item.evidence).toEqual(['https://github.com/redpanda-data/docs/pull/9 [merged]', 'DOC-1234 [Done]'])
   })
 
   test('a writer-confirmed item survives a reseed unchanged', () => {

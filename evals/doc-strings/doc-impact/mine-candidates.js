@@ -452,6 +452,24 @@ function toItems(candidates, existing) {
   });
 }
 
+// An item headed for a public file keeps only what the harness and a
+// reader of this repository need. The label evidence points into private
+// repositories (docs PR links, partial paths) and Jira (ticket keys and
+// resolutions), so it is dropped, and the one-line reason keeps its sense
+// without the references. The PR's own URL, its title and body, and the
+// published docs.redpanda.com pages stay, because they are public.
+function publicItem(item) {
+  const { evidence, expected_partials, ...rest } = item;
+  const own = item.pr_url || '';
+  const reason = String(item.reason || '')
+    .replace(/https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/g, (url) => (url === own ? url : 'a docs PR'))
+    .replace(/\b[A-Z][A-Z0-9]+-\d+\b/g, 'a DOC ticket')
+    .replace(/(a docs PR)(?:,\s*a docs PR)+/g, 'docs PRs')
+    .replace(/\bmerged docs PR a docs PR\b/g, 'a merged docs PR')
+    .replace(/\bmerged docs PR docs PRs\b/g, 'merged docs PRs');
+  return { ...rest, reason: reason || 'label mined from history' };
+}
+
 // ---------- main ----------
 function main() {
   const args = parseArgs(process.argv);
@@ -475,7 +493,8 @@ function main() {
     const report = {};
     for (const [file, cands] of groups) {
       const existing = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : [];
-      const items = toItems(cands, existing);
+      const seeded = toItems(cands, existing);
+      const items = file === args.itemsOut ? seeded.map(publicItem) : seeded;
       fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
       fs.writeFileSync(file, JSON.stringify(items, null, 2) + '\n');
       const tally = {};
@@ -740,4 +759,4 @@ if (require.main === module) {
   try { main(); } catch (e) { console.error(e.stack || String(e)); process.exit(1); }
 }
 
-module.exports = { toItems, refPatterns, engRefs, isContent, adocToUrl, parseArgs, classifyTickets };
+module.exports = { toItems, publicItem, refPatterns, engRefs, isContent, adocToUrl, parseArgs, classifyTickets };
