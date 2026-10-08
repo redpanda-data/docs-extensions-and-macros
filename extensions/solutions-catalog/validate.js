@@ -18,7 +18,14 @@ const yaml = require('js-yaml')
 
 const DURATION_MIN = 5
 const DURATION_MAX = 600
-const DESCRIPTION_MAX = 200
+// The landing card shows the description in three clamped lines; 140
+// characters is what fits them.
+const DESCRIPTION_MAX = 140
+// page-solution-technologies names what a reader needs beyond Redpanda
+// itself: other systems, languages, formats, and separately deployed Redpanda
+// products. Tools every solution uses say nothing about any one of them, and
+// a value that is also a category belongs in page-categories.
+const TECHNOLOGY_DENY_LIST = ['rpk', 'curl', 'docker', 'docker compose', 'redpanda', 'redpanda console']
 const REQUIRED_OVERVIEW_H2 = ['architecture', 'prerequisites']
 // The complete production section lives at the end of the last step, once the
 // reader has the whole stack running, with one h3 per topic.
@@ -327,7 +334,7 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
 
   // Required scalars and enums
   if (!record.description) err('description is required')
-  else if (record.description.length > DESCRIPTION_MAX) warn(`description is ${record.description.length} characters; keep it under ${DESCRIPTION_MAX}`)
+  else if (record.description.length > DESCRIPTION_MAX) err(`description is ${record.description.length} characters; the landing card fits ${DESCRIPTION_MAX}`)
 
   if (!record.version) err('page-solution-version is required (vX.Y.Z)')
   else if (!VERSION_RX.test(record.version)) err(`page-solution-version "${record.version}" must match vX.Y.Z`)
@@ -347,6 +354,17 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
   if (badPlatforms.length) err(`page-solution-platforms contains unknown values: ${badPlatforms.join(', ')} (allowed: ${ENUMS.platforms.join(', ')})`)
 
   if (!record.technologies.length) err('page-solution-technologies is required')
+  const denied = record.technologies.filter((t) => TECHNOLOGY_DENY_LIST.includes(t.toLowerCase()))
+  if (denied.length) {
+    err(`page-solution-technologies must not list ${denied.join(', ')}: it names what a reader needs beyond Redpanda and its everyday tools (other systems, languages, formats, and separately deployed products such as Redpanda Connect)`)
+  }
+  if (categoryMap) {
+    const categoryNames = new Map([...categoryMap.categories, ...categoryMap.subcategories].map((c) => [c.toLowerCase(), c]))
+    const asCategory = record.technologies.filter((t) => categoryNames.has(t.toLowerCase()) && !denied.includes(t))
+    if (asCategory.length) {
+      err(`page-solution-technologies lists ${asCategory.join(', ')}, which ${asCategory.length === 1 ? 'is a category' : 'are categories'}; put ${asCategory.length === 1 ? 'it' : 'them'} in page-categories instead`)
+    }
+  }
 
   // Verification manifest: the build-side twin of the monorepo's check-metadata.
   // Nothing is inferred when it is absent or unreadable, so say so instead.
@@ -413,6 +431,19 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
   }
   for (const stepId of present) {
     if (!listed.has(stepId)) err(`pages/${stepId}.adoc exists but is not listed in page-solution-steps`)
+  }
+
+  // Duration: when every step is timed, the steps are the whole story.
+  const stepMinutes = record.stepIds.map((sid) => {
+    const step = record.steps.find((s) => s.id === sid)
+    const value = step && step.page.asciidoc && step.page.asciidoc.attributes && step.page.asciidoc.attributes['page-solution-step-duration']
+    return value !== undefined && value !== '' && isInteger(value) ? Number(value) : null
+  })
+  if (stepMinutes.length && stepMinutes.every((m) => m !== null) && isInteger(record.duration)) {
+    const total = stepMinutes.reduce((a, b) => a + b, 0)
+    if (total !== Number(record.duration)) {
+      warn(`page-solution-duration is ${record.duration} but the steps' page-solution-step-duration values add up to ${total}`)
+    }
   }
 
   // Related docs: warn when absent, fatal when malformed or unresolved
@@ -541,6 +572,36 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
 }
 
 /**
+ * Checks across solutions: the related-solutions graph should be symmetric,
+ * and two solutions that point at each other should share a use case, or the
+ * landing page's Use case filter separates what the overviews join.
+ *
+ * @param {Array<Object>} records - collected records
+ * @returns {Array<string>} warnings
+ */
+function validateCatalog (records) {
+  const warnings = []
+  const byId = new Map((records || []).map((r) => [r.id, r]))
+  const reportedPairs = new Set()
+  for (const record of records || []) {
+    for (const otherId of record.relatedSolutionIds || []) {
+      const other = byId.get(otherId)
+      if (!other || other === record) continue
+      if (!(other.relatedSolutionIds || []).includes(record.id)) {
+        warnings.push(`${otherId}: ${record.id} lists it in page-solution-related-solutions but ${otherId} does not list ${record.id} back`)
+      }
+      const pair = [record.id, otherId].sort().join(' ')
+      const shared = (record.useCases || []).filter((u) => (other.useCases || []).includes(u))
+      if ((record.useCases || []).length && (other.useCases || []).length && !shared.length && !reportedPairs.has(pair)) {
+        reportedPairs.add(pair)
+        warnings.push(`${record.id}: page-solution-related-solutions lists ${otherId}, but the two share no page-solution-use-cases value`)
+      }
+    }
+  }
+  return warnings
+}
+
+/**
  * Parse ROOT/partials/solution-facets.yml into the allowed values per axis.
  *
  * Shape:
@@ -662,6 +723,8 @@ module.exports = {
   validateStructure,
   validateSolution,
   validateRelationships,
+  validateCatalog,
+  TECHNOLOGY_DENY_LIST,
   formatErrors,
   parseFacetVocab,
 }

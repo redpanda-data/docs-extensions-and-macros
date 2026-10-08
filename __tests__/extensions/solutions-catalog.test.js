@@ -2052,3 +2052,54 @@ describe('solutions-catalog: Cloud readers', () => {
     ])
   })
 })
+
+describe('solutions-catalog: authoring drift', () => {
+  test.each([
+    ['a description over 140 characters', { description: 'x'.repeat(141) }, /description is 141 characters; the landing card fits 140/],
+    ['an everyday tool in technologies', { 'page-solution-technologies': 'Go, rpk, Docker Compose' }, /page-solution-technologies must not list rpk, Docker Compose/],
+    ['Redpanda itself in technologies', { 'page-solution-technologies': 'Redpanda, Redpanda Console, Go' }, /must not list Redpanda, Redpanda Console/],
+    ['a category in technologies', { 'page-solution-technologies': 'Go, Schema Registry' }, /page-solution-technologies lists Schema Registry, which is a category; put it in page-categories instead/],
+  ])('%s is fatal', async (_name, attrs, rx) => {
+    await expect(run({ solutions: [makeSolution('leaderboard', { attrs })] })).rejects.toThrow(rx)
+  })
+
+  test('140 characters exactly is fine', async () => {
+    await expect(run({ solutions: [makeSolution('leaderboard', { attrs: { description: 'x'.repeat(140) } })] })).resolves.toBeTruthy()
+    expect(validate.DESCRIPTION_MAX).toBe(140)
+  })
+
+  test('a separately deployed Redpanda product is a technology', async () => {
+    await expect(run({ solutions: [makeSolution('leaderboard', { attrs: { 'page-solution-technologies': 'Redpanda Migrator, Redpanda Operator, Go' } })] })).resolves.toBeTruthy()
+  })
+
+  test('step durations that do not add up to the total warn, only when every step is timed', async () => {
+    const partly = await run()
+    expect(warningsOf(partly)).not.toMatch(/add up to/)
+    const solution = makeSolution('leaderboard')
+    for (const page of solution.pages.slice(1)) page.asciidoc.attributes['page-solution-step-duration'] = '10'
+    const timed = await run({ solutions: [solution] })
+    expect(warningsOf(timed)).toMatch(/leaderboard: page-solution-duration is 45 but the steps' page-solution-step-duration values add up to 30/)
+  })
+
+  test('a landing or index page in related docs warns', async () => {
+    const index = makeDoc({ relative: 'index.adoc', attrs: { 'page-layout': 'index' } })
+    const solution = makeSolution('leaderboard', { attrs: { 'page-solution-related-docs': 'streaming:develop:consumer-offsets.adoc, streaming:develop:index.adoc' } })
+    const result = await run({ solutions: [solution], docs: [makeDoc(), index] })
+    expect(warningsOf(result)).toMatch(/page-solution-related-docs entry "streaming:develop:index\.adoc" is a landing or index page \(layout index\)/)
+  })
+
+  test('related solutions: empty, one-way, and sharing no use case each warn', async () => {
+    const facetsText = 'industries: [Gaming]\nuse_cases: [Change data capture, Data lakehouse, Real-time analytics]\n'
+    const a = makeSolution('alpha', { attrs: { 'page-solution-related-solutions': 'bravo', 'page-solution-use-cases': 'Change data capture' } })
+    const b = makeSolution('bravo', { attrs: { 'page-solution-use-cases': 'Data lakehouse', 'page-solution-featured': 'false' } })
+    const c = makeSolution('charlie', { attrs: { 'page-solution-related-solutions': 'delta', 'page-solution-use-cases': 'Real-time analytics', 'page-solution-featured': 'false' } })
+    const d = makeSolution('delta', { attrs: { 'page-solution-related-solutions': 'charlie', 'page-solution-use-cases': 'Real-time analytics', 'page-solution-featured': 'false' } })
+    const result = await run({ solutions: [a, b, c, d], facetsText })
+    const w = warningsOf(result)
+    expect(w).toMatch(/bravo: page-solution-related-solutions is empty/)
+    expect(w).toMatch(/bravo: alpha lists it in page-solution-related-solutions but bravo does not list alpha back/)
+    expect(w).toMatch(/alpha: page-solution-related-solutions lists bravo, but the two share no page-solution-use-cases value/)
+    // A symmetric pair that shares a use case is quiet.
+    expect(w).not.toMatch(/charlie lists it|delta lists it|charlie.*share no|delta.*share no/)
+  })
+})

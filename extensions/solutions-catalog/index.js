@@ -321,6 +321,7 @@ module.exports.register = function ({ config = {} } = {}) {
       errors.push(...result.errors)
       warnings.push(...result.warnings)
     }
+    warnings.push(...validate.validateCatalog(collected.solutions))
 
     const rel = validate.validateRelationships(state.relationshipsData || { relationships: [] }, {
       validate: getValidator(), solutionIds, resolveDoc, keyOf: collect.pageKey,
