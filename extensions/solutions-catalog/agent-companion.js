@@ -19,7 +19,8 @@
  *                :page-solution-adapt:             -> Adapt, Design contract
  *                == Why / == Why Redpanda / == In production -> Design contract
  *                == Verify, prose after the expected output -> Reference build: failure modes
- *                == Production considerations table -> Production gaps (overview)
+ *   last step    == Production considerations (one === per topic) -> Production gaps
+ *                (an overview's == Production considerations table, for older content)
  *   scripts/verify.sh  "# N." comments             -> Reference build: acceptance checks
  *
  * `include::partial$...[]` lines are spliced in before anything is read, with
@@ -305,6 +306,49 @@ function subsection (lines, name) {
   return lines.slice(i + 1, j < 0 ? undefined : j)
 }
 
+/**
+ * The level-3 subsections of a level-2 section's lines: the lines before the
+ * first `=== ` heading, then one entry per heading. Headings inside delimited
+ * blocks are content, not subsections.
+ */
+function subsections (lines) {
+  const lead = []
+  const subs = []
+  let cur = null
+  let delim = null
+  for (const line of lines) {
+    const target = cur ? cur.lines : lead
+    if (delim) { if (line === delim) delim = null; target.push(line); continue }
+    if (isDelimiter(line)) { delim = line; target.push(line); continue }
+    const h = line.match(/^=== (.*)$/)
+    if (h) { cur = { title: h[1].trim(), lines: [] }; subs.push(cur); continue }
+    target.push(line)
+  }
+  return { lead, subs }
+}
+
+/**
+ * A `== Production considerations` section -> Markdown. The current shape is
+ * an intro and one `=== Topic` per production concern (each becomes an h3 with
+ * its paragraphs); older content carries a three-column table instead.
+ */
+function productionGaps (lines, ctx) {
+  const tableStart = lines.findIndex((l) => /^\|={3,}$/.test(l))
+  const { lead, subs } = subsections(tableStart < 0 ? lines : lines.slice(0, tableStart))
+  const out = []
+  const intro = prose(lead, ctx)
+  if (intro) out.push(intro, '')
+  if (tableStart >= 0) {
+    const rows = table(lines, ctx)
+    if (rows) out.push(rows, '')
+  }
+  for (const s of subs) {
+    const body = prose(s.lines, ctx)
+    if (body) out.push(`### ${inline(s.title, ctx)}`, '', body, '')
+  }
+  return out
+}
+
 /** The prose after the expected-output block of == Verify: likely failures and how to tell them apart. */
 function failureModes (lines, ctx) {
   const i = lines.findIndex((l) => l.startsWith('include::') && l.includes('/expected/'))
@@ -423,7 +467,10 @@ function generateAgentCompanion ({ slug, pages, verifyScript, siteUrl = DEFAULT_
   const [problem, outcomes] = pre.split(OUTCOMES_RX)
   const build = section(index, 'What you build')
   const arch = section(index, 'Architecture')
-  const prod = section(index, 'Production considerations')
+  // The complete production section lives at the end of the last step; older
+  // content kept it on the overview.
+  const lastStep = steps.find((s) => s.id === stepIds[stepIds.length - 1])
+  const prod = (lastStep && section(lastStep.page, 'Production considerations')) || section(index, 'Production considerations')
 
   const adapts = rules.filter((r) => r.adapt)
   const contract = steps.filter((s) => s.rule || s.adapt)
@@ -498,12 +545,8 @@ function generateAgentCompanion ({ slug, pages, verifyScript, siteUrl = DEFAULT_
   }
 
   if (prod) {
-    const tableStart = prod.lines.findIndex((l) => /^\|={3,}$/.test(l))
-    const intro = prose(tableStart < 0 ? prod.lines : prod.lines.slice(0, tableStart), ctx)
-    const rows = table(prod.lines, ctx)
-    md.push('## Production gaps', '')
-    if (intro) md.push(intro, '')
-    if (rows) md.push(rows, '')
+    const gaps = productionGaps(prod.lines, ctx)
+    if (gaps.length) md.push('## Production gaps', '', ...gaps)
   }
   const related = String(index.attrs['page-solution-related-docs'] || '').split(',').map((s) => s.trim()).filter(Boolean)
   if (related.length) {
@@ -560,6 +603,7 @@ module.exports = {
   parsePartialTarget,
   expandIncludes,
   selectTagged,
+  productionGaps,
   resourceUrl,
   inline,
   parsePage,

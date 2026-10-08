@@ -265,6 +265,192 @@ describe('agent companion: solutions without rules', () => {
   })
 })
 
+describe('agent companion: single-sourced production content', () => {
+  // The current layout: each step's In production note is an include of a
+  // partial's summary region, and the last step carries the complete section
+  // assembled from the same partials' detail regions.
+  const index = [
+    '= Tiny',
+    ':page-layout: solution',
+    ':page-solution-steps: one, verify-end-to-end',
+    '',
+    'A problem worth solving.',
+    '',
+    '== Prerequisites',
+    '',
+    'This reference runs on one broker. The last step, xref:verify-end-to-end.adoc#production-considerations[], lists what changes for production.',
+  ].join('\n')
+  const one = [
+    '= Compact the board',
+    ':page-layout: solution-step',
+    ':page-solution-rule: Publish absolute state.',
+    '',
+    '== Why',
+    '',
+    'Totals survive compaction.',
+    '',
+    '== Verify',
+    '',
+    '[,bash]',
+    '----',
+    'include::example$steps/one/commands.sh[tag=check]',
+    '----',
+    '',
+    '== Files for this step',
+    '',
+    '* link:{attachmentsdir}/services/board.go[services/board.go]',
+    '',
+    '== In production',
+    '',
+    '[.production-note]',
+    '.In production',
+    '--',
+    'include::partial$production/compaction.adoc[tag=summary]',
+    'For the full picture, see xref:verify-end-to-end.adoc#prod-compaction[Production considerations: compaction].',
+    '--',
+  ].join('\n')
+  const last = [
+    '= Verify the system end to end',
+    ':page-layout: solution-step',
+    '',
+    '== Why',
+    '',
+    'One check proves it.',
+    '',
+    '== Files for this step',
+    '',
+    '* link:{attachmentsdir}/verify.sh[verify.sh]',
+    '',
+    '== Production considerations',
+    '',
+    'include::partial$production/_all.adoc[]',
+    '',
+    '== Clean up',
+    '',
+    'Stop the stack.',
+  ].join('\n')
+  const partials = {
+    'production/_all.adoc': [
+      'This solution runs on a single broker with no authentication.',
+      '',
+      '[#prod-compaction]',
+      '=== Compaction',
+      '',
+      'include::partial$production/compaction.adoc[tag=detail]',
+      '',
+      '[#prod-security]',
+      '=== Security',
+      '',
+      'include::partial$production/security.adoc[tag=detail]',
+    ].join('\n'),
+    'production/compaction.adoc': [
+      '// tag::summary[]',
+      'Size segment.ms for your write rate, because compaction only runs on closed segments.',
+      '// end::summary[]',
+      '// tag::detail[]',
+      'In this solution, segments roll every minute.',
+      '',
+      'In production, tune segment.ms and see xref:streaming:manage:cluster-maintenance/compaction-settings.adoc[compaction settings].',
+      '// end::detail[]',
+    ].join('\n'),
+    'production/security.adoc': [
+      '// tag::summary[]',
+      'Turn on SASL.',
+      '// end::summary[]',
+      '// tag::detail[]',
+      'In this solution, nothing authenticates.',
+      '',
+      'In production, enable SASL and TLS.',
+      '// end::detail[]',
+    ].join('\n'),
+  }
+  const pages = { index, one, 'verify-end-to-end': last }
+  const generate = (over = {}) => generateAgentCompanion({
+    slug: 'tiny',
+    pages,
+    resolveInclude: partialResolver(partials, { module: 'tiny' }),
+    ...over,
+  })
+
+  test('a step whose In production is only an include still yields **In production:** with the summary', () => {
+    const r = generate()
+    expect(r.leaks).toEqual([])
+    const entry = sectionOf(r.markdown, '### 1. Compact the board')
+    expect(entry).toContain(
+      '**In production:** Size segment.ms for your write rate, because compaction only runs on closed segments.\n' +
+      'For the full picture, see [Production considerations: compaction](https://docs.redpanda.com/solutions/tiny/verify-end-to-end/#prod-compaction).'
+    )
+    // Only the summary region: the detail belongs to the last step.
+    expect(entry).not.toContain('segments roll every minute')
+  })
+
+  test('the last step\'s Production considerations become Production gaps, one h3 per topic', () => {
+    const r = generate()
+    const gaps = sectionOf(r.markdown, '## Production gaps')
+    expect(gaps.trim().startsWith('This solution runs on a single broker with no authentication.')).toBe(true)
+    expect(headings(r.markdown).filter((h) => /^### /.test(h) && ['### Compaction', '### Security'].includes(h))).toEqual(['### Compaction', '### Security'])
+    expect(r.markdown).toContain(
+      '### Compaction\n\nIn this solution, segments roll every minute.\n\n' +
+      'In production, tune segment.ms and see [compaction settings](https://docs.redpanda.com/streaming/current/manage/cluster-maintenance/compaction-settings/).'
+    )
+    expect(r.markdown).toContain('### Security\n\nIn this solution, nothing authenticates.\n\nIn production, enable SASL and TLS.')
+    // Production gaps keeps its place between Acceptance and Reference build.
+    const top = headings(r.markdown).filter((h) => /^## /.test(h))
+    expect(top.indexOf('## Production gaps')).toBe(top.indexOf('## Acceptance') + 1)
+  })
+
+  test('tag markers, anchors, and the Files for this step section never reach the Markdown', () => {
+    const r = generate()
+    expect(r.markdown).not.toMatch(/tag::|end::|\[#prod-|include::|attachmentsdir/)
+    expect(r.markdown).not.toContain('board.go')
+    expect(r.markdown).not.toContain('verify.sh')
+    expect(r.markdown).not.toContain('Stop the stack.')
+  })
+
+  test('a missing partial is reported in leaks', () => {
+    const broken = one.replace('production/compaction.adoc', 'production/missing.adoc')
+    const r = generate({ pages: { ...pages, one: broken } })
+    expect(r.leaks).toEqual(['unresolved include: partial$production/missing.adoc (in one)'])
+  })
+
+  test('a tag the partial does not have is reported in leaks', () => {
+    const broken = one.replace('[tag=summary]', '[tag=summry]')
+    const r = generate({ pages: { ...pages, one: broken } })
+    expect(r.leaks).toEqual(['include tag not found: summry in partial$production/compaction.adoc (in one)'])
+  })
+
+  test('without a resolver, every partial include is reported rather than silently dropped', () => {
+    const r = generate({ resolveInclude: undefined })
+    expect(r.leaks).toEqual([
+      'unresolved include: partial$production/compaction.adoc (in one)',
+      'unresolved include: partial$production/_all.adoc (in verify-end-to-end)',
+    ])
+  })
+
+  test('nested includes stop at the depth limit', () => {
+    const loop = { 'loop.adoc': 'Again.\ninclude::partial$loop.adoc[]' }
+    const r = generateAgentCompanion({
+      slug: 'tiny',
+      pages: { index: index + '\n\ninclude::partial$loop.adoc[]' },
+      resolveInclude: partialResolver(loop, { module: 'tiny' }),
+    })
+    expect(r.leaks).toEqual([`include nested deeper than ${MAX_INCLUDE_DEPTH}: partial$loop.adoc (in index)`])
+  })
+
+  test('example$ and attachment$ includes are still dropped and never resolved', () => {
+    const seen = []
+    generate({ resolveInclude: (t) => { seen.push(t); return partialResolver(partials, { module: 'tiny' })(t) } })
+    expect(seen.every((t) => t.includes('partial$'))).toBe(true)
+  })
+
+  test('old content: with no production section on the last step, the overview table is used', () => {
+    const oldIndex = index + '\n\n== Production considerations\n\nOne broker.\n\n|===\n| Area | In this solution | In production\n\n| Security\n| None\n| SASL\n|===\n'
+    const oldLast = last.replace(/== Production considerations[\s\S]*?(?=== Clean up)/, '')
+    const r = generate({ pages: { index: oldIndex, one, 'verify-end-to-end': oldLast } })
+    expect(sectionOf(r.markdown, '## Production gaps')).toContain('One broker.\n\n| Area | In this solution | In production |\n|---|---|---|\n| Security | None | SASL |')
+  })
+})
+
 describe('agent companion: include helpers', () => {
   const text = [
     'untagged',
