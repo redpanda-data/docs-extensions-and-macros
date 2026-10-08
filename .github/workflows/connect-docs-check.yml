@@ -15,13 +15,20 @@
 #      but do not block: a connect PR cannot cause them, and a break on docs
 #      main must not turn every connect PR red. Antora runs with
 #      --log-failure-level=fatal, so this check, not Antora, decides, and the
-#      job summary says why.
-#   3. doc-tools check-rendered-html over the connect component. WARNS only:
-#      the published docs still have known literal-backtick defects.
-#   4. doc-tools connect-docs-diff against the merge base tree, when the
+#      job summary says why. It also BLOCKS when the build did not read every
+#      file of the PR's tree through REDPANDA_CONNECT_DOCS_DIR.
+#   3. doc-tools connect-docs-diff against the merge base tree, when the
 #      caller passes one: the changed pages with links and per-file diffs, in
 #      the job summary. The rendered HTML of those pages is uploaded as an
 #      artifact.
+#   4. doc-tools check-rendered-html over the Connect and Cloud connect pages:
+#      unconverted markup, broken anchors, and links to pages that don't
+#      exist. With the diff, findings on a page the PR changes BLOCK and the
+#      rest are listed; without it, nothing blocks.
+#   5. A Netlify draft deploy preview, linked from a commit status.
+#   6. One sticky PR comment with the result, the preview, and the changed
+#      pages, the notify_label, and a one-time review request to notify_team,
+#      whenever the PR changes a published page or breaks the build.
 #
 # CALLER CONTRACT
 #
@@ -45,6 +52,8 @@
 #         id-token: write
 #         # The "Connect docs preview" commit status with the preview link.
 #         statuses: write
+#         # The sticky PR comment and the notify label.
+#         pull-requests: write
 #       uses: redpanda-data/docs-extensions-and-macros/.github/workflows/connect-docs-check.yml@<commit-sha> # v<version>
 #       with:
 #         docs_artifact: connect-docs-head
@@ -115,6 +124,14 @@ on:
         description: "Secrets Manager id holding the Netlify token and site ID for the deploy preview (JSON keys DOCS_NETLIFY_PREVIEW_AUTH_TOKEN and DOCS_NETLIFY_PREVIEW_SITE_ID). When the caller can't read it, the preview is skipped. Empty turns the preview off."
         type: string
         default: "sdlc/prod/github/docs_netlify_preview"
+      notify_label:
+        description: "Label added to a PR that changes a published page or breaks the docs build. Empty adds no label."
+        type: string
+        default: "documentation"
+      notify_team:
+        description: "Org team (slug) asked to review a PR that changes a published page or breaks the docs build, once per PR. The request uses the org bot token, because GITHUB_TOKEN cannot request team reviews. Empty requests no review."
+        type: string
+        default: "documentation"
     secrets:
       aws_cred_account_id:
         description: "AWS account id owning the OIDC role. Required on the OIDC path."
@@ -143,6 +160,8 @@ jobs:
       id-token: write
       # The "Connect docs preview" commit status with the preview link.
       statuses: write
+      # The sticky PR comment and the notify label.
+      pull-requests: write
     env:
       WORK: ${{ github.workspace }}/connect-docs-check
     steps:
@@ -296,6 +315,7 @@ jobs:
           echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
           echo "Antora exited $rc"
       - name: Check the build log (blocking)
+        id: log_check
         if: ${{ !cancelled() && steps.build.outputs.exit_code != '' }}
         env:
           ANTORA_EXIT: ${{ steps.build.outputs.exit_code }}
@@ -303,6 +323,21 @@ jobs:
         run: |
           set -uo pipefail
           cd "$WORK/sources/rp-connect-docs"
+          # The build must have used the PR's tree. A docs-extensions-and-macros
+          # that ignores REDPANDA_CONNECT_DOCS_DIR, or a playbook without the
+          # extension, would build the released docs instead and pass.
+          expected=$(find "$WORK/head/modules/components" -type f | wc -l | tr -d ' ')
+          added=$(jq -r 'select((.msg // "") | startswith("Redpanda Connect reference docs from REDPANDA_CONNECT_DOCS_DIR")) | .msg' "$WORK/antora.ndjson" \
+            | sed -n 's/.*: added \([0-9][0-9]*\) files.*/\1/p' | head -1)
+          if [ -z "$added" ]; then
+            echo "::error::The build did not read the PR's generated docs: no REDPANDA_CONNECT_DOCS_DIR record in the Antora log. The installed docs-extensions-and-macros or the playbook does not support it."
+            exit 1
+          fi
+          if [ "$added" != "$expected" ]; then
+            echo "::error::The build added $added of the PR's $expected generated files."
+            exit 1
+          fi
+          echo "The build used all $added of the PR's generated files."
           rc=0
           npx --no-install doc-tools check-build-log "$WORK/antora.ndjson" \
             --site-dir "$WORK/site/connect" --min-pages "$MIN_PAGES" \
@@ -318,24 +353,6 @@ jobs:
           if [ "$rc" -ne 0 ]; then
             echo "::error::The Antora build log has errors or too few pages. See the job summary."
             exit 1
-          fi
-      - name: Check the rendered HTML (warning only)
-        if: ${{ !cancelled() && steps.build.outputs.exit_code != '' }}
-        continue-on-error: true
-        run: |
-          set -uo pipefail
-          cd "$WORK/sources/rp-connect-docs"
-          if npx --no-install doc-tools check-rendered-html "$WORK/site" --component connect \
-              --format json --output "$WORK/html-check.json" > /dev/null; then
-            npx --no-install doc-tools check-rendered-html "$WORK/site" --component connect \
-              --output "$WORK/html-check.md" > /dev/null || true
-            cat "$WORK/html-check.md" >> "$GITHUB_STEP_SUMMARY"
-            total=$(jq -r '.total' "$WORK/html-check.json")
-            if [ "$total" != "0" ]; then
-              echo "::warning::The rendered connect pages have $total unconverted-markup findings. See the job summary."
-            fi
-          else
-            echo "::warning::The rendered HTML check could not run."
           fi
       - name: Diff the generated docs against the merge base
         id: diff
@@ -361,6 +378,39 @@ jobs:
             fi
           done < <(jq -r '.pages[].sitePath' "$WORK/diff.json")
           echo "pages=$count" >> "$GITHUB_OUTPUT"
+      # Connect and Cloud connect pages: unconverted markup, broken anchors,
+      # and links to pages that don't exist. With the merge-base diff, a
+      # finding on a page this PR changes BLOCKS; findings on other pages were
+      # already on the site and are only listed. Without the diff nothing
+      # blocks, as before.
+      - name: Check the rendered HTML
+        id: html_check
+        if: ${{ !cancelled() && steps.build.outputs.exit_code != '' }}
+        run: |
+          set -uo pipefail
+          cd "$WORK/sources/rp-connect-docs"
+          args=(--component connect --component cloud-data-platform/develop/connect)
+          [ -f "$WORK/diff.json" ] && args+=(--changed-pages "$WORK/diff.json" --strict)
+          rc=0
+          npx --no-install doc-tools check-rendered-html "$WORK/site" "${args[@]}" \
+            --format json --output "$WORK/html-check.json" > /dev/null || rc=$?
+          npx --no-install doc-tools check-rendered-html "$WORK/site" "${args[@]}" \
+            --output "$WORK/html-check.md" > /dev/null || true
+          cat "$WORK/html-check.md" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          if [ "$rc" -gt 1 ] || ! jq -e .total "$WORK/html-check.json" > /dev/null 2>&1; then
+            echo "::warning::The rendered HTML check could not run."
+            exit 0
+          fi
+          total=$(jq -r '.total' "$WORK/html-check.json")
+          changed=$(jq -r '.changed.total // 0' "$WORK/html-check.json")
+          echo "changed_findings=$changed" >> "$GITHUB_OUTPUT"
+          if [ "$rc" -eq 1 ] && [ -f "$WORK/diff.json" ]; then
+            echo "::error::$changed rendered-HTML findings on pages this PR changes. See the job summary."
+            exit 1
+          fi
+          if [ "$total" != "0" ]; then
+            echo "::warning::The rendered Connect pages have $total findings, none on a page this PR changes. See the job summary."
+          fi
       - name: Upload the rendered HTML of the changed pages
         if: ${{ !cancelled() && steps.diff.outputs.pages != '' && steps.diff.outputs.pages != '0' }}
         uses: actions/upload-artifact@v4
@@ -391,14 +441,23 @@ jobs:
           secret-ids: |
             ,${{ inputs.preview_secret_id }}
           parse-json-secrets: true
+      # A Netlify failure must not fail the docs check: the preview is a
+      # convenience, the build and log checks above are the gate.
       - name: Publish the deploy preview
         id: preview
         if: ${{ !cancelled() && steps.preview_secret.outcome == 'success' }}
+        continue-on-error: true
         env:
           NETLIFY_AUTH_TOKEN: ${{ env.DOCS_NETLIFY_PREVIEW_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ env.DOCS_NETLIFY_PREVIEW_SITE_ID }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # netlify-cli is third-party code fetched at run time: it gets the
+          # Netlify token and nothing else. The role session credentials stay
+          # out of its environment.
+          AWS_ACCESS_KEY_ID: ""
+          AWS_SECRET_ACCESS_KEY: ""
+          AWS_SESSION_TOKEN: ""
         run: |
           set -euo pipefail
           if [ -z "${NETLIFY_AUTH_TOKEN:-}" ] || [ -z "${NETLIFY_SITE_ID:-}" ]; then
@@ -432,6 +491,7 @@ jobs:
             exit 1
           fi
           echo "url=$url/connect/home/" >> "$GITHUB_OUTPUT"
+          echo "base=$url" >> "$GITHUB_OUTPUT"
           {
             echo "## Docs preview"
             echo
@@ -452,3 +512,86 @@ jobs:
             -f description="Rendered Connect docs built from this pull request" \
             -f target_url="$URL" > /dev/null
 
+      # One sticky comment per PR: whether the docs build passed, the preview,
+      # and the published pages the PR changes, so the author and the docs
+      # team review rendered pages, not Go strings. A PR that changes no
+      # published page and passes gets no comment (an existing one is
+      # updated, so it never goes stale).
+      - name: Comment on the PR
+        id: comment
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && steps.build.outputs.exit_code != '' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          LOG_OUTCOME: ${{ steps.log_check.outcome }}
+          HTML_FINDINGS: ${{ steps.html_check.outputs.changed_findings }}
+          PREVIEW: ${{ steps.preview.outputs.base }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          LABEL: ${{ inputs.notify_label }}
+        run: |
+          set -euo pipefail
+          build=fail
+          [ "$LOG_OUTCOME" = success ] && build=pass
+          diff_args=()
+          [ -f "$WORK/diff.json" ] && diff_args=(--diff "$WORK/diff.json")
+          notify=$(node "$WORK/dem/tools/connect-docs/pr-comment.js" --build "$build" "${diff_args[@]}" \
+            --html-findings "${HTML_FINDINGS:-0}" --preview "$PREVIEW" --run-url "$RUN_URL" --sha "$HEAD_SHA" --output "$WORK/comment.md" | jq -r .notify)
+          existing=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate \
+            --jq '.[] | select(.user.type == "Bot" and (.body | startswith("<!-- connect-docs-check -->"))) | .id' | head -1)
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$existing" -F body=@"$WORK/comment.md" > /dev/null
+            echo "Updated comment $existing."
+          elif [ "$notify" = true ]; then
+            gh api "repos/$REPO/issues/$PR_NUMBER/comments" -F body=@"$WORK/comment.md" > /dev/null
+            echo "Posted a comment."
+          else
+            echo "No published page changes and the build passed, so no comment."
+          fi
+          if [ "$notify" = true ] && [ -n "$LABEL" ]; then
+            gh api "repos/$REPO/issues/$PR_NUMBER/labels" -f "labels[]=$LABEL" > /dev/null
+          fi
+          echo "notify=$notify" >> "$GITHUB_OUTPUT"
+          # The team is asked once per PR: on the run that posts the comment.
+          [ -z "$existing" ] && [ "$notify" = true ] && echo "first=true" >> "$GITHUB_OUTPUT"
+          exit 0
+      # GITHUB_TOKEN cannot request a team review, so this uses the org bot
+      # token, fetched only now and only for this request.
+      - name: Assume the AWS role that can read the bot token for the review request
+        id: review_credentials
+        if: >-
+          ${{ !cancelled() && steps.comment.outputs.first == 'true' && inputs.notify_team != '' &&
+          inputs.aws_region != '' && inputs.aws_role_name_prefix != '' }}
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: arn:aws:iam::${{ secrets.aws_cred_account_id }}:role/${{ inputs.aws_role_name_prefix }}${{ github.event.repository.name }}
+      - name: Fetch the bot token for the review request
+        id: review_secret
+        if: ${{ !cancelled() && steps.review_credentials.outcome == 'success' }}
+        continue-on-error: true
+        uses: aws-actions/aws-secretsmanager-get-secrets@v3
+        with:
+          secret-ids: |
+            ,${{ inputs.bot_token_secret_id }}
+          parse-json-secrets: true
+      - name: Ask the docs team to review
+        if: >-
+          ${{ !cancelled() && steps.comment.outputs.first == 'true' && inputs.notify_team != '' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ env.ACTIONS_BOT_TOKEN || secrets.actions_bot_token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          TEAM: ${{ inputs.notify_team }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::notice::No bot token for the review request, so $TEAM was not asked to review."
+            exit 0
+          fi
+          gh api "repos/$REPO/pulls/$PR_NUMBER/requested_reviewers" -f "team_reviewers[]=$TEAM" > /dev/null
+          echo "Asked $TEAM to review."

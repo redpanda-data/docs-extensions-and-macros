@@ -2975,13 +2975,22 @@ programCli
  * check-rendered-html
  *
  * @description
- * Scan the rendered HTML of one Antora component for AsciiDoc that did not
- * convert: literal backticks outside code, literal `xref:` or `include::`
- * text, leftover {page-*} or {env-*} attribute references, `|===` table
- * markup, Asciidoctor's "Unresolved include directive" text, links with the
- * `unresolved` class, and empty sections (a heading followed directly by a
- * heading of the same or higher level). Only the page body is scanned.
- * Reports findings per page and exits 0 unless --strict.
+ * Scan the rendered HTML of one or more Antora component paths for AsciiDoc
+ * that did not convert: literal backticks outside code, literal `xref:` or
+ * `include::` text, leftover {page-*} or {env-*} attribute references, `|===`
+ * table markup, Asciidoctor's "Unresolved include directive" text, links with
+ * the `unresolved` class, and empty sections (a heading followed directly by a
+ * heading of the same or higher level). Also checks links: a fragment with no
+ * matching id on its target page (broken-anchor), and a relative or
+ * root-relative link under a link root that is not in the build
+ * (broken-link). External links are ignored; links outside every link root,
+ * or into a root the build does not contain, are counted as unchecked. Only
+ * the page body is scanned. Reports findings per page and exits 0 unless
+ * --strict.
+ *
+ * With --changed-pages, findings are split into those on the listed pages and
+ * the rest, and --strict exits 1 only when a listed page has findings, so
+ * defects already on the base never fail a PR.
  *
  * @why
  * These defects reach readers without a single line in the Antora log: two
@@ -2993,16 +3002,22 @@ programCli
  *
  * # Fail on any finding
  * npx doc-tools check-rendered-html build/site --strict
+ *
+ * # Self-managed and Cloud Connect pages; fail only on the pages a PR changed
+ * npx doc-tools check-rendered-html build/site --component connect,cloud-data-platform/develop/connect \
+ *   --changed-pages changed-pages.txt --strict
  */
 programCli
   .command('check-rendered-html')
-  .description('Scan rendered Antora HTML for unconverted AsciiDoc (literal backticks, xref:, include::, attributes, tables, empty sections)')
+  .description('Scan rendered Antora HTML for unconverted AsciiDoc (literal backticks, xref:, include::, attributes, tables, empty sections) and broken anchors and links')
   .argument('<site-dir>', 'Antora output directory (the --to-dir of the build)')
-  .option('--component <name>', 'Component output directory to scan under <site-dir>', 'connect')
+  .option('--component <path>', 'Component output path to scan under <site-dir>; repeat it or give a comma list, for example connect,cloud-data-platform/develop/connect (default: connect)', (value, previous = []) => previous.concat(value))
+  .option('--link-root <path>', 'Site path whose linked pages must exist; repeat it or give a comma list. Scanned components are always included. Links outside every root, or into a root not in the build, are counted as unchecked (default: connect,cloud-data-platform/develop/connect)', (value, previous = []) => previous.concat(value))
   .option('--pages <file>', 'Only scan the pages listed in <file>, one path relative to <site-dir> per line')
+  .option('--changed-pages <file>', 'Pages a PR changed: one path relative to <site-dir> per line (the sitePath from connect-docs-diff) or connect-docs-diff --format json output. All pages are still scanned; findings are split into changed and other pages, and --strict fails only on changed pages')
   .option('--format <format>', 'Output format: markdown or json', 'markdown')
   .option('--output <path>', 'Also write the output to this file')
-  .option('--strict', 'Exit 1 when any finding exists (default: always exit 0)')
+  .option('--strict', 'Exit 1 when any finding exists, or with --changed-pages when a changed page has findings (default: always exit 0)')
   .action((siteDir, options) => {
     const { runCli } = require('../tools/connect-docs/check-rendered-html')
     runCli(siteDir, options)

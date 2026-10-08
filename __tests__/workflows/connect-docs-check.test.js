@@ -38,10 +38,28 @@ const CLONE = 'Clone the private doc sources'
 const DROP = 'Drop credentials from the job environment'
 const BUILD = 'Build the docs with the PR\'s generated tree'
 const LOG_CHECK = 'Check the build log (blocking)'
-const HTML_CHECK = 'Check the rendered HTML (warning only)'
+const HTML_CHECK = 'Check the rendered HTML'
 const DIFF = 'Diff the generated docs against the merge base'
+const COMMENT = 'Comment on the PR'
+const REVIEW_FETCH = 'Fetch the bot token for the review request'
+const REVIEW = 'Ask the docs team to review'
 
 const SECRETISH = /secrets\.|ACTIONS_BOT_TOKEN|TOKEN|aws_cred/i
+
+/**
+ * A WORK directory after a build: `generated` files in the PR's tree and an
+ * Antora log whose REDPANDA_CONNECT_DOCS_DIR record says `added` were added
+ * (null for no record).
+ */
+function builtWork (added, generated) {
+  const work = workDir()
+  const dir = path.join(work, 'head', 'modules', 'components', 'partials')
+  fs.mkdirSync(dir, { recursive: true })
+  for (let i = 0; i < generated; i++) fs.writeFileSync(path.join(dir, `f${i}.adoc`), '')
+  const rec = added == null ? [] : [{ level: 'info', msg: `Redpanda Connect reference docs from REDPANDA_CONNECT_DOCS_DIR (${work}/head): added ${added} files to the connect component; replaced 0 provided by another source` }]
+  fs.writeFileSync(path.join(work, 'antora.ndjson'), rec.map((r) => JSON.stringify(r) + '\n').join(''))
+  return work
+}
 
 /** A WORK directory with the rp-connect-docs clone the steps cd into. */
 function workDir () {
@@ -105,7 +123,13 @@ describe('connect-docs-check workflow: no token in the Antora step', () => {
 
   test('only the clone step references the bot token', () => {
     const users = job.steps.filter((s) => /ACTIONS_BOT_TOKEN|secrets\.actions_bot_token/.test(JSON.stringify(s.env || {})))
-    expect(users.map((s) => s.name)).toEqual([CLONE])
+    expect(users.map((s) => s.name)).toEqual([CLONE, REVIEW])
+    // The review request re-fetches the token after Antora, every check, and
+    // netlify-cli have run, so none of them can see it.
+    for (const name of [BUILD, LOG_CHECK, HTML_CHECK, DIFF, 'Publish the deploy preview', COMMENT]) {
+      expect(indexOf(REVIEW_FETCH)).toBeGreaterThan(indexOf(name))
+    }
+    expect(job.steps[job.steps.length - 1].name).toBe(REVIEW)
   })
 
   test('the Antora step env has no token, and Antora runs with JSON logs and failure level fatal', () => {
@@ -127,7 +151,7 @@ describe('connect-docs-check workflow: no token in the Antora step', () => {
     // Secrets Manager and the AWS role export into the job env; the ones that
     // read the bot token must come before the drop. The preview's own come
     // after the build (see the deploy preview tests).
-    const exporters = job.steps.filter((s) => s.uses && /aws-actions\//.test(s.uses) && !/preview/.test(s.name))
+    const exporters = job.steps.filter((s) => s.uses && /aws-actions\//.test(s.uses) && !/preview|review request/.test(s.name))
     expect(exporters).toHaveLength(2)
     for (const s of exporters) expect(job.steps.indexOf(s)).toBeLessThan(indexOf(DROP))
     expect(stepNamed(DROP).if).toBe('always()')
@@ -237,7 +261,7 @@ exit \${NPX_EXIT:-0}
   ])('the log check step blocks on %s', (_, env, status) => {
     const sum = summary()
     const r = execRun(stepNamed(LOG_CHECK), {
-      env: { WORK: workDir(), MIN_PAGES: '400', GITHUB_STEP_SUMMARY: sum, ...env },
+      env: { WORK: builtWork(2, 2), MIN_PAGES: '400', GITHUB_STEP_SUMMARY: sum, ...env },
       stubs: { npx: NPX_STUB }
     })
     expect(r.status).toBe(status)
@@ -246,23 +270,59 @@ exit \${NPX_EXIT:-0}
     expect(fs.readFileSync(sum, 'utf8')).toContain('REPORT FROM check-build-log')
   })
 
-  test('the HTML check never blocks: continue-on-error, no --strict, and exit 0 when the check fails', () => {
-    const step = stepNamed(HTML_CHECK)
-    expect(step['continue-on-error']).toBe(true)
-    expect(step.run).not.toMatch(/--strict/)
-    const r = execRun(step, { env: { WORK: workDir(), GITHUB_STEP_SUMMARY: summary(), NPX_EXIT: '1' }, stubs: { npx: NPX_STUB } })
-    expect(r.status).toBe(0)
-    expect(r.all).toMatch(/::warning::The rendered HTML check could not run/)
+  test.each([
+    ['no record of the PR\'s tree in the log', null, 2, /did not read the PR's generated docs/],
+    ['fewer files added than the PR generated', 1, 2, /added 1 of the PR's 2 generated files/]
+  ])('the log check blocks when the build used the wrong docs: %s', (_, added, generated, message) => {
+    const r = execRun(stepNamed(LOG_CHECK), {
+      env: { WORK: builtWork(added, generated), MIN_PAGES: '400', GITHUB_STEP_SUMMARY: summary(), NPX_EXIT: '0', ANTORA_EXIT: '0' },
+      stubs: { npx: NPX_STUB }
+    })
+    expect(r.status).toBe(1)
+    expect(r.all).toMatch(message)
   })
 
-  test('the HTML check warns, not errors, when it has findings', () => {
+  test('the HTML check scans Connect and Cloud pages, and runs after the diff so it can split changed pages', () => {
+    const step = stepNamed(HTML_CHECK)
+    expect(step['continue-on-error']).toBeUndefined()
+    expect(step.run).toMatch(/--component connect --component cloud-data-platform\/develop\/connect/)
+    expect(indexOf(HTML_CHECK)).toBeGreaterThan(indexOf(DIFF))
+  })
+
+  test('without the merge-base diff the HTML check never blocks, even when the tool fails', () => {
+    const r = execRun(stepNamed(HTML_CHECK), { env: { WORK: workDir(), GITHUB_STEP_SUMMARY: summary(), NPX_EXIT: '1' }, stubs: { npx: NPX_STUB } })
+    expect(r.status).toBe(0)
+    expect(r.all).toMatch(/::warning::The rendered HTML check could not run/)
+    expect(r.read('npx-argv')).not.toMatch(/--strict|--changed-pages/)
+  })
+
+  test('without the merge-base diff the HTML check warns about findings', () => {
     const work = workDir()
     fs.writeFileSync(path.join(work, 'html-check.json'), JSON.stringify({ total: 17 }))
-    fs.writeFileSync(path.join(work, 'html-check.md'), '## Rendered HTML checks\n')
     const r = execRun(stepNamed(HTML_CHECK), { env: { WORK: work, GITHUB_STEP_SUMMARY: summary() }, stubs: { npx: NPX_STUB } })
     expect(r.status).toBe(0)
-    expect(r.all).toMatch(/::warning::The rendered connect pages have 17/)
+    expect(r.all).toMatch(/::warning::The rendered Connect pages have 17 findings/)
     expect(r.all).not.toMatch(/::error::/)
+  })
+
+  test('with the diff, findings on a changed page block', () => {
+    const work = workDir()
+    fs.writeFileSync(path.join(work, 'diff.json'), '{"pages":[]}')
+    fs.writeFileSync(path.join(work, 'html-check.json'), JSON.stringify({ total: 9, changed: { total: 2 } }))
+    const r = execRun(stepNamed(HTML_CHECK), { env: { WORK: work, GITHUB_STEP_SUMMARY: summary(), NPX_EXIT: '1' }, stubs: { npx: NPX_STUB } })
+    expect(r.status).toBe(1)
+    expect(r.all).toMatch(/::error::2 rendered-HTML findings on pages this PR changes/)
+    expect(r.outputs.changed_findings).toBe('2')
+    expect(r.read('npx-argv')).toMatch(/--changed-pages \S*diff\.json --strict/)
+  })
+
+  test('with the diff, findings only on unchanged pages warn', () => {
+    const work = workDir()
+    fs.writeFileSync(path.join(work, 'diff.json'), '{"pages":[]}')
+    fs.writeFileSync(path.join(work, 'html-check.json'), JSON.stringify({ total: 9, changed: { total: 0 } }))
+    const r = execRun(stepNamed(HTML_CHECK), { env: { WORK: work, GITHUB_STEP_SUMMARY: summary() }, stubs: { npx: NPX_STUB } })
+    expect(r.status).toBe(0)
+    expect(r.all).toMatch(/::warning::The rendered Connect pages have 9 findings, none on a page this PR changes/)
   })
 
   test('the diff step stages the rendered HTML of changed pages that were built', () => {
@@ -346,5 +406,86 @@ echo '{"deploy_url":"https://connect-pr-42--redpanda-connect.netlify.app"}'
     expect(r.status).toBe(0)
     expect(r.read('gh-argv')).toMatch(/repos\/redpanda-data\/connect\/statuses\/abc .*context=Connect docs preview .*target_url=https:\/\/x\.netlify\.app\/connect\/home\//)
     expect(job.permissions.statuses).toBe('write')
+  })
+})
+
+describe('connect-docs-check workflow: PR comment and docs-team notification', () => {
+  // gh stub: the comments listing prints $EXISTING (a comment id or nothing);
+  // every other call is recorded.
+  const GH_STUB = `#!/bin/bash
+if [[ "$*" == *"--paginate"* ]]; then printf '%s' "\${EXISTING:-}"; exit 0; fi
+printf '%s\\n' "$*" >> "$HOME/gh-calls"
+`
+  function commentWork (pages) {
+    const work = workDir()
+    fs.symlinkSync(REPO_ROOT, path.join(work, 'dem'))
+    if (pages != null) {
+      fs.writeFileSync(path.join(work, 'diff.json'), JSON.stringify({
+        summary: { files: pages, changed: pages, added: 0, removed: 0, pages },
+        pages: Array.from({ length: pages }, (_, i) => ({ sitePath: `connect/components/inputs/c${i}/index.html` }))
+      }))
+    }
+    return work
+  }
+  const run = (work, env) => execRun(stepNamed(COMMENT), {
+    env: { WORK: work, REPO: 'redpanda-data/connect', PR_NUMBER: '7', HEAD_SHA: 'abc', PREVIEW: '', RUN_URL: 'https://run', LABEL: 'documentation', LOG_OUTCOME: 'success', ...env },
+    stubs: { gh: GH_STUB }
+  })
+  const calls = (r) => r.read('gh-calls') || ''
+
+  test('first run with changed pages posts the comment, labels the PR, and asks the team', () => {
+    const r = run(commentWork(2), {})
+    expect(r.status).toBe(0)
+    expect(calls(r)).toMatch(/^api repos\/redpanda-data\/connect\/issues\/7\/comments -F body=@/m)
+    expect(calls(r)).toMatch(/issues\/7\/labels -f labels\[\]=documentation/)
+    expect(r.outputs.notify).toBe('true')
+    expect(r.outputs.first).toBe('true')
+  })
+
+  test('a later run updates the same comment and does not ask the team again', () => {
+    const r = run(commentWork(2), { EXISTING: '99' })
+    expect(r.status).toBe(0)
+    expect(calls(r)).toMatch(/-X PATCH repos\/redpanda-data\/connect\/issues\/comments\/99/)
+    expect(calls(r)).not.toMatch(/issues\/7\/comments -F/)
+    expect(r.outputs.first).toBeUndefined()
+  })
+
+  test('a PR that changes no published page and passes gets no comment and no label', () => {
+    const r = run(commentWork(0), {})
+    expect(r.status).toBe(0)
+    expect(calls(r)).toBe('')
+    expect(r.outputs.notify).toBe('false')
+  })
+
+  test('a failed build with no page changes still comments', () => {
+    const work = commentWork(0)
+    const r = run(work, { LOG_OUTCOME: 'failure' })
+    expect(calls(r)).toMatch(/issues\/7\/comments -F body=@/)
+    expect(fs.readFileSync(path.join(work, 'comment.md'), 'utf8')).toContain('The docs build failed')
+  })
+
+  test('rendered-HTML findings on a changed page count as a reason to comment', () => {
+    const work = commentWork(0)
+    const r = run(work, { HTML_FINDINGS: '3' })
+    expect(r.outputs.notify).toBe('true')
+    expect(fs.readFileSync(path.join(work, 'comment.md'), 'utf8')).toContain('**3 rendered-HTML findings on pages this PR changes**')
+  })
+
+  test('the comment and the review request never fail the check', () => {
+    for (const name of [COMMENT, 'Assume the AWS role that can read the bot token for the review request', REVIEW_FETCH, REVIEW]) {
+      expect(stepNamed(name)['continue-on-error']).toBe(true)
+    }
+  })
+
+  test('the review request skips with a notice when there is no bot token', () => {
+    const r = execRun(stepNamed(REVIEW), { env: { GH_TOKEN: '', REPO: 'r/c', PR_NUMBER: '7', TEAM: 'documentation' }, stubs: { gh: GH_STUB } })
+    expect(r.status).toBe(0)
+    expect(r.all).toMatch(/::notice::No bot token/)
+  })
+
+  test('the review request asks the team', () => {
+    const r = execRun(stepNamed(REVIEW), { env: { GH_TOKEN: 't', REPO: 'r/c', PR_NUMBER: '7', TEAM: 'documentation' }, stubs: { gh: GH_STUB } })
+    expect(r.status).toBe(0)
+    expect(calls(r)).toMatch(/pulls\/7\/requested_reviewers -f team_reviewers\[\]=documentation/)
   })
 })
