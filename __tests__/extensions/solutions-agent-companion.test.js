@@ -129,6 +129,19 @@ describe('agent companion: the flagship solution', () => {
     expect(md).not.toMatch(/\/index\/|\.adoc/)
   })
 
+  test('old content: the overview table still yields Production gaps rows', () => {
+    const gaps = sectionOf(md, '## Production gaps')
+    expect(gaps).toMatch(/^\| Area \| In this solution \| In production \|$/m)
+    expect(gaps).toContain('|---|---|---|')
+    expect(gaps.split('\n').filter((l) => /^\| /.test(l)).length).toBeGreaterThan(5)
+  })
+
+  test('old content: the .Files for this step list is dropped, the In production note is kept', () => {
+    const entry = sectionOf(md, '### 4. Build the live leaderboard')
+    expect(entry).toContain('**In production:** The board on `game.leaderboard` is the source of truth')
+    expect(md).not.toContain('services/dashboard/static/index.html')
+  })
+
   test('is deterministic', () => {
     expect(generateAgentCompanion({ slug: 'multiplayer-gaming', pages, verifyScript }).markdown).toBe(md)
   })

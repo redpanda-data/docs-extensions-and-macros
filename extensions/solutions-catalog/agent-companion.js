@@ -267,8 +267,10 @@ function prose (lines, ctx) {
   const out = []
   let skip = null
   // The build-along file list is for a reader saving files, not for an agent.
-  const files = lines.findIndex((l) => /^\.Files for this step/.test(l))
-  if (files >= 0) lines = lines.slice(0, files)
+  // Current pages give it its own `== Files for this step` section, which no
+  // reader of this module asks for; older pages titled a list inside the last
+  // section `.Files for this step`, and only that list is dropped.
+  let fileList = false
   const dropLeadIn = () => {
     let k = out.length - 1
     while (k >= 0 && !out[k].trim()) k--
@@ -283,6 +285,8 @@ function prose (lines, ctx) {
   for (const raw of lines) {
     const line = raw.replace(/\s+$/, '')
     if (skip) { if (line === skip) skip = null; continue }
+    if (fileList) { if (line) continue; fileList = false }
+    if (/^\.Files for this step\b/.test(line)) { fileList = true; continue }
     if (isDelimiter(line)) { dropLeadIn(); skip = line; continue }
     if (/^(image|video|include)::/.test(line)) { dropLeadIn(); continue }
     if (/^(ifn?def|endif|ifeval)::/.test(line)) continue
@@ -590,7 +594,7 @@ function pushJudgment (md, page, ctx) {
   const d = whyRp && prose(whyRp.lines, ctx)
   if (d) md.push(`**Depends on:** ${d}`, '')
   const p = inProd && prose(inProd.lines, ctx)
-  if (p) md.push(`**In production:** ${p.replace(/^In production, (\w)/, (_, c) => c.toUpperCase())}`, '')
+  if (p) md.push(`**In production:** ${p}`, '')
 }
 
 module.exports = {
