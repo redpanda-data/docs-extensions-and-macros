@@ -1528,6 +1528,25 @@ describe('solutions-catalog: agent companion', () => {
     expect(md).not.toContain('[consumer offsets]')
   })
 
+  test('include::partial$ lines resolve against the module\'s partials, and a missing one warns', async () => {
+    const saved = SOURCES['build-leaderboard']
+    SOURCES['build-leaderboard'] = saved + '\n\n== In production\n\n[.production-note]\n.In production\n--\ninclude::partial$production/compaction.adoc[tag=summary]\ninclude::partial$production/missing.adoc[tag=summary]\n--\n'
+    let prepared
+    try { prepared = withSources(makeSolution('leaderboard'), 'leaderboard') } finally { SOURCES['build-leaderboard'] = saved }
+    prepared.solution.examples.push(makePartial({
+      module: 'leaderboard',
+      relative: 'production/compaction.adoc',
+      text: '// tag::summary[]\nKeep publishing absolute totals.\n// end::summary[]\n// tag::detail[]\nDetail.\n// end::detail[]\n',
+    }))
+    const { siteCatalog, logger } = await run({ solutions: [prepared.solution], afterContentClassified: prepared.convert })
+    const md = companionCall(siteCatalog).contents.toString('utf8')
+    expect(md).toContain('**In production:** Keep publishing absolute totals.')
+    expect(md).not.toContain('Detail.')
+    expect(logger.warn.mock.calls.map((c) => c[0]).join('\n')).toContain(
+      'solutions-catalog: leaderboard: AsciiDoc left in the agent companion (unresolved include: partial$production/missing.adoc (in build-leaderboard))'
+    )
+  })
+
   test('pages that are no longer AsciiDoc at contentClassified yield no companion and no link', async () => {
     const { siteCatalog, pages } = await run()
     expect(companionCall(siteCatalog)).toBeUndefined()

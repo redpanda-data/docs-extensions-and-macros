@@ -262,7 +262,9 @@ function buildCompanion (record, sources, logger, { titleOf, errors } = {}) {
   if (!sources || !overview || !overview.out || !overview.out.path) return null
   let result
   try {
-    result = companion.generateAgentCompanion({ slug: record.id, pages: sources.pages, verifyScript: sources.verifyScript, titleOf })
+    // include::partial$ lines resolve against this module's captured partials.
+    const resolveInclude = companion.partialResolver(sources.partials || {}, { module: record.module || record.id })
+    result = companion.generateAgentCompanion({ slug: record.id, pages: sources.pages, verifyScript: sources.verifyScript, titleOf, resolveInclude })
   } catch (err) {
     logger.warn(`solutions-catalog: ${record.id}: agent companion not generated: ${err.message}`)
     return null
