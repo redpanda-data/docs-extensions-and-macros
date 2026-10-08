@@ -1,0 +1,1398 @@
+{
+  "findings": [
+    {
+      "surface": "crd",
+      "name": "extraEnv",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/postupgradejob.go",
+      "line_start": 24,
+      "line_end": 24,
+      "string": null,
+      "declaration_text": "\tExtraEnv        []corev1.EnvVar                `json:\"extraEnv,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"ExtraEnv\" (json: \"extraEnv\") in PostUpgradeJobApplyConfiguration has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "623460991531ef2f"
+    },
+    {
+      "surface": "crd",
+      "name": "extraEnvFrom",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/postupgradejob.go",
+      "line_start": 25,
+      "line_end": 25,
+      "string": null,
+      "declaration_text": "\tExtraEnvFrom    []corev1.EnvFromSource         `json:\"extraEnvFrom,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"ExtraEnvFrom\" (json: \"extraEnvFrom\") in PostUpgradeJobApplyConfiguration has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "9987a63740adc79b"
+    },
+    {
+      "surface": "crd",
+      "name": "limits",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/resources.go",
+      "line_start": 22,
+      "line_end": 22,
+      "string": null,
+      "declaration_text": "\tLimits   *map[corev1.ResourceName]resource.Quantity `json:\"limits,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"Limits\" (json: \"limits\") in ResourcesApplyConfiguration has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "f2cbdb0a94d9780c"
+    },
+    {
+      "surface": "crd",
+      "name": "requests",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/resources.go",
+      "line_start": 23,
+      "line_end": 23,
+      "string": null,
+      "declaration_text": "\tRequests *map[corev1.ResourceName]resource.Quantity `json:\"requests,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"Requests\" (json: \"requests\") in ResourcesApplyConfiguration has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "dfb85006db7b1d81"
+    },
+    {
+      "surface": "crd",
+      "name": "cpu",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/resources.go",
+      "line_start": 24,
+      "line_end": 24,
+      "string": null,
+      "declaration_text": "\tCPU      *CPUApplyConfiguration                     `json:\"cpu,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"CPU\" (json: \"cpu\") in ResourcesApplyConfiguration has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "64b8bebc9bddf0b2"
+    },
+    {
+      "surface": "crd",
+      "name": "memory",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/resources.go",
+      "line_start": 25,
+      "line_end": 25,
+      "string": null,
+      "declaration_text": "\tMemory   *MemoryApplyConfiguration                  `json:\"memory,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"Memory\" (json: \"memory\") in ResourcesApplyConfiguration has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "2598366c68b0d623"
+    },
+    {
+      "surface": "crd",
+      "name": "extraVolumeMounts",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/tuning.go",
+      "line_start": 21,
+      "line_end": 21,
+      "string": null,
+      "declaration_text": "\tExtraVolumeMounts *string                      `json:\"extraVolumeMounts,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"ExtraVolumeMounts\" (json: \"extraVolumeMounts\") in TuningApplyConfiguration has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "1ec57dc54edfc731"
+    },
+    {
+      "surface": "crd",
+      "name": "ballast_file_path",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/tuning.go",
+      "line_start": 23,
+      "line_end": 23,
+      "string": null,
+      "declaration_text": "\tBallastFilePath   *string                      `json:\"ballast_file_path,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"BallastFilePath\" (json: \"ballast_file_path\") in TuningApplyConfiguration has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "9c181134393e001f"
+    },
+    {
+      "surface": "crd",
+      "name": "ballast_file_size",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/tuning.go",
+      "line_start": 24,
+      "line_end": 24,
+      "string": null,
+      "declaration_text": "\tBallastFileSize   *string                      `json:\"ballast_file_size,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"BallastFileSize\" (json: \"ballast_file_size\") in TuningApplyConfiguration has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "22592c24143d96e9"
+    },
+    {
+      "surface": "crd",
+      "name": "tune_aio_events",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/tuning.go",
+      "line_start": 25,
+      "line_end": 25,
+      "string": null,
+      "declaration_text": "\tTuneAioEvents     *bool                        `json:\"tune_aio_events,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"TuneAioEvents\" (json: \"tune_aio_events\") in TuningApplyConfiguration has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "38b4f1189c13ace5"
+    },
+    {
+      "surface": "crd",
+      "name": "tune_ballast_file",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/tuning.go",
+      "line_start": 26,
+      "line_end": 26,
+      "string": null,
+      "declaration_text": "\tTuneBallastFile   *bool                        `json:\"tune_ballast_file,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"TuneBallastFile\" (json: \"tune_ballast_file\") in TuningApplyConfiguration has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "8c2db17f5c813570"
+    },
+    {
+      "surface": "crd",
+      "name": "tune_clocksource",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/tuning.go",
+      "line_start": 27,
+      "line_end": 27,
+      "string": null,
+      "declaration_text": "\tTuneClockSource   *bool                        `json:\"tune_clocksource,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"TuneClockSource\" (json: \"tune_clocksource\") in TuningApplyConfiguration has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "d59c5ab510e20837"
+    },
+    {
+      "surface": "crd",
+      "name": "well_known_io",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/tuning.go",
+      "line_start": 28,
+      "line_end": 28,
+      "string": null,
+      "declaration_text": "\tWellKnownIo       *string                      `json:\"well_known_io,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"WellKnownIo\" (json: \"well_known_io\") in TuningApplyConfiguration has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "5b89b590f11c5f74"
+    },
+    {
+      "surface": "crd",
+      "name": "apply_host_tuners",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/tuning.go",
+      "line_start": 29,
+      "line_end": 29,
+      "string": null,
+      "declaration_text": "\tApplyHostTuners   *bool                        `json:\"apply_host_tuners,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"ApplyHostTuners\" (json: \"apply_host_tuners\") in TuningApplyConfiguration has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "cfff9637425c31f9"
+    }
+  ],
+  "summary": {
+    "totalDeclarations": 25,
+    "flaggedDeclarations": 14,
+    "removedSurfaceLines": 0,
+    "removedSurfaceFiles": [],
+    "errors": 0,
+    "warnings": 14,
+    "info": 0,
+    "byRule": {
+      "undocumented-field": {
+        "errors": 0,
+        "warnings": 14,
+        "info": 0
+      }
+    },
+    "bySurface": {
+      "helm": {
+        "declarations": 2,
+        "flagged": 0,
+        "errors": 0,
+        "warnings": 0,
+        "info": 0
+      },
+      "crd": {
+        "declarations": 23,
+        "flagged": 14,
+        "errors": 0,
+        "warnings": 14,
+        "info": 0
+      }
+    },
+    "alreadyReviewed": 0,
+    "removedDeclarations": [],
+    "unverifiableDeclarations": 0,
+    "skippedDeclarations": []
+  },
+  "unsupported_surfaces": [],
+  "declarations": [
+    {
+      "surface": "helm",
+      "name": "tls.certs.default.issuerRef",
+      "file": "charts/redpanda/chart/values.yaml",
+      "line_start": 215,
+      "line_end": 222,
+      "fingerprint": "352c709c2144a0f7",
+      "context": [
+        {
+          "name": "external",
+          "kind": "key",
+          "file": "charts/redpanda/chart/values.yaml",
+          "line_start": 266,
+          "string": "External access settings. For details, see the [Networking and Connectivity documentation](https://docs.redpanda.com/docs/manage/kubernetes/networking/networking-and-connectivity/)."
+        }
+      ]
+    },
+    {
+      "surface": "helm",
+      "name": "tls.certs.external.issuerRef",
+      "file": "charts/redpanda/chart/values.yaml",
+      "line_start": 242,
+      "line_end": 249,
+      "fingerprint": "5f3e6bdbbf9c17e6",
+      "context": [
+        {
+          "name": "external",
+          "kind": "key",
+          "file": "charts/redpanda/chart/values.yaml",
+          "line_start": 266,
+          "string": "External access settings. For details, see the [Networking and Connectivity documentation](https://docs.redpanda.com/docs/manage/kubernetes/networking/networking-and-connectivity/)."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "resources",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/postinstalljob.go",
+      "line_start": 21,
+      "line_end": 21,
+      "fingerprint": "07408301fc63a7a4",
+      "context": [
+        {
+          "name": "commonLabels",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 55,
+          "string": "Assigns custom labels to all resources generated by the Redpanda Helm chart. Specify labels as key/value pairs."
+        },
+        {
+          "name": "resources",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 164,
+          "string": "Specifies resource requests for the sidecar container.\nDEPRECATED: Use sideCars.resources"
+        },
+        {
+          "name": "nameOverride",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 207,
+          "string": "Specifies a custom name for the Redpanda Console resources, overriding the default naming convention."
+        },
+        {
+          "name": "extraEnvFrom",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 266,
+          "string": "Allows you to add extra environment variables from external resources to the Pods that run Redpanda Console."
+        },
+        {
+          "name": "secretMounts",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 281,
+          "string": "Mounts additional Secret resources inside the containers that run Redpanda Console."
+        },
+        {
+          "name": "monitoring",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 340,
+          "string": "Specifies monitoring resources"
+        },
+        {
+          "name": "nameOverride",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 351,
+          "string": "Specifies a custom name for the Redpanda Console resources, overriding the default naming convention."
+        },
+        {
+          "name": "commonLabels",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 355,
+          "string": "Assigns custom labels to all resources generated by the Connector Helm chart. Specify labels as key/value pairs."
+        },
+        {
+          "name": "gateway",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 553,
+          "string": "Configures Gateway API TLSRoute-based external access. When enabled, ClusterIP services and TLSRoute resources are created instead of NodePort/LoadBalancer services. The Gateway itself must be managed externally."
+        },
+        {
+          "name": "extraEnvFrom",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 775,
+          "string": "Specifies environment variables from external sources, such as ConfigMap resources, or Secret resources, to dynamically configure the job."
+        },
+        {
+          "name": "resources",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1142,
+          "string": "Specifies resource requests for the sidecar container.\nDEPRECATED: Use sideCars.resources"
+        },
+        {
+          "name": "cores",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1158,
+          "string": "Specifies the number of CPU cores available to the application. Redpanda makes use of a thread per core model. For details, see https://docs.redpanda.com/current/get-started/architecture/#thread-per-core-model. For this reason, Redpanda should only be given full cores. Note: You can increase cores, but decreasing cores is not currently supported. See the GitHub issue:https://github.com/redpanda-data/redpanda/issues/350. This setting is equivalent to `--smp`, `resources.requests.cpu`, and `resources.limits.cpu`. For production, use `4` or greater."
+        },
+        {
+          "name": "overprovisioned",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1160,
+          "string": "Specifies whether Redpanda assumes it has all of the provisioned CPU. This should be `true` unless the container has CPU affinity. Equivalent to: `--idle-poll-time-us 0`, `--thread-affinity 0`, and `--poll-aio 0`. If the value of full cores in `resources.cpu.cores` is less than `1`, this setting is set to `true`."
+        },
+        {
+          "name": "max",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1166,
+          "string": "Specifies the maximum resources that can be allocated to a container."
+        },
+        {
+          "name": "min",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1168,
+          "string": "Specifies the minimum resources required for a container."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "affinity",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/postinstalljob.go",
+      "line_start": 25,
+      "line_end": 25,
+      "fingerprint": "3bfb636efd489bcd",
+      "context": [
+        {
+          "name": "affinity",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 137,
+          "string": "Affinity constraints for scheduling Pods, can override this for\nStatefulSets and Jobs. For details, see the [Kubernetes\ndocumentation](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#affinity-and-anti-affinity)."
+        },
+        {
+          "name": "affinity",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 257,
+          "string": "Defines affinity rules for Pod assignment."
+        },
+        {
+          "name": "affinity",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 752,
+          "string": "Affinity constraints for scheduling Pods. For details, see the\nhttps://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#affinity-and-anti-affinity[Kubernetes' documentation]."
+        },
+        {
+          "name": "affinity",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 781,
+          "string": "Affinity constraints for scheduling Pods. For details, see the\nhttps://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#affinity-and-anti-affinity[Kubernetes' documentation]."
+        },
+        {
+          "name": "podAffinity",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 817,
+          "string": "Defines Pod affinity rules to influence the scheduling and placement of Pods relative to other Pods."
+        },
+        {
+          "name": "podAntiAffinity",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 819,
+          "string": "Defines Pod anti-affinity rules to prevent Pods from being scheduled together on the same node."
+        },
+        {
+          "name": "type",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 925,
+          "string": "Type defines the type of anti-affinity, such as `soft` or `hard`."
+        },
+        {
+          "name": "weight",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 927,
+          "string": "Weight sets the weight associated with the soft anti-affinity rule."
+        },
+        {
+          "name": "custom",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 929,
+          "string": "Custom configures additional custom anti-affinity rules."
+        },
+        {
+          "name": "apply_host_tuners",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 968,
+          "string": "ApplyHostTuners enables a chroot-based tuning init container that\ngives `rpk redpanda tune all` access to the host's /sys, /proc,\nNICs and block devices so tuners like disk_irq, disk_scheduler,\ndisk_nomerges and net actually apply. Enabling it default-enables\nthose tuners plus fstrim, disk_write_cache (GCP-only) and cpu; an\nexplicit `config.rpk.tune_*: false` overrides any of the defaults.\nRequires `tune_aio_events: true` (rendering fails otherwise).\nOpt-in: defaults to false. Enabling requires a privileged SCC/PSA\non the namespace (the pod adds twelve hostPath mounts) and MUST be\ncombined wit..."
+        },
+        {
+          "name": "overprovisioned",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1160,
+          "string": "Specifies whether Redpanda assumes it has all of the provisioned CPU. This should be `true` unless the container has CPU affinity. Equivalent to: `--idle-poll-time-us 0`, `--thread-affinity 0`, and `--poll-aio 0`. If the value of full cores in `resources.cpu.cores` is less than `1`, this setting is set to `true`."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "securityContext",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/postinstalljob.go",
+      "line_start": 26,
+      "line_end": 26,
+      "fingerprint": "116bf96021ea76db",
+      "context": [
+        {
+          "name": "securityContext",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 167,
+          "string": "Specifies the container's security context, including privileges and access levels of the container and its processes.\nDEPRECATED: Use sideCars.securityContext"
+        },
+        {
+          "name": "securityContext",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1145,
+          "string": "Specifies the container's security context, including privileges and access levels of the container and its processes.\nDEPRECATED: Use sideCars.securityContext"
+        },
+        {
+          "name": "securityContext",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1343,
+          "string": "Specifies the container's security context, including privileges and access levels of the container and its processes.\nDEPRECATED: Use sideCars.securityContext"
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "extraEnv",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/postupgradejob.go",
+      "line_start": 24,
+      "line_end": 24,
+      "fingerprint": "623460991531ef2f",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "extraEnvFrom",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/postupgradejob.go",
+      "line_start": 25,
+      "line_end": 25,
+      "fingerprint": "9987a63740adc79b",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "resources",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/postupgradejob.go",
+      "line_start": 26,
+      "line_end": 26,
+      "fingerprint": "07408301fc63a7a4",
+      "context": [
+        {
+          "name": "commonLabels",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 55,
+          "string": "Assigns custom labels to all resources generated by the Redpanda Helm chart. Specify labels as key/value pairs."
+        },
+        {
+          "name": "resources",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 164,
+          "string": "Specifies resource requests for the sidecar container.\nDEPRECATED: Use sideCars.resources"
+        },
+        {
+          "name": "nameOverride",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 207,
+          "string": "Specifies a custom name for the Redpanda Console resources, overriding the default naming convention."
+        },
+        {
+          "name": "extraEnvFrom",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 266,
+          "string": "Allows you to add extra environment variables from external resources to the Pods that run Redpanda Console."
+        },
+        {
+          "name": "secretMounts",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 281,
+          "string": "Mounts additional Secret resources inside the containers that run Redpanda Console."
+        },
+        {
+          "name": "monitoring",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 340,
+          "string": "Specifies monitoring resources"
+        },
+        {
+          "name": "nameOverride",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 351,
+          "string": "Specifies a custom name for the Redpanda Console resources, overriding the default naming convention."
+        },
+        {
+          "name": "commonLabels",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 355,
+          "string": "Assigns custom labels to all resources generated by the Connector Helm chart. Specify labels as key/value pairs."
+        },
+        {
+          "name": "gateway",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 553,
+          "string": "Configures Gateway API TLSRoute-based external access. When enabled, ClusterIP services and TLSRoute resources are created instead of NodePort/LoadBalancer services. The Gateway itself must be managed externally."
+        },
+        {
+          "name": "extraEnvFrom",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 775,
+          "string": "Specifies environment variables from external sources, such as ConfigMap resources, or Secret resources, to dynamically configure the job."
+        },
+        {
+          "name": "resources",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1142,
+          "string": "Specifies resource requests for the sidecar container.\nDEPRECATED: Use sideCars.resources"
+        },
+        {
+          "name": "cores",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1158,
+          "string": "Specifies the number of CPU cores available to the application. Redpanda makes use of a thread per core model. For details, see https://docs.redpanda.com/current/get-started/architecture/#thread-per-core-model. For this reason, Redpanda should only be given full cores. Note: You can increase cores, but decreasing cores is not currently supported. See the GitHub issue:https://github.com/redpanda-data/redpanda/issues/350. This setting is equivalent to `--smp`, `resources.requests.cpu`, and `resources.limits.cpu`. For production, use `4` or greater."
+        },
+        {
+          "name": "overprovisioned",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1160,
+          "string": "Specifies whether Redpanda assumes it has all of the provisioned CPU. This should be `true` unless the container has CPU affinity. Equivalent to: `--idle-poll-time-us 0`, `--thread-affinity 0`, and `--poll-aio 0`. If the value of full cores in `resources.cpu.cores` is less than `1`, this setting is set to `true`."
+        },
+        {
+          "name": "max",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1166,
+          "string": "Specifies the maximum resources that can be allocated to a container."
+        },
+        {
+          "name": "min",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1168,
+          "string": "Specifies the minimum resources required for a container."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "affinity",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/postupgradejob.go",
+      "line_start": 28,
+      "line_end": 28,
+      "fingerprint": "3bfb636efd489bcd",
+      "context": [
+        {
+          "name": "affinity",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 137,
+          "string": "Affinity constraints for scheduling Pods, can override this for\nStatefulSets and Jobs. For details, see the [Kubernetes\ndocumentation](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#affinity-and-anti-affinity)."
+        },
+        {
+          "name": "affinity",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 257,
+          "string": "Defines affinity rules for Pod assignment."
+        },
+        {
+          "name": "affinity",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 752,
+          "string": "Affinity constraints for scheduling Pods. For details, see the\nhttps://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#affinity-and-anti-affinity[Kubernetes' documentation]."
+        },
+        {
+          "name": "affinity",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 781,
+          "string": "Affinity constraints for scheduling Pods. For details, see the\nhttps://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#affinity-and-anti-affinity[Kubernetes' documentation]."
+        },
+        {
+          "name": "podAffinity",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 817,
+          "string": "Defines Pod affinity rules to influence the scheduling and placement of Pods relative to other Pods."
+        },
+        {
+          "name": "podAntiAffinity",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 819,
+          "string": "Defines Pod anti-affinity rules to prevent Pods from being scheduled together on the same node."
+        },
+        {
+          "name": "type",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 925,
+          "string": "Type defines the type of anti-affinity, such as `soft` or `hard`."
+        },
+        {
+          "name": "weight",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 927,
+          "string": "Weight sets the weight associated with the soft anti-affinity rule."
+        },
+        {
+          "name": "custom",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 929,
+          "string": "Custom configures additional custom anti-affinity rules."
+        },
+        {
+          "name": "apply_host_tuners",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 968,
+          "string": "ApplyHostTuners enables a chroot-based tuning init container that\ngives `rpk redpanda tune all` access to the host's /sys, /proc,\nNICs and block devices so tuners like disk_irq, disk_scheduler,\ndisk_nomerges and net actually apply. Enabling it default-enables\nthose tuners plus fstrim, disk_write_cache (GCP-only) and cpu; an\nexplicit `config.rpk.tune_*: false` overrides any of the defaults.\nRequires `tune_aio_events: true` (rendering fails otherwise).\nOpt-in: defaults to false. Enabling requires a privileged SCC/PSA\non the namespace (the pod adds twelve hostPath mounts) and MUST be\ncombined wit..."
+        },
+        {
+          "name": "overprovisioned",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1160,
+          "string": "Specifies whether Redpanda assumes it has all of the provisioned CPU. This should be `true` unless the container has CPU affinity. Equivalent to: `--idle-poll-time-us 0`, `--thread-affinity 0`, and `--poll-aio 0`. If the value of full cores in `resources.cpu.cores` is less than `1`, this setting is set to `true`."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "securityContext",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/postupgradejob.go",
+      "line_start": 29,
+      "line_end": 29,
+      "fingerprint": "116bf96021ea76db",
+      "context": [
+        {
+          "name": "securityContext",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 167,
+          "string": "Specifies the container's security context, including privileges and access levels of the container and its processes.\nDEPRECATED: Use sideCars.securityContext"
+        },
+        {
+          "name": "securityContext",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1145,
+          "string": "Specifies the container's security context, including privileges and access levels of the container and its processes.\nDEPRECATED: Use sideCars.securityContext"
+        },
+        {
+          "name": "securityContext",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1343,
+          "string": "Specifies the container's security context, including privileges and access levels of the container and its processes.\nDEPRECATED: Use sideCars.securityContext"
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "limits",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/resources.go",
+      "line_start": 22,
+      "line_end": 22,
+      "fingerprint": "f2cbdb0a94d9780c",
+      "context": [
+        {
+          "name": "resources",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 245,
+          "string": "Configures resource requests and limits for the Pods that run Redpanda Console."
+        },
+        {
+          "name": "resources",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 954,
+          "string": "Sets resource requirements such as CPU and memory limits."
+        },
+        {
+          "name": "cores",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1158,
+          "string": "Specifies the number of CPU cores available to the application. Redpanda makes use of a thread per core model. For details, see https://docs.redpanda.com/current/get-started/architecture/#thread-per-core-model. For this reason, Redpanda should only be given full cores. Note: You can increase cores, but decreasing cores is not currently supported. See the GitHub issue:https://github.com/redpanda-data/redpanda/issues/350. This setting is equivalent to `--smp`, `resources.requests.cpu`, and `resources.limits.cpu`. For production, use `4` or greater."
+        },
+        {
+          "name": "container",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1174,
+          "string": "Defines resource limits for containers."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "requests",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/resources.go",
+      "line_start": 23,
+      "line_end": 23,
+      "fingerprint": "dfb85006db7b1d81",
+      "context": [
+        {
+          "name": "resources",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 164,
+          "string": "Specifies resource requests for the sidecar container.\nDEPRECATED: Use sideCars.resources"
+        },
+        {
+          "name": "resources",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 245,
+          "string": "Configures resource requests and limits for the Pods that run Redpanda Console."
+        },
+        {
+          "name": "resources",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1126,
+          "string": "Specifies resource requests for the sidecar container."
+        },
+        {
+          "name": "resources",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1142,
+          "string": "Specifies resource requests for the sidecar container.\nDEPRECATED: Use sideCars.resources"
+        },
+        {
+          "name": "cores",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1158,
+          "string": "Specifies the number of CPU cores available to the application. Redpanda makes use of a thread per core model. For details, see https://docs.redpanda.com/current/get-started/architecture/#thread-per-core-model. For this reason, Redpanda should only be given full cores. Note: You can increase cores, but decreasing cores is not currently supported. See the GitHub issue:https://github.com/redpanda-data/redpanda/issues/350. This setting is equivalent to `--smp`, `resources.requests.cpu`, and `resources.limits.cpu`. For production, use `4` or greater."
+        },
+        {
+          "name": "resources",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1340,
+          "string": "Specifies resource requests for the sidecar container.\nDEPRECATED: Use sideCars.resources"
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "cpu",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/resources.go",
+      "line_start": 24,
+      "line_end": 24,
+      "fingerprint": "64b8bebc9bddf0b2",
+      "context": [
+        {
+          "name": "apply_host_tuners",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 968,
+          "string": "ApplyHostTuners enables a chroot-based tuning init container that\ngives `rpk redpanda tune all` access to the host's /sys, /proc,\nNICs and block devices so tuners like disk_irq, disk_scheduler,\ndisk_nomerges and net actually apply. Enabling it default-enables\nthose tuners plus fstrim, disk_write_cache (GCP-only) and cpu; an\nexplicit `config.rpk.tune_*: false` overrides any of the defaults.\nRequires `tune_aio_events: true` (rendering fails otherwise).\nOpt-in: defaults to false. Enabling requires a privileged SCC/PSA\non the namespace (the pod adds twelve hostPath mounts) and MUST be\ncombined wit..."
+        },
+        {
+          "name": "cores",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1158,
+          "string": "Specifies the number of CPU cores available to the application. Redpanda makes use of a thread per core model. For details, see https://docs.redpanda.com/current/get-started/architecture/#thread-per-core-model. For this reason, Redpanda should only be given full cores. Note: You can increase cores, but decreasing cores is not currently supported. See the GitHub issue:https://github.com/redpanda-data/redpanda/issues/350. This setting is equivalent to `--smp`, `resources.requests.cpu`, and `resources.limits.cpu`. For production, use `4` or greater."
+        },
+        {
+          "name": "overprovisioned",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1160,
+          "string": "Specifies whether Redpanda assumes it has all of the provisioned CPU. This should be `true` unless the container has CPU affinity. Equivalent to: `--idle-poll-time-us 0`, `--thread-affinity 0`, and `--poll-aio 0`. If the value of full cores in `resources.cpu.cores` is less than `1`, this setting is set to `true`."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "memory",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/resources.go",
+      "line_start": 25,
+      "line_end": 25,
+      "fingerprint": "2598366c68b0d623",
+      "context": [
+        {
+          "name": "memory",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 615,
+          "string": "Specifies the amount of memory."
+        },
+        {
+          "name": "resources",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 744,
+          "string": "Sets resource requirements (CPU, memory) for the job to ensure proper allocation and limit resource usage."
+        },
+        {
+          "name": "resources",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 777,
+          "string": "Sets resource requirements (CPU, memory) for the job to ensure proper allocation and limit resource usage."
+        },
+        {
+          "name": "resources",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 954,
+          "string": "Sets resource requirements such as CPU and memory limits."
+        },
+        {
+          "name": "enable_memory_locking",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1176,
+          "string": "Enables memory locking. For production, set to `true`."
+        },
+        {
+          "name": "redpanda",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1178,
+          "string": "Allows you to optionally specify the memory size for both the Redpanda process and the underlying reserved memory used by Seastar."
+        },
+        {
+          "name": "memory",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1192,
+          "string": "Memory for the Redpanda process. This must be lower than the container's memory (`resources.memory.container.min` if provided, otherwise `resources.memory.container.max`). Equivalent to `--memory`. For production, use 8Gi or greater."
+        },
+        {
+          "name": "reserveMemory",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1194,
+          "string": "Memory reserved for the OS. Any value above 1Gi will provide diminishing performance benefits. Equivalent to `--reserve-memory`. For production, use 1Gi."
+        },
+        {
+          "name": "queueMaxBufferSizePerShard",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1391,
+          "string": "Defines the maximum amount of memory used (in bytes) by the audit buffer in each shard"
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "extraVolumeMounts",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/tuning.go",
+      "line_start": 21,
+      "line_end": 21,
+      "fingerprint": "1ec57dc54edfc731",
+      "context": [
+        {
+          "name": "extraVolumeMounts",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 161,
+          "string": "Specifies additional volumes to mount to the sidecar.\nDEPRECATED: Use sideCars.extraVolumeMounts"
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "resources",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/tuning.go",
+      "line_start": 22,
+      "line_end": 22,
+      "fingerprint": "07408301fc63a7a4",
+      "context": [
+        {
+          "name": "commonLabels",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 55,
+          "string": "Assigns custom labels to all resources generated by the Redpanda Helm chart. Specify labels as key/value pairs."
+        },
+        {
+          "name": "resources",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 164,
+          "string": "Specifies resource requests for the sidecar container.\nDEPRECATED: Use sideCars.resources"
+        },
+        {
+          "name": "nameOverride",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 207,
+          "string": "Specifies a custom name for the Redpanda Console resources, overriding the default naming convention."
+        },
+        {
+          "name": "extraEnvFrom",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 266,
+          "string": "Allows you to add extra environment variables from external resources to the Pods that run Redpanda Console."
+        },
+        {
+          "name": "secretMounts",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 281,
+          "string": "Mounts additional Secret resources inside the containers that run Redpanda Console."
+        },
+        {
+          "name": "monitoring",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 340,
+          "string": "Specifies monitoring resources"
+        },
+        {
+          "name": "nameOverride",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 351,
+          "string": "Specifies a custom name for the Redpanda Console resources, overriding the default naming convention."
+        },
+        {
+          "name": "commonLabels",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 355,
+          "string": "Assigns custom labels to all resources generated by the Connector Helm chart. Specify labels as key/value pairs."
+        },
+        {
+          "name": "gateway",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 553,
+          "string": "Configures Gateway API TLSRoute-based external access. When enabled, ClusterIP services and TLSRoute resources are created instead of NodePort/LoadBalancer services. The Gateway itself must be managed externally."
+        },
+        {
+          "name": "extraEnvFrom",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 775,
+          "string": "Specifies environment variables from external sources, such as ConfigMap resources, or Secret resources, to dynamically configure the job."
+        },
+        {
+          "name": "resources",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1142,
+          "string": "Specifies resource requests for the sidecar container.\nDEPRECATED: Use sideCars.resources"
+        },
+        {
+          "name": "cores",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1158,
+          "string": "Specifies the number of CPU cores available to the application. Redpanda makes use of a thread per core model. For details, see https://docs.redpanda.com/current/get-started/architecture/#thread-per-core-model. For this reason, Redpanda should only be given full cores. Note: You can increase cores, but decreasing cores is not currently supported. See the GitHub issue:https://github.com/redpanda-data/redpanda/issues/350. This setting is equivalent to `--smp`, `resources.requests.cpu`, and `resources.limits.cpu`. For production, use `4` or greater."
+        },
+        {
+          "name": "overprovisioned",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1160,
+          "string": "Specifies whether Redpanda assumes it has all of the provisioned CPU. This should be `true` unless the container has CPU affinity. Equivalent to: `--idle-poll-time-us 0`, `--thread-affinity 0`, and `--poll-aio 0`. If the value of full cores in `resources.cpu.cores` is less than `1`, this setting is set to `true`."
+        },
+        {
+          "name": "max",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1166,
+          "string": "Specifies the maximum resources that can be allocated to a container."
+        },
+        {
+          "name": "min",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1168,
+          "string": "Specifies the minimum resources required for a container."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "ballast_file_path",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/tuning.go",
+      "line_start": 23,
+      "line_end": 23,
+      "fingerprint": "9c181134393e001f",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "ballast_file_size",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/tuning.go",
+      "line_start": 24,
+      "line_end": 24,
+      "fingerprint": "22592c24143d96e9",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "tune_aio_events",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/tuning.go",
+      "line_start": 25,
+      "line_end": 25,
+      "fingerprint": "38b4f1189c13ace5",
+      "context": [
+        {
+          "name": "apply_host_tuners",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 968,
+          "string": "ApplyHostTuners enables a chroot-based tuning init container that\ngives `rpk redpanda tune all` access to the host's /sys, /proc,\nNICs and block devices so tuners like disk_irq, disk_scheduler,\ndisk_nomerges and net actually apply. Enabling it default-enables\nthose tuners plus fstrim, disk_write_cache (GCP-only) and cpu; an\nexplicit `config.rpk.tune_*: false` overrides any of the defaults.\nRequires `tune_aio_events: true` (rendering fails otherwise).\nOpt-in: defaults to false. Enabling requires a privileged SCC/PSA\non the namespace (the pod adds twelve hostPath mounts) and MUST be\ncombined wit..."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "tune_ballast_file",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/tuning.go",
+      "line_start": 26,
+      "line_end": 26,
+      "fingerprint": "8c2db17f5c813570",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "tune_clocksource",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/tuning.go",
+      "line_start": 27,
+      "line_end": 27,
+      "fingerprint": "d59c5ab510e20837",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "well_known_io",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/tuning.go",
+      "line_start": 28,
+      "line_end": 28,
+      "fingerprint": "5b89b590f11c5f74",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "apply_host_tuners",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/tuning.go",
+      "line_start": 29,
+      "line_end": 29,
+      "fingerprint": "cfff9637425c31f9",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "kind",
+      "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+      "line_start": 485,
+      "line_end": 487,
+      "fingerprint": "8961c7413475675e",
+      "context": [
+        {
+          "name": "external",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 88,
+          "string": "Defines external access settings."
+        },
+        {
+          "name": "name",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 415,
+          "string": "Name specifies the name of the bootstrap user created for the cluster, if unspecified\ndefaults to \"kubernetes-controller\".\nNOTE: for the StretchCluster kind this field is currently ignored; the bootstrap\nusername is fixed to \"kubernetes-controller\". Only secretKeyRef is honored there."
+        },
+        {
+          "name": "secretKeyRef",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 420,
+          "string": "Specifies the location where the generated password will be written or a pre-existing\npassword will be read from. For the StretchCluster kind the referenced key is required\n(there is no default key at the CRD level).\n\nFor the StretchCluster kind the referenced Secret is read and replicated by the\noperator to every member cluster in the same namespace, so whoever can set this field\nis trusted to name a Secret whose contents may be copied across all member clusters of\nthe mesh. The operator never overwrites an existing Secret of that name on a member\ncluster.\n\nIMPORTANT: for the StretchCluster k..."
+        },
+        {
+          "name": "mechanism",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 437,
+          "string": "Specifies the authentication mechanism to use for the bootstrap user. Options are `SCRAM-SHA-256` and `SCRAM-SHA-512`.\nNOTE: for the StretchCluster kind this field is currently ignored; the mechanism is\ntaken from sasl.mechanism."
+        },
+        {
+          "name": "external",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1058,
+          "string": "Defines settings for the external listeners."
+        },
+        {
+          "name": "external",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1066,
+          "string": "Defines settings for the external listeners."
+        },
+        {
+          "name": "external",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1077,
+          "string": "Defines settings for the external listeners."
+        },
+        {
+          "name": "external",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1085,
+          "string": "Defines settings for the external listeners."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "group",
+      "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+      "line_start": 488,
+      "line_end": 491,
+      "fingerprint": "b6b07958099fbd9e",
+      "context": [
+        {
+          "name": "external",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 88,
+          "string": "Defines external access settings."
+        },
+        {
+          "name": "cert",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 511,
+          "string": "References a specific certificate for the listener."
+        },
+        {
+          "name": "external",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1058,
+          "string": "Defines settings for the external listeners."
+        },
+        {
+          "name": "external",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1066,
+          "string": "Defines settings for the external listeners."
+        },
+        {
+          "name": "external",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1077,
+          "string": "Defines settings for the external listeners."
+        },
+        {
+          "name": "external",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1085,
+          "string": "Defines settings for the external listeners."
+        }
+      ]
+    }
+  ]
+}

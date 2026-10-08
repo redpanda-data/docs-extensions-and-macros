@@ -1,0 +1,20 @@
+{
+  "findings": [],
+  "summary": {
+    "totalDeclarations": 0,
+    "flaggedDeclarations": 0,
+    "removedSurfaceLines": 0,
+    "removedSurfaceFiles": [],
+    "errors": 0,
+    "warnings": 0,
+    "info": 0,
+    "byRule": {},
+    "bySurface": {},
+    "alreadyReviewed": 0,
+    "removedDeclarations": [],
+    "unverifiableDeclarations": 0,
+    "skippedDeclarations": []
+  },
+  "unsupported_surfaces": [],
+  "declarations": []
+}

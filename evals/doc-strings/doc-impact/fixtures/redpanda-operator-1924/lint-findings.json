@@ -1,0 +1,192 @@
+{
+  "findings": [
+    {
+      "surface": "crd",
+      "name": "maxBytes",
+      "file": "operator/api/redpanda/v1alpha2/broker_pool_types.go",
+      "line_start": 205,
+      "line_end": 205,
+      "string": null,
+      "declaration_text": "\tMaxBytes int `json:\"maxBytes\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"MaxBytes\" (json: \"maxBytes\") in SmokeTestSpec has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "d062feb6a1e3db56"
+    },
+    {
+      "surface": "helm",
+      "name": "smokeTestTimeout",
+      "file": "charts/redpanda/chart/values.yaml",
+      "line_start": 1193,
+      "line_end": 1194,
+      "string": "smoke test key",
+      "declaration_text": "# -- smoke test key\nsmokeTestTimeout: 30",
+      "rules": [
+        {
+          "id": "starts-lowercase",
+          "severity": "warning",
+          "message": "Description starts with a lowercase letter: \"smoke test key\""
+        },
+        {
+          "id": "too-short",
+          "severity": "warning",
+          "message": "Description is only 14 characters: \"smoke test key\". Too short to explain behavior, units, or impact."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": "optional",
+        "verbatim_asciidoc": false
+      },
+      "in_pr_diff": true,
+      "fingerprint": "5841cb7f49aa2ed6"
+    },
+    {
+      "surface": "helm",
+      "name": "smokeTestUndocumented",
+      "file": "charts/redpanda/chart/values.yaml",
+      "line_start": 1195,
+      "line_end": 1195,
+      "string": null,
+      "declaration_text": "smokeTestUndocumented: true",
+      "rules": [
+        {
+          "id": "undocumented-key",
+          "severity": "info",
+          "message": "\"smokeTestUndocumented\" has no \"# --\" description of its own, so helm-docs publishes it with an empty description. Add a marker comment directly above the key (or \"# @ignored\" if it is not user-facing). Note that documenting an ancestor instead removes the row entirely rather than filling it in."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": "optional",
+        "verbatim_asciidoc": false
+      },
+      "in_pr_diff": true,
+      "fingerprint": "d9baa4d3f7814a54"
+    }
+  ],
+  "summary": {
+    "totalDeclarations": 5,
+    "flaggedDeclarations": 3,
+    "removedSurfaceLines": 0,
+    "removedSurfaceFiles": [],
+    "errors": 0,
+    "warnings": 3,
+    "info": 1,
+    "byRule": {
+      "starts-lowercase": {
+        "errors": 0,
+        "warnings": 1,
+        "info": 0
+      },
+      "too-short": {
+        "errors": 0,
+        "warnings": 1,
+        "info": 0
+      },
+      "undocumented-key": {
+        "errors": 0,
+        "warnings": 0,
+        "info": 1
+      },
+      "undocumented-field": {
+        "errors": 0,
+        "warnings": 1,
+        "info": 0
+      }
+    },
+    "bySurface": {
+      "helm": {
+        "declarations": 3,
+        "flagged": 2,
+        "errors": 0,
+        "warnings": 2,
+        "info": 1
+      },
+      "crd": {
+        "declarations": 2,
+        "flagged": 1,
+        "errors": 0,
+        "warnings": 1,
+        "info": 0
+      }
+    },
+    "alreadyReviewed": 0,
+    "removedDeclarations": [],
+    "unverifiableDeclarations": 1,
+    "skippedDeclarations": []
+  },
+  "unsupported_surfaces": [],
+  "declarations": [
+    {
+      "surface": "helm",
+      "name": "listeners.admin.port",
+      "file": "charts/redpanda/chart/values.yaml",
+      "line_start": 884,
+      "line_end": 885,
+      "fingerprint": "809ad28327a3da15",
+      "context": [
+        {
+          "name": "external",
+          "kind": "key",
+          "file": "charts/redpanda/chart/values.yaml",
+          "line_start": 260,
+          "string": "External access settings. For details, see the [Networking and Connectivity documentation](https://docs.redpanda.com/docs/manage/kubernetes/networking/networking-and-connectivity/)."
+        },
+        {
+          "name": "listeners.admin.external.default.tls",
+          "kind": "key",
+          "file": "charts/redpanda/chart/values.yaml",
+          "line_start": 898,
+          "string": "The port advertised to this listener's external clients. List one port if you want to use the same port for each broker (would be the case when using NodePort service). Otherwise, list the port you want to use for each broker in order of StatefulSet replicas. If undefined, `listeners.admin.port` is used."
+        }
+      ]
+    },
+    {
+      "surface": "helm",
+      "name": "smokeTestTimeout",
+      "file": "charts/redpanda/chart/values.yaml",
+      "line_start": 1193,
+      "line_end": 1194,
+      "fingerprint": "5841cb7f49aa2ed6",
+      "context": []
+    },
+    {
+      "surface": "helm",
+      "name": "smokeTestUndocumented",
+      "file": "charts/redpanda/chart/values.yaml",
+      "line_start": 1195,
+      "line_end": 1195,
+      "fingerprint": "d9baa4d3f7814a54",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "retentionTime",
+      "file": "operator/api/redpanda/v1alpha2/broker_pool_types.go",
+      "line_start": 203,
+      "line_end": 204,
+      "fingerprint": "8efd68993d995af3",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "maxBytes",
+      "file": "operator/api/redpanda/v1alpha2/broker_pool_types.go",
+      "line_start": 205,
+      "line_end": 205,
+      "fingerprint": "d062feb6a1e3db56",
+      "context": []
+    }
+  ]
+}
