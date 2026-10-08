@@ -327,17 +327,21 @@ jobs:
           # that ignores REDPANDA_CONNECT_DOCS_DIR, or a playbook without the
           # extension, would build the released docs instead and pass.
           expected=$(find "$WORK/head/modules/components" -type f | wc -l | tr -d ' ')
-          added=$(jq -r 'select((.msg // "") | startswith("Redpanda Connect reference docs from REDPANDA_CONNECT_DOCS_DIR")) | .msg' "$WORK/antora.ndjson" \
-            | sed -n 's/.*: added \([0-9][0-9]*\) files.*/\1/p' | head -1)
+          # rp-connect-docs branches that still commit generated partials have
+          # them replaced by the PR's, so "replaced" counts as used too.
+          record=$(jq -r 'select((.msg // "") | startswith("Redpanda Connect reference docs from REDPANDA_CONNECT_DOCS_DIR")) | .msg' "$WORK/antora.ndjson" | head -1)
+          added=$(printf '%s' "$record" | sed -n 's/.*: added \([0-9][0-9]*\) files.*/\1/p')
+          replaced=$(printf '%s' "$record" | sed -n 's/.*; replaced \([0-9][0-9]*\) provided.*/\1/p')
           if [ -z "$added" ]; then
             echo "::error::The build did not read the PR's generated docs: no REDPANDA_CONNECT_DOCS_DIR record in the Antora log. The installed docs-extensions-and-macros or the playbook does not support it."
             exit 1
           fi
-          if [ "$added" != "$expected" ]; then
-            echo "::error::The build added $added of the PR's $expected generated files."
+          used=$((added + ${replaced:-0}))
+          if [ "$used" != "$expected" ]; then
+            echo "::error::The build used $used of the PR's $expected generated files ($added added, ${replaced:-0} replacing copies from another source)."
             exit 1
           fi
-          echo "The build used all $added of the PR's generated files."
+          echo "The build used all $used of the PR's generated files ($added added, ${replaced:-0} replacing copies from another source)."
           rc=0
           npx --no-install doc-tools check-build-log "$WORK/antora.ndjson" \
             --site-dir "$WORK/site/connect" --min-pages "$MIN_PAGES" \
