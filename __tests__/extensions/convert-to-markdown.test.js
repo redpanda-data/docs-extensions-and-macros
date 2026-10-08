@@ -567,3 +567,77 @@ describe('solution files in Markdown frontmatter', () => {
     expect(buildSolutionMetadata(page(BASE)).files).toBeUndefined()
   })
 })
+
+// The landing page's Markdown twin is a catalogue for agents: the cards, not
+// the filter form, its counts, or the empty states that wait for script.
+describe('solutions landing in Markdown', () => {
+  const { isUnwantedNode } = require('../../extensions/convert-to-markdown')
+
+  function convert (html) {
+    const td = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced', bulletListMarker: '-' })
+    td.use(gfm)
+    td.addRule('remove-unwanted', { filter: isUnwantedNode, replacement: () => '' })
+    return td.turndown(html)
+  }
+
+  const TITLES = ['Multiplayer gaming', 'Sports data fan-out', 'Kafka migration', 'CDC to Iceberg', 'Disaster recovery']
+  const card = (title) =>
+    `<li class="sol-card"><a href="/solutions/${title.toLowerCase().replace(/\W+/g, '-')}/"><h3>${title}</h3></a><p>About ${title}.</p></li>`
+  const HOME = [
+    '<div class="doc sol-home">',
+    '<section class="sol-hero"><h1>Redpanda Solutions</h1><p>Runnable reference architectures.</p></section>',
+    '<section class="sol-continue" hidden><h2>Pick up where you left off</h2></section>',
+    '<details class="sol-filters" open data-sol-filters><summary>Filters</summary>',
+    '<form role="search"><input type="search" placeholder="Search solutions">',
+    '<fieldset><legend>Use case</legend><label><input type="checkbox" name="use-case" value="Gaming"> Gaming <span>1</span></label></fieldset>',
+    '<button type="reset">Clear filters</button></form></details>',
+    '<div class="sol-results-head"><p aria-live="polite">5 solutions</p><p class="sol-filters-active" hidden>Clear filters</p></div>',
+    `<ul class="sol-grid">${TITLES.map(card).join('')}</ul>`,
+    '<div class="sol-empty" hidden><p>No solutions match your filters.</p></div>',
+    '</div>',
+  ].join('')
+
+  test('keeps the hero, the count, and every card', () => {
+    const md = convert(HOME)
+    expect(md).toContain('Redpanda Solutions')
+    expect(md).toContain('5 solutions')
+    for (const title of TITLES) expect(md).toContain(title)
+  })
+
+  test('drops the filter form and everything rendered hidden', () => {
+    const md = convert(HOME)
+    for (const text of ['Search solutions', 'Clear filters', 'Pick up where you left off', 'No solutions match your filters', 'Use case']) {
+      expect(md).not.toContain(text)
+    }
+  })
+
+  test('an element without hidden is untouched', () => {
+    expect(convert('<p>Shown</p><p hidden>Not shown</p>')).toBe('Shown')
+  })
+})
+
+describe('edit link of a private origin in Markdown frontmatter', () => {
+  const yaml = require('js-yaml')
+  const { generateFrontmatter } = require('../../extensions/convert-to-markdown')
+  const parse = (frontmatter) => yaml.load(frontmatter.replace(/^---\n/, '').replace(/---\n*$/, '')) || {}
+  const page = (origin) => ({
+    src: { component: 'solutions', version: '', origin },
+    asciidoc: { doctitle: 'T', attributes: { 'page-edit-url': 'https://github.com/redpanda-data/solutions/edit/main/docs/x.adoc' } },
+  })
+  let saved
+  beforeEach(() => { saved = process.env.FORCE_SHOW_EDIT_PAGE_LINK; delete process.env.FORCE_SHOW_EDIT_PAGE_LINK })
+  afterEach(() => { if (saved === undefined) delete process.env.FORCE_SHOW_EDIT_PAGE_LINK; else process.env.FORCE_SHOW_EDIT_PAGE_LINK = saved })
+
+  test('a public origin keeps page-edit-url', () => {
+    expect(parse(generateFrontmatter(page({ url: 'https://github.com/redpanda-data/docs.git' })))['page-edit-url']).toMatch(/edit\/main/)
+  })
+
+  test('a private origin drops page-edit-url', () => {
+    expect(parse(generateFrontmatter(page({ url: 'https://github.com/redpanda-data/solutions.git', private: 'auth-required' })))['page-edit-url']).toBeUndefined()
+  })
+
+  test('FORCE_SHOW_EDIT_PAGE_LINK brings it back', () => {
+    process.env.FORCE_SHOW_EDIT_PAGE_LINK = 'true'
+    expect(parse(generateFrontmatter(page({ private: 'auth-required' })))['page-edit-url']).toMatch(/edit\/main/)
+  })
+})
