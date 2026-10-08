@@ -194,6 +194,58 @@ function isIsoTimestamp (value) {
   return !Number.isNaN(Date.parse(value.trim()))
 }
 
+/** Latest page-git-modified-date across a solution's overview and steps. */
+function contentModifiedDate (record) {
+  const dates = [record.overview, ...(record.steps || []).map((s) => s.page)]
+    .map((p) => p && p.asciidoc && p.asciidoc.attributes && p.asciidoc.attributes['page-git-modified-date'])
+    .filter((d) => typeof d === 'string' && !Number.isNaN(Date.parse(d)))
+  if (record.lastModified && !Number.isNaN(Date.parse(record.lastModified))) dates.push(String(record.lastModified))
+  return dates.sort().pop() || null
+}
+
+const HEX_RX = /^[0-9a-f]+$/i
+
+/**
+ * Warnings about the verification manifest itself. Never fatal: the manifest
+ * is evidence the monorepo writes, and a stale or partial one should be
+ * visible in the build log without stopping the docs from publishing.
+ */
+function verificationWarnings (record) {
+  const warnings = []
+  const v = record.verified || {}
+  const runAt = v.runAt
+  if (runAt === undefined) warnings.push(`${VERIFICATION_FILE} has no run_at`)
+  else if (!isIsoTimestamp(runAt)) warnings.push(`${VERIFICATION_FILE} run_at "${runAt}" is not an ISO 8601 timestamp`)
+  else {
+    // Day granularity: page-git-modified-date carries no time, so a commit
+    // on the same day as the run cannot be ordered against it.
+    const modified = contentModifiedDate(record)
+    if (modified && String(runAt).slice(0, 10) < String(modified).slice(0, 10)) {
+      warnings.push(`${VERIFICATION_FILE} run_at ${runAt} is older than the solution's pages (last modified ${modified}); rerun the verification so the evidence matches what readers see`)
+    }
+  }
+  if (v.platforms !== undefined) {
+    const list = Array.isArray(v.platforms) ? v.platforms : null
+    const unknown = list ? list.filter((p) => !ENUMS.platforms.includes(p)) : []
+    if (!list) warnings.push(`${VERIFICATION_FILE} platforms must be an array of ${ENUMS.platforms.join(', ')}`)
+    else if (unknown.length) warnings.push(`${VERIFICATION_FILE} platforms contains unknown values: ${unknown.join(', ')}`)
+    else {
+      const missing = (record.platforms || []).filter((p) => !list.includes(p))
+      if (missing.length) warnings.push(`page-solution-platforms includes ${missing.join(', ')} but ${VERIFICATION_FILE} verified only ${list.join(', ') || 'nothing'}`)
+    }
+  }
+  if (v.contentRev !== undefined) {
+    const rev = v.contentRev
+    const ok = rev && typeof rev === 'object' && !Array.isArray(rev) &&
+      ['solution', 'docs'].every((k) => typeof rev[k] === 'string' && HEX_RX.test(rev[k]))
+    if (!ok) warnings.push(`${VERIFICATION_FILE} content_rev must be {"solution": <git tree hash>, "docs": <git tree hash>}`)
+  }
+  if (v.stackSha256 !== undefined && !(typeof v.stackSha256 === 'string' && /^[0-9a-f]{64}$/i.test(v.stackSha256))) {
+    warnings.push(`${VERIFICATION_FILE} stack_sha256 must be a 64-character hex SHA-256 digest`)
+  }
+  return warnings
+}
+
 /**
  * Validate one collected solution record after conversion.
  *
@@ -267,9 +319,7 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
     warn(`no ${VERIFICATION_FILE} attachment; readers get no verification evidence`)
   }
   if (record.verified) {
-    const runAt = record.verified.runAt
-    if (runAt === undefined) warn(`${VERIFICATION_FILE} has no run_at`)
-    else if (!isIsoTimestamp(runAt)) warn(`${VERIFICATION_FILE} run_at "${runAt}" is not an ISO 8601 timestamp`)
+    for (const w of verificationWarnings(record)) warn(w)
   }
 
   if (record.status === 'deprecated' && !record.supersededBy) err('page-solution-superseded-by is required when status is deprecated')
@@ -486,6 +536,8 @@ function formatErrors (errors) {
 
 module.exports = {
   isIsoTimestamp,
+  verificationWarnings,
+  contentModifiedDate,
   DURATION_MIN,
   DURATION_MAX,
   DESCRIPTION_MAX,

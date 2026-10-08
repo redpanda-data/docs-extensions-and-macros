@@ -541,6 +541,14 @@ describe('solution verification in Markdown frontmatter', () => {
     expect(buildSolutionMetadata(page(BASE)).verified).toBeUndefined()
   })
 
+  test('carries the platforms, content revision, and stack digest', () => {
+    const block = buildSolutionMetadata(page({
+      ...BASE,
+      verified: { ...VERIFIED, platforms: ['self-managed'], contentRev: { solution: 'a1b2', docs: 'c3d4' }, stackSha256: 'ab'.repeat(32) },
+    }))
+    expect(block.verified).toMatchObject({ platforms: ['self-managed'], content_rev: { solution: 'a1b2', docs: 'c3d4' }, stack_sha256: 'ab'.repeat(32) })
+  })
+
   test('only the fields the manifest carried are emitted', () => {
     const block = buildSolutionMetadata(page({ ...BASE, verified: { suite: 'doc-detective', specs: 4, media: 0 } }))
     expect(block.verified).toEqual({ suite: 'doc-detective', specs: 4, media: 0 })

@@ -1308,6 +1308,52 @@ describe('solutions-catalog: verification manifest', () => {
     expect(json(solution.pages[0], 'page-solution').verified.media).toBe(0)
   })
 
+  const TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+  const STACK = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+
+  test('carries platforms, content_rev, and stack_sha256 through to the record', async () => {
+    const extra = { platforms: ['self-managed', 'cloud'], content_rev: { solution: TREE, docs: TREE }, stack_sha256: STACK }
+    const solution = makeSolution('leaderboard', { verification: JSON.stringify({ ...MANIFEST, ...extra }) })
+    const result = await run({ solutions: [solution] })
+    expect(json(solution.pages[0], 'page-solution').verified).toEqual({
+      ...EXPECTED, platforms: ['self-managed', 'cloud'], contentRev: { solution: TREE, docs: TREE }, stackSha256: STACK,
+    })
+    expect(warningsOf(result)).not.toMatch(/verification\.json/)
+  })
+
+  test('warns when the run covered fewer platforms than the page claims', async () => {
+    const solution = makeSolution('leaderboard', { verification: JSON.stringify({ ...MANIFEST, platforms: ['self-managed'] }) })
+    const result = await run({ solutions: [solution] })
+    expect(warningsOf(result)).toMatch(/page-solution-platforms includes cloud but verification\.json verified only self-managed/)
+  })
+
+  test.each([
+    ['platforms not an array', { platforms: 'cloud' }, /platforms must be an array/],
+    ['an unknown platform', { platforms: ['mainframe'] }, /platforms contains unknown values: mainframe/],
+    ['content_rev not an object of hashes', { content_rev: 'abc' }, /content_rev must be/],
+    ['content_rev missing docs', { content_rev: { solution: 'abc123' } }, /content_rev must be/],
+    ['stack_sha256 not a digest', { stack_sha256: 'xyz' }, /stack_sha256 must be a 64-character hex/],
+  ])('warns on %s, and keeps the manifest', async (_name, extra, rx) => {
+    const solution = makeSolution('leaderboard', { verification: JSON.stringify({ ...MANIFEST, ...extra }) })
+    const result = await run({ solutions: [solution] })
+    expect(json(solution.pages[0], 'page-solution').verified.specs).toBe(11)
+    expect(warningsOf(result)).toMatch(rx)
+  })
+
+  test('warns when the run is older than the pages it verified', async () => {
+    const solution = makeSolution('leaderboard')
+    // A step changed after the run on 2026-09-14.
+    solution.pages[2].asciidoc.attributes['page-git-modified-date'] = '2026-09-20'
+    const result = await run({ solutions: [solution] })
+    expect(warningsOf(result)).toMatch(/leaderboard: verification\.json run_at 2026-09-14T09:12:00Z is older than the solution's pages \(last modified 2026-09-20\)/)
+  })
+
+  test('a page changed on the day of the run is not called stale', async () => {
+    const solution = makeSolution('leaderboard', { attrs: { 'page-git-modified-date': '2026-09-14' } })
+    const result = await run({ solutions: [solution] })
+    expect(warningsOf(result)).not.toMatch(/is older than the solution's pages/)
+  })
+
   test('parseVerification is pure over the file', () => {
     expect(collect.parseVerification(undefined)).toEqual({ verified: null, error: null })
     expect(collect.parseVerification({ contents: Buffer.from(JSON.stringify(MANIFEST)) }).verified).toEqual(EXPECTED)

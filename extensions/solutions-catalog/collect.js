@@ -58,6 +58,13 @@ const VERIFICATION_FIELDS = Object.freeze([
   ['verify_script', 'verifyScript'],
   ['redpanda_version', 'redpandaVersion'],
   ['run_at', 'runAt'],
+  // Which platforms the run covered, as page-solution-platforms values.
+  ['platforms', 'platforms'],
+  // Git tree hashes of the content the run verified:
+  // { solution: <tree of solutions/<slug>>, docs: <tree of docs/modules/<slug>> }.
+  ['content_rev', 'contentRev'],
+  // Digest of the stack the run started (compose files, images, versions).
+  ['stack_sha256', 'stackSha256'],
 ])
 
 /**

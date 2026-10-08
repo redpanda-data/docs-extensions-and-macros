@@ -144,6 +144,9 @@ function buildSolutionMetadata(page) {
       verify_script: record.verified.verifyScript,
       redpanda_version: record.verified.redpandaVersion,
       run_at: record.verified.runAt,
+      platforms: record.verified.platforms,
+      content_rev: record.verified.contentRev,
+      stack_sha256: record.verified.stackSha256,
     })
     if (Object.keys(verified).length) block.verified = verified
   }
