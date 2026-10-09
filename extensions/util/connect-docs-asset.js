@@ -103,12 +103,16 @@ async function fetchAssetOnce (tag, { fetchImpl, token }) {
   const api = `https://api.github.com/repos/${OWNER}/${REPO}/releases/tags/${encodeURIComponent(tag)}`
   const release = await fetchImpl(api, { signal: timeout(), headers: { ...auth, Accept: 'application/vnd.github+json' } })
   // A token that is expired or lacks access must not break a build that the
-  // public download would serve.
+  // public download would serve. GitHub answers 404, not 403, for a repo the
+  // token can't see, so a 404 here falls back too, and is flagged so the
+  // caller can say why when the public download has no asset either.
   if (release.status === 401 || release.status === 403) return fetchAssetOnce(tag, { fetchImpl, token: null })
+  if (release.status === 404) return { ...(await fetchAssetOnce(tag, { fetchImpl, token: null })), tokenCouldNotSee: true }
   if (!release.ok) return { status: release.status, statusText: release.statusText }
   const found = ((await release.json()).assets || []).find((a) => a.name === ASSET_NAME)
   if (!found) return { status: 404, statusText: 'Not Found' }
   let response = await fetchImpl(found.url, { redirect: 'manual', signal: timeout(), headers: { ...auth, Accept: 'application/octet-stream' } })
+  if (response.status === 401 || response.status === 403) return fetchAssetOnce(tag, { fetchImpl, token: null })
   if (response.status >= 300 && response.status < 400 && response.headers.get('location')) {
     response = await fetchImpl(response.headers.get('location'), { redirect: 'follow', signal: timeout(), headers: ua })
   }
@@ -131,7 +135,12 @@ async function downloadAsset (tag, { fetchImpl = globalThis.fetch, logger, token
     }
     if (result && result.body) return result.body
     if (result) {
-      if (result.status === 404) return null
+      if (result.status === 404) {
+        if (result.tokenCouldNotSee && logger) {
+          logger.warn(`The GitHub API found no ${tag} release of ${OWNER}/${REPO} with the GitHub token, and the public download has no ${ASSET_NAME} either. If the repo is private, check that the token has read access to it.`)
+        }
+        return null
+      }
       lastError = new Error(`could not download ${url}: HTTP ${result.status} ${result.statusText || ''}`.trim())
       // A client error other than 404 will not change on a retry.
       if (result.status < 500 && result.status !== 429) break

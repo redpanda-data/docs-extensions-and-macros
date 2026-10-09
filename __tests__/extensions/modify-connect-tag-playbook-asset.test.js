@@ -491,7 +491,7 @@ describe('connect-docs-asset download', () => {
   it('with a token, returns null for a release without the asset or a missing release', async () => {
     const noAsset = routes({ [`${API}/releases/tags/v4.200.0`]: json(200, { assets: [{ name: 'other.tar.gz', url: `${API}/releases/assets/6` }] }) })
     await expect(asset.downloadAsset('v4.200.0', { fetchImpl: noAsset, token: 't' })).resolves.toBeNull()
-    const noRelease = routes({ [`${API}/releases/tags/v4.200.0`]: json(404, {}) })
+    const noRelease = routes({ [`${API}/releases/tags/v4.200.0`]: json(404, {}), [asset.assetUrl('v4.200.0')]: response(404) })
     await expect(asset.downloadAsset('v4.200.0', { fetchImpl: noRelease, token: 't' })).resolves.toBeNull()
   })
 
@@ -503,6 +503,44 @@ describe('connect-docs-asset download', () => {
     const body = await asset.downloadAsset('v4.200.0', { fetchImpl, token: 'expired' })
     expect(Buffer.compare(body, archive)).toBe(0)
     expect(fetchImpl.mock.calls.find(([u]) => u === asset.assetUrl('v4.200.0'))[1].headers.Authorization).toBeUndefined()
+  })
+
+  it('falls back to the public download when the asset endpoint rejects the token', async () => {
+    for (const status of [401, 403]) {
+      const fetchImpl = routes({
+        [`${API}/releases/tags/v4.200.0`]: json(200, { assets: [{ name: 'redpanda-connect-docs.tar.gz', url: ASSET_API }] }),
+        [ASSET_API]: response(status),
+        [asset.assetUrl('v4.200.0')]: response(200, archive)
+      })
+      const body = await asset.downloadAsset('v4.200.0', { fetchImpl, token: 't' })
+      expect(Buffer.compare(body, archive)).toBe(0)
+    }
+  })
+
+  it('falls back to the public download when the token cannot see the release (404)', async () => {
+    const fetchImpl = routes({
+      [`${API}/releases/tags/v4.200.0`]: json(404, {}),
+      [asset.assetUrl('v4.200.0')]: response(200, archive)
+    })
+    const body = await asset.downloadAsset('v4.200.0', { fetchImpl, token: 't' })
+    expect(Buffer.compare(body, archive)).toBe(0)
+  })
+
+  it('says why when neither the token nor the public download finds the release', async () => {
+    const fetchImpl = routes({
+      [`${API}/releases/tags/v4.200.0`]: json(404, {}),
+      [asset.assetUrl('v4.200.0')]: response(404)
+    })
+    const warn = jest.fn()
+    await expect(asset.downloadAsset('v4.200.0', { fetchImpl, token: 't', logger: { warn } })).resolves.toBeNull()
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/found no v4\.200\.0 release of redpanda-data\/connect with the GitHub token.*read access/))
+  })
+
+  it('stays quiet for a release that exists without the asset', async () => {
+    const fetchImpl = routes({ [`${API}/releases/tags/v4.200.0`]: json(200, { assets: [] }) })
+    const warn = jest.fn()
+    await expect(asset.downloadAsset('v4.200.0', { fetchImpl, token: 't', logger: { warn } })).resolves.toBeNull()
+    expect(warn).not.toHaveBeenCalled()
   })
 
   it('without a token, uses the public download URL', async () => {

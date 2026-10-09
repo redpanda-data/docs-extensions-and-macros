@@ -457,7 +457,7 @@ A connect source with explicit refs is kept, which is how you preview a connect 
 === Environment variables
 
 - `REDPANDA_CONNECT_DOCS_DIR` (optional): A local directory, or a local `redpanda-connect-docs.tar.gz` file, to read the reference docs from instead of a release. See <<Preview unreleased Connect changes>>.
-- `REDPANDA_GITHUB_TOKEN` (optional): A GitHub token for the latest release lookup, the fallback release listing, the asset download, and the `git ls-remote` fallback. Without it, the extension sends unauthenticated requests, which GitHub can rate limit, and which only work while the connect repository is public.
+- `REDPANDA_GITHUB_TOKEN` (optional): A GitHub token for the latest release lookup, the fallback release listing, the asset download, and the `git ls-remote` fallback. The extension also reads `ACTIONS_BOT_TOKEN`, `GITHUB_TOKEN`, `VBOT_GITHUB_API_TOKEN`, `GH_TOKEN`, and a github.com entry in `GIT_CREDENTIALS`, in that order. Without any GitHub token, the extension sends unauthenticated requests, which GitHub can rate limit, and which only work while the connect repository is public.
 
 === Configuration options
 
