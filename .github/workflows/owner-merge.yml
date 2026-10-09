@@ -1,0 +1,191 @@
+name: Owner Merge
+
+# Owners merge their own changes without an external review
+# (DEVPROD-5038). This is the cupboard Owner Merge workflow
+# (DEVPROD-4759), extended to accept a `*` catch-all line.
+#
+# The default-branch ruleset requires one approval plus a code-owner
+# approval. This workflow supplies that approval — as @vbotbuildovich,
+# which CODEOWNERS co-lists on owner-merge-enabled lines — when the PR
+# author is a member of the owning team for every path the PR touches.
+# The author then merges normally. Anything else — an outsider's PR,
+# or any change to a line without the bot, such as /.github/ — gets no
+# approval from the bot, and the owning team reviews as usual.
+#
+# Security posture:
+# - pull_request_target runs THIS file's base-branch version, so a PR
+#   cannot modify the workflow and have the modified copy run with
+#   secrets. Only the base branch is checked out; no PR code executes.
+# - CODEOWNERS is read from the base branch, so a PR cannot grant
+#   itself ownership by editing CODEOWNERS in the same PR.
+# - The bot is not a code owner of /.github/, so its approval cannot
+#   unlock CI or CODEOWNERS changes even if this workflow misfires.
+# - The ruleset sets dismiss_stale_reviews_on_push, so every push
+#   re-runs this decision instead of riding an earlier approval.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: owner-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  owner-merge:
+    # Same-repo, non-draft PRs only, and never for the bot's own PRs.
+    # Fork PRs get no approval and fall through to normal owner review.
+    if: >
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'vbotbuildovich'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out base branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          fetch-depth: 1
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ vars.RP_AWS_CRED_REGION }}
+          role-to-assume: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
+
+      - uses: aws-actions/aws-secretsmanager-get-secrets@v3
+        with:
+          secret-ids: |
+            ,sdlc/prod/github/cupboard_owner_merge_token
+          parse-json-secrets: true
+
+      - name: Approve when the author owns every changed path
+        env:
+          GH_TOKEN: ${{ env.OWNER_MERGE_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: python
+        run: |
+          import json
+          import os
+          import subprocess
+          import sys
+
+          BOT = "vbotbuildovich"
+          ORG = "redpanda-data"
+          repo = os.environ["REPO"]
+          pr = os.environ["PR_NUMBER"]
+          author = os.environ["AUTHOR"]
+          head_sha = os.environ["HEAD_SHA"]
+
+          def gh(*args):
+              res = subprocess.run(
+                  ["gh", *args], capture_output=True, text=True)
+              return res.returncode, res.stdout
+
+          def gh_json(path, paginate=False):
+              args = ["api", path]
+              if paginate:
+                  args += ["--paginate", "--slurp"]
+              rc, out = gh(*args)
+              if rc != 0:
+                  return None
+              data = json.loads(out)
+              if paginate:  # --slurp wraps pages in an outer array
+                  data = [x for page in data for x in page]
+              return data
+
+          def bail(msg):
+              print(f"no owner-merge: {msg}")
+              sys.exit(0)
+
+          # Ownership rules, from the BASE branch's CODEOWNERS.
+          # Only a bare `*` catch-all and anchored exact-file and
+          # directory-prefix patterns are supported; anything else
+          # fails closed.
+          rules = []
+          with open(".github/CODEOWNERS") as f:
+              for line in f:
+                  line = line.strip()
+                  if not line or line.startswith("#"):
+                      continue
+                  pattern, *owners = line.split()
+                  if pattern == "*":
+                      rules.append(("", owners))  # matches every path
+                      continue
+                  if not pattern.startswith("/") or "*" in pattern:
+                      bail(f"unsupported CODEOWNERS pattern {pattern!r}")
+                  rules.append((pattern[1:], owners))
+
+          def owners_of(path):
+              matched = None
+              for prefix, owners in rules:  # last match wins
+                  if not prefix or path == prefix \
+                          or (prefix.endswith("/") and path.startswith(prefix)):
+                      matched = owners
+              return matched
+
+          files = gh_json(f"repos/{repo}/pulls/{pr}/files", paginate=True)
+          if files is None:
+              bail("could not list changed files")
+          paths = {f["filename"] for f in files}
+          paths |= {f["previous_filename"] for f in files
+                    if f.get("previous_filename")}
+
+          # The author must be an active member of an owning team on
+          # every owned path, and every owned path must have the bot
+          # co-listed (bot presence is how CODEOWNERS marks a line as
+          # owner-merge-enabled). Unowned paths need no review at all.
+          membership_cache = {}
+
+          def is_member(team_slug):
+              if team_slug not in membership_cache:
+                  data = gh_json(
+                      f"orgs/{ORG}/teams/{team_slug}"
+                      f"/memberships/{author}")
+                  membership_cache[team_slug] = bool(
+                      data and data.get("state") == "active")
+              return membership_cache[team_slug]
+
+          gated = False
+          for path in sorted(paths):
+              owners = owners_of(path)
+              if owners is None:
+                  continue
+              gated = True
+              if f"@{BOT}" not in owners:
+                  bail(f"{path}: owner-merge not enabled for {owners}")
+              teams = [o.removeprefix(f"@{ORG}/") for o in owners
+                       if o.startswith(f"@{ORG}/")]
+              if not any(is_member(t) for t in teams):
+                  bail(f"{path}: @{author} is not in {teams}")
+
+          # Idempotence: skip if the bot already approved this head.
+          reviews = gh_json(
+              f"repos/{repo}/pulls/{pr}/reviews", paginate=True) or []
+          for r in reviews:
+              if (r["user"]["login"] == BOT
+                      and r["state"] == "APPROVED"
+                      and r["commit_id"] == head_sha):
+                  bail(f"already approved {head_sha[:8]}")
+
+          reason = (
+              f"@{author} is a member of the owning team for every "
+              "path in this PR" if gated else
+              "this PR touches no CODEOWNERS paths")
+          body = (
+              f"owner-merge: {reason}, so per the owner-merge policy "
+              "(DEVPROD-5038) no external review is required. "
+              "Approving so the author can merge.")
+          rc, out = gh("pr", "review", pr, "--repo", repo,
+                       "--approve", "--body", body)
+          if rc != 0:
+              print(out)
+              sys.exit(1)
+          print(f"approved PR #{pr} at {head_sha[:8]} for @{author}")
