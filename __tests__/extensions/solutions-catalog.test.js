@@ -2227,8 +2227,8 @@ describe('solutions-catalog: authoring drift', () => {
     expect(validate.DESCRIPTION_MAX).toBe(140)
   })
 
-  test('a separately deployed Redpanda product is a technology', async () => {
-    await expect(run({ solutions: [makeSolution('leaderboard', { attrs: { 'page-solution-technologies': 'Redpanda Migrator, Redpanda Operator, Go' } })] })).resolves.toBeTruthy()
+  test('a separately deployed Redpanda product is a technology, even one the taxonomy also names', async () => {
+    await expect(run({ solutions: [makeSolution('leaderboard', { attrs: { 'page-solution-technologies': 'Redpanda Connect, Redpanda Migrator, Redpanda Operator, Go' } })] })).resolves.toBeTruthy()
   })
 
   test('step durations that do not add up to the total warn, only when every step is timed', async () => {
