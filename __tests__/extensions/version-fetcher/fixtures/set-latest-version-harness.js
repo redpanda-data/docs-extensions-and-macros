@@ -9,7 +9,13 @@
 // require.cache so no network requests are made.
 //
 // Usage: node set-latest-version-harness.js '<scenario JSON>'
-// Prints a JSON result: { versionAttributes, latestAttributes, errors }
+// Prints a JSON result: { versionAttributes, latestAttributes, attributesByVersion,
+// errors, warnings, requires, helmChartLookups }
+//
+// The component has one version (26.2) unless the scenario lists `versions`,
+// in which case `latestVersion` names the component's latest. Set
+// `helmChartByTag` to answer the Helm chart lookup per operator tag; a tag
+// missing from it resolves to no chart version.
 
 const path = require('path');
 
@@ -44,7 +50,12 @@ const config = { ...defaults, ...scenario };
 
 mock(path.join(extDir, 'get-latest-redpanda-version.js'), async () => config.redpanda);
 mock(path.join(extDir, 'fetch-latest-docker-tag.js'), async (namespace, repo) => config.dockerTags[repo] || null);
-mock(path.join(extDir, 'get-latest-redpanda-helm-version-from-operator.js'), async () => config.helmChart);
+const helmChartLookups = [];
+mock(path.join(extDir, 'get-latest-redpanda-helm-version-from-operator.js'), async (github, owner, repo, stableTag) => {
+  helmChartLookups.push(stableTag);
+  if (!config.helmChartByTag) return config.helmChart;
+  return { latestStableRelease: config.helmChartByTag[stableTag] || null, latestBetaRelease: null };
+});
 mock(path.join(extDir, 'get-latest-connect.js'), async () => config.connect);
 mock(path.join(repoRoot, 'cli-utils/github-token.js'), { getGitHubToken: () => 'fake-token', getGitHubApiToken: () => 'fake-token' });
 
@@ -59,10 +70,11 @@ Module._load = function (request, ...rest) {
 };
 
 const errors = [];
+const warnings = [];
 const logger = {
   info: () => {},
   debug: () => {},
-  warn: () => {},
+  warn: (message) => warnings.push(String(message)),
   error: (message) => errors.push(String(message)),
 };
 
@@ -76,11 +88,18 @@ const extensionContext = {
 
 require(path.join(extDir, 'set-latest-version.js')).register.call(extensionContext, { config: {} });
 
-const versionEntry = { name: 'ROOT', version: '26.2', asciidoc: { attributes: { ...config.versionAttributes } } };
+const versionNames = config.versions || ['26.2'];
+const latestVersion = config.versions ? config.latestVersion : '26.2';
+const versionEntries = versionNames.map((version) => ({
+  name: 'ROOT',
+  version,
+  asciidoc: { attributes: { ...config.versionAttributes } },
+}));
+const versionEntry = versionEntries[0];
 const component = {
   latestPrerelease: null,
-  versions: [versionEntry],
-  latest: { name: 'ROOT', version: '26.2', asciidoc: { attributes: { ...config.latestAttributes } } },
+  versions: versionEntries,
+  latest: { name: 'ROOT', version: latestVersion, asciidoc: { attributes: { ...config.latestAttributes } } },
 };
 const contentCatalog = { getComponents: async () => [component] };
 
@@ -89,8 +108,11 @@ const contentCatalog = { getComponents: async () => [component] };
   process.stdout.write(JSON.stringify({
     versionAttributes: versionEntry.asciidoc.attributes,
     latestAttributes: component.latest.asciidoc.attributes,
+    attributesByVersion: Object.fromEntries(versionEntries.map((entry) => [String(entry.version), entry.asciidoc.attributes])),
     errors,
+    warnings,
     requires,
+    helmChartLookups,
   }));
 })().catch((error) => {
   console.error(error);

@@ -4,30 +4,50 @@
  * The function separates tags into stable (tags not including "-beta") and beta (tags including "-beta"),
  * sorts each group by their major.minor version in descending order, and returns the top tag from each.
  *
+ * It also returns every stable tag it saw (`stableReleases`), so callers can
+ * pick the newest release of an older line, not just the newest overall.
+ * Docker Hub lists the most recently pushed tags first, so the first page
+ * already holds every line that still gets patches. Pass `maxPages` to reach
+ * further back.
+ *
  * @param {string} dockerNamespace - The Docker Hub namespace (organization or username)
  * @param {string} dockerRepo - The repository name on Docker Hub
  * @param {Object} logger - Optional Antora logger instance for logging
- * @returns {Promise<{ latestStableRelease: string|null, latestBetaRelease: string|null }>}
+ * @param {{ maxPages?: number, fetch?: Function }} options - How many pages of 100 tags to read (default 1), and an optional fetch implementation for tests
+ * @returns {Promise<{ latestStableRelease: string|null, latestBetaRelease: string|null, stableReleases: string[] }>}
  */
-module.exports = async (dockerNamespace, dockerRepo, logger = null) => {
-  const { default: fetch } = await import('node-fetch');
+module.exports = async (dockerNamespace, dockerRepo, logger = null, { maxPages = 1, fetch: fetchImpl } = {}) => {
+  const fetch = fetchImpl || (await import('node-fetch')).default;
 
   try {
-    // Fetch a list of tags from Docker Hub.
-    const url = `https://hub.docker.com/v2/repositories/${dockerNamespace}/${dockerRepo}/tags?page_size=100`;
-    const response = await fetch(url);
+    // Fetch a list of tags from Docker Hub. Only the first page is required:
+    // a later page that fails costs older lines, not the latest release.
+    const results = [];
+    let url = `https://hub.docker.com/v2/repositories/${dockerNamespace}/${dockerRepo}/tags?page_size=100`;
+    for (let page = 1; url && page <= maxPages; page++) {
+      const response = await fetch(url);
 
-    if (!response.ok) {
-      throw new Error(`Docker Hub API responded with status ${response.status}`);
+      if (!response.ok) {
+        const message = `Docker Hub API responded with status ${response.status}`;
+        if (page === 1) throw new Error(message);
+        if (logger) {
+          logger.warn(`${message} for page ${page} of ${dockerRepo} tags; using the first ${results.length} tags.`);
+        } else {
+          console.warn(`${message} for page ${page} of ${dockerRepo} tags; using the first ${results.length} tags.`);
+        }
+        break;
+      }
+
+      const data = await response.json();
+      results.push(...(data.results || []));
+      url = data.next;
     }
-
-    const data = await response.json();
 
     // Regex to capture major and minor version numbers (e.g. "v2.3")
     const versionRegex = /^v(\d+)\.(\d+)/;
 
     // Filter tags to include only those matching the version pattern.
-    let tags = data.results.filter(tag => versionRegex.test(tag.name));
+    let tags = results.filter(tag => versionRegex.test(tag.name));
 
     // For specific repositories (e.g. "redpanda-operator"), you might want to filter out certain versions.
     if (dockerRepo === 'redpanda-operator') {
@@ -61,7 +81,8 @@ module.exports = async (dockerNamespace, dockerRepo, logger = null) => {
 
     return {
       latestStableRelease: latestStableReleaseVersion || null,
-      latestBetaRelease: latestBetaReleaseVersion || null
+      latestBetaRelease: latestBetaReleaseVersion || null,
+      stableReleases: sortedStable.map(tag => tag.name)
     };
 
   } catch (error) {
@@ -72,7 +93,8 @@ module.exports = async (dockerNamespace, dockerRepo, logger = null) => {
     }
     return {
       latestStableRelease: null,
-      latestBetaRelease: null
+      latestBetaRelease: null,
+      stableReleases: []
     };
   }
 };
