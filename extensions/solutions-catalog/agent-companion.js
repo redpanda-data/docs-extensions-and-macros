@@ -76,10 +76,30 @@ function resourceUrl (id, { slug, siteUrl = DEFAULT_SITE_URL } = {}) {
   return null
 }
 
+/**
+ * A link to one of this solution's attachments, in Markdown.
+ *
+ * verification.json is the only file a solution publishes as an attachment,
+ * and it is evidence, so it gets a live URL. Any other path is the reference
+ * system's code, which is never a public download: every build-along file is
+ * shown in full on the solution's pages, and only signed-in readers download
+ * it, so it is named as a repo path with no link an agent could not follow.
+ */
+function attachmentRef (path, text, { slug, siteUrl = DEFAULT_SITE_URL } = {}) {
+  const file = String(path).replace(/^\.\//, '')
+  if (file === 'verification.json') {
+    const label = text || file
+    return slug ? `[${label}](${siteUrl}/solutions/${slug}/_attachments/${file})` : `\`${label}\` (verification evidence)`
+  }
+  return `\`${file}\` (reference code, shown in full on the solution's pages)`
+}
+
 /** AsciiDoc inline markup -> Markdown, for the constructs solution pages use. */
 function inline (s, ctx) {
   const titles = (ctx && ctx.titles) || {}
   return String(s)
+    .replace(/xref:(?:[^[\s$:]+:)?attachment\$([^[\s]+)\[([^\]]*)\]/g, (_, p, t) => attachmentRef(p, t, ctx))
+    .replace(/link:\{attachmentsdir\}\/([^[]+)\[([^\]]*)\]/g, (_, p, t) => attachmentRef(p, t, ctx))
     .replace(/xref:([^[\s]+)\[([^\]]*)\]/g, (_, id, text) => {
       const url = resourceUrl(id, ctx)
       const stem = id.replace(/\.adoc.*$/, '')
@@ -96,7 +116,6 @@ function inline (s, ctx) {
     })
     .replace(/<<([^,>]+),([^>]+)>>/g, '$2')
     .replace(/<<([^>]+)>>/g, (_, a) => a.replace(/^_/, '').replace(/[_-]/g, ' '))
-    .replace(/link:\{attachmentsdir\}\/([^[]+)\[([^\]]*)\]/g, (_, p, t) => `\`${t || p}\` (reference code)`)
     .replace(/(?:link:)?(https?:\/\/[^\s[]+)\[([^\]]*)\]/g, (_, u, t) => `[${t.replace(/\^$/, '') || u}](${u})`)
     .replace(/`\+([^`]*)\+`/g, '`$1`')
     .replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s.,:;)]|$)/g, '$1**$2**')
@@ -630,6 +649,7 @@ module.exports = {
   selectTagged,
   productionGaps,
   resourceUrl,
+  attachmentRef,
   inline,
   parsePage,
   prose,

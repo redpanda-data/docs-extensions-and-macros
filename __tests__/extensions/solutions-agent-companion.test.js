@@ -6,6 +6,8 @@ const path = require('path')
 const {
   generateAgentCompanion,
   resourceUrl,
+  attachmentRef,
+  inline,
   parsePage,
   prose,
   verifyChecks,
@@ -172,6 +174,35 @@ describe('agent companion: resourceUrl', () => {
   test('unlinked xrefs keep the resource ID instead of a guessed URL', () => {
     const out = prose(['See xref:cloud-data-platform:security:authorization/acl.adoc[].'], ctx)
     expect(out).toBe('See acl (`cloud-data-platform:security:authorization/acl.adoc`).')
+  })
+})
+
+// A solution's code is never a public download: verification.json is its only
+// attachment. The companion must not hand an agent a public link to code.
+describe('agent companion: attachment references', () => {
+  const ctx = { slug: 'multiplayer-gaming' }
+
+  test('verification.json is evidence and gets its live URL', () => {
+    expect(inline('Evidence: link:{attachmentsdir}/verification.json[]', ctx))
+      .toBe('Evidence: [verification.json](https://docs.redpanda.com/solutions/multiplayer-gaming/_attachments/verification.json)')
+    expect(inline('See xref:attachment$verification.json[the run].', ctx))
+      .toBe('See [the run](https://docs.redpanda.com/solutions/multiplayer-gaming/_attachments/verification.json).')
+  })
+
+  test('any other attachment is named by its repo path, with no link', () => {
+    for (const source of ['See link:{attachmentsdir}/services/board.go[the board].', 'See xref:attachment$services/board.go[the board].']) {
+      const md = inline(source, ctx)
+      expect(md).toBe("See `services/board.go` (reference code, shown in full on the solution's pages).")
+      expect(md).not.toMatch(/_attachments|\]\(/)
+    }
+  })
+
+  test('without a slug, verification.json is named, not linked', () => {
+    expect(attachmentRef('verification.json', '', {})).toBe('`verification.json` (verification evidence)')
+  })
+
+  test('a page xref is untouched by the attachment rule', () => {
+    expect(inline('See xref:build-leaderboard.adoc[Build].', ctx)).toBe('See [Build](https://docs.redpanda.com/solutions/multiplayer-gaming/build-leaderboard/).')
   })
 })
 
