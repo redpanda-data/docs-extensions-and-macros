@@ -5,12 +5,27 @@
 
 == What you do
 
-Download link:{attachmentsdir}/docker-compose.yml[docker-compose.yml] and start the stack.
+Save `docker-compose.yml` from the Complete source below and start the stack.
 
 [source,bash]
 ----
 include::example$commands.sh[tags=up]
 ----
+
+.Complete source: `docker-compose.yml`
+[%collapsible]
+====
+[source,yaml]
+----
+include::example$docker-compose.yml[]
+----
+====
+
+== Files for this step
+
+* `docker-compose.yml`: shown in full under Complete source.
+
+Signed-in readers can download each file with the Download control on its code block or from the All build-along files panel.
 
 == Why
 

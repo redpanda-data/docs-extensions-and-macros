@@ -787,7 +787,7 @@ When the build has no `solutions` component, every hook is a no-op, so the exten
 
 Everything Antora-independent lives in pure modules next to `index.js`:
 
-* `collect.js` reads the component into records (module = solution id) and derives repo, tag, asset, and attachments.
+* `collect.js` reads the component into records (module = solution id) and derives repo, tag, asset, the download allowlist (`files`), and the inputs of the build-along rules (the module's attachments and examples, and `page-solution-generated-files`).
 * `validate.js` holds every rule and returns `{ errors, warnings }`; errors are collected across all solutions and thrown once.
 * `relationships.js` parses and validates `relationships.yml` and computes the scored graph.
 * `outputs.js` shapes `page-solution`, `solutions.json`, and `solutions-graph.json`.
@@ -795,7 +795,7 @@ Everything Antora-independent lives in pure modules next to `index.js`:
 === Hooks
 
 contentClassified::
-Structural fatals: the landing page `ROOT/pages/index.adoc` exists; every solution module has `pages/index.adoc`; module names are unique, lower-case slugs, and not reserved (`progress`, `download`, `api`, `index`, `examples`); `ROOT/partials/relationships.yml` parses as YAML and validates against `docs-data/solutions-relationships.schema.json`. A missing `relationships.yml` warns and builds with no editorial edges.
+Structural fatals: the landing page `ROOT/pages/index.adoc` exists; every solution module has `pages/index.adoc`; module names are unique, lower-case slugs, and not reserved (`progress`, `download`, `api`, `index`, `examples`); `ROOT/partials/relationships.yml` parses as YAML and validates against `docs-data/solutions-relationships.schema.json`. A missing `relationships.yml` warns and builds with no editorial edges. Also records every whole-file `include::example$` in the solution page sources for the build-along check (see <<Build-along files>>), because this is the last hook where page contents are still AsciiDoc.
 
 documentsConverted::
 Register directly before `validate-attributes`, and after `unpublish-pages` and `add-git-dates`. Collects records, normalizes `page-categories` (parents added, unknown values fatal), runs every validation rule, applies `page-solution-status`, computes `page-related-solutions` for eligible Product Docs pages, writes the derived attributes onto solution pages, and sets the `solutions-catalog` component attribute on every component version. The attribute is set here rather than at `beforePublish` because Antora composes pages before `beforePublish` fires.
@@ -826,7 +826,7 @@ include_drafts (optional)::
 `true` or `false`. When set, wins over `SOLUTIONS_INCLUDE_DRAFTS`. Default: follow the environment variable, else `false`.
 
 public_repo (optional)::
-`true` or `false`. Default `false`. The solutions repository is private, so by default no output names it: the public record has no `repo`, pages get no `page-solution-repo`, and the `.md` block carries neither `repository.url` nor `repository.ref`. Readers get the code through the download endpoint and the public attachments. Set `true` only if the repository becomes public. The release check reads the repository from the content source either way.
+`true` or `false`. Default `false`. The solutions repository is private, so by default no output names it: the public record has no `repo`, pages get no `page-solution-repo`, and the `.md` block carries neither `repository.url` nor `repository.ref`. Readers read every build-along file in full on the pages, and signed-in readers download it through the gated download endpoint. Set `true` only if the repository becomes public. The release check reads the repository from the content source either way.
 
 === Registration
 
@@ -854,8 +854,8 @@ docs/modules/ROOT/pages/index.adoc           :page-layout: solutions-home
 docs/modules/ROOT/partials/relationships.yml editorial edges (schema below)
 docs/modules/<slug>/pages/index.adoc         overview, :page-layout: solution
 docs/modules/<slug>/pages/<step-id>.adoc     one page per step, :page-layout: solution-step
-docs/modules/<slug>/attachments/*            build-along files, published at /solutions/<slug>/_attachments/
-docs/modules/<slug>/examples/*               code pulled into pages with the example$ include macro
+docs/modules/<slug>/attachments/verification.json  Doc Detective evidence, the module's only attachment
+docs/modules/<slug>/examples/*               symlink onto solutions/<slug>/: the code pages show with the example$ include macro
 docs/modules/examples/attachments/*          public tutorial code for Product Docs pages (not a solution)
 ----
 
@@ -934,13 +934,17 @@ On the overview (`pages/index.adoc`):
 | `page-solution-superseded-by`
 | when deprecated
 | Solution id the reader should use instead.
+
+| `page-solution-generated-files`
+| no
+| Comma list of repo paths under `solutions/<slug>/` that a reader produces with a documented command instead of reading on a page (for example `services/go.sum, services/internal/gamepb/game_events.pb.go`). These are the only files a reader needs that no page shows in full. Each entry must be a file in the module's examples (fatal otherwise, as is listing one twice). See <<Build-along files>>.
 |===
 
 On a step page: `page-layout` must be `solution-step`; `description` is the step's own; `page-solution-step-duration` (optional) is an integer number of minutes. When every step sets it, the build warns if they do not add up to `page-solution-duration`.
 
 Published solutions must also pass the section checks on the converted HTML: the overview needs `h2` headings `Architecture` and `Prerequisites` (matched after lower-casing, collapsing whitespace, and dropping trailing punctuation); every step needs an `h2`/`h3` whose text starts with `Verify` or a block with the `solution-verify` role.
 
-Production considerations live at the end of the last step in `page-solution-steps`, where the reader has the whole stack running, not on the overview. The last step needs an `h2` `Production considerations` with at least five `h3` topics under it (the content repo assembles it with `include::partial$production/_all.adoc[]`, one `[#prod-<topic>]` `=== <Topic>` per partial). Every `[.production-note]` block on any page of the solution (the in-context `== In production` note on a step) must contain a link, which points at its topic on the last step. Both checks are fatal for a published solution and warnings for a draft. The section left on the overview or on an earlier step is a warning. Every link into this module's own attachments (`link:{attachmentsdir}/...`, or any href that resolves under `/solutions/<slug>/_attachments/` once resolved against the page URL) must point at a file that exists in the module. Links to another module's or another component's attachments are not checked here.
+Production considerations live at the end of the last step in `page-solution-steps`, where the reader has the whole stack running, not on the overview. The last step needs an `h2` `Production considerations` with at least five `h3` topics under it (the content repo assembles it with `include::partial$production/_all.adoc[]`, one `[#prod-<topic>]` `=== <Topic>` per partial). Every `[.production-note]` block on any page of the solution (the in-context `== In production` note on a step) must contain a link, which points at its topic on the last step. Both checks are fatal for a published solution and warnings for a draft. The section left on the overview or on an earlier step is a warning. Every link into this module's own attachments (`link:{attachmentsdir}/...`, or any href that resolves under `/solutions/<slug>/_attachments/` once resolved against the page URL) must point at a file that exists in the module. Because `verification.json` is the only attachment a solution may have (see <<Build-along files>>), a link to any other file there is fatal. Links to another module's or another component's attachments are not checked here.
 
 Every link on a solution page that carries a `#fragment` and lands on a page in this build (the same page, another solution page, or a Product Docs page) must name an id in that page's converted HTML. This site renders headings with no id prefix and hyphens (`idprefix` empty, `idseparator` `-`), so `#_production_considerations` misses and `#production-considerations` hits; the message suggests the hyphenated id when the target has it. A miss is fatal for a published or deprecated solution and a warning for a draft. Links to attachments, to URLs that are not pages in the build, and off-site links are not checked.
 
@@ -953,7 +957,7 @@ Written on the overview and every step page (complex values are JSON strings, re
 | Attribute | Value
 
 | `page-solution`
-| The full record: `id`, `title`, `description`, `url`, `version`, `tag`, `asset`, `repo` (only with `public_repo: true`), `status`, `draft` (true only for a draft built with `include_drafts`), `featured`, `difficulty`, `duration`, `download`, `platforms`, `technologies`, `categories`, `useCases`, `files` (see <<Snippet provenance and the download allowlist>>), `personas`, `steps[{id, title, url, order, duration}]`, `relatedDocs[{id, title, url, provenance}]`, `relatedSolutions[{id, title, url}]`, `attachments[{name, url}]`, `supersededBy`, `lastModified`, and `verified{suite, specs, steps, commands, checks, media, verifyScript, redpandaVersion, runAt, platforms, contentRev, stackSha256}` when the solution ships a verification manifest (see <<Verification>>). Keys the manifest did not carry are absent, and a solution with no manifest has no `verified` key at all.
+| The full record: `id`, `title`, `description`, `url`, `version`, `tag`, `asset`, `repo` (only with `public_repo: true`), `status`, `draft` (true only for a draft built with `include_drafts`), `featured`, `difficulty`, `duration`, `download`, `platforms`, `technologies`, `categories`, `useCases`, `files` (see <<Snippet provenance and the download allowlist>>), `personas`, `steps[{id, title, url, order, duration}]`, `relatedDocs[{id, title, url, provenance}]`, `relatedSolutions[{id, title, url}]`, `attachments[{name, url}]` (kept for compatibility: `verification.json` is the only attachment and is published as `verified`, so this is empty; `files` is the build-along list), `supersededBy`, `lastModified`, and `verified{suite, specs, steps, commands, checks, media, verifyScript, redpandaVersion, runAt, platforms, contentRev, stackSha256}` when the solution ships a verification manifest (see <<Verification>>). Keys the manifest did not carry are absent, and a solution with no manifest has no `verified` key at all.
 
 | `page-solution-nav`
 | `{ home: {title, url}, overview: {title, url}, steps: [{id, title, url, order, duration}] }`. Every title in the JSON outputs is plain text: inline markup in the document title (`<code>`, entities) is stripped before it enters `page-solution`, the nav, `relatedDocs`, or `relatedSolutions`.
@@ -983,13 +987,23 @@ Eligible Product Docs pages receive `page-related-solutions`, only when non-empt
 Every code block on a solution page is single-sourced from the solution's own code with `include::example$<path>`, so a reader can be offered the file behind the snippet. Two outputs carry that:
 
 * Each listing block rendered from an `example$` include gets `data-solution-file="<path>"` in the HTML, plus `data-solution-tag="<tag>"` when the include selected exactly one tagged region, and the `sol-snippet` role. A hand-written listing gets none of these. This is the `add-solution-file-provenance` AsciiDoc extension (see <<Solution snippet provenance>>), which must be registered in `asciidoc.extensions`.
-* The record's `files` is the deduplicated, sorted set of those paths across the solution's overview and step pages: exactly the set a reader may download and nothing more. The download endpoint rejects any path that is not in it.
+* The record's `files` is the deduplicated, sorted set of those paths across the solution's overview and step pages: exactly the set a reader may download and nothing more. It is also the list the rail's All build-along files panel renders, each entry a link to the gated download. The download endpoint rejects any path that is not in it.
 
 Nothing under the module's `examples/steps/` directory is stamped, and so nothing there is downloadable: a step's `commands.sh` holds the tagged commands the page shows inline and Doc Detective runs, and `steps/<step>/expected/` holds captured output (as does an `expected/` directory anywhere else). Both are scaffolding that only makes sense beside the harness that uses them.
 
-`files` is read back out of the rendered HTML rather than by re-reading the AsciiDoc, which is what keeps the two in step: a snippet a reader can see is in the list, and a path no page renders cannot be. A solution whose pages render no includes has an empty list.
+`files` is read back out of the rendered HTML rather than by re-reading the AsciiDoc, which is what keeps the two in step: a snippet a reader can see is in the list, and a path no page renders cannot be. A solution whose pages render no includes has an empty list. A listing nested in another block counts the same as one at the top level, so the `.Complete source: <path>` pattern (a `[%collapsible]` example block around `include::example$<path>[]`) puts its file in the list.
 
 Provenance depends on Antora attaching block source locations, which it does only when `asciidoc.sourcemap` is set. The `solutions-catalog` extension sets it at `beforeProcess` so no playbook has to remember; without it the attributes and the allowlist would both be silently empty.
+
+=== Build-along files
+
+A solution's code is not a public download. Readers read every file they need to build along on a page, and signed-in readers download any of those files, one at a time from its code block or the rail's All build-along files panel, or as the release bundle, through the gated download endpoint, which serves only the record's `files`. Public attachments would bypass that sign-in, so the build enforces:
+
+* The module's attachments hold only `verification.json`. Any other attachment, a symlink onto the solution's code included, is fatal, for drafts too, since a draft's attachments publish the moment its status changes.
+* Each `page-solution-generated-files` entry is a file under `solutions/<slug>/` (through the module's `examples` symlink). Fatal otherwise. These are the files a reader produces with a documented command (`go.sum`, generated protobuf code) rather than reading on a page.
+* A file a page includes in full (`include::example$<path>[]` or `[tags=**]`, read from the page source) that no rendered code block carries is missing from `files`, so it would have no Download control and no rail entry. Provenance stamps every listing an example include renders, so this should not happen; it warns, with the page and line, for an include outside a listing block or behind a conditional. Includes under `steps/`, of an `expected/` directory, with an attribute reference in the path, inside a comment, or that do not resolve are not checked.
+
+Which files a reader needs, and that each is shown in full on some page, is checked by the solutions repository's own tooling; the build sees only what the pages render. Antora does not read files whose names start with a dot, so a file such as `.env.example` cannot be included with `example$` and is never in `files`.
 
 === Verification
 
@@ -1004,7 +1018,7 @@ A solution's Doc Detective evidence comes from `verification.json`, an attachmen
  "stack_sha256":"<hex SHA-256 of the stack the run started>"}
 ----
 
-`platforms` says which `page-solution-platforms` values the run covered, `content_rev` pins the exact content it verified, and `stack_sha256` the stack it ran. The file is read from the content catalog, mapped onto the record's `verified` (the manifest's `verify_script`, `redpanda_version`, `run_at`, `content_rev`, and `stack_sha256` become `verifyScript`, `redpandaVersion`, `runAt`, `contentRev`, and `stackSha256`), projected into the Markdown frontmatter under the manifest's own key names, and mirrored as `page-solution-verified-at` and `page-solution-verified-version` so a step page template can show when the solution was last verified without parsing JSON. Because it is machine evidence rather than build-along scaffolding, it is left out of the record's `attachments` list.
+`platforms` says which `page-solution-platforms` values the run covered, `content_rev` pins the exact content it verified, and `stack_sha256` the stack it ran. The file is read from the content catalog, mapped onto the record's `verified` (the manifest's `verify_script`, `redpanda_version`, `run_at`, `content_rev`, and `stack_sha256` become `verifyScript`, `redpandaVersion`, `runAt`, `contentRev`, and `stackSha256`), projected into the Markdown frontmatter under the manifest's own key names, and mirrored as `page-solution-verified-at` and `page-solution-verified-version` so a step page template can show when the solution was last verified without parsing JSON. Because it is machine evidence rather than build-along scaffolding, it is left out of the record's `attachments` list. It is also the only file a solution may publish as an attachment (see <<Build-along files>>).
 
 Nothing about verification is inferred. A solution with no manifest has no `verified` key, and the build warns when that solution is published, which is the build-side twin of the monorepo's `check-metadata`. A manifest that does not parse, is not a JSON object, or carries none of the known fields produces no key either, plus a warning naming the file and the reason. `run_at` is never synthesized from a git date: when it is missing or not an ISO 8601 timestamp the build warns and the value is published exactly as the manifest wrote it, so the disagreement is visible rather than papered over. The build also warns when the run is a day or more older than the newest `page-git-modified-date` across the overview and steps (the evidence predates what readers see), when `platforms` covers fewer platforms than `page-solution-platforms` claims, and when `platforms`, `content_rev`, or `stack_sha256` is malformed. None of these is fatal.
 
@@ -1106,7 +1120,7 @@ Unknown keys, a bad `status`, a `solution` that is not a slug, or a `doc` that i
 
 === Warnings
 
-Missing `page-solution-related-docs`; a related doc with no item in `== Related docs`; a landing or index page in related docs; a Cloud solution that reaches no Cloud page; an explicit edge hidden by `max_related`; empty, one-way, or no-shared-use-case `page-solution-related-solutions`; step durations that do not add up to `page-solution-duration`; a category no eligible doc page carries; a published solution with no `verification.json`; an unreadable `verification.json`; a `run_at` that is absent, not an ISO 8601 timestamp, or older than the pages; `platforms`, `content_rev`, or `stack_sha256` malformed or covering fewer platforms than the page claims; Production considerations on the overview or an earlier step; on a draft, the production considerations and Related docs findings that are fatal once published; no published solution featured; orphaned relationships; pending relationships (count); drafts being built; `page-valid-categories` unavailable (category validation and category edges are skipped); a release or asset missing on GitHub when `network_checks` runs.
+Missing `page-solution-related-docs`; a related doc with no item in `== Related docs`; a landing or index page in related docs; a Cloud solution that reaches no Cloud page; an explicit edge hidden by `max_related`; empty, one-way, or no-shared-use-case `page-solution-related-solutions`; step durations that do not add up to `page-solution-duration`; a category no eligible doc page carries; a published solution with no `verification.json`; an unreadable `verification.json`; a `run_at` that is absent, not an ISO 8601 timestamp, or older than the pages; `platforms`, `content_rev`, or `stack_sha256` malformed or covering fewer platforms than the page claims; a file included in full that no rendered code block carries; Production considerations on the overview or an earlier step; on a draft, the production considerations and Related docs findings that are fatal once published; no published solution featured; orphaned relationships; pending relationships (count); drafts being built; `page-valid-categories` unavailable (category validation and category edges are skipped); a release or asset missing on GitHub when `network_checks` runs.
 
 == Solution snippet provenance
 
@@ -1125,9 +1139,9 @@ A listing block rendered from `include::example$<path>` gets:
 `data-solution-tag`:: The tag the include selected, when it selected exactly one (`tags=handler` or `tag=handler`). A whole-file include, several regions (`tags=a;b`), a negation, or a wildcard leaves this off rather than naming something the reader is not looking at.
 `sol-snippet`:: A role, so the UI can find these blocks. Roles already on the block are kept.
 
-A hand-written listing gets none of them, and pages outside the `solutions` component are left alone entirely.
+A hand-written listing gets none of them, and pages outside the `solutions` component are left alone entirely. A listing nested in another block (the `[%collapsible]` example block of a `.Complete source`, a sidebar, a tab) is stamped the same way.
 
-How it works, in case it ever needs changing: Antora's include processor pushes the resolved file onto the reader carrying its Antora source record and a parent cursor that points at the include directive's own line, so a tree processor reading a block's `source_location` can tell which example file the block came from and which line of the page included it. The tag is read from that directive line, because Asciidoctor keeps the included lines and not the selection that produced them. Asciidoctor's HTML converter emits no `data-*` attributes on a listing block, so the tree processor marks each block with a per-document role token and a postprocessor swaps that token for the attributes; the token is unique per block, so nothing depends on blocks and HTML being in the same order.
+How it works, in case it ever needs changing: Antora's include processor pushes the resolved file onto the reader carrying its Antora source record and a parent cursor that points at the include directive's own line, so a tree processor reading a block's `source_location` can tell which example file the block came from and which line of the page included it. The tag is read from that directive line, because Asciidoctor keeps the included lines and not the selection that produced them. Asciidoctor's HTML converter emits no `data-*` attributes on a listing block, so the tree processor marks each block with a per-document role token and a postprocessor swaps that token for the attributes; the token is unique per block, so nothing depends on blocks and HTML being in the same order. A listing nested in a compound block is parsed from lines its parent already read, include expanded, so its source location names the page and the listing's own delimiter line instead of the included file. For those, the extension reads the line after the delimiter from the page source, takes it only when it is an `include::example$` directive of this module, resolves it through the content catalog, and checks that the block's first line is in that file, so a line number that drifted onto another listing's directive is never taken for this one.
 
 IMPORTANT: Block source locations exist only when `asciidoc.sourcemap` is set. The `solutions-catalog` extension sets it at `beforeProcess`, so registering that extension is enough; with neither, this extension emits nothing. The catalog turns these attributes into the solution record's `files` allowlist (see <<Snippet provenance and the download allowlist>>).
 

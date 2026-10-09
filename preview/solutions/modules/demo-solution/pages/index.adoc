@@ -1,7 +1,7 @@
 = Demo solution: live leaderboard
 :page-layout: solution
 :page-topic-type: solution
-:description: A fixture solution that exercises the solutions-catalog extension end to end: metadata, steps, attachments, and recommendations.
+:description: A fixture solution that exercises the solutions-catalog extension end to end: metadata, steps, build-along files, and recommendations.
 :page-solution-version: v1.0.0
 :page-solution-difficulty: beginner
 :page-solution-duration: 15
@@ -46,7 +46,12 @@ The producer writes to one topic; the consumer reads it with its own consumer gr
 
 == Build-along files
 
-* link:{attachmentsdir}/docker-compose.yml[docker-compose.yml]
+Every file you need is shown in full on the step that uses it:
+
+* `docker-compose.yml`: shown in full under Complete source on xref:start-environment.adoc[].
+* `hello.go`: shown in full on xref:verify-end-to-end.adoc[].
+
+Signed-in readers can download each file with the Download control on its code block or from the All build-along files panel.
 
 == Clean up
 

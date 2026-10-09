@@ -77,6 +77,19 @@ function makeAlias ({ component = 'solutions', version = '', module, relative, t
   }
 }
 
+// An example resource: a file under solutions/<slug>/ reached through the
+// module's examples symlink. Never published, so no out or pub.
+function makeExample ({ component = 'solutions', version = '', module, relative, text = '' }) {
+  return {
+    src: { component, version, module, relative, family: 'example' },
+    contents: Buffer.from(text),
+  }
+}
+
+// A code block as add-solution-file-provenance stamps it.
+const SNIPPET_HTML = (file) =>
+  `<div class="listingblock sol-snippet" data-solution-file="${file}"><div class="content"><pre>x</pre></div></div>`
+
 function makePartial ({ component = 'solutions', version = '', module = 'ROOT', relative, text }) {
   return {
     src: { component, version, module, relative, family: 'partial' },
@@ -122,10 +135,11 @@ const OVERVIEW_ATTRS = {
 }
 
 /**
- * A complete, valid solution: overview + three steps + one attachment.
+ * A complete, valid solution: overview + three steps, one example file the
+ * overview shows in full, and verification.json as its only attachment.
  * `mutate` can edit the overview attrs / html / steps before pages are built.
  */
-function makeSolution (id, { attrs = {}, steps, overviewHtml, stepHtml, title, verification = JSON.stringify(MANIFEST) } = {}) {
+function makeSolution (id, { attrs = {}, steps, overviewHtml, stepHtml, title, verification = JSON.stringify(MANIFEST), examples = ['docker-compose.yml'], attachments = [] } = {}) {
   const overviewAttrs = { ...OVERVIEW_ATTRS, ...attrs }
   const stepIds = steps || collect.parseList(overviewAttrs['page-solution-steps'])
   const overview = makePage({
@@ -133,7 +147,7 @@ function makeSolution (id, { attrs = {}, steps, overviewHtml, stepHtml, title, v
     relative: 'index.adoc',
     title: title || `Solution ${id}`,
     attrs: overviewAttrs,
-    html: overviewHtml || OVERVIEW_HTML(title || `Solution ${id}`, '<a href="_attachments/docker-compose.yml">compose</a>'),
+    html: overviewHtml || OVERVIEW_HTML(title || `Solution ${id}`, SNIPPET_HTML('docker-compose.yml')),
   })
   const stepPages = stepIds.map((stepId, i) => makePage({
     module: id,
@@ -145,9 +159,10 @@ function makeSolution (id, { attrs = {}, steps, overviewHtml, stepHtml, title, v
   return {
     pages: [overview, ...stepPages],
     attachments: [
-      makeAttachment({ module: id, relative: 'docker-compose.yml' }),
+      ...attachments.map((relative) => makeAttachment({ module: id, relative })),
       ...(verification === null ? [] : [makeAttachment({ module: id, relative: 'verification.json', text: verification })]),
     ],
+    examples: examples.map((relative) => makeExample({ module: id, relative })),
   }
 }
 
@@ -220,9 +235,13 @@ async function run ({
   env = {},
   hooks = ['contentClassified', 'documentsConverted', 'navigationBuilt', 'beforePublish'],
   beforeNavigationBuilt,
+  // '<module>/<relative>' -> AsciiDoc source: the page holds it at
+  // contentClassified and its converted HTML from documentsConverted on, as
+  // in a real build.
+  sources = {},
 } = {}) {
   const pages = [...(landing ? [landing] : []), ...solutions.flatMap((s) => s.pages), ...docs]
-  const attachments = solutions.flatMap((s) => s.attachments)
+  const attachments = [...solutions.flatMap((s) => s.attachments), ...solutions.flatMap((s) => s.examples || [])]
   const partials = [
     ...(relationshipsText === null ? [] : [makePartial({ relative: 'relationships.yml', text: relationshipsText })]),
     ...(facetsText === null ? [] : [makePartial({ relative: 'solution-facets.yml', text: facetsText })]),
@@ -235,7 +254,15 @@ async function run ({
   Object.assign(process.env, env)
   try {
     const { handlers, logger } = createContext(config)
+    const html = new Map()
+    for (const page of pages) {
+      const source = sources[`${page.src.module}/${page.src.relative}`]
+      if (source === undefined) continue
+      html.set(page, page.contents)
+      page.contents = Buffer.from(source)
+    }
     if (hooks.includes('contentClassified')) await handlers.contentClassified({ contentCatalog: catalog, siteCatalog, playbook })
+    for (const [page, contents] of html) page.contents = contents
     if (hooks.includes('documentsConverted')) await handlers.documentsConverted({ contentCatalog: catalog, siteCatalog, playbook })
     if (beforeNavigationBuilt) beforeNavigationBuilt(siteCatalog)
     if (hooks.includes('navigationBuilt')) await handlers.navigationBuilt({ contentCatalog: catalog, siteCatalog, playbook })
@@ -277,7 +304,10 @@ describe('solutions-catalog: happy path', () => {
     expect(record.download).toBe('authenticated')
     expect(record.featured).toBe(true)
     expect(record.duration).toBe(45)
-    expect(record.attachments).toEqual([{ name: 'docker-compose.yml', url: '/solutions/leaderboard/_attachments/docker-compose.yml' }])
+    // verification.json is the only attachment, and it is evidence, so the
+    // compatibility list is empty; files is the build-along list.
+    expect(record.attachments).toEqual([])
+    expect(record.files).toEqual(['docker-compose.yml'])
     expect(record.lastModified).toBe('2026-09-01')
   })
 
@@ -630,7 +660,7 @@ describe('solutions-catalog: step bijection', () => {
 
 describe('solutions-catalog: section checks on converted HTML', () => {
   test.each(['Architecture', 'Prerequisites'])('published overview without h2 %s', async (missing) => {
-    const html = OVERVIEW_HTML('Solution leaderboard', '<a href="_attachments/docker-compose.yml">c</a>').replace(`>${missing}</h2>`, '>Something else</h2>')
+    const html = OVERVIEW_HTML('Solution leaderboard', '<a href="_attachments/verification.json">c</a>').replace(`>${missing}</h2>`, '>Something else</h2>')
     const solution = makeSolution('leaderboard', { overviewHtml: html })
     await expect(run({ solutions: [solution] })).rejects.toThrow(new RegExp(`missing an h2 "${missing}"`))
   })
@@ -672,7 +702,7 @@ describe('solutions-catalog: section checks on converted HTML', () => {
 
   test('a relative attachment link from a step resolves against the step URL', async () => {
     // /solutions/leaderboard/build-leaderboard/ + ../_attachments/f -> /solutions/leaderboard/_attachments/f
-    const ok = makeSolution('leaderboard', { stepHtml: { 'build-leaderboard': STEP_HTML('b') .replace('</article>', '<a href="../_attachments/docker-compose.yml">c</a></article>') } })
+    const ok = makeSolution('leaderboard', { stepHtml: { 'build-leaderboard': STEP_HTML('b') .replace('</article>', '<a href="../_attachments/verification.json">c</a></article>') } })
     await expect(run({ solutions: [ok] })).resolves.toBeTruthy()
     const bad = makeSolution('leaderboard', { stepHtml: { 'build-leaderboard': STEP_HTML('b').replace('</article>', '<a href="../_attachments/nope.yml">c</a></article>') } })
     await expect(run({ solutions: [bad] })).rejects.toThrow(/build-leaderboard\.adoc links to attachment "nope\.yml" which does not exist/)
@@ -866,7 +896,7 @@ describe('solutions-catalog: status handling', () => {
     expect(result.siteCatalog.unpublishedPages).toEqual(expect.arrayContaining(['/solutions/sandbox/', '/solutions/sandbox/start-environment/', '/solutions/sandbox/old-name/']))
     expect(new Set(result.siteCatalog.unpublishedPages).size).toBe(result.siteCatalog.unpublishedPages.length)
     // attachments and images are files, not pages: not in the unpublished URL list
-    expect(result.siteCatalog.unpublishedPages).not.toContain('/solutions/sandbox/_attachments/docker-compose.yml')
+    expect(result.siteCatalog.unpublishedPages).not.toContain('/solutions/sandbox/_attachments/verification.json')
     // a live solution's files are untouched
     for (const file of result.solutions[0].attachments) expect(file.out).toBeDefined()
   })
@@ -905,7 +935,7 @@ describe('solutions-catalog: status handling', () => {
       fs.writeFileSync(file, buf)
       const entries = []
       await tar.t({ file, onentry: (e) => entries.push(e.path) })
-      expect(entries.join('\n')).toMatch(/docker-compose\.yml/)
+      expect(entries.join('\n')).toMatch(/verification\.json/)
       expect(entries.join('\n')).not.toMatch(/sandbox/)
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
@@ -1332,7 +1362,8 @@ describe('solutions-catalog: verification manifest', () => {
     const solution = makeSolution('leaderboard')
     await run({ solutions: [solution] })
     const record = json(solution.pages[0], 'page-solution')
-    expect(record.attachments.map((a) => a.name)).toEqual(['docker-compose.yml'])
+    expect(record.attachments).toEqual([])
+    expect(record.verified).toBeDefined()
   })
 
   test('no manifest means no key, and a published solution says so', async () => {
@@ -1500,7 +1531,7 @@ describe('solutions-catalog: snippet allowlist', () => {
   })
 
   test('a solution whose pages render no snippets has an empty allowlist', async () => {
-    const solution = makeSolution('leaderboard')
+    const solution = makeSolution('leaderboard', { overviewHtml: OVERVIEW_HTML('Solution leaderboard') })
     await run({ solutions: [solution] })
     expect(json(solution.pages[0], 'page-solution').files).toEqual([])
   })
@@ -2101,5 +2132,132 @@ describe('solutions-catalog: authoring drift', () => {
     expect(w).toMatch(/alpha: page-solution-related-solutions lists bravo, but the two share no page-solution-use-cases value/)
     // A symmetric pair that shares a use case is quiet.
     expect(w).not.toMatch(/charlie lists it|delta lists it|charlie.*share no|delta.*share no/)
+  })
+})
+
+describe('solutions-catalog: build-along files', () => {
+  const errorsOf = async (solution) => {
+    try {
+      await run({ solutions: [solution] })
+      return ''
+    } catch (err) {
+      return err.message
+    }
+  }
+  const warningsOf = (result) => result.logger.warn.mock.calls.map((c) => c[0]).join('\n')
+
+  test('verification.json alone is a valid attachments family', async () => {
+    // The negative control for every rule below: the default fixture.
+    await expect(run({ solutions: [makeSolution('leaderboard')] })).resolves.toBeTruthy()
+  })
+
+  test('any other public attachment is fatal, symlinked code included', async () => {
+    const solution = makeSolution('leaderboard', { attachments: ['docker-compose.yml', 'services/leaderboard/main.go'] })
+    const message = await errorsOf(solution)
+    expect(message).toMatch(/leaderboard: attachments\/docker-compose\.yml is a public attachment; a solution's only attachment is verification\.json/)
+    expect(message).toMatch(/leaderboard: attachments\/services\/leaderboard\/main\.go is a public attachment/)
+    expect(message).not.toMatch(/attachments\/verification\.json is a public attachment/)
+  })
+
+  test('a draft gets no exemption', async () => {
+    const draft = makeSolution('sandbox', { attrs: { 'page-solution-status': 'draft' }, attachments: ['Makefile.mk'] })
+    delete draft.pages[0].asciidoc.attributes['page-solution-related-docs']
+    expect(await errorsOf(draft)).toMatch(/sandbox: attachments\/Makefile\.mk is a public attachment/)
+  })
+
+  test('a link to verification.json resolves; a link to a deleted attachment is fatal', async () => {
+    const ok = makeSolution('leaderboard', {
+      overviewHtml: OVERVIEW_HTML('Solution leaderboard', SNIPPET_HTML('docker-compose.yml') + '<a href="_attachments/verification.json">evidence</a>'),
+    })
+    await expect(run({ solutions: [ok] })).resolves.toBeTruthy()
+    const bad = makeSolution('leaderboard', {
+      overviewHtml: OVERVIEW_HTML('Solution leaderboard', SNIPPET_HTML('docker-compose.yml') + '<a href="_attachments/docker-compose.yml">compose</a>'),
+    })
+    expect(await errorsOf(bad)).toMatch(/index\.adoc links to attachment "docker-compose\.yml" which does not exist in the module/)
+  })
+
+  test('page-solution-generated-files entries must be real files under solutions/<slug>/', async () => {
+    const examples = ['docker-compose.yml', 'services/go.sum', 'services/internal/gamepb/game_events.pb.go']
+    const ok = makeSolution('leaderboard', {
+      examples,
+      attrs: { 'page-solution-generated-files': 'services/go.sum, ./services/internal/gamepb/game_events.pb.go' },
+    })
+    await expect(run({ solutions: [ok] })).resolves.toBeTruthy()
+
+    const missing = makeSolution('leaderboard', { examples, attrs: { 'page-solution-generated-files': 'services/go.sum, services/go.mod' } })
+    const message = await errorsOf(missing)
+    expect(message).toMatch(/leaderboard: page-solution-generated-files entry "services\/go\.mod" is not a file under solutions\/leaderboard\//)
+    expect(message).not.toMatch(/"services\/go\.sum"/)
+
+    const twice = makeSolution('leaderboard', { examples, attrs: { 'page-solution-generated-files': 'services/go.sum, services/go.sum' } })
+    expect(await errorsOf(twice)).toMatch(/page-solution-generated-files lists "services\/go\.sum" more than once/)
+  })
+
+  test('the attribute is read into the record as repo paths', async () => {
+    const solution = makeSolution('leaderboard', { examples: ['docker-compose.yml', 'services/go.sum'], attrs: { 'page-solution-generated-files': ' ./services/go.sum ' } })
+    const collected = collect.collectSolutions(makeCatalog({ pages: [makeLanding(), ...solution.pages], attachments: [...solution.attachments, ...solution.examples] }))
+    const record = collected.solutions[0]
+    expect(record.generatedFiles).toEqual(['services/go.sum'])
+    expect(record.exampleFiles).toEqual(['docker-compose.yml', 'services/go.sum'])
+    expect(record.attachmentFiles).toEqual(['verification.json'])
+  })
+
+  const OVERVIEW_SOURCE = (body) => `= Solution leaderboard\n:page-layout: solution\n\n${body}\n`
+
+  test('a file included in full that no code block carries warns with page and line', async () => {
+    // The include sits outside a listing block, so provenance never stamps it.
+    const solution = makeSolution('leaderboard', { examples: ['docker-compose.yml', 'Makefile'] })
+    const result = await run({
+      solutions: [solution],
+      sources: {
+        'leaderboard/index.adoc': OVERVIEW_SOURCE('[source,yaml]\n----\ninclude::example$docker-compose.yml[]\n----\n\ninclude::example$Makefile[]'),
+      },
+    })
+    expect(warningsOf(result)).toMatch(/leaderboard: index\.adoc:9 includes example\$Makefile in full, but no rendered code block carries it, so it is missing from the download allowlist \(files\)/)
+    // docker-compose.yml is rendered in a stamped block: no warning for it.
+    expect(warningsOf(result)).not.toMatch(/example\$docker-compose\.yml in full/)
+  })
+
+  test('only whole-file includes of resolvable, non-scaffolding files count', async () => {
+    const solution = makeSolution('leaderboard', { examples: ['docker-compose.yml', 'Makefile', 'steps/start/commands.sh', 'main.go'] })
+    const result = await run({
+      solutions: [solution],
+      sources: {
+        'leaderboard/start-environment.adoc': [
+          '= Start', '',
+          'include::example$Makefile[tags=topics]',
+          'include::example$steps/start/commands.sh[]',
+          'include::example${dir}/main.go[]',
+          'include::example$not-there.go[]',
+          '// include::example$main.go[]',
+          '////', 'include::example$main.go[tags=**]', '////',
+        ].join('\n'),
+      },
+    })
+    expect(warningsOf(result)).not.toMatch(/in full, but no rendered code block/)
+  })
+
+  test('tags=** is a whole-file include', async () => {
+    const solution = makeSolution('leaderboard', { examples: ['docker-compose.yml', 'main.go'] })
+    const result = await run({
+      solutions: [solution],
+      sources: { 'leaderboard/build-leaderboard.adoc': '= Build\n\ninclude::example$main.go[tags=**]' },
+    })
+    expect(warningsOf(result)).toMatch(/leaderboard: build-leaderboard\.adoc:3 includes example\$main\.go in full/)
+  })
+
+  test('fullExampleIncludes and isFullIncludeAttrlist', () => {
+    expect(collect.isFullIncludeAttrlist('')).toBe(true)
+    expect(collect.isFullIncludeAttrlist('tags=**')).toBe(true)
+    expect(collect.isFullIncludeAttrlist('tag="**"')).toBe(true)
+    expect(collect.isFullIncludeAttrlist('tags=main')).toBe(false)
+    expect(collect.isFullIncludeAttrlist('tags=*')).toBe(false)
+    expect(collect.isFullIncludeAttrlist('lines=1..5')).toBe(false)
+    expect(collect.fullExampleIncludes('a\ninclude::example$./x/y.go[]\ninclude::partial$p.adoc[]\ninclude::example$z.sh[tags=a]')).toEqual([{ path: 'x/y.go', line: 2 }])
+    expect(collect.fullExampleIncludes(Buffer.from('include::example$a.yml[]'))).toEqual([{ path: 'a.yml', line: 1 }])
+  })
+
+  test('buildAlongFindings without collected includes or examples stays quiet', () => {
+    expect(validate.buildAlongFindings({ id: 'x', attachmentFiles: ['verification.json'], files: [] })).toEqual({ errors: [], warnings: [] })
   })
 })

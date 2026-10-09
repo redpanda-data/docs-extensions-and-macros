@@ -11,8 +11,9 @@
 
 const { parse } = require('node-html-parser')
 const {
-  RESERVED_IDS, LAYOUTS, ENUMS, SLUG_RX, VERSION_RX, VERIFICATION_FILE, COMPONENT, stripVersion, pageKey,
+  RESERVED_IDS, LAYOUTS, ENUMS, SLUG_RX, VERSION_RX, VERIFICATION_FILE, ALLOWED_ATTACHMENTS, COMPONENT, stripVersion, pageKey,
 } = require('./collect')
+const { isStepScaffolding } = require('../../asciidoc-extensions/add-solution-file-provenance')
 const { normalizeCategories, isLeafCategory } = require('../../extension-utils/categories')
 const yaml = require('js-yaml')
 
@@ -292,6 +293,59 @@ function verificationWarnings (record) {
 }
 
 /**
+ * The build-along rules: what a solution may publish, and what it must show.
+ *
+ * - A solution's public attachments hold only verification.json. Attachments
+ *   are public downloads, and a solution's code is not: readers read every
+ *   build-along file in full on a page, and signed-in readers download it
+ *   through the gated endpoint, which serves only the record's `files`.
+ *   Fatal for every status, drafts included, so a file never becomes public by
+ *   being published.
+ * - Each `page-solution-generated-files` entry (a file a reader produces with a
+ *   documented command instead of reading it on a page) must be a real file
+ *   under solutions/<slug>/. Fatal.
+ * - A file a page includes in full but that no rendered code block carries is
+ *   missing from `files`, so its Download control and its rail entry would not
+ *   exist. That should not happen (provenance stamps every listing an example
+ *   include renders), so it is a warning, for the include that sits outside a
+ *   listing block or behind a conditional.
+ *
+ * @param {Object} record - collected record
+ * @param {Object} [options]
+ * @param {Array<{page: string, path: string, line: number}>} [options.fullIncludes] - from collect.collectFullIncludes
+ * @returns {{ errors: string[], warnings: string[] }} messages without the solution id prefix
+ */
+function buildAlongFindings (record, { fullIncludes = [] } = {}) {
+  const errors = []
+  const warnings = []
+  const examples = new Set(record.exampleFiles || [])
+
+  for (const name of record.attachmentFiles || []) {
+    if (ALLOWED_ATTACHMENTS.includes(name)) continue
+    errors.push(`attachments/${name} is a public attachment; a solution's only attachment is ${VERIFICATION_FILE}. Delete it: readers see the file in full on a page (include::example$<path>[]), and signed-in readers download it from its code block`)
+  }
+
+  const seen = new Set()
+  for (const path of record.generatedFiles || []) {
+    if (seen.has(path)) { errors.push(`page-solution-generated-files lists "${path}" more than once`); continue }
+    seen.add(path)
+    if (!examples.has(path)) errors.push(`page-solution-generated-files entry "${path}" is not a file under solutions/${record.id}/`)
+  }
+
+  const files = new Set(record.files || [])
+  const reported = new Set()
+  for (const { page, path, line } of fullIncludes || []) {
+    if (isStepScaffolding(path) || files.has(path) || reported.has(path)) continue
+    // An include Antora cannot resolve is already reported by Antora.
+    if (examples.size && !examples.has(path)) continue
+    reported.add(path)
+    warnings.push(`${page}.adoc:${line} includes example$${path} in full, but no rendered code block carries it, so it is missing from the download allowlist (files) and the All build-along files panel`)
+  }
+
+  return { errors, warnings }
+}
+
+/**
  * Validate one collected solution record after conversion.
  *
  * Side effect by design: `record.categories` is replaced with the normalized
@@ -313,7 +367,7 @@ function verificationWarnings (record) {
  * @param {(key: string) => Array<string>} [ctx.cloudTwinsOf] - Cloud pages that single-source a doc
  * @returns {{errors: Array<string>, warnings: Array<string>}}
  */
-function validateSolution (record, { categoryMap, facetVocab, resolveDoc, solutionIds, pageByUrl, umbrellaLayouts, isCloudPage, cloudTwinsOf } = {}) {
+function validateSolution (record, { categoryMap, facetVocab, resolveDoc, solutionIds, pageByUrl, umbrellaLayouts, isCloudPage, cloudTwinsOf, fullIncludes } = {}) {
   const errors = []
   const warnings = []
   const id = record.id
@@ -546,8 +600,14 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
     }
   }
 
-  // Links into this module's attachments must point at files that exist
-  const attachmentNames = new Set(record.attachments.map((a) => a.name))
+  const build = buildAlongFindings(record, { fullIncludes })
+  build.errors.forEach(err)
+  build.warnings.forEach(warn)
+
+  // Links into this module's attachments must point at files that exist. Only
+  // verification.json can (see buildAlongFindings), so a link to anything
+  // else under _attachments/ fails here as well.
+  const attachmentNames = new Set(record.attachmentFiles || record.attachments.map((a) => a.name))
   const attachmentPrefix = attachmentPrefixOf(record.overview.pub && record.overview.pub.url)
   const pagesToScan = [{ id: 'index', page: record.overview }, ...record.steps]
   for (const { id: pageId, page } of pagesToScan) {
@@ -721,6 +781,7 @@ module.exports = {
   hasVerifySection,
   attachmentPrefixOf,
   attachmentLinkTargets,
+  buildAlongFindings,
   fragmentLinks,
   brokenFragments,
   siteStyleId,

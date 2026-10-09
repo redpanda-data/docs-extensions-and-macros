@@ -44,7 +44,18 @@ const VERSION_RX = /^v\d+\.\d+\.\d+$/
 // a passing full run and committed like the captured media. It is machine
 // evidence rather than build-along scaffolding, so it is projected as the
 // record's `verified` and kept out of the record's attachment list.
+//
+// It is also the only file a solution may publish as an attachment. Attachments
+// are public downloads, and a solution's code is not: a reader reads every
+// build-along file in full on a page, and a signed-in reader downloads it
+// through the gated endpoint, which serves exactly the record's `files`.
 const VERIFICATION_FILE = 'verification.json'
+const ALLOWED_ATTACHMENTS = Object.freeze([VERIFICATION_FILE])
+
+// An include that renders a whole example file: no attributes, or a tag
+// selection of `**` (every line except the tag markers). The `.Complete
+// source: <path>` collapsible on a solution page is written this way.
+const EXAMPLE_INCLUDE_RX = /^include::example\$([^\[\s]+)\[(.*)\]\s*$/
 
 // Manifest key -> record key. Only these are read, and only when the manifest
 // carries them: nothing here is defaulted or synthesised.
@@ -189,6 +200,69 @@ function collectSnippetFiles (pages) {
 }
 
 /**
+ * True when an include directive's attribute list renders the whole file:
+ * empty, or a `tags`/`tag` selection of exactly `**`. Any other attribute
+ * (`lines=`, a named tag, `leveloffset=`, `indent=`) is either a partial
+ * selection or something this cannot vouch for, so it does not count.
+ */
+function isFullIncludeAttrlist (attrlist) {
+  const attrs = String(attrlist || '').trim()
+  if (!attrs) return true
+  return /^tags?\s*=\s*(["']?)\*\*\1$/.test(attrs)
+}
+
+/**
+ * Every `include::example$<path>` in an AsciiDoc page source that renders the
+ * whole file, with its 1-based line number. A path with an attribute
+ * reference (`{name}`) cannot be resolved here and is skipped. Comment
+ * blocks and line comments are skipped, since Asciidoctor never runs their
+ * includes.
+ *
+ * @param {string|Buffer} source
+ * @returns {Array<{ path: string, line: number }>}
+ */
+function fullExampleIncludes (source) {
+  const text = Buffer.isBuffer(source) ? source.toString('utf8') : String(source || '')
+  const found = []
+  let inComment = false
+  text.split(/\r\n?|\n/).forEach((raw, i) => {
+    const line = raw.replace(/\s+$/, '')
+    if (/^\/{4,}$/.test(line)) { inComment = !inComment; return }
+    if (inComment || line.startsWith('//')) return
+    const m = EXAMPLE_INCLUDE_RX.exec(line)
+    if (!m || m[1].includes('{') || !isFullIncludeAttrlist(m[2])) return
+    found.push({ path: m[1].replace(/^\.\//, ''), line: i + 1 })
+  })
+  return found
+}
+
+/**
+ * The whole-file example includes of every solution page, read from the page
+ * sources. Call it at contentClassified, the last point where page contents
+ * are still AsciiDoc.
+ *
+ * @returns {Map<string, Array<{ page: string, path: string, line: number }>>} module -> includes
+ */
+function collectFullIncludes (contentCatalog, { component = COMPONENT } = {}) {
+  const byModule = new Map()
+  const comp = contentCatalog.getComponent(component)
+  if (!comp) return byModule
+  const latest = comp.latest || (comp.versions && comp.versions[0])
+  const version = latest ? latest.version : ''
+  for (const page of contentCatalog.findBy({ component, family: 'page', version })) {
+    const mod = page.src.module
+    if (NON_SOLUTION_MODULES.includes(mod) || !page.contents) continue
+    if (page.mediaType && page.mediaType !== 'text/asciidoc') continue
+    const includes = fullExampleIncludes(page.contents)
+    if (!includes.length) continue
+    if (!byModule.has(mod)) byModule.set(mod, [])
+    const pageId = stepIdOf(page)
+    for (const include of includes) byModule.get(mod).push({ page: pageId, ...include })
+  }
+  return byModule
+}
+
+/**
  * The items of the overview's `== Related docs` list, from converted HTML.
  *
  * Each item opens with an xref to the doc and goes on to say why the doc
@@ -288,6 +362,7 @@ function collectSolutions (contentCatalog, { component = COMPONENT } = {}) {
 
   const pages = contentCatalog.findBy({ component, family: 'page', version })
   const attachments = contentCatalog.findBy({ component, family: 'attachment', version })
+  const examples = contentCatalog.findBy({ component, family: 'example', version })
   const partials = contentCatalog.findBy({ component, family: 'partial', version })
 
   const byModule = new Map()
@@ -308,14 +383,17 @@ function collectSolutions (contentCatalog, { component = COMPONENT } = {}) {
   const solutions = []
   for (const [mod, modulePages] of byModule) {
     if (NON_SOLUTION_MODULES.includes(mod)) continue
-    solutions.push(buildRecord(mod, modulePages, attachments.filter((a) => a.src.module === mod), { version }))
+    solutions.push(buildRecord(mod, modulePages, attachments.filter((a) => a.src.module === mod), {
+      version,
+      moduleExamples: examples.filter((e) => e.src.module === mod),
+    }))
   }
   solutions.sort((a, b) => a.id.localeCompare(b.id))
 
   return { component: comp, version, landing, solutions, rootPages, relationshipsFile, facetsFile }
 }
 
-function buildRecord (mod, modulePages, moduleAttachments, { version }) {
+function buildRecord (mod, modulePages, moduleAttachments, { version, moduleExamples = [] }) {
   const overview = modulePages.find((p) => p.src.relative === 'index.adoc')
   const stepPages = modulePages
     .filter((p) => p !== overview)
@@ -364,7 +442,21 @@ function buildRecord (mod, modulePages, moduleAttachments, { version }) {
     asset: solutionVersion ? `${mod}-${solutionVersion}.zip` : '',
     verified,
     verifiedError,
+    // The download allowlist and the list the rail's "All build-along files"
+    // panel renders: every example file a page shows.
     files: collectSnippetFiles([overview, ...stepPages.map((s) => s.page)]),
+    // Files a reader produces with a documented command rather than reading
+    // on a page (go.sum, generated protobuf code), as repo paths.
+    generatedFiles: parseList(attrs['page-solution-generated-files']).map((p) => p.replace(/^\.\//, '')),
+    // Every file of the module's examples family (solutions/<slug>/ through
+    // the examples symlink), as repo paths.
+    exampleFiles: moduleExamples.map((e) => e.src.relative).sort(),
+    // Every attachment of the module, verification.json included, for the
+    // public-attachment rule. `attachments` below is the public list.
+    attachmentFiles: moduleAttachments.map((a) => a.src.relative).sort(),
+    // Kept for compatibility. Only verification.json may be an attachment,
+    // and it is evidence, so in practice this list is empty; `files` is the
+    // build-along list.
     attachments: moduleAttachments
       .filter((a) => a.src.relative !== VERIFICATION_FILE)
       .filter((a) => a.pub && a.pub.url)
@@ -426,9 +518,13 @@ module.exports = {
   SLUG_RX,
   VERSION_RX,
   VERIFICATION_FILE,
+  ALLOWED_ATTACHMENTS,
   VERIFICATION_FIELDS,
   parseVerification,
   collectSnippetFiles,
+  isFullIncludeAttrlist,
+  fullExampleIncludes,
+  collectFullIncludes,
   relatedDocLines,
   resolveRelatedDocLines,
   collectSingleSourcedTwins,
