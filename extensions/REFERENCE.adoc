@@ -795,13 +795,13 @@ Everything Antora-independent lives in pure modules next to `index.js`:
 === Hooks
 
 contentClassified::
-Structural fatals: the landing page `ROOT/pages/index.adoc` exists; every solution module has `pages/index.adoc`; module names are unique, lower-case slugs, and not reserved (`progress`, `download`, `api`, `index`, `examples`); `ROOT/partials/relationships.yml` parses as YAML and validates against `docs-data/solutions-relationships.schema.json`. A missing `relationships.yml` warns and builds with no editorial edges. Also records every whole-file `include::example$` in the solution page sources for the build-along check (see <<Build-along files>>), because this is the last hook where page contents are still AsciiDoc.
+Structural fatals: the landing page `ROOT/pages/index.adoc` exists; every solution module has `pages/index.adoc`; module names are unique, lower-case slugs, and not reserved (`progress`, `download`, `api`, `index`, `examples`); `ROOT/partials/relationships.yml` parses as YAML and validates against `docs-data/solutions-relationships.schema.json`. A missing `relationships.yml` warns and builds with no editorial edges. Also captures the AsciiDoc source of every solution page and `scripts/verify.sh` (an `example$` resource through the module's `examples` symlink) for the agent companion. It also records every whole-file `include::example$` in the solution page sources for the build-along check (see <<Build-along files>>). Both are read here because this is the last hook where page contents are still AsciiDoc.
 
 documentsConverted::
 Register directly before `validate-attributes`, and after `unpublish-pages` and `add-git-dates`. Collects records, normalizes `page-categories` (parents added, unknown values fatal), runs every validation rule, applies `page-solution-status`, computes `page-related-solutions` for eligible Product Docs pages, writes the derived attributes onto solution pages, and sets the `solutions-catalog` component attribute on every component version. The attribute is set here rather than at `beforePublish` because Antora composes pages before `beforePublish` fires.
 
 beforePublish::
-Adds `assets/data/solutions.json` and `assets/data/solutions-graph.json` to the site. With `network_checks` on, verifies through the GitHub API that the release `<slug>/<version>` carries the asset `<slug>-<version>.zip` and warns if not (informational: the release workflow creates both after the merge that changes the version).
+Adds `assets/data/solutions.json` and `assets/data/solutions-graph.json` to the site, and `solutions/<slug>/agent-companion.md` for every solution built (see <<Agent companion>>). With `network_checks` on, verifies through the GitHub API that the release `<slug>/<version>` carries the asset `<slug>-<version>.zip` and warns if not (informational: the release workflow creates both after the merge that changes the version).
 
 === Environment variables
 
@@ -824,6 +824,9 @@ network_checks (optional)::
 
 include_drafts (optional)::
 `true` or `false`. When set, wins over `SOLUTIONS_INCLUDE_DRAFTS`. Default: follow the environment variable, else `false`.
+
+agent_companion (optional)::
+`true` (default) or `false`. Generate and publish the agent companion for each solution built.
 
 public_repo (optional)::
 `true` or `false`. Default `false`. The solutions repository is private, so by default no output names it: the public record has no `repo`, pages get no `page-solution-repo`, and the `.md` block carries neither `repository.url` nor `repository.ref`. Readers read every build-along file in full on the pages, and signed-in readers download it through the gated download endpoint. Set `true` only if the repository becomes public. The release check reads the repository from the content source either way.
@@ -940,7 +943,7 @@ On the overview (`pages/index.adoc`):
 | Comma list of repo paths under `solutions/<slug>/` that a reader produces with a documented command instead of reading on a page (for example `services/go.sum, services/internal/gamepb/game_events.pb.go`). These are the only files a reader needs that no page shows in full. Each entry must be a file in the module's examples (fatal otherwise, as is listing one twice). See <<Build-along files>>.
 |===
 
-On a step page: `page-layout` must be `solution-step`; `description` is the step's own; `page-solution-step-duration` (optional) is an integer number of minutes. When every step sets it, the build warns if they do not add up to `page-solution-duration`.
+On a step page: `page-layout` must be `solution-step`; `description` is the step's own; `page-solution-step-duration` (optional) is an integer number of minutes. `page-solution-rule` and `page-solution-adapt` (optional, one sentence each) are read only by the agent companion: the invariant the step establishes, stated so it holds in any codebase, and what to inspect in a target repository to apply it. When every step sets `page-solution-step-duration`, the build warns if they do not add up to `page-solution-duration`.
 
 Published solutions must also pass the section checks on the converted HTML: the overview needs `h2` headings `Architecture` and `Prerequisites` (matched after lower-casing, collapsing whitespace, and dropping trailing punctuation); every step needs an `h2`/`h3` whose text starts with `Verify` or a block with the `solution-verify` role.
 
@@ -957,7 +960,7 @@ Written on the overview and every step page (complex values are JSON strings, re
 | Attribute | Value
 
 | `page-solution`
-| The full record: `id`, `title`, `description`, `url`, `version`, `tag`, `asset`, `repo` (only with `public_repo: true`), `status`, `draft` (true only for a draft built with `include_drafts`), `featured`, `difficulty`, `duration`, `download`, `platforms`, `technologies`, `categories`, `useCases`, `files` (see <<Snippet provenance and the download allowlist>>), `personas`, `steps[{id, title, url, order, duration}]`, `relatedDocs[{id, title, url, provenance}]`, `relatedSolutions[{id, title, url}]`, `attachments[{name, url}]` (kept for compatibility: `verification.json` is the only attachment and is published as `verified`, so this is empty; `files` is the build-along list), `supersededBy`, `lastModified`, and `verified{suite, specs, steps, commands, checks, media, verifyScript, redpandaVersion, runAt, platforms, contentRev, stackSha256}` when the solution ships a verification manifest (see <<Verification>>). Keys the manifest did not carry are absent, and a solution with no manifest has no `verified` key at all.
+| The full record: `id`, `title`, `description`, `url`, `version`, `tag`, `asset`, `repo` (only with `public_repo: true`), `status`, `draft` (true only for a draft built with `include_drafts`), `featured`, `difficulty`, `duration`, `download`, `platforms`, `technologies`, `categories`, `useCases`, `files` (see <<Snippet provenance and the download allowlist>>), `personas`, `steps[{id, title, url, order, duration}]`, `relatedDocs[{id, title, url, provenance}]`, `relatedSolutions[{id, title, url}]`, `attachments[{name, url}]` (kept for compatibility: `verification.json` is the only attachment and is published as `verified`, so this is empty; `files` is the build-along list), `supersededBy`, `lastModified`, `agentCompanion` (the companion's URL, only when one was generated), and `verified{suite, specs, steps, commands, checks, media, verifyScript, redpandaVersion, runAt, platforms, contentRev, stackSha256}` when the solution ships a verification manifest (see <<Verification>>). Keys the manifest did not carry are absent, and a solution with no manifest has no `verified` key at all.
 
 | `page-solution-nav`
 | `{ home: {title, url}, overview: {title, url}, steps: [{id, title, url, order, duration}] }`. Every title in the JSON outputs is plain text: inline markup in the document title (`<code>`, entities) is stripped before it enters `page-solution`, the nav, `relatedDocs`, or `relatedSolutions`.
@@ -1121,6 +1124,43 @@ Unknown keys, a bad `status`, a `solution` that is not a slug, or a `doc` that i
 === Warnings
 
 Missing `page-solution-related-docs`; a related doc with no item in `== Related docs`; a landing or index page in related docs; a Cloud solution that reaches no Cloud page; an explicit edge hidden by `max_related`; empty, one-way, or no-shared-use-case `page-solution-related-solutions`; step durations that do not add up to `page-solution-duration`; a category no eligible doc page carries; a published solution with no `verification.json`; an unreadable `verification.json`; a `run_at` that is absent, not an ISO 8601 timestamp, or older than the pages; `platforms`, `content_rev`, or `stack_sha256` malformed or covering fewer platforms than the page claims; a file included in full that no rendered code block carries; Production considerations on the overview or an earlier step; on a draft, the production considerations and Related docs findings that are fatal once published; no published solution featured; orphaned relationships; pending relationships (count); drafts being built; `page-valid-categories` unavailable (category validation and category edges are skipped); a release or asset missing on GitHub when `network_checks` runs.
+
+=== Agent companion
+
+One Markdown file per built solution, at `solutions/<slug>/agent-companion.md`, for a coding agent applying the solution's design to another codebase. It carries the judgment around the reference code, not the code: rules, where to look in a target repository, why each rule exists, and how the reference proves itself. It is generated from what the solution already authors, so nothing is written twice:
+
+[cols="2,3"]
+|===
+| Section | Source
+
+| The problem, What the system must do
+| The overview's preamble, split at "After completing this solution, you will be able to:"
+
+| Rules, Adapt
+| `page-solution-rule` and `page-solution-adapt` of each step, numbered in step order
+
+| System map
+| The overview's `== What you build` and `== Architecture` (with its `=== Why Redpanda`)
+
+| Design contract
+| Per step with a rule or adapt line: the rule, the adapt line, `== Why`, `== Why Redpanda`, `== In production`
+
+| Acceptance
+| One check per rule
+
+| Production gaps
+| The last step's `== Production considerations`: its intro, then each `=== Topic` as a Markdown h3 with its paragraphs. Content that still keeps the section on the overview falls back to the overview's section and its three-column table
+
+| Canonical docs
+| `page-solution-related-docs`
+
+| Reference build
+| Steps with neither attribute (demo-stack detail), the numbered `# N.` comments of `scripts/verify.sh`, and the prose after each step's expected output in `== Verify` (failure modes)
+|===
+
+Before any section is read, every `include::partial$...[]` line is replaced with the lines it selects from the solution module's partials: a `tag=` or `tags=` attribute keeps only those regions (with `*`, `**`, and `!name` as in Asciidoctor), tag marker lines are dropped, and an included partial's own includes are resolved too, up to 8 levels deep (a plain relative path inside a partial, such as `include::compaction.adoc[]`, is a sibling partial, as in Antora). This is how a step's `== In production` note, written as an include of a partial's `summary` region, and the last step's production section, assembled from the partials' `detail` regions, reach the companion. The `== Files for this step` section is not read. `example$` and `attachment$` includes (code, commands, expected output) are never resolved and are dropped with the block they feed.
+
+Code, commands, expected output, images, tabs, and collapsible blocks are dropped. Cross references become live links only for the URL shapes the site serves (`streaming` as `/streaming/current/<module>/<path>/`, `connect` as `/connect/<module>/<path>/`, `solutions` as `/solutions/<module>/<path>/`, `ROOT` without a segment, an index page without `index`); any other resource ID stays in backticks. A link to the solution's `verification.json` attachment (`link:{attachmentsdir}/verification.json[]` or `xref:attachment$verification.json[]`, optionally qualified as `<module>:` or `solutions:<module>:`, which then names that solution) becomes its live URL; a link to any other attachment, which only older content has, is named by its repo path with no link, because a solution's code is never a public download. An xref written with empty text is labeled with the target page's title (this solution's own pages from their source, any other page through the content catalog), and only a target nobody can name gets a label made from its path. The `How to use this` intro names only the sections the companion has, so a solution with no rules does not tell the agent to start with Rules. A generation error, AsciiDoc left in the output (`xref:`, `include::`, an attribute reference, a listing delimiter), or a partial include that cannot be resolved (no such partial, a tag the partial does not have, nesting past the limit) is a warning; all three appear in the result's `leaks`. A solution where no step sets `page-solution-rule` is a warning while it is a draft and a build error once it is published, because its companion gives an agent nothing to apply. The pure function is exported as `@redpanda-data/docs-extensions-and-macros/extensions/solutions-catalog/agent-companion` (`generateAgentCompanion({ slug, pages, verifyScript, titleOf, resolveInclude })`), so the solutions repository can generate the same file locally. `resolveInclude(target, attrs)` returns the whole source of a partial include target, or `undefined`; tag selection happens inside the function. `partialResolver(partials, { module })`, exported from the same module, builds one from an object of partial sources keyed by their path under `partials/` (for example `production/compaction.adoc`), resolving `partial$x`, `<module>:partial$x`, and `solutions:<module>:partial$x` and nothing else. The extension builds it from the module's partials in the content catalog; a local runner builds it from `docs/modules/<slug>/partials/`.
 
 == Solution snippet provenance
 
@@ -1729,6 +1769,7 @@ solution:
     - Event-driven microservices
   industries:
     - Gaming
+  agent_companion: /solutions/multiplayer-gaming/agent-companion.md
   steps:
     - id: start-environment
       title: Start the environment
@@ -1742,7 +1783,7 @@ solution:
     download: authenticated
 ----
 
-A step page gets the same block without `steps`, and with its own position instead: `step: {id, index, of}`. `files` lists the snippets the solution's pages render, which is the same allowlist the download endpoint enforces, so an agent reading the `.md` can fetch exactly that set; it is omitted when the solution renders none. `repository.ref` is the release tag that exists (`<id>/<version>`), not the bare version, so a consumer can check the ref out. `repository.url` and `repository.ref` appear only when the catalog publishes the repository (`public_repo: true`); for the default private repository the block carries only `repository.download`, and `files` names what the download serves. The generic frontmatter (title, description, and the allowlist) is unchanged, and `personas` stays a top-level key rather than moving into the block.
+A step page gets the same block without `steps`, and with its own position instead: `step: {id, index, of}`. `files` lists the snippets the solution's pages render, which is the same allowlist the download endpoint enforces, so an agent reading the `.md` can fetch exactly that set; it is omitted when the solution renders none. `agent_companion` is the URL of the solution's <<Agent companion>>, present only when the build generated one. `repository.ref` is the release tag that exists (`<id>/<version>`), not the bare version, so a consumer can check the ref out. `repository.url` and `repository.ref` appear only when the catalog publishes the repository (`public_repo: true`); for the default private repository the block carries only `repository.download`, and `files` names what the download serves. The generic frontmatter (title, description, and the allowlist) is unchanged, and `personas` stays a top-level key rather than moving into the block.
 
 A field whose value cannot be sourced truthfully is left out rather than guessed, and so is an empty list, so that every key present is a claim. `verified` follows from the solution's `verification.json` manifest (see <<Verification>>) and is emitted with that file's own snake_case keys, so the block and the file read the same way:
 

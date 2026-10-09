@@ -466,6 +466,44 @@ function buildRecord (mod, modulePages, moduleAttachments, { version, moduleExam
   }
 }
 
+/**
+ * The raw AsciiDoc of every solution module, read for the agent companion.
+ *
+ * Call it at contentClassified: that is the last point where page contents are
+ * still AsciiDoc (the converter replaces them with HTML and drops the source
+ * unless keepSource is on). A page that is not AsciiDoc any more is skipped, so
+ * a module whose overview is not readable yields no entry and no companion.
+ * scripts/verify.sh is reached as an example resource through the module's
+ * `examples` symlink onto solutions/<slug>/. The module's partials are kept by
+ * their path under partials/ so the companion can splice `include::partial$`
+ * lines (the production notes are single-sourced there).
+ *
+ * @returns {Map<string, { pages: Object<string,string>, partials: Object<string,string>, verifyScript: string }>}
+ */
+function collectCompanionSources (contentCatalog, { component = COMPONENT } = {}) {
+  const sources = new Map()
+  const comp = contentCatalog.getComponent(component)
+  if (!comp) return sources
+  const latest = comp.latest || (comp.versions && comp.versions[0])
+  const version = latest ? latest.version : ''
+  const isAsciiDoc = (f) => f && f.contents && f.mediaType === 'text/asciidoc'
+  for (const page of contentCatalog.findBy({ component, family: 'page', version })) {
+    const mod = page.src.module
+    if (NON_SOLUTION_MODULES.includes(mod) || !isAsciiDoc(page)) continue
+    if (!sources.has(mod)) sources.set(mod, { pages: {}, partials: {}, verifyScript: '' })
+    sources.get(mod).pages[stepIdOf(page)] = page.contents.toString('utf8')
+  }
+  for (const [mod, entry] of sources) {
+    if (!entry.pages.index) { sources.delete(mod); continue }
+    const script = contentCatalog.findBy({ component, version, module: mod, family: 'example', relative: 'scripts/verify.sh' })[0]
+    if (script && script.contents) entry.verifyScript = script.contents.toString('utf8')
+    for (const partial of contentCatalog.findBy({ component, version, module: mod, family: 'partial' })) {
+      if (partial.contents) entry.partials[partial.src.relative] = partial.contents.toString('utf8')
+    }
+  }
+  return sources
+}
+
 // A qualified include of another component's page: the single-sourcing
 // pattern, where a Cloud page is a stub around include::streaming:...[].
 const PAGE_INCLUDE_RX = /^include::((?:[^@:\[\s$]+@)?[A-Za-z0-9_-]+:[A-Za-z0-9_-]*:[^\[\s$]+\.adoc)\[/gm
@@ -536,4 +574,5 @@ module.exports = {
   stepIdOf,
   plainTitle,
   collectSolutions,
+  collectCompanionSources,
 }
