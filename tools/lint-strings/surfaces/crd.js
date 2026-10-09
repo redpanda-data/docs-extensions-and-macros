@@ -421,11 +421,22 @@ const RULES = [
   }
 ]
 
+/**
+ * Where a declaration lives, for removal matching. json names repeat across
+ * structs (`enabled`, `name`), so the key is the Go package directory, the
+ * struct and the json name. Go type names are unique per package, and a
+ * package is one directory.
+ */
+function identity (decl) {
+  return [path.dirname(decl.file), (decl.meta && decl.meta.struct) || null, decl.name]
+}
+
 module.exports = {
   name: 'crd',
   convention: CONVENTION,
   extract,
   scanFile,
+  identity,
   loadConfig,
   collectInlinedTypes,
   UNDESCRIBED_EXTERNAL_TYPES,

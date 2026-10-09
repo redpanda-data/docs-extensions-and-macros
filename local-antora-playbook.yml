@@ -21,6 +21,9 @@ content:
     start_paths: [docs,'*/docs']
   - url: https://github.com/redpanda-data/rp-connect-docs
     branches: main
+  # The connect component's generated reference partials come from the latest
+  # Connect release asset (modify-connect-tag-playbook). Set
+  # REDPANDA_CONNECT_DOCS_DIR to preview unreleased changes.
   - url: https://github.com/redpanda-data/cloud-docs
     branches: main
 ui:
@@ -45,6 +48,7 @@ antora:
   - require: './extensions/add-global-attributes'
   - './extensions/version-fetcher/set-latest-version'
   - './extensions/algolia-indexer/index'
+  - require: './extensions/modify-connect-tag-playbook'
   - require: './extensions/generate-rp-connect-info'
   - require: './extensions/collect-bloblang-samples'
   - require: './extensions/generate-rp-connect-categories'

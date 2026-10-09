@@ -6,6 +6,8 @@ const { execSync, execFileSync, spawnSync } = require('child_process');
 // Mock child_process for isolated testing
 jest.mock('child_process');
 
+const { TOKEN_ENV_VAR } = require('../../cli-utils/git-credential-env');
+
 // Import all functions from the bundler
 const {
   normalizeTag,
@@ -702,10 +704,10 @@ describe('bundleOpenAPI repository resolution and auth', () => {
     expect(args.join(' ')).not.toContain('test-token-123');
     expect(args.some((a) => a.includes('extraheader'))).toBe(false);
 
-    expect(options.env.BUNDLE_OPENAPI_CLONE_TOKEN).toBe('test-token-123');
+    expect(options.env[TOKEN_ENV_VAR]).toBe('test-token-123');
     expect(options.env.GIT_CONFIG_COUNT).toBe('2');
     expect(options.env.GIT_CONFIG_KEY_1).toBe('credential.https://github.com.helper');
-    expect(options.env.GIT_CONFIG_VALUE_1).toContain('$BUNDLE_OPENAPI_CLONE_TOKEN');
+    expect(options.env.GIT_CONFIG_VALUE_1).toContain(`$${TOKEN_ENV_VAR}`);
   });
 
   test('does not require a token when a custom --repo is given', async () => {

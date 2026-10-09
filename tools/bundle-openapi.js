@@ -5,6 +5,7 @@ const path = require('path');
 const { execSync, execFileSync, spawnSync } = require('child_process');
 const yaml = require('yaml');
 const { getMajorMinor } = require('../cli-utils/version');
+const { gitAuthEnv, redactCredentials } = require('../cli-utils/git-credential-env');
 
 /**
  * Normalize a Git tag into a semantic version string.
@@ -662,24 +663,16 @@ async function bundleOpenAPI(options) {
       throw new Error('redpanda-data/streaming-enterprise is a private repository: set GH_TOKEN, GITHUB_TOKEN, or REDPANDA_GITHUB_TOKEN so the clone can authenticate.');
     }
 
-    // Auth travels via a credential helper registered through GIT_CONFIG_*
-    // environment variables, never as a git -c argument, so the token
-    // cannot appear in this process's argv (visible to anything that can
-    // list processes) or get embedded in an exec error's command-line
-    // message. It's also never embedded in the remote URL or persisted in
-    // the clone's .git/config.
-    const gitEnv = { ...process.env };
-    if (token && repositoryUrl.includes('github.com')) {
-      if (!quiet) {
-        console.log('🔑 Using authenticated clone (token provided)');
-      }
-      gitEnv.BUNDLE_OPENAPI_CLONE_TOKEN = token;
-      gitEnv.GIT_CONFIG_COUNT = '2';
-      gitEnv.GIT_CONFIG_KEY_0 = 'credential.helper';
-      gitEnv.GIT_CONFIG_VALUE_0 = '';
-      gitEnv.GIT_CONFIG_KEY_1 = 'credential.https://github.com.helper';
-      gitEnv.GIT_CONFIG_VALUE_1 = '!f() { echo "username=x-access-token"; echo "password=$BUNDLE_OPENAPI_CLONE_TOKEN"; }; f';
+    // gitAuthEnv hands the token to git through a credential helper carried
+    // in the subprocess environment, so it cannot appear in this process's
+    // argv (visible to anything that can list processes) or in an exec
+    // error's command line, and is never embedded in the remote URL or
+    // persisted in the clone's .git/config.
+    const useToken = Boolean(token) && repositoryUrl.includes('github.com');
+    if (useToken && !quiet) {
+      console.log('🔑 Using authenticated clone (token provided)');
     }
+    const gitEnv = gitAuthEnv(useToken ? token : null, { ...process.env });
 
     try {
       execFileSync('git', ['clone', '--depth', '1', '--branch', tag, repositoryUrl, 'redpanda'], {
@@ -689,7 +682,7 @@ async function bundleOpenAPI(options) {
         timeout: 60000 // 1 minute timeout
       });
     } catch (cloneError) {
-      throw new Error(`Failed to clone repository: ${cloneError.message}`);
+      throw new Error(`Failed to clone repository: ${redactCredentials(cloneError.message)}`);
     }
 
     const repoDir = path.join(tempDir, 'redpanda');

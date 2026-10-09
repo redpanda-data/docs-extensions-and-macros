@@ -59,8 +59,9 @@ function isNameEcho (name, description) {
  * appear bare, so the inline-code rule only sees prose:
  *
  *   * backticked spans - already marked up, which is the whole point;
- *   * URLs and Markdown link targets - a path inside a link is part of the
- *     link, and backticking it would break the link;
+ *   * URLs, Markdown link targets, and AsciiDoc macro targets and anchor
+ *     ids - a path inside a link is part of the link, and backticking it
+ *     would break the link;
  *   * anything the declaration is named after, which name-echo owns.
  *
  * Replaced with spaces rather than removed so match indices stay meaningful.
@@ -74,6 +75,13 @@ function maskNonProse (text) {
   out = out.replace(/\[[^\]]*\]\([^)]*\)/g, blank)
   // Bare URLs, and AsciiDoc's url[text] form.
   out = out.replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, blank)
+  // AsciiDoc macro targets and anchor ids: xref:components:processors/
+  // schema_registry_encode.adoc[...] names a page, <<avro_raw_json,...>>
+  // and [[field_paths]] name an anchor. Backticking either breaks the link.
+  // The label in brackets stays prose.
+  out = out.replace(/\b(?:xref|link|image|include|glossterm|config_ref|anchor):[^\s[]*(?=\[)/g, blank)
+  out = out.replace(/<<[^,>]*/g, blank)
+  out = out.replace(/\[\[[^\]]*\]\]|\[#[^\]]*\]/g, blank)
   return out
 }
 
@@ -100,7 +108,9 @@ function maskNonProse (text) {
 const CODE_TOKEN_PATTERNS = Object.freeze([
   { id: 'identifier', re: /\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g },
   { id: 'flag', re: /(?<![\w-])--[a-z][a-z0-9]*(?:-[a-z0-9]+)*\b/g },
-  { id: 'path', re: /(?<![\w/])\/[a-z][a-zA-Z0-9_.-]*(?:\/[a-zA-Z0-9_.{}-]+)+\/?/g }
+  // A path may not end in a period, so "served from /v1/brokers." reports
+  // `/v1/brokers`, not the sentence's full stop with it.
+  { id: 'path', re: /(?<![\w/])\/[a-z][a-zA-Z0-9_.-]*(?:\/[a-zA-Z0-9_.{}-]*[a-zA-Z0-9_{}-])+\/?/g }
 ])
 
 /**
@@ -125,6 +135,18 @@ function findBareCodeTokens (text, name = null) {
     }
   }
   return found
+}
+
+/**
+ * A short window of `text` around the first occurrence of `needle`, for use in
+ * rule messages so the writer can see the offending phrase in context.
+ */
+function excerpt (text, needle, width = 60) {
+  const at = text.toLowerCase().indexOf(needle.toLowerCase())
+  if (at === -1) return text.slice(0, width)
+  const start = Math.max(0, at - Math.floor(width / 2))
+  const slice = text.slice(start, start + width)
+  return `${start > 0 ? '...' : ''}${slice}${start + width < text.length ? '...' : ''}`
 }
 
 const COMMON_RULES = [
@@ -204,6 +226,49 @@ const COMMON_RULES = [
     }
   },
   {
+    name: 'em-dash',
+    description: 'Em dash in prose that ships to docs.redpanda.com',
+    severity: 'warning',
+    check: (decl) => {
+      const text = decl.string || ''
+      if (!text.includes('\u2014')) return []
+      // The docs style guide takes commas, parentheses or a sentence break
+      // instead of em dashes. Reference docs generated from these strings pass
+      // prose through unchanged, so an em dash here is published verbatim, and
+      // correcting it in the generated partial is undone by the next
+      // regeneration.
+      const count = (text.match(/\u2014/g) || []).length
+      return [{
+        message: `Contains ${count} em dash${count === 1 ? '' : 'es'}. Use a comma, parentheses, or a separate sentence: "${excerpt(text, '\u2014')}"`
+      }]
+    }
+  },
+  {
+    name: 'latin-abbreviation',
+    description: 'Latin abbreviation instead of plain English',
+    severity: 'warning',
+    check: (decl) => {
+      const text = decl.string || ''
+      if (!text) return []
+      const issues = []
+      // "e.g." and "i.e." are both ruled out by the style guide's terminology
+      // list. Match the abbreviation only, so "e.g" inside a longer token such
+      // as a URL or an identifier is left alone.
+      for (const [abbr, replacement] of [['e.g.', '"for example"'], ['i.e.', '"that is"']]) {
+        // Boundaries on both sides: the abbreviation must not be part of a
+        // longer token, so a host or identifier that happens to contain it
+        // (https://e.g.example/path) is left alone.
+        const pattern = new RegExp(`(^|[^\\w.])${abbr.replace(/\./g, '\\.')}(?=$|[^\\w])`, 'i')
+        if (pattern.test(text)) {
+          issues.push({
+            message: `Uses "${abbr}". Write ${replacement} instead: "${excerpt(text, abbr)}"`
+          })
+        }
+      }
+      return issues
+    }
+  },
+  {
     name: 'unbalanced-backticks',
     description: 'Odd number of backticks ships broken markup',
     severity: 'error',
@@ -221,7 +286,12 @@ const COMMON_RULES = [
     description: 'Code value or field name in prose without inline code',
     severity: 'warning',
     check: (decl) => {
-      const bare = findBareCodeTokens(decl.string, decl.name)
+      // A surface whose generator formats some code values itself declares
+      // which (convention.auto_inline_code); those are not findings there.
+      const auto = (decl.convention && decl.convention.auto_inline_code) || null
+      const bare = findBareCodeTokens(decl.string, decl.name).filter((b) => !auto ||
+        !((auto.kinds || []).includes(b.kind) ||
+          (b.kind === 'path' && (auto.path_prefixes || []).some((prefix) => b.token.startsWith(prefix)))))
       if (bare.length === 0) return []
       const list = bare.map((b) => `\`${b.token}\``).join(', ')
       return [{

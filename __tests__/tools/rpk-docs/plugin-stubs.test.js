@@ -66,7 +66,7 @@ describe('plugin stub reconciler', () => {
     expect(result.deleted).toEqual(['rpk-ai-old.adoc'])
     const stub = fs.readFileSync(path.join(stubDir, 'rpk-ai-auth-login.adoc'), 'utf8')
     expect(stub).toContain('= rpk ai auth login')
-    expect(stub).toContain(':page-preview: true')
+    expect(stub).not.toContain(':page-preview:')
     expect(stub).toContain('include::streaming:reference:partial$rpk-ai/rpk-ai-auth-login.adoc[tag=single-source]')
   })
 
@@ -80,7 +80,35 @@ describe('plugin stub reconciler', () => {
     const stub = fs.readFileSync(path.join(stubDir, 'rpk-ai-agent-create.adoc'), 'utf8').split('\n')
     expect(stub[0]).toBe('= rpk ai agent create')
     expect(stub[1]).toBe(':description: Create an agent.')
-    expect(stub[2]).toBe(':page-preview: true')
+    expect(stub[2]).toBe('')
+  })
+
+  test('adds page attributes to created stubs only when passed explicitly', () => {
+    writePartial('rpk-ai-agent.adoc', 'rpk ai agent')
+    writePartial('rpk-ai-agent-list.adoc', 'rpk ai agent list')
+    writeStub('rpk-ai-agent.adoc', 'rpk ai agent') // existing stub keeps its header
+
+    const result = run({ attributes: [':page-preview: true'] })
+
+    expect(result.created).toEqual(['rpk-ai-agent-list.adoc'])
+    const created = fs.readFileSync(path.join(stubDir, 'rpk-ai-agent-list.adoc'), 'utf8')
+    expect(created).toContain(':page-preview: true')
+  })
+
+  test('never rewrites the attributes of an existing stub', () => {
+    writePartial('rpk-ai-agent.adoc', 'rpk ai agent')
+    fs.writeFileSync(path.join(stubDir, 'rpk-ai-agent.adoc'), renderStub({
+      title: 'rpk ai agent',
+      file: 'rpk-ai-agent.adoc',
+      includePrefix: 'streaming:reference:partial$rpk-ai/',
+      attributes: []
+    }))
+
+    const result = run({ attributes: [':page-preview: true'] })
+
+    expect(result.created).toEqual([])
+    const stub = fs.readFileSync(path.join(stubDir, 'rpk-ai-agent.adoc'), 'utf8')
+    expect(stub).not.toContain(':page-preview:')
   })
 
   test('creates stubs without a description line when the partial has none', () => {
@@ -92,7 +120,7 @@ describe('plugin stub reconciler', () => {
     expect(result.created).toEqual(['rpk-ai-bare.adoc'])
     const stub = fs.readFileSync(path.join(stubDir, 'rpk-ai-bare.adoc'), 'utf8')
     expect(stub).not.toContain(':description:')
-    expect(stub).toContain(':page-preview: true')
+    expect(stub).not.toContain(':page-preview:')
   })
 
   test('rebuilds the nav block hierarchically and preserves surrounding nav', () => {

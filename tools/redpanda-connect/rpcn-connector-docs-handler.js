@@ -399,7 +399,7 @@ function updateWhatsNew ({ dataDir, oldVersion, newVersion, binaryAnalysis }) {
       for (const comp of regularComponents) {
         const typeLabel = comp.type.charAt(0).toUpperCase() + comp.type.slice(1)
         const statusLabel = comp.status || '-'
-        let desc = comp.summary || (comp.description ? capToTwoSentences(comp.description) : '// TODO: Add description')
+        let desc = comp.summary ? capToTwoSentences(comp.summary) : (comp.description ? capToTwoSentences(comp.description) : '// TODO: Add description')
 
         if (comp.requiresCgo) {
           const cgoNote = '\nNOTE: Requires a cgo-enabled binary. See the xref:install:index.adoc[installation guides] for details.'
@@ -500,7 +500,18 @@ function updateWhatsNew ({ dataDir, oldVersion, newVersion, binaryAnalysis }) {
     const firstMatch = versionHeading.exec(contentWithoutOldSection)
     const insertIdx = firstMatch ? firstMatch.index : contentWithoutOldSection.length
 
-    const updated = contentWithoutOldSection.slice(0, insertIdx) + section + '\n' + contentWithoutOldSection.slice(insertIdx)
+    // Entries in this file are separated by two blank lines. Normalize both
+    // boundaries instead of appending a newline to whatever is already there:
+    // the insertion point already carries the separator that preceded the
+    // previous first entry, so adding to it gave every new entry one more blank
+    // line than the entries below it, which then had to be corrected by hand
+    // after each release. Mirrors the rpk what's-new fix in #285.
+    const before = contentWithoutOldSection.slice(0, insertIdx).replace(/\n*$/, '')
+    const after = contentWithoutOldSection.slice(insertIdx).replace(/^\n*/, '')
+    const entry = section.replace(/^\n*/, '').replace(/\n*$/, '')
+    const updated = after
+      ? `${before}\n\n\n${entry}\n\n\n${after}`
+      : `${before}\n\n\n${entry}\n`
 
     if (startIdx !== -1) {
       console.log(`♻️  whats-new.adoc: replaced section for Version ${diff.comparison.newVersion}`)
@@ -1232,19 +1243,25 @@ async function handleRpcnConnectorDocs (options) {
   // Main Processing: Handle the latest version (final iteration)
   // ========================================================================
 
-  console.log('Generating connector partials...')
-  let partialsWritten, partialFiles
+  // options.partials is false with --no-partials: the connect repo publishes
+  // the generated partials, so this run only updates release-level content.
+  const writePartials = options.partials !== false
+  let partialsWritten = 0, partialFiles = []
   const descriptionReports = []
   const lostSectionWarnings = []
+  const styleRegressionWarnings = []
   // Both generator call sites (partials and drafts) feed the same PR summary,
   // so they collect through one function. Pushed inline, the draft call site
   // silently dropped descriptionReports for months: the structure reports for
   // newly drafted connectors, the ones most likely to need an upstream fix,
   // never reached the summary.
   const { collectGeneratorReports } = require('./pr-summary-formatter.js')
-  const collect = (result) => collectGeneratorReports(result, { descriptionReports, lostSectionWarnings })
+  const collect = (result) => collectGeneratorReports(result, { descriptionReports, lostSectionWarnings, styleRegressionWarnings })
 
-  try {
+  if (!writePartials) {
+    console.log('Skipping connector partials (--no-partials): the connect repo provides them.')
+  } else try {
+    console.log('Generating connector partials...')
     const result = await generateRpcnConnectorDocs({
       data: dataFile,
       overrides: options.overrides,
@@ -1499,20 +1516,20 @@ async function handleRpcnConnectorDocs (options) {
     }
   }
 
-  // Publish merged version to attachments
+  // Publish the connector data to attachments. The Bloblang playground and
+  // other site tools read this file, so it is published on every run, with
+  // overrides merged in only when an overrides file still exists.
   // IMPORTANT: This must run AFTER binary analysis and augmentation to include CGO-only connectors
-  if (options.overrides && fs.existsSync(options.overrides)) {
+  {
     try {
-      const { mergeOverrides, resolveReferences } = require('./generate-rpcn-connector-docs.js')
-
       // Use the augmented newIndex which now includes CGO-only and cloud-only connectors
       const mergedData = JSON.parse(JSON.stringify(newIndex))
 
-      const ovRaw = fs.readFileSync(options.overrides, 'utf8')
-      const ovObj = JSON.parse(ovRaw)
-      const resolvedOverrides = resolveReferences(ovObj, ovObj)
-
-      mergeOverrides(mergedData, resolvedOverrides)
+      if (options.overrides && fs.existsSync(options.overrides)) {
+        const { mergeOverrides, resolveReferences } = require('./generate-rpcn-connector-docs.js')
+        const ovObj = JSON.parse(fs.readFileSync(options.overrides, 'utf8'))
+        mergeOverrides(mergedData, resolveReferences(ovObj, ovObj))
+      }
 
       const attachmentsRoot = path.resolve(process.cwd(), 'modules/components/attachments')
       fs.mkdirSync(attachmentsRoot, { recursive: true })
@@ -2054,6 +2071,7 @@ async function handleRpcnConnectorDocs (options) {
           templateDescription: options.templateDescription,
           templateIntro: options.templateIntro,
           writeFullDrafts: true,
+          writePartials,
           cgoOnly: binaryAnalysis?.cgoOnly || [],
           cloudOnly: binaryAnalysis?.comparison?.cloudOnly || [],
           csvMetadata
@@ -2109,22 +2127,24 @@ async function handleRpcnConnectorDocs (options) {
 
   // Generate PR summary
   try {
-    const { printPRSummary, renderLostSectionWarnings, renderDescriptionReports } = require('./pr-summary-formatter.js')
+    const { printPRSummary, renderLostSectionWarnings, renderStyleRegressionWarnings, renderDescriptionReports } = require('./pr-summary-formatter.js')
     // Use master diff if available, otherwise use single diff. Content-loss
     // warnings and structure reports ride the diff object so they land in the
     // PR summary body instead of dying in the collapsed workflow log.
     const summaryDiff = masterDiff || diffJson
     if (summaryDiff) {
       if (lostSectionWarnings.length) summaryDiff.lostSectionWarnings = lostSectionWarnings
+      if (styleRegressionWarnings.length) summaryDiff.styleRegressionWarnings = styleRegressionWarnings
       if (descriptionReports.length) summaryDiff.descriptionReports = descriptionReports
       printPRSummary(summaryDiff, binaryAnalysis, draftFiles, masterDiff ? true : false)
-    } else if (lostSectionWarnings.length || descriptionReports.length) {
+    } else if (lostSectionWarnings.length || styleRegressionWarnings.length || descriptionReports.length) {
       // No diff to summarize (no prior version, or versions match), but this
       // run still produced content-loss warnings or description-structure
       // reports that a reviewer needs to see -- print them on their own
       // instead of losing them because there was nothing to diff against.
       const lines = [
         ...renderLostSectionWarnings(lostSectionWarnings),
+        ...renderStyleRegressionWarnings(styleRegressionWarnings),
         ...renderDescriptionReports(descriptionReports)
       ]
       console.log('\n' + lines.join('\n') + '\n')

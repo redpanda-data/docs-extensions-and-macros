@@ -95,8 +95,26 @@ describe('path -> surface routing', () => {
     expect(routeFile('charts/redpanda/chart/values.yaml')).toBe('helm')
     expect(routeFile('operator/api/redpanda/v1alpha2/redpanda_types.go')).toBe('crd')
     expect(routeFile('internal/impl/kafka/input.go')).toBe('connect')
-    expect(routeFile('src/v/raft/consensus.cc')).toBeNull()
     expect(routeFile('README.md')).toBeNull()
+  })
+
+  test('metrics route by content, not file name', () => {
+    // Metrics registered outside *probe.cc files used to route nowhere, so a
+    // bad description in any of these reported zero declarations.
+    for (const file of [
+      'src/v/raft/consensus.cc',
+      'src/v/cluster/rm_stm.cc',
+      'src/v/net/probes.cc',
+      'src/v/kafka/server/kafka_probe.h'
+    ]) {
+      expect(routeFile(file)).toBe('metrics')
+    }
+    // Test sources stay out, as in the whole-repo scan, and config/ is
+    // still properties.
+    expect(routeFile('src/v/raft/tests/consensus_test.cc')).toBeNull()
+    expect(routeFile('src/v/cluster/test/fixture.h')).toBeNull()
+    expect(routeFile('src/v/config/node_config.cc')).toBe('properties')
+    expect(routeFile('src/v/raft/BUILD')).toBeNull()
   })
 
   test('classifyDiff groups changed files by surface', () => {
@@ -162,7 +180,8 @@ describe('declaration-anchored diff mode (end-to-end, temp git repo)', () => {
     expect(finding.name).toBe('committed_offset')
     expect(finding.surface).toBe('metrics')
     expect(finding.in_pr_diff).toBe(true)
-    expect(finding.rules.map((r) => r.id)).toEqual(['trailing-period'])
+    // The fixture's description also spells its aside as "i.e.".
+    expect(finding.rules.map((r) => r.id).sort()).toEqual(['latin-abbreviation', 'trailing-period'])
 
     // Full-span anchoring: the finding covers the whole sm::description(...)
     // call, not just the edited line.
@@ -230,10 +249,15 @@ describe('deletion-only diff (end-to-end, temp git repo)', () => {
     expect(result.summary.totalDeclarations).toBe(0)
     expect(result.findings).toHaveLength(0)
 
-    // What keeps the gate open.
-    expect(result.summary.removedSurfaceLines).toBe(5)
+    // What keeps the gate open: the declaration itself, found by extracting
+    // the merge-base side. Two of the five deleted lines are its anchors: the
+    // sm::description(...) call and the name literal in make_counter(...).
+    expect(result.summary.removedDeclarations).toEqual([
+      expect.objectContaining({ surface: 'metrics', name: 'records_produced', file: REL })
+    ])
+    expect(result.summary.removedSurfaceLines).toBe(2)
     expect(result.summary.removedSurfaceFiles).toEqual([
-      { surface: 'metrics', file: REL, lines: 5 }
+      { surface: 'metrics', file: REL, lines: 2 }
     ])
   })
 
@@ -255,8 +279,11 @@ describe('deletion-only diff (end-to-end, temp git repo)', () => {
 
       const result = lintStrings({ repo: solo, diffBase: 'HEAD~1', log: () => {} })
       expect(result.summary.totalDeclarations).toBe(0)
+      // Each removed metric's name line plus its sm::description(...) lines.
+      expect(result.summary.removedDeclarations.map((d) => d.name).sort()).toEqual(
+        ['buffer_size', 'committed_offset', 'records_produced', 'start_offset'].sort())
       expect(result.summary.removedSurfaceFiles).toEqual([
-        { surface: 'metrics', file: REL, lines: 41 }
+        { surface: 'metrics', file: REL, lines: 10 }
       ])
     } finally {
       fs.rmSync(solo, { recursive: true, force: true })
@@ -269,5 +296,407 @@ describe('deletion-only diff (end-to-end, temp git repo)', () => {
     const result = lintStrings({ repo, surfaces: ['metrics'], log: () => {} })
     expect(result.summary.removedSurfaceLines).toBe(0)
     expect(result.summary.removedSurfaceFiles).toEqual([])
+  })
+})
+
+// A PR review runs on every push. These pin the two properties that keep it
+// from re-reviewing or waking up for nothing: a deleted line only counts when
+// it belonged to a doc-string declaration, and a string already reviewed on
+// an earlier push is skipped until its text changes.
+describe('review once (end-to-end, temp git repo)', () => {
+  const FIXTURE = path.join(__dirname, '../../../tools/lint-strings/fixtures/metrics/lint_probe.cc')
+  const REL = path.join('src', 'v', 'cluster', 'lint_probe.cc')
+  let repo
+
+  function git (args) {
+    execSync(`git ${args}`, { cwd: repo, stdio: 'pipe' })
+  }
+
+  function commitEdit (from, to, message) {
+    const target = path.join(repo, REL)
+    const content = fs.readFileSync(target, 'utf8')
+    expect(content).toContain(from)
+    fs.writeFileSync(target, content.replace(from, to))
+    git('add .')
+    git(`commit --quiet -m "${message}"`)
+  }
+
+  beforeEach(() => {
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-strings-once-'))
+    const target = path.join(repo, REL)
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    fs.copyFileSync(FIXTURE, target)
+    git('init --quiet')
+    git('config user.email lint-strings-test@example.invalid')
+    git('config user.name "lint-strings test"')
+    git('add .')
+    git('commit --quiet -m base')
+    git('tag base')
+  })
+
+  afterEach(() => {
+    fs.rmSync(repo, { recursive: true, force: true })
+  })
+
+  test('deleting a line that is not part of a declaration is not a removal', () => {
+    commitEdit('          [this] { return _buffer_size; },\n', '', 'drop a code line')
+    const result = lintStrings({ repo, diffBase: 'base', log: () => {} })
+    expect(result.summary.removedDeclarations).toEqual([])
+    expect(result.summary.removedSurfaceLines).toBe(0)
+    expect(result.summary.removedSurfaceFiles).toEqual([])
+  })
+
+  test('an edited declaration is reviewed, not reported as removed', () => {
+    commitEdit('sm::description("start offset")', 'sm::description("Offset of the first record")', 'reword')
+    const result = lintStrings({ repo, diffBase: 'base', log: () => {} })
+    expect(result.summary.removedDeclarations).toEqual([])
+    expect(result.declarations.map((d) => d.name)).toEqual(['start_offset'])
+  })
+
+  test('a renamed metric is a removal of the old name', () => {
+    commitEdit('"records_produced"', '"records_written"', 'rename')
+    const result = lintStrings({ repo, diffBase: 'base', log: () => {} })
+    expect(result.summary.removedDeclarations.map((d) => d.name)).toEqual(['records_produced'])
+    expect(result.declarations.map((d) => d.name)).toEqual(['records_written'])
+  })
+
+  test('a reviewed fingerprint is skipped until the string changes', () => {
+    commitEdit('sm::description("start offset")', 'sm::description("start offset.")', 'first push')
+    const first = lintStrings({ repo, diffBase: 'base', log: () => {} })
+    expect(first.summary.totalDeclarations).toBe(1)
+    const [pending] = first.declarations
+    expect(pending.fingerprint).toMatch(/^[0-9a-f]{16}$/)
+    expect(first.findings[0].fingerprint).toBe(pending.fingerprint)
+
+    // Second push touches an unrelated line of the same declaration's file
+    // and leaves the string alone: nothing new to review.
+    commitEdit('[this] { return _start_offset; }', '[this] { return _start_offset + 0; }', 'second push')
+    const second = lintStrings({ repo, diffBase: 'base', reviewedFingerprints: new Set([pending.fingerprint]), log: () => {} })
+    expect(second.summary.totalDeclarations).toBe(0)
+    expect(second.findings).toHaveLength(0)
+    expect(second.declarations).toEqual([])
+    expect(second.summary.alreadyReviewed).toBe(1)
+
+    // Third push edits the string: a new fingerprint, reviewed again.
+    commitEdit('sm::description("start offset.")', 'sm::description("Offset of the first record")', 'third push')
+    const third = lintStrings({ repo, diffBase: 'base', reviewedFingerprints: new Set([pending.fingerprint]), log: () => {} })
+    expect(third.summary.totalDeclarations).toBe(1)
+    expect(third.declarations[0].fingerprint).not.toBe(pending.fingerprint)
+  })
+
+  test('a reviewed removal is not reported again', () => {
+    commitEdit('"records_produced"', '"records_written"', 'rename')
+    const first = lintStrings({ repo, diffBase: 'base', log: () => {} })
+    const seen = new Set([...first.summary.removedDeclarations, ...first.declarations].map((d) => d.fingerprint))
+    const again = lintStrings({ repo, diffBase: 'base', reviewedFingerprints: seen, log: () => {} })
+    expect(again.summary.removedDeclarations).toEqual([])
+    expect(again.summary.removedSurfaceLines).toBe(0)
+    expect(again.summary.totalDeclarations).toBe(0)
+    expect(again.summary.alreadyReviewed).toBe(2)
+  })
+})
+
+// Names repeat within a surface: two proto messages both have `name` and
+// `enabled`, two CRD structs both have `enabled`. Deleting one copy while the
+// other survives is still a removal, so matching has to use the declaration's
+// place (message path, struct) and not the bare name.
+describe('removal detection with repeated names (end-to-end, temp git repo)', () => {
+  const PROTO = path.join('proto', 'redpanda', 'api', 'dataplane', 'v1', 'lint_dupe.proto')
+  const GO = path.join('operator', 'api', 'redpanda', 'v1alpha2', 'lint_dupe_types.go')
+  const PROTO_SOURCE = [
+    'syntax = "proto3";',
+    '',
+    'package redpanda.api.dataplane.v1;',
+    '',
+    '// A user account.',
+    'message User {',
+    '  // The user name.',
+    '  string name = 1;',
+    '  // Whether the user can sign in.',
+    '  bool enabled = 2;',
+    '}',
+    '',
+    '// A topic.',
+    'message Topic {',
+    '  // The topic name.',
+    '  string name = 1;',
+    '  // Whether the topic accepts writes.',
+    '  bool enabled = 2;',
+    '}',
+    ''
+  ].join('\n')
+  const GO_SOURCE = [
+    'package v1alpha2',
+    '',
+    '// ClusterSpec configures a cluster.',
+    'type ClusterSpec struct {',
+    '\t// Turns the cluster on.',
+    '\tEnabled bool `json:"enabled"`',
+    '}',
+    '',
+    '// ConsoleSpec configures Console.',
+    'type ConsoleSpec struct {',
+    '\t// Turns Console on.',
+    '\tEnabled bool `json:"enabled"`',
+    '}',
+    ''
+  ].join('\n')
+  let repo
+
+  function git (args) {
+    execSync(`git ${args}`, { cwd: repo, stdio: 'pipe' })
+  }
+
+  function commitEdit (rel, from, to, message) {
+    const target = path.join(repo, rel)
+    const content = fs.readFileSync(target, 'utf8')
+    expect(content).toContain(from)
+    fs.writeFileSync(target, content.replace(from, to))
+    git('add .')
+    git(`commit --quiet -m "${message}"`)
+  }
+
+  beforeEach(() => {
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-strings-dupe-'))
+    for (const [rel, source] of [[PROTO, PROTO_SOURCE], [GO, GO_SOURCE]]) {
+      fs.mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true })
+      fs.writeFileSync(path.join(repo, rel), source)
+    }
+    git('init --quiet')
+    git('config user.email lint-strings-test@example.invalid')
+    git('config user.name "lint-strings test"')
+    git('add .')
+    git('commit --quiet -m base')
+    git('tag base')
+  })
+
+  afterEach(() => {
+    fs.rmSync(repo, { recursive: true, force: true })
+  })
+
+  test('api: deleting one of two same-name fields is a removal', () => {
+    commitEdit(PROTO, '  // Whether the topic accepts writes.\n  bool enabled = 2;\n', '', 'drop Topic.enabled')
+    const result = lintStrings({ repo, diffBase: 'base', surfaces: ['api'], log: () => {} })
+    expect(result.summary.totalDeclarations).toBe(0)
+    expect(result.summary.removedDeclarations.map((d) => [d.name, d.line_start])).toEqual([['enabled', 17]])
+  })
+
+  test('api: deleting both same-name fields reports two removals with distinct fingerprints', () => {
+    commitEdit(PROTO, '  // Whether the user can sign in.\n  bool enabled = 2;\n', '', 'drop User.enabled')
+    commitEdit(PROTO, '  // Whether the topic accepts writes.\n  bool enabled = 2;\n', '', 'drop Topic.enabled')
+    const result = lintStrings({ repo, diffBase: 'base', surfaces: ['api'], log: () => {} })
+    const removed = result.summary.removedDeclarations
+    expect(removed.map((d) => d.name)).toEqual(['enabled', 'enabled'])
+    expect(new Set(removed.map((d) => d.fingerprint)).size).toBe(2)
+  })
+
+  test('api: moving a field within its message is not a removal', () => {
+    commitEdit(PROTO, '  // The topic name.\n  string name = 1;\n  // Whether the topic accepts writes.\n  bool enabled = 2;\n',
+      '  // Whether the topic accepts writes.\n  bool enabled = 2;\n  // The topic name.\n  string name = 1;\n', 'reorder Topic')
+    const result = lintStrings({ repo, diffBase: 'base', surfaces: ['api'], log: () => {} })
+    expect(result.summary.removedDeclarations).toEqual([])
+  })
+
+  test('crd: deleting one of two same-name struct fields is a removal', () => {
+    commitEdit(GO, '\t// Turns Console on.\n\tEnabled bool `json:"enabled"`\n', '', 'drop ConsoleSpec.enabled')
+    const result = lintStrings({ repo, diffBase: 'base', surfaces: ['crd'], log: () => {} })
+    expect(result.summary.totalDeclarations).toBe(0)
+    expect(result.summary.removedDeclarations.map((d) => [d.name, d.line_start])).toEqual([['enabled', 11]])
+  })
+
+  test('metrics: deleting one of two same-name metrics in one file is a removal', () => {
+    const rel = path.join('src', 'v', 'cluster', 'lint_dupe_probe.cc')
+    fs.mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true })
+    fs.writeFileSync(path.join(repo, rel), [
+      'void probe::setup() {',
+      '  _metrics.add_group("produce", {',
+      '    sm::make_counter("requests", [this] { return _produce; }, sm::description("Produce requests.")),',
+      '  });',
+      '  _metrics.add_group("fetch", {',
+      '    sm::make_counter("requests", [this] { return _fetch; }, sm::description("Fetch requests.")),',
+      '  });',
+      '}',
+      ''
+    ].join('\n'))
+    git('add .')
+    git('commit --quiet -m "add probe"')
+    git('tag -f base')
+    commitEdit(rel, '    sm::make_counter("requests", [this] { return _fetch; }, sm::description("Fetch requests.")),\n', '', 'drop fetch requests')
+    const result = lintStrings({ repo, diffBase: 'base', surfaces: ['metrics'], log: () => {} })
+    expect(result.summary.removedDeclarations.map((d) => [d.name, d.line_start])).toEqual([['requests', 6]])
+  })
+
+  test('crd: an edited field is reviewed, not reported as removed', () => {
+    commitEdit(GO, '\t// Turns Console on.\n', '\t// Turns on Console.\n', 'reword ConsoleSpec.enabled')
+    const result = lintStrings({ repo, diffBase: 'base', surfaces: ['crd'], log: () => {} })
+    expect(result.summary.removedDeclarations).toEqual([])
+    expect(result.declarations.map((d) => d.name)).toEqual(['enabled'])
+  })
+})
+
+describe('readFingerprints', () => {
+  const { readFingerprints } = require('../../../tools/lint-strings')
+
+  test('a missing file is an empty set, and non-fingerprint tokens are ignored', () => {
+    expect(readFingerprints(path.join(os.tmpdir(), 'no-such-lint-strings-state'))).toEqual(new Set())
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'lint-strings-fp-')), 'reviewed.txt')
+    fs.writeFileSync(file, '0123456789abcdef\nnot-a-fingerprint, fedcba9876543210\n\nABCDEF0123456789\n')
+    expect(readFingerprints(file)).toEqual(new Set(['0123456789abcdef', 'fedcba9876543210']))
+  })
+})
+
+describe('CLI output through a pipe', () => {
+  test('a report larger than the pipe buffer arrives whole', () => {
+    // runCli used to call process.exit() right after console.log, which
+    // drops buffered output when stdout is a pipe: anything past the first
+    // 64 KiB of a JSON report never reached the reader.
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-strings-pipe-'))
+    try {
+      const file = path.join(repo, 'src', 'v', 'cluster', 'big_probe.cc')
+      fs.mkdirSync(path.dirname(file), { recursive: true })
+      const metrics = []
+      for (let i = 0; i < 1500; i++) {
+        metrics.push(`        sm::make_gauge("m${i}", [] { return 0; }, sm::description("m${i}."), labels),`)
+      }
+      fs.writeFileSync(file, `void f() {\n  _metrics.add_group("g", {\n${metrics.join('\n')}\n  });\n}\n`)
+      const cli = path.join(__dirname, '../../../tools/lint-strings/index.js')
+      const r = require('child_process').spawnSync(process.execPath, [cli, '--repo', repo, '--surface', 'metrics', '--format', 'json'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+      expect(r.status).toBe(0)
+      expect(r.stdout.length).toBeGreaterThan(256 * 1024)
+      const report = JSON.parse(r.stdout)
+      expect(report.summary.totalDeclarations).toBe(1500)
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('page context for a pending declaration', () => {
+  const { pageContext } = require('../../../tools/lint-strings')
+  const d = (surface, name, file, line, string, kind) => ({ surface, name, file, line_start: line, line_end: line, string, meta: kind ? { kind } : {} })
+
+  test('an rpk flag carries its command\'s Short, Long and other flags, not other files', () => {
+    const flag = d('rpk', 'regex', 'cli/topic/delete.go', 114, 'Parse topics as regex', 'flag')
+    const all = [
+      d('rpk', 'delete', 'cli/topic/delete.go', 52, 'Delete topics', 'short'),
+      d('rpk', 'delete', 'cli/topic/delete.go', 53, 'Delete topics.\n\nThe --regex flag...', 'long'),
+      flag,
+      d('rpk', 'format', 'cli/topic/delete.go', 116, 'Output format', 'flag'),
+      d('rpk', 'list', 'cli/topic/list.go', 40, 'List topics', 'short')
+    ]
+    const ctx = pageContext(flag, all)
+    expect(ctx.map((c) => `${c.kind}:${c.name}`)).toEqual(['short:delete', 'long:delete', 'flag:format'])
+  })
+
+  test('a property carries the properties that name it and the ones it names', () => {
+    const target = d('properties', 'cloud_topics_leaderless_rpc_timeout_ms', 'src/v/config/configuration.cc', 10,
+      'Applies only when `cloud_topics_leaderless_enabled` is `true`.')
+    const all = [
+      target,
+      d('properties', 'cloud_topics_leaderless_enabled', 'src/v/config/configuration.cc', 5, 'Enables leaderless cloud topics.'),
+      d('properties', 'other_prop', 'src/v/config/configuration.cc', 20, 'See cloud_topics_leaderless_rpc_timeout_ms for the timeout.'),
+      d('properties', 'unrelated', 'src/v/config/configuration.cc', 11, 'Something else entirely.'),
+      // A name that is a prefix of a mentioned name is not a mention.
+      d('properties', 'cloud_topics_leaderless', 'src/v/config/configuration.cc', 30, 'Prefix only.')
+    ]
+    expect(pageContext(target, all).map((c) => c.name).sort()).toEqual(['cloud_topics_leaderless_enabled', 'other_prop'])
+  })
+
+  test('context strings are truncated and the list is capped', () => {
+    const target = d('rpk', 'x', 'f.go', 1, 's', 'flag')
+    const many = Array.from({ length: 30 }, (_, i) => d('rpk', `f${i}`, 'f.go', i + 2, 'y'.repeat(2000), 'flag'))
+    const ctx = pageContext(target, [target, ...many])
+    expect(ctx).toHaveLength(15)
+    expect(ctx[0].string.length).toBe(603)
+  })
+
+  test('diff mode attaches context to each pending declaration', () => {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-strings-ctx-'))
+    const run = (args) => execSync(`git ${args}`, { cwd: repo, stdio: 'pipe' })
+    try {
+      const file = path.join(repo, 'src', 'go', 'rpk', 'pkg', 'cli', 'topic', 'delete.go')
+      fs.mkdirSync(path.dirname(file), { recursive: true })
+      const src = (usage) => `package topic\n\nfunc newDeleteCommand() *cobra.Command {\n\tcmd := &cobra.Command{\n\t\tUse:   "delete [TOPICS...]",\n\t\tShort: "Delete topics",\n\t\tLong:  "Delete topics, including internal ones.",\n\t}\n\tcmd.Flags().BoolVarP(&re, "regex", "r", false, "${usage}")\n\treturn cmd\n}\n`
+      fs.writeFileSync(file, src('Parse topics as regex'))
+      run('init --quiet'); run('config user.email t@example.invalid'); run('config user.name t')
+      run('add .'); run('commit --quiet -m base')
+      fs.writeFileSync(file, src('Treat the topic arguments as regular expressions and delete every matching topic except internal topics'))
+      run('commit --quiet -am edit')
+      const result = lintStrings({ repo, surfaces: ['rpk'], diffBase: 'HEAD~1', log: () => {} })
+      expect(result.declarations.map((x) => x.name)).toEqual(['regex'])
+      expect(result.declarations[0].context.map((c) => c.kind)).toEqual(['short', 'long'])
+      expect(result.declarations[0].context[1].string).toMatch(/including internal ones/)
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('page context: cap and scope', () => {
+  const lint = require('../../../tools/lint-strings')
+  const d = (surface, name, file, line, string, kind) => ({ surface, name, file, line_start: line, line_end: line, string, meta: kind ? { kind } : {} })
+
+  test('a late rpk flag keeps Short, Long and its nearest flags under the cap', () => {
+    const file = 'cli/topic/produce.go'
+    const target = d('rpk', 'late', file, 200, 'Late flag', 'flag')
+    const early = Array.from({ length: 20 }, (_, i) => d('rpk', `early${i}`, file, 100 + i, 'Early flag', 'flag'))
+    const near = [d('rpk', 'before', file, 199, 'Neighbor', 'flag'), d('rpk', 'after', file, 201, 'Neighbor', 'flag')]
+    const text = [d('rpk', 'produce', file, 10, 'Produce records', 'short'), d('rpk', 'produce', file, 11, 'Long text', 'long')]
+    const ctx = lint.pageContext(target, [...text, ...early, target, ...near])
+    const names = ctx.map((c) => `${c.kind}:${c.name}`)
+    expect(ctx).toHaveLength(15)
+    expect(names).toEqual(expect.arrayContaining(['short:produce', 'long:produce', 'flag:before', 'flag:after']))
+    // Source order in the output, whatever the selection order was.
+    const lines = ctx.map((c) => c.line_start)
+    expect(lines).toEqual([...lines].sort((a, b) => a - b))
+  })
+
+  describe('a surface that extracts everything supplies cross-file context', () => {
+    let repo
+    const original = lint.SURFACES.properties
+    const A = 'src/v/config/a.cc'
+    const B = 'src/v/config/b.cc'
+    const all = (repoPath) => {
+      const text = fs.readFileSync(path.join(repoPath, A), 'utf8')
+      return [
+        { ...d('properties', 'changed_prop', A, 1, text.trim()), convention: original.convention },
+        { ...d('properties', 'other_prop', B, 1, 'Only applies when `changed_prop` is set.'), convention: original.convention }
+      ]
+    }
+    const stub = (contextScope) => ({
+      ...original,
+      contextScope,
+      extract: ({ repo: r, files = null }) => all(r).filter((x) => !files || files.has(x.file))
+    })
+
+    beforeAll(() => {
+      repo = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-strings-scope-'))
+      const run = (args) => execSync(`git ${args}`, { cwd: repo, stdio: 'pipe' })
+      fs.mkdirSync(path.join(repo, 'src', 'v', 'config'), { recursive: true })
+      fs.writeFileSync(path.join(repo, A), 'Enables the thing.\n')
+      fs.writeFileSync(path.join(repo, B), 'untouched\n')
+      run('init --quiet'); run('config user.email t@example.invalid'); run('config user.name t')
+      run('add .'); run('commit --quiet -m base')
+      fs.writeFileSync(path.join(repo, A), 'Enables the thing, now differently.\n')
+      run('commit --quiet -am edit')
+    })
+
+    afterAll(() => {
+      lint.SURFACES.properties = original
+      fs.rmSync(repo, { recursive: true, force: true })
+    })
+
+    test('with contextScope surface, a related property in an untouched file is in context', () => {
+      lint.SURFACES.properties = stub('surface')
+      const result = lint.lintStrings({ repo, surfaces: ['properties'], diffBase: 'HEAD~1', log: () => {} })
+      expect(result.declarations.map((x) => x.name)).toEqual(['changed_prop'])
+      expect(result.declarations[0].context.map((c) => c.name)).toEqual(['other_prop'])
+    })
+
+    test('without it, context stops at the touched files', () => {
+      lint.SURFACES.properties = stub(undefined)
+      const result = lint.lintStrings({ repo, surfaces: ['properties'], diffBase: 'HEAD~1', log: () => {} })
+      expect(result.declarations[0].context).toEqual([])
+    })
   })
 })

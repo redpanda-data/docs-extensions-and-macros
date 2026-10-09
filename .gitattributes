@@ -1,0 +1,5 @@
+# Raw GitHub release-body fixtures arrive with CRLF line endings. Keep them
+# byte-exact so the release-notes parser's CRLF handling is exercised against
+# real input: -text stops git from normalizing the EOLs, and -whitespace stops
+# `git diff --check` from flagging the carriage returns as trailing whitespace.
+__tests__/fixtures/release-notes/*-streaming-enterprise.md -text -whitespace

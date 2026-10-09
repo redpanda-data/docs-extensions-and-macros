@@ -479,7 +479,15 @@ def find_meta_dict(info):
 
         # Case 1: Already parsed dict
         if isinstance(val, dict) and any(
-            k in val for k in ("needs_restart", "visibility", "deprecated", "secret", "experimental")
+            k in val
+            for k in (
+                "needs_restart", "visibility", "deprecated", "secret", "experimental",
+                # A block holding only one of these is still a meta block. Left
+                # out, `meta{ .gets_restored = gets_restored::no }` resolved to
+                # None here and the caller fell back to its default, inverting
+                # the value it had already parsed correctly.
+                "gets_restored", "restored",
+            )
         ):
             return val
 
@@ -1072,14 +1080,45 @@ class GetsRestoredTransformer:
     """
     
     def accepts(self, info, file_pair):
-        """Process properties with backup/restore metadata."""
-        return (get_meta_value(info, "gets_restored") is not None or 
-                get_meta_value(info, "restored") is not None)
+        """Process every property parsed from source, annotated or not.
+
+        Accepting only annotated properties left the key absent for the
+        majority, and absent then had to carry two incompatible meanings:
+        "the declared default applies" and "the data never reached us". The
+        templates cannot tell those apart, and for a release whose rp_util
+        schema can never be published they picked the second, rendering
+        "Unknown" for 626 properties whose value is not in doubt.
+
+        A property reaching this transformer was parsed out of the C++, so the
+        first meaning is the true one and this is the place that knows it.
+        """
+        return True
 
     def parse(self, property, info, file_pair):
-        """Extract restoration flag from either naming convention."""
-        val = get_meta_value(info, "gets_restored") or get_meta_value(info, "restored", "no")
-        property["gets_restored"] = (val != "no")
+        """Extract the restoration flag, defaulting to the declared default.
+
+        base_property.h declares `gets_restored gets_restored{gets_restored::yes}`,
+        so a property carrying no annotation is restored. Materialize that
+        rather than leaving it implicit: at v26.2.2 every one of the 17
+        annotated properties says `no`, so the default is what the other 674
+        actually rely on.
+
+        rp_util's runtime value still wins wherever the merge runs -- it sets
+        the same key afterwards (see rp_util_merge.map_rp_util_property) -- so
+        this is the fallback for the releases the merge cannot cover, not a
+        competing source of truth.
+        """
+        val = get_meta_value(info, "gets_restored")
+        if val is None:
+            val = get_meta_value(info, "restored")
+        if val is not None:
+            property["gets_restored"] = (val != "no")
+        else:
+            # MetaParamTransformer runs first (property_extractor.py) and sets
+            # this key off the same meta block, so only default when nothing
+            # upstream resolved a real value. Assigning unconditionally would
+            # overwrite an explicit `no` with the default.
+            property.setdefault("gets_restored", True)
         return property
 
 
@@ -2084,6 +2123,32 @@ class EnterpriseTransformer:
             enterprise_constructor = "restricted_only"
             restricted_vals = self._extract_list_items(params[0]["value"])
             info["params"] = params[1:]
+
+        # --- restricted scalar ahead of the name, with a trailing vector ---
+        # Pattern: (restricted, name, description, meta, default, ..., vector)
+        # enterprise<enum_set_property<T>> takes this shape: http_authentication
+        # is ("OIDC", "http_authentication", ...) ending in its allowed values.
+        # Without this branch the trailing vector wins as sanctioned_only and
+        # the restricted value is left where the name belongs. Anchored on the
+        # member name, so a scalar is only taken as a restriction when the
+        # argument after it is the property's own name.
+        elif (
+            len(params) >= 5
+            and "std::vector" in str(params[-1]["value"])
+            and params[0]["type"] in ("true", "false", "integer_literal", "string_literal", "qualified_identifier")
+            and self._clean_value(params[1]["value"]) == info.get("name_in_file")
+            and self._clean_value(params[0]["value"]) != info.get("name_in_file")
+        ):
+            restricted_vals = [self._clean_value(params[0]["value"])]
+            if "enum" in str(info.get("type") or ""):
+                # The trailing vector is the enum's allowed values; keep it for
+                # TypeTransformer.
+                enterprise_constructor = "restricted_only"
+                info["params"] = params[1:]
+            else:
+                enterprise_constructor = "restricted_with_sanctioned"
+                sanctioned_vals = self._extract_list_items(params[-1]["value"])
+                info["params"] = params[1:-1]
 
         # --- sanctioned_only (vector form) ---
         elif len(params) >= 5 and "std::vector" in str(params[-1]["value"]):

@@ -415,6 +415,12 @@ jobs:
       - name: Lint the guard workflow and its embedded bash
         run: docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.7 -color .github/workflows/guard-generated-files.yml
 
+      # connect-docs-check.yml is a PR check for connect, so it gets the same
+      # treatment. actionlint does not know job.workflow_sha yet (GitHub
+      # documents it in the job context), hence the one ignore.
+      - name: Lint the Connect docs check workflow and its embedded bash
+        run: docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.7 -color -ignore 'property "workflow_sha" is not defined' .github/workflows/connect-docs-check.yml
+
       - name: Shellcheck the guard script
         run: docker run --rm -v "$PWD":/mnt -w /mnt koalaman/shellcheck:v0.10.0 .github/scripts/guard-generated-files.sh
 
