@@ -51,12 +51,12 @@ const SECRETISH = /secrets\.|ACTIONS_BOT_TOKEN|TOKEN|aws_cred/i
  * Antora log whose REDPANDA_CONNECT_DOCS_DIR record says `added` were added
  * (null for no record).
  */
-function builtWork (added, generated) {
+function builtWork (added, generated, replaced = 0) {
   const work = workDir()
   const dir = path.join(work, 'head', 'modules', 'components', 'partials')
   fs.mkdirSync(dir, { recursive: true })
   for (let i = 0; i < generated; i++) fs.writeFileSync(path.join(dir, `f${i}.adoc`), '')
-  const rec = added == null ? [] : [{ level: 'info', msg: `Redpanda Connect reference docs from REDPANDA_CONNECT_DOCS_DIR (${work}/head): added ${added} files to the connect component; replaced 0 provided by another source` }]
+  const rec = added == null ? [] : [{ level: 'info', msg: `Redpanda Connect reference docs from REDPANDA_CONNECT_DOCS_DIR (${work}/head): added ${added} files to the connect component; replaced ${replaced} provided by another source; skipped 0 outside the generated partials and examples` }]
   fs.writeFileSync(path.join(work, 'antora.ndjson'), rec.map((r) => JSON.stringify(r) + '\n').join(''))
   return work
 }
@@ -287,7 +287,7 @@ exit \${NPX_EXIT:-0}
 
   test.each([
     ['no record of the PR\'s tree in the log', null, 2, /did not read the PR's generated docs/],
-    ['fewer files added than the PR generated', 1, 2, /added 1 of the PR's 2 generated files/]
+    ['fewer files used than the PR generated', 1, 2, /used 1 of the PR's 2 generated files/]
   ])('the log check blocks when the build used the wrong docs: %s', (_, added, generated, message) => {
     const r = execRun(stepNamed(LOG_CHECK), {
       env: { WORK: builtWork(added, generated), MIN_PAGES: '400', GITHUB_STEP_SUMMARY: summary(), NPX_EXIT: '0', ANTORA_EXIT: '0' },
@@ -295,6 +295,16 @@ exit \${NPX_EXIT:-0}
     })
     expect(r.status).toBe(1)
     expect(r.all).toMatch(message)
+  })
+
+  test('the log check counts generated files that replaced another source\'s copies as used', () => {
+    const work = builtWork(1, 3, 2)
+    const r = execRun(stepNamed(LOG_CHECK), {
+      env: { WORK: work, MIN_PAGES: '400', GITHUB_STEP_SUMMARY: summary(), NPX_EXIT: '0', ANTORA_EXIT: '0' },
+      stubs: { npx: NPX_STUB }
+    })
+    expect(r.status).toBe(0)
+    expect(r.all).toMatch(/used all 3 of the PR's generated files \(1 added, 2 replacing/)
   })
 
   test('the HTML check scans Connect and Cloud pages, and runs after the diff so it can split changed pages', () => {
