@@ -5,6 +5,7 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { getGitHubToken, getGitHubApiToken } = require('../../cli-utils/github-token')
+const { gitAuthEnv, redactCredentials } = require('../../cli-utils/git-credential-env')
 
 /**
  * rp_util's config schema JSON, for any streaming-enterprise ref (tag,
@@ -58,49 +59,6 @@ const SCHEMA_FLAGS = [
  * @param {string} ref - Branch, tag, or commit SHA
  * @param {string} destDir - Destination directory (must not exist yet)
  */
-/**
- * Strip a credential out of text before it's surfaced anywhere that gets
- * logged -- an Error message ends up in plain CI logs. Covers a credential
- * embedded in a Git remote URL's userinfo (e.g. https://<token>@github.com/...),
- * which Git echoes back verbatim in common failures (a private repo it can't
- * access, a bad ref, ...), and a Basic-auth header in case Git ever echoes
- * failing config back -- defense in depth: this module keeps the token out
- * of argv and URLs entirely (see gitAuthEnv).
- */
-function redactCredentials(text) {
-  return String(text || '')
-    .replace(/\/\/[^/@\s]+@/g, '//***@')
-    .replace(/(authorization:\s*basic\s+)\S+/gi, '$1***')
-}
-
-/**
- * Build the environment that authenticates git's github.com requests via a
- * per-invocation credential helper, injected through GIT_CONFIG_* env vars.
- * No token byte ever appears in argv (readable by any local process via
- * `ps`/`/proc/<pid>/cmdline` for the full multi-minute clone) or in a URL
- * (echoed verbatim by git on common failures), and nothing is written into
- * the resulting clone's .git/config, where it would otherwise sit readable
- * on disk for the entire downstream Bazel/Docker build. Same env-only
- * pattern the property-docs Makefile migration uses.
- * @param {string} token
- * @returns {object} env for spawnSync
- */
-function gitAuthEnv(token) {
-  return {
-    ...process.env,
-    RP_UTIL_FETCH_GIT_TOKEN: token,
-    GIT_CONFIG_COUNT: '2',
-    // Clear any inherited helpers first so a system credential manager
-    // can't intercept (or prompt) before ours answers.
-    GIT_CONFIG_KEY_0: 'credential.helper',
-    GIT_CONFIG_VALUE_0: '',
-    GIT_CONFIG_KEY_1: 'credential.https://github.com.helper',
-    // The helper reads the token from its own environment at callback time;
-    // argv carries only this static, secret-free string.
-    GIT_CONFIG_VALUE_1: '!f() { echo "username=x-access-token"; echo "password=$RP_UTIL_FETCH_GIT_TOKEN"; }; f'
-  }
-}
-
 function cloneStreamingEnterprise(ref, destDir) {
   const token = getGitHubToken()
   if (!token) {

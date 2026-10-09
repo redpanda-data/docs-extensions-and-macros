@@ -41,6 +41,13 @@ function loadJson (filePath, label) {
  * REDUNDANT (the audit's normalization only widens equality, never narrows
  * it), so a violation indicates a classifier bug.
  *
+ * One exemption, not an exception to the rule: a description carrying
+ * audience-scoped paragraphs classifies KEEP even when its unconditional prose
+ * is raw-equal to source, because retiring it would delete the scoped
+ * paragraphs too. Those entries are compared on their unconditional prose --
+ * skipping them outright would quietly drop the array form out of the
+ * invariant's coverage.
+ *
  * @param {Object} extractedDoc - Extracted properties document.
  * @param {Object} overrides - Override entries map.
  * @param {Object[]} manifest - Classified manifest rows.
@@ -51,8 +58,11 @@ function crossCheckWithCompare (extractedDoc, overrides, manifest) {
   const overlaidProps = {}
   for (const [name, prop] of Object.entries(extractedProps)) {
     const override = overrides[name]
-    overlaidProps[name] = override && typeof override.description === 'string'
-      ? { ...prop, description: override.description }
+    const description = override && override.description !== undefined
+      ? classify.unconditionalProse(override.description).prose
+      : undefined
+    overlaidProps[name] = description !== undefined
+      ? { ...prop, description }
       : prop
   }
 
@@ -72,7 +82,8 @@ function crossCheckWithCompare (extractedDoc, overrides, manifest) {
       row.field === 'description' &&
       row.class !== classify.CLASSES.REDUNDANT &&
       overrides[row.name] &&
-      typeof overrides[row.name].description === 'string' &&
+      overrides[row.name].description !== undefined &&
+      classify.unconditionalProse(overrides[row.name].description).scoped === 0 &&
       extractedProps[row.name] &&
       !changedNames.has(row.name)
   )

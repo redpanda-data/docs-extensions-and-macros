@@ -197,6 +197,33 @@ function mergeOverrides(target, overrides) {
 }
 
 /**
+ * House-style regressions that a regeneration would reintroduce.
+ *
+ * Generated prose passes through unchanged by design (see
+ * helpers/renderConnectDescription.js), so when a writer corrects an em dash or
+ * an "e.g." in a published partial instead of upstream, the next regeneration
+ * silently puts it back. Comparing the published text with the incoming text
+ * catches exactly that case: a style issue the published file does not have and
+ * the new one does. Same rules the doc-strings lint applies at the source, so
+ * the two agree on what counts as a regression.
+ *
+ * @param {string} published current on-disk partial
+ * @param {string} incoming regenerated partial
+ * @returns {string[]} rule names whose hit count increases
+ */
+function styleRegressions (published, incoming) {
+  return STYLE_REGRESSION_RULES
+    .filter(({ count }) => count(incoming) > count(published))
+    .map(({ label }) => label);
+}
+
+const STYLE_REGRESSION_RULES = [
+  { label: 'em dash', count: (text) => (text.match(/\u2014/g) || []).length },
+  { label: '"e.g."', count: (text) => (text.match(/(^|[^\w.])e\.g\./gi) || []).length },
+  { label: '"i.e."', count: (text) => (text.match(/(^|[^\w.])i\.e\./gi) || []).length }
+];
+
+/**
  * Resolves $ref references in an object by replacing them with their definitions.
  * Supports JSON Pointer style references like "#/definitions/client_certs".
  * 
@@ -307,6 +334,11 @@ async function generateRpcnConnectorDocs(options) {
     templateDescription,
     templateBloblang,
     writeFullDrafts,
+    // False when the connect repo provides the generated partials, config
+    // snippets, and Bloblang reference (see the modify-connect-tag-playbook
+    // extension). Drafts are still written, and still include the description
+    // partial the connect repo publishes for them.
+    writePartials = true,
     // Explicit opt-in for the destructive description-partial orphan sweep.
     // Off by default: see ORPHAN_SWEEP_MAX_FRACTION.
     pruneOrphanedDescriptions = false,
@@ -431,7 +463,7 @@ async function generateRpcnConnectorDocs(options) {
     : path.join(outputRoot, 'components');
   const configExamplesRoot = path.resolve(process.cwd(), 'modules/components/examples');
 
-  if (!writeFullDrafts) {
+  if (!writeFullDrafts && writePartials) {
     fs.mkdirSync(fieldsOutRoot,   { recursive: true });
     fs.mkdirSync(examplesOutRoot, { recursive: true });
     fs.mkdirSync(metadataOutRoot, { recursive: true });
@@ -448,6 +480,7 @@ async function generateRpcnConnectorDocs(options) {
   let partialsWritten = 0;
   const descriptionReports = [];
   const lostSectionWarnings = [];
+  const styleRegressionWarnings = [];
   // typeDir/name keys handled this run; used after the loop to blank
   // description partials orphaned by a connector deleted upstream.
   const visitedDescriptionPartials = new Set();
@@ -484,9 +517,15 @@ async function generateRpcnConnectorDocs(options) {
         examplesOut = renderExamplesPartial(item);
       }
 
-      if (fieldsOut.trim()) {
+      if (writePartials && fieldsOut.trim()) {
         const fPath = path.join(fieldsOutRoot, type, `${name}.adoc`);
         fs.mkdirSync(path.dirname(fPath), { recursive: true });
+        if (fs.existsSync(fPath)) {
+          const regressions = styleRegressions(fs.readFileSync(fPath, 'utf8'), fieldsOut);
+          if (regressions.length) {
+            styleRegressionWarnings.push({ partial: path.relative(process.cwd(), fPath), issues: regressions });
+          }
+        }
         fs.writeFileSync(fPath, fieldsOut);
         if (!writeFullDrafts) {
           partialsWritten++;
@@ -498,7 +537,7 @@ async function generateRpcnConnectorDocs(options) {
       // gate, one list. The old denylist named only the two bloblang keys, so
       // any other non-page data key (config today, anything added upstream
       // tomorrow) leaked partials no page can include.
-      if (examplesOut.trim() && CONNECTOR_PAGE_TYPE_DIRS.has(partialTypeDir)) {
+      if (writePartials && examplesOut.trim() && CONNECTOR_PAGE_TYPE_DIRS.has(partialTypeDir)) {
         const ePath = path.join(examplesOutRoot, type, `${name}.adoc`);
         fs.mkdirSync(path.dirname(ePath), { recursive: true });
         fs.writeFileSync(ePath, examplesOut);
@@ -508,7 +547,7 @@ async function generateRpcnConnectorDocs(options) {
         }
       }
 
-      if (CONNECTOR_PAGE_TYPE_DIRS.has(partialTypeDir)) {
+      if (writePartials && CONNECTOR_PAGE_TYPE_DIRS.has(partialTypeDir)) {
         // Render the metadata partial from the connector's description. Only
         // written when the description contains a `== Metadata` section.
         // Rendered inside the guard, not before it: the loop covers every
@@ -577,8 +616,8 @@ async function generateRpcnConnectorDocs(options) {
         visitedDescriptionPartials.add(`${partialTypeDir}/${name}`);
         const dPath = path.join(descriptionOutRoot, partialTypeDir, `${name}.adoc`);
         if (descriptionOut.trim()) {
-          fs.mkdirSync(path.dirname(dPath), { recursive: true });
-          if (fs.existsSync(dPath)) {
+          if (writePartials) fs.mkdirSync(path.dirname(dPath), { recursive: true });
+          if (writePartials && fs.existsSync(dPath)) {
             // Same content-loss check the metadata partial ten lines up has
             // had since #236, for the same reason: regeneration is
             // authoritative, but a section disappearing from a published
@@ -587,7 +626,12 @@ async function generateRpcnConnectorDocs(options) {
             // because it left the upstream description or because a human
             // added it here -- so warn before overwriting instead of
             // dropping it without a trace.
-            const lost = lostMetadataSections(fs.readFileSync(dPath, 'utf8'), descriptionOut);
+            const publishedDescription = fs.readFileSync(dPath, 'utf8');
+            const regressions = styleRegressions(publishedDescription, descriptionOut);
+            if (regressions.length) {
+              styleRegressionWarnings.push({ partial: path.relative(process.cwd(), dPath), issues: regressions });
+            }
+            const lost = lostMetadataSections(publishedDescription, descriptionOut);
             if (lost.length) {
               lostSectionWarnings.push({ partial: path.relative(process.cwd(), dPath), sections: lost });
               console.warn(
@@ -598,7 +642,7 @@ async function generateRpcnConnectorDocs(options) {
               );
             }
           }
-          fs.writeFileSync(dPath, descriptionOut);
+          if (writePartials) fs.writeFileSync(dPath, descriptionOut);
           // The partial now exists for this connector, so a drafted page can
           // include its body instead of freezing the summary and description
           // into the page. Gated on the file actually being written:
@@ -613,7 +657,7 @@ async function generateRpcnConnectorDocs(options) {
           if (typeof item.summary === 'string' && item.summary.trim()) {
             item.hasDescriptionMeta = true;
           }
-          if (!writeFullDrafts) {
+          if (!writeFullDrafts && writePartials) {
             partialsWritten++;
             partialFiles.push(path.relative(process.cwd(), dPath));
           }
@@ -644,7 +688,7 @@ async function generateRpcnConnectorDocs(options) {
             descriptionReports.push({ connector: `${partialTypeDir}/${name}`, message: seqMsg });
             console.warn(seqMsg);
           }
-        } else if (fs.existsSync(dPath)) {
+        } else if (writePartials && fs.existsSync(dPath)) {
           // The upstream description disappeared, but a previously generated
           // partial is still on disk and an already published page may include
           // it. Deleting the file would break that include, so blank it to a
@@ -693,6 +737,11 @@ async function generateRpcnConnectorDocs(options) {
 
         // typeDir is already computed at the beginning of the loop
 
+        // When the connect repo publishes the partials, the draft includes
+        // its availability, footnotes, and catalog data instead of freezing
+        // categories and the cgo requirement into the page.
+        item.connectPartials = !writePartials;
+
         let content;
         try {
           content = compiledTemplate(item);
@@ -728,7 +777,7 @@ async function generateRpcnConnectorDocs(options) {
   }
 
   // Bloblang function/method partials (only if includeBloblang is true)
-  if (options.includeBloblang) {
+  if (writePartials && options.includeBloblang) {
     for (const { key, folder } of bloblangTypes) {
       const items = dataObj[key];
       if (!Array.isArray(items)) continue;
@@ -838,7 +887,7 @@ async function generateRpcnConnectorDocs(options) {
   // Common/Advanced config snippet YAMLs in modules/components/examples
   const commonConfig = helpers.commonConfig;
   const advancedConfig = helpers.advancedConfig;
-  for (const [type, items] of Object.entries(dataObj)) {
+  for (const [type, items] of writePartials ? Object.entries(dataObj) : []) {
     if (!Array.isArray(items)) continue;
     for (const item of items) {
       if (!item.name || !item.config || !Array.isArray(item.config.children)) continue;
@@ -869,7 +918,7 @@ async function generateRpcnConnectorDocs(options) {
   // The sweep is destructive against published content, so collect the
   // candidates first and check the blast radius before writing anything.
   let orphanSweepSkipped = null;
-  if (!writeFullDrafts && fs.existsSync(descriptionOutRoot)) {
+  if (!writeFullDrafts && writePartials && fs.existsSync(descriptionOutRoot)) {
     const orphans = [];
     let partialsOnDisk = 0;
     for (const typeDirName of fs.readdirSync(descriptionOutRoot)) {
@@ -927,7 +976,7 @@ async function generateRpcnConnectorDocs(options) {
   // Self-heal published page headers: pages are one-time drafts, so pages
   // created before the template emitted :description: never got one.
   let descriptionBackfill = { backfilled: [], skippedNoSummary: [] };
-  if (!writeFullDrafts) {
+  if (!writeFullDrafts && writePartials) {
     descriptionBackfill = backfillPageDescriptions(dataObj);
   }
 
@@ -938,6 +987,7 @@ async function generateRpcnConnectorDocs(options) {
     draftFiles,
     descriptionReports,
     lostSectionWarnings,
+    styleRegressionWarnings,
     orphanSweepSkipped,
     descriptionBackfill
   };

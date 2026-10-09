@@ -1,0 +1,10 @@
+name: macro-fixtures
+title: Macro fixtures (released)
+version: '26.2'
+# No prerelease key: this is a released version of the SAME component as
+# macro-fixtures-beta (26.3, prerelease: true). Building both into one site
+# gives the two a real version selector, so the beta-workflow gates can be
+# shown by flipping versions on the same page rather than by describing the
+# other side in prose.
+nav:
+- modules/ROOT/nav.adoc

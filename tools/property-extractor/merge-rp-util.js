@@ -207,15 +207,21 @@ async function handleMergeUnavailable(tag, enhanced, reason, output = enhanced) 
 }
 
 // rp_util covers every cluster/broker-scope property (see this file's own
-// header comment), so when its merge is skipped or fails, any cluster/
-// broker property still missing gets_restored isn't "no annotation exists"
-// (the pre-existing, legitimate case property.hbs already renders as an
-// absent row) -- it's "we don't know, because the merge that would have
-// told us didn't run". Mark those explicitly so the template can render
-// that as a visible "Unknown" state instead of silently rendering nothing,
-// which previously made a flaky rp_util fetch indistinguishable from a
-// real upstream change in the generated docs.
+// header comment), so when its merge is skipped or fails, a cluster/broker
+// property still missing gets_restored means "we don't know, because the
+// merge that would have told us didn't run". Mark those so the template can
+// render a visible "Unknown" instead of silently rendering nothing, which
+// made a flaky rp_util fetch indistinguishable from a real upstream change.
+//
+// Since the Tree-sitter pass materializes the declared default (see
+// GetsRestoredTransformer), a source-parsed property always arrives with the
+// key set, so this now marks only entries with no source to default from.
+// That is the honest scope for it: an override-fabricated stub has no
+// declaration to read, but the reason is the missing property, not the
+// missing merge, so those are skipped too and simply render no row.
 const RP_UTIL_COVERED_SCOPES = new Set(['cluster', 'broker'])
+const NO_SOURCE_PROVENANCE = 'override'
+
 
 function markRpUtilMergeUnavailable(enhancedPath) {
   let data
@@ -230,12 +236,17 @@ function markRpUtilMergeUnavailable(enhancedPath) {
   for (const prop of Object.values(properties)) {
     if (!prop || !RP_UTIL_COVERED_SCOPES.has(prop.config_scope)) continue
     if (prop.gets_restored !== undefined) continue
+    if (prop.defined_in === NO_SOURCE_PROVENANCE) continue
     prop.rp_util_merge_status = 'unavailable'
     marked++
   }
   if (marked === 0) return
   try {
-    fs.writeFileSync(enhancedPath, bigIntJson.stringify(data))
+    // indent 4, matching what property_extractor.py and rp_util_merge.py
+    // write. Without it this rewrite minified the whole dataset onto one
+    // line, flipping the committed attachment from 14,000 diffable lines
+    // to one.
+    fs.writeFileSync(enhancedPath, bigIntJson.stringify(data, 4))
   } catch (err) {
     console.warn(`Warning: could not write rp_util-unavailable marker to ${enhancedPath}: ${err.message}`)
   }

@@ -1,0 +1,9 @@
+= Licensing (placeholder)
+
+The real licensing page (`get-started:licensing/overview.adoc`) lives in the
+`streaming` component, which this lightweight showcase build does not
+include. `local-macro-showcase-playbook.yml` points `enterprise-licensing-page`
+here instead, so an `enterprise:` mention with no feature-specific `xref`
+still links to something real rather than an unresolved xref. Build with
+`local-macro-test-playbook.yml` (or `scripts/macro-test.sh`) to see the same
+mentions link to the actual licensing page.
