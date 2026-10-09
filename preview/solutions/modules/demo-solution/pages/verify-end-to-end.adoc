@@ -1,0 +1,23 @@
+= Verify end to end
+:page-layout: solution-step
+:description: Run the producer and confirm the leaderboard updates.
+:page-solution-step-duration: 10
+
+== What you do
+
+Run the producer shown here. The full source ships in the download bundle and is
+included from the module's examples so the page never drifts from the code.
+
+[source,go]
+----
+include::example$hello.go[]
+----
+
+== What happens inside
+
+Each event is keyed by player id, so one player's events stay ordered on one partition.
+
+[.solution-verify]
+--
+Run `go run ./hello.go` and confirm it prints `PASS (1/1)`.
+--

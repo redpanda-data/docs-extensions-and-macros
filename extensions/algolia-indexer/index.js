@@ -131,9 +131,10 @@ function register ({
 
     // Identify objects to delete (stale content)
     for (const [objectID, obj] of existingObjectsMap) {
-      // Only delete Doc pages (not API) and Labs that aren't interactive
+      // Only delete Doc pages (not API), solution records, and Labs that aren't interactive
       const shouldDelete = (obj.type === 'Doc' && !obj.objectID.includes('/api/')) ||
                           (!obj.type) ||
+                          (obj.type === 'Solution') ||
                           (obj.type === 'Lab' && !obj.interactive)
 
       if (shouldDelete) {
