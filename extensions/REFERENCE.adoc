@@ -878,6 +878,8 @@ The extension accepts the following configuration options:
 
 termspath (optional):: Specifies the path to a local directory containing term files (in `.adoc` format). If this path is provided, the extension will attempt to load terms from this directory first. If this path is not provided or no valid terms are found in the specified directory, the extension will fall back to loading terms from the `shared` component.
 
+glossarypage (optional):: The resource ID of one page that holds the glossary for the whole site, such as `home:ROOT:glossary.adoc`. The extension appends every term to that page and sets every component's `glossary-page` attribute to it, so `glossterm` links from any component point at the one glossary. Any `reference:glossary.adoc` pages that components still have are filled too, so they stay complete until they are removed. If the page does not exist, the extension logs a warning and links each component to its own `reference:glossary.adoc`, as without this option.
+
 Term files should follow the following structure:
 
 ```asciidoc
