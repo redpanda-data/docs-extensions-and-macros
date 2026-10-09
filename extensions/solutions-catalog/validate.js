@@ -26,6 +26,10 @@ const DESCRIPTION_MAX = 140
 // products. Tools every solution uses say nothing about any one of them, and
 // a value that is also a category belongs in page-categories.
 const TECHNOLOGY_DENY_LIST = ['rpk', 'curl', 'docker', 'docker compose', 'redpanda', 'redpanda console']
+// Separately deployed Redpanda products are technologies of a solution even
+// where the category taxonomy also names them (Redpanda Connect is a top-level
+// category). Matches tools/check-metadata.sh in the solutions repository.
+const PRODUCT_TECHNOLOGIES = ['redpanda connect', 'redpanda migrator', 'redpanda operator']
 const REQUIRED_OVERVIEW_H2 = ['architecture', 'prerequisites']
 // The complete production section lives at the end of the last step, once the
 // reader has the whole stack running, with one h3 per topic.
@@ -360,7 +364,7 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
   }
   if (categoryMap) {
     const categoryNames = new Map([...categoryMap.categories, ...categoryMap.subcategories].map((c) => [c.toLowerCase(), c]))
-    const asCategory = record.technologies.filter((t) => categoryNames.has(t.toLowerCase()) && !denied.includes(t))
+    const asCategory = record.technologies.filter((t) => categoryNames.has(t.toLowerCase()) && !denied.includes(t) && !PRODUCT_TECHNOLOGIES.includes(t.toLowerCase()))
     if (asCategory.length) {
       err(`page-solution-technologies lists ${asCategory.join(', ')}, which ${asCategory.length === 1 ? 'is a category' : 'are categories'}; put ${asCategory.length === 1 ? 'it' : 'them'} in page-categories instead`)
     }
