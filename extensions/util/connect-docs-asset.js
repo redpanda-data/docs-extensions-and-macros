@@ -86,30 +86,64 @@ async function readTarGz (buffer) {
   })
 }
 
+// One download attempt: { status } on an HTTP error, { body } on success.
+// With a token it goes through the releases API, which works whether or not
+// the connect repo is public. The asset endpoint redirects to a short-lived
+// signed URL, which is fetched without the token.
+async function fetchAssetOnce (tag, { fetchImpl, token }) {
+  const timeout = () => AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS)
+  const ua = { 'User-Agent': 'Redpanda Docs' }
+  if (!token) {
+    const response = await fetchImpl(assetUrl(tag), { redirect: 'follow', signal: timeout(), headers: ua })
+    // Read the body here, so a connection that drops or times out
+    // mid-download is retried like a failed request.
+    return response.ok ? { body: Buffer.from(await response.arrayBuffer()) } : { status: response.status, statusText: response.statusText }
+  }
+  const auth = { ...ua, Authorization: `Bearer ${token}` }
+  const api = `https://api.github.com/repos/${OWNER}/${REPO}/releases/tags/${encodeURIComponent(tag)}`
+  const release = await fetchImpl(api, { signal: timeout(), headers: { ...auth, Accept: 'application/vnd.github+json' } })
+  // A token that is expired or lacks access must not break a build that the
+  // public download would serve. GitHub answers 404, not 403, for a repo the
+  // token can't see, so a 404 here falls back too, and is flagged so the
+  // caller can say why when the public download has no asset either.
+  if (release.status === 401 || release.status === 403) return fetchAssetOnce(tag, { fetchImpl, token: null })
+  if (release.status === 404) return { ...(await fetchAssetOnce(tag, { fetchImpl, token: null })), tokenCouldNotSee: true }
+  if (!release.ok) return { status: release.status, statusText: release.statusText }
+  const found = ((await release.json()).assets || []).find((a) => a.name === ASSET_NAME)
+  if (!found) return { status: 404, statusText: 'Not Found' }
+  let response = await fetchImpl(found.url, { redirect: 'manual', signal: timeout(), headers: { ...auth, Accept: 'application/octet-stream' } })
+  if (response.status === 401 || response.status === 403) return fetchAssetOnce(tag, { fetchImpl, token: null })
+  if (response.status >= 300 && response.status < 400 && response.headers.get('location')) {
+    response = await fetchImpl(response.headers.get('location'), { redirect: 'follow', signal: timeout(), headers: ua })
+  }
+  return response.ok ? { body: Buffer.from(await response.arrayBuffer()) } : { status: response.status, statusText: response.statusText }
+}
+
 // Downloads the asset of a release tag. Returns null when the release has no
 // asset (404). Throws on any other failure, after retrying network errors and
-// server errors.
-async function downloadAsset (tag, { fetchImpl = globalThis.fetch, logger } = {}) {
-  const url = assetUrl(tag)
+// server errors. Pass the GitHub token when there is one: an unauthenticated
+// download only works while the connect repo is public.
+async function downloadAsset (tag, { fetchImpl = globalThis.fetch, logger, token = null } = {}) {
+  const url = token ? `the ${tag} release asset ${ASSET_NAME} through the GitHub API` : assetUrl(tag)
   let lastError = null
   for (let attempt = 1; attempt <= DOWNLOAD_ATTEMPTS; attempt++) {
-    let response
-    let body
+    let result
     try {
-      response = await fetchImpl(url, { redirect: 'follow', signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS), headers: { 'User-Agent': 'Redpanda Docs' } })
-      // Read the body inside the try, so a connection that drops or times
-      // out mid-download is retried like a failed request.
-      if (response.ok) body = Buffer.from(await response.arrayBuffer())
+      result = await fetchAssetOnce(tag, { fetchImpl, token })
     } catch (error) {
-      response = undefined
       lastError = new Error(`could not download ${url}: ${error.message}`)
     }
-    if (body) return body
-    if (response) {
-      if (response.status === 404) return null
-      lastError = new Error(`could not download ${url}: HTTP ${response.status} ${response.statusText || ''}`.trim())
+    if (result && result.body) return result.body
+    if (result) {
+      if (result.status === 404) {
+        if (result.tokenCouldNotSee && logger) {
+          logger.warn(`The GitHub API found no ${tag} release of ${OWNER}/${REPO} with the GitHub token, and the public download has no ${ASSET_NAME} either. If the repo is private, check that the token has read access to it.`)
+        }
+        return null
+      }
+      lastError = new Error(`could not download ${url}: HTTP ${result.status} ${result.statusText || ''}`.trim())
       // A client error other than 404 will not change on a retry.
-      if (response.status < 500 && response.status !== 429) break
+      if (result.status < 500 && result.status !== 429) break
     }
     if (attempt < DOWNLOAD_ATTEMPTS) {
       if (logger) logger.warn(`${lastError.message}; retrying (${attempt}/${DOWNLOAD_ATTEMPTS - 1})`)

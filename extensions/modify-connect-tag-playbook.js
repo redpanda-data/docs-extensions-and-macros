@@ -62,6 +62,8 @@ const listConnectReleases = require('./version-fetcher/list-connect-releases')
 const { createGitHub } = require('./util/connect-github')
 const { isConnectSource, isConnectOrigin, githubRepoOf, setResolvedConnectRef } = require('./util/connect-catalog')
 const asset = require('./util/connect-docs-asset')
+const { getGitHubApiToken } = require('../cli-utils/github-token')
+const { gitAuthEnv } = require('../cli-utils/git-credential-env')
 
 const OWNER = 'redpanda-data'
 const REPO = 'connect'
@@ -121,9 +123,12 @@ function highestStableTag (lsRemoteOutput) {
   return stableTags(lsRemoteOutput)[0] || null
 }
 
+// With a token, git authenticates through the shared credential helper, so a
+// private connect repo still lists its tags.
 function gitTags (url) {
   const { execFileSync } = require('child_process')
-  return execFileSync('git', ['ls-remote', '--tags', '--refs', url], { encoding: 'utf8', timeout: 60000 })
+  const env = gitAuthEnv(getGitHubApiToken())
+  return execFileSync('git', ['ls-remote', '--tags', '--refs', url], { encoding: 'utf8', timeout: 60000, env })
 }
 
 function latestTagFromGit (url) {
@@ -229,7 +234,7 @@ async function resolveLatestTag (url, logger) {
 // Downloads the asset of a release. Null on a 404; throws on any other failure.
 async function downloadRelease (tag, logger) {
   try {
-    return await asset.downloadAsset(tag, { logger })
+    return await asset.downloadAsset(tag, { logger, token: getGitHubApiToken() })
   } catch (error) {
     throw new Error(`Could not download the Redpanda Connect reference docs for ${tag}: ${error.message}`)
   }

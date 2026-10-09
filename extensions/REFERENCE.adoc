@@ -411,7 +411,7 @@ Every Connect release publishes the generated tree as a release asset named `red
 At build time, when the playbook has the `connect` component, the extension:
 
 . Picks the release: the latest stable `vX.Y.Z` release by default, so the site never shows fields from unreleased code on connect's `main` branch. It asks the GitHub API for the latest release and falls back to the highest stable `vX.Y.Z` tag from `git ls-remote`. If neither works, the build stops with an error. The `tag` option picks a specific release instead.
-. Downloads that release's `redpanda-connect-docs.tar.gz` asset. No token is needed.
+. Downloads that release's `redpanda-connect-docs.tar.gz` asset. With a GitHub token it downloads through the releases API, which keeps working if the connect repository becomes private. Without one, or if GitHub rejects the token, it uses the public download URL.
 . Adds `modules/components/partials/**` as partials and `modules/components/examples/**` as examples of the `components` module, in every version of the `connect` component. A file that another source, such as rp-connect-docs, already provides is skipped and counted in the log, so rp-connect-docs can keep committing its own copies until it stops.
 
 A release from before the asset existed has none, and the download returns 404. A new release can also be missing it for a while: Connect publishes the release first and attaches the asset 15 to 20 minutes later in a separate job, which can fail.
@@ -457,7 +457,7 @@ A connect source with explicit refs is kept, which is how you preview a connect 
 === Environment variables
 
 - `REDPANDA_CONNECT_DOCS_DIR` (optional): A local directory, or a local `redpanda-connect-docs.tar.gz` file, to read the reference docs from instead of a release. See <<Preview unreleased Connect changes>>.
-- `REDPANDA_GITHUB_TOKEN` (optional): A GitHub token for the latest release lookup and the fallback release listing. Without it, the extension sends unauthenticated API requests, which GitHub can rate limit. The `git ls-remote` fallback and the asset download need no token.
+- `REDPANDA_GITHUB_TOKEN` (optional): A GitHub token for the latest release lookup, the fallback release listing, the asset download, and the `git ls-remote` fallback. The extension also reads `ACTIONS_BOT_TOKEN`, `GITHUB_TOKEN`, `VBOT_GITHUB_API_TOKEN`, `GH_TOKEN`, and a github.com entry in `GIT_CREDENTIALS`, in that order. Without any GitHub token, the extension sends unauthenticated requests, which GitHub can rate limit, and which only work while the connect repository is public.
 
 === Configuration options
 

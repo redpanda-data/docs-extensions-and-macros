@@ -144,8 +144,18 @@ const response = (status, body = Buffer.alloc(0)) => ({
   arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength)
 })
 
+// The download takes the authenticated API path when a token is set, so keep
+// the runner's own tokens out of these tests.
+const TOKEN_VARS = ['REDPANDA_GITHUB_TOKEN', 'ACTIONS_BOT_TOKEN', 'GITHUB_TOKEN', 'VBOT_GITHUB_API_TOKEN', 'GH_TOKEN', 'GIT_CREDENTIALS']
+let savedTokens = {}
+
 let tmp, archive, realFetch
 beforeEach(() => {
+  savedTokens = {}
+  for (const v of TOKEN_VARS) {
+    savedTokens[v] = process.env[v]
+    delete process.env[v]
+  }
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rpcn-asset-'))
   fs.mkdirSync(path.join(tmp, 'tree'))
   writeTree(path.join(tmp, 'tree'))
@@ -165,6 +175,10 @@ beforeEach(() => {
   octokit.rest.repos.getContent.mockResolvedValue({ data: { content: Buffer.from('name,type\nsql_driver_postgres,sql_driver\n').toString('base64') } })
 })
 afterEach(() => {
+  for (const v of TOKEN_VARS) {
+    if (savedTokens[v] === undefined) delete process.env[v]
+    else process.env[v] = savedTokens[v]
+  }
   global.fetch = realFetch
   delete process.env[ENV]
   fs.rmSync(tmp, { recursive: true, force: true })
@@ -448,6 +462,93 @@ describe('modify-connect-tag-playbook with a connect content source', () => {
 })
 
 describe('connect-docs-asset download', () => {
+  const API = 'https://api.github.com/repos/redpanda-data/connect'
+  const ASSET_API = `${API}/releases/assets/7`
+  const SIGNED = 'https://objects.githubusercontent.com/signed?x=1'
+  const json = (status, value) => ({ ...response(status), json: async () => value })
+  const redirect = (location) => ({ ...response(302), headers: { get: (h) => (h.toLowerCase() === 'location' ? location : null) } })
+  const routes = (map) => jest.fn(async (url) => {
+    if (!(url in map)) throw new Error(`unexpected fetch ${url}`)
+    return map[url]
+  })
+
+  it('with a token, downloads through the releases API and keeps the token off the signed URL', async () => {
+    const fetchImpl = routes({
+      [`${API}/releases/tags/v4.200.0`]: json(200, { assets: [{ name: 'other.tar.gz', url: `${API}/releases/assets/6` }, { name: 'redpanda-connect-docs.tar.gz', url: ASSET_API }] }),
+      [ASSET_API]: redirect(SIGNED),
+      [SIGNED]: response(200, archive)
+    })
+    const body = await asset.downloadAsset('v4.200.0', { fetchImpl, token: 't0ken' })
+    expect(Buffer.compare(body, archive)).toBe(0)
+    const headersFor = (url) => fetchImpl.mock.calls.find(([u]) => u === url)[1].headers
+    expect(headersFor(`${API}/releases/tags/v4.200.0`).Authorization).toBe('Bearer t0ken')
+    expect(headersFor(ASSET_API)).toMatchObject({ Authorization: 'Bearer t0ken', Accept: 'application/octet-stream' })
+    expect(fetchImpl.mock.calls.find(([u]) => u === ASSET_API)[1].redirect).toBe('manual')
+    expect(headersFor(SIGNED).Authorization).toBeUndefined()
+    expect(fetchImpl.mock.calls.some(([u]) => u.startsWith('https://github.com/'))).toBe(false)
+  })
+
+  it('with a token, returns null for a release without the asset or a missing release', async () => {
+    const noAsset = routes({ [`${API}/releases/tags/v4.200.0`]: json(200, { assets: [{ name: 'other.tar.gz', url: `${API}/releases/assets/6` }] }) })
+    await expect(asset.downloadAsset('v4.200.0', { fetchImpl: noAsset, token: 't' })).resolves.toBeNull()
+    const noRelease = routes({ [`${API}/releases/tags/v4.200.0`]: json(404, {}), [asset.assetUrl('v4.200.0')]: response(404) })
+    await expect(asset.downloadAsset('v4.200.0', { fetchImpl: noRelease, token: 't' })).resolves.toBeNull()
+  })
+
+  it.each([401, 403])('falls back to the public download when the token is rejected (%s)', async (status) => {
+    const fetchImpl = routes({
+      [`${API}/releases/tags/v4.200.0`]: json(status, {}),
+      [asset.assetUrl('v4.200.0')]: response(200, archive)
+    })
+    const body = await asset.downloadAsset('v4.200.0', { fetchImpl, token: 'expired' })
+    expect(Buffer.compare(body, archive)).toBe(0)
+    expect(fetchImpl.mock.calls.find(([u]) => u === asset.assetUrl('v4.200.0'))[1].headers.Authorization).toBeUndefined()
+  })
+
+  it('falls back to the public download when the asset endpoint rejects the token', async () => {
+    for (const status of [401, 403]) {
+      const fetchImpl = routes({
+        [`${API}/releases/tags/v4.200.0`]: json(200, { assets: [{ name: 'redpanda-connect-docs.tar.gz', url: ASSET_API }] }),
+        [ASSET_API]: response(status),
+        [asset.assetUrl('v4.200.0')]: response(200, archive)
+      })
+      const body = await asset.downloadAsset('v4.200.0', { fetchImpl, token: 't' })
+      expect(Buffer.compare(body, archive)).toBe(0)
+    }
+  })
+
+  it('falls back to the public download when the token cannot see the release (404)', async () => {
+    const fetchImpl = routes({
+      [`${API}/releases/tags/v4.200.0`]: json(404, {}),
+      [asset.assetUrl('v4.200.0')]: response(200, archive)
+    })
+    const body = await asset.downloadAsset('v4.200.0', { fetchImpl, token: 't' })
+    expect(Buffer.compare(body, archive)).toBe(0)
+  })
+
+  it('says why when neither the token nor the public download finds the release', async () => {
+    const fetchImpl = routes({
+      [`${API}/releases/tags/v4.200.0`]: json(404, {}),
+      [asset.assetUrl('v4.200.0')]: response(404)
+    })
+    const warn = jest.fn()
+    await expect(asset.downloadAsset('v4.200.0', { fetchImpl, token: 't', logger: { warn } })).resolves.toBeNull()
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/found no v4\.200\.0 release of redpanda-data\/connect with the GitHub token.*read access/))
+  })
+
+  it('stays quiet for a release that exists without the asset', async () => {
+    const fetchImpl = routes({ [`${API}/releases/tags/v4.200.0`]: json(200, { assets: [] }) })
+    const warn = jest.fn()
+    await expect(asset.downloadAsset('v4.200.0', { fetchImpl, token: 't', logger: { warn } })).resolves.toBeNull()
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it('without a token, uses the public download URL', async () => {
+    const fetchImpl = routes({ [asset.assetUrl('v4.200.0')]: response(200, archive) })
+    const body = await asset.downloadAsset('v4.200.0', { fetchImpl })
+    expect(Buffer.compare(body, archive)).toBe(0)
+  })
+
   it('retries when the connection drops while reading the body', async () => {
     const dropped = { ...response(200), arrayBuffer: async () => { throw new Error('terminated') } }
     const fetchImpl = jest.fn()
