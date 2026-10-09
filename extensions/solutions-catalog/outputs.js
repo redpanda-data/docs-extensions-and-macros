@@ -36,8 +36,9 @@ function buildSteps (record) {
  *
  * `repo` (owner/name) is included only with `publicRepo`. The solutions
  * repository is private, so advertising it sends readers and agents to a 404;
- * the download endpoint and the public attachments are the way in, and the
- * download function takes the repository from its own configuration. The
+ * the pages (every build-along file is shown in full) and the gated download
+ * endpoint are the way in, and the download function takes the repository from
+ * its own configuration. The
  * internal record keeps `repo` for the release check either way.
  */
 function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions = [], publicRepo = false } = {}) {
@@ -60,12 +61,15 @@ function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions 
     categories: record.categories,
     useCases: record.useCases,
     industries: record.industries,
-    // The download endpoint's allowlist: exactly the snippets these pages render.
+    // The download endpoint's allowlist, exactly the snippets these pages
+    // render, and the list the rail's "All build-along files" panel shows.
     files: record.files || [],
     personas: record.personas,
     steps: steps || buildSteps(record),
     relatedDocs,
     relatedSolutions,
+    // Compatibility only: verification.json is a solution's only attachment
+    // and is published as `verified`, so this is empty in practice.
     attachments: record.attachments,
     supersededBy: record.supersededBy || null,
     lastModified: record.lastModified || null,

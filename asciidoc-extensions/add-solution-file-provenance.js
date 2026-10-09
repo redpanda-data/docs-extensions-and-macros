@@ -96,6 +96,68 @@ function includeDirectiveLine (block, file, pageLines) {
   return pageLines[lineno - 1] || ''
 }
 
+// An include of this module's examples, unqualified or qualified with the
+// module name only: `include::example$<path>[...]`, `include::<module>:example$<path>[...]`.
+const EXAMPLE_DIRECTIVE_RX = /^\s*include::(?:([A-Za-z0-9_-]+):)?example\$([^[\]\s]+)\[.*\]\s*$/
+const DELIMITER_RX = /^(?:-{4,}|\.{4,})$/
+
+/**
+ * The include directive behind a listing nested in another block.
+ *
+ * A listing inside a compound block (the `[%collapsible]` example block that
+ * holds a solution page's `.Complete source`, a sidebar, a tab) is parsed from
+ * lines the parent block already read, include expanded, so its source
+ * location names the page and a line in it rather than the included file.
+ * That line is the listing's opening delimiter (or the attribute and title
+ * lines above it), so the directive is the line after the delimiter. Returns
+ * '' when the location is not this page or that line is not an example include.
+ */
+function nestedDirectiveLine (block, file, pageLines) {
+  if (!pageLines || typeof block.getSourceLocation !== 'function') return ''
+  const location = block.getSourceLocation()
+  if (!location || typeof location.getFile !== 'function') return ''
+  const located = location.getFile()
+  // A String carrying a source record is an included file: not this case.
+  if (located && typeof located === 'object') return ''
+  const name = located === undefined || located === null ? '' : String(located)
+  const ownPaths = [file.path, file.src && file.src.path].filter(Boolean).map(String)
+  if (name !== '' && !ownPaths.includes(name)) return ''
+  let i = Number(location.getLineNumber()) - 1
+  if (!Number.isInteger(i) || i < 0) return ''
+  while (i < pageLines.length && (/^\[.*\]$/.test(pageLines[i]) || /^\.[^.\s]/.test(pageLines[i]))) i++
+  if (!DELIMITER_RX.test(String(pageLines[i] || '').trim())) return ''
+  const line = pageLines[i + 1] || ''
+  return EXAMPLE_DIRECTIVE_RX.test(line) ? line : ''
+}
+
+/**
+ * The example file a nested listing was included from, as an Antora source
+ * record, or null. Resolved through the content catalog when the loader passes
+ * one, which also proves the include resolved; the block's first line must be
+ * in that file, so a line number that drifted onto some other listing's
+ * directive is never taken for this one.
+ */
+function nestedIncludedSrc (block, file, directive, contentCatalog) {
+  const m = EXAMPLE_DIRECTIVE_RX.exec(directive)
+  if (!m) return null
+  const [, module, relative] = m
+  if (module && file.src && module !== file.src.module) return null
+  if (relative.includes('{')) return null
+  if (!contentCatalog || typeof contentCatalog.resolveResource !== 'function') {
+    return { family: EXAMPLE_FAMILY, relative: relative.replace(/^\.\//, '') }
+  }
+  let resolved
+  try {
+    resolved = contentCatalog.resolveResource(`example$${relative}`, file.src, 'example', ['example'])
+  } catch {
+    return null
+  }
+  if (!resolved || !resolved.src || !resolved.contents) return null
+  const first = (typeof block.getSourceLines === 'function' ? block.getSourceLines() : []).find((l) => String(l).trim())
+  if (first !== undefined && !resolved.contents.toString('utf8').includes(String(first).trim())) return null
+  return resolved.src
+}
+
 function sourceLinesOf (file) {
   try {
     return file && file.contents ? file.contents.toString('utf8').split(/\r\n?|\n/) : null
@@ -129,11 +191,16 @@ function register (registry, context = {}) {
     this.process((doc) => {
       const pageLines = sourceLinesOf(file)
       for (const block of doc.findBy({ context: 'listing' })) {
-        const src = includedSrcOf(block)
+        let src = includedSrcOf(block)
+        let directive = ''
+        if (!src) {
+          directive = nestedDirectiveLine(block, file, pageLines)
+          src = directive ? nestedIncludedSrc(block, file, directive, context.contentCatalog) : null
+        }
         if (!src || src.family !== EXAMPLE_FAMILY || !src.relative) continue
         if (isStepScaffolding(src.relative)) continue
         const marker = `${MARKER_PREFIX}${stamped.size + 1}`
-        stamped.set(marker, { path: src.relative, tag: tagFromDirective(includeDirectiveLine(block, file, pageLines)) })
+        stamped.set(marker, { path: src.relative, tag: tagFromDirective(directive || includeDirectiveLine(block, file, pageLines)) })
         const role = block.getAttribute('role')
         block.setAttribute('role', [role, SNIPPET_ROLE, marker].filter(Boolean).join(' '))
       }
@@ -166,5 +233,6 @@ module.exports = {
   MARKER_PREFIX,
   tagFromDirective,
   htmlEscape,
+  isStepScaffolding,
 }
 module.exports.register = register

@@ -181,6 +181,50 @@ describe('solution snippet provenance', () => {
     expect(block).toMatchObject({ file: 'services/steps/main.go' })
   })
 
+  // The `.Complete source: <path>` pattern: a listing nested in a collapsible
+  // example block. Its lines are read by the parent block, so its source
+  // location names the page, not the included file.
+  const COLLAPSIBLE = (inner) => `.Complete source: \`main.go\`\n[%collapsible]\n====\n${inner}====\n`
+
+  renderTest('a whole file shown inside a collapsible block carries the file', () => {
+    const [block] = listings(render(COLLAPSIBLE(WHOLE_FILE)))
+    expect(block).toMatchObject({ file: 'services/leaderboard/main.go', tag: undefined })
+    expect(block.classes).toContain('sol-snippet')
+  })
+
+  renderTest('tags=** inside a collapsible block carries the file, and no single tag', () => {
+    const [block] = listings(render(COLLAPSIBLE('[,go]\n----\ninclude::example$services/leaderboard/main.go[tags=**]\n----\n')))
+    expect(block).toMatchObject({ file: 'services/leaderboard/main.go', tag: undefined })
+  })
+
+  renderTest('an excerpt inside a collapsible block carries its tag', () => {
+    const [block] = listings(render(`Intro.\n\n${COLLAPSIBLE(EXCERPT)}`))
+    expect(block).toMatchObject({ file: 'services/leaderboard/main.go', tag: 'handler' })
+  })
+
+  renderTest('nested blocks after other content on the page are each stamped', () => {
+    const html = render(`${EXCERPT}\n${HAND_WRITTEN}\n${COLLAPSIBLE(WHOLE_FILE)}\n${COLLAPSIBLE('[,make]\n----\ninclude::example$Makefile[tag=topics]\n----\n')}`)
+    expect(listings(html).map((b) => [b.file, b.tag])).toEqual([
+      ['services/leaderboard/main.go', 'handler'],
+      [undefined, undefined],
+      ['services/leaderboard/main.go', undefined],
+      ['Makefile', 'topics'],
+    ])
+    expect(html).not.toMatch(/sol-snippet-\d/)
+  })
+
+  renderTest('a hand-written listing inside a collapsible block carries nothing', () => {
+    const [block] = listings(render(COLLAPSIBLE(HAND_WRITTEN)))
+    expect(block.file).toBeUndefined()
+    expect(block.classes).not.toContain('sol-snippet')
+  })
+
+  renderTest('nested scaffolding and unresolved includes carry nothing', () => {
+    const html = render(COLLAPSIBLE('[,bash]\n----\ninclude::example$steps/build-leaderboard/commands.sh[]\n----\n') +
+      '\n' + COLLAPSIBLE('[,go]\n----\ninclude::example$services/missing.go[]\n----\n'))
+    expect(html).not.toContain('data-solution-file')
+  })
+
   renderTest('an existing role on the block survives', () => {
     const html = render('[.wide,go]\n----\ninclude::example$services/leaderboard/main.go[]\n----\n')
     const [block] = listings(html)

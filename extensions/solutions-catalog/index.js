@@ -68,9 +68,9 @@ const DEFAULTS = Object.freeze({
   networkChecks: 'auto',
   includeDrafts: false,
   agentCompanion: true,
-  // The solutions repository is private: readers get the code through the
-  // gated download and the public attachments, so its owner/name is not
-  // published unless a playbook says the repository is public.
+  // The solutions repository is private: readers read the code on the pages
+  // and signed-in readers download it through the gated endpoint, so its
+  // owner/name is not published unless a playbook says the repository is public.
   publicRepo: false,
 })
 
@@ -315,6 +315,9 @@ module.exports.register = function ({ config = {} } = {}) {
     // included page key -> keys of the pages in other components that include
     // it, read from sources at contentClassified (see collectSingleSourcedTwins)
     twins: new Map(),
+    // module -> whole-file example includes of its pages, read from sources at
+    // contentClassified (see collectFullIncludes)
+    fullIncludes: new Map(),
   }
   let validator = null
   const getValidator = () => (validator = validator || relationships.createRelationshipsValidator())
@@ -331,6 +334,7 @@ module.exports.register = function ({ config = {} } = {}) {
     // Page sources are only AsciiDoc until conversion, so the single-sourcing
     // map that lets Cloud twins inherit explicit edges is read now.
     state.twins = collect.collectSingleSourcedTwins(contentCatalog)
+    state.fullIncludes = collect.collectFullIncludes(contentCatalog)
 
     if (collected.relationshipsFile) {
       try {
@@ -385,6 +389,7 @@ module.exports.register = function ({ config = {} } = {}) {
       collect.resolveRelatedDocLines(record, pageByUrl)
       const result = validate.validateSolution(record, {
         categoryMap, facetVocab, resolveDoc, solutionIds, pageByUrl, umbrellaLayouts: UMBRELLA_LAYOUTS, isCloudPage, cloudTwinsOf,
+        fullIncludes: state.fullIncludes.get(record.module) || [],
       })
       errors.push(...result.errors)
       warnings.push(...result.warnings)
