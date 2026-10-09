@@ -85,20 +85,28 @@ function resourceUrl (id, { slug, siteUrl = DEFAULT_SITE_URL } = {}) {
  * shown in full on the solution's pages, and only signed-in readers download
  * it, so it is named as a repo path with no link an agent could not follow.
  */
-function attachmentRef (path, text, { slug, siteUrl = DEFAULT_SITE_URL } = {}) {
+function attachmentRef (path, text, { slug, siteUrl = DEFAULT_SITE_URL, module } = {}) {
   const file = String(path).replace(/^\.\//, '')
+  // An xref qualified with another module points at that solution's attachment.
+  const owner = module || slug
   if (file === 'verification.json') {
     const label = text || file
-    return slug ? `[${label}](${siteUrl}/solutions/${slug}/_attachments/${file})` : `\`${label}\` (verification evidence)`
+    return owner ? `[${label}](${siteUrl}/solutions/${owner}/_attachments/${file})` : `\`${label}\` (verification evidence)`
   }
-  return `\`${file}\` (reference code, shown in full on the solution's pages)`
+  const where = module && slug && module !== slug ? `the ${module} solution's pages` : "the solution's pages"
+  return `\`${file}\` (reference code, shown in full on ${where})`
 }
+
+// xref:attachment$<path>[text], optionally qualified with a module or with
+// the solutions component and a solution module. ROOT's and another
+// component's attachments are left to the page xref rule.
+const ATTACHMENT_XREF_RX = /xref:(?:(?:solutions:)?(?!ROOT:)([A-Za-z0-9_-]+):)?attachment\$([^[\s]+)\[([^\]]*)\]/g
 
 /** AsciiDoc inline markup -> Markdown, for the constructs solution pages use. */
 function inline (s, ctx) {
   const titles = (ctx && ctx.titles) || {}
   return String(s)
-    .replace(/xref:(?:[^[\s$:]+:)?attachment\$([^[\s]+)\[([^\]]*)\]/g, (_, p, t) => attachmentRef(p, t, ctx))
+    .replace(ATTACHMENT_XREF_RX, (_, mod, p, t) => attachmentRef(p, t, { ...ctx, module: mod }))
     .replace(/link:\{attachmentsdir\}\/([^[]+)\[([^\]]*)\]/g, (_, p, t) => attachmentRef(p, t, ctx))
     .replace(/xref:([^[\s]+)\[([^\]]*)\]/g, (_, id, text) => {
       const url = resourceUrl(id, ctx)

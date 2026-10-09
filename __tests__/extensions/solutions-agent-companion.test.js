@@ -197,6 +197,23 @@ describe('agent companion: attachment references', () => {
     }
   })
 
+  test('a module-qualified xref names that solution, and the component prefix is accepted', () => {
+    expect(inline('xref:multiplayer-gaming:attachment$verification.json[run]', ctx))
+      .toBe('[run](https://docs.redpanda.com/solutions/multiplayer-gaming/_attachments/verification.json)')
+    expect(inline('xref:fraud-detection:attachment$verification.json[]', ctx))
+      .toBe('[verification.json](https://docs.redpanda.com/solutions/fraud-detection/_attachments/verification.json)')
+    const md = inline('xref:solutions:fraud-detection:attachment$app/main.go[main]', ctx)
+    expect(md).toBe("`app/main.go` (reference code, shown in full on the fraud-detection solution's pages)")
+    expect(inline('xref:solutions:multiplayer-gaming:attachment$app/main.go[]', ctx))
+      .toBe("`app/main.go` (reference code, shown in full on the solution's pages)")
+  })
+
+  test('ROOT and other components are not treated as solution attachments', () => {
+    for (const source of ['xref:ROOT:attachment$x.yml[x]', 'xref:streaming:ROOT:attachment$x.yml[x]']) {
+      expect(inline(source, ctx)).not.toMatch(/_attachments|reference code/)
+    }
+  })
+
   test('without a slug, verification.json is named, not linked', () => {
     expect(attachmentRef('verification.json', '', {})).toBe('`verification.json` (verification evidence)')
   })
