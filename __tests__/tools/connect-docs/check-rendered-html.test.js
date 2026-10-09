@@ -163,6 +163,14 @@ describe('check-rendered-html: anchors and links', () => {
     expect(f['broken-anchor'].samples).toEqual(['targets_input -> #targetsinput'])
   })
 
+  test('a glossary term tooltip is not an anchor link', () => {
+    // Real markup: the glossterm macro renders href="#pipeline" with a tooltip.
+    const html = page(sect1('fields', 'Fields', '<p>Drops messages from the <a data-tippy-content="A pipeline." href="#pipeline" class="glossary-term">pipeline</a>, and <a href="#nope">this</a> is broken.</p>'))
+    const f = findings(html)
+    expect(f['broken-anchor'].count).toBe(1)
+    expect(f['broken-anchor'].samples).toEqual(['this -> #nope'])
+  })
+
   test('negative control: fragments matching an id or a[name], percent-encoded, empty, or external are fine', () => {
     const html = page([
       sect1('fields', 'Fields', '<p><a href="#fields">up</a> <a href="#legacy">old</a> <a name="legacy"></a></p>'),

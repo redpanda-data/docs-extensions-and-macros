@@ -248,6 +248,9 @@ function checkHtml (html, { contextChars = DEFAULTS.contextChars, maxSamples = D
   const links = { internal: 0, external: 0, unchecked: 0 }
   $(article).find('a[href]').each((_, a) => {
     if (hasClass(a, 'unresolved')) return
+    // A glossterm renders as a tooltip whose href is #<term>, on every
+    // page; it was never meant to land on an anchor.
+    if (hasClass(a, 'glossary-term')) return
     const href = a.attribs.href.trim()
     if (!href || href === '#') return
     const label = `${$(a).text().replace(/\s+/g, ' ').trim()} -> ${href}`.trim()
