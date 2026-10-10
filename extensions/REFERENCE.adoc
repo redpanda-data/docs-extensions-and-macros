@@ -490,8 +490,8 @@ The following attributes are available to all versions of all Antora components:
 `console-beta-version`:: The latest beta version of Redpanda Console.
 `operator-beta-version`:: The latest beta version of the Redpanda Operator.
 `helm-beta-version`:: The latest beta version of the Redpanda Helm chart.
-`latest-operator-version`:: The latest release version of the Redpanda Operator. This value keeps its `v` prefix (for example, `v25.1.3`) because pages pass it straight to `helm --version`.
-`latest-redpanda-helm-chart-version`:: The latest release version of the Redpanda Helm chart.
+`latest-operator-version`:: The latest release version of the Redpanda Operator for the component version's release line (see <<operator-and-chart-per-version>>). This value keeps its `v` prefix (for example, `v25.1.3`) because pages pass it straight to `helm --version`.
+`latest-redpanda-helm-chart-version`:: The latest release version of the Redpanda Helm chart for the component version's release line (see <<operator-and-chart-per-version>>). This value has no `v` prefix (for example, `25.3.11`).
 
 The following attributes are available to the latest version of each Antora component:
 
@@ -510,6 +510,17 @@ ever moves forwards.
 `<base>-version-short`:: Only the `major.minor` part (for example, `latest-redpanda-version-short` is `26.2` when `latest-redpanda-version` is `26.2.1`). Use this where a page needs the release line rather than an exact patch, such as a download directory or an install pack name.
 
 A short attribute is only set when a `major.minor` pair can be derived. Release channels that are not versions, such as `nightly` or `latest`, get a `-version` and a `-tag` but no `-version-short`, so a page never renders a fabricated release line.
+
+[[operator-and-chart-per-version]]
+==== Operator and Helm chart versions per component version
+
+An operator or Helm chart release supports its own Redpanda version and one minor version above and below it, so each component version gets the release of its own line:
+
+* A component version named `<major>.<minor>` that is older than the component's latest version gets the newest stable release in that line. For example, version `25.3` gets the newest `v25.3.x` operator and the newest `25.3.x` chart, even when a `26.2.x` release exists.
+* The component's latest version, any prerelease version ahead of it, and unversioned components get the newest stable release overall.
+* If an older line has no stable operator release (for example, lines that shipped only legacy `v2.x.y-<redpanda-version>` operator tags), both attributes fall back to the newest release overall. If the line has an operator release but its `release/v<major>.<minor>.x` branch has no chart, only the chart attribute falls back. Either way, the build logs a warning that names the line.
+
+The release lines come from the fetched operator tags, so no version map needs updating when a line ships. The extension reads up to three pages (300 tags) of the operator's Docker Hub tags, newest pushes first, and reads one chart file per older line from that line's release branch.
 
 ==== Seed a fallback in antora.yml
 

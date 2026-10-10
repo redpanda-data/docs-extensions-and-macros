@@ -239,3 +239,107 @@ describe('the sibling contract extensions/REFERENCE.adoc documents', () => {
     expect(latestAttributes['latest-redpanda-version-short']).toBeDefined()
   })
 })
+
+describe('operator and Helm chart versions per docs version', () => {
+  // An operator or chart release supports its own Redpanda line and the lines
+  // next to it, so each docs version installs the newest release of its own
+  // line. Tags are listed in Docker Hub order (recent pushes first), which is
+  // not semver order within a line.
+  const operatorTags = {
+    console: { latestStableRelease: 'v3.2.5' },
+    'redpanda-operator': {
+      latestStableRelease: 'v26.2.4',
+      latestBetaRelease: null,
+      stableReleases: ['v25.3.10', 'v26.1.12', 'v26.2.4', 'v25.3.9', 'v26.1.9', 'v26.1.11', 'v2.3.15-24.3.18'],
+    },
+  }
+  const helmChartByTag = { 'v26.2.4': '26.2.4', 'v26.1.12': '26.1.12', 'v25.3.10': '25.3.11' }
+  const scenario = (overrides = {}) => ({
+    dockerTags: operatorTags,
+    helmChart: { latestStableRelease: '26.2.4', latestBetaRelease: null },
+    helmChartByTag,
+    versions: ['26.2', '26.1', '25.3'],
+    latestVersion: '26.2',
+    ...overrides,
+  })
+
+  it('pins each older version to the newest release of its own line', () => {
+    const { attributesByVersion, warnings, errors } = runExtension(scenario())
+
+    expect(errors).toEqual([])
+    expect(warnings).toEqual([])
+    expect(attributesByVersion['25.3']['latest-operator-version']).toBe('v25.3.10')
+    expect(attributesByVersion['25.3']['latest-operator-version-short']).toBe('25.3')
+    expect(attributesByVersion['25.3']['latest-redpanda-helm-chart-version']).toBe('25.3.11')
+    expect(attributesByVersion['25.3']['latest-redpanda-helm-chart-version-short']).toBe('25.3')
+    expect(attributesByVersion['26.1']['latest-operator-version']).toBe('v26.1.12')
+    expect(attributesByVersion['26.1']['latest-redpanda-helm-chart-version']).toBe('26.1.12')
+  })
+
+  it('keeps the newest release overall on the latest version', () => {
+    const { attributesByVersion } = runExtension(scenario())
+
+    expect(attributesByVersion['26.2']['latest-operator-version']).toBe('v26.2.4')
+    expect(attributesByVersion['26.2']['latest-redpanda-helm-chart-version']).toBe('26.2.4')
+  })
+
+  it('keeps the newest release overall on a prerelease ahead of the latest version', () => {
+    const { attributesByVersion, warnings } = runExtension(scenario({ versions: ['26.3', '26.2'] }))
+
+    expect(warnings).toEqual([])
+    expect(attributesByVersion['26.3']['latest-operator-version']).toBe('v26.2.4')
+    expect(attributesByVersion['26.3']['latest-redpanda-helm-chart-version']).toBe('26.2.4')
+  })
+
+  it('keeps the newest release overall on an unversioned component', () => {
+    const { attributesByVersion, warnings, helmChartLookups } = runExtension(scenario({ versions: [null], latestVersion: null }))
+
+    expect(warnings).toEqual([])
+    expect(attributesByVersion.null['latest-operator-version']).toBe('v26.2.4')
+    expect(attributesByVersion.null['latest-redpanda-helm-chart-version']).toBe('26.2.4')
+    expect(helmChartLookups).toEqual(['v26.2.4'])
+  })
+
+  it('falls back to the newest release and warns when a line has no operator release', () => {
+    // 24.3 shipped only legacy v2.3.x-24.3.y operator tags, which have no
+    // line of their own to pin to.
+    const { attributesByVersion, warnings } = runExtension(scenario({ versions: ['26.2', '24.3'] }))
+
+    expect(attributesByVersion['24.3']['latest-operator-version']).toBe('v26.2.4')
+    expect(attributesByVersion['24.3']['latest-redpanda-helm-chart-version']).toBe('26.2.4')
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toMatch(/No stable Redpanda Operator release found for the 24\.3 line/)
+    expect(warnings[0]).toMatch(/v26\.2\.4/)
+  })
+
+  it('pins the operator but falls back to the newest chart and warns when the line has no chart', () => {
+    const { attributesByVersion, warnings } = runExtension(scenario({
+      helmChartByTag: { 'v26.2.4': '26.2.4', 'v26.1.12': '26.1.12' },
+    }))
+
+    expect(attributesByVersion['25.3']['latest-operator-version']).toBe('v25.3.10')
+    expect(attributesByVersion['25.3']['latest-redpanda-helm-chart-version']).toBe('26.2.4')
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toMatch(/No Redpanda Helm chart release found for the 25\.3 line/)
+  })
+
+  it('looks up each line chart once, even when several components share the line', () => {
+    const { helmChartLookups } = runExtension(scenario({ versions: ['26.2', '26.1', '25.3', '25.3'] }))
+
+    expect(helmChartLookups.sort()).toEqual(['v25.3.10', 'v26.1.12', 'v26.2.4'])
+  })
+
+  it('preserves the old behavior when the operator lookup returns no tag list', () => {
+    // Negative control: without per-line data every version gets the newest
+    // release, exactly as before, and each older version says so.
+    const { attributesByVersion, warnings } = runExtension(scenario({
+      dockerTags: { console: { latestStableRelease: 'v3.2.5' }, 'redpanda-operator': { latestStableRelease: 'v26.2.4', latestBetaRelease: null } },
+    }))
+
+    for (const version of ['26.2', '26.1', '25.3']) {
+      expect(attributesByVersion[version]['latest-operator-version']).toBe('v26.2.4')
+      expect(attributesByVersion[version]['latest-redpanda-helm-chart-version']).toBe('26.2.4')
+    }
+    expect(warnings).toHaveLength(2)
+  })
+})

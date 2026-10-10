@@ -8,6 +8,7 @@ module.exports.register = function ({ config }) {
   const GetLatestDockerTag = require('./fetch-latest-docker-tag');
   const GetLatestHelmChartVersionFromOperator = require('./get-latest-redpanda-helm-version-from-operator');
   const GetLatestConnectVersion = require('./get-latest-connect');
+  const { latestStablePerLine, releaseLineOf, isOlderReleaseLine } = require('./release-lines');
   const logger = this.getLogger('set-latest-version-extension');
 
   const { getGitHubApiToken } = require('../../cli-utils/github-token');
@@ -55,7 +56,10 @@ module.exports.register = function ({ config }) {
         // pre-freeze version forever.
         GetLatestRedpandaVersion(github, owner, 'streaming-enterprise', logger),
         GetLatestDockerTag(dockerNamespace, 'console', logger),
-        GetLatestDockerTag(dockerNamespace, 'redpanda-operator', logger),
+        // Three pages (300 tags) so older docs versions can still find the
+        // newest patch of their own operator line. Supported lines are all
+        // on the first page, because Docker Hub lists recent pushes first.
+        GetLatestDockerTag(dockerNamespace, 'redpanda-operator', logger, { maxPages: 3 }),
         GetLatestConnectVersion(github, owner, 'connect', logger),
       ]);
       
@@ -97,6 +101,33 @@ module.exports.register = function ({ config }) {
       };
 
       const components = await contentCatalog.getComponents();
+
+      // An operator or Helm chart release supports only its own Redpanda line
+      // and the lines next to it, so a docs version for an older line must
+      // install that line's release, not the newest one. Resolve the newest
+      // operator tag of each line from the fetched tags, and that line's chart
+      // version from its release branch, once per line.
+      const operatorLines = latestStablePerLine(latestVersions.operator?.stableReleases);
+      const lineVersions = new Map();
+      for (const component of components) {
+        for (const { version } of component.versions) {
+          if (!isOlderReleaseLine(version, component.latest?.version)) continue;
+          const line = releaseLineOf(version);
+          if (lineVersions.has(line)) continue;
+          const operatorTag = operatorLines.get(line) || null;
+          lineVersions.set(line, { operator: operatorTag, helmChart: null });
+        }
+      }
+      await Promise.all([...lineVersions].map(async ([line, resolved]) => {
+        if (!resolved.operator) return;
+        try {
+          const chart = await GetLatestHelmChartVersionFromOperator(github, owner, 'redpanda-operator', resolved.operator, null, logger);
+          resolved.helmChart = chart?.latestStableRelease || null;
+        } catch (error) {
+          logger.warn(`Helm chart lookup for the ${line} line failed: ${error.message || error}`);
+        }
+      }));
+
       components.forEach(component => {
         const prerelease = component.latestPrerelease;
 
@@ -105,13 +136,34 @@ module.exports.register = function ({ config }) {
             asciidoc.attributes['page-component-version-is-prerelease'] = 'true';
           }
 
+          // Older docs versions get the newest operator and chart release of
+          // their own line. The latest version, prereleases, and unversioned
+          // components get the newest release overall, and so does an older
+          // version whose line has no release to pin to.
+          let operatorVersion = latestVersions.operator?.latestStableRelease;
+          let helmChartVersion = latestVersions.helmChart?.latestStableRelease;
+          if (isOlderReleaseLine(version, component.latest?.version)) {
+            const line = releaseLineOf(version);
+            const resolved = lineVersions.get(line) || {};
+            if (!resolved.operator) {
+              logger.warn(`No stable Redpanda Operator release found for the ${line} line, so ${name} ${version} uses the newest operator and Helm chart releases (${operatorVersion || 'unknown'}, ${helmChartVersion || 'unknown'}).`);
+            } else {
+              operatorVersion = resolved.operator;
+              if (resolved.helmChart) {
+                helmChartVersion = resolved.helmChart;
+              } else {
+                logger.warn(`No Redpanda Helm chart release found for the ${line} line, so ${name} ${version} uses operator ${operatorVersion} with the newest Helm chart release (${helmChartVersion || 'unknown'}).`);
+              }
+            }
+          }
+
           // Set operator and helm chart attributes via helper function. These keep
           // their raw fetched form, including the "v" prefix on
           // latest-operator-version, because docs pages pass that value straight
           // to `helm --version`. Only the short sibling is derived.
           updateAttributes(asciidoc, [
-            { condition: latestVersions.operator, key: 'latest-operator-version', value: latestVersions.operator?.latestStableRelease },
-            { condition: latestVersions.helmChart, key: 'latest-redpanda-helm-chart-version', value: latestVersions.helmChart?.latestStableRelease }
+            { condition: latestVersions.operator, key: 'latest-operator-version', value: operatorVersion },
+            { condition: latestVersions.helmChart, key: 'latest-redpanda-helm-chart-version', value: helmChartVersion }
           ]);
 
           // Set attributes for console and connect versions
@@ -189,6 +241,9 @@ module.exports.register = function ({ config }) {
       }
       summary.forEach(([label, stableVersion, betaVersion]) => {
         logger.info(`- ${label}: ${stableVersion || 'unknown'}${betaVersion ? ', beta: ' + betaVersion : ''}`);
+      });
+      [...lineVersions].sort(([a], [b]) => semver.rcompare(`${a}.0`, `${b}.0`)).forEach(([line, resolved]) => {
+        logger.info(`- ${line} docs: operator ${resolved.operator || 'newest (no release in line)'}, Helm chart ${resolved.helmChart || 'newest (no release in line)'}`);
       });
     } catch (error) {
       logger.error(`Error updating versions: ${error}`);
