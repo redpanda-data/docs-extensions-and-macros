@@ -3,6 +3,25 @@
 const { formatHelmSpec } = require('../../cli-utils/format-helm-spec')
 
 describe('formatHelmSpec', () => {
+  test('escapes an array index followed by a dot inside heading link text', () => {
+    // The Console chart's ingress.hosts[0].host heading. Unescaped, the "]"
+    // after the index ends the link text early.
+    const heading = '=== link:++https://artifacthub.io/packages/helm/redpanda-data/console?modal=values&path=ingress.hosts%5B0%5D.host++[ingress.hosts[0].host]\n'
+    expect(formatHelmSpec(heading)).toBe(
+      '=== link:++https://artifacthub.io/packages/helm/redpanda-data/console?modal=values&path=ingress.hosts%5B0%5D.host++[ingress.hosts[0\\].host]\n'
+    )
+  })
+
+  test('escapes every array index in a nested key', () => {
+    expect(formatHelmSpec('[ingress.hosts[0].paths[0].path]\n')).toBe(
+      '[ingress.hosts[0\\].paths[0\\].path]\n'
+    )
+  })
+
+  test('escapes an array index that closes the link text', () => {
+    expect(formatHelmSpec('[tolerations[0]]\n')).toBe('[tolerations[0\\]]\n')
+  })
+
   test('renders a local chart dependency repository as literal code', () => {
     // The row helm-docs writes for the Redpanda chart's console subchart.
     // Asciidoctor auto-links a bare file:// URL, publishing a dead link.

@@ -1,6 +1,7 @@
 'use strict'
 
 const {
+  parseValuesFile,
   extractCommentedValueDocs,
   injectIntoAsciiDoc,
   filterEntriesBySchema,
@@ -268,7 +269,10 @@ describe('injectIntoAsciiDoc', () => {
 // review; keep them green on any change to this tooling.
 
 describe('extractCommentedValueDocs regressions', () => {
-  test('a prose line shaped like a key does not steal the block from the documented key', () => {
+  test('the first key line after the description is the documented key, as helm-docs reads it', () => {
+    // helm-docs attaches a `# --` block to the key directly below it. A
+    // key-shaped line right after the description is therefore read as the
+    // key, and a later sibling with no comment of its own is not documented.
     const yaml = [
       'external:',
       '  # -- The domain.',
@@ -278,16 +282,16 @@ describe('extractCommentedValueDocs regressions', () => {
     ].join('\n')
 
     const entries = extractCommentedValueDocs(yaml)
-    expect(entries.map((e) => e.path)).toEqual(['external.domain'])
+    expect(entries.map((e) => e.path)).toEqual(['external.example'])
     expect(entries[0].description).toBe('The domain.')
   })
 
-  test('a "# default: value" prose line does not steal the block from the documented key', () => {
+  test('a later sibling key does not take the description from the key above it', () => {
     const yaml = [
       'gateway:',
       '  # -- Request timeout.',
-      '  # default: 30s',
-      '  # timeout: null',
+      '  # timeout: 30s',
+      '  # retries: 3',
     ].join('\n')
 
     const entries = extractCommentedValueDocs(yaml)
@@ -332,7 +336,7 @@ describe('extractCommentedValueDocs regressions', () => {
     expect(entries.map((e) => e.path)).toEqual(['service'])
   })
 
-  test('the last shallowest key line wins in a deprecation-notice block', () => {
+  test('a deprecation-notice block documents its first key only', () => {
     const yaml = [
       'storage:',
       '  tiered:',
@@ -347,7 +351,7 @@ describe('extractCommentedValueDocs regressions', () => {
 
     const entries = extractCommentedValueDocs(yaml)
     expect(entries).toHaveLength(1)
-    expect(entries[0].path).toBe('storage.tiered.credentialsSecretRef.key')
+    expect(entries[0].path).toBe('storage.tiered.credentialsSecretRef.configurationKey')
   })
 
   test('skips block scalar bodies that use an explicit indentation indicator', () => {
@@ -395,6 +399,247 @@ describe('extractCommentedValueDocs regressions', () => {
 
     const entries = extractCommentedValueDocs(yaml)
     expect(entries.map((e) => e.path)).toEqual(['external.domain'])
+  })
+})
+
+// A `# --` marker followed by a run of commented-out sibling keys, the shape
+// of the redpanda chart's `external` block. The fixtures are the block
+// verbatim from redpanda-operator charts/redpanda/chart/values.yaml.
+describe('extractCommentedValueDocs commented-out sibling runs', () => {
+  // Tag charts/redpanda/v26.2.4: one `# --` marker for `domain`, followed by
+  // siblings that carry only plain comments.
+  const v2624External = [
+      'external:',
+      '  # -- Service allows you to manage the creation of an external kubernetes service object',
+      '  service:',
+      '    # -- Enabled if set to false will not create the external service type',
+      '    # You can still set your cluster with external access but not create the supporting service (NodePort/LoadBalander).',
+      '    # Set this to false if you rather manage your own service.',
+      '    enabled: true',
+      '  # -- Enable external access for each Service.',
+      '  # You can toggle external access for each listener in',
+      '  # `listeners.<service name>.external.<listener-name>.enabled`.',
+      '  enabled: true',
+      '  # -- External access type. Only `NodePort` and `LoadBalancer` are supported.',
+      '  # If undefined, then advertised listeners will be configured in Redpanda,',
+      '  # but the helm chart will not create a Service.',
+      '  # You must create a Service manually.',
+      '  # Warning: If you use LoadBalancers, you will likely experience higher latency and increased packet loss.',
+      '  # NodePort is recommended in cases where latency is a priority.',
+      '  type: NodePort',
+      '  # Optional source range for external access. Only applicable when external.type is LoadBalancer',
+      '  # sourceRanges: []',
+      '  # -- Optional domain advertised to external clients',
+      '  # If specified, then it will be appended to the `external.addresses` values as each broker\'s advertised address',
+      '  # domain: local',
+      '  # Optional list of addresses that the Redpanda brokers advertise.',
+      '  # Provide one entry for each broker in order of StatefulSet replicas.',
+      '  # The number of brokers is defined in statefulset.replicas.',
+      '  # The values can be IP addresses or DNS names.',
+      '  # If external.domain is set, the domain is appended to these values.',
+      '  # There is an option to define a single external address for all brokers and leverage',
+      '  # prefixTemplate as it will be calculated during initContainer execution.',
+      '  # addresses:',
+      '  # - redpanda-0',
+      '  # - redpanda-1',
+      '  # - redpanda-2',
+      '  #',
+      '  # annotations:',
+      '    # For example:',
+      '    # cloud.google.com/load-balancer-type: \"Internal\"',
+      '    # service.beta.kubernetes.io/aws-load-balancer-type: nlb',
+      '  # If you enable externalDns, each LoadBalancer service instance',
+      '  # will be annotated with external-dns hostname',
+      '  # matching external.addresses + external.domain',
+      '  # externalDns:',
+      '  #   enabled: true',
+      '  # prefixTemplate: \"\"',
+      '  # -- Gateway API TLSRoute-based external access (alternative to NodePort/LoadBalancer).',
+      '  # The chart creates a bootstrap TLSRoute plus one per-broker TLSRoute, routed by SNI',
+      '  # through a Gateway you manage. Opt individual listeners in by setting their type:',
+      '  # `listeners.<service>.external.<name>.type: tlsroute` (see listeners.kafka.external below).',
+      '  # The Gateway itself is NOT created by the chart; reference it via parentRefs.',
+      '  # gateway:',
+      '  #   # Activates Gateway API TLSRoute mode. Takes precedence over external.type.',
+      '  #   enabled: false',
+      '  #   # Gateway(s) that handle the TLSRoutes. Passed directly into each TLSRoute\'s',
+      '  #   # spec.parentRefs. At least one entry is required when enabled.',
+      '  #   parentRefs:',
+      '  #     - name: redpanda-gateway      # required: name of the Gateway',
+      '  #       sectionName: kafka          # optional: Gateway listener section to attach to',
+      '  #       # namespace: rp-gw          # optional: defaults to the TLSRoute\'s namespace',
+      '  #       # kind: Gateway             # optional: defaults to \"Gateway\"',
+      '  #       # group: gateway.networking.k8s.io  # optional: default API group',
+      '  #   # Port advertised to clients in broker metadata. Defaults to 443. The actual',
+      '  #   # listening port is configured on the Gateway, not on the TLSRoute.',
+      '  #   advertisedPort: 9094',
+      '',
+  ].join('\n')
+
+  // redpanda-operator main: the same block with `@doc` markers on the
+  // siblings.
+  const mainExternal = [
+      'external:',
+      '  # -- Service allows you to manage the creation of an external kubernetes service object',
+      '  service:',
+      '    # -- Enabled if set to false will not create the external service type',
+      '    # You can still set your cluster with external access but not create the supporting service (NodePort/LoadBalander).',
+      '    # Set this to false if you rather manage your own service.',
+      '    enabled: true',
+      '  # -- Enable external access for each Service.',
+      '  # You can toggle external access for each listener in',
+      '  # `listeners.<service name>.external.<listener-name>.enabled`.',
+      '  enabled: true',
+      '  # -- External access type. Only `NodePort` and `LoadBalancer` are supported.',
+      '  # If undefined, then advertised listeners will be configured in Redpanda,',
+      '  # but the helm chart will not create a Service.',
+      '  # You must create a Service manually.',
+      '  # Warning: If you use LoadBalancers, you will likely experience higher latency and increased packet loss.',
+      '  # NodePort is recommended in cases where latency is a priority.',
+      '  type: NodePort',
+      '  # Optional source range for external access. Only applicable when external.type is LoadBalancer',
+      '  # @doc external.sourceRanges -- Optional source IP ranges for external access. Only applicable when `external.type` is `LoadBalancer`.',
+      '  # sourceRanges: []',
+      '  # -- Optional domain advertised to external clients',
+      '  # If specified, then it will be appended to the `external.addresses` values as each broker\'s advertised address',
+      '  # domain: local',
+      '  # Optional list of addresses that the Redpanda brokers advertise.',
+      '  # Provide one entry for each broker in order of StatefulSet replicas.',
+      '  # The number of brokers is defined in statefulset.replicas.',
+      '  # The values can be IP addresses or DNS names.',
+      '  # If external.domain is set, the domain is appended to these values.',
+      '  # There is an option to define a single external address for all brokers and leverage',
+      '  # prefixTemplate as it will be calculated during initContainer execution.',
+      '  # @doc external.addresses -- Optional list of addresses that the Redpanda brokers advertise, with one entry for each broker in order of StatefulSet replicas. The number of brokers is defined in `statefulset.replicas`. The values can be IP addresses or DNS names. If `external.domain` is set, the domain is appended to these values. To use a single external address for all brokers, define one entry and use `external.prefixTemplate` so that each broker\'s address is calculated during initContainer execution.',
+      '  # addresses:',
+      '  # - redpanda-0',
+      '  # - redpanda-1',
+      '  # - redpanda-2',
+      '  #',
+      '  # @doc external.annotations -- Optional annotations to add to the external Service instances, for example `cloud.google.com/load-balancer-type: \"Internal\"` or `service.beta.kubernetes.io/aws-load-balancer-type: nlb`.',
+      '  # annotations:',
+      '    # For example:',
+      '    # cloud.google.com/load-balancer-type: \"Internal\"',
+      '    # service.beta.kubernetes.io/aws-load-balancer-type: nlb',
+      '  # If you enable externalDns, each LoadBalancer service instance',
+      '  # will be annotated with external-dns hostname',
+      '  # matching external.addresses + external.domain',
+      '  # @doc external.externalDns.enabled -- If you enable externalDns, each LoadBalancer Service instance is annotated with the external-dns hostname, matching `external.addresses` plus `external.domain`.',
+      '  # externalDns:',
+      '  #   enabled: true',
+      '  # @doc external.prefixTemplate -- Optional Go template for the prefix of each broker\'s advertised address. The result is prepended to `external.domain` during initContainer execution. Only used when `external.addresses` contains a single entry that serves all brokers.',
+      '  # @default -- `\"\"`',
+      '  # prefixTemplate: \"\"',
+      '  # -- Gateway API TLSRoute-based external access (alternative to NodePort/LoadBalancer).',
+      '  # The chart creates a bootstrap TLSRoute plus one per-broker TLSRoute, routed by SNI',
+      '  # through a Gateway you manage. Opt individual listeners in by setting their type:',
+      '  # `listeners.<service>.external.<name>.type: tlsroute` (see listeners.kafka.external below).',
+      '  # The Gateway itself is NOT created by the chart; reference it via parentRefs.',
+      '  # gateway:',
+      '  #   # Activates Gateway API TLSRoute mode. Takes precedence over external.type.',
+      '  #   enabled: false',
+      '  #   # Gateway(s) that handle the TLSRoutes. Passed directly into each TLSRoute\'s',
+      '  #   # spec.parentRefs. At least one entry is required when enabled.',
+      '  #   parentRefs:',
+      '  #     - name: redpanda-gateway      # required: name of the Gateway',
+      '  #       sectionName: kafka          # optional: Gateway listener section to attach to',
+      '  #       # namespace: rp-gw          # optional: defaults to the TLSRoute\'s namespace',
+      '  #       # kind: Gateway             # optional: defaults to \"Gateway\"',
+      '  #       # group: gateway.networking.k8s.io  # optional: default API group',
+      '  #   # Port advertised to clients in broker metadata. Defaults to 443. The actual',
+      '  #   # listening port is configured on the Gateway, not on the TLSRoute.',
+      '  #   advertisedPort: 9094',
+      '',
+  ].join('\n')
+
+  const byPath = (yaml) => new Map(extractCommentedValueDocs(yaml).map((e) => [e.path, e]))
+
+  test('the marker documents the key directly below it, not the last key in the run (v26.2.4 chart)', () => {
+    const entries = byPath(v2624External)
+    expect(entries.get('external.domain').description).toBe([
+      'Optional domain advertised to external clients',
+      'If specified, then it will be appended to the `external.addresses` values as each broker\'s advertised address',
+    ].join('\n'))
+    // The domain description used to land here, on the last key of the run.
+    expect(entries.has('external.prefixTemplate')).toBe(false)
+  })
+
+  test('later siblings in the run are documented by their own plain comments (v26.2.4 chart)', () => {
+    const entries = byPath(v2624External)
+    expect([...entries.keys()]).toEqual([
+      'external.domain',
+      'external.addresses',
+      'external.externalDns',
+      'external.gateway',
+    ])
+    const addresses = entries.get('external.addresses').description
+    expect(addresses.startsWith('Optional list of addresses that the Redpanda brokers advertise.')).toBe(true)
+    expect(addresses).toContain('prefixTemplate as it will be calculated during initContainer execution.')
+    // The list items under `addresses` are its example, not prose.
+    expect(addresses).not.toContain('redpanda-0')
+    expect(entries.get('external.externalDns').description.startsWith('If you enable externalDns')).toBe(true)
+    // `annotations` and `prefixTemplate` have no comment of their own, and
+    // the `For example:` lines nested under `annotations` stay its example.
+    for (const e of entries.values()) expect(e.description).not.toContain('For example:')
+  })
+
+  test('@doc markers still render on the chart that carries them (operator main)', () => {
+    const entries = byPath(mainExternal)
+    expect([...entries.keys()].sort()).toEqual([
+      'external.addresses',
+      'external.annotations',
+      'external.domain',
+      'external.externalDns.enabled',
+      'external.gateway',
+      'external.prefixTemplate',
+      'external.sourceRanges',
+    ])
+    expect(entries.get('external.domain').description.startsWith('Optional domain advertised to external clients')).toBe(true)
+    expect(entries.get('external.addresses').description.startsWith('Optional list of addresses that the Redpanda brokers advertise, with one entry')).toBe(true)
+    expect(entries.get('external.prefixTemplate').description.startsWith('Optional Go template')).toBe(true)
+    expect(entries.get('external.prefixTemplate').default).toBe('`""`')
+    // The plain comments the @doc lines replaced are not published.
+    for (const e of entries.values()) expect(e.description).not.toContain('There is an option to define')
+  })
+
+  test('a plain comment after the documented key with no key below it is neither documented nor a dead marker', () => {
+    const yaml = [
+      'external:',
+      '  # -- Optional domain.',
+      '  # domain: local',
+      '  # Trailing note about the domain.',
+      'logging: {}',
+    ].join('\n')
+
+    const records = parseValuesFile(yaml)
+    expect(records.map((r) => [r.kind, r.path])).toEqual([['key', 'external.domain']])
+    expect(records[0].descLines).toEqual(['Optional domain.'])
+  })
+
+  test('without a marker above the run, plain-commented keys stay undocumented', () => {
+    const yaml = [
+      'external:',
+      '  type: NodePort',
+      '  # Optional source range for external access.',
+      '  # sourceRanges: []',
+      '  # -- Optional domain.',
+      '  # domain: local',
+    ].join('\n')
+
+    expect(extractCommentedValueDocs(yaml).map((e) => e.path)).toEqual(['external.domain'])
+  })
+
+  test('in helm-docs mode, a plain comment directly above a real key does not attach to it', () => {
+    const yaml = [
+      'parent:',
+      '  # -- Doc for child.',
+      '  # child: x',
+      '  # Plain comment.',
+      '  real: 1',
+    ].join('\n')
+
+    const records = parseValuesFile(yaml, { attachRealKeys: true })
+    expect(records.filter((r) => !r.undocumented).map((r) => r.path)).toEqual(['parent.child'])
   })
 })
 
