@@ -180,6 +180,16 @@ async function getTreeFiles (git, gitdir, oid, prefix, cache, treeCache) {
   return files
 }
 
+// The later of two YYYY-MM-DD dates. modify-connect-tag-playbook sets
+// page.connectReferenceModified to the date of the Connect release that last
+// changed a page's generated reference, which lives in a release asset and so
+// in no git commit of the page's repo.
+function laterDate (a, b) {
+  if (!b) return a
+  if (!a) return b
+  return b > a ? b : a
+}
+
 module.exports.register = function () {
   raiseListenerLimit(this)
   const logger = this.getLogger('add-git-dates-extension')
@@ -271,7 +281,7 @@ module.exports.register = function () {
           const dates = fileDateMap.get(relativeFilePath)
           if (dates) {
             page.asciidoc.attributes['page-git-created-date'] = dates.created
-            page.asciidoc.attributes['page-git-modified-date'] = dates.modified
+            page.asciidoc.attributes['page-git-modified-date'] = laterDate(dates.modified, page.connectReferenceModified)
             processedCount++
           }
         }
@@ -288,3 +298,5 @@ module.exports.register = function () {
     logger.info(`Git dates added: processed=${processedCount}, skipped=${skippedCount}, duration=${duration}ms (${perPage}ms/page)`)
   })
 }
+
+module.exports._internal = Object.assign(module.exports._internal || {}, { laterDate })

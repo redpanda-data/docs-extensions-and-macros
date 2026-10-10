@@ -232,6 +232,52 @@ describe('connect-docs-asset tar reader', () => {
   })
 })
 
+describe('modify-connect-tag-playbook release dates for changed reference', () => {
+  // v4.113.0 changes the kafka fields partial and nothing else since v4.112.0.
+  async function datedBuild ({ releases }) {
+    const prevDir = path.join(tmp, 'prev')
+    fs.mkdirSync(prevDir)
+    writeTree(prevDir, { ...TREE, 'modules/components/partials/fields/inputs/kafka.adoc': '// older fields of kafka' })
+    const prev = makeTarGz(prevDir)
+    global.fetch = jest.fn(async (url) => response(200, String(url).includes('/v4.112.0/') ? prev : archive))
+    listConnectReleases.mockResolvedValue(releases)
+    const catalog = makeCatalog()
+    const origin = { type: 'git', url: 'https://github.com/redpanda-data/cloud-docs', reftype: 'branch', refname: 'main', branch: 'main' }
+    catalog.registerComponentVersion('cloud-data-platform', '', { title: 'Cloud' })
+    const addPage = (component, module, relative, text) => catalog.addFile({ path: `modules/${module}/pages/${relative}`, contents: Buffer.from(text), src: { component, version: '', module, family: 'page', relative, path: `modules/${module}/pages/${relative}`, origin } })
+    addPage('cloud-data-platform', 'develop', 'connect/components/inputs/kafka.adoc', '= kafka\ninclude::connect:components:inputs/kafka.adoc[tag=single-source]\n')
+    addPage('cloud-data-platform', 'develop', 'connect/components/inputs/other.adoc', '= other\ninclude::connect:components:inputs/other.adoc[tag=single-source]\n')
+    addPage('connect', 'components', 'inputs/unchanged.adoc', '= unchanged\ninclude::connect:components:partial$descriptions/inputs/kafka.adoc[tag=meta]\n')
+    const { error, logs } = await build({ catalog })
+    expect(error).toBeNull()
+    const page = (component, module, relative) => catalog.getById({ component, version: '', module, family: 'page', relative })
+    return { logs, page }
+  }
+  const release = (tag, date) => ({ tag_name: tag, published_at: date, draft: false, prerelease: false, assets: [{ name: 'redpanda-connect-docs.tar.gz' }] })
+
+  it('gives pages that include a changed partial, and stubs that single-source them, the release date', async () => {
+    const { page, logs } = await datedBuild({ releases: [release('v4.113.0', '2026-10-09T10:42:05Z'), release('v4.112.0', '2026-10-02T08:00:00Z')] })
+    expect(page('connect', 'components', 'inputs/kafka.adoc').connectReferenceModified).toBe('2026-10-09')
+    expect(page('cloud-data-platform', 'develop', 'connect/components/inputs/kafka.adoc').connectReferenceModified).toBe('2026-10-09')
+    // Includes only the unchanged description partial.
+    expect(page('connect', 'components', 'inputs/unchanged.adoc').connectReferenceModified).toBeUndefined()
+    expect(page('cloud-data-platform', 'develop', 'connect/components/inputs/other.adoc').connectReferenceModified).toBeUndefined()
+    expect(logs).toContainEqual(['info', expect.stringMatching(/v4\.113\.0 changed 1 generated files since v4\.112\.0; 2 pages get the release date 2026-10-09/)])
+  })
+
+  it('leaves dates alone when no earlier release has the asset', async () => {
+    const { page } = await datedBuild({ releases: [release('v4.113.0', '2026-10-09T10:42:05Z')] })
+    expect(page('connect', 'components', 'inputs/kafka.adoc').connectReferenceModified).toBeUndefined()
+  })
+
+  it('add-git-dates uses the later of the commit date and the release date', () => {
+    const { laterDate } = require('../../extensions/add-git-dates')._internal
+    expect(laterDate('2026-10-10', '2026-10-09')).toBe('2026-10-10')
+    expect(laterDate('2026-03-13', '2026-10-09')).toBe('2026-10-09')
+    expect(laterDate('2026-03-13', undefined)).toBe('2026-03-13')
+  })
+})
+
 describe('modify-connect-tag-playbook with the release asset', () => {
   it('downloads the latest release asset and adds its partials and examples to the connect component', async () => {
     const { catalog, error, logs } = await build()

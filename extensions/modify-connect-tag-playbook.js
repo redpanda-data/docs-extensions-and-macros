@@ -284,6 +284,92 @@ async function findOlderReleaseWithAsset (latestTag, url, logger) {
   return null
 }
 
+// The resource keys (`partial$<relative>`, `example$<relative>`) of generated
+// files that differ between two releases' assets, or are new in `files`.
+function changedReferenceKeys (files, previousFiles) {
+  const before = new Map()
+  for (const f of previousFiles) {
+    const r = asset.toResource(f.path)
+    if (r) before.set(`${r.family}$${r.relative}`, f.contents)
+  }
+  const changed = new Set()
+  for (const f of files) {
+    const r = asset.toResource(f.path)
+    if (!r || r.family === 'attachment') continue
+    const key = `${r.family}$${r.relative}`
+    const old = before.get(key)
+    if (!old || Buffer.compare(Buffer.from(old), Buffer.from(f.contents)) !== 0) changed.add(key)
+  }
+  return changed
+}
+
+// Includes of the connect components module in a page: `partial$x` and
+// `example$x` keys. In the connect component's own components module the
+// module may be implicit; elsewhere only fully qualified includes count.
+const INCLUDE_RX = /^include::([^[\s]+)\[/gm
+function connectIncludes (page) {
+  const own = page.src.component === COMPONENT && page.src.module === asset.MODULE
+  const keys = []
+  for (const m of page.contents.toString('utf8').matchAll(INCLUDE_RX)) {
+    const target = m[1]
+    const q = target.match(/^connect:components:((?:partial|example)\$.+)$/) ||
+      (own ? target.match(/^(?:components:)?((?:partial|example)\$.+)$/) : null)
+    if (q) keys.push(q[1])
+  }
+  return keys
+}
+
+// Marks every page whose generated content changed in this release with the
+// release date, as page.connectReferenceModified (YYYY-MM-DD), which
+// add-git-dates uses when it is later than the page's last commit. A page
+// counts when it includes a changed partial or example, or single-sources a
+// connect page that does (the Cloud stubs). Returns the number of pages marked.
+function markReferenceChanges (contentCatalog, changed, date) {
+  if (!changed.size || !date) return 0
+  const marked = new Set()
+  const pages = contentCatalog.getPages()
+  for (const page of pages) {
+    if (connectIncludes(page).some((k) => changed.has(k))) marked.add(page)
+  }
+  const markedConnect = new Set()
+  for (const page of marked) {
+    if (page.src.component === COMPONENT) markedConnect.add(`${page.src.module}:${page.src.relative}`)
+  }
+  for (const page of pages) {
+    if (marked.has(page)) continue
+    for (const m of page.contents.toString('utf8').matchAll(INCLUDE_RX)) {
+      const q = m[1].match(/^connect:([^:$]+):([^$]+\.adoc)$/)
+      if (q && markedConnect.has(`${q[1]}:${q[2]}`)) { marked.add(page); break }
+    }
+  }
+  for (const page of marked) page.connectReferenceModified = date
+  return marked.size
+}
+
+// The release date of `tag`, and the files of the newest older release that
+// has the asset, from one releases listing. Null when either is unknown, in
+// which case pages keep their git dates.
+async function previousReleaseForDates (tag, logger) {
+  let releases
+  try {
+    releases = await listConnectReleases(await createGitHub(), OWNER, REPO, FALLBACK_RELEASE_LIMIT)
+  } catch (error) {
+    logger.info(`Couldn't list Redpanda Connect releases (${error.message}), so pages keep their git modified dates`)
+    return null
+  }
+  const current = releases.find((r) => r && r.tag_name === tag)
+  const date = current && current.published_at ? String(current.published_at).slice(0, 10) : null
+  const latest = stableVersion(tag)
+  const previous = releases
+    .filter((r) => r && !r.draft && !r.prerelease && stableVersion(r.tag_name) && latest && compareVersions(stableVersion(r.tag_name), latest) < 0)
+    .sort((a, b) => compareVersions(stableVersion(b.tag_name), stableVersion(a.tag_name)))
+    .find((r) => (r.assets || []).some((a) => a && a.name === asset.ASSET_NAME))
+  if (!date || !previous) return null
+  const archive = await downloadRelease(previous.tag_name, logger)
+  if (!archive) return null
+  return { date, tag: previous.tag_name, files: await asset.readTarGz(archive) }
+}
+
 // Adds the generated files to every version of the connect component.
 // Mutates the content catalog and returns what it added, replaced, and
 // skipped. A file another source already provides is skipped, unless
@@ -434,7 +520,18 @@ module.exports.register = function ({ config }) {
         : `skipped ${r.providedElsewhere} already provided by another source and ${r.outsideGenerated}`) +
       ' outside the generated partials and examples'
     )
+    // A release that changes a component's generated reference changes its
+    // page, so the page's modified date becomes that release's date when it
+    // is later than the page's last commit.
+    if (!localDir) {
+      const prev = await previousReleaseForDates(origin.tag, logger)
+      if (prev) {
+        const changed = changedReferenceKeys(files, prev.files)
+        const count = markReferenceChanges(contentCatalog, changed, prev.date)
+        logger.info(`Redpanda Connect ${origin.tag} changed ${changed.size} generated files since ${prev.tag}; ${count} pages get the release date ${prev.date} as their modified date when it is later than their last commit`)
+      }
+    }
   })
 }
 
-module.exports._internal = { isRemote, isUpstreamConnect, redact, isConnectSource, isConnectOrigin, toTag, highestStableTag, stableTags, findOlderReleaseWithAsset, resolveLatestTag, FALLBACK_RELEASE_LIMIT, FALLBACK_PROBE_LIMIT, wantsLatest, removeLatestConnectSources, filterConnectContent, hasConnectSource, addConnectDocs, LOCAL_DIR_ENV }
+module.exports._internal = { isRemote, isUpstreamConnect, redact, isConnectSource, isConnectOrigin, toTag, highestStableTag, stableTags, findOlderReleaseWithAsset, resolveLatestTag, FALLBACK_RELEASE_LIMIT, FALLBACK_PROBE_LIMIT, wantsLatest, removeLatestConnectSources, filterConnectContent, hasConnectSource, addConnectDocs, LOCAL_DIR_ENV, changedReferenceKeys, connectIncludes, markReferenceChanges }
