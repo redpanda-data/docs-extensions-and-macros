@@ -75,6 +75,7 @@ const LOCAL_DIR_ENV = 'REDPANDA_CONNECT_DOCS_DIR'
 // the probe fallback tries, when the latest release has no asset yet.
 const FALLBACK_RELEASE_LIMIT = 10
 const FALLBACK_PROBE_LIMIT = 3
+const DATE_RELEASE_PAGE_SIZE = 100
 
 // HTTPS, SSH (ssh://), and scp-style (git@host:owner/repo) URLs are all
 // remote content sources in Antora.
@@ -284,6 +285,121 @@ async function findOlderReleaseWithAsset (latestTag, url, logger) {
   return null
 }
 
+// The resource keys (`partial$<relative>`, `example$<relative>`) of generated
+// files that differ between two releases' assets, or are new in `files`.
+function changedReferenceKeys (files, previousFiles) {
+  const before = new Map()
+  for (const f of previousFiles) {
+    const r = asset.toResource(f.path)
+    if (r && !before.has(`${r.family}$${r.relative}`)) before.set(`${r.family}$${r.relative}`, f.contents)
+  }
+  const changed = new Set()
+  const seen = new Set()
+  for (const f of files) {
+    const r = asset.toResource(f.path)
+    if (!r || r.family === 'attachment') continue
+    const key = `${r.family}$${r.relative}`
+    // addConnectDocs retains the first copy of a resource in an asset.
+    if (seen.has(key)) continue
+    seen.add(key)
+    const old = before.get(key)
+    if (old === undefined || Buffer.compare(Buffer.from(old), Buffer.from(f.contents)) !== 0) changed.add(key)
+  }
+  return changed
+}
+
+// Includes of the connect components module in a page: `partial$x` and
+// `example$x` keys. In the connect component's own components module the
+// module may be implicit; elsewhere only fully qualified includes count.
+const INCLUDE_RX = /^include::([^[\s]+)\[/gm
+function connectIncludes (page, contentCatalog, origin) {
+  const own = page.src.component === COMPONENT && page.src.module === asset.MODULE
+  const keys = []
+  for (const m of page.contents.toString('utf8').matchAll(INCLUDE_RX)) {
+    const target = m[1]
+    const q = target.match(/^connect:components:((?:partial|example)\$.+)$/) ||
+      (own ? target.match(/^(?:components:)?((?:partial|example)\$.+)$/) : null)
+    if (!q) continue
+    if (contentCatalog) {
+      const file = contentCatalog.resolveResource(target, page.src)
+      // Only files inserted from this asset can acquire a release date.
+      if (!file || file.src.origin !== origin) continue
+    }
+    keys.push(q[1])
+  }
+  return keys
+}
+
+// Marks pages with the newest change date of their included asset references.
+// Catalog resolution excludes retained duplicates and respects each version.
+// Cloud stubs inherit the date of the connect page they actually include.
+function markReferenceChanges (contentCatalog, dates, origin) {
+  if (!dates.size) return 0
+  const marked = new Set()
+  const pages = contentCatalog.getPages()
+  const mark = (page, date) => {
+    if (!date) return
+    if (!page.connectReferenceModified || date > page.connectReferenceModified) page.connectReferenceModified = date
+    marked.add(page)
+  }
+  for (const page of pages) {
+    for (const key of connectIncludes(page, contentCatalog, origin)) mark(page, dates.get(key))
+  }
+  for (const page of pages) {
+    for (const m of page.contents.toString('utf8').matchAll(INCLUDE_RX)) {
+      if (!/^connect:([^:$]+):([^$]+\.adoc)$/.test(m[1])) continue
+      const included = contentCatalog.resolvePage(m[1], page.src)
+      if (marked.has(included)) mark(page, included.connectReferenceModified)
+    }
+  }
+  return marked.size
+}
+
+// Reconstruct each included reference's last change on every build, even when
+// the selected release leaves it unchanged. Paginate beyond the short listing
+// used for asset fallback, and walk older assets until every key is dated.
+// The oldest available asset is a baseline; without a comparison its change
+// date is unknown, so those references keep their git dates.
+async function referenceReleaseDates (tag, files, keys, logger) {
+  const dates = new Map()
+  if (!keys.size) return dates
+  const releases = []
+  try {
+    const github = await createGitHub()
+    for (let page = 1; ; page++) {
+      const batch = await listConnectReleases(github, OWNER, REPO, DATE_RELEASE_PAGE_SIZE, page)
+      releases.push(...batch)
+      if (batch.length < DATE_RELEASE_PAGE_SIZE) break
+    }
+  } catch (error) {
+    logger.info(`Couldn't list Redpanda Connect releases (${error.message}), so pages keep their git modified dates`)
+    return dates
+  }
+  let newer = releases.find((r) => r && r.tag_name === tag)
+  if (!newer || !newer.published_at) return dates
+  const latest = stableVersion(tag)
+  const older = releases
+    .filter((r) => r && !r.draft && !r.prerelease && stableVersion(r.tag_name) && latest && compareVersions(stableVersion(r.tag_name), latest) < 0)
+    .filter((r) => (r.assets || []).some((a) => a && a.name === asset.ASSET_NAME))
+    .sort((a, b) => compareVersions(stableVersion(b.tag_name), stableVersion(a.tag_name)))
+  const pending = new Set(keys)
+  for (const release of older) {
+    const archive = await downloadRelease(release.tag_name, logger)
+    if (!archive) continue
+    const previousFiles = await asset.readTarGz(archive)
+    const changed = changedReferenceKeys(files, previousFiles)
+    for (const key of pending) {
+      if (!changed.has(key)) continue
+      if (newer.published_at) dates.set(key, String(newer.published_at).slice(0, 10))
+      pending.delete(key)
+    }
+    if (!pending.size) break
+    files = previousFiles
+    newer = release
+  }
+  return dates
+}
+
 // Adds the generated files to every version of the connect component.
 // Mutates the content catalog and returns what it added, replaced, and
 // skipped. A file another source already provides is skipped, unless
@@ -434,7 +550,15 @@ module.exports.register = function ({ config }) {
         : `skipped ${r.providedElsewhere} already provided by another source and ${r.outsideGenerated}`) +
       ' outside the generated partials and examples'
     )
+    // Resolve only included files supplied by this asset. Retained copies
+    // from another source keep their git dates, even if the asset differs.
+    if (!localDir) {
+      const keys = new Set(contentCatalog.getPages().flatMap((page) => connectIncludes(page, contentCatalog, origin)))
+      const dates = await referenceReleaseDates(origin.tag, files, keys, logger)
+      const count = markReferenceChanges(contentCatalog, dates, origin)
+      logger.info(`Redpanda Connect ${origin.tag}: resolved last change dates for ${dates.size} included generated files; ${count} pages use those release dates when later than their last commit`)
+    }
   })
 }
 
-module.exports._internal = { isRemote, isUpstreamConnect, redact, isConnectSource, isConnectOrigin, toTag, highestStableTag, stableTags, findOlderReleaseWithAsset, resolveLatestTag, FALLBACK_RELEASE_LIMIT, FALLBACK_PROBE_LIMIT, wantsLatest, removeLatestConnectSources, filterConnectContent, hasConnectSource, addConnectDocs, LOCAL_DIR_ENV }
+module.exports._internal = { isRemote, isUpstreamConnect, redact, isConnectSource, isConnectOrigin, toTag, highestStableTag, stableTags, findOlderReleaseWithAsset, resolveLatestTag, FALLBACK_RELEASE_LIMIT, FALLBACK_PROBE_LIMIT, wantsLatest, removeLatestConnectSources, filterConnectContent, hasConnectSource, addConnectDocs, LOCAL_DIR_ENV, changedReferenceKeys, connectIncludes, markReferenceChanges }
