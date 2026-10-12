@@ -27,6 +27,13 @@
  * carries for an enum value are used (the member line inside the enum, and
  * the `case license_required_feature::<name>:` line in format_to), so a
  * hunk header that happens not to name the enum still detects.
+ *
+ * Each finding names ONE affected page, the licensing overview. The docs-site
+ * receiver falls back to matching a finding with no name match against open
+ * tickets that share at least two page topics, so two gating findings that
+ * both listed the overview and the disable page would be treated as one
+ * ticket however different the features. The disable page is named in the
+ * summary text instead.
  */
 
 const ENUM_HEADER = 'src/v/features/enterprise_features.h'
@@ -128,8 +135,8 @@ function detectGatingChanges (diffText) {
           surface: 'enterprise-feature',
           name,
           change_kind: 'enterprise-feature-added',
-          affected_pages: [LICENSING_OVERVIEW, DISABLE_PAGE],
-          summary: `\`${name}\` was added to \`license_required_feature\` in \`${ENUM_HEADER}\`. From the first release that contains this change, \`rpk cluster license info\` and \`GET /v1/features/enterprise\` report it and the license nag names it. The enterprise features registry (${REGISTRY_URL}) needs an entry under the approved external name, with a gating property and a disable-page row where a property turns it off; the weekly registry check fails until it has one. Any page that describes this feature's license behavior needs the new reporting and enforcement.`
+          affected_pages: [LICENSING_OVERVIEW],
+          summary: `\`${name}\` was added to \`license_required_feature\` in \`${ENUM_HEADER}\`. From the first release that contains this change, \`rpk cluster license info\` and \`GET /v1/features/enterprise\` report it and the license nag names it. The enterprise features registry (${REGISTRY_URL}) needs an entry under the approved external name, with a gating property and, where a property turns it off, a row on ${DISABLE_PAGE}; the weekly registry check fails until it has one. Any page that describes this feature's license behavior needs the new reporting and enforcement.`
         })
       }
       for (const name of removed) {
@@ -137,7 +144,7 @@ function detectGatingChanges (diffText) {
           surface: 'enterprise-feature',
           name,
           change_kind: 'enterprise-feature-removed',
-          affected_pages: [LICENSING_OVERVIEW, DISABLE_PAGE],
+          affected_pages: [LICENSING_OVERVIEW],
           summary: `\`${name}\` was removed from \`license_required_feature\` in \`${ENUM_HEADER}\`. The release that contains this change no longer reports it as an enterprise feature. The enterprise features registry entry that points at it (${REGISTRY_URL}) needs a new source pointer or a note, never deletion: a published external name stays in the registry.`
         })
       }
@@ -148,8 +155,8 @@ function detectGatingChanges (diffText) {
           surface: 'enterprise-property',
           name,
           change_kind: 'enterprise-gate-added',
-          affected_pages: [LICENSING_OVERVIEW, DISABLE_PAGE],
-          summary: `\`${name}\` is now wrapped in \`config::enterprise<>\` in \`${CONFIG_HEADER}\`, so a restricted value needs a license from the first release that contains this change. The enterprise features registry (${REGISTRY_URL}) needs an entry that names this property as its source or gating property, and the disable page needs a row for the unrestricted value.`
+          affected_pages: [LICENSING_OVERVIEW],
+          summary: `\`${name}\` is now wrapped in \`config::enterprise<>\` in \`${CONFIG_HEADER}\`, so a restricted value needs a license from the first release that contains this change. The enterprise features registry (${REGISTRY_URL}) needs an entry that names this property as its source or gating property, and ${DISABLE_PAGE} needs a row for the unrestricted value.`
         })
       }
       for (const name of removed) {
@@ -157,8 +164,8 @@ function detectGatingChanges (diffText) {
           surface: 'enterprise-property',
           name,
           change_kind: 'enterprise-gate-removed',
-          affected_pages: [LICENSING_OVERVIEW, DISABLE_PAGE],
-          summary: `\`${name}\` is no longer wrapped in \`config::enterprise<>\` in \`${CONFIG_HEADER}\`, so it no longer needs a license. The registry entry that names it (${REGISTRY_URL}) and its disable-page row need to change.`
+          affected_pages: [LICENSING_OVERVIEW],
+          summary: `\`${name}\` is no longer wrapped in \`config::enterprise<>\` in \`${CONFIG_HEADER}\`, so it no longer needs a license. The registry entry that names it (${REGISTRY_URL}) and its row on ${DISABLE_PAGE} need to change.`
         })
       }
     }

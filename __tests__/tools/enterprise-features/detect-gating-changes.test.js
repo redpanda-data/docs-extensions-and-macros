@@ -35,6 +35,11 @@ describe('detectGatingChanges: license_required_feature enum', () => {
       change_kind: 'enterprise-feature-added'
     })])
     expect(findings[0].affected_pages.every((u) => u.startsWith('https://docs.redpanda.com/'))).toBe(true)
+    // Exactly one page: the docs-site receiver treats a finding sharing two
+    // or more page topics with an open ticket as the same work, so a second
+    // page here would merge every gating finding into the first ticket.
+    expect(findings[0].affected_pages).toHaveLength(1)
+    expect(findings[0].summary).toMatch(/disable-enterprise-features/)
     expect(findings[0].summary).toMatch(/rpk cluster license info/)
     expect(findings[0].summary).toMatch(/enterprise-features\.yml/)
   })
