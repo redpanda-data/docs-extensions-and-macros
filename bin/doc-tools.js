@@ -3136,7 +3136,7 @@ overridesGroup
   .description('Classify each override field as redundant, upstreamable, or keep against extracted source strings')
   .requiredOption('--overrides <path>', 'Path to the overrides JSON file (for example docs-data/property-overrides.json)')
   .option('--extracted <path>', 'Path to the extracted source JSON (property extractor raw output; required for the properties surface)')
-  .addOption(new Option('--surface <surface>', 'Override surface to audit').choices(['properties', 'rpk', 'connect']).default('properties'))
+  .addOption(new Option('--surface <surface>', 'Override surface to audit').choices(['properties', 'rpk']).default('properties'))
   .addOption(new Option('--format <format>', 'Output format').choices(['json', 'human']).default('json'))
   .option('--repo <path>', 'Redpanda checkout to extract raw source strings from (alternative to --extracted)')
   .option('--output <path>', 'Also write the JSON result to this file')

@@ -516,7 +516,7 @@ const tools = [
         surface: {
           type: 'string',
           description: 'Override surface to audit (optional, defaults to "properties")',
-          enum: ['properties', 'rpk', 'connect']
+          enum: ['properties', 'rpk']
         },
         output: {
           type: 'string',
