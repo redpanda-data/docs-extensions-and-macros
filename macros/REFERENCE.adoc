@@ -18,6 +18,18 @@ antora:
   - '@redpanda-data/docs-extensions-and-macros/asciidoc-extensions/add-line-numbers-highlights'
 ```
 
+== Hide links to Connect pages that Cloud doesn't have
+
+Redpanda Cloud single-sources Redpanda Connect pages and their generated partials, and some of that text links to Connect pages that Cloud doesn't have because the feature doesn't exist in Cloud, such as streams mode. In documents with the `env-cloud` attribute, this extension removes each paragraph or list item with an xref that resolves in the `connect` component but not from the Cloud page. The content catalog decides, so there's no page list to maintain. To keep such text in Cloud, add a Cloud page for its target. An xref that resolves nowhere is left alone, so Antora still reports it.
+
+=== Registration
+
+```yaml
+asciidoc:
+  extensions:
+  - '@redpanda-data/docs-extensions-and-macros/asciidoc-extensions/cloud-unavailable-links'
+```
+
 == config_ref
 
 IMPORTANT: `config_ref` is deprecated. The `prop` macro supersedes all of its functionality: it validates names against the published property reference, discovers the target page dynamically instead of taking a manual path, powers hover tooltips, and its `helm-path=auto` attribute replaces `config_ref`'s Kubernetes prefixing with a per-property correct Helm values path (`config_ref` prefixed every property with `storage.tiered.config.`, mislabeling non-tiered properties). Migrate call sites with `doc-tools generate migrate-property-refs --config-refs`. The macro stays registered only because older versioned docs, which are frozen, still contain it; generated content emits `prop` (the extractor rewrites any `config_ref` it finds).
