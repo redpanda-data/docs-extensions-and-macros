@@ -2882,6 +2882,53 @@ programCli
   })
 
 /**
+ * detect-enterprise-gating
+ *
+ * @description
+ * Find enterprise gating changes in a Redpanda core diff that no doc string
+ * announces: a value added to or removed from license_required_feature in
+ * src/v/features/enterprise_features.h, or a property wrapped in or unwrapped
+ * from config::enterprise<> in src/v/config/configuration.h. Prints them as a
+ * doc-impact report, the JSON the doc-strings review dispatches to the docs
+ * team's Jira router, so a licensing change reaches a DOC ticket even when
+ * the review has no doc string to look at.
+ *
+ * @example
+ * npx doc-tools detect-enterprise-gating --repo . --diff origin/dev
+ *
+ * @exit 0 always: `{"findings":[]}` means nothing to report. Errors from git
+ * print to stderr and still exit 0 with an empty report, so a caller's
+ * fail-open gate stays closed rather than red.
+ */
+programCli
+  .command('detect-enterprise-gating')
+  .description('Find enterprise gating changes (license_required_feature values, config::enterprise<> wrappers) in a core diff and print them as a doc-impact report')
+  .requiredOption('--repo <path>', 'Path to a Redpanda core checkout. Nothing is cloned.')
+  .requiredOption('--diff <base>', 'Base ref: changes in <base>...HEAD are inspected')
+  .option('--format <format>', 'Output format: json or human', 'json')
+  .action((options) => {
+    const { spawnSync } = require('child_process')
+    const { detectGatingChanges, buildDocImpact, ENUM_HEADER, CONFIG_HEADER } = require('../tools/enterprise-features/detect-gating-changes')
+    const empty = { findings: [] }
+    const result = spawnSync('git', ['diff', '--no-color', '--no-ext-diff', `${options.diff}...HEAD`, '--', ENUM_HEADER, CONFIG_HEADER], {
+      cwd: options.repo, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024
+    })
+    if (result.status !== 0) {
+      console.error(`git diff ${options.diff}...HEAD failed in ${options.repo}: ${(result.stderr || '').trim()}`)
+      console.log(JSON.stringify(empty))
+      return
+    }
+    const findings = detectGatingChanges(result.stdout)
+    const report = buildDocImpact(findings) || empty
+    if (options.format === 'human') {
+      if (findings.length === 0) { console.log('No enterprise gating changes.'); return }
+      for (const f of findings) console.log(`${f.change_kind}: ${f.name}`)
+      return
+    }
+    console.log(JSON.stringify(report, null, 2))
+  })
+
+/**
  * lint-screenshots
  *
  * @description

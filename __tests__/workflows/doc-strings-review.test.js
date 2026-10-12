@@ -689,6 +689,118 @@ describe('doc-strings-review workflow: doc-impact dispatch (executed)', () => {
   })
 })
 
+describe('doc-strings-review workflow: enterprise gating detection (executed)', () => {
+  // streaming-enterprise PR 579 added a license_required_feature value and
+  // changed license enforcement without touching a doc string, so the lint
+  // gate stayed shut and nothing was filed. This step is the mechanical
+  // backstop; these tests pin its fail-closed behaviour the same way the
+  // lint-step tests pin theirs.
+  const step = stepNamed('Detect enterprise gating changes')
+  const env = { BASE: 'abc123', PKG: RESOLVED_PKG }
+  const REPORT = JSON.stringify({
+    findings: [{ surface: 'enterprise-feature', name: 'manual_finalization', change_kind: 'enterprise-feature-added', affected_pages: ['https://docs.redpanda.com/current/get-started/licensing/overview/'], summary: 's' }],
+    proposed_ticket: { title: 't', body: 'b' }
+  })
+
+  test('a finding opens the gate and leaves the report for the dispatch step', () => {
+    const r = execRun(step, { env: { ...env, LINT_JSON: REPORT }, stubs: { npx: NPX_STUB } })
+    expect(r.status).toBe(0)
+    expect(r.outputs.found).toBe('1')
+    expect(r.exists('enterprise-impact.json')).toBe(true)
+    const argv = fs.readFileSync(path.join(r.dir, 'npx-argv'), 'utf8')
+    expect(argv).toMatch(/^--package=/m)
+    expect(argv).toMatch(/^detect-enterprise-gating$/m)
+    expect(argv).toMatch(/^abc123$/m)
+  })
+
+  test('an empty report closes the gate and leaves no file behind', () => {
+    const r = execRun(step, { env: { ...env, LINT_JSON: '{"findings":[]}' }, stubs: { npx: NPX_STUB } })
+    expect(r.outputs.found).toBe('0')
+    expect(r.exists('enterprise-impact.json')).toBe(false)
+  })
+
+  test.each([
+    ['a CLI failure', { LINT_EXIT: '1', LINT_JSON: '' }],
+    ['zero bytes of output', { LINT_JSON: '' }],
+    ['non-JSON output', { LINT_JSON: 'not json' }],
+    ['findings of the wrong shape', { LINT_JSON: '{"findings":{"a":1}}' }]
+  ])('%s closes the gate at 0, never empty', (_label, extra) => {
+    const r = execRun(step, { env: { ...env, ...extra }, stubs: { npx: NPX_STUB } })
+    expect(r.status).toBe(0)
+    expect(r.outputs.found).toBe('0')
+    expect(r.exists('enterprise-impact.json')).toBe(false)
+  })
+
+  test('every credential and dispatch gate also opens on a gating finding', () => {
+    for (const name of ['Assume the AWS role that can read the bot token', "Drop fetched credentials from the review's environment", 'Dispatch doc-impact']) {
+      expect(stepNamed(name).if).toMatch(/steps\.enterprise\.outputs\.found != '0'/)
+    }
+    // But the model review and the bearer mint do not: a gating-only run
+    // dispatches with the bot token and runs no model.
+    expect(stepNamed('Claude review with suggestions').if).not.toMatch(/steps\.enterprise/)
+    expect(stepNamed('Fetch the ADP client credential').if).not.toMatch(/steps\.enterprise/)
+    expect(stepNamed('Fetch the ADP client credential').if).toMatch(/steps\.lint\.outputs\.declarations/)
+  })
+})
+
+describe('doc-strings-review workflow: doc-impact dispatch merges gating findings (executed)', () => {
+  const step = stepNamed('Dispatch doc-impact')
+  const expressions = {
+    '${{ github.repository }}': 'redpanda-data/redpanda',
+    '${{ github.event.pull_request.number }}': '7',
+    '${{ github.event.pull_request.html_url }}': 'https://github.com/redpanda-data/redpanda/pull/7'
+  }
+  const GH_RECORDER = '#!/bin/bash\nprintf \'%s\\n\' "$@" >> "$HOME/gh-argv"\ncat > "$HOME/gh-stdin"\n'
+  const env = { GH_TOKEN: 'bot', DISPATCH_REPO: 'redpanda-data/docs-site' }
+  const finding = (name, surface = 'properties') => ({
+    surface, name, change_kind: 'x', affected_pages: ['https://docs.redpanda.com/current/x/'], summary: `about ${name}`
+  })
+  const gating = { findings: [finding('manual_finalization', 'enterprise-feature')], proposed_ticket: { title: 'gating', body: '- manual_finalization (enterprise-feature-added): s' } }
+
+  function dispatch (files, extraEnv = {}) {
+    return execRun(step, { env: { ...env, ...extraEnv }, expressions, stubs: { gh: GH_RECORDER }, files })
+  }
+  const payload = (r) => JSON.parse(fs.readFileSync(path.join(r.dir, 'gh-stdin'), 'utf8')).client_payload.impact
+
+  test('with no model report, the gating report is dispatched on its own', () => {
+    const r = dispatch({ 'enterprise-impact.json': JSON.stringify(gating) })
+    expect(r.status).toBe(0)
+    expect(payload(r).findings.map((f) => f.name)).toEqual(['manual_finalization'])
+    expect(payload(r).proposed_ticket.title).toBe('gating')
+  })
+
+  test('with both, the gating findings join the model report and the body gains the gating section', () => {
+    const model = { findings: [finding('cloud_storage_cache_size')], proposed_ticket: { title: 'model', body: 'model body' } }
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify(gating) })
+    const impact = payload(r)
+    expect(impact.findings.map((f) => f.name)).toEqual(['cloud_storage_cache_size', 'manual_finalization'])
+    expect(impact.proposed_ticket.title).toBe('model')
+    expect(impact.proposed_ticket.body).toMatch(/^model body/)
+    expect(impact.proposed_ticket.body).toMatch(/Enterprise gating changes in this PR/)
+    expect(impact.proposed_ticket.body).toMatch(/manual_finalization \(enterprise-feature-added\)/)
+  })
+
+  test('the merge never grows past the ten-finding cap the schema enforces', () => {
+    const model = { findings: Array.from({ length: 10 }, (_, i) => finding(`p${i}`)), proposed_ticket: { title: 'model', body: 'b' } }
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify(gating) })
+    expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(true)
+    expect(payload(r).findings).toHaveLength(10)
+  })
+
+  test('a malformed gating report alone is still schema-checked and not dispatched', () => {
+    const r = dispatch({ 'enterprise-impact.json': JSON.stringify({ findings: [{ surface: 'enterprise-feature' }], proposed_ticket: { title: 't', body: 'b' } }) })
+    expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(false)
+    expect(r.all).toMatch(/::warning::/)
+    expect(r.status).toBe(0)
+  })
+
+  test('an unparseable model report with a good gating report dispatches nothing rather than something unchecked', () => {
+    const r = dispatch({ 'doc-impact.json': 'not json', 'enterprise-impact.json': JSON.stringify(gating) })
+    expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(false)
+    expect(r.status).toBe(0)
+  })
+})
+
 describe('doc-strings-review workflow: ADP mint (executed)', () => {
   // A curl stub that records its own argv and writes a token file, so the
   // assertions are about what the mint ACTUALLY sends rather than about the

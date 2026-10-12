@@ -481,6 +481,36 @@ jobs:
       # lint ran on, filtered to source: generated docs, lockfiles, vendored
       # code and test data are left out, and listed by name at the top so
       # the model knows they exist.
+      # Enterprise gating changes carry no doc string, so the lint above never
+      # sees them: a value added to license_required_feature or a property
+      # wrapped in config::enterprise<> changes what the licensing docs say
+      # and what `rpk cluster license info` reports, and the model-authored
+      # doc-impact report cannot mention a change it was never shown.
+      # streaming-enterprise PR 579 (2026-10-07) was the first miss. This is
+      # mechanical, model-free, and only ever adds to the dispatch: its
+      # findings merge into doc-impact.json below. Fails closed to 0, for the
+      # same reasons the lint gate does.
+      - name: Detect enterprise gating changes
+        id: enterprise
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          PKG: ${{ steps.pkg.outputs.pkg }}
+        run: |
+          set -uo pipefail
+          status=0
+          npx --yes --package="$PKG" doc-tools detect-enterprise-gating --repo . --diff "$BASE" --format json \
+            > enterprise-impact.json 2> enterprise-stderr.txt || status=$?
+          found=0
+          if [ "$status" -eq 0 ] && [ -s enterprise-impact.json ]; then
+            found=$(jq -r 'if (.findings | type) == "array" then (.findings | length) else 0 end' enterprise-impact.json 2>/dev/null || echo 0)
+          else
+            echo "::warning::detect-enterprise-gating failed (exit $status) or produced no output; no gating findings."
+            sed -n '1,20p' enterprise-stderr.txt >&2 || true
+          fi
+          case "$found" in ''|*[!0-9]*) found=0 ;; esac
+          [ "$found" -gt 0 ] || rm -f enterprise-impact.json
+          echo "found=$found" >> "$GITHUB_OUTPUT"
+          echo "Enterprise gating findings: $found"
       - name: Save the source diff for the review
         if: steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0'
         continue-on-error: true
@@ -564,7 +594,7 @@ jobs:
       # rather than a failed job.
       - name: Assume the AWS role that can read the bot token
         id: aws_credentials
-        if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0') && inputs.aws_region != '' && inputs.aws_role_name_prefix != ''
+        if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0' || steps.enterprise.outputs.found != '0') && inputs.aws_region != '' && inputs.aws_role_name_prefix != ''
         continue-on-error: true
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -579,9 +609,11 @@ jobs:
           secret-ids: |
             ,${{ inputs.bot_token_secret_id }}
           parse-json-secrets: true
+      # Only when a review will run: a run that found a gating change and no
+      # doc string dispatches with the bot token alone and mints no bearer.
       - name: Fetch the ADP client credential
         id: adpsecrets
-        if: steps.aws_credentials.outcome == 'success' && inputs.use_adp_gateway
+        if: steps.aws_credentials.outcome == 'success' && inputs.use_adp_gateway && (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0')
         continue-on-error: true
         uses: aws-actions/aws-secretsmanager-get-secrets@v3
         with:
@@ -710,7 +742,7 @@ jobs:
       # job env. Callers on the plain-secret path are unaffected: this step
       # only runs when the OIDC inputs are set.
       - name: Drop fetched credentials from the review's environment
-        if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0') && inputs.aws_region != '' && inputs.aws_role_name_prefix != ''
+        if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0' || steps.enterprise.outputs.found != '0') && inputs.aws_region != '' && inputs.aws_role_name_prefix != ''
         env:
           CLIENT_SECRET_ID: ${{ inputs.adp_client_secret_id }}
         run: |
@@ -1043,7 +1075,7 @@ jobs:
           path: ${{ runner.temp }}/doc-strings-review-state
           key: doc-strings-review-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Dispatch doc-impact
-        if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0')
+        if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0' || steps.enterprise.outputs.found != '0')
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.actions_bot_token }}
@@ -1062,6 +1094,24 @@ jobs:
             export GH_TOKEN
           fi
           [ -n "${GH_TOKEN:-}" ] || { echo "No bot token; skipping dispatch."; exit 0; }
+          # The mechanical enterprise gating findings (see the Detect step)
+          # join the model's report, or stand in for it when no review ran.
+          # Appended after the model's findings and capped at the schema's
+          # ten, so a hostile model report cannot grow past the cap by way of
+          # this step; the ticket body gains the gating section verbatim.
+          if [ -s enterprise-impact.json ]; then
+            if [ -s doc-impact.json ]; then
+              jq -s '
+                .[0] as $m | .[1] as $e |
+                $m | .findings = (($m.findings // []) + ($e.findings // []))[:10]
+                   | .proposed_ticket.body = (($m.proposed_ticket.body // "") + "\n\nEnterprise gating changes in this PR (detected mechanically):\n" + ($e.proposed_ticket.body // ""))
+              ' doc-impact.json enterprise-impact.json > doc-impact.merged.json \
+                && mv doc-impact.merged.json doc-impact.json \
+                || echo "::warning::could not merge enterprise-impact.json into doc-impact.json; dispatching the model report alone."
+            else
+              cp enterprise-impact.json doc-impact.json
+            fi
+          fi
           [ -s doc-impact.json ] || { echo "No high-impact findings."; exit 0; }
           # doc-impact.json is model-authored from untrusted PR content and a
           # bot token forwards it to another repo, where it opens Jira tickets.
