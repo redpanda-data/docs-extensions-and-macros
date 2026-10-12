@@ -517,8 +517,9 @@ runs:
     - name: Assert the plugin actually loaded
       shell: bash
       env:
-        # `-p "list skills"` is a model call, so it runs after the mint,
-        # under the same gateway env as the review itself.
+        # `claude -p` makes one model call even though the check below does
+        # not depend on it, so it runs after the mint, under the same gateway
+        # env as the review itself.
         CLAUDE_CODE_USE_BEDROCK: '1'
         CLAUDE_CODE_SKIP_BEDROCK_AUTH: '1'
         ANTHROPIC_BEDROCK_BASE_URL: ${{ inputs.adp_gateway_base_url }}
@@ -534,19 +535,43 @@ runs:
         fi
         # A missing/misloaded plugin is the known silent failure mode: Claude
         # reviews without the skills, output looks plausible, job goes green.
-        # Make it loud instead: the skill listing must show the plugin. This
-        # also catches the --plugin-dir marketplace trap regressing (the
-        # manifest removal above), because a marketplace load lists nothing.
-        # Captured into a variable rather than piped into `grep -q`: this step
-        # runs under `pipefail`, and grep exits at its first match, so the
-        # still-writing claude process dies of SIGPIPE (141), pipefail
-        # propagates that, the `!` inverts it, and a healthy run reports the
-        # plugin as missing. Matching the captured string has no such race.
-        SKILLS=$(claude --plugin-dir "$PWD/.docs-team-standards-plugin" -p "list skills" \
-          --max-turns 2 --output-format text 2>/dev/null || true)
-        if [[ "$SKILLS" != *"docs-team-standards:"* ]]; then
+        # Make it loud instead. The check reads the stream-json `init` event,
+        # which the CLI emits BEFORE any model call and which lists the loaded
+        # plugins and their slash commands (verified on CLI 2.1.258). The
+        # previous probe grepped the model's free-text answer to "list skills"
+        # with stderr discarded, so a failed gateway call or a differently
+        # worded answer looked exactly like a missing plugin, with no error to
+        # read. Any regression that leaves the plugin unloaded (the
+        # --plugin-dir marketplace trap the manifest removal above guards
+        # against, which does not reproduce on 2.1.258) fails here too.
+        # Output goes to files, not a pipe, so nothing can die of SIGPIPE
+        # under pipefail.
+        PROBE="$RUNNER_TEMP/plugin-probe"
+        claude --plugin-dir "$PWD/.docs-team-standards-plugin" -p "Reply with OK." \
+          --max-turns 1 --output-format stream-json --verbose \
+          > "$PROBE.jsonl" 2> "$PROBE.err" || true
+        LOADED=$(jq -Rn '[inputs | fromjson?]
+          | (map(select(.type == "system" and .subtype == "init"))[0] // {})
+          | (((.plugins // []) | map(.name) | index("docs-team-standards")) != null)
+            and (((.slash_commands // []) | map(select(startswith("docs-team-standards:"))) | length) > 0)' \
+          "$PROBE.jsonl")
+        if [[ "$LOADED" != "true" ]]; then
           echo "::error::docs-team-standards plugin did not load from the pinned checkout (plugin_ref=${{ inputs.plugin_ref }}) — refusing to review without the skills"
+          echo "--- probe stderr (last 20 lines)"
+          tail -n 20 "$PROBE.err" || true
           exit 1
+        fi
+        # The plugin is there. If the model call itself failed, say why: the
+        # review step makes the same call and will soft-fail to "automated
+        # review unavailable", and this is the readable cause.
+        ERR=$(jq -Rrn '[inputs | fromjson?]
+          | (map(select(.type == "result"))[0] // {is_error: true, result: "no result event (the CLI exited before answering)"})
+          | select(.is_error == true) | (.result // "error result with no text") | tostring' "$PROBE.jsonl")
+        if [[ -n "$ERR" ]]; then
+          echo "::warning::plugin loaded, but the probe's model call through the gateway failed: ${ERR:0:300}"
+          tail -n 20 "$PROBE.err" || true
+        else
+          echo "plugin loaded and the gateway answered"
         fi
 
     - name: Run skill (1 retry, findings-only)
