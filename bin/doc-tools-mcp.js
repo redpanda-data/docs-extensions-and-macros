@@ -10,7 +10,6 @@
  * - Context-aware: Works from any repository based on cwd
  * - Antora intelligence: Understands component/module structure
  * - Automation: Run doc-tools generate commands
- * - Auto-discovery: Prompts loaded automatically from mcp/prompts/
  * - Validation: Startup checks ensure all resources are accessible
  * - Telemetry: Usage tracking for adoption metrics
  */
@@ -594,7 +593,7 @@ const resourceMap = {
 
 /**
  * Load resource content from team-standards directory
- * @param {string} uri - Resource URI (such as 'redpanda://style-guide')
+ * @param {string} uri - Resource URI (such as 'redpanda://personas')
  * @returns {Object} Resource content
  */
 function getResourceContent(uri) {
