@@ -81,9 +81,9 @@ on:
         type: number
       # ── ADP AI Gateway auth (docs-pr-review agent's service account) ───
       # No Anthropic API key anywhere: model auth is the gateway, which
-      # gives per-account spend attribution on the ADP cost page. Seven of
-      # the nine callers were granted the credential in devprod-infra #779;
-      # adp-cloud-docs and docs-template need a follow-up.
+      # gives per-account spend attribution on the ADP cost page. All nine
+      # callers were granted the docs-pr-review credential in devprod-infra
+      # #826 (merged 2026-09-18).
       sme_gate:
         description: >-
           true (default): hold the review until one SME approves. false for
@@ -145,9 +145,9 @@ on:
           (docs_team_agents_client is that agent's credential). Cost and usage
           attributes per agent and tags are per-agent and static, so sharing
           one secret between two workloads collapses their spend permanently.
-          The secret is created and granted in devprod-infra#826; until that
-          merges and the values are written, the fetch fails and every review
-          degrades to "automated review unavailable".
+          The secret was created and granted in devprod-infra#826 (merged
+          2026-09-18). If it is missing for a repo, the fetch fails and every
+          review degrades to "automated review unavailable".
         type: string
         default: 'sdlc/prod/github/docs_pr_review_client'
       plugin_ref:

@@ -54,9 +54,8 @@ inputs:
     description: >
       Base IAM role name (RP_AWS_CRED_BASE_ROLE_NAME); the calling
       repository's own name is appended, matching the engineering-repo
-      convention. Seven of the nine docs callers were granted the
-      credential in devprod-infra #779; adp-cloud-docs and docs-template
-      need a follow-up grant.
+      convention. All nine docs callers were granted the docs-pr-review
+      credential in devprod-infra #826 (merged 2026-09-18).
     required: true
   aws_cred_account_id:
     description: AWS account id owning the role (RP_AWS_CRED_ACCOUNT_ID). Pass from secrets.
