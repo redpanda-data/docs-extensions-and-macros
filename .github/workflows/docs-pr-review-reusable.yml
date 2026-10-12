@@ -544,11 +544,14 @@ jobs:
             echo "only_json=$([[ $TOTAL -gt 0 && $JSON -eq $TOTAL ]] && echo true || echo false)"
             echo "overrides_json=$([[ $OVERRIDES -gt 0 ]] && echo true || echo false)"
             # Code-heavy heuristic (decision 3): ≥3 code files AND more code
-            # files than .adoc files. The callers are all content repos, so
-            # what this catches is EXAMPLE code shipped alongside a page (a
-            # lab, a quickstart's docker-compose + client snippets), not the
-            # main content — the code pass is additive to the prose
-            # review, never a substitute for it. Tune with data.
+            # files than .adoc files. In the content repos what this catches
+            # is EXAMPLE code shipped alongside a page (a lab, a quickstart's
+            # client snippets), not the main content — the code pass is
+            # additive to the prose review, never a substitute for it. In a
+            # tooling caller (docs-team-standards) it is the repo's own
+            # implementation; the code_review prompt tells the two apart.
+            # .yml/.yaml are not counted, so a workflow-only PR (or a
+            # quickstart's docker-compose file) never trips this. Tune with data.
             echo "code_heavy=$([[ $CODE -ge 3 && $CODE -gt $ADOC ]] && echo true || echo false)"
             echo "has_images=$([[ $IMG -gt 0 ]] && echo true || echo false)"
           } >> "$GITHUB_OUTPUT"

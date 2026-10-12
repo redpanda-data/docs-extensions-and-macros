@@ -323,11 +323,32 @@ runs:
                 # A foreign host would turn a GET into an exfiltration
                 # channel for GH_TOKEN (sent as the Authorization header).
                 --hostname|--hostname=*) deny api "$@" ;;
-                -X|--method)
+                --method)
                   m="${args[$((i+1))]:-}"; [[ "$m" =~ ^[Gg][Ee][Tt]$ ]] || deny api "$@"; i=$((i+1)) ;;
-                -X*|--method=*)
-                  m="${a#-X}"; m="${m#--method=}"; [[ "$m" =~ ^[Gg][Ee][Tt]$ ]] || deny api "$@" ;;
-                -f|-F|--field|--raw-field|--input|-f=*|-F=*|--field=*|--raw-field=*|--input=*) deny api "$@" ;;
+                --method=*)
+                  m="${a#--method=}"; [[ "$m" =~ ^[Gg][Ee][Tt]$ ]] || deny api "$@" ;;
+                --field|--raw-field|--input|--field=*|--raw-field=*|--input=*) deny api "$@" ;;
+                --*) ;;
+                # Short flags parse the way gh (pflag) does: one word can be a
+                # cluster with the value attached, so -fbody=x, -Fbody=x,
+                # -iF body=x and -XPOST all reach gh as fields or a method.
+                # Walk the cluster: -i and -h take no value, -H/-q/-t/-p
+                # consume the rest of it, and anything unrecognised is refused.
+                -?*)
+                  j=1
+                  while (( j < ${#a} )); do
+                    case "${a:$j:1}" in
+                      i|h) j=$((j+1)) ;;
+                      X)
+                        m="${a:$((j+1))}"
+                        if [[ -z "$m" ]]; then m="${args[$((i+1))]:-}"; i=$((i+1)); fi
+                        m="${m#=}"
+                        [[ "$m" =~ ^[Gg][Ee][Tt]$ ]] || deny api "$@"
+                        break ;;
+                      H|q|t|p) break ;;
+                      *) deny api "$@" ;;
+                    esac
+                  done ;;
               esac
               i=$((i+1))
             done ;;
@@ -346,6 +367,8 @@ runs:
         [[ "$REFUSAL1" == *"refused:"* ]] || { echo "::error::gh shim failed to refuse a POST (got: $REFUSAL1)"; exit 1; }
         REFUSAL2=$(PATH="$SHIM_DIR:$PATH" gh pr comment 1 --body hi 2>&1 1>/dev/null || true)
         [[ "$REFUSAL2" == *"refused:"* ]] || { echo "::error::gh shim failed to refuse pr comment (got: $REFUSAL2)"; exit 1; }
+        REFUSAL3=$(PATH="$SHIM_DIR:$PATH" gh api repos/x/y/issues/1/comments -fbody=hi 2>&1 1>/dev/null || true)
+        [[ "$REFUSAL3" == *"refused:"* ]] || { echo "::error::gh shim failed to refuse an attached-value field (got: $REFUSAL3)"; exit 1; }
         echo "gh read-only shim installed at $SHIM_DIR"
 
     # ── ADP gateway auth (DEVPROD-4735 pattern) ────────────────────────────
