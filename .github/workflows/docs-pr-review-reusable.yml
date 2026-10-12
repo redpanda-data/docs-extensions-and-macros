@@ -312,7 +312,8 @@ jobs:
             # shape, so the code cannot be shared verbatim). The RULE must stay
             # identical — (requested ∪ reviewed) − docs team − author − bots —
             # or the nag will chase authors the gate is already satisfied
-            # with, or vice versa. Change both together.
+            # with, or vice versa. Change both together; docs-team-standards'
+            # scripts/test-sme-parity.sh (sme-parity.yml) fails CI if they drift.
             #
             # (requested ∪ reviewed) − docs team − author − bots, recomputed
             # from the API on EVERY run. Deliberately not cached anywhere: a
