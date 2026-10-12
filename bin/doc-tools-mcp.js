@@ -221,6 +221,10 @@ const tools = [
           type: 'boolean',
           description: 'Include Bloblang functions and methods in generation (optional, defaults to false)'
         },
+        no_partials: {
+          type: 'boolean',
+          description: 'Skip the generated partials, config snippets, and Bloblang reference because the connect repo publishes them. What\'s new, diffs, drafts, nav, and the version bump still run (optional, defaults to false)'
+        },
         data_dir: {
           type: 'string',
           description: 'Directory where versioned connect JSON files live (optional)'

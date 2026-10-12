@@ -399,7 +399,7 @@ function updateWhatsNew ({ dataDir, oldVersion, newVersion, binaryAnalysis }) {
       for (const comp of regularComponents) {
         const typeLabel = comp.type.charAt(0).toUpperCase() + comp.type.slice(1)
         const statusLabel = comp.status || '-'
-        let desc = comp.summary || (comp.description ? capToTwoSentences(comp.description) : '// TODO: Add description')
+        let desc = comp.summary ? capToTwoSentences(comp.summary) : (comp.description ? capToTwoSentences(comp.description) : '// TODO: Add description')
 
         if (comp.requiresCgo) {
           const cgoNote = '\nNOTE: Requires a cgo-enabled binary. See the xref:install:index.adoc[installation guides] for details.'
@@ -1243,8 +1243,10 @@ async function handleRpcnConnectorDocs (options) {
   // Main Processing: Handle the latest version (final iteration)
   // ========================================================================
 
-  console.log('Generating connector partials...')
-  let partialsWritten, partialFiles
+  // options.partials is false with --no-partials: the connect repo publishes
+  // the generated partials, so this run only updates release-level content.
+  const writePartials = options.partials !== false
+  let partialsWritten = 0, partialFiles = []
   const descriptionReports = []
   const lostSectionWarnings = []
   const styleRegressionWarnings = []
@@ -1256,7 +1258,10 @@ async function handleRpcnConnectorDocs (options) {
   const { collectGeneratorReports } = require('./pr-summary-formatter.js')
   const collect = (result) => collectGeneratorReports(result, { descriptionReports, lostSectionWarnings, styleRegressionWarnings })
 
-  try {
+  if (!writePartials) {
+    console.log('Skipping connector partials (--no-partials): the connect repo provides them.')
+  } else try {
+    console.log('Generating connector partials...')
     const result = await generateRpcnConnectorDocs({
       data: dataFile,
       overrides: options.overrides,
@@ -1511,20 +1516,20 @@ async function handleRpcnConnectorDocs (options) {
     }
   }
 
-  // Publish merged version to attachments
+  // Publish the connector data to attachments. The Bloblang playground and
+  // other site tools read this file, so it is published on every run, with
+  // overrides merged in only when an overrides file still exists.
   // IMPORTANT: This must run AFTER binary analysis and augmentation to include CGO-only connectors
-  if (options.overrides && fs.existsSync(options.overrides)) {
+  {
     try {
-      const { mergeOverrides, resolveReferences } = require('./generate-rpcn-connector-docs.js')
-
       // Use the augmented newIndex which now includes CGO-only and cloud-only connectors
       const mergedData = JSON.parse(JSON.stringify(newIndex))
 
-      const ovRaw = fs.readFileSync(options.overrides, 'utf8')
-      const ovObj = JSON.parse(ovRaw)
-      const resolvedOverrides = resolveReferences(ovObj, ovObj)
-
-      mergeOverrides(mergedData, resolvedOverrides)
+      if (options.overrides && fs.existsSync(options.overrides)) {
+        const { mergeOverrides, resolveReferences } = require('./generate-rpcn-connector-docs.js')
+        const ovObj = JSON.parse(fs.readFileSync(options.overrides, 'utf8'))
+        mergeOverrides(mergedData, resolveReferences(ovObj, ovObj))
+      }
 
       const attachmentsRoot = path.resolve(process.cwd(), 'modules/components/attachments')
       fs.mkdirSync(attachmentsRoot, { recursive: true })
@@ -2066,6 +2071,7 @@ async function handleRpcnConnectorDocs (options) {
           templateDescription: options.templateDescription,
           templateIntro: options.templateIntro,
           writeFullDrafts: true,
+          writePartials,
           cgoOnly: binaryAnalysis?.cgoOnly || [],
           cloudOnly: binaryAnalysis?.comparison?.cloudOnly || [],
           csvMetadata

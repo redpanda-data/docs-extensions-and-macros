@@ -41,6 +41,7 @@ function generateRpConnectDocs(args = {}) {
     if (args.draft_missing) cmdArgs.push('--draft-missing');
     if (args.update_whats_new) cmdArgs.push('--update-whats-new');
     if (args.include_bloblang) cmdArgs.push('--include-bloblang');
+    if (args.no_partials) cmdArgs.push('--no-partials');
     if (args.skip_cloud_detection) cmdArgs.push('--skip-cloud-detection');
     if (args.skip_binary_analysis) cmdArgs.push('--skip-binary-analysis');
     if (args.skip_cloud_analysis) cmdArgs.push('--skip-cloud-analysis');

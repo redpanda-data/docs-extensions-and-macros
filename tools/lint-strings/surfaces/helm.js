@@ -472,6 +472,15 @@ const RULES = [
   }
 ]
 
+/**
+ * Where a declaration lives, for removal matching. The name is the full
+ * values path, unique inside one values.yaml but repeated across charts, so
+ * the key is the file, the kind and the path.
+ */
+function identity (decl) {
+  return [decl.file, (decl.meta && decl.meta.kind) || null, decl.name]
+}
+
 module.exports = {
   name: 'helm',
   convention: CONVENTION,
@@ -480,6 +489,7 @@ module.exports = {
   publishableBlankKeys,
   scanKeyLines,
   misattachedMarkers,
+  identity,
   HELM_DOCS_MARKER_RE,
   rules: RULES
 }

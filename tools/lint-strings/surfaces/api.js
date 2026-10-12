@@ -761,11 +761,29 @@ const RULES = [
   }
 ]
 
+/**
+ * Where a declaration lives, for removal matching. Field and message names
+ * repeat across messages (`name`, `enabled`), and rpc names across services,
+ * so the key is the proto package directory, the kind, and the dotted path
+ * inside the file. Proto names are unique per package, and buf keeps a
+ * package in one directory; a move to another package counts as a removal,
+ * which errs toward reviewing.
+ */
+function identity (decl) {
+  const meta = decl.meta || {}
+  let where = decl.name
+  if (meta.kind === 'field') where = meta.path || decl.name
+  else if (meta.kind === 'message' || meta.kind === 'enum') where = meta.block ? `${meta.block}.${decl.name}` : decl.name
+  else if (meta.kind === 'rpc-summary' || meta.kind === 'rpc-description') where = meta.service ? `${meta.service}.${decl.name}` : decl.name
+  return [path.dirname(decl.file), meta.kind || null, where]
+}
+
 module.exports = {
   name: 'api',
   convention: CONVENTION,
   extract,
   scanFile,
+  identity,
   rules: RULES,
   API_ROOTS,
   SUMMARY_KINDS,

@@ -144,6 +144,13 @@ describe('verbatim-asciidoc rules', () => {
 })
 
 describe('engine', () => {
+  test('a declaration skips the rules its meta.skip_rules names', () => {
+    const rule = { name: 'always', severity: 'warning', check: () => [{ message: 'hit' }] }
+    const decl = (meta) => ({ surface: 'connect', name: 'x', file: 'f.go', line_start: 1, line_end: 1, string: 'x', meta })
+    expect(runRules([decl({})], [rule]).findings).toHaveLength(1)
+    expect(runRules([decl({ skip_rules: ['always'] })], [rule]).findings).toHaveLength(0)
+  })
+
   test('collates findings per declaration with byRule and bySurface summary', () => {
     const declarations = [
       decl({ name: 'empty_prop', string: null }),

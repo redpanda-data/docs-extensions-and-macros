@@ -1,0 +1,77 @@
+# Trimmed playbook for the Connect docs PR check
+# (.github/workflows/connect-docs-check.yml).
+#
+# The workflow clones each source into a sibling directory and copies this
+# file into the rp-connect-docs clone, so every url below is a local
+# directory relative to that clone. Antora fetches nothing with credentials:
+# the private repos are already on disk, and the token that cloned them is not
+# in the Antora process environment.
+#
+# Sources: rp-connect-docs at the ref under test, docs main (the streaming
+# component root and the shared component), cloud-docs main, redpanda-labs
+# main, and the docs-site home, data-platform, and self-managed components.
+# Without labs and the two docs-site components, docs and docs-site pages
+# report xref errors to them (9 in October 2026); with them the build is
+# clean. The connect generated reference docs come from
+# REDPANDA_CONNECT_DOCS_DIR, which modify-connect-tag-playbook reads.
+#
+# Extensions that only serve the production site are left out:
+# set-latest-version needs a GitHub token to resolve versions and logs an
+# error without one, and the redirect, attachment, and related-labs
+# extensions do not change what the connect pages render.
+site:
+  title: Redpanda Docs
+  start_page: connect:home:index.adoc
+  url: https://docs.redpanda.com
+  robots: disallow
+urls:
+  html_extension_style: indexify
+content:
+  sources:
+  - url: .
+    branches: HEAD
+  - url: ../docs
+    branches: HEAD
+  - url: ../docs
+    branches: HEAD
+    start_path: shared
+  - url: ../cloud-docs
+    branches: HEAD
+  - url: ../redpanda-labs
+    branches: HEAD
+    start_paths: [docs, '*/docs']
+  - url: ../docs-site
+    branches: HEAD
+    start_paths: [home, data-platform, self-managed]
+ui:
+  bundle:
+    url: https://github.com/redpanda-data/docs-ui/releases/latest/download/ui-bundle.zip
+    # The workflow caches the Antora cache directory under a weekly key, so
+    # the bundle is downloaded at most once a week rather than on every run.
+    snapshot: false
+asciidoc:
+  attributes:
+    enterprise-validate: warn
+  extensions:
+  - '@asciidoctor/tabs'
+  - '@redpanda-data/docs-extensions-and-macros/macros/rp-connect-components'
+  - '@redpanda-data/docs-extensions-and-macros/macros/glossary'
+  - '@redpanda-data/docs-extensions-and-macros/macros/config-ref'
+  - '@redpanda-data/docs-extensions-and-macros/macros/helm-ref'
+  - '@redpanda-data/docs-extensions-and-macros/asciidoc-extensions/add-line-numbers-highlights'
+  - '@redpanda-data/docs-extensions-and-macros/macros/badge'
+  - '@redpanda-data/docs-extensions-and-macros/macros/enterprise'
+antora:
+  extensions:
+  - require: '@redpanda-data/docs-extensions-and-macros/extensions/unified-navigation'
+  - require: '@redpanda-data/docs-extensions-and-macros/extensions/modify-connect-tag-playbook'
+  - require: '@redpanda-data/docs-extensions-and-macros/extensions/generate-rp-connect-info'
+  - require: '@redpanda-data/docs-extensions-and-macros/extensions/generate-rp-connect-categories'
+  - require: '@redpanda-data/docs-extensions-and-macros/extensions/collect-bloblang-samples'
+  - require: '@redpanda-data/docs-extensions-and-macros/extensions/unpublish-pages'
+  - require: '@redpanda-data/docs-extensions-and-macros/extensions/unlisted-pages'
+  - require: '@redpanda-data/docs-extensions-and-macros/extensions/add-global-attributes'
+  - require: '@redpanda-data/docs-extensions-and-macros/extensions/validate-attributes'
+  - require: '@redpanda-data/docs-extensions-and-macros/extensions/aggregate-terms'
+output:
+  clean: true

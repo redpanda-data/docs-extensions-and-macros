@@ -472,6 +472,86 @@ describe('placeholder escaping and heading-sequence reporting', () => {
   });
 });
 
+describe('field descriptions: placeholder escaping (salesforce inputs)', () => {
+  const renderConnectFields = require('../../tools/redpanda-connect/helpers/renderConnectFields.js');
+
+  // The three field descriptions that shipped unescaped: every Salesforce
+  // input embeds them from one shared authFieldSpecs() upstream, so the same
+  // four references were dropped from six published pages (the three input
+  // pages in rp-connect-docs, and again through the cloud-docs stubs that
+  // single-source them).
+  const salesforceFields = [
+    {
+      name: 'api_version',
+      description: 'Affects endpoint paths (`/services/data/{api_version}/...`) and available fields.',
+    },
+    {
+      name: 'client_secret',
+      description: 'Sensitive: prefer environment variable interpolation (`${SALESFORCE_CLIENT_SECRET}`) over inlining.',
+    },
+    {
+      name: 'org_url',
+      description: 'Production orgs use `https://{my-domain}.my.salesforce.com`; sandboxes use `https://{my-domain}.sandbox.my.salesforce.com`.',
+    },
+  ];
+
+  const render = (fields) => String(renderConnectFields(fields));
+
+  test('escapes lowercase and environment-variable placeholders in field prose', () => {
+    const out = render(salesforceFields);
+    expect(out).toContain('/services/data/\\{api_version}/...');
+    expect(out).toContain('$\\{SALESFORCE_CLIENT_SECRET}');
+    expect(out).toContain('https://\\{my-domain}.my.salesforce.com');
+    expect(out).toContain('https://\\{my-domain}.sandbox.my.salesforce.com');
+    // Nothing unescaped survives.
+    expect(out).not.toMatch(/[^\\]\{api_version}/);
+    expect(out).not.toMatch(/[^\\]\{my-domain}/);
+    expect(out).not.toMatch(/[^\\]\{SALESFORCE_CLIENT_SECRET}/);
+  });
+
+  test('leaves a fenced ${VAR} untouched', () => {
+    const out = render([{
+      name: 'client_secret',
+      description: 'Use interpolation:\n\n----\nclient_secret: ${SALESFORCE_CLIENT_SECRET}\n----\n',
+    }]);
+    // A backslash inside a listing block renders as a literal backslash.
+    expect(out).toContain('client_secret: ${SALESFORCE_CLIENT_SECRET}');
+    expect(out).not.toContain('$\\{SALESFORCE_CLIENT_SECRET}');
+  });
+
+  test('keeps the beta badge attribute reference intact', () => {
+    const out = render([{ name: 'thing', is_beta: true, description: 'Uses `{endpoint}`.' }]);
+    // The badge tooltip is a real attribute reference the generator adds,
+    // so it must not be escaped; the description placeholder must be.
+    expect(out).toContain('tooltip={page-beta-text}');
+    expect(out).toContain('\\{endpoint}');
+  });
+
+  renderTest('Asciidoctor reports no missing attribute for the rendered fields (raw descriptions are the control)', () => {
+    const convert = (body) => {
+      const logger = asciidoctor.MemoryLogger.create();
+      asciidoctor.LoggerManager.setLogger(logger);
+      asciidoctor.convert(body, { attributes: { 'attribute-missing': 'warn' } });
+      return logger.getMessages()
+        .map((m) => m.getText())
+        .filter((text) => text.startsWith('skipping reference to missing attribute'));
+    };
+
+    // Control: the descriptions as they arrive from the connector source
+    // reproduce the exact production warnings. Without this the assertion
+    // below could pass for a renderer that emitted nothing at all.
+    const control = convert(salesforceFields.map((f) => f.description).join('\n\n'));
+    expect(control).toEqual([
+      'skipping reference to missing attribute: api_version',
+      'skipping reference to missing attribute: salesforce_client_secret',
+      'skipping reference to missing attribute: my-domain',
+      'skipping reference to missing attribute: my-domain',
+    ]);
+
+    expect(convert(render(salesforceFields))).toEqual([]);
+  });
+});
+
 describe('ensureHeadingSeparation', () => {
   const { ensureHeadingSeparation } = renderConnectDescription;
 

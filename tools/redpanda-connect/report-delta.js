@@ -24,6 +24,7 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
       type,
       status: raw.status || '',
       version: raw.version || raw.introducedInVersion || '',
+      summary: raw.summary || '',
       description: raw.description || '',
       requiresCgo: metadata.requiresCgo || false,
       cloudOnly: metadata.cloudOnly || false,

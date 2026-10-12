@@ -20,13 +20,23 @@ const { spawnSync } = require('child_process')
  */
 const SURFACE_ROUTES = [
   { surface: 'properties', pattern: /^src\/v\/config\// },
-  { surface: 'metrics', pattern: /(^|\/)[^/]*probe\.cc$|^src\/v\/metrics\// },
+  // Metrics are registered wherever a component exposes them, not in files
+  // with a predictable name: raft/consensus.cc, cluster/rm_stm.cc and
+  // headers such as kafka/server/kafka_probe.h all call sm::description. So
+  // route every non-test C++ source under src/v (config/ has already matched
+  // properties above) and let the scanner, which skips any file with no
+  // description() call, decide what is a declaration. Test directories are
+  // excluded the same way the whole-repo scan excludes them.
+  { surface: 'metrics', pattern: /^src\/v\/(?!(?:.*\/)?tests?\/).*\.(?:cc|h)$/ },
   { surface: 'rpk', pattern: /^src\/go\/rpk\/pkg\/cli\// },
   // Both chart layouts ship: charts/<name>/chart/values.yaml (redpanda,
   // console) and charts/<name>/values.yaml (connectors).
   { surface: 'helm', pattern: /^charts\/[^/]+\/(chart\/)?values\.yaml$/ },
   { surface: 'crd', pattern: /^operator\/api\// },
-  { surface: 'connect', pattern: /^internal\/impl\// },
+  // Redpanda Connect publishes strings from component packages, the helper
+  // packages they share (internal/httpclient, internal/retries, ...), the
+  // public schema and the `rpk connect` CLI, plus config templates.
+  { surface: 'connect', pattern: /^(?:internal|public|cmd)\/(?!(?:.*\/)?testdata\/)(?:.*(?<!_test)\.go|.*\.tmpl\.ya?ml)$/ },
   // API protos, whose comments and openapiv2 option strings reach readers as
   // OpenAPI descriptions. console holds the data plane and Console APIs under
   // proto/redpanda/api/; cloudv2's control plane lives under proto/public/.

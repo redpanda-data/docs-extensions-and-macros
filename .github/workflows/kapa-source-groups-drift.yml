@@ -69,12 +69,18 @@ jobs:
             ,sdlc/prod/github/kapa
           parse-json-secrets: true
 
-      # The org bot token can write issues in docs-ui. A pull_request run never
-      # files an issue (the failing check is the notification), and same-repo
-      # PRs run the workflow file from the PR branch, so the token is only
-      # fetched for the events that need it.
+      # The org bot token can write issues in docs-ui. Restricted to the
+      # default branch, not just "not a pull_request": workflow_dispatch can
+      # be aimed at any branch a user with write access selects, and
+      # checkout below has no explicit ref, so a modified
+      # kapa-source-groups-drift.sh on that branch would run holding this
+      # token regardless of event name. The drift script's own ref check
+      # (GITHUB_REF != refs/heads/main -> file nothing) is not a security
+      # boundary against that: an attacker controlling the script on their
+      # own branch can simply not carry that check over. Gating the fetch
+      # itself is the actual boundary.
       - name: Get the bot token for filing issues
-        if: github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main'
         uses: aws-actions/aws-secretsmanager-get-secrets@v2
         with:
           secret-ids: |
