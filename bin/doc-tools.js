@@ -896,7 +896,7 @@ automation
   .option('--template-metadata <path>', 'Metadata section partial template', path.resolve(__dirname, '../tools/redpanda-connect/templates/metadata-partials.hbs'))
   .option('--template-description <path>', 'Description section partial template', path.resolve(__dirname, '../tools/redpanda-connect/templates/descriptions-partials.hbs'))
   .option('--template-bloblang <path>', 'Custom Handlebars template for bloblang function/method partials')
-  .option('--overrides <path>', 'Optional JSON file with overrides', 'docs-data/overrides.json')
+  .option('--overrides <path>', 'Optional JSON file of description overrides to merge into the generated output. Nothing is merged unless you pass it. Connector descriptions come from the connect and benthos component specs, so fix wrong text there')
   .option('--include-bloblang', 'Include Bloblang functions and methods in generation')
   .option('--no-partials', 'Skip the generated partials, config snippets, and Bloblang reference because the connect repo publishes them. What\'s new, diffs, drafts, nav, and the version bump still run')
   .option('--prune-orphaned-descriptions', 'Allow the description-partial orphan sweep to blank more than 10% of the tree. Only use this when the connector dataset is confirmed complete: an incomplete dataset looks identical to a mass upstream deletion and the sweep blanks published content')
