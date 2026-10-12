@@ -260,11 +260,15 @@ runs:
         # the whole run (verified on CLI 2.1.258: a frontmatter
         # `Bash(touch:*)` ran under `--allowedTools Read`). Those grants are
         # a local convenience for humans; in CI the --allowedTools list is
-        # the ONLY grant. Strip them from the staged plugin copy.
+        # the ONLY grant. Strip them from the staged plugin copy. Skills carry
+        # the same key: overrides-review and docs-gate grant Bash, and
+        # sm-release-notes grants Write, Edit, and Bash.
         find .docs-team-standards-plugin/commands -name '*.md' -exec sed -i '/^allowed-tools:/d' {} +
+        find .docs-team-standards-plugin/skills -name 'SKILL.md' -exec sed -i '/^allowed-tools:/d' {} +
         find .docs-team-standards-plugin/agents -name '*.md' -exec perl -pi -e \
           'if (/^tools:/) { s/\b(Bash|WebFetch|Write|Edit|NotebookEdit)\b//g; s/,([ \t]*,)+/,/g; s/:[ \t]*,/: /; s/,[ \t]*$//; }' {} +
         if grep -rn '^allowed-tools:' .docs-team-standards-plugin/commands/ || \
+           grep -rn --include=SKILL.md '^allowed-tools:' .docs-team-standards-plugin/skills/ || \
            grep -rnE '^tools:.*\b(Bash|WebFetch|Write|Edit)\b' .docs-team-standards-plugin/agents/; then
           echo "::error::a plugin frontmatter grant survived stripping — refusing to run with a widened sandbox"
           exit 1
