@@ -98,10 +98,14 @@ inputs:
     default: ''
   gateway_model:
     description: >
-      Bedrock-style model id; must be in the ADP provider's allowlist. Only
-      us.anthropic.claude-opus-5 and us.anthropic.claude-haiku-4-5 are proven
-      against claude-code-provider-adp (cloud-docs' doc-detective and
-      streaming-enterprise's review both run opus-5 through it). An id that
+      Bedrock-style model id; must be in the ADP provider's allowlist.
+      DevProd measured claude-code-provider-adp on 2026-08-31 (msd#169;
+      cupboard engineering/devprod/2026-09-05-enabling-the-claude-github-
+      workflow-in-a-repo.md): us.anthropic.claude-opus-5,
+      us.anthropic.claude-fable-5 and
+      us.anthropic.claude-haiku-4-5-20251001-v1:0 (the helper model set in
+      ANTHROPIC_DEFAULT_HAIKU_MODEL below) work; global.* and bare
+      anthropic.* ids are rejected. An id that
       is not on the allowlist returns 400 and the review silently never
       appears, so confirm the allowlist before changing this.
     required: false

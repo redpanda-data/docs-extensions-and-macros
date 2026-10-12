@@ -43,7 +43,7 @@
 #
 # Ordering contract: in an SME-gated repo the automated docs review never
 # runs before one SME approval (SME = (requested ∪ reviewed) − docs team −
-# author, recomputed from the API on every run — never cached). Everywhere
+# author − bots, recomputed from the API on every run — never cached). Everywhere
 # it runs exactly once per (PR, head SHA), and it never merges anything.
 # The only physical merge gate is the docs-team approval (CODEOWNERS).
 #
@@ -213,7 +213,8 @@ jobs:
       sme_approver: ${{ steps.eval.outputs.sme_approver }}
       sme_set: ${{ steps.eval.outputs.sme_set }}
       # How the SME requirement was satisfied — the review comment says so:
-      # approved | repo-not-gated | no-sme-needed-label | bot-author
+      # approved | repo-not-gated | no-sme-needed-label | author-is-sme-label |
+      # bot-author
       sme_mode: ${{ steps.eval.outputs.sme_mode }}
     steps:
       - id: eval
@@ -324,7 +325,8 @@ jobs:
             # is why the union with users-who-reviewed is what makes this
             # recomputable at any moment.
             local live reviewed
-            live=$(gh api "repos/$R/pulls/$PR" --jq '[.requested_reviewers[].login] | join(",")')
+            # From the PR object this run fetched at the top of the gate.
+            live=$(jq -r '[.requested_reviewers[].login] | join(",")' <<< "$PRJ")
             # Pipe into `jq -s`, never `--paginate --jq`: gh applies --jq to
             # each 30-item page separately and prints one line per page, so
             # a PR with >30 reviews yields "a,b\nc,d" and a bogus login
@@ -642,9 +644,11 @@ jobs:
           mkdir -p review-output
           FAILED=0
           python3 scripts/validate-manifests.py || FAILED=1
-          if compgen -G "evaluations/tier-*/*.eval.json" > /dev/null; then
-            npx --yes ajv-cli@5.0.0 validate -s evaluations/schema.json \
-              -d "evaluations/tier-*/*.eval.json" || FAILED=1
+          # Same file set and flags as validate-skills.yml. A wrong glob here
+          # used to skip silently and report a pass that validated nothing.
+          if compgen -G "evaluations/suites/*.eval.json" > /dev/null; then
+            npx --yes ajv-cli@5.0.0 validate -s evaluations/schema.json --all-errors \
+              -d "evaluations/suites/*.eval.json" || FAILED=1
           fi
           if [[ "$FAILED" -eq 1 ]]; then
             jq -n '{verdict:"fail",blocking:["JSON validation failed (validate-manifests / eval schema) — see job log"],suggestions:[]}' > review-output/verdict.json
@@ -1064,6 +1068,7 @@ jobs:
           SME_APPROVER: ${{ needs.gate.outputs.sme_approver }}
           SME_MODE: ${{ needs.gate.outputs.sme_mode }}
           TICKET: ${{ needs.classify.outputs.ticket }}
+          RESULT_CLASSIFY: ${{ needs.classify.result }}
           RESULT_ADOC: ${{ needs.adoc_review.result }}
           RESULT_JSON: ${{ needs.json_validation.result }}
           RESULT_CODE: ${{ needs.code_review.result }}
