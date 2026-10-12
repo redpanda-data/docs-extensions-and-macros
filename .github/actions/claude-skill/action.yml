@@ -184,6 +184,9 @@ runs:
     # head is untrusted, and a PR must not be able to rewrite the rules it is
     # reviewed against. Every CLAUDE.md / CLAUDE.local.md in the head is
     # dropped first, then the base branch's copies of BOTH are restored.
+    # Symlinks are dropped too: `-type f` alone skips them, so a PR could add
+    # a CLAUDE.md symlink to a file it controls in a directory where the base
+    # has none, and nothing would restore over it.
     # Consequence: a PR that edits CLAUDE.md is reviewed under the OLD rules;
     # the new ones apply to the next PR after it merges.
     - name: Load this repo's CLAUDE.md/CLAUDE.local.md files from the base branch
@@ -195,7 +198,7 @@ runs:
       run: |
         set -euo pipefail
         BASE_REF=$(gh api "repos/$R/pulls/$PR" --jq .base.ref)
-        find . -type f \( -name CLAUDE.md -o -name CLAUDE.local.md \) -not -path './.git/*' -print0 \
+        find . \( -type f -o -type l \) \( -name CLAUDE.md -o -name CLAUDE.local.md \) -not -path './.git/*' -print0 \
           | xargs -0 -r rm -f
         N=0; LOADED=""
         while IFS= read -r f; do
