@@ -272,13 +272,19 @@ runs:
         # the ONLY grant. Strip them from the staged plugin copy. Skills carry
         # the same key: overrides-review and docs-gate grant Bash, and
         # sm-release-notes grants Write, Edit, and Bash.
-        find .docs-team-standards-plugin/commands -name '*.md' -exec sed -i '/^allowed-tools:/d' {} +
-        find .docs-team-standards-plugin/skills -name 'SKILL.md' -exec sed -i '/^allowed-tools:/d' {} +
-        find .docs-team-standards-plugin/agents -name '*.md' -exec perl -pi -e \
+        # At any depth, not just the root plugin's folders: the nested
+        # plugins/docs-eng-essentials copy carries its own grants (docs-gate
+        # grants Bash). --plugin-dir does not load it today, but the strip
+        # must not depend on that. The guard then searches every .md in
+        # the staged tree, so a grant in a new location fails the run
+        # instead of passing because nobody stripped there.
+        P=.docs-team-standards-plugin
+        find "$P" -path '*/.git' -prune -o \( -name 'SKILL.md' -o -path '*/commands/*.md' \) \
+          -type f -exec sed -i '/^allowed-tools:/d' {} +
+        find "$P" -path '*/.git' -prune -o -path '*/agents/*.md' -type f -exec perl -pi -e \
           'if (/^tools:/) { s/\b(Bash|WebFetch|Write|Edit|NotebookEdit)\b//g; s/,([ \t]*,)+/,/g; s/:[ \t]*,/: /; s/,[ \t]*$//; }' {} +
-        if grep -rn '^allowed-tools:' .docs-team-standards-plugin/commands/ || \
-           grep -rn --include=SKILL.md '^allowed-tools:' .docs-team-standards-plugin/skills/ || \
-           grep -rnE '^tools:.*\b(Bash|WebFetch|Write|Edit)\b' .docs-team-standards-plugin/agents/; then
+        if grep -rn --include='*.md' --exclude-dir=.git '^allowed-tools:' "$P" || \
+           grep -rnE --include='*.md' --exclude-dir=.git '^tools:.*\b(Bash|WebFetch|Write|Edit)\b' "$P"; then
           echo "::error::a plugin frontmatter grant survived stripping — refusing to run with a widened sandbox"
           exit 1
         fi

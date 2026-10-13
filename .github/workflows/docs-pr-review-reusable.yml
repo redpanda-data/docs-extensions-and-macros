@@ -878,13 +878,20 @@ jobs:
             echo "::error::doc-tools lint-screenshots produced no output at doc_tools_version=${DOC_TOOLS_VERSION} — the pin may predate this subcommand, or npx failed to install it"
             exit 1
           fi
+          # `// []`: a result with no findings key is a clean lint, not a
+          # jq crash that turns into a red gate. The verdict also fails on
+          # any error-level finding, so it does not depend on .summary
+          # being present.
           jq '
             def line: "\(.file)\(if .line then ":\(.line)" else "" end)\(if .image then " [\(.image)]" else "" end) \(.message)";
-            {
-              verdict: (if .summary.errors > 0 then "fail" else "pass" end),
-              blocking:    [.findings[] | select(.severity == "error")   | line],
-              suggestions: [.findings[] | select(.severity == "warning") | line]
-            }' "$LINT_DIR/result.json" > "$OUT"
+            (.summary.errors // 0) as $errors
+            | (.findings // []) as $f
+            | {
+                blocking:    [$f[] | select(.severity == "error")   | line],
+                suggestions: [$f[] | select(.severity == "warning") | line]
+              }
+            | .verdict = (if (.blocking | length) > 0 or $errors > 0 then "fail" else "pass" end)
+            ' "$LINT_DIR/result.json" > "$OUT"
           jq -r '"screenshot-lint: verdict=\(.verdict), \(.blocking | length) blocking, \(.suggestions | length) suggestion(s)"' "$OUT"
 
       - name: Claude vision pass
