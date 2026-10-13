@@ -21,3 +21,25 @@ Each event is keyed by player id, so one player's events stay ordered on one par
 --
 Run `go run ./hello.go` and confirm it prints `PASS (1/1)`.
 --
+
+== In production
+
+[.production-note]
+.In production
+--
+include::partial$production/partitions.adoc[tag=summary]
+For the full picture, see xref:verify-end-to-end.adoc#prod-partitions[Production considerations: partitions].
+--
+
+== Clean up
+
+You are done. Stop the stack and delete its volumes:
+
+[source,bash]
+----
+docker compose down -v
+----
+
+== Production considerations
+
+include::partial$production/_all.adoc[]
