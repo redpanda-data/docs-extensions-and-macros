@@ -397,8 +397,6 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
   if (!record.version) err('page-solution-version is required (vX.Y.Z)')
   else if (!VERSION_RX.test(record.version)) err(`page-solution-version "${record.version}" must match vX.Y.Z`)
 
-  if (!ENUMS.difficulty.includes(record.difficulty)) err(`page-solution-difficulty must be one of ${ENUMS.difficulty.join(', ')} (found "${record.difficulty}")`)
-
   if (record.duration === undefined || record.duration === null || record.duration === '') {
     err(`page-solution-duration is required (${DURATION_MIN}..${DURATION_MAX} minutes)`)
   } else if (!isInteger(record.duration) || Number(record.duration) < DURATION_MIN || Number(record.duration) > DURATION_MAX) {

@@ -84,7 +84,6 @@ function buildSolutionMetadata(page) {
     id: record.id,
     version: record.version,
     status: record.status,
-    difficulty: record.difficulty,
     duration_minutes: Number.isFinite(duration) ? duration : undefined,
     technologies: record.technologies,
     platforms: record.platforms,

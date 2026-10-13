@@ -174,7 +174,6 @@ describe('algolia-indexer generate-index (Solutions records)', () => {
       _tags: ['Solutions'],
       solutionId: 'leaderboard',
       stepId: 'build-leaderboard',
-      difficulty: 'intermediate',
       duration: 10,
       technologies: ['Go', 'Protobuf'],
       platforms: ['self-managed', 'cloud'],

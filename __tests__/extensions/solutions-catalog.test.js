@@ -121,6 +121,7 @@ const OVERVIEW_ATTRS = {
   'page-topic-type': 'solution',
   description: 'Build a live leaderboard from game events.',
   'page-solution-version': 'v1.2.3',
+  // A retired attribute an older page may still set: ignored, never an error.
   'page-solution-difficulty': 'intermediate',
   'page-solution-duration': '45',
   'page-solution-status': 'published',
@@ -382,7 +383,8 @@ describe('solutions-catalog: happy path', () => {
     expect(attr(step, 'page-solution-id')).toBe('leaderboard')
     expect(attr(step, 'page-solution-step-id')).toBe('start-environment')
     expect(attr(step, 'page-solution-version')).toBe('v1.2.3')
-    expect(attr(step, 'page-solution-difficulty')).toBe('intermediate')
+    expect(attr(step, 'page-solution-difficulty')).toBeUndefined()
+    expect(json(step, 'page-solution')).not.toHaveProperty('difficulty')
     expect(attr(step, 'page-solution-duration')).toBe('45')
     expect(attr(step, 'page-solution-status')).toBe('published')
     expect(attr(step, 'page-solution-download')).toBe('authenticated')
@@ -404,7 +406,6 @@ describe('solutions-catalog: happy path', () => {
       url: '/solutions/leaderboard/',
       provenance: 'explicit',
       score: 1,
-      difficulty: 'intermediate',
       duration: 45,
       technologies: ['Go', 'Protobuf'],
     })
@@ -420,7 +421,7 @@ describe('solutions-catalog: happy path', () => {
     // every solution carries, and ticking any of them would return the same
     // single card. The two-solution case below is where the facets appear.
     expect(catalog.facets).toEqual({
-      industries: [], useCases: [], categories: [], technologies: [], difficulty: [], platforms: [],
+      industries: [], useCases: [], categories: [], technologies: [], platforms: [],
     })
 
     const graph = addedFile(result.siteCatalog, 'assets/data/solutions-graph.json')
@@ -579,7 +580,6 @@ describe('solutions-catalog: metadata fatals (documentsConverted)', () => {
     ['missing description', { description: undefined }, /description is required/],
     ['missing version', { 'page-solution-version': undefined }, /page-solution-version is required/],
     ['malformed version', { 'page-solution-version': '1.2.3' }, /must match vX\.Y\.Z/],
-    ['bad difficulty', { 'page-solution-difficulty': 'hard' }, /page-solution-difficulty must be one of/],
     ['missing duration', { 'page-solution-duration': undefined }, /page-solution-duration is required/],
     ['duration below range', { 'page-solution-duration': '2' }, /between 5 and 600/],
     ['duration above range', { 'page-solution-duration': '601' }, /between 5 and 600/],
@@ -633,11 +633,11 @@ describe('solutions-catalog: metadata fatals (documentsConverted)', () => {
   })
 
   test('collects every error into one throw', async () => {
-    const solution = makeSolution('leaderboard', { attrs: { 'page-solution-difficulty': 'hard', 'page-solution-version': 'nope' } })
+    const solution = makeSolution('leaderboard', { attrs: { 'page-solution-duration': undefined, 'page-solution-version': 'nope' } })
     let message
     try { await run({ solutions: [solution] }) } catch (err) { message = err.message }
     expect(message).toMatch(/2 errors/)
-    expect(message).toMatch(/difficulty must be one of/)
+    expect(message).toMatch(/page-solution-duration is required/)
     expect(message).toMatch(/must match vX\.Y\.Z/)
   })
 })
@@ -836,7 +836,7 @@ describe('solutions-catalog: status handling', () => {
     expect(catalog.solutions.map((s) => [s.id, s.status, s.draft])).toEqual([['sandbox', 'draft', true]])
     // Empty because a one-solution catalog has nothing to narrow, not
     // because drafts are treated differently: they are counted like any other.
-    expect(catalog.facets.difficulty).toEqual([])
+    expect(catalog.facets.platforms).toEqual([])
     const attrCatalog = JSON.parse(result.catalog.getComponent('home').versions[0].asciidoc.attributes['solutions-catalog'])
     expect(attrCatalog.solutions[0].id).toBe('sandbox')
 
@@ -1834,15 +1834,16 @@ describe('solutions-catalog: pure helpers', () => {
   })
 
   test('buildCatalog keeps published and deprecated, plus drafts only when flagged as included', () => {
-    const recs = ['published', 'deprecated', 'draft'].map((status, i) => ({ id: `s${i}`, status, categories: [], technologies: [], platforms: [], difficulty: i ? 'advanced' : 'beginner' }))
+    const recs = ['published', 'deprecated', 'draft'].map((status, i) => ({ id: `s${i}`, status, categories: [], technologies: [], platforms: i ? ['cloud'] : ['self-managed'] }))
     const catalog = outputs.buildCatalog(recs, { siteUrl: 'x', generatedAt: 't' })
     expect(catalog.solutions.map((s) => s.status)).toEqual(['published', 'deprecated'])
-    expect(catalog.facets.difficulty).toEqual([{ value: 'advanced', count: 1 }, { value: 'beginner', count: 1 }])
-    // The same records with one difficulty between them: it is then a value on
+    expect(catalog.facets.platforms).toEqual([{ value: 'cloud', count: 1 }, { value: 'self-managed', count: 1 }])
+    expect(catalog.facets).not.toHaveProperty('difficulty')
+    // The same records with one platform between them: it is then a value on
     // every solution, narrows nothing and is dropped. This is why the
     // assertion above needs two different values to prove facets are built.
-    const same = recs.map((r) => ({ ...r, difficulty: 'beginner' }))
-    expect(outputs.buildCatalog(same, { siteUrl: 'x', generatedAt: 't' }).facets.difficulty).toEqual([])
+    const same = recs.map((r) => ({ ...r, platforms: ['self-managed'] }))
+    expect(outputs.buildCatalog(same, { siteUrl: 'x', generatedAt: 't' }).facets.platforms).toEqual([])
     recs[2].draft = true
     expect(outputs.buildCatalog(recs, { siteUrl: 'x', generatedAt: 't' }).solutions.map((s) => s.status)).toEqual(['published', 'deprecated', 'draft'])
   })
@@ -1973,7 +1974,7 @@ describe('solutions-catalog: the Category facet', () => {
   })
 
   test('buildCatalog falls back to categories when no leaf map is given', () => {
-    const rec = (id, categories) => ({ id, status: 'published', categories, industries: [], useCases: [], technologies: [], platforms: [], difficulty: 'beginner' })
+    const rec = (id, categories) => ({ id, status: 'published', categories, industries: [], useCases: [], technologies: [], platforms: [] })
     const catalog = outputs.buildCatalog([rec('a', ['X', 'P']), rec('b', ['Y', 'P'])])
     expect(catalog.facets.categories.map((f) => f.value)).toEqual(['X', 'Y'])
   })
@@ -2068,7 +2069,7 @@ const OFFSETS_HREF = '../../streaming/26.2/develop/consumer-offsets/'
 
 describe('solutions-catalog: the Category facet does not repeat another axis', () => {
   const rec = (id, { categories = [], useCases = [], technologies = [] } = {}) =>
-    ({ id, status: 'published', categories, useCases, technologies, industries: [], platforms: [], difficulty: 'beginner' })
+    ({ id, status: 'published', categories, useCases, technologies, industries: [], platforms: [] })
 
   test('a category selecting the same solutions as a use case or technology is dropped', () => {
     const catalog = outputs.buildCatalog([

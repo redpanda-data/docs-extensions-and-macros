@@ -53,7 +53,6 @@ function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions 
     status: record.status,
     draft: record.status === 'draft',
     featured: Boolean(record.featured),
-    difficulty: record.difficulty,
     duration: Number(record.duration),
     download: record.download,
     platforms: record.platforms,
@@ -101,7 +100,6 @@ const SCALAR_MIRRORS = [
   ['page-solution-asset', 'asset'],
   ['page-solution-repo', 'repo'],
   ['page-solution-status', 'status'],
-  ['page-solution-difficulty', 'difficulty'],
   ['page-solution-download', 'download'],
 ]
 
@@ -272,7 +270,6 @@ function buildCatalog (publicRecords, { siteUrl = '', generatedAt = new Date().t
         [(r) => r.useCases, (r) => r.technologies]
       ),
       technologies: discriminating(countValues(solutions, (r) => r.technologies), solutions.length),
-      difficulty: discriminating(countValues(solutions, (r) => [r.difficulty]), solutions.length),
       platforms: discriminating(countValues(solutions, (r) => r.platforms), solutions.length),
     },
   }

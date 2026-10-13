@@ -31,7 +31,6 @@ const LAYOUTS = Object.freeze({
 })
 
 const ENUMS = Object.freeze({
-  difficulty: ['beginner', 'intermediate', 'advanced'],
   status: ['draft', 'published', 'deprecated'],
   download: ['authenticated', 'public', 'none'],
   platforms: ['self-managed', 'cloud', 'kubernetes'],
@@ -446,7 +445,6 @@ function buildRecord (mod, modulePages, moduleAttachments, { version, moduleExam
     url: overview && overview.pub ? overview.pub.url : undefined,
     description: attrs.description ? String(attrs.description).trim() : '',
     version: solutionVersion,
-    difficulty: attrs['page-solution-difficulty'] ? String(attrs['page-solution-difficulty']).trim() : '',
     duration: attrs['page-solution-duration'],
     status: attrs['page-solution-status'] ? String(attrs['page-solution-status']).trim() : '',
     featured: parseFlag(attrs['page-solution-featured']),
