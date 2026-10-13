@@ -595,6 +595,25 @@ describe('doc-strings-review workflow: writing-standard fetch (executed)', () =>
     expect(r.status).toBe(0)
     expect(r.size(STANDARD)).toBe(-1)
   })
+
+  // The docs-gate skill carries the doc-impact pass. Same discipline as the
+  // standard: a failed fetch leaves no file, so the prompt's existence check
+  // skips the pass instead of applying an empty rule.
+  test('the docs-gate skill is fetched beside the standard and discarded on failure', () => {
+    const b64 = Buffer.from('# Docs gate\n').toString('base64')
+    const ok = execRun(step, {
+      env: { GH_TOKEN: 'bot' },
+      stubs: { gh: `#!/bin/bash\nprintf '%s' '${b64}'\n` }
+    })
+    expect(ok.read('docs-gate.md')).toBe('# Docs gate\n')
+    const bad = execRun(step, {
+      env: { GH_TOKEN: 'bot' },
+      files: { 'docs-gate.md': 'stale' },
+      stubs: { gh: '#!/bin/bash\nexit 1\n' }
+    })
+    expect(bad.size('docs-gate.md')).toBe(-1)
+    expect(bad.all).toMatch(/docs-gate skill unavailable/)
+  })
 })
 
 describe('doc-strings-review workflow: doc-impact dispatch (executed)', () => {
@@ -1199,31 +1218,38 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(review.with.prompt).not.toMatch(/Finish with one summary comment/)
     })
 
-    test('the prompt carries the connect suggestion rules and the regeneration footer', () => {
+    // The writing rules themselves live in docs-team-standards, where its
+    // eval suites grade them (embedded-reference-strings, docs-gate). The
+    // prompt keeps only this workflow's mechanics and points at the fetched
+    // files for the rest, so a rule stated here would be a second copy.
+    test('the prompt sends connect strings to the fetched contract and keeps the regeneration footer', () => {
       const prompt = review.with.prompt
       expect(prompt).toMatch(/CONNECT STRINGS/)
-      expect(prompt).toContain('`text ` + "`code`" + ` text`')
-      expect(prompt).toMatch(/Every xref names its module/)
-      expect(prompt).toMatch(/Never put ifdef::env-cloud\[\]/)
+      expect(prompt).toMatch(/"Connect fields" contract\s+in embedded-reference-strings\.md/)
       expect(prompt).toMatch(/cloud_ai/)
-      expect(prompt).toContain('`CGO_ENABLED=1 TAGS=x_benthos_extra task docs`')
+      expect(prompt).toContain('`CGO_ENABLED=1 TAGS=x_benthos_extra task')
+      expect(prompt).not.toMatch(/Every xref names its module/)
+      expect(prompt).not.toMatch(/Never put ifdef::env-cloud\[\]/)
     })
 
-    test('the impact check leaves out the regenerated connector and Bloblang references', () => {
+    test('the impact check applies the fetched docs-gate skill and skips without it', () => {
       const prompt = review.with.prompt
-      expect(prompt).toMatch(/OTHER than the generated property, metric, rpk, connector\s+\(Redpanda Connect component pages\) or Bloblang function and\s+method reference/)
-      expect(prompt).toMatch(/a changed connector\s+summary, description, field or Bloblang text/)
+      expect(prompt).toMatch(/docs-gate\.md, when present and non-empty/)
+      expect(prompt).toMatch(/"Doc-impact pass"/)
+      expect(prompt).toMatch(/other than the generated property,\s+metric, rpk, connector and Bloblang references/)
+      expect(prompt).toMatch(/When docs-gate\.md is absent or empty, skip\s+this pass/)
+      expect(review.with.claude_args).toMatch(/Bash\(cat docs-gate\.md\)/)
     })
 
-    test('the prompt reviews strings in their page context and keeps articles', () => {
+    test('the prompt reviews strings in their page context by the fetched standard', () => {
       expect(review.with.prompt).toMatch(/REVIEW IN CONTEXT/)
       expect(review.with.prompt).toMatch(/Each entry carries context/)
+      expect(review.with.prompt).toMatch(/"Review in context" and "Composing a rewrite" sections\s+of embedded-reference-strings\.md/)
       expect(review.with.prompt).toMatch(/articles and subjects/)
-      expect(review.with.prompt).toMatch(/Every flag, command, path and URL goes in inline code/)
       // The related-string comment is the named exception to the
       // suggestion-block rule, and still carries the fingerprint footer.
-      expect(review.with.prompt).toMatch(/one exception to the suggestion rules above/)
-      expect(review.with.prompt).toMatch(/still ends with the changed declaration's\s+fingerprint footer/)
+      expect(review.with.prompt).toMatch(/one exception to\s+the suggestion rules above/)
+      expect(review.with.prompt).toMatch(/still ends with the changed\s+declaration's fingerprint footer/)
     })
   })
 })

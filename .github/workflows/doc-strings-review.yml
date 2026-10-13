@@ -681,7 +681,7 @@ jobs:
           # "is the authoritative writing standard" - worse than no file, since
           # the prompt's existence check takes the wrong branch. rm -f up front
           # so a stale file can never be mistaken for a fresh fetch.
-          rm -f embedded-reference-strings.md terminology.md
+          rm -f embedded-reference-strings.md terminology.md docs-gate.md
           [ -n "${GH_TOKEN:-}" ] || { echo "::notice::No bot token; lint-only review."; exit 0; }
           tmp=$(mktemp)
           if gh api repos/redpanda-data/docs-team-standards/contents/resources/writing-style/embedded-reference-strings.md \
@@ -701,6 +701,19 @@ jobs:
           else
             rm -f "$tmp2"
             echo "::notice::terminology reference unavailable; term checks skipped."
+          fi
+          # The docs-gate skill's "Doc-impact pass" decides which declarations
+          # need a DOC ticket and fixes the shape of doc-impact.json. It lives
+          # in docs-team-standards so that repo's evals grade the text this
+          # run applies. Absent, the impact pass is skipped: filing nothing is
+          # the safe way to be wrong when the rule itself is unavailable.
+          tmp3=$(mktemp)
+          if gh api repos/redpanda-data/docs-team-standards/contents/skills/docs-gate/SKILL.md \
+            --jq .content | base64 -d > "$tmp3" && [ -s "$tmp3" ]; then
+            mv "$tmp3" docs-gate.md
+          else
+            rm -f "$tmp3"
+            echo "::warning::docs-gate skill unavailable; the doc-impact pass is skipped this run."
           fi
       # The next step hands untrusted PR content to a model with Bash
       # access. Nothing it does not need should sit in its process
@@ -775,7 +788,8 @@ jobs:
               Bash(gh pr view *),
               Bash(cat lint-findings.json),
               Bash(cat embedded-reference-strings.md),
-              Bash(cat terminology.md)"
+              Bash(cat terminology.md),
+              Bash(cat docs-gate.md)"
           prompt: |
             REPO: ${{ github.repository }}
             PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -828,102 +842,37 @@ jobs:
               the rule or standard section it breaks. No headings, no
               bullet inventories, no account of what you checked.
             - carries a ```suggestion block replacing the FULL declaration
-              span. Per surface: C++ strings re-wrap as clang-format-style
-              adjacent literals within the file's column limit, all
-              non-description arguments byte-identical; metrics descriptions
-              take NO terminal period; cobra Short stays one capitalized line
-              with no period; CRD comments describe the json: tag key (never
-              the Go field name) and keep +kubebuilder marker lines
-              byte-identical; Helm comments keep the # -- marker conventions;
-              connect strings follow CONNECT STRINGS below.
+              span, composed by the "Composing a rewrite" rules and the
+              per-surface contract for its surface in
+              embedded-reference-strings.md (C++ adjacent literals, metrics
+              with no terminal period, cobra Short, CRD json tag and marker
+              lines, Helm markers, connect strings).
             - ends with this line, exactly, using the declaration's
               fingerprint from lint-findings.json:
               <sub>doc-strings-review:fp=FINGERPRINT</sub>
 
-            CONNECT STRINGS (surface connect): each declaration's detail
-            names its kind and, for component text, the components that
-            publish it with their internal/plugins/info.csv row: support
-            level, cloud (it runs in Redpanda Cloud) and cloud_ai (it runs in
-            Cloud GPU pipelines).
-            - Spec and field strings are AsciiDoc page bodies; AsciiDoc
-              headings, tables and links in them are legitimate. A Go raw
-              string cannot hold a backtick, so inline code inside one uses
-              the idiom `text ` + "`code`" + ` text`. Keep the string's
-              existing raw or interpreted form and every byte outside the
-              change; in an interpreted string escape quotes and newlines.
-            - Every xref names its module: xref:components:...,
-              xref:configuration:... or xref:guides:..., or a
-              component:module:page xref. A module-less xref breaks when
-              Cloud includes the same text into its own pages.
-            - Never put ifdef::env-cloud[], ifndef::env-cloud[] or any other
-              AsciiDoc conditional in a Go string, and never write Cloud or
-              cgo availability as prose. The generator renders those notes
-              from info.csv and the build lists; point to info.csv instead.
-            - When a component has cloud true, the same string ships on its
-              Cloud page: flag wording that holds only for self-managed
-              deployments (local file paths, installing binaries, process
-              restarts, command-line flags).
-            - ShortDescription (kind field-short) shows as plain text in
-              form-based editors: one plain sentence, no backticks, links or
-              markup.
-            - A declaration with detail.template comes from a helper called
-              once per component, and detail.call_site names the call. The
-              fix goes in the helper, so it must read correctly for every
-              caller. A {{unresolved:N}} placeholder is text the extractor
-              could not evaluate; never rewrite across it.
-            - CLI help (kinds cli-*) is `rpk connect` help: Usage is a
-              one-line label with no terminal period, and Description is
-              plain text, not AsciiDoc.
-            - End every connect suggestion comment, on the line before the
-              fingerprint line, with exactly: After you apply this
-              suggestion, run `CGO_ENABLED=1 TAGS=x_benthos_extra task docs`
-              and commit the regenerated docs, or the docs check fails.
+            CONNECT STRINGS (surface connect): apply the "Connect fields" contract
+            in embedded-reference-strings.md. Each declaration's detail names its
+            kind and, for component text, the components that publish it with
+            their internal/plugins/info.csv row (support level, cloud, cloud_ai),
+            which that contract's rules refer to. End every connect suggestion
+            comment, on the line before the fingerprint line, with exactly: After
+            you apply this suggestion, run `CGO_ENABLED=1 TAGS=x_benthos_extra task
+            docs` and commit the regenerated docs, or the docs check fails.
 
-            REVIEW IN CONTEXT: judge each string as the reader of its page,
-            not on its own. Read it together with its context entries and
-            with the code that implements what it describes:
-            - The whole declaration ships, so judge all of it, not only the
-              lines this PR changed, and fix every problem it has in one
-              suggestion.
-            - A string must agree with the strings around it. A flag's usage,
-              its command's Long text and that text's examples describe the
-              same behavior; a change to one that leaves another saying
-              something different is a finding.
-            - Verify a behavior claim where the user sees it. Follow the code
-              to what the command prints or the setting changes (filters
-              applied before output, validation, defaults), not only to the
-              first API it calls, and read any other command the string
-              names before saying anything about it.
-            - When the change makes an untouched string wrong, post one plain
-              comment on the changed line naming that string and what is now
-              wrong. It is the one exception to the suggestion rules above: no
-              suggestion block, because the string to fix is not in the
-              changed span, but it still ends with the changed declaration's
-              fingerprint footer. It counts toward the 10.
-            - A term the page never explains, and a reader cannot check,
-              needs tying to something they can observe: "internal topics"
-              means little until the page says they are the topics
-              rpk topic list shows only with -i.
-            - Say nothing about a related string that is still correct.
-            - Leave docs-side overrides out of the review entirely; they are
-              reconciled separately.
-
-            Rewrites state effect and units where the code shows them and
-            never restate the name. Write complete sentences with their
-            articles and subjects, even when the surface is terse: "1 when
-            this broker is the leader, otherwise 0", not "1 when leader, 0
-            otherwise"; "The request takes no parameters.", not "Takes no
-            parameters." A surface that is a fragment by contract (cobra
-            Short, a flag usage, an API rpc summary) still keeps its
-            articles. Every flag, command, path and URL goes in inline code.
-            In rpk strings write them bare, never in single or double
-            quotes: the generator formats them, and a Long is a Go raw
-            string that cannot hold a backtick. The rendered page builds its "Default:"
-            row from structured data, so do not ask for a concrete default
-            to be restated in prose; only a sentinel default (null, 0, -1,
-            empty) needs its meaning explained. State only behavior the diff
-            or the code you read shows; when a rewrite rests on an inference,
-            say so in one clause. Do not review code logic.
+            REVIEW IN CONTEXT: judge each string as the reader of its page, not on
+            its own, by the "Review in context" and "Composing a rewrite" sections
+            of embedded-reference-strings.md (the whole declaration ships; strings
+            must agree with their neighbours; verify behavior where the user sees
+            it; complete sentences with their articles and subjects; every flag,
+            command, path and URL in inline code except bare in rpk strings; no
+            concrete default restated; inferences said as such; no review of code
+            logic). One mechanic is this workflow's: when the change makes an
+            untouched string wrong, post one plain comment on the changed line
+            naming that string and what is now wrong. It is the one exception to
+            the suggestion rules above: no suggestion block, because the string to
+            fix is not in the changed span, but it still ends with the changed
+            declaration's fingerprint footer. It counts toward the 10.
 
             PROSE QUALITY: the lint is mechanical, so a string can pass
             every rule and still tell an operator nothing. For each entry in
@@ -941,31 +890,18 @@ jobs:
             the standard, not taste; skip terminology findings when
             terminology.md is absent.
 
-            PUBLISHED-CONTENT IMPACT: consider only the entries in
-            declarations and summary.removedDeclarations, and use at most 4
-            redpanda-docs MCP calls in total. HIGH-IMPACT means a published
-            page OTHER than the generated property, metric, rpk, connector
-            (Redpanda Connect component pages) or Bloblang function and
-            method reference states something this PR makes wrong (a removed or renamed
-            surface, a changed behavior or unit, a changed default that a
-            page quotes in prose), or a new user-facing feature with no
-            coverage beyond those generated references. These are NOT high
-            impact: a changed default the generated reference renders from
-            structured data, a new property, metric or flag the generated
-            reference picks up when it is regenerated, a changed connector
-            summary, description, field or Bloblang text, which the connect
-            docs regenerate from source, and anything you
-            cannot verify from the diff (binary assets, code outside it). If
-            any high-impact entries exist, Write doc-impact.json:
-            {"findings":[{"surface","name","change_kind","affected_pages":
-            ["url"],"summary"}],"proposed_ticket":{"title","body"}}. Every
-            affected_pages entry must be an absolute
-            https://docs.redpanda.com/ URL. In proposed_ticket.body and each
-            summary, put code identifiers in backticks, start bullet lines
-            with "- ", and write links as bare URLs; Jira renders only those
-            three, so use no other Markdown. Only high-impact entries,
-            maximum 10; write NO file when there are none. A report that
-            does not match that shape is discarded before dispatch.
+            PUBLISHED-CONTENT IMPACT: consider only the entries in declarations
+            and summary.removedDeclarations, and use at most 4 redpanda-docs MCP
+            calls in total. docs-gate.md, when present and non-empty, is the
+            docs-gate skill; its "Doc-impact pass" section decides what is
+            high-impact (a published page other than the generated property,
+            metric, rpk, connector and Bloblang references that the PR makes
+            wrong, or a new user-facing feature with no coverage beyond them) and
+            fixes the exact shape of doc-impact.json. Apply it, and Write
+            doc-impact.json only when it says to: only high-impact entries, at most
+            10, absolute https://docs.redpanda.com/ URLs, Jira-safe text, and NO
+            file when there are none. When docs-gate.md is absent or empty, skip
+            this pass and say so in review-summary.md.
 
             SUMMARY: do not post a summary comment yourself. Write
             review-summary.md ONLY when the author needs something the inline
