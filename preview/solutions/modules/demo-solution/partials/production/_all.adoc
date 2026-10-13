@@ -1,0 +1,27 @@
+// == Production considerations includes this file and nothing else.
+Before you reuse this design in production, work through each topic below.
+
+[#prod-brokers-and-replication]
+=== Brokers and replication
+
+include::partial$production/brokers-and-replication.adoc[tag=detail]
+
+[#prod-security]
+=== Security
+
+include::partial$production/security.adoc[tag=detail]
+
+[#prod-partitions]
+=== Partitions
+
+include::partial$production/partitions.adoc[tag=detail]
+
+[#prod-consumer-scaling]
+=== Consumer scaling
+
+include::partial$production/consumer-scaling.adoc[tag=detail]
+
+[#prod-observability]
+=== Observability
+
+include::partial$production/observability.adoc[tag=detail]
