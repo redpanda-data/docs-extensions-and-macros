@@ -619,8 +619,9 @@ jobs:
 
   # ──────────────────────────────────────────────────────────────────────
   # §4 — JSON-only PRs (decision 4). docs-team-standards: the PR #2902
-  # deterministic validators. Content repos: headless overrides-review for
-  # *overrides*.json; plain jq validity for anything else.
+  # deterministic validators. Content repos: plain jq validity on every
+  # changed .json, plus headless overrides-review when any *overrides*.json
+  # changed; the last step folds the jq result into that verdict.
   # ──────────────────────────────────────────────────────────────────────
   json_validation:
     needs: [gate, classify]
@@ -656,22 +657,26 @@ jobs:
             jq -n '{verdict:"pass",blocking:[],suggestions:[]}' > review-output/verdict.json
           fi
 
-      - name: Basic JSON validity (content repos, non-overrides)
-        if: github.repository != 'redpanda-data/docs-team-standards' && needs.classify.outputs.overrides_json != 'true'
+      # Runs on every content-repo JSON-only PR, including ones that also
+      # change an overrides file, so an unrelated .json beside it is still
+      # checked. Writes under RUNNER_TEMP, not review-output/: the
+      # claude-skill action's checkout runs `git clean` on the workspace.
+      - name: Basic JSON validity (content repos)
+        if: github.repository != 'redpanda-data/docs-team-standards'
         env:
           GH_TOKEN: ${{ github.token }}
+          OUT: ${{ runner.temp }}/json-validity.json
         run: |
           set -euo pipefail
-          mkdir -p review-output
           BAD=()
           while IFS= read -r f; do
             [[ -f "$f" ]] || continue   # deleted files
             jq -e . "$f" > /dev/null 2>&1 || BAD+=("$f")
           done < <(gh pr diff "${{ inputs.pr_number }}" --repo "${{ github.repository }}" --name-only | grep -E '\.json$')
           if [[ ${#BAD[@]} -gt 0 ]]; then
-            printf '%s\n' "${BAD[@]}" | jq -R . | jq -s '{verdict:"fail",blocking:(map("Invalid JSON: " + .)),suggestions:[]}' > review-output/verdict.json
+            printf '%s\n' "${BAD[@]}" | jq -R . | jq -s '{verdict:"fail",blocking:(map("Invalid JSON: " + .)),suggestions:[]}' > "$OUT"
           else
-            jq -n '{verdict:"pass",blocking:[],suggestions:[]}' > review-output/verdict.json
+            jq -n '{verdict:"pass",blocking:[],suggestions:[]}' > "$OUT"
           fi
 
       - name: Overrides review (content repos, decision 4)
@@ -697,6 +702,35 @@ jobs:
             base branch) alongside the skill. Write findings to
             review-output/findings.md and review-output/verdict.json with schema
             {"verdict":"pass"|"fail","blocking":[...],"suggestions":[...]}.
+
+      # Fold the jq result into the job's single verdict.json. With no
+      # overrides file it IS the verdict. With one, invalid JSON joins the
+      # overrides verdict's blocking list. If the overrides review wrote no
+      # verdict, a jq failure still fails the job and says the review is
+      # missing; with no jq failure, verdict.json stays absent so the
+      # aggregate reports "unavailable" instead of a pass.
+      - name: Combine JSON verdicts (content repos)
+        if: always() && github.repository != 'redpanda-data/docs-team-standards'
+        env:
+          JQ_VERDICT: ${{ runner.temp }}/json-validity.json
+          OVERRIDES: ${{ needs.classify.outputs.overrides_json }}
+        run: |
+          set -euo pipefail
+          mkdir -p review-output
+          V=review-output/verdict.json
+          if [[ ! -f "$JQ_VERDICT" ]]; then
+            jq -n '{verdict:"fail",blocking:["JSON validity check did not run — see job log"],suggestions:[]}' > "$JQ_VERDICT"
+          fi
+          if [[ "$OVERRIDES" != "true" ]]; then
+            cp "$JQ_VERDICT" "$V"
+          elif [[ -f "$V" ]] && jq -e 'type == "object"' "$V" > /dev/null 2>&1; then
+            jq -s '.[0] as $o | .[1] as $j
+              | $o + {blocking: ((($o.blocking // []) | if type == "array" then . else [.] end) + $j.blocking)}
+              | if (.blocking | length) > 0 then .verdict = "fail" else . end' "$V" "$JQ_VERDICT" > "$V.tmp"
+            mv "$V.tmp" "$V"
+          elif jq -e '.verdict == "fail"' "$JQ_VERDICT" > /dev/null; then
+            jq '.blocking += ["Overrides review produced no verdict — human review required"]' "$JQ_VERDICT" > "$V"
+          fi
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -964,6 +998,9 @@ jobs:
         with:
           name: adoc-review
           path: ${{ runner.temp }}/prior-review
+      # No --add-dir needed for the prompt to read it: a bare `Read` in the
+      # action's allowlist is not scoped to the workspace in -p mode
+      # (verified on CLI 2.1.258, reading a file outside the cwd).
       - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
         with:
           repo: ${{ github.repository }}

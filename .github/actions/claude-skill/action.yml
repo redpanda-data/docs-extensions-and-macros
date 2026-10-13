@@ -615,8 +615,12 @@ runs:
         # are PREFIX matches and cannot express "GET only", so read-only gh
         # is enforced by the shim on PATH (installed above), not by this
         # list. No tree-mutating git verbs (fetch/checkout/switch): the
-        # review must stay on the PR head that was checked out.
-        ALLOWED="Read,Grep,Glob,Write,Agent,Task"
+        # review must stay on the PR head that was checked out. Skill: the
+        # frontmatter grants that would otherwise cover it are stripped
+        # above, and doc-ticket, pr-review and overrides-review all load
+        # skills. (CLI 2.1.258 auto-approves Skill in -p mode, so this is
+        # belt and braces, not a fix for an observed failure.)
+        ALLOWED="Read,Grep,Glob,Write,Skill,Agent,Task"
         ALLOWED="$ALLOWED,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr list:*),Bash(gh pr checks:*),Bash(gh issue view:*),Bash(gh api:*)"
         ALLOWED="$ALLOWED,Bash(git log:*),Bash(git grep:*),Bash(git diff:*),Bash(git show:*),Bash(git status),Bash(pwd),Bash(ls:*)"
 
