@@ -34,8 +34,12 @@ const ENUMS = Object.freeze({
   difficulty: ['beginner', 'intermediate', 'advanced'],
   status: ['draft', 'published', 'deprecated'],
   download: ['authenticated', 'public', 'none'],
-  platforms: ['self-managed', 'cloud'],
+  platforms: ['self-managed', 'cloud', 'kubernetes'],
 })
+
+// A solution that sets no page-solution-platforms runs on these. Kubernetes is
+// never assumed: it needs the solution's own manifests and k8s-up target.
+const DEFAULT_PLATFORMS = Object.freeze(['self-managed', 'cloud'])
 
 const SLUG_RX = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/
 const VERSION_RX = /^v\d+\.\d+\.\d+$/
@@ -424,7 +428,7 @@ function buildRecord (mod, modulePages, moduleAttachments, { version, moduleExam
     status: attrs['page-solution-status'] ? String(attrs['page-solution-status']).trim() : '',
     featured: parseFlag(attrs['page-solution-featured']),
     download: attrs['page-solution-download'] ? String(attrs['page-solution-download']).trim() : '',
-    platforms: platforms.length ? platforms : [...ENUMS.platforms],
+    platforms: platforms.length ? platforms : [...DEFAULT_PLATFORMS],
     platformsAuthored: platforms.length > 0,
     technologies: parseList(attrs['page-solution-technologies']),
     categoriesRaw: parseList(attrs['page-categories']),
@@ -553,6 +557,7 @@ module.exports = {
   NON_SOLUTION_MODULES,
   LAYOUTS,
   ENUMS,
+  DEFAULT_PLATFORMS,
   SLUG_RX,
   VERSION_RX,
   VERIFICATION_FILE,
