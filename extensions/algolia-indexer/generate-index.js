@@ -346,7 +346,6 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
         // Step titles repeat across solutions ("Start the environment"), so
         // every record names the solution it belongs to.
         indexItem.solutionTitle = attrs['page-solution-title'] || (solution && solution.title) || ''
-        indexItem.difficulty = attrs['page-solution-difficulty'] || ''
         // A step record carries the step's own duration, never the whole
         // solution's: "50 min" on a five-minute step is wrong. A step with no
         // duration of its own gets null rather than the solution's total.

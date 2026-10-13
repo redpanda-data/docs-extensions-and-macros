@@ -3,7 +3,6 @@
 :page-topic-type: solution
 :description: A fixture solution that exercises the solutions-catalog extension end to end: metadata, steps, build-along files, and recommendations.
 :page-solution-version: v1.0.0
-:page-solution-difficulty: beginner
 :page-solution-duration: 15
 :page-solution-status: published
 :page-solution-featured: true

@@ -360,7 +360,6 @@ describe('solution metadata in Markdown frontmatter', () => {
     status: 'draft',
     draft: true,
     featured: true,
-    difficulty: 'intermediate',
     duration: 45,
     download: 'authenticated',
     platforms: ['self-managed', 'cloud'],
@@ -408,7 +407,6 @@ describe('solution metadata in Markdown frontmatter', () => {
       id: 'multiplayer-gaming',
       version: 'v1.0.0',
       status: 'draft',
-      difficulty: 'intermediate',
       duration_minutes: 45,
       technologies: ['Redpanda', 'Schema Registry', 'Go'],
       platforms: ['self-managed', 'cloud'],
@@ -469,13 +467,12 @@ describe('solution metadata in Markdown frontmatter', () => {
   })
 
   test('a field with nothing truthful to say is left out, not guessed', () => {
-    const sparse = { id: 'minimal', status: 'published', difficulty: 'beginner', duration: 15, version: 'v0.1.0', tag: 'minimal/v0.1.0', download: 'none', repo: '', steps: [], technologies: [], platforms: [], categories: [], useCases: [], industries: [], relatedDocs: [] }
+    const sparse = { id: 'minimal', status: 'published', duration: 15, version: 'v0.1.0', tag: 'minimal/v0.1.0', download: 'none', repo: '', steps: [], technologies: [], platforms: [], categories: [], useCases: [], industries: [], relatedDocs: [] }
     const parsed = parse(generateFrontmatter(makePage({ record: sparse })))
     expect(parsed.solution).toEqual({
       id: 'minimal',
       version: 'v0.1.0',
       status: 'published',
-      difficulty: 'beginner',
       duration_minutes: 15,
       repository: { download: 'none' },
     })
@@ -518,7 +515,7 @@ describe('solution verification in Markdown frontmatter', () => {
     src: { component: 'solutions', version: '' },
     asciidoc: { doctitle: 'T', attributes: { 'page-solution': JSON.stringify(record) } },
   })
-  const BASE = { id: 'multiplayer-gaming', version: 'v1.0.0', tag: 'multiplayer-gaming/v1.0.0', repo: 'redpanda-data/solutions', status: 'published', difficulty: 'intermediate', duration: 45, download: 'authenticated', steps: [] }
+  const BASE = { id: 'multiplayer-gaming', version: 'v1.0.0', tag: 'multiplayer-gaming/v1.0.0', repo: 'redpanda-data/solutions', status: 'published', duration: 45, download: 'authenticated', steps: [] }
 
   test('projects the manifest with its own snake_case keys', () => {
     const block = buildSolutionMetadata(page({ ...BASE, verified: VERIFIED }))
@@ -563,7 +560,7 @@ describe('solution files in Markdown frontmatter', () => {
     src: { component: 'solutions', version: '' },
     asciidoc: { doctitle: 'T', attributes: { 'page-solution': JSON.stringify(record) } },
   })
-  const BASE = { id: 'mg', version: 'v1.0.0', tag: 'mg/v1.0.0', status: 'published', difficulty: 'beginner', duration: 15, steps: [] }
+  const BASE = { id: 'mg', version: 'v1.0.0', tag: 'mg/v1.0.0', status: 'published', duration: 15, steps: [] }
 
   test('emits the files a reader may download', () => {
     const block = buildSolutionMetadata(page({ ...BASE, files: ['Makefile', 'services/leaderboard/main.go'] }))
