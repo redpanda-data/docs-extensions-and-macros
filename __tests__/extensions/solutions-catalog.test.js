@@ -1190,8 +1190,11 @@ describe('solutions-catalog: platform filter', () => {
     expect(hidden.reason).toMatch(/Redpanda Cloud page, solution platforms self-managed/)
   })
 
-  test('Kubernetes, Linux, and Docker docs need self-managed; unmarked docs match everything', () => {
+  test('Kubernetes docs need a Kubernetes path, Linux and Docker docs need self-managed; unmarked docs match everything', () => {
     expect(relationships.platformCompatible('Kubernetes', ['cloud'])).toBe(false)
+    // A Kubernetes page needs a solution with its own Kubernetes path; Self-Managed alone is not enough.
+    expect(relationships.platformCompatible('Kubernetes', ['self-managed'])).toBe(false)
+    expect(relationships.platformCompatible('Kubernetes', ['self-managed', 'kubernetes'])).toBe(true)
     expect(relationships.platformCompatible('Linux', ['self-managed'])).toBe(true)
     expect(relationships.platformCompatible('Docker', ['self-managed', 'cloud'])).toBe(true)
     expect(relationships.platformCompatible('Redpanda Cloud', ['self-managed'])).toBe(false)
@@ -1313,7 +1316,8 @@ describe('solutions-catalog: eligible doc pages', () => {
     expect(byDoc['produce-data/configure-producers.adoc']).toMatchObject({ provenance: 'category', score: 0.7, shown: true })
     expect(byDoc['kafka-clients.adoc']).toMatchObject({ provenance: 'category', score: 0.1, shown: false })
     expect(byDoc['k-manage-topics.adoc']).toMatchObject({ provenance: 'category', score: 0.4, shown: false })
-    expect(byDoc['k-manage-topics.adoc'].reason).toMatch(/below 0\.6/)
+    // Hidden first because the solution has no Kubernetes path (score 0.4 is also below 0.6).
+    expect(byDoc['k-manage-topics.adoc'].reason).toMatch(/Kubernetes page, solution platforms self-managed, cloud/)
     // labs and index pages are not eligible: no edge at all
     expect(byDoc['produce-data/index.adoc']).toBeUndefined()
     expect(byDoc['docker-go.adoc']).toBeUndefined()
@@ -2259,5 +2263,12 @@ describe('solutions-catalog: build-along files', () => {
 
   test('buildAlongFindings without collected includes or examples stays quiet', () => {
     expect(validate.buildAlongFindings({ id: 'x', attachmentFiles: ['verification.json'], files: [] })).toEqual({ errors: [], warnings: [] })
+  })
+})
+
+describe('solutions-catalog: the kubernetes platform', () => {
+  test('kubernetes is an allowed platform, but a solution that sets none is never assumed to run there', () => {
+    expect(collect.ENUMS.platforms).toEqual(['self-managed', 'cloud', 'kubernetes'])
+    expect(collect.DEFAULT_PLATFORMS).toEqual(['self-managed', 'cloud'])
   })
 })

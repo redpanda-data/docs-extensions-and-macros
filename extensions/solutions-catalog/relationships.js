@@ -119,6 +119,9 @@ function platformCompatible (deployment, platforms) {
   if (!deployment) return true
   const set = new Set(platforms || [])
   if (deployment === 'Redpanda Cloud') return set.has('cloud')
+  // A Kubernetes page recommends only solutions a Kubernetes reader can run
+  // there: the ones with their own Kubernetes path.
+  if (deployment === 'Kubernetes') return set.has('kubernetes')
   return set.has('self-managed')
 }
 
