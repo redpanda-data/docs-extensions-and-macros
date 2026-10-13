@@ -634,11 +634,13 @@ function generateAgentCompanion ({ slug, pages, verifyScript, siteUrl = DEFAULT_
 }
 
 function pushJudgment (md, page, ctx) {
-  // The heading was renamed from `== Why` to `== Why this design` so that it
-  // reads apart from `== Why Redpanda` in a page's table of contents; pages
-  // written before the rename still carry the old one.
-  const why = section(page, 'Why this design') || section(page, 'Why')
-  const whyRp = section(page, 'Why Redpanda')
+  // Current pages carry one `== Why this approach` (the problem, how Redpanda
+  // helps, and the other ways to do it, each opened by its own lead-in), and
+  // its prose is the judgment as written. Older pages split it into
+  // `== Why this design` (before that, `== Why`) and `== Why Redpanda`.
+  const approach = section(page, 'Why this approach')
+  const why = approach || section(page, 'Why this design') || section(page, 'Why')
+  const whyRp = approach ? null : section(page, 'Why Redpanda')
   const inProd = section(page, 'In production')
   const w = why && prose(why.lines, ctx)
   if (w) md.push(w, '')

@@ -317,6 +317,22 @@ describe('agent companion: solutions without rules', () => {
     expect(r.markdown).not.toContain('Rule 2')
   })
 
+  test('== Why this approach is the judgment as written, with no separate Depends on', () => {
+    const one = '= One\n:page-layout: solution-step\n:page-solution-rule: Key by player.\n\n' +
+      '== Why this approach\n\n*The problem.* A rule needs each player\'s history.\n\n' +
+      '*How Redpanda helps.* The topic is keyed by player, so one instance sees all of it.\n\n' +
+      '*Other ways to do this.*\n\n* A shared cache: a network round trip per event.\n\n' +
+      '== Why Redpanda\n\nStale text the merged section replaced.\n'
+    const r = generateAgentCompanion({ slug: 'tiny', pages: { index, one, two: step('Two') } })
+    const entry = sectionOf(r.markdown, '### 1. One')
+    expect(entry).toContain('The problem.')
+    expect(entry).toContain('The topic is keyed by player, so one instance sees all of it.')
+    expect(entry).toContain('A shared cache: a network round trip per event.')
+    expect(entry).not.toContain('**Depends on:**')
+    expect(entry).not.toContain('Stale text')
+    expect(r.leaks).toEqual([])
+  })
+
   test('a listed step with no page is reported, not fatal', () => {
     const r = generateAgentCompanion({ slug: 'tiny', pages: { index, one: step('One') } })
     expect(r.missingSteps).toEqual(['two'])
