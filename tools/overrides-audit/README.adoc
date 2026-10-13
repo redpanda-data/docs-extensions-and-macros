@@ -133,7 +133,7 @@ JSON (default): `{ surface, overrides_file, extracted_file, manifest, summary, c
 
 * `properties` (complete): `property-overrides.json` vs the property extractor's raw JSON.
 * `rpk` (structural): enumerates `rpk-overrides.json` (see `docs-data/rpk-overrides.schema.json`) -- command/flag `description` fields are the upstreamable prose (classified `REVIEW` with a TODO note until source comparison lands; it needs a raw pre-override `--print-tree` snapshot plus the `formatDescription()` pipeline from `tools/rpk-docs`), everything else (`seeAlso`, `pageAliases`, `content`, platform scoping, ...) is `KEEP` by design.
-* `connect` (structural): enumerates the rp-connect-docs `overrides.json` (`definitions` + per-component arrays with nested `config.children`); prose fields classify `REVIEW` with a TODO note until `$ref` resolution and plugin-JSON comparison land.
+* `connect` (retired): rp-connect-docs no longer has an `overrides.json`. The Connect reference is generated from the component specs in the connect and benthos Go code and ships as a Connect release asset, so a wrong description is fixed in source. The adapter still enumerates an old-format file (`definitions` plus per-component arrays with nested `config.children`), with prose fields classified `REVIEW`, but there is no live file to audit.
 
 == Golden run (local checkouts required)
 
