@@ -632,7 +632,21 @@ runs:
         MIN_RETRY_SECS=300
         remaining() { echo $(( DEADLINE - $(date +%s) )); }
 
+        # A verdict.json is only trusted if the attempt that wrote it
+        # finished. Each attempt starts with no verdict or findings, and
+        # every soft-fail removes the verdict before exiting. Otherwise an
+        # attempt that wrote verdict.json and then died (timeout, CLI
+        # error) would leave it behind: the aggregate would report it as a
+        # finished review, and screenshot_gate's merge step would merge it
+        # as a real vision verdict. Both read only whether the file exists.
+        soft_fail() {
+          rm -f "$OUTPUT_DIR/verdict.json"
+          echo "claude_failed=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        }
+
         run_claude() {
+          rm -f "$OUTPUT_DIR/verdict.json" "$OUTPUT_DIR/findings.md"
           local budget; budget=$(remaining)
           (( budget > 0 )) || return 124
           timeout "${budget}s" claude -p "$PROMPT" \
@@ -652,13 +666,11 @@ runs:
               # Soft-fail: the aggregate job turns a missing verdict.json into
               # "automated review unavailable — human review required". Never
               # let an infra failure masquerade as a review verdict.
-              echo "claude_failed=true" >> "$GITHUB_OUTPUT"
-              exit 0
+              soft_fail
             fi
           else
             echo "::warning::Claude run failed (exit $rc) and under ${MIN_RETRY_SECS}s of the ${TIMEOUT_MIN}m budget remain — not retrying"
-            echo "claude_failed=true" >> "$GITHUB_OUTPUT"
-            exit 0
+            soft_fail
           fi
         fi
 
