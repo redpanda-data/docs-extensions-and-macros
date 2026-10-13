@@ -15,6 +15,14 @@
 #      impact check against docs.redpanda.com (public MCP),
 #   4. doc-impact dispatch to the docs team's Jira router.
 #
+# THE PROMPT LIVES HERE ON PURPOSE. Callers pin this workflow by SHA, so a
+# prompt change reaches an engineering repo only when that repo bumps its pin
+# in a reviewed pull request. Do not move the prompt to docs-team-standards or
+# fetch any part of it from another repository at run time: that would change
+# every caller's review the moment someone merged elsewhere. The writing
+# standard and terminology fetch below predates this rule; do not add to it.
+# See CLAUDE.md, "Automation prompts stay in this repository".
+#
 # Each string is reviewed once. lint-strings fingerprints every declaration
 # (surface, name, text), the fingerprints a review has seen are kept in the
 # Actions cache under the PR number, and a later push hands the model only
