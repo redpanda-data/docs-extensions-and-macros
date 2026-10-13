@@ -93,9 +93,10 @@ const CASES = [
     columnLimit: null,
     singleLine: true,
     expectRules: ['connect-xref-module'],
-    // Deleting the link also re-lints clean, so the link must survive,
-    // qualified, to the same page.
-    stringMustMatch: 'xref:(?:[a-z-]+:){1,2}bloblang/about\\.adoc\\['
+    // Deleting the link, or qualifying it with a module the page is not in,
+    // also re-lints clean, so the link must survive with the page's real
+    // module (modules/guides/pages/bloblang/about.adoc in rp-connect-docs).
+    stringMustMatch: 'xref:(?:connect:)?guides:bloblang/about\\.adoc\\['
   },
   {
     id: 'connect-short-description-markup',

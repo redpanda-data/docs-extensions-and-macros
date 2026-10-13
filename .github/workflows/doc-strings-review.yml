@@ -865,7 +865,12 @@ jobs:
             - Every xref names its module: xref:components:...,
               xref:configuration:... or xref:guides:..., or a
               component:module:page xref. A module-less xref breaks when
-              Cloud includes the same text into its own pages.
+              Cloud includes the same text into its own pages. The module is
+              the one the page lives in, the path segment after
+              /connect/ in its docs URL: component pages (inputs/,
+              outputs/, processors/ ...) are in components, bloblang/ pages
+              are in guides. When you are not sure, look the page up with
+              the docs tools rather than guess.
             - Never put ifdef::env-cloud[], ifndef::env-cloud[] or any other
               AsciiDoc conditional in a Go string, and never write Cloud or
               cgo availability as prose. The generator renders those notes
