@@ -110,8 +110,12 @@ function runRewriteCase (spec, io) {
   // Genuine findings from the real linter - the same JSON the workflow feeds
   // the model.
   const lintBefore = lib.runLint(repo.dir, repo.surface)
-  const finding = lintBefore.findings.find((f) => f.name === spec.target)
+  const finding = lintBefore.findings.find((f) => f.name === spec.target &&
+    (!spec.targetRule || f.rules.some((r) => r.id === spec.targetRule)))
   if (!finding) return harnessError(checks, `No lint finding for target ${spec.target}; fixture drifted`)
+  if (finding.file !== repo.targetRel) {
+    return harnessError(checks, `Precondition: finding for ${spec.target} is in ${finding.file}, layout targets ${repo.targetRel}`)
+  }
   const foundRules = finding.rules.map((r) => r.id)
   for (const rule of spec.expectRules) {
     if (!foundRules.includes(rule)) {
@@ -189,13 +193,13 @@ function runRewriteCase (spec, io) {
 
   // --- Re-run the real linter over the applied output ---
   const lintAfter = lib.runLint(repo.dir, repo.surface)
-  const targetRulesAfter = lib.findingsFor(lintAfter, spec.target)
+  const targetRulesAfter = lib.findingsFor(lintAfter, spec.target, finding.file)
   const counts = severityCounts(targetRulesAfter)
   checks.add('re-lint: zero findings of any severity on the rewritten declaration',
     targetRulesAfter.length === 0,
     targetRulesAfter.length === 0 ? 'clean' : `remaining: ${JSON.stringify(targetRulesAfter)} (${JSON.stringify(counts)})`)
   checks.add('re-lint: untouched declarations kept exactly their findings',
-    JSON.stringify(lib.findingFingerprint(lintBefore, spec.target)) === JSON.stringify(lib.findingFingerprint(lintAfter, spec.target)),
+    JSON.stringify(lib.findingFingerprint(lintBefore, spec.target, finding.file)) === JSON.stringify(lib.findingFingerprint(lintAfter, spec.target, finding.file)),
     'finding fingerprints compared')
 
   // --- Re-extract and compare semantics ---
@@ -216,6 +220,16 @@ function runRewriteCase (spec, io) {
       str.trim().length > 0, JSON.stringify(str.slice(0, 120)))
     if (repo.surface === 'metrics') {
       checks.add('metrics contract: rewritten string has no terminal period', !/\.\s*$/.test(str), JSON.stringify(str.slice(-40)))
+    }
+    // Surface rules the lint cannot see, stated per case as the shape the
+    // re-extracted string must have (for example, a qualified xref kept).
+    if (spec.stringMustMatch) {
+      checks.add(`re-extraction: rewritten string matches ${spec.stringMustMatch}`,
+        new RegExp(spec.stringMustMatch).test(str), JSON.stringify(str.slice(0, 160)))
+    }
+    if (spec.stringMustNotMatch) {
+      checks.add(`re-extraction: rewritten string does not match ${spec.stringMustNotMatch}`,
+        !new RegExp(spec.stringMustNotMatch).test(str), JSON.stringify(str.slice(0, 160)))
     }
   }
 
@@ -439,7 +453,7 @@ function runNegativeReviewCase (spec, io, sabotage) {
 
   // Precondition: the REAL declaration-anchored lint finds nothing in this
   // diff (skipped under sabotage, where the diff is violating by design).
-  const lintDiff = lib.runLint(repo.dir, 'properties', ['--diff', base])
+  const lintDiff = lib.runLint(repo.dir, repo.surface, ['--diff', base])
   if (!sabotage && lintDiff.findings.length !== 0) {
     return harnessError(checks, `Precondition: conforming diff produced ${lintDiff.findings.length} lint findings`)
   }

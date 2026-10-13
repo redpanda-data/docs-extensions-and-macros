@@ -23,9 +23,14 @@ const EVAL_FIXTURES = path.join(__dirname, 'fixtures')
 const propertiesSurface = require(path.join(REPO_ROOT, 'tools/lint-strings/surfaces/properties'))
 const metricsSurface = require(path.join(REPO_ROOT, 'tools/lint-strings/surfaces/metrics'))
 const rpkSurface = require(path.join(REPO_ROOT, 'tools/lint-strings/surfaces/rpk'))
+const connectSurface = require(path.join(REPO_ROOT, 'tools/lint-strings/surfaces/connect'))
 const { deepEqual, normalizeText, detectDocsMarkup } = require(path.join(REPO_ROOT, 'tools/overrides-audit/classify.js'))
 
-const SURFACE_MODULES = { properties: propertiesSurface, metrics: metricsSurface, rpk: rpkSurface }
+const SURFACE_MODULES = { properties: propertiesSurface, metrics: metricsSurface, rpk: rpkSurface, connect: connectSurface }
+
+// The connect surface resolves strings across files (helper constructors,
+// constants, info.csv), so its layouts copy the whole fixture repo.
+const CONNECT_TREE = path.join(LINT_FIXTURES, 'connect', 'repo')
 
 /** Repo-relative target file per surface, shaped like the real repos. */
 const SURFACE_LAYOUT = {
@@ -48,6 +53,23 @@ const SURFACE_LAYOUT = {
   rpk: {
     files: [{ from: path.join(LINT_FIXTURES, 'rpk', 'lint_cmd.go'), to: 'src/go/rpk/pkg/cli/cluster/lint_cmd.go' }],
     target: 'src/go/rpk/pkg/cli/cluster/lint_cmd.go'
+  },
+  'connect-input': { tree: CONNECT_TREE, target: 'internal/impl/azure/input_thing.go', surface: 'connect' },
+  'connect-common': { tree: CONNECT_TREE, target: 'internal/impl/azure/common.go', surface: 'connect' }
+}
+
+/** Copy a fixture tree; a `go.mod.txt` becomes `go.mod` (kept renamed so the
+ * fixture is not a nested Go module in this repo). */
+function copyTree (from, to) {
+  for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+    const src = path.join(from, entry.name)
+    const dest = path.join(to, entry.name === 'go.mod.txt' ? 'go.mod' : entry.name)
+    if (entry.isDirectory()) {
+      fs.mkdirSync(dest, { recursive: true })
+      copyTree(src, dest)
+    } else {
+      fs.copyFileSync(src, dest)
+    }
   }
 }
 
@@ -68,7 +90,8 @@ function materializeRepo (layoutName, edits = []) {
   const layout = SURFACE_LAYOUT[layoutName]
   if (!layout) throw new Error(`Unknown layout: ${layoutName}`)
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `doc-strings-eval-${layoutName}-`))
-  for (const file of layout.files) {
+  if (layout.tree) copyTree(layout.tree, dir)
+  for (const file of layout.files || []) {
     const dest = path.join(dir, file.to)
     fs.mkdirSync(path.dirname(dest), { recursive: true })
     fs.copyFileSync(file.from, dest)
@@ -284,10 +307,12 @@ function overlongLines (text, limit) {
 }
 
 /** Findings for one declaration name, as a flat list of {id, severity}. */
-function findingsFor (lintResult, name) {
+// Connect reuses one name across kinds (a component's summary, description
+// and example share it) and files, so `file` narrows the match when given.
+function findingsFor (lintResult, name, file) {
   const rules = []
   for (const finding of lintResult.findings) {
-    if (finding.name === name) rules.push(...finding.rules.map((r) => ({ id: r.id, severity: r.severity })))
+    if (finding.name === name && (!file || finding.file === file)) rules.push(...finding.rules.map((r) => ({ id: r.id, severity: r.severity })))
   }
   return rules
 }
@@ -298,10 +323,10 @@ function findingsFor (lintResult, name) {
  * span-length changes. Used to prove untouched declarations kept exactly
  * their findings.
  */
-function findingFingerprint (lintResult, excludeName) {
+function findingFingerprint (lintResult, excludeName, excludeFile) {
   const groups = []
   for (const finding of lintResult.findings) {
-    if (finding.name === excludeName) continue
+    if (finding.name === excludeName && (!excludeFile || finding.file === excludeFile)) continue
     groups.push(`${finding.surface}:${finding.name}:${finding.rules.map((r) => r.id).sort().join(',')}`)
   }
   return groups.sort()
