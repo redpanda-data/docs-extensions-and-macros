@@ -138,6 +138,7 @@ function runRewriteCase (spec, io) {
   const model = io.callProduction({ repo, lint, diff: null })
   if (model.failed) return modelCallFailed(checks, model)
   checkImpactFile(checks, model, false)
+  checkBlockType(checks, model, io.committable)
 
   // --- Execute the output ---
   const suggestions = lib.parseFences(model.output, 'suggestion')
@@ -345,6 +346,7 @@ function runProseReviewCase (spec, io, sabotage) {
   const model = io.callProduction({ repo, lint: lintDiff, diff })
   if (model.failed) return modelCallFailed(checks, model)
   checkImpactFile(checks, model, false)
+  checkBlockType(checks, model, io.committable)
 
   const suggestions = lib.parseFences(model.output, 'suggestion')
   if (!checks.add('at least one ```suggestion block (a vacuous string must draw one)',
@@ -510,6 +512,17 @@ function checkImpactFile (checks, model, expected) {
   return checks.add('doc-impact.json passes the dispatch step\'s schema check', ok.pass, ok.detail)
 }
 
+/**
+ * Which block the review carried its rewrite in: ```suggestion by default,
+ * ```text when the caller turns committable suggestions off.
+ */
+function checkBlockType (checks, model, committable) {
+  const { suggestion, text } = model.blockCounts || { suggestion: 0, text: 0 }
+  return committable
+    ? checks.add('rewrite carried in a ```suggestion block (committable suggestions on)', suggestion >= 1 && text === 0, `suggestion=${suggestion} text=${text}`)
+    : checks.add('rewrite carried in a ```text block and no ```suggestion block (committable suggestions off)', text >= 1 && suggestion === 0, `suggestion=${suggestion} text=${text}`)
+}
+
 function harnessError (checks, message) {
   checks.add('harness precondition', false, message)
   return { status: 'HARNESS_ERROR', checks: checks.rows, model: null }
@@ -538,16 +551,17 @@ const EXECUTORS = {
 // ---------------------------------------------------------------------------
 
 function parseArgs (argv) {
-  const options = { cases: null, sabotage: null, model: null, keepTemp: false }
+  const options = { cases: null, sabotage: null, model: null, keepTemp: false, committable: true }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     if (arg === '--case') options.cases = (options.cases || []).concat(argv[++i].split(','))
     else if (arg === '--sabotage') options.sabotage = argv[++i]
     else if (arg === '--model') options.model = argv[++i]
     else if (arg === '--keep-temp') options.keepTemp = true
+    else if (arg === '--no-committable-suggestions') options.committable = false
     else {
       console.error(`Unknown argument: ${arg}`)
-      console.error('Usage: node evals/doc-strings/run-evals.js [--case <id>[,<id>]] [--sabotage <negative-case-id>] [--model <model>] [--keep-temp]')
+      console.error('Usage: node evals/doc-strings/run-evals.js [--case <id>[,<id>]] [--sabotage <negative-case-id>] [--model <model>] [--keep-temp] [--no-committable-suggestions]')
       process.exit(2)
     }
   }
@@ -593,6 +607,7 @@ function main () {
 
     const io = {
       caseDir,
+      committable: options.committable,
       callModel (prompt) {
         fs.writeFileSync(path.join(caseDir, 'prompt.txt'), prompt)
         const result = lib.runClaude(prompt, { cwd: workDir, model: options.model || 'sonnet' })
@@ -604,7 +619,7 @@ function main () {
       callProduction ({ repo, lint, diff }) {
         let result
         try {
-          result = production.runReview({ repoDir: repo.dir, lint, diff, model: options.model || production.PRODUCTION_MODEL })
+          result = production.runReview({ repoDir: repo.dir, lint, diff, model: options.model || production.PRODUCTION_MODEL, committableSuggestions: options.committable })
         } catch (err) {
           return { failed: true, timedOut: false, status: 'harness', stderr: err.message, ms: 0, comments: [], files: {}, output: '' }
         }

@@ -27,6 +27,14 @@ describe('doc-strings evals: production review extraction', () => {
     expect(rendered).toMatch(/PR_NUMBER: 7/)
   })
 
+  test('committable suggestions render the way a caller input would', () => {
+    const on = production.renderPrompt(step.with.prompt, { repository: 'r/r', prNumber: 1 })
+    const off = production.renderPrompt(step.with.prompt, { repository: 'r/r', prNumber: 1, committableSuggestions: false })
+    expect(on).not.toMatch(/COMMITTABLE SUGGESTIONS ARE OFF/)
+    expect(off).toMatch(/COMMITTABLE SUGGESTIONS ARE OFF/)
+    expect(off).not.toMatch(/\$\{\{/)
+  })
+
   test('an expression the eval does not know is an error, not a blank', () => {
     expect(() => production.renderPrompt('x ${{ secrets.TOKEN }}', { repository: 'a', prNumber: 1 })).toThrow(/unfilled/)
   })

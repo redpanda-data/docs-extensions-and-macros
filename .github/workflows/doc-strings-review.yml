@@ -187,6 +187,16 @@ on:
           review runs us.anthropic.claude-opus-5 through the same provider).
         type: string
         default: "us.anthropic.claude-sonnet-5"
+      committable_suggestions:
+        description: >-
+          Post each rewrite as a GitHub ```suggestion block the author can
+          commit from the PR page. Set false for a repository whose review
+          policy forbids committable suggestions (connect's does): the same
+          full-span rewrite then goes in a ```text block, which can be copied
+          but offers no commit button. The fingerprint footer and everything
+          else about the comment are unchanged.
+        type: boolean
+        default: true
     secrets:
       anthropic_api_key:
         description: >-
@@ -839,6 +849,7 @@ jobs:
             - ends with this line, exactly, using the declaration's
               fingerprint from lint-findings.json:
               <sub>doc-strings-review:fp=FINGERPRINT</sub>
+            ${{ !inputs.committable_suggestions && 'COMMITTABLE SUGGESTIONS ARE OFF for this repository. Wherever this prompt says to carry a ```suggestion block, carry the same full-span replacement in a ```text block instead, so the author can copy it but GitHub offers no commit button. Never post a ```suggestion block here.' || '' }}
 
             CONNECT STRINGS (surface connect): each declaration's detail
             names its kind and, for component text, the components that
