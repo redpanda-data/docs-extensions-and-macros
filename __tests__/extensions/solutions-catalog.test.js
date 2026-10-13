@@ -1470,6 +1470,28 @@ describe('solutions-catalog: verification manifest', () => {
     expect(warningsOf(result)).not.toMatch(/is older than the solution's pages/)
   })
 
+  test('per-platform runs reach the record keyed by platform', () => {
+    const manifest = {
+      ...MANIFEST,
+      platforms: ['self-managed', 'kubernetes'],
+      kubernetes_verify_script: 'PASS (9/9)',
+      kubernetes_run_at: '2026-10-13T18:00:00Z',
+      kubernetes_environment: { kind: 'v0.32.0', kubernetes: 'v1.35.0', redpanda_operator: 'v26.2.3', redpanda: 'v26.2.2' },
+      cloud_verify_script: 'PASS (9/9)',
+      cloud_environment: 'not an object',
+      self_managed_verify_script: 'ignored',
+    }
+    const { verified } = collect.parseVerification({ contents: Buffer.from(JSON.stringify(manifest)) })
+    expect(verified.runs).toEqual({
+      kubernetes: {
+        verifyScript: 'PASS (9/9)',
+        runAt: '2026-10-13T18:00:00Z',
+        environment: { kind: 'v0.32.0', kubernetes: 'v1.35.0', redpanda_operator: 'v26.2.3', redpanda: 'v26.2.2' },
+      },
+      cloud: { verifyScript: 'PASS (9/9)' },
+    })
+  })
+
   test('parseVerification is pure over the file', () => {
     expect(collect.parseVerification(undefined)).toEqual({ verified: null, error: null })
     expect(collect.parseVerification({ contents: Buffer.from(JSON.stringify(MANIFEST)) }).verified).toEqual(EXPECTED)

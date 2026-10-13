@@ -82,6 +82,17 @@ const VERIFICATION_FIELDS = Object.freeze([
   ['stack_sha256', 'stackSha256'],
 ])
 
+// The extra platforms a solution can be verified on besides the base
+// self-managed run. The recorder writes each as <platform>_verify_script,
+// <platform>_run_at and <platform>_environment (what the run ran on, for
+// example { kind, kubernetes, redpanda_operator, redpanda }); they reach the
+// record as verified.runs[<platform>] = { verifyScript, runAt, environment }.
+const PLATFORM_RUN_FIELDS = Object.freeze([
+  ['verify_script', 'verifyScript'],
+  ['run_at', 'runAt'],
+  ['environment', 'environment'],
+])
+
 /**
  * Read a solution's verification manifest.
  *
@@ -106,6 +117,18 @@ function parseVerification (file) {
     if (value === undefined || value === null || value === '') continue
     verified[to] = value
   }
+  const runs = {}
+  for (const platform of ENUMS.platforms.filter((p) => p !== 'self-managed')) {
+    const run = {}
+    for (const [from, to] of PLATFORM_RUN_FIELDS) {
+      const value = data[`${platform}_${from}`]
+      if (value === undefined || value === null || value === '') continue
+      if (from === 'environment' && (typeof value !== 'object' || Array.isArray(value))) continue
+      run[to] = value
+    }
+    if (Object.keys(run).length) runs[platform] = run
+  }
+  if (Object.keys(runs).length) verified.runs = runs
   if (!Object.keys(verified).length) return { verified: null, error: 'no known fields' }
   return { verified, error: null }
 }
