@@ -17,7 +17,7 @@
  *                :page-solution-related-docs:      -> Canonical docs
  *   <step>.adoc  :page-solution-rule:              -> Rules, Design contract, Acceptance
  *                :page-solution-adapt:             -> Adapt, Design contract
- *                == Why / == Why Redpanda / == In production -> Design contract
+ *                == Why this design (or the older == Why) / == Why Redpanda / == In production -> Design contract
  *                == Verify, prose after the expected output -> Reference build: failure modes
  *   last step    == Production considerations (one === per topic) -> Production gaps
  *                (an overview's == Production considerations table, for older content)
@@ -634,7 +634,10 @@ function generateAgentCompanion ({ slug, pages, verifyScript, siteUrl = DEFAULT_
 }
 
 function pushJudgment (md, page, ctx) {
-  const why = section(page, 'Why')
+  // The heading was renamed from `== Why` to `== Why this design` so that it
+  // reads apart from `== Why Redpanda` in a page's table of contents; pages
+  // written before the rename still carry the old one.
+  const why = section(page, 'Why this design') || section(page, 'Why')
   const whyRp = section(page, 'Why Redpanda')
   const inProd = section(page, 'In production')
   const w = why && prose(why.lines, ctx)

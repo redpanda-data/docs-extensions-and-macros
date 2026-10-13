@@ -69,7 +69,7 @@ And what it publishes:
 include::example$proto/game_events.proto[tags=leaderboard]
 ----
 
-== Why
+== Why this design
 
 A leaderboard is a per-player total, and the consumer that owns a player's partition sees every one of that player's score changes, in order. So the service aggregates where the data already is: it adds each `score_changed` delta to an in-memory total for that player. Nothing else is needed to compute the board.
 
@@ -83,7 +83,7 @@ The service commits offsets by hand, after the entries of a batch are acknowledg
 
 Compaction is a topic property, `cleanup.policy=compact`, and the broker does the rest in the background: it rewrites closed segments so that only the newest record per key survives. That is what lets a topic act as a key-value store that streams. `segment.ms` is set low here (60 seconds) so you can watch it happen; production values are minutes to hours. The `leaderboard` group's offsets are its own, so Redpanda Connect and the achievements service read the same partitions at their own pace, and a slow Postgres in xref:persist-match-history.adoc[] changes nothing here. See xref:streaming:manage:cluster-maintenance/compaction-settings.adoc[] and xref:streaming:develop:consume-data/consumer-offsets.adoc[].
 
-== What happens inside
+== What happens when you run it
 
 On startup the client joins the group `leaderboard`, and the group coordinator assigns it all six partitions because it is the only member. `PollRecords` fetches up to 500 records across those partitions. The first record of each partition triggers `seed`:
 

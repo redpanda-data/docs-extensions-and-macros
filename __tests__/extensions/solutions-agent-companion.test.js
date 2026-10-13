@@ -68,7 +68,8 @@ describe('agent companion: the flagship solution', () => {
     const entry = sectionOf(md, '### 4. Build the live leaderboard')
     expect(entry.trim().startsWith('**Rule:** Publish absolute state, never deltas')).toBe(true)
     expect(entry).toContain('**Adapt:** Find consumers that aggregate')
-    // Judgment from == Why follows the rule.
+    // Judgment from == Why this design (the fixture uses the renamed heading;
+    // the parser tests below keep covering the older == Why) follows the rule.
     expect(entry).toContain('It then publishes the total, never the delta.')
   })
 
