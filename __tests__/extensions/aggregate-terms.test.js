@@ -59,11 +59,23 @@ describe('aggregate-terms', () => {
       '26.2@streaming:reference:glossary.adoc': streaming,
     })
     expect(attrs).toEqual({ streaming: 'home:ROOT:glossary.adoc', connect: 'home:ROOT:glossary.adoc', home: 'home:ROOT:glossary.adoc' })
-    expect(site.contents.toString()).toMatch(/=== broker[\s\S]*/)
-    expect(site.contents.toString()).toMatch(/=== pipeline/)
+    expect(site.contents.toString()).toMatch(/== Redpanda Connect[\s\S]*=== pipeline[\s\S]*== Redpanda core[\s\S]*=== broker/)
     // A component glossary that still exists stays complete until it is removed.
     expect(streaming.contents.toString()).toMatch(/=== broker/)
     expect(logs.some(([l, m]) => l === 'info' && /site glossary home:ROOT:glossary.adoc/.test(m))).toBe(true)
+  })
+
+  test('glossarypage pointing at a component glossary merges each term once', () => {
+    const streaming = page('streaming', '26.2', 'reference:glossary.adoc')
+    const { attrs } = run({ glossarypage: 'streaming:reference:glossary.adoc' }, {
+      'streaming:reference:glossary.adoc': streaming,
+      '26.2@streaming:reference:glossary.adoc': streaming,
+    })
+    expect(attrs).toEqual({ streaming: 'streaming:reference:glossary.adoc', connect: 'streaming:reference:glossary.adoc', home: 'streaming:reference:glossary.adoc' })
+    const content = streaming.contents.toString()
+    expect(content.match(/=== broker/g)).toHaveLength(1)
+    expect(content.match(/=== pipeline/g)).toHaveLength(1)
+    expect(content.match(/== Redpanda core/g)).toHaveLength(1)
   })
 
   test('a missing glossarypage warns and falls back to per-component glossaries', () => {
