@@ -10,9 +10,12 @@ description: >
   posts under its own identity), and the plugin's github-mutation-guard
   hook backstops any mutating gh call.
 
-  Model auth is the ADP AI Gateway as the docs-team-agents service account
-  (per-account spend attribution on the ADP cost page; DEVPROD-4735
-  pattern). There is no Anthropic API key anywhere in this pipeline.
+  Model auth is the ADP AI Gateway as the docs-pr-review agent
+  (sdlc/prod/github/docs_pr_review_client, the adp_client_secret_id
+  default; per-agent spend attribution on the ADP cost page; DEVPROD-4735
+  pattern). Do not point it at docs_team_agents_client, doc-detective's
+  credential: sharing one agent between workloads merges their spend
+  permanently. There is no Anthropic API key anywhere in this pipeline.
 
 inputs:
   prompt:
