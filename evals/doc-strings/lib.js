@@ -367,7 +367,25 @@ function compareDeclExtraction (before, after, targetKey) {
   return problems
 }
 
+/**
+ * Whether the doc-strings-review workflow's dispatch step would send this
+ * doc-impact.json. Runs the step's own jq predicate, read from the workflow
+ * file, so the eval and the gate cannot disagree about the shape.
+ *
+ * @returns {{ pass: boolean, detail: string }}
+ */
+function dispatchAccepts (docImpactText) {
+  const YAML = require('yaml')
+  const wf = YAML.parse(fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'doc-strings-review.yml'), 'utf8'))
+  const step = wf.jobs['doc-strings-review'].steps.find((s) => s.name === 'Dispatch doc-impact')
+  const m = step && step.run.match(/if ! jq -e '([\s\S]*?)'\s+doc-impact\.json/)
+  if (!m) throw new Error('the dispatch step\'s doc-impact.json predicate was not found in doc-strings-review.yml')
+  const r = spawnSync('jq', ['-e', m[1]], { input: docImpactText, encoding: 'utf8' })
+  return { pass: r.status === 0, detail: r.status === 0 ? 'accepted' : `rejected (jq exit ${r.status}${r.stderr ? ': ' + r.stderr.trim().slice(0, 160) : ''})` }
+}
+
 module.exports = {
+  dispatchAccepts,
   REPO_ROOT,
   DOC_TOOLS,
   EVAL_FIXTURES,

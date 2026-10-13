@@ -123,8 +123,7 @@ const CASES = [
       find: '      "Maximum size of a batch processed by the server. If the batch is "\n' +
             '      "compressed, the limit applies to the compressed batch size. Default "\n' +
             '      "is 1048576 bytes.",',
-      replace: '      "Controls how the server processes large requests. Default is "\n' +
-               '      "1048576 bytes.",'
+      replace: '      "Controls how the server processes large requests.",'
     }],
     // Sabotage: the same fully conforming rewording negative-property-diff
     // uses. The model must rightly stay silent on it, which makes this
@@ -135,11 +134,14 @@ const CASES = [
             '      "is 1048576 bytes.",',
       replace: '      "Maximum size in bytes of a batch processed by the server. If the "\n' +
                '      "batch is compressed, this limit applies to the compressed batch "\n' +
-               '      "size. Default is 1048576 bytes.",'
+               '      "size.",'
     }],
-    // The vacuous string dodges every rule (its default is concrete, so
-    // sentinel-default-unexplained stays silent) while saying nothing about WHAT is
-    // limited. The removed diff lines show the model the original, so a
+    // The vacuous string dodges every rule while saying nothing about WHAT
+    // is limited. Earlier versions of these fixtures also restated the
+    // concrete default ("Default is 1048576 bytes."), which the standard says
+    // to delete; the old hand-written prompt did not carry that rule, so the
+    // "conforming" text only looked conforming. Each fixture now plants only
+    // the defect its case tests. The removed diff lines show the model the original, so a
     // substantive rewrite names the thing: a batch.
     mustMentionAny: ['batch']
   },
@@ -155,9 +157,9 @@ const CASES = [
       find: '      "Maximum size of a batch processed by the server. If the batch is "\n' +
             '      "compressed, the limit applies to the compressed batch size. Default "\n' +
             '      "is 1048576 bytes.",',
-      replace: '      "Maximum size of a batch the redpanda broker accepts. If the batch "\n' +
-               '      "is compressed, the limit applies to the compressed batch size. "\n' +
-               '      "Default is 1048576 bytes.",'
+      replace: '      "Maximum size in bytes of a batch the redpanda broker accepts. If "\n' +
+               '      "the batch is compressed, the limit applies to the compressed "\n' +
+               '      "batch size.",'
     }],
     // Sabotage: identical rewording with the canonical casing; the model
     // must stay silent there, so this case fails, proving it can fail.
@@ -165,9 +167,9 @@ const CASES = [
       find: '      "Maximum size of a batch processed by the server. If the batch is "\n' +
             '      "compressed, the limit applies to the compressed batch size. Default "\n' +
             '      "is 1048576 bytes.",',
-      replace: '      "Maximum size of a batch the Redpanda broker accepts. If the batch "\n' +
-               '      "is compressed, the limit applies to the compressed batch size. "\n' +
-               '      "Default is 1048576 bytes.",'
+      replace: '      "Maximum size in bytes of a batch the Redpanda broker accepts. If "\n' +
+               '      "the batch is compressed, the limit applies to the compressed "\n' +
+               '      "batch size.",'
     }],
     mustMentionAny: ['Redpanda'],
     mustNotMention: ['redpanda']
@@ -183,7 +185,7 @@ const CASES = [
             '      "is 1048576 bytes.",',
       replace: '      "Maximum size in bytes of a batch processed by the server. If the "\n' +
                '      "batch is compressed, this limit applies to the compressed batch "\n' +
-               '      "size. Default is 1048576 bytes.",'
+               '      "size.",'
     }],
     sabotageEdits: [{
       find: '      "Maximum size of a batch processed by the server. If the batch is "\n' +

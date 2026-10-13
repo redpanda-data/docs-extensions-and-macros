@@ -18,7 +18,15 @@
  *   node evals/doc-strings/run-evals.js --sabotage <negative-case-id>
  *       Runs that negative control against a deliberately violating fixture.
  *       The case is EXPECTED to FAIL; the run exits 0 only if it does.
- *   Options: --model <model> (default sonnet), --keep-temp
+ *   Options: --model <model> (default: the model production runs each case
+ *   kind on), --keep-temp
+ *
+ * The rewrite, prose-review and negative-review cases run the PRODUCTION
+ * review: the prompt, tools and turn limit of doc-strings-review.yml at this
+ * commit, on the model the callers pass (see production.js). Callers pin the
+ * workflow by SHA, so this tests exactly what a pin bump ships. The upstream
+ * and negative-audit cases still use prompts.js templates: they cover the
+ * docs repo's upstream-doc-strings workflow, which does not live here.
  *
  * Exit codes: 0 all pass (or sabotage proven), 1 failures, 2 harness error,
  * 3 SKIPPED (claude CLI unavailable).
@@ -33,9 +41,9 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 
-const YAML = require('yaml')
 const lib = require('./lib')
 const prompts = require('./prompts')
+const production = require('./production')
 const { CASES } = require('./cases')
 
 // ---------------------------------------------------------------------------
@@ -118,9 +126,18 @@ function runRewriteCase (spec, io) {
   const originalLines = originalText.split('\n')
   const originalSpan = originalLines.slice(finding.line_start - 1, finding.line_end).join('\n')
 
-  const prompt = prompts.rewrite({ finding, columnLimit: spec.columnLimit, language: spec.language })
-  const model = io.callModel(prompt)
+  // The workflow's --diff/--reviewed filtering leaves only the declarations a
+  // push changed; this case's push changed exactly the target, so the report
+  // the review reads carries that one finding and its declaration.
+  const lint = {
+    ...lintBefore,
+    declarations: [{ surface: finding.surface, name: finding.name, file: finding.file, line_start: finding.line_start, line_end: finding.line_end, string: finding.string }],
+    findings: [finding],
+    summary: { ...lintBefore.summary, totalDeclarations: 1, flaggedDeclarations: 1, removedDeclarations: [] }
+  }
+  const model = io.callProduction({ repo, lint, diff: null })
   if (model.failed) return modelCallFailed(checks, model)
+  checkImpactFile(checks, model, false)
 
   // --- Execute the output ---
   const suggestions = lib.parseFences(model.output, 'suggestion')
@@ -300,24 +317,6 @@ function runUpstreamCase (spec, io) {
  * substance. Under --sabotage the diff is a fully conforming rewording,
  * the model must stay silent, and this case must FAIL.
  */
-const WORKFLOW_PATH = path.join(__dirname, '..', '..', '.github', 'workflows', 'doc-strings-review.yml')
-
-/**
- * The production prose-quality contract, extracted from the live workflow so
- * the eval can never drift from what actually runs. Throws when the fragment
- * is missing, turning a deleted or renamed contract into a HARNESS_ERROR
- * rather than a silently weaker eval.
- */
-function loadWorkflowProseFragment () {
-  const wf = YAML.parse(fs.readFileSync(WORKFLOW_PATH, 'utf8'))
-  const claude = wf.jobs['doc-strings-review'].steps.find((st) => st.name === 'Claude review with suggestions')
-  const prompt = claude && claude.with && claude.with.prompt
-  if (!prompt) throw new Error('Claude step prompt not found in doc-strings-review.yml')
-  const m = prompt.match(/PROSE QUALITY:[\s\S]*?(?=\n\s*\n[A-Z][A-Z -]+:|$)/)
-  if (!m) throw new Error('PROSE QUALITY fragment not found in the workflow prompt; the eval and the workflow have drifted')
-  return m[0].trim()
-}
-
 function runProseReviewCase (spec, io, sabotage) {
   const checks = makeChecks()
   const repo = lib.materializeRepo(spec.layout)
@@ -342,22 +341,10 @@ function runProseReviewCase (spec, io, sabotage) {
     `declarations in diff: ${declarations}`)
 
   const extractionBefore = lib.extractDeclarations(repo.dir, repo.surface)
-  let workflowFragment
-  try {
-    workflowFragment = loadWorkflowProseFragment()
-  } catch (err) {
-    return harnessError(checks, err.message)
-  }
-  checks.add('production PROSE QUALITY fragment extracted from the live workflow', true,
-    `${workflowFragment.length} chars`)
-
-  let terminology = null
-  if (spec.terminologyFixture) {
-    terminology = fs.readFileSync(path.join(__dirname, 'fixtures', spec.terminologyFixture), 'utf8')
-  }
   const diff = lib.gitDiff(repo.dir, base)
-  const model = io.callModel(prompts.proseReview({ diff, workflowFragment, terminology }))
+  const model = io.callProduction({ repo, lint: lintDiff, diff })
   if (model.failed) return modelCallFailed(checks, model)
+  checkImpactFile(checks, model, false)
 
   const suggestions = lib.parseFences(model.output, 'suggestion')
   if (!checks.add('at least one ```suggestion block (a vacuous string must draw one)',
@@ -460,18 +447,14 @@ function runNegativeReviewCase (spec, io, sabotage) {
   true, `lint findings in diff: ${lintDiff.findings.length}`)
 
   const diff = lib.gitDiff(repo.dir, base)
-  const model = io.callModel(prompts.negativeReview({ diff }))
+  const model = io.callProduction({ repo, lint: lintDiff, diff })
   if (model.failed) return modelCallFailed(checks, model)
 
-  const suggestions = lib.parseFences(model.output, 'suggestion')
-  checks.add('zero ```suggestion blocks in the model output', suggestions.length === 0, `found ${suggestions.length}`)
-  const jsonBlocks = lib.parseJsonFences(model.output)
-  const impactFindings = jsonBlocks
-    .filter((b) => b.ok && b.value && Array.isArray(b.value.doc_impact))
-    .reduce((n, b) => n + b.value.doc_impact.length, 0)
-  checks.add('zero doc-impact findings claimed', jsonBlocks.length === 0 || impactFindings === 0,
-    `json blocks: ${jsonBlocks.length}, doc_impact entries: ${impactFindings}`)
-  checks.add('model states NO_SUGGESTIONS', /\bNO_SUGGESTIONS\b/.test(model.output), 'token scan')
+  // Production's silence is no inline comment at all: "posting none is the
+  // common, correct outcome".
+  checks.add('zero inline comments posted', model.comments.length === 0,
+    model.comments.length ? `posted ${model.comments.length}: ${model.comments.map((c) => c.path + ':' + (c.line || '?')).join(', ')}` : 'none')
+  checkImpactFile(checks, model, false)
 
   io.cleanup(repo.dir)
   return finish(checks.allPass() ? 'PASS' : 'FAIL', checks, model)
@@ -510,6 +493,23 @@ function runNegativeAuditCase (spec, io, sabotage) {
   return finish(checks.allPass() ? 'PASS' : 'FAIL', checks, model)
 }
 
+/**
+ * The doc-impact.json gate, measured with the dispatch step's own jq
+ * predicate from the workflow (the check that decides whether the file
+ * leaves the runner), so a wrong shape fails here exactly as it would be
+ * discarded in production. `expected` says whether the case should file.
+ */
+function checkImpactFile (checks, model, expected) {
+  const text = model.files['doc-impact.json']
+  if (!expected) {
+    return checks.add('no doc-impact.json written (nothing here needs a DOC ticket)', text === undefined,
+      text === undefined ? 'absent' : `written: ${text.slice(0, 200)}`)
+  }
+  if (!checks.add('doc-impact.json written', text !== undefined, text === undefined ? 'absent' : 'present')) return false
+  const ok = lib.dispatchAccepts(text)
+  return checks.add('doc-impact.json passes the dispatch step\'s schema check', ok.pass, ok.detail)
+}
+
 function harnessError (checks, message) {
   checks.add('harness precondition', false, message)
   return { status: 'HARNESS_ERROR', checks: checks.rows, model: null }
@@ -538,7 +538,7 @@ const EXECUTORS = {
 // ---------------------------------------------------------------------------
 
 function parseArgs (argv) {
-  const options = { cases: null, sabotage: null, model: 'sonnet', keepTemp: false }
+  const options = { cases: null, sabotage: null, model: null, keepTemp: false }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     if (arg === '--case') options.cases = (options.cases || []).concat(argv[++i].split(','))
@@ -595,10 +595,25 @@ function main () {
       caseDir,
       callModel (prompt) {
         fs.writeFileSync(path.join(caseDir, 'prompt.txt'), prompt)
-        const result = lib.runClaude(prompt, { cwd: workDir, model: options.model })
+        const result = lib.runClaude(prompt, { cwd: workDir, model: options.model || 'sonnet' })
         fs.writeFileSync(path.join(caseDir, 'model-output.txt'), result.output)
         if (result.stderr) fs.writeFileSync(path.join(caseDir, 'model-stderr.txt'), result.stderr)
         result.failed = result.timedOut || result.status !== 0
+        return result
+      },
+      callProduction ({ repo, lint, diff }) {
+        let result
+        try {
+          result = production.runReview({ repoDir: repo.dir, lint, diff, model: options.model || production.PRODUCTION_MODEL })
+        } catch (err) {
+          return { failed: true, timedOut: false, status: 'harness', stderr: err.message, ms: 0, comments: [], files: {}, output: '' }
+        }
+        fs.writeFileSync(path.join(caseDir, 'prompt.txt'), result.prompt)
+        fs.writeFileSync(path.join(caseDir, 'model-output.txt'), result.output)
+        fs.writeFileSync(path.join(caseDir, 'transcript.txt'), result.transcript)
+        fs.writeFileSync(path.join(caseDir, 'inline-comments.json'), JSON.stringify(result.comments, null, 2))
+        for (const [name, text] of Object.entries(result.files)) fs.writeFileSync(path.join(caseDir, name), text)
+        if (result.stderr) fs.writeFileSync(path.join(caseDir, 'model-stderr.txt'), result.stderr)
         return result
       },
       saveFixture (label, repo) {
@@ -638,7 +653,7 @@ function main () {
 
   const wallMs = Date.now() - startedAt
   fs.writeFileSync(path.join(resultsRoot, 'summary.json'), JSON.stringify({
-    model: options.model,
+    model: options.model || `production default (${production.PRODUCTION_MODEL} for review cases)`,
     sabotage: options.sabotage,
     wall_ms: wallMs,
     cases: summary
