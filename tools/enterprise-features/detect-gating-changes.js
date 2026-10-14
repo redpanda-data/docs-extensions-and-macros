@@ -180,16 +180,23 @@ function detectGatingChanges (diffText) {
  */
 function buildDocImpact (findings) {
   if (!findings || findings.length === 0) return null
-  const names = findings.map((f) => `\`${f.name}\``).join(', ')
-  const bullets = findings.map((f) => `- ${f.name} (${f.change_kind}): ${f.summary}`).join('\n')
+  // The dispatch schema allows ten findings. Title, body and findings all
+  // come from the same capped list, so the ticket never names a change the
+  // findings (which the receiver dedupes on) leave out; the overflow is
+  // counted instead.
+  const capped = findings.slice(0, 10)
+  const overflow = findings.length - capped.length
+  const names = capped.map((f) => `\`${f.name}\``).join(', ')
+  const bullets = capped.map((f) => `- ${f.name} (${f.change_kind}): ${f.summary}`).join('\n')
   return {
-    findings: findings.slice(0, 10),
+    findings: capped,
     proposed_ticket: {
-      title: `Update enterprise feature docs for ${findings.map((f) => f.name).join(', ')}`,
+      title: `Update enterprise feature docs for ${capped.map((f) => f.name).join(', ')}${overflow > 0 ? ` and ${overflow} more` : ''}`,
       body: [
         `This PR changes which features Redpanda gates on an enterprise license, without changing any doc string, so the licensing docs do not pick it up on regeneration: ${names}.`,
         '',
         bullets,
+        ...(overflow > 0 ? [`- ${overflow} more gating change(s) are not listed here; see the PR diff.`] : []),
         '',
         `Registry: ${REGISTRY_URL}`,
         `Licensing overview: ${LICENSING_OVERVIEW}`,

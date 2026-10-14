@@ -605,7 +605,7 @@ describe('doc-strings-review workflow: doc-impact dispatch (executed)', () => {
     '${{ github.event.pull_request.html_url }}': 'https://github.com/redpanda-data/redpanda/pull/7'
   }
   const GH_RECORDER = '#!/bin/bash\nprintf \'%s\\n\' "$@" >> "$HOME/gh-argv"\ncat > "$HOME/gh-stdin"\n'
-  const env = { GH_TOKEN: 'bot', DISPATCH_REPO: 'redpanda-data/docs-site' }
+  const env = { GH_TOKEN: 'bot', DISPATCH_REPO: 'redpanda-data/docs-site', REVIEW_OUTCOME: 'success' }
 
   const valid = {
     findings: [{
@@ -620,7 +620,7 @@ describe('doc-strings-review workflow: doc-impact dispatch (executed)', () => {
 
   function dispatch (docImpact, extraEnv = {}) {
     return execRun(step, {
-      env: { ...env, ...extraEnv },
+      env: { RUNNER_TEMP: fs.mkdtempSync(path.join(os.tmpdir(), 'runner-temp-')), ...env, ...extraEnv },
       expressions,
       stubs: { gh: GH_RECORDER },
       files: docImpact === null ? {} : { 'doc-impact.json': JSON.stringify(docImpact) }
@@ -702,11 +702,20 @@ describe('doc-strings-review workflow: enterprise gating detection (executed)', 
     proposed_ticket: { title: 't', body: 'b' }
   })
 
-  test('a finding opens the gate and leaves the report for the dispatch step', () => {
-    const r = execRun(step, { env: { ...env, LINT_JSON: REPORT }, stubs: { npx: NPX_STUB } })
+  const runnerTemp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'runner-temp-'))
+  const detect = (extra, files = {}) => {
+    const tmp = runnerTemp()
+    const r = execRun(step, { env: { ...env, RUNNER_TEMP: tmp, ...extra }, stubs: { npx: NPX_STUB }, files })
+    r.tmpExists = (f) => fs.existsSync(path.join(tmp, f))
+    return r
+  }
+
+  test('a finding opens the gate and leaves the report in RUNNER_TEMP, outside the checkout', () => {
+    const r = detect({ LINT_JSON: REPORT })
     expect(r.status).toBe(0)
     expect(r.outputs.found).toBe('1')
-    expect(r.exists('enterprise-impact.json')).toBe(true)
+    expect(r.tmpExists('enterprise-impact.json')).toBe(true)
+    expect(r.exists('enterprise-impact.json')).toBe(false)
     const argv = fs.readFileSync(path.join(r.dir, 'npx-argv'), 'utf8')
     expect(argv).toMatch(/^--package=/m)
     expect(argv).toMatch(/^detect-enterprise-gating$/m)
@@ -714,9 +723,9 @@ describe('doc-strings-review workflow: enterprise gating detection (executed)', 
   })
 
   test('an empty report closes the gate and leaves no file behind', () => {
-    const r = execRun(step, { env: { ...env, LINT_JSON: '{"findings":[]}' }, stubs: { npx: NPX_STUB } })
+    const r = detect({ LINT_JSON: '{"findings":[]}' })
     expect(r.outputs.found).toBe('0')
-    expect(r.exists('enterprise-impact.json')).toBe(false)
+    expect(r.tmpExists('enterprise-impact.json')).toBe(false)
   })
 
   test.each([
@@ -725,10 +734,10 @@ describe('doc-strings-review workflow: enterprise gating detection (executed)', 
     ['non-JSON output', { LINT_JSON: 'not json' }],
     ['findings of the wrong shape', { LINT_JSON: '{"findings":{"a":1}}' }]
   ])('%s closes the gate at 0, never empty', (_label, extra) => {
-    const r = execRun(step, { env: { ...env, ...extra }, stubs: { npx: NPX_STUB } })
+    const r = detect(extra)
     expect(r.status).toBe(0)
     expect(r.outputs.found).toBe('0')
-    expect(r.exists('enterprise-impact.json')).toBe(false)
+    expect(r.tmpExists('enterprise-impact.json')).toBe(false)
   })
 
   test('every credential and dispatch gate also opens on a gating finding', () => {
@@ -751,14 +760,22 @@ describe('doc-strings-review workflow: doc-impact dispatch merges gating finding
     '${{ github.event.pull_request.html_url }}': 'https://github.com/redpanda-data/redpanda/pull/7'
   }
   const GH_RECORDER = '#!/bin/bash\nprintf \'%s\\n\' "$@" >> "$HOME/gh-argv"\ncat > "$HOME/gh-stdin"\n'
-  const env = { GH_TOKEN: 'bot', DISPATCH_REPO: 'redpanda-data/docs-site' }
+  const env = { GH_TOKEN: 'bot', DISPATCH_REPO: 'redpanda-data/docs-site', REVIEW_OUTCOME: 'success' }
   const finding = (name, surface = 'properties') => ({
     surface, name, change_kind: 'x', affected_pages: ['https://docs.redpanda.com/current/x/'], summary: `about ${name}`
   })
   const gating = { findings: [finding('manual_finalization', 'enterprise-feature')], proposed_ticket: { title: 'gating', body: '- manual_finalization (enterprise-feature-added): s' } }
 
+  // The gating report lives in RUNNER_TEMP (the Detect step writes it
+  // there); everything else in `files` lands in the checkout.
   function dispatch (files, extraEnv = {}) {
-    return execRun(step, { env: { ...env, ...extraEnv }, expressions, stubs: { gh: GH_RECORDER }, files })
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-temp-'))
+    const workspace = { ...files }
+    if ('enterprise-impact.json' in workspace) {
+      fs.writeFileSync(path.join(tmp, 'enterprise-impact.json'), workspace['enterprise-impact.json'])
+      delete workspace['enterprise-impact.json']
+    }
+    return execRun(step, { env: { RUNNER_TEMP: tmp, ...env, ...extraEnv }, expressions, stubs: { gh: GH_RECORDER }, files: workspace })
   }
   const payload = (r) => JSON.parse(fs.readFileSync(path.join(r.dir, 'gh-stdin'), 'utf8')).client_payload.impact
 
@@ -773,7 +790,7 @@ describe('doc-strings-review workflow: doc-impact dispatch merges gating finding
     const model = { findings: [finding('cloud_storage_cache_size')], proposed_ticket: { title: 'model', body: 'model body' } }
     const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify(gating) })
     const impact = payload(r)
-    expect(impact.findings.map((f) => f.name)).toEqual(['cloud_storage_cache_size', 'manual_finalization'])
+    expect(impact.findings.map((f) => f.name)).toEqual(['manual_finalization', 'cloud_storage_cache_size'])
     expect(impact.proposed_ticket.title).toBe('model')
     expect(impact.proposed_ticket.body).toMatch(/^model body/)
     expect(impact.proposed_ticket.body).toMatch(/Enterprise gating changes in this PR/)
@@ -787,6 +804,49 @@ describe('doc-strings-review workflow: doc-impact dispatch merges gating finding
     expect(payload(r).findings).toHaveLength(10)
   })
 
+  test('a full model report never pushes the mechanical findings out of the cap', () => {
+    // Ten model findings plus one gating finding: the cap has to drop a
+    // model finding, never the gating one the model could not see.
+    const model = { findings: Array.from({ length: 10 }, (_, i) => finding(`p${i}`)), proposed_ticket: { title: 'model', body: 'b' } }
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify(gating) })
+    const names = payload(r).findings.map((f) => f.name)
+    expect(names[0]).toBe('manual_finalization')
+    expect(names).not.toContain('p9')
+  })
+
+  test.each([
+    ['skipped (a gating-only run)', 'skipped'],
+    ['not run at all', '']
+  ])('when the review was %s, a doc-impact.json in the checkout is ignored', (_label, outcome) => {
+    // The PR's tree is the workspace. A committed doc-impact.json on a run
+    // where the model never ran is PR-authored, not run output, and must not
+    // ride the bot token: only the mechanical report goes out.
+    const planted = { findings: Array.from({ length: 10 }, (_, i) => finding(`planted${i}`)), proposed_ticket: { title: 'planted title', body: 'planted body' } }
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(planted), 'enterprise-impact.json': JSON.stringify(gating) }, { REVIEW_OUTCOME: outcome })
+    const impact = payload(r)
+    expect(impact.findings.map((f) => f.name)).toEqual(['manual_finalization'])
+    expect(impact.proposed_ticket.title).toBe('gating')
+    expect(JSON.stringify(impact)).not.toMatch(/planted/)
+  })
+
+  test('with the review skipped and no gating report, a checked-in doc-impact.json dispatches nothing', () => {
+    const r = dispatch({ 'doc-impact.json': JSON.stringify({ findings: [finding('planted')], proposed_ticket: { title: 't', body: 'b' } }) }, { REVIEW_OUTCOME: 'skipped' })
+    expect(r.status).toBe(0)
+    expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(false)
+  })
+
+  test('a gating report committed to the checkout is never read', () => {
+    // Only the Detect step's RUNNER_TEMP output counts as the gating report.
+    const r = execRun(step, {
+      env: { RUNNER_TEMP: fs.mkdtempSync(path.join(os.tmpdir(), 'runner-temp-')), ...env, REVIEW_OUTCOME: 'skipped' },
+      expressions,
+      stubs: { gh: GH_RECORDER },
+      files: { 'enterprise-impact.json': JSON.stringify(gating) }
+    })
+    expect(r.status).toBe(0)
+    expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(false)
+  })
+
   test('a malformed gating report alone is still schema-checked and not dispatched', () => {
     const r = dispatch({ 'enterprise-impact.json': JSON.stringify({ findings: [{ surface: 'enterprise-feature' }], proposed_ticket: { title: 't', body: 'b' } }) })
     expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(false)
@@ -798,6 +858,26 @@ describe('doc-strings-review workflow: doc-impact dispatch merges gating finding
     const r = dispatch({ 'doc-impact.json': 'not json', 'enterprise-impact.json': JSON.stringify(gating) })
     expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(false)
     expect(r.status).toBe(0)
+  })
+})
+
+describe('doc-strings-review workflow: checked-in run outputs (executed)', () => {
+  const step = stepNamed('Remove run-output files the PR checked in')
+  const OUTPUTS = ['doc-impact.json', 'review-summary.md', 'lint-findings.json', 'pr-diff.patch', 'enterprise-impact.json', 'embedded-reference-strings.md', 'terminology.md']
+
+  test('runs straight after checkout, before any step reads or writes those files', () => {
+    const idx = job.steps.indexOf(step)
+    expect(job.steps[idx - 1].uses).toMatch(/^actions\/checkout@/)
+    expect(step.if).toBeUndefined()
+  })
+
+  test('removes every run-output file a PR could commit, and leaves source alone', () => {
+    const files = Object.fromEntries(OUTPUTS.map((f) => [f, '{"findings":[]}']))
+    files['main.cc'] = 'int main() {}'
+    const r = execRun(step, { files })
+    expect(r.status).toBe(0)
+    for (const f of OUTPUTS) expect(r.exists(f)).toBe(false)
+    expect(r.exists('main.cc')).toBe(true)
   })
 })
 

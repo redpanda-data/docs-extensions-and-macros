@@ -180,4 +180,19 @@ describe('buildDocImpact', () => {
     }))
     expect(buildDocImpact(many).findings).toHaveLength(10)
   })
+
+  test('the ticket names only the findings it carries and counts the rest', () => {
+    // The receiver dedupes on finding names, so a ticket that names a change
+    // the findings leave out can never be matched to an open ticket.
+    const many = Array.from({ length: 12 }, (_, i) => ({
+      surface: 'enterprise-feature', name: `feat_${i}`, change_kind: 'enterprise-feature-added', affected_pages: [], summary: 's'
+    }))
+    const { proposed_ticket: t } = buildDocImpact(many)
+    for (const dropped of ['feat_10', 'feat_11']) {
+      expect(t.title).not.toContain(dropped)
+      expect(t.body).not.toContain(dropped)
+    }
+    expect(t.title).toMatch(/feat_9 and 2 more$/)
+    expect(t.body).toMatch(/^- 2 more gating change\(s\) are not listed here/m)
+  })
 })
