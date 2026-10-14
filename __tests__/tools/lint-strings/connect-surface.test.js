@@ -103,6 +103,7 @@ describe('connect surface: conditional rule on Summary, Description and field st
   const source = `package condfixture
 
 import (
+	"github.com/redpanda-data/benthos/v4/public/bloblang"
 	"github.com/redpanda-data/benthos/v4/public/service"
 )
 
@@ -120,6 +121,7 @@ ifdef::env-cloud[]
 Upload the mapping file in the Cloud UI; the processor reads it from there.
 endif::[]
 \`).
+		Example("Basic", "Copies a field.\\n\\nifdef::env-cloud[]\\nOn a managed cluster.\\nendif::[]", "pipeline: {}").
 		Fields(
 			service.NewStringField("region").
 				Description("The region to target. ifndef::env-cloud[Defaults to the broker's region.]"),
@@ -131,6 +133,10 @@ endif::[]
 }
 
 func init() {
+	spec := bloblang.NewPluginSpec().
+		Summary("Doubles a number.").
+		Example("Doubles it.\\n\\nifndef::env-cloud[]\\nOn self-managed.\\nendif::[]", "root = this.n.cond_double()")
+	bloblang.MustRegisterMethodV2("cond_double", spec, nil)
 	service.MustRegisterProcessor("cond_processor", condProcessorConfig(),
 		func(conf *service.ParsedConfig, mgr *service.Resources) (service.Processor, error) {
 			return nil, nil
@@ -159,10 +165,21 @@ func init() {
 
   test('field descriptions: single-line form, indented directive, and an unclosed block', () => {
     expect(conditional('region', 'field')).toEqual([expect.objectContaining({ message: expect.stringContaining('not a directive on a line of its own at column 0') })])
+    // The indented opener is text, so the endif it meant to pair with is unmatched.
     const mode = conditional('mode', 'field')
-    expect(mode.map((r) => r.message)).toEqual([expect.stringContaining('is indented')])
+    expect(mode.map((r) => [r.severity, r.message])).toEqual([
+      ['warning', expect.stringContaining('is indented')],
+      ['error', expect.stringContaining('no matching ifdef::env-cloud[]')]
+    ])
     const unclosed = conditional('unclosed', 'field')
     expect(unclosed).toEqual([expect.objectContaining({ severity: 'error', message: expect.stringContaining('never closed') })])
-    expect(summary.byRule.conditional.errors).toBe(1)
+    expect(summary.byRule.conditional.errors).toBe(2)
+  })
+
+  test('example summaries, for components and Bloblang, are reported with the summary reason', () => {
+    for (const [name, kind] of [['cond_processor', 'example-summary'], ['cond_double', 'bloblang-example']]) {
+      expect(declarations.find((d) => d.name === name && d.meta.kind === kind)).toBeDefined()
+      expect(conditional(name, kind).map((r) => r.message)).toEqual([expect.stringContaining('in an example summary')])
+    }
   })
 })
