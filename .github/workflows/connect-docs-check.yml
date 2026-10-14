@@ -482,8 +482,11 @@ jobs:
           # Previews must never be indexed.
           printf 'User-agent: *\nDisallow: /\n' > "$dir/robots.txt"
           # A draft deploy with a per-PR alias, never a production one, so it
-          # never changes the site's published deploy.
+          # never changes the site's published deploy. --no-build: the site
+          # has a build command configured, and the CLI would otherwise run
+          # it here instead of uploading the already built directory.
           npx --yes netlify-cli@27.11.2 deploy \
+            --no-build \
             --dir "$dir" \
             --site "$NETLIFY_SITE_ID" \
             --alias "connect-pr-$PR_NUMBER" \
