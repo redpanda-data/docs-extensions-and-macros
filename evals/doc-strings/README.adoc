@@ -20,7 +20,9 @@ Every verdict here is computed by *executing* the model's output against the
 real machinery:
 
 1. A fixture mini-repo (shaped like redpanda: `src/v/config/`, `*probe.cc`,
-   `src/go/rpk/pkg/cli/`) is materialized in a temp dir.
+   `src/go/rpk/pkg/cli/`; or the whole connect fixture tree, because the
+   connect surface resolves strings across files) is materialized in a temp
+   dir.
 2. The real tools produce the genuine input the production workflow would
    feed the model (`doc-tools lint-strings --format json` findings, or a
    `doc-tools overrides audit` candidate row).
@@ -46,7 +48,7 @@ real machinery:
      findings of any severity**, and every untouched declaration must keep
      exactly the findings it had (fingerprint compare);
    * re-run the surface extractor (the real Python property extractor, the
-     metrics scanner, the rpk scanner): the target must still parse, every
+     metrics scanner, the rpk and connect scanners): the target must still parse, every
      other declaration must be byte-identical, and every non-description
      field of the target must be unchanged;
    * for upstream ports, re-run `overrides audit`: the classification must
@@ -86,7 +88,11 @@ string the real review flags (a restated concrete default).
 deterministic lint findings into GitHub suggestion blocks
 |`prop-empty-description`, `prop-tautology-no-period`, `metric-name-echo`
 (rewrite must carry NO terminal period), `rpk-flag-lowercase-period` (only
-the usage literal may change - the rest of the line is byte-compared)
+the usage literal may change - the rest of the line is byte-compared),
+`connect-xref-module` (a module-less xref must keep its link and gain a
+module; deleting the link also lints clean, so `stringMustMatch` requires
+it), `connect-short-description-markup` (a ShortDescription in a shared
+helper must become plain text)
 
 |B. Upstream port
 |`upstream-doc-strings.yml`: Claude ports override prose into the C++
@@ -100,7 +106,8 @@ The evals are the contract the workflow will have to meet.
 |C. False-positive guard
 |Both workflows' suggest-only posture
 |`negative-property-diff` (conforming rewording diff -> zero suggestions,
-zero doc-impact claims), `negative-metrics-file` (conforming probe file ->
+zero doc-impact claims), `negative-connect-diff` (the same for a connect
+field rewording), `negative-metrics-file` (conforming probe file ->
 the model must claim `{"findings": []}`). *Any* invention fails the case.
 
 |D. Prose quality
@@ -127,6 +134,7 @@ the case to FAIL*:
 [source,bash]
 ----
 node evals/doc-strings/run-evals.js --sabotage negative-property-diff
+node evals/doc-strings/run-evals.js --sabotage negative-connect-diff
 node evals/doc-strings/run-evals.js --sabotage negative-metrics-file
 ----
 
@@ -142,15 +150,17 @@ controls demonstrably fail on violating input.
 
 [source,bash]
 ----
-npm run eval:doc-strings                     # full suite (10 cases)
+npm run eval:doc-strings                     # full suite (13 cases)
 node evals/doc-strings/run-evals.js --case metric-name-echo
-node evals/doc-strings/run-evals.js --model sonnet   # override the production model
+node evals/doc-strings/run-evals.js --model claude-sonnet-5   # override the production model
 node evals/doc-strings/run-evals.js --keep-temp   # keep fixture repos
 ----
 
-Without `--model`, review cases run on Opus (production) and the template
-cases on Sonnet. Pass `--model` only for a deliberate comparison: a result on
-any other model says nothing about what callers run.
+Without `--model`, review cases run on `claude-opus-5` (production) and the
+template cases on Sonnet. Pass `--model` only for a deliberate comparison: a
+result on any other model says nothing about what callers run. Name the model
+exactly. The `opus` and `sonnet` aliases resolve to the newest model the CLI
+knows, which is not necessarily the one a caller pins.
 
 Requirements:
 
@@ -167,13 +177,67 @@ Requirements:
 Exit codes: `0` all pass (or sabotage proven), `1` failures, `2` harness
 error, `3` skipped.
 
-Deliberately **not wired into CI**: a full run makes ten real model calls
+Deliberately **not wired into CI**: a full run makes thirteen real model calls
 (a few minutes of wall time and real tokens). Run it when the workflow
 prompts, the lint rules, or the extraction change.
 
 Each run writes `results/<timestamp>/<case>/` with the exact prompt, the raw
 model output, before/after fixture snapshots, and `evidence.json` (every
 mechanical check with its measured detail). `results/` is gitignored.
+
+== Model comparison
+
+Which model a caller passes as `gateway_model` is decided by these cases.
+Rerun the comparison when a new model is a candidate, and add the result as a
+new subsection rather than overwriting this one.
+
+=== 2026-10-14: Opus 5 and Sonnet 5
+
+All 13 cases, twice on `claude-opus-5` and twice on `claude-sonnet-5`, with
+committable suggestions on. The cases were those at commit `50911d28`, with
+the fingerprint fix described below. Both models ran at the same time, and 4
+model calls timed out under that load, two per model. Those cases were rerun
+on their own and passed, and they are counted that way.
+
+[cols="2,1,1"]
+|===
+| |Opus 5 |Sonnet 5
+
+|All cases, both runs |25 of 26 |24 of 26
+|Connect cases (3 cases) |5 of 6 |6 of 6
+|C++ suggestion runs within 80 columns |10 of 10 |8 of 10
+|Negative controls (3 cases) |6 of 6 |6 of 6
+|===
+
+The failures:
+
+* Sonnet 5 wrote a C++ suggestion line longer than 80 columns twice:
+  85 columns in `metric-name-echo`, and once in `prop-empty-description`.
+* Opus 5 failed `connect-short-description-markup` once. Asked to fix the
+  `ShortDescription`, it also rewrote the field's `Description`, which was not
+  in the change.
+
+An earlier run of the same comparison found a gap in this harness rather than
+in either model. The rewrite cases hand the review a `lint-findings.json`
+whose finding had no `fingerprint`, although the workflow's lint always
+supplies one and the prompt requires it in the comment footer. Sonnet 5
+refused to post without it, in 5 of its 12 runs of those cases. Opus 5
+posted anyway, with a footer it made up (such as `fp=metrics:start_offset`) in
+7 of its 12. On a real PR that footer fails the `fp=<16 hex digits>` match the
+workflow uses to skip strings it has reviewed, so the string is reviewed again
+on every push. The cases now carry the
+workflow's fingerprint, and a case fails unless the footer repeats it.
+
+Decision:
+
+* Connect runs the review on Sonnet 5. It passed every connect case, and
+  Go strings have no column limit.
+* streaming-enterprise stays on Opus 5. Its strings are C++, where Sonnet 5
+  broke the 80-column limit in 2 of 10 runs and the suggestion would fail
+  that repo's format check once committed. Holding Sonnet to the limit in
+  the prompt, then rerunning these cases, is what would change that.
+* No case here covers redpanda-operator's CRD and Helm strings, so this
+  comparison says nothing either way about its model.
 
 == Anatomy
 
@@ -212,7 +276,11 @@ exact-match `find`/`replace` pairs that throw when they no longer match.
    * `rewrite` kind: pick (or `edits`-create) a declaration in a fixture
      that the real linter flags, set `target` and `expectRules`, and for Go
      one-liners set `singleLine: true` (enables the byte-identical
-     prefix/suffix check).
+     prefix/suffix check). When a name repeats in the lint output, as connect
+     names do across kinds, set `targetRule` to pick the finding. When a
+     rule the lint enforces could also be satisfied by deleting content, set
+     `stringMustMatch` (and `stringMustNotMatch`) on the re-extracted
+     string.
    * `upstream` kind: provide the `overrides` document, `expectClassBefore`
      (what the real audit must say going in) and `expectClassAfter` (what it
      must say after a correct port).
