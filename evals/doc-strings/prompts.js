@@ -49,9 +49,11 @@ Per-surface contract:
   bodies, published on the self-managed Connect docs and on the Cloud docs,
   which set env-cloud. xref:, <<anchors>> and env-cloud conditionals are
   allowed. A conditional is block form only: ifdef::env-cloud[] or
-  ifndef::env-cloud[] alone on a line at column 0, the whole paragraph
-  inside, endif::[] alone on a line, a blank line before and after; never
-  the single-line form, never in a Summary, never inside a code fence, and
+  ifndef::env-cloud[] alone on a line at column 0 with nothing after the ],
+  not even spaces, the whole paragraph inside, endif::[] alone on a line, a
+  blank line before and after; never the single-line form, never in a
+  Summary or example summary, never inside a code fence, never
+  ifndef::env-cloud[] nested in ifdef::env-cloud[] or the reverse, and
   env-cloud is the only attribute. The Cloud docs and the Cloud binaries set
   env-cloud, and the text inside must read as a whole paragraph in both
   outputs. Other attributes, glossterm:, prop: and include:: do not belong
@@ -127,9 +129,10 @@ ${JSON.stringify(candidate, null, 2)}
    drop that markup (keep the plain text) rather than porting it. That rule
    is for property strings. In Connect and benthos ConfigSpec strings, xref:,
    <<anchors>> and env-cloud block conditionals (ifdef::env-cloud[] or
-   ifndef::env-cloud[] alone on a line at column 0, the paragraph inside,
-   endif::[] alone on a line, blank lines around; never single-line, never
-   in a Summary) are allowed and are kept.
+   ifndef::env-cloud[] alone on a line at column 0 with nothing after the ],
+   the paragraph inside, endif::[] alone on a line, blank lines around;
+   never single-line, never in a Summary or example summary) are allowed
+   and are kept.
 
 Edit only the description string of this one property. Do not reformat
 surrounding code and do not touch any other declaration.

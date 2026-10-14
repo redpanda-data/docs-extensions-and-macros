@@ -1204,7 +1204,11 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(prompt).toMatch(/CONNECT STRINGS/)
       expect(prompt).toContain('`text ` + "`code`" + ` text`')
       expect(prompt).toMatch(/Every xref names its module/)
-      expect(prompt).toMatch(/Never put ifdef::env-cloud\[\]/)
+      // env-cloud block conditionals are allowed in the form the conditional rule checks
+      expect(prompt).not.toMatch(/Never put ifdef::env-cloud\[\]/)
+      expect(prompt).toMatch(/An env-cloud block conditional is allowed/)
+      expect(prompt).toMatch(/nothing\s+after the \], not even spaces/)
+      expect(prompt).toMatch(/a conditional in a Summary or example summary/)
       expect(prompt).toMatch(/cloud_ai/)
       expect(prompt).toContain('`CGO_ENABLED=1 TAGS=x_benthos_extra task docs`')
     })
