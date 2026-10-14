@@ -340,3 +340,18 @@ describe('combined status markers in Markdown', () => {
     expect(formatStatusMarker([null, 'beta'])).toBe('(beta)')
   })
 })
+
+describe('generateFrontmatter page-introduced-in', () => {
+  const { generateFrontmatter } = require('../../extensions/convert-to-markdown')
+  const page = (attributes) => ({ asciidoc: { doctitle: 'sap_hana', attributes } })
+
+  test('includes the version a generated Connect page was introduced in', () => {
+    expect(generateFrontmatter(page({ 'page-introduced-in': '4.113.1' })))
+      .toContain('page-introduced-in: 4.113.1\n')
+  })
+
+  test('omits it when the page does not set it, as on Cloud pages', () => {
+    expect(generateFrontmatter(page({ description: 'Reads rows.' })))
+      .not.toContain('page-introduced-in')
+  })
+})

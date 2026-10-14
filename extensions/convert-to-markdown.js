@@ -70,6 +70,9 @@ function generateFrontmatter(page) {
     'page-eol-date',
     'page-git-created-date',
     'page-git-modified-date',
+    // Release that introduced the page's feature. Generated Connect reference
+    // pages set it on self-managed pages; the UI shows it as a "Since" badge.
+    'page-introduced-in',
     // Component-specific version attributes (from antora.yml)
     'latest-redpanda-tag', // Redpanda docker tag (e.g., v25.3.5)
     'latest-console-tag',
@@ -294,6 +297,7 @@ function createEnterpriseFeatureRules () {
 }
 
 module.exports.createEnterpriseFeatureRules = createEnterpriseFeatureRules
+module.exports.generateFrontmatter = generateFrontmatter
 module.exports.formatStatusMarker = formatStatusMarker
 module.exports.ENTERPRISE_MARKER = ENTERPRISE_MARKER
 
