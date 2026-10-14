@@ -677,11 +677,15 @@ function buildChangedDefaultsTable (changedDefaults, capFn) {
   section += '|Field |Old default |New default |Description |Affected components\n\n'
 
   for (const [, info] of Object.entries(byFieldAndDefaults)) {
+    // Values render as literal inline code, so interpolations like
+    // ${!uuid_v4()} and characters like * or _ show as typed.
     const formatDefault = (val) => {
       if (val === undefined || val === null) return 'none'
-      if (typeof val === 'string') return val
-      if (typeof val === 'number' || typeof val === 'boolean') return String(val)
-      return JSON.stringify(val)
+      let text
+      if (typeof val === 'string') text = val === '' ? '""' : val
+      else if (typeof val === 'number' || typeof val === 'boolean') text = String(val)
+      else text = JSON.stringify(val)
+      return `\`+${text.replace(/\|/g, '\\|')}+\``
     }
 
     const oldVal = formatDefault(info.oldDefault)

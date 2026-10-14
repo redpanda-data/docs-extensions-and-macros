@@ -1,5 +1,20 @@
 # Changelog
 
+## [5.54.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.53.0...v5.54.0) (2026-10-09)
+
+
+### Features
+
+* **connect-docs:** check the Connect docs build from connect PRs ([#361](https://github.com/redpanda-data/docs-extensions-and-macros/issues/361)) ([8ea62d7](https://github.com/redpanda-data/docs-extensions-and-macros/commit/8ea62d7287c87cd3e3b167cd8ffebd6f6f617f28))
+* **rpcn-docs:** download the Connect docs asset with the GitHub token when there is one ([#368](https://github.com/redpanda-data/docs-extensions-and-macros/issues/368)) ([fd0b193](https://github.com/redpanda-data/docs-extensions-and-macros/commit/fd0b19342ae3cc77b4f2d9e08b28a64be5bca616))
+* **rpcn-docs:** source connect reference docs from the release asset ([#358](https://github.com/redpanda-data/docs-extensions-and-macros/issues/358)) ([88e21d8](https://github.com/redpanda-data/docs-extensions-and-macros/commit/88e21d819e2b0842b585238e75adee67c9fe3b55))
+
+
+### Bug fixes
+
+* **connect-docs:** count generated files that replace committed copies as used ([#367](https://github.com/redpanda-data/docs-extensions-and-macros/issues/367)) ([c1d254a](https://github.com/redpanda-data/docs-extensions-and-macros/commit/c1d254a9743200cab95f9d92eb42fa52116f51bb))
+* **url-to-xref:** drop the new-window caret from converted link text ([#365](https://github.com/redpanda-data/docs-extensions-and-macros/issues/365)) ([cc5fa01](https://github.com/redpanda-data/docs-extensions-and-macros/commit/cc5fa01ed7b66dce2eec02a90836c21e52c40334))
+
 ## [5.53.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.52.0...v5.53.0) (2026-10-05)
 
 
