@@ -33,7 +33,9 @@ const STEP = 'Claude review with suggestions'
 
 // The model production callers run the review on. streaming-enterprise and
 // redpanda-operator both pass gateway_model: us.anthropic.claude-opus-5.
-const PRODUCTION_MODEL = 'opus'
+// Name the exact model, never the CLI alias: `opus` resolves to the newest
+// Opus the CLI knows, which stops being the one callers run.
+const PRODUCTION_MODEL = 'claude-opus-5'
 
 // The files the workflow's "Fetch the writing standard" step downloads from
 // docs-team-standards main at run time (unpinned, an existing exception; see

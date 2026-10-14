@@ -42,6 +42,7 @@ const os = require('os')
 const path = require('path')
 
 const lib = require('./lib')
+const { fingerprint } = require('../../tools/lint-strings')
 const prompts = require('./prompts')
 const production = require('./production')
 const { CASES } = require('./cases')
@@ -132,17 +133,25 @@ function runRewriteCase (spec, io) {
 
   // The workflow's --diff/--reviewed filtering leaves only the declarations a
   // push changed; this case's push changed exactly the target, so the report
-  // the review reads carries that one finding and its declaration.
+  // the review reads carries that one finding and its declaration. The
+  // workflow's lint marks both as in the diff and fingerprints them, and the
+  // prompt requires that fingerprint in each comment's footer, so the report
+  // carries it too. Without it a model either refuses to post or invents one.
+  const fp = fingerprint(finding)
   const lint = {
     ...lintBefore,
-    declarations: [{ surface: finding.surface, name: finding.name, file: finding.file, line_start: finding.line_start, line_end: finding.line_end, string: finding.string }],
-    findings: [finding],
+    declarations: [{ surface: finding.surface, name: finding.name, file: finding.file, line_start: finding.line_start, line_end: finding.line_end, string: finding.string, in_pr_diff: true, fingerprint: fp }],
+    findings: [{ ...finding, in_pr_diff: true, fingerprint: fp }],
     summary: { ...lintBefore.summary, totalDeclarations: 1, flaggedDeclarations: 1, removedDeclarations: [] }
   }
   const model = io.callProduction({ repo, lint, diff: null })
   if (model.failed) return modelCallFailed(checks, model)
   checkImpactFile(checks, model, false)
   checkBlockType(checks, model, io.committable)
+  // The workflow recovers reviewed strings from these footers on later
+  // pushes, matching fp=<16 hex digits>, so any other value re-reviews the
+  // string on every push.
+  checks.add('comment footer carries the finding\'s fingerprint', model.output.includes(`doc-strings-review:fp=${fp}`), `expected fp=${fp}`)
 
   // --- Execute the output ---
   const suggestions = lib.parseFences(model.output, 'suggestion')

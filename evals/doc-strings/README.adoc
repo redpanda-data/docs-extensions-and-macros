@@ -152,13 +152,15 @@ controls demonstrably fail on violating input.
 ----
 npm run eval:doc-strings                     # full suite (13 cases)
 node evals/doc-strings/run-evals.js --case metric-name-echo
-node evals/doc-strings/run-evals.js --model sonnet   # override the production model
+node evals/doc-strings/run-evals.js --model claude-sonnet-5   # override the production model
 node evals/doc-strings/run-evals.js --keep-temp   # keep fixture repos
 ----
 
-Without `--model`, review cases run on Opus (production) and the template
-cases on Sonnet. Pass `--model` only for a deliberate comparison: a result on
-any other model says nothing about what callers run.
+Without `--model`, review cases run on `claude-opus-5` (production) and the
+template cases on Sonnet. Pass `--model` only for a deliberate comparison: a
+result on any other model says nothing about what callers run. Name the model
+exactly. The `opus` and `sonnet` aliases resolve to the newest model the CLI
+knows, which is not necessarily the one a caller pins.
 
 Requirements:
 
@@ -182,6 +184,60 @@ prompts, the lint rules, or the extraction change.
 Each run writes `results/<timestamp>/<case>/` with the exact prompt, the raw
 model output, before/after fixture snapshots, and `evidence.json` (every
 mechanical check with its measured detail). `results/` is gitignored.
+
+== Model comparison
+
+Which model a caller passes as `gateway_model` is decided by these cases.
+Rerun the comparison when a new model is a candidate, and add the result as a
+new subsection rather than overwriting this one.
+
+=== 2026-10-14: Opus 5 and Sonnet 5
+
+All 13 cases, twice on `claude-opus-5` and twice on `claude-sonnet-5`, with
+committable suggestions on. The cases were those at commit `50911d28`, with
+the fingerprint fix described below. Both models ran at the same time, and 4
+model calls timed out under that load, two per model. Those cases were rerun
+on their own and passed, and they are counted that way.
+
+[cols="2,1,1"]
+|===
+| |Opus 5 |Sonnet 5
+
+|All cases, both runs |25 of 26 |24 of 26
+|Connect cases (3 cases) |5 of 6 |6 of 6
+|C++ suggestion runs within 80 columns |10 of 10 |8 of 10
+|Negative controls (3 cases) |6 of 6 |6 of 6
+|===
+
+The failures:
+
+* Sonnet 5 wrote a C++ suggestion line longer than 80 columns twice:
+  85 columns in `metric-name-echo`, and once in `prop-empty-description`.
+* Opus 5 failed `connect-short-description-markup` once. Asked to fix the
+  `ShortDescription`, it also rewrote the field's `Description`, which was not
+  in the change.
+
+An earlier run of the same comparison found a gap in this harness rather than
+in either model. The rewrite cases hand the review a `lint-findings.json`
+whose finding had no `fingerprint`, although the workflow's lint always
+supplies one and the prompt requires it in the comment footer. Sonnet 5
+refused to post without it, in 5 of its 12 runs of those cases. Opus 5
+posted anyway, with a footer it made up (such as `fp=metrics:start_offset`) in
+7 of its 12. On a real PR that footer fails the `fp=<16 hex digits>` match the
+workflow uses to skip strings it has reviewed, so the string is reviewed again
+on every push. The cases now carry the
+workflow's fingerprint, and a case fails unless the footer repeats it.
+
+Decision:
+
+* Connect runs the review on Sonnet 5. It passed every connect case, and
+  Go strings have no column limit.
+* streaming-enterprise stays on Opus 5. Its strings are C++, where Sonnet 5
+  broke the 80-column limit in 2 of 10 runs and the suggestion would fail
+  that repo's format check once committed. Holding Sonnet to the limit in
+  the prompt, then rerunning these cases, is what would change that.
+* No case here covers redpanda-operator's CRD and Helm strings, so this
+  comparison says nothing either way about its model.
 
 == Anatomy
 
