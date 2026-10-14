@@ -854,10 +854,12 @@ jobs:
           LINT_DIR="$RUNNER_TEMP/screenshot-lint"; mkdir -p "$LINT_DIR"
           OUT="$LINT_DIR/screenshot-lint.json"
           if [[ ! -d modules ]]; then
-            # Not an Antora content repo (docs-site, docs-team-standards): nothing
-            # to lint, and the pipeline's posture is that "nothing to check"
-            # is a pass, not a red X.
-            jq -n '{verdict:"pass", blocking:[], suggestions:["No modules/ directory in this repo — screenshot lint skipped"]}' > "$OUT"
+            # Not an Antora content repo (docs-site, docs-team-standards): the
+            # lint cannot run. Not a failure (a red X on every image PR in a
+            # docs-only repo), but not a clean pass either: `not_run` makes the
+            # aggregate show that this check did not run, in the table and
+            # outside the collapsed details, instead of a bare ✅.
+            jq -n '{verdict:"pass", blocking:[], suggestions:[], not_run:["Screenshot lint (doc-tools lint-screenshots): this repo has no root modules/ directory, so the size and alt-text checks did not run"]}' > "$OUT"
             exit 0
           fi
           gh pr diff "$PR" --repo "$R" --name-only > "$LINT_DIR/changed-files.txt"
@@ -971,7 +973,8 @@ jobs:
           jq -s '{
             verdict: (if (.[0].verdict=="fail" or .[1].verdict=="fail") then "fail" else "pass" end),
             blocking: ((.[0].blocking // []) + (.[1].blocking // [])),
-            suggestions: ((.[0].suggestions // []) + (.[1].suggestions // []))
+            suggestions: ((.[0].suggestions // []) + (.[1].suggestions // [])),
+            not_run: ((.[0].not_run // []) + (.[1].not_run // []))
           }' "$LINT" "$VISION" > "$FINAL"
           echo "merged the deterministic lint with the vision verdict"
 

@@ -533,6 +533,8 @@ runs:
         CLAUDE_CODE_SKIP_BEDROCK_AUTH: '1'
         ANTHROPIC_BEDROCK_BASE_URL: ${{ inputs.adp_gateway_base_url }}
         ANTHROPIC_MODEL: ${{ inputs.gateway_model }}
+        ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ inputs.gateway_model }}
+        ANTHROPIC_DEFAULT_OPUS_MODEL: ${{ inputs.gateway_model }}
         ANTHROPIC_DEFAULT_HAIKU_MODEL: 'us.anthropic.claude-haiku-4-5-20251001-v1:0'
         AWS_REGION: us-west-2
       run: |
@@ -594,8 +596,16 @@ runs:
         CLAUDE_CODE_SKIP_BEDROCK_AUTH: '1'
         ANTHROPIC_BEDROCK_BASE_URL: ${{ inputs.adp_gateway_base_url }}
         ANTHROPIC_MODEL: ${{ inputs.gateway_model }}
-        # Background tasks go to Haiku instead of inheriting the primary
-        # model. Must be in the provider allowlist.
+        # Model aliases. The plugin's agents declare `model: sonnet`
+        # (content-reviewer, which pr-review delegates to, among them), and
+        # an unmapped alias resolves to the CLI's built-in Bedrock id, which
+        # the gateway rejects with a 403 (seen on #2967: the content-reviewer
+        # launch failed until the model retried with an explicit override).
+        # Map sonnet and opus to the primary model, which is on the
+        # allowlist. Background tasks go to Haiku instead of inheriting the
+        # primary model. All three must be in the provider allowlist.
+        ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ inputs.gateway_model }}
+        ANTHROPIC_DEFAULT_OPUS_MODEL: ${{ inputs.gateway_model }}
         ANTHROPIC_DEFAULT_HAIKU_MODEL: 'us.anthropic.claude-haiku-4-5-20251001-v1:0'
         # Required by the env validator in Bedrock mode only; ignored once
         # ANTHROPIC_BEDROCK_BASE_URL is set.
