@@ -472,7 +472,7 @@ module.exports.register = function ({ config }) {
     if (r.kept + r.outsideGenerated + r.providedElsewhere + r.otherComponents === 0) return
     logger.info(
       `Redpanda Connect content: kept ${r.kept} generated files; skipped ${r.providedElsewhere} already provided by another source, ` +
-      `${r.outsideGenerated} outside the generated partials and examples, and ${r.otherComponents} from other components`
+      `${r.outsideGenerated} outside the generated partials, examples, and attachments, and ${r.otherComponents} from other components`
     )
   })
 
@@ -548,7 +548,7 @@ module.exports.register = function ({ config }) {
       (localDir
         ? `replaced ${r.replaced} provided by another source; skipped ${r.outsideGenerated}`
         : `skipped ${r.providedElsewhere} already provided by another source and ${r.outsideGenerated}`) +
-      ' outside the generated partials and examples'
+      ' outside the generated partials, examples, and attachments'
     )
     // Resolve only included files supplied by this asset. Retained copies
     // from another source keep their git dates, even if the asset differs.

@@ -3,6 +3,7 @@ const path = require('path');
 const {
   generateReleaseNotes,
   buildReleaseSection,
+  clusterSectionByArea,
   assertSectionMatchesTag,
   insertReleaseSection,
   compareVersions,
@@ -122,6 +123,148 @@ describe('insertReleaseSection', () => {
   });
 });
 
+describe('clusterSectionByArea', () => {
+  const scattered = [
+    '== v26.2.9 (2026-11-01)', '',
+    '=== Bug fixes', '',
+    'Security:: Alpha.', '',
+    'Kafka API:: Beta.', '',
+    'Security:: Gamma.', '',
+    'Cloud Topics:: Delta.', '',
+    'Kafka API:: Epsilon.', '',
+    '=== Improvements', '',
+    'rpk:: Zeta.', '',
+    'Security:: Theta.', '',
+  ].join('\n');
+
+  const clustered = [
+    '== v26.2.9 (2026-11-01)', '',
+    '=== Bug fixes', '',
+    'Cloud Topics:: Delta.', '',
+    'Kafka API:: Beta.', '',
+    'Kafka API:: Epsilon.', '',
+    'Security:: Alpha.', '',
+    'Security:: Gamma.', '',
+    '=== Improvements', '',
+    'rpk:: Zeta.', '',
+    'Security:: Theta.', '',
+  ].join('\n');
+
+  it('clusters same-area entries alphabetically by area, stable within an area', () => {
+    expect(clusterSectionByArea(scattered)).toBe(clustered);
+  });
+
+  it('is idempotent: clustering a clustered section changes nothing', () => {
+    expect(clusterSectionByArea(clustered)).toBe(clustered);
+  });
+
+  it('does not move entries across a category boundary', () => {
+    // The Bug fixes "Security" entries do not absorb the Improvements "Security".
+    const out = clusterSectionByArea(scattered);
+    expect(out.indexOf('Security:: Theta.')).toBeGreaterThan(out.indexOf('=== Improvements'));
+  });
+
+  it('leaves a category of plain bullets (a phase-1 candidate) untouched', () => {
+    const bullets = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Features', '',
+      '* First.', '',
+      '* Second.', '',
+    ].join('\n');
+    expect(clusterSectionByArea(bullets)).toBe(bullets);
+  });
+
+  it('bails on a category that mixes an Area:: entry with a non-labeled one', () => {
+    const mixed = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Bug fixes', '',
+      'Security:: One.', '',
+      '* Unlabeled.', '',
+      'Security:: Two.', '',
+    ].join('\n');
+    // Order preserved (no reorder), so the unlabeled entry stays between them.
+    expect(clusterSectionByArea(mixed)).toBe(mixed);
+  });
+
+  it('bails on bullet-form entries that carry a :: (a leading list marker is not an area)', () => {
+    // A plain `*` bullet that happens to contain `::` must not be mistaken for
+    // an area entry and reordered — the whole bullet list is left untouched.
+    const bulletsWithColons = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Bug fixes', '',
+      '* Security:: First.', '',
+      '* Kafka API:: Beta.', '',
+      '* Security:: Gamma.', '',
+    ].join('\n');
+    expect(clusterSectionByArea(bulletsWithColons)).toBe(bulletsWithColons);
+  });
+
+  it('bails on indented bullet entries carrying a :: (the marker may be indented)', () => {
+    // A leading list marker is rejected whether at column zero or indented, so
+    // an indented bullet list carrying `::` is left untouched too.
+    const indentedBullets = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Bug fixes', '',
+      '  * Security:: First.', '',
+      '  * Kafka API:: Beta.', '',
+      '  * Security:: Gamma.', '',
+    ].join('\n');
+    expect(clusterSectionByArea(indentedBullets)).toBe(indentedBullets);
+  });
+
+  it('trims the area key, so a stray space before :: does not split one area', () => {
+    const spaced = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Bug fixes', '',
+      'Kafka API:: One.', '',
+      'Security:: Two.', '',
+      'Kafka API :: Three.', '',
+    ].join('\n');
+    const expected = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Bug fixes', '',
+      'Kafka API:: One.', '',
+      'Kafka API :: Three.', '', // grouped with Kafka API; text left verbatim
+      'Security:: Two.', '',
+    ].join('\n');
+    expect(clusterSectionByArea(spaced)).toBe(expected);
+  });
+
+  describe('bail warning', () => {
+    let warn;
+    beforeEach(() => { warn = jest.spyOn(console, 'warn').mockImplementation(() => {}); });
+    afterEach(() => { warn.mockRestore(); });
+
+    it('warns, naming the category, when a curated category bails', () => {
+      const multiLine = [
+        '== v26.2.9 (2026-11-01)', '',
+        '=== Bug fixes', '',
+        'Security:: One.', '',
+        'Kafka API:: Two,\n+\ncontinued.', '',
+      ].join('\n');
+      expect(clusterSectionByArea(multiLine)).toBe(multiLine); // left unclustered
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toMatch(/\[release-notes\] WARN: "Bug fixes" not grouped by area/);
+    });
+
+    it('stays silent when a phase-1 bullet category bails', () => {
+      const bullets = [
+        '== v26.2.9 (2026-11-01)', '',
+        '=== Features', '',
+        '* First.', '',
+        '* Second.', '',
+      ].join('\n');
+      clusterSectionByArea(bullets);
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('stays silent when a curated category clusters normally', () => {
+      clusterSectionByArea('== v26.2.9 (2026-11-01)\n\n=== Bug fixes\n\nSecurity:: A.\n\nKafka API:: B.\n');
+      expect(warn).not.toHaveBeenCalled();
+    });
+  });
+});
+
 describe('assertSectionMatchesTag (finding 1)', () => {
   it('accepts a section whose single heading matches the tag', () => {
     expect(() => assertSectionMatchesTag('== v26.2.3 (2026-09-15)\n\n=== Features\n\n* X.\n', '26.2.3')).not.toThrow();
@@ -197,12 +340,17 @@ describe('generateReleaseNotes (real fixture, newer tag)', () => {
 //   '__tests__/fixtures/release-notes/expected/'+t+'-candidate.adoc',\
 //   buildReleaseSection({body:fs.readFileSync('__tests__/fixtures/release-notes/'+t+'-streaming-enterprise.md','utf8'),version:t,date:d}))"
 describe('generateReleaseNotes phase 2 (insert a curated section)', () => {
-  it('inserts a pre-curated section verbatim, newest-first, under the guards', () => {
+  it('inserts the curated section newest-first, clustering its entries by area', () => {
     const res = generateReleaseNotes({ section: CURATED_V2623, tag: 'v26.2.3', pageContent: page() });
     expect(res.status).toBe('ok');
-    expect(res.section).toBe(CURATED_V2623); // used as-is, not rebuilt from a body
+    // Curated labels are kept (proves it used the curated section, not rebuilt
+    // from a body — a rebuild would carry no Area:: labels).
     expect(res.content).toContain('Cluster:: Reconnection logic is hardened');
     expect(res.content.indexOf('== v26.2.3')).toBeLessThan(res.content.indexOf('== v26.2.2'));
+    // The scattered fixture is clustered on the way in: the order changed, and
+    // the result is itself cluster-stable.
+    expect(res.section).not.toBe(CURATED_V2623);
+    expect(clusterSectionByArea(res.section)).toBe(res.section);
   });
 
   it('applies the floor guard on the section path too', () => {
