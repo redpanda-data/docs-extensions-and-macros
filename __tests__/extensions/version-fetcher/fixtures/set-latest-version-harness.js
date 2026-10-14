@@ -15,7 +15,9 @@
 // The component has one version (26.2) unless the scenario lists `versions`,
 // in which case `latestVersion` names the component's latest. Set
 // `helmChartByTag` to answer the Helm chart lookup per operator tag; a tag
-// missing from it resolves to no chart version.
+// missing from it resolves to no chart version. Set `attributesForVersion`
+// to give one version its own antora.yml attributes, on top of
+// `versionAttributes`.
 
 const path = require('path');
 
@@ -93,7 +95,7 @@ const latestVersion = config.versions ? config.latestVersion : '26.2';
 const versionEntries = versionNames.map((version) => ({
   name: 'ROOT',
   version,
-  asciidoc: { attributes: { ...config.versionAttributes } },
+  asciidoc: { attributes: { ...config.versionAttributes, ...(config.attributesForVersion || {})[String(version)] } },
 }));
 const versionEntry = versionEntries[0];
 const component = {

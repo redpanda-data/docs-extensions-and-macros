@@ -518,9 +518,11 @@ An operator or Helm chart release supports its own Redpanda version and one mino
 
 * A component version named `<major>.<minor>` that is older than the component's latest version gets the newest stable release in that line. For example, version `25.3` gets the newest `v25.3.x` operator and the newest `25.3.x` chart, even when a `26.2.x` release exists.
 * The component's latest version, any prerelease version ahead of it, and unversioned components get the newest stable release overall.
-* If an older line has no stable operator release (for example, lines that shipped only legacy `v2.x.y-<redpanda-version>` operator tags), both attributes fall back to the newest release overall. If the line has an operator release but its `release/v<major>.<minor>.x` branch has no chart, only the chart attribute falls back. Either way, the build logs a warning that names the line.
+* If an older line has no stable operator release (for example, lines that shipped only legacy `v2.x.y-<redpanda-version>` operator tags), the newest release does not support it, so both attributes keep the values the component version's `antora.yml` sets. If the line has an operator release but no chart release, only the chart attribute keeps its `antora.yml` value. An attribute that `antora.yml` leaves unset or empty falls back to the newest release overall. Either way, the build logs a warning that names the line.
 
-The release lines come from the fetched operator tags, so no version map needs updating when a line ships. The extension reads up to three pages (300 tags) of the operator's Docker Hub tags, newest pushes first, and reads one chart file per older line from that line's release branch.
+The release lines come from the fetched operator tags, so no version map needs updating when a line ships. The extension reads up to three pages (300 tags) of the operator's Docker Hub tags, newest pushes first.
+
+The chart version of a line is the newest stable `charts/redpanda/v<major>.<minor>.*` tag in the redpanda-operator repository, which marks a published chart (what `helm search repo` reports). A release branch's `Chart.yaml` can be ahead of the published chart, so the extension reads it only when the line has no chart tag, trying each path the chart has used in order: `charts/redpanda/chart/Chart.yaml`, then `charts/redpanda/Chart.yaml` (the layout of `release/v25.1.x`).
 
 ==== Seed a fallback in antora.yml
 

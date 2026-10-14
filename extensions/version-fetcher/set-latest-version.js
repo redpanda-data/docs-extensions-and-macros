@@ -57,8 +57,12 @@ module.exports.register = function ({ config }) {
         GetLatestRedpandaVersion(github, owner, 'streaming-enterprise', logger),
         GetLatestDockerTag(dockerNamespace, 'console', logger),
         // Three pages (300 tags) so older docs versions can still find the
-        // newest patch of their own operator line. Supported lines are all
-        // on the first page, because Docker Hub lists recent pushes first.
+        // newest patch of their own operator line. Docker Hub lists recent
+        // pushes first, so the first page holds every line that still gets
+        // patches. Today the second and third pages add only legacy lines
+        // (2.x, 22.3, 23.x) that no built docs version pins to. They are
+        // headroom for a line that stops getting patches and drops off the
+        // first page as newer tags are pushed.
         GetLatestDockerTag(dockerNamespace, 'redpanda-operator', logger, { maxPages: 3 }),
         GetLatestConnectVersion(github, owner, 'connect', logger),
       ]);
@@ -138,22 +142,33 @@ module.exports.register = function ({ config }) {
 
           // Older docs versions get the newest operator and chart release of
           // their own line. The latest version, prereleases, and unversioned
-          // components get the newest release overall, and so does an older
-          // version whose line has no release to pin to.
+          // components get the newest release overall. When an older line has
+          // no release to pin to, the newest release would not support it, so
+          // the version keeps the value its antora.yml sets, and gets the
+          // newest release only when antora.yml sets nothing.
           let operatorVersion = latestVersions.operator?.latestStableRelease;
           let helmChartVersion = latestVersions.helmChart?.latestStableRelease;
           if (isOlderReleaseLine(version, component.latest?.version)) {
             const line = releaseLineOf(version);
             const resolved = lineVersions.get(line) || {};
-            if (!resolved.operator) {
-              logger.warn(`No stable Redpanda Operator release found for the ${line} line, so ${name} ${version} uses the newest operator and Helm chart releases (${operatorVersion || 'unknown'}, ${helmChartVersion || 'unknown'}).`);
-            } else {
-              operatorVersion = resolved.operator;
-              if (resolved.helmChart) {
-                helmChartVersion = resolved.helmChart;
-              } else {
-                logger.warn(`No Redpanda Helm chart release found for the ${line} line, so ${name} ${version} uses operator ${operatorVersion} with the newest Helm chart release (${helmChartVersion || 'unknown'}).`);
+            const keepOrNewest = (key, newest, what) => {
+              const own = asciidoc.attributes[key];
+              if (own) {
+                logger.warn(`No ${what} release found for the ${line} line, so ${name} ${version} keeps ${key} from its antora.yml (${own}).`);
+                return own;
               }
+              logger.warn(`No ${what} release found for the ${line} line and its antora.yml sets no ${key}, so ${name} ${version} uses the newest release (${newest || 'unknown'}).`);
+              return newest;
+            };
+            if (resolved.operator) {
+              operatorVersion = resolved.operator;
+            } else {
+              operatorVersion = keepOrNewest('latest-operator-version', operatorVersion, 'stable Redpanda Operator');
+            }
+            if (resolved.helmChart) {
+              helmChartVersion = resolved.helmChart;
+            } else {
+              helmChartVersion = keepOrNewest('latest-redpanda-helm-chart-version', helmChartVersion, 'Redpanda Helm chart');
             }
           }
 
@@ -243,7 +258,7 @@ module.exports.register = function ({ config }) {
         logger.info(`- ${label}: ${stableVersion || 'unknown'}${betaVersion ? ', beta: ' + betaVersion : ''}`);
       });
       [...lineVersions].sort(([a], [b]) => semver.rcompare(`${a}.0`, `${b}.0`)).forEach(([line, resolved]) => {
-        logger.info(`- ${line} docs: operator ${resolved.operator || 'newest (no release in line)'}, Helm chart ${resolved.helmChart || 'newest (no release in line)'}`);
+        logger.info(`- ${line} docs: operator ${resolved.operator || 'antora.yml value (no release in line)'}, Helm chart ${resolved.helmChart || 'antora.yml value (no release in line)'}`);
       });
     } catch (error) {
       logger.error(`Error updating versions: ${error}`);
