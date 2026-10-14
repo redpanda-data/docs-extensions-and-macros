@@ -195,7 +195,7 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
           component: cKey,
           field: fName,
           description: newFieldObj && newFieldObj.description,
-            shortDescription: newFieldObj && newFieldObj.short_description
+          shortDescription: newFieldObj && newFieldObj.short_description
         });
       }
 

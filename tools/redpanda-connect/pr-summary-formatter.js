@@ -360,7 +360,8 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
       lines.push(`**Deprecated Fields (${summary.deprecatedFields}):**`);
       lines.push('');
       deprecatedFields.forEach(field => {
-        const guidance = field.description ? ` — ${truncateToSentence(field.description, 1)}` : '';
+        const text = field.shortDescription || field.description;
+        const guidance = text ? ` — ${truncateToSentence(text, 1)}` : '';
         lines.push(`- \`${field.component}.${field.field}\`${guidance}`);
       });
       lines.push('');

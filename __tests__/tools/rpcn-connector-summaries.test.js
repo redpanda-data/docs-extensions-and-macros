@@ -66,7 +66,37 @@ describe('capToTwoSentences - xref and filename protection', () => {
   })
 
   test('stops at a list that follows without a blank line', () => {
-    expect(capToTwoSentences('Accepts one of:\n- `a`: first.\n- `b`: second.')).toBe('Accepts one of.')
+    expect(capToTwoSentences('Sets the compression codec:\n- `gzip`: smaller files.\n- `none`: no compression.')).toBe('Sets the compression codec.')
+  })
+
+  test('drops a colon lead-in that follows a complete sentence', () => {
+    // connect 4.113.0 shared tcp block (46 fields, for example
+    // caches/aws_dynamodb tcp): keeping the lead-in as a second sentence gave
+    // "These low-level controls are useful for."
+    const description = 'Configure TCP socket-level settings to optimize network performance and reliability. These low-level controls are useful for:\n\n- **Unresponsive hosts**: Set `connect_timeout` to limit how long a connection attempt can take (the default `0s` sets no limit)\n- **Long-lived connections**: Configure `keep_alive` settings to detect and recover from stale connections\n- **Unstable networks**: Tune keep-alive probes to balance between quick failure detection and avoiding false positives\n- **Linux systems with specific requirements**: Use `tcp_user_timeout` (Linux 2.6.37+) to control data acknowledgment timeouts\n\nMost users should keep the default values. Only modify these settings if you\'re experiencing connection stability issues or have specific network requirements.'
+
+    expect(capToTwoSentences(description)).toBe('Configure TCP socket-level settings to optimize network performance and reliability.')
+  })
+
+  test('drops a colon lead-in that follows two complete sentences', () => {
+    expect(capToTwoSentences('One. Two. You might use this option to:\n\n- a.\n- b.')).toBe('One. Two.')
+  })
+
+  test('never ends on a tail left by a mid-token period', () => {
+    // connect 4.113.0 inputs/kafka_franz fetch_max_partition_bytes: the
+    // dotted Java setting name split the second sentence, which came out as
+    // "bytes`." on its own.
+    const description = 'The maximum number of bytes that are consumed from a single partition in a fetch request. This field is equivalent to the Java setting `fetch.max.partition.bytes`.\n\nIf a single batch is larger than the `fetch_max_partition_bytes` value, the batch is still sent so that the client can make progress.'
+
+    expect(capToTwoSentences(description)).toBe('The maximum number of bytes that are consumed from a single partition in a fetch request.')
+  })
+
+  test('keeps a second sentence that contains a mid-token period', () => {
+    // connect 4.113.0 tcp.tcp_user_timeout: main gave "...the connection. 37+), ignored on other platforms."
+    const description = 'Maximum time to wait for acknowledgment of transmitted data before killing the connection. Linux-only (kernel 2.6.37+), ignored on other platforms. When enabled, keep_alive.idle must be greater than this value per RFC 5482. Zero disables.'
+
+    expect(capToTwoSentences(description))
+      .toBe('Maximum time to wait for acknowledgment of transmitted data before killing the connection. Linux-only (kernel 2.6.37+), ignored on other platforms.')
   })
 
   test('keeps two sentences of a first paragraph and drops the next paragraph', () => {
