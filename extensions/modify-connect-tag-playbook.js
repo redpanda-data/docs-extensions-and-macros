@@ -75,7 +75,16 @@ const LOCAL_DIR_ENV = 'REDPANDA_CONNECT_DOCS_DIR'
 // the probe fallback tries, when the latest release has no asset yet.
 const FALLBACK_RELEASE_LIMIT = 10
 const FALLBACK_PROBE_LIMIT = 3
+// Dating pages by release (only when add-git-dates is in the playbook): the
+// page size of the releases listing, the first release that has the asset
+// (no older release can be compared), and the most older releases the walk
+// downloads per build.
 const DATE_RELEASE_PAGE_SIZE = 100
+const FIRST_ASSET_RELEASE = 'v4.113.0'
+const DATE_RELEASE_LIMIT = 10
+// How deep the walk follows includes inside the asset's own partials, such as
+// bloblang/methods.adoc including every bloblang-methods/* partial.
+const NESTED_INCLUDE_DEPTH = 3
 
 // HTTPS, SSH (ssh://), and scp-style (git@host:owner/repo) URLs are all
 // remote content sources in Antora.
@@ -310,23 +319,37 @@ function changedReferenceKeys (files, previousFiles) {
 
 // Includes of the connect components module in a page: `partial$x` and
 // `example$x` keys. In the connect component's own components module the
-// module may be implicit; elsewhere only fully qualified includes count.
+// module may be implicit; elsewhere only fully qualified includes count. With
+// a content catalog, only files this asset added count, and includes inside
+// those files are followed too (up to NESTED_INCLUDE_DEPTH levels), so a page
+// that includes an aggregate partial is dated by the partials it pulls in.
 const INCLUDE_RX = /^include::([^[\s]+)\[/gm
+function includeKey (target, src) {
+  const own = src.component === COMPONENT && src.module === asset.MODULE
+  const q = target.match(/^connect:components:((?:partial|example)\$.+)$/) ||
+    (own ? target.match(/^(?:components:)?((?:partial|example)\$.+)$/) : null)
+  return q ? q[1] : null
+}
 function connectIncludes (page, contentCatalog, origin) {
-  const own = page.src.component === COMPONENT && page.src.module === asset.MODULE
   const keys = []
-  for (const m of page.contents.toString('utf8').matchAll(INCLUDE_RX)) {
-    const target = m[1]
-    const q = target.match(/^connect:components:((?:partial|example)\$.+)$/) ||
-      (own ? target.match(/^(?:components:)?((?:partial|example)\$.+)$/) : null)
-    if (!q) continue
-    if (contentCatalog) {
-      const file = contentCatalog.resolveResource(target, page.src)
+  const seen = new Set()
+  const visit = (file, depth) => {
+    for (const m of file.contents.toString('utf8').matchAll(INCLUDE_RX)) {
+      const key = includeKey(m[1], file.src)
+      if (!key) continue
+      if (!contentCatalog) {
+        keys.push(key)
+        continue
+      }
+      const included = contentCatalog.resolveResource(m[1], file.src)
       // Only files inserted from this asset can acquire a release date.
-      if (!file || file.src.origin !== origin) continue
+      if (!included || included.src.origin !== origin || seen.has(included)) continue
+      seen.add(included)
+      keys.push(key)
+      if (depth < NESTED_INCLUDE_DEPTH) visit(included, depth + 1)
     }
-    keys.push(q[1])
   }
+  visit(page, 1)
   return keys
 }
 
@@ -355,14 +378,19 @@ function markReferenceChanges (contentCatalog, dates, origin) {
   return marked.size
 }
 
-// Reconstruct each included reference's last change on every build, even when
-// the selected release leaves it unchanged. Paginate beyond the short listing
-// used for asset fallback, and walk older assets until every key is dated.
-// The oldest available asset is a baseline; without a comparison its change
-// date is unknown, so those references keep their git dates.
+// The date of the newest release that changed each of `keys`, as a Map of
+// key to YYYY-MM-DD. It compares the release with older releases that have
+// the asset, newest first, so a file left unchanged by the current release
+// keeps the date of the release that last changed it. Bounded so the cost
+// does not grow with every connect release: the listing stops paging at the
+// first release older than FIRST_ASSET_RELEASE, and the walk downloads at
+// most DATE_RELEASE_LIMIT older releases. A file still unchanged at the end
+// of the walk gets no date. A failed listing, download, or read only costs
+// dates: it logs a warning, and every file not dated yet keeps its git date.
 async function referenceReleaseDates (tag, files, keys, logger) {
   const dates = new Map()
   if (!keys.size) return dates
+  const floor = stableVersion(FIRST_ASSET_RELEASE)
   const releases = []
   try {
     const github = await createGitHub()
@@ -370,9 +398,12 @@ async function referenceReleaseDates (tag, files, keys, logger) {
       const batch = await listConnectReleases(github, OWNER, REPO, DATE_RELEASE_PAGE_SIZE, page)
       releases.push(...batch)
       if (batch.length < DATE_RELEASE_PAGE_SIZE) break
+      // Newest first: past the first release older than the asset, no
+      // release can have it.
+      if (batch.some((r) => r && stableVersion(r.tag_name) && compareVersions(stableVersion(r.tag_name), floor) < 0)) break
     }
   } catch (error) {
-    logger.info(`Couldn't list Redpanda Connect releases (${error.message}), so pages keep their git modified dates`)
+    logger.warn(`Couldn't list Redpanda Connect releases (${error.message}), so Connect pages keep their git modified dates`)
     return dates
   }
   let newer = releases.find((r) => r && r.tag_name === tag)
@@ -380,13 +411,23 @@ async function referenceReleaseDates (tag, files, keys, logger) {
   const latest = stableVersion(tag)
   const older = releases
     .filter((r) => r && !r.draft && !r.prerelease && stableVersion(r.tag_name) && latest && compareVersions(stableVersion(r.tag_name), latest) < 0)
+    .filter((r) => compareVersions(stableVersion(r.tag_name), floor) >= 0)
     .filter((r) => (r.assets || []).some((a) => a && a.name === asset.ASSET_NAME))
     .sort((a, b) => compareVersions(stableVersion(b.tag_name), stableVersion(a.tag_name)))
+    .slice(0, DATE_RELEASE_LIMIT)
   const pending = new Set(keys)
   for (const release of older) {
-    const archive = await downloadRelease(release.tag_name, logger)
-    if (!archive) continue
-    const previousFiles = await asset.readTarGz(archive)
+    let previousFiles
+    try {
+      const archive = await downloadRelease(release.tag_name, logger)
+      if (!archive) throw new Error(`the release lists a ${asset.ASSET_NAME} asset but its download returns 404`)
+      previousFiles = await asset.readTarGz(archive)
+    } catch (error) {
+      // Skipping the release would credit its changes to the newer release,
+      // so stop here: dates found so far are exact, the rest keep git dates.
+      logger.warn(`Couldn't read the Redpanda Connect ${release.tag_name} reference docs to date pages (${error.message}), so ${pending.size} generated files keep their pages' git modified dates`)
+      break
+    }
     const changed = changedReferenceKeys(files, previousFiles)
     for (const key of pending) {
       if (!changed.has(key)) continue
@@ -398,6 +439,16 @@ async function referenceReleaseDates (tag, files, keys, logger) {
     newer = release
   }
   return dates
+}
+
+// True when the playbook registers add-git-dates, the only reader of the
+// release dates. Without it, the dating step is skipped.
+function usesGitDates (playbook) {
+  const extensions = (playbook && playbook.antora && playbook.antora.extensions) || []
+  return [].concat(extensions).some((ext) => {
+    const id = typeof ext === 'string' ? ext : ext && ext.enabled !== false ? ext.require || ext.id : null
+    return /(^|[/\\])add-git-dates(\.js)?$/.test(String(id || ''))
+  })
 }
 
 // Adds the generated files to every version of the connect component.
@@ -448,6 +499,8 @@ module.exports.register = function ({ config }) {
   // Set in contextStarted: true when the playbook still lists a connect
   // content source with explicit refs.
   let gitSourceMode = false
+  // Set in contextStarted: true when add-git-dates is in the playbook.
+  let dateReferencePages = false
 
   this.on('contextStarted', ({ playbook }) => {
     // Clear a ref left over from an earlier build in the same process.
@@ -461,6 +514,7 @@ module.exports.register = function ({ config }) {
       )
     }
     gitSourceMode = hasConnectSource(playbook)
+    dateReferencePages = usesGitDates(playbook)
     if (gitSourceMode && (process.env[LOCAL_DIR_ENV] || '').trim()) {
       logger.warn(`${LOCAL_DIR_ENV} is ignored because the playbook lists the connect repo as a content source`)
     }
@@ -552,7 +606,7 @@ module.exports.register = function ({ config }) {
     )
     // Resolve only included files supplied by this asset. Retained copies
     // from another source keep their git dates, even if the asset differs.
-    if (!localDir) {
+    if (!localDir && dateReferencePages) {
       const keys = new Set(contentCatalog.getPages().flatMap((page) => connectIncludes(page, contentCatalog, origin)))
       const dates = await referenceReleaseDates(origin.tag, files, keys, logger)
       const count = markReferenceChanges(contentCatalog, dates, origin)
@@ -561,4 +615,4 @@ module.exports.register = function ({ config }) {
   })
 }
 
-module.exports._internal = { isRemote, isUpstreamConnect, redact, isConnectSource, isConnectOrigin, toTag, highestStableTag, stableTags, findOlderReleaseWithAsset, resolveLatestTag, FALLBACK_RELEASE_LIMIT, FALLBACK_PROBE_LIMIT, wantsLatest, removeLatestConnectSources, filterConnectContent, hasConnectSource, addConnectDocs, LOCAL_DIR_ENV, changedReferenceKeys, connectIncludes, markReferenceChanges }
+module.exports._internal = { isRemote, isUpstreamConnect, redact, isConnectSource, isConnectOrigin, toTag, highestStableTag, stableTags, findOlderReleaseWithAsset, resolveLatestTag, FALLBACK_RELEASE_LIMIT, FALLBACK_PROBE_LIMIT, wantsLatest, removeLatestConnectSources, filterConnectContent, hasConnectSource, addConnectDocs, LOCAL_DIR_ENV, changedReferenceKeys, connectIncludes, markReferenceChanges, usesGitDates, FIRST_ASSET_RELEASE, DATE_RELEASE_LIMIT }

@@ -119,12 +119,12 @@ const LOCAL_TREE = {
 // Registers both extensions and runs a build up to contentClassified.
 // generate-rp-connect-info is registered first, which is the wrong order in a
 // playbook, to show the asset files still arrive before its guard.
-async function build ({ sources = [{ url: DOCS_URL, branches: 'main' }], config = {}, catalog = makeCatalog(), infoFirst = true } = {}) {
+async function build ({ sources = [{ url: DOCS_URL, branches: 'main' }], config = {}, catalog = makeCatalog(), infoFirst = true, extensions = [] } = {}) {
   const ctx = new Context()
   const registerInfo = () => infoExt.register.call(ctx, { config: {} })
   const registerTag = () => tagExt.register.call(ctx, { config })
   if (infoFirst) { registerInfo(); registerTag() } else { registerTag(); registerInfo() }
-  const playbook = { content: { sources } }
+  const playbook = { antora: { extensions }, content: { sources } }
   await ctx.notify('contextStarted', { playbook })
   await ctx.notify('contentAggregated', { playbook, contentAggregate: [] })
   let error = null
@@ -234,13 +234,15 @@ describe('connect-docs-asset tar reader', () => {
 })
 
 describe('modify-connect-tag-playbook release dates for changed reference', () => {
-  // v4.113.0 changes the kafka fields partial and nothing else since v4.112.0.
+  // Dating only runs when the playbook registers add-git-dates.
+  const GIT_DATES = ['@redpanda-data/docs-extensions-and-macros/extensions/add-git-dates']
+  // v4.116.0 changes the kafka fields partial and nothing else since v4.115.0.
   async function datedBuild ({ releases, extraFiles = [] }) {
     const prevDir = path.join(tmp, 'prev')
     fs.mkdirSync(prevDir)
     writeTree(prevDir, { ...TREE, 'modules/components/partials/fields/inputs/kafka.adoc': '// older fields of kafka' })
     const prev = makeTarGz(prevDir)
-    global.fetch = jest.fn(async (url) => response(200, String(url).includes('/v4.112.0/') ? prev : archive))
+    global.fetch = jest.fn(async (url) => response(200, String(url).includes('/v4.115.0/') ? prev : archive))
     listConnectReleases.mockResolvedValue(releases)
     const catalog = makeCatalog(extraFiles)
     const origin = { type: 'git', url: 'https://github.com/redpanda-data/cloud-docs', reftype: 'branch', refname: 'main', branch: 'main' }
@@ -249,7 +251,7 @@ describe('modify-connect-tag-playbook release dates for changed reference', () =
     addPage('cloud-data-platform', 'develop', 'connect/components/inputs/kafka.adoc', '= kafka\ninclude::connect:components:inputs/kafka.adoc[tag=single-source]\n')
     addPage('cloud-data-platform', 'develop', 'connect/components/inputs/other.adoc', '= other\ninclude::connect:components:inputs/other.adoc[tag=single-source]\n')
     addPage('connect', 'components', 'inputs/unchanged.adoc', '= unchanged\ninclude::connect:components:partial$descriptions/inputs/kafka.adoc[tag=meta]\n')
-    const { error, logs } = await build({ catalog })
+    const { error, logs } = await build({ catalog, config: { tag: 'v4.116.0' }, extensions: GIT_DATES })
     expect(error).toBeNull()
     const page = (component, module, relative) => catalog.getById({ component, version: '', module, family: 'page', relative })
     return { logs, page }
@@ -257,13 +259,13 @@ describe('modify-connect-tag-playbook release dates for changed reference', () =
   const release = (tag, date) => ({ tag_name: tag, published_at: date, draft: false, prerelease: false, assets: [{ name: 'redpanda-connect-docs.tar.gz' }] })
 
   it('gives pages that include a changed partial, and stubs that single-source them, the release date', async () => {
-    const { page, logs } = await datedBuild({ releases: [release('v4.113.0', '2026-10-09T10:42:05Z'), release('v4.112.0', '2026-10-02T08:00:00Z')] })
+    const { page, logs } = await datedBuild({ releases: [release('v4.116.0', '2026-10-09T10:42:05Z'), release('v4.115.0', '2026-10-02T08:00:00Z')] })
     expect(page('connect', 'components', 'inputs/kafka.adoc').connectReferenceModified).toBe('2026-10-09')
     expect(page('cloud-data-platform', 'develop', 'connect/components/inputs/kafka.adoc').connectReferenceModified).toBe('2026-10-09')
     // Includes only the unchanged description partial.
     expect(page('connect', 'components', 'inputs/unchanged.adoc').connectReferenceModified).toBeUndefined()
     expect(page('cloud-data-platform', 'develop', 'connect/components/inputs/other.adoc').connectReferenceModified).toBeUndefined()
-    expect(logs).toContainEqual(['info', expect.stringMatching(/v4\.113\.0: resolved last change dates for 1 included generated files; 2 pages/)])
+    expect(logs).toContainEqual(['info', expect.stringMatching(/v4\.116\.0: resolved last change dates for 1 included generated files; 2 pages/)])
   })
 
   async function historyBuild (history, { catalog = makeCatalog(), releases } = {}) {
@@ -277,29 +279,29 @@ describe('modify-connect-tag-playbook release dates for changed reference', () =
     global.fetch = jest.fn(async (url) => response(200, archives.get(String(url).match(/download\/([^/]+)\//)[1])))
     if (typeof releases === 'function') listConnectReleases.mockImplementation(releases)
     else listConnectReleases.mockResolvedValue(releases || history.map(([tag, , date]) => release(tag, date)))
-    return build({ config: { tag: history[0][0] }, catalog })
+    return build({ config: { tag: history[0][0] }, catalog, extensions: GIT_DATES })
   }
 
   it('retains the last change date on a fresh build of an unchanged later release', async () => {
     const older = { ...TREE, 'modules/components/partials/fields/inputs/kafka.adoc': '// older fields' }
     const first = await historyBuild([
-      ['v4.113.0', TREE, '2026-10-09T10:00:00Z'],
-      ['v4.112.0', older, '2026-10-02T10:00:00Z']
+      ['v4.116.0', TREE, '2026-10-09T10:00:00Z'],
+      ['v4.115.0', older, '2026-10-02T10:00:00Z']
     ])
     expect(first.error).toBeNull()
     expect(first.catalog.getPages()[0].connectReferenceModified).toBe('2026-10-09')
     // A new catalog and context, with no in-memory dates from the first build.
     listConnectReleases.mockResolvedValue([
-      release('v4.114.0', '2026-10-10T10:00:00Z'),
-      release('v4.113.0', '2026-10-09T10:00:00Z'),
-      release('v4.112.0', '2026-10-02T10:00:00Z')
+      release('v4.117.0', '2026-10-10T10:00:00Z'),
+      release('v4.116.0', '2026-10-09T10:00:00Z'),
+      release('v4.115.0', '2026-10-02T10:00:00Z')
     ])
     const fetchPrevious = global.fetch
-    global.fetch = jest.fn(async (url) => String(url).includes('/v4.114.0/') ? response(200, archive) : fetchPrevious(url))
+    global.fetch = jest.fn(async (url) => String(url).includes('/v4.117.0/') ? response(200, archive) : fetchPrevious(url))
     const catalog = makeCatalog()
     catalog.registerComponentVersion('cloud-data-platform', '', { title: 'Cloud' })
     catalog.addFile({ contents: Buffer.from('include::connect:components:inputs/kafka.adoc[]'), src: { component: 'cloud-data-platform', version: '', module: 'develop', family: 'page', relative: 'kafka.adoc' } })
-    const later = await build({ config: { tag: 'v4.114.0' }, catalog })
+    const later = await build({ config: { tag: 'v4.117.0' }, catalog, extensions: GIT_DATES })
     expect(later.error).toBeNull()
     expect(catalog.getPages().map((p) => p.connectReferenceModified)).toEqual(['2026-10-09', '2026-10-09'])
   })
@@ -311,10 +313,10 @@ describe('modify-connect-tag-playbook release dates for changed reference', () =
     delete oldest[examplePath]
     const middle = { ...TREE, [fieldsPath]: '// changed then reverted fields' }
     const { catalog, error } = await historyBuild([
-      ['v4.114.0', TREE, '2026-10-10T10:00:00Z'],
-      ['v4.113.0', TREE, '2026-10-09T10:00:00Z'],
-      ['v4.112.0', middle, '2026-10-02T10:00:00Z'],
-      ['v4.111.0', oldest, '2026-09-25T10:00:00Z']
+      ['v4.117.0', TREE, '2026-10-10T10:00:00Z'],
+      ['v4.116.0', TREE, '2026-10-09T10:00:00Z'],
+      ['v4.115.0', middle, '2026-10-02T10:00:00Z'],
+      ['v4.114.0', oldest, '2026-09-25T10:00:00Z']
     ], { catalog: makeCatalog([
       ['page', 'inputs/fields-only.adoc', '= Fields\ninclude::partial$fields/inputs/kafka.adoc[]'],
       ['page', 'inputs/example-only.adoc', '= Example\ninclude::example$common/inputs/kafka.yaml[]']
@@ -328,7 +330,7 @@ describe('modify-connect-tag-playbook release dates for changed reference', () =
 
   it.each(['// committed fields', TREE['modules/components/partials/fields/inputs/kafka.adoc']])('ignores a changed asset partial when the catalog retains %s', async (contents) => {
     const { page } = await datedBuild({
-      releases: [release('v4.113.0', '2026-10-09T10:00:00Z'), release('v4.112.0', '2026-10-02T10:00:00Z')],
+      releases: [release('v4.116.0', '2026-10-09T10:00:00Z'), release('v4.115.0', '2026-10-02T10:00:00Z')],
       extraFiles: [['partial', 'fields/inputs/kafka.adoc', contents]]
     })
     expect(page('connect', 'components', 'inputs/kafka.adoc').connectReferenceModified).toBeUndefined()
@@ -356,8 +358,8 @@ describe('modify-connect-tag-playbook release dates for changed reference', () =
     catalog.registerComponentVersion('cloud-data-platform', '', { title: 'Cloud' })
     catalog.addFile({ contents: Buffer.from('include::connect:components:inputs/kafka.adoc[]'), src: { component: 'cloud-data-platform', version: '', module: 'develop', family: 'page', relative: 'kafka.adoc' } })
     const { error } = await historyBuild([
-      ['v4.113.0', TREE, '2026-10-09T10:00:00Z'],
-      ['v4.112.0', { ...TREE, 'modules/components/partials/fields/inputs/kafka.adoc': '// older fields' }, '2026-10-02T10:00:00Z']
+      ['v4.116.0', TREE, '2026-10-09T10:00:00Z'],
+      ['v4.115.0', { ...TREE, 'modules/components/partials/fields/inputs/kafka.adoc': '// older fields' }, '2026-10-02T10:00:00Z']
     ], { catalog })
     expect(error).toBeNull()
     expect(page.connectReferenceModified).toBe('2026-10-09')
@@ -370,11 +372,11 @@ describe('modify-connect-tag-playbook release dates for changed reference', () =
 
   it('finds the last change beyond the first page of release history', async () => {
     const history = [
-      ['v4.200.0', TREE, '2026-10-10T10:00:00Z'],
-      ['v4.100.0', TREE, '2026-10-02T10:00:00Z'],
-      ['v4.99.0', { ...TREE, 'modules/components/partials/fields/inputs/kafka.adoc': '// older fields' }, '2026-09-25T10:00:00Z']
+      ['v4.300.0', TREE, '2026-10-10T10:00:00Z'],
+      ['v4.200.0', TREE, '2026-10-02T10:00:00Z'],
+      ['v4.199.0', { ...TREE, 'modules/components/partials/fields/inputs/kafka.adoc': '// older fields' }, '2026-09-25T10:00:00Z']
     ]
-    const releases = Array.from({ length: 100 }, (_, i) => ({ ...release(`v4.${200 - i}.0`, '2026-10-10T10:00:00Z'), assets: i === 0 ? [{ name: asset.ASSET_NAME }] : [] }))
+    const releases = Array.from({ length: 100 }, (_, i) => ({ ...release(`v4.${300 - i}.0`, '2026-10-10T10:00:00Z'), assets: i === 0 ? [{ name: asset.ASSET_NAME }] : [] }))
     const extra = history.slice(1).map(([tag, , date]) => release(tag, date))
     const { catalog, error } = await historyBuild(history, { releases: async (github, owner, repo, limit, page) => page === 2 ? extra : releases })
     expect(error).toBeNull()
@@ -383,8 +385,126 @@ describe('modify-connect-tag-playbook release dates for changed reference', () =
   })
 
   it('leaves dates alone when no earlier release has the asset', async () => {
-    const { page } = await datedBuild({ releases: [release('v4.113.0', '2026-10-09T10:42:05Z')] })
+    const { page } = await datedBuild({ releases: [release('v4.116.0', '2026-10-09T10:42:05Z')] })
     expect(page('connect', 'components', 'inputs/kafka.adoc').connectReferenceModified).toBeUndefined()
+  })
+
+  it('stops paging at the first release older than v4.113.0 and walks no further back than it', async () => {
+    // Nothing changed in three releases, so no file can be dated, and the walk
+    // reaches v4.113.0, the first release with the asset, and stops.
+    // A full page, so only the version floor stops the paging.
+    const page1 = [
+      ...Array.from({ length: 96 }, (_, i) => ({ ...release(`v4.${300 - i}.0`, '2026-12-01T10:00:00Z'), assets: [] })),
+      release('v4.115.0', '2026-10-16T10:00:00Z'),
+      release('v4.114.0', '2026-10-15T10:00:00Z'),
+      release('v4.113.0', '2026-10-09T10:00:00Z'),
+      release('v4.112.0', '2026-10-02T10:00:00Z')
+    ]
+    expect(page1).toHaveLength(100)
+    const { catalog, error, logs } = await historyBuild([
+      ['v4.115.0', TREE, '2026-10-16T10:00:00Z'],
+      ['v4.114.0', TREE, '2026-10-15T10:00:00Z'],
+      ['v4.113.0', TREE, '2026-10-09T10:00:00Z']
+    ], { releases: async (github, owner, repo, limit, page) => (page === 1 ? page1 : [release('v4.111.0', '2026-09-25T10:00:00Z')]) })
+    expect(error).toBeNull()
+    expect(listConnectReleases).toHaveBeenCalledTimes(1)
+    // The current release, then v4.114.0 and v4.113.0. v4.112.0 lists the
+    // asset but is older than the first real one, so it is never downloaded.
+    expect(global.fetch.mock.calls.map(([url]) => String(url).match(/download\/([^/]+)\//)[1])).toEqual(['v4.115.0', 'v4.114.0', 'v4.113.0'])
+    expect(catalog.getPages()[0].connectReferenceModified).toBeUndefined()
+    expect(logs).toContainEqual(['info', expect.stringMatching(/resolved last change dates for 0 included generated files; 0 pages/)])
+  })
+
+  it('downloads at most the walk limit of older releases', async () => {
+    const limit = tagExt._internal.DATE_RELEASE_LIMIT
+    const history = Array.from({ length: limit + 3 }, (_, i) => [`v4.${200 - i}.0`, TREE, `2026-10-${String(20 - (i % 20)).padStart(2, '0')}T10:00:00Z`])
+    const { error } = await historyBuild(history)
+    expect(error).toBeNull()
+    expect(global.fetch).toHaveBeenCalledTimes(1 + limit)
+  })
+
+  it('logs a warning and keeps git dates when an older release download fails with HTTP 500', async () => {
+    const older = { ...TREE, 'modules/components/partials/fields/inputs/kafka.adoc': '// older fields' }
+    const { catalog, error, logs } = await historyBuild([
+      ['v4.114.0', TREE, '2026-10-10T10:00:00Z'],
+      ['v4.113.0', older, '2026-10-09T10:00:00Z']
+    ])
+    expect(error).toBeNull()
+    const ok = global.fetch.getMockImplementation()
+    global.fetch = jest.fn(async (url) => (String(url).includes('/v4.113.0/') ? response(500) : ok(url)))
+    const again = await build({ config: { tag: 'v4.114.0' }, catalog: makeCatalog(), extensions: GIT_DATES })
+    expect(again.error).toBeNull()
+    expect(again.catalog.getPages()[0].connectReferenceModified).toBeUndefined()
+    expect(again.logs).toContainEqual(['warn', expect.stringMatching(/Couldn't read the Redpanda Connect v4\.113\.0 reference docs to date pages \(.*HTTP 500.*\), so 5 generated files keep their pages' git modified dates/)])
+    // The reference itself still comes from v4.114.0.
+    expect(fromConnect(again.catalog).length).toBeGreaterThan(0)
+    expect(catalog.getPages()[0].connectReferenceModified).toBe('2026-10-10')
+  })
+
+  it('keeps the dates found before a corrupt older asset and logs a warning', async () => {
+    const fieldsPath = 'modules/components/partials/fields/inputs/kafka.adoc'
+    const { catalog, error } = await historyBuild([
+      ['v4.115.0', TREE, '2026-10-16T10:00:00Z'],
+      ['v4.114.0', { ...TREE, [fieldsPath]: '// older fields' }, '2026-10-10T10:00:00Z'],
+      ['v4.113.0', TREE, '2026-10-09T10:00:00Z']
+    ])
+    expect(error).toBeNull()
+    const ok = global.fetch.getMockImplementation()
+    global.fetch = jest.fn(async (url) => (String(url).includes('/v4.113.0/') ? response(200, Buffer.from('not a tarball')) : ok(url)))
+    const fresh = makeCatalog()
+    const { error: e2, logs } = await build({ config: { tag: 'v4.115.0' }, catalog: fresh, extensions: GIT_DATES })
+    expect(e2).toBeNull()
+    expect(catalog.getPages()[0].connectReferenceModified).toBe('2026-10-16')
+    // v4.115.0 changed the fields partial, found before the corrupt asset.
+    expect(fresh.getPages()[0].connectReferenceModified).toBe('2026-10-16')
+    expect(logs).toContainEqual(['warn', expect.stringMatching(/Couldn't read the Redpanda Connect v4\.113\.0 reference docs to date pages \(not a valid gzip archive/)])
+  })
+
+  it('logs a warning when the releases listing fails, and pages keep their git dates', async () => {
+    const { catalog, error, logs } = await historyBuild([['v4.114.0', TREE, '2026-10-10T10:00:00Z']], { releases: async () => { throw new Error('API rate limit exceeded') } })
+    expect(error).toBeNull()
+    expect(catalog.getPages()[0].connectReferenceModified).toBeUndefined()
+    expect(logs).toContainEqual(['warn', expect.stringMatching(/Couldn't list Redpanda Connect releases \(API rate limit exceeded\)/)])
+  })
+
+  it('dates a page through an aggregate partial that includes the changed partial', async () => {
+    const methods = 'include::connect:components:partial$bloblang-methods/foo.adoc[leveloffset=+2]\ninclude::connect:components:partial$bloblang-methods/bar.adoc[leveloffset=+2]\n'
+    const tree = { ...TREE, 'modules/components/partials/bloblang/methods.adoc': methods, 'modules/components/partials/bloblang-methods/foo.adoc': '// foo', 'modules/components/partials/bloblang-methods/bar.adoc': '// bar' }
+    const { catalog, error } = await historyBuild([
+      ['v4.114.0', tree, '2026-10-10T10:00:00Z'],
+      ['v4.113.0', { ...tree, 'modules/components/partials/bloblang-methods/foo.adoc': '// older foo' }, '2026-10-09T10:00:00Z']
+    ], { catalog: makeCatalog([['page', 'bloblang/methods.adoc', '= Methods\ninclude::connect:components:partial$bloblang/methods.adoc[]\n']]) })
+    expect(error).toBeNull()
+    expect(catalog.getPages().find((p) => p.src.relative === 'bloblang/methods.adoc').connectReferenceModified).toBe('2026-10-10')
+    expect(catalog.getPages().find((p) => p.src.relative === 'inputs/kafka.adoc').connectReferenceModified).toBeUndefined()
+  })
+
+  it('skips dating, with no releases listing and no older downloads, without add-git-dates in the playbook', async () => {
+    const older = { ...TREE, 'modules/components/partials/fields/inputs/kafka.adoc': '// older fields' }
+    const { error } = await historyBuild([
+      ['v4.114.0', TREE, '2026-10-10T10:00:00Z'],
+      ['v4.113.0', older, '2026-10-09T10:00:00Z']
+    ])
+    expect(error).toBeNull()
+    listConnectReleases.mockClear()
+    global.fetch.mockClear()
+    const catalog = makeCatalog()
+    const { error: e2 } = await build({ config: { tag: 'v4.114.0' }, catalog })
+    expect(e2).toBeNull()
+    expect(listConnectReleases).not.toHaveBeenCalled()
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    expect(catalog.getPages()[0].connectReferenceModified).toBeUndefined()
+  })
+
+  it('recognizes add-git-dates in every playbook form, unless it is disabled', () => {
+    const { usesGitDates } = tagExt._internal
+    const pb = (extensions) => ({ antora: { extensions } })
+    expect(usesGitDates(pb(['./extensions/add-git-dates.js']))).toBe(true)
+    expect(usesGitDates(pb([{ require: '@redpanda-data/docs-extensions-and-macros/extensions/add-git-dates' }]))).toBe(true)
+    expect(usesGitDates(pb([{ require: '@redpanda-data/docs-extensions-and-macros/extensions/add-git-dates', enabled: false }]))).toBe(false)
+    expect(usesGitDates(pb(['@redpanda-data/docs-extensions-and-macros/extensions/add-git-dates-extra']))).toBe(false)
+    expect(usesGitDates(pb(undefined))).toBe(false)
+    expect(usesGitDates({})).toBe(false)
   })
 
   it('add-git-dates uses the later of the commit date and the release date', () => {
