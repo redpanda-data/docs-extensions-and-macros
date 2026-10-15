@@ -1,5 +1,24 @@
 # Changelog
 
+## [5.55.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.54.0...v5.55.0) (2026-10-15)
+
+
+### Features
+
+* **aggregate-terms:** link every component to one site glossary page ([#370](https://github.com/redpanda-data/docs-extensions-and-macros/issues/370)) ([d2911a4](https://github.com/redpanda-data/docs-extensions-and-macros/commit/d2911a43e3a82abb3a798a775d4a881fe0d9c215))
+* **release-notes:** cluster release-note entries by area ([#359](https://github.com/redpanda-data/docs-extensions-and-macros/issues/359)) ([d0b3f4a](https://github.com/redpanda-data/docs-extensions-and-macros/commit/d0b3f4a423f9f0f49099570fdbaa19329d736896))
+* **rpcn-docs:** add the connector data from the Connect docs asset ([#371](https://github.com/redpanda-data/docs-extensions-and-macros/issues/371)) ([b4908ce](https://github.com/redpanda-data/docs-extensions-and-macros/commit/b4908ce6e979d0a16a024ca58dee65220064dd54))
+
+
+### Bug fixes
+
+* attach Helm doc comments to the commented-out key that follows them ([#372](https://github.com/redpanda-data/docs-extensions-and-macros/issues/372)) ([1194b2f](https://github.com/redpanda-data/docs-extensions-and-macros/commit/1194b2fa7ed44f178a5e88c0a9495d8d222d9fbd))
+* deploy the docs preview without running a site build ([#383](https://github.com/redpanda-data/docs-extensions-and-macros/issues/383)) ([613628d](https://github.com/redpanda-data/docs-extensions-and-macros/commit/613628d48614c327514252dd47cec88176a6eb03))
+* honor descriptionScope cloud in rpk docs ([#374](https://github.com/redpanda-data/docs-extensions-and-macros/issues/374)) ([4312390](https://github.com/redpanda-data/docs-extensions-and-macros/commit/4312390307742bc8793f926f3cb62e5980f070e3))
+* map unversioned operator branches to docs main in crd-spec ([#378](https://github.com/redpanda-data/docs-extensions-and-macros/issues/378)) ([2fae67a](https://github.com/redpanda-data/docs-extensions-and-macros/commit/2fae67acf95ffcd958c6aef4e5e7819d89f7982f))
+* render changed defaults in What's new as inline code ([#376](https://github.com/redpanda-data/docs-extensions-and-macros/issues/376)) ([6e379ad](https://github.com/redpanda-data/docs-extensions-and-macros/commit/6e379ad378f61c710f9c29bde8eaf15054f78135))
+* **rpcn-docs:** stop defaulting to docs-data/overrides.json ([#380](https://github.com/redpanda-data/docs-extensions-and-macros/issues/380)) ([b0a3f39](https://github.com/redpanda-data/docs-extensions-and-macros/commit/b0a3f39255189b4002a84c92d89f96a2c4d6065c))
+
 ## [5.54.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.53.0...v5.54.0) (2026-10-09)
 
 
