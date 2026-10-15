@@ -670,7 +670,8 @@ function buildChangedDefaultsTable (changedDefaults, capFn) {
     // Values render as literal inline code, so interpolations like
     // ${!uuid_v4()} and characters like * or _ show as typed.
     const formatDefault = (val) => {
-      if (val === undefined || val === null) return 'none'
+      // 'none' would read as a value, and is one for some fields (compression).
+      if (val === undefined || val === null) return '_no default_'
       let text
       if (typeof val === 'string') text = val === '' ? '""' : val
       else if (typeof val === 'number' || typeof val === 'boolean') text = String(val)

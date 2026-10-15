@@ -373,7 +373,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
       lines.push('| Component | Field | Old Default | New Default |');
       lines.push('|-----------|-------|-------------|-------------|');
       changedDefaults.forEach(change => {
-        const oldVal = change.oldDefault !== undefined ? `\`${JSON.stringify(change.oldDefault)}\`` : '_none_';
+        const oldVal = change.oldDefault !== undefined ? `\`${JSON.stringify(change.oldDefault)}\`` : '_no default_';
         const newVal = change.newDefault !== undefined ? `\`${JSON.stringify(change.newDefault)}\`` : '_none_';
         lines.push(`| \`${change.component}\` | \`${change.field}\` | ${oldVal} | ${newVal} |`);
       });
@@ -556,7 +556,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
     lines.push('**Review Changed Defaults for Breaking Changes:**');
     lines.push('');
     allChangedDefaults.forEach(change => {
-      const oldVal = change.oldDefault !== undefined ? JSON.stringify(change.oldDefault) : 'none';
+      const oldVal = change.oldDefault !== undefined ? JSON.stringify(change.oldDefault) : 'no default';
       const newVal = change.newDefault !== undefined ? JSON.stringify(change.newDefault) : 'none';
       lines.push(`- [ ] \`${change.component}.${change.field}\`: \`${oldVal}\` → \`${newVal}\` — changed in **${change.version}**`);
     });
@@ -1231,8 +1231,8 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
       const [type, name] = component.split(':');
       lines.push(`**${type}/${name}:**`);
       changes.forEach(c => {
-        const oldStr = JSON.stringify(c.oldDefault);
-        const newStr = JSON.stringify(c.newDefault);
+        const oldStr = c.oldDefault !== undefined ? JSON.stringify(c.oldDefault) : 'no default';
+        const newStr = c.newDefault !== undefined ? JSON.stringify(c.newDefault) : 'no default';
         lines.push(`- \`${c.field}\`: ${oldStr} → ${newStr}`);
       });
       lines.push('');

@@ -802,7 +802,8 @@ describe('buildChangedDefaultsTable - whats-new changed default links', () => {
 
     expect(table).toContain('|`+${!count("items")}-${!timestamp_unix_nano()}+`\n|`+${!timestamp_unix_nano()}-${!uuid_v4()}+`\n');
     expect(table).toContain('|`+""+`\n|`+a\\|b+`\n');
-    expect(table).toContain('|none\n|`+5+`\n');
+    // A missing default reads as "no default", never as the value none.
+    expect(table).toContain('|_no default_\n|`+5+`\n');
   });
 });
 
