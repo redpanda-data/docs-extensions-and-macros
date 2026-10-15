@@ -435,12 +435,26 @@ describe('text a human reviewer wrote (end-to-end, PR 461 fixtures)', () => {
     expect(result.summary.reviewerWritten).toBe(0)
   })
 
-  test('strings the reviewer wrote are skipped, re-wrapped or not', () => {
+  test('a string whose changed lines all came from the reviewer is skipped', () => {
     const passages = readReviewerComments(path.join(FIXTURES, 'reviewer-comments.json'))
     const result = lintStrings({ repo, diffBase: 'base', reviewerPassages: passages, log: () => {} })
-    expect(result.declarations).toEqual([])
-    expect(result.summary.totalDeclarations).toBe(0)
-    expect(result.summary.reviewerWritten).toBe(2)
+    expect(result.declarations.map((d) => d.name)).toEqual(['delete'])
+    expect(result.summary.reviewerWritten).toBe(1)
+  })
+
+  test("the author's own lines in a string are still reviewed, with the reviewer's marked", () => {
+    // The author re-wrapped the reviewer's first paragraph (it still
+    // matches), dropped the quotes in the second (so that line is the
+    // author's), and edited an example comment the reviewer never wrote.
+    const passages = readReviewerComments(path.join(FIXTURES, 'reviewer-comments.json'))
+    const result = lintStrings({ repo, diffBase: 'base', reviewerPassages: passages, log: () => {} })
+    const [decl] = result.declarations
+    const lines = fs.readFileSync(path.join(repo, REL), 'utf8').split('\n')
+    const marked = decl.reviewer_lines.map((n) => lines[n - 1])
+    expect(marked).toContain('The --regex flag (-r) treats each argument as a regular expression and deletes')
+    expect(marked).toContain('exactly, without -r.')
+    expect(marked).not.toContain('which rpk topic list shows only with -i. To delete an internal topic, name it')
+    expect(marked.some((l) => l.includes('deletes all non-internal topics'))).toBe(false)
   })
 
   test('a comment that does not quote the string skips nothing', () => {

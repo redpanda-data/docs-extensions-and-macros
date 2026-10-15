@@ -1191,6 +1191,12 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
     expect(prompt).toMatch(/Never put published-content impact in it/)
   })
 
+  test('the prompt keeps reviewer-written lines as they are', () => {
+    const prompt = stepNamed('Claude review with suggestions').with.prompt
+    expect(prompt).toMatch(/REVIEWER LINES: reviewer_lines lists the source line numbers/)
+    expect(prompt).toMatch(/a suggestion block keeps them\s+byte-identical/)
+  })
+
   describe('summary comment', () => {
     const step = stepNamed('Update the review summary comment')
     const env = { GH_TOKEN: 't', GITHUB_REPOSITORY: 'o/r', PR: '7', HEAD_SHA: 'abcdef1234567' }

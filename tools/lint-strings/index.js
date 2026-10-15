@@ -60,9 +60,11 @@ function rulesFor (surface) {
  * @param {Set<string>} [options.reviewedFingerprints] - Diff mode: skip
  *   declarations (and removals) whose fingerprint is in this set, so a PR
  *   review sees each string once across pushes
- * @param {string[]} [options.reviewerPassages] - Diff mode: skip
- *   declarations whose text contains one of these passages (or is contained
- *   in one), so a string a human reviewer already wrote is not reviewed again
+ * @param {string[]} [options.reviewerPassages] - Diff mode: passages from
+ *   human review comments. A changed line found in one counts as written by
+ *   a reviewer; a declaration whose changed lines all are is skipped, and any
+ *   other carries the reviewer-written line numbers so the review leaves
+ *   them alone
  * @param {Function} [options.log] - Progress logger (stderr by default)
  * @returns {Object} { findings, summary, unsupported_surfaces }
  */
@@ -98,6 +100,7 @@ function lintStrings (options) {
   const pending = []
   let alreadyReviewed = 0
   let reviewerWritten = 0
+  const headLines = new Map()
   let removal = { rawFiles: [], declarations: [] }
   const skipped = []
   let unverifiable = 0
@@ -143,14 +146,24 @@ function lintStrings (options) {
           alreadyReviewed++
           continue
         }
-        if (reviewerPassages && writtenByReviewer(decl, reviewerPassages)) {
-          reviewerWritten++
-          continue
+        let reviewerLines = []
+        if (reviewerPassages && reviewerPassages.length) {
+          const changed = changedLinesOf(repoPath, decl, files.get(decl.file), headLines)
+          reviewerLines = changed.filter((l) => writtenByReviewer(l.text, reviewerPassages)).map((l) => l.line)
+          if (changed.length > 0 && reviewerLines.length === changed.length) {
+            reviewerWritten++
+            continue
+          }
         }
         declarations.push(decl)
         if (decl.meta && decl.meta.unverifiable) unverifiable++
         const detail = surface.reviewContext ? surface.reviewContext(decl) : null
-        pending.push({ ...pendingEntry(decl), ...(detail ? { detail } : {}), context: pageContext(decl, everything || head) })
+        pending.push({
+          ...pendingEntry(decl),
+          ...(detail ? { detail } : {}),
+          ...(reviewerLines.length ? { reviewer_lines: reviewerLines } : {}),
+          context: pageContext(decl, everything || head)
+        })
       }
       results.push(runRules(declarations, rulesFor(surface), { skipRules, onlyRules }))
       // Doc-method calls the extractor saw but could not trace, in the
@@ -562,16 +575,48 @@ function reviewerPassagesFrom (bodies) {
   return [...passages]
 }
 
+// A changed line shorter than this ("per topic.", "For example,") occurs in
+// too many paragraphs to say who wrote it, so it never counts as a
+// reviewer's. That errs toward reviewing.
+const MIN_REVIEWER_LINE = 12
+
 /**
- * True when a human reviewer already wrote this string, or part of it, on the
- * PR: the review would otherwise argue with wording the author applied from a
- * reviewer, as it did on streaming-enterprise PR 461.
+ * The lines this PR changed inside a declaration's span, as HEAD has them.
+ * Lines with no letters or digits (a closing backtick, a blank line) say
+ * nothing about who wrote the string and are left out.
  */
-function writtenByReviewer (decl, passages) {
-  const forms = [normalizeText(decl.string), normalizeText(decl.declaration_text)]
-    .filter((text) => text.length >= MIN_REVIEWER_PASSAGE)
-  return passages.some((passage) =>
-    forms.some((text) => text.includes(passage) || passage.includes(text)))
+function changedLinesOf (repoPath, decl, lineSet, cache) {
+  if (!lineSet) return []
+  if (!cache.has(decl.file)) {
+    let lines = null
+    try {
+      lines = fs.readFileSync(path.join(repoPath, decl.file), 'utf8').split('\n')
+    } catch {}
+    cache.set(decl.file, lines)
+  }
+  const lines = cache.get(decl.file)
+  if (!lines) return []
+  const out = []
+  for (const [start, end] of spansOf(decl)) {
+    if (start == null || end == null) continue
+    for (let n = start; n <= end; n++) {
+      if (!lineSet.has(n) || n > lines.length) continue
+      const text = normalizeText(lines[n - 1])
+      if (/[A-Za-z0-9]/.test(text)) out.push({ line: n, text })
+    }
+  }
+  return out
+}
+
+/**
+ * True when a human reviewer wrote this line on the PR: it appears whole in
+ * one of their passages. Matching per line, not per string, means an author
+ * who keeps a reviewer's paragraph and rewrites the next one still gets the
+ * new paragraph reviewed (streaming-enterprise PR 461 is the case this
+ * exists for: the review argued with help text applied from a reviewer).
+ */
+function writtenByReviewer (line, passages) {
+  return line.length >= MIN_REVIEWER_LINE && passages.some((passage) => passage.includes(line))
 }
 
 /**

@@ -21,10 +21,12 @@
 # declarations whose fingerprint is new. Editing a string makes it new
 # again; rebases, moves and unrelated edits do not. Each inline suggestion
 # also ends with its fingerprint in a small visible footer, so an evicted
-# cache still never produces a second comment on the same string. A string
+# cache still never produces a second comment on the same string. Lines
 # whose text a human reviewer other than the author wrote on the PR (in a
-# suggestion block or a prose paragraph) is skipped too: the author applied
-# a reviewer's wording, and the bot arguing with it is noise. There is no
+# suggestion block or a prose paragraph) are left alone too: a string whose
+# changed lines all came from a reviewer is skipped, and in any other the
+# model is told which lines are the reviewer's, so the author's own edits
+# are still reviewed. There is no
 # summary comment unless the author has something to act on that the inline
 # comments cannot carry, and then it is one comment, updated in place.
 # Published pages the PR makes wrong are the docs team's to fix, so they go
@@ -828,7 +830,9 @@ jobs:
               suggest rewrites of it. Each entry carries context: the other
               strings a reader sees on the same page (a command's Short,
               Long and flags; properties that name each other; the fields
-              around an API field).
+              around an API field). An entry with reviewer_lines has lines
+              a human reviewer wrote on this PR and the author applied:
+              see REVIEWER LINES below.
             - findings: deterministic rule violations for those declarations
               (surface, name, file, line_start/line_end, the current string,
               the exact declaration_text of the span, rules, fingerprint).
@@ -907,6 +911,15 @@ jobs:
               fingerprint line, with exactly: After you apply this
               suggestion, run `CGO_ENABLED=1 TAGS=x_benthos_extra task docs`
               and commit the regenerated docs, or the docs check fails.
+
+            REVIEWER LINES: reviewer_lines lists the source line numbers,
+            inside a declaration's span, whose text a human reviewer wrote in
+            a comment on this PR. Never suggest rewording them and never
+            count their wording as a finding; a suggestion block keeps them
+            byte-identical. Review the declaration's other changed lines,
+            reading the reviewer's lines as their context. When the only
+            problems you see are in reviewer lines, post nothing on that
+            declaration.
 
             REVIEW IN CONTEXT: judge each string as the reader of its page,
             not on its own. Read it together with its context entries and
