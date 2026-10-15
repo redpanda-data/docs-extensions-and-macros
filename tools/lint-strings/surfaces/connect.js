@@ -8,6 +8,7 @@ const { SourceCache } = require('../source-text')
 const { splitTopLevelArgs, findBalancedClose, collectGoFiles } = require('../go-source')
 const { GoIndex, statementEnd, straightLineReturn, stripStrings, renderResult, isResolved, unresolvedParts } = require('../go-index')
 const { parseLiteralFields } = require('./rpk')
+const { CONDITIONAL_RULE } = require('../rules/verbatim-asciidoc')
 
 /**
  * Connect surface: every published string a Redpanda Connect build defines.
@@ -1272,7 +1273,7 @@ class ConnectScanner {
           extra: {
             literal: literal === 'Command' ? 'command' : literal,
             // rpk-docs formats CLI help like cobra help; it is not AsciiDoc.
-            skip_rules: ['raw-pipe', 'unknown-attribute', 'broken-macro', 'too-short']
+            skip_rules: ['raw-pipe', 'unknown-attribute', 'broken-macro', 'conditional', 'too-short']
           }
         }))
       }
@@ -1460,8 +1461,6 @@ const MARKUP_PATTERNS = [
   [/\n/, 'a line break']
 ]
 
-const ENV_CONDITIONAL = /\b(?:ifdef|ifndef|ifeval|endif)::/
-
 // Modules of the Redpanda Connect docs component. A generated partial is
 // rendered on the self-managed page and included into Cloud pages, so a
 // link needs an explicit module to resolve in both places.
@@ -1491,15 +1490,11 @@ const RULES = [
       return [{ message: `ShortDescription contains ${found.join(', ')}. Form-based config editors, such as the one in Redpanda Cloud, show it as plain text, so markup renders literally. Write one plain sentence and keep markup in Description().` }]
     }
   },
-  {
-    name: 'connect-env-conditional',
-    description: 'AsciiDoc ifdef/ifndef conditional in a Go spec string',
-    severity: 'warning',
-    check: (decl) => {
-      if (!decl.string || !ENV_CONDITIONAL.test(decl.string)) return []
-      return [{ message: 'Contains an AsciiDoc conditional (ifdef::, ifndef:: or endif::). The docs generator owns every Cloud conditional in the partials, and a hand-written one nests inside them, so the Cloud copy shows or hides the wrong text. Fix the availability data in internal/plugins/info.csv instead, or ask the docs team to carry the sentence on the page.' }]
-    }
-  },
+  // Spec strings publish to the self-managed and the Cloud docs, and the
+  // Cloud binaries render them with env-cloud set, so an env-cloud block
+  // conditional is the supported way to vary a paragraph between the two.
+  // The rule checks the form; see rules/verbatim-asciidoc.js.
+  CONDITIONAL_RULE,
   {
     name: 'connect-xref-module',
     description: 'xref without a module, or to a module the Connect docs do not have',
