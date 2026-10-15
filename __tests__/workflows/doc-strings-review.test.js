@@ -1044,6 +1044,49 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(r.status).toBe(0)
       expect(fs.readFileSync(path.join(dir, 'state', 'reviewed.txt'), 'utf8').trim()).toBe('aaaaaaaaaaaaaaaa')
     })
+
+    // streaming-enterprise PR 461: the review argued with help text the
+    // author had applied from a docs reviewer's suggestion.
+    test('keeps what human reviewers wrote, never the author or a bot', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-state-'))
+      const out = path.join(dir, 'reviewer-comments.json')
+      const comments = [
+        { id: 1, user: { login: 'docs-reviewer', type: 'User' }, body: '```suggestion\nShort: "Delete topics",\n```' },
+        { id: 2, user: { login: 'pr-author', type: 'User' }, body: 'my own text, pasted to dodge the review' },
+        { id: 3, user: { login: 'claude[bot]', type: 'Bot' }, body: 'a bot suggestion' },
+        { id: 4, user: { login: 'other-reviewer', type: 'User' }, body: '' }
+      ]
+      const r = execRun(step, {
+        env: { ...env(dir), PR_AUTHOR: 'pr-author', REVIEWER_COMMENTS: out },
+        stubs: { gh: ghCommentsStub },
+        files: { 'comments.json': JSON.stringify(comments) }
+      })
+      expect(r.status).toBe(0)
+      // The stub serves the same payload for review comments and reviews, so
+      // the one human body arrives once from each.
+      expect(JSON.parse(fs.readFileSync(out, 'utf8'))).toEqual([comments[0].body, comments[0].body])
+    })
+
+    test('no author login means no reviewer file, so every string is reviewed', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-state-'))
+      const out = path.join(dir, 'reviewer-comments.json')
+      const r = execRun(step, {
+        env: { ...env(dir), PR_AUTHOR: '', REVIEWER_COMMENTS: out },
+        stubs: { gh: ghCommentsStub },
+        files: { 'comments.json': '[]' }
+      })
+      expect(r.status).toBe(0)
+      expect(fs.existsSync(out)).toBe(false)
+    })
+
+    test('a failed reviewer read leaves no file behind', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-state-'))
+      const out = path.join(dir, 'reviewer-comments.json')
+      fs.writeFileSync(out, '["stale"]')
+      const r = execRun(step, { env: { ...env(dir), PR_AUTHOR: 'pr-author', REVIEWER_COMMENTS: out }, stubs: { gh: '#!/bin/bash\nexit 1\n' } })
+      expect(r.status).toBe(0)
+      expect(fs.existsSync(out)).toBe(false)
+    })
   })
 
   describe('lint step', () => {
@@ -1059,10 +1102,21 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(argv).toContain(path.join(dir, 'reviewed.txt'))
     })
 
+    test('passes human review comments to the CLI when there are any', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-state-'))
+      const file = path.join(dir, 'reviewer-comments.json')
+      fs.writeFileSync(file, '["text"]')
+      const r = execRun(step, { env: { ...baseEnv, STATE_DIR: dir, REVIEWER_COMMENTS: file }, stubs: { npx: NPX_STUB } })
+      const argv = fs.readFileSync(path.join(r.dir, 'npx-argv'), 'utf8').split('\n')
+      expect(argv).toContain('--reviewer-comments')
+      expect(argv).toContain(file)
+    })
+
     test('a first run passes no --reviewed at all', () => {
       const r = execRun(step, { env: { ...baseEnv, STATE_DIR: path.join(os.tmpdir(), 'no-such-dsr-state') }, stubs: { npx: NPX_STUB } })
       const argv = fs.readFileSync(path.join(r.dir, 'npx-argv'), 'utf8').split('\n')
       expect(argv).not.toContain('--reviewed')
+      expect(argv).not.toContain('--reviewer-comments')
       expect(r.status).toBe(0)
     })
   })
@@ -1106,6 +1160,35 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(r.status).toBe(0)
       expect(r.read('summary.md')).toMatch(/No lint report/)
     })
+  })
+
+  describe('doc-impact in the job summary', () => {
+    const step = stepNamed('Write doc-impact to the job summary')
+
+    test('lists affected pages for the docs team, one escaped line per field', () => {
+      const impact = {
+        findings: [{ surface: 'rpk', name: 'delete', change_kind: 'behavior', summary: 'Regex mode\nskips <b>internal</b> topics', affected_pages: ['https://docs.redpanda.com/x/'] }],
+        proposed_ticket: { title: 't', body: 'b' }
+      }
+      const r = execRun(step, { env: { GITHUB_STEP_SUMMARY: 'summary.md' }, files: { 'doc-impact.json': JSON.stringify(impact) } })
+      expect(r.status).toBe(0)
+      const out = r.read('summary.md')
+      expect(out).toMatch(/Nothing here is for the PR author/)
+      expect(out).toContain('- `delete` (rpk): Regex mode skips &lt;b>internal&lt;/b> topics')
+      expect(out).toContain('  - https://docs.redpanda.com/x/')
+    })
+
+    test('no doc-impact file writes nothing', () => {
+      const r = execRun(step, { env: { GITHUB_STEP_SUMMARY: 'summary.md' } })
+      expect(r.status).toBe(0)
+      expect(r.exists('summary.md')).toBe(false)
+    })
+  })
+
+  test('the prompt keeps published-content impact out of the PR summary', () => {
+    const prompt = stepNamed('Claude review with suggestions').with.prompt
+    expect(prompt).not.toMatch(/"Affected published content" section/)
+    expect(prompt).toMatch(/Never put published-content impact in it/)
   })
 
   describe('summary comment', () => {

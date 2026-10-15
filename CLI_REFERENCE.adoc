@@ -613,6 +613,9 @@ Comma-separated rule ids to run exclusively
 `--reviewed <file>`::
 Diff mode: skip declarations whose fingerprint is listed in <file> (already reviewed on an earlier push)
 
+`--reviewer-comments <file>`::
+Diff mode: skip declarations whose text a human reviewer wrote in one of the comment bodies in <file> (a JSON array of strings)
+
 `--strict`::
 Exit 1 when any error-severity finding exists (default: always exit 0 - suggest, never block)
 
