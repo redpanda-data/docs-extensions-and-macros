@@ -356,7 +356,7 @@ module.exports.register = function ({ config }) {
     if (r.kept + r.outsideGenerated + r.providedElsewhere + r.otherComponents === 0) return
     logger.info(
       `Redpanda Connect content: kept ${r.kept} generated files; skipped ${r.providedElsewhere} already provided by another source, ` +
-      `${r.outsideGenerated} outside the generated partials, examples, and attachments, and ${r.otherComponents} from other components`
+      `${r.outsideGenerated} outside the generated partials and examples, and ${r.otherComponents} from other components`
     )
   })
 
@@ -422,7 +422,7 @@ module.exports.register = function ({ config }) {
       from = `the ${tag} ${asset.ASSET_NAME} release asset`
     }
     if (!files.some((f) => asset.toResource(f.path))) {
-      throw new Error(`${from} has no files under modules/components/partials or modules/components/examples`)
+      throw new Error(`${from} has no files under modules/components/partials, modules/components/examples, or modules/components/attachments`)
     }
     const r = addConnectDocs(contentCatalog, files, origin, { replace: !!localDir })
     const versions = r.versions.filter(Boolean)
