@@ -78,13 +78,13 @@ describe('linkProperties', () => {
     'cloud_storage_segment_max_upload_interval_sec', 'retention.ms', 'admin', 'rack',
   ]);
 
-  it('rewrites an exact backticked property name as a prop: macro', () => {
+  it('rewrites an exact backticked property name as a linked prop: macro', () => {
     expect(linkProperties('Changing `cloud_storage_segment_max_upload_interval_sec` now requires a restart.', names))
-      .toBe('Changing prop:cloud_storage_segment_max_upload_interval_sec[] now requires a restart.');
+      .toBe('Changing prop:cloud_storage_segment_max_upload_interval_sec[link=true] now requires a restart.');
   });
 
   it('links a dotted topic property', () => {
-    expect(linkProperties('Set `retention.ms` on the topic.', names)).toBe('Set prop:retention.ms[] on the topic.');
+    expect(linkProperties('Set `retention.ms` on the topic.', names)).toBe('Set prop:retention.ms[link=true] on the topic.');
   });
 
   it('leaves a backticked identifier that is not a known property alone', () => {
@@ -113,7 +113,7 @@ describe('parseReleaseBody (property links)', () => {
 
   it('links known properties when names are given, after unescaping backticks', () => {
     const { sections } = parseReleaseBody(body, { propertyNames: new Set(['retention.ms']) });
-    expect(sections[0].entries).toEqual(['Changing prop:retention.ms[] now applies to `health_manager` too.']);
+    expect(sections[0].entries).toEqual(['Changing prop:retention.ms[link=true] now applies to `health_manager` too.']);
   });
 
   it('keeps plain monospace when no names are given', () => {

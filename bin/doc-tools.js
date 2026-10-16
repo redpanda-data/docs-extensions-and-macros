@@ -2015,7 +2015,7 @@ automation
  * `Area::` labels, normalizes units, and phrases CVEs.
  *
  * In phase 1, a backticked name that matches a property in the release
- * series' redpanda-properties-<tag>.json becomes a `prop:<name>[]` link. The
+ * series' redpanda-properties-<tag>.json becomes a `prop:<name>[link=true]` link. The
  * file is found in modules/reference/attachments/ unless --properties-file
  * names one. With no file, names stay monospace and a warning is logged.
  *

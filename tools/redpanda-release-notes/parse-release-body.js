@@ -105,8 +105,9 @@ function cleanEntry(raw, { propertyNames } = {}) {
 }
 
 /**
- * Rewrites a backticked configuration property name as a `prop:` macro, so the
- * page links it to the property reference. Engineers cannot write `prop:` in
+ * Rewrites a backticked configuration property name as a `prop:` macro with
+ * `link=true`, so the page links it to the property reference. Without
+ * `link=true`, the macro shows only a hover tooltip. Engineers cannot write `prop:` in
  * the source, because nothing resolves it outside the docs build, so this is
  * where the link is added.
  *
@@ -117,12 +118,12 @@ function cleanEntry(raw, { propertyNames } = {}) {
  *
  * @param {string} text - The entry text, with backticks already unescaped.
  * @param {Set<string>} [propertyNames] - Known property names. Without it, the text is returned unchanged.
- * @return {string} The text with known property names as `prop:<name>[]`.
+ * @return {string} The text with known property names as `prop:<name>[link=true]`.
  */
 function linkProperties(text, propertyNames) {
   if (!propertyNames || propertyNames.size === 0) return text;
   return text.replace(/`([\w.-]+)`/g, (match, name) =>
-    /[_.]/.test(name) && propertyNames.has(name) ? `prop:${name}[]` : match);
+    /[_.]/.test(name) && propertyNames.has(name) ? `prop:${name}[link=true]` : match);
 }
 
 /**

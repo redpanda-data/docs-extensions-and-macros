@@ -51,7 +51,7 @@ describe('generate redpanda-release-notes flags', () => {
       '--body', PROPS_BODY, '--properties-file', PROPS_FILE,
     ]);
     expect(res.status).toBe(0);
-    expect(res.stdout).toContain('Changing prop:cloud_storage_segment_max_upload_interval_sec[] now reports');
+    expect(res.stdout).toContain('Changing prop:cloud_storage_segment_max_upload_interval_sec[link=true] now reports');
     expect(res.stdout).toContain('`health_manager`');
   });
 
