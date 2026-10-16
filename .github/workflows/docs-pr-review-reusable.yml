@@ -1037,9 +1037,32 @@ jobs:
             NOT post to GitHub. Write the delta report (requirements the PR misses; PR
             content the ticket doesn't cover) to review-output/ticket-delta.md
             and review-output/verdict.json as
-            {"verdict":"pass"|"fail","blocking":[...],"suggestions":[...]}
+            {"verdict":"pass"|"fail","blocking":[...],"suggestions":[...],"ticket_source":"jira"|"pr-body"|"none"}
             where "fail" means the PR clearly misses a requirement the ticket
-            states.
+            states, and ticket_source says where you read the ticket's
+            requirements: "jira" only if you read the ticket itself,
+            "pr-body" if you used a description quoted in the PR body, and
+            "none" if you could read neither.
+      # This job has no Jira credential yet (DOCS_REVIEW_ROLLOUT.md, org
+      # setup item 6), so unless the PR body quotes the ticket, the delta
+      # had nothing to compare against and its "pass" means nothing. Mark
+      # that as a check that did not run, so the comment cannot show a bare
+      # ✅. A missing or unrecognised ticket_source counts as "none".
+      - name: Flag an unread ticket
+        if: always()
+        env:
+          TICKET: ${{ needs.classify.outputs.ticket }}
+        run: |
+          set -euo pipefail
+          V=review-output/verdict.json
+          [[ -f "$V" ]] && jq -e 'type == "object"' "$V" > /dev/null 2>&1 || exit 0
+          if jq -e '.ticket_source == "jira" or .ticket_source == "pr-body"' "$V" > /dev/null; then
+            exit 0
+          fi
+          jq --arg t "$TICKET" '.not_run = (((.not_run // []) | if type == "array" then . else [.] end)
+              + ["Ticket delta: \($t) was never read. This job cannot reach Jira, and the PR body quotes no ticket description, so there was nothing to compare the PR against. Quote the ticket description in the PR body to enable this check."])' \
+            "$V" > "$V.tmp" && mv "$V.tmp" "$V"
+          echo "::warning::ticket_delta read no ticket requirements; marked as not run"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
