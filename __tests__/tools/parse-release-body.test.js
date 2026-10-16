@@ -6,6 +6,7 @@ const {
   stripAttribution,
   stripLeadingIssueRef,
   cleanEntry,
+  linkProperties,
   normalizeUnits,
   escapeAsciiDocBraces,
   KIND_FEATURE,
@@ -69,6 +70,55 @@ describe('cleanEntry', () => {
   it('normalizes data-size units and escapes braces', () => {
     expect(cleanEntry('`GET /schemas/ids/{id}` returned 403.')).toBe('`GET /schemas/ids/\\{id\\}` returned 403.');
     expect(cleanEntry('offset up to one interval (`4_MiB` of records).')).toBe('offset up to one interval (`4 MiB` of records).');
+  });
+});
+
+describe('linkProperties', () => {
+  const names = new Set([
+    'cloud_storage_segment_max_upload_interval_sec', 'retention.ms', 'admin', 'rack',
+  ]);
+
+  it('rewrites an exact backticked property name as a prop: macro', () => {
+    expect(linkProperties('Changing `cloud_storage_segment_max_upload_interval_sec` now requires a restart.', names))
+      .toBe('Changing prop:cloud_storage_segment_max_upload_interval_sec[] now requires a restart.');
+  });
+
+  it('links a dotted topic property', () => {
+    expect(linkProperties('Set `retention.ms` on the topic.', names)).toBe('Set prop:retention.ms[] on the topic.');
+  });
+
+  it('leaves a backticked identifier that is not a known property alone', () => {
+    expect(linkProperties('The `health_manager` keeps ticking.', names)).toBe('The `health_manager` keeps ticking.');
+  });
+
+  it('leaves a name with a value or other text in the same backticks alone', () => {
+    expect(linkProperties('Use `retention.ms=1000` here.', names)).toBe('Use `retention.ms=1000` here.');
+  });
+
+  it('never links a known name that has no _ or .', () => {
+    expect(linkProperties('The `admin` and `rack` settings.', names)).toBe('The `admin` and `rack` settings.');
+  });
+
+  it('returns the text unchanged without property names', () => {
+    expect(linkProperties('Set `retention.ms`.', undefined)).toBe('Set `retention.ms`.');
+    expect(linkProperties('Set `retention.ms`.', new Set())).toBe('Set `retention.ms`.');
+  });
+});
+
+describe('parseReleaseBody (property links)', () => {
+  const body = [
+    '## Bug Fixes',
+    '* Changing \\`retention.ms\\` now applies to `health_manager` too. by @dev in [#1](https://example.com/1)',
+  ].join('\n');
+
+  it('links known properties when names are given, after unescaping backticks', () => {
+    const { sections } = parseReleaseBody(body, { propertyNames: new Set(['retention.ms']) });
+    expect(sections[0].entries).toEqual(['Changing prop:retention.ms[] now applies to `health_manager` too.']);
+  });
+
+  it('keeps plain monospace when no names are given', () => {
+    const { sections } = parseReleaseBody(body);
+    expect(sections[0].entries).toEqual(['Changing `retention.ms` now applies to `health_manager` too.']);
   });
 });
 

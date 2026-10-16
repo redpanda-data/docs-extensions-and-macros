@@ -16,7 +16,7 @@ describe('generate redpanda-release-notes flags', () => {
     const help = run(['--help']);
     const flags = [...help.stdout.matchAll(/^ {2}(--[a-z][a-z-]*)/gm)].map((m) => m[1]);
     expect(flags.sort()).toEqual([
-      '--body', '--date', '--dry-run', '--page', '--section-file', '--section-only', '--tag',
+      '--body', '--date', '--dry-run', '--page', '--properties-file', '--section-file', '--section-only', '--tag',
     ]);
   });
 
@@ -40,5 +40,37 @@ describe('generate redpanda-release-notes flags', () => {
     expect(res.status).toBe(0);
     expect(`${res.stdout}${res.stderr}`).toMatch(/Skipped: not a GA tag/);
     expect(res.stdout).not.toContain('== v'); // no section emitted
+  });
+
+  const PROPS_BODY = '__tests__/fixtures/release-notes/v26.2.5-property-names.md';
+  const PROPS_FILE = '__tests__/fixtures/release-notes/properties/redpanda-properties-v26.2.4.json';
+
+  it('links known property names as prop: macros with --properties-file', () => {
+    const res = run([
+      '--tag', 'v26.2.5', '--date', '2026-10-16', '--section-only',
+      '--body', PROPS_BODY, '--properties-file', PROPS_FILE,
+    ]);
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain('Changing prop:cloud_storage_segment_max_upload_interval_sec[] now reports');
+    expect(res.stdout).toContain('`health_manager`');
+  });
+
+  it('keeps names monospace and warns when no property file is found', () => {
+    const res = run([
+      '--tag', 'v26.2.5', '--date', '2026-10-16', '--section-only', '--body', PROPS_BODY,
+    ]);
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain('`cloud_storage_segment_max_upload_interval_sec`');
+    expect(res.stdout).not.toContain('prop:');
+    expect(res.stderr).toMatch(/no property file for v26\.2\.5/);
+  });
+
+  it('fails when --properties-file names a missing file', () => {
+    const res = run([
+      '--tag', 'v26.2.5', '--date', '2026-10-16', '--section-only',
+      '--body', PROPS_BODY, '--properties-file', 'nope.json',
+    ]);
+    expect(res.status).not.toBe(0);
+    expect(res.stderr).toMatch(/--properties-file/);
   });
 });
