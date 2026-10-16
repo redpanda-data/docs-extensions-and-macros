@@ -1677,7 +1677,7 @@ npx doc-tools generate cloud-regions --ref staging
 
 === generate redpanda-release-notes
 
-Converts a Self-Managed rpchangelog release body into a candidate AsciiDoc section and inserts it into the Redpanda Release Notes page, newest-first. Applies the mechanical guards: GA tags only (a prerelease is a no-op), the `:earliest-tracked-version:` floor, and idempotency (an already-present version is a no-op). The section carries de-noised source prose as plain bullets — it is a CANDIDATE for the curation step that rewrites voice, adds `Area::` labels, normalizes units, and phrases CVEs.
+Converts a Self-Managed rpchangelog release body into a candidate AsciiDoc section and inserts it into the Redpanda Release Notes page, newest-first. Applies the mechanical guards: GA tags only (a prerelease is a no-op), the `:earliest-tracked-version:` floor, and idempotency (an already-present version is a no-op). The section carries de-noised source prose as plain bullets — it is a CANDIDATE for the curation step that rewrites voice, adds `Area::` labels, normalizes units, and phrases CVEs. In phase 1, a backticked name that matches a property in the release series' redpanda-properties-<tag>.json becomes a `prop:<name>[]` link. The file is found in modules/reference/attachments/ unless --properties-file names one. With no file, names stay monospace and a warning is logged.
 
 *Why use it:*
 
@@ -1706,6 +1706,9 @@ Authored release date as YYYY-MM-DD (required with --body; confirmed on the PR)
 
 `--page <file>`::
 Target release-notes page (relative to repo root, must stay inside the repository) (default: "modules/reference/pages/releases/redpanda.adoc")
+
+`--properties-file <file>`::
+Phase 1: property JSON whose names become prop: links (relative to repo root, must stay inside the repository). Default: the newest redpanda-properties-<tag>.json in modules/reference/attachments/ for the tag's release series
 
 `--section-only`::
 Phase 1 only: print the candidate section and do not read or modify the page
