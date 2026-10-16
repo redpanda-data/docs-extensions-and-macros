@@ -88,7 +88,7 @@ function makeCatalog (extraFiles = []) {
   catalog.registerComponentVersion('connect', '', { title: 'Connect' })
   const origin = { type: 'git', url: DOCS_URL, reftype: 'branch', refname: 'main', branch: 'main' }
   const add = (family, relative, contents) => {
-    const dir = family === 'page' ? 'pages' : family === 'partial' ? 'partials' : 'examples'
+    const dir = { page: 'pages', partial: 'partials', example: 'examples', attachment: 'attachments' }[family]
     const p = `modules/components/${dir}/${relative}`
     catalog.addFile({ path: p, contents: Buffer.from(contents), src: { component: 'connect', version: '', module: 'components', family, relative, path: p, origin } })
   }
@@ -229,10 +229,33 @@ describe('connect-docs-asset tar reader', () => {
     expect(asset.toResource('modules/components/pages/inputs/kafka.adoc')).toBeNull()
     expect(asset.toResource('modules/components/partials/../pages/x.adoc')).toBeNull()
     expect(asset.toResource('modules/components/partials/')).toBeNull()
+    expect(asset.toResource('modules/components/attachments/connect-4.113.0.json')).toEqual({ family: 'attachment', relative: 'connect-4.113.0.json', path: 'modules/components/attachments/connect-4.113.0.json' })
   })
 })
 
 describe('modify-connect-tag-playbook with the release asset', () => {
+  it('adds the release connector data as an attachment, which set-available-attachment-versions then picks', async () => {
+    const dir = path.join(tmp, 'with-json')
+    fs.mkdirSync(dir)
+    writeTree(dir, { ...TREE, 'modules/components/attachments/connect-4.113.0.json': '{"version":"4.113.0"}' })
+    const withJson = makeTarGz(dir)
+    global.fetch = jest.fn(async () => response(200, withJson))
+    // rp-connect-docs still commits the previous release's file.
+    const catalog = makeCatalog([['attachment', 'connect-4.112.0.json', '{"version":"4.112.0"}']])
+    const { error } = await build({ catalog })
+    expect(error).toBeNull()
+    const json = catalog.getById({ component: 'connect', version: '', module: 'components', family: 'attachment', relative: 'connect-4.113.0.json' })
+    expect(json.contents.toString()).toBe('{"version":"4.113.0"}')
+    expect(json.pub.url).toBe('/connect/components/_attachments/connect-4.113.0.json')
+
+    const available = require('../../extensions/set-available-attachment-versions')
+    const ctx = new Context()
+    available.register.call(ctx, { config: {} })
+    await ctx.notify('contentClassified', { contentCatalog: catalog, siteCatalog: {} })
+    const attrs = catalog.getComponent('connect').versions[0].asciidoc.attributes
+    expect(attrs['available-connect-version']).toBe('4.113.0')
+  })
+
   it('downloads the latest release asset and adds its partials and examples to the connect component', async () => {
     const { catalog, error, logs } = await build()
     expect(error).toBeNull()

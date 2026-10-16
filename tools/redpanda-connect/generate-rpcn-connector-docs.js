@@ -101,9 +101,9 @@ function mergeOverrides(target, overrides) {
     throw new Error('Target must be a valid object');
   }
 
-  // 'summary' earns its place here the hard way: overrides.json has carried
-  // summary overrides (zmq4, ffi) that were silently dropped because the key
-  // fell through every branch below. Summaries feed page meta descriptions.
+  // Scalar keys are replaced outright. 'summary' must be listed: a key that
+  // falls through every branch below is silently dropped, and summaries feed
+  // page meta descriptions.
   const scalarKeys = ['description', 'summary', 'type', 'annotated_field', 'version'];
 
   for (const key in overrides) {
