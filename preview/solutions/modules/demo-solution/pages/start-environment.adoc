@@ -1,0 +1,45 @@
+= Start the environment
+:page-layout: solution-step
+:description: Start Redpanda and the demo services with Docker Compose.
+:page-solution-step-duration: 5
+
+== What you do
+
+Save `docker-compose.yml` from the Complete source below and start the stack.
+
+[source,bash]
+----
+include::example$commands.sh[tags=up]
+----
+
+.Complete source: `docker-compose.yml`
+[%collapsible]
+====
+[source,yaml]
+----
+include::example$docker-compose.yml[]
+----
+====
+
+== Files for this step
+
+* `docker-compose.yml`: shown in full under Complete source.
+
+Signed-in readers can download each file with the Download control on its code block or from the All build-along files panel.
+
+== Why
+
+Everything the solution needs runs locally; nothing is installed on the host.
+
+== Verify
+
+[source,bash]
+----
+include::example$commands.sh[tags=info]
+----
+
+The output lists one broker.
+
+== In production
+
+Use the Helm chart or Redpanda Cloud instead of Compose.

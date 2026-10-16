@@ -67,10 +67,17 @@ IMPORTANT: Extensions must be registered under the `antora.extensions` key in yo
 * **unpublish-pages** - Mark pages as unpublished
 
 === Integrations
-* **algolia-indexer** - Index content for Algolia search
+* **algolia-indexer** - Index content for Algolia search (records typed `Doc`, `Lab`, or `Solution`)
 * **compute-end-of-life** - Calculate and display EOL information
-* **find-related-docs** - Find and link related documentation
-* **find-related-labs** - Find and link related lab exercises
+* **find-related-docs** - Find and link related documentation (deprecated, removed in 6.0; use solutions-catalog)
+* **find-related-labs** - Find and link related lab exercises (deprecated, removed in 6.0; use solutions-catalog)
+
+=== Solutions
+* **solutions-catalog** - Validate the `solutions` component, derive every `page-solution-*` attribute, compute `page-related-solutions` for Product Docs pages, and publish `assets/data/solutions.json` plus `assets/data/solutions-graph.json`
+
+=== Shared helpers (`extension-utils/`)
+* **deployment-type** - `getDeploymentType(attributes)`: the one mapping from `env-kubernetes`/`env-linux`/`env-docker`/`env-cloud`/`page-cloud` to a deployment label, used by every extension above
+* **categories** - `createCategoryMap`, `parseCategoryList`, `normalizeCategories`: validate `page-categories` against `valid-categories.yml` and add missing parents
 
 === File processing
 * **archive-attachments** - Archive file attachments
