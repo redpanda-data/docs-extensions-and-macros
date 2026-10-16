@@ -543,8 +543,27 @@ describe('doc-strings-review workflow: source diff (executed)', () => {
   // reaches the model in full when it can page through it with Read.
   test('the review can page through a large diff with Read', () => {
     const review = stepNamed('Claude review with suggestions')
-    expect(review.with.claude_args).toMatch(/--allowed-tools "[^"]*\bRead,/)
+    expect(review.with.claude_args).toMatch(/--allowed-tools "[^"]*\bRead\(\.\/\*\*\),/)
     expect(review.with.prompt).toMatch(/offset and limit/)
+  })
+
+  // The bot token sits in $RUNNER_TEMP/bot-token while the model runs. A bare
+  // Read reaches any path on the runner, and a bare Write can write anywhere,
+  // including the runner's file-command files. File writes are governed by
+  // Edit(path) rules, so the two output files are the only writable paths.
+  test('the review cannot read or write outside the workspace', () => {
+    const review = stepNamed('Claude review with suggestions')
+    const allowed = review.with.claude_args.match(/--allowed-tools "([^"]*)"/)[1]
+      .split(',').map((t) => t.trim()).filter(Boolean)
+    expect(allowed).not.toContain('Read')
+    expect(allowed).not.toContain('Write')
+    expect(allowed).not.toContain('Glob')
+    expect(allowed).not.toContain('Grep')
+    expect(allowed).toContain('Read(./**)')
+    expect(allowed.filter((t) => t.startsWith('Edit('))).toEqual([
+      'Edit(./doc-impact.json)',
+      'Edit(./review-summary.md)'
+    ])
   })
 })
 

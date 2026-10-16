@@ -702,12 +702,13 @@ jobs:
             rm -f "$tmp2"
             echo "::notice::terminology reference unavailable; term checks skipped."
           fi
-      # The next step hands untrusted PR content to a model with Bash
-      # access. Nothing it does not need should sit in its process
-      # environment, so stash the OIDC-fetched bot token in a runner-temp
-      # file for the dispatch step (whose allowed tool patterns cannot read
-      # it), then blank the token and the AWS session credentials from the
-      # job env. Callers on the plain-secret path are unaffected: this step
+      # The next step hands untrusted PR content to a model. Nothing it does
+      # not need should sit in its process environment, so stash the
+      # OIDC-fetched bot token in a runner-temp file for the dispatch step,
+      # then blank the token and the AWS session credentials from the job
+      # env. The file is outside the workspace, and the review's Read and
+      # Edit rules are scoped to the workspace, so the model cannot read it.
+      # A bare Read or Write in that step would reach it. Callers on the plain-secret path are unaffected: this step
       # only runs when the OIDC inputs are set.
       - name: Drop fetched credentials from the review's environment
         if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0') && inputs.aws_region != '' && inputs.aws_role_name_prefix != ''
@@ -769,8 +770,9 @@ jobs:
               mcp__redpanda-docs__search_api_reference,
               mcp__redpanda-docs__ask_redpanda_question,
               mcp__redpanda-docs__get_api_reference_content,
-              Read,
-              Write,
+              Read(./**),
+              Edit(./doc-impact.json),
+              Edit(./review-summary.md),
               Bash(cat pr-diff.patch),
               Bash(gh pr view *),
               Bash(cat lint-findings.json),
