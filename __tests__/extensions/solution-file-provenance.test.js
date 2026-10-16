@@ -225,6 +225,45 @@ describe('solution snippet provenance', () => {
     expect(html).not.toContain('data-solution-file')
   })
 
+  // A numbered step that shows its command, then the file the command uses,
+  // attached with list continuations. Asciidoctor reads a list item's lines
+  // with every include already expanded and numbers them as page lines, so a
+  // listing after an included one reports a line that has drifted past its
+  // own directive by the length of the earlier includes.
+  const STEP = (...blocks) => `. Register the schemas:\n${blocks.map((b) => `+\n${b}`).join('')}`
+
+  renderTest('a listing after an included one in a list item carries its file', () => {
+    const html = render(STEP(
+      '[,bash]\n----\ninclude::example$steps/build-leaderboard/commands.sh[tag=topics]\n----\n',
+      '.What `make topics` runs\n[,make]\n----\ninclude::example$Makefile[tag=topics]\n----\n',
+      '.`main.go`\n[,go]\n----\ninclude::example$services/leaderboard/main.go[]\n----\n',
+    ))
+    expect(listings(html).map((b) => [b.file, b.tag])).toEqual([
+      [undefined, undefined],
+      ['Makefile', 'topics'],
+      ['services/leaderboard/main.go', undefined],
+    ])
+  })
+
+  renderTest('the same file twice in a list item carries each include its own tag', () => {
+    const html = render(STEP(WHOLE_FILE, EXCERPT, '[,make]\n----\ninclude::example$Makefile[tag=topics]\n----\n'))
+    expect(listings(html).map((b) => [b.file, b.tag])).toEqual([
+      ['services/leaderboard/main.go', undefined],
+      ['services/leaderboard/main.go', 'handler'],
+      ['Makefile', 'topics'],
+    ])
+  })
+
+  renderTest('a list item after an earlier list item with includes carries its file', () => {
+    const html = render(`${STEP(WHOLE_FILE)}\n${STEP('[,make]\n----\ninclude::example$Makefile[tag=topics]\n----\n')}`)
+    expect(listings(html).map((b) => b.file)).toEqual(['services/leaderboard/main.go', 'Makefile'])
+  })
+
+  renderTest('a hand-written listing in a list item after an include carries nothing', () => {
+    const html = render(STEP(WHOLE_FILE, HAND_WRITTEN))
+    expect(listings(html).map((b) => b.file)).toEqual(['services/leaderboard/main.go', undefined])
+  })
+
   renderTest('an existing role on the block survives', () => {
     const html = render('[.wide,go]\n----\ninclude::example$services/leaderboard/main.go[]\n----\n')
     const [block] = listings(html)

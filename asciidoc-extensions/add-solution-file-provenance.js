@@ -102,32 +102,50 @@ const EXAMPLE_DIRECTIVE_RX = /^\s*include::(?:([A-Za-z0-9_-]+):)?example\$([^[\]
 const DELIMITER_RX = /^(?:-{4,}|\.{4,})$/
 
 /**
- * The include directive behind a listing nested in another block.
+ * The page lines that can open a nested listing's include: an example include
+ * directly after a listing delimiter, as `{ index, line }` in page order.
+ */
+function directiveCandidates (pageLines) {
+  const out = []
+  if (!pageLines) return out
+  for (let i = 1; i < pageLines.length; i++) {
+    if (EXAMPLE_DIRECTIVE_RX.test(pageLines[i]) && DELIMITER_RX.test(String(pageLines[i - 1]).trim())) {
+      out.push({ index: i, line: pageLines[i] })
+    }
+  }
+  return out
+}
+
+/**
+ * The latest page line a nested listing's include directive can be on, or -1
+ * when the block's location is not this page.
  *
  * A listing inside a compound block (the `[%collapsible]` example block that
- * holds a solution page's `.Complete source`, a sidebar, a tab) is parsed from
- * lines the parent block already read, include expanded, so its source
- * location names the page and a line in it rather than the included file.
- * That line is the listing's opening delimiter (or the attribute and title
- * lines above it), so the directive is the line after the delimiter. Returns
- * '' when the location is not this page or that line is not an example include.
+ * holds a solution page's `.Complete source`, a list item joined with `+`, a
+ * sidebar, a tab) is parsed from lines the parent block already read, include
+ * expanded, so its source location names the page and a line in it rather
+ * than the included file. That line is the listing's opening delimiter (or the
+ * attribute and title lines above it), and the directive is the line after the
+ * delimiter. But the parent numbers the lines it read as page lines, included
+ * ones too, so a listing after an included one in the same parent reports a
+ * line that has drifted past its own directive by the length of the earlier
+ * includes. Drift only ever moves the line forward, which makes this an upper
+ * bound rather than an answer.
  */
-function nestedDirectiveLine (block, file, pageLines) {
-  if (!pageLines || typeof block.getSourceLocation !== 'function') return ''
+function nestedDirectiveBound (block, file, pageLines) {
+  if (!pageLines || typeof block.getSourceLocation !== 'function') return -1
   const location = block.getSourceLocation()
-  if (!location || typeof location.getFile !== 'function') return ''
+  if (!location || typeof location.getFile !== 'function') return -1
   const located = location.getFile()
   // A String carrying a source record is an included file: not this case.
-  if (located && typeof located === 'object') return ''
+  if (located && typeof located === 'object') return -1
   const name = located === undefined || located === null ? '' : String(located)
   const ownPaths = [file.path, file.src && file.src.path].filter(Boolean).map(String)
-  if (name !== '' && !ownPaths.includes(name)) return ''
+  if (name !== '' && !ownPaths.includes(name)) return -1
   let i = Number(location.getLineNumber()) - 1
-  if (!Number.isInteger(i) || i < 0) return ''
+  if (!Number.isInteger(i) || i < 0) return -1
   while (i < pageLines.length && (/^\[.*\]$/.test(pageLines[i]) || /^\.[^.\s]/.test(pageLines[i]))) i++
-  if (!DELIMITER_RX.test(String(pageLines[i] || '').trim())) return ''
-  const line = pageLines[i + 1] || ''
-  return EXAMPLE_DIRECTIVE_RX.test(line) ? line : ''
+  return DELIMITER_RX.test(String(pageLines[i] || '').trim()) ? i + 1 : i
 }
 
 /**
@@ -190,12 +208,35 @@ function register (registry, context = {}) {
   registry.treeProcessor(function () {
     this.process((doc) => {
       const pageLines = sourceLinesOf(file)
+      // Blocks come in document order and each include directive renders at
+      // most one listing, so a nested listing's directive is the first one
+      // after the last directive claimed that resolves to a file holding the
+      // block's lines, and no later than the line the block reports.
+      const candidates = directiveCandidates(pageLines)
+      let next = 0
+      const claim = (index) => { if (index >= next) next = index + 1 }
       for (const block of doc.findBy({ context: 'listing' })) {
         let src = includedSrcOf(block)
         let directive = ''
-        if (!src) {
-          directive = nestedDirectiveLine(block, file, pageLines)
-          src = directive ? nestedIncludedSrc(block, file, directive, context.contentCatalog) : null
+        if (src) {
+          const location = block.getSourceLocation()
+          const parent = location.getFile().parent
+          const ownPaths = [file.path, file.src && file.src.path].filter(Boolean).map(String)
+          if (parent && Number.isInteger(Number(parent.lineno)) && (!parent.file || ownPaths.includes(String(parent.file)))) {
+            claim(Number(parent.lineno) - 1)
+          }
+        } else {
+          const bound = nestedDirectiveBound(block, file, pageLines)
+          for (const candidate of candidates) {
+            if (bound < 0 || candidate.index > bound) break
+            if (candidate.index < next) continue
+            const resolved = nestedIncludedSrc(block, file, candidate.line, context.contentCatalog)
+            if (!resolved) continue
+            src = resolved
+            directive = candidate.line
+            claim(candidate.index)
+            break
+          }
         }
         if (!src || src.family !== EXAMPLE_FAMILY || !src.relative) continue
         if (isStepScaffolding(src.relative)) continue
