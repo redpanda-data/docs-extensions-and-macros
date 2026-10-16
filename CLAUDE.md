@@ -6,6 +6,16 @@ This repository contains tools that help write and maintain Redpanda's technical
 
 This toolbox helps Redpanda's documentation team in several ways. When Redpanda releases a new version, these tools extract information from the code (like configuration options, commands, and features) and create documentation pages automatically. They provide reusable templates and shortcuts that ensure all docs look and work the same way. Instead of manually documenting hundreds of configuration options or commands, these tools do it automatically. The repository also includes a bridge that lets Claude Code (an AI assistant) help with documentation tasks through natural conversation.
 
+## Automation prompts stay in this repository
+
+The prompts for the automations this repository ships, such as the doc-strings review in `.github/workflows/doc-strings-review.yml`, live here on purpose. Do not move them to docs-team-standards, and do not change a workflow to fetch its prompt from another repository at run time.
+
+The reason is change control. Engineering repos call these workflows pinned to a commit SHA, so a prompt change reaches a repo only when that repo bumps its pin, in a pull request its owners review. A prompt fetched at run time from another repository's default branch would change every engineering repo's review the moment someone merged there, with no release, no pin bump, and no review by the repos it affects.
+
+This holds even when the motive is evaluation. Evaluate these prompts here, beside the workflow, with a harness modeled on docs-team-standards' (`claude -p`, regex patterns, an LLM judge, the production model pinned) that reads the prompt from the workflow file itself, so the eval and the pinned prompt always move together.
+
+Known exception, not a precedent: the review currently fetches `resources/writing-style/embedded-reference-strings.md` and `resources/writing-style/terminology.md` from docs-team-standards at run time, unpinned. That predates this note. Do not extend it to more files.
+
 ## Documentation for this repository
 
 ### If you write documentation
