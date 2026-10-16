@@ -17,6 +17,8 @@ Object.entries(helpers).forEach(([name, fn]) => {
   }
   handlebars.registerHelper(name, fn);
 });
+// The provenance marker the partial templates write on their first line
+handlebars.registerHelper('generatedMarker', require('../../cli-utils/generated-marker').generatedMarker);
 
 // Default “main” template (connector.hbs) which invokes partials {{> intro}}, {{> fields}}, {{> examples}}
 const DEFAULT_TEMPLATE = path.resolve(__dirname, './templates/connector.hbs');

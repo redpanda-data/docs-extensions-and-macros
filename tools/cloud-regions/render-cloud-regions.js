@@ -1,7 +1,10 @@
 const fs = require('fs');
 const path = require('path');
 const handlebars = require('handlebars');
+const { generatedMarker, DOC_TOOLS_VERSION } = require('../../cli-utils/generated-marker');
 
+// The provenance marker the templates write on their first line
+handlebars.registerHelper('generatedMarker', generatedMarker);
 
 /**
  * Generates a formatted string representing cloud provider regions using a Handlebars template.
@@ -45,7 +48,7 @@ function renderCloudRegions({ providers, format, lastUpdated, template, clusterT
     throw new Error(`Failed to compile Handlebars template at ${templateFile}: ${err.message}`);
   }
   try {
-    return compiledTemplate({ providers: sortedProviders, lastUpdated, clusterType });
+    return compiledTemplate({ providers: sortedProviders, lastUpdated, clusterType, docToolsVersion: DOC_TOOLS_VERSION });
   } catch (err) {
     throw new Error(`Failed to render Handlebars template at ${templateFile}: ${err.message}`);
   }
