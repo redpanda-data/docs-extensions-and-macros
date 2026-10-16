@@ -174,6 +174,10 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
   const deprecatedFields = [];
   // Changed default values
   const changedDefaults = [];
+  // Fields that had no default and now state one. The field behaved the same
+  // way before, the spec just didn't say so, so these are not default changes
+  // and stay out of What's new and the breaking-change warning.
+  const documentedDefaults = [];
 
   Object.keys(newMap).forEach(cKey => {
     if (!(cKey in oldMap)) return;
@@ -207,13 +211,15 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
         const newDefaultStr = JSON.stringify(newDefault);
 
         if (oldDefaultStr !== newDefaultStr) {
-          changedDefaults.push({
+          const entry = {
             component: cKey,
             field: fName,
             oldDefault: oldDefault,
             newDefault: newDefault,
             description: newFieldObj && newFieldObj.description
-          });
+          };
+          if (oldDefault === undefined) documentedDefaults.push(entry);
+          else changedDefaults.push(entry);
         }
       }
     });
@@ -277,6 +283,7 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
       deprecatedComponents: deprecatedComponents.length,
       deprecatedFields: deprecatedFields.length,
       changedDefaults: changedDefaults.length,
+      documentedDefaults: documentedDefaults.length,
       platformTransitions: platformTransitions.length,
       newBloblangMethods: newBloblangMethods.length,
       removedBloblangMethods: removedBloblangMethods.length,
@@ -293,6 +300,7 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
       deprecatedComponents,
       deprecatedFields,
       changedDefaults,
+      documentedDefaults,
       platformTransitions,
       newBloblangMethods,
       removedBloblangMethods,
@@ -643,7 +651,8 @@ function printDeltaReport(oldIndex, newIndex, opts = {}) {
         const oldDefaultStr = JSON.stringify(oldDefault);
         const newDefaultStr = JSON.stringify(newDefault);
 
-        if (oldDefaultStr !== newDefaultStr) {
+        // A field that had no default and now states one is not a change.
+        if (oldDefaultStr !== newDefaultStr && oldDefault !== undefined) {
           changedDefaultsList.push({
             component: cKey,
             field: fName,
