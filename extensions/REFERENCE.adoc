@@ -413,6 +413,7 @@ At build time, when the playbook has the `connect` component, the extension:
 . Picks the release: the latest stable `vX.Y.Z` release by default, so the site never shows fields from unreleased code on connect's `main` branch. It asks the GitHub API for the latest release and falls back to the highest stable `vX.Y.Z` tag from `git ls-remote`. If neither works, the build stops with an error. The `tag` option picks a specific release instead.
 . Downloads that release's `redpanda-connect-docs.tar.gz` asset. With a GitHub token it downloads through the releases API, which keeps working if the connect repository becomes private. Without one, or if GitHub rejects the token, it uses the public download URL.
 . Adds `modules/components/partials/**` as partials, `modules/components/examples/**` as examples, and `modules/components/attachments/**` (the release's `connect-<version>.json`, read by the Bloblang playground) as attachments of the `components` module, in every version of the `connect` component. A file that another source, such as rp-connect-docs, already provides is skipped and counted in the log, so rp-connect-docs can keep committing its own copies until it stops.
+. When the playbook also registers `add-git-dates`, dates each page by the Connect release that last changed its reference. For every generated partial or example a page includes, directly or through another generated partial such as `bloblang/methods.adoc`, the extension compares the release with older releases that have the asset, newest first, and takes the publish date of the newest release that changed the file. A page that single-sources such a connect page, such as a Cloud stub, gets the same date. `add-git-dates` uses the date as `page-git-modified-date` when it is later than the page's last commit. The walk stops at v4.113.0, the first release with the asset, and after at most 10 older releases. A file that is unchanged for the whole walk keeps the page's git date. If the releases listing or an older release's download fails, the extension logs a warning and pages keep their git dates, so the build never stops for a date. Without `add-git-dates` in the playbook, the extension skips this step and downloads only the release it uses.
 
 A release from before the asset existed has none, and the download returns 404. A new release can also be missing it for a while: Connect publishes the release first and attaches the asset 15 to 20 minutes later in a separate job, which can fail.
 
@@ -1115,7 +1116,7 @@ This extension adds accurate git-based created and modified dates to documentati
 The extension adds the following attributes to each page:
 
 - `page-git-created-date`: The date when the file was first committed (YYYY-MM-DD format)
-- `page-git-modified-date`: The date when the file was last modified (YYYY-MM-DD format)
+- `page-git-modified-date`: The date when the file was last modified (YYYY-MM-DD format). For a page with Connect reference content, this is the date of the most recent Connect release that changed that content, when it is later than the page's last commit (see <<Redpanda Connect tag modifier>>).
 
 These attributes are available for use in UI templates (for metadata, display banners, etc.) and are exported to markdown files for AI consumption.
 
