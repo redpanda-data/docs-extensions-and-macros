@@ -60,6 +60,9 @@ function rulesFor (surface) {
  * @param {Set<string>} [options.reviewedFingerprints] - Diff mode: skip
  *   declarations (and removals) whose fingerprint is in this set, so a PR
  *   review sees each string once across pushes
+ * @param {string[]} [options.reviewerPassages] - Diff mode: passages from
+ *   human review comments. A changed line found in one counts as written by
+ *   a reviewer, and a declaration whose changed lines all are is skipped
  * @param {Function} [options.log] - Progress logger (stderr by default)
  * @returns {Object} { findings, summary, unsupported_surfaces }
  */
@@ -71,6 +74,7 @@ function lintStrings (options) {
     skipRules = [],
     onlyRules = null,
     reviewedFingerprints = null,
+    reviewerPassages = null,
     log = (msg) => process.stderr.write(`${msg}\n`)
   } = options
 
@@ -93,6 +97,8 @@ function lintStrings (options) {
   const reviewed = reviewedFingerprints || new Set()
   const pending = []
   let alreadyReviewed = 0
+  let reviewerWritten = 0
+  const headLines = new Map()
   let removal = { rawFiles: [], declarations: [] }
   const skipped = []
   let unverifiable = 0
@@ -138,6 +144,13 @@ function lintStrings (options) {
           alreadyReviewed++
           continue
         }
+        if (reviewerPassages && reviewerPassages.length) {
+          const changed = changedLinesOf(repoPath, decl, files.get(decl.file), headLines)
+          if (changed.length > 0 && changed.every((l) => writtenByReviewer(l.text, reviewerPassages))) {
+            reviewerWritten++
+            continue
+          }
+        }
         declarations.push(decl)
         if (decl.meta && decl.meta.unverifiable) unverifiable++
         const detail = surface.reviewContext ? surface.reviewContext(decl) : null
@@ -181,6 +194,7 @@ function lintStrings (options) {
   if (diffBase) {
     merged.declarations = pending
     merged.summary.alreadyReviewed = alreadyReviewed
+    merged.summary.reviewerWritten = reviewerWritten
   }
   merged.summary.removedDeclarations = removal.declarations.map(pendingEntry)
   // Declarations whose text has gaps the extractor could not evaluate
@@ -468,6 +482,9 @@ function formatHuman (result) {
   if (summary.alreadyReviewed) {
     lines.push(`Already reviewed on an earlier push (skipped): ${summary.alreadyReviewed}`)
   }
+  if (summary.reviewerWritten) {
+    lines.push(`Text a human reviewer suggested on the PR (skipped): ${summary.reviewerWritten}`)
+  }
   for (const decl of summary.removedDeclarations || []) {
     lines.push(`Removed or renamed: ${decl.name} (${decl.surface}, ${decl.file})`)
   }
@@ -520,6 +537,91 @@ function readFingerprints (file) {
   return new Set(text.split(/[\s,]+/).filter((token) => /^[0-9a-f]{16}$/.test(token)))
 }
 
+// Shorter passages are labels, lead-ins ("Suggest replacing this with:") or
+// fragments that occur in many strings, so matching on them would skip
+// declarations nobody reviewed.
+const MIN_REVIEWER_PASSAGE = 40
+
+function normalizeText (text) {
+  return String(text == null ? '' : text).replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * Passages from human review comments that a declaration can be matched
+ * against: the body of every ```suggestion block, and every prose paragraph
+ * outside a code block. Whitespace is collapsed so a paragraph the author
+ * re-wrapped to the file's line length still matches.
+ */
+function reviewerPassagesFrom (bodies) {
+  const passages = new Set()
+  for (const body of Array.isArray(bodies) ? bodies : []) {
+    if (typeof body !== 'string') continue
+    const chunks = [...body.matchAll(/```suggestion[^\n]*\n([\s\S]*?)```/g)].map((m) => m[1])
+    chunks.push(...body.replace(/```[\s\S]*?(```|$)/g, '\n\n').split(/\n\s*\n/))
+    for (const chunk of chunks) {
+      const text = normalizeText(chunk)
+      if (text.length >= MIN_REVIEWER_PASSAGE) passages.add(text)
+    }
+  }
+  return [...passages]
+}
+
+// A changed line shorter than this ("per topic.", "For example,") occurs in
+// too many paragraphs to say who wrote it, so it never counts as a
+// reviewer's. That errs toward reviewing.
+const MIN_REVIEWER_LINE = 12
+
+/**
+ * The lines this PR changed inside a declaration's span, as HEAD has them.
+ * Lines with no letters or digits (a closing backtick, a blank line) say
+ * nothing about who wrote the string and are left out.
+ */
+function changedLinesOf (repoPath, decl, lineSet, cache) {
+  if (!lineSet) return []
+  if (!cache.has(decl.file)) {
+    let lines = null
+    try {
+      lines = fs.readFileSync(path.join(repoPath, decl.file), 'utf8').split('\n')
+    } catch {}
+    cache.set(decl.file, lines)
+  }
+  const lines = cache.get(decl.file)
+  if (!lines) return []
+  const out = []
+  for (const [start, end] of spansOf(decl)) {
+    if (start == null || end == null) continue
+    for (let n = start; n <= end; n++) {
+      if (!lineSet.has(n) || n > lines.length) continue
+      const text = normalizeText(lines[n - 1])
+      if (/[A-Za-z0-9]/.test(text)) out.push({ line: n, text })
+    }
+  }
+  return out
+}
+
+/**
+ * True when a human reviewer wrote this line on the PR: it appears whole in
+ * one of their passages. Matching per line, not per string, means an author
+ * who keeps a reviewer's paragraph and rewrites the next one still gets the
+ * new paragraph reviewed (streaming-enterprise PR 461 is the case this
+ * exists for: the review argued with help text applied from a reviewer).
+ */
+function writtenByReviewer (line, passages) {
+  return line.length >= MIN_REVIEWER_LINE && passages.some((passage) => passage.includes(line))
+}
+
+/**
+ * Read a --reviewer-comments file: a JSON array of comment bodies. A missing
+ * or unparseable file yields no passages, so it means "review everything".
+ */
+function readReviewerComments (file) {
+  try {
+    return reviewerPassagesFrom(JSON.parse(fs.readFileSync(file, 'utf8')))
+  } catch {
+    return []
+  }
+}
+
 /**
  * CLI entry point shared by bin/doc-tools.js and direct invocation
  * (node tools/lint-strings --repo <path> ...).
@@ -536,7 +638,8 @@ function runCli (options) {
       diffBase: options.diff || null,
       skipRules: options.skipRules ? String(options.skipRules).split(',').map((s) => s.trim()).filter(Boolean) : [],
       onlyRules: options.onlyRules ? String(options.onlyRules).split(',').map((s) => s.trim()).filter(Boolean) : null,
-      reviewedFingerprints: options.reviewed ? readFingerprints(options.reviewed) : null
+      reviewedFingerprints: options.reviewed ? readFingerprints(options.reviewed) : null,
+      reviewerPassages: options.reviewerComments ? readReviewerComments(options.reviewerComments) : null
     })
   } catch (err) {
     console.error(`Error: ${err.message}`)
@@ -555,7 +658,7 @@ function runCli (options) {
   process.exitCode = options.strict && result.summary.errors > 0 ? 1 : 0
 }
 
-module.exports = { lintStrings, formatHuman, runCli, SURFACES, rulesFor, fingerprint, readFingerprints, pageContext }
+module.exports = { lintStrings, formatHuman, runCli, SURFACES, rulesFor, fingerprint, readFingerprints, reviewerPassagesFrom, readReviewerComments, pageContext }
 
 // Direct usage: node tools/lint-strings --repo <path> [--surface a,b]
 //   [--diff <base>] [--format json|human] [--strict]
@@ -571,10 +674,11 @@ if (require.main === module) {
     else if (arg === '--skip-rules') options.skipRules = args[++i]
     else if (arg === '--only-rules') options.onlyRules = args[++i]
     else if (arg === '--reviewed') options.reviewed = args[++i]
+    else if (arg === '--reviewer-comments') options.reviewerComments = args[++i]
     else if (arg === '--strict') options.strict = true
     else {
       console.error(`Unknown argument: ${arg}`)
-      console.error('Usage: node tools/lint-strings --repo <path> [--surface a,b] [--diff <base>] [--format json|human] [--skip-rules a,b] [--only-rules a,b] [--reviewed <file>] [--strict]')
+      console.error('Usage: node tools/lint-strings --repo <path> [--surface a,b] [--diff <base>] [--format json|human] [--skip-rules a,b] [--only-rules a,b] [--reviewed <file>] [--reviewer-comments <file>] [--strict]')
       process.exit(2)
     }
   }

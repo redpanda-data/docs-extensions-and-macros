@@ -7,7 +7,7 @@ const { execSync } = require('child_process')
 
 const { parseUnifiedDiff, parseUnifiedDiffRemovals, routeFile, spanIntersects, classifyDiff } =
   require('../../../tools/lint-strings/diff')
-const { lintStrings } = require('../../../tools/lint-strings')
+const { lintStrings, reviewerPassagesFrom, readReviewerComments } = require('../../../tools/lint-strings')
 
 describe('unified diff parsing', () => {
   test('maps hunks to post-image line numbers per file', () => {
@@ -393,6 +393,90 @@ describe('review once (end-to-end, temp git repo)', () => {
     expect(again.summary.removedSurfaceLines).toBe(0)
     expect(again.summary.totalDeclarations).toBe(0)
     expect(again.summary.alreadyReviewed).toBe(2)
+  })
+})
+
+// streaming-enterprise PR 461: a docs reviewer suggested new rpk help text,
+// the author applied it, and the review on the next push argued with it. The
+// fixtures carry that command's help text before and after, and the
+// reviewer's two real comments: a suggestion block for the flag and a prose
+// paragraph for Long.
+describe('text a human reviewer wrote (end-to-end, PR 461 fixtures)', () => {
+  const FIXTURES = path.join(__dirname, '../../../tools/lint-strings/fixtures/rpk-pr461')
+  const REL = path.join('src', 'go', 'rpk', 'pkg', 'cli', 'topic', 'delete.go')
+  let repo
+
+  function git (args) {
+    execSync(`git ${args}`, { cwd: repo, stdio: 'pipe' })
+  }
+
+  beforeAll(() => {
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-strings-reviewer-'))
+    const target = path.join(repo, REL)
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    fs.copyFileSync(path.join(FIXTURES, 'delete.base.go'), target)
+    git('init --quiet')
+    git('config user.email lint-strings-test@example.invalid')
+    git('config user.name "lint-strings test"')
+    git('add .')
+    git('commit --quiet -m base')
+    git('tag base')
+    fs.copyFileSync(path.join(FIXTURES, 'delete.head.go'), target)
+    git('commit --quiet -am head')
+  })
+
+  afterAll(() => {
+    fs.rmSync(repo, { recursive: true, force: true })
+  })
+
+  test('without reviewer comments both changed strings are reviewed', () => {
+    const result = lintStrings({ repo, diffBase: 'base', log: () => {} })
+    expect(result.declarations.map((d) => d.name).sort()).toEqual(['delete', 'regex'])
+    expect(result.summary.reviewerWritten).toBe(0)
+  })
+
+  test('a string whose changed lines all came from the reviewer is skipped', () => {
+    const passages = readReviewerComments(path.join(FIXTURES, 'reviewer-comments.json'))
+    const result = lintStrings({ repo, diffBase: 'base', reviewerPassages: passages, log: () => {} })
+    expect(result.declarations.map((d) => d.name)).toEqual(['delete'])
+    expect(result.summary.reviewerWritten).toBe(1)
+  })
+
+  test("a string with lines of the author's own is still reviewed", () => {
+    // Long keeps the reviewer's paragraphs but has two lines the author
+    // wrote: the second paragraph without the reviewer's quotes, and an
+    // edited example comment.
+    const passages = readReviewerComments(path.join(FIXTURES, 'reviewer-comments.json'))
+    const result = lintStrings({ repo, diffBase: 'base', reviewerPassages: passages, log: () => {} })
+    expect(result.declarations.map((d) => d.name)).toEqual(['delete'])
+    expect(result.declarations[0]).not.toHaveProperty('reviewer_lines')
+  })
+
+  test('a comment that does not quote the string skips nothing', () => {
+    const passages = reviewerPassagesFrom([
+      'Looks good to me, but please double check the internal topics handling in the regex branch.'
+    ])
+    const result = lintStrings({ repo, diffBase: 'base', reviewerPassages: passages, log: () => {} })
+    expect(result.declarations.map((d) => d.name).sort()).toEqual(['delete', 'regex'])
+  })
+})
+
+describe('reviewerPassagesFrom', () => {
+  test('takes suggestion bodies and prose paragraphs, not short lines or other code blocks', () => {
+    const passages = reviewerPassagesFrom([
+      'Suggest this:\n\n```suggestion\n\tShort: "Delete topics, printing the status of each one",\n```',
+      'Try:\n\n```go\nfmt.Println("this is a long line of code that is not a suggestion")\n```\n\nA prose paragraph that is long enough\nto count, wrapped across lines.',
+      'LGTM',
+      null
+    ])
+    expect(passages).toEqual([
+      'Short: "Delete topics, printing the status of each one",',
+      'A prose paragraph that is long enough to count, wrapped across lines.'
+    ])
+  })
+
+  test('an unreadable comments file yields no passages', () => {
+    expect(readReviewerComments(path.join(os.tmpdir(), 'no-such-reviewer-comments.json'))).toEqual([])
   })
 })
 
