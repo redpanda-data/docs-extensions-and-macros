@@ -62,9 +62,7 @@ function rulesFor (surface) {
  *   review sees each string once across pushes
  * @param {string[]} [options.reviewerPassages] - Diff mode: passages from
  *   human review comments. A changed line found in one counts as written by
- *   a reviewer; a declaration whose changed lines all are is skipped, and any
- *   other carries the reviewer-written line numbers so the review leaves
- *   them alone
+ *   a reviewer, and a declaration whose changed lines all are is skipped
  * @param {Function} [options.log] - Progress logger (stderr by default)
  * @returns {Object} { findings, summary, unsupported_surfaces }
  */
@@ -146,11 +144,9 @@ function lintStrings (options) {
           alreadyReviewed++
           continue
         }
-        let reviewerLines = []
         if (reviewerPassages && reviewerPassages.length) {
           const changed = changedLinesOf(repoPath, decl, files.get(decl.file), headLines)
-          reviewerLines = changed.filter((l) => writtenByReviewer(l.text, reviewerPassages)).map((l) => l.line)
-          if (changed.length > 0 && reviewerLines.length === changed.length) {
+          if (changed.length > 0 && changed.every((l) => writtenByReviewer(l.text, reviewerPassages))) {
             reviewerWritten++
             continue
           }
@@ -158,12 +154,7 @@ function lintStrings (options) {
         declarations.push(decl)
         if (decl.meta && decl.meta.unverifiable) unverifiable++
         const detail = surface.reviewContext ? surface.reviewContext(decl) : null
-        pending.push({
-          ...pendingEntry(decl),
-          ...(detail ? { detail } : {}),
-          ...(reviewerLines.length ? { reviewer_lines: reviewerLines } : {}),
-          context: pageContext(decl, everything || head)
-        })
+        pending.push({ ...pendingEntry(decl), ...(detail ? { detail } : {}), context: pageContext(decl, everything || head) })
       }
       results.push(runRules(declarations, rulesFor(surface), { skipRules, onlyRules }))
       // Doc-method calls the extractor saw but could not trace, in the
