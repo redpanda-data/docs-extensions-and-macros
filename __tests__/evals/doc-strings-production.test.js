@@ -84,3 +84,54 @@ describe('doc-strings evals: inline-comment stand-in', () => {
     expect(recorded).toEqual([{ path: 'a.cc', line: 3, body: 'b' }])
   })
 })
+
+describe('doc-strings evals: unchanged-lines check', () => {
+  const decl = { file: 'cmd.go', line_start: 10, line_end: 20 }
+  const keep = ['An untouched line.', 'Another untouched line.']
+  const comment = (body, line = 20, startLine = 10) => ({ path: 'cmd.go', body, line, startLine })
+
+  test('a suggestion that keeps every unchanged line passes', () => {
+    const r = lib.linesKept([comment('```suggestion\nAn untouched line.\nA changed line, fixed.\nAnother untouched line.\n```')], decl, keep)
+    expect(r).toEqual({ pass: true, judged: 1, dropped: [] })
+  })
+
+  test('a suggestion that rewords an unchanged line fails and names it', () => {
+    const r = lib.linesKept([comment('```suggestion\nAn untouched line, improved.\nAnother untouched line.\n```')], decl, keep)
+    expect(r.pass).toBe(false)
+    expect(r.dropped).toEqual(['An untouched line.'])
+  })
+
+  test('plain comments and comments on other spans are not judged', () => {
+    const r = lib.linesKept([
+      comment('Reads oddly, no suggestion.'),
+      comment('```suggestion\nunrelated\n```', 40, 38),
+      { path: 'other.go', body: '```suggestion\nunrelated\n```', line: 15 }
+    ], decl, keep)
+    expect(r).toEqual({ pass: true, judged: 0, dropped: [] })
+  })
+
+  test('changedLines reads post-image line numbers from git', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dse-changed-'))
+    fs.writeFileSync(path.join(dir, 'f.txt'), 'a\nb\nc\nd\n')
+    const base = lib.gitInit(dir)
+    fs.writeFileSync(path.join(dir, 'f.txt'), 'a\nB\nc\nd\ne\n')
+    lib.gitCommitAll(dir, 'edit')
+    expect([...lib.changedLines(dir, base, 'f.txt')].sort()).toEqual([2, 5])
+  })
+})
+
+describe('doc-strings evals: prompt controls', () => {
+  const { CASES } = require('../../evals/doc-strings/cases')
+
+  // A control that silently ran the unchanged prompt would prove nothing,
+  // so each control edit must match the shipped prompt exactly once.
+  test.each(CASES.filter((c) => c.sabotagePromptEdits).map((c) => [c.id, c]))('%s: its control edit applies to the shipped prompt', (_, spec) => {
+    const prompt = production.loadStep().with.prompt
+    const edited = production.editPrompt(prompt, spec.sabotagePromptEdits)
+    expect(edited).not.toBe(prompt)
+  })
+
+  test('an edit that does not match is an error', () => {
+    expect(() => production.editPrompt('text', [{ find: 'absent', replace: 'x' }])).toThrow(/must match once/)
+  })
+})
