@@ -48,6 +48,13 @@ const SURFACE_LAYOUT = {
   rpk: {
     files: [{ from: path.join(LINT_FIXTURES, 'rpk', 'lint_cmd.go'), to: 'src/go/rpk/pkg/cli/cluster/lint_cmd.go' }],
     target: 'src/go/rpk/pkg/cli/cluster/lint_cmd.go'
+  },
+  // rpk topic delete's help text before the change in streaming-enterprise
+  // PR 461; the case commits the after side (delete.head.go) on top.
+  'rpk-pr461': {
+    files: [{ from: path.join(EVAL_FIXTURES, 'rpk-pr461', 'delete.base.go'), to: 'src/go/rpk/pkg/cli/topic/delete.go' }],
+    target: 'src/go/rpk/pkg/cli/topic/delete.go',
+    surface: 'rpk'
   }
 }
 
@@ -199,6 +206,52 @@ function parseFences (output, tag) {
   let match
   while ((match = pattern.exec(output)) !== null) blocks.push(match[1])
   return blocks
+}
+
+/**
+ * The lines a suggestion on a declaration dropped or reworded: for every
+ * recorded comment whose range overlaps the declaration's span, each
+ * ```suggestion block must contain every one of `keep` as a whole line
+ * (trailing whitespace aside). Comments without a suggestion block change
+ * nothing and are not judged.
+ *
+ * @param {Array<{path, body, line, startLine}>} comments - recorded inline comments
+ * @param {{file: string, line_start: number, line_end: number}} decl
+ * @param {string[]} keep - exact text of the lines that must survive
+ * @returns {{pass: boolean, judged: number, dropped: string[]}}
+ */
+function linesKept (comments, decl, keep) {
+  let judged = 0
+  const dropped = new Set()
+  for (const comment of comments) {
+    if (comment.path !== decl.file) continue
+    const end = Number(comment.line)
+    const start = Number(comment.startLine || comment.line)
+    if (!(start <= decl.line_end && end >= decl.line_start)) continue
+    for (const body of parseFences(comment.body || '', 'suggestion')) {
+      judged++
+      const lines = new Set(body.split('\n').map((l) => l.replace(/\s+$/, '')))
+      for (const want of keep) {
+        if (!lines.has(want.replace(/\s+$/, ''))) dropped.add(want)
+      }
+    }
+  }
+  return { pass: dropped.size === 0, judged, dropped: [...dropped] }
+}
+
+/**
+ * Line numbers changed between `base` and HEAD in one file (post-image),
+ * from git's own zero-context diff.
+ */
+function changedLines (repoDir, base, fileRel) {
+  const out = run('git', ['diff', '-U0', base, 'HEAD', '--', fileRel], repoDir).stdout
+  const lines = new Set()
+  for (const m of out.matchAll(/^@@ -\S+ \+(\d+)(?:,(\d+))? @@/gm)) {
+    const start = Number(m[1])
+    const count = m[2] === undefined ? 1 : Number(m[2])
+    for (let n = start; n < start + count; n++) lines.add(n)
+  }
+  return lines
 }
 
 /** All fenced ```json blocks, parsed; unparseable blocks are kept as errors. */
@@ -420,6 +473,8 @@ function checkSuggestionComment (comments, target) {
 module.exports = {
   checkSuggestionComment,
   dispatchAccepts,
+  linesKept,
+  changedLines,
   REPO_ROOT,
   DOC_TOOLS,
   EVAL_FIXTURES,
