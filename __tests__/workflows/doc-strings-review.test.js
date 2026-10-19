@@ -547,10 +547,10 @@ describe('doc-strings-review workflow: source diff (executed)', () => {
     expect(review.with.prompt).toMatch(/offset and limit/)
   })
 
-  // The bot token sits in $RUNNER_TEMP/bot-token while the model runs. A bare
-  // Read reaches any path on the runner, and a bare Write can write anywhere,
-  // including the runner's file-command files. File writes are governed by
-  // Edit(path) rules, so the two output files are the only writable paths.
+  // A bare Read reaches any path on the runner, and a bare Write can write
+  // anywhere, including the runner's file-command files. File writes are
+  // governed by Edit(path) rules, so the two output files are the only
+  // writable paths.
   test('the review cannot read or write outside the workspace', () => {
     const review = stepNamed('Claude review with suggestions')
     const allowed = review.with.claude_args.match(/--allowed-tools "([^"]*)"/)[1]
@@ -564,6 +564,60 @@ describe('doc-strings-review workflow: source diff (executed)', () => {
       'Edit(./doc-impact.json)',
       'Edit(./review-summary.md)'
     ])
+  })
+})
+
+describe('doc-strings-review workflow: no bot token while the model runs', () => {
+  // Claude Code auto-approves read-only Bash commands such as cat, so a
+  // workspace-scoped Read rule does not stop the model reading a file
+  // elsewhere on the runner. The token must not exist anywhere while the
+  // review runs.
+  const steps = job.steps
+  const reviewIndex = steps.findIndex((s) => s.name === 'Claude review with suggestions')
+
+  test('no step writes the bot token to a file', () => {
+    for (const step of steps) {
+      if (typeof step.run !== 'string') continue
+      expect(step.run).not.toMatch(/ACTIONS_BOT_TOKEN[^\n]*>/)
+      expect(step.run).not.toMatch(/bot-token/)
+    }
+  })
+
+  test('the scrub step leaves no file behind and blanks the token', () => {
+    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'scrub-'))
+    const runnerTemp = path.join(tmp, 'runner-temp')
+    const githubEnv = path.join(tmp, 'github-env')
+    fs.mkdirSync(runnerTemp)
+    fs.writeFileSync(githubEnv, '')
+    const r = execRun(stepNamed('Drop fetched credentials from the review\'s environment'), {
+      env: {
+        ACTIONS_BOT_TOKEN: 'ghs_secret',
+        CLIENT_SECRET_ID: 'sdlc/prod/github/docs_doc_strings_client',
+        RUNNER_TEMP: runnerTemp,
+        GITHUB_ENV: githubEnv
+      }
+    })
+    expect(r.status).toBe(0)
+    // Nothing on disk the model could cat, and the token is blanked.
+    expect(fs.readdirSync(runnerTemp)).toEqual([])
+    const written = fs.readFileSync(githubEnv, 'utf8')
+    expect(written).toMatch(/^ACTIONS_BOT_TOKEN=$/m)
+    expect(written).not.toContain('ghs_secret')
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  test('the token is fetched again only after the review, before the dispatch', () => {
+    const fetches = steps
+      .map((s, i) => ({ s, i }))
+      .filter(({ s }) => typeof s.uses === 'string' && s.uses.startsWith('aws-actions/aws-secretsmanager-get-secrets') && /bot_token_secret_id/.test(s.with['secret-ids']))
+    const dispatchIndex = steps.findIndex((s) => s.name === 'Dispatch doc-impact')
+    const after = fetches.filter(({ i }) => i > reviewIndex)
+    expect(after).toHaveLength(1)
+    expect(after[0].i).toBeLessThan(dispatchIndex)
+    expect(after[0].s.if).toMatch(/aws_dispatch\.outcome == 'success'/)
+    const assume = stepNamed('Assume the AWS role for the doc-impact dispatch')
+    expect(assume.if).toMatch(/hashFiles\('doc-impact\.json'\) != ''/)
+    expect(steps.indexOf(assume)).toBeGreaterThan(reviewIndex)
   })
 })
 
@@ -645,6 +699,19 @@ describe('doc-strings-review workflow: doc-impact dispatch (executed)', () => {
       files: docImpact === null ? {} : { 'doc-impact.json': JSON.stringify(docImpact) }
     })
   }
+
+  test('on the OIDC path the re-fetched token is used', () => {
+    const r = dispatch(valid, { GH_TOKEN: '', ACTIONS_BOT_TOKEN: 'refetched' })
+    expect(r.status).toBe(0)
+    expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(true)
+  })
+
+  test('with no token at all the dispatch is skipped', () => {
+    const r = dispatch(valid, { GH_TOKEN: '', ACTIONS_BOT_TOKEN: '' })
+    expect(r.status).toBe(0)
+    expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(false)
+    expect(r.all).toMatch(/No bot token/)
+  })
 
   test('a well-formed report is dispatched to the configured repo', () => {
     const r = dispatch(valid)

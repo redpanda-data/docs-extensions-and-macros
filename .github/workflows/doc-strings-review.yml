@@ -703,21 +703,19 @@ jobs:
             echo "::notice::terminology reference unavailable; term checks skipped."
           fi
       # The next step hands untrusted PR content to a model. Nothing it does
-      # not need should sit in its process environment, so stash the
-      # OIDC-fetched bot token in a runner-temp file for the dispatch step,
-      # then blank the token and the AWS session credentials from the job
-      # env. The file is outside the workspace, and the review's Read and
-      # Edit rules are scoped to the workspace, so the model cannot read it.
-      # A bare Read or Write in that step would reach it. Callers on the plain-secret path are unaffected: this step
-      # only runs when the OIDC inputs are set.
+      # not need may exist while it runs, so blank the OIDC-fetched bot token
+      # and the AWS session credentials from the job env, and do not write the
+      # token anywhere. Scoping the review's Read rule to the workspace is not
+      # enough on its own: Claude Code auto-approves read-only Bash commands
+      # such as cat, so any file on the runner is readable. The dispatch step
+      # fetches the token again after the review. Callers on the plain-secret
+      # path are unaffected: this step only runs when the OIDC inputs are set.
       - name: Drop fetched credentials from the review's environment
         if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0') && inputs.aws_region != '' && inputs.aws_role_name_prefix != ''
         env:
           CLIENT_SECRET_ID: ${{ inputs.adp_client_secret_id }}
         run: |
           set -euo pipefail
-          umask 077
-          printf '%s' "${ACTIONS_BOT_TOKEN:-}" > "$RUNNER_TEMP/bot-token"
           # AWS_BEARER_TOKEN_BEDROCK deliberately survives: it is the model
           # auth in gateway mode, short-lived, and usable only against the
           # gateway. The long-lived client credential that can mint fresh
@@ -1044,6 +1042,25 @@ jobs:
         with:
           path: ${{ runner.temp }}/doc-strings-review-state
           key: doc-strings-review-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
+      # The bot token was blanked before the review and never written to
+      # disk, so the dispatch fetches it again now that the model has exited.
+      # Only when there is a report to send, and only on the OIDC path.
+      - name: Assume the AWS role for the doc-impact dispatch
+        id: aws_dispatch
+        if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0') && inputs.aws_region != '' && inputs.aws_role_name_prefix != '' && hashFiles('doc-impact.json') != ''
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: arn:aws:iam::${{ secrets.aws_cred_account_id }}:role/${{ inputs.aws_role_name_prefix }}${{ github.event.repository.name }}
+      - name: Fetch the bot token for the doc-impact dispatch
+        if: steps.aws_dispatch.outcome == 'success'
+        continue-on-error: true
+        uses: aws-actions/aws-secretsmanager-get-secrets@v3
+        with:
+          secret-ids: |
+            ,${{ inputs.bot_token_secret_id }}
+          parse-json-secrets: true
       - name: Dispatch doc-impact
         if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0')
         continue-on-error: true
@@ -1056,11 +1073,10 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
-          # The OIDC path stashes the token in a temp file (see the scrub
-          # step above) because it is deliberately blanked from the job env
-          # before the review runs.
-          if [ -z "${GH_TOKEN:-}" ] && [ -n "${RUNNER_TEMP:-}" ] && [ -s "$RUNNER_TEMP/bot-token" ]; then
-            GH_TOKEN="$(cat "$RUNNER_TEMP/bot-token")"
+          # On the OIDC path the token is fetched again after the review (the
+          # two steps above), because it is blanked before the review runs.
+          if [ -z "${GH_TOKEN:-}" ] && [ -n "${ACTIONS_BOT_TOKEN:-}" ]; then
+            GH_TOKEN="$ACTIONS_BOT_TOKEN"
             export GH_TOKEN
           fi
           [ -n "${GH_TOKEN:-}" ] || { echo "No bot token; skipping dispatch."; exit 0; }
