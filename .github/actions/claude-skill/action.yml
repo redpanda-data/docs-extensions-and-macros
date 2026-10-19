@@ -540,6 +540,7 @@ runs:
       run: |
         set -euo pipefail
         export PATH="$GH_READONLY_SHIM:$PATH"
+        unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN   # see the run step
         if [[ -z "${AWS_BEARER_TOKEN_BEDROCK:-}" ]]; then
           echo "::warning::no gateway bearer — skipping the plugin-load probe (the run step soft-fails next)"
           exit 0
@@ -617,6 +618,13 @@ runs:
       run: |
         set -u
         export PATH="$GH_READONLY_SHIM:$PATH"
+        # The job grants id-token: write for the mint step, so the runner
+        # puts the OIDC request URL and token into EVERY step's environment,
+        # this one included. Anything Claude could run with them could mint
+        # an OIDC token, assume this repo's AWS role and read the long-lived
+        # ADP client secret that the scrub step keeps out of this
+        # environment. Nothing after the mint needs them.
+        unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
         mkdir -p "$OUTPUT_DIR"
 
         if [[ -z "${AWS_BEARER_TOKEN_BEDROCK:-}" ]]; then
@@ -626,19 +634,35 @@ runs:
         fi
 
         # Tool allowlist. Agent/Task included so pr-review can spawn the
-        # content-reviewer agent (itself Read/Grep/Glob only). Write is
-        # needed for the findings/verdict output contract. The gh patterns
+        # content-reviewer agent (itself Read/Grep/Glob only). Writes are
+        # needed for the findings/verdict output contract, and ONLY there:
+        # a bare `Write` reaches any path the runner user can write (the gh
+        # shim, $GITHUB_ENV, $GITHUB_PATH, the CLI config), so writes are
+        # granted as `Edit(<output_dir>/**)`, which governs the Write tool
+        # too. Tested on CLI 2.1.258: `Edit(review-output/**)` allows
+        # review-output/ok.txt and denies a write elsewhere in the
+        # workspace and outside it, while `Write(review-output/**)` denies
+        # all three. The gh patterns
         # are PREFIX matches and cannot express "GET only", so read-only gh
         # is enforced by the shim on PATH (installed above), not by this
-        # list. No tree-mutating git verbs (fetch/checkout/switch): the
-        # review must stay on the PR head that was checked out. Skill: the
+        # list. No git verbs beyond a bare `git status`. Prefix rules cannot
+        # restrict flags, and the read-only-looking verbs are not read-only:
+        # `git grep -O<cmd>` runs any program, and `git diff`, `git log` and
+        # `git show` all write any file with `--output=<path>` (all four
+        # tested on CLI 2.1.258 and git 2.49, none denied). Grep and Read
+        # cover searching and reading; `gh pr diff` and `gh api` cover the
+        # diff and history. Skill: the
         # frontmatter grants that would otherwise cover it are stripped
         # above, and doc-ticket, pr-review and overrides-review all load
         # skills. (CLI 2.1.258 auto-approves Skill in -p mode, so this is
         # belt and braces, not a fix for an observed failure.)
-        ALLOWED="Read,Grep,Glob,Write,Skill,Agent,Task"
+        if [[ "$OUTPUT_DIR" == /* || "$OUTPUT_DIR" == *..* ]]; then
+          echo "::error::output_dir must be a relative path inside the workspace (got '$OUTPUT_DIR')"
+          exit 1
+        fi
+        ALLOWED="Read,Grep,Glob,Edit(${OUTPUT_DIR%/}/**),Skill,Agent,Task"
         ALLOWED="$ALLOWED,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr list:*),Bash(gh pr checks:*),Bash(gh issue view:*),Bash(gh api:*)"
-        ALLOWED="$ALLOWED,Bash(git log:*),Bash(git grep:*),Bash(git diff:*),Bash(git show:*),Bash(git status),Bash(pwd),Bash(ls:*)"
+        ALLOWED="$ALLOWED,Bash(git status),Bash(pwd),Bash(ls:*)"
 
         # ONE end-to-end budget across both attempts. A per-attempt timeout
         # let two attempts exceed the calling job's own timeout, and a job
