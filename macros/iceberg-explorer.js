@@ -150,7 +150,7 @@ function defineBlock (registry) {
       // height; `engine-base` overrides where docs-ui fetches the engine from.
       const initialConfig = attrs.config || (defaults && defaults.config) || '';
       const height = cssLength(attrs.height, warn);
-      const engineBase = attrs['engine-base'] || '';
+      const engineBase = rootRelativePath(attrs['engine-base'], warn);
 
       const dataDefaults = defaults
         ? escapeHtml(JSON.stringify(defaults))
@@ -208,7 +208,35 @@ function cssLength (raw, warn) {
   return '';
 }
 
+/**
+ * Validate the `engine-base` attribute as a same-origin, root-relative path.
+ * docs-ui loads `<engine-base>/iceberg-engine-<version>.js` as a script, so any
+ * other value would let page source run another origin's JavaScript on the docs
+ * site. Escaping stops HTML injection but does not make a URL trustworthy, so
+ * reject schemes, protocol-relative paths (`//host`), backslashes (which
+ * browsers treat as `/`), whitespace, and raw or percent-encoded control
+ * characters.
+ * @param {string} raw
+ * @param {function(string): void} warn
+ * @returns {string} A safe root-relative path, or '' to use the docs-ui default.
+ */
+function rootRelativePath (raw, warn) {
+  if (!raw) return '';
+  const value = String(raw);
+  const safe =
+    /^\/(?![\/\\])/.test(value) &&
+    !/[\\\s\x00-\x1f\x7f]/.test(value) &&
+    !/%(?:[01][0-9a-f]|7f|5c)/i.test(value);
+  if (safe) return value;
+  warn(
+    `engine-base="${value}" is not a root-relative path on this site (for example, /_/engine/26.2). ` +
+    'Ignoring it, so docs-ui loads the engine from its default location.'
+  );
+  return '';
+}
+
 module.exports.MOUNT_ATTRIBUTE = MOUNT_ATTRIBUTE;
 module.exports.MOUNT_CONTRACT_VERSION = MOUNT_CONTRACT_VERSION;
 module.exports.MOUNT_CLASS = MOUNT_CLASS;
 module.exports.MOUNT_SELECTOR = MOUNT_SELECTOR;
+module.exports.rootRelativePath = rootRelativePath;

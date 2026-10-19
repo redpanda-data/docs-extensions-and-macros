@@ -505,7 +505,7 @@ The block accepts an open (`--`), listing (`----`), literal, or pass body. It is
 | Minimum height for the container, emitted as an inline `min-height` style. A bare number is treated as pixels (`height=400` becomes `min-height:400px`). Otherwise the value must be a CSS length in `px`, `rem`, `em`, `vh`, `vw`, or `%`; any other value is rejected with a warning rather than interpolated into the style attribute.
 
 | `engine-base`
-| Optional base location for the translation engine build, emitted as `data-engine-base`. docs-ui falls back to its own default when this is absent, so set it only to pin a specific engine build.
+| Optional base location for the translation engine build, emitted as `data-engine-base`. It must be a root-relative path on the docs site, such as `/_/engine/26.2`, because docs-ui loads a script from it. Any other value (an absolute or protocol-relative URL, a relative path, backslashes, or control characters) is ignored with a build warning. docs-ui falls back to its own default when this is absent, so set it only to pin a specific engine build.
 |===
 
 === Registration
@@ -519,12 +519,12 @@ asciidoc:
 
 === docs-ui dependency
 
-This block is half of a two-repo handshake and does nothing on its own. The explorer UI and its translation engine ship in docs-ui, and no released docs-ui bundle contains them yet: the explorer module is still open in `redpanda-data/docs-ui` (PR #404, `jake/iceberg-mode-explorer`), so on a site built with the current bundle the block renders the container and its fallback paragraph, nothing more.
+This block is half of a two-repo handshake and does nothing on its own. The explorer UI and its translation engine ship in docs-ui, so the block requires a docs-ui release that includes the explorer module. On a site built with a bundle that lacks the module, the block renders the container and its fallback paragraph, nothing more.
 
 Order of operations before an author uses the block on a published page:
 
 . Merge and publish this package, so consumers can resolve the macro.
-. Merge and release docs-ui #404, with hydration keyed on `[data-iceberg-explorer]` (see <<Mount contract>>).
+. Release a docs-ui bundle that includes the explorer module, with hydration keyed on `[data-iceberg-explorer]` (see <<Mount contract>>).
 . Add the macro to each consuming playbook's `asciidoc.extensions` (`redpanda-data/docs`, `cloud-docs`). Registering it in this repo's `local-antora-playbook.yml` covers only this repo's preview site.
 
 Until step 2 lands, a page that uses the block shows the fallback paragraph rather than an explorer. That is deliberate: it is visible, so a missing or outdated UI bundle looks broken rather than looking like a page with nothing on it.

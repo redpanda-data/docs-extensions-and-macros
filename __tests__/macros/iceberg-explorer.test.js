@@ -229,6 +229,33 @@ describe('iceberg-explorer macro', () => {
       expect(html).not.toContain('style=')
       expect(messages()).toMatch(/is not a CSS length/)
     })
+
+    // docs-ui loads <engine-base>/iceberg-engine-<version>.js as a script, so
+    // anything but a same-origin path would run another origin's JavaScript.
+    test.each([
+      ['an absolute URL', 'https://attacker.example'],
+      ['a protocol-relative URL', '//attacker.example/engine'],
+      ['a backslash path', '/\\attacker.example'],
+      ['a javascript: URL', 'javascript:alert(1)'],
+      ['a relative path', 'engine/26.2'],
+      ['an encoded newline', '/_/engine%0a/26.2'],
+      ['an encoded backslash', '/%5cattacker.example'],
+      ['a raw tab', '/_/en\tgine'],
+    ])('rejects an engine-base that is %s', (_label, base) => {
+      const html = convert(`[iceberg-explorer,engine-base="${base}"]\n--\n--`, {
+        'page-relative-src-path': 'ROOT/pages/iceberg-mode.adoc',
+      })
+      expect(html).toContain(macro.MOUNT_ATTRIBUTE)
+      expect(html).not.toContain('data-engine-base=')
+      expect(messages()).toMatch(/is not a root-relative path/)
+      expect(messages()).toContain('ROOT/pages/iceberg-mode.adoc')
+    })
+
+    test.each(['/_/engine/26.2', '/assets/iceberg/v1'])('accepts the root-relative engine-base %s', (base) => {
+      const html = convert(`[iceberg-explorer,engine-base="${base}"]\n--\n--`)
+      expect(html).toContain(`data-engine-base="${base}"`)
+      expect(warn).not.toHaveBeenCalled()
+    })
   })
 
   describe('block contexts', () => {
