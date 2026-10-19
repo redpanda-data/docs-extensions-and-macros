@@ -100,10 +100,12 @@ module.exports.register = function ({ config }) {
           continue;
         }
 
-        // Filter attachments based on file_patterns
+        // Filter attachments based on file_patterns. An attachment with no
+        // `out` is unpublished (for example, solutions-catalog removes `out`
+        // from every file of a draft solution), so it is never archived.
         const attachmentsSegment = "_attachments/";
         const matched = attachments.filter((attachment) =>
-          micromatch.isMatch(attachment.out.path, file_patterns)
+          attachment.out && attachment.out.path && micromatch.isMatch(attachment.out.path, file_patterns)
         );
 
         logger.debug(`Matched ${matched.length} attachments for ${compName}@${compVersion}`);
