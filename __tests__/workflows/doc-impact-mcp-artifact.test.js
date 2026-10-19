@@ -59,6 +59,12 @@ function runExtract ({ npx = NPX_REAL, executionFile = FIXTURE } = {}) {
 }
 
 describe('doc-impact MCP artifact: wiring', () => {
+  test('the extract runs outside the PR checkout and without the model token', () => {
+    const step = stepNamed(EXTRACT)
+    expect(step['working-directory']).toBe('${{ runner.temp }}')
+    expect(step.env).toHaveProperty('AWS_BEARER_TOKEN_BEDROCK', '')
+  })
+
   test('runs after the review and before the dispatch, never failing the job', () => {
     const review = indexOf('Claude review with suggestions')
     expect(indexOf(EXTRACT)).toBeGreaterThan(review)

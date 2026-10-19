@@ -1049,14 +1049,26 @@ jobs:
       # come from docs that may already hold the writer's fix, so a correct
       # "already documented" would score as a miss. The artifact holds only
       # each call's tool name, arguments and result content, never tokens,
-      # headers or identity. It is stored in the CALLER's repository, so a
-      # private caller's artifact is private too. A doc-tools release older
-      # than the doc-impact-recording command just skips with a notice.
+      # headers or identity, and the extractor drops any call whose arguments
+      # or result look like a credential (log masking doesn't cover
+      # artifacts). The artifact is stored in the CALLER's repository for 90
+      # days, so anyone who can read that repository can download it: for a
+      # public caller (connect, redpanda, redpanda-operator) that is anyone.
+      # It holds public docs answers and the review's questions about PR
+      # strings. Mining a private caller's artifacts copies that PR text out
+      # of the private repository, so keep mined recordings somewhere at
+      # least as private. A doc-tools release older than the
+      # doc-impact-recording command just skips with a notice.
       - name: Extract the docs MCP calls for the doc-impact eval
         id: mcp_recording
         if: always() && steps.review.outputs.execution_file != ''
         continue-on-error: true
+        # Runs outside the PR checkout, so a .npmrc in the PR can't redirect
+        # npx's registry, and without the model token, which this step doesn't
+        # need.
+        working-directory: ${{ runner.temp }}
         env:
+          AWS_BEARER_TOKEN_BEDROCK: ''
           PKG: ${{ steps.pkg.outputs.pkg }}
           EXECUTION_FILE: ${{ steps.review.outputs.execution_file }}
           REPO: ${{ github.repository }}

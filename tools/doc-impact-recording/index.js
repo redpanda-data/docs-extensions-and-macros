@@ -15,6 +15,12 @@
  * Nothing else from the transcript is copied, so the session's tokens,
  * headers, environment and identity never reach the recording.
  *
+ * The arguments are the model's own text, though, and the review reads
+ * untrusted PR content. A call whose arguments or result contain something
+ * shaped like a credential is dropped rather than saved, because the
+ * recording is uploaded as an artifact and log masking doesn't cover
+ * artifacts.
+ *
  * Accepted input:
  *   - the execution file anthropics/claude-code-action writes: one JSON
  *     array of SDK messages;
@@ -26,6 +32,22 @@ const fs = require('fs')
 const path = require('path')
 
 const DEFAULT_SERVER = 'redpanda-docs'
+
+// Credential shapes a recording must never carry: GitHub tokens (classic and
+// fine-grained), JWTs (which include GitHub App and OIDC tokens), and AWS
+// access key IDs.
+const SECRET_PATTERNS = [
+  /\bgh[pousr]_[A-Za-z0-9]{20,}/,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}/,
+  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}/,
+  /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/
+]
+
+/** Whether a value, serialized, contains anything shaped like a credential. */
+function looksSecret (value) {
+  const text = typeof value === 'string' ? value : JSON.stringify(value)
+  return SECRET_PATTERNS.some((re) => re.test(text || ''))
+}
 
 /** Messages from a transcript, in order. Lines that are not JSON are skipped. */
 function parseTranscript (text) {
@@ -96,6 +118,12 @@ function extractCalls (messages, { server = DEFAULT_SERVER } = {}) {
   return calls.filter((c) => c.content !== null)
 }
 
+/** Split calls into the ones safe to save and the count dropped as secret-bearing. */
+function dropSecretCalls (calls) {
+  const kept = calls.filter((c) => !looksSecret(c.arguments) && !looksSecret(c.content))
+  return { kept, dropped: calls.length - kept.length }
+}
+
 /** The model the session ran on, from its init message. */
 function sessionModel (messages) {
   const init = (messages || []).find((m) => m.type === 'system' && m.subtype === 'init')
@@ -107,19 +135,24 @@ function sessionModel (messages) {
  * { item, recorded_at, server_url, model, source, calls: [{ tool, arguments, content, is_error }] }
  */
 function buildRecording (messages, { item = null, recordedAt, serverUrl = null, model = null, server = DEFAULT_SERVER } = {}) {
-  return {
+  const { kept, dropped } = dropSecretCalls(extractCalls(messages, { server }))
+  const recording = {
     item,
     recorded_at: recordedAt || new Date().toISOString(),
     server_url: serverUrl,
     model: model || sessionModel(messages),
     source: 'production',
-    calls: extractCalls(messages, { server })
+    calls: kept
   }
+  // Not enumerable, so it never reaches the written file.
+  Object.defineProperty(recording, 'droppedSecretCalls', { value: dropped })
+  return recording
 }
 
 /**
  * CLI entry: read --execution-file, write --output. Writes nothing when the
- * session made no docs calls, so the caller can tell "no calls" from "a
+ * session made no docs calls it can save, and removes any file an earlier
+ * run left at --output, so the caller can tell "no calls" from "a
  * recording" by the file's presence. Exits 0 either way; a missing or
  * unreadable transcript is exit 1.
  */
@@ -140,8 +173,12 @@ function runCli (options, { log = console.log, error = console.error } = {}) {
     model: options.model || null,
     server: options.server || DEFAULT_SERVER
   })
+  if (recording.droppedSecretCalls) {
+    error(`Dropped ${recording.droppedSecretCalls} MCP call(s) whose arguments or result look like a credential.`)
+  }
   if (!recording.calls.length) {
-    log(`No ${options.server || DEFAULT_SERVER} MCP calls in ${messages.length} transcript message(s); no recording written.`)
+    fs.rmSync(options.output, { force: true })
+    log(`No ${options.server || DEFAULT_SERVER} MCP calls to save in ${messages.length} transcript message(s); no recording written.`)
     return 0
   }
   fs.mkdirSync(path.dirname(path.resolve(options.output)), { recursive: true })
@@ -150,4 +187,4 @@ function runCli (options, { log = console.log, error = console.error } = {}) {
   return 0
 }
 
-module.exports = { parseTranscript, extractCalls, sessionModel, buildRecording, runCli, DEFAULT_SERVER }
+module.exports = { parseTranscript, extractCalls, sessionModel, buildRecording, dropSecretCalls, looksSecret, runCli, DEFAULT_SERVER }

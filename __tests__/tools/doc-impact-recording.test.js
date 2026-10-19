@@ -10,6 +10,7 @@ const {
   extractCalls,
   sessionModel,
   buildRecording,
+  looksSecret,
   runCli
 } = require('../../tools/doc-impact-recording')
 
@@ -136,5 +137,65 @@ describe('doc-impact-recording: CLI', () => {
     const rec = JSON.parse(fs.readFileSync(out, 'utf8'))
     expect(rec).toMatchObject({ item: 'redpanda-operator-7', recorded_at: '2026-10-08T00:00:00.000Z', source: 'production' })
     expect(rec.calls).toHaveLength(2)
+  })
+})
+
+// A transcript with one docs call whose arguments carry the given text, and
+// a clean second call.
+function transcriptWith (query) {
+  const call = (id, q) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'mcp__redpanda-docs__search', input: { query: q } }] } })
+  const result = (id, text) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: text }] } })
+  return [call('a', query), result('a', 'page text'), call('b', 'what is a broker'), result('b', 'a broker is')]
+}
+
+describe('doc-impact-recording: credential-shaped calls', () => {
+  const quiet = { log: () => {}, error: () => {} }
+  const samples = {
+    'GitHub App token': 'ghs_' + 'A'.repeat(36),
+    'classic PAT': 'ghp_' + 'b'.repeat(36),
+    'fine-grained PAT': 'github_pat_' + '1'.repeat(22) + '_' + 'x'.repeat(30),
+    JWT: 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U',
+    'AWS access key ID': 'AKIA' + 'ABCDEFGHIJKLMNOP'
+  }
+
+  for (const [name, secret] of Object.entries(samples)) {
+    test(`drops a call whose arguments contain a ${name}`, () => {
+      const rec = buildRecording(transcriptWith(`docs for ${secret} please`))
+      expect(rec.calls.map((c) => c.arguments.query)).toEqual(['what is a broker'])
+      expect(rec.droppedSecretCalls).toBe(1)
+      expect(JSON.stringify(rec)).not.toContain(secret)
+    })
+  }
+
+  test('drops a call whose result content contains a credential', () => {
+    const msgs = transcriptWith('clean query')
+    msgs[1].message.content[0].content = 'leaked ghs_' + 'Z'.repeat(36)
+    expect(buildRecording(msgs).calls.map((c) => c.arguments.query)).toEqual(['what is a broker'])
+  })
+
+  test('keeps ordinary docs text, including words that start with the prefixes', () => {
+    expect(looksSecret({ query: 'ghost topics, AKIA docs, eyJ prefix, github_pat setting' })).toBe(false)
+    expect(buildRecording(transcriptWith('how do shadow links work')).calls).toHaveLength(2)
+  })
+
+  test('the written file has no droppedSecretCalls key', () => {
+    const dir = tmp()
+    const file = path.join(dir, 't.json')
+    fs.writeFileSync(file, JSON.stringify(transcriptWith('ghp_' + 'c'.repeat(36))))
+    const out = path.join(dir, 'recording.json')
+    expect(runCli({ executionFile: file, output: out }, quiet)).toBe(0)
+    const rec = JSON.parse(fs.readFileSync(out, 'utf8'))
+    expect(rec.calls).toHaveLength(1)
+    expect(rec).not.toHaveProperty('droppedSecretCalls')
+  })
+
+  test('removes an earlier recording when this run has nothing to save', () => {
+    const dir = tmp()
+    const out = path.join(dir, 'recording.json')
+    fs.writeFileSync(out, '{"stale": true}')
+    const file = path.join(dir, 'none.json')
+    fs.writeFileSync(file, JSON.stringify([{ type: 'system', subtype: 'init', model: 'm' }]))
+    expect(runCli({ executionFile: file, output: out }, quiet)).toBe(0)
+    expect(fs.existsSync(out)).toBe(false)
   })
 })
