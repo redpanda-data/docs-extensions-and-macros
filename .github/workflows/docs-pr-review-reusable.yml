@@ -43,7 +43,8 @@
 #
 # Ordering contract: in an SME-gated repo the automated docs review never
 # runs before one SME approval (SME = (requested ∪ reviewed) − docs team −
-# author − bots, recomputed from the API on every run — never cached). Everywhere
+# author − bots, where "reviewed" means any review that is not COMMENTED,
+# recomputed from the API on every run — never cached). Everywhere
 # it runs exactly once per (PR, head SHA), and it never merges anything.
 # The only physical merge gate is the docs-team approval (CODEOWNERS).
 #
@@ -317,6 +318,7 @@ jobs:
             # scripts/test-sme-parity.sh (sme-parity.yml) fails CI if they drift.
             #
             # (requested ∪ reviewed) − docs team − author − bots, recomputed
+            # ("reviewed" = any review that is not COMMENTED),
             # from the API on EVERY run. Deliberately not cached anywhere: a
             # marker comment would be shared mutable state that anyone with
             # write access can edit or delete, and a stale snapshot silently
@@ -332,11 +334,17 @@ jobs:
             # a PR with >30 reviews yields "a,b\nc,d" and a bogus login
             # "b\nc" after split(",") — real SMEs silently dropped. (gh's
             # own --slurp cannot be combined with --jq.)
-            reviewed=$(gh api "repos/$R/pulls/$PR/reviews" --paginate \
-              | jq -rs '[.[][].user.login] | unique | join(",")')
-            jq -nr --arg live "$live" --arg reviewed "$reviewed" \
+            reviews=$(gh api "repos/$R/pulls/$PR/reviews" --paginate \
+              | jq -cs '[.[][] | {login: .user.login, state}]')
+            # A COMMENTED review does not make someone an SME (decision with
+            # Jake, 2026-10-19): the approval check below ignores COMMENTED,
+            # so a drive-by commenter counted here could never satisfy the
+            # gate, and the nag (which only fires on an empty set) would
+            # stay silent. Anyone with an APPROVED, CHANGES_REQUESTED or
+            # DISMISSED review still counts, even if they commented later.
+            jq -nr --arg live "$live" --argjson reviews "$reviews" \
               --arg team "$DOC_TEAM" --arg author "$AUTHOR" --arg bots "$BOT_LOGINS" '
-              (($live | split(",")) + ($reviewed | split(","))) | unique
+              (($live | split(",")) + ($reviews | map(select(.state != "COMMENTED") | .login))) | unique
               | map(select(. != "" and . != $author))
               | map(select(endswith("[bot]") | not))
               | map(select(. as $l | ($bots | split(",") | map(gsub("\\s";""))) | index($l) | not))
@@ -551,7 +559,7 @@ jobs:
           ADOC=$(grep -cE '\.adoc$' files.txt || true)
           JSON=$(grep -cE '\.json$' files.txt || true)
           OVERRIDES=$(grep -ciE '(^|/)[^/]*overrides[^/]*\.json$' files.txt || true)
-          IMG=$(grep -cE '\.(png|svg|jpe?g|gif|webp)$' files.txt || true)
+          IMG=$(grep -ciE '\.(png|svg|jpe?g|gif|webp)$' files.txt || true)   # -i: .PNG, .JPG
           CODE=$(grep -cE '\.(go|java|py|js|ts|jsx|tsx|sh|sql|proto|c|cc|cpp|rs)$' files.txt || true)
           {
             echo "has_adoc=$([[ $ADOC -gt 0 ]] && echo true || echo false)"

@@ -206,14 +206,25 @@ runs:
         BASE_REF=$(gh api "repos/$R/pulls/$PR" --jq .base.ref)
         find . \( -type f -o -type l \) \( -name CLAUDE.md -o -name CLAUDE.local.md \) -not -path './.git/*' -print0 \
           | xargs -0 -r rm -f
+        # List to a file first. Inside the process substitution a failed
+        # trees call (rate limit, transient 5xx) was invisible to set -e: the
+        # step logged "Loaded 0" and went green, and Claude reviewed with
+        # none of the repo's own rules. Now it fails the step instead.
+        RULES_LIST="$RUNNER_TEMP/claude-md-list.txt"
+        gh api "repos/$R/git/trees/$BASE_REF?recursive=1" > "$RUNNER_TEMP/base-tree.json"
+        if [[ "$(jq -r '.truncated' "$RUNNER_TEMP/base-tree.json")" == "true" ]]; then
+          echo "::error::the base-branch tree listing for $BASE_REF was truncated, so some CLAUDE.md files may be missing; refusing to review with an incomplete rule set"
+          exit 1
+        fi
+        jq -r '.tree[] | select(.type=="blob") | select(.path | test("(^|/)CLAUDE(\\.local)?\\.md$")) | .path' \
+          "$RUNNER_TEMP/base-tree.json" > "$RULES_LIST"
         N=0; LOADED=""
         while IFS= read -r f; do
           [[ -z "$f" ]] && continue
           mkdir -p "$(dirname "$f")"
           gh api "repos/$R/contents/$f?ref=$BASE_REF" -H 'Accept: application/vnd.github.raw+json' > "$f"
           N=$((N + 1)); LOADED="$LOADED $f"
-        done < <(gh api "repos/$R/git/trees/$BASE_REF?recursive=1" \
-          --jq '.tree[] | select(.type=="blob") | select(.path | test("(^|/)CLAUDE(\\.local)?\\.md$")) | .path')
+        done < "$RULES_LIST"
         echo "Loaded $N CLAUDE.md/CLAUDE.local.md file(s) from $BASE_REF:${LOADED:- none}"
 
     # The plugin, checked out at a pinned SHA rather than installed via
@@ -283,6 +294,14 @@ runs:
           -type f -exec sed -i '/^allowed-tools:/d' {} +
         find "$P" -path '*/.git' -prune -o -path '*/agents/*.md' -type f -exec perl -pi -e \
           'if (/^tools:/) { s/\b(Bash|WebFetch|Write|Edit|NotebookEdit)\b//g; s/,([ \t]*,)+/,/g; s/:[ \t]*,/: /; s/,[ \t]*$//; }' {} +
+        # The strip handles one-line values only. A list form (`tools:` or
+        # `allowed-tools:` with the items on the following lines) would keep
+        # its items, so any empty-value key is refused outright. No file
+        # uses that form today.
+        if grep -rnE --include='*.md' --exclude-dir=.git '^(tools|allowed-tools):[[:space:]]*$' "$P"; then
+          echo "::error::a plugin frontmatter grant uses the multi-line list form, which the strip cannot handle — refusing to run"
+          exit 1
+        fi
         if grep -rn --include='*.md' --exclude-dir=.git '^allowed-tools:' "$P" || \
            grep -rnE --include='*.md' --exclude-dir=.git '^tools:.*\b(Bash|WebFetch|Write|Edit)\b' "$P"; then
           echo "::error::a plugin frontmatter grant survived stripping — refusing to run with a widened sandbox"
@@ -602,7 +621,12 @@ runs:
         # Output goes to files, not a pipe, so nothing can die of SIGPIPE
         # under pipefail.
         PROBE="$RUNNER_TEMP/plugin-probe"
-        claude --plugin-dir "$PWD/.docs-team-standards-plugin" -p "Reply with OK." \
+        # Bounded: against a gateway that never answers, the model call hung
+        # for 590s and more, and this runs before the review's own time
+        # budget starts, so a hang ate into the job's timeout. The load check
+        # below reads the init event, which the CLI writes before any model
+        # call, so it still works when the timeout kills the process.
+        timeout 60 claude --plugin-dir "$PWD/.docs-team-standards-plugin" -p "Reply with OK." \
           --max-turns 1 --output-format stream-json --verbose \
           > "$PROBE.jsonl" 2> "$PROBE.err" || true
         LOADED=$(jq -Rn '[inputs | fromjson?]
@@ -722,14 +746,23 @@ runs:
         # error) would leave it behind: the aggregate would report it as a
         # finished review, and screenshot_gate's merge step would merge it
         # as a real vision verdict. Both read only whether the file exists.
+        # Everything in OUTPUT_DIR, not just verdict.json and findings.md:
+        # passes name their reports differently (ticket_delta writes
+        # ticket-delta.md), and a dead attempt's report rendered beside
+        # "unavailable" would be just as misleading. Each pass has its own
+        # OUTPUT_DIR, and nothing else writes there before this step. The
+        # CLI's own claude-run.json stays: it is the debugging record of a
+        # failed attempt, the aggregate never renders it, and each attempt
+        # overwrites it.
+        clear_output() { find "$OUTPUT_DIR" -mindepth 1 ! -name claude-run.json -delete 2>/dev/null || true; }
         soft_fail() {
-          rm -f "$OUTPUT_DIR/verdict.json"
+          clear_output
           echo "claude_failed=true" >> "$GITHUB_OUTPUT"
           exit 0
         }
 
         run_claude() {
-          rm -f "$OUTPUT_DIR/verdict.json" "$OUTPUT_DIR/findings.md"
+          clear_output
           local budget; budget=$(remaining)
           (( budget > 0 )) || return 124
           timeout "${budget}s" claude -p "$PROMPT" \
