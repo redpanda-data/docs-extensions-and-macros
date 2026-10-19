@@ -40,6 +40,7 @@ display help for command
 * `mcp-version` - Show MCP server version and configuration information
 * `lint-strings` - Lint user-facing doc strings embedded in engineering source code (properties, metrics, ...)
 * `detect-enterprise-gating` - Find enterprise gating changes (license_required_feature values, config::enterprise<> wrappers) in a core diff and print them as a doc-impact report
+* `doc-impact-recording` - Extract the docs MCP calls from a Claude Code transcript into a doc-impact eval recording
 * `lint-screenshots` - Lint image macros and image files in a docs repo against the screenshot standard (alt text, size, format, width)
 * `check-build-log` - Check an Antora JSON build log: fail on error or fatal records or too few pages, print a Markdown summary
 * `check-rendered-html` - Scan rendered Antora HTML for unconverted AsciiDoc (literal backticks, xref:, include::, attributes, tables, empty sections) and broken anchors and links
@@ -666,6 +667,56 @@ display help for command
 npx doc-tools detect-enterprise-gating --repo . --diff origin/dev
 ----
 
+== doc-impact-recording
+
+Extracts every redpanda-docs MCP call and its result from a Claude Code transcript (the claude-code-action execution file, or `claude -p --output-format stream-json` output) and writes them as a doc-impact eval recording. Only the tool name, arguments and result content are kept. Writes nothing when the session made no docs calls.
+
+*Why use it:*
+
+The doc-impact eval replays docs answers per PR. Answers recorded later come from docs that may already contain the writer's fix, so the eval would score a correct "already documented" as a miss. The doc-strings review saves what the docs server told it at review time, and the eval miner turns that into the item's recording.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools doc-impact-recording [options]
+----
+
+*Options:*
+
+`--execution-file <path>`::
+Transcript: a JSON array of SDK messages or stream-json lines
+
+`--output <path>`::
+Recording file to write (not written when there are no docs calls)
+
+`--item <id>`::
+Item id to store in the recording
+
+`--server <name>`::
+MCP server name in the transcript tool names (default: "redpanda-docs")
+
+`--server-url <url>`::
+URL of that MCP server, stored in the recording
+
+`--model <name>`::
+Model to store (default: the model in the transcript init message)
+
+`--recorded-at <iso>`::
+Timestamp to store (default: now)
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# What the doc-strings review runs after its Claude step
+npx doc-tools doc-impact-recording --execution-file "$RUNNER_TEMP/claude-execution-output.json" \
+  --output recording.json --item redpanda-operator-1615 --server-url https://docs.redpanda.com/mcp
+----
+
 == lint-screenshots
 
 Deterministic checks from the docs screenshot standard, run against the .adoc pages under modules/ in a docs repo: every image macro (block and inline) has alt text, the alt text is at most 125 characters, does not start with "screenshot of" / "image of" / "picture of", and has no unquoted comma (Asciidoctor would split it into width/height); the referenced image file exists and is at most 100KB. Those are errors and exit 1. Warnings (exit 0 unless --warnings-as-errors) cover the rest of the standard: images above the 50KB target, JPEG/WebP where PNG or SVG belongs, captures wider than 1920px, and - in --files mode - changed images nothing references. Commented-out macros are skipped.
@@ -1075,7 +1126,7 @@ Description section partial template (default: "<repository-root>/tools/redpanda
 Custom Handlebars template for bloblang function/method partials
 
 `--overrides <path>`::
-Optional JSON file with overrides (default: "docs-data/overrides.json")
+Optional JSON file of description overrides to merge into the generated output. Nothing is merged unless you pass it. Connector descriptions come from the connect and benthos component specs, so fix wrong text there
 
 `--include-bloblang`::
 Include Bloblang functions and methods in generation
@@ -2297,7 +2348,7 @@ Path to the overrides JSON file (for example docs-data/property-overrides.json)
 Path to the extracted source JSON (property extractor raw output; required for the properties surface)
 
 `--surface <surface>`::
-Override surface to audit (choices: "properties", "rpk", "connect", default: "properties")
+Override surface to audit (choices: "properties", "rpk", default: "properties")
 
 `--format <format>`::
 Output format (choices: "json", "human", default: "json")

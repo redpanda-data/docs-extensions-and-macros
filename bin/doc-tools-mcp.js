@@ -10,7 +10,6 @@
  * - Context-aware: Works from any repository based on cwd
  * - Antora intelligence: Understands component/module structure
  * - Automation: Run doc-tools generate commands
- * - Auto-discovery: Prompts loaded automatically from mcp/prompts/
  * - Validation: Startup checks ensure all resources are accessible
  * - Telemetry: Usage tracking for adoption metrics
  */
@@ -201,7 +200,7 @@ const tools = [
   },
   {
     name: 'generate_rpcn_connector_docs',
-    description: 'Generate Redpanda Connect connector documentation. Creates component documentation for all connectors. Writers use this when updating connector reference docs. Automatically uses docs-data/overrides.json if present.',
+    description: 'Generate Redpanda Connect connector documentation. Creates component documentation for all connectors. Writers use this when updating connector reference docs. Field, component, and Bloblang descriptions come from the component specs in redpanda-data/connect and redpanda-data/benthos, so fix wrong text with a PR there.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -239,7 +238,7 @@ const tools = [
         },
         overrides: {
           type: 'string',
-          description: 'Path to optional JSON file with overrides (defaults to docs-data/overrides.json if present)'
+          description: 'Path to an optional JSON file of description overrides (optional). Nothing is merged unless you pass it.'
         },
         cloud_version: {
           type: 'string',
@@ -516,7 +515,7 @@ const tools = [
         surface: {
           type: 'string',
           description: 'Override surface to audit (optional, defaults to "properties")',
-          enum: ['properties', 'rpk', 'connect']
+          enum: ['properties', 'rpk']
         },
         output: {
           type: 'string',
@@ -594,7 +593,7 @@ const resourceMap = {
 
 /**
  * Load resource content from team-standards directory
- * @param {string} uri - Resource URI (such as 'redpanda://style-guide')
+ * @param {string} uri - Resource URI (such as 'redpanda://personas')
  * @returns {Object} Resource content
  */
 function getResourceContent(uri) {

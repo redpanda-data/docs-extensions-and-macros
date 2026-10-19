@@ -11,7 +11,7 @@ const { findRepoRoot, getDocToolsCommand, MAX_EXEC_BUFFER_SIZE, DEFAULT_COMMAND_
  * @param {string} args.overrides - Path to the overrides JSON file (for example "docs-data/property-overrides.json")
  * @param {string} [args.extracted] - Path to the extracted source JSON (property extractor raw output; required for the properties surface)
  * @param {string} [args.repo] - Redpanda checkout to extract raw source strings from (alternative to args.extracted, properties surface only)
- * @param {string} [args.surface] - Override surface: 'properties', 'rpk', or 'connect'
+ * @param {string} [args.surface] - Override surface: 'properties' or 'rpk'
  * @param {string} [args.output] - Also write the JSON result to this file (relative to repo root)
  * @returns {Object} Audit results with manifest and per-class summary
  */

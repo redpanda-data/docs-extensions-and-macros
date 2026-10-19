@@ -47,6 +47,21 @@ function capToTwoSentences (description) {
     /\bNo\./gi
   ]
 
+  // A table cell takes one paragraph of plain text. Keep only the text before
+  // the first blank line or list item, so a description such as
+  // "Controls how X is sized:\n\n- `a`: ...\n- `b`: ..." does not leak half a
+  // list into the cell. A lead-in that ends with a colon is left unterminated
+  // so the sentence match below drops it whenever a complete sentence comes
+  // before it ("Configure TCP settings. These controls are useful for:" keeps
+  // only the first sentence). Only a lead-in with nothing before it is kept,
+  // with the colon turned into a period.
+  let colonLeadIn = false
+  const firstBlock = description.split(/\n\s*\n|\n(?=\s*(?:[-*]|\d+\.)\s)/)[0].trim()
+  if (firstBlock && firstBlock !== description.trim() && !/^(?:[=#]|```|----)/.test(firstBlock)) {
+    description = firstBlock
+    colonLeadIn = firstBlock.endsWith(':')
+  }
+
   let normalized = description
   const placeholders = []
 
@@ -65,16 +80,19 @@ function capToTwoSentences (description) {
   })
 
   const sentenceRegex = /[^.!?]+[.!?]+(?:\s|$)/g
-  const sentences = normalized.match(sentenceRegex)
 
-  // If an unprotected mid-token period prevented the leading text from
-  // forming a complete match, merge that dropped prefix into the first
-  // sentence rather than silently discarding it.
-  if (sentences && sentences.length > 0) {
-    const firstIndex = normalized.indexOf(sentences[0])
-    if (firstIndex > 0) {
-      sentences[0] = normalized.slice(0, firstIndex) + sentences[0]
-    }
+  // An unprotected mid-token period (`fetch.max.partition.bytes`) stops a
+  // match, and the regex then resumes after it, so the text before that
+  // period never belongs to any match. Merge each such gap into the sentence
+  // that follows it rather than silently discarding it, otherwise the second
+  // "sentence" can be a tail such as "bytes`.". Text after the last match
+  // (an unterminated colon lead-in, for example) is still dropped.
+  let sentences = null
+  let lastEnd = 0
+  for (const m of normalized.matchAll(sentenceRegex)) {
+    if (!sentences) sentences = []
+    sentences.push(normalized.slice(lastEnd, m.index) + m[0])
+    lastEnd = m.index + m[0].length
   }
 
   if (!sentences || sentences.length === 0) {
@@ -82,7 +100,7 @@ function capToTwoSentences (description) {
     placeholders.forEach(({ placeholder, original }) => {
       result = result.replace(placeholder, original)
     })
-    return result
+    return colonLeadIn ? result.replace(/:$/, '.') : result
   }
 
   let maxSentences = 2
@@ -592,7 +610,7 @@ function buildFieldsTable (fields, capFn, opts = {}) {
     if (!byField[key]) {
       byField[key] = {
         field: field.field,
-        description: field.description,
+        description: field.shortDescription || field.description,
         introducedIn: field.introducedIn,
         components: []
       }
@@ -655,7 +673,7 @@ function buildChangedDefaultsTable (changedDefaults, capFn) {
         field: change.field,
         oldDefault: change.oldDefault,
         newDefault: change.newDefault,
-        description: change.description,
+        description: change.shortDescription || change.description,
         components: []
       }
     }
@@ -667,11 +685,15 @@ function buildChangedDefaultsTable (changedDefaults, capFn) {
   section += '|Field |Old default |New default |Description |Affected components\n\n'
 
   for (const [, info] of Object.entries(byFieldAndDefaults)) {
+    // Values render as literal inline code, so interpolations like
+    // ${!uuid_v4()} and characters like * or _ show as typed.
     const formatDefault = (val) => {
       if (val === undefined || val === null) return 'none'
-      if (typeof val === 'string') return val
-      if (typeof val === 'number' || typeof val === 'boolean') return String(val)
-      return JSON.stringify(val)
+      let text
+      if (typeof val === 'string') text = val === '' ? '""' : val
+      else if (typeof val === 'number' || typeof val === 'boolean') text = String(val)
+      else text = JSON.stringify(val)
+      return `\`+${text.replace(/\|/g, '\\|')}+\``
     }
 
     const oldVal = formatDefault(info.oldDefault)
