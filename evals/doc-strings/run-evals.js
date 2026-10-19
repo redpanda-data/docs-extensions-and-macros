@@ -42,7 +42,7 @@ const os = require('os')
 const path = require('path')
 
 const lib = require('./lib')
-const { fingerprint } = require('../../tools/lint-strings')
+const lintStrings = require('../../tools/lint-strings')
 const prompts = require('./prompts')
 const production = require('./production')
 const { CASES } = require('./cases')
@@ -136,8 +136,9 @@ function runRewriteCase (spec, io) {
   // the review reads carries that one finding and its declaration. The
   // workflow's lint marks both as in the diff and fingerprints them, and the
   // prompt requires that fingerprint in each comment's footer, so the report
-  // carries it too. Without it a model either refuses to post or invents one.
-  const fp = fingerprint(finding)
+  // carries it too; compute it the way lint-strings does. Without it a model
+  // either refuses to post or invents one.
+  const fp = finding.fingerprint || lintStrings.fingerprint(finding)
   const lint = {
     ...lintBefore,
     declarations: [{ surface: finding.surface, name: finding.name, file: finding.file, line_start: finding.line_start, line_end: finding.line_end, string: finding.string, in_pr_diff: true, fingerprint: fp }],
@@ -166,9 +167,20 @@ function runRewriteCase (spec, io) {
       overlong.length ? `overlong lines (line,len): ${JSON.stringify(overlong)}` : 'ok')
   }
 
+  // The suggestion must sit on the declaration's own file and lines with the
+  // fingerprint footer, and it is applied at the coordinates the comment
+  // recorded, as GitHub would apply it.
+  const target = lib.checkSuggestionComment(model.comments, {
+    file: finding.file, lineStart: finding.line_start, lineEnd: finding.line_end, fingerprint: fp
+  })
+  if (!checks.add('suggestion is posted on the declaration span with its fingerprint footer',
+    target.problems.length === 0, target.problems.join('; ') || 'ok')) {
+    return finish('FAIL', checks, model)
+  }
+
   let applied
   try {
-    applied = lib.replaceSpan(originalText, finding.line_start, finding.line_end, replacement)
+    applied = lib.replaceSpan(originalText, target.start, target.end, replacement)
   } catch (err) {
     checks.add('suggestion applies to the declaration span', false, err.message)
     return finish('FAIL', checks, model)
@@ -393,6 +405,21 @@ function runProseReviewCase (spec, io, sabotage) {
   // need it.
   checks.add('model names a declaration span (FILE ... LINES a-b)',
     /LINES\s+\d+\s*-\s*\d+/.test(model.output), 'marker scan')
+
+  // Content-anchored application aside, the comment itself must land on the
+  // declaration in the diffed file and carry its fingerprint footer:
+  // production posts it there, and GitHub applies it to those lines.
+  const decl = (lintDiff.declarations || []).find((d) => d.name === spec.target)
+  if (!checks.add('the diff report names the target declaration', Boolean(decl), decl ? `${decl.file}:${decl.line_start}-${decl.line_end}` : 'not found')) {
+    return finish('FAIL', checks, model)
+  }
+  const target = lib.checkSuggestionComment(model.comments, {
+    file: decl.file, lineStart: decl.line_start, lineEnd: decl.line_end, fingerprint: decl.fingerprint
+  })
+  if (!checks.add('suggestion is posted on the declaration span with its fingerprint footer',
+    target.problems.length === 0, target.problems.join('; ') || 'ok')) {
+    return finish('FAIL', checks, model)
+  }
 
   const literalLine = /^\s*"(?:[^"\\]|\\.)*",?\s*$/
   const nameLiteral = `"${spec.target}",`

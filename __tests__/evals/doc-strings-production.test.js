@@ -92,3 +92,48 @@ describe('doc-strings evals: inline-comment stand-in', () => {
     expect(recorded).toEqual([{ path: 'a.cc', line: 3, body: 'b' }])
   })
 })
+
+describe('doc-strings evals: the suggestion comment must target the declaration', () => {
+  const target = { file: 'src/v/config/configuration.cc', lineStart: 10, lineEnd: 12, fingerprint: '0123456789abcdef' }
+  const footer = '<sub>doc-strings-review:fp=0123456789abcdef</sub>'
+  const body = (extra = footer) => '```suggestion\n"New text.",\n```\n' + extra
+  const good = { path: 'src/v/config/configuration.cc', startLine: 10, line: 12, body: body() }
+
+  test('the right file, range and footer pass, and the recorded range is returned', () => {
+    const r = lib.checkSuggestionComment([good], target)
+    expect(r.problems).toEqual([])
+    expect([r.start, r.end]).toEqual([10, 12])
+  })
+
+  test.each([
+    ['a wrong path', { ...good, path: 'src/v/config/other.cc' }, /posted on src\/v\/config\/other\.cc/],
+    ['a wrong line range', { ...good, startLine: 11, line: 13 }, /lines 11-13, expected 10-12/],
+    ['no line at all', { path: good.path, body: good.body }, /no line/],
+    ['no fingerprint footer', { ...good, body: body('') }, /lacks the footer/]
+  ])('%s fails', (_label, comment, why) => {
+    const r = lib.checkSuggestionComment([comment], target)
+    expect(r.problems.join('; ')).toMatch(why)
+  })
+
+  test('zero or two suggestion comments fail', () => {
+    expect(lib.checkSuggestionComment([], target).problems.join()).toMatch(/found 0/)
+    expect(lib.checkSuggestionComment([good, good], target).problems.join()).toMatch(/found 2/)
+  })
+
+  test('the mock inline-comment tool rejects a call with no line and logs only a full one', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mock-'))
+    const log = path.join(dir, 'log.jsonl')
+    const call = (id, args) => JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'create_inline_comment', arguments: args } })
+    const r = spawnSync(process.execPath, [path.join(__dirname, '../../evals/doc-strings/mocks/inline-comment.js')], {
+      input: [call(1, { path: 'a.cc', body: 'x' }), call(2, { path: 'a.cc', body: 'y', line: 3 })].join('\n') + '\n',
+      env: { ...process.env, INLINE_COMMENT_LOG: log },
+      encoding: 'utf8'
+    })
+    const replies = r.stdout.trim().split('\n').map((l) => JSON.parse(l))
+    expect(replies[0].result.isError).toBe(true)
+    expect(replies[1].result.isError).toBeUndefined()
+    const logged = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+    expect(logged).toEqual([{ path: 'a.cc', body: 'y', line: 3 }])
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+})

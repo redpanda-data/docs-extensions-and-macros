@@ -409,7 +409,41 @@ function dispatchAccepts (docImpactText) {
   return { pass: r.status === 0, detail: r.status === 0 ? 'accepted' : `rejected (jq exit ${r.status}${r.stderr ? ': ' + r.stderr.trim().slice(0, 160) : ''})` }
 }
 
+/**
+ * Check the inline comment that carries a suggestion against the declaration
+ * it should replace. Production posts the comment on the lines it names and
+ * GitHub applies the suggestion to exactly those lines, so a correct
+ * replacement on the wrong file or range is a wrong review. The footer is how
+ * a later push recovers which declarations were reviewed.
+ *
+ * @param {Array<{path:string, line?:number, startLine?:number, body:string}>} comments
+ * @param {{file:string, lineStart:number, lineEnd:number, fingerprint?:string}} target
+ * @returns {{problems:string[], comment:object|null, start:number, end:number}}
+ */
+function checkSuggestionComment (comments, target) {
+  const withSuggestion = (comments || []).filter((c) => parseFences(c.body || '', 'suggestion').length > 0)
+  if (withSuggestion.length !== 1) {
+    return { problems: [`expected one comment with a suggestion, found ${withSuggestion.length}`], comment: null, start: 0, end: 0 }
+  }
+  const c = withSuggestion[0]
+  const problems = []
+  const norm = (p) => String(p || '').replace(/^\.\//, '')
+  if (norm(c.path) !== norm(target.file)) problems.push(`posted on ${c.path}, expected ${target.file}`)
+  if (!Number.isInteger(c.line)) problems.push('comment has no line')
+  const end = Number.isInteger(c.line) ? c.line : 0
+  const start = Number.isInteger(c.startLine) ? c.startLine : end
+  if (end && (start !== target.lineStart || end !== target.lineEnd)) {
+    problems.push(`posted on lines ${start}-${end}, expected ${target.lineStart}-${target.lineEnd}`)
+  }
+  if (target.fingerprint) {
+    const footer = `<sub>doc-strings-review:fp=${target.fingerprint}</sub>`
+    if (!String(c.body).includes(footer)) problems.push(`body lacks the footer ${footer}`)
+  }
+  return { problems, comment: c, start, end }
+}
+
 module.exports = {
+  checkSuggestionComment,
   dispatchAccepts,
   REPO_ROOT,
   DOC_TOOLS,
