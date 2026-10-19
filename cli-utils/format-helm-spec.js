@@ -9,9 +9,10 @@
  */
 function formatHelmSpec (doc) {
   const formatted = doc
-    // pandoc escapes footnote-style references inconsistently
-    .replace(/(\[\d+\])\]\./g, '$1\\].')
-    .replace(/(\[\d+\])\]\]/g, '$1\\]\\]')
+    // an array index inside a heading's link text (ingress.hosts[0].host)
+    // closes the link text early unless its "]" is escaped
+    .replace(/(\[\d+)\]\./g, '$1\\].')
+    .replace(/(\[\d+)\]\]/g, '$1\\]]')
     // a section title that is a bare URL has to be a link macro to render
     .replace(/^=== +(https?:\/\/[^[]*)\[([^\]]*)\]/gm, '=== link:++$1++[$2]')
     .replace(/^== # (.*)$/gm, '= $1')

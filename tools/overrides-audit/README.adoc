@@ -22,7 +22,7 @@ npx doc-tools overrides audit \
   --format human
 
 # Standalone
-node tools/overrides-audit/index.js --overrides <path> --extracted <path> [--surface properties|rpk|connect] [--format json|human] [--output <file>]
+node tools/overrides-audit/index.js --overrides <path> --extracted <path> [--surface properties|rpk] [--format json|human] [--output <file>]
 ----
 
 IMPORTANT: `--extracted` must be the property extractor's *raw* output (the `--output` file), never the enhanced output (`--enhanced-output`) or the versioned `redpanda-properties-<tag>.json` attachments: those already have overrides applied, so every override would classify as REDUNDANT. The same trap exists for rpk: the versioned `rpk-v<version>.json` files in docs repos are post-override snapshots.
@@ -133,7 +133,6 @@ JSON (default): `{ surface, overrides_file, extracted_file, manifest, summary, c
 
 * `properties` (complete): `property-overrides.json` vs the property extractor's raw JSON.
 * `rpk` (structural): enumerates `rpk-overrides.json` (see `docs-data/rpk-overrides.schema.json`) -- command/flag `description` fields are the upstreamable prose (classified `REVIEW` with a TODO note until source comparison lands; it needs a raw pre-override `--print-tree` snapshot plus the `formatDescription()` pipeline from `tools/rpk-docs`), everything else (`seeAlso`, `pageAliases`, `content`, platform scoping, ...) is `KEEP` by design.
-* `connect` (structural): enumerates the rp-connect-docs `overrides.json` (`definitions` + per-component arrays with nested `config.children`); prose fields classify `REVIEW` with a TODO note until `$ref` resolution and plugin-JSON comparison land.
 
 == Golden run (local checkouts required)
 
