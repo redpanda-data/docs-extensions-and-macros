@@ -786,6 +786,24 @@ describe('buildChangedDefaultsTable - whats-new changed default links', () => {
     // The visible field name in the table keeps its original dotted form.
     expect(table).toContain('|batching.byte_size\n');
   });
+
+  test('renders old and new defaults as literal inline code', () => {
+    const table = buildChangedDefaultsTable([
+      {
+        component: 'outputs:cache',
+        field: 'key',
+        oldDefault: '${!count("items")}-${!timestamp_unix_nano()}',
+        newDefault: '${!timestamp_unix_nano()}-${!uuid_v4()}',
+        description: 'The key to store messages by.'
+      },
+      { component: 'inputs:x', field: 'a', oldDefault: '', newDefault: 'a|b', description: 'A.' },
+      { component: 'inputs:y', field: 'b', oldDefault: undefined, newDefault: 5, description: 'B.' }
+    ], cap);
+
+    expect(table).toContain('|`+${!count("items")}-${!timestamp_unix_nano()}+`\n|`+${!timestamp_unix_nano()}-${!uuid_v4()}+`\n');
+    expect(table).toContain('|`+""+`\n|`+a\\|b+`\n');
+    expect(table).toContain('|none\n|`+5+`\n');
+  });
 });
 
 describe('backfillPageDescriptions - self-healing page headers', () => {
@@ -895,9 +913,8 @@ describe('mergeOverrides honors summary overrides', () => {
   const { mergeOverrides } = require('../../tools/redpanda-connect/generate-rpcn-connector-docs');
 
   test('a top-level summary override reaches the component', () => {
-    // overrides.json has carried summary overrides (zmq4, ffi) that were
-    // silently dropped: 'summary' was missing from scalarKeys and fell
-    // through every merge branch.
+    // 'summary' must be in scalarKeys, or it falls through every merge
+    // branch and is silently dropped.
     const data = { inputs: [{ name: 'zmq4', summary: '' }] };
     mergeOverrides(data, { inputs: [{ name: 'zmq4', summary: 'Consumes messages from a ZeroMQ socket.' }] });
     expect(data.inputs[0].summary).toBe('Consumes messages from a ZeroMQ socket.');

@@ -46,11 +46,9 @@ content:
     start_paths: [docs,'*/docs']
   - url: https://github.com/redpanda-data/rp-connect-docs
     branches: main
-  # Generated reference partials. modify-connect-tag-playbook pins this to the
-  # latest Connect release and keeps only the generated partials and examples.
-  - url: https://github.com/redpanda-data/connect
-    tags: latest
-    start_path: docs
+  # The connect component's generated reference partials come from the latest
+  # Connect release asset (modify-connect-tag-playbook). Set
+  # REDPANDA_CONNECT_DOCS_DIR to preview unreleased changes.
   # WIP: this branch has the prop: calls in Cloud prose, so it exercises the
   # cloud_supported gate. Swap for jake/property-source-attributes to test the
   # declarations on Cloud's own pages instead.
