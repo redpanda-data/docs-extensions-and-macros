@@ -614,7 +614,7 @@ describe('doc-strings-review workflow: diff base (executed)', () => {
     gitIn(root, 'clone', '--quiet', '--depth', '1', '--branch', 'merge', `file://${repo}`, shallow)
     const r = run(shallow, { REF: 'refs/pull/7/merge', PR_BASE_SHA: stale })
     expect(r.status).not.toBe(0)
-    expect(r.stdout + r.stderr).toMatch(/::error::.*no merge parents/)
+    expect(r.stdout + r.stderr).toMatch(/::error::.*not a two-parent merge commit/)
     expect(r.outputs.base).toBeUndefined()
   })
 
