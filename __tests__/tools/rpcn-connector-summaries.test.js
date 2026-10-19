@@ -920,3 +920,15 @@ describe('mergeOverrides honors summary overrides', () => {
     expect(data.inputs[0].summary).toBe('Consumes messages from a ZeroMQ socket.');
   });
 });
+
+describe('capToTwoSentences - periods inside tokens', () => {
+  test('keeps a sentence that contains a dotted name whole', () => {
+    const d = 'When using a consumer group, the strategies this client supports for assigning partitions to group members, in order of preference. This is the equivalent to the Java partition.assignment.strategy setting. Supported values:\n\n- `range`: Divides partitions.'
+    expect(capToTwoSentences(d)).toBe('When using a consumer group, the strategies this client supports for assigning partitions to group members, in order of preference. This is the equivalent to the Java partition.assignment.strategy setting.')
+  })
+
+  test('a dotted name in the first sentence does not split it', () => {
+    expect(capToTwoSentences('Sets kafka.compression for the producer. Defaults to snappy. Ignored otherwise.'))
+      .toBe('Sets kafka.compression for the producer. Defaults to snappy.')
+  })
+})

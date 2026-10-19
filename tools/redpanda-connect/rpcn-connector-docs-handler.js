@@ -64,7 +64,10 @@ function capToTwoSentences (description) {
     return placeholder
   })
 
-  const sentenceRegex = /[^.!?]+[.!?]+(?:\s|$)/g
+  // A sentence ends at punctuation followed by whitespace or the end of the
+  // text. Matching lazily up to that boundary keeps a period inside a token,
+  // such as the dotted name partition.assignment.strategy, in its sentence.
+  const sentenceRegex = /[\s\S]+?[.!?]+(?:\s|$)/g
   const sentences = normalized.match(sentenceRegex)
 
   // If an unprotected mid-token period prevented the leading text from
