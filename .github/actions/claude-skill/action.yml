@@ -318,6 +318,39 @@ runs:
         EOF
         cat >> "$SHIM_DIR/gh" <<'EOF'
         deny() { echo "gh (read-only shim): refused: gh $*" >&2; exit 1; }
+        # GitHub hosts only, for EVERY subcommand. gh follows a full URL
+        # wherever it points: `gh api https://host/...` sends a GET there,
+        # and `gh pr view https://host/o/r/pull/1`, `-R host/o/r` and
+        # `--repo host/o/r` send GraphQL POSTs (all observed against
+        # example.com, gh 2.50). With no other outbound HTTP in the
+        # sandbox, that would be an exfiltration channel: data rides in
+        # the path or query string whether or not a token goes with it.
+        # github.com URLs stay allowed, because pr-review takes a PR URL.
+        gh_host_ok() {
+          local h="${1,,}"
+          [[ "$h" == "github.com" || "$h" == "api.github.com" || "$h" == "www.github.com" ]]
+        }
+        check_url() {   # $1 = an argument containing ://
+          local rest="${1#*://}" auth host
+          auth="${rest%%[/?#]*}"
+          host="${auth##*@}"; host="${host%%:*}"
+          [[ "$auth" != *@* && "$host" =~ ^[A-Za-z0-9.-]+$ ]] && gh_host_ok "$host" || deny "$@"
+        }
+        check_repo() {  # $1 = a --repo/-R value; HOST/OWNER/REPO names a host
+          local v="$1"
+          [[ "$v" == *://* ]] && { check_url "$v"; return; }
+          if [[ "$v" == */*/* ]]; then gh_host_ok "${v%%/*}" || deny --repo "$v"; fi
+        }
+        prev=""
+        for a in "$@"; do
+          case "$a" in
+            *://*) check_url "$a" ;;
+            --repo=*) check_repo "${a#--repo=}" ;;
+            -R?*) check_repo "${a#-R}" ;;
+          esac
+          case "$prev" in --repo|-R) check_repo "$a" ;; esac
+          prev="$a"
+        done
         sub="${1:-}"; [[ $# -gt 0 ]] && shift
         case "$sub" in
           --version|--help|-h|help) exec "$REAL_GH" "$sub" "$@" ;;
@@ -334,6 +367,7 @@ runs:
                 graphql) deny api "$@" ;;
                 # A foreign host would turn a GET into an exfiltration
                 # channel for GH_TOKEN (sent as the Authorization header).
+                # Full-URL endpoints are checked above, for every subcommand.
                 --hostname|--hostname=*) deny api "$@" ;;
                 --method)
                   m="${args[$((i+1))]:-}"; [[ "$m" =~ ^[Gg][Ee][Tt]$ ]] || deny api "$@"; i=$((i+1)) ;;
@@ -381,6 +415,15 @@ runs:
         [[ "$REFUSAL2" == *"refused:"* ]] || { echo "::error::gh shim failed to refuse pr comment (got: $REFUSAL2)"; exit 1; }
         REFUSAL3=$(PATH="$SHIM_DIR:$PATH" gh api repos/x/y/issues/1/comments -fbody=hi 2>&1 1>/dev/null || true)
         [[ "$REFUSAL3" == *"refused:"* ]] || { echo "::error::gh shim failed to refuse an attached-value field (got: $REFUSAL3)"; exit 1; }
+        # Foreign hosts: the three above only cover mutation.
+        for probe in "api https://example.com/x?d=1" "pr view https://example.com/o/r/pull/1" "pr view 1 -R example.com/o/r" "issue view 1 --repo=example.com/o/r"; do
+          # shellcheck disable=SC2086 # word-split the probe on purpose
+          R4=$(PATH="$SHIM_DIR:$PATH" gh $probe 2>&1 1>/dev/null || true)
+          [[ "$R4" == *"refused:"* ]] || { echo "::error::gh shim failed to refuse a foreign host: gh $probe (got: $R4)"; exit 1; }
+        done
+        # ...and must not over-block the github.com URL pr-review is given.
+        OK1=$(PATH="$SHIM_DIR:$PATH" gh pr view https://github.com/o/r/pull/1 2>&1 1>/dev/null || true)
+        [[ "$OK1" != *"refused:"* ]] || { echo "::error::gh shim refused a github.com PR URL (got: $OK1)"; exit 1; }
         echo "gh read-only shim installed at $SHIM_DIR"
 
     # ── ADP gateway auth (DEVPROD-4735 pattern) ────────────────────────────
