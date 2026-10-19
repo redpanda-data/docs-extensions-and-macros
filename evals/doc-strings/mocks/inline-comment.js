@@ -34,7 +34,7 @@ const TOOL = {
       startLine: { type: 'number', description: 'First line of a multi-line range' },
       side: { type: 'string', enum: ['LEFT', 'RIGHT'] }
     },
-    required: ['path', 'body']
+    required: ['path', 'body', 'line']
   }
 }
 
@@ -62,8 +62,9 @@ rl.on('line', (line) => {
     send({ jsonrpc: '2.0', id: msg.id, result: { tools: [TOOL] } })
   } else if (msg.method === 'tools/call') {
     const args = (msg.params && msg.params.arguments) || {}
-    if (msg.params.name !== TOOL.name || typeof args.path !== 'string' || typeof args.body !== 'string') {
-      send({ jsonrpc: '2.0', id: msg.id, result: { isError: true, content: [{ type: 'text', text: 'path and body are required' }] } })
+    // GitHub rejects a review comment with no line, so the stand-in does too.
+    if (msg.params.name !== TOOL.name || typeof args.path !== 'string' || typeof args.body !== 'string' || !Number.isInteger(args.line)) {
+      send({ jsonrpc: '2.0', id: msg.id, result: { isError: true, content: [{ type: 'text', text: 'path, body and line are required' }] } })
       return
     }
     fs.appendFileSync(LOG, JSON.stringify(args) + '\n')
