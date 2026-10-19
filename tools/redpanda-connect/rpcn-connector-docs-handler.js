@@ -47,6 +47,21 @@ function capToTwoSentences (description) {
     /\bNo\./gi
   ]
 
+  // A table cell takes one paragraph of plain text. Keep only the text before
+  // the first blank line or list item, so a description such as
+  // "Controls how X is sized:\n\n- `a`: ...\n- `b`: ..." does not leak half a
+  // list into the cell. A lead-in that ends with a colon is left unterminated
+  // so the sentence match below drops it whenever a complete sentence comes
+  // before it ("Configure TCP settings. These controls are useful for:" keeps
+  // only the first sentence). Only a lead-in with nothing before it is kept,
+  // with the colon turned into a period.
+  let colonLeadIn = false
+  const firstBlock = description.split(/\n\s*\n|\n(?=\s*(?:[-*]|\d+\.)\s)/)[0].trim()
+  if (firstBlock && firstBlock !== description.trim() && !/^(?:[=#]|```|----)/.test(firstBlock)) {
+    description = firstBlock
+    colonLeadIn = firstBlock.endsWith(':')
+  }
+
   let normalized = description
   const placeholders = []
 
@@ -68,16 +83,17 @@ function capToTwoSentences (description) {
   // text. Matching lazily up to that boundary keeps a period inside a token,
   // such as the dotted name partition.assignment.strategy, in its sentence.
   const sentenceRegex = /[\s\S]+?[.!?]+(?:\s|$)/g
-  const sentences = normalized.match(sentenceRegex)
 
-  // If an unprotected mid-token period prevented the leading text from
-  // forming a complete match, merge that dropped prefix into the first
-  // sentence rather than silently discarding it.
-  if (sentences && sentences.length > 0) {
-    const firstIndex = normalized.indexOf(sentences[0])
-    if (firstIndex > 0) {
-      sentences[0] = normalized.slice(0, firstIndex) + sentences[0]
-    }
+  // The lazy regex leaves no text between matches, so this merge is a guard:
+  // any text that falls between two matches joins the sentence that follows
+  // it instead of being silently discarded. Text after the last match (an
+  // unterminated colon lead-in, for example) is still dropped.
+  let sentences = null
+  let lastEnd = 0
+  for (const m of normalized.matchAll(sentenceRegex)) {
+    if (!sentences) sentences = []
+    sentences.push(normalized.slice(lastEnd, m.index) + m[0])
+    lastEnd = m.index + m[0].length
   }
 
   if (!sentences || sentences.length === 0) {
@@ -85,7 +101,7 @@ function capToTwoSentences (description) {
     placeholders.forEach(({ placeholder, original }) => {
       result = result.replace(placeholder, original)
     })
-    return result
+    return colonLeadIn ? result.replace(/:$/, '.') : result
   }
 
   let maxSentences = 2
@@ -595,7 +611,7 @@ function buildFieldsTable (fields, capFn, opts = {}) {
     if (!byField[key]) {
       byField[key] = {
         field: field.field,
-        description: field.description,
+        description: field.shortDescription || field.description,
         introducedIn: field.introducedIn,
         components: []
       }
@@ -658,7 +674,7 @@ function buildChangedDefaultsTable (changedDefaults, capFn) {
         field: change.field,
         oldDefault: change.oldDefault,
         newDefault: change.newDefault,
-        description: change.description,
+        description: change.shortDescription || change.description,
         components: []
       }
     }
