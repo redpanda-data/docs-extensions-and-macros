@@ -286,24 +286,38 @@ runs:
         # At any depth, not just the root plugin's folders: the nested
         # plugins/docs-eng-essentials copy carries its own grants (docs-gate
         # grants Bash). --plugin-dir does not load it today, but the strip
-        # must not depend on that. The guard then searches every .md in
-        # the staged tree, so a grant in a new location fails the run
-        # instead of passing because nobody stripped there.
+        # must not depend on that.
+        #
+        # The guard below checks the same files the strip touches: every
+        # command file, SKILL.md and agent file, at any depth. Those are the
+        # only files whose frontmatter the CLI reads as a grant. It used to
+        # scan every .md, so one reference doc with a line starting
+        # `allowed-tools:` (a frontmatter example, say) would have
+        # hard-failed every Claude job in every calling repo, for a line
+        # that grants nothing.
         P=.docs-team-standards-plugin
+        mapfile -d '' GRANT_FILES < <(find "$P" -path '*/.git' -prune -o -type f \
+          \( -name 'SKILL.md' -o -path '*/commands/*.md' -o -path '*/agents/*.md' \) -print0)
+        if (( ${#GRANT_FILES[@]} == 0 )); then
+          echo "::error::no command, skill or agent files found in the staged plugin — refusing to run"
+          exit 1
+        fi
+        # The strip handles one-line values only. A list form (`tools:` or
+        # `allowed-tools:` with the items on the following lines) would keep
+        # its items, so any empty-value key is refused outright. No file
+        # uses that form today. This runs BEFORE the strip: the sed below
+        # deletes the `allowed-tools:` key line itself, which would leave
+        # the list items behind and hide the empty key from this check.
+        if grep -nE '^(tools|allowed-tools):[[:space:]]*$' "${GRANT_FILES[@]}"; then
+          echo "::error::a plugin frontmatter grant uses the multi-line list form, which the strip cannot handle — refusing to run"
+          exit 1
+        fi
         find "$P" -path '*/.git' -prune -o \( -name 'SKILL.md' -o -path '*/commands/*.md' \) \
           -type f -exec sed -i '/^allowed-tools:/d' {} +
         find "$P" -path '*/.git' -prune -o -path '*/agents/*.md' -type f -exec perl -pi -e \
           'if (/^tools:/) { s/\b(Bash|WebFetch|Write|Edit|NotebookEdit)\b//g; s/,([ \t]*,)+/,/g; s/:[ \t]*,/: /; s/,[ \t]*$//; }' {} +
-        # The strip handles one-line values only. A list form (`tools:` or
-        # `allowed-tools:` with the items on the following lines) would keep
-        # its items, so any empty-value key is refused outright. No file
-        # uses that form today.
-        if grep -rnE --include='*.md' --exclude-dir=.git '^(tools|allowed-tools):[[:space:]]*$' "$P"; then
-          echo "::error::a plugin frontmatter grant uses the multi-line list form, which the strip cannot handle — refusing to run"
-          exit 1
-        fi
-        if grep -rn --include='*.md' --exclude-dir=.git '^allowed-tools:' "$P" || \
-           grep -rnE --include='*.md' --exclude-dir=.git '^tools:.*\b(Bash|WebFetch|Write|Edit)\b' "$P"; then
+        if grep -n '^allowed-tools:' "${GRANT_FILES[@]}" || \
+           grep -nE '^tools:.*\b(Bash|WebFetch|Write|Edit|NotebookEdit)\b' "${GRANT_FILES[@]}"; then
           echo "::error::a plugin frontmatter grant survived stripping — refusing to run with a widened sandbox"
           exit 1
         fi
