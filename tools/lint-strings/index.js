@@ -97,7 +97,7 @@ function lintStrings (options) {
   const reviewed = reviewedFingerprints || new Set()
   const pending = []
   let alreadyReviewed = 0
-  let reviewerWritten = 0
+  const reviewerWritten = []
   const headLines = new Map()
   let removal = { rawFiles: [], declarations: [] }
   const skipped = []
@@ -146,8 +146,12 @@ function lintStrings (options) {
         }
         if (reviewerPassages && reviewerPassages.length) {
           const changed = changedLinesOf(repoPath, decl, files.get(decl.file), headLines)
-          if (changed.length > 0 && changed.every((l) => writtenByReviewer(l.text, reviewerPassages))) {
-            reviewerWritten++
+          const own = passagesInDeclaration(decl, reviewerPassages)
+          if (changed.length > 0 && changed.every((l) => writtenByReviewer(l.text, own))) {
+            // No wording review, but the published-content check still
+            // sees it: a reviewer's wording can describe a behavior change
+            // that makes another page wrong.
+            reviewerWritten.push(pendingEntry(decl))
             continue
           }
         }
@@ -194,7 +198,8 @@ function lintStrings (options) {
   if (diffBase) {
     merged.declarations = pending
     merged.summary.alreadyReviewed = alreadyReviewed
-    merged.summary.reviewerWritten = reviewerWritten
+    merged.summary.reviewerWritten = reviewerWritten.length
+    merged.summary.reviewerWrittenDeclarations = reviewerWritten
   }
   merged.summary.removedDeclarations = removal.declarations.map(pendingEntry)
   // Declarations whose text has gaps the extractor could not evaluate
@@ -600,6 +605,17 @@ function changedLinesOf (repoPath, decl, lineSet, cache) {
 }
 
 /**
+ * The passages a declaration contains whole. A reviewer's proposed wording
+ * lands in the string as written, but a comment that quotes the string to
+ * criticize it ("Please change this: ...") carries a lead-in the string
+ * does not have, so it never counts as the reviewer writing the string.
+ */
+function passagesInDeclaration (decl, passages) {
+  const forms = [normalizeText(decl.string), normalizeText(decl.declaration_text)].filter(Boolean)
+  return passages.filter((passage) => forms.some((form) => form.includes(passage)))
+}
+
+/**
  * True when a human reviewer wrote this line on the PR: it appears whole in
  * one of their passages. Matching per line, not per string, means an author
  * who keeps a reviewer's paragraph and rewrites the next one still gets the
@@ -674,7 +690,17 @@ if (require.main === module) {
     else if (arg === '--skip-rules') options.skipRules = args[++i]
     else if (arg === '--only-rules') options.onlyRules = args[++i]
     else if (arg === '--reviewed') options.reviewed = args[++i]
-    else if (arg === '--reviewer-comments') options.reviewerComments = args[++i]
+    else if (arg === '--reviewer-comments') {
+      // A present flag with no operand must not act like an absent one, or
+      // `--reviewer-comments --strict` would read --strict as the file and
+      // quietly turn strict mode off.
+      const operand = args[i + 1]
+      if (!operand || operand.startsWith('-')) {
+        console.error('--reviewer-comments requires a file path')
+        process.exit(2)
+      }
+      options.reviewerComments = args[++i]
+    }
     else if (arg === '--strict') options.strict = true
     else {
       console.error(`Unknown argument: ${arg}`)

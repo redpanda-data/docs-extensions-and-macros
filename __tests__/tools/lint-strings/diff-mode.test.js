@@ -435,11 +435,13 @@ describe('text a human reviewer wrote (end-to-end, PR 461 fixtures)', () => {
     expect(result.summary.reviewerWritten).toBe(0)
   })
 
-  test('a string whose changed lines all came from the reviewer is skipped', () => {
+  test('a string whose changed lines all came from the reviewer is skipped, and kept for the impact check', () => {
     const passages = readReviewerComments(path.join(FIXTURES, 'reviewer-comments.json'))
     const result = lintStrings({ repo, diffBase: 'base', reviewerPassages: passages, log: () => {} })
     expect(result.declarations.map((d) => d.name)).toEqual(['delete'])
     expect(result.summary.reviewerWritten).toBe(1)
+    expect(result.summary.reviewerWrittenDeclarations.map((d) => d.name)).toEqual(['regex'])
+    expect(result.summary.reviewerWrittenDeclarations[0].fingerprint).toMatch(/^[0-9a-f]{16}$/)
   })
 
   test("a string with lines of the author's own is still reviewed", () => {
@@ -461,6 +463,58 @@ describe('text a human reviewer wrote (end-to-end, PR 461 fixtures)', () => {
   })
 })
 
+// Only the reviewer's first paragraph lands in Long, so every changed line
+// of the string is text from a comment. Whether that comment proposed the
+// text or quoted it to criticize it decides the skip.
+describe('quoted text is not reviewer-written (temp git repo)', () => {
+  const FIXTURES = path.join(__dirname, '../../../tools/lint-strings/fixtures/rpk-pr461')
+  const REL = path.join('src', 'go', 'rpk', 'pkg', 'cli', 'topic', 'delete.go')
+  const PARAGRAPH = 'The --regex flag (-r) treats each argument as a regular expression and deletes every topic whose full name matches any of them. rpk wraps each expression in ^ and $, so it must match the whole name.'
+  let repo
+
+  function git (args) {
+    execSync(`git ${args}`, { cwd: repo, stdio: 'pipe' })
+  }
+
+  beforeAll(() => {
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-strings-quoted-'))
+    const target = path.join(repo, REL)
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    const base = fs.readFileSync(path.join(FIXTURES, 'delete.base.go'), 'utf8')
+    fs.writeFileSync(target, base)
+    git('init --quiet')
+    git('config user.email lint-strings-test@example.invalid')
+    git('config user.name "lint-strings test"')
+    git('add .')
+    git('commit --quiet -m base')
+    git('tag base')
+    const old = base.slice(base.indexOf('The --regex flag (-r) opts'), base.indexOf('delete-everything mistakes).') + 'delete-everything mistakes).'.length)
+    fs.writeFileSync(target, base.replace(old,
+      'The --regex flag (-r) treats each argument as a regular expression and deletes\n' +
+      'every topic whose full name matches any of them. rpk wraps each expression in\n' +
+      '^ and $, so it must match the whole name.'))
+    git('commit --quiet -am head')
+  })
+
+  afterAll(() => {
+    fs.rmSync(repo, { recursive: true, force: true })
+  })
+
+  test('a paragraph the reviewer proposed is skipped', () => {
+    const passages = reviewerPassagesFrom([`Suggest replacing the paragraph with:\n\n${PARAGRAPH}`])
+    const result = lintStrings({ repo, diffBase: 'base', reviewerPassages: passages, log: () => {} })
+    expect(result.declarations).toEqual([])
+    expect(result.summary.reviewerWrittenDeclarations.map((d) => d.name)).toEqual(['delete'])
+  })
+
+  test('the same text quoted to ask for a change is still reviewed', () => {
+    const passages = reviewerPassagesFrom([`Please change this, it is hard to follow: ${PARAGRAPH}`])
+    const result = lintStrings({ repo, diffBase: 'base', reviewerPassages: passages, log: () => {} })
+    expect(result.declarations.map((d) => d.name)).toEqual(['delete'])
+    expect(result.summary.reviewerWritten).toBe(0)
+  })
+})
+
 describe('reviewerPassagesFrom', () => {
   test('takes suggestion bodies and prose paragraphs, not short lines or other code blocks', () => {
     const passages = reviewerPassagesFrom([
@@ -473,6 +527,14 @@ describe('reviewerPassagesFrom', () => {
       'Short: "Delete topics, printing the status of each one",',
       'A prose paragraph that is long enough to count, wrapped across lines.'
     ])
+  })
+
+  test('the direct CLI rejects --reviewer-comments without a file', () => {
+    const r = require('child_process').spawnSync('node',
+      [path.join(__dirname, '../../../tools/lint-strings'), '--repo', os.tmpdir(), '--reviewer-comments', '--strict'],
+      { encoding: 'utf8' })
+    expect(r.status).toBe(2)
+    expect(r.stderr).toMatch(/--reviewer-comments requires a file path/)
   })
 
   test('an unreadable comments file yields no passages', () => {

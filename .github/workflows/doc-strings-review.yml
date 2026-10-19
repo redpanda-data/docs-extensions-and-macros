@@ -484,7 +484,9 @@ jobs:
           # pass every rule while still telling an operator nothing, so the
           # review must see clean strings too. Same fail-closed handling as
           # findings: anything unparseable becomes 0 and skips the review.
-          if ! decls=$(jq '.summary.totalDeclarations // 0' lint-findings.json 2>/dev/null); then
+          # Strings a reviewer wrote count toward the gate: they get no wording
+          # review, but the published-content check still has to see them.
+          if ! decls=$(jq '(.summary.totalDeclarations // 0) + (.summary.reviewerWritten // 0)' lint-findings.json 2>/dev/null); then
             decls=0
           fi
           case "${decls:-}" in
@@ -836,6 +838,10 @@ jobs:
             - summary.removedDeclarations: doc-string declarations this PR
               removed or renamed. They are absent from HEAD, so they have no
               finding.
+            - summary.reviewerWrittenDeclarations: declarations this push
+              changed using only text a human reviewer wrote on this PR.
+              Never comment on them or suggest rewrites of them; they are
+              here for the published-content check alone.
             If embedded-reference-strings.md exists in the workspace AND is
             non-empty it is the authoritative writing standard. If it is
             absent or empty, cite the lint rule messages instead and do not
@@ -972,7 +978,8 @@ jobs:
             terminology.md is absent.
 
             PUBLISHED-CONTENT IMPACT: consider only the entries in
-            declarations and summary.removedDeclarations, and use at most 4
+            declarations, summary.removedDeclarations and
+            summary.reviewerWrittenDeclarations, and use at most 4
             redpanda-docs MCP calls in total. HIGH-IMPACT means a published
             page OTHER than the generated property, metric, rpk, connector
             (Redpanda Connect component pages) or Bloblang function and
@@ -1022,7 +1029,7 @@ jobs:
             def line: tostring | gsub("[\r\n]+"; " ") | gsub("<"; "&lt;");
             "## Published content this PR affects",
             "",
-            "Sent to the docs team as a doc-impact ticket. Nothing here is for the PR author.",
+            "Proposed to the docs team as a doc-impact ticket; the dispatch step reports whether it was sent. Nothing here is for the PR author.",
             "",
             (.findings[]? | "- `\(.name | line)` (\(.surface | line)): \(.summary | line)", ((.affected_pages // [])[] | "  - \(. | line)"))
           ' doc-impact.json >> "$GITHUB_STEP_SUMMARY" || echo "::warning::could not render doc-impact.json."
@@ -1080,7 +1087,7 @@ jobs:
           set -euo pipefail
           mkdir -p "$STATE_DIR"
           touch "$STATE_DIR/reviewed.txt"
-          jq -r '(.declarations // [])[].fingerprint, (.summary.removedDeclarations // [])[].fingerprint' lint-findings.json \
+          jq -r '(.declarations // [])[].fingerprint, (.summary.removedDeclarations // [])[].fingerprint, (.summary.reviewerWrittenDeclarations // [])[].fingerprint' lint-findings.json \
             | grep -E '^[0-9a-f]{16}$' >> "$STATE_DIR/reviewed.txt" || true
           sort -u -o "$STATE_DIR/reviewed.txt" "$STATE_DIR/reviewed.txt"
           echo "Reviewed fingerprints now: $(grep -c . "$STATE_DIR/reviewed.txt" || true)"

@@ -1112,6 +1112,15 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(argv).toContain(file)
     })
 
+    test('strings a reviewer wrote still open the gate, for the published-content check', () => {
+      const r = execRun(step, {
+        env: { ...baseEnv, STATE_DIR: path.join(os.tmpdir(), 'no-such-dsr-state'), LINT_JSON: '{"findings":[],"summary":{"totalDeclarations":0,"reviewerWritten":2}}' },
+        stubs: { npx: NPX_STUB }
+      })
+      expect(r.status).toBe(0)
+      expect(r.outputs.declarations).toBe('2')
+    })
+
     test('a first run passes no --reviewed at all', () => {
       const r = execRun(step, { env: { ...baseEnv, STATE_DIR: path.join(os.tmpdir(), 'no-such-dsr-state') }, stubs: { npx: NPX_STUB } })
       const argv = fs.readFileSync(path.join(r.dir, 'npx-argv'), 'utf8').split('\n')
@@ -1243,12 +1252,14 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       fs.writeFileSync(path.join(dir, 'reviewed.txt'), 'aaaaaaaaaaaaaaaa\n')
       const lint = {
         declarations: [{ fingerprint: 'bbbbbbbbbbbbbbbb' }, { fingerprint: 'aaaaaaaaaaaaaaaa' }, { fingerprint: '$(touch pwned)' }],
-        summary: { removedDeclarations: [{ fingerprint: 'cccccccccccccccc' }] }
+        summary: { removedDeclarations: [{ fingerprint: 'cccccccccccccccc' }], reviewerWrittenDeclarations: [{ fingerprint: 'dddddddddddddddd' }] }
       }
       const r = execRun(step, { env: { STATE_DIR: dir }, files: { 'lint-findings.json': JSON.stringify(lint) } })
       expect(r.status).toBe(0)
+      // Reviewer-written strings are recorded too, so their impact check
+      // runs once, not on every push.
       expect(fs.readFileSync(path.join(dir, 'reviewed.txt'), 'utf8').trim().split('\n'))
-        .toEqual(['aaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbb', 'cccccccccccccccc'])
+        .toEqual(['aaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbb', 'cccccccccccccccc', 'dddddddddddddddd'])
       expect(r.exists('pwned')).toBe(false)
     })
   })
