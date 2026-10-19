@@ -8,7 +8,7 @@ This toolbox helps Redpanda's documentation team in several ways. When Redpanda 
 
 ## Automation prompts stay in this repository
 
-The prompts for the automations this repository ships, such as the doc-strings review in `.github/workflows/doc-strings-review.yml`, live here on purpose. Do not move them to docs-team-standards, and do not change a workflow to fetch its prompt from another repository at run time.
+The prompts for the automations this repository ships, such as the doc-strings review in `.github/workflows/doc-strings-review.yml`, live here on purpose. Do not move them to docs-team-standards, and never make a workflow fetch a prompt, a skill, or a resource from another repository's branch at run time. A fetch pinned to a commit SHA is allowed, because it changes only when a reviewed pin bump changes it.
 
 The reason is change control. Engineering repos call these workflows pinned to a commit SHA, so a prompt change reaches a repo only when that repo bumps its pin, in a pull request its owners review. A prompt fetched at run time from another repository's default branch would change every engineering repo's review the moment someone merged there, with no release, no pin bump, and no review by the repos it affects.
 
