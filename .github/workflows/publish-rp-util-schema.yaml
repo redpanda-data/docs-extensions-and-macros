@@ -237,7 +237,7 @@ jobs:
             unsupported=""
             while IFS=: read -r flag _asset; do
               [ -z "$flag" ] && continue
-              printf '%s' "$main_cc" | grep -q "\"${flag}\"" \
+              grep -qF "\"${flag}\"" <<< "$main_cc" \
                 || unsupported="${unsupported}${unsupported:+, }--${flag}"
             done <<< "$RP_UTIL_SCHEMAS"
             if [ -n "$unsupported" ]; then
