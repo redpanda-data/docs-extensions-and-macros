@@ -2887,8 +2887,10 @@ programCli
  * @description
  * Find enterprise gating changes in a Redpanda core diff that no doc string
  * announces: a value added to or removed from license_required_feature in
- * src/v/features/enterprise_features.h, or a property wrapped in or unwrapped
- * from config::enterprise<> in src/v/config/configuration.h. Prints them as a
+ * src/v/features/enterprise_features.h, a property wrapped in or unwrapped
+ * from config::enterprise<> in src/v/config/configuration.h, or a changed
+ * restricted value of an enterprise<> property in
+ * src/v/config/configuration.cc. Prints them as a
  * doc-impact report, the JSON the doc-strings review dispatches to the docs
  * team's Jira router, so a licensing change reaches a DOC ticket even when
  * the review has no doc string to look at.
@@ -2902,15 +2904,15 @@ programCli
  */
 programCli
   .command('detect-enterprise-gating')
-  .description('Find enterprise gating changes (license_required_feature values, config::enterprise<> wrappers) in a core diff and print them as a doc-impact report')
+  .description('Find enterprise gating changes (license_required_feature values, config::enterprise<> wrappers and restricted values) in a core diff and print them as a doc-impact report')
   .requiredOption('--repo <path>', 'Path to a Redpanda core checkout. Nothing is cloned.')
   .requiredOption('--diff <base>', 'Base ref: changes in <base>...HEAD are inspected')
   .option('--format <format>', 'Output format: json or human', 'json')
   .action((options) => {
     const { spawnSync } = require('child_process')
-    const { detectGatingChanges, buildDocImpact, ENUM_HEADER, CONFIG_HEADER } = require('../tools/enterprise-features/detect-gating-changes')
+    const { detectGatingChanges, buildDocImpact, enterprisePropertyNames, ENUM_HEADER, CONFIG_HEADER, CONFIG_SOURCE } = require('../tools/enterprise-features/detect-gating-changes')
     const empty = { findings: [] }
-    const result = spawnSync('git', ['diff', '--no-color', '--no-ext-diff', `${options.diff}...HEAD`, '--', ENUM_HEADER, CONFIG_HEADER], {
+    const result = spawnSync('git', ['diff', '--no-color', '--no-ext-diff', `${options.diff}...HEAD`, '--', ENUM_HEADER, CONFIG_HEADER, CONFIG_SOURCE], {
       cwd: options.repo, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024
     })
     if (result.status !== 0) {
@@ -2918,7 +2920,12 @@ programCli
       console.log(JSON.stringify(empty))
       return
     }
-    const findings = detectGatingChanges(result.stdout)
+    // A configuration.cc change is tied to an enterprise property through
+    // the header at HEAD. Without it, header and enum changes still report.
+    const header = spawnSync('git', ['show', `HEAD:${CONFIG_HEADER}`], { cwd: options.repo, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+    if (header.status !== 0) console.error(`git show HEAD:${CONFIG_HEADER} failed in ${options.repo}; configuration.cc changes are not checked: ${(header.stderr || '').trim()}`)
+    const enterpriseNames = header.status === 0 ? enterprisePropertyNames(header.stdout) : []
+    const findings = detectGatingChanges(result.stdout, { enterpriseNames })
     const report = buildDocImpact(findings) || empty
     if (options.format === 'human') {
       if (findings.length === 0) { console.log('No enterprise gating changes.'); return }

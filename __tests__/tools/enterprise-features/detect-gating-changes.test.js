@@ -5,8 +5,10 @@ const path = require('path')
 const {
   detectGatingChanges,
   buildDocImpact,
+  enterprisePropertyNames,
   ENUM_HEADER,
-  CONFIG_HEADER
+  CONFIG_HEADER,
+  CONFIG_SOURCE
 } = require('../../../tools/enterprise-features/detect-gating-changes')
 
 const fixture = (name) => fs.readFileSync(path.join(__dirname, '..', '..', 'fixtures', 'enterprise-gating', name), 'utf8')
@@ -154,6 +156,184 @@ describe('detectGatingChanges: config::enterprise<> wrappers', () => {
       ''
     ].join('\n')
     expect(detectGatingChanges(diff)).toEqual([])
+    expect(detectGatingChanges(diff, { enterpriseNames: ['features_auto_finalization'] })).toEqual([])
+  })
+
+  const headerDiff = (hunkLines) => [
+    `diff --git a/${CONFIG_HEADER} b/${CONFIG_HEADER}`,
+    `--- a/${CONFIG_HEADER}`,
+    `+++ b/${CONFIG_HEADER}`,
+    '@@ -590,7 +590,8 @@ struct configuration final : public config_store {',
+    ...hunkLines,
+    ''
+  ].join('\n')
+
+  test('a declaration that wraps across lines is read whole', () => {
+    // clang-format splits these three in configuration.h at v26.2.4.
+    const diff = headerDiff([
+      '     property<bool> enable_rack_awareness;',
+      '+    enterprise<property<std::vector<config::sasl_mechanisms_override>>>',
+      '+      sasl_mechanisms_overrides;',
+      '+    enterprise<enum_property<model::partition_autobalancing_mode>>',
+      '+      partition_autobalancing_mode;',
+      '+    enterprise<',
+      '+      enum_property<pandaproxy::schema_registry::schema_id_validation_mode>>',
+      '+      enable_schema_id_validation;',
+      '     property<bool> core_balancing_on_core_count_change;'
+    ])
+    expect(detectGatingChanges(diff).map((f) => [f.change_kind, f.name])).toEqual([
+      ['enterprise-gate-added', 'enable_schema_id_validation'],
+      ['enterprise-gate-added', 'partition_autobalancing_mode'],
+      ['enterprise-gate-added', 'sasl_mechanisms_overrides']
+    ])
+  })
+
+  test('wrapping only the type line of a split declaration is a gate added', () => {
+    const diff = headerDiff([
+      '-    enum_property<model::partition_autobalancing_mode>',
+      '+    enterprise<enum_property<model::partition_autobalancing_mode>>',
+      '       partition_autobalancing_mode;',
+      '     property<std::chrono::seconds>'
+    ])
+    expect(detectGatingChanges(diff).map((f) => [f.change_kind, f.name])).toEqual([['enterprise-gate-added', 'partition_autobalancing_mode']])
+  })
+
+  test('an unchanged split declaration in the context is not reported', () => {
+    const diff = headerDiff([
+      '     enterprise<enum_property<model::partition_autobalancing_mode>>',
+      '       partition_autobalancing_mode;',
+      '-    property<bool> core_balancing_on_core_count_change;',
+      '+    property<bool> core_balancing_on_core_count_changes;'
+    ])
+    expect(detectGatingChanges(diff)).toEqual([])
+  })
+
+  test('a declaration never absorbs the comment, access specifier or brace before it', () => {
+    const header = [
+      'struct configuration final : public config_store {',
+      'public:',
+      '    // enables rack aware replica assignment',
+      '    enterprise<property<bool>> audit_enabled; // gated',
+      '    enterprise<',
+      '      enum_property<pandaproxy::schema_registry::schema_id_validation_mode>>',
+      '      enable_schema_id_validation;',
+      '    property<bool> enable_rack_awareness;',
+      '};'
+    ].join('\n')
+    expect(enterprisePropertyNames(header)).toEqual(['audit_enabled', 'enable_schema_id_validation'])
+  })
+
+  test('affected pages use the canonical /streaming/current/ URLs', () => {
+    const diff = headerDiff(['+    enterprise<property<bool>> audit_enabled;'])
+    const report = buildDocImpact(detectGatingChanges(diff))
+    expect(report.findings[0].affected_pages).toEqual(['https://docs.redpanda.com/streaming/current/get-started/licensing/overview/'])
+    expect(report.proposed_ticket.body).toMatch('https://docs.redpanda.com/streaming/current/get-started/licensing/disable-enterprise-features/')
+    expect(JSON.stringify(report)).not.toMatch('https://docs.redpanda.com/current/')
+  })
+})
+
+describe('detectGatingChanges: restricted values in configuration.cc', () => {
+  const ENTERPRISE = ['audit_enabled', 'http_authentication', 'partition_autobalancing_mode']
+  const sourceDiff = (hunkLines) => [
+    `diff --git a/${CONFIG_SOURCE} b/${CONFIG_SOURCE}`,
+    `--- a/${CONFIG_SOURCE}`,
+    `+++ b/${CONFIG_SOURCE}`,
+    '@@ -3440,9 +3440,9 @@ configuration::configuration()',
+    ...hunkLines,
+    ''
+  ].join('\n')
+  const kinds = (findings) => findings.map((f) => [f.change_kind, f.name])
+
+  test('a changed restricted value is reported', () => {
+    const diff = sourceDiff([
+      '   , partition_autobalancing_mode(',
+      '       *this,',
+      '-      model::partition_autobalancing_mode::continuous,',
+      '+      model::partition_autobalancing_mode::node_add,',
+      '       model::partition_autobalancing_mode::node_add,',
+      '       "partition_autobalancing_mode",',
+      '       "Mode of partition balancing for a cluster. * `node_add`: partition "'
+    ])
+    const findings = detectGatingChanges(diff, { enterpriseNames: ENTERPRISE })
+    expect(kinds(findings)).toEqual([['enterprise-restricted-value-changed', 'partition_autobalancing_mode']])
+    expect(findings[0].affected_pages).toHaveLength(1)
+  })
+
+  test('a hunk that starts after *this still ties the change to its name literal', () => {
+    const diff = sourceDiff([
+      '-      true, /* restricted values */',
+      '+      false, /* restricted values */',
+      '       "audit_enabled",',
+      '       "Enables or disables audit logging. When you set this to true, Redpanda "'
+    ])
+    expect(kinds(detectGatingChanges(diff, { enterpriseNames: ENTERPRISE }))).toEqual([['enterprise-restricted-value-changed', 'audit_enabled']])
+  })
+
+  test('a restricted string value is not mistaken for the name', () => {
+    const diff = sourceDiff([
+      '   , http_authentication(',
+      '       *this,',
+      '-      "OIDC",',
+      '+      "oidc",',
+      '       "http_authentication",',
+      '       "A list of supported HTTP authentication mechanisms.",'
+    ])
+    expect(kinds(detectGatingChanges(diff, { enterpriseNames: ENTERPRISE }))).toEqual([['enterprise-restricted-value-changed', 'http_authentication']])
+  })
+
+  test('a description or default change after the name literal is not a restricted-value change', () => {
+    const diff = sourceDiff([
+      '   , audit_enabled(',
+      '       *this,',
+      '       true, /* restricted values */',
+      '       "audit_enabled",',
+      '-      "Enables or disables audit logging.",',
+      '+      "Turns audit logging on or off.",',
+      '       meta{.needs_restart = needs_restart::no, .visibility = visibility::user},',
+      '-      false)',
+      '+      true)'
+    ])
+    expect(detectGatingChanges(diff, { enterpriseNames: ENTERPRISE })).toEqual([])
+  })
+
+  test('a property that is not enterprise<> is never reported', () => {
+    const diff = sourceDiff([
+      '   , enable_rack_awareness(',
+      '       *this,',
+      '-      "enable_rack_awareness",',
+      '+      "enable_rack_aware",',
+      '       "Enable rack-aware replica assignment.",'
+    ])
+    expect(detectGatingChanges(diff, { enterpriseNames: ENTERPRISE })).toEqual([])
+  })
+
+  test('without the enterprise property list, configuration.cc is not checked', () => {
+    const diff = sourceDiff([
+      '   , audit_enabled(',
+      '       *this,',
+      '-      true,',
+      '+      false,',
+      '       "audit_enabled",'
+    ])
+    expect(detectGatingChanges(diff)).toEqual([])
+  })
+
+  test('a property gated in the same PR is reported once, as a gate added', () => {
+    const diff = [
+      `diff --git a/${CONFIG_HEADER} b/${CONFIG_HEADER}`,
+      `--- a/${CONFIG_HEADER}`,
+      `+++ b/${CONFIG_HEADER}`,
+      '@@ -380,7 +380,7 @@ struct configuration final : public config_store {',
+      '-    property<bool> audit_enabled;',
+      '+    enterprise<property<bool>> audit_enabled;',
+      sourceDiff([
+        '   , audit_enabled(',
+        '       *this,',
+        '+      true, /* restricted values */',
+        '       "audit_enabled",'
+      ])
+    ].join('\n')
+    expect(kinds(detectGatingChanges(diff, { enterpriseNames: ENTERPRISE }))).toEqual([['enterprise-gate-added', 'audit_enabled']])
   })
 })
 

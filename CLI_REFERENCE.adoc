@@ -39,7 +39,7 @@ display help for command
 * `sync-schemas` - Sync this package's docs-data/*.schema.json into a content repo's docs-data/
 * `mcp-version` - Show MCP server version and configuration information
 * `lint-strings` - Lint user-facing doc strings embedded in engineering source code (properties, metrics, ...)
-* `detect-enterprise-gating` - Find enterprise gating changes (license_required_feature values, config::enterprise<> wrappers) in a core diff and print them as a doc-impact report
+* `detect-enterprise-gating` - Find enterprise gating changes (license_required_feature values, config::enterprise<> wrappers and restricted values) in a core diff and print them as a doc-impact report
 * `doc-impact-recording` - Extract the docs MCP calls from a Claude Code transcript into a doc-impact eval recording
 * `lint-screenshots` - Lint image macros and image files in a docs repo against the screenshot standard (alt text, size, format, width)
 * `check-build-log` - Check an Antora JSON build log: fail on error or fatal records or too few pages, print a Markdown summary
@@ -637,7 +637,7 @@ npx doc-tools lint-strings --repo ~/redpanda --diff origin/dev
 
 == detect-enterprise-gating
 
-Find enterprise gating changes in a Redpanda core diff that no doc string announces: a value added to or removed from license_required_feature in src/v/features/enterprise_features.h, or a property wrapped in or unwrapped from config::enterprise<> in src/v/config/configuration.h. Prints them as a doc-impact report, the JSON the doc-strings review dispatches to the docs team's Jira router, so a licensing change reaches a DOC ticket even when the review has no doc string to look at.
+Find enterprise gating changes in a Redpanda core diff that no doc string announces: a value added to or removed from license_required_feature in src/v/features/enterprise_features.h, a property wrapped in or unwrapped from config::enterprise<> in src/v/config/configuration.h, or a changed restricted value of an enterprise<> property in src/v/config/configuration.cc. Prints them as a doc-impact report, the JSON the doc-strings review dispatches to the docs team's Jira router, so a licensing change reaches a DOC ticket even when the review has no doc string to look at.
 
 *Usage:*
 
