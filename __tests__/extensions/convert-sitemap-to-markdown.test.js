@@ -43,9 +43,11 @@ describe('convert-sitemap-to-markdown', () => {
       ),
       [page('/adp/reference/rpk-ai-trigger-delete/', 'rpk ai trigger delete', 'Delete one trigger. &lt;name&gt; is the <code>full</code> resource name.')]
     )
-    const line = '[rpk ai trigger delete](https://docs.example.com/adp/reference/rpk-ai-trigger-delete%s): Delete one trigger. <name> is the full resource name. (modified: 2026-10-19)'
+    const line = '[rpk ai trigger delete](https://docs.example.com/adp/reference/rpk-ai-trigger-delete%s): Delete one trigger. <name> is the full resource name.'
     expect(markdown).toContain(`- ${line.replace('%s', '/')}`)
     expect(markdown).toContain(`- ${line.replace('%s', '.md')}`)
+    // The modified date stays out of the description.
+    expect(markdown).not.toContain('resource name. (modified')
   })
 
   it('escapes brackets in titles so the link parses', async () => {
