@@ -1777,9 +1777,9 @@ describe('solutions-catalog: pure helpers', () => {
   })
 
   test('resolveConfig accepts camelCase and snake_case, with defaults and env', () => {
-    expect(extension.resolveConfig({}, {})).toEqual({ maxRelated: 3, minScore: 0.6, networkChecks: 'auto', includeDrafts: false, publicRepo: false, agentCompanion: true })
-    expect(extension.resolveConfig({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: 'true', publicRepo: true }, {})).toEqual({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: true, publicRepo: true, agentCompanion: true })
-    expect(extension.resolveConfig({ max_related: '2', network_checks: 'false', public_repo: 'true' }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' })).toEqual({ maxRelated: 2, minScore: 0.6, networkChecks: false, includeDrafts: true, publicRepo: true, agentCompanion: true })
+    expect(extension.resolveConfig({}, {})).toEqual({ maxRelated: 3, minScore: 0.6, networkChecks: 'auto', includeDrafts: false, draftDownloads: false, publicRepo: false, agentCompanion: true })
+    expect(extension.resolveConfig({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: 'true', publicRepo: true }, {})).toEqual({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: true, draftDownloads: false, publicRepo: true, agentCompanion: true })
+    expect(extension.resolveConfig({ max_related: '2', network_checks: 'false', public_repo: 'true' }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' })).toEqual({ maxRelated: 2, minScore: 0.6, networkChecks: false, includeDrafts: true, draftDownloads: false, publicRepo: true, agentCompanion: true })
     expect(extension.resolveConfig({ include_drafts: false }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' }).includeDrafts).toBe(false)
     expect(extension.resolveConfig({ max_related: 'lots' }, {}).maxRelated).toBe(3)
   })
@@ -2439,5 +2439,29 @@ describe('solutions-catalog: the kubernetes platform', () => {
   test('kubernetes is an allowed platform, but a solution that sets none is never assumed to run there', () => {
     expect(collect.ENUMS.platforms).toEqual(['self-managed', 'cloud', 'kubernetes'])
     expect(collect.DEFAULT_PLATFORMS).toEqual(['self-managed', 'cloud'])
+  })
+})
+
+// TEMPORARY, preview only: draft_downloads marks included drafts as
+// downloadable from their draft release. Remove with the setting at go-live.
+describe('solutions-catalog: draft_downloads (preview only)', () => {
+  const sandbox = () => makeSolution('sandbox', { attrs: { 'page-solution-status': 'draft' } })
+  const recordOf = (result, id) => addedFile(result.siteCatalog, 'solutions.json').solutions.find((s) => s.id === id)
+
+  test('marks included drafts, and only drafts', async () => {
+    const result = await run({ solutions: [makeSolution('leaderboard'), sandbox()], config: { include_drafts: true, draft_downloads: true } })
+    expect(recordOf(result, 'sandbox').draftDownloads).toBe(true)
+    expect(recordOf(result, 'leaderboard')).not.toHaveProperty('draftDownloads')
+    expect(warningsOf(result)).toMatch(/draft_downloads is on/)
+  })
+
+  test('reads SOLUTIONS_DRAFT_DOWNLOADS, and does nothing without include_drafts', async () => {
+    const env = await run({ solutions: [makeSolution('leaderboard'), sandbox()], env: { SOLUTIONS_INCLUDE_DRAFTS: 'true', SOLUTIONS_DRAFT_DOWNLOADS: 'true' } })
+    expect(recordOf(env, 'sandbox').draftDownloads).toBe(true)
+    const off = await run({ solutions: [makeSolution('leaderboard'), sandbox()], config: { include_drafts: true } })
+    expect(recordOf(off, 'sandbox')).not.toHaveProperty('draftDownloads')
+    const noDrafts = await run({ solutions: [makeSolution('leaderboard'), sandbox()], config: { draft_downloads: true } })
+    expect(recordOf(noDrafts, 'sandbox')).toBeUndefined()
+    expect(warningsOf(noDrafts)).not.toMatch(/draft_downloads is on/)
   })
 })

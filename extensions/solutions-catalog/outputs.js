@@ -74,6 +74,9 @@ function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions 
   if (record.verified) publicRecord.verified = record.verified
   // Only when the companion was generated for this build.
   if (record.agentCompanion) publicRecord.agentCompanion = record.agentCompanion
+  // TEMPORARY, preview only (draft_downloads): this draft downloads from its
+  // draft release. Absent everywhere else.
+  if (record.draftDownloads) publicRecord.draftDownloads = true
   return publicRecord
 }
 

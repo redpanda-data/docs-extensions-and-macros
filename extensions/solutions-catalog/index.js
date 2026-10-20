@@ -67,6 +67,10 @@ const DEFAULTS = Object.freeze({
   minScore: 0.6,
   networkChecks: 'auto',
   includeDrafts: false,
+  // TEMPORARY, preview only: with include_drafts on, mark each draft as
+  // downloadable from its draft release, so a preview can test the signed-in
+  // download flow before anything is published. Remove at go-live.
+  draftDownloads: false,
   agentCompanion: true,
   // The solutions repository is private: readers read the code on the pages
   // and signed-in readers download it through the gated endpoint, so its
@@ -85,17 +89,23 @@ function resolveConfig (config = {}, env = process.env) {
   const minScore = Number(pick('minScore', 'min_score'))
   const networkChecks = pick('networkChecks', 'network_checks')
   const includeDraftsRaw = pick('includeDrafts', 'include_drafts')
+  const draftDownloadsRaw = pick('draftDownloads', 'draft_downloads')
   const agentCompanionRaw = pick('agentCompanion', 'agent_companion')
   const publicRepoRaw = pick('publicRepo', 'public_repo')
   const envDrafts = env.SOLUTIONS_INCLUDE_DRAFTS
   const includeDrafts = includeDraftsRaw !== undefined
     ? isTrue(includeDraftsRaw)
     : envDrafts !== undefined ? isTrue(envDrafts) : DEFAULTS.includeDrafts
+  const envDraftDownloads = env.SOLUTIONS_DRAFT_DOWNLOADS
+  const draftDownloads = includeDrafts && (draftDownloadsRaw !== undefined
+    ? isTrue(draftDownloadsRaw)
+    : envDraftDownloads !== undefined ? isTrue(envDraftDownloads) : DEFAULTS.draftDownloads)
   return {
     maxRelated: Number.isInteger(maxRelated) && maxRelated >= 0 ? maxRelated : DEFAULTS.maxRelated,
     minScore: Number.isFinite(minScore) ? minScore : DEFAULTS.minScore,
     networkChecks: networkChecks === undefined ? DEFAULTS.networkChecks : normalizeTristate(networkChecks),
     includeDrafts,
+    draftDownloads,
     agentCompanion: agentCompanionRaw === undefined ? DEFAULTS.agentCompanion : isTrue(agentCompanionRaw),
     publicRepo: publicRepoRaw === undefined ? DEFAULTS.publicRepo : isTrue(publicRepoRaw),
   }
@@ -428,10 +438,14 @@ module.exports.register = function ({ config = {} } = {}) {
         logger.info(`solutions-catalog: ${record.id} is a draft; unpublished with its attachments, images, and aliases (set SOLUTIONS_INCLUDE_DRAFTS=true to build it)`)
         continue
       }
-      if (record.status === 'draft') draftsBuilt++
+      if (record.status === 'draft') {
+        draftsBuilt++
+        if (settings.draftDownloads) record.draftDownloads = true
+      }
       active.push(record)
     }
     if (draftsBuilt) logger.warn(`solutions-catalog: building ${draftsBuilt} draft solution${draftsBuilt === 1 ? '' : 's'} because include_drafts is on`)
+    if (draftsBuilt && settings.draftDownloads) logger.warn('solutions-catalog: drafts are downloadable from their draft releases because draft_downloads is on (preview only)')
     if (!active.some((r) => (r.status === 'published' || r.draft) && r.featured)) logger.warn('solutions-catalog: no published solution is featured')
 
     // Explicit related docs, resolved to keys and display items. A rejected
