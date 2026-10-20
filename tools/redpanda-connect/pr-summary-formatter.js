@@ -376,7 +376,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
       lines.push('|-----------|-------|-------------|-------------|');
       changedDefaults.forEach(change => {
         const oldVal = change.oldDefault !== undefined ? `\`${JSON.stringify(change.oldDefault)}\`` : '_no default_';
-        const newVal = change.newDefault !== undefined ? `\`${JSON.stringify(change.newDefault)}\`` : '_none_';
+        const newVal = change.newDefault !== undefined ? `\`${JSON.stringify(change.newDefault)}\`` : '_no default_';
         lines.push(`| \`${change.component}\` | \`${change.field}\` | ${oldVal} | ${newVal} |`);
       });
       lines.push('');
@@ -558,9 +558,9 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
     lines.push('**Review Changed Defaults for Breaking Changes:**');
     lines.push('');
     allChangedDefaults.forEach(change => {
-      const oldVal = change.oldDefault !== undefined ? JSON.stringify(change.oldDefault) : 'no default';
-      const newVal = change.newDefault !== undefined ? JSON.stringify(change.newDefault) : 'none';
-      lines.push(`- [ ] \`${change.component}.${change.field}\`: \`${oldVal}\` → \`${newVal}\` — changed in **${change.version}**`);
+      const oldVal = change.oldDefault !== undefined ? `\`${JSON.stringify(change.oldDefault)}\`` : '_no default_';
+      const newVal = change.newDefault !== undefined ? `\`${JSON.stringify(change.newDefault)}\`` : '_no default_';
+      lines.push(`- [ ] \`${change.component}.${change.field}\`: ${oldVal} → ${newVal} — changed in **${change.version}**`);
     });
     lines.push('');
   }

@@ -689,7 +689,9 @@ function buildChangedDefaultsTable (changedDefaults, capFn) {
     // ${!uuid_v4()} and characters like * or _ show as typed.
     const formatDefault = (val) => {
       // 'none' would read as a value, and is one for some fields (compression).
-      if (val === undefined || val === null) return '_no default_'
+      if (val === undefined) return '_no default_'
+      // A null default is declared (Default(nil)), so it renders as a value.
+      if (val === null) return '`+null+`'
       let text
       if (typeof val === 'string') text = val === '' ? '""' : val
       else if (typeof val === 'number' || typeof val === 'boolean') text = String(val)

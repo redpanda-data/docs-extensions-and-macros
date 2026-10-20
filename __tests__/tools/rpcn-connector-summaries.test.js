@@ -888,6 +888,16 @@ describe('buildChangedDefaultsTable - whats-new changed default links', () => {
     // A missing default reads as "no default", never as the value none.
     expect(table).toContain('|_no default_\n|`+5+`\n');
   });
+
+  test('renders a declared null default as null, not as no default', () => {
+    const table = buildChangedDefaultsTable([
+      { component: 'inputs:postgres_cdc', field: 'unchanged_toast_value', oldDefault: null, newDefault: '__x__', description: 'A.' },
+      { component: 'inputs:y', field: 'b', oldDefault: undefined, newDefault: null, description: 'B.' }
+    ], cap);
+
+    expect(table).toContain('|`+null+`\n|`+__x__+`\n');
+    expect(table).toContain('|_no default_\n|`+null+`\n');
+  });
 });
 
 describe('backfillPageDescriptions - self-healing page headers', () => {
