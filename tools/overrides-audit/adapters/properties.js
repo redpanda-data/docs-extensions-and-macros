@@ -4,7 +4,7 @@
  * Reads docs-data/property-overrides.json and an extracted-properties JSON
  * (the property extractor's raw --output, WITHOUT overrides applied) and
  * classifies every override field. This is the complete reference adapter;
- * rpk and connect adapters follow the same shape.
+ * The rpk adapter follows the same shape.
  */
 
 'use strict'
