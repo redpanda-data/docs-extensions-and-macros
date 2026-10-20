@@ -969,10 +969,26 @@ describe('doc-strings-review workflow: doc-impact dispatch merges gating finding
     expect(r.status).toBe(0)
   })
 
-  test('an unparseable model report with a good gating report dispatches nothing rather than something unchecked', () => {
-    const r = dispatch({ 'doc-impact.json': 'not json', 'enterprise-impact.json': JSON.stringify(gating) })
-    expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(false)
+  test.each([
+    ['unparseable', '{not json'],
+    ['findings of the wrong type', JSON.stringify({ findings: 'oops' })],
+    ['a finding of the wrong shape', JSON.stringify({ findings: [{ name: 'x' }], proposed_ticket: { title: 't', body: 'b' } })],
+    ['a page outside the docs site', JSON.stringify({ findings: [{ ...finding('x'), affected_pages: ['https://example.com/'] }], proposed_ticket: { title: 't', body: 'b' } })]
+  ])('a model report that is %s is dropped and the gating report still goes out', (_label, model) => {
+    // The gating finding is the one thing in the dispatch the model did not
+    // write, so a broken or steered model report must not be able to hide it.
+    const r = dispatch({ 'doc-impact.json': model, 'enterprise-impact.json': JSON.stringify(gating) })
     expect(r.status).toBe(0)
+    expect(r.all).toMatch(/::warning::.*model/)
+    const impact = payload(r)
+    expect(impact.findings.map((f) => f.name)).toEqual(['manual_finalization'])
+    expect(impact.proposed_ticket.title).toBe('gating')
+  })
+
+  test('a malformed model report with no gating report still dispatches nothing', () => {
+    const r = dispatch({ 'doc-impact.json': JSON.stringify({ findings: 'oops' }) })
+    expect(r.status).toBe(0)
+    expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(false)
   })
 })
 
