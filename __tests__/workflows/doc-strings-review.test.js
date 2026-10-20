@@ -452,6 +452,26 @@ esac
     }
   })
 
+  test('a non-writer cannot slip a protected path past the guard in a large file list', () => {
+    // Under pipefail, `printf | grep -q` fails once the list outgrows the pipe
+    // buffer: grep exits on the first match, printf takes SIGPIPE, and the
+    // pipeline reads as no match. A protected path listed first, ahead of
+    // thousands of others, then waved a non-writer's PR through.
+    const r = execRun(step, {
+      env,
+      stubs: {
+        gh: `#!/bin/bash
+case "$*" in
+  *collaborators*) echo read ;;
+  *) echo '.github/workflows/doc-strings-review.yml'; for i in $(seq 1 5000); do printf 'modules/reference/pages/some/long/path/file-%05d.adoc\\n' "$i"; done ;;
+esac
+`
+      }
+    })
+    expect(r.status).not.toBe(0)
+    expect(r.all).toMatch(/::error::PR touches review configuration/)
+  })
+
   test('a writer touching review configuration is allowed through', () => {
     const r = execRun(step, {
       env,
@@ -1429,5 +1449,25 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(review.with.prompt).toMatch(/one exception to the suggestion rules above/)
       expect(review.with.prompt).toMatch(/still ends with the changed declaration's\s+fingerprint footer/)
     })
+  })
+})
+
+describe('doc-strings-review workflow: run-output files from the PR (executed)', () => {
+  const step = stepNamed('Remove run-output files the PR checked in')
+  const outputs = ['doc-impact.json', 'review-summary.md', 'lint-findings.json', 'pr-diff.patch', 'pr-diff.full', 'pr-diff.err', 'embedded-reference-strings.md', 'terminology.md']
+
+  test('runs after the checkout and before anything reads or writes them', () => {
+    const at = job.steps.indexOf(step)
+    expect(job.steps[at - 1].uses).toMatch(/^actions\/checkout@/)
+    expect(at).toBeLessThan(job.steps.findIndex((s) => s.id === 'lint'))
+    expect(at).toBeLessThan(job.steps.findIndex((s) => s.id === 'review'))
+  })
+
+  test('removes every file a later step trusts as this run\'s output', () => {
+    const files = Object.fromEntries(outputs.map((f) => [f, 'planted by the PR']))
+    const r = execRun(step, { files: { ...files, 'README.adoc': 'kept' } })
+    expect(r.status).toBe(0)
+    for (const f of outputs) expect(fs.existsSync(path.join(r.dir, f))).toBe(false)
+    expect(fs.existsSync(path.join(r.dir, 'README.adoc'))).toBe(true)
   })
 })

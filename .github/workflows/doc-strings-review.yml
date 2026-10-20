@@ -266,7 +266,10 @@ jobs:
             echo "::error::Could not read the changed-file list for PR $PR; refusing to run the review."
             exit 1
           fi
-          if printf '%s\n' "$files" | grep -qE '(^|/)\.claude/|(^|/)CLAUDE\.md$|^\.github/workflows/|^\.github/actions/|^action\.ya?ml$'; then
+          # Here-string, not a pipe: under pipefail, grep -q exiting on the
+          # first match makes printf fail with SIGPIPE once the list is past
+          # the pipe buffer, and the guard would wave a large PR through.
+          if grep -qE '(^|/)\.claude/|(^|/)CLAUDE\.md$|^\.github/workflows/|^\.github/actions/|^action\.ya?ml$' <<< "$files"; then
             perm=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$AUTHOR/permission" -q .permission || echo none)
             if [ "$perm" != "admin" ] && [ "$perm" != "write" ]; then
               echo "::error::PR touches review configuration from a non-writer; skipping automated review."
@@ -277,6 +280,20 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      # Every file below is one this run writes and a later step trusts as
+      # its own output: the dispatch forwards doc-impact.json under the bot
+      # token, the summary step posts review-summary.md, and the model reads
+      # the rest as authoritative. The checkout is the PR's tree, so a PR
+      # that commits any of them would otherwise have them read as if this
+      # run produced them, even on a run where the step that writes them is
+      # skipped. Every diff here is commit to commit, so removing them from
+      # the working tree changes nothing the lint or the review sees.
+      - name: Remove run-output files the PR checked in
+        run: |
+          set -euo pipefail
+          rm -f doc-impact.json review-summary.md \
+            lint-findings.json pr-diff.patch pr-diff.full pr-diff.err \
+            embedded-reference-strings.md terminology.md
       # The commit every diff in this job is taken from. On pull_request the
       # checkout is refs/pull/N/merge: GitHub's merge of the PR head into the
       # base branch. pull_request.base.sha is NOT that merge's base: it can
