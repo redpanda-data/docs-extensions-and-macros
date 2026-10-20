@@ -935,7 +935,7 @@ On the overview (`pages/index.adoc`):
 | Comma list of repo paths under `solutions/<slug>/` that a reader produces with a documented command instead of reading on a page (for example `services/go.sum, services/internal/gamepb/game_events.pb.go`). These are the only files a reader needs that no page shows in full. Each entry must be a file in the module's examples (fatal otherwise, as is listing one twice). See <<Build-along files>>.
 |===
 
-On a step page: `page-layout` must be `solution-step`; `description` is the step's own; `page-solution-rule` and `page-solution-adapt` (optional, one sentence each) are read only by the agent companion: the invariant the step establishes, stated so it holds in any codebase, and what to inspect in a target repository to apply it. When every step sets `page-solution-step-duration`, the build warns if they do not add up to `page-solution-duration`.
+On a step page: `page-layout` must be `solution-step`; `description` is the step's own; `page-solution-rule` and `page-solution-adapt` (optional, one sentence each) are read only by the agent companion: the invariant the step establishes, stated so it holds in any codebase, and what to inspect in a target repository to apply it.
 
 Published solutions must also pass the section checks on the converted HTML: the overview needs `h2` headings `Architecture` and `Prerequisites` (matched after lower-casing, collapsing whitespace, and dropping trailing punctuation); every step needs an `h2`/`h3` whose text starts with `Verify` or a block with the `solution-verify` role.
 
