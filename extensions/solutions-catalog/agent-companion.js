@@ -477,9 +477,12 @@ function findLeaks (markdown) {
  * @param {(target: string, attrs: Object<string,string>) => string|undefined} [input.resolveInclude] - the
  *   whole source of an `include::partial$...[]` target, or undefined when there is none (see
  *   partialResolver). Without it, every partial include is reported in `leaks`.
+ * @param {{gated: boolean, version: string, verified: boolean}} [input.download] - whether the solution is a
+ *   released signed-in download; when it is, How to use this names the download for a user who wants to run
+ *   the reference system.
  * @returns {{ markdown: string, rules: Array<{step, title, rule, adapt}>, referenceSteps: string[], missingSteps: string[], leaks: string[] }}
  */
-function generateAgentCompanion ({ slug, pages, verifyScript, siteUrl = DEFAULT_SITE_URL, titleOf, resolveInclude }) {
+function generateAgentCompanion ({ slug, pages, verifyScript, siteUrl = DEFAULT_SITE_URL, titleOf, resolveInclude, download }) {
   if (!slug) throw new Error('agent-companion: slug is required')
   if (!pages || !pages.index) throw new Error(`agent-companion: ${slug} has no index page`)
   siteUrl = String(siteUrl || DEFAULT_SITE_URL).replace(/\/+$/, '')
@@ -555,6 +558,13 @@ function generateAgentCompanion ({ slug, pages, verifyScript, siteUrl = DEFAULT_
   }
   if (hasReference) intro.push('Reference build describes how the reference system proves itself: its numbers and failure modes belong to that system, not to the target.')
   md.push(intro.join(' '), '')
+  // A gated, released solution: the reference system is a signed-in download.
+  // The companion is for applying the design, so this is only for a user who
+  // wants to run the reference itself.
+  if (download && download.gated && download.version) {
+    const tree = download.verified ? ', the exact file tree that passed its recorded test run' : ''
+    md.push(`If the user wants to run the reference system as tested rather than apply the design, point them to the signed-in download: one zip at ${download.version}${tree}, from ${solutionUrl}.`, '')
+  }
   if (problem && problem.trim()) md.push('## The problem', '', problem.trim(), '')
   if (outcomes && outcomes.trim()) md.push('## What the system must do', '', outcomes.trim(), '')
 

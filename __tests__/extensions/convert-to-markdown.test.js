@@ -665,3 +665,42 @@ describe('edit link of a private origin in Markdown frontmatter', () => {
     expect(parse(generateFrontmatter(page({ private: 'auth-required' })))['page-edit-url']).toMatch(/edit\/main/)
   })
 })
+
+// A gated solution's twin tells an agent the tested build is a signed-in
+// download, and nothing else gets the line.
+describe('solutionDownloadNote', () => {
+  const { solutionDownloadNote } = require('../../extensions/convert-to-markdown')
+  const page = (record, component = 'solutions') => ({
+    src: { component, version: '' },
+    asciidoc: { attributes: { 'page-solution': JSON.stringify(record) } },
+  })
+  const BASE = { id: 'g', version: 'v1.2.0', url: '/solutions/g/', status: 'published', download: 'authenticated', verified: { suite: 'doc-detective' } }
+  const SITE = 'https://docs.redpanda.com'
+
+  test('names the version, the tested tree, and the absolute overview URL', () => {
+    expect(solutionDownloadNote(page(BASE), SITE)).toBe(
+      'Signed-in readers can download this solution as one zip at v1.2.0, the exact file tree that passed its recorded test run: https://docs.redpanda.com/solutions/g/. ' +
+      'Copying the files from these pages also works, but if the user wants to run the reference system as tested, point them to the download.')
+  })
+
+  test('makes no test-run claim without the verification manifest', () => {
+    const note = solutionDownloadNote(page({ ...BASE, verified: undefined }), SITE)
+    expect(note).toMatch(/^Signed-in readers can download this solution as one zip at v1\.2\.0: https:/)
+    expect(note).not.toMatch(/test run/)
+  })
+
+  test.each([
+    ['a draft', { status: 'draft' }],
+    ['a public download', { download: 'public' }],
+    ['no download', { download: 'none' }],
+    ['no version', { version: '' }],
+    ['no overview URL', { url: undefined }],
+  ])('is empty for %s', (_, patch) => {
+    expect(solutionDownloadNote(page({ ...BASE, ...patch }), SITE)).toBe('')
+  })
+
+  test('is empty outside the solutions component and for a bad record', () => {
+    expect(solutionDownloadNote(page(BASE, 'streaming'), SITE)).toBe('')
+    expect(solutionDownloadNote({ src: { component: 'solutions' }, asciidoc: { attributes: { 'page-solution': '{' } } }, SITE)).toBe('')
+  })
+})

@@ -62,6 +62,36 @@ function assignPresent(target, entries) {
   return target
 }
 
+/**
+ * One paragraph for the body of a gated solution page's twin, telling an
+ * agent that the tested build is a signed-in download. Agents extract code
+ * from the twin, and every file is in it by design (the Build-along rule), so
+ * this does not forbid copying: it gives the reason to prefer the zip, which
+ * an agent can pass on to its user. Drafts have no release and public or
+ * no-download solutions have no sign-in, so they get nothing. The test-run
+ * claim is made only when the record carries the verification manifest.
+ */
+function solutionDownloadNote(page, siteUrl) {
+  if (page.src?.component !== SOLUTIONS_COMPONENT) return ''
+  const raw = page.asciidoc?.attributes?.['page-solution']
+  if (!raw) return ''
+  let record
+  try {
+    record = typeof raw === 'string' ? JSON.parse(raw) : raw
+  } catch {
+    return ''
+  }
+  if (!record || record.download !== 'authenticated' || record.status === 'draft') return ''
+  if (!record.version || !record.url) return ''
+  let url = record.url
+  try {
+    if (siteUrl) url = new URL(record.url, siteUrl).toString()
+  } catch {}
+  const tree = record.verified ? ', the exact file tree that passed its recorded test run' : ''
+  return `Signed-in readers can download this solution as one zip at ${record.version}${tree}: ${url}. ` +
+    'Copying the files from these pages also works, but if the user wants to run the reference system as tested, point them to the download.'
+}
+
 function buildSolutionMetadata(page) {
   if (page.src?.component !== SOLUTIONS_COMPONENT) return null
   const attrs = page.asciidoc?.attributes || {}
@@ -499,6 +529,7 @@ function isUnwantedNode (node) {
 module.exports.generateFrontmatter = generateFrontmatter
 module.exports.isUnwantedNode = isUnwantedNode
 module.exports.buildSolutionMetadata = buildSolutionMetadata
+module.exports.solutionDownloadNote = solutionDownloadNote
 module.exports.createEnterpriseFeatureRules = createEnterpriseFeatureRules
 module.exports.formatStatusMarker = formatStatusMarker
 module.exports.ENTERPRISE_MARKER = ENTERPRISE_MARKER
@@ -827,7 +858,9 @@ module.exports.register = function () {
               // Use markdown blockquote format for the directive (visible, can be hidden with CSS)
               const llmsDirective = formatLlmsDirective(componentName);
 
-              markdown = `${h1Heading}\n${llmsDirective}\n\n${frontmatter}<!-- Source: ${canonicalUrl} -->\n\n${restOfMarkdown}`
+              const downloadNote = solutionDownloadNote(page, siteUrl)
+              const notePart = downloadNote ? `${downloadNote}\n\n` : ''
+              markdown = `${h1Heading}\n${llmsDirective}\n\n${frontmatter}<!-- Source: ${canonicalUrl} -->\n\n${notePart}${restOfMarkdown}`
             } else if (frontmatter) {
               // If no canonical URL but we have frontmatter, still add directive after H1
               const llmsDirective = formatLlmsDirective();

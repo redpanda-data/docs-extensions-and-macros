@@ -595,3 +595,30 @@ describe('agent companion: include helpers', () => {
     expect(resolve('example$production/x.adoc')).toBeUndefined()
   })
 })
+
+describe('agent companion: signed-in download line', () => {
+  const { generateAgentCompanion } = require('../../extensions/solutions-catalog/agent-companion')
+  const index = '= Tiny\n:page-solution-steps: one\n\nA problem worth solving.\n'
+  const pages = { index, one: '= One\n:page-layout: solution-step\n\n== Why\n\nReason.\n' }
+  const LINE = /^If the user wants to run the reference system as tested rather than apply the design, point them to the signed-in download: one zip at v1\.2\.0(, the exact file tree that passed its recorded test run)?, from https:\/\/docs\.redpanda\.com\/solutions\/tiny\/\.$/m
+
+  test('a gated, verified release names the download and the tested tree', () => {
+    const md = generateAgentCompanion({ slug: 'tiny', pages, download: { gated: true, version: 'v1.2.0', verified: true } }).markdown
+    expect(md).toMatch(LINE)
+    expect(md).toContain('passed its recorded test run')
+  })
+
+  test('without a verification manifest there is no test-run claim', () => {
+    const md = generateAgentCompanion({ slug: 'tiny', pages, download: { gated: true, version: 'v1.2.0', verified: false } }).markdown
+    expect(md).toMatch(LINE)
+    expect(md).not.toContain('test run')
+  })
+
+  test.each([
+    ['no download facts', undefined],
+    ['not gated', { gated: false, version: 'v1.2.0', verified: true }],
+    ['no version', { gated: true, version: '', verified: true }],
+  ])('%s: no line', (_, download) => {
+    expect(generateAgentCompanion({ slug: 'tiny', pages, download }).markdown).not.toMatch(/signed-in download/)
+  })
+})
