@@ -44,19 +44,18 @@ describe('convert-sitemap-to-markdown', () => {
       [page('/adp/reference/rpk-ai-trigger-delete/', 'rpk ai trigger delete', 'Delete one trigger. &lt;name&gt; is the <code>full</code> resource name.')]
     )
     const line = '[rpk ai trigger delete](https://docs.example.com/adp/reference/rpk-ai-trigger-delete%s): Delete one trigger. <name> is the full resource name.'
-    expect(markdown).toContain(`- ${line.replace('%s', '/')}`)
-    expect(markdown).toContain(`- ${line.replace('%s', '.md')}`)
-    // The modified date stays out of the description.
-    expect(markdown).not.toContain('resource name. (modified')
+    // The entry line ends with the description; metadata is on a nested line.
+    expect(markdown).toContain(`- ${line.replace('%s', '/')}\n  - modified: 2026-10-19\n`)
+    expect(markdown).toContain(`- ${line.replace('%s', '.md')}\n  - modified: 2026-10-19\n`)
   })
 
   it('escapes brackets in titles so the link parses', async () => {
     const markdown = await run(sitemap('https://docs.example.com/adp/k8s/'), [page('/adp/k8s/', 'Deploy on [K8s]')])
-    expect(markdown).toContain('- [Deploy on \\[K8s\\]](https://docs.example.com/adp/k8s/) (modified: 2026-10-19)')
+    expect(markdown).toContain('- [Deploy on \\[K8s\\]](https://docs.example.com/adp/k8s/)\n  - modified: 2026-10-19\n')
   })
 
   it('falls back to a title from the URL for pages not in the content catalog', async () => {
     const markdown = await run(sitemap('https://docs.example.com/adp/some-other-page/'), [])
-    expect(markdown).toContain('- [Some Other Page](https://docs.example.com/adp/some-other-page/) (modified: 2026-10-19)')
+    expect(markdown).toContain('- [Some Other Page](https://docs.example.com/adp/some-other-page/)\n  - modified: 2026-10-19\n')
   })
 })

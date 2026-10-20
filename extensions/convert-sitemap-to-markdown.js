@@ -163,23 +163,20 @@ function convertUrlsetToMarkdown(urls, pageInfo = new Map()) {
         const page = pageInfo.get(new URL(loc).pathname)
         const title = (page && page.title) || extractPageTitle(loc)
         markdown += `- [${title}](${loc})`
-        // Readers of the llms.txt link form take everything after `: ` as the
-        // description, so a trailing metadata list would become part of it.
-        // An entry with a description carries it alone.
-        if (page && page.description) {
-          markdown += `: ${page.description}`
-        } else {
-          const metadata = []
-          if (lastmod) metadata.push(`modified: ${lastmod}`)
-          if (changefreq) metadata.push(`frequency: ${changefreq}`)
-          if (priority) metadata.push(`priority: ${priority}`)
-
-          if (metadata.length > 0) {
-            markdown += ` (${metadata.join(', ')})`
-          }
-        }
-
+        if (page && page.description) markdown += `: ${page.description}`
         markdown += '\n'
+
+        // Metadata goes on a nested line. Readers of the llms.txt link form
+        // take everything after `: ` as the description, so metadata on the
+        // entry line would become part of it.
+        const metadata = []
+        if (lastmod) metadata.push(`modified: ${lastmod}`)
+        if (changefreq) metadata.push(`frequency: ${changefreq}`)
+        if (priority) metadata.push(`priority: ${priority}`)
+
+        if (metadata.length > 0) {
+          markdown += `  - ${metadata.join(', ')}\n`
+        }
       }
     }
 

@@ -1397,7 +1397,7 @@ The `convert-sitemap-to-markdown` extension generates human-readable markdown ve
 - Creates master `sitemap-all.md` combining all pages
 - Organizes URLs by component/version
 - Uses each page's document title and `:description:`, falling back to a title from the URL for files that aren't Antora pages
-- Includes page metadata (modified dates, priority) on entries without a description, so the description stays the last thing on the line
+- Includes page metadata (modified dates, priority) on a nested line under each entry, so the entry line keeps the `- [Title](url): description` form
 - Uses Antora content catalog (no filesystem operations)
 
 === Configuration
@@ -1442,7 +1442,9 @@ Total pages: 4,126
 ### Current
 
 - [Introduction to Redpanda](https://docs.redpanda.com/current/get-started/): Learn about Redpanda and its features.
-- [Deploy](https://docs.redpanda.com/current/deploy/) (modified: 2024-03-28)
+  - modified: 2024-03-29
+- [Deploy](https://docs.redpanda.com/current/deploy/)
+  - modified: 2024-03-28
 ----
 
 === Use cases
