@@ -375,6 +375,34 @@ describe('overrides-audit adapters', () => {
         expect(row.source_text).toBe('List all topics in the cluster.')
       })
 
+      test('command description with an env-cloud conditional is REVIEW, never an upstream candidate', () => {
+        const row = auditDescription({
+          overrideDescription: 'List topics.\n\nifndef::env-cloud[]\nOn self-managed clusters, also list internal topics.\nendif::[]',
+          sourceDescription: 'List all topics in the cluster.'
+        })
+        expect(row.class).toBe(CLASSES.REVIEW)
+        expect(row.upstream_candidate_text).toBeUndefined()
+        expect(row.note).toContain('audience-scoped')
+      })
+
+      test('command description that only scopes source text with a conditional is KEEP', () => {
+        const row = auditDescription({
+          overrideDescription: 'List topics.\n\nifndef::env-cloud[]\nAlso lists internal topics.\nendif::[]',
+          sourceDescription: 'List topics.\n\nAlso lists internal topics.'
+        })
+        expect(row.class).toBe(CLASSES.KEEP)
+        expect(row.upstream_candidate_text).toBeUndefined()
+      })
+
+      test('command description with a cloud-only: prefix is REVIEW, never an upstream candidate', () => {
+        const row = auditDescription({
+          overrideDescription: 'cloud-only: List topics in your Redpanda Cloud cluster.',
+          sourceDescription: 'List all topics in the cluster.'
+        })
+        expect(row.class).toBe(CLASSES.REVIEW)
+        expect(row.upstream_candidate_text).toBeUndefined()
+      })
+
       test('only the mainDescription portion before an ALL-CAPS section header is compared', () => {
         const row = auditDescription({
           overrideDescription: 'List topics in a cluster.',

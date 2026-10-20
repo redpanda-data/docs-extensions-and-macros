@@ -232,6 +232,17 @@ function classifyProse (name, field, overrideText, formattedSource, upstreamRef,
     }
   }
 
+  // Audience-scoped text cannot be upstreamed as written: stripDocsMarkup
+  // drops a cloud-only: prefix or an ifdef/ifndef wrapper and keeps the
+  // prose, so the candidate would publish one audience's text to every rpk
+  // user. When the stripped prose already matches source (KEEP above), the
+  // override only scopes source text and nothing goes upstream.
+  const scopedKinds = markupKinds.filter((kind) => kind === 'audience-prefix' || kind === 'conditional')
+  if (scopedKinds.length > 0) {
+    return reviewRow(name, field, overrideText, upstreamRef,
+      `The override differs from source and contains audience-scoped text (${scopedKinds.join(', ')}). rpk help has one audience, so decide which prose belongs in source and keep the scoped part in the override.`)
+  }
+
   return {
     ...common,
     class: classify.CLASSES.KEEP_UNTIL_UPSTREAMED,
