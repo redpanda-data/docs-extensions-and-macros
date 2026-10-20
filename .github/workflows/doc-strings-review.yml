@@ -1269,13 +1269,20 @@ jobs:
             echo "::warning::the model's doc-impact.json does not match the expected schema; dropping the model report."
             model=""
           fi
+          # The gating report is checked the same way, so a malformed one
+          # (a detector bug) cannot sink a valid model report either.
+          if [ -s "$gating" ] && ! jq -e "$schema" "$gating" >/dev/null 2>&1; then
+            echo "::warning::the enterprise gating report does not match the expected schema; dropping it."
+            gating=""
+          fi
           # The mechanical enterprise gating findings (see the Detect step)
           # join the model's report, or stand in for it when no review ran.
-          # They go FIRST, so the ten-finding cap the schema enforces drops
-          # model findings before it drops a mechanical one; the cap also
-          # keeps a hostile model report from growing past ten by way of
-          # this step. The ticket body gains the gating section verbatim.
-          if [ -s "$gating" ]; then
+          # A model report with more than ten findings already failed the
+          # schema above and was dropped whole. The gating findings go FIRST,
+          # so when the two together pass ten, the cap drops model findings
+          # before a mechanical one. The ticket body gains the gating section
+          # verbatim.
+          if [ -n "$gating" ] && [ -s "$gating" ]; then
             if [ -n "$model" ]; then
               jq -s '
                 .[0] as $m | .[1] as $e |

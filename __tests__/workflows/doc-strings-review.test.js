@@ -985,6 +985,25 @@ describe('doc-strings-review workflow: doc-impact dispatch merges gating finding
     expect(impact.proposed_ticket.title).toBe('gating')
   })
 
+  test('a malformed gating report is dropped and a valid model report still goes out', () => {
+    // The mirror case: a detector bug must not sink the model's findings.
+    const model = { findings: [finding('cloud_storage_cache_size')], proposed_ticket: { title: 'model', body: 'model body' } }
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify({ findings: 'x' }) })
+    expect(r.status).toBe(0)
+    expect(r.all).toMatch(/::warning::.*gating/)
+    const impact = payload(r)
+    expect(impact.findings.map((f) => f.name)).toEqual(['cloud_storage_cache_size'])
+    expect(impact.proposed_ticket.title).toBe('model')
+  })
+
+  test('a model report of more than ten findings is dropped whole, not trimmed', () => {
+    const model = { findings: Array.from({ length: 11 }, (_, i) => finding(`p${i}`)), proposed_ticket: { title: 'model', body: 'b' } }
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify(gating) })
+    const impact = payload(r)
+    expect(impact.findings.map((f) => f.name)).toEqual(['manual_finalization'])
+    expect(impact.proposed_ticket.title).toBe('gating')
+  })
+
   test('a malformed model report with no gating report still dispatches nothing', () => {
     const r = dispatch({ 'doc-impact.json': JSON.stringify({ findings: 'oops' }) })
     expect(r.status).toBe(0)
