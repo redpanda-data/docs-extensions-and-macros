@@ -910,10 +910,20 @@ jobs:
               xref:configuration:... or xref:guides:..., or a
               component:module:page xref. A module-less xref breaks when
               Cloud includes the same text into its own pages.
-            - Never put ifdef::env-cloud[], ifndef::env-cloud[] or any other
-              AsciiDoc conditional in a Go string, and never write Cloud or
-              cgo availability as prose. The generator renders those notes
-              from info.csv and the build lists; point to info.csv instead.
+            - An env-cloud block conditional is allowed when a paragraph
+              behaves differently in Cloud: ifdef::env-cloud[] or
+              ifndef::env-cloud[] alone on a line at column 0 with nothing
+              after the ], not even spaces, the whole paragraph inside,
+              endif::[] alone on a line, and a blank line before and after.
+              Flag the single-line form, any attribute other than env-cloud,
+              ifeval::, a conditional in a Summary or example summary, one
+              inside a code fence, and ifndef::env-cloud[] nested inside
+              ifdef::env-cloud[] or the reverse. The Cloud docs and the Cloud
+              binaries set env-cloud, and the text inside must read as a
+              whole paragraph in both outputs.
+            - Never write Cloud or cgo availability as prose or as a
+              conditional. The generator renders those notes from info.csv
+              and the build lists; point to info.csv instead.
             - When a component has cloud true, the same string ships on its
               Cloud page: flag wording that holds only for self-managed
               deployments (local file paths, installing binaries, process
