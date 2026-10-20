@@ -115,13 +115,18 @@ jobs:
           # neither. Via gh api so the bot token stays in env: an ls-remote
           # URL with embedded userinfo puts the token in argv and in git's
           # verbatim URL echo on failure.
+          # The API call runs on its own so a failed later page fails the
+          # step: in a pipeline, `|| true` would also swallow that failure
+          # and keep the tags from the pages that did arrive.
           se_tags=""
           if [ "$EVENT_NAME" != "workflow_dispatch" ]; then
-            se_tags=$(GH_TOKEN="$SE_TOKEN" gh api --paginate \
+            if ! se_refs=$(GH_TOKEN="$SE_TOKEN" gh api --paginate \
                 repos/redpanda-data/streaming-enterprise/git/refs/tags \
-                --jq '.[].ref' \
-              | sed 's|^refs/tags/||' \
-              | grep -E "$TAG_RX" || true)
+                --jq '.[].ref'); then
+              echo "::error::Could not list streaming-enterprise tags" >&2
+              exit 1
+            fi
+            se_tags=$(grep -E "$TAG_RX" <<< "${se_refs//refs\/tags\//}" || true)
             if [ -z "$se_tags" ]; then
               echo "::error::Could not list streaming-enterprise release tags" >&2
               exit 1
@@ -184,7 +189,9 @@ jobs:
             if [ "$EVENT_NAME" != "workflow_dispatch" ] && [[ "$tag" == *-rc* ]]; then
               # v26.2.5-rc1 -> v26.2, then look for any v26.2.<n> without -rc.
               line="${tag%.*}"
-              if printf '%s\n' "$se_tags" | grep -qE "^${line//./\\.}\.[0-9]+$"; then
+              # Here-string, not a pipe: under pipefail, grep -q exiting on
+              # the first match can SIGPIPE the writer and fail the test.
+              if grep -qE "^${line//./\\.}\.[0-9]+$" <<< "$se_tags"; then
                 echo "::notice::Skipping '$tag': ${line#v} already has a GA tag, so the docs never read a schema for this patch RC." >&2
                 continue
               fi
