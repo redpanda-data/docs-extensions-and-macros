@@ -52,7 +52,9 @@ describe('detectGatingChanges: license_required_feature enum', () => {
     expect(detectGatingChanges(diff)).toEqual([])
   })
 
-  test('the format_to case line detects on its own, when the enum hunk is absent', () => {
+  test('a format_to case label alone is not a feature change', () => {
+    // The member line is the source of truth. A case label moves whenever
+    // the formatter is rewritten, so it never counts on its own.
     const diff = [
       `diff --git a/${ENUM_HEADER} b/${ENUM_HEADER}`,
       `--- a/${ENUM_HEADER}`,
@@ -65,7 +67,32 @@ describe('detectGatingChanges: license_required_feature enum', () => {
       '     }',
       ''
     ].join('\n')
-    expect(detectGatingChanges(diff).map((f) => f.name)).toEqual(['manual_finalization'])
+    expect(detectGatingChanges(diff)).toEqual([])
+  })
+
+  test('rewriting the formatter as a switch reports only real member changes', () => {
+    // The shape of v26.1.18-rc3...v26.2.4: operator<< became a format_to
+    // switch over every member, and cloud_topics left the enum.
+    const cases = ['audit_logging', 'cloud_storage', 'gssapi', 'oidc', 'rbac', 'shadow_linking', 'topic_deletion_disabled']
+    const diff = [
+      `diff --git a/${ENUM_HEADER} b/${ENUM_HEADER}`,
+      `--- a/${ENUM_HEADER}`,
+      `+++ b/${ENUM_HEADER}`,
+      '@@ -34,11 +33,39 @@ enum class license_required_feature {',
+      '     shadow_linking,',
+      '-    cloud_topics,',
+      '     topic_deletion_disabled,',
+      ' };',
+      ' ',
+      '-std::ostream& operator<<(std::ostream&, license_required_feature);',
+      '+inline fmt::iterator format_to(license_required_feature f, fmt::iterator out) {',
+      '+    switch (f) {',
+      ...cases.flatMap((c) => [`+    case license_required_feature::${c}:`, `+        return fmt::format_to(out, "${c}");`]),
+      '+    }',
+      '+}',
+      ''
+    ].join('\n')
+    expect(detectGatingChanges(diff).map((f) => [f.change_kind, f.name])).toEqual([['enterprise-feature-removed', 'cloud_topics']])
   })
 
   test('a removed value is reported as removed', () => {
@@ -221,6 +248,60 @@ describe('detectGatingChanges: config::enterprise<> wrappers', () => {
       '};'
     ].join('\n')
     expect(enterprisePropertyNames(header)).toEqual(['audit_enabled', 'enable_schema_id_validation'])
+  })
+
+  test('a block comment above a declaration does not hide it', () => {
+    const diff = headerDiff([
+      '     property<bool> enable_rack_awareness;',
+      '+    /* gated */',
+      '+    enterprise<property<bool>> new_gated;',
+      '+    /*',
+      '+     * Gated since 26.3.',
+      '+     */',
+      '+    enterprise<property<bool>> other_gated;',
+      '     property<bool> core_balancing_on_core_count_change;'
+    ])
+    expect(detectGatingChanges(diff).map((f) => [f.change_kind, f.name])).toEqual([
+      ['enterprise-gate-added', 'new_gated'],
+      ['enterprise-gate-added', 'other_gated']
+    ])
+  })
+
+  test('an attribute line above a declaration does not hide it', () => {
+    const diff = headerDiff([
+      '     property<bool> enable_rack_awareness;',
+      '+    [[no_unique_address]]',
+      '+    enterprise<property<bool>> new_gated;',
+      '     property<bool> core_balancing_on_core_count_change;'
+    ])
+    expect(detectGatingChanges(diff).map((f) => [f.change_kind, f.name])).toEqual([['enterprise-gate-added', 'new_gated']])
+  })
+
+  test('a hunk that starts inside a block comment still reads the declaration after it', () => {
+    const diff = headerDiff([
+      '      * remainder of a comment that opened above the hunk',
+      '      */',
+      '+    enterprise<property<bool>> new_gated;',
+      '     property<bool> core_balancing_on_core_count_change;'
+    ])
+    expect(detectGatingChanges(diff).map((f) => [f.change_kind, f.name])).toEqual([['enterprise-gate-added', 'new_gated']])
+  })
+
+  test('the enterprise property list sees declarations under block comments and attributes', () => {
+    const header = [
+      'struct configuration final : public config_store {',
+      '    /* single line */',
+      '    enterprise<property<bool>> audit_enabled;',
+      '    /**',
+      '     * Doc block, as configuration.h uses above members.',
+      '     */',
+      '    enterprise<property<bool>> iceberg_enabled;',
+      '    [[no_unique_address]] enterprise<property<bool>> fips_gate;',
+      '    /* enterprise<property<bool>> commented_out; */',
+      '    property<bool> enable_rack_awareness;',
+      '};'
+    ].join('\n')
+    expect(enterprisePropertyNames(header)).toEqual(['audit_enabled', 'fips_gate', 'iceberg_enabled'])
   })
 
   test('affected pages use the canonical /streaming/current/ URLs', () => {

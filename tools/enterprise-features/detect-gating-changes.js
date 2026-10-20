@@ -77,6 +77,9 @@ function enumChanges (lines) {
   const removed = new Set()
   // The member line only counts inside the enum. Track that from the hunk
   // header and from context lines, both of which git carries in the diff.
+  // Only enum members count: `case license_required_feature::x:` labels move
+  // whenever the formatter is rewritten (26.2 replaced operator<< with a
+  // format_to switch), so a case label is never read as a feature change.
   let inEnum = false
   for (const line of lines) {
     if (line.startsWith('@@')) {
@@ -91,8 +94,6 @@ function enumChanges (lines) {
     const target = sign === '+' ? added : removed
     const member = inEnum && /^\s*([a-z][a-z0-9_]*)\s*,?\s*(\/\/.*)?$/.exec(body)
     if (member) target.add(member[1])
-    const kase = /^\s*case license_required_feature::([a-z][a-z0-9_]*)\s*:/.exec(body)
-    if (kase) target.add(kase[1])
   }
   return {
     added: [...added].filter((n) => !removed.has(n)).sort(),
@@ -107,8 +108,35 @@ function enumChanges (lines) {
 // so a declaration never absorbs the line before it.
 const ENTERPRISE_DECL = /^\s*(?:config::)?enterprise<[\s\S]*>\s*([a-z][a-z0-9_]*)\s*;\s*$/
 
-function stripLineComment (text) {
-  return text.replace(/\/\/.*$/, '')
+// Comments and attributes are dropped before joining: a `/* ... */` or
+// `[[attr]]` line above a declaration has no `;` or brace, so it would
+// otherwise be glued to the front of the declaration and hide it.
+function stripComments (text, state) {
+  let out = ''
+  let rest = text
+  // A hunk can start inside a block comment whose opener is above it; a
+  // line that starts with `*` or `*/` is read as part of that comment.
+  if (!state.inBlock && /^\s*\*(\s|\/|$)/.test(rest)) state.inBlock = true
+  while (rest) {
+    if (state.inBlock) {
+      const end = rest.indexOf('*/')
+      if (end === -1) return out
+      state.inBlock = false
+      rest = rest.slice(end + 2)
+      continue
+    }
+    const line = rest.indexOf('//')
+    const block = rest.indexOf('/*')
+    if (block !== -1 && (line === -1 || block < line)) {
+      out += rest.slice(0, block) + ' '
+      state.inBlock = true
+      rest = rest.slice(block + 2)
+      continue
+    }
+    out += line === -1 ? rest : rest.slice(0, line)
+    break
+  }
+  return out.replace(/\[\[[^\]]*\]\]/g, ' ')
 }
 
 /**
@@ -126,8 +154,9 @@ function joinStatements (lines) {
     buf = []
     changed = false
   }
+  const state = { inBlock: false }
   for (const { text, changed: c } of lines) {
-    const body = stripLineComment(text).trim()
+    const body = stripComments(text, state).trim()
     if (!body) continue
     if (/^#/.test(body) || /^(public|private|protected)\s*:$/.test(body)) { flush(); continue }
     buf.push(body)
