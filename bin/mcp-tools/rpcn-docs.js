@@ -12,8 +12,6 @@ const { execSync, spawnSync } = require('child_process');
 const { findRepoRoot, MAX_EXEC_BUFFER_SIZE, DEFAULT_COMMAND_TIMEOUT } = require('./utils');
 const { getAntoraStructure } = require('./antora');
 const cache = require('./cache');
-const fs = require('fs');
-const path = require('path');
 
 /**
  * Generate Redpanda Connect connector documentation
@@ -59,19 +57,11 @@ function generateRpConnectDocs(args = {}) {
       cmdArgs.push(args.csv);
     }
 
-    // Default to using overrides.json from docs-data if it exists
-    let overridesPath = args.overrides;
-    if (!overridesPath) {
-      // Try to find docs-data/overrides.json in current directory
-      const defaultOverrides = path.join(process.cwd(), 'docs-data', 'overrides.json');
-      if (fs.existsSync(defaultOverrides)) {
-        overridesPath = defaultOverrides;
-      }
-    }
-
-    if (overridesPath) {
+    // Overrides are opt-in. Connector descriptions come from the connect and
+    // benthos specs, so no file is picked up implicitly.
+    if (args.overrides) {
       cmdArgs.push('--overrides');
-      cmdArgs.push(overridesPath);
+      cmdArgs.push(args.overrides);
     }
     if (args.cloud_version) {
       cmdArgs.push('--cloud-version');

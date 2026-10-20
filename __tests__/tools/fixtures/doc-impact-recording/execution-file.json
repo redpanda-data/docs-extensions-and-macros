@@ -1,0 +1,58 @@
+[
+  {
+    "type": "system",
+    "subtype": "init",
+    "cwd": "/home/runner/work/example/example",
+    "session_id": "00000000-0000-0000-0000-000000000000",
+    "apiKeySource": "ANTHROPIC_API_KEY",
+    "model": "claude-sonnet-5",
+    "tools": ["Read", "mcp__redpanda-docs__ask_redpanda_question", "mcp__github_inline_comment__create_inline_comment"],
+    "mcp_servers": [{ "name": "redpanda-docs", "status": "connected" }]
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "content": [
+        { "type": "text", "text": "Checking the published docs." },
+        { "type": "tool_use", "id": "toolu_01", "name": "mcp__redpanda-docs__ask_redpanda_question", "input": { "question": "How do I enable rack awareness?", "platform": "self-managed" } },
+        { "type": "tool_use", "id": "toolu_02", "name": "Read", "input": { "file_path": "pr-diff.patch" } }
+      ]
+    }
+  },
+  {
+    "type": "user",
+    "message": {
+      "content": [
+        { "type": "tool_result", "tool_use_id": "toolu_01", "content": [{ "type": "text", "text": "{\"results\":[{\"source_url\":\"https://docs.redpanda.com/streaming/current/manage/rack-awareness/\"}]}" }] },
+        { "type": "tool_result", "tool_use_id": "toolu_02", "content": "diff --git a/secret b/secret" }
+      ]
+    }
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "content": [
+        { "type": "tool_use", "id": "toolu_03", "name": "mcp__redpanda-docs__get_api_reference_content", "input": { "url": "https://docs.redpanda.com/api/doc/admin/" } },
+        { "type": "tool_use", "id": "toolu_04", "name": "mcp__github_inline_comment__create_inline_comment", "input": { "path": "a.go", "body": "suggestion" } }
+      ]
+    }
+  },
+  {
+    "type": "user",
+    "message": {
+      "content": [
+        { "type": "tool_result", "tool_use_id": "toolu_03", "is_error": true, "content": "page not found" },
+        { "type": "tool_result", "tool_use_id": "toolu_04", "content": "posted" }
+      ]
+    }
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "content": [
+        { "type": "tool_use", "id": "toolu_05", "name": "mcp__redpanda-docs__search_api_reference", "input": { "query": "never answered" } }
+      ]
+    }
+  },
+  { "type": "result", "subtype": "error_max_turns", "is_error": true, "num_turns": 40 }
+]
