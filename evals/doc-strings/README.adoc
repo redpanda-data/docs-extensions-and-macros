@@ -230,8 +230,8 @@ For each item, the harness:
   discard is not a flag here either.
 
 An item whose `lint-findings.json` has no declarations and no removed
-surface lines is scored as not flagged without a model call, because the
-workflow skips the pass in that case.
+surface lines gets no model call, because the workflow skips the pass in
+that case. It reports `GATE_CLOSED` and is left out of every score.
 
 === Running
 
