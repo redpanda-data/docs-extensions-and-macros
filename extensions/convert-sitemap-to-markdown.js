@@ -14,12 +14,14 @@
 
 const path = require('path')
 const { parseStringPromise } = require('xml2js')
+const { decode } = require('html-entities')
+const { toMarkdownUrl } = require('../extension-utils/url-utils')
 
 module.exports.register = function ({ config }) {
   const logger = this.getLogger('convert-sitemap-to-markdown')
 
   this
-    .on('beforePublish', async ({ playbook, siteCatalog }) => {
+    .on('beforePublish', async ({ playbook, siteCatalog, contentCatalog }) => {
       const startTime = Date.now()
 
       logger.info('Sitemap to markdown converter starting...')
@@ -37,10 +39,12 @@ module.exports.register = function ({ config }) {
 
         logger.info(`Found ${sitemapFiles.length} sitemap file(s)`)
 
+        const pageInfo = collectPageInfo(contentCatalog)
+
         // Convert each sitemap and collect all URLs
         const allUrls = []
         for (const sitemapFile of sitemapFiles) {
-          const urls = await convertSitemapToMarkdown(sitemapFile, siteCatalog, logger)
+          const urls = await convertSitemapToMarkdown(sitemapFile, siteCatalog, logger, pageInfo)
           if (urls) {
             allUrls.push(...urls)
           }
@@ -48,7 +52,7 @@ module.exports.register = function ({ config }) {
 
         // Create combined master sitemap if we have multiple sitemaps
         if (sitemapFiles.length > 1 && allUrls.length > 0) {
-          await createMasterSitemap(sitemapFiles, allUrls, siteCatalog, logger)
+          await createMasterSitemap(sitemapFiles, allUrls, siteCatalog, logger, pageInfo)
         }
 
         const duration = ((Date.now() - startTime) / 1000).toFixed(2)
@@ -63,7 +67,7 @@ module.exports.register = function ({ config }) {
 /**
  * Create a master combined sitemap from all individual sitemaps
  */
-async function createMasterSitemap(sitemapFiles, allUrls, siteCatalog, logger) {
+async function createMasterSitemap(sitemapFiles, allUrls, siteCatalog, logger, pageInfo) {
   const sitemapCount = sitemapFiles.length
   const sitemapWord = sitemapCount === 1 ? 'sitemap' : 'sitemaps'
 
@@ -81,7 +85,7 @@ async function createMasterSitemap(sitemapFiles, allUrls, siteCatalog, logger) {
 
   // Add all URLs grouped by component
   if (allUrls.length > 0) {
-    markdown += convertUrlsetToMarkdown(allUrls)
+    markdown += convertUrlsetToMarkdown(allUrls, pageInfo)
   }
 
   // Add to site catalog
@@ -97,7 +101,7 @@ async function createMasterSitemap(sitemapFiles, allUrls, siteCatalog, logger) {
  * Convert a sitemap file to markdown
  * Returns the URLs found in this sitemap for aggregation
  */
-async function convertSitemapToMarkdown(sitemapFile, siteCatalog, logger) {
+async function convertSitemapToMarkdown(sitemapFile, siteCatalog, logger, pageInfo) {
   const xmlContent = sitemapFile.contents.toString('utf8')
   const basename = path.basename(sitemapFile.out.path)
   const outputPath = basename.replace(/\.xml$/, '.md')
@@ -113,7 +117,7 @@ async function convertSitemapToMarkdown(sitemapFile, siteCatalog, logger) {
     // Handle standard sitemap
     if (parsed.urlset && parsed.urlset.url) {
       urls = parsed.urlset.url
-      markdown += convertUrlsetToMarkdown(urls)
+      markdown += convertUrlsetToMarkdown(urls, pageInfo)
     }
 
     // Handle sitemap index
@@ -139,7 +143,7 @@ async function convertSitemapToMarkdown(sitemapFile, siteCatalog, logger) {
 /**
  * Convert URL entries to markdown
  */
-function convertUrlsetToMarkdown(urls) {
+function convertUrlsetToMarkdown(urls, pageInfo = new Map()) {
   let markdown = '## Pages\n\n'
   markdown += `Total pages: ${urls.length.toLocaleString()}\n\n`
 
@@ -156,7 +160,10 @@ function convertUrlsetToMarkdown(urls) {
       const priority = url.priority ? url.priority[0] : ''
 
       if (loc) {
-        markdown += `- [${extractPageTitle(loc)}](${loc})`
+        const page = pageInfo.get(new URL(loc).pathname)
+        const title = (page && page.title) || extractPageTitle(loc)
+        markdown += `- [${title}](${loc})`
+        if (page && page.description) markdown += `: ${page.description}`
 
         const metadata = []
         if (lastmod) metadata.push(`modified: ${lastmod}`)
@@ -175,6 +182,32 @@ function convertUrlsetToMarkdown(urls) {
   }
 
   return markdown
+}
+
+/**
+ * Map each published page's HTML and Markdown paths to its document title and
+ * description, so sitemap entries carry the same text as the page itself
+ * rather than a title guessed from the URL.
+ */
+function collectPageInfo(contentCatalog) {
+  const info = new Map()
+  if (!contentCatalog) return info
+  for (const page of contentCatalog.getPages((p) => p.pub && p.pub.url && p.out)) {
+    const asciidoc = page.asciidoc || {}
+    const title = plainText(asciidoc.doctitle || asciidoc.navtitle)
+    const description = plainText(asciidoc.attributes && asciidoc.attributes.description)
+    if (!title && !description) continue
+    const entry = { title: title.replace(/([[\]])/g, '\\$1'), description }
+    info.set(page.pub.url, entry)
+    info.set(toMarkdownUrl(page.pub.url), entry)
+  }
+  return info
+}
+
+// Converted titles and descriptions are HTML. Strip tags before decoding so an
+// escaped placeholder such as `&lt;name&gt;` survives as `<name>`.
+function plainText(html) {
+  return decode(String(html || '').replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim()
 }
 
 /**
