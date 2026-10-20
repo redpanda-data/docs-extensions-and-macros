@@ -896,8 +896,9 @@ automation
   .option('--template-metadata <path>', 'Metadata section partial template', path.resolve(__dirname, '../tools/redpanda-connect/templates/metadata-partials.hbs'))
   .option('--template-description <path>', 'Description section partial template', path.resolve(__dirname, '../tools/redpanda-connect/templates/descriptions-partials.hbs'))
   .option('--template-bloblang <path>', 'Custom Handlebars template for bloblang function/method partials')
-  .option('--overrides <path>', 'Optional JSON file with overrides', 'docs-data/overrides.json')
+  .option('--overrides <path>', 'Optional JSON file of description overrides to merge into the generated output. Nothing is merged unless you pass it. Connector descriptions come from the connect and benthos component specs, so fix wrong text there')
   .option('--include-bloblang', 'Include Bloblang functions and methods in generation')
+  .option('--no-partials', 'Skip the generated partials, config snippets, and Bloblang reference because the connect repo publishes them. What\'s new, diffs, drafts, nav, and the version bump still run')
   .option('--prune-orphaned-descriptions', 'Allow the description-partial orphan sweep to blank more than 10% of the tree. Only use this when the connector dataset is confirmed complete: an incomplete dataset looks identical to a mass upstream deletion and the sweep blanks published content')
   .option('--cloud-version <version>', 'Cloud binary version (default: auto-detect latest)')
   .option('--cgo-version <version>', 'cgo binary version (default: same as cloud-version)')
@@ -2002,6 +2003,124 @@ automation
   })
 
 /**
+ * generate redpanda-release-notes
+ *
+ * @description
+ * Converts a Self-Managed rpchangelog release body into a candidate AsciiDoc
+ * section and inserts it into the Redpanda Release Notes page, newest-first.
+ * Applies the mechanical guards: GA tags only (a prerelease is a no-op), the
+ * `:earliest-tracked-version:` floor, and idempotency (an already-present
+ * version is a no-op). The section carries de-noised source prose as plain
+ * bullets — it is a CANDIDATE for the curation step that rewrites voice, adds
+ * `Area::` labels, normalizes units, and phrases CVEs.
+ *
+ * @why
+ * Release notes are the one reference surface whose source of truth is
+ * engineer-authored prose rather than code, so the deterministic part
+ * (parsing, de-noising, de-duplicating backports, ordering, insertion) is
+ * split from the editorial part. This command is the deterministic half; it is
+ * unit-tested and makes no editorial change.
+ *
+ * @example
+ * # Phase 1: build the candidate the curation skill will edit (no page touched).
+ * # Paths must stay inside the repository; write the fetched body somewhere local.
+ * npx doc-tools generate redpanda-release-notes \
+ *   --tag v26.2.3 --date 2026-09-15 --body docs-data/v26.2.3-body.md --section-only > candidate.adoc
+ *
+ * # (the sm-release-notes skill curates candidate.adoc into curated.adoc)
+ *
+ * # Phase 2: insert the curated section into the page under the guards
+ * npx doc-tools generate redpanda-release-notes \
+ *   --tag v26.2.3 --section-file curated.adoc
+ *
+ * @requirements
+ * - Phase 1 needs --body (+ --date); phase 2 needs --section-file. Fetching the
+ *   body from the private streaming-enterprise release, and running the curation
+ *   skill between the two phases, are wired by the docs-repo workflow, not here.
+ */
+automation
+  .command('redpanda-release-notes')
+  .description('Generate a Self-Managed release-notes section from an rpchangelog release body')
+  .requiredOption('--tag <tag>', 'GA release tag, such as v26.2.3')
+  .option('--body <file>', 'Phase 1: rpchangelog release body markdown to build a candidate from (relative to repo root, must stay inside the repository)')
+  .option('--section-file <file>', 'Phase 2: a curated section (from the sm-release-notes skill) to insert (relative to repo root, must stay inside the repository)')
+  .option('--date <date>', 'Authored release date as YYYY-MM-DD (required with --body; confirmed on the PR)')
+  .option('--page <file>', 'Target release-notes page (relative to repo root, must stay inside the repository)', 'modules/reference/pages/releases/redpanda.adoc')
+  .option('--section-only', 'Phase 1 only: print the candidate section and do not read or modify the page')
+  .option('--dry-run', 'Print output to stdout instead of writing the page')
+  .action(async (options) => {
+    const {
+      generateReleaseNotes,
+      buildReleaseSection,
+      isGaTag,
+    } = require('../tools/redpanda-release-notes/generate-release-notes.js')
+    try {
+      const repoRoot = findRepoRoot()
+
+      // Exactly one input: --body (phase 1, build a candidate) XOR --section-file
+      // (phase 2, insert the curated section). Curation sits between them.
+      const hasBody = Boolean(options.body)
+      const hasSection = Boolean(options.sectionFile)
+      if (hasBody === hasSection) {
+        throw new Error('Provide exactly one of --body (phase 1) or --section-file (phase 2).')
+      }
+      if (hasBody && !options.date) {
+        throw new Error('--date is required with --body.')
+      }
+
+      const readInside = (rel, label) => {
+        const abs = resolveInsideRepo(repoRoot, rel, label)
+        if (!fs.existsSync(abs)) throw new Error(`File not found for ${label}: ${abs}`)
+        return abs
+      }
+
+      // Phase-1 candidate preview: emit the candidate for the curation step. No
+      // page is read or written — this is the LLM step's input, nothing else.
+      if (options.sectionOnly) {
+        if (!hasBody) throw new Error('--section-only applies to --body (candidate generation).')
+        // Same GA-only contract as the insert path: a non-GA tag is a clean
+        // no-op, not an "invalid version" throw from buildReleaseSection.
+        if (!isGaTag(options.tag)) {
+          console.log(`[release-notes] Skipped: not a GA tag: ${options.tag}`)
+          return
+        }
+        const body = fs.readFileSync(readInside(options.body, '--body'), 'utf8')
+        const section = buildReleaseSection({ body, version: options.tag, date: options.date })
+        process.stdout.write(section)
+        return
+      }
+
+      const pagePath = readInside(options.page, '--page')
+      const pageContent = fs.readFileSync(pagePath, 'utf8')
+      const genArgs = { tag: options.tag, date: options.date, pageContent }
+      if (hasBody) {
+        genArgs.body = fs.readFileSync(readInside(options.body, '--body'), 'utf8')
+      } else {
+        genArgs.section = fs.readFileSync(readInside(options.sectionFile, '--section-file'), 'utf8')
+      }
+      const result = generateReleaseNotes(genArgs)
+
+      if (result.status === 'skipped') {
+        // A guard miss is a clean no-op, not an error: the workflow runs this on
+        // every release and most runs have nothing to add.
+        console.log(`[release-notes] Skipped: ${result.reason}`)
+        return
+      }
+
+      if (options.dryRun) {
+        process.stdout.write(result.content)
+        console.log(`\nDone: (dry-run) updated page for ${options.tag} printed to stdout.`)
+      } else {
+        fs.writeFileSync(pagePath, result.content, 'utf8')
+        console.log(`Done: Inserted the ${options.tag} section into ${pagePath}`)
+      }
+    } catch (err) {
+      console.error(`Error: Failed to generate release notes: ${err.message}`)
+      process.exit(1)
+    }
+  })
+
+/**
  * generate crd-spec
  *
  * @description
@@ -2763,6 +2882,43 @@ programCli
   })
 
 /**
+ * doc-impact-recording
+ *
+ * @description
+ * Extracts every redpanda-docs MCP call and its result from a Claude Code
+ * transcript (the claude-code-action execution file, or `claude -p
+ * --output-format stream-json` output) and writes them as a doc-impact eval
+ * recording. Only the tool name, arguments and result content are kept.
+ * Writes nothing when the session made no docs calls.
+ *
+ * @why
+ * The doc-impact eval replays docs answers per PR. Answers recorded later
+ * come from docs that may already contain the writer's fix, so the eval
+ * would score a correct "already documented" as a miss. The doc-strings
+ * review saves what the docs server told it at review time, and the eval
+ * miner turns that into the item's recording.
+ *
+ * @example
+ * # What the doc-strings review runs after its Claude step
+ * npx doc-tools doc-impact-recording --execution-file "$RUNNER_TEMP/claude-execution-output.json" \
+ *   --output recording.json --item redpanda-operator-1615 --server-url https://docs.redpanda.com/mcp
+ */
+programCli
+  .command('doc-impact-recording')
+  .description('Extract the docs MCP calls from a Claude Code transcript into a doc-impact eval recording')
+  .requiredOption('--execution-file <path>', 'Transcript: a JSON array of SDK messages or stream-json lines')
+  .requiredOption('--output <path>', 'Recording file to write (not written when there are no docs calls)')
+  .option('--item <id>', 'Item id to store in the recording')
+  .option('--server <name>', 'MCP server name in the transcript tool names', 'redpanda-docs')
+  .option('--server-url <url>', 'URL of that MCP server, stored in the recording')
+  .option('--model <name>', 'Model to store (default: the model in the transcript init message)')
+  .option('--recorded-at <iso>', 'Timestamp to store (default: now)')
+  .action((options) => {
+    const { runCli } = require('../tools/doc-impact-recording')
+    process.exit(runCli(options))
+  })
+
+/**
  * lint-screenshots
  *
  * @description
@@ -2809,6 +2965,133 @@ programCli
   .action((options) => {
     const { runCli } = require('../tools/lint-screenshots')
     runCli(options)
+  })
+
+/**
+ * check-build-log
+ *
+ * @description
+ * Check an Antora JSON log (`antora --log-format json`): exit 1 when any
+ * record is at level error or fatal, and, with --min-pages and --site-dir,
+ * when fewer HTML pages were written than expected. Prints a Markdown
+ * summary (counts by level, then the error and warning messages grouped and
+ * deduplicated, with file and line) for $GITHUB_STEP_SUMMARY. Warnings never
+ * fail the check. With --blocking-sources, only errors from those
+ * repositories (or with no source) fail it, so a broken page in another
+ * content source of the playbook is reported without blocking.
+ *
+ * @why
+ * Antora's --log-failure-level fails the build but explains nothing in a job
+ * summary, and cannot catch a build that exits 0 having written no files,
+ * which is what Antora does on an unsupported Node version. The Connect docs
+ * PR check runs Antora with --log-failure-level=fatal so this command, not
+ * Antora, decides.
+ *
+ * @example
+ * npx antora --log-format json --log-failure-level=fatal antora-playbook.yml > build.ndjson
+ * npx doc-tools check-build-log build.ndjson --site-dir build/site/connect --min-pages 400 >> "$GITHUB_STEP_SUMMARY"
+ *
+ * # Block only on errors from these repositories; list the rest
+ * npx doc-tools check-build-log build.ndjson --blocking-sources redpanda-data/rp-connect-docs,redpanda-data/connect
+ */
+programCli
+  .command('check-build-log')
+  .description('Check an Antora JSON build log: fail on error or fatal records or too few pages, print a Markdown summary')
+  .argument('<log>', 'Antora log written with --log-format json (one JSON record per line)')
+  .option('--site-dir <dir>', 'Output directory to count HTML pages in (with --min-pages)')
+  .option('--min-pages <n>', 'Fail when fewer than <n> HTML pages were written under --site-dir')
+  .option('--blocking-sources <repos>', 'Comma-separated owner/name repositories whose errors block (default: all). Errors with no source always block; others are listed only')
+  .option('--format <format>', 'Output format: markdown or json', 'markdown')
+  .option('--output <path>', 'Also write the output to this file')
+  .action((log, options) => {
+    const { runCli } = require('../tools/connect-docs/check-build-log')
+    runCli(log, options)
+  })
+
+/**
+ * check-rendered-html
+ *
+ * @description
+ * Scan the rendered HTML of one or more Antora component paths for AsciiDoc
+ * that did not convert: literal backticks outside code, literal `xref:` or
+ * `include::` text, leftover {page-*} or {env-*} attribute references, `|===`
+ * table markup, Asciidoctor's "Unresolved include directive" text, links with
+ * the `unresolved` class, and empty sections (a heading followed directly by a
+ * heading of the same or higher level). Also checks links: a fragment with no
+ * matching id on its target page (broken-anchor), and a relative or
+ * root-relative link under a link root that is not in the build
+ * (broken-link). External links are ignored; links outside every link root,
+ * or into a root the build does not contain, are counted as unchecked. Only
+ * the page body is scanned. Reports findings per page and exits 0 unless
+ * --strict.
+ *
+ * With --changed-pages, findings are split into those on the listed pages and
+ * the rest, and --strict exits 1 only when a listed page has findings, so
+ * defects already on the base never fail a PR.
+ *
+ * @why
+ * These defects reach readers without a single line in the Antora log: two
+ * backticks for an empty enum option, or a backtick glued to the next word,
+ * render as literal backticks on the published page.
+ *
+ * @example
+ * npx doc-tools check-rendered-html build/site --component connect >> "$GITHUB_STEP_SUMMARY"
+ *
+ * # Fail on any finding
+ * npx doc-tools check-rendered-html build/site --strict
+ *
+ * # Self-managed and Cloud Connect pages; fail only on the pages a PR changed
+ * npx doc-tools check-rendered-html build/site --component connect,cloud-data-platform/develop/connect \
+ *   --changed-pages changed-pages.txt --strict
+ */
+programCli
+  .command('check-rendered-html')
+  .description('Scan rendered Antora HTML for unconverted AsciiDoc (literal backticks, xref:, include::, attributes, tables, empty sections) and broken anchors and links')
+  .argument('<site-dir>', 'Antora output directory (the --to-dir of the build)')
+  .option('--component <path>', 'Component output path to scan under <site-dir>; repeat it or give a comma list, for example connect,cloud-data-platform/develop/connect (default: connect)', (value, previous = []) => previous.concat(value))
+  .option('--link-root <path>', 'Site path whose linked pages must exist; repeat it or give a comma list. Scanned components are always included. Links outside every root, or into a root not in the build, are counted as unchecked (default: connect,cloud-data-platform/develop/connect)', (value, previous = []) => previous.concat(value))
+  .option('--pages <file>', 'Only scan the pages listed in <file>, one path relative to <site-dir> per line')
+  .option('--changed-pages <file>', 'Pages a PR changed: one path relative to <site-dir> per line (the sitePath from connect-docs-diff) or connect-docs-diff --format json output. All pages are still scanned; findings are split into changed and other pages, and --strict fails only on changed pages')
+  .option('--format <format>', 'Output format: markdown or json', 'markdown')
+  .option('--output <path>', 'Also write the output to this file')
+  .option('--strict', 'Exit 1 when any finding exists, or with --changed-pages when a changed page has findings (default: always exit 0)')
+  .action((siteDir, options) => {
+    const { runCli } = require('../tools/connect-docs/check-rendered-html')
+    runCli(siteDir, options)
+  })
+
+/**
+ * connect-docs-diff
+ *
+ * @description
+ * Compare two trees written by connect's docs generator, for example a PR's
+ * merge base and its head, and map each added, removed, or changed partial or
+ * example to the docs.redpanda.com page that includes it. Prints a Markdown
+ * table of changed pages with links, then a unified diff per file in
+ * collapsible blocks, capped in size. A tree root can be connect's docs/
+ * directory, its modules/ directory, or the components/ directory.
+ *
+ * @why
+ * Writers review Go string literals today and never see the page. The
+ * generated output is the published change: connect strings, benthos strings
+ * from a go.mod bump, and generator changes all show up here.
+ *
+ * @example
+ * npx doc-tools connect-docs-diff base/modules head/modules >> "$GITHUB_STEP_SUMMARY"
+ * npx doc-tools connect-docs-diff base/modules head/modules --format json
+ */
+programCli
+  .command('connect-docs-diff')
+  .description('Diff two generated Connect docs trees and map each changed partial or example to its published page')
+  .argument('<base-dir>', 'Generated tree of the base (merge base) commit')
+  .argument('<head-dir>', 'Generated tree of the head commit')
+  .option('--format <format>', 'Output format: markdown or json', 'markdown')
+  .option('--site-url <url>', 'Docs site the page links point at', 'https://docs.redpanda.com')
+  .option('--max-bytes <n>', 'Cap on the Markdown output size; diffs past it are counted, not shown', '60000')
+  .option('--output <path>', 'Also write the output to this file')
+  .action((baseDir, headDir, options) => {
+    const { runCli } = require('../tools/connect-docs/diff-generated')
+    runCli(baseDir, headDir, options)
   })
 
 /**
@@ -2890,7 +3173,7 @@ overridesGroup
   .description('Classify each override field as redundant, upstreamable, or keep against extracted source strings')
   .requiredOption('--overrides <path>', 'Path to the overrides JSON file (for example docs-data/property-overrides.json)')
   .option('--extracted <path>', 'Path to the extracted source JSON (raw property extractor output, or a raw rpk --print-tree dump; required for properties without --repo. For rpk, omitting both --extracted and --repo classifies every field REVIEW with a TODO note instead of erroring)')
-  .addOption(new Option('--surface <surface>', 'Override surface to audit').choices(['properties', 'rpk', 'connect']).default('properties'))
+  .addOption(new Option('--surface <surface>', 'Override surface to audit').choices(['properties', 'rpk']).default('properties'))
   .addOption(new Option('--format <format>', 'Output format').choices(['json', 'human']).default('json'))
   .option('--repo <path>', 'Alternative to --extracted: for properties, a redpanda checkout to extract raw source strings from; for rpk, a streaming-enterprise src/go/rpk checkout to build and run --print-tree against. For rpk, also runs the source-string locator so UPSTREAMABLE rows carry source_file/source_line, unless --locations was given')
   .option('--locations <path>', 'rpk only: path to an already-produced source-string locator JSON file (see the locate-strings analyzer under tools/rpk-docs/scripts), instead of having --repo compute one')

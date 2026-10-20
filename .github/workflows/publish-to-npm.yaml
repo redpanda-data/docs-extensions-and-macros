@@ -1,24 +1,94 @@
 ---
+# Releases this package. Nothing here reads a version that a feature PR chose.
+#
+# release-please reads the conventional-commit titles of the squash-merged PRs
+# since the last `v*` tag and keeps one release PR open that carries the
+# version bump and CHANGELOG entry. Feature PRs never touch `version`, so two
+# open PRs no longer conflict on package.json and package-lock.json. Merging
+# the release PR is the release: on that push release-please creates the
+# `v<version>` tag and GitHub release, `publish` sends that version to npm, and
+# `dispatch` tells the docs repositories to pull it.
+#
+# The file name is load-bearing: npm trusted publishing is configured for
+# `publish-to-npm.yaml`, so the publish step has to stay in this file.
 name: publish-to-npm
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: >-
+          Recovery only: an existing v<version> tag to publish, when its
+          publish failed and "Re-run failed jobs" is no longer an option.
+          Leave empty for a normal run.
+        type: string
+        default: ''
   push:
     branches: [main]
 permissions:
-  id-token: write
   contents: read
 jobs:
-  publish:
+  release-please:
     runs-on: ubuntu-latest
-    # Stays at the workflow default of contents: read. The tag is created by
-    # the `release` job below, which is the only place that holds write.
+    # The action does everything (push the release branch, open the release
+    # PR, create the tag and release) with the bot token below, never with
+    # GITHUB_TOKEN, so this job's own token only needs id-token: write for the
+    # AWS role that holds the bot token. The "Protect releases" ruleset on
+    # refs/tags/v* blocks updating and deleting tags with no bypass actors, so
+    # the bot can create a new `v*` tag but cannot move an existing one.
+    permissions:
+      contents: read
+      id-token: write
+    # Two quick merges would otherwise run two instances against the same
+    # release branch. Not cancelled: a run that GitHub drops from the pending
+    # slot is harmless, because the next run tags any merged release PR that
+    # is still untagged, and publish follows the SHA it reports.
+    concurrency:
+      group: release-please
+      cancel-in-progress: false
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      version: ${{ steps.release.outputs.version }}
+      # The commit release-please tagged. Usually github.sha, but not when this
+      # run is tagging a release PR that an earlier, failed run merged: then
+      # github.sha is a later commit whose package.json still says the
+      # released version, and publishing it would ship unreleased code.
+      sha: ${{ steps.release.outputs.sha }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.RP_AWS_CRED_REGION }}
+          role-to-assume: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
+      - uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            ,sdlc/prod/github/actions_bot_token
+          parse-json-secrets: true
+      # The bot token, not GITHUB_TOKEN: a PR opened or updated with
+      # GITHUB_TOKEN triggers no workflows, so test.yaml would never run on
+      # the release PR. Pinned to a commit because this action holds a
+      # write-capable token.
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
+        with:
+          token: ${{ env.ACTIONS_BOT_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  publish:
+    needs: release-please
+    # Only the run that tags a release publishes, or a manual recovery run
+    # naming a tag. Every other push to main leaves package.json at the last
+    # released version.
+    if: needs.release-please.outputs.release_created == 'true' || inputs.tag != ''
+    runs-on: ubuntu-latest
+    # No contents: write. This job runs `npm install`, which runs dependency
+    # lifecycle scripts, and a third-party publish action; neither needs to be
+    # able to write to the repository.
     permissions:
       id-token: write
       contents: read
     outputs:
-      pkg: ${{ steps.meta.outputs.pkg }}
-      version: ${{ steps.meta.outputs.version }}
-      published: ${{ steps.publish.outputs.type }}
+      sha: ${{ steps.ref.outputs.sha }}
     steps:
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -26,167 +96,43 @@ jobs:
           role-to-assume: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
       - uses: actions/checkout@v5
         with:
+          ref: ${{ inputs.tag || needs.release-please.outputs.sha }}
           # Don't leave the token in .git/config for later steps to find.
           # OIDC publishing does not need it and nothing here pushes.
           persist-credentials: false
+      # The tarball has to be the tagged commit. For a recovery run, refuse a
+      # tag whose package.json names a different version.
+      - name: Check the checkout is the release
+        id: ref
+        env:
+          TAG: ${{ inputs.tag }}
+          VERSION: ${{ needs.release-please.outputs.version }}
+        run: |
+          set -euo pipefail
+          actual=$(jq -r .version package.json)
+          expected="${TAG#v}"
+          expected="${expected:-$VERSION}"
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::package.json at the checked-out commit says $actual, expected $expected."
+            exit 1
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "Publishing $actual from $(git rev-parse HEAD)."
       - uses: actions/setup-node@v5
         with:
           node-version: 24
           registry-url: 'https://registry.npmjs.org/'
       - run: npm install
+      # If this fails, the tag and release already exist. Use "Re-run failed
+      # jobs" on this run: it keeps release-please's outputs, so publish runs
+      # again against the same commit. Otherwise run this workflow manually
+      # with the tag input. npm-publish skips a version npm already has, so a
+      # recovery run for a version that did publish is a no-op.
       - uses: JS-DevTools/npm-publish@v4
-        id: publish
-      - name: Check published version
-        if: ${{ steps.publish.outputs.type }}
-        run: echo "Version changed!"
-      # Read the manifest here, where the checkout is, and hand the two values
-      # to the release job as outputs so that job needs no checkout at all.
-      - name: Read package name and version
-        id: meta
-        run: |
-          set -euo pipefail
-          {
-            echo "pkg=$(jq -r .name package.json)"
-            echo "version=$(jq -r .version package.json)"
-          } >> "$GITHUB_OUTPUT"
-
-  # Separate job purely to contain `contents: write`.
-  #
-  # When the tag step lived at the end of `publish`, job-level permissions gave
-  # that token to EVERY step in the job: actions/checkout, `npm install` (which
-  # runs dependency lifecycle scripts), and a third-party publish action. Any
-  # of those could have moved or deleted a `v*` tag, which is the exact artifact
-  # this workflow asks other repositories to trust. This job holds the write
-  # scope, runs no third-party code, and needs no checkout: `gh` is on the
-  # runner, the package name and version arrive as outputs, and GITHUB_SHA
-  # already names the commit to tag.
-  release:
-    # Scoped to this job and keyed by version, not workflow-wide. GitHub keeps
-    # only one PENDING run per concurrency group and cancels the previously
-    # pending one when another queues, so a workflow-level group meant three
-    # quick merges could leave the middle version neither published nor
-    # tagged. Publishing distinct versions does not race, so only the release
-    # of a GIVEN version needs serialising: two runs for the same version
-    # could both find no release and both try to create it, and the loser's
-    # `gh release create` would take its job down. cancel-in-progress is false
-    # because cancelling mid-release is worse than making the next one wait.
-    concurrency:
-      group: release-${{ needs.publish.outputs.version }}
-      cancel-in-progress: false
-    needs: publish
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      # Keyed on the registry, not on npm-publish's `type` output: a rerun of
-      # this workflow, or a push that did not change the version, reports no
-      # type, and the tag should still be created if it is missing. Idempotent:
-      # an existing release is left alone.
-      - name: Tag and release the published version
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          PKG: ${{ needs.publish.outputs.pkg }}
-          VERSION: ${{ needs.publish.outputs.version }}
-          PUBLISHED_THIS_RUN: ${{ needs.publish.outputs.published }}
-        run: |
-          set -euo pipefail
-          tag="v${VERSION}"
-
-          # Only a confirmed 404 means "not published". Treating every non-zero
-          # exit as absent turned a registry blip or a network error into a
-          # silent skip: no tag, no release, and a green run, while `dispatch`
-          # went ahead and told four repositories to pull the new version. A
-          # missing pin is exactly the thing this workflow exists to prevent, so
-          # it has to be loud. Retry first, since 5xx from the registry is real.
-          #
-          # A 404 gets trusted immediately UNLESS this same run just published
-          # this version (PUBLISHED_THIS_RUN set): a stale packument right after
-          # `npm publish` 404s too, which is exactly the silent-skip-with-green-run
-          # this loop exists to close. In that case a 404 is retried instead, and
-          # persisting after retries fails loudly rather than skipping.
-          #
-          # The two cases need different retry budgets. A run that did NOT just
-          # publish is checking for a genuine transient error (5xx, network), so
-          # 3 short retries (5s/10s/15s) is plenty. A run that DID just publish
-          # is instead waiting out real npm registry propagation lag: on v5.46.0
-          # (2026-09-21) `npm view` kept 404ing for 2-4 minutes after a publish
-          # that had already succeeded (job output `type=minor`), and 3 short
-          # retries failed loudly on a version that was, in fact, fine. That
-          # case gets a longer, fixed-interval budget instead: 13 attempts is
-          # 12 sleeps of 20s, so the loop covers the full 4-minute end of the
-          # observed range before giving up, not just the 2-minute end.
-          if [ -n "${PUBLISHED_THIS_RUN:-}" ]; then
-            max_attempts=13
-          else
-            max_attempts=3
-          fi
-
-          on_npm=""
-          for attempt in $(seq 1 "$max_attempts"); do
-            if out=$(npm view "${PKG}@${VERSION}" version 2>&1); then
-              on_npm="yes"
-              echo "Found ${PKG}@${VERSION} on npm (${out})."
-              break
-            fi
-            if printf '%s' "$out" | grep -q 'E404' && [ -z "${PUBLISHED_THIS_RUN:-}" ]; then
-              on_npm="no"
-              break
-            fi
-            echo "::warning::npm view attempt ${attempt}/${max_attempts} failed; retrying."
-            printf '%s\n' "$out" >&2
-            if [ "$attempt" -lt "$max_attempts" ]; then
-              if [ -n "${PUBLISHED_THIS_RUN:-}" ]; then
-                sleep 20
-              else
-                sleep $((attempt * 5))
-              fi
-            fi
-          done
-
-          if [ -z "$on_npm" ]; then
-            if [ -n "${PUBLISHED_THIS_RUN:-}" ]; then
-              echo "::error::${PKG}@${VERSION} was just published by this run but never appeared on npm after retries."
-            else
-              echo "::error::Could not determine whether ${PKG}@${VERSION} is on npm."
-            fi
-            echo "Refusing to guess: a skipped tag looks identical to a healthy run,"
-            echo "and callers pinning to v<version> would have nothing to pin to."
-            exit 1
-          fi
-          if [ "$on_npm" = "no" ]; then
-            echo "::notice::${PKG}@${VERSION} is not on npm; nothing to tag."
-            exit 0
-          fi
-
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Release ${tag} already exists; nothing to do."
-            exit 0
-          fi
-
-          # The job-level concurrency group above already serializes runs for
-          # this version. This also tolerates a tag created some other way
-          # between the check above and here, rather than failing the job over
-          # a race whose outcome we wanted anyway.
-          if ! err=$(gh release create "$tag" \
-              --target "$GITHUB_SHA" \
-              --title "$tag" \
-              --generate-notes \
-              --notes "Published to npm as \`${PKG}@${VERSION}\`. Prefer pinning reusable workflows and actions from this repository to the commit this tag points at: a \`refs/tags/v*\` ruleset blocks tag updates and deletion, but it is scoped to this repository, so an admin can disable it and re-point a tag without review." 2>&1); then
-            if gh release view "$tag" >/dev/null 2>&1; then
-              echo "::notice::Release ${tag} already existed by the time we created it; treating as success."
-              exit 0
-            fi
-            echo "::error::Failed to create release ${tag}."
-            printf '%s\n' "$err" >&2
-            exit 1
-          fi
-          echo "::notice::Created release ${tag} at ${GITHUB_SHA}"
 
   dispatch:
-    # Deliberately `needs: publish`, not `needs: release`: the npm package is
-    # what these repositories consume, so a tagging problem should not hold up
-    # their dependency update. The release job failing is loud on its own.
+    # Runs only after a publish, so the docs repositories are told to update
+    # when there is a new version to update to.
     needs: publish
     strategy:
       # Each repository's dispatch is independent: one failing must not
@@ -195,6 +141,9 @@ jobs:
       matrix:
         repo: ['redpanda-data/docs', 'redpanda-data/cloud-docs', 'redpanda-data/rp-connect-docs', 'redpanda-data/api-docs', 'redpanda-data/adp-docs']
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -210,4 +159,4 @@ jobs:
           token: ${{ env.ACTIONS_BOT_TOKEN }}
           repository: ${{ matrix.repo }}
           event-type: trigger-npm-update
-          client-payload: '{"commit_sha": "${{ github.sha }}"}'
+          client-payload: '{"commit_sha": "${{ needs.publish.outputs.sha }}"}'

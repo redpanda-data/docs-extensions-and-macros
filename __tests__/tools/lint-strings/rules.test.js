@@ -2,7 +2,7 @@
 
 const { runRules } = require('../../../tools/lint-strings/engine')
 const { COMMON_RULES, isNameEcho } = require('../../../tools/lint-strings/rules/common')
-const { VERBATIM_ASCIIDOC_RULES } = require('../../../tools/lint-strings/rules/verbatim-asciidoc')
+const { VERBATIM_ASCIIDOC_RULES, CONDITIONAL_RULE } = require('../../../tools/lint-strings/rules/verbatim-asciidoc')
 
 function decl (overrides = {}) {
   return {
@@ -143,7 +143,202 @@ describe('verbatim-asciidoc rules', () => {
   })
 })
 
+describe('conditional rule (env-cloud blocks in connect spec strings)', () => {
+  const WHY = 'The Cloud docs and the Cloud binaries set env-cloud, and the text inside must read as a whole paragraph in both outputs. See docs/README.md in the connect repo.'
+  const connectDecl = (string, meta = { kind: 'description' }) => decl({
+    surface: 'connect',
+    name: 'fixture_input',
+    file: 'internal/impl/fixture/lint_connect.go',
+    string,
+    convention: { case: 'sentence', terminal_period: true, verbatim_asciidoc: true },
+    meta
+  })
+  const messages = (string, meta) => CONDITIONAL_RULE.check(connectDecl(string, meta)).map((i) => i.message)
+
+  test('is registered under the name the connect surface enables, as a warning', () => {
+    expect(CONDITIONAL_RULE.name).toBe('conditional')
+    expect(CONDITIONAL_RULE.severity).toBe('warning')
+    expect(VERBATIM_ASCIIDOC_RULES.find((r) => r.name === 'conditional')).toBeUndefined()
+  })
+
+  test('a well-formed env-cloud block passes: ifdef and ifndef, mid-string, at the start, at the end', () => {
+    expect(messages('Reads records.\n\nifndef::env-cloud[]\nSet the broker list yourself.\nendif::[]\n\nMore prose.')).toEqual([])
+    expect(messages('Reads records.\n\nifdef::env-cloud[]\nThe broker list is managed for you.\nendif::[]\n\nMore prose.')).toEqual([])
+    expect(messages('ifdef::env-cloud[]\nOpens the string.\nendif::[]\n\nMore prose.')).toEqual([])
+    expect(messages('Prose first.\n\nifndef::env-cloud[]\nCloses the string.\nendif::[]')).toEqual([])
+    // A multi-line paragraph and a blank line inside the block are fine.
+    expect(messages('Prose.\n\nifndef::env-cloud[]\nLine one of the paragraph\ncontinues here.\n\nSecond paragraph.\nendif::[]\n\nAfter.')).toEqual([])
+  })
+
+  test('strings with no conditional, and CLI help, are left alone', () => {
+    expect(messages('Nothing conditional here, not even an xref:components:about.adoc[link].')).toEqual([])
+    const cli = connectDecl('ifdef::env-cloud[]\nx\nendif::[]')
+    cli.convention = { verbatim_asciidoc: false }
+    expect(CONDITIONAL_RULE.check(cli)).toEqual([])
+  })
+
+  test('unbalanced directives are errors', () => {
+    const unclosed = CONDITIONAL_RULE.check(connectDecl('Prose.\n\nifndef::env-cloud[]\nHidden forever.'))
+    expect(unclosed).toHaveLength(1)
+    expect(unclosed[0].severity).toBe('error')
+    expect(unclosed[0].message).toContain('never closed with endif::[]')
+
+    const stray = CONDITIONAL_RULE.check(connectDecl('Prose.\n\nendif::[]\n\nAfter.'))
+    expect(stray).toHaveLength(1)
+    expect(stray[0].severity).toBe('error')
+    expect(stray[0].message).toContain('no matching ifdef::env-cloud[] or ifndef::env-cloud[]')
+  })
+
+  test('env-cloud is the only attribute', () => {
+    expect(messages('Prose.\n\nifdef::env-kubernetes[]\nText.\nendif::[]\n\nAfter.')).toEqual([
+      expect.stringContaining('tests "env-kubernetes". env-cloud is the only attribute')
+    ])
+    expect(messages('Prose.\n\nifndef::env-cloud,env-k8s[]\nText.\nendif::[]\n\nAfter.')).toHaveLength(1)
+    expect(messages('Prose.\n\nifdef::[]\nText.\nendif::[]\n\nAfter.')).toHaveLength(1)
+    expect(messages('Prose.\n\nifeval::["{x}" == "y"]\nText.\nendif::[]\n\nAfter.')).toEqual([
+      expect.stringContaining('uses ifeval')
+    ])
+    // endif may be bare, or name env-cloud, but nothing else
+    expect(messages('Prose.\n\nifdef::env-cloud[]\nText.\nendif::env-cloud[]\n\nAfter.')).toEqual([])
+    expect(messages('Prose.\n\nifdef::env-cloud[]\nText.\nendif::other[]\n\nAfter.')).toEqual([
+      expect.stringContaining('names "other"')
+    ])
+  })
+
+  test('directives must sit on a line of their own', () => {
+    expect(messages('Prose. ifdef::env-cloud[]\nText.\nendif::[]')).toEqual([
+      expect.stringContaining('not a directive on a line of its own at column 0'),
+      expect.stringContaining('no matching ifdef::env-cloud[] or ifndef::env-cloud[]')
+    ])
+  })
+
+  test('an indented directive is text: it neither opens nor closes a block, so the imbalance is an error', () => {
+    // Indented endif: Asciidoctor hides everything after the opener on
+    // self-managed, so the opener is reported as never closed.
+    const indentedEnd = CONDITIONAL_RULE.check(connectDecl('A.\n\nifdef::env-cloud[]\nB.\n  endif::[]\n\nC after.'))
+    expect(indentedEnd.map((i) => [i.severity, i.message])).toEqual([
+      [undefined, expect.stringContaining('endif::[] is indented')],
+      ['error', expect.stringContaining('ifdef::env-cloud[] is never closed with endif::[]')]
+    ])
+    // Indented opener before a column-0 endif: the endif has no opener.
+    const indentedOpen = CONDITIONAL_RULE.check(connectDecl('Prose.\n\n  ifdef::env-cloud[]\nText.\nendif::[]\n\nAfter.'))
+    expect(indentedOpen.map((i) => [i.severity, i.message])).toEqual([
+      [undefined, expect.stringContaining('ifdef::env-cloud[] is indented')],
+      ['error', expect.stringContaining('endif::[] has no matching ifdef::env-cloud[] or ifndef::env-cloud[]')]
+    ])
+    // A tab counts as indent too
+    expect(messages('Prose.\n\nifdef::env-cloud[]\nText.\n\tendif::[]\n\nAfter.')).toEqual([
+      expect.stringContaining('is indented'),
+      expect.stringContaining('is never closed')
+    ])
+  })
+
+  test('trailing whitespace after a directive is an error', () => {
+    const opener = CONDITIONAL_RULE.check(connectDecl('A.\n\nifdef::env-cloud[]   \nB.\nendif::[]\n\nC.'))
+    expect(opener).toEqual([expect.objectContaining({ severity: 'error', message: expect.stringContaining('ifdef::env-cloud[] has trailing whitespace after the closing bracket') })])
+    const closer = CONDITIONAL_RULE.check(connectDecl('A.\n\nifndef::env-cloud[]\nB.\nendif::[]\t\n\nC.'))
+    expect(closer).toEqual([expect.objectContaining({ severity: 'error', message: expect.stringContaining('endif::[] has trailing whitespace') })])
+    // The directive still balances, so no unclosed or unmatched errors pile on
+    expect(closer).toHaveLength(1)
+  })
+
+  test('contradictory nesting is reported: the inner text renders for neither audience', () => {
+    expect(messages('A.\n\nifdef::env-cloud[]\nCloud.\n\nifndef::env-cloud[]\nNever.\nendif::[]\n\nendif::[]\n\nB.')).toEqual([
+      expect.stringContaining('ifndef::env-cloud[] is inside ifdef::env-cloud[], so the text between them renders for neither audience')
+    ])
+    expect(messages('A.\n\nifndef::env-cloud[]\nSelf.\n\nifdef::env-cloud[]\nNever.\nendif::[]\n\nendif::[]\n\nB.')).toEqual([
+      expect.stringContaining('ifdef::env-cloud[] is inside ifndef::env-cloud[]')
+    ])
+    // Sequential opposite blocks are fine
+    expect(messages('A.\n\nifdef::env-cloud[]\nCloud.\nendif::[]\n\nifndef::env-cloud[]\nSelf.\nendif::[]\n\nB.')).toEqual([])
+  })
+
+  test('a blank line is required before the opening directive and after the closing one', () => {
+    expect(messages('Prose.\nifdef::env-cloud[]\nText.\nendif::[]\n\nAfter.')).toEqual([
+      expect.stringContaining('needs a blank line before it')
+    ])
+    expect(messages('Prose.\n\nifdef::env-cloud[]\nText.\nendif::[]\nAfter.')).toEqual([
+      expect.stringContaining('needs a blank line after it')
+    ])
+    // Two blocks back to back need a blank line between them
+    expect(messages('ifdef::env-cloud[]\nA.\nendif::[]\nifndef::env-cloud[]\nB.\nendif::[]')).toHaveLength(2)
+  })
+
+  test('the single-line form is rejected and does not open a block', () => {
+    const found = messages('Prose.\n\nifndef::env-cloud[Only on self-managed.]\n\nAfter.')
+    expect(found).toEqual([expect.stringContaining('is the single-line form')])
+    expect(messages('Prose.\n\nifdef::env-cloud[]\nText.\nendif::[extra]\n\nAfter.')).toEqual([
+      expect.stringContaining('carries text in its brackets')
+    ])
+  })
+
+  test('a conditional inside a code fence is reported, for every fence style', () => {
+    for (const fence of ['----', '....', '```']) {
+      const found = messages(`Prose.\n\n${fence}\nifdef::env-cloud[]\nkey: value\nendif::[]\n${fence}\n\nAfter.`)
+      expect(found).toEqual([
+        expect.stringContaining('ifdef::env-cloud[] is inside a code fence'),
+        expect.stringContaining('endif::[] is inside a code fence')
+      ])
+    }
+    // A fence that closes before the block is not a fence any more
+    expect(messages('----\nyaml: here\n----\n\nifdef::env-cloud[]\nText.\nendif::[]')).toEqual([])
+  })
+
+  test('a Markdown fence with a language tag opens a block, and its bare closing fence closes it', () => {
+    // Before: the closing ``` opened a block and inverted tracking.
+    expect(messages('Example:\n\n```yaml\nkey: value\n```\n\nifdef::env-cloud[]\nText.\nendif::[]\n\nAfter.')).toEqual([])
+    expect(messages('Example:\n\n```yaml\nifdef::env-cloud[]\nkey: value\nendif::[]\n```\n\nAfter.')).toEqual([
+      expect.stringContaining('ifdef::env-cloud[] is inside a code fence'),
+      expect.stringContaining('endif::[] is inside a code fence')
+    ])
+    // A fence with a tag inside an open Markdown fence does not close it
+    expect(messages('```\n```go\nifdef::env-cloud[]\nendif::[]\n```')).toHaveLength(2)
+  })
+
+  test('an AsciiDoc listing or literal block closes only on a delimiter of the same length', () => {
+    expect(messages('Prose.\n\n------\n----\nifdef::env-cloud[]\nkey: value\nendif::[]\n------\n\nAfter.')).toEqual([
+      expect.stringContaining('ifdef::env-cloud[] is inside a code fence'),
+      expect.stringContaining('endif::[] is inside a code fence')
+    ])
+    expect(messages('Prose.\n\n.....\n....\n.....\n\nifdef::env-cloud[]\nText.\nendif::[]\n\nAfter.')).toEqual([])
+  })
+
+  test('any conditional in a Summary is reported once, with the Summary reason', () => {
+    const found = messages('Reads records.\n\nifdef::env-cloud[]\nFrom a managed cluster.\nendif::[]', { kind: 'summary' })
+    expect(found).toEqual([expect.stringContaining('in a Summary')])
+    expect(messages('ifndef::env-cloud[Self-managed only.]', { kind: 'summary' })).toHaveLength(1)
+    expect(messages('ifdef::env-cloud[]\nx\nendif::[]', { kind: 'bloblang', part: 'summary' })).toHaveLength(1)
+    // Example summaries: Example() and Bloblang Example()/ExampleNotTested()
+    for (const meta of [{ kind: 'example-summary' }, { kind: 'bloblang-example' }]) {
+      expect(messages('Copies a field.\n\nifdef::env-cloud[]\nOn Cloud.\nendif::[]', meta)).toEqual([
+        expect.stringContaining('in an example summary')
+      ])
+    }
+    // An example title is not a summary
+    expect(messages('ifdef::env-cloud[]\nx\nendif::[]', { kind: 'example-title' })).toEqual([])
+    // The same text in a Description is judged on form alone
+    expect(messages('Reads records.\n\nifdef::env-cloud[]\nFrom a managed cluster.\nendif::[]', { kind: 'description' })).toEqual([])
+  })
+
+  test('every message carries the why sentence and points to the connect README', () => {
+    const all = [
+      ...messages('Prose.\nifdef::env-kubernetes[]\n  Text.\n  endif::[extra]\nAfter.'),
+      ...messages('x', { kind: 'summary' }).concat(messages('ifdef::env-cloud[y]', { kind: 'summary' })),
+      ...messages('Prose.\n\nendif::[]')
+    ]
+    expect(all.length).toBeGreaterThan(4)
+    for (const message of all) expect(message.endsWith(WHY)).toBe(true)
+  })
+})
+
 describe('engine', () => {
+  test('a declaration skips the rules its meta.skip_rules names', () => {
+    const rule = { name: 'always', severity: 'warning', check: () => [{ message: 'hit' }] }
+    const decl = (meta) => ({ surface: 'connect', name: 'x', file: 'f.go', line_start: 1, line_end: 1, string: 'x', meta })
+    expect(runRules([decl({})], [rule]).findings).toHaveLength(1)
+    expect(runRules([decl({ skip_rules: ['always'] })], [rule]).findings).toHaveLength(0)
+  })
+
   test('collates findings per declaration with byRule and bySurface summary', () => {
     const declarations = [
       decl({ name: 'empty_prop', string: null }),

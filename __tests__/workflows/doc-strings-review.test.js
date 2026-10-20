@@ -468,6 +468,200 @@ esac
   })
 })
 
+describe('doc-strings-review workflow: source diff (executed)', () => {
+  const step = stepNamed('Save the source diff for the review')
+  let repo
+  let base
+  const git = (...args) => {
+    const r = spawnSync('git', args, { cwd: repo, encoding: 'utf8' })
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`)
+    return r.stdout.trim()
+  }
+  const run = (env) => spawnSync('/bin/bash', ['-e', '-c', step.run], { cwd: repo, encoding: 'utf8', env: { ...process.env, ...env } })
+
+  beforeAll(() => {
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-diff-'))
+    git('init', '--quiet')
+    // The second commit adds ~322 files, which makes git start its automatic
+    // housekeeping (gc --auto / maintenance). That detaches and keeps writing
+    // into .git after the commit returns, so afterAll's rmSync races it and
+    // fails with ENOTEMPTY. Turn it off for this throwaway repo.
+    git('config', 'gc.auto', '0')
+    git('config', 'maintenance.auto', 'false')
+    git('config', 'user.email', 'dsr-test@example.invalid')
+    git('config', 'user.name', 'dsr test')
+    fs.mkdirSync(path.join(repo, 'internal/impl/kafka'), { recursive: true })
+    fs.writeFileSync(path.join(repo, 'internal/impl/kafka/input.go'), 'package kafka\n\nconst d = "old"\n')
+    git('add', '.')
+    git('commit', '--quiet', '-m', 'base')
+    base = git('rev-parse', 'HEAD')
+    // A regenerated-docs PR: more files than the PR diff API serves. The 320
+    // partials, the example config, and go.sum make 322 left-out files.
+    fs.writeFileSync(path.join(repo, 'internal/impl/kafka/input.go'), 'package kafka\n\nconst d = "new"\n')
+    const gen = path.join(repo, 'docs/modules/components/partials/fields/inputs')
+    fs.mkdirSync(gen, { recursive: true })
+    for (let i = 0; i < 320; i++) fs.writeFileSync(path.join(gen, `c${i}.adoc`), `= C${i}\n`)
+    const examples = path.join(repo, 'docs/modules/components/examples/common/inputs')
+    fs.mkdirSync(examples, { recursive: true })
+    fs.writeFileSync(path.join(examples, 'kafka.yaml'), 'input:\n  kafka: {}\n')
+    fs.writeFileSync(path.join(repo, 'go.sum'), 'x v1 h1:y\n')
+    git('add', '.')
+    git('commit', '--quiet', '-m', 'change')
+  })
+
+  // Retries cover any other late writer, so a slow runner cannot fail the suite
+  // after every test in it has passed.
+  afterAll(() => fs.rmSync(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }))
+
+  test('a PR over 300 files yields the source diff, with generated files counted, not included', () => {
+    const r = run({ BASE: base })
+    expect(r.status).toBe(0)
+    const patch = fs.readFileSync(path.join(repo, 'pr-diff.patch'), 'utf8')
+    expect(patch).toContain('+const d = "new"')
+    expect(patch).not.toContain('docs/modules/')
+    expect(patch).not.toContain('go.sum')
+    expect(patch).toMatch(/Left out \(generated docs, lockfiles, vendored code, test data\): 322 file\(s\)/)
+    expect(fs.existsSync(path.join(repo, 'pr-diff.err'))).toBe(false)
+  })
+
+  test('a bad base leaves no diff file and still succeeds under bash -e', () => {
+    fs.writeFileSync(path.join(repo, 'pr-diff.patch'), 'stale')
+    const r = run({ BASE: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef' })
+    expect(r.status).toBe(0)
+    expect(r.stdout + r.stderr).toMatch(/::warning::could not compute the source diff/)
+    expect(fs.existsSync(path.join(repo, 'pr-diff.patch'))).toBe(false)
+    expect(fs.existsSync(path.join(repo, 'pr-diff.err'))).toBe(false)
+  })
+
+  test('the review reads the saved diff, never gh pr diff', () => {
+    const review = stepNamed('Claude review with suggestions')
+    expect(review.with.claude_args).toContain('Bash(cat pr-diff.patch)')
+    expect(review.with.claude_args).not.toContain('gh pr diff')
+  })
+
+  // Bash output is cut off far below the diff cap, so a large diff only
+  // reaches the model in full when it can page through it with Read.
+  test('the review can page through a large diff with Read', () => {
+    const review = stepNamed('Claude review with suggestions')
+    expect(review.with.claude_args).toMatch(/--allowed-tools "[^"]*\bRead,/)
+    expect(review.with.prompt).toMatch(/offset and limit/)
+  })
+})
+
+describe('doc-strings-review workflow: diff base (executed)', () => {
+  // The checkout is refs/pull/N/merge, GitHub's merge of the PR into the base
+  // branch as it is now. pull_request.base.sha is the base as of the event,
+  // so once the base branch moves on, base.sha..HEAD also carries the other
+  // PRs that arrived through the merge. This repo reproduces that shape: the
+  // PR branches from `stale`, main then gains another PR's commit, and HEAD
+  // is the merge of the PR into the new main tip.
+  const step = stepNamed('Resolve the diff base')
+  let root
+  let repo
+  let stale
+  let tip
+  const gitIn = (cwd, ...args) => {
+    const r = spawnSync('git', args, { cwd, encoding: 'utf8' })
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`)
+    return r.stdout.trim()
+  }
+  const write = (dir, file, body) => {
+    fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true })
+    fs.writeFileSync(path.join(dir, file), body)
+  }
+  const run = (cwd, env) => {
+    const out = path.join(root, `out-${Math.random().toString(16).slice(2)}`)
+    fs.writeFileSync(out, '')
+    const r = spawnSync('/bin/bash', ['-e', '-c', step.run], {
+      cwd,
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, HOME: root, GITHUB_OUTPUT: out, REF: '', PR_BASE_SHA: '', DEFAULT_BRANCH: '', ...env }
+    })
+    const outputs = Object.fromEntries(fs.readFileSync(out, 'utf8').split('\n').filter(Boolean).map((l) => l.split('=')))
+    return { ...r, outputs }
+  }
+  const changed = (cwd, base) => gitIn(cwd, 'diff', '--name-only', `${base}...HEAD`).split('\n').filter(Boolean).sort()
+
+  beforeAll(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-base-'))
+    repo = path.join(root, 'repo')
+    fs.mkdirSync(repo)
+    const git = (...args) => gitIn(repo, ...args)
+    git('init', '--quiet', '-b', 'main')
+    git('config', 'user.email', 'dsr-test@example.invalid')
+    git('config', 'user.name', 'dsr test')
+    write(repo, 'src/v/config/a.cc', 'a("old")\n')
+    write(repo, 'src/v/config/b.cc', 'b("old")\n')
+    git('add', '.')
+    git('commit', '--quiet', '-m', 'base')
+    stale = git('rev-parse', 'HEAD')
+    git('checkout', '--quiet', '-b', 'pr')
+    write(repo, 'src/v/config/a.cc', 'a("this PR")\n')
+    git('commit', '--quiet', '-am', 'this PR')
+    git('checkout', '--quiet', 'main')
+    write(repo, 'src/v/config/b.cc', 'b("another PR")\n')
+    git('commit', '--quiet', '-am', 'another PR')
+    tip = git('rev-parse', 'HEAD')
+    git('checkout', '--quiet', '-b', 'merge')
+    git('merge', '--quiet', '--no-ff', '--no-edit', 'pr')
+  })
+
+  afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
+
+  test('a merge checkout diffs against the first parent, not the stale base.sha', () => {
+    const r = run(repo, { REF: 'refs/pull/7/merge', PR_BASE_SHA: stale })
+    expect(r.status).toBe(0)
+    expect(r.outputs.base).toBe(tip)
+    expect(changed(repo, r.outputs.base)).toEqual(['src/v/config/a.cc'])
+    // Negative control: the old base attributes the other PR's file to this one.
+    expect(changed(repo, stale)).toEqual(['src/v/config/a.cc', 'src/v/config/b.cc'])
+  })
+
+  test('a merge checkout without its parents fails loudly', () => {
+    const shallow = path.join(root, 'shallow')
+    gitIn(root, 'clone', '--quiet', '--depth', '1', '--branch', 'merge', `file://${repo}`, shallow)
+    const r = run(shallow, { REF: 'refs/pull/7/merge', PR_BASE_SHA: stale })
+    expect(r.status).not.toBe(0)
+    expect(r.stdout + r.stderr).toMatch(/::error::.*not a two-parent merge commit/)
+    expect(r.outputs.base).toBeUndefined()
+  })
+
+  test('a non-merge checkout falls back to the merge base with the PR base', () => {
+    const head = path.join(root, 'head')
+    gitIn(root, 'clone', '--quiet', '--branch', 'pr', `file://${repo}`, head)
+    const r = run(head, { REF: 'refs/heads/pr', PR_BASE_SHA: tip })
+    expect(r.status).toBe(0)
+    expect(r.outputs.base).toBe(stale)
+    expect(changed(head, r.outputs.base)).toEqual(['src/v/config/a.cc'])
+  })
+
+  test('with no PR it falls back to the default branch', () => {
+    const head = path.join(root, 'dispatch')
+    gitIn(root, 'clone', '--quiet', '--branch', 'pr', `file://${repo}`, head)
+    const r = run(head, { REF: 'refs/heads/pr', DEFAULT_BRANCH: 'main' })
+    expect(r.status).toBe(0)
+    expect(r.outputs.base).toBe(stale)
+  })
+
+  test('with nothing to diff against it fails rather than diffing against nothing', () => {
+    const r = run(repo, { REF: 'refs/heads/merge' })
+    expect(r.status).not.toBe(0)
+    expect(r.stdout + r.stderr).toMatch(/::error::No merge ref, PR base or default branch/)
+  })
+
+  test('every diff in the job takes its base from this step', () => {
+    const order = job.steps.map((s) => s.name)
+    expect(order.indexOf('Resolve the diff base')).toBeLessThan(order.indexOf('Lint doc strings in the diff'))
+    expect(stepNamed('Lint doc strings in the diff').env.BASE).toBe('${{ steps.diffbase.outputs.base }}')
+    expect(stepNamed('Save the source diff for the review').env.BASE).toBe('${{ steps.diffbase.outputs.base }}')
+    const checkout = job.steps.find((s) => (s.uses || '').startsWith('actions/checkout@'))
+    expect(checkout.with['fetch-depth']).not.toBe(1)
+    // base.sha may still feed the fallback, but nothing else reads it.
+    const readers = job.steps.filter((s) => JSON.stringify(s).includes('pull_request.base.sha')).map((s) => s.name)
+    expect(readers).toEqual(['Resolve the diff base'])
+  })
+})
+
 describe('doc-strings-review workflow: writing-standard fetch (executed)', () => {
   const step = stepNamed('Fetch the writing standard')
   const STANDARD = 'embedded-reference-strings.md'
@@ -555,6 +749,21 @@ describe('doc-strings-review workflow: doc-impact dispatch (executed)', () => {
     const payload = JSON.parse(fs.readFileSync(path.join(r.dir, 'gh-stdin'), 'utf8'))
     expect(payload.event_type).toBe('doc-impact')
     expect(payload.client_payload.impact.findings).toHaveLength(1)
+  })
+
+  test('the base and default branch travel with the payload so the router can flag a stacked PR', () => {
+    const r = dispatch(valid, { BASE_REF: 'CORE-1-parent', DEFAULT_BRANCH: 'dev' })
+    const payload = JSON.parse(fs.readFileSync(path.join(r.dir, 'gh-stdin'), 'utf8'))
+    expect(payload.client_payload.base_ref).toBe('CORE-1-parent')
+    expect(payload.client_payload.default_branch).toBe('dev')
+  })
+
+  test('a hostile base branch name is carried as data, not executed', () => {
+    const r = dispatch(valid, { BASE_REF: '$(touch PWNED)"; touch PWNED2; "', DEFAULT_BRANCH: 'dev' })
+    expect(r.exists('PWNED')).toBe(false)
+    expect(r.exists('PWNED2')).toBe(false)
+    const payload = JSON.parse(fs.readFileSync(path.join(r.dir, 'gh-stdin'), 'utf8'))
+    expect(payload.client_payload.base_ref).toBe('$(touch PWNED)"; touch PWNED2; "')
   })
 
   test.each([
@@ -990,6 +1199,22 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(row.split(/(?<!\\)\|/).length - 2).toBe(4)
     })
 
+    test('lists unattributed doc-method calls and counts partly evaluated text, so no gap is silent', () => {
+      const lint = {
+        findings: [],
+        summary: {
+          totalDeclarations: 1,
+          unverifiableDeclarations: 2,
+          skippedDeclarations: [{ surface: 'connect', file: 'internal/impl/x/y.go', line: 12, method: 'Description', reason: 'receiver d does not trace to a benthos spec' }]
+        }
+      }
+      const r = execRun(step, { env: { GITHUB_STEP_SUMMARY: 'summary.md' }, files: { 'lint-findings.json': JSON.stringify(lint) } })
+      expect(r.status).toBe(0)
+      const out = r.read('summary.md')
+      expect(out).toMatch(/could not fully evaluate .*: 2\./)
+      expect(out).toMatch(/could not attribute, so nothing reviewed them:\n\n- internal\/impl\/x\/y\.go:12 `\.Description\(\)`: receiver d does not trace to a benthos spec/)
+    })
+
     test('no report file is said plainly rather than failing', () => {
       const r = execRun(step, { env: { GITHUB_STEP_SUMMARY: 'summary.md' } })
       expect(r.status).toBe(0)
@@ -1086,6 +1311,26 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(review.with.prompt).toMatch(/<sub>doc-strings-review:fp=FINGERPRINT<\/sub>/)
       expect(review.with.prompt).not.toMatch(/<!-- doc-strings-review:fp/)
       expect(review.with.prompt).not.toMatch(/Finish with one summary comment/)
+    })
+
+    test('the prompt carries the connect suggestion rules and the regeneration footer', () => {
+      const prompt = review.with.prompt
+      expect(prompt).toMatch(/CONNECT STRINGS/)
+      expect(prompt).toContain('`text ` + "`code`" + ` text`')
+      expect(prompt).toMatch(/Every xref names its module/)
+      // env-cloud block conditionals are allowed in the form the conditional rule checks
+      expect(prompt).not.toMatch(/Never put ifdef::env-cloud\[\]/)
+      expect(prompt).toMatch(/An env-cloud block conditional is allowed/)
+      expect(prompt).toMatch(/nothing\s+after the \], not even spaces/)
+      expect(prompt).toMatch(/a conditional in a Summary or example summary/)
+      expect(prompt).toMatch(/cloud_ai/)
+      expect(prompt).toContain('`CGO_ENABLED=1 TAGS=x_benthos_extra task docs`')
+    })
+
+    test('the impact check leaves out the regenerated connector and Bloblang references', () => {
+      const prompt = review.with.prompt
+      expect(prompt).toMatch(/OTHER than the generated property, metric, rpk, connector\s+\(Redpanda Connect component pages\) or Bloblang function and\s+method reference/)
+      expect(prompt).toMatch(/a changed connector\s+summary, description, field or Bloblang text/)
     })
 
     test('the prompt reviews strings in their page context and keeps articles', () => {

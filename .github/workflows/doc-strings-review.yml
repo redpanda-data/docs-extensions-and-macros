@@ -14,6 +14,8 @@
 #      prose-quality pass over the clean strings, and a published-content
 #      impact check against docs.redpanda.com (public MCP),
 #   4. doc-impact dispatch to the docs team's Jira router.
+#   5. a workflow artifact holding the docs MCP calls the review made and
+#      the answers it got, for the doc-impact eval (see the step).
 #
 # Each string is reviewed once. lint-strings fingerprints every declaration
 # (surface, name, text), the fingerprints a review has seen are kept in the
@@ -89,13 +91,15 @@
 # `github.event.pull_request.head.repo.full_name == github.repository`.
 #
 # This workflow reviews OTHER repos' PRs, so treat changes to it as review
-# infrastructure: callers should pin a commit SHA, not @main. The doc-tools
-# CLI version is resolved at run time from the workflow's OWN ref (the
-# package.json committed alongside this file), so the workflow and the CLI it
-# runs always come from the same commit: a caller pinned to a ref gets that
-# ref's CLI, and a reviewed change to this repo is the only way to change
-# what executes inside engineering repos. doc_tools_package remains as an
-# explicit override for callers that need a different version.
+# infrastructure: callers should pin the commit a `v<version>` tag points
+# at, not @main and not an arbitrary commit. The doc-tools CLI version is
+# resolved at run time from the package.json committed alongside this file.
+# At a release commit that is the version released from that commit, so the
+# workflow and the CLI match. Between releases, package.json still names the
+# PREVIOUS release (release-please bumps it only in the release PR), so a
+# caller pinned to an untagged commit runs this commit's workflow with the
+# previous release's CLI. doc_tools_package remains as an explicit override
+# for callers that need a different version.
 name: doc-strings-review (reusable)
 on:
   workflow_call:
@@ -273,6 +277,59 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      # The commit every diff in this job is taken from. On pull_request the
+      # checkout is refs/pull/N/merge: GitHub's merge of the PR head into the
+      # base branch. pull_request.base.sha is NOT that merge's base: it can
+      # lag the base commit GitHub actually merged into (it isn't refreshed
+      # when the base branch moves), even on the first run. A diff from it to
+      # HEAD then also carries every change that reached the base since, and
+      # lint findings, suggestions and doc-impact tickets get attributed to a
+      # PR that never touched those strings. The merge commit's first parent
+      # is the base it was built on, so HEAD^1..HEAD is exactly the PR's own
+      # change. fetch-depth: 0 above is what makes that parent present; a
+      # missing parent fails the job rather than diffing against nothing.
+      # Any other checkout falls back to the merge base with the PR base, or
+      # with the default branch. Today that fallback only matters for a PR
+      # checked out by head: the configuration check at the top of the job
+      # needs a PR number, so a run with no PR stops there.
+      - name: Resolve the diff base
+        id: diffbase
+        env:
+          REF: ${{ github.ref }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          case "$REF" in
+            refs/pull/*/merge)
+              # Both parents must be present: a shallow checkout shows the
+              # merge commit with no parents at all, and a non-merge HEAD on a
+              # merge ref means the checkout is not what this step assumes.
+              if ! base=$(git rev-parse --verify --quiet 'HEAD^1^{commit}') \
+                || ! git rev-parse --verify --quiet 'HEAD^2^{commit}' > /dev/null; then
+                echo "::error::HEAD ($REF) is not a two-parent merge commit in this checkout. The diff base is the merge commit's first parent: check that the checkout is the merge ref and has fetch-depth of at least 2."
+                exit 1
+              fi
+              echo "Merge checkout: diffing against the merge commit's first parent."
+              ;;
+            *)
+              if [ -n "$PR_BASE_SHA" ]; then
+                against="$PR_BASE_SHA"
+              elif [ -n "$DEFAULT_BRANCH" ]; then
+                against="origin/$DEFAULT_BRANCH"
+              else
+                echo "::error::No merge ref, PR base or default branch to diff against ($REF)."
+                exit 1
+              fi
+              if ! base=$(git merge-base "$against" HEAD); then
+                echo "::error::No merge base between $against and HEAD in this checkout."
+                exit 1
+              fi
+              echo "Not a merge checkout ($REF): diffing against the merge base with $against."
+              ;;
+          esac
+          echo "Diff base: $base"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -284,14 +341,14 @@ jobs:
           python-version: '3.12'
       # Resolve which doc-tools version to run. The version is read from the
       # package.json at this workflow's OWN ref (github.job_workflow_sha names
-      # the reusable workflow's commit; workflow_sha covers a same-repo run),
-      # so a caller pinned to any ref runs the CLI released from that exact
-      # commit: lockstep is structural, not a hand-maintained default that
-      # every release bump has to edit. Fail-open order when resolution cannot
-      # complete, after three attempts at the read: @latest with a warning,
-      # matching the workflow's posture -- in the publish window right after a
-      # merge, the resolved version is not on npm yet and @latest is simply
-      # the previous release.
+      # the reusable workflow's commit; workflow_sha covers a same-repo run).
+      # For a caller pinned to a release commit, that is the CLI released from
+      # that exact commit, with no hand-maintained default to edit. For an
+      # untagged commit it is the last release before it (see the header).
+      # Fail-open order when resolution cannot complete, after three attempts
+      # at the read: @latest with a warning, matching the workflow's posture --
+      # in the publish window right after a release PR merges, the resolved
+      # version is not on npm yet and @latest is simply the previous release.
       - name: Resolve the doc-tools package
         id: pkg
         env:
@@ -399,7 +456,7 @@ jobs:
       - name: Lint doc strings in the diff
         id: lint
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
+          BASE: ${{ steps.diffbase.outputs.base }}
           SURFACES: ${{ inputs.surfaces }}
           PKG: ${{ steps.pkg.outputs.pkg }}
           STATE_DIR: ${{ runner.temp }}/doc-strings-review-state
@@ -472,6 +529,56 @@ jobs:
             ''|*[!0-9]*) removals=0 ;;
           esac
           echo "removals=$removals" >> "$GITHUB_OUTPUT"
+      # The review reads the diff from a file, not `gh pr diff`: the API
+      # refuses a diff over 300 files with HTTP 406, which regenerated-docs
+      # PRs exceed routinely, and the model then lost all diff context
+      # without saying so. The local diff is the same diff the lint ran on
+      # (see Resolve the diff base), filtered to source: generated docs,
+      # lockfiles, vendored code and test data are left out, and listed by
+      # name at the top so the model knows they exist.
+      - name: Save the source diff for the review
+        if: steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0'
+        continue-on-error: true
+        env:
+          BASE: ${{ steps.diffbase.outputs.base }}
+        run: |
+          set -uo pipefail
+          EXCLUDE=(
+            ':(exclude,glob)docs/modules/**'
+            ':(exclude,glob)**/*.adoc'
+            ':(exclude,glob)**/testdata/**'
+            ':(exclude,glob)**/vendor/**'
+            ':(exclude,glob)**/node_modules/**'
+            ':(exclude)go.sum'
+            ':(exclude,glob)**/go.sum'
+            ':(exclude,glob)**/package-lock.json'
+            ':(exclude,glob)**/*.lock'
+          )
+          left_out=$(git diff --name-only "$BASE"...HEAD | grep -cvxFf <(git diff --name-only "$BASE"...HEAD -- . "${EXCLUDE[@]}") || true)
+          status=0
+          {
+            echo "# Source diff of this PR against its base."
+            echo "# Left out (generated docs, lockfiles, vendored code, test data): ${left_out:-0} file(s)."
+            echo
+            git diff --no-color --no-ext-diff "$BASE"...HEAD -- . "${EXCLUDE[@]}"
+          } > pr-diff.full 2> pr-diff.err || status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "::warning::could not compute the source diff (exit $status); the review runs without it."
+            sed -n '1,20p' pr-diff.err >&2 || true
+            rm -f pr-diff.full pr-diff.err pr-diff.patch
+            exit 0
+          fi
+          # Cap what the model reads. The declarations it reviews come from
+          # lint-findings.json either way; the diff is supporting context.
+          limit=$((1536 * 1024))
+          if [ "$(wc -c < pr-diff.full)" -gt "$limit" ]; then
+            head -c "$limit" pr-diff.full > pr-diff.patch
+            printf '\n# Diff truncated at %s bytes. Read the changed files directly for the rest.\n' "$limit" >> pr-diff.patch
+          else
+            mv pr-diff.full pr-diff.patch
+          fi
+          rm -f pr-diff.full pr-diff.err
+          echo "Saved pr-diff.patch: $(wc -c < pr-diff.patch) bytes, ${left_out:-0} file(s) left out."
       # The lint report is the fallback when no model runs (no credentials,
       # mint failure, nothing new to review), so it has to land somewhere a
       # person can read it: the job summary, not a file on the runner.
@@ -487,6 +594,12 @@ jobs:
             "",
             "New or changed declarations to review: \(.summary.totalDeclarations // 0). Already reviewed on an earlier push: \(.summary.alreadyReviewed // 0). Flagged: \(.summary.flaggedDeclarations // 0).",
             "",
+            (if (.summary.unverifiableDeclarations // 0) > 0
+             then "Declarations with text the extractor could not fully evaluate (exact-text rules skipped, the review still sees them): \(.summary.unverifiableDeclarations).\n"
+             else empty end),
+            (if ((.summary.skippedDeclarations // []) | length) > 0
+             then "Doc-method calls the extractor could not attribute, so nothing reviewed them:\n\n" + ([.summary.skippedDeclarations[] | "- \(.file | cell):\(.line) `.\(.method)()`: \(.reason | cell)"] | join("\n")) + "\n"
+             else empty end),
             (if ((.summary.removedDeclarations // []) | length) > 0
              then "Removed or renamed: " + ([.summary.removedDeclarations[] | "`\(.name)` (\(.surface))"] | join(", ")) + "\n"
              else empty end),
@@ -711,8 +824,9 @@ jobs:
               mcp__redpanda-docs__search_api_reference,
               mcp__redpanda-docs__ask_redpanda_question,
               mcp__redpanda-docs__get_api_reference_content,
+              Read,
               Write,
-              Bash(gh pr diff *),
+              Bash(cat pr-diff.patch),
               Bash(gh pr view *),
               Bash(cat lint-findings.json),
               Bash(cat embedded-reference-strings.md),
@@ -724,7 +838,15 @@ jobs:
             You are reviewing user-facing doc strings only: strings that doc
             generators publish verbatim (config property descriptions, metric
             help, rpk cobra help, Helm values comments, CRD field comments,
-            connector fields). lint-findings.json holds:
+            Redpanda Connect component specs, fields, Bloblang plugins and
+            `rpk connect` help). The PR's source diff is in pr-diff.patch
+            (generated docs, lockfiles and vendored code are left out; never
+            use gh pr diff). Read it with the Read tool, and page through a
+            large file with offset and limit until you reach the end:
+            cat output is cut off long before the end of a big diff. Read
+            lint-findings.json the same way. When pr-diff.patch is
+            absent, review from lint-findings.json and the checked-out
+            files. lint-findings.json holds:
             - declarations: the doc-string declarations this push adds or
               changes that no earlier push of this PR has reviewed. This is
               the COMPLETE list of what you review. Any other string in the
@@ -767,10 +889,60 @@ jobs:
               take NO terminal period; cobra Short stays one capitalized line
               with no period; CRD comments describe the json: tag key (never
               the Go field name) and keep +kubebuilder marker lines
-              byte-identical; Helm comments keep the # -- marker conventions.
+              byte-identical; Helm comments keep the # -- marker conventions;
+              connect strings follow CONNECT STRINGS below.
             - ends with this line, exactly, using the declaration's
               fingerprint from lint-findings.json:
               <sub>doc-strings-review:fp=FINGERPRINT</sub>
+
+            CONNECT STRINGS (surface connect): each declaration's detail
+            names its kind and, for component text, the components that
+            publish it with their internal/plugins/info.csv row: support
+            level, cloud (it runs in Redpanda Cloud) and cloud_ai (it runs in
+            Cloud GPU pipelines).
+            - Spec and field strings are AsciiDoc page bodies; AsciiDoc
+              headings, tables and links in them are legitimate. A Go raw
+              string cannot hold a backtick, so inline code inside one uses
+              the idiom `text ` + "`code`" + ` text`. Keep the string's
+              existing raw or interpreted form and every byte outside the
+              change; in an interpreted string escape quotes and newlines.
+            - Every xref names its module: xref:components:...,
+              xref:configuration:... or xref:guides:..., or a
+              component:module:page xref. A module-less xref breaks when
+              Cloud includes the same text into its own pages.
+            - An env-cloud block conditional is allowed when a paragraph
+              behaves differently in Cloud: ifdef::env-cloud[] or
+              ifndef::env-cloud[] alone on a line at column 0 with nothing
+              after the ], not even spaces, the whole paragraph inside,
+              endif::[] alone on a line, and a blank line before and after.
+              Flag the single-line form, any attribute other than env-cloud,
+              ifeval::, a conditional in a Summary or example summary, one
+              inside a code fence, and ifndef::env-cloud[] nested inside
+              ifdef::env-cloud[] or the reverse. The Cloud docs and the Cloud
+              binaries set env-cloud, and the text inside must read as a
+              whole paragraph in both outputs.
+            - Never write Cloud or cgo availability as prose or as a
+              conditional. The generator renders those notes from info.csv
+              and the build lists; point to info.csv instead.
+            - When a component has cloud true, the same string ships on its
+              Cloud page: flag wording that holds only for self-managed
+              deployments (local file paths, installing binaries, process
+              restarts, command-line flags).
+            - ShortDescription (kind field-short) shows as plain text in
+              form-based editors: one plain sentence, no backticks, links or
+              markup.
+            - A declaration with detail.template comes from a helper called
+              once per component, and detail.call_site names the call. The
+              fix goes in the helper, so it must read correctly for every
+              caller. A {{unresolved:N}} placeholder is text the extractor
+              could not evaluate; never rewrite across it.
+            - CLI help (kinds cli-*) is `rpk connect` help: Usage is a
+              one-line label with no terminal period, and Description is
+              plain text, not AsciiDoc.
+            - End every connect suggestion comment, on the line before the
+              fingerprint line, with exactly: After you apply this
+              suggestion, run `CGO_ENABLED=1 TAGS=x_benthos_extra task docs`
+              and commit the regenerated docs, or the docs check fails.
 
             REVIEW IN CONTEXT: judge each string as the reader of its page,
             not on its own. Read it together with its context entries and
@@ -837,20 +1009,26 @@ jobs:
             PUBLISHED-CONTENT IMPACT: consider only the entries in
             declarations and summary.removedDeclarations, and use at most 4
             redpanda-docs MCP calls in total. HIGH-IMPACT means a published
-            page OTHER than the generated property, metric, or rpk reference
-            states something this PR makes wrong (a removed or renamed
+            page OTHER than the generated property, metric, rpk, connector
+            (Redpanda Connect component pages) or Bloblang function and
+            method reference states something this PR makes wrong (a removed or renamed
             surface, a changed behavior or unit, a changed default that a
             page quotes in prose), or a new user-facing feature with no
             coverage beyond those generated references. These are NOT high
             impact: a changed default the generated reference renders from
             structured data, a new property, metric or flag the generated
-            reference picks up when it is regenerated, and anything you
+            reference picks up when it is regenerated, a changed connector
+            summary, description, field or Bloblang text, which the connect
+            docs regenerate from source, and anything you
             cannot verify from the diff (binary assets, code outside it). If
             any high-impact entries exist, Write doc-impact.json:
             {"findings":[{"surface","name","change_kind","affected_pages":
             ["url"],"summary"}],"proposed_ticket":{"title","body"}}. Every
             affected_pages entry must be an absolute
-            https://docs.redpanda.com/ URL. Only high-impact entries,
+            https://docs.redpanda.com/ URL. In proposed_ticket.body and each
+            summary, put code identifiers in backticks, start bullet lines
+            with "- ", and write links as bare URLs; Jira renders only those
+            three, so use no other Markdown. Only high-impact entries,
             maximum 10; write NO file when there are none. A report that
             does not match that shape is discarded before dispatch.
 
@@ -929,12 +1107,74 @@ jobs:
         with:
           path: ${{ runner.temp }}/doc-strings-review-state
           key: doc-strings-review-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
+      # Keep what the docs MCP server told this review, for the doc-impact
+      # eval. The eval replays docs answers per PR, and answers fetched later
+      # come from docs that may already hold the writer's fix, so a correct
+      # "already documented" would score as a miss. The artifact holds only
+      # each call's tool name, arguments and result content, never tokens,
+      # headers or identity, and the extractor drops any call whose arguments
+      # or result look like a credential (log masking doesn't cover
+      # artifacts). The artifact is stored in the CALLER's repository for 90
+      # days, so anyone who can read that repository can download it: for a
+      # public caller (connect, redpanda, redpanda-operator) that is anyone.
+      # It holds public docs answers and the review's questions about PR
+      # strings. Mining a private caller's artifacts copies that PR text out
+      # of the private repository, so keep mined recordings somewhere at
+      # least as private. A doc-tools release older than the
+      # doc-impact-recording command just skips with a notice.
+      - name: Extract the docs MCP calls for the doc-impact eval
+        id: mcp_recording
+        if: always() && steps.review.outputs.execution_file != ''
+        continue-on-error: true
+        # Runs outside the PR checkout, so a .npmrc in the PR can't redirect
+        # npx's registry, and without the model token, which this step doesn't
+        # need.
+        working-directory: ${{ runner.temp }}
+        env:
+          AWS_BEARER_TOKEN_BEDROCK: ''
+          PKG: ${{ steps.pkg.outputs.pkg }}
+          EXECUTION_FILE: ${{ steps.review.outputs.execution_file }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          # Same server the review step's --mcp-config names.
+          DOCS_MCP_URL: https://docs.redpanda.com/mcp
+          OUT_DIR: ${{ runner.temp }}/doc-impact-mcp
+        run: |
+          set -euo pipefail
+          rm -rf "$OUT_DIR"
+          mkdir -p "$OUT_DIR"
+          if ! npx --yes --package="$PKG" doc-tools doc-impact-recording \
+              --execution-file "$EXECUTION_FILE" \
+              --output "$OUT_DIR/recording.json" \
+              --item "${REPO##*/}-$PR" \
+              --server-url "$DOCS_MCP_URL"; then
+            echo "::notice::Could not extract the docs MCP calls with $PKG; no doc-impact recording saved."
+            exit 0
+          fi
+          if [ -s "$OUT_DIR/recording.json" ]; then
+            echo "saved=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::The review made no docs MCP calls; no doc-impact recording saved."
+          fi
+      - name: Upload the docs MCP recording
+        if: always() && steps.mcp_recording.outputs.saved == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: doc-impact-mcp-${{ github.event.pull_request.number }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/doc-impact-mcp/recording.json
+          retention-days: 90
+          if-no-files-found: ignore
       - name: Dispatch doc-impact
         if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0')
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.actions_bot_token }}
           DISPATCH_REPO: ${{ inputs.dispatch_repo }}
+          # The router tells the assignee the PR is unmerged and, when the base
+          # is not the default branch, that it is stacked on another PR.
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           # The OIDC path stashes the token in a temp file (see the scrub
@@ -972,5 +1212,7 @@ jobs:
             --arg repo "${{ github.repository }}" \
             --arg pr "${{ github.event.pull_request.number }}" \
             --arg url "${{ github.event.pull_request.html_url }}" \
-            '{event_type: "doc-impact", client_payload: {source_repo: $repo, pr_number: $pr, pr_url: $url, impact: $impact[0]}}' \
+            --arg base "${BASE_REF:-}" \
+            --arg default "${DEFAULT_BRANCH:-}" \
+            '{event_type: "doc-impact", client_payload: {source_repo: $repo, pr_number: $pr, pr_url: $url, base_ref: $base, default_branch: $default, impact: $impact[0]}}' \
           | gh api "repos/$DISPATCH_REPO/dispatches" --input -

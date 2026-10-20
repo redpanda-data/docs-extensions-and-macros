@@ -12,7 +12,7 @@
  *   node tools/overrides-audit/index.js \
  *     --overrides docs-data/property-overrides.json \
  *     --extracted tools/property-extractor/gen/properties-output.json \
- *     [--surface properties|rpk|connect] [--format json|human] [--output <file>]
+ *     [--surface properties|rpk] [--format json|human] [--output <file>]
  *
  * For the rpk surface, --repo takes a streaming-enterprise src/go/rpk
  * checkout (builds rpk and runs --print-tree); --extracted takes an
@@ -36,8 +36,7 @@ const path = require('path')
 
 const ADAPTERS = {
   properties: () => require('./adapters/properties'),
-  rpk: () => require('./adapters/rpk'),
-  connect: () => require('./adapters/connect')
+  rpk: () => require('./adapters/rpk')
 }
 
 /**
@@ -210,7 +209,7 @@ function main (argv) {
     .description('Classify docs-side override fields against extracted source strings')
     .requiredOption('--overrides <path>', 'Path to the overrides JSON file (for example docs-data/property-overrides.json)')
     .option('--extracted <path>', 'Path to the extracted source JSON (property extractor raw output; required for the properties surface)')
-    .option('--surface <surface>', 'Override surface: properties, rpk, or connect', 'properties')
+    .option('--surface <surface>', 'Override surface: properties or rpk', 'properties')
     .option('--format <format>', 'Output format: json or human', 'json')
     .option('--output <path>', 'Also write the JSON result to this file')
     .action((options) => {

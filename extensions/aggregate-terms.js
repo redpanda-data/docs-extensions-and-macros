@@ -127,32 +127,46 @@ module.exports.register = function ({ config }) {
   })
 
   .on('contentClassified', ({ siteCatalog, contentCatalog }) => {
-    const components = contentCatalog.getComponents();
+    // Appends every term, by category, to a glossary page.
+    function mergeTerms (glossaryPage) {
+      let glossaryContent = glossaryPage.contents.toString('utf8');
+      Object.keys(siteCatalog.termsByCategory).sort().forEach(category => {
+        let categoryContent = `\n\n== ${category}\n`;
+        siteCatalog.termsByCategory[category].sort((a, b) => a.name.localeCompare(b.name)).forEach(term => {
+          categoryContent += `\n\n${processTermContent(term.content)}`;
+        });
+        glossaryContent += categoryContent;
+      });
+      glossaryPage.contents = Buffer.from(glossaryContent, 'utf8');
+    }
+
     try {
-      components.forEach(({ versions }) => {
+      // With `glossarypage`, one page holds the glossary for the whole site,
+      // and every component's glossterm links point at it. Glossary pages
+      // components still have are filled too, so they stay complete until
+      // they are removed.
+      let sitePage = null;
+      if (config.glossarypage) {
+        sitePage = contentCatalog.resolvePage(config.glossarypage);
+        if (sitePage) {
+          mergeTerms(sitePage);
+          logger.info(`Merged terms into the site glossary ${config.glossarypage}.`);
+        } else {
+          logger.warn(`The glossarypage ${config.glossarypage} does not exist, so each component links to its own reference:glossary.adoc instead.`);
+        }
+      }
+
+      contentCatalog.getComponents().forEach(({ versions }) => {
         versions.forEach(({ name: component, version, asciidoc, title }) => {
           if (component == 'shared') return;
+          if (sitePage) asciidoc.attributes['glossary-page'] = config.glossarypage;
 
           const glossaryPage = contentCatalog.resolvePage(`${version ? version + '@' : ''}${component}:reference:glossary.adoc`);
-
-          if (glossaryPage) {
-            asciidoc.attributes['glossary-page'] = 'reference:glossary.adoc';
-            let glossaryContent = glossaryPage.contents.toString('utf8');
-
-            Object.keys(siteCatalog.termsByCategory).sort().forEach(category => {
-              let categoryContent = `\n\n== ${category}\n`;
-
-              siteCatalog.termsByCategory[category].sort((a, b) => a.name.localeCompare(b.name)).forEach(term => {
-                let processedContent = processTermContent(term.content);
-                categoryContent += `\n\n${processedContent}`;
-              });
-
-              glossaryContent += categoryContent;
-            });
-
-            glossaryPage.contents = Buffer.from(glossaryContent, 'utf8');
+          if (glossaryPage && glossaryPage !== sitePage) {
+            if (!sitePage) asciidoc.attributes['glossary-page'] = 'reference:glossary.adoc';
+            mergeTerms(glossaryPage);
             logger.info(`Merged terms into glossary for ${component} component${version ? ' version ' + version : ''}.`);
-          } else {
+          } else if (!glossaryPage && !sitePage) {
             logger.info(`Skipping ${title} ${version ? ' version ' + version : ''} - No glossary page (reference:glossary.adoc) found`);
           }
         });
