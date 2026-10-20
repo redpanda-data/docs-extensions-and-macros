@@ -121,7 +121,7 @@ const OVERVIEW_ATTRS = {
   'page-topic-type': 'solution',
   description: 'Build a live leaderboard from game events.',
   'page-solution-version': 'v1.2.3',
-  // A retired attribute an older page may still set: ignored, never an error.
+  // Retired attributes an older page may still set: ignored, never an error.
   'page-solution-difficulty': 'intermediate',
   'page-solution-duration': '45',
   'page-solution-status': 'published',
@@ -154,7 +154,7 @@ function makeSolution (id, { attrs = {}, steps, overviewHtml, stepHtml, title, v
     module: id,
     relative: `${stepId}.adoc`,
     title: `Step ${stepId}`,
-    attrs: { 'page-layout': 'solution-step', description: `Step ${stepId}`, ...(i === 0 ? { 'page-solution-step-duration': '5' } : {}) },
+    attrs: { 'page-layout': 'solution-step', description: `Step ${stepId}`, },
     html: (stepHtml && stepHtml[stepId]) || (i === stepIds.length - 1 ? LAST_STEP_HTML(`Step ${stepId}`) : STEP_HTML(`Step ${stepId}`)),
   }))
   return {
@@ -306,7 +306,7 @@ describe('solutions-catalog: happy path', () => {
     expect(record.version).toBe('v1.2.3')
     expect(record.download).toBe('authenticated')
     expect(record.featured).toBe(true)
-    expect(record.duration).toBe(45)
+    expect(record).not.toHaveProperty('duration')
     // verification.json is the only attachment, and it is evidence, so the
     // compatibility list is empty; files is the build-along list.
     expect(record.attachments).toEqual([])
@@ -318,8 +318,7 @@ describe('solutions-catalog: happy path', () => {
     const record = json(overview, 'page-solution')
     expect(record.steps.map((s) => s.id)).toEqual(['start-environment', 'build-leaderboard', 'verify-end-to-end'])
     expect(record.steps.map((s) => s.order)).toEqual([1, 2, 3])
-    expect(record.steps[0].duration).toBe(5)
-    expect(record.steps[1].duration).toBeNull()
+    expect(record.steps[0]).not.toHaveProperty('duration')
     expect(record.steps[0].url).toBe('/solutions/leaderboard/start-environment/')
   })
 
@@ -385,7 +384,8 @@ describe('solutions-catalog: happy path', () => {
     expect(attr(step, 'page-solution-version')).toBe('v1.2.3')
     expect(attr(step, 'page-solution-difficulty')).toBeUndefined()
     expect(json(step, 'page-solution')).not.toHaveProperty('difficulty')
-    expect(attr(step, 'page-solution-duration')).toBe('45')
+    expect(attr(step, 'page-solution-duration')).toBeUndefined()
+    expect(json(step, 'page-solution')).not.toHaveProperty('duration')
     expect(attr(step, 'page-solution-status')).toBe('published')
     expect(attr(step, 'page-solution-download')).toBe('authenticated')
     expect(attr(step, 'page-solution-featured')).toBe('true')
@@ -406,7 +406,6 @@ describe('solutions-catalog: happy path', () => {
       url: '/solutions/leaderboard/',
       provenance: 'explicit',
       score: 1,
-      duration: 45,
       technologies: ['Go', 'Protobuf'],
     })
   })
@@ -580,10 +579,6 @@ describe('solutions-catalog: metadata fatals (documentsConverted)', () => {
     ['missing description', { description: undefined }, /description is required/],
     ['missing version', { 'page-solution-version': undefined }, /page-solution-version is required/],
     ['malformed version', { 'page-solution-version': '1.2.3' }, /must match vX\.Y\.Z/],
-    ['missing duration', { 'page-solution-duration': undefined }, /page-solution-duration is required/],
-    ['duration below range', { 'page-solution-duration': '2' }, /between 5 and 600/],
-    ['duration above range', { 'page-solution-duration': '601' }, /between 5 and 600/],
-    ['duration not an integer', { 'page-solution-duration': '45m' }, /between 5 and 600/],
     ['bad status', { 'page-solution-status': 'live' }, /page-solution-status must be one of/],
     ['bad download', { 'page-solution-download': 'maybe' }, /page-solution-download must be one of/],
     ['bad platform', { 'page-solution-platforms': 'mainframe' }, /page-solution-platforms contains unknown values: mainframe/],
@@ -615,10 +610,11 @@ describe('solutions-catalog: metadata fatals (documentsConverted)', () => {
     await expect(run({ solutions: [solution] })).rejects.toThrow(/step start-environment must set :page-layout: solution-step/)
   })
 
-  test('step duration must be an integer', async () => {
-    const solution = makeSolution('leaderboard')
+  test('duration attributes are retired: no value is an error, and none is required', async () => {
+    const solution = makeSolution('leaderboard', { attrs: { 'page-solution-duration': '45m' } })
     solution.pages[1].asciidoc.attributes['page-solution-step-duration'] = 'five'
-    await expect(run({ solutions: [solution] })).rejects.toThrow(/page-solution-step-duration must be an integer/)
+    await expect(run({ solutions: [solution] })).resolves.toBeTruthy()
+    await expect(run({ solutions: [makeSolution('leaderboard', { attrs: { 'page-solution-duration': undefined } })] })).resolves.toBeTruthy()
   })
 
   test('landing layout must be solutions-home', async () => {
@@ -633,11 +629,11 @@ describe('solutions-catalog: metadata fatals (documentsConverted)', () => {
   })
 
   test('collects every error into one throw', async () => {
-    const solution = makeSolution('leaderboard', { attrs: { 'page-solution-duration': undefined, 'page-solution-version': 'nope' } })
+    const solution = makeSolution('leaderboard', { attrs: { description: undefined, 'page-solution-version': 'nope' } })
     let message
     try { await run({ solutions: [solution] }) } catch (err) { message = err.message }
     expect(message).toMatch(/2 errors/)
-    expect(message).toMatch(/page-solution-duration is required/)
+    expect(message).toMatch(/description is required/)
     expect(message).toMatch(/must match vX\.Y\.Z/)
   })
 })
@@ -2287,15 +2283,6 @@ describe('solutions-catalog: authoring drift', () => {
 
   test('a separately deployed Redpanda product is a technology, even one the taxonomy also names', async () => {
     await expect(run({ solutions: [makeSolution('leaderboard', { attrs: { 'page-solution-technologies': 'Redpanda Connect, Redpanda Migrator, Redpanda Operator, Go' } })] })).resolves.toBeTruthy()
-  })
-
-  test('step durations that do not add up to the total warn, only when every step is timed', async () => {
-    const partly = await run()
-    expect(warningsOf(partly)).not.toMatch(/add up to/)
-    const solution = makeSolution('leaderboard')
-    for (const page of solution.pages.slice(1)) page.asciidoc.attributes['page-solution-step-duration'] = '10'
-    const timed = await run({ solutions: [solution] })
-    expect(warningsOf(timed)).toMatch(/leaderboard: page-solution-duration is 45 but the steps' page-solution-step-duration values add up to 30/)
   })
 
   test('a landing or index page in related docs warns', async () => {

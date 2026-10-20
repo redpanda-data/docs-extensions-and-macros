@@ -360,7 +360,6 @@ describe('solution metadata in Markdown frontmatter', () => {
     status: 'draft',
     draft: true,
     featured: true,
-    duration: 45,
     download: 'authenticated',
     platforms: ['self-managed', 'cloud'],
     technologies: ['Redpanda', 'Schema Registry', 'Go'],
@@ -369,8 +368,8 @@ describe('solution metadata in Markdown frontmatter', () => {
     industries: ['Gaming'],
     personas: ['application-developer'],
     steps: [
-      { id: 'start-environment', title: 'Start the environment', url: '/solutions/multiplayer-gaming/start-environment/', order: 1, duration: 5 },
-      { id: 'build-leaderboard', title: 'Build the leaderboard', url: '/solutions/multiplayer-gaming/build-leaderboard/', order: 2, duration: null },
+      { id: 'start-environment', title: 'Start the environment', url: '/solutions/multiplayer-gaming/start-environment/', order: 1 },
+      { id: 'build-leaderboard', title: 'Build the leaderboard', url: '/solutions/multiplayer-gaming/build-leaderboard/', order: 2 },
     ],
     relatedDocs: [{ id: 'streaming:develop:consumer-offsets.adoc', title: 'Consumer offsets', url: '/streaming/develop/consumer-offsets/', provenance: 'explicit' }],
     relatedSolutions: [{ id: 'other', title: 'Other', url: '/solutions/other/' }],
@@ -407,7 +406,6 @@ describe('solution metadata in Markdown frontmatter', () => {
       id: 'multiplayer-gaming',
       version: 'v1.0.0',
       status: 'draft',
-      duration_minutes: 45,
       technologies: ['Redpanda', 'Schema Registry', 'Go'],
       platforms: ['self-managed', 'cloud'],
       categories: ['Topics and Partitions', 'Producers'],
@@ -467,13 +465,12 @@ describe('solution metadata in Markdown frontmatter', () => {
   })
 
   test('a field with nothing truthful to say is left out, not guessed', () => {
-    const sparse = { id: 'minimal', status: 'published', duration: 15, version: 'v0.1.0', tag: 'minimal/v0.1.0', download: 'none', repo: '', steps: [], technologies: [], platforms: [], categories: [], useCases: [], industries: [], relatedDocs: [] }
+    const sparse = { id: 'minimal', status: 'published', version: 'v0.1.0', tag: 'minimal/v0.1.0', download: 'none', repo: '', steps: [], technologies: [], platforms: [], categories: [], useCases: [], industries: [], relatedDocs: [] }
     const parsed = parse(generateFrontmatter(makePage({ record: sparse })))
     expect(parsed.solution).toEqual({
       id: 'minimal',
       version: 'v0.1.0',
       status: 'published',
-      duration_minutes: 15,
       repository: { download: 'none' },
     })
   })
@@ -515,7 +512,7 @@ describe('solution verification in Markdown frontmatter', () => {
     src: { component: 'solutions', version: '' },
     asciidoc: { doctitle: 'T', attributes: { 'page-solution': JSON.stringify(record) } },
   })
-  const BASE = { id: 'multiplayer-gaming', version: 'v1.0.0', tag: 'multiplayer-gaming/v1.0.0', repo: 'redpanda-data/solutions', status: 'published', duration: 45, download: 'authenticated', steps: [] }
+  const BASE = { id: 'multiplayer-gaming', version: 'v1.0.0', tag: 'multiplayer-gaming/v1.0.0', repo: 'redpanda-data/solutions', status: 'published', download: 'authenticated', steps: [] }
 
   test('projects the manifest with its own snake_case keys', () => {
     const block = buildSolutionMetadata(page({ ...BASE, verified: VERIFIED }))
@@ -560,7 +557,7 @@ describe('solution files in Markdown frontmatter', () => {
     src: { component: 'solutions', version: '' },
     asciidoc: { doctitle: 'T', attributes: { 'page-solution': JSON.stringify(record) } },
   })
-  const BASE = { id: 'mg', version: 'v1.0.0', tag: 'mg/v1.0.0', status: 'published', duration: 15, steps: [] }
+  const BASE = { id: 'mg', version: 'v1.0.0', tag: 'mg/v1.0.0', status: 'published', steps: [] }
 
   test('emits the files a reader may download', () => {
     const block = buildSolutionMetadata(page({ ...BASE, files: ['Makefile', 'services/leaderboard/main.go'] }))
@@ -580,7 +577,7 @@ describe('agent companion link in Markdown frontmatter', () => {
     src: { component: 'solutions', version: '' },
     asciidoc: { doctitle: 'T', attributes: { 'page-solution': JSON.stringify(record) } },
   })
-  const BASE = { id: 'mg', version: 'v1.0.0', tag: 'mg/v1.0.0', status: 'published', duration: 15, steps: [] }
+  const BASE = { id: 'mg', version: 'v1.0.0', tag: 'mg/v1.0.0', status: 'published', steps: [] }
 
   test('emits agent_companion when the build generated one', () => {
     const block = buildSolutionMetadata(page({ ...BASE, agentCompanion: '/solutions/mg/agent-companion.md' }))

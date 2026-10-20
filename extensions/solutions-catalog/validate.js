@@ -17,8 +17,6 @@ const { isStepScaffolding } = require('../../asciidoc-extensions/add-solution-fi
 const { normalizeCategories, isLeafCategory } = require('../../extension-utils/categories')
 const yaml = require('js-yaml')
 
-const DURATION_MIN = 5
-const DURATION_MAX = 600
 // The landing card shows the description in three clamped lines; 140
 // characters is what fits them.
 const DESCRIPTION_MAX = 140
@@ -229,10 +227,6 @@ function validateStructure (collected, { reservedIds = RESERVED_IDS } = {}) {
   return errors
 }
 
-function isInteger (value) {
-  return /^-?\d+$/.test(String(value).trim())
-}
-
 /** ISO 8601 instant, as the verification manifest is expected to carry. */
 function isIsoTimestamp (value) {
   if (typeof value !== 'string') return false
@@ -384,10 +378,6 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
   for (const step of record.steps) {
     const attrs = (step.page.asciidoc && step.page.asciidoc.attributes) || {}
     if (attrs['page-layout'] !== LAYOUTS.step) err(`step ${step.id} must set :page-layout: ${LAYOUTS.step} (found "${attrs['page-layout'] || ''}")`)
-    const stepDuration = attrs['page-solution-step-duration']
-    if (stepDuration !== undefined && stepDuration !== '' && !isInteger(stepDuration)) {
-      err(`step ${step.id}: page-solution-step-duration must be an integer number of minutes (found "${stepDuration}")`)
-    }
   }
 
   // Required scalars and enums
@@ -396,12 +386,6 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
 
   if (!record.version) err('page-solution-version is required (vX.Y.Z)')
   else if (!VERSION_RX.test(record.version)) err(`page-solution-version "${record.version}" must match vX.Y.Z`)
-
-  if (record.duration === undefined || record.duration === null || record.duration === '') {
-    err(`page-solution-duration is required (${DURATION_MIN}..${DURATION_MAX} minutes)`)
-  } else if (!isInteger(record.duration) || Number(record.duration) < DURATION_MIN || Number(record.duration) > DURATION_MAX) {
-    err(`page-solution-duration must be an integer between ${DURATION_MIN} and ${DURATION_MAX} (found "${record.duration}")`)
-  }
 
   if (!ENUMS.status.includes(record.status)) err(`page-solution-status must be one of ${ENUMS.status.join(', ')} (found "${record.status}")`)
   if (!ENUMS.download.includes(record.download)) err(`page-solution-download must be one of ${ENUMS.download.join(', ')} (found "${record.download}")`)
@@ -487,19 +471,6 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
   }
   for (const stepId of present) {
     if (!listed.has(stepId)) err(`pages/${stepId}.adoc exists but is not listed in page-solution-steps`)
-  }
-
-  // Duration: when every step is timed, the steps are the whole story.
-  const stepMinutes = record.stepIds.map((sid) => {
-    const step = record.steps.find((s) => s.id === sid)
-    const value = step && step.page.asciidoc && step.page.asciidoc.attributes && step.page.asciidoc.attributes['page-solution-step-duration']
-    return value !== undefined && value !== '' && isInteger(value) ? Number(value) : null
-  })
-  if (stepMinutes.length && stepMinutes.every((m) => m !== null) && isInteger(record.duration)) {
-    const total = stepMinutes.reduce((a, b) => a + b, 0)
-    if (total !== Number(record.duration)) {
-      warn(`page-solution-duration is ${record.duration} but the steps' page-solution-step-duration values add up to ${total}`)
-    }
   }
 
   // Related docs: warn when absent, fatal when malformed or unresolved
@@ -767,8 +738,6 @@ module.exports = {
   isIsoTimestamp,
   verificationWarnings,
   contentModifiedDate,
-  DURATION_MIN,
-  DURATION_MAX,
   DESCRIPTION_MAX,
   REQUIRED_OVERVIEW_H2,
   PRODUCTION_MIN_TOPICS,

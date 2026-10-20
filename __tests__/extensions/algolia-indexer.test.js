@@ -158,8 +158,6 @@ describe('algolia-indexer generate-index (Solutions records)', () => {
           'page-solution-id': 'leaderboard',
           'page-solution-step-id': 'build-leaderboard',
           'page-solution-difficulty': 'intermediate',
-          'page-solution-duration': '45',
-          'page-solution-step-duration': '10',
           'page-solution-technologies': 'Go, Protobuf',
           'page-solution-platforms': 'self-managed, cloud',
           'page-solution-status': 'published',
@@ -174,7 +172,6 @@ describe('algolia-indexer generate-index (Solutions records)', () => {
       _tags: ['Solutions'],
       solutionId: 'leaderboard',
       stepId: 'build-leaderboard',
-      duration: 10,
       technologies: ['Go', 'Protobuf'],
       platforms: ['self-managed', 'cloud'],
       status: 'published',
@@ -219,7 +216,6 @@ describe('algolia-indexer generate-index (Solutions records)', () => {
   const RECORD = JSON.stringify({
     id: 'leaderboard',
     title: 'Multiplayer game events with a live leaderboard',
-    duration: 50,
     useCases: ['Event-driven microservices'],
     industries: ['Gaming']
   })
@@ -230,7 +226,6 @@ describe('algolia-indexer generate-index (Solutions records)', () => {
     'page-solution-id': 'leaderboard',
     'page-solution-title': 'Multiplayer game events with a live leaderboard',
     'page-solution-step-id': 'start-environment',
-    'page-solution-duration': '50',
     ...extra
   })
 
@@ -261,14 +256,14 @@ describe('algolia-indexer generate-index (Solutions records)', () => {
     expect(record.solutionTitle).toBe('Multiplayer game events with a live leaderboard')
   })
 
-  test('a step with no duration of its own gets null, never the solution total', () => {
+  test('solution records carry no duration', () => {
     const [record] = runSolutions(solutionPage({
       url: '/solutions/leaderboard/start-environment/',
       relative: 'start-environment.adoc',
       attrs: stepAttrs(),
       html: stepHtml('Start the environment')
     }))
-    expect(record.duration).toBeNull()
+    expect(record).not.toHaveProperty('duration')
   })
 
   test('the overview record carries useCases and industries, searchable through keywords', () => {
@@ -278,7 +273,6 @@ describe('algolia-indexer generate-index (Solutions records)', () => {
       '<body><h1>Multiplayer game events with a live leaderboard</h1></body></html>'
     const [record] = runSolutions(solutionPage({ url: '/solutions/leaderboard/', relative: 'index.adoc', attrs, html }))
     expect(record.stepId).toBe('')
-    expect(record.duration).toBe(50)
     expect(record.useCases).toEqual(['Event-driven microservices'])
     expect(record.industries).toEqual(['Gaming'])
     expect(record.keywords).toEqual(['leaderboard', 'Event-driven microservices', 'Gaming'])

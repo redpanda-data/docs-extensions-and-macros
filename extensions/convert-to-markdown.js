@@ -108,13 +108,11 @@ function buildSolutionMetadata(page) {
 
   const steps = Array.isArray(record.steps) ? record.steps : []
   const stepId = attrs['page-solution-step-id']
-  const duration = Number(record.duration)
 
   const block = assignPresent({}, {
     id: record.id,
     version: record.version,
     status: record.status,
-    duration_minutes: Number.isFinite(duration) ? duration : undefined,
     technologies: record.technologies,
     platforms: record.platforms,
     categories: record.categories,

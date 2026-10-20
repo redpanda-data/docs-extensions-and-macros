@@ -445,7 +445,6 @@ function buildRecord (mod, modulePages, moduleAttachments, { version, moduleExam
     url: overview && overview.pub ? overview.pub.url : undefined,
     description: attrs.description ? String(attrs.description).trim() : '',
     version: solutionVersion,
-    duration: attrs['page-solution-duration'],
     status: attrs['page-solution-status'] ? String(attrs['page-solution-status']).trim() : '',
     featured: parseFlag(attrs['page-solution-featured']),
     download: attrs['page-solution-download'] ? String(attrs['page-solution-download']).trim() : '',
