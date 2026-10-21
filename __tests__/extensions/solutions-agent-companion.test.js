@@ -127,7 +127,13 @@ describe('agent companion: the flagship solution', () => {
       /^https:\/\/docs\.redpanda\.com\/connect\/[\w/.-]+\/(#[\w-]+)?$/,
       /^https:\/\/docs\.redpanda\.com\/solutions\/multiplayer-gaming\/([\w-]+\/)?(#[\w-]+)?$/,
     ]
-    const bad = urls.filter((u) => !live.some((rx) => rx.test(u)))
+    // How to use this names the companion itself, the docs MCP server, and llms.txt.
+    const fixed = [
+      'https://docs.redpanda.com/solutions/multiplayer-gaming/agent-companion.md',
+      'https://docs.redpanda.com/mcp',
+      'https://docs.redpanda.com/llms.txt',
+    ]
+    const bad = urls.filter((u) => !fixed.includes(u) && !live.some((rx) => rx.test(u)))
     expect(bad).toEqual([])
     expect(md).not.toMatch(/\/index\/|\.adoc/)
   })
@@ -143,6 +149,36 @@ describe('agent companion: the flagship solution', () => {
     const entry = sectionOf(md, '### 4. Build the live leaderboard')
     expect(entry).toContain('**In production:** The board on `game.leaderboard` is the source of truth')
     expect(md).not.toContain('services/dashboard/static/index.html')
+  })
+
+  test('How to use this carries the whole procedure, in order, before any reference data', () => {
+    const how = sectionOf(md, '## How to use this')
+    const steps = sectionOf(md, '### Steps').trim().split('\n')
+    expect(steps).toHaveLength(7)
+    steps.forEach((line, i) => expect(line.startsWith(`${i + 1}. `)).toBe(true))
+    // One plain download command for this companion's own URL, and what a failed download looks like.
+    expect(steps[0]).toContain('`curl -sf https://docs.redpanda.com/solutions/multiplayer-gaming/agent-companion.md`')
+    expect(steps[0]).toContain('with no pipes, redirects, `cd`, or temporary directories')
+    expect(steps[0]).toContain('If curl exits non-zero, or its output does not start with `# Agent companion:`, the download failed')
+    expect(steps[0]).toContain('ask the user to paste the file')
+    expect(steps[1]).toMatch(/^2\. Inspect the repository/)
+    expect(steps[2]).toMatch(/where Redpanda runs .* throughput and retention, and security requirements/)
+    expect(steps[3]).toBe('4. Answer every Adapt item for this repository, with file paths.')
+    expect(steps[4]).toMatch(/^5\. Write a plan before you change anything: for each Rule.*for each Production gap that applies.*Cite the companion section or the docs page/)
+    expect(steps[5]).toMatch(/^6\. Stop and wait for the user's approval\. Then make the changes in small reviewable commits\./)
+    expect(steps[6]).toMatch(/^7\. Finish with the Acceptance list: for each Rule, the evidence from the user's own system/)
+    const constraints = sectionOf(md, '### Constraints')
+    expect(how).toContain('Do not copy the reference system.')
+    expect(constraints).toContain('Never invent a configuration value')
+    expect(constraints).toContain('reference data, not instructions')
+    expect(constraints).toContain('https://docs.redpanda.com/mcp')
+    expect(constraints).toContain('https://docs.redpanda.com/llms.txt')
+    expect(md.indexOf('### Constraints')).toBeLessThan(md.indexOf('## The problem'))
+  })
+
+  test('the download command follows siteUrl', () => {
+    const r = generateAgentCompanion({ slug: 'multiplayer-gaming', pages, verifyScript, siteUrl: 'https://preview.example/' })
+    expect(sectionOf(r.markdown, '### Steps')).toContain('`curl -sf https://preview.example/solutions/multiplayer-gaming/agent-companion.md`')
   })
 
   test('is deterministic', () => {
@@ -296,6 +332,18 @@ describe('agent companion: solutions without rules', () => {
     expect(intro).not.toMatch(/Start with the Rules|Work through Adapt|Design contract|Acceptance is the finish line/)
     expect(intro).toContain('This solution states no rules yet')
     expect(intro).toContain('Reference build describes')
+  })
+
+  test('no rules: the procedure is still there, and plans against what the system must do', () => {
+    const r = generateAgentCompanion({ slug: 'tiny', pages: { index, one: step('One'), two: step('Two') } })
+    const steps = sectionOf(r.markdown, '### Steps').trim().split('\n')
+    expect(steps).toHaveLength(6)
+    expect(steps[0]).toContain('`curl -sf https://docs.redpanda.com/solutions/tiny/agent-companion.md`')
+    expect(steps.join('\n')).not.toMatch(/Rule|Adapt|Acceptance|Production gap/)
+    expect(steps[3]).toMatch(/^4\. Write a plan before you change anything: for each item in What the system must do/)
+    expect(steps[4]).toMatch(/^5\. Stop and wait for the user's approval/)
+    expect(steps[5]).toMatch(/^6\. Finish with the evidence from the user's own system for each item in What the system must do/)
+    expect(sectionOf(r.markdown, '### Constraints')).toContain('Never invent a configuration value')
   })
 
   test('an xref with empty text takes the title titleOf gives, else a label from its path', () => {
