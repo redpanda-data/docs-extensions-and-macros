@@ -242,6 +242,21 @@ describe('conditional rule (env-cloud blocks in connect spec strings)', () => {
     expect(closer).toHaveLength(1)
   })
 
+  test('whitespace inside the brackets of a directive is an error: Asciidoctor reads it as the single-line form', () => {
+    for (const kind of ['ifdef', 'ifndef']) {
+      const issues = CONDITIONAL_RULE.check(connectDecl(`A.\n\n${kind}::env-cloud[ ]\nB.\nendif::[]\n\nC.`))
+      expect(issues).toEqual([
+        expect.objectContaining({ severity: 'error', message: expect.stringContaining(`${kind}::env-cloud[ ] has whitespace inside its brackets`) }),
+        expect.objectContaining({ severity: 'error', message: expect.stringContaining('has no matching') })
+      ])
+    }
+    const closer = CONDITIONAL_RULE.check(connectDecl('A.\n\nifndef::env-cloud[]\nB.\nendif::[\t]\n\nC.'))
+    expect(closer).toEqual([expect.objectContaining({ severity: 'error', message: expect.stringContaining('has whitespace inside its brackets. Write endif::[]') })])
+    // Negative controls: the block form with empty brackets, and a named endif, pass
+    expect(messages('A.\n\nifndef::env-cloud[]\nB.\nendif::[]\n\nC.')).toEqual([])
+    expect(messages('A.\n\nifdef::env-cloud[]\nB.\nendif::env-cloud[]\n\nC.')).toEqual([])
+  })
+
   test('contradictory nesting is reported: the inner text renders for neither audience', () => {
     expect(messages('A.\n\nifdef::env-cloud[]\nCloud.\n\nifndef::env-cloud[]\nNever.\nendif::[]\n\nendif::[]\n\nB.')).toEqual([
       expect.stringContaining('ifndef::env-cloud[] is inside ifdef::env-cloud[], so the text between them renders for neither audience')

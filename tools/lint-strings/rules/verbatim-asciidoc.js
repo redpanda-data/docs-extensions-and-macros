@@ -231,6 +231,7 @@ const CONDITIONAL_RULE = {
       }
       if (kind === 'endif') {
         if (body.trim() !== '') say(`${label} carries text in its brackets. Close a block with endif::[] on its own line.`)
+        else if (body !== '') say(`${label} has whitespace inside its brackets. Write endif::[] with nothing between the brackets.`, 'error')
         if (attribute && attribute !== CONDITIONAL_ATTRIBUTE) say(`${label} names "${attribute}". env-cloud is the only attribute; close the block with endif::[].`)
         if (open.length === 0) say(`${label} has no matching ifdef::env-cloud[] or ifndef::env-cloud[] before it.`, 'error')
         else open.pop()
@@ -239,7 +240,13 @@ const CONDITIONAL_RULE = {
       }
       // ifdef / ifndef
       if (attribute !== CONDITIONAL_ATTRIBUTE) say(`${label} tests "${attribute}". env-cloud is the only attribute a doc string may test.`)
-      if (body.trim() !== '') {
+      if (body !== '' && body.trim() === '') {
+        // Asciidoctor reads any bracket content, whitespace included, as the
+        // single-line form, which opens no block: the text that follows shows
+        // for both audiences. So it is not pushed as an opener, and the endif
+        // that follows reports no matching opener.
+        say(`${label} has whitespace inside its brackets. Asciidoctor then reads it as the single-line form, which opens no block, so the text after it shows for both audiences. Write ${kind}::${attribute}[] with nothing between the brackets.`, 'error')
+      } else if (body !== '') {
         say(`${label} is the single-line form. Use the block form: the directive alone on its line, the whole paragraph inside, then endif::[] on its own line.`)
       } else {
         if (attribute === CONDITIONAL_ATTRIBUTE) {
