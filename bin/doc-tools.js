@@ -1824,22 +1824,28 @@ automation
       const outFile = path.join(outDir, `k-${name}${opts.outputSuffix}`)
       console.log(`pandoc ${md} → ${outFile}`)
       fs.mkdirSync(path.dirname(outFile), { recursive: true })
-      r = spawnSync('pandoc', [md, '-t', 'asciidoc', '-o', outFile], { stdio: 'inherit' })
-      if (r.status !== 0) process.exit(r.status)
+      const { markdownToAsciiDoc } = require('../cli-utils/helm-commented-values')
+      let converted
+      try {
+        converted = markdownToAsciiDoc(fs.readFileSync(md, 'utf8')) + '\n'
+      } catch (err) {
+        console.error(`Error: ${err.message}`)
+        process.exit(1)
+      }
 
       const { formatHelmSpec } = require('../cli-utils/format-helm-spec')
-      let doc = formatHelmSpec(fs.readFileSync(outFile, 'utf8'))
+      let doc = formatHelmSpec(converted)
 
       // helm-docs only renders keys that exist in the YAML tree, so optional
       // values that ship commented out never appear in the reference. Pull
       // documented commented-out keys from values.yaml and inject them. This
       // runs after formatHelmSpec so the injected body sections are not affected
       // by the blank-line normalization that its header fix performs. The
-      // comments are Markdown, so each one goes through pandoc on the way in,
-      // like the rest of the README did.
+      // comments are Markdown, so each one goes through markdownToAsciiDoc on
+      // the way in, like the README did.
       const valuesFile = path.join(chartPath, 'values.yaml')
       if (fs.existsSync(valuesFile)) {
-        const { extractCommentedValueDocs, injectIntoAsciiDoc, markdownToAsciiDoc, filterEntriesBySchema } = require('../cli-utils/helm-commented-values')
+        const { extractCommentedValueDocs, injectIntoAsciiDoc, filterEntriesBySchema } = require('../cli-utils/helm-commented-values')
         try {
           let entries = extractCommentedValueDocs(fs.readFileSync(valuesFile, 'utf8'))
 

@@ -878,4 +878,36 @@ describe('Markdown in commented-out value comments', () => {
     expect(markdownToAsciiDoc('')).toBe('')
     expect(markdownToAsciiDoc('Plain *emphasis*.')).toBe('Plain _emphasis_.')
   })
+
+  // pandoc's smart extension writes quotes as ``text'', which Asciidoctor
+  // does not render as quotes outside compat mode.
+  withPandoc('markdownToAsciiDoc keeps straight quotes instead of writing ``text\'\'', () => {
+    const out = markdownToAsciiDoc('Named "kubernetes-controller" unless it\'s set, with \'single\' quotes.')
+    expect(out).not.toContain('``')
+    expect(out).toBe('Named "kubernetes-controller" unless it\'s set, with \'single\' quotes.')
+  })
+
+  test('markdownToAsciiDoc runs pandoc with the smart extension off', () => {
+    const calls = []
+    jest.isolateModules(() => {
+      jest.doMock('child_process', () => ({
+        spawnSync: (cmd, args) => {
+          calls.push([cmd, args])
+          return { status: 0, stdout: 'out\n', stderr: '' }
+        },
+      }))
+      const mod = require('../../cli-utils/helm-commented-values')
+      expect(mod.markdownToAsciiDoc('"quoted"')).toBe('out')
+    })
+    jest.dontMock('child_process')
+    expect(calls).toEqual([['pandoc', ['-f', 'markdown-smart', '-t', 'asciidoc']]])
+  })
+
+  // generate helm-spec converts the README with markdownToAsciiDoc too, so
+  // the README and the injected comments can't drift to different options.
+  test('generate helm-spec has no pandoc call of its own', () => {
+    const src = require('fs').readFileSync(require('path').join(__dirname, '../../bin/doc-tools.js'), 'utf8')
+    expect(src).not.toMatch(/spawnSync\(\s*['"]pandoc['"]/)
+    expect(src).toMatch(/markdownToAsciiDoc\(fs\.readFileSync\(md, 'utf8'\)\)/)
+  })
 })

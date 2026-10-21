@@ -467,11 +467,16 @@ function filterEntriesBySchema (entries, schema) {
 }
 
 /**
- * Convert a Markdown fragment to AsciiDoc with pandoc, the same conversion
- * `generate helm-spec` applies to the helm-docs README. values.yaml comments
- * are Markdown (helm-docs copies them into the README as is), so a comment on
- * a commented-out key needs this before it is injected into the AsciiDoc, or
- * its links and emphasis are published as literal Markdown.
+ * Convert Markdown to AsciiDoc with pandoc. `generate helm-spec` uses this for
+ * the helm-docs README and for each values.yaml comment it injects, so both
+ * get the same conversion. values.yaml comments are Markdown (helm-docs copies
+ * them into the README as is), so without it an injected comment's links and
+ * emphasis are published as literal Markdown.
+ *
+ * The `smart` extension is turned off on input. With it, pandoc turns straight
+ * quotes into curly ones and writes them as ``text'', which only AsciiDoc
+ * Python understood. Asciidoctor prints those backticks and apostrophes
+ * literally, so straight quotes are passed through instead.
  *
  * @param {string} markdown - Markdown text.
  * @returns {string} AsciiDoc text, without a trailing newline.
@@ -479,9 +484,10 @@ function filterEntriesBySchema (entries, schema) {
  */
 function markdownToAsciiDoc (markdown) {
   if (!markdown || !markdown.trim()) return markdown
-  const r = spawnSync('pandoc', ['-f', 'markdown', '-t', 'asciidoc'], { input: markdown, encoding: 'utf8' })
+  const r = spawnSync('pandoc', ['-f', 'markdown-smart', '-t', 'asciidoc'], { input: markdown, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
   if (r.error) throw new Error(`pandoc failed: ${r.error.message}`)
   if (r.status !== 0) throw new Error(`pandoc exited ${r.status}: ${(r.stderr || '').trim()}`)
+  if (r.stderr) process.stderr.write(r.stderr)
   return r.stdout.replace(/\s+$/, '')
 }
 
