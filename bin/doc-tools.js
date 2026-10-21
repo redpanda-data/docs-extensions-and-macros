@@ -1834,10 +1834,12 @@ automation
       // values that ship commented out never appear in the reference. Pull
       // documented commented-out keys from values.yaml and inject them. This
       // runs after formatHelmSpec so the injected body sections are not affected
-      // by the blank-line normalization that its header fix performs.
+      // by the blank-line normalization that its header fix performs. The
+      // comments are Markdown, so each one goes through pandoc on the way in,
+      // like the rest of the README did.
       const valuesFile = path.join(chartPath, 'values.yaml')
       if (fs.existsSync(valuesFile)) {
-        const { extractCommentedValueDocs, injectIntoAsciiDoc, filterEntriesBySchema } = require('../cli-utils/helm-commented-values')
+        const { extractCommentedValueDocs, injectIntoAsciiDoc, markdownToAsciiDoc, filterEntriesBySchema } = require('../cli-utils/helm-commented-values')
         try {
           let entries = extractCommentedValueDocs(fs.readFileSync(valuesFile, 'utf8'))
 
@@ -1856,7 +1858,7 @@ automation
           }
 
           if (entries.length > 0) {
-            const { doc: withInjected, injected, sectionsFound } = injectIntoAsciiDoc(doc, entries)
+            const { doc: withInjected, injected, sectionsFound } = injectIntoAsciiDoc(doc, entries, { toAsciiDoc: markdownToAsciiDoc })
             doc = withInjected
             if (injected.length > 0) {
               console.log(`Documented ${injected.length} commented-out value(s): ${injected.join(', ')}`)

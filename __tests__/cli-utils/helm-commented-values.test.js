@@ -1,9 +1,11 @@
 'use strict'
 
+const { spawnSync } = require('child_process')
 const {
   parseValuesFile,
   extractCommentedValueDocs,
   injectIntoAsciiDoc,
+  markdownToAsciiDoc,
   filterEntriesBySchema,
   isPathAllowedBySchema,
 } = require('../../cli-utils/helm-commented-values')
@@ -788,5 +790,92 @@ describe('injectIntoAsciiDoc regressions', () => {
     expect(injected).toEqual(['zeta'])
     expect(doc.indexOf('path=zeta')).toBeGreaterThan(doc.indexOf('path=alpha'))
     expect(doc.indexOf('path=zeta')).toBeLessThan(doc.indexOf('=== Chart Requirements'))
+  })
+})
+
+describe('Markdown in commented-out value comments', () => {
+  const base = 'https://artifacthub.io/packages/helm/redpanda-data/operator?modal=values&path='
+  const adoc = [
+    '= Redpanda Operator Helm Chart Specification',
+    '',
+    `=== link:++${base}image.pullPolicy++[image.pullPolicy]`,
+    '',
+    'Sets the `pullPolicy` for the `redpanda-operator` image.',
+    '',
+    '*Default:* `"IfNotPresent"`',
+    '',
+    `=== link:++${base}nodeSelector++[nodeSelector]`,
+    '',
+    'Node selection constraints.',
+    '',
+    '*Default:* `{}`',
+    '',
+  ].join('\n')
+
+  test('passes each description and default through toAsciiDoc before sanitizing it', () => {
+    const seen = []
+    const toAsciiDoc = (text) => {
+      seen.push(text)
+      return text === 'md description' ? '== converted heading' : 'converted default'
+    }
+    const { doc } = injectIntoAsciiDoc(adoc, [
+      { path: 'image.tag', description: 'md description', default: 'md default' },
+    ], { toAsciiDoc })
+
+    expect(seen).toEqual(['md description', 'md default'])
+    // The converted text is still neutralized, so pandoc output can't add a section.
+    expect(doc).toContain('{empty}== converted heading')
+    expect(doc).toContain('*Default:* converted default')
+    expect(doc).not.toContain('md description')
+  })
+
+  // pandoc is what generate helm-spec runs; CI's test jobs don't install it.
+  const hasPandoc = spawnSync('pandoc', ['--version']).status === 0
+  const withPandoc = hasPandoc ? test : test.skip
+
+  // From redpanda-operator operator/v26.2.4 operator/chart/values.yaml.
+  const operatorValues = [
+    'image:',
+    '  # -- Sets the repository from which to pull the `redpanda-operator` image.',
+    '  repository: docker.redpanda.com/redpandadata/redpanda-operator',
+    '  # -- Sets the image version.',
+    '  # See DockerHub for [all stable versions](https://hub.docker.com/r/redpandadata/redpanda-operator/tags).',
+    '  # @default -- `Chart.appVersion`.',
+    '  # tag:',
+    '  # -- Sets the `pullPolicy` for the `redpanda-operator` image.',
+    '  pullPolicy: IfNotPresent',
+    '',
+    '# -- Sets operator container liveness probe various durations',
+    '# For details,',
+    '# see the [Kubernetes documentation](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/#Probe).',
+    '# livenessProbe:',
+    '',
+    '# -- Sets operator container readiness probe various durations',
+    '# For details,',
+    '# see the [Kubernetes documentation](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/#Probe).',
+    '# readinessProbe:',
+    '',
+  ].join('\n')
+
+  withPandoc('renders Markdown links in the operator chart comments as AsciiDoc links', () => {
+    const entries = extractCommentedValueDocs(operatorValues)
+    expect(entries.map((e) => e.path).sort()).toEqual(['image.tag', 'livenessProbe', 'readinessProbe'])
+
+    const { doc, injected } = injectIntoAsciiDoc(adoc, entries, { toAsciiDoc: markdownToAsciiDoc })
+    expect(injected.sort()).toEqual(['image.tag', 'livenessProbe', 'readinessProbe'])
+
+    // pandoc wraps lines, and where it wraps depends on its version.
+    const flat = doc.replace(/\s+/g, ' ')
+    expect(flat).not.toMatch(/\]\(https?:/)
+    expect(flat).toContain('https://hub.docker.com/r/redpandadata/redpanda-operator/tags[all stable versions]')
+    const probeLink = 'https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/#Probe[Kubernetes documentation]'
+    expect(flat.split(probeLink)).toHaveLength(3)
+    expect(doc).toContain('*Default:* `Chart.appVersion`.')
+    expect(doc).toContain('*Default:* `nil`')
+  })
+
+  withPandoc('markdownToAsciiDoc leaves empty text alone and strips the trailing newline', () => {
+    expect(markdownToAsciiDoc('')).toBe('')
+    expect(markdownToAsciiDoc('Plain *emphasis*.')).toBe('Plain _emphasis_.')
   })
 })
