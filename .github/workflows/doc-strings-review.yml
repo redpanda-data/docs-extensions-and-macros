@@ -887,8 +887,9 @@ jobs:
               adjacent literals within the file's column limit, all
               non-description arguments byte-identical; metrics descriptions
               take NO terminal period; cobra Short stays one capitalized line
-              with no period; CRD comments describe the json: tag key (never
-              the Go field name) and keep +kubebuilder marker lines
+              with no period; CRD comments open with what the field does
+              ("Specifies ...", never the Go field name or the json: tag
+              key) and keep +kubebuilder marker lines
               byte-identical; Helm comments keep the # -- marker conventions;
               connect strings follow CONNECT STRINGS below.
             - ends with this line, exactly, using the declaration's
