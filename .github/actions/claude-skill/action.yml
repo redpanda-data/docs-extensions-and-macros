@@ -10,6 +10,12 @@ description: >
   posts under its own identity), and the plugin's github-mutation-guard
   hook backstops any mutating gh call.
 
+  A caller with no PR under review (the docs update-release-notes
+  workflow, which curates a release before any PR exists) leaves
+  pr_number empty. The action then skips the PR checkout and the
+  base-branch CLAUDE.md step, and runs the skill against the caller's
+  workspace as it is, so files the caller downloaded first stay in place.
+
   Model auth is the ADP AI Gateway as the docs-pr-review agent
   (sdlc/prod/github/docs_pr_review_client, the adp_client_secret_id
   default; per-agent spend attribution on the ADP cost page; DEVPROD-4735
@@ -25,11 +31,16 @@ inputs:
     description: Directory (relative to workspace) the skill writes findings/verdict into
     required: true
   repo:
-    description: owner/repo of the PR under review
+    description: owner/repo of the PR under review. Unused when pr_number is empty.
     required: true
   pr_number:
-    description: PR number under review (its head is checked out for file reads)
-    required: true
+    description: >
+      PR number under review. Its head is checked out for file reads, and
+      the base branch's CLAUDE.md files are loaded. Leave empty when there
+      is no PR under review: both steps are skipped, and the skill reads
+      the caller's workspace. A non-empty value must be digits only.
+    required: false
+    default: ''
   plugin_ref:
     description: >
       Commit SHA of redpanda-data/docs-team-standards to check out as the
@@ -153,12 +164,30 @@ runs:
           exit 1
         fi
 
+    # pr_number lands in a git ref and an API path, so a non-empty value must
+    # be a plain number. Empty is valid: it means no PR is under review.
+    - name: Assert pr_number is empty or a number
+      shell: bash
+      env:
+        PR_NUMBER: ${{ inputs.pr_number }}
+      run: |
+        if [[ -n "$PR_NUMBER" && ! "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+          echo "::error::pr_number must be empty or digits only (got '${PR_NUMBER}')"
+          exit 1
+        fi
+        if [[ -z "$PR_NUMBER" ]]; then
+          echo "::notice::no PR under review: skipping the PR checkout and the base-branch CLAUDE.md step"
+        fi
+
     # PR head, so the skill can Read/Grep the changed files. Same-repo
     # branches only (fork PRs are excluded by the caller workflow).
     # persist-credentials: false — github.token must not be left in the
     # checkout's git config, where Claude's allowlisted git commands and any
     # script in the PR head could use it as an authenticated Git path.
+    # Skipped with no PR: a checkout into the workspace root would delete the
+    # files the caller staged there for the skill.
     - uses: actions/checkout@v4
+      if: inputs.pr_number != ''
       with:
         repository: ${{ inputs.repo }}
         ref: refs/pull/${{ inputs.pr_number }}/head
@@ -170,7 +199,8 @@ runs:
     # register MCP servers — so a same-repo PR could add a hook that reads
     # GH_TOKEN or the gateway bearer from this step's environment. Remove
     # them from the workspace before any claude invocation; the skills
-    # come from the pinned plugin checkout, not from the PR.
+    # come from the pinned plugin checkout, not from the PR. This also runs
+    # with no PR, because the caller's workspace can hold the same files.
     - name: Remove project-level Claude config from the PR head
       shell: bash
       run: |
@@ -195,7 +225,9 @@ runs:
     # has none, and nothing would restore over it.
     # Consequence: a PR that edits CLAUDE.md is reviewed under the OLD rules;
     # the new ones apply to the next PR after it merges.
+    # Skipped with no PR: there is no base branch, and no PR head to replace.
     - name: Load this repo's CLAUDE.md/CLAUDE.local.md files from the base branch
+      if: inputs.pr_number != ''
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
