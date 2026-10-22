@@ -2,7 +2,7 @@ const { raiseListenerLimit } = require('./util/raise-listener-limit')
 const os = require('os')
 const yaml = require('js-yaml')
 const { toMarkdownUrl } = require('../extension-utils/url-utils')
-const { formatLlmsDirective } = require('../extension-utils/llms-utils')
+const { formatLlmsDirective, transformOutsideFences } = require('../extension-utils/llms-utils')
 const TurndownService = require('turndown')
 const turndownPluginGfm = require('turndown-plugin-gfm')
 const { gfm } = turndownPluginGfm
@@ -320,6 +320,9 @@ const BASE_ESCAPES = [
   [/\]/g, '\\]'],
   [/^>/g, '\\>'],
   [/^(\d+)\. /g, '$1\\. '],
+  // A `*` or `_` that opens the text as a thematic break or a list marker.
+  [/^([*_])(?:\s*\1){2,}\s*$/g, (run) => run.replace(/[*_]/g, '\\$&')],
+  [/^([*_])(?=\s|$)/g, '\\$1'],
 ]
 
 // Outside the text node the neighbour is unknown. Treat it as punctuation:
@@ -355,10 +358,17 @@ function escapeEmphasisDelimiters (text) {
   return text.replace(/([*_])\1*/g, (run, ch, offset) => {
     const prev = offset > 0 ? text[offset - 1] : undefined
     const next = text[offset + run.length]
-    if (ch === '_' && isAlphanumeric(prev) && isAlphanumeric(next)) return run
+    // Already escaped by the base list.
+    if (prev === '\\') return run
+    // Intraword underscore. Both neighbours must be known: at a node boundary
+    // the next character may be a delimiter Turndown emits for <em>.
+    if (ch === '_' && prev !== undefined && next !== undefined && isAlphanumeric(prev) && isAlphanumeric(next)) return run
+    // A run that ends the text node may continue into an emitted delimiter
+    // (`RPK_` + `_NAME_`) or open emphasis that an unescaped closer later in
+    // the paragraph completes, so it is always escaped.
+    if (next === undefined) return run.replace(/[*_]/g, '\\$&')
     const leftFlanking =
       !isWhitespace(next) &&
-      next !== undefined &&
       (!isPunctuation(next) || prev === undefined || isWhitespace(prev) || isPunctuation(prev))
     return leftFlanking ? run.replace(/[*_]/g, '\\$&') : run
   })
@@ -396,6 +406,17 @@ const LINE_BREAKING_TAGS = new Set([
 
 const LINE_START_ESCAPE = /^(?:[-+>#=~]|\d+\. )/
 
+/** True for a sibling that produces no Markdown: a comment, or an element
+ * with no text and no image or line break inside it (an inline anchor from
+ * `[[id]]`, an empty badge span). Whitespace-only text counts too. */
+function rendersNothing (node) {
+  if (node.nodeType === 8) return true
+  if (node.nodeType === 3) return !(node.nodeValue || '').trim()
+  if (node.nodeType !== 1) return false
+  if ((node.textContent || '').trim()) return false
+  return !node.querySelector('img, br')
+}
+
 function insideCode (node) {
   for (let el = node.parentNode; el; el = el.parentNode) {
     if (el.nodeName === 'CODE' || el.nodeName === 'PRE') return true
@@ -420,7 +441,8 @@ function markLineContinuations (root) {
   const walk = (node) => {
     Array.from(node.childNodes || []).forEach((child) => {
       if (child.nodeType === 3) {
-        const previous = child.previousSibling
+        let previous = child.previousSibling
+        while (previous && rendersNothing(previous)) previous = previous.previousSibling
         if (
           previous &&
           !(previous.nodeType === 1 && LINE_BREAKING_TAGS.has(previous.nodeName)) &&
@@ -514,6 +536,15 @@ function resolveTarget (target, pageUrl) {
   }
 }
 
+/** The nearest enclosing tab group, or null. */
+function closestTabGroup (node) {
+  for (let el = node.parentNode; el; el = el.parentNode) {
+    const classAttr = (el.getAttribute && el.getAttribute('class')) || ''
+    if (classAttr.includes('openblock') && classAttr.includes('tabs')) return el
+  }
+  return null
+}
+
 function hasAncestorClass (node, className) {
   for (let el = node.parentNode; el; el = el.parentNode) {
     const classAttr = (el.getAttribute && el.getAttribute('class')) || ''
@@ -523,11 +554,24 @@ function hasAncestorClass (node, className) {
 }
 
 function isAdmonitionTable (node) {
-  return node.nodeName === 'TABLE' && !!(node.querySelector('td.icon') && node.querySelector('td.content'))
+  if (node.nodeName !== 'TABLE') return false
+  // The cells must be this table's own. querySelector searches descendants,
+  // so a data table with an admonition in one cell would otherwise be taken
+  // for the admonition and lose every other cell.
+  const icon = node.querySelector('td.icon')
+  const content = node.querySelector('td.content')
+  return !!icon && !!content && closestTable(icon) === node && closestTable(content) === node
 }
 
 function isCalloutTable (node) {
   return node.nodeName === 'TABLE' && hasAncestorClass(node, 'colist')
+}
+
+function insideCell (node) {
+  for (let el = node.parentNode; el; el = el.parentNode) {
+    if (el.nodeName === 'TD' || el.nodeName === 'TH') return true
+  }
+  return false
 }
 
 function closestTable (node) {
@@ -587,7 +631,6 @@ function createTurndownBase () {
   const td = new TurndownService(baseConfig)
   td.use(gfm)
   td.escape = escapeText
-  td.keep(['div.openblock.tabs', 'article.doc'])
   return td
 }
 
@@ -675,7 +718,11 @@ function createTurndownForPage ({ pageUrl, logger }) {
       replacement: function (_, node) {
         function processTabGroup (group, parentHeadingLevel = null) {
           const contentDiv = group.querySelector('.content') || group
-          const tabList = contentDiv.querySelectorAll('li.tab')
+          // Only this group's own tabs: querySelectorAll also finds the tabs
+          // of nested groups, which the recursion below handles.
+          const tabList = Array.from(contentDiv.querySelectorAll('li.tab')).filter(
+            (tab) => closestTabGroup(tab) === group
+          )
           if (!tabList.length) return ''
 
           const nearestLevel =
@@ -692,21 +739,30 @@ function createTurndownForPage ({ pageUrl, logger }) {
             const panel = group.querySelector(`#${panelId}`)
             if (!panel) return
 
-            const nestedTabs = panel.querySelectorAll('.openblock.tabs')
+            const nestedTabs = Array.from(panel.querySelectorAll('.openblock.tabs')).filter(
+              (nested) => closestTabGroup(nested) === group
+            )
             let nestedMdCombined = ''
             nestedTabs.forEach((nested) => {
               nestedMdCombined += '\n' + processTabGroup(nested, tabHeadingLevel) + '\n'
-              nested.remove()
             })
+
+            // Turndown converts children before it calls the parent's
+            // replacement, so this rule runs once in a pass whose output is
+            // thrown away. Removing nested groups from the shared tree there
+            // would lose them for the admonition or cell that converts this
+            // subtree again. Strip them from a copy instead.
+            const panelWithoutNested = panel.cloneNode(true)
+            panelWithoutNested.querySelectorAll('.openblock.tabs').forEach((nested) => nested.remove())
 
             let md = ''
             try {
-              md = convert(panel)
+              md = convert(panelWithoutNested)
             } catch (e) {
               logger.warn(`Turndown failed in nested tab: ${e.message}`)
             }
 
-            markdown += `${headingPrefix} ${title}\n\n${md.trim()}\n${nestedMdCombined.trim()}\n\n`
+            markdown += `${headingPrefix} ${title}\n\n${md.trim()}\n\n${nestedMdCombined.trim()}\n\n`
           })
 
           return markdown.trim()
@@ -805,6 +861,13 @@ function createTurndownForPage ({ pageUrl, logger }) {
         const pad = (cells) => cells.concat(Array(columnCount - cells.length).fill(''))
         const line = (cells) => `| ${pad(cells).join(' | ')} |`
 
+        // A table inside a cell cannot be a GFM table. Render its rows as
+        // text so the outer cell stays one line.
+        if (insideCell(node)) {
+          const textRows = (headerRow ? [headerCells] : []).concat(bodyRows)
+          return `\n\n${textRows.map((cells) => cells.filter(Boolean).join(' / ')).join('\n')}\n\n`
+        }
+
         const lines = [
           line(headerCells),
           `| ${Array(columnCount).fill('---').join(' | ')} |`,
@@ -856,8 +919,16 @@ function createTurndownForPage ({ pageUrl, logger }) {
     turndownInstance.addRule('links', {
       filter: (node) => node.nodeName === 'A' && !!node.getAttribute('href'),
       replacement: (content, node) => {
-        if (!content.trim()) return ''
-        const href = resolveTarget(node.getAttribute('href'), pageUrl).replace(/([()])/g, '\\$1')
+        const rawHref = node.getAttribute('href')
+        if (!content.trim()) {
+          // Heading anchors and other in-page links with no text carry nothing
+          // a reader can use. A text-less link elsewhere (an icon link) keeps
+          // its destination as an autolink.
+          const classAttr = node.getAttribute('class') || ''
+          if (classAttr.split(/\s+/).includes('anchor') || rawHref.startsWith('#')) return ''
+          return `<${resolveTarget(rawHref, pageUrl)}>`
+        }
+        const href = resolveTarget(rawHref, pageUrl).replace(/([()])/g, '\\$1')
         const title = cleanAttribute(node.getAttribute('title'))
         const titlePart = title ? ` "${title.replace(/"/g, '\\"')}"` : ''
         return `[${content}](${href}${titlePart})`
@@ -1000,10 +1071,11 @@ function convertPageHtml ({ html, page, siteUrl = '', logger = noopLogger }) {
     }
   }
 
-  return markdown
-    .replace(/\n{3,}/g, '\n\n')
-    .replace(/[ \t]+$/gm, '')
-    .trim()
+  // Tidy prose without touching code blocks, where blank lines and trailing
+  // spaces are content. A two-space hard break is kept.
+  return transformOutsideFences(markdown, (text) =>
+    text.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+$/gm, (spaces) => (spaces === '  ' ? spaces : ''))
+  ).trim()
 }
 
 module.exports.convertPageHtml = convertPageHtml

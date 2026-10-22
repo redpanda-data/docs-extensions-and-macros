@@ -1358,8 +1358,11 @@ The extension replaces Turndown's defaults where Asciidoctor's HTML would otherw
 |Inline code
 |Emitted from the element's text, so a URL that Asciidoctor auto-linked inside monospace does not become a Markdown link inside a code span.
 
-|Heading anchors (`<a class="anchor">`)
-|Removed. They otherwise appear as `[](#id)` in front of every heading.
+|Links with no text
+|A heading anchor (`<a class="anchor">`) or any other text-less in-page link is removed; it otherwise appears as `[](#id)` in front of every heading. A text-less link elsewhere, such as an icon link, keeps its destination as an autolink.
+
+|Tables with an admonition or a table in a cell
+|The outer table is kept. The admonition becomes a blockquote inside the cell; an inner table becomes text rows separated by ` / `.
 
 |Links and images
 |Relative targets are resolved against the page's HTML URL, so they work when the Markdown is read away from the site.
@@ -1370,7 +1373,7 @@ The extension replaces Turndown's defaults where Asciidoctor's HTML would otherw
 
 === Escaping
 
-Turndown escapes every `_` and `*`, which turns `get_orders` into `get\_orders` and `RPK_ environment variable` into `RPK\_`. The extension escapes an emphasis delimiter only when CommonMark would let it open emphasis: an underscore between two alphanumerics, or any delimiter followed by whitespace, is left alone. It also stops Turndown escaping a line-start character (`-`, `+`, `#`, `>`) that merely continues a line after an inline element, so `<a>Raft</a>-based` no longer exports as `[Raft](…)\-based`.
+Turndown escapes every `_` and `*`, which turns `get_orders` into `get\_orders` and `RPK_ environment variable` into `RPK\_`. The extension escapes an emphasis delimiter only when it could change meaning: a run that could open emphasis under CommonMark's flanking rules, a run that ends a text node (the next node may start with a delimiter Turndown emits for `<em>`), or a run that opens the text as a list marker or thematic break. An underscore between two alphanumerics, or a delimiter followed by whitespace in the middle of the text, is left alone. The extension also stops Turndown escaping a line-start character (`-`, `+`, `#`, `>`) that merely continues a line after an inline element, so `<a>Raft</a>-based` no longer exports as `[Raft](…)\-based`. Blank-line collapsing and trailing-space trimming skip fenced code blocks, and a two-space hard break is kept.
 
 == Generate llms.txt exports
 

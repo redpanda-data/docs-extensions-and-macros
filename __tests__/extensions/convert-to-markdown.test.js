@@ -161,6 +161,23 @@ describe('tables', () => {
     expect(bodyOf(md)).toBe('1. Required. The signing key.\n2. Marks cookies as secure.')
   })
 
+  test('keeps a table whose cell holds an admonition', () => {
+    const md = convert(
+      '<h1>T</h1><table><thead><tr><th>Setting</th><th>Notes</th></tr></thead><tbody>' +
+      '<tr><td>a</td><td>plain</td></tr>' +
+      '<tr><td>b</td><td><div class="admonitionblock note"><table><tr><td class="icon"><i class="fa icon-note"></i></td><td class="content"><p>careful</p></td></tr></table></div></td></tr>' +
+      '<tr><td>c</td><td>also plain</td></tr></tbody></table><p>after</p>'
+    )
+    expect(bodyOf(md)).toBe(
+      '| Setting | Notes |\n| --- | --- |\n| a | plain |\n| b | > 📝 **NOTE**<br>><br>> careful |\n| c | also plain |\n\nafter'
+    )
+  })
+
+  test('renders a table nested in a cell as text rows', () => {
+    const md = convert('<h1>T</h1><table><thead><tr><th>N</th><th>Inner</th></tr></thead><tbody><tr><td>1</td><td><table><tr><td>x</td><td>y</td></tr></table></td></tr></tbody></table>')
+    expect(bodyOf(md)).toBe('| N | Inner |\n| --- | --- |\n| 1 | x / y |')
+  })
+
   test('still renders admonitions as blockquotes', () => {
     const md = convert(
       '<h1>T</h1><div class="admonitionblock note"><table><tr><td class="icon"><i class="fa icon-note" title="Note"></i></td>' +
@@ -176,9 +193,26 @@ describe('escaping', () => {
     expect(bodyOf(md)).toBe('Built on [Raft](https://raft.github.io/)-based consensus.')
   })
 
+  test('keeps a line-start escape when only an invisible sibling precedes the text', () => {
+    const md = convert('<h1>T</h1><p><a id="z"></a># not a heading</p><p><a id="y"></a>1. not a list</p><div><!-- c -->- after comment</div>')
+    expect(bodyOf(md)).toBe('\\# not a heading\n\n1\\. not a list\n\n\\- after comment')
+  })
+
   test('still escapes a hyphen that starts a paragraph', () => {
     const md = convert('<h1>T</h1><p>- not a list</p>')
     expect(bodyOf(md)).toBe('\\- not a list')
+  })
+
+  test('escapes a delimiter that opens the text as a list marker or thematic break', () => {
+    expect(escapeText('* Indicates a required field')).toBe('\\* Indicates a required field')
+    expect(escapeText('***')).toBe('\\*\\*\\*')
+    expect(escapeText('* * *')).toBe('\\* \\* \\*')
+    expect(escapeText('___')).toBe('\\_\\_\\_')
+  })
+
+  test('escapes a delimiter run that ends the text node', () => {
+    const md = convert('<h1>T</h1><p>Press *<kbd>Ctrl</kbd>* and RPK_<em>NAME</em>; 10* faster, marked with * <b>x</b></p>')
+    expect(bodyOf(md)).toBe('Press \\*Ctrl\\* and RPK\\__NAME_; 10* faster, marked with * **x**')
   })
 
   test('leaves underscores inside identifiers alone', () => {
@@ -206,6 +240,16 @@ describe('escaping', () => {
   test('fences a literal block so its underscores are not escaped', () => {
     const md = convert('<h1>T</h1><div class="literalblock"><div class="content"><pre>invoke_agent (6.65 seconds)\n├── execute_tool get_quote</pre></div></div>')
     expect(bodyOf(md)).toBe('```\ninvoke_agent (6.65 seconds)\n├── execute_tool get_quote\n```')
+  })
+
+  test('keeps blank lines and trailing spaces inside a code block', () => {
+    const md = convert('<h1>T</h1><pre><code>def a():\n    pass\n\n\n\ndef b():  \n    pass</code></pre><p>x</p>')
+    expect(bodyOf(md)).toBe('```\ndef a():\n    pass\n\n\n\ndef b():  \n    pass\n```\n\nx')
+  })
+
+  test('keeps a two-space hard break', () => {
+    const md = convert('<h1>T</h1><p>Street 1<br>City</p>')
+    expect(bodyOf(md)).toBe('Street 1  \nCity')
   })
 
   test('keeps a source block fenced with its language', () => {
@@ -240,6 +284,12 @@ describe('links and images', () => {
     )
   })
 
+  test('keeps the destination of a link that has no text, as an autolink', () => {
+    const md = convert('<h1>T</h1><p><a href="https://x.com"><i class="fa fa-github"></i></a> text <a href="#top"></a></p>')
+    // Turndown drops the space after an element that renders no text.
+    expect(bodyOf(md)).toBe('<https://x.com>text')
+  })
+
   test('resolves image sources and keeps alt text', () => {
     const md = convert('<h1>T</h1><div class="imageblock"><div class="content"><img src="../_images/arch.png" alt="Tiered Storage architecture"></div></div>')
     expect(bodyOf(md)).toBe('![Tiered Storage architecture](https://docs.example.com/streaming/current/manage/_images/arch.png)')
@@ -251,6 +301,27 @@ describe('links and images', () => {
     expect(resolveTarget('//cdn.example.com/x.png', pageUrl)).toBe('//cdn.example.com/x.png')
     expect(resolveTarget('c/', null)).toBe('c/')
     expect(resolveTarget('c/', pageUrl)).toBe('https://docs.example.com/a/b/c/')
+  })
+})
+
+describe('tabs', () => {
+  const tabs = (id, title, body) =>
+    `<div class="openblock tabs"><div class="content"><ul class="tablist"><li class="tab" id="${id}" aria-controls="${id}--panel"><p>${title}</p></li></ul>` +
+    `<div class="tabpanel" id="${id}--panel">${body}</div></div></div>`
+
+  test('keeps a nested tab group inside an admonition', () => {
+    const inner = tabs('in', 'Inner', '<p>inner text</p>')
+    const outer = tabs('out', 'Outer', `<p>outer text</p>${inner}`)
+    const md = convert(`<h1>T</h1><div class="admonitionblock note"><table><tr><td class="icon"><i class="fa icon-note"></i></td><td class="content">${outer}</td></tr></table></div>`)
+    expect(bodyOf(md)).toBe('> 📝 **NOTE**\n>\n> ### Outer\n>\n> outer text\n>\n> #### Inner\n>\n> inner text')
+  })
+
+  test('renders three nested levels once each', () => {
+    const l3 = tabs('c', 'L3', '<p>three</p>')
+    const l2 = tabs('b', 'L2', `<p>two</p>${l3}`)
+    const l1 = tabs('a', 'L1', `<p>one</p>${l2}`)
+    const md = convert(`<h1>T</h1><h2>Section</h2>${l1}`)
+    expect(bodyOf(md)).toBe('## Section\n\n### L1\n\none\n\n#### L2\n\ntwo\n\n##### L3\n\nthree')
   })
 })
 
