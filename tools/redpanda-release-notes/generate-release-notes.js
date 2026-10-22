@@ -132,41 +132,72 @@ function insertReleaseSection(pageContent, sectionText) {
 }
 
 /**
- * Reorders the entries within each `=== category` of a curated section so that
- * entries sharing an `Area::` label sit together. Areas are ordered
- * ALPHABETICALLY (case-insensitive), so a given area sits in the same place on
- * every release instead of moving with the source's merge order; entries keep
- * their source order within an area, so the sort is stable. The label is
- * repeated per entry (not merged into one heading), so the page format is
- * unchanged — only the order of entries within a category changes. Running it on
- * an already-clustered section is a no-op, so it is safe to apply on every
- * release and on a backfill.
+ * Groups the entries within each `=== category` of a curated section by their
+ * `Area::` label. Areas are ordered ALPHABETICALLY (case-insensitive), so a given
+ * area sits in the same place on every release instead of moving with the
+ * source's merge order; entries keep their source order within an area, so the
+ * sort is stable. Each area is written ONCE per category, as the definition-list
+ * term, with its entries as a bulleted list under it:
  *
- * Only the clean single-line `Area:: description` definition-list form is
- * reordered. A category whose entries are not all of that form — a phase-1
- * candidate's plain `*` bullets, or a multi-line entry — is left in its original
- * order, so this is a safe no-op on anything it does not recognize. A curated
- * category (one with at least one `Area::` entry) that bails logs a warning, since
- * it then ships unclustered. Area keys are trimmed for grouping, so `Kafka API`
- * and `Kafka API ` are one area. Headings and any prose outside a category are
- * passed through untouched.
+ *   Cloud Topics::
+ *   * First entry.
+ *   * Second entry.
+ *
+ * An area with one entry still gets a one-item list. Input entries may be in
+ * either form: single-line `Area:: description` (what curation writes) or an
+ * already-grouped `Area::` paragraph with single-line `* ` items. A category can
+ * mix the two. Running it on its own output is a no-op, so it is safe to apply on
+ * every release, on a backfill, and on a section grouped by hand.
+ *
+ * A category with any other kind of entry (a phase-1 candidate's plain `*`
+ * bullets, or a multi-line entry) is left exactly as it is, so this is a safe
+ * no-op on anything it does not recognize. A curated category (one with at least
+ * one `Area::` entry) that is left as it is logs a warning, because it then
+ * ships ungrouped. Area keys are trimmed, so `Kafka API` and `Kafka API ` are one
+ * area, written as the trimmed label. Headings and any prose outside a category
+ * are passed through untouched.
  *
  * @param {string} sectionText - A rendered release section.
- * @return {string} The section with each category's entries clustered by area,
+ * @return {string} The section with each category's entries grouped by area,
  *   ending in a single newline.
  */
 function clusterSectionByArea(sectionText) {
-  // The area label is the text up to the first `:: ` (double-colon + space),
-  // which is the AsciiDoc definition-list term separator. A lazy match stops at
-  // that first separator, so a `::` later in the description is left alone. A
-  // leading list marker (`*`, `-`, `.`), at column zero or indented, is rejected
-  // so a plain bullet that happens to carry a `::` — a phase-1 candidate line —
-  // is not mistaken for an area entry; its category then bails and is left
-  // untouched.
-  const ENTRY_RE = /^(?!\s*[*.\-]+\s)(.+?)::\s/;
+  // A single-line entry: the area label is the text up to the first `:: `
+  // (double-colon + space), the AsciiDoc definition-list term separator. A lazy
+  // match stops at that first separator, so a `::` later in the description is
+  // left alone. A leading list marker (`*`, `-`, `.`), at column zero or
+  // indented, is rejected so a plain bullet that happens to carry a `::` (a
+  // phase-1 candidate line) is not mistaken for an area entry.
+  const ENTRY_RE = /^(?!\s*[*.\-]+\s)(.+?)::\s+(\S.*)$/;
+  // A grouped area: a term line with nothing after the `::`.
+  const TERM_RE = /^(?!\s*[*.\-]+\s)(.+?)::\s*$/;
+  // An item of a grouped area: one `* ` bullet on one line.
+  const ITEM_RE = /^\* (\S.*)$/;
+
+  // Parses one paragraph into [area, items], or null if it is not a recognized
+  // entry. A grouped paragraph must be a term line followed only by items.
+  const parseEntry = (para) => {
+    if (para.length === 1) {
+      const m = para[0].match(ENTRY_RE);
+      if (m) return [m[1].trim(), [m[2]]];
+    }
+    const t = para[0].match(TERM_RE);
+    if (t && para.length > 1) {
+      const items = [];
+      for (const line of para.slice(1)) {
+        const i = line.match(ITEM_RE);
+        if (!i) return null;
+        items.push(i[1]);
+      }
+      return [t[1].trim(), items];
+    }
+    return null;
+  };
+  const looksCurated = (para) => ENTRY_RE.test(para[0]) || TERM_RE.test(para[0]);
 
   // Tokenize into paragraphs: maximal runs of non-blank lines. In this format
-  // every heading and every entry is one such paragraph.
+  // every heading, every single-line entry, and every grouped area is one such
+  // paragraph.
   const lines = String(sectionText).replace(/\n+$/, '').split('\n');
   const paragraphs = [];
   let current = [];
@@ -181,38 +212,35 @@ function clusterSectionByArea(sectionText) {
 
   const out = [];
   let categoryEntries = null; // entry paragraphs of the open `=== category`
-  let categoryBail = false;   // the open category has an unrecognized entry
   let categoryTitle = '';     // the open category's heading text, for warnings
 
   const flushCategory = () => {
     if (!categoryEntries) return;
-    if (categoryBail) {
-      // A phase-1 bullet category is expected to bail. A curated one (it has at
-      // least one `Area::` entry) bailing means some entry spans several lines,
-      // so the whole category ships unclustered — say so rather than fail quietly.
-      if (categoryEntries.some((entry) => ENTRY_RE.test(entry[0]))) {
-        console.warn(`${LOG_TAG} WARN: "${categoryTitle}" not grouped by area: an entry is not a single-line \`Area:: description\` (for example a \`+\` continuation or a code block).`);
+    const parsed = categoryEntries.map(parseEntry);
+    if (parsed.some((e) => e === null)) {
+      // A phase-1 bullet category is expected to be left as it is. A curated one
+      // (it has at least one `Area::` entry) left as it is means some entry is
+      // neither form, so the whole category ships ungrouped. Say so rather than
+      // fail quietly.
+      if (categoryEntries.some(looksCurated)) {
+        console.warn(`${LOG_TAG} WARN: "${categoryTitle}" not grouped by area: an entry is neither a single-line \`Area:: description\` nor an \`Area::\` term with single-line \`* \` items (for example a \`+\` continuation or a code block).`);
       }
       for (const entry of categoryEntries) out.push(entry);
     } else {
       const order = [];
       const groups = new Map();
-      for (const entry of categoryEntries) {
-        // Trimmed, so a stray space before `::` does not split one area in two.
-        // Only the grouping key is trimmed; the entry text is emitted verbatim.
-        const key = entry[0].match(ENTRY_RE)[1].trim();
+      for (const [key, items] of parsed) {
         if (!groups.has(key)) { groups.set(key, []); order.push(key); }
-        groups.get(key).push(entry);
+        groups.get(key).push(...items);
       }
       // Areas alphabetical (case-insensitive), so an area lands in the same
       // place on every release; entries keep their source order within an area.
       order.sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }));
       for (const key of order) {
-        for (const entry of groups.get(key)) out.push(entry);
+        out.push([`${key}::`, ...groups.get(key).map((item) => `* ${item}`)]);
       }
     }
     categoryEntries = null;
-    categoryBail = false;
   };
 
   for (const para of paragraphs) {
@@ -222,7 +250,6 @@ function clusterSectionByArea(sectionText) {
       flushCategory();
       out.push(para);
       categoryEntries = [];
-      categoryBail = false;
       categoryTitle = first.replace(/^===\s+/, '').trim();
     } else if (/^==\s/.test(first)) {
       // The release heading (or any other top-level heading) closes the open
@@ -232,7 +259,6 @@ function clusterSectionByArea(sectionText) {
       categoryEntries = null;
     } else if (categoryEntries) {
       categoryEntries.push(para);
-      if (para.length !== 1 || !ENTRY_RE.test(para[0])) categoryBail = true;
     } else {
       // Prose outside any category (for example an intro paragraph): untouched.
       out.push(para);
