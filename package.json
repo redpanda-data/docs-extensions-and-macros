@@ -99,6 +99,7 @@
       "require": "./asciidoc-extensions/add-solution-file-provenance.js"
     },
     "./extensions/solutions-catalog/index": "./extensions/solutions-catalog/index.js",
+    "./extensions/solutions-catalog/agent-companion": "./extensions/solutions-catalog/agent-companion.js",
     "./extension-utils/deployment-type": "./extension-utils/deployment-type.js",
     "./extension-utils/categories": "./extension-utils/categories.js",
     "./docs-data/solutions-relationships.schema.json": "./docs-data/solutions-relationships.schema.json"

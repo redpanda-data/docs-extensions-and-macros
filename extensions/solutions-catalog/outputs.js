@@ -17,14 +17,11 @@ function buildSteps (record) {
   record.stepIds.forEach((id) => {
     const page = byId.get(id)
     if (!page) return
-    const attrs = (page.asciidoc && page.asciidoc.attributes) || {}
-    const duration = attrs['page-solution-step-duration']
     steps.push({
       id,
       title: plainTitle(page.asciidoc && page.asciidoc.doctitle) || page.title || id,
       url: page.pub && page.pub.url,
       order: steps.length + 1,
-      duration: duration === undefined || duration === '' ? null : Number(duration),
     })
   })
   return steps
@@ -53,7 +50,6 @@ function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions 
     status: record.status,
     draft: record.status === 'draft',
     featured: Boolean(record.featured),
-    duration: Number(record.duration),
     download: record.download,
     platforms: record.platforms,
     technologies: record.technologies,
@@ -76,6 +72,11 @@ function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions 
   if (publicRepo && record.repo) publicRecord.repo = record.repo
   // Evidence, not a default: no manifest means no key at all.
   if (record.verified) publicRecord.verified = record.verified
+  // Only when the companion was generated for this build.
+  if (record.agentCompanion) publicRecord.agentCompanion = record.agentCompanion
+  // TEMPORARY, preview only (draft_downloads): this draft downloads from its
+  // draft release. Absent everywhere else.
+  if (record.draftDownloads) publicRecord.draftDownloads = true
   return publicRecord
 }
 
@@ -84,7 +85,7 @@ function buildNav (publicRecord, { homeUrl } = {}) {
   return {
     home: { title: 'Solutions', url: homeUrl || null },
     overview: { title: publicRecord.title, url: publicRecord.url },
-    steps: publicRecord.steps.map(({ id, title, url, order, duration }) => ({ id, title, url, order, duration })),
+    steps: publicRecord.steps.map(({ id, title, url, order }) => ({ id, title, url, order })),
   }
 }
 
@@ -124,7 +125,6 @@ function applyPageAttributes (record, publicRecord, nav) {
       if (value === undefined || value === null || value === '') continue
       attrs[attr] = String(value)
     }
-    attrs['page-solution-duration'] = String(publicRecord.duration)
     // Present only when true, so templates can test the attribute's existence.
     if (publicRecord.featured) attrs['page-solution-featured'] = 'true'
     else delete attrs['page-solution-featured']
