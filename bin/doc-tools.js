@@ -2968,6 +2968,57 @@ programCli
   })
 
 /**
+ * check-sources
+ *
+ * @description
+ * Check the `// source:` comments in AsciiDoc pages. A source comment sits
+ * directly above the claim it supports: `// source: <ref>`, optionally
+ * followed by a short exact quote in double quotes. A ref is a file range
+ * (`redpanda-data/<repo>[@<git-ref>]:<path>:<line>[-<line>]`, default ref is
+ * the repo's default branch), a pull request (`redpanda-data/<repo>#<n>`), a
+ * Jira key, or an https:// URL. File refs are fetched from GitHub once per
+ * repo, ref, and path: the cited lines must exist and the quote must appear
+ * in them after whitespace is normalised (when it has moved, the message
+ * says where it is now). PR refs must exist; their state (merged, open,
+ * closed) is info. Jira keys and URLs are checked for syntax only, unless
+ * --check-urls. Errors (exit 1): malformed, missing-file, line-out-of-range,
+ * quote-not-found, pr-not-found, url-not-found. Warnings (exit 0):
+ * unreachable (auth or network failure, never a silent pass) and no-claim
+ * (nothing directly below the comment). Comments inside listing, literal,
+ * passthrough, and comment blocks are skipped. The GitHub token comes from
+ * REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN,
+ * GH_TOKEN, GIT_CREDENTIALS, then `gh auth token`.
+ *
+ * @why
+ * A page that paraphrases source code goes stale silently when the code
+ * changes. A source comment records where a claim came from; this command
+ * proves on every PR that the cited lines still exist and still say it.
+ *
+ * @example
+ * # Pages changed on this branch (what the docs PR check runs)
+ * npx doc-tools check-sources --diff origin/main
+ *
+ * # Specific pages, JSON output
+ * npx doc-tools check-sources --files 'modules/manage/pages/*.adoc,modules/get-started/pages/*.adoc' --format json
+ *
+ * # Also HEAD-check cited URLs
+ * npx doc-tools check-sources --check-urls
+ */
+programCli
+  .command('check-sources')
+  .description('Check that `// source:` comments in AsciiDoc pages cite GitHub lines, PRs, Jira keys, or URLs that exist and still contain the quoted text')
+  .option('--root <path>', 'Docs repo root (default: current directory)')
+  .option('--files <globs>', 'Comma-separated globs of .adoc files to check, relative to --root (default: modules/**/*.adoc). With --diff, filters the changed files')
+  .option('--diff <base>', 'Check only .adoc files changed between the merge base with <base> and HEAD, for example origin/main')
+  .option('--format <format>', 'Output format: human or json', 'human')
+  .option('--output <path>', 'Also write the JSON result to this file')
+  .option('--check-urls', 'HEAD-check https:// URL refs (default: syntax only)')
+  .action(async (options) => {
+    const { runCli } = require('../tools/check-sources')
+    await runCli(options)
+  })
+
+/**
  * check-build-log
  *
  * @description

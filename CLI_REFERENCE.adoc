@@ -41,6 +41,7 @@ display help for command
 * `lint-strings` - Lint user-facing doc strings embedded in engineering source code (properties, metrics, ...)
 * `doc-impact-recording` - Extract the docs MCP calls from a Claude Code transcript into a doc-impact eval recording
 * `lint-screenshots` - Lint image macros and image files in a docs repo against the screenshot standard (alt text, size, format, width)
+* `check-sources` - Check that `// source:` comments in AsciiDoc pages cite GitHub lines, PRs, Jira keys, or URLs that exist and still contain the quoted text
 * `check-build-log` - Check an Antora JSON build log: fail on error or fatal records or too few pages, print a Markdown summary
 * `check-rendered-html` - Scan rendered Antora HTML for unconverted AsciiDoc (literal backticks, xref:, include::, attributes, tables, empty sections) and broken anchors and links
 * `connect-docs-diff` - Diff two generated Connect docs trees and map each changed partial or example to its published page
@@ -744,6 +745,58 @@ npx doc-tools lint-screenshots --files changed.txt --format json --output review
 
 # Adopt the stricter items as blocking
 npx doc-tools lint-screenshots --warnings-as-errors
+----
+
+== check-sources
+
+Check the `// source:` comments in AsciiDoc pages. A source comment sits directly above the claim it supports: `// source: <ref>`, optionally followed by a short exact quote in double quotes. A ref is a file range (`redpanda-data/<repo>[@<git-ref>]:<path>:<line>[-<line>]`, default ref is the repo's default branch), a pull request (`redpanda-data/<repo>#<n>`), a Jira key, or an https:// URL. File refs are fetched from GitHub once per repo, ref, and path: the cited lines must exist and the quote must appear in them after whitespace is normalised (when it has moved, the message says where it is now). PR refs must exist; their state (merged, open, closed) is info. Jira keys and URLs are checked for syntax only, unless --check-urls. Errors (exit 1): malformed, missing-file, line-out-of-range, quote-not-found, pr-not-found, url-not-found. Warnings (exit 0): unreachable (auth or network failure, never a silent pass) and no-claim (nothing directly below the comment). Comments inside listing, literal, passthrough, and comment blocks are skipped. The GitHub token comes from REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, GH_TOKEN, GIT_CREDENTIALS, then `gh auth token`.
+
+*Why use it:*
+
+A page that paraphrases source code goes stale silently when the code changes. A source comment records where a claim came from; this command proves on every PR that the cited lines still exist and still say it.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools check-sources [options]
+----
+
+*Options:*
+
+`--root <path>`::
+Docs repo root (default: current directory)
+
+`--files <globs>`::
+Comma-separated globs of .adoc files to check, relative to --root (default: modules/**/*.adoc). With --diff, filters the changed files
+
+`--diff <base>`::
+Check only .adoc files changed between the merge base with <base> and HEAD, for example origin/main
+
+`--format <format>`::
+Output format: human or json (default: "human")
+
+`--output <path>`::
+Also write the JSON result to this file
+
+`--check-urls`::
+HEAD-check https:// URL refs (default: syntax only)
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Pages changed on this branch (what the docs PR check runs)
+npx doc-tools check-sources --diff origin/main
+
+# Specific pages, JSON output
+npx doc-tools check-sources --files 'modules/manage/pages/*.adoc,modules/get-started/pages/*.adoc' --format json
+
+# Also HEAD-check cited URLs
+npx doc-tools check-sources --check-urls
 ----
 
 == check-build-log
