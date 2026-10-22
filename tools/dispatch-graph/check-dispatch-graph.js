@@ -21,6 +21,8 @@
  *   receiver-never-received        the sender has fired, the receiver has never run from a dispatch
  *   payload-variant-without-sender a receiver's choice input lists a value no sender ever sends
  *   duplicate-sender               the same edge is dispatched from more than one repo (one is usually stale)
+ *   sender-step-never-succeeded    the sender's dispatch step has an `if:` and did not succeed in any recent run checked
+ *   receiver-disabled              the receiving workflow is disabled (state is not active), so dispatches are dropped
  *
  * Informational (do not affect the exit code):
  *   listener-without-sender (cron) nothing dispatches to it, but a schedule runs it anyway
@@ -29,6 +31,9 @@
  *   reusable-sender                a workflow_call-only sender, whose runs live in its callers
  *   receiver-no-dispatch-runs      a receiver that has only ever run by hand or on a schedule
  *   parse-error                    a workflow file that is not valid YAML
+ *   archived-repo                  a configured repo that is archived; its workflows cannot run, so it sends nothing
+ *   renamed-repo                   a configured repo that GitHub redirects to a new name; it is checked under the new name
+ *   conditional-sender             a gated dispatch step that could not be located in the jobs API, so the workflow run counts
  *
  * Could-not-run (exit 2) is anything that stops the check seeing the whole
  * graph: a repo that cannot be read, a runs query that fails. The findings
@@ -79,6 +84,19 @@ function createGitHubApi (octokit) {
       const { data } = await octokit.repos.get(split(slug))
       return data.default_branch
     },
+    // repos.get follows a rename redirect, so full_name is the current name.
+    async getRepo (slug) {
+      const { data } = await octokit.repos.get(split(slug))
+      return { fullName: data.full_name, defaultBranch: data.default_branch, archived: Boolean(data.archived) }
+    },
+    async listWorkflows (slug) {
+      const { data } = await octokit.actions.listRepoWorkflows({ ...split(slug), per_page: 100 })
+      return (data.workflows || []).map((w) => ({ path: w.path, state: w.state }))
+    },
+    async listJobsForRun (slug, runId) {
+      const { data } = await octokit.actions.listJobsForWorkflowRun({ ...split(slug), run_id: runId, per_page: 100 })
+      return data.jobs || []
+    },
     async listWorkflowFiles (slug, ref) {
       const { data } = await octokit.repos.getContent({ ...split(slug), path: '.github/workflows', ref })
       if (!Array.isArray(data)) return []
@@ -91,8 +109,10 @@ function createGitHubApi (octokit) {
       if (Array.isArray(data) || typeof data.content !== 'string') throw new Error(`${slug}:${path} is not a file`)
       return Buffer.from(data.content, data.encoding || 'base64').toString('utf8')
     },
-    async listWorkflowRuns (slug, file, perPage) {
-      const { data } = await octokit.actions.listWorkflowRuns({ ...split(slug), workflow_id: file, per_page: perPage })
+    async listWorkflowRuns (slug, file, perPage, opts = {}) {
+      const params = { ...split(slug), workflow_id: file, per_page: perPage }
+      if (opts.event) params.event = opts.event
+      const { data } = await octokit.actions.listWorkflowRuns(params)
       return data.workflow_runs || []
     },
   }
@@ -137,12 +157,34 @@ async function scanRepos ({ repos, api, concurrency }) {
   const unreadable = []
   const parseErrors = []
   const scanned = []
+  const notes = []
+  const aliases = {} // configured slug (lowercase) -> current full_name (lowercase)
+  const seen = new Set()
 
-  await mapLimit(repos, concurrency, async ({ repo, role }) => {
+  await mapLimit(repos, concurrency, async ({ repo: configured, role }) => {
     let ref
     let files
+    let repo = String(configured).toLowerCase()
     try {
-      ref = await api.getDefaultBranch(repo)
+      const meta = api.getRepo
+        ? await api.getRepo(configured)
+        : { fullName: configured, defaultBranch: await api.getDefaultBranch(configured), archived: false }
+      repo = String(meta.fullName || configured).toLowerCase()
+      ref = meta.defaultBranch
+      if (repo !== String(configured).toLowerCase()) {
+        aliases[String(configured).toLowerCase()] = repo
+        notes.push({ kind: 'renamed-repo', message: `${configured} has been renamed to ${repo}; it is checked under the new name. Update the configured list.` })
+      }
+      if (seen.has(repo)) return // configured twice, for example under an old and a new name
+      seen.add(repo)
+      if (meta.archived) {
+        // Archived repos cannot run workflows, so nothing in them sends or
+        // receives. Kept in the scanned set so a dispatch aimed at one is
+        // still reported as having no listener.
+        notes.push({ kind: 'archived-repo', message: `${repo} is archived; its workflows cannot run, so it is skipped as a sender and has no listeners.` })
+        scanned.push({ repo, role, ref, workflows: 0, archived: true })
+        return
+      }
       files = await api.listWorkflowFiles(repo, ref)
     } catch (err) {
       unreadable.push({ repo, role, error: describeError(err) })
@@ -172,7 +214,7 @@ async function scanRepos ({ repos, api, concurrency }) {
   })
 
   scanned.sort((a, b) => a.repo.localeCompare(b.repo))
-  return { listeners, senders, unreadable, parseErrors, scanned }
+  return { listeners, senders, unreadable, parseErrors, scanned, notes, aliases }
 }
 
 function describeError (err) {
@@ -184,7 +226,7 @@ function describeError (err) {
  * Join senders and listeners into edges and derive the structural findings
  * (everything that can be known from the files alone).
  */
-function buildGraph ({ listeners, senders, scannedRepos, docsRepos }) {
+function buildGraph ({ listeners, senders, scannedRepos, docsRepos, aliases = {} }) {
   const scannedSet = new Set(scannedRepos)
   const docsSet = new Set(docsRepos)
   const listenersByKey = new Map()
@@ -211,6 +253,9 @@ function buildGraph ({ listeners, senders, scannedRepos, docsRepos }) {
   }
 
   for (const s of senders) {
+    // A dispatch aimed at a repo's old name is redirected by GitHub, so it is
+    // an edge to the repo under its current name.
+    if (s.targetRepo && aliases[s.targetRepo]) s.targetRepo = aliases[s.targetRepo]
     if (s.unresolved || !s.targetRepo || !s.eventType) {
       info.push({
         kind: 'unresolved-sender',
@@ -308,22 +353,101 @@ function buildGraph ({ listeners, senders, scannedRepos, docsRepos }) {
  * Fetch the run record of every workflow that takes part in an edge and
  * derive the run-based findings.
  */
-async function recordRuns ({ edges, api, perPage, window, threshold, concurrency }) {
-  const workflows = new Map() // repo/file -> { repo, file, side }
+async function recordRuns ({ edges, api, perPage, window, threshold, concurrency, stepRuns = 20 }) {
+  const workflows = new Map() // repo/file -> { repo, file, listener }
   for (const e of edges) {
-    for (const s of e.senders) workflows.set(`${s.repo}/${s.file}`, { repo: s.repo, file: s.file })
-    for (const l of e.listeners) workflows.set(`${l.repo}/${l.file}`, { repo: l.repo, file: l.file })
+    for (const s of e.senders) {
+      const k = `${s.repo}/${s.file}`
+      if (!workflows.has(k)) workflows.set(k, { repo: s.repo, file: s.file, listener: false })
+    }
+    for (const l of e.listeners) workflows.set(`${l.repo}/${l.file}`, { repo: l.repo, file: l.file, listener: true })
   }
   const runs = new Map()
+  const rawRuns = new Map()
   const runsUnreadable = []
-  await mapLimit([...workflows.values()], concurrency, async ({ repo, file }) => {
+  let extraCalls = 0
+  await mapLimit([...workflows.values()], concurrency, async ({ repo, file, listener }) => {
     try {
       const list = await api.listWorkflowRuns(repo, file, perPage)
-      runs.set(`${repo}/${file}`, summarizeRuns(list, { window }))
+      const summary = summarizeRuns(list, { window })
+      // A listener that also runs on push, pull_request or a schedule can
+      // fill a whole page with those runs and push its dispatch runs off the
+      // end. Only when the page is full and holds no dispatch run is the
+      // filtered query needed; a shorter page is the complete history.
+      if (listener && summary.dispatchRuns === 0 && list.length >= perPage) {
+        extraCalls += 1
+        const dispatched = await api.listWorkflowRuns(repo, file, perPage, { event: 'repository_dispatch' })
+        const only = (dispatched || []).filter((r) => !r.event || r.event === 'repository_dispatch')
+        const d = summarizeRuns(only, { window })
+        summary.dispatchRuns = d.total
+        summary.lastDispatchRunAt = d.lastRunAt
+      }
+      runs.set(`${repo}/${file}`, summary)
+      rawRuns.set(`${repo}/${file}`, list)
     } catch (err) {
       runsUnreadable.push({ repo, file, error: describeError(err) })
     }
   })
+
+  // A disabled workflow receives nothing: GitHub still answers the dispatch
+  // with 204. One workflow list per repo that holds a listener.
+  const states = new Map() // repo -> Map(file -> state)
+  if (api.listWorkflows) {
+    const listenerRepos = [...new Set([...workflows.values()].filter((w) => w.listener).map((w) => w.repo))]
+    await mapLimit(listenerRepos, concurrency, async (repo) => {
+      try {
+        extraCalls += 1
+        const list = await api.listWorkflows(repo)
+        states.set(repo, new Map(list.map((w) => [String(w.path).replace(/^\.github\/workflows\//, ''), w.state])))
+      } catch (err) {
+        runsUnreadable.push({ repo, file: '(workflow list)', error: describeError(err) })
+      }
+    })
+  }
+
+  // A sender whose dispatch step (or its job) is gated by `if:` has not
+  // dispatched just because the workflow ran. Read the jobs of its newest
+  // completed runs, newest first, and stop at the first run where the step
+  // succeeded. Bounded by stepRuns per workflow; jobs are cached per run.
+  // The bound is generous because a gate like "only on a non-prerelease tag"
+  // skips the step on most runs: on 2026-10-22 connect's release.yml needed
+  // 7 runs and a window of 5 reported a working sender as dead.
+  const jobsCache = new Map()
+  const getJobs = async (repo, runId) => {
+    const k = `${repo}#${runId}`
+    if (!jobsCache.has(k)) {
+      extraCalls += 1
+      jobsCache.set(k, api.listJobsForRun(repo, runId))
+    }
+    return jobsCache.get(k)
+  }
+  const stepChecks = new Map() // sender object -> { checked, succeeded, located }
+  const conditional = []
+  for (const e of edges) for (const s of e.senders) if (s.conditional && !conditional.includes(s)) conditional.push(s)
+  if (api.listJobsForRun) {
+    await mapLimit(conditional, concurrency, async (s) => {
+      const list = rawRuns.get(`${s.repo}/${s.file}`)
+      if (!list || list.length === 0) return
+      const completed = list
+        .filter((r) => r.status === 'completed' && r.id !== undefined)
+        .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+        .slice(0, stepRuns)
+      const check = { checked: 0, succeeded: 0, located: 0 }
+      try {
+        for (const r of completed) {
+          const jobs = await getJobs(s.repo, r.id)
+          check.checked += 1
+          const conclusion = dispatchStepConclusion(jobs, s.stepRef)
+          if (conclusion === undefined) continue
+          check.located += 1
+          if (conclusion === 'success') { check.succeeded += 1; break }
+        }
+        stepChecks.set(s, check)
+      } catch (err) {
+        runsUnreadable.push({ repo: s.repo, file: `${s.file} (jobs)`, error: describeError(err) })
+      }
+    })
+  }
 
   const findings = []
   const info = []
@@ -335,6 +459,33 @@ async function recordRuns ({ edges, api, perPage, window, threshold, concurrency
       const summary = runs.get(`${s.repo}/${s.file}`)
       if (!summary) continue
       const id = `${s.repo}/${s.file}`
+      if (s.conditional && summary.total > 0) {
+        const check = stepChecks.get(s)
+        if (check && check.succeeded > 0) {
+          anySenderFired = true
+        } else if (check && check.located > 0) {
+          if (!reportedSenders.has(`${id}#step`)) {
+            reportedSenders.add(`${id}#step`)
+            findings.push({
+              severity: 'error',
+              kind: 'sender-step-never-succeeded',
+              edge: e.key,
+              message: `${describeSender(s)} ran, but its dispatch step "${s.stepRef.stepName}" (if: ${s.condition}) did not succeed in any of the newest ${check.checked} completed run(s), so it has not dispatched ${e.eventType} recently.`,
+            })
+          }
+        } else {
+          // The step could not be found in the jobs API (a job name built
+          // from an expression, say), or the jobs could not be read at all.
+          // The workflow run is the best evidence left.
+          anySenderFired = true
+          info.push({
+            kind: 'conditional-sender',
+            edge: e.key,
+            message: `${describeSender(s)} dispatches only when ${s.condition}; its dispatch step was not found in the jobs of its recent runs (the step may be newer than those runs), so a workflow run is counted as a dispatch.`,
+          })
+        }
+        continue
+      }
       // A reusable workflow (workflow_call only) runs inside its callers'
       // jobs, so its own run list is empty by construction. Its edge is still
       // reported, but "never fired" cannot be read off this repo.
@@ -391,6 +542,16 @@ async function recordRuns ({ edges, api, perPage, window, threshold, concurrency
       })
     }
     for (const l of e.listeners) {
+      const state = states.get(l.repo) && states.get(l.repo).get(l.file)
+      if (state && state !== 'active') {
+        findings.push({
+          severity: 'error',
+          kind: 'receiver-disabled',
+          edge: e.key,
+          message: `${target}/${l.file} is ${state}, so it does not run on ${e.eventType}. GitHub accepts the dispatch (204) and drops it.`,
+        })
+        continue
+      }
       const summary = runs.get(`${l.repo}/${l.file}`)
       if (!summary) continue
       const c = classifyReceiver(summary, { threshold })
@@ -418,7 +579,29 @@ async function recordRuns ({ edges, api, perPage, window, threshold, concurrency
       }
     }
   }
-  return { runs, runsUnreadable, findings, info }
+  return { runs, runsUnreadable, findings, info, stepChecks, extraCalls }
+}
+
+/**
+ * The conclusion of the dispatch step in one run's jobs, or undefined when the
+ * step cannot be found. A matrix job is reported as "name (a, b)", so any job
+ * whose name starts with the job's name counts; success in any of them wins.
+ */
+function dispatchStepConclusion (jobs, ref) {
+  if (!ref) return undefined
+  const matching = (jobs || []).filter((j) => j.name === ref.jobName || String(j.name).startsWith(`${ref.jobName} (`) ||
+    (ref.jobName !== ref.jobKey && (j.name === ref.jobKey || String(j.name).startsWith(`${ref.jobKey} (`))))
+  let found
+  for (const j of matching) {
+    // A job skipped by its own `if:` has no steps; its dispatch step did not run.
+    if (j.conclusion === 'skipped' && (!j.steps || j.steps.length === 0)) { found = found || 'skipped'; continue }
+    const steps = j.steps || []
+    const step = steps.find((st) => st.name === ref.stepName) || steps.find((st) => st.number === ref.stepNumber && !ref.stepName)
+    if (!step) continue
+    if (step.conclusion === 'success') return 'success'
+    found = step.conclusion || 'unknown'
+  }
+  return found
 }
 
 /**
@@ -431,6 +614,7 @@ async function recordRuns ({ edges, api, perPage, window, threshold, concurrency
  * @param {number} [opts.window=20]
  * @param {number} [opts.perPage=50]
  * @param {number} [opts.concurrency=4]
+ * @param {number} [opts.stepRuns=20] - most runs whose jobs are read per gated sender
  */
 async function runCheck (opts) {
   const repos = opts.repos || DEFAULT_REPOS
@@ -443,12 +627,13 @@ async function runCheck (opts) {
 
   const scan = await scanRepos({ repos, api, concurrency })
   const scannedRepos = scan.scanned.map((s) => s.repo)
-  const docsRepos = repos.filter((r) => r.role === 'docs').map((r) => r.repo)
-  const graph = buildGraph({ listeners: scan.listeners, senders: scan.senders, scannedRepos, docsRepos })
-  const runRecord = await recordRuns({ edges: graph.edges, api, perPage, window, threshold, concurrency })
+  const docsRepos = scan.scanned.filter((r) => r.role === 'docs').map((r) => r.repo)
+  const graph = buildGraph({ listeners: scan.listeners, senders: scan.senders, scannedRepos, docsRepos, aliases: scan.aliases })
+  const runRecord = await recordRuns({ edges: graph.edges, api, perPage, window, threshold, concurrency, stepRuns: opts.stepRuns })
 
   const findings = [...graph.findings, ...runRecord.findings]
   const info = [
+    ...scan.notes,
     ...graph.info,
     ...runRecord.info,
     ...scan.parseErrors.map((p) => ({ kind: 'parse-error', message: `${shortRepo(p.repo)}/${p.file}: ${p.error}` })),
@@ -464,6 +649,9 @@ async function runCheck (opts) {
       form: s.form,
       triggers: s.triggers,
       payload: s.payload,
+      conditional: Boolean(s.conditional),
+      condition: s.condition || null,
+      dispatchStep: runRecord.stepChecks.get(s) || null,
       runs: runRecord.runs.get(`${s.repo}/${s.file}`) || null,
     })),
     listeners: e.listeners.map((l) => ({
@@ -481,6 +669,7 @@ async function runCheck (opts) {
   return {
     checkedAt: new Date().toISOString(),
     options: { threshold, window, perPage },
+    extraCalls: runRecord.extraCalls,
     scanned: scan.scanned,
     unreadable,
     counts: {
@@ -564,7 +753,7 @@ function formatReport (result) {
     for (const s of senders) {
       for (const l of listeners) {
         rows.push({
-          sender: s ? `${shortRepo(s.repo)}/${s.file}` : '(none)',
+          sender: s ? `${shortRepo(s.repo)}/${s.file}${s.conditional ? ' [if]' : ''}` : '(none)',
           senderRuns: s ? (s.runs ? (s.runs.total === 0 ? 'never ran' : `${s.runs.total}, last ${day(s.runs.lastRunAt)}`) : 'unknown') : '',
           event: e.eventType,
           receiver: l ? `${shortRepo(l.repo)}/${l.file}` : `(none in ${shortRepo(e.targetRepo)})`,

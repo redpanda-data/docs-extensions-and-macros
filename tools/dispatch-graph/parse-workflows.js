@@ -139,6 +139,9 @@ function parseListeners (text, where) {
  * @property {string} [raw] - the unresolved text, for the report
  * @property {Object<string, string>} payload - literal client_payload values found beside the dispatch
  * @property {string} [stepName]
+ * @property {boolean} conditional - the dispatch step, or its job, has an `if:`, so a run of the workflow does not mean it dispatched
+ * @property {string|null} condition - the `if:` text(s), job first, for the report
+ * @property {{jobKey: string, jobName: string, stepName: string, stepNumber: number}} stepRef - how to find the dispatch step in the jobs API
  */
 
 /** Trigger names a workflow runs on, for the never-fired hint. */
@@ -258,7 +261,9 @@ function resolveValue (value, ctx) {
 function normalizeRepo (slug) {
   if (!slug) return null
   const m = String(slug).trim().replace(/^https?:\/\/(api\.)?github\.com\/(repos\/)?/, '').match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?$/)
-  return m ? `${m[1]}/${m[2]}` : null
+  // GitHub slugs are case-insensitive, so `Redpanda-Data/Docs` and
+  // `redpanda-data/docs` are the same edge. Keys are always lowercase.
+  return m ? `${m[1]}/${m[2]}`.toLowerCase() : null
 }
 
 /** Literal `"key": "value"` pairs from a JSON-ish payload string. */
@@ -364,6 +369,7 @@ function sendersFromGithubScript (script, ctx, step) {
     if (owner && repo) target = `${owner}/${repo}`
     else if (selfOwner && repo) target = `${ctx.selfRepo.split('/')[0]}/${repo}`
     else if (selfOwner && selfRepo) target = ctx.selfRepo
+    if (target) target = target.toLowerCase()
     senders.push(ctx.make({
       targetRepo: target,
       eventType,
@@ -375,6 +381,22 @@ function sendersFromGithubScript (script, ctx, step) {
     }))
   }
   return senders
+}
+
+/** An `if:` value as text, or null when there is none. `if: true` is no condition. */
+function ifText (v) {
+  if (v === undefined || v === null || v === true) return null
+  const t = String(v).trim()
+  if (t === '' || /^\$\{\{\s*true\s*\}\}$/.test(t)) return null
+  return t
+}
+
+/** The step name the jobs API reports: `name:`, else "Run <uses>" or "Run <first line of run>". */
+function defaultStepName (step) {
+  if (typeof step.name === 'string' && step.name.trim()) return step.name.trim()
+  if (typeof step.uses === 'string') return `Run ${step.uses.trim()}`
+  if (typeof step.run === 'string') return `Run ${step.run.trim().split('\n')[0]}`
+  return ''
 }
 
 /**
@@ -393,23 +415,36 @@ function parseSenders (text, where) {
   const jobs = doc.jobs && typeof doc.jobs === 'object' ? doc.jobs : {}
   const defaults = inputDefaults(on)
 
-  for (const job of Object.values(jobs)) {
+  for (const [jobKey, job] of Object.entries(jobs)) {
     if (!job || typeof job !== 'object') continue
     const matrix = matrixValues(job.strategy)
-    for (const step of toArray(job.steps)) {
+    const steps = toArray(job.steps)
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i]
       if (!step || typeof step !== 'object') continue
       const env = envChain(doc.env, job.env, step.env)
+      const conditions = [ifText(job.if), ifText(step.if)].filter(Boolean)
+      const stepRef = {
+        jobKey,
+        jobName: typeof job.name === 'string' ? job.name : jobKey,
+        stepName: defaultStepName(step),
+        // The jobs API numbers "Set up job" as 1, so the workflow's first step is 2.
+        stepNumber: i + 2,
+      }
       const ctx = {
         env,
         matrix,
         inputDefaults: defaults,
-        selfRepo: where.repo,
+        selfRepo: String(where.repo).toLowerCase(),
         make: (fields) => ({
           repo: where.repo,
           file: where.file,
           workflowName,
           triggers,
           payload: {},
+          conditional: conditions.length > 0,
+          condition: conditions.length ? conditions.join(' && ') : null,
+          stepRef,
           ...fields,
         }),
       }
@@ -417,7 +452,7 @@ function parseSenders (text, where) {
       if (typeof step.uses === 'string' && PETER_EVANS_RE.test(step.uses.trim())) {
         const w = step.with && typeof step.with === 'object' ? step.with : {}
         // peter-evans defaults `repository` to the workflow's own repo.
-        const repoCandidates = w.repository === undefined ? [where.repo] : resolveValue(w.repository, ctx).map(normalizeRepo).filter(Boolean)
+        const repoCandidates = w.repository === undefined ? [ctx.selfRepo] : resolveValue(w.repository, ctx).map(normalizeRepo).filter(Boolean)
         const typeCandidates = resolveValue(w['event-type'], ctx)
         const payload = literalPayloadPairs(w['client-payload'])
         if (repoCandidates.length === 0 || typeCandidates.length === 0) {

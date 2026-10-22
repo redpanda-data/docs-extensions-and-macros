@@ -583,7 +583,7 @@ Health check for the repository_dispatch graph that connects Redpanda's engineer
 
 *Why use it:*
 
-A repository_dispatch is accepted with HTTP 204 whether or not a listener exists, and a receiver that fails every run looks, from the sender's side, exactly like one that works. Breaks in this graph went unnoticed for weeks until someone read the receivers' run history by hand. This command reads it by script, and .github/workflows/check-dispatch-graph.yml runs it weekly and files one issue. Exit codes: 0 clean, 1 findings (the output ends with the line DISPATCH_GRAPH_FINDINGS_CONFIRMED), 2 could not run (a repo or runs query could not be read, so the graph is incomplete; never reported as clean).
+A repository_dispatch is accepted with HTTP 204 whether or not a listener exists, and a receiver that fails every run looks, from the sender's side, exactly like one that works. Breaks in this graph went unnoticed for weeks until someone read the receivers' run history by hand. This command reads it by script, and .github/workflows/check-dispatch-graph.yml runs it weekly, files one issue, and closes it on the first run that finds the graph healthy. Exit codes: 0 clean, 1 findings (the output ends with the line DISPATCH_GRAPH_FINDINGS_CONFIRMED), 2 could not run (a repo or runs query could not be read, so the graph is incomplete; never reported as clean).
 
 *Usage:*
 

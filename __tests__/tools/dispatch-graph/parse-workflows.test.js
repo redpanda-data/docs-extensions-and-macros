@@ -186,3 +186,36 @@ describe('helpers', () => {
     expect(shellLogicalLines('# c\na \\\n  b\nc')).toEqual(['a b', 'c'])
   })
 })
+
+describe('parseSenders: if-gated dispatch steps and target case', () => {
+  const gated = (jobIf, stepIf) => [
+    'on: { release: { types: [published] } }', 'jobs:', '  d:', jobIf ? `    if: ${jobIf}` : '', '    runs-on: ubuntu-latest', '    steps:',
+    '      - run: echo first',
+    stepIf ? `      - if: ${stepIf}` : '      - name: plain', '        uses: peter-evans/repository-dispatch@v3',
+    '        with:', '          repository: redpanda-data/docs', '          event-type: ev',
+  ].filter((l) => l !== '').join('\n')
+
+  test('a step if: makes the sender conditional, with the step located for the jobs API', () => {
+    const [s] = parseSenders(gated(null, "github.repository == 'redpanda-data/redpanda'"), where('x.yml'))
+    expect(s).toMatchObject({ conditional: true, condition: "github.repository == 'redpanda-data/redpanda'" })
+    expect(s.stepRef).toEqual({ jobKey: 'd', jobName: 'd', stepName: 'Run peter-evans/repository-dispatch@v3', stepNumber: 3 })
+  })
+
+  test('a job if: is recorded too, job first', () => {
+    const [s] = parseSenders(gated('${{ false }}', 'always()'), where('x.yml'))
+    expect(s.condition).toBe('${{ false }} && always()')
+  })
+
+  test('negative control: no if: is not conditional', () => {
+    const [s] = parseSenders(gated(null, null), where('x.yml'))
+    expect(s.conditional).toBe(false)
+    expect(s.condition).toBeNull()
+    expect(s.stepRef.stepName).toBe('plain')
+  })
+
+  test('a mixed-case repository: is normalized to lowercase', () => {
+    const [s] = parseSenders(gated(null, null).replace('redpanda-data/docs', 'Redpanda-Data/Docs'), where('x.yml'))
+    expect(s.targetRepo).toBe('redpanda-data/docs')
+    expect(normalizeRepo('Redpanda-Data/Cloud-Docs.git')).toBe('redpanda-data/cloud-docs')
+  })
+})

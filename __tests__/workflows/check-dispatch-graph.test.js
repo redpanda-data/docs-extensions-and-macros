@@ -52,6 +52,7 @@ beforeAll(() => {
     '    else echo ""; fi ;;',
     '  "issue edit") [ "${GH_WRITE_MODE:-ok}" = "fail" ] && exit 1 ;;',
     '  "issue create") [ "${GH_WRITE_MODE:-ok}" = "fail" ] && exit 1 ;;',
+    '  "issue close") [ "${GH_WRITE_MODE:-ok}" = "fail" ] && exit 1 ;;',
     'esac',
     'exit 0',
   ].join('\n'), { mode: 0o755 });
@@ -147,7 +148,39 @@ describe('dispatch graph: healthy', () => {
     const r = run({ CHECK_STATUS: '0', CHECK_OUTPUT: '✓ No findings.' });
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/Nothing to report/);
-    expect(r.ghCalls.trim()).toBe('');
+    expect(r.ghCalls).not.toMatch(/issue (create|edit|close)|label create/);
+  });
+
+  test('closes the open issue from an earlier run, with a comment', () => {
+    const r = run({ CHECK_STATUS: '0', CHECK_OUTPUT: '✓ No findings.', GH_LIST_MODE: 'existing', GH_EXISTING_NUMBER: '412' });
+    expect(r.status).toBe(0);
+    expect(r.ghCalls).toMatch(/issue list[^\n]*--label dispatch-graph[^\n]*in:title/);
+    expect(r.ghCalls).toMatch(/issue close 412 --repo redpanda-data\/docs-extensions-and-macros --comment [^\n]*no broken edges[^\n]*actions\/runs\/1/);
+    expect(r.stdout).toMatch(/Closed redpanda-data\/docs-extensions-and-macros#412/);
+  });
+
+  test('no open issue: closes nothing', () => {
+    const r = run({ CHECK_STATUS: '0', CHECK_OUTPUT: 'ok', GH_LIST_MODE: 'none' });
+    expect(r.status).toBe(0);
+    expect(r.ghCalls).not.toMatch(/issue close/);
+  });
+
+  test('on a pull_request or a branch other than main it touches no issue', () => {
+    for (const env of [{ EVENT_NAME: 'pull_request' }, { EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/jake/wip' }]) {
+      const r = run({ CHECK_STATUS: '0', CHECK_OUTPUT: 'ok', GH_LIST_MODE: 'existing', GH_EXISTING_NUMBER: '412', ...env });
+      expect(r.status).toBe(0);
+      expect(r.ghCalls.trim()).toBe('');
+    }
+  });
+
+  test('a failed lookup or a failed close exits 2 rather than claiming the issue is resolved', () => {
+    const a = run({ CHECK_STATUS: '0', CHECK_OUTPUT: 'ok', GH_LIST_MODE: 'error' });
+    expect(a.status).toBe(2);
+    expect(a.stderr).toMatch(/could not look up an open issue/);
+    expect(a.ghCalls).not.toMatch(/issue close/);
+    const b = run({ CHECK_STATUS: '0', CHECK_OUTPUT: 'ok', GH_LIST_MODE: 'existing', GH_EXISTING_NUMBER: '9', GH_WRITE_MODE: 'fail' });
+    expect(b.status).toBe(2);
+    expect(b.stderr).toMatch(/could not close/);
   });
 
   test('runs the pinned doc-tools via npx --no-install', () => {
@@ -260,9 +293,10 @@ describe('dispatch graph: inconclusive runs fail loudly and file nothing', () =>
     expect(r.stderr).toMatch(/could not update/);
   });
 
-  test('an unreadable issue list still files a new issue rather than dropping the report', () => {
+  test('an unreadable issue list fails the step and files nothing, so a blip cannot open a duplicate', () => {
     const r = run({ CHECK_STATUS: '1', CHECK_OUTPUT: FINDINGS_OUTPUT, GH_LIST_MODE: 'error' });
-    expect(r.status).toBe(1);
-    expect(r.ghCalls).toMatch(/issue create/);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/could not look up an existing issue/);
+    expect(r.ghCalls).not.toMatch(/issue (create|edit)/);
   });
 });

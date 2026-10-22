@@ -774,8 +774,8 @@ programCli
  * exists, and a receiver that fails every run looks, from the sender's side,
  * exactly like one that works. Breaks in this graph went unnoticed for weeks
  * until someone read the receivers' run history by hand. This command reads it
- * by script, and .github/workflows/check-dispatch-graph.yml runs it weekly and
- * files one issue.
+ * by script, and .github/workflows/check-dispatch-graph.yml runs it weekly,
+ * files one issue, and closes it on the first run that finds the graph healthy.
  *
  * Exit codes: 0 clean, 1 findings (the output ends with the line
  * DISPATCH_GRAPH_FINDINGS_CONFIRMED), 2 could not run (a repo or runs query

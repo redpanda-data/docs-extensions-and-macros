@@ -9,10 +9,11 @@
 # a stubbed gh and asserts the workflow invokes it.
 #
 # EXIT STATUS
-#   0  the graph is healthy
+#   0  the graph is healthy (an open issue from an earlier run is closed)
 #   1  findings (issue opened or updated, unless this is a PR or a dispatch
 #      from a branch other than main)
-#   2  could not find out (a repo or its runs unreadable, bad token, crash)
+#   2  could not find out (a repo or its runs unreadable, bad token, crash,
+#      or the existing issue could not be looked up, updated or closed)
 #
 # The 1 vs 2 split is the whole design. A job that reads "the API was down" or
 # "the token cannot see the private repos" as "the graph is broken" files a
@@ -35,6 +36,30 @@ GITHUB_REF="${GITHUB_REF:-refs/heads/main}"
 # -e stays OFF: a non-zero exit from the check is the signal, not a reason to
 # abort before it can be reported, and every failure below is checked explicitly.
 set +e
+
+# Only a scheduled or dispatched run against main touches the issue.
+may_file() {
+  [ "$EVENT_NAME" != "pull_request" ] && [ "$GITHUB_REF" = "refs/heads/main" ]
+}
+
+# Prints the number of the open issue, or nothing when there is none. Returns
+# non-zero when the lookup itself failed, which callers must not read as
+# "no issue": that would file a duplicate on every API blip.
+# --search restricted to the title, so an unrelated open issue mentioning
+# dispatches can never be mistaken for this one and overwritten.
+find_existing() {
+  local out
+  out="$(gh issue list \
+    --repo "$ISSUE_REPO" \
+    --state open \
+    --label "$ISSUE_LABEL" \
+    --search "\"${ISSUE_TITLE}\" in:title" \
+    --json number \
+    --jq '.[0].number')" || return 1
+  [ "$out" = "null" ] && out=""
+  printf '%s' "$out"
+}
+
 OUTPUT="$(npx --no-install doc-tools check-dispatch-graph 2>&1)"
 STATUS=$?
 
@@ -42,6 +67,19 @@ printf '%s\n' "$OUTPUT"
 
 if [ "$STATUS" -eq 0 ]; then
   echo "The dispatch graph is healthy. Nothing to report."
+  may_file || exit 0
+  # A healthy run closes the issue an earlier run opened, so an open issue
+  # always means the graph is broken now.
+  if ! EXISTING="$(find_existing)"; then
+    echo "::error::The graph is healthy, but could not look up an open issue in ${ISSUE_REPO} to close it." >&2
+    exit 2
+  fi
+  if [ -n "$EXISTING" ]; then
+    gh issue close "$EXISTING" --repo "$ISSUE_REPO" \
+      --comment "The weekly check-dispatch-graph run found no broken edges, so this is resolved. Run: ${RUN_URL:-(not available)}" >/dev/null \
+      || { echo "::error::The graph is healthy, but could not close ${ISSUE_REPO}#${EXISTING}." >&2; exit 2; }
+    echo "Closed ${ISSUE_REPO}#${EXISTING}: the graph is healthy again."
+  fi
   exit 0
 fi
 
@@ -78,7 +116,7 @@ BODY="$(
   printf '%s\n' \
     'The weekly `doc-tools check-dispatch-graph` run found broken edges in the repository_dispatch graph between the engineering repos and the docs repos. A dispatch is accepted (HTTP 204) whether or not anything listens, and a receiver that always fails looks the same as one that always works from the sender side, so these do not surface anywhere else.' \
     '' \
-    "Checked: $(date -u +%Y-%m-%dT%H:%MZ). This issue is updated in place on every run that still has findings; it is not closed automatically." \
+    "Checked: $(date -u +%Y-%m-%dT%H:%MZ). This issue is updated in place on every run that still has findings, and closed by the first run that finds none." \
     '' \
     '```' \
     "$REPORT" \
@@ -95,17 +133,12 @@ BODY="$(
 gh label create "$ISSUE_LABEL" --repo "$ISSUE_REPO" \
   --description "Filed by the weekly check-dispatch-graph run" --color 'D93F0B' >/dev/null 2>&1 || true
 
-# --search restricted to the title, so an unrelated open issue mentioning
-# dispatches can never be mistaken for this one and overwritten.
-EXISTING="$(gh issue list \
-  --repo "$ISSUE_REPO" \
-  --state open \
-  --label "$ISSUE_LABEL" \
-  --search "\"${ISSUE_TITLE}\" in:title" \
-  --json number \
-  --jq '.[0].number' 2>/dev/null || true)"
+if ! EXISTING="$(find_existing)"; then
+  echo "::error::Findings, but could not look up an existing issue in ${ISSUE_REPO}. Not filing, so a failed lookup cannot open a duplicate." >&2
+  exit 2
+fi
 
-if [ -n "$EXISTING" ] && [ "$EXISTING" != "null" ]; then
+if [ -n "$EXISTING" ]; then
   # Updated in place rather than commented on, so the issue always reads as
   # the current state of the graph and a long-lived break does not pile up
   # one comment per week.

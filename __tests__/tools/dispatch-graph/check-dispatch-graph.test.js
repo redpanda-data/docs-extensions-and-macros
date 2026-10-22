@@ -119,6 +119,9 @@ describe('classifySender', () => {
  * @param {object} [opts]
  * @param {string[]} [opts.unreadable] - repos whose reads fail with 404
  * @param {string[]} [opts.runsUnreadable] - "repo/file" whose runs query fails
+ * @param {Object<string, {fullName?: string, archived?: boolean}>} [opts.meta] - configured repo -> what repos.get returns
+ * @param {Object<string, Object<string, string>>} [opts.states] - repo -> { file: workflow state }; default active
+ * @param {Object<string, Array>} [opts.jobs] - "repo#runId" -> jobs for that run
  */
 function fakeApi (files, runs, opts = {}) {
   const calls = []
@@ -130,6 +133,22 @@ function fakeApi (files, runs, opts = {}) {
       if ((opts.unreadable || []).includes(repo)) throw notFound(repo)
       return repo.endsWith('streaming-enterprise') ? 'dev' : 'main'
     },
+    async getRepo (repo) {
+      calls.push(['repo', repo])
+      if ((opts.unreadable || []).includes(repo)) throw notFound(repo)
+      const m = (opts.meta || {})[repo] || {}
+      const fullName = m.fullName || repo
+      return { fullName, defaultBranch: fullName.endsWith('streaming-enterprise') ? 'dev' : 'main', archived: Boolean(m.archived) }
+    },
+    async listWorkflows (repo) {
+      calls.push(['workflows', repo])
+      const st = (opts.states || {})[repo] || {}
+      return Object.keys(files[repo] || {}).map((f) => ({ path: `.github/workflows/${f}`, state: st[f] || 'active' }))
+    },
+    async listJobsForRun (repo, runId) {
+      calls.push(['jobs', repo, runId])
+      return (opts.jobs || {})[`${repo}#${runId}`] || []
+    },
     async listWorkflowFiles (repo, ref) {
       calls.push(['list', repo, ref])
       return Object.keys(files[repo] || {})
@@ -140,10 +159,11 @@ function fakeApi (files, runs, opts = {}) {
       if (!files[repo] || files[repo][name] === undefined) throw notFound(p)
       return files[repo][name]
     },
-    async listWorkflowRuns (repo, file, perPage) {
-      calls.push(['runs', repo, file, perPage])
+    async listWorkflowRuns (repo, file, perPage, q = {}) {
+      calls.push(['runs', repo, file, perPage, q.event || null])
       if ((opts.runsUnreadable || []).includes(`${repo}/${file}`)) throw notFound(`${repo}/${file} runs`)
-      return runs[`${repo}/${file}`] || []
+      // Like the API: newest first, filtered by event when asked, capped at per_page.
+      return (runs[`${repo}/${file}`] || []).filter((r) => !q.event || r.event === q.event).slice(0, perPage)
     },
   }
 }
@@ -369,6 +389,164 @@ describe('runCheck: scope and resolution', () => {
   })
 })
 
+describe('runCheck: dispatch runs are counted even when other events fill the page', () => {
+  // The listener also runs on pull_request. Its 50 newest runs are all PR
+  // runs and its last dispatch run is the 61st, beyond one page.
+  const busy = Array.from({ length: 70 }, (_, i) => run(i + 1, 'success', i === 60 ? 'repository_dispatch' : 'pull_request'))
+  const files = { 'redpanda-data/eng': { 's.yml': sender('docs', 'ev') }, 'redpanda-data/docs': { 'r.yml': listener('ev', '  pull_request:') } }
+
+  test('a dispatch run beyond the newest page is still a received dispatch', async () => {
+    const api = fakeApi(files, { 'redpanda-data/eng/s.yml': nRuns(1, 'success', 'release'), 'redpanda-data/docs/r.yml': busy })
+    const r = await runCheck({ repos: [ENG('eng'), DOCS('docs')], api })
+    expect(kinds(r)).toEqual([])
+    expect(r.exitCode).toBe(0)
+    expect(api.calls).toContainEqual(['runs', 'redpanda-data/docs', 'r.yml', 50, 'repository_dispatch'])
+  })
+
+  test('negative control: a full page and no dispatch run anywhere is still receiver-never-received', async () => {
+    const api = fakeApi(files, { 'redpanda-data/eng/s.yml': nRuns(1, 'success', 'release'), 'redpanda-data/docs/r.yml': nRuns(70, 'success', 'pull_request') })
+    const r = await runCheck({ repos: [ENG('eng'), DOCS('docs')], api })
+    expect(kinds(r)).toEqual(['receiver-never-received'])
+  })
+
+  test('a page that is not full is the whole history, so no filtered query is made', async () => {
+    const api = fakeApi(files, { 'redpanda-data/eng/s.yml': nRuns(1, 'success', 'release'), 'redpanda-data/docs/r.yml': nRuns(5, 'success') })
+    const r = await runCheck({ repos: [ENG('eng'), DOCS('docs')], api })
+    expect(r.exitCode).toBe(0)
+    expect(api.calls.filter((c) => c[0] === 'runs' && c[4])).toEqual([])
+  })
+})
+
+describe('runCheck: a gated dispatch step counts only when it ran', () => {
+  const gated = [
+    'name: S', 'on:', '  push:', '  release:', '    types: [published]', 'jobs:', '  dispatch:', '    runs-on: x', '    steps:',
+    '      - name: Dispatch', "        if: github.event_name == 'release'", '        uses: peter-evans/repository-dispatch@v4',
+    '        with:', '          repository: redpanda-data/docs', '          event-type: ev',
+  ].join('\n')
+  const files = { 'redpanda-data/eng': { 's.yml': gated }, 'redpanda-data/docs': { 'r.yml': listener('ev') } }
+  const senderRuns = nRuns(8, 'success', 'push')
+  const jobsWith = (conclusion) => Object.fromEntries(senderRuns.map((r) => [`redpanda-data/eng#${r.id}`, [
+    { name: 'dispatch', conclusion: 'success', steps: [{ name: 'Set up job', number: 1, conclusion: 'success' }, { name: 'Dispatch', number: 2, conclusion }] },
+  ]]))
+
+  test('the sender is recorded as conditional', async () => {
+    const api = fakeApi(files, { 'redpanda-data/eng/s.yml': senderRuns, 'redpanda-data/docs/r.yml': nRuns(3, 'success') }, { jobs: jobsWith('success') })
+    const r = await runCheck({ repos: [ENG('eng'), DOCS('docs')], api })
+    expect(r.edges[0].senders[0]).toMatchObject({ conditional: true, condition: "github.event_name == 'release'" })
+    expect(formatReport(r)).toMatch(/eng\/s\.yml \[if\]/)
+  })
+
+  test('the step succeeded in the newest run: fired, one jobs call', async () => {
+    const api = fakeApi(files, { 'redpanda-data/eng/s.yml': senderRuns, 'redpanda-data/docs/r.yml': nRuns(3, 'success') }, { jobs: jobsWith('success') })
+    const r = await runCheck({ repos: [ENG('eng'), DOCS('docs')], api })
+    expect(r.exitCode).toBe(0)
+    expect(api.calls.filter((c) => c[0] === 'jobs')).toHaveLength(1)
+  })
+
+  test('the step was skipped in every run checked: a finding, and no more than stepRuns jobs calls', async () => {
+    const api = fakeApi(files, { 'redpanda-data/eng/s.yml': senderRuns, 'redpanda-data/docs/r.yml': nRuns(3, 'success', 'workflow_dispatch') }, { jobs: jobsWith('skipped') })
+    const r = await runCheck({ repos: [ENG('eng'), DOCS('docs')], api, stepRuns: 5 })
+    expect(kinds(r)).toEqual(['sender-step-never-succeeded'])
+    expect(r.findings[0].message).toMatch(/"Dispatch" \(if: github.event_name == 'release'\)/)
+    expect(api.calls.filter((c) => c[0] === 'jobs')).toHaveLength(5)
+    // The receiver's lack of dispatch runs is explained by the sender, not reported twice.
+    expect(kinds(r)).not.toContain('receiver-never-received')
+  })
+
+  test('a job skipped by its own if: has no steps and counts as not dispatched', async () => {
+    const jobs = Object.fromEntries(senderRuns.map((r) => [`redpanda-data/eng#${r.id}`, [{ name: 'dispatch', conclusion: 'skipped', steps: [] }]]))
+    const api = fakeApi(files, { 'redpanda-data/eng/s.yml': senderRuns, 'redpanda-data/docs/r.yml': nRuns(3, 'success') }, { jobs })
+    const r = await runCheck({ repos: [ENG('eng'), DOCS('docs')], api })
+    expect(kinds(r)).toEqual(['sender-step-never-succeeded'])
+  })
+
+  test('a step that cannot be found in the jobs falls back to the workflow run, with a note', async () => {
+    const api = fakeApi(files, { 'redpanda-data/eng/s.yml': senderRuns, 'redpanda-data/docs/r.yml': nRuns(3, 'success') }, { jobs: {} })
+    const r = await runCheck({ repos: [ENG('eng'), DOCS('docs')], api })
+    expect(r.exitCode).toBe(0)
+    expect(infoKinds(r)).toContain('conditional-sender')
+  })
+
+  test('negative control: an ungated sender makes no jobs calls', async () => {
+    const api = fakeApi(
+      { 'redpanda-data/eng': { 's.yml': sender('docs', 'ev') }, 'redpanda-data/docs': { 'r.yml': listener('ev') } },
+      { 'redpanda-data/eng/s.yml': nRuns(3, 'success', 'release'), 'redpanda-data/docs/r.yml': nRuns(3, 'success') },
+    )
+    const r = await runCheck({ repos: [ENG('eng'), DOCS('docs')], api })
+    expect(r.exitCode).toBe(0)
+    expect(r.edges[0].senders[0].conditional).toBe(false)
+    expect(api.calls.filter((c) => c[0] === 'jobs')).toEqual([])
+  })
+})
+
+describe('runCheck: archived repos, disabled workflows, case and renames', () => {
+  const healthyRuns = { 'redpanda-data/eng/s.yml': nRuns(3, 'success', 'release'), 'redpanda-data/docs/r.yml': nRuns(3, 'success') }
+
+  test('an archived repo is skipped as a sender, with an info note', async () => {
+    const api = fakeApi(
+      { 'redpanda-data/old': { 's.yml': sender('docs', 'ev') }, 'redpanda-data/docs': { 'r.yml': cronListener('ev') } },
+      { 'redpanda-data/old/s.yml': [], 'redpanda-data/docs/r.yml': nRuns(3, 'success', 'schedule') },
+      { meta: { 'redpanda-data/old': { archived: true } } },
+    )
+    const r = await runCheck({ repos: [ENG('old'), DOCS('docs')], api })
+    expect(kinds(r)).toEqual([])
+    expect(infoKinds(r)).toEqual(['archived-repo', 'listener-without-sender'])
+    expect(api.calls.filter((c) => c[0] === 'list' && c[1] === 'redpanda-data/old')).toEqual([])
+  })
+
+  test('a disabled listener is an error even when its past runs look healthy', async () => {
+    const api = fakeApi(
+      { 'redpanda-data/eng': { 's.yml': sender('docs', 'ev') }, 'redpanda-data/docs': { 'r.yml': listener('ev') } },
+      healthyRuns,
+      { states: { 'redpanda-data/docs': { 'r.yml': 'disabled_manually' } } },
+    )
+    const r = await runCheck({ repos: [ENG('eng'), DOCS('docs')], api })
+    expect(kinds(r)).toEqual(['receiver-disabled'])
+    expect(r.findings[0].message).toMatch(/disabled_manually/)
+  })
+
+  test('negative control: an active listener is not flagged, and the workflow list is one call per listener repo', async () => {
+    const api = fakeApi({ 'redpanda-data/eng': { 's.yml': sender('docs', 'ev') }, 'redpanda-data/docs': { 'r.yml': listener('ev') } }, healthyRuns)
+    const r = await runCheck({ repos: [ENG('eng'), DOCS('docs')], api })
+    expect(r.exitCode).toBe(0)
+    expect(api.calls.filter((c) => c[0] === 'workflows')).toEqual([['workflows', 'redpanda-data/docs']])
+  })
+
+  test('a mixed-case repository: target matches the lowercase listener', async () => {
+    const api = fakeApi(
+      { 'redpanda-data/eng': { 's.yml': sender('docs', 'ev').replace('redpanda-data/docs', 'Redpanda-Data/Docs') }, 'redpanda-data/docs': { 'r.yml': listener('ev') } },
+      healthyRuns,
+    )
+    const r = await runCheck({ repos: [ENG('eng'), DOCS('docs')], api })
+    expect(kinds(r)).toEqual([])
+    expect(r.edges.map((e) => e.key)).toEqual(['redpanda-data/docs#ev'])
+  })
+
+  test('a renamed repo is followed and keyed by its current full_name, and dispatches to the old name resolve', async () => {
+    const api = fakeApi(
+      { 'redpanda-data/eng': { 's.yml': sender('old-docs', 'ev') }, 'redpanda-data/docs': { 'r.yml': listener('ev') } },
+      healthyRuns,
+      { meta: { 'redpanda-data/old-docs': { fullName: 'redpanda-data/docs' } } },
+    )
+    const r = await runCheck({ repos: [ENG('eng'), DOCS('old-docs')], api })
+    expect(kinds(r)).toEqual([])
+    expect(infoKinds(r)).toEqual(['renamed-repo'])
+    expect(r.scanned.map((x) => x.repo)).toEqual(['redpanda-data/docs', 'redpanda-data/eng'])
+    expect(r.edges.map((e) => e.key)).toEqual(['redpanda-data/docs#ev'])
+  })
+
+  test('a repo configured under both its old and new name is scanned once', async () => {
+    const api = fakeApi(
+      { 'redpanda-data/docs': { 'r.yml': cronListener('ev') } },
+      { 'redpanda-data/docs/r.yml': nRuns(1, 'success', 'schedule') },
+      { meta: { 'redpanda-data/old-docs': { fullName: 'redpanda-data/docs' } } },
+    )
+    const r = await runCheck({ repos: [DOCS('old-docs'), DOCS('docs')], api })
+    expect(r.scanned).toHaveLength(1)
+    expect(r.counts.listeners).toBe(1)
+  })
+})
+
 describe('runCheck: could-not-run is exit 2 and never looks clean', () => {
   test('an unreadable repo (404: private, no token) is exit 2 even when everything readable is healthy', async () => {
     const api = fakeApi(
@@ -432,19 +610,25 @@ describe('createGitHubApi adapts Octokit', () => {
   test('decodes file content and maps the runs call', async () => {
     const octokit = {
       repos: {
-        get: async () => ({ data: { default_branch: 'dev' } }),
+        get: async () => ({ data: { default_branch: 'dev', full_name: 'O/Renamed', archived: true } }),
         getContent: async ({ path: p }) => p === '.github/workflows'
           ? ({ data: [{ type: 'file', name: 'a.yml' }, { type: 'file', name: 'README.md' }, { type: 'dir', name: 'x' }] })
           : ({ data: { content: Buffer.from('name: hi').toString('base64'), encoding: 'base64' } }),
       },
       actions: {
-        listWorkflowRuns: async (p) => ({ data: { workflow_runs: [{ id: p.per_page }] } }),
+        listWorkflowRuns: async (p) => ({ data: { workflow_runs: [{ id: p.per_page, event: p.event }] } }),
+        listRepoWorkflows: async () => ({ data: { workflows: [{ path: '.github/workflows/a.yml', state: 'disabled_inactivity', id: 1 }] } }),
+        listJobsForWorkflowRun: async (p) => ({ data: { jobs: [{ name: 'j', run: p.run_id }] } }),
       },
     }
     const api = createGitHubApi(octokit)
     expect(await api.getDefaultBranch('o/r')).toBe('dev')
+    expect(await api.getRepo('o/r')).toEqual({ fullName: 'O/Renamed', defaultBranch: 'dev', archived: true })
     expect(await api.listWorkflowFiles('o/r', 'dev')).toEqual(['a.yml'])
     expect(await api.getFileText('o/r', '.github/workflows/a.yml', 'dev')).toBe('name: hi')
     expect(await api.listWorkflowRuns('o/r', 'a.yml', 50)).toEqual([{ id: 50 }])
+    expect(await api.listWorkflowRuns('o/r', 'a.yml', 50, { event: 'repository_dispatch' })).toEqual([{ id: 50, event: 'repository_dispatch' }])
+    expect(await api.listWorkflows('o/r')).toEqual([{ path: '.github/workflows/a.yml', state: 'disabled_inactivity' }])
+    expect(await api.listJobsForRun('o/r', 7)).toEqual([{ name: 'j', run: 7 }])
   })
 })
