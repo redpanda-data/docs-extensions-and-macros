@@ -157,8 +157,10 @@ the model issued is recorded with its arguments. The check, in
 * Each staged standard (`production.MUST_READ`, derived from the files the
   harness stages so the two cannot drift) must have been opened at least
   once: a `Read` of that file in the workspace, or a shell command that
-  names it (`cat`, which the step's allowed tools list, or a read-only
-  `grep` or `head`, which the CLI lets through in production as well). A
+  prints it (`cat`, which the step's allowed tools list, or a read-only
+  `grep`, `head` or `sed`, which the CLI lets through in production as
+  well). One command can open both files (`cat a.md b.md`). A command that
+  only names a file (`ls`, `wc`, `echo`, `test`) has not opened it. A
   read whose tool result came back as an error does not count, nor does a
   file of the same name outside the workspace. The command or path that
   opened each file is kept in `must-read.json`, so a reviewer can see

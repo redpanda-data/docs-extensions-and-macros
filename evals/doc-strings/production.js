@@ -170,37 +170,93 @@ function realDir (dir) {
   try { return fs.realpathSync(dir) } catch { return path.resolve(dir) }
 }
 
-/** Which staged file, if any, a tool call opened. */
-function readTarget (call, cwd) {
+// Shell programs that print a file's content. A command that only names the
+// file (ls, echo, wc, stat, test) has not opened it.
+const SHELL_READERS = new Set(['cat', 'head', 'tail', 'grep', 'egrep', 'fgrep', 'rg', 'sed', 'awk', 'less', 'more', 'nl'])
+
+/**
+ * A shell command split into simple commands (at |, ||, &&, ;, &, parentheses
+ * and newlines), each a list of words with quotes removed. Operators inside
+ * quotes stay in the word, so `grep "a|b" terminology.md` is one command.
+ * Redirection operators end a word, so `< terminology.md` yields the name.
+ */
+function shellSegments (command) {
+  const segments = []
+  let words = []
+  let word = ''
+  let quote = null
+  let inWord = false
+  const endWord = () => { if (inWord) words.push(word); word = ''; inWord = false }
+  const endSegment = () => { endWord(); if (words.length) segments.push(words); words = [] }
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i]
+    if (quote) {
+      if (ch === quote) quote = null
+      else if (ch === '\\' && quote === '"' && i + 1 < command.length) word += command[++i]
+      else word += ch
+      continue
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch
+      inWord = true
+    } else if (ch === '\\' && i + 1 < command.length) {
+      word += command[++i]
+      inWord = true
+    } else if ('|;&()\n'.includes(ch)) {
+      endSegment()
+    } else if (/\s/.test(ch) || ch === '<' || ch === '>') {
+      endWord()
+    } else {
+      word += ch
+      inWord = true
+    }
+  }
+  endSegment()
+  return segments
+}
+
+/** The staged file a path-like shell token or Read path refers to, if any. */
+function stagedFile (token, cwd) {
+  if (!token.includes('/')) return MUST_READ.includes(token) ? token : null
+  const abs = path.resolve(cwd, token)
+  return MUST_READ.includes(path.basename(abs)) && realDir(path.dirname(abs)) === realDir(cwd) ? path.basename(abs) : null
+}
+
+/** Every staged file a tool call opened, in the order it named them. */
+function readTargets (call, cwd) {
   if (call.name === 'Read' && typeof call.input.file_path === 'string') {
     const abs = path.resolve(cwd, call.input.file_path)
-    return realDir(path.dirname(abs)) === realDir(cwd) ? path.basename(abs) : null
+    return realDir(path.dirname(abs)) === realDir(cwd) && MUST_READ.includes(path.basename(abs)) ? [path.basename(abs)] : []
   }
   if (call.name === 'Bash' && typeof call.input.command === 'string') {
     // The step allows `cat <file>` for the two standards, and the CLI lets a
     // read-only shell command (grep, head, sed) through in the same way in
-    // production, so any command that names the staged file opened it. A
-    // path-qualified name has to resolve to the workspace; a bare name is
-    // relative to it. The evidence records the command, so a reviewer can
-    // see whether the model read the file or grepped one term out of it.
-    for (const raw of call.input.command.split(/[\s|;&()<>]+/)) {
-      const token = raw.replace(/^['"]|['"]$/g, '')
-      if (!token || token.startsWith('-')) continue
-      if (!token.includes('/')) {
-        if (MUST_READ.includes(token)) return token
-        continue
+    // production. So a file counts as opened when a segment of the command
+    // runs one of SHELL_READERS and names the file, one file per name: `cat
+    // a.md b.md` opens both. A path-qualified name has to resolve to the
+    // workspace; a bare name is relative to it. The evidence records the
+    // command, so a reviewer can see whether the model read the file or
+    // grepped one term out of it.
+    const found = []
+    for (const tokens of shellSegments(call.input.command)) {
+      // Skip leading VAR=value assignments to find the program.
+      let i = 0
+      while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++
+      if (i >= tokens.length || !SHELL_READERS.has(path.basename(tokens[i]))) continue
+      for (const token of tokens.slice(i + 1)) {
+        if (token.startsWith('-')) continue
+        const file = stagedFile(token, cwd)
+        if (file && !found.includes(file)) found.push(file)
       }
-      const abs = path.resolve(cwd, token)
-      if (MUST_READ.includes(path.basename(abs)) && realDir(path.dirname(abs)) === realDir(cwd)) return path.basename(abs)
     }
-    return null
+    return found
   }
-  return null
+  return []
 }
 
 /**
  * The must-read verdict for one run. Every file in MUST_READ has to have been
- * opened by a Read of it, or a shell command that names it, that did not
+ * opened by a Read of it, or a shell command that prints it, that did not
  * error; and when the model posted any inline comment, each such read has to
  * come before the first comment: a standard consulted after the suggestions
  * were posted did not shape them.
@@ -208,8 +264,8 @@ function readTarget (call, cwd) {
 function checkMustRead (calls, cwd, files = MUST_READ) {
   const firstComment = calls.findIndex((c) => c.name === COMMENT_TOOL)
   const reads = calls
-    .map((c) => ({ call: c, file: readTarget(c, cwd) }))
-    .filter((r) => r.file && files.includes(r.file))
+    .flatMap((c) => readTargets(c, cwd).map((file) => ({ call: c, file })))
+    .filter((r) => files.includes(r.file))
     .map((r) => ({
       file: r.file,
       index: r.call.index,

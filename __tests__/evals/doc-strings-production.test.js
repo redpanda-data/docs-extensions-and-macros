@@ -211,6 +211,45 @@ describe('doc-strings evals: the must-read check', () => {
     expect(v.reads[0].how).toMatch(/grep/)
   })
 
+  test('one shell command that prints both standards opens both', () => {
+    const { calls } = production.parseStream(stream([
+      use('t1', 'Bash', { command: 'cat embedded-reference-strings.md terminology.md' }), result('t1'),
+      comment('t2'), result('t2')
+    ]))
+    const v = production.checkMustRead(calls, cwd)
+    expect(v.pass).toBe(true)
+    expect(v.files.map((f) => [f.file, f.indices])).toEqual([['embedded-reference-strings.md', [0]], ['terminology.md', [0]]])
+  })
+
+  test('a command that only names a standard (ls, echo, wc, test) does not open it', () => {
+    const { calls } = production.parseStream(stream([
+      use('t1', 'Bash', { command: 'ls -la embedded-reference-strings.md terminology.md' }), result('t1'),
+      use('t2', 'Bash', { command: 'echo terminology.md && wc -c embedded-reference-strings.md' }), result('t2'),
+      use('t3', 'Bash', { command: 'test -s terminology.md; stat embedded-reference-strings.md 2>&1' }), result('t3')
+    ]))
+    const v = production.checkMustRead(calls, cwd)
+    expect(v.pass).toBe(false)
+    expect(v.detail).toMatch(/never read: embedded-reference-strings\.md, terminology\.md/)
+  })
+
+  test('a reader later in a pipeline or after && still counts, and only for the files it names', () => {
+    const { calls } = production.parseStream(stream([
+      use('t1', 'Bash', { command: `ls ${cwd} && LC_ALL=C grep -n "broker" < terminology.md | head -5` }), result('t1'),
+      use('t2', 'Bash', { command: 'grep -n -i -E "cluster|wc embedded-reference-strings.md" lint-findings.json' }), result('t2'),
+      comment('t3'), result('t3')
+    ]))
+    const v = production.checkMustRead(calls, cwd)
+    expect(v.files.map((f) => [f.file, f.indices])).toEqual([['embedded-reference-strings.md', []], ['terminology.md', [0]]])
+  })
+
+  test('a pipe inside a quoted grep pattern does not split the command', () => {
+    const { calls } = production.parseStream(stream([
+      use('t1', 'Bash', { command: 'grep -n -i "cluster|identifier|null" terminology.md | head -40' }), result('t1'),
+      use('t2', 'Bash', { command: "sed -n '1,200p' embedded-reference-strings.md" }), result('t2')
+    ]))
+    expect(production.checkMustRead(calls, cwd).pass).toBe(true)
+  })
+
   test('a Read through a symlinked spelling of the workspace still counts', () => {
     const real = fs.mkdtempSync(path.join(os.tmpdir(), 'must-read-real-'))
     const link = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'must-read-link-')), 'ws')
