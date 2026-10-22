@@ -224,6 +224,19 @@ describe('stripMarkdownMetadata', () => {
   it('still strips the root-relative directive', () => {
     expect(stripMarkdownMetadata(`${formatLlmsDirective('streaming')}\n\nBody`)).toBe('Body')
   })
+
+  it('strips the front matter block that opens a page export', () => {
+    const page = `---\ntitle: Tiered Storage\ndescription: a --- b\n---\n\n# Tiered Storage\n\n${formatLlmsDirective('streaming')}\n\n<!-- Source: https://docs.example.com/x.md -->\n\nBody`
+    expect(stripMarkdownMetadata(page)).toBe('# Tiered Storage\n\nBody')
+  })
+
+  it('does not collapse blank lines inside a fenced code block', () => {
+    expect(stripMarkdownMetadata('---\ntitle: x\n---\n\n\n\n```\na\n\n\n\nb\n```\n\n\n\nafter')).toBe('```\na\n\n\n\nb\n```\n\nafter')
+  })
+
+  it('leaves a thematic break inside the body alone', () => {
+    expect(stripMarkdownMetadata('# Title\n\nabove\n\n---\n\nbelow')).toBe('# Title\n\nabove\n\n---\n\nbelow')
+  })
 })
 
 describe('unlinkSelfReferences', () => {

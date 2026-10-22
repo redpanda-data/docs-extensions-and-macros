@@ -3,213 +3,342 @@
  */
 
 const TurndownService = require('turndown')
-const turndownPluginGfm = require('turndown-plugin-gfm')
-const { gfm } = turndownPluginGfm
-const path = require('path')
+const {
+  convertPageHtml,
+  escapeText,
+  flattenCell,
+  resolveTarget,
+  createEnterpriseFeatureRules,
+  formatStatusMarker,
+  ENTERPRISE_MARKER,
+} = require('../../extensions/convert-to-markdown')
 
-// --- Minimal reproduction of the link conversion rule from the extension
-function createTurndownForPage({ siteUrl, page, playbook }) {
-  const td = new TurndownService({
-    headingStyle: 'atx',
-    codeBlockStyle: 'fenced',
-    bulletListMarker: '-',
-    linkReferenceStyle: 'full',
-  })
-  td.remove('script')
-  td.use(gfm)
+const siteUrl = 'https://docs.example.com'
 
-  // Compute base URL for relative → absolute links
-  let pageBase = null
-  if (siteUrl && page?.out?.path) {
-    try {
-      let pubUrl = page?.pub?.url
-      if (pubUrl && !pubUrl.endsWith('/')) pubUrl += '/'
-      const siteBase = siteUrl.endsWith('/') ? siteUrl : siteUrl + '/'
-      pageBase = new URL(pubUrl || '', siteBase)
-    } catch {
-      pageBase = null
-    }
-  }
-
-  td.addRule('absolute-links', {
-    filter: 'a',
-    replacement: function (content, node) {
-      const href = node.getAttribute('href') || ''
-      const text = content || node.textContent || ''
-      if (!href) return `[${text}]()`
-
-      // Anchors and full URLs unchanged
-      if (href.startsWith('#') || /^(?:[a-z]+:)?\/\//i.test(href))
-        return `[${text}](${href})`
-
-      // /api/ links → prepend siteUrl
-      if (/^\/api\//i.test(href)) {
-        const base = siteUrl
-          ? siteUrl.endsWith('/')
-            ? siteUrl.slice(0, -1)
-            : siteUrl
-          : ''
-        const fullApiUrl = base + href
-        return `[${text}](${fullApiUrl})`
-      }
-
-      if (!siteUrl || !pageBase) return `[${text}](${href})`
-
-      try {
-        const urlObj = new URL(href, pageBase)
-        const htmlStyle = playbook?.urls?.htmlExtensionStyle
-        const isIndexify = htmlStyle === 'indexify'
-        const pathname = urlObj.pathname
-
-        if (isIndexify) {
-          const looksLikeDir =
-            pathname.endsWith('/') ||
-            !path.basename(pathname).includes('.')
-
-          if (looksLikeDir) {
-            urlObj.pathname = pathname.replace(/\/?$/, '/index.md')
-          } else {
-            urlObj.pathname = pathname.replace(/\.html$/, '.md')
-          }
-        } else {
-          urlObj.pathname = pathname.replace(/\.html$/, '.md')
-        }
-
-        return `[${text}](${urlObj.toString()})`
-      } catch {
-        return `[${text}](${href})`
-      }
-    },
-  })
-
-  return td
+/** Wrap body HTML in the article element the extension extracts. */
+function article (body) {
+  return `<html><body><nav>chrome</nav><article class="doc">${body}</article><footer>f</footer></body></html>`
 }
 
-// --- TESTS ---
-describe('absolute-links rule (from extension)', () => {
-  const siteUrl = 'https://example.com/'
-  const page = { out: { path: 'docs/guide.html' }, pub: { url: 'docs/guide/' } }
+function makePage (overrides = {}) {
+  return {
+    asciidoc: {
+      doctitle: 'Tiered Storage',
+      attributes: { description: 'Store data in object storage.', 'page-component-name': 'streaming' },
+    },
+    pub: { url: '/streaming/current/manage/tiered-storage/' },
+    src: { component: 'streaming', version: 'current', path: 'modules/manage/pages/tiered-storage.adoc' },
+    out: { path: 'streaming/current/manage/tiered-storage/index.html' },
+    ...overrides,
+  }
+}
 
-  test('converts relative .html to .md', () => {
-    const html = `<a href="../intro.html">Intro</a>`
-    const td = createTurndownForPage({ siteUrl, page })
-    const result = td.turndown(html)
-    expect(result).toBe('[Intro](https://example.com/docs/intro.md)')
+function convert (body, pageOverrides) {
+  return convertPageHtml({ html: article(body), page: makePage(pageOverrides), siteUrl })
+}
+
+/** The body after the front matter, H1, directive and source comment. */
+function bodyOf (markdown) {
+  return markdown.split('-->\n\n')[1]
+}
+
+describe('export structure', () => {
+  const markdown = convert('<h1 class="page">Tiered Storage</h1><p>Intro.</p>')
+
+  test('starts with the front matter block', () => {
+    expect(markdown.startsWith('---\ntitle: Tiered Storage\n')).toBe(true)
+    expect(markdown).toMatch(/^---\n[\s\S]*?\n---\n\n# Tiered Storage\n/)
   })
 
-  test('converts .html#anchor → .md#anchor', () => {
-    const html = `<a href="../overview.html#details">Overview</a>`
-    const td = createTurndownForPage({ siteUrl, page })
-    const result = td.turndown(html)
-    expect(result).toBe('[Overview](https://example.com/docs/overview.md#details)')
+  test('puts the H1, the llms.txt directive and the source comment after the front matter', () => {
+    expect(markdown).toBe(
+      '---\n' +
+      'title: Tiered Storage\n' +
+      'description: Store data in object storage.\n' +
+      'page-component-name: streaming\n' +
+      '---\n\n' +
+      '# Tiered Storage\n\n' +
+      '> For the complete documentation index, see [llms.txt](https://docs.example.com/llms.txt). ' +
+      'Component-specific: [streaming-full.txt](https://docs.example.com/streaming-full.txt)\n\n' +
+      '<!-- Source: https://docs.example.com/streaming/current/manage/tiered-storage.md -->\n\n' +
+      'Intro.'
+    )
   })
 
-  test('converts .html?query=1#anchor → .md?query=1#anchor', () => {
-    const html = `<a href="../overview.html?lang=en#intro">Overview</a>`
-    const td = createTurndownForPage({ siteUrl, page })
-    const result = td.turndown(html)
-    expect(result).toBe('[Overview](https://example.com/docs/overview.md?lang=en#intro)')
+  test('keeps a page without an opening H1 intact', () => {
+    const md = convert('<p>Intro text</p><h1>Later</h1><p>More</p>')
+    expect(bodyOf(md)).toBe('Intro text\n\n# Later\n\nMore')
   })
 
-  test('converts folder → index.md (indexify=true)', () => {
-    const html = `<a href="../getting-started/">Get Started</a>`
-    const td = createTurndownForPage({
-      siteUrl,
-      page,
-      playbook: { urls: { htmlExtensionStyle: 'indexify' } },
+  test('decodes HTML entities in front matter values', () => {
+    const md = convert('<h1>x</h1>', {
+      asciidoc: { doctitle: 'rpk ai trigger get', attributes: { description: 'Get one trigger. &lt;name&gt; is the resource name.' } },
     })
-    const result = td.turndown(html)
-    expect(result).toBe('[Get Started](https://example.com/docs/getting-started/index.md)')
+    expect(md).toContain('description: Get one trigger. <name> is the resource name.')
   })
 
-  test('replaces .html → .md (indexify=false)', () => {
-    const html = `<a href="../install.html">Install</a>`
-    const td = createTurndownForPage({
-      siteUrl,
-      page,
-      playbook: { urls: { htmlExtensionStyle: 'default' } },
-    })
-    const result = td.turndown(html)
-    expect(result).toBe('[Install](https://example.com/docs/install.md)')
+  test('gives field-only pages the body alone', () => {
+    const md = convert('<h2 id="f"><a class="anchor" href="#f"></a>Fields</h2><p>Body</p>', { isFieldOnlyPage: true })
+    expect(md).toBe('## Fields\n\nBody')
   })
 
-  test('prefixes /api/ links with siteUrl', () => {
-    const html = `<a href="/api/doc/schema-registry/">Schema Registry</a>`
-    const td = createTurndownForPage({ siteUrl, page })
-    const result = td.turndown(html)
-    expect(result).toBe('[Schema Registry](https://example.com/api/doc/schema-registry/)')
+  test('returns an empty string when the page has no article', () => {
+    expect(convertPageHtml({ html: '<html><body><p>x</p></body></html>', page: makePage(), siteUrl })).toBe('')
   })
 
-  test('keeps anchor-only links', () => {
-    const html = `<a href="#section-2">Jump</a>`
-    const td = createTurndownForPage({ siteUrl, page })
-    const result = td.turndown(html)
-    expect(result).toBe('[Jump](#section-2)')
-  })
-
-  test('keeps external URLs untouched', () => {
-    const html = `<a href="https://github.com/redpanda-data">GitHub</a>`
-    const td = createTurndownForPage({ siteUrl, page })
-    const result = td.turndown(html)
-    expect(result).toBe('[GitHub](https://github.com/redpanda-data)')
+  test('drops site chrome and tracking pixels', () => {
+    const md = convert(
+      '<h1>T</h1><p>Body</p><img src="https://static.scarf.sh/a.png" alt="Image for tracking purposes only" style="display:none">' +
+      '<div class="feedback-section">Was this helpful?</div>'
+    )
+    expect(bodyOf(md)).toBe('Body')
   })
 })
 
-describe('H1 and frontmatter placement', () => {
-  function processMarkdownWithFrontmatter(markdown, frontmatter) {
-    // Simulate the logic from convert-to-markdown.js lines 493-513
-    const h1Match = markdown.match(/^(#\s+.+?)(\n|$)/)
-    let h1Heading = ''
-    let restOfMarkdown = markdown
-
-    if (h1Match) {
-      h1Heading = h1Match[0]
-      restOfMarkdown = markdown.substring(h1Match[0].length).trimStart()
-    }
-
-    // Simplified: just frontmatter placement (matches line 513 logic)
-    let result
-    if (frontmatter) {
-      result = `${h1Heading}\n${frontmatter}${restOfMarkdown}`
-    } else {
-      result = markdown
-    }
-
-    // Apply cleanup logic (lines 517-523)
-    if (result) {
-      result = result.replace(/\n{3,}/g, '\n\n')
-      result = result.replace(/[ \t]+$/gm, '')
-      result = result.trim()
-    }
-
-    return result
-  }
-
-  const frontmatter = '---\ntitle: Test\n---\n'
-
-  test('places frontmatter after H1 at document start', () => {
-    const markdown = '# Heading\n\nSome content'
-    const result = processMarkdownWithFrontmatter(markdown, frontmatter)
-    expect(result).toBe('# Heading\n\n---\ntitle: Test\n---\nSome content')
+describe('headings', () => {
+  test('removes the empty anchor link Antora puts in every heading', () => {
+    const md = convert('<h1>T</h1><h2 id="discovery"><a class="anchor" href="#discovery"></a>Discovery</h2>')
+    expect(bodyOf(md)).toBe('## Discovery')
   })
 
-  test('places frontmatter at top when no H1', () => {
-    const markdown = 'Some content without heading'
-    const result = processMarkdownWithFrontmatter(markdown, frontmatter)
-    expect(result).toBe('---\ntitle: Test\n---\nSome content without heading')
+  test('keeps a heading with an underscore in a name readable', () => {
+    const md = convert('<h1>T</h1><h2 id="x"><a class="anchor" href="#x"></a>invoke_agent spans</h2>')
+    expect(bodyOf(md)).toBe('## invoke_agent spans')
+  })
+})
+
+describe('tables', () => {
+  test('converts cell content as Markdown instead of flattening it to text', () => {
+    const md = convert(
+      '<h1>T</h1>' +
+      '<table class="tableblock"><thead><tr><th>Your role</th><th>Start here</th></tr></thead><tbody>' +
+      '<tr><td><p class="tableblock">Administrator</p></td>' +
+      '<td><div class="content"><div class="ulist"><ul>' +
+      '<li><p><a href="#level-1">Level 1</a></p></li>' +
+      '<li><p>Run <code>rpk ai agent create --ttl</code> with <strong>Existing</strong> or <strong>New</strong></p></li>' +
+      '</ul></div></div></td></tr></tbody></table>'
+    )
+    expect(bodyOf(md)).toBe(
+      '| Your role | Start here |\n' +
+      '| --- | --- |\n' +
+      '| Administrator | - [Level 1](#level-1)<br>- Run `rpk ai agent create --ttl` with **Existing** or **New** |'
+    )
   })
 
-  test('does not match H1 later in document (bug fix)', () => {
-    const markdown = 'Intro text\n\n# Heading Later\n\nMore content'
-    const result = processMarkdownWithFrontmatter(markdown, frontmatter)
-    // Should place frontmatter at top since H1 is not at document start
-    expect(result).toBe('---\ntitle: Test\n---\nIntro text\n\n# Heading Later\n\nMore content')
+  test('separates paragraphs in a cell so text does not run into a URL', () => {
+    const md = convert(
+      '<h1>T</h1><table><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody><tr><td>URL</td>' +
+      '<td><p class="tableblock"><code>https://aigw.clusters.rdpa.co</code></p><p class="tableblock">Replace <code>&lt;cluster-id&gt;</code> with yours.</p></td></tr></tbody></table>'
+    )
+    expect(bodyOf(md)).toContain('| URL | `https://aigw.clusters.rdpa.co`<br>Replace `<cluster-id>` with yours. |')
   })
 
-  test('handles H1 with double newline separator', () => {
-    const markdown = '# Heading\n\nParagraph one\n\nParagraph two'
-    const result = processMarkdownWithFrontmatter(markdown, frontmatter)
-    expect(result).toBe('# Heading\n\n---\ntitle: Test\n---\nParagraph one\n\nParagraph two')
+  test('keeps a cron value in a cell as code', () => {
+    const md = convert('<h1>T</h1><table><thead><tr><th>Field</th><th>Example</th></tr></thead><tbody><tr><td>Cron</td><td><p><code>0 0 * * *</code></p></td></tr></tbody></table>')
+    expect(bodyOf(md)).toContain('| Cron | `0 0 * * *` |')
+  })
+
+  test('leaves the header row empty when the table declares none', () => {
+    const md = convert('<h1>T</h1><table><tbody><tr><td>key</td><td>value</td></tr><tr><td>k2</td><td>v2</td></tr></tbody></table>')
+    expect(bodyOf(md)).toBe('|  |  |\n| --- | --- |\n| key | value |\n| k2 | v2 |')
+  })
+
+  test('escapes pipes and turns code blocks in a cell into code spans', () => {
+    const md = convert(
+      '<h1>T</h1><table><thead><tr><th>Option</th><th>Example</th></tr></thead><tbody><tr><td>a | b</td>' +
+      '<td><div class="listingblock"><div class="content"><pre class="highlightjs highlight"><code class="language-yaml" data-lang="yaml">a: 1\nb: 2</code></pre></div></div></td></tr></tbody></table>'
+    )
+    expect(bodyOf(md)).toContain('| a \\| b | `a: 1`<br>`b: 2` |')
+  })
+
+  test('renders a callout list as a numbered list, not a table', () => {
+    const md = convert(
+      '<h1>T</h1><div class="colist arabic"><table><tbody>' +
+      '<tr><td><i class="conum" data-value="1"></i><b>1</b></td><td>Required. The signing key.</td></tr>' +
+      '<tr><td><i class="conum" data-value="2"></i><b>2</b></td><td>Marks cookies as secure.</td></tr>' +
+      '</tbody></table></div>'
+    )
+    expect(bodyOf(md)).toBe('1. Required. The signing key.\n2. Marks cookies as secure.')
+  })
+
+  test('keeps a table whose cell holds an admonition', () => {
+    const md = convert(
+      '<h1>T</h1><table><thead><tr><th>Setting</th><th>Notes</th></tr></thead><tbody>' +
+      '<tr><td>a</td><td>plain</td></tr>' +
+      '<tr><td>b</td><td><div class="admonitionblock note"><table><tr><td class="icon"><i class="fa icon-note"></i></td><td class="content"><p>careful</p></td></tr></table></div></td></tr>' +
+      '<tr><td>c</td><td>also plain</td></tr></tbody></table><p>after</p>'
+    )
+    expect(bodyOf(md)).toBe(
+      '| Setting | Notes |\n| --- | --- |\n| a | plain |\n| b | > 📝 **NOTE**<br>><br>> careful |\n| c | also plain |\n\nafter'
+    )
+  })
+
+  test('renders a table nested in a cell as text rows', () => {
+    const md = convert('<h1>T</h1><table><thead><tr><th>N</th><th>Inner</th></tr></thead><tbody><tr><td>1</td><td><table><tr><td>x</td><td>y</td></tr></table></td></tr></tbody></table>')
+    expect(bodyOf(md)).toBe('| N | Inner |\n| --- | --- |\n| 1 | x / y |')
+  })
+
+  test('still renders admonitions as blockquotes', () => {
+    const md = convert(
+      '<h1>T</h1><div class="admonitionblock note"><table><tr><td class="icon"><i class="fa icon-note" title="Note"></i></td>' +
+      '<td class="content">Use <code>rpk</code>.</td></tr></table></div>'
+    )
+    expect(bodyOf(md)).toBe('> 📝 **NOTE**\n>\n> Use `rpk`.')
+  })
+})
+
+describe('escaping', () => {
+  test('does not escape a hyphen that continues a line after an inline element', () => {
+    const md = convert('<h1>T</h1><p>Built on <a href="https://raft.github.io/">Raft</a>-based consensus.</p>')
+    expect(bodyOf(md)).toBe('Built on [Raft](https://raft.github.io/)-based consensus.')
+  })
+
+  test('keeps a line-start escape when only an invisible sibling precedes the text', () => {
+    const md = convert('<h1>T</h1><p><a id="z"></a># not a heading</p><p><a id="y"></a>1. not a list</p><div><!-- c -->- after comment</div>')
+    expect(bodyOf(md)).toBe('\\# not a heading\n\n1\\. not a list\n\n\\- after comment')
+  })
+
+  test('still escapes a hyphen that starts a paragraph', () => {
+    const md = convert('<h1>T</h1><p>- not a list</p>')
+    expect(bodyOf(md)).toBe('\\- not a list')
+  })
+
+  test('escapes a delimiter that opens the text as a list marker or thematic break', () => {
+    expect(escapeText('* Indicates a required field')).toBe('\\* Indicates a required field')
+    expect(escapeText('***')).toBe('\\*\\*\\*')
+    expect(escapeText('* * *')).toBe('\\* \\* \\*')
+    expect(escapeText('___')).toBe('\\_\\_\\_')
+  })
+
+  test('escapes a delimiter run that ends the text node', () => {
+    const md = convert('<h1>T</h1><p>Press *<kbd>Ctrl</kbd>* and RPK_<em>NAME</em>; 10* faster, marked with * <b>x</b></p>')
+    expect(bodyOf(md)).toBe('Press \\*Ctrl\\* and RPK\\__NAME_; 10* faster, marked with * **x**')
+  })
+
+  test('leaves underscores inside identifiers alone', () => {
+    expect(escapeText('Use get_orders and the RPK_ environment variable.')).toBe('Use get_orders and the RPK_ environment variable.')
+    expect(escapeText('conversation_id joins a run')).toBe('conversation_id joins a run')
+  })
+
+  test('escapes an underscore or asterisk that could open emphasis', () => {
+    expect(escapeText('_emphasis_ here')).toBe('\\_emphasis_ here')
+    expect(escapeText('say *loud* words')).toBe('say \\*loud* words')
+    expect(escapeText('a *b')).toBe('a \\*b')
+  })
+
+  test('leaves an asterisk that cannot open emphasis alone', () => {
+    expect(escapeText('fields marked with * are required')).toBe('fields marked with * are required')
+    expect(escapeText('the --teams-* flags')).toBe('the --teams-* flags')
+  })
+
+  test('keeps the rest of the escape list', () => {
+    expect(escapeText('a [link] and `code` and \\ backslash')).toBe('a \\[link\\] and \\`code\\` and \\\\ backslash')
+    expect(escapeText('# not a heading')).toBe('\\# not a heading')
+    expect(escapeText('1. not a list')).toBe('1\\. not a list')
+  })
+
+  test('fences a literal block so its underscores are not escaped', () => {
+    const md = convert('<h1>T</h1><div class="literalblock"><div class="content"><pre>invoke_agent (6.65 seconds)\n├── execute_tool get_quote</pre></div></div>')
+    expect(bodyOf(md)).toBe('```\ninvoke_agent (6.65 seconds)\n├── execute_tool get_quote\n```')
+  })
+
+  test('keeps blank lines and trailing spaces inside a code block', () => {
+    const md = convert('<h1>T</h1><pre><code>def a():\n    pass\n\n\n\ndef b():  \n    pass</code></pre><p>x</p>')
+    expect(bodyOf(md)).toBe('```\ndef a():\n    pass\n\n\n\ndef b():  \n    pass\n```\n\nx')
+  })
+
+  test('keeps a two-space hard break', () => {
+    const md = convert('<h1>T</h1><p>Street 1<br>City</p>')
+    expect(bodyOf(md)).toBe('Street 1  \nCity')
+  })
+
+  test('keeps a source block fenced with its language', () => {
+    const md = convert('<h1>T</h1><pre class="highlightjs highlight"><code class="language-bash hljs" data-lang="bash">rpk topic list</code></pre>')
+    expect(bodyOf(md)).toBe('```bash\nrpk topic list\n```')
+  })
+})
+
+describe('inline code', () => {
+  test('emits the text of a code span even when Asciidoctor auto-linked a URL inside it', () => {
+    const md = convert('<h1>T</h1><p>Assume <code><a href="https://aigw.<id>.clusters.rdpa.co/mcp">https://aigw.&lt;id&gt;.clusters.rdpa.co/mcp</a></code> is yours.</p>')
+    expect(bodyOf(md)).toBe('Assume `https://aigw.<id>.clusters.rdpa.co/mcp` is yours.')
+  })
+
+  test('widens the delimiter when the code contains a backtick', () => {
+    const md = convert('<h1>T</h1><p>Type <code>a ` b</code>.</p>')
+    expect(bodyOf(md)).toBe('Type ``a ` b``.')
+  })
+})
+
+describe('links and images', () => {
+  test('resolves relative, parent-relative and root-relative links against the page URL', () => {
+    const md = convert(
+      '<h1>T</h1><p><a href="kubernetes/">K8s</a> <a href="../deploy/index.html">Deploy</a> <a href="/home/glossary/#tool">tool</a> ' +
+      '<a href="#local">anchor</a> <a href="https://example.org/x">ext</a> <a href="mailto:a@b.c">mail</a></p>'
+    )
+    expect(bodyOf(md)).toBe(
+      '[K8s](https://docs.example.com/streaming/current/manage/tiered-storage/kubernetes/) ' +
+      '[Deploy](https://docs.example.com/streaming/current/manage/deploy/index.html) ' +
+      '[tool](https://docs.example.com/home/glossary/#tool) ' +
+      '[anchor](#local) [ext](https://example.org/x) [mail](mailto:a@b.c)'
+    )
+  })
+
+  test('keeps the destination of a link that has no text, as an autolink', () => {
+    const md = convert('<h1>T</h1><p><a href="https://x.com"><i class="fa fa-github"></i></a> text <a href="#top"></a></p>')
+    // Turndown drops the space after an element that renders no text.
+    expect(bodyOf(md)).toBe('<https://x.com>text')
+  })
+
+  test('resolves image sources and keeps alt text', () => {
+    const md = convert('<h1>T</h1><div class="imageblock"><div class="content"><img src="../_images/arch.png" alt="Tiered Storage architecture"></div></div>')
+    expect(bodyOf(md)).toBe('![Tiered Storage architecture](https://docs.example.com/streaming/current/manage/_images/arch.png)')
+  })
+
+  test('resolveTarget leaves targets it cannot or should not resolve alone', () => {
+    const pageUrl = new URL('https://docs.example.com/a/b/')
+    expect(resolveTarget('#x', pageUrl)).toBe('#x')
+    expect(resolveTarget('//cdn.example.com/x.png', pageUrl)).toBe('//cdn.example.com/x.png')
+    expect(resolveTarget('c/', null)).toBe('c/')
+    expect(resolveTarget('c/', pageUrl)).toBe('https://docs.example.com/a/b/c/')
+  })
+})
+
+describe('tabs', () => {
+  const tabs = (id, title, body) =>
+    `<div class="openblock tabs"><div class="content"><ul class="tablist"><li class="tab" id="${id}" aria-controls="${id}--panel"><p>${title}</p></li></ul>` +
+    `<div class="tabpanel" id="${id}--panel">${body}</div></div></div>`
+
+  test('keeps a nested tab group inside an admonition', () => {
+    const inner = tabs('in', 'Inner', '<p>inner text</p>')
+    const outer = tabs('out', 'Outer', `<p>outer text</p>${inner}`)
+    const md = convert(`<h1>T</h1><div class="admonitionblock note"><table><tr><td class="icon"><i class="fa icon-note"></i></td><td class="content">${outer}</td></tr></table></div>`)
+    expect(bodyOf(md)).toBe('> 📝 **NOTE**\n>\n> ### Outer\n>\n> outer text\n>\n> #### Inner\n>\n> inner text')
+  })
+
+  test('renders three nested levels once each', () => {
+    const l3 = tabs('c', 'L3', '<p>three</p>')
+    const l2 = tabs('b', 'L2', `<p>two</p>${l3}`)
+    const l1 = tabs('a', 'L1', `<p>one</p>${l2}`)
+    const md = convert(`<h1>T</h1><h2>Section</h2>${l1}`)
+    expect(bodyOf(md)).toBe('## Section\n\n### L1\n\none\n\n#### L2\n\ntwo\n\n##### L3\n\nthree')
+  })
+})
+
+describe('description lists', () => {
+  test('bolds the term so it reads as a label', () => {
+    const md = convert('<h1>T</h1><div class="dlist"><dl><dt class="hdlist1">term</dt><dd><p>its description</p></dd></dl></div>')
+    expect(bodyOf(md)).toBe('**term**\n\nits description')
+  })
+})
+
+describe('flattenCell', () => {
+  test('joins lines with <br>, tightens list markers and escapes pipes', () => {
+    expect(flattenCell('-   one\n    \n-   two | three\n')).toBe('- one<br>- two \\| three')
+  })
+
+  test('drops line-start escapes, which mean nothing inside a cell', () => {
+    expect(flattenCell('Use these instead:\n\n\\- `rpk a`\n\n\\- `rpk b`\n\n1\\. step')).toBe('Use these instead:<br>- `rpk a`<br>- `rpk b`<br>1. step')
   })
 })
 
@@ -218,125 +347,75 @@ describe('H1 and frontmatter placement', () => {
 // These tests use the rule the extension actually registers, not a local
 // reproduction, so they fail if the real rule regresses.
 describe('enterprise feature marker in Markdown', () => {
-  const {
-    createEnterpriseFeatureRules,
-  } = require('../../extensions/convert-to-markdown')
-
-  function convert(html) {
-    const td = new TurndownService({
-      headingStyle: 'atx',
-      codeBlockStyle: 'fenced',
-      bulletListMarker: '-',
-    })
-    td.use(gfm)
+  function createTurndown () {
+    const td = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced', bulletListMarker: '-' })
     const rules = createEnterpriseFeatureRules()
     td.addRule('enterprise-feature', rules.enterpriseFeature)
     td.addRule('beta-badge', rules.betaBadge)
-    return td.turndown(html)
+    return td
   }
 
-  test('marks a linked enterprise feature and keeps the link', () => {
-    const html =
-      '<p>Enable <span class="enterprise-feature" title="Iceberg Topics requires an Enterprise Edition license.">' +
-      '<a href="../iceberg/about/">Iceberg Topics</a></span> to write to tables.</p>'
-    expect(convert(html)).toBe(
-      'Enable [Iceberg Topics](../iceberg/about/) (enterprise) to write to tables.'
-    )
+  test('appends the marker to a plain feature name', () => {
+    const html = '<p>Use <span class="enterprise-feature" title="Enterprise feature">Tiered Storage</span> today.</p>'
+    expect(createTurndown().turndown(html)).toBe(`Use Tiered Storage ${ENTERPRISE_MARKER} today.`)
   })
 
-  test('marks an unlinked enterprise feature', () => {
-    const html =
-      '<p>Enable <span class="enterprise-feature" title="Tiered Storage requires an Enterprise Edition license.">' +
-      'Tiered Storage</span> first.</p>'
-    expect(convert(html)).toBe('Enable Tiered Storage (enterprise) first.')
+  test('keeps the link when the feature is linked', () => {
+    const html = '<p>See <span class="enterprise-feature"><a href="../manage/tiered-storage.html">Tiered Storage</a></span>.</p>'
+    expect(createTurndown().turndown(html)).toBe(`See [Tiered Storage](../manage/tiered-storage.html) ${ENTERPRISE_MARKER}.`)
   })
 
-  test('honors a custom enterprise-feature-role class', () => {
-    // The macro allows overriding the class via enterprise-feature-role, so a
-    // substring match keeps the marker working for renamed roles.
-    const html =
-      '<p>Uses <span class="rp-enterprise-feature-badge">Audit Logs</span>.</p>'
-    expect(convert(html)).toBe('Uses Audit Logs (enterprise).')
+  test('matches when the class is one of several', () => {
+    const html = '<p><span class="foo enterprise-feature bar">Audit Logging</span></p>'
+    expect(createTurndown().turndown(html)).toBe(`Audit Logging ${ENTERPRISE_MARKER}`)
   })
 
-  test('does not double-mark content that already ends with the marker', () => {
-    const html =
-      '<p><span class="enterprise-feature">' +
-      '<span class="enterprise-feature">Tiered Storage</span></span></p>'
-    expect(convert(html)).toBe('Tiered Storage (enterprise)')
+  test('does not add a second marker when the content already carries one', () => {
+    const html = `<p><span class="enterprise-feature"><span class="enterprise-feature">Nested</span></span></p>`
+    expect(createTurndown().turndown(html)).toBe(`Nested ${ENTERPRISE_MARKER}`)
   })
 
-  test('drops an empty enterprise span instead of emitting a bare marker', () => {
-    const html = '<p>Nothing here <span class="enterprise-feature"></span>.</p>'
-    expect(convert(html)).toBe('Nothing here .')
+  test('emits nothing for an empty span', () => {
+    expect(createTurndown().turndown('<p>a <span class="enterprise-feature"></span> b</p>')).toBe('a b')
   })
 
-  test('leaves ordinary spans untouched', () => {
-    const html = '<p>Just <span class="other">text</span> here.</p>'
-    expect(convert(html)).toBe('Just text here.')
+  test('leaves unrelated spans alone', () => {
+    expect(createTurndown().turndown('<p><span class="other">Plain</span></p>')).toBe('Plain')
+  })
+
+  test('survives the full page conversion', () => {
+    const md = convert('<h1>T</h1><p>Use <span class="enterprise-feature">Tiered Storage</span>.</p>')
+    expect(bodyOf(md)).toBe(`Use Tiered Storage ${ENTERPRISE_MARKER}.`)
   })
 })
 
-// A beta enterprise feature carries two markers in HTML. Emitting them
-// separately read as "Stretch Clusters (enterprise) (beta)", so they collapse
-// into one parenthetical.
 describe('combined status markers in Markdown', () => {
-  const {
-    createEnterpriseFeatureRules,
-    formatStatusMarker,
-  } = require('../../extensions/convert-to-markdown')
-
-  function convert(html) {
-    const td = new TurndownService({
-      headingStyle: 'atx',
-      codeBlockStyle: 'fenced',
-      bulletListMarker: '-',
-    })
-    td.use(gfm)
+  function createTurndown () {
+    const td = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced', bulletListMarker: '-' })
     const rules = createEnterpriseFeatureRules()
     td.addRule('enterprise-feature', rules.enterpriseFeature)
     td.addRule('beta-badge', rules.betaBadge)
-    return td.turndown(html)
+    return td
   }
 
-  const betaBadge = '<span class="badge badge--beta ">(beta)</span>'
-
-  test('merges an enterprise feature and a following beta badge', () => {
-    const html =
-      '<p>Enable <span class="enterprise-feature" title="x">' +
-      '<a href="../stretch/">Stretch Clusters</a></span> ' + betaBadge + ' today.</p>'
-    expect(convert(html)).toBe(
-      'Enable [Stretch Clusters](../stretch/) (enterprise, beta) today.'
-    )
-  })
-
-  test('leaves exactly one space around the merged marker', () => {
-    const html =
-      '<p>Enable <span class="enterprise-feature">Stretch Clusters</span> ' +
-      betaBadge + ' today.</p>'
-    // Suppressing the badge and marking the span instead left a doubled space.
-    expect(convert(html)).not.toMatch(/ {2}/)
-  })
-
-  test('marks a beta badge that stands alone', () => {
-    expect(convert('<p>Feature ' + betaBadge + ' here.</p>')).toBe(
-      'Feature (beta) here.'
-    )
-  })
-
-  test('does not merge a badge that is not adjacent to the feature', () => {
-    const html =
-      '<p><span class="enterprise-feature">Tiered Storage</span> and other text ' +
-      betaBadge + '.</p>'
-    expect(convert(html)).toBe(
-      'Tiered Storage (enterprise) and other text (beta).'
-    )
-  })
-
-  test('formatStatusMarker joins statuses and drops empties', () => {
+  test('formatStatusMarker joins the statuses into one parenthetical', () => {
     expect(formatStatusMarker(['enterprise', 'beta'])).toBe('(enterprise, beta)')
-    expect(formatStatusMarker(['enterprise'])).toBe('(enterprise)')
+    expect(formatStatusMarker(['beta'])).toBe('(beta)')
     expect(formatStatusMarker([])).toBe('')
-    expect(formatStatusMarker([null, 'beta'])).toBe('(beta)')
+  })
+
+  test('a beta enterprise feature gets one combined marker', () => {
+    const html = '<p><span class="enterprise-feature">Stretch Clusters</span> <span class="badge badge--beta">beta</span></p>'
+    expect(createTurndown().turndown(html)).toBe('Stretch Clusters (enterprise, beta)')
+  })
+
+  test('a beta badge on its own becomes (beta)', () => {
+    const html = '<p>Shadowing <span class="badge badge--beta">beta</span></p>'
+    expect(createTurndown().turndown(html)).toBe('Shadowing (beta)')
+  })
+
+  test('an enterprise feature followed by other text keeps its own marker', () => {
+    const html = '<p><span class="enterprise-feature">Tiered Storage</span> <em>note</em></p>'
+    expect(createTurndown().turndown(html)).toBe(`Tiered Storage ${ENTERPRISE_MARKER} _note_`)
   })
 })
