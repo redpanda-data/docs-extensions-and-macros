@@ -87,16 +87,13 @@ describe('overrides-audit adapters', () => {
     })
   })
 
-  describe('rpk surface (structural)', () => {
+  describe('rpk surface', () => {
+    // Prose classification is covered in rpk-adapter.test.js; this checks
+    // the adapter is wired through runAudit like the properties surface.
     const rpkOverrides = {
       $schema: './rpk-overrides.schema.json',
-      _notes: { ignored: 'yes' },
       textTransformations: { replacements: [] },
-      definitions: {
-        'common-tls-flags': {
-          'tls-cert': { description: 'Path to the TLS certificate.' }
-        }
-      },
+      definitions: { 'common-tls-flags': { 'tls-cert': { description: 'Path to the TLS certificate.' } } },
       commands: {
         'rpk topic create': {
           description: 'Create topics.',
@@ -107,48 +104,51 @@ describe('overrides-audit adapters', () => {
         }
       }
     }
-    const rpkExtracted = {
-      tree: {
+    const rpkSnapshot = {
+      rpk_version: 'v1.0.0',
+      raw_tree: {
         name: 'rpk',
         commands: [
-          { name: 'topic', commands: [{ name: 'create' }] }
+          { name: 'topic', commands: [{ name: 'create', description: 'Create topics', flags: [{ name: 'partitions', description: 'Number of partitions' }] }] }
         ]
-      }
+      },
+      tree: { name: 'rpk', commands: [] }
     }
 
-    test('enumerates prose fields as REVIEW-TODO and docs structure as KEEP', () => {
+    test('classifies prose against raw_tree and docs structure as KEEP', () => {
       const result = runAudit({
         overrides: writeFixture('rpk-overrides.json', rpkOverrides),
-        extracted: writeFixture('rpk-extracted.json', rpkExtracted),
+        extracted: writeFixture('rpk-v1.0.0.json', rpkSnapshot),
         surface: 'rpk'
       })
 
       const byKey = Object.fromEntries(result.manifest.map((row) => [`${row.name}|${row.field}`, row]))
-      expect(byKey['rpk topic create|description'].class).toBe(CLASSES.REVIEW)
-      expect(byKey['rpk topic create|description'].note).toContain('TODO')
+      // Only the formatter's trailing period differs: redundant.
+      expect(byKey['rpk topic create|description'].class).toBe(CLASSES.REDUNDANT)
       expect(byKey['rpk topic create|description'].content_hash).toMatch(/^[0-9a-f]{16}$/)
-      expect(byKey['rpk topic create --partitions|flags.description'].class).toBe(CLASSES.REVIEW)
+      expect(byKey['rpk topic create --partitions|flags.description'].class).toBe(CLASSES.REDUNDANT)
       expect(byKey['rpk topic create|seeAlso'].class).toBe(CLASSES.KEEP)
       expect(byKey['rpk topic create|introducedInVersion'].class).toBe(CLASSES.KEEP)
       expect(byKey['rpk topic create|pageAliases'].class).toBe(CLASSES.KEEP)
-      expect(byKey['definitions/common-tls-flags --tls-cert|flags.description'].class).toBe(CLASSES.REVIEW)
+      expect(byKey['definitions/common-tls-flags --tls-cert|flags.description'].class).toBe(CLASSES.KEEP)
+      expect(result.cross_check.violations).toEqual([])
+      expect(formatHumanReport(result)).toContain('surface: rpk')
     })
 
-    test('flags overrides for commands missing from the extracted tree', () => {
+    test('flags overrides for commands missing from raw_tree', () => {
       const result = runAudit({
-        overrides: writeFixture('rpk-overrides-stale.json', {
-          commands: { 'rpk gone command': { description: 'Stale.' } }
-        }),
-        extracted: writeFixture('rpk-extracted.json', rpkExtracted),
+        overrides: writeFixture('rpk-overrides-stale.json', { commands: { 'rpk gone command': { description: 'Stale.' } } }),
+        extracted: writeFixture('rpk-v1.0.0.json', rpkSnapshot),
         surface: 'rpk'
       })
-      expect(result.manifest[0].note).toContain('not found in the extracted rpk tree')
+      expect(result.manifest[0].class).toBe(CLASSES.REVIEW)
+      expect(result.manifest[0].note).toContain("not found in the snapshot's raw_tree")
     })
 
     test('findCommandNode walks the tree by full command name', () => {
-      expect(findCommandNode(rpkExtracted.tree, 'rpk topic create')).toEqual({ name: 'create' })
-      expect(findCommandNode(rpkExtracted.tree, 'rpk topic delete')).toBeNull()
-      expect(findCommandNode(rpkExtracted.tree, 'other root')).toBeNull()
+      expect(findCommandNode(rpkSnapshot.raw_tree, 'rpk topic create').name).toBe('create')
+      expect(findCommandNode(rpkSnapshot.raw_tree, 'rpk topic delete')).toBeNull()
+      expect(findCommandNode(rpkSnapshot.raw_tree, 'other root')).toBeNull()
     })
   })
 
