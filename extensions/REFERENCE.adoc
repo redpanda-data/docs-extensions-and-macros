@@ -1274,7 +1274,7 @@ The `convert-to-markdown` extension converts all HTML pages to markdown format a
 - Converts all HTML pages to GitHub-Flavored Markdown
 - Exports as `.md` files (e.g., `/page.html` → `/page.md`)
 - Adds YAML frontmatter with page metadata
-- Decodes HTML entities in titles
+- Decodes HTML entities in titles and attribute values
 - Supports content negotiation via `Accept: text/markdown` header
 - Stores markdown in `page.markdownContents` for other extensions
 
@@ -1289,41 +1289,88 @@ antora:
   - require: '@redpanda-data/docs-extensions-and-macros/extensions/convert-to-markdown'
 ----
 
-=== Frontmatter attributes
+=== Output structure
 
-The extension exports these attributes to YAML frontmatter:
+Each export opens with the frontmatter, then the page title, the llms.txt directive, and an HTML comment naming the export's own URL:
 
-- `page-title`: Page title
-- `page-description`: Page description
-- `page-component-name`, `page-component-version`: Component info
-- `page-git-created-date`, `page-git-modified-date`: Git dates (if git-dates extension enabled)
-- `page-categories`: Categories
-- `page-topic-type`: Topic type (tutorial, how-to, concept, reference)
-- `page-personas`: Target audience
-- Custom attributes from allowlist
-
-=== Example output
-
-[,yaml]
+[,markdown]
 ----
 ---
-title: "Get started with Redpanda"
-description: "Quick start guide for Redpanda"
-component: ROOT
-version: current
-created: 2024-01-15
-modified: 2024-03-29
-categories:
-  - Getting Started
-topic-type: tutorial
-personas:
-  - developer
+title: Get started with Redpanda
+description: Quick start guide for Redpanda
+page-component-name: streaming
+page-topic-type: tutorial
+personas: developer
+page-git-created-date: "2024-01-15"
+page-git-modified-date: "2024-03-29"
 ---
 
 # Get started with Redpanda
 
+> For the complete documentation index, see [llms.txt](https://docs.redpanda.com/llms.txt). Component-specific: [streaming-full.txt](https://docs.redpanda.com/streaming-full.txt)
+
+<!-- Source: https://docs.redpanda.com/streaming/current/get-started/quick-start.md -->
+
 Your markdown content here...
 ----
+
+The frontmatter comes first so Markdown tooling reads it as metadata rather than body text. The aggregate exports (`llms-full.txt` and `<component>-full.txt`) strip the frontmatter, directive and source comment from each page, because they carry their own per-page title and URL.
+
+Field-only pages (see `generate-fields-only-pages`) get the body alone.
+
+=== Frontmatter attributes
+
+The extension exports these attributes to YAML frontmatter:
+
+- `title`, `navtitle`: Page titles
+- `description`: Page description
+- `page-component-name`, `page-component-title`, `page-component-version`, `page-version`: Component info
+- `page-relative-src-path`, `page-edit-url`, `docname`: Source location
+- `page-topic-type`: Topic type (tutorial, how-to, concept, reference)
+- `personas`, `learning-objective-*`: Audience and objectives
+- `page-git-created-date`, `page-git-modified-date`: Git dates (if git-dates extension enabled)
+- `page-beta`, `release-status`, `page-is-nearing-eol`, `page-is-past-eol`, `page-eol-date`, `support-status`: Lifecycle status
+- `latest-redpanda-tag`, `latest-console-tag`, `latest-operator-version`, `latest-connect-version`: Component versions from `antora.yml`
+
+=== How HTML constructs are converted
+
+The extension replaces Turndown's defaults where Asciidoctor's HTML would otherwise lose information:
+
+[cols="1,2"]
+|===
+|Construct |Markdown
+
+|Table cells
+|Converted as Markdown, so lists, links, code spans and emphasis inside a cell survive. Block content in a cell is joined onto one line with `<br>`, a code block becomes one code span per line, and pipes are escaped. A table without a declared header row gets an empty header row rather than promoting its first data row.
+
+|Callout lists (`<div class="colist">`)
+|A numbered list. Asciidoctor renders them as a two-column table, which would otherwise become a Markdown table with the first callout as its header.
+
+|Admonitions
+|A blockquote led by the type and any custom title.
+
+|Tabs
+|One heading per tab, one level below the surrounding heading.
+
+|Literal and plain listing blocks (`<pre>` without `<code>`)
+|A fenced code block. Turndown only fences `<pre><code>`, so these were escaped as prose.
+
+|Inline code
+|Emitted from the element's text, so a URL that Asciidoctor auto-linked inside monospace does not become a Markdown link inside a code span.
+
+|Heading anchors (`<a class="anchor">`)
+|Removed. They otherwise appear as `[](#id)` in front of every heading.
+
+|Links and images
+|Relative targets are resolved against the page's HTML URL, so they work when the Markdown is read away from the site.
+
+|Description lists
+|The term in bold, followed by its description.
+|===
+
+=== Escaping
+
+Turndown escapes every `_` and `*`, which turns `get_orders` into `get\_orders` and `RPK_ environment variable` into `RPK\_`. The extension escapes an emphasis delimiter only when CommonMark would let it open emphasis: an underscore between two alphanumerics, or any delimiter followed by whitespace, is left alone. It also stops Turndown escaping a line-start character (`-`, `+`, `#`, `>`) that merely continues a line after an inline element, so `<a>Raft</a>-based` no longer exports as `[Raft](…)\-based`.
 
 == Generate llms.txt exports
 
