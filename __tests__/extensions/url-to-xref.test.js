@@ -313,6 +313,23 @@ describe('convertContent', () => {
     )
   })
 
+  // A page a generator writes into a docs repo links to its own component by
+  // module and page, the way the repo's hand-written xrefs do, so that a
+  // regeneration does not rewrite every same-component link into a form the
+  // repo never uses. A version-pinned target still names its component.
+  test('writes same-component targets as module:page xrefs when the context names a local component', () => {
+    const context = Object.assign(makeResolverContext(), { localComponent: 'streaming' })
+    expect(
+      convertContent('https://docs.redpanda.com/current/manage/kubernetes/manage-resources/', context).content
+    ).toBe('xref:manage:kubernetes/manage-resources.adoc[]')
+    expect(
+      convertContent('https://docs.redpanda.com/streaming/24.3/manage/security/authentication/', context).content
+    ).toBe('xref:24.3@streaming:manage:security/authentication.adoc[]')
+    expect(convertContent('https://docs.redpanda.com/connect/configuration/secrets/', context).content).toBe(
+      'xref:connect:configuration:secrets.adoc[]'
+    )
+  })
+
   test('replaces a link: macro wholesale', () => {
     expect(convert('link:https://docs.redpanda.com/connect/configuration/secrets/[Secrets]').content).toBe(
       'xref:connect:configuration:secrets.adoc[Secrets]'

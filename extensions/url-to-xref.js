@@ -41,6 +41,10 @@ const { raiseListenerLimit } = require('./util/raise-listener-limit')
  *   page declares (see buildUrlMap).
  * - URLs carrying a query string are left raw, because an xref cannot express
  *   one; they are reported at info level rather than as warnings.
+ * - A resolver context may name a localComponent (see
+ *   cli-utils/docs-links-to-xrefs.js, which converts generated pages before
+ *   they are committed): targets in that component are written as
+ *   module:page xrefs, the form the docs repos use for same-component links.
  */
 
 // Rewrites for URL shapes that predate the current docs.redpanda.com site
@@ -335,9 +339,14 @@ function resolveUrlPath (urlPath, resolverContext) {
   return undefined
 }
 
-function entryToXref (entry, fragment, label) {
+function entryToXref (entry, fragment, label, localComponent) {
   const versionPrefix = entry.latest || !entry.version ? '' : `${entry.version}@`
-  return `xref:${versionPrefix}${entry.component}:${entry.module}:${entry.relative}${fragment || ''}[${label || ''}]`
+  // Content that is itself part of a component (a page a generator writes into
+  // the docs repo) names a target in that component by module and page only,
+  // the way the docs repos write xrefs by hand. A version-pinned xref still
+  // has to name its component.
+  const componentPrefix = !versionPrefix && localComponent && entry.component === localComponent ? '' : `${entry.component}:`
+  return `xref:${versionPrefix}${componentPrefix}${entry.module}:${entry.relative}${fragment || ''}[${label || ''}]`
 }
 
 // Parsed heading id -> heading text, cached per target file.
@@ -510,7 +519,7 @@ function convertContent (content, resolverContext) {
       withoutLinkText.push(match.url)
       continue
     }
-    result += content.slice(cursor, match.start) + entryToXref(entry, url.hash, label)
+    result += content.slice(cursor, match.start) + entryToXref(entry, url.hash, label, resolverContext.localComponent)
     cursor = match.end
     converted++
   }

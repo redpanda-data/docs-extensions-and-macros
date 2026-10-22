@@ -1,0 +1,6 @@
+= Redpanda Architecture
+:description: How Redpanda is built.
+
+== Thread-per-core model
+
+Redpanda pins one thread to each core.
