@@ -38,6 +38,7 @@ display help for command
 * `validate-mcp` - Validate MCP server configuration (tools, resources)
 * `sync-schemas` - Sync this package's docs-data/*.schema.json into a content repo's docs-data/
 * `mcp-version` - Show MCP server version and configuration information
+* `check-dispatch-graph` - Check the repository_dispatch graph between engineering and docs repos: senders without listeners, listeners without senders, never-fired senders, failing receivers (exit 0 clean, 1 findings, 2 could not run)
 * `lint-strings` - Lint user-facing doc strings embedded in engineering source code (properties, metrics, ...)
 * `doc-impact-recording` - Extract the docs MCP calls from a Claude Code transcript into a doc-impact eval recording
 * `lint-screenshots` - Lint image macros and image files in a docs repo against the screenshot standard (alt text, size, format, width)
@@ -575,6 +576,62 @@ npx doc-tools mcp-version --stats
 *Requirements:*
 
 None.
+
+== check-dispatch-graph
+
+Health check for the repository_dispatch graph that connects Redpanda's engineering repos to its docs repos. Reads every workflow file on each configured repo's default branch, pairs the senders (peter-evans/repository-dispatch, `gh api .../dispatches`, curl, github-script) with the listeners (`on.repository_dispatch.types`), and reads each workflow's recent runs from the Actions API. Reports senders with no listener, docs listeners with no sender (informational when a cron backstops them), senders that have never fired, receivers failing more than the threshold, receiver payload variants no sender dispatches, and edges dispatched from more than one repo.
+
+*Why use it:*
+
+A repository_dispatch is accepted with HTTP 204 whether or not a listener exists, and a receiver that fails every run looks, from the sender's side, exactly like one that works. Breaks in this graph went unnoticed for weeks until someone read the receivers' run history by hand. This command reads it by script, and .github/workflows/check-dispatch-graph.yml runs it weekly and files one issue. Exit codes: 0 clean, 1 findings (the output ends with the line DISPATCH_GRAPH_FINDINGS_CONFIRMED), 2 could not run (a repo or runs query could not be read, so the graph is incomplete; never reported as clean).
+
+*Usage:*
+
+[,bash]
+----
+doc-tools check-dispatch-graph [options]
+----
+
+*Options:*
+
+`--repos <list>`::
+Comma-separated owner/name[:role] entries (role engineering or docs) replacing the default repo set
+
+`--fail-threshold <fraction>`::
+Flag a receiver whose fail rate over the window is above this fraction (default: "0.5")
+
+`--window <n>`::
+How many of the newest runs the fail rate is computed over (default: "20")
+
+`--per-page <n>`::
+How many runs to fetch per workflow (max 100) (default: "50")
+
+`--json`::
+Print the full result as JSON instead of the table
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Check the default repo set against the live org
+export REDPANDA_GITHUB_TOKEN=...   # or GH_TOKEN; must read the private docs repos
+npx doc-tools check-dispatch-graph
+
+# Machine-readable
+npx doc-tools check-dispatch-graph --json > dispatch-graph.json
+
+# A narrower set of repos (role decides which side a missing counterpart is reported on)
+npx doc-tools check-dispatch-graph --repos redpanda-data/helm-charts:engineering,redpanda-data/docs:docs
+----
+
+*Requirements:*
+
+- A GitHub token that can read every configured repo and its Actions runs
+  (REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN or GH_TOKEN). The
+  docs repos are private, so an unauthenticated run exits 2.
 
 == lint-strings
 

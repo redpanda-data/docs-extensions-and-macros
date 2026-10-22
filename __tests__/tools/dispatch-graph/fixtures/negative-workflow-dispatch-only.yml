@@ -1,0 +1,12 @@
+# NEGATIVE CONTROL: manual trigger only. Not a listener, not a sender.
+name: Manual only
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        required: true
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "repository_dispatch is mentioned here in a string but nothing dispatches"

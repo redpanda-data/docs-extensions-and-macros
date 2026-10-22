@@ -1,0 +1,16 @@
+name: Script form
+on: [push]
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            // await github.rest.repos.createDispatchEvent({ owner: 'x', repo: 'commented', event_type: 'nope' })
+            await github.rest.repos.createDispatchEvent({
+              owner: 'redpanda-data',
+              repo: 'docs',
+              event_type: 'from-script',
+              client_payload: { plugin: 'check' },
+            })
