@@ -147,6 +147,7 @@ describe('docs-links-to-xrefs', () => {
         '| *`cores`* __integer__ | See https://docs.redpanda.com/current/get-started/architecture/#thread-per-core-model. +',
         '| *`secrets`* __string__ | See https://docs.redpanda.com/redpanda-connect/configuration/secrets/. +',
         '| *`tabs`* __string__ | See https://docs.redpanda.com/current/manage/kubernetes/manage-resources/?platform=kubernetes. +',
+        '| *`tiered`* __boolean__ | See https://docs.redpanda.com/current/reference/properties/cluster-properties/#cloud_storage_no_such_anchor. +',
         '',
       ].join('\n')
     )
@@ -156,6 +157,7 @@ describe('docs-links-to-xrefs', () => {
       unmapped: ['https://docs.redpanda.com/redpanda-connect/configuration/secrets/'],
       withQueryString: ['https://docs.redpanda.com/current/manage/kubernetes/manage-resources/?platform=kubernetes'],
       withoutLinkText: [],
+      missingAnchor: ['https://docs.redpanda.com/current/reference/properties/cluster-properties/#cloud_storage_no_such_anchor'],
     })
     const written = fs.readFileSync(file, 'utf8')
     expect(written).toContain('See xref:get-started:architecture.adoc#thread-per-core-model[Thread-per-core model]. +')
@@ -165,6 +167,37 @@ describe('docs-links-to-xrefs', () => {
     expect(report).toContain('no page in this checkout matches')
     expect(report).toContain('  https://docs.redpanda.com/redpanda-connect/configuration/secrets/')
     expect(report).toContain('an xref cannot carry a query string')
+    expect(report).toContain('anchor not found')
+    expect(report).toContain('  https://docs.redpanda.com/current/reference/properties/cluster-properties/#cloud_storage_no_such_anchor')
+    expect(written).toContain('See https://docs.redpanda.com/current/reference/properties/cluster-properties/#cloud_storage_no_such_anchor. +')
+  })
+
+  test('leaves a URL whose page resolves but whose anchor does not as written, and reports it', () => {
+    for (const url of [
+      'https://docs.redpanda.com/current/reference/properties/cluster-properties/#cloud_storage_no_such_anchor',
+      'https://docs.redpanda.com/current/get-started/architecture/#nope',
+    ]) {
+      for (const input of [`See ${url}.`, `See ${url}[the setting].`]) {
+        const { content, converted, missingAnchor, unmapped, withoutLinkText } = convert(input)
+        expect(content).toBe(input)
+        expect(converted).toBe(0)
+        expect(missingAnchor).toEqual([url])
+        expect(unmapped).toEqual([])
+        expect(withoutLinkText).toEqual([])
+      }
+    }
+  })
+
+  test('converts a fragment that names a property heading from the generated partial, a custom heading id or a block anchor', () => {
+    const property = convert('https://docs.redpanda.com/current/reference/properties/cluster-properties/#default_topic_replications')
+    expect(property.content).toBe('xref:reference:properties/cluster-properties.adoc#default_topic_replications[default_topic_replications]')
+    expect(property.missingAnchor).toEqual([])
+    expect(convert('https://docs.redpanda.com/current/get-started/architecture/#shard-layout').content).toBe(
+      'xref:get-started:architecture.adoc#shard-layout[How shards are laid out]'
+    )
+    expect(convert('https://docs.redpanda.com/current/get-started/architecture/#pinning-note[pinning]').content).toBe(
+      'xref:get-started:architecture.adoc#pinning-note[pinning]'
+    )
   })
 
   test('does not rewrite a file that has nothing to convert', () => {

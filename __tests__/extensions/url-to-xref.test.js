@@ -258,13 +258,52 @@ describe('convertContent', () => {
     )
   })
 
-  test('falls back to the page title when the fragment matches no heading', () => {
-    expect(
-      convert('https://docs.redpanda.com/streaming/current/reference/properties/cluster-properties/#no-such-anchor')
-        .content
-    ).toBe(
-      'xref:streaming:reference:properties/cluster-properties.adoc#no-such-anchor[Cluster Configuration Properties]'
+  test('leaves a URL raw and reports it when the page resolves but the anchor does not', () => {
+    const url = 'https://docs.redpanda.com/streaming/current/reference/properties/cluster-properties/#no-such-anchor'
+    for (const input of [url, `${url}[Batch size]`]) {
+      const { content, converted, missingAnchor, unmapped } = convert(input)
+      expect(content).toBe(input)
+      expect(converted).toBe(0)
+      expect(missingAnchor).toEqual([url])
+      expect(unmapped).toEqual([])
+    }
+  })
+
+  test('accepts explicit and inline anchors, and labels an anchor off a heading with the page title', () => {
+    const page = makePage({
+      component: 'streaming',
+      version: '25.3',
+      module: 'manage',
+      relative: 'tuning.adoc',
+      url: '/streaming/current/manage/tuning/',
+      contents: [
+        '= Tune Redpanda',
+        '',
+        '[[before-you-begin]]',
+        'Read this first.',
+        '',
+        '[#io-tuning.wide]',
+        '== Tune I/O',
+        '',
+        'Set the scheduler. [[scheduler]]It matters. See anchor:knob[the knob].',
+        '',
+      ].join('\n'),
+    })
+    const context = Object.assign(
+      buildUrlMap({
+        getComponents: () => [{ name: 'streaming', latest: { version: '25.3' } }],
+        getPages: (filter) => (filter ? [page].filter(filter) : [page]),
+        findBy: () => [],
+      }),
+      { hostnames: new Set(['docs.redpanda.com']), ignore: [], latestVersionSegment: 'current' }
     )
+    const base = 'https://docs.redpanda.com/streaming/current/manage/tuning/'
+    const run = (text) => convertContent(text, context)
+    expect(run(`${base}#before-you-begin`).content).toBe('xref:streaming:manage:tuning.adoc#before-you-begin[Tune Redpanda]')
+    expect(run(`${base}#io-tuning`).content).toBe('xref:streaming:manage:tuning.adoc#io-tuning[Tune I/O]')
+    expect(run(`${base}#scheduler`).content).toBe('xref:streaming:manage:tuning.adoc#scheduler[Tune Redpanda]')
+    expect(run(`${base}#knob[Knob]`).content).toBe('xref:streaming:manage:tuning.adoc#knob[Knob]')
+    expect(run(`${base}#tune-io`).missingAnchor).toEqual([`${base}#tune-io`])
   })
 
   test('resolves link text from a heading in an included partial', () => {

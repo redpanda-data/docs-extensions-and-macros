@@ -16,8 +16,9 @@
  * classifier, worktree files, HEAD only) and hands it to the extension's
  * buildUrlMap and convertContent. Nothing about the URL structure is guessed:
  * a URL is converted only when it matches a page the checkout publishes,
- * directly or through a page alias, and everything else is left as written and
- * reported to the caller.
+ * directly or through a page alias, and its fragment, if any, matches an
+ * anchor on that page; everything else is left as written and reported to the
+ * caller.
  *
  * Targets in the checkout's own component are written as module:page xrefs,
  * the form the docs repos use by hand for same-component links. Pages of other
@@ -131,7 +132,7 @@ function convertDocsLinks (content, context) {
  * Converts the docs URLs in a file in place. The file is rewritten only when
  * something changed.
  *
- * @returns {Object} `{ converted, unmapped, withQueryString, withoutLinkText }`
+ * @returns {Object} `{ converted, unmapped, withQueryString, withoutLinkText, missingAnchor }`
  *   with the raw URLs in each list deduplicated.
  */
 function convertDocsLinksInFile (filePath, context) {
@@ -143,6 +144,7 @@ function convertDocsLinksInFile (filePath, context) {
     unmapped: [...new Set(result.unmapped)],
     withQueryString: [...new Set(result.withQueryString)],
     withoutLinkText: [...new Set(result.withoutLinkText)],
+    missingAnchor: [...new Set(result.missingAnchor)],
   }
 }
 
@@ -159,7 +161,8 @@ function formatDocsLinkReport (result, filePath) {
   }
   leftRaw(result.unmapped, 'no page in this checkout matches; the url-to-xref extension converts cross-component URLs at build time and warns about broken ones')
   leftRaw(result.withQueryString, 'an xref cannot carry a query string')
-  leftRaw(result.withoutLinkText, 'no link text could be resolved for the fragment')
+  leftRaw(result.withoutLinkText, 'the target page could not be read to check the fragment')
+  leftRaw(result.missingAnchor || [], 'anchor not found: the page exists but has no section or anchor with that id')
   return lines.join('\n')
 }
 
