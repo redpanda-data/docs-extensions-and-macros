@@ -4,6 +4,7 @@ const path = require('path')
 const { stripComments, matchBracket, splitArgs, literalValue, lineAt, normalize } = require('../source')
 const { changedLines } = require('../diff')
 const { makeFinding, PAGES } = require('../finding')
+const { sameValue } = require('../values')
 
 /**
  * Cluster and broker configuration properties (src/v/config/*.cc, *.h).
@@ -26,6 +27,8 @@ const { makeFinding, PAGES } = require('../finding')
  * Both sides of each changed file are parsed into initializers keyed by
  * member name and compared, so a change anywhere in the initializer is
  * attributed to its property even when the hunk never shows the name.
+ * Defaults are compared by value where values.js can normalize both sides,
+ * and as whitespace-collapsed text otherwise.
  */
 
 const ROUTES = [/^src\/v\/config\/(?!(?:.*\/)?tests?\/)[^/]+\.(?:cc|h)$/]
@@ -228,7 +231,10 @@ function detect ({ files, sides, excerpt, note }) {
         }))
         continue
       }
-      if (b.defaultText !== null && h.defaultText !== null && b.defaultText !== h.defaultText) {
+      // Compared by value where both sides normalize (values.js), so a
+      // rewrite that keeps the value (`std::chrono::milliseconds(150)` to
+      // `150ms`, `128_MiB` to `134217728`) is not a changed default.
+      if (b.defaultText !== null && h.defaultText !== null && !sameValue(b.defaultText, h.defaultText, 'cpp')) {
         findings.push(makeFinding({
           ...common,
           name: h.name,

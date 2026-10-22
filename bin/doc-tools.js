@@ -2946,8 +2946,11 @@ programCli
  * default; metrics added, removed or renamed; API rpcs, fields and enum
  * values added, removed, renamed or deprecated; Helm values keys and CRD
  * fields added, removed or given a new default; new values in enums that a
- * configuration property or the feature table exposes; and enterprise
- * license gating changes. Prints them as a doc-impact report, the JSON the
+ * configuration property or the feature table exposes; enterprise
+ * license gating changes; and property and rpk flag defaults that changed
+ * through a named constant. Defaults are compared by value (chrono and
+ * size literals, digit separators, YAML 1.1 booleans), so a rewrite that
+ * keeps the value is not reported. Prints them as a doc-impact report, the JSON the
  * doc-strings review dispatches to the docs team's Jira router, with each
  * finding's severity (the docs-gate ladder), file, line and the diff lines
  * as evidence. Deterministic: no model, no network.
@@ -2965,7 +2968,7 @@ programCli
  */
 programCli
   .command('detect-user-facing-changes')
-  .description('Find user-facing changes (properties, rpk, metrics, API, Helm, CRD, enums, enterprise gating) in an engineering diff, with or without a doc string change, and print them as a doc-impact report')
+  .description('Find user-facing changes (properties, rpk, metrics, API, Helm, CRD, enums, enterprise gating, defaults held in constants) in an engineering diff, with or without a doc string change, and print them as a doc-impact report')
   .option('--repo <path>', 'Path to an engineering checkout. Nothing is cloned. Required with --diff; with --patch it lets the detectors read whole files at --base and --head.')
   .option('--diff <base>', 'Base ref: changes in <base>...<head> (the merge base with <head>) are inspected')
   .option('--head <ref>', 'Head ref (default: HEAD)')

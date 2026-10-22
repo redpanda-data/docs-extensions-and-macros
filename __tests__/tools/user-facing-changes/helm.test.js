@@ -98,3 +98,31 @@ describe('helm detector: negative controls', () => {
     expect(r.notes).toEqual([expect.objectContaining({ detector: 'helm', message: expect.stringMatching(/needs both sides of the file/) })])
   })
 })
+
+describe('helm detector: values compared as Helm parses them', () => {
+  test('quoting, 1 to 1.0 and YAML 1.1 booleans (yes, on) keep the value and yield nothing', () => {
+    expect(detect(base, edit('  replicas: 3', '  replicas: 3.0')).findings).toEqual([])
+    expect(detect(base, edit('      enabled: true', '      enabled: yes')).findings).toEqual([])
+    expect(detect(base, edit('      enabled: true', '      enabled: On')).findings).toEqual([])
+    expect(detect(base, edit('  tag: ""', "  tag: ''")).findings).toEqual([])
+    expect(detect(base, edit('    port: 9093', '    port: "9093"')).findings).not.toEqual([])
+  })
+
+  test('yes to no is a default change, reported as the booleans Helm reads', () => {
+    const yes = edit('      enabled: true', '      enabled: yes')
+    const r = detect(yes, { [FILE]: yes[FILE].replace('      enabled: yes', '      enabled: no') })
+    expect(kinds(r)).toEqual([['default-changed', 'listeners.kafka.tls.enabled']])
+    expect(r.findings[0].summary).toMatch(/from `true` to `false`/)
+  })
+
+  test('the evidence is the changed key\'s lines, not the whole hunk', () => {
+    const head = SOURCE
+      .replace('# -- Override the chart name.\nnameOverride: ""\n', '')
+      .replace('  tag: ""', '  tag: v1')
+      .replace('      enabled: true', '      enabled: false')
+    const r = detect(base, { [FILE]: head }, { context: 20 })
+    const tls = r.findings.find((f) => f.name === 'listeners.kafka.tls.enabled')
+    const lines = tls.evidence.split('\n')
+    expect(lines.slice(1)).toEqual(['-      enabled: true', '+      enabled: false'])
+  })
+})

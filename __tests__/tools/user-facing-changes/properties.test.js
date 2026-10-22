@@ -274,3 +274,29 @@ describe('properties detector: hunks only (no checkout)', () => {
     expect(r.notes).toEqual([])
   })
 })
+
+describe('properties detector: defaults compared by value', () => {
+  const D = '      1h)\n  , audit_enabled('
+  const withDefault = (text) => edit(D, `      ${text})\n  , audit_enabled(`)
+  const reported = (from, to) => kinds(detect(withDefault(from), withDefault(to)))
+
+  test.each([
+    ['std::chrono::milliseconds(150)', '150ms'],
+    ['std::chrono::seconds(3600)', '1h'],
+    ['128_MiB', '134217728'],
+    ['134\'217\'728', '128 * 1024 * 1024'],
+    ['true', 'true'],
+    ['"abc"', '"a" "bc"']
+  ])('%s to %s keeps the value and yields nothing', (from, to) => {
+    expect(reported(from, to)).toEqual([])
+  })
+
+  test.each([
+    ['std::chrono::milliseconds(150)', '200ms'],
+    ['128_MiB', '256_MiB'],
+    ['"abc"', '"abd"'],
+    ['model::mode::a', 'model::mode::b']
+  ])('%s to %s is still a default change', (from, to) => {
+    expect(reported(from, to)).toEqual([['default-changed', 'cloud_storage_segment_max_upload_interval_sec']])
+  })
+})

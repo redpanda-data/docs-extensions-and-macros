@@ -168,25 +168,21 @@ function excerpt (file, side, from, to) {
   }
   const out = []
   for (const hunk of picked) {
-    const lines = hunk.lines.filter((l) => {
-      if (whole) return true
-      const n = l[key]
-      // Lines on the other side only (no number on this side) are kept when
-      // they sit inside the span's window, so a -/+ pair stays together.
-      if (n === null) return true
-      return n >= from && n <= to
-    })
-    // Trim other-side-only lines that fall outside the window: keep those
-    // adjacent to a kept same-side line.
-    const keep = new Array(lines.length).fill(false)
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i][key] !== null) {
-        keep[i] = true
-        for (let j = i - 1; j >= 0 && lines[j][key] === null; j--) keep[j] = true
-        for (let j = i + 1; j < lines.length && lines[j][key] === null; j++) keep[j] = true
+    // Same-side lines inside the window, plus the other side's lines that
+    // touch one of them in the hunk itself (a -/+ pair stays together).
+    // Adjacency is judged on the hunk as written, so a deleted line that a
+    // context line separates from the window is not pulled in.
+    const all = hunk.lines
+    const inWindow = (l) => l[key] !== null && l[key] >= from && l[key] <= to
+    const keep = all.map((l) => whole || inWindow(l))
+    if (!whole) {
+      for (let i = 0; i < all.length; i++) {
+        if (!inWindow(all[i])) continue
+        for (let j = i - 1; j >= 0 && all[j][key] === null; j--) keep[j] = true
+        for (let j = i + 1; j < all.length && all[j][key] === null; j++) keep[j] = true
       }
     }
-    const kept = whole ? lines : lines.filter((_, i) => keep[i])
+    const kept = all.filter((_, i) => keep[i])
     if (kept.length === 0) continue
     out.push(`@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@${hunk.header ? ' ' + hunk.header : ''}`)
     for (const l of kept) out.push(`${l.sign}${l.text}`)

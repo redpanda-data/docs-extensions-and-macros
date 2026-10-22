@@ -35,7 +35,7 @@ const HEADER = `struct configuration final : public config_store {
 
 describe('the registry', () => {
   test('every detector has the contract the registry relies on, and every kind maps to a severity', () => {
-    expect(DETECTORS.map((d) => d.id)).toEqual(['properties', 'rpk', 'metrics', 'api', 'helm', 'crd', 'enums', 'enterprise-gating'])
+    expect(DETECTORS.map((d) => d.id)).toEqual(['properties', 'rpk', 'metrics', 'api', 'helm', 'crd', 'enums', 'enterprise-gating', 'constants'])
     for (const d of DETECTORS) {
       expect(typeof d.detect).toBe('function')
       expect(Array.isArray(d.routes) && d.routes.length > 0).toBe(true)

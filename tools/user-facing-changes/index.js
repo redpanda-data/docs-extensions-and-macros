@@ -25,8 +25,9 @@ const { compareFindings, SEVERITY_RANK, KINDS } = require('./finding')
  * where ctx carries the routed diff files, `sides(file)` (both sides of a
  * file as line-numbered snippets, from the checkout when there is one and
  * from the hunks otherwise), `excerpt(file, side, from, to)` for evidence,
- * `readBase`/`readHead` for whole files, and `note()` for anything it
- * could not resolve. Every finding goes through finding.js makeFinding, so
+ * `readBase`/`readHead` for whole files, `listHead(dir)` for the files of
+ * one directory at head (null without a checkout), and `note()` for
+ * anything it could not resolve. Every finding goes through finding.js makeFinding, so
  * the shape and vocabulary cannot drift between detectors.
  */
 
@@ -38,7 +39,8 @@ const DETECTORS = [
   require('./detectors/helm'),
   require('./detectors/crd'),
   require('./detectors/enums'),
-  require('./detectors/enterprise-gating')
+  require('./detectors/enterprise-gating'),
+  require('./detectors/constants')
 ]
 
 /**
@@ -48,10 +50,11 @@ const DETECTORS = [
  * @param {object} [options]
  * @param {(path: string) => string|null} [options.readBase] - pre-image file text
  * @param {(path: string) => string|null} [options.readHead] - post-image file text
+ * @param {(dir: string) => string[]|null} [options.listHead] - repo-relative paths of the files directly in `dir` at head
  * @param {string[]} [options.detectors] - detector ids to run (default all)
  * @returns {{ findings: object[], notes: Array<{detector: string, message: string, file: string|null, line: number|null}>, byDetector: Object<string, number>, routed: Object<string, string[]> }}
  */
-function detectUserFacingChanges (diffText, { readBase = null, readHead = null, detectors = null } = {}) {
+function detectUserFacingChanges (diffText, { readBase = null, readHead = null, listHead = null, detectors = null } = {}) {
   const files = parseDiff(diffText).filter((f) => !f.isBinary)
   const notes = []
   const findings = []
@@ -86,7 +89,7 @@ function detectUserFacingChanges (diffText, { readBase = null, readHead = null, 
     }
     let found = []
     try {
-      found = detector.detect({ files: mine, diffText, sides, excerpt, excerptAt, readBase, readHead, note }) || []
+      found = detector.detect({ files: mine, diffText, sides, excerpt, excerptAt, readBase, readHead, listHead, note }) || []
     } catch (err) {
       // One broken detector must not hide the others' findings, and must
       // not be silent either.
@@ -191,6 +194,21 @@ function gitReader (repo, rev) {
 }
 
 /**
+ * Lister for a checkout: the files directly in a directory at `rev`
+ * (`git ls-tree`), null when git fails.
+ */
+function gitLister (repo, rev) {
+  const cache = new Map()
+  return (dir) => {
+    if (cache.has(dir)) return cache.get(dir)
+    const r = spawnSync('git', ['ls-tree', '--name-only', rev, '--', `${dir.replace(/\/$/, '')}/`], { cwd: repo, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+    const out = r.status === 0 ? r.stdout.split('\n').filter(Boolean) : null
+    cache.set(dir, out)
+    return out
+  }
+}
+
+/**
  * CLI entry point. Exit code is always 0 and the JSON is always printed:
  * a git failure prints an empty report with the reason on stderr, so a
  * caller's fail-open gate stays closed rather than red.
@@ -200,12 +218,14 @@ function runCli (options) {
   let diffText
   let readBase = null
   let readHead = null
+  let listHead = null
   try {
     if (options.patch) {
       diffText = fs.readFileSync(options.patch, 'utf8')
       if (options.repo && options.base) {
         readBase = gitReader(options.repo, options.base)
         readHead = gitReader(options.repo, options.head || 'HEAD')
+        listHead = gitLister(options.repo, options.head || 'HEAD')
       }
     } else {
       if (!options.repo || !options.diff) throw new Error('detect-user-facing-changes needs --repo <path> and --diff <base>, or --patch <file>')
@@ -214,6 +234,7 @@ function runCli (options) {
       diffText = git(options.repo, ['diff', '--no-color', '--no-ext-diff', mergeBase, head])
       readBase = gitReader(options.repo, mergeBase)
       readHead = gitReader(options.repo, head)
+      listHead = gitLister(options.repo, head)
     }
   } catch (err) {
     console.error(`detect-user-facing-changes: ${err.message}`)
@@ -221,7 +242,7 @@ function runCli (options) {
     return
   }
   const detectors = options.detectors ? String(options.detectors).split(',').map((s) => s.trim()).filter(Boolean) : null
-  const result = detectUserFacingChanges(diffText, { readBase, readHead, detectors })
+  const result = detectUserFacingChanges(diffText, { readBase, readHead, listHead, detectors })
   if (options.format === 'human') {
     console.log(formatHuman(result))
     return
@@ -234,4 +255,4 @@ function runCli (options) {
   console.log(JSON.stringify(report, null, 2))
 }
 
-module.exports = { DETECTORS, detectUserFacingChanges, buildDocImpact, formatHuman, runCli, gitReader, CAP }
+module.exports = { DETECTORS, detectUserFacingChanges, buildDocImpact, formatHuman, runCli, gitReader, gitLister, CAP }

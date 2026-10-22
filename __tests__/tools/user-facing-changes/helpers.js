@@ -45,6 +45,7 @@ function detect (base, head, { whole = true, context = 3, detectors = null } = {
   if (whole) {
     opts.readBase = (p) => (p in base ? base[p] : null)
     opts.readHead = (p) => (p in head ? head[p] : null)
+    opts.listHead = (dir) => Object.keys(head).filter((p) => path.posix.dirname(p) === dir)
   }
   return detectUserFacingChanges(diff, opts)
 }
