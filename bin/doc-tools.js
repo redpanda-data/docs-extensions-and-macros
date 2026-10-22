@@ -2936,6 +2936,49 @@ programCli
   })
 
 /**
+ * detect-user-facing-changes
+ *
+ * @description
+ * Find every user-facing change in an engineering diff whether or not a doc
+ * string changed: configuration properties added, removed, renamed,
+ * deprecated or given a new default, visibility or restart requirement;
+ * rpk commands and flags added, removed, renamed, deprecated or given a new
+ * default; metrics added, removed or renamed; API rpcs, fields and enum
+ * values added, removed, renamed or deprecated; Helm values keys and CRD
+ * fields added, removed or given a new default; new values in enums that a
+ * configuration property or the feature table exposes; and enterprise
+ * license gating changes. Prints them as a doc-impact report, the JSON the
+ * doc-strings review dispatches to the docs team's Jira router, with each
+ * finding's severity (the docs-gate ladder), file, line and the diff lines
+ * as evidence. Deterministic: no model, no network.
+ *
+ * @example
+ * # Changes on a branch against its merge base with dev
+ * npx doc-tools detect-user-facing-changes --repo . --diff origin/dev
+ *
+ * # A saved pull request diff, with no checkout
+ * npx doc-tools detect-user-facing-changes --patch pr.diff --format human
+ *
+ * @exit 0 always: `{"findings":[]}` means nothing to report. Errors from git
+ * print to stderr and still exit 0 with an empty report, so a caller's
+ * fail-open gate stays closed rather than red.
+ */
+programCli
+  .command('detect-user-facing-changes')
+  .description('Find user-facing changes (properties, rpk, metrics, API, Helm, CRD, enums, enterprise gating) in an engineering diff, with or without a doc string change, and print them as a doc-impact report')
+  .option('--repo <path>', 'Path to an engineering checkout. Nothing is cloned. Required with --diff; with --patch it lets the detectors read whole files at --base and --head.')
+  .option('--diff <base>', 'Base ref: changes in <base>...<head> (the merge base with <head>) are inspected')
+  .option('--head <ref>', 'Head ref (default: HEAD)')
+  .option('--patch <file>', 'Read a saved unified diff instead of running git. Without --repo, each side of a file is rebuilt from the hunks, and a declaration cut by a hunk is reported as a note rather than guessed at.')
+  .option('--base <rev>', 'With --patch and --repo: the revision holding the pre-image files')
+  .option('--detectors <list>', `Comma-separated detector ids to run (default: all). Registered: ${require('../tools/user-facing-changes').DETECTORS.map((d) => d.id).join(', ')}`)
+  .option('--format <format>', 'Output format: json or human', 'json')
+  .action((options) => {
+    const { runCli } = require('../tools/user-facing-changes')
+    runCli(options)
+  })
+
+/**
  * doc-impact-recording
  *
  * @description

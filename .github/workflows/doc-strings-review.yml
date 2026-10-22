@@ -6,7 +6,12 @@
 # shared logic so it cannot drift between repos:
 #   1. tamper-hardening pre-step (abort when a non-writer PR touches the
 #      review's own configuration),
-#   2. deterministic lint (doc-tools lint-strings --diff),
+#   2. deterministic lint (doc-tools lint-strings --diff), beside a
+#      deterministic user-facing change detector
+#      (doc-tools detect-user-facing-changes): property defaults,
+#      visibility and deprecations, rpk commands and flags, metrics, API
+#      rpcs and fields, Helm values, CRD fields, config enum values and
+#      enterprise gating, all read from the diff with no doc string needed,
 #   3. a Claude pass whenever the push adds or changes a doc-string
 #      declaration that has not been reviewed on an earlier push of the same
 #      PR (not only when the lint fires; mechanically clean prose can still
@@ -285,14 +290,15 @@ jobs:
       # run produced them, even on a run where the step that writes them is
       # skipped. Every diff here is commit to commit, so removing them from
       # the working tree changes nothing the lint or the review sees.
-      # enterprise-impact.json and enterprise-stderr.txt now live in
-      # $RUNNER_TEMP, so no step reads them from here. They stay on the list
-      # as defense in depth, in case a later change writes them here again.
+      # user-facing-impact.json and its stderr live in $RUNNER_TEMP, so no
+      # step reads them from here. They stay on the list as defense in
+      # depth, in case a later change writes them here again.
       - name: Remove run-output files the PR checked in
         run: |
           set -euo pipefail
           rm -f doc-impact.json doc-impact.merged.json review-summary.md \
             lint-findings.json pr-diff.patch pr-diff.full pr-diff.err \
+            user-facing-impact.json user-facing-stderr.txt \
             enterprise-impact.json enterprise-stderr.txt \
             embedded-reference-strings.md terminology.md
       # The commit every diff in this job is taken from. On pull_request the
@@ -547,40 +553,67 @@ jobs:
             ''|*[!0-9]*) removals=0 ;;
           esac
           echo "removals=$removals" >> "$GITHUB_OUTPUT"
-      # Enterprise gating changes carry no doc string, so the lint above never
-      # sees them: a value added to license_required_feature or a property
-      # wrapped in config::enterprise<> changes what the licensing docs say
-      # and what `rpk cluster license info` reports, and the model-authored
-      # doc-impact report cannot mention a change it was never shown.
-      # streaming-enterprise PR 579 (2026-10-07) was the first miss. This is
-      # mechanical, model-free, and only ever adds to the dispatch: its
-      # findings merge into the dispatched report below. The report goes to
-      # $RUNNER_TEMP, outside the PR's checkout, so nothing the PR commits
-      # can stand in for it. Fails closed to 0, for the same reasons the
-      # lint gate does.
-      - name: Detect enterprise gating changes
-        id: enterprise
+      # A user-facing change need not touch a doc string, and then the lint
+      # above never sees it: a default changed inside a property initializer
+      # (streaming-enterprise PR 203), a restart requirement flipped (PR
+      # 774), a new rpk flag (PR 597), a new metric (PR 740), a value added
+      # to license_required_feature (PR 579, the first miss: DOC-2600 was
+      # filed by hand). The model-authored doc-impact report cannot mention
+      # a change it was never shown. This step is the mechanical backstop:
+      # model-free detectors over the diff and the two sides of each changed
+      # file (see tools/user-facing-changes), each finding carrying its
+      # severity, file, line and the diff lines as evidence. It only ever
+      # adds to the dispatch: its findings merge into the dispatched report
+      # below and open the bot-token and dispatch gates, never the model
+      # review or the gateway mint. The report goes to $RUNNER_TEMP, outside
+      # the PR's checkout, so nothing the PR commits can stand in for it.
+      # Fails open to 0 findings, never silently: the job summary says so.
+      - name: Detect user-facing changes
+        id: detect
         env:
           BASE: ${{ steps.diffbase.outputs.base }}
           PKG: ${{ steps.pkg.outputs.pkg }}
         run: |
           set -uo pipefail
-          report="$RUNNER_TEMP/enterprise-impact.json"
+          report="$RUNNER_TEMP/user-facing-impact.json"
+          errlog="$RUNNER_TEMP/user-facing-stderr.txt"
           rm -f "$report"
           status=0
-          npx --yes --package="$PKG" doc-tools detect-enterprise-gating --repo . --diff "$BASE" --format json \
-            > "$report" 2> "$RUNNER_TEMP/enterprise-stderr.txt" || status=$?
+          npx --yes --package="$PKG" doc-tools detect-user-facing-changes --repo . --diff "$BASE" --format json \
+            > "$report" 2> "$errlog" || status=$?
           found=0
           if [ "$status" -eq 0 ] && [ -s "$report" ]; then
             found=$(jq -r 'if (.findings | type) == "array" then (.findings | length) else 0 end' "$report" 2>/dev/null || echo 0)
           else
-            echo "::warning::detect-enterprise-gating failed (exit $status) or produced no output; no gating findings."
-            sed -n '1,20p' "$RUNNER_TEMP/enterprise-stderr.txt" >&2 || true
+            echo "::warning::detect-user-facing-changes failed (exit $status) or produced no output; no detector findings."
+            sed -n '1,20p' "$errlog" >&2 || true
+            {
+              echo "## User-facing change detection"
+              echo
+              echo "The detector did not run (exit $status); no mechanical findings this run. See the step log."
+            } >> "$GITHUB_STEP_SUMMARY" || true
           fi
           case "$found" in ''|*[!0-9]*) found=0 ;; esac
-          [ "$found" -gt 0 ] || rm -f "$report"
+          if [ "$found" -gt 0 ]; then
+            jq -r '
+              def cell: tostring | gsub("\\|"; "\\|") | gsub("\n"; " ");
+              "## User-facing change detection",
+              "",
+              "Mechanical findings: \(.summary.total // (.findings | length)) (\((.summary.bySeverity // {}) | to_entries | map("\(.value) \(.key)") | join(", ")))\(if (.summary.total // 0) > (.findings | length) then "; the dispatch carries the first \(.findings | length) and the ticket counts the rest" else "" end). These open the doc-impact dispatch even when no doc string changed.",
+              "",
+              "| Severity | Surface | Change | Name | Where |",
+              "|---|---|---|---|---|",
+              (.findings[] | "| \(.severity) | \(.surface) | \(.change_kind) | `\(.name | cell)` | \(.file // "?" | cell):\(.line // "?") |"),
+              ((.summary.notes // []) | if length > 0 then "", "Not resolved:", (.[] | "- \(.message | cell)") else empty end)
+            ' "$report" >> "$GITHUB_STEP_SUMMARY" || echo "::warning::could not render the detector report."
+          else
+            rm -f "$report"
+            if [ "$status" -eq 0 ]; then
+              echo "No user-facing changes detected." >> "$GITHUB_STEP_SUMMARY" || true
+            fi
+          fi
           echo "found=$found" >> "$GITHUB_OUTPUT"
-          echo "Enterprise gating findings: $found"
+          echo "User-facing change findings: $found"
       # The review reads the diff from a file, not `gh pr diff`: the API
       # refuses a diff over 300 files with HTTP 406, which regenerated-docs
       # PRs exceed routinely, and the model then lost all diff context
@@ -671,7 +704,7 @@ jobs:
       # rather than a failed job.
       - name: Assume the AWS role that can read the bot token
         id: aws_credentials
-        if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0' || steps.enterprise.outputs.found != '0') && inputs.aws_region != '' && inputs.aws_role_name_prefix != ''
+        if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0' || steps.detect.outputs.found != '0') && inputs.aws_region != '' && inputs.aws_role_name_prefix != ''
         continue-on-error: true
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -686,8 +719,9 @@ jobs:
           secret-ids: |
             ,${{ inputs.bot_token_secret_id }}
           parse-json-secrets: true
-      # Only when a review will run: a run that found a gating change and no
-      # doc string dispatches with the bot token alone and mints no bearer.
+      # Only when a review will run: a run whose only findings are the
+      # mechanical detector's dispatches with the bot token alone and mints
+      # no bearer, so a detector-only PR costs no model turns.
       - name: Fetch the ADP client credential
         id: adpsecrets
         if: steps.aws_credentials.outcome == 'success' && inputs.use_adp_gateway && (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0')
@@ -819,7 +853,7 @@ jobs:
       # job env. Callers on the plain-secret path are unaffected: this step
       # only runs when the OIDC inputs are set.
       - name: Drop fetched credentials from the review's environment
-        if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0' || steps.enterprise.outputs.found != '0') && inputs.aws_region != '' && inputs.aws_role_name_prefix != ''
+        if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0' || steps.detect.outputs.found != '0') && inputs.aws_region != '' && inputs.aws_role_name_prefix != ''
         env:
           CLIENT_SECRET_ID: ${{ inputs.adp_client_secret_id }}
         run: |
@@ -1210,7 +1244,7 @@ jobs:
           retention-days: 90
           if-no-files-found: ignore
       - name: Dispatch doc-impact
-        if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0' || steps.enterprise.outputs.found != '0')
+        if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0' || steps.detect.outputs.found != '0')
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.actions_bot_token }}
@@ -1233,11 +1267,11 @@ jobs:
           # The dispatched report is assembled in $RUNNER_TEMP from files this
           # run wrote. The model's doc-impact.json counts only when the review
           # step ran (success, or failure under continue-on-error): on a
-          # gating-only run the review is skipped and any doc-impact.json in
-          # the workspace did not come from this run. The checkout step
+          # detector-only run the review is skipped and any doc-impact.json
+          # in the workspace did not come from this run. The checkout step
           # already removes a committed one; this is the second lock.
           report="$RUNNER_TEMP/dispatch-impact.json"
-          gating="$RUNNER_TEMP/enterprise-impact.json"
+          gating="$RUNNER_TEMP/user-facing-impact.json"
           rm -f "$report"
           model=""
           case "${REVIEW_OUTCOME:-}" in
@@ -1269,30 +1303,32 @@ jobs:
             echo "::warning::the model's doc-impact.json does not match the expected schema; dropping the model report."
             model=""
           fi
-          # The gating report is checked the same way, so a malformed one
-          # (a detector bug) cannot sink a valid model report either.
+          # The detector report is checked the same way, so a malformed one
+          # (a detector bug) cannot sink a valid model report either. Its
+          # run summary (counts, unresolved notes) is for the job summary,
+          # not the receiver, so it is dropped before dispatch.
           if [ -s "$gating" ] && ! jq -e "$schema" "$gating" >/dev/null 2>&1; then
-            echo "::warning::the enterprise gating report does not match the expected schema; dropping it."
+            echo "::warning::the user-facing change detector report does not match the expected schema; dropping it."
             gating=""
           fi
-          # The mechanical enterprise gating findings (see the Detect step)
+          # The mechanical findings (see the Detect user-facing changes step)
           # join the model's report, or stand in for it when no review ran.
           # A model report with more than ten findings already failed the
-          # schema above and was dropped whole. The gating findings go FIRST,
-          # so when the two together pass ten, the cap drops model findings
-          # before a mechanical one. The ticket body gains the gating section
-          # verbatim.
+          # schema above and was dropped whole. The mechanical findings go
+          # FIRST, so when the two together pass ten, the cap drops model
+          # findings before a mechanical one. The ticket body gains the
+          # detector section verbatim.
           if [ -n "$gating" ] && [ -s "$gating" ]; then
             if [ -n "$model" ]; then
               jq -s '
                 .[0] as $m | .[1] as $e |
                 (($e.findings // []) + ($m.findings // [])) as $all |
                 $m | .findings = $all[:10]
-                   | .proposed_ticket.body = (($m.proposed_ticket.body // "") + "\n\nEnterprise gating changes in this PR (detected mechanically):\n" + ($e.proposed_ticket.body // ""))
+                   | .proposed_ticket.body = (($m.proposed_ticket.body // "") + "\n\nUser-facing changes in this PR (detected mechanically):\n" + ($e.proposed_ticket.body // ""))
               ' "$model" "$gating" > "$report" \
-                || { rm -f "$report"; echo "::warning::could not merge the gating report into doc-impact.json; dispatching the gating report alone."; cp "$gating" "$report"; }
+                || { rm -f "$report"; echo "::warning::could not merge the detector report into doc-impact.json; dispatching the detector report alone."; jq 'del(.summary)' "$gating" > "$report"; }
             else
-              cp "$gating" "$report"
+              jq 'del(.summary)' "$gating" > "$report"
             fi
           elif [ -n "$model" ]; then
             cp "$model" "$report"
