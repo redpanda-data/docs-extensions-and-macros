@@ -7,8 +7,8 @@ description: >
   split the doc-strings review runs in production; twin/review copy:
   docs-team-standards PR #2912, DOC-2496). Claude runs
   findings-only: read-only gh allowlist, no posting rights (the workflow
-  posts under its own identity), and the plugin's github-mutation-guard
-  hook backstops any mutating gh call.
+  posts under its own identity), and a gh shim on PATH that refuses any
+  mutating gh call or non-GitHub host before it reaches the real binary.
 
   Model auth is the ADP AI Gateway as the docs-pr-review agent
   (sdlc/prod/github/docs_pr_review_client, the adp_client_secret_id
