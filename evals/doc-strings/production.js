@@ -170,15 +170,22 @@ function realDir (dir) {
   try { return fs.realpathSync(dir) } catch { return path.resolve(dir) }
 }
 
-// Shell programs that print a file's content. A command that only names the
-// file (ls, echo, wc, stat, test) has not opened it.
+// Shell programs that print some or all of a file. Only a `cat` whose output
+// reaches the model prints the whole file; the others print the lines they
+// select. A command that only names the file (ls, echo, wc, stat, test) has
+// not opened it at all.
 const SHELL_READERS = new Set(['cat', 'head', 'tail', 'grep', 'egrep', 'fgrep', 'rg', 'sed', 'awk', 'less', 'more', 'nl'])
+
+// The Read tool returns this many lines when the call sets no limit.
+const READ_DEFAULT_LINES = 2000
 
 /**
  * A shell command split into simple commands (at |, ||, &&, ;, &, parentheses
  * and newlines), each a list of words with quotes removed. Operators inside
  * quotes stay in the word, so `grep "a|b" terminology.md` is one command.
  * Redirection operators end a word, so `< terminology.md` yields the name.
+ * Each segment records whether its output goes somewhere other than the
+ * model: `piped` when a single | ends it, `redirected` when it has a >.
  */
 function shellSegments (command) {
   const segments = []
@@ -186,8 +193,14 @@ function shellSegments (command) {
   let word = ''
   let quote = null
   let inWord = false
+  let redirected = false
   const endWord = () => { if (inWord) words.push(word); word = ''; inWord = false }
-  const endSegment = () => { endWord(); if (words.length) segments.push(words); words = [] }
+  const endSegment = (piped = false) => {
+    endWord()
+    if (words.length) segments.push({ words, piped, redirected })
+    words = []
+    redirected = false
+  }
   for (let i = 0; i < command.length; i++) {
     const ch = command[i]
     if (quote) {
@@ -202,9 +215,24 @@ function shellSegments (command) {
     } else if (ch === '\\' && i + 1 < command.length) {
       word += command[++i]
       inWord = true
-    } else if ('|;&()\n'.includes(ch)) {
+    } else if (ch === '|') {
+      // `||` is a list operator; a lone `|` (or `|&`) pipes this command's output.
+      if (command[i + 1] === '|') { endSegment(); i++ } else endSegment(true)
+    } else if (ch === '&' && command[i + 1] === '>') {
+      // `&>` sends stdout and stderr to a file.
+      endWord()
+      redirected = true
+      i++
+    } else if (';&()\n'.includes(ch)) {
       endSegment()
-    } else if (/\s/.test(ch) || ch === '<' || ch === '>') {
+    } else if (ch === '>') {
+      // `2>file` and `2>&1` move stderr only; stdout still reaches the model.
+      // Any other > (`>`, `>>`, `1>`, `>&2`) takes stdout away from it.
+      if (!(inWord && word === '2')) redirected = true
+      if (inWord && /^\d$/.test(word)) { word = ''; inWord = false }
+      endWord()
+      if (command[i + 1] === '&' && /\d/.test(command[i + 2] || '')) i += 2
+    } else if (/\s/.test(ch) || ch === '<') {
       endWord()
     } else {
       word += ch
@@ -222,31 +250,63 @@ function stagedFile (token, cwd) {
   return MUST_READ.includes(path.basename(abs)) && realDir(path.dirname(abs)) === realDir(cwd) ? path.basename(abs) : null
 }
 
-/** Every staged file a tool call opened, in the order it named them. */
+/** Line count of a staged file in the workspace, or null when it cannot be read. */
+function stagedLines (file, cwd) {
+  try {
+    const text = fs.readFileSync(path.join(cwd, file), 'utf8')
+    return text.split('\n').length - (text.endsWith('\n') ? 1 : 0)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Whether a Read call returned the whole file. With no offset and no limit,
+ * Read returns the first READ_DEFAULT_LINES lines, which is the whole of a
+ * file no longer than that (a file that cannot be measured is taken to be).
+ * A limit, or an offset past the first line, covers the whole file only when
+ * it starts at line 1 and the limit reaches the file's last line.
+ */
+function readIsWhole (input, lines) {
+  const offset = Number(input.offset) || 0
+  if (offset > 1) return false
+  if (input.limit == null) return lines == null || lines <= READ_DEFAULT_LINES
+  return lines != null && Number(input.limit) >= lines
+}
+
+/**
+ * Every staged file a tool call opened, in the order it named them, each with
+ * whether the call returned the whole file (`full`) or only part of it.
+ */
 function readTargets (call, cwd) {
   if (call.name === 'Read' && typeof call.input.file_path === 'string') {
     const abs = path.resolve(cwd, call.input.file_path)
-    return realDir(path.dirname(abs)) === realDir(cwd) && MUST_READ.includes(path.basename(abs)) ? [path.basename(abs)] : []
+    if (realDir(path.dirname(abs)) !== realDir(cwd) || !MUST_READ.includes(path.basename(abs))) return []
+    const file = path.basename(abs)
+    return [{ file, full: readIsWhole(call.input, stagedLines(file, cwd)) }]
   }
   if (call.name === 'Bash' && typeof call.input.command === 'string') {
-    // The step allows `cat <file>` for the two standards, and the CLI lets a
-    // read-only shell command (grep, head, sed) through in the same way in
-    // production. So a file counts as opened when a segment of the command
-    // runs one of SHELL_READERS and names the file, one file per name: `cat
-    // a.md b.md` opens both. A path-qualified name has to resolve to the
-    // workspace; a bare name is relative to it. The evidence records the
-    // command, so a reviewer can see whether the model read the file or
-    // grepped one term out of it.
+    // A file is opened when a segment of the command runs one of
+    // SHELL_READERS and names it, one file per name. It was read in full only
+    // when that program is `cat` (which the step's allowed tools list) and
+    // its output is neither piped nor redirected: `cat a.md b.md` reads both
+    // whole, `grep`, `head`, `sed` or `cat a.md | head` read part of it. A
+    // path-qualified name has to resolve to the workspace; a bare name is
+    // relative to it.
     const found = []
-    for (const tokens of shellSegments(call.input.command)) {
+    for (const { words, piped, redirected } of shellSegments(call.input.command)) {
       // Skip leading VAR=value assignments to find the program.
       let i = 0
-      while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++
-      if (i >= tokens.length || !SHELL_READERS.has(path.basename(tokens[i]))) continue
-      for (const token of tokens.slice(i + 1)) {
+      while (i < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i])) i++
+      if (i >= words.length || !SHELL_READERS.has(path.basename(words[i]))) continue
+      const full = path.basename(words[i]) === 'cat' && !piped && !redirected
+      for (const token of words.slice(i + 1)) {
         if (token.startsWith('-')) continue
         const file = stagedFile(token, cwd)
-        if (file && !found.includes(file)) found.push(file)
+        if (!file) continue
+        const prev = found.find((f) => f.file === file)
+        if (!prev) found.push({ file, full })
+        else if (full) prev.full = true
       }
     }
     return found
@@ -256,36 +316,42 @@ function readTargets (call, cwd) {
 
 /**
  * The must-read verdict for one run. Every file in MUST_READ has to have been
- * opened by a Read of it, or a shell command that prints it, that did not
- * error; and when the model posted any inline comment, each such read has to
- * come before the first comment: a standard consulted after the suggestions
- * were posted did not shape them.
+ * read in full, by a Read that returned the whole file or a `cat` of it whose
+ * output reached the model, by a call that did not error; and when the model
+ * posted any inline comment, such a read has to come before the first
+ * comment: a standard consulted after the suggestions were posted did not
+ * shape them. A grep, head, sed or ranged Read opened the file but showed the
+ * model only part of it, so it is recorded and does not count.
  */
 function checkMustRead (calls, cwd, files = MUST_READ) {
   const firstComment = calls.findIndex((c) => c.name === COMMENT_TOOL)
   const reads = calls
-    .flatMap((c) => readTargets(c, cwd).map((file) => ({ call: c, file })))
+    .flatMap((c) => readTargets(c, cwd).map((t) => ({ call: c, file: t.file, full: t.full })))
     .filter((r) => files.includes(r.file))
     .map((r) => ({
       file: r.file,
       index: r.call.index,
       tool: r.call.name,
       how: r.call.name === 'Bash' ? r.call.input.command : r.call.input.file_path,
+      full: r.full,
       error: r.call.error
     }))
   const perFile = files.map((file) => {
-    const ok = reads.filter((r) => r.file === file && !r.error)
+    const opened = reads.filter((r) => r.file === file && !r.error)
+    const ok = opened.filter((r) => r.full)
     const before = firstComment === -1 ? ok : ok.filter((r) => r.index < firstComment)
     return {
       file,
       read: ok.length > 0,
       read_before_first_comment: before.length > 0,
-      indices: ok.map((r) => r.index)
+      indices: ok.map((r) => r.index),
+      partial_indices: opened.filter((r) => !r.full).map((r) => r.index)
     }
   })
-  const missing = perFile.filter((f) => !f.read).map((f) => f.file)
+  const partial = perFile.filter((f) => !f.read && f.partial_indices.length > 0).map((f) => f.file)
+  const missing = perFile.filter((f) => !f.read && f.partial_indices.length === 0).map((f) => f.file)
   const late = perFile.filter((f) => f.read && !f.read_before_first_comment).map((f) => f.file)
-  const pass = missing.length === 0 && late.length === 0
+  const pass = missing.length === 0 && partial.length === 0 && late.length === 0
   let detail
   if (pass) {
     detail = perFile.map((f) => `${f.file} at call #${f.indices.join(',#')}`).join('; ') +
@@ -293,6 +359,12 @@ function checkMustRead (calls, cwd, files = MUST_READ) {
   } else {
     const parts = []
     if (missing.length) parts.push(`never read: ${missing.join(', ')}`)
+    if (partial.length) {
+      parts.push(`read only in part (grep, head, sed or a ranged Read): ${partial.map((f) => {
+        const r = reads.find((x) => x.file === f && !x.error && !x.full)
+        return `${f} (#${r.index} ${r.tool}: ${String(r.how).slice(0, 80)})`
+      }).join(', ')}`)
+    }
     if (late.length) parts.push(`read only after the first inline comment (call #${firstComment}): ${late.join(', ')}`)
     parts.push(`tool calls: [${calls.map((c) => c.name).join(', ') || 'none'}]`)
     detail = parts.join('; ')

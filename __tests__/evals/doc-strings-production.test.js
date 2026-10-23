@@ -200,15 +200,100 @@ describe('doc-strings evals: the must-read check', () => {
     expect(v.detail).toMatch(/never read: embedded-reference-strings\.md, terminology\.md/)
   })
 
-  test('a grep or head that names the staged file counts as opening it, and the command is kept as evidence', () => {
+  test('a grep or head of a staged file is a partial read: recorded with its command, and it does not count', () => {
     const { calls } = production.parseStream(stream([
       use('t1', 'Bash', { command: `cd ${cwd} && grep -n -i "broker" terminology.md | head -20` }), result('t1'),
       use('t2', 'Bash', { command: `head -40 ${cwd}/embedded-reference-strings.md` }), result('t2')
     ]))
     const v = production.checkMustRead(calls, cwd)
-    expect(v.pass).toBe(true)
-    expect(v.reads.map((r) => [r.file, r.tool])).toEqual([['terminology.md', 'Bash'], ['embedded-reference-strings.md', 'Bash']])
+    expect(v.pass).toBe(false)
+    expect(v.reads.map((r) => [r.file, r.tool, r.full])).toEqual([['terminology.md', 'Bash', false], ['embedded-reference-strings.md', 'Bash', false]])
     expect(v.reads[0].how).toMatch(/grep/)
+    expect(v.files.map((f) => [f.file, f.indices, f.partial_indices])).toEqual([['embedded-reference-strings.md', [], [1]], ['terminology.md', [], [0]]])
+    expect(v.detail).toMatch(/read only in part \(grep, head, sed or a ranged Read\): embedded-reference-strings\.md \(#1 Bash: head -40/)
+    expect(v.detail).not.toMatch(/never read/)
+  })
+
+  test('a cat whose output is piped or redirected is a partial read; a cat with only stderr redirected is a full one', () => {
+    const { calls } = production.parseStream(stream([
+      use('t1', 'Bash', { command: 'cat terminology.md | head -50' }), result('t1'),
+      use('t2', 'Bash', { command: 'cat embedded-reference-strings.md > /tmp/copy.md' }), result('t2'),
+      use('t3', 'Bash', { command: 'cat terminology.md &> /tmp/both.txt' }), result('t3')
+    ]))
+    const v = production.checkMustRead(calls, cwd)
+    expect(v.pass).toBe(false)
+    expect(v.reads.map((r) => [r.index, r.full])).toEqual([[0, false], [1, false], [2, false]])
+
+    const ok = production.parseStream(stream([
+      use('t1', 'Bash', { command: 'cat embedded-reference-strings.md 2>&1' }), result('t1'),
+      use('t2', 'Bash', { command: 'cat -n terminology.md 2>/dev/null || echo missing' }), result('t2')
+    ]))
+    expect(production.checkMustRead(ok.calls, cwd).pass).toBe(true)
+  })
+
+  describe('Read calls against the staged files on disk', () => {
+    let ws
+    beforeAll(() => {
+      ws = fs.mkdtempSync(path.join(os.tmpdir(), 'must-read-ws-'))
+      fs.writeFileSync(path.join(ws, 'embedded-reference-strings.md'), Array.from({ length: 325 }, (_, i) => `line ${i + 1}`).join('\n') + '\n')
+      fs.writeFileSync(path.join(ws, 'terminology.md'), Array.from({ length: 199 }, (_, i) => `term ${i + 1}`).join('\n') + '\n')
+    })
+    afterAll(() => fs.rmSync(ws, { recursive: true, force: true }))
+
+    test('a Read with no offset or limit of a file within the default 2000 lines is a full read', () => {
+      const { calls } = production.parseStream(stream([
+        use('t1', 'Read', { file_path: path.join(ws, 'embedded-reference-strings.md') }), result('t1'),
+        use('t2', 'Read', { file_path: 'terminology.md' }), result('t2'),
+        comment('t3'), result('t3')
+      ]))
+      const v = production.checkMustRead(calls, ws)
+      expect(v.pass).toBe(true)
+      expect(v.reads.map((r) => r.full)).toEqual([true, true])
+    })
+
+    test('a Read whose limit reaches the last line, from line 1, is a full read', () => {
+      const { calls } = production.parseStream(stream([
+        use('t1', 'Read', { file_path: 'embedded-reference-strings.md', offset: 1, limit: 325 }), result('t1'),
+        use('t2', 'Read', { file_path: 'terminology.md', limit: 2000 }), result('t2')
+      ]))
+      expect(production.checkMustRead(calls, ws).pass).toBe(true)
+    })
+
+    test('a Read with a limit short of the end, or an offset past line 1, is a partial read and fails', () => {
+      const { calls } = production.parseStream(stream([
+        use('t1', 'Read', { file_path: 'embedded-reference-strings.md', limit: 100 }), result('t1'),
+        use('t2', 'Read', { file_path: 'terminology.md', offset: 50 }), result('t2'),
+        comment('t3'), result('t3')
+      ]))
+      const v = production.checkMustRead(calls, ws)
+      expect(v.pass).toBe(false)
+      expect(v.reads.map((r) => [r.file, r.full])).toEqual([['embedded-reference-strings.md', false], ['terminology.md', false]])
+      expect(v.detail).toMatch(/read only in part[^;]*embedded-reference-strings\.md \(#0 Read[^;]*terminology\.md \(#1 Read/)
+    })
+
+    test('a partial read followed by a full read before the first comment passes on the full one', () => {
+      const { calls } = production.parseStream(stream([
+        use('t1', 'Bash', { command: 'grep -n broker terminology.md' }), result('t1'),
+        use('t2', 'Read', { file_path: 'terminology.md' }), result('t2'),
+        use('t3', 'Read', { file_path: 'embedded-reference-strings.md' }), result('t3'),
+        comment('t4'), result('t4')
+      ]))
+      const v = production.checkMustRead(calls, ws)
+      expect(v.pass).toBe(true)
+      expect(v.files.find((f) => f.file === 'terminology.md')).toMatchObject({ indices: [1], partial_indices: [0] })
+    })
+
+    test('a Read with no limit of a file longer than 2000 lines is a partial read', () => {
+      fs.writeFileSync(path.join(ws, 'terminology.md'), 'x\n'.repeat(2500))
+      const { calls } = production.parseStream(stream([
+        use('t1', 'Read', { file_path: 'embedded-reference-strings.md' }), result('t1'),
+        use('t2', 'Read', { file_path: 'terminology.md' }), result('t2')
+      ]))
+      const v = production.checkMustRead(calls, ws)
+      expect(v.pass).toBe(false)
+      expect(v.reads.map((r) => r.full)).toEqual([true, false])
+      fs.writeFileSync(path.join(ws, 'terminology.md'), Array.from({ length: 199 }, (_, i) => `term ${i + 1}`).join('\n') + '\n')
+    })
   })
 
   test('one shell command that prints both standards opens both', () => {
@@ -232,22 +317,26 @@ describe('doc-strings evals: the must-read check', () => {
     expect(v.detail).toMatch(/never read: embedded-reference-strings\.md, terminology\.md/)
   })
 
-  test('a reader later in a pipeline or after && still counts, and only for the files it names', () => {
+  test('a cat after && still counts, and only for the files it names', () => {
     const { calls } = production.parseStream(stream([
-      use('t1', 'Bash', { command: `ls ${cwd} && LC_ALL=C grep -n "broker" < terminology.md | head -5` }), result('t1'),
-      use('t2', 'Bash', { command: 'grep -n -i -E "cluster|wc embedded-reference-strings.md" lint-findings.json' }), result('t2'),
+      use('t1', 'Bash', { command: `ls ${cwd} && LC_ALL=C cat terminology.md` }), result('t1'),
+      use('t2', 'Bash', { command: 'grep -n -i -E "cluster|cat embedded-reference-strings.md" lint-findings.json' }), result('t2'),
       comment('t3'), result('t3')
     ]))
     const v = production.checkMustRead(calls, cwd)
-    expect(v.files.map((f) => [f.file, f.indices])).toEqual([['embedded-reference-strings.md', []], ['terminology.md', [0]]])
+    expect(v.files.map((f) => [f.file, f.indices, f.partial_indices])).toEqual([['embedded-reference-strings.md', [], []], ['terminology.md', [0], []]])
   })
 
   test('a pipe inside a quoted grep pattern does not split the command', () => {
+    // Split at the quoted |, terminology.md would land in a segment whose
+    // program is "identifier" and not be attributed at all.
     const { calls } = production.parseStream(stream([
       use('t1', 'Bash', { command: 'grep -n -i "cluster|identifier|null" terminology.md | head -40' }), result('t1'),
       use('t2', 'Bash', { command: "sed -n '1,200p' embedded-reference-strings.md" }), result('t2')
     ]))
-    expect(production.checkMustRead(calls, cwd).pass).toBe(true)
+    const v = production.checkMustRead(calls, cwd)
+    expect(v.pass).toBe(false)
+    expect(v.files.map((f) => [f.file, f.partial_indices])).toEqual([['embedded-reference-strings.md', [1]], ['terminology.md', [0]]])
   })
 
   test('a Read through a symlinked spelling of the workspace still counts', () => {

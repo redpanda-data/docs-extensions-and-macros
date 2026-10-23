@@ -155,16 +155,20 @@ the model issued is recorded with its arguments. The check, in
 `production.checkMustRead`:
 
 * Each staged standard (`production.MUST_READ`, derived from the files the
-  harness stages so the two cannot drift) must have been opened at least
-  once: a `Read` of that file in the workspace, or a shell command that
-  prints it (`cat`, which the step's allowed tools list, or a read-only
-  `grep`, `head` or `sed`, which the CLI lets through in production as
-  well). One command can open both files (`cat a.md b.md`). A command that
-  only names a file (`ls`, `wc`, `echo`, `test`) has not opened it. A
-  read whose tool result came back as an error does not count, nor does a
-  file of the same name outside the workspace. The command or path that
-  opened each file is kept in `must-read.json`, so a reviewer can see
-  whether the model read the standard or grepped one term out of it.
+  harness stages so the two cannot drift) must have been read in full at
+  least once. A full read is a `Read` of that file in the workspace that
+  returns the whole file (no `offset` past line 1, and either no `limit` on a
+  file of at most 2000 lines, the Read tool's default, or a `limit` that
+  reaches the last line), or a `cat` of it, which the step's allowed tools
+  list, whose output is neither piped nor redirected. One command can read
+  both files (`cat a.md b.md`). A `grep`, `head`, `sed`, a ranged `Read` or a
+  `cat` piped into `head` opened the file but showed the model only part of
+  it: it is recorded under `partial_indices` and does not count, and a file
+  read only that way fails as `read only in part`. A command that only names
+  a file (`ls`, `wc`, `echo`, `test`) has not opened it. A read whose tool
+  result came back as an error does not count, nor does a file of the same
+  name outside the workspace. The command or path behind each read, and
+  whether it was full, is kept in `must-read.json`.
 * When the model posted any inline comment, every such read must come
   before the first `mcp__github_inline_comment__create_inline_comment`
   call. A standard consulted after the suggestions were posted did not shape
@@ -242,6 +246,19 @@ production-prompt finding, not a harness one: the prompt says to use the
 terminology file's canonical forms but never says to read it. Must-read
 sabotage proofs: `negative-property-diff` (neither file read) and
 `metric-name-echo` (`terminology.md` never read) both exited 0.
+
+Why a partial read does not count, measured 2026-10-23 on `claude-opus-5`
+with the production prompt from #415 applied (it tells the model to read
+both files in full with the Read tool before the first suggestion), one run
+each of the six production-path cases `prop-empty-description`,
+`prop-tautology-no-period`, `metric-name-echo`, `rpk-flag-lowercase-period`,
+`terminology-misuse` and `negative-property-diff`: every run passed, and in
+6 of 6 runs each file was read whole, by a `Read` with no offset or limit
+(325 and 199 lines), before the first inline comment. The only shell call
+that named the files was a `wc -l` of all four workspace files, which opens
+neither. No run grepped or ranged a standard, so the strict rule costs no
+passing run while the prompt asks for a full read, and a run that greps one
+term out of a standard no longer passes as having applied it.
 
 Deliberately **not wired into CI**: a full run makes ten real model calls
 (a few minutes of wall time and real tokens). Run it when the workflow
