@@ -460,6 +460,10 @@ function buildRecord (mod, modulePages, moduleAttachments, { version, moduleExam
     relatedDocRefs: parseList(attrs['page-solution-related-docs']),
     relatedSolutionIds: parseList(attrs['page-solution-related-solutions']),
     supersededBy: attrs['page-solution-superseded-by'] ? String(attrs['page-solution-superseded-by']).trim() : '',
+    // The outcome diagram under the overview hero: a file name in the module's
+    // images/ and its one-sentence alt text. Resolved by resolveOutcome.
+    outcomeImage: attrs['page-solution-outcome-image'] ? String(attrs['page-solution-outcome-image']).trim() : '',
+    outcomeAlt: attrs['page-solution-outcome-alt'] ? String(attrs['page-solution-outcome-alt']).trim() : '',
     topicType: attrs['page-topic-type'],
     repo: deriveRepo(overview && overview.src && overview.src.origin && overview.src.origin.url),
     tag: solutionVersion ? `${mod}/${solutionVersion}` : '',
@@ -488,6 +492,57 @@ function buildRecord (mod, modulePages, moduleAttachments, { version, moduleExam
       .sort((a, b) => a.name.localeCompare(b.name)),
     lastModified: attrs['page-git-modified-date'] || null,
   }
+}
+
+/**
+ * Plain text of the first `<tag>` element in SVG markup (`title` or `desc`),
+ * with CDATA kept as text, child elements dropped, entities decoded, and
+ * whitespace collapsed. Empty string when the element is absent.
+ */
+function svgText (markup, tag) {
+  if (!markup) return ''
+  const match = String(markup).match(new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`, 'i'))
+  if (!match) return ''
+  const text = match[1]
+    // CDATA is literal text: escape it so the tag strip below leaves it alone.
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, (_, text) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'))
+    .replace(/<[^>]*>/g, '')
+  return decode(text).replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * Resolve a solution's outcome diagram, named on the overview by
+ * :page-solution-outcome-image: (a file name in the module's images/), the way
+ * docs-ui's solution-outcome helper does.
+ *
+ * Returns `{ outcome, problem }`. `outcome` is `{ image, alt, description }`:
+ * the image's published URL, the overview's :page-solution-outcome-alt: (the
+ * SVG's `<title>` when the attribute is absent), and the SVG's `<desc>`, read
+ * from the image file in the content catalog so a reader who cannot see the
+ * SVG gets the outcome as text. Keys with no value are left out. `outcome` is
+ * null, with a `problem` to report, when the attribute is missing or the image
+ * does not resolve to a published file.
+ */
+function resolveOutcome (record, contentCatalog) {
+  const name = record.outcomeImage
+  if (!name) return { outcome: null, problem: 'the overview sets no page-solution-outcome-image, so the outcome diagram is missing from the page, its Markdown twin, and the catalog' }
+  let image = null
+  if (contentCatalog && typeof contentCatalog.resolveResource === 'function') {
+    try {
+      image = contentCatalog.resolveResource(`image$${name}`, { component: COMPONENT, version: record.componentVersion, module: record.module }, 'image', ['image'])
+    } catch {
+      image = null
+    }
+  }
+  const url = image && image.pub && image.pub.url
+  if (!url) return { outcome: null, problem: `page-solution-outcome-image "${name}" is not in the module's images/` }
+  const markup = /\.svg$/i.test(name) && image.contents ? image.contents.toString() : ''
+  const outcome = { image: url }
+  const alt = record.outcomeAlt || svgText(markup, 'title')
+  if (alt) outcome.alt = alt
+  const description = svgText(markup, 'desc')
+  if (description) outcome.description = description
+  return { outcome, problem: null }
 }
 
 /**
@@ -600,4 +655,6 @@ module.exports = {
   plainTitle,
   collectSolutions,
   collectCompanionSources,
+  svgText,
+  resolveOutcome,
 }

@@ -701,3 +701,86 @@ describe('solutionDownloadNote', () => {
     expect(solutionDownloadNote({ src: { component: 'solutions' }, asciidoc: { attributes: { 'page-solution': '{' } } }, SITE)).toBe('')
   })
 })
+
+// A solution overview's twin carries the outcome diagram right after the
+// title and description, as an image and its description in text, because a
+// Markdown reader often cannot see an SVG.
+describe('solution outcome diagram in Markdown', () => {
+  const { solutionOutcomeMarkdown, createSolutionOutcomeRules, isUnwantedNode } = require('../../extensions/convert-to-markdown')
+  const SITE = 'https://docs.redpanda.com'
+  const OUTCOME = {
+    image: '/solutions/g/_images/outcome.svg',
+    alt: 'Game events become a live board [and a feed].',
+    description: 'Game events flow into Redpanda. The results: a live board.',
+  }
+  const page = ({ outcome = OUTCOME, attrs = {}, component = 'solutions' } = {}) => ({
+    src: { component, version: '' },
+    asciidoc: { attributes: { 'page-solution': JSON.stringify({ id: 'g', ...(outcome ? { outcome } : {}) }), ...attrs } },
+  })
+  // The overview markup docs-ui renders: the hero, then the figure with the
+  // SVG inlined, then the metadata panel.
+  const OVERVIEW = [
+    '<header class="sol-hero"><div class="sol-eyebrow"><span>Solution</span></div>',
+    '<h1 class="page sol-title">Build a leaderboard</h1>',
+    '<p class="sol-lede is-before-toc">Turn game events into a live board.</p>',
+    '<div class="sol-hero-actions"><a href="start/">Start building</a></div></header>',
+    '<figure class="sol-outcome is-before-toc"><div class="sol-outcome-art" role="img" aria-label="x">',
+    '<svg viewBox="0 0 640 332" aria-hidden="true"><title>What it delivers</title><desc>Loose desc</desc><text>Loose label</text></svg>',
+    '</div></figure>',
+    '<dl class="sol-meta"><dt>Steps</dt><dd>3</dd></dl>',
+  ].join('')
+
+  function convert (html, markdown) {
+    const td = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced', bulletListMarker: '-' })
+    td.use(gfm)
+    td.addRule('remove-unwanted', { filter: isUnwantedNode, replacement: () => '' })
+    const rules = createSolutionOutcomeRules(markdown)
+    td.addRule('solution-outcome-figure', rules.figure)
+    td.addRule('solution-hero', rules.hero)
+    return td.turndown(html)
+  }
+
+  test('emits the image with an absolute URL and escaped alt, then the description', () => {
+    expect(solutionOutcomeMarkdown(page(), SITE)).toBe(
+      '![Game events become a live board \\[and a feed\\].](https://docs.redpanda.com/solutions/g/_images/outcome.svg)\n\n' +
+      'Game events flow into Redpanda. The results: a live board.')
+  })
+
+  test('places the diagram after the title and description, and drops the SVG text', () => {
+    const md = convert(OVERVIEW, solutionOutcomeMarkdown(page(), SITE))
+    const order = ['# Build a leaderboard', 'Turn game events into a live board.', '[Start building]', '![Game events', 'Game events flow into Redpanda.', 'Steps']
+    const positions = order.map((text) => md.indexOf(text))
+    expect(positions.every((p) => p >= 0)).toBe(true)
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions)
+    for (const text of ['What it delivers', 'Loose desc', 'Loose label']) expect(md).not.toContain(text)
+  })
+
+  test('without the attribute, or with an image that did not resolve, the twin has no diagram and no SVG text', () => {
+    // Both reach the twin as a record with no outcome.
+    const markdown = solutionOutcomeMarkdown(page({ outcome: null }), SITE)
+    expect(markdown).toBe('')
+    const md = convert(OVERVIEW, markdown)
+    expect(md).toContain('Turn game events into a live board.')
+    expect(md).not.toContain('![')
+    for (const text of ['What it delivers', 'Loose desc', 'Loose label']) expect(md).not.toContain(text)
+  })
+
+  test('an outcome with no description is the image alone', () => {
+    expect(solutionOutcomeMarkdown(page({ outcome: { image: OUTCOME.image, alt: 'A' } }), SITE)).toBe('![A](https://docs.redpanda.com/solutions/g/_images/outcome.svg)')
+  })
+
+  test('keeps the site-relative URL without a site URL', () => {
+    expect(solutionOutcomeMarkdown(page(), '')).toMatch(/^!\[[^\n]*\]\(\/solutions\/g\/_images\/outcome\.svg\)/)
+  })
+
+  test('is empty on a step page, outside the solutions component, and for a bad record', () => {
+    expect(solutionOutcomeMarkdown(page({ attrs: { 'page-solution-step-id': 'start' } }), SITE)).toBe('')
+    expect(solutionOutcomeMarkdown(page({ component: 'streaming' }), SITE)).toBe('')
+    expect(solutionOutcomeMarkdown({ src: { component: 'solutions' }, asciidoc: { attributes: { 'page-solution': '{' } } }, SITE)).toBe('')
+  })
+
+  test('the landing hero, a section, is left alone', () => {
+    const md = convert('<section class="sol-hero"><h1>Redpanda Solutions</h1></section>', 'SHOULD NOT APPEAR')
+    expect(md).toBe('# Redpanda Solutions')
+  })
+})

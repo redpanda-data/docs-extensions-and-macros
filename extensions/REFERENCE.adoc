@@ -935,6 +935,14 @@ On the overview (`pages/index.adoc`):
 | `page-solution-generated-files`
 | no
 | Comma list of repo paths under `solutions/<slug>/` that a reader produces with a documented command instead of reading on a page (for example `services/go.sum, services/internal/gamepb/game_events.pb.go`). These are the only files a reader needs that no page shows in full. Each entry must be a file in the module's examples (fatal otherwise, as is listing one twice). See <<Build-along files>>.
+
+| `page-solution-outcome-image`
+| no (warns when published)
+| File name of the outcome diagram in the module's `images/` (for example `outcome.svg`): the finished system and what it delivers, which docs-ui draws under the overview hero. It is resolved as `image$<name>` in the solution's module, and becomes the record's `outcome` (see <<Derived attributes>>). A published solution warns when the attribute is missing, when the image does not resolve, and when an SVG has no `<desc>`. A draft does not warn.
+
+| `page-solution-outcome-alt`
+| with `page-solution-outcome-image`
+| One sentence: the diagram's alt text, and its accessible name on the page. When absent, `outcome.alt` falls back to the SVG's `<title>`.
 |===
 
 On a step page: `page-layout` must be `solution-step`; `description` is the step's own; `page-solution-rule` and `page-solution-adapt` (optional, one sentence each) are read only by the agent companion: the invariant the step establishes, stated so it holds in any codebase, and what to inspect in a target repository to apply it.
@@ -954,7 +962,7 @@ Written on the overview and every step page (complex values are JSON strings, re
 | Attribute | Value
 
 | `page-solution`
-| The full record: `id`, `title`, `description`, `url`, `version`, `tag`, `asset`, `repo` (only with `public_repo: true`), `status`, `draft` (true only for a draft built with `include_drafts`), `featured`, `download`, `platforms`, `technologies`, `categories`, `useCases`, `files` (see <<Snippet provenance and the download allowlist>>), `personas`, `steps[{id, title, url, order}]`, `relatedDocs[{id, title, url, provenance}]`, `relatedSolutions[{id, title, url}]`, `attachments[{name, url}]` (kept for compatibility: `verification.json` is the only attachment and is published as `verified`, so this is empty; `files` is the build-along list), `supersededBy`, `lastModified`, `agentCompanion` (the companion's URL, only when one was generated), `draftDownloads` (only on a draft built with `draft_downloads`), and `verified{suite, specs, steps, commands, checks, media, verifyScript, redpandaVersion, runAt, platforms, contentRev, stackSha256, runs}` when the solution ships a verification manifest (see <<Verification>>). Keys the manifest did not carry are absent, and a solution with no manifest has no `verified` key at all.
+| The full record: `id`, `title`, `description`, `url`, `version`, `tag`, `asset`, `repo` (only with `public_repo: true`), `status`, `draft` (true only for a draft built with `include_drafts`), `featured`, `download`, `platforms`, `technologies`, `categories`, `useCases`, `files` (see <<Snippet provenance and the download allowlist>>), `personas`, `steps[{id, title, url, order}]`, `relatedDocs[{id, title, url, provenance}]`, `relatedSolutions[{id, title, url}]`, `attachments[{name, url}]` (kept for compatibility: `verification.json` is the only attachment and is published as `verified`, so this is empty; `files` is the build-along list), `supersededBy`, `lastModified`, `agentCompanion` (the companion's URL, only when one was generated), `outcome{image, alt, description}` (only when `page-solution-outcome-image` resolves: the image's published URL, `page-solution-outcome-alt`, and the text of the SVG's `<desc>`, read from the image file in the content catalog; a key with no value is left out), `draftDownloads` (only on a draft built with `draft_downloads`), and `verified{suite, specs, steps, commands, checks, media, verifyScript, redpandaVersion, runAt, platforms, contentRev, stackSha256, runs}` when the solution ships a verification manifest (see <<Verification>>). Keys the manifest did not carry are absent, and a solution with no manifest has no `verified` key at all.
 
 | `page-solution-nav`
 | `{ home: {title, url}, overview: {title, url}, steps: [{id, title, url, order}] }`. Every title in the JSON outputs is plain text: inline markup in the document title (`<code>`, entities) is stripped before it enters `page-solution`, the nav, `relatedDocs`, or `relatedSolutions`.
@@ -1804,6 +1812,10 @@ solution:
 ----
 
 A solution with no manifest, or one whose manifest could not be read, has no `verified` key. Only the fields the manifest carried are emitted.
+
+==== Outcome diagram
+
+On a solution overview whose record has an `outcome` (see <<Derived attributes>>), the twin's body carries the diagram right after the title, the description, and the hero's links, where the page draws it: `![<alt>](<absolute image URL>)`, then the SVG's `<desc>` as a plain paragraph, because a Markdown reader often cannot see an SVG. The figure docs-ui renders with the SVG inlined is always dropped from the twin, so its labels never reach the Markdown as loose text. With no `outcome` (no `page-solution-outcome-image`, or an image that does not resolve) the twin has no diagram. Step pages never carry it, and neither does the <<Agent companion>>, whose Rules and Design contract already state what the diagram shows.
 
 ==== Field naming
 
