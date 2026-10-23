@@ -3051,6 +3051,18 @@ programCli
  * where, and the line). --min-score defaults to 5 for Product Docs pages and
  * 3 for solution overviews; --limit (per facet) to 3 and 6. Suggestions do
  * not change the exit code.
+ * --suggest also lists candidates: frequent, distinctive terms on a page that
+ * no concept's label or altLabel matches, in any scheme, for proposing new
+ * concepts or altLabels. They are repeated capitalized terms in prose (Amazon
+ * S3, Debezium) and component identifiers (`aws_s3` output, xrefs to Connect
+ * component pages), each with a count, the lines, and a likely facet from a
+ * cue word after it (a connector, database, format, or product word). Terms
+ * in the terminology lists (--terminology, default the docs glossary in the
+ * checkout), common English, and words the page also writes in lowercase are
+ * dropped. --candidates-only skips the check and the suggestions and
+ * aggregates candidates across the pages: one entry per term, with the pages
+ * it is on, leaving out terms on more than a fifth of the pages
+ * (boilerplate).
  * Exit 0 without errors, 1 with errors, 2 when the check could not run.
  *
  * @why
@@ -3077,6 +3089,9 @@ programCli
  *
  * # Suggest only for changed pages that carry no categories, with a lower bar
  * npx doc-tools check-metadata --changed origin/main --suggest --suggest-empty-only --min-score 3
+ *
+ * # Terms across a repository that no concept covers, filtered by the style guide's word lists
+ * npx doc-tools check-metadata --candidates-only --terminology shared/modules/terms/partials,../docs-team-standards/resources/writing-style/terminology.md --format json modules
  */
 programCli
   .command('check-metadata')
@@ -3093,6 +3108,8 @@ programCli
   .option('--min-score <n>', 'With --suggest, the lowest score to suggest (default: 5 on Product Docs pages, 3 on solution overviews)')
   .option('--limit <n>', 'With --suggest, the most suggestions per facet and page (default: 3 on Product Docs pages, 6 on solution overviews; never past the facet cardinality)')
   .option('--suggest-empty-only', 'With --suggest, suggest only for pages without :page-categories:')
+  .option('--candidates-only', 'List only candidate terms, frequent distinctive terms that no concept matches, aggregated across the pages with the pages each appears in')
+  .option('--terminology <paths>', 'With --suggest or --candidates-only, comma-separated terminology lists whose terms are never candidates: a glossary partials directory, a Markdown word list, or a text file (default: the docs glossary, shared/modules/terms/partials, in the checkout or $REDPANDA_DOCS_PATH)')
   .action(async (paths, options) => {
     const { runCli } = require('../tools/check-metadata')
     await runCli(paths, options)

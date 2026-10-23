@@ -402,3 +402,37 @@ include::manage:partial$tiered.adoc[]
     expect(out.suggest.suggestions.filter((x) => x.file.endsWith('tiered.adoc'))).toHaveLength(1)
   })
 })
+
+describe('check-metadata candidates', () => {
+  const page = (n) => `= Page ${n}\n\nWe read with Debezium, then Debezium again, into Parquet files.\n`
+  const repo = () => makeRepo({
+    'modules/a/pages/one.adoc': page(1),
+    'modules/a/pages/two.adoc': page(2) + 'More Parquet files.\n',
+    'shared/modules/terms/partials/parquet.adoc': '=== Parquet\n:term-name: Parquet\n',
+  })
+
+  test('--suggest lists candidates per page, filtered by the glossary in the checkout', async () => {
+    const { result } = await cli([], { root: repo(), taxonomy: TAXONOMY, suggest: true, format: 'json' })
+    expect(result.suggest.terminology).toEqual([expect.stringMatching(/shared\/modules\/terms\/partials$/)])
+    expect(result.suggest.candidates.map((c) => `${c.file} ${c.term} ${c.count}`)).toEqual(['modules/a/pages/one.adoc Debezium 2', 'modules/a/pages/two.adoc Debezium 2'])
+  })
+
+  test('--candidates-only aggregates across pages and lists the pages', async () => {
+    const root = repo()
+    const terms = path.join(root, 'none.txt')
+    fs.writeFileSync(terms, 'Nothing\n')
+    const { result, stdout, code } = await cli([], { root, taxonomy: TAXONOMY, candidatesOnly: true, terminology: terms })
+    expect(code).toBe(0)
+    expect(result.findings).toBeUndefined()
+    expect(result.candidates.map((c) => [c.term, c.count, c.pageCount, c.facet])).toEqual([['Debezium', 4, 2, null], ['Parquet', 3, 2, 'technology']])
+    expect(result.candidates[0].pages.map((p) => p.file)).toEqual(['modules/a/pages/one.adoc', 'modules/a/pages/two.adoc'])
+    expect(stdout).toMatch(/TERM {4}"Debezium" x4 on 2 page\(s\)/)
+  })
+
+  test('--candidates-only refuses --suggest, --fix, and --strict; --terminology needs one of the two modes', async () => {
+    for (const options of [{ candidatesOnly: true, suggest: true }, { candidatesOnly: true, fix: true }, { candidatesOnly: true, strict: true }, { terminology: 'x.txt' }]) {
+      const { code } = await cli([], { root: repo(), taxonomy: TAXONOMY, ...options })
+      expect(code).toBe(2)
+    }
+  })
+})

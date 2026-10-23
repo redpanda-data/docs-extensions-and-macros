@@ -839,6 +839,8 @@ The metadata rules live in `extension-utils/metadata-check.js` (`checkPageMetada
 
 Suggestions live in `extension-utils/metadata-suggest.js` (`suggestForPage`), which `doc-tools check-metadata --suggest` runs. It matches every live concept's labels against a page's title, description, path, headings, and body, deterministically and with no model, and returns up to a few concepts per facet that the page does not carry yet, each with a score and the evidence for it. It honors the facet cardinalities in the taxonomy, `implies`, and `broader`, and never suggests a deprecated concept. Another tool that tags content against the taxonomy should call it rather than match labels itself, so every tagger agrees.
 
+`extension-utils/metadata-candidates.js` finds the other side: frequent, distinctive terms on a page that no concept's label matches (`pageCandidates`), and the same across a repository with the pages each is on (`aggregateCandidates`). `doc-tools check-metadata --suggest` lists them per page and `--candidates-only` aggregates them. They are evidence for proposing a new concept or altLabel, deterministic like the suggestions.
+
 
 This extension collects Asciidoc attributes from the https://github.com/redpanda-data/docs-site[`shared` component] or a local YAML file and makes them available to all component versions. Having global attributes is useful for consistent configuration of local and production builds.
 
