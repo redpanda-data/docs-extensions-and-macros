@@ -916,7 +916,11 @@ jobs:
             (AsciiDoc pages, images, JSON-only, code-heavy) applies to it, so
             your job is to pick the review that best suits what it changes
             and run it. Read the diff with `gh pr diff` and the PR body with
-            `gh pr view`. No git command other than `git status` is allowed;
+            `gh pr view`. On a PR with more than 300 changed files
+            `gh pr diff` fails (HTTP 406): use `gh api --paginate
+            repos/${{ github.repository }}/pulls/${{ inputs.pr_number }}/files`
+            instead, whose entries carry each file's patch. No git command
+            other than `git status` is allowed;
             use Grep and Read, and read the changed files in the working tree
             for context the diff does not show.
             Choose by what the files are, and load the matching
@@ -1000,8 +1004,8 @@ jobs:
             # Not an Antora content repo (docs-site, docs-team-standards): the
             # lint cannot run. Not a failure (a red X on every image PR in a
             # docs-only repo), but not a clean pass either: `not_run` makes the
-            # aggregate show that this check did not run, in the table and
-            # outside the collapsed details, instead of a bare ✅.
+            # aggregate list this check under "Did not run" and count it in
+            # the headline, instead of a bare ✅.
             jq -n '{verdict:"pass", blocking:[], suggestions:[], not_run:["Screenshot lint (doc-tools lint-screenshots): this repo has no root modules/ directory, so the size and alt-text checks did not run"]}' > "$OUT"
             exit 0
           fi
@@ -1136,8 +1140,8 @@ jobs:
     # !cancelled(), not the implicit success(): a hard adoc_review failure
     # (job timeout, plugin-load assertion, CLAUDE.md fetch) must degrade
     # the delta (the prompt handles a missing findings.md), not skip it. A
-    # skipped delta drops its row from the comment instead of showing it
-    # unavailable. !cancelled() rather than always() so a cancelled run
+    # skipped delta drops out of the report silently instead of showing
+    # as unavailable. !cancelled() rather than always() so a cancelled run
     # does not start a paid job.
     if: >-
       !cancelled() && needs.classify.result == 'success' &&
@@ -1367,6 +1371,17 @@ jobs:
                 owner: context.repo.owner, repo: context.repo.repo, issue_number, body,
               });
             }
+
+      # With no comment there is nowhere else for the preview links to
+      # appear, and a PR that needs a review by hand is when the reviewer
+      # wants them most. The docs-review status links to this run, so its
+      # summary is one click from the checks list.
+      - name: Preview links in the run summary (no comment posted)
+        if: steps.verdict.outputs.post_comment == 'false'
+        run: |
+          if [[ -s preview-links.md ]]; then
+            { echo "### 🔍 Preview pages"; echo; cat preview-links.md; } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Apply labels and set the final status
         env:
