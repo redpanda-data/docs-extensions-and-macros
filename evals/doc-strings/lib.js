@@ -97,7 +97,7 @@ function gitInit (dir) {
   run('git', ['config', 'user.email', 'eval@localhost'], dir)
   run('git', ['config', 'user.name', 'doc-strings-eval'], dir)
   run('git', ['add', '-A'], dir)
-  run('git', ['commit', '-q', '-m', 'base'], dir)
+  run('git', ['commit', '-q', '--allow-empty', '-m', 'base'], dir)
   return run('git', ['rev-parse', 'HEAD'], dir).stdout.trim()
 }
 

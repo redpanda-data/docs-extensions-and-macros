@@ -33,7 +33,9 @@ real machinery:
    that step: `lint-findings.json`, `pr-diff.patch`, and the writing standard
    and terminology fetched from docs-team-standards. The one stand-in is the
    GitHub inline-comment tool (`mocks/inline-comment.js`), which records each
-   comment instead of posting it. The upstream-port and audit behaviors,
+   comment instead of posting it. The CLI loads only the fixture repo's
+   settings (`--setting-sources project`), so your own CLAUDE.md, plugins and
+   skills stay out of the review, as they are on the Actions runner. The upstream-port and audit behaviors,
    whose production prompts do not live in this repo, use the templates in
    `prompts.js` (`claude -p`, no tools, 300s timeout).
 4. The harness *applies* the output - each recorded comment's
@@ -112,7 +114,9 @@ nothing.
 suggest a rewrite that restores substance, and the applied result must still
 lint clean), `terminology-misuse` (a lint-clean, substantive description that
 lowercases the product name, which `terminology.md` names as incorrect: the
-model must suggest the canonical casing). Both sabotage against the fully
+model must suggest the canonical casing; it reads the live `terminology.md`
+from docs-team-standards main, as production does, so an upstream edit to
+that file can change its result). Both sabotage against the fully
 conforming rewording `negative-property-diff` uses, where staying silent is
 correct and so fails the must-suggest check.
 |===

@@ -33,7 +33,9 @@ const STEP = 'Claude review with suggestions'
 
 // The model production callers run the review on. streaming-enterprise and
 // redpanda-operator both pass gateway_model: us.anthropic.claude-opus-5.
-const PRODUCTION_MODEL = 'opus'
+// Name the exact model, never the CLI alias: `opus` resolves to the newest
+// Opus the CLI knows, which stops being the one callers run.
+const PRODUCTION_MODEL = 'claude-opus-5'
 
 // The files the workflow's "Fetch the writing standard" step downloads from
 // docs-team-standards main at run time (unpinned, an existing exception; see
@@ -105,7 +107,9 @@ function fetchStandards () {
 function runReview ({ repoDir, lint, diff, model = PRODUCTION_MODEL, timeoutMs = 600000 }) {
   const step = loadStep()
   const args = parseClaudeArgs(step.with.claude_args || '')
-  const prompt = renderPrompt(step.with.prompt, { repository: 'redpanda-data/redpanda', prNumber: 1 })
+  // A repository that doesn't exist, so a model that looks the PR up with
+  // `gh pr view` gets an error rather than a real, unrelated PR.
+  const prompt = renderPrompt(step.with.prompt, { repository: 'example-org/doc-strings-eval-fixture', prNumber: 1 })
 
   fs.writeFileSync(path.join(repoDir, 'lint-findings.json'), JSON.stringify(lint, null, 2))
   if (diff != null) {
@@ -127,6 +131,11 @@ function runReview ({ repoDir, lint, diff, model = PRODUCTION_MODEL, timeoutMs =
 
   const cli = [
     '-p', '--output-format', 'text', '--model', model,
+    // Load only the fixture repo's settings. The Actions runner has no user
+    // settings, so a developer's own CLAUDE.md, plugins, and skills (such as
+    // docs-team-standards, which ships the same standards) must not reach the
+    // review here either.
+    '--setting-sources', 'project',
     '--strict-mcp-config', '--mcp-config', mcpPath,
     '--allowed-tools', args.allowed.join(','),
     '--disallowed-tools', args.disallowed.join(',')

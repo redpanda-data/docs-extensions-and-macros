@@ -152,7 +152,6 @@ const CASES = [
     layout: 'properties',
     target: 'kafka_batch_max_bytes',
     columnLimit: 80,
-    terminologyFixture: 'terminology.md',
     diffEdits: [{
       find: '      "Maximum size of a batch processed by the server. If the batch is "\n' +
             '      "compressed, the limit applies to the compressed batch size. Default "\n' +
