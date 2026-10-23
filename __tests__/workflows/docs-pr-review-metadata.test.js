@@ -8,8 +8,9 @@ const { spawnSync } = require('child_process')
 const { execRun } = require('./helpers/exec-run')
 
 /**
- * The docs PR review runs `doc-tools check-metadata` in adoc_review and adds
- * its findings to that branch's verdict and findings. These tests execute
+ * The docs PR review runs `doc-tools check-metadata` in its own job,
+ * metadata_check, which holds no id-token, and adoc_review adds the result
+ * to that branch's verdict and findings. These tests execute
  * the two steps' run: bodies (helpers/exec-run.js) with gh and npx stubbed,
  * and once with npx running this repository's own doc-tools on a real git
  * checkout, and check what reaches the review: an error is blocking, a
@@ -19,14 +20,13 @@ const { execRun } = require('./helpers/exec-run')
 
 const ROOT = path.join(__dirname, '..', '..')
 const workflow = YAML.parse(fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'docs-pr-review-reusable.yml'), 'utf8'))
-const job = workflow.jobs.adoc_review
-const stepNamed = (name) => {
+const stepNamed = (job, name) => {
   const step = job.steps.find((s) => s.name === name)
   if (!step) throw new Error(`no step named ${name}; steps: ${job.steps.map((s) => s.name || s.uses).join(', ')}`)
   return step
 }
-const CHECK = stepNamed('Deterministic checks (doc-tools check-metadata)')
-const MERGE = stepNamed('Add the check-metadata findings to the review')
+const CHECK = stepNamed(workflow.jobs.metadata_check, 'Deterministic checks (doc-tools check-metadata)')
+const MERGE = stepNamed(workflow.jobs.adoc_review, 'Add the check-metadata findings to the review')
 
 const tmpdir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pr-review-meta-'))
 const GH = 'echo main'
@@ -40,7 +40,7 @@ const result = (findings) => {
 // An npx that answers like doc-tools check-metadata: writes `json` to the
 // --output path (unless null) and exits `rc`, with `stderr` on stderr.
 const npxStub = ({ json, rc = 0, stderr = '' }) => `#!/bin/bash
-echo "$PWD $*" >> "$RUNNER_TEMP/npx.log"
+echo "$PWD \${GH_TOKEN:-no-token} $*" >> "$RUNNER_TEMP/npx.log"
 out=""; prev=""
 for a in "$@"; do [ "$prev" = --output ] && out="$a"; prev="$a"; done
 ${json === null ? '' : `cat > "$out" <<'JSON'\n${JSON.stringify(json)}\nJSON`}
@@ -59,7 +59,7 @@ function runCheck ({ npx, gh = GH, src } = {}) {
   return { ...r, runnerTemp, srcDir, readOut: read, state: (read('state') || '').trim(), npxLog: () => fs.readFileSync(path.join(runnerTemp, 'npx.log'), 'utf8') }
 }
 
-function runMerge ({ state, json, reason, verdict, findingsMd } = {}) {
+function runMerge ({ state, json, reason, verdict, findingsMd, jobResult = 'success' } = {}) {
   const runnerTemp = tmpdir()
   const dir = path.join(runnerTemp, 'metadata-check')
   fs.mkdirSync(dir, { recursive: true })
@@ -69,17 +69,31 @@ function runMerge ({ state, json, reason, verdict, findingsMd } = {}) {
   const files = {}
   if (verdict !== undefined) files['review-output/verdict.json'] = typeof verdict === 'string' ? verdict : JSON.stringify(verdict)
   if (findingsMd) files['review-output/findings.md'] = findingsMd
-  const r = execRun(MERGE, { env: { RUNNER_TEMP: runnerTemp }, files })
+  const r = execRun(MERGE, { env: { RUNNER_TEMP: runnerTemp, METADATA_CHECK_RESULT: jobResult }, files })
   const v = r.read('review-output/verdict.json')
   return { ...r, verdict: v && (() => { try { return JSON.parse(v) } catch { return v } })(), findings: r.read('review-output/findings.md') }
 }
 
 describe('docs PR review: the check-metadata step', () => {
-  test('runs check-metadata on the changed pages against the PR base, in the PR checkout', () => {
+  test('runs check-metadata on the changed pages against the PR base, from RUNNER_TEMP with --root, without GH_TOKEN', () => {
     const r = runCheck({ npx: npxStub({ json: result([]) }) })
     expect({ status: r.status, out: r.all }).toMatchObject({ status: 0 })
     expect(r.state).toBe('ran')
-    expect(r.npxLog()).toBe(`${r.srcDir} --yes --package @redpanda-data/docs-extensions-and-macros@9.9.9 doc-tools check-metadata --changed origin/main --format json --output ${r.runnerTemp}/metadata-check/check-metadata.json\n`)
+    expect(r.npxLog()).toBe(`${r.runnerTemp} no-token --yes --package @redpanda-data/docs-extensions-and-macros@9.9.9 doc-tools check-metadata --root ${r.srcDir} --changed origin/main --format json --output ${r.runnerTemp}/metadata-check/check-metadata.json\n`)
+  })
+
+  test('the job that runs it holds no id-token, and the review waits for it without being skipped by it', () => {
+    expect(workflow.jobs.metadata_check.permissions).toEqual({ contents: 'read', 'pull-requests': 'read' })
+    expect(workflow.jobs.adoc_review.needs).toContain('metadata_check')
+    expect(workflow.jobs.adoc_review.if).toMatch(/^!cancelled\(\) && /)
+    expect(workflow.jobs.adoc_review.steps.some((s) => s.name === CHECK.name)).toBe(false)
+  })
+
+  test('no published taxonomy.yml is skipped with a notice, not reported', () => {
+    const r = runCheck({ npx: npxStub({ json: null, rc: 2, stderr: 'check-metadata: no taxonomy.yml found; tried /src/shared/modules/ROOT/attachments/taxonomy.yml, https://docs.redpanda.com/shared/_attachments/taxonomy.yml' }) })
+    expect({ status: r.status, out: r.all }).toMatchObject({ status: 0 })
+    expect(r.state).toBe('missing')
+    expect(r.all).toMatch(/::notice::check-metadata found no taxonomy\.yml/)
   })
 
   test('exit 1 with a result is a result: errors found', () => {
@@ -98,6 +112,7 @@ describe('docs PR review: the check-metadata step', () => {
 
   test.each([
     ['exit 2', { json: null, rc: 2, stderr: 'check-metadata: could not load the taxonomy: 404' }, /could not run \(exit 2\): check-metadata: could not load the taxonomy: 404/],
+    ['a taxonomy fetch that failed', { json: null, rc: 2, stderr: 'check-metadata: fetching https://docs.redpanda.com/shared/_attachments/taxonomy.yml failed with HTTP 503' }, /could not run \(exit 2\): .*HTTP 503/],
     ['exit 1 with no result', { json: null, rc: 1, stderr: 'npm error 404' }, /could not run \(exit 1\): npm error 404/],
     ['a result that is not its JSON', { json: { nope: true }, rc: 0 }, /could not run \(exit 0\)/],
   ])('%s is a check that could not run', (_name, stub, rx) => {
@@ -156,9 +171,25 @@ describe('docs PR review: adding check-metadata to the review', () => {
     expect(r.verdict.not_run).toEqual(['earlier', 'Page metadata (doc-tools check-metadata): doc-tools check-metadata could not run (exit 2): no taxonomy'])
   })
 
-  test.each([['missing'], [null]])('state %s changes nothing', (state) => {
+  test.each([
+    ['failure', /the metadata_check job left no result \(failure\)/],
+    ['success', /the metadata_check job left no result \(success\)/],
+  ])('no result from a metadata_check job with result %s is not_run, never a pass', (jobResult, rx) => {
+    const r = runMerge({ jobResult, verdict: { verdict: 'pass', blocking: [], suggestions: [] } })
+    expect({ status: r.status, out: r.all }).toMatchObject({ status: 0 })
+    expect(r.verdict.verdict).toBe('pass')
+    expect(r.verdict.not_run).toEqual([expect.stringMatching(rx)])
+  })
+
+  test('markdown in a finding message is escaped', () => {
+    const r = runMerge({ state: 'ran', json: result([finding('error', "page-categories value 'a `b` [c](d) <e>' is not in the taxonomy")]), verdict: { verdict: 'pass', blocking: [], suggestions: [] } })
+    expect(r.verdict.blocking).toEqual(["page metadata: `modules/manage/pages/a.adoc:2` page-categories value 'a \\`b\\` \\[c\\](d) \\<e\\>' is not in the taxonomy"])
+    expect(r.findings).toContain("- error: `modules/manage/pages/a.adoc:2` page-categories value 'a \\`b\\` \\[c\\](d) \\<e\\>' is not in the taxonomy")
+  })
+
+  test.each([['missing', 'success'], [null, 'skipped']])('state %s (job %s) changes nothing', (state, jobResult) => {
     const verdict = { verdict: 'pass', blocking: [], suggestions: [] }
-    const r = runMerge({ state, verdict, findingsMd: '# Review\n' })
+    const r = runMerge({ state, jobResult, verdict, findingsMd: '# Review\n' })
     expect({ status: r.status, out: r.all }).toMatchObject({ status: 0 })
     expect(r.verdict).toEqual(verdict)
     expect(r.findings).toBe('# Review\n')
@@ -194,7 +225,9 @@ describe('docs PR review: check-metadata with this repository\'s doc-tools', () 
     git(src, 'add', '-A')
     git(src, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'pr')
 
-    // npx runs this checkout's bin, as the published package would.
+    // npx runs this checkout's bin, as the published package would. It runs
+    // from RUNNER_TEMP, so this also checks that --root and --changed reach
+    // the checkout from outside it.
     const npx = `#!/bin/bash
 while [ "$1" = --yes ] || [ "$1" = --package ]; do [ "$1" = --package ] && shift; shift; done
 [ "$1" = doc-tools ] && shift
