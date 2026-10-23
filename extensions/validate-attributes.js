@@ -7,6 +7,8 @@
 'use strict';
 
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
+const { getTaxonomy } = require('../extension-utils/taxonomy')
+const { checkTaxonomy, createTaxonomyReport, logTaxonomyReport } = require('../extension-utils/taxonomy-categories')
 
 module.exports.register = function ({ config }) {
   raiseListenerLimit(this)
@@ -18,15 +20,22 @@ module.exports.register = function ({ config }) {
     const validCategories = siteCatalog.attributeFile['page-valid-categories'];
     if (!validCategories) return logger.warn('No page-valid-categories attribute found - skipping attribute validation')
     const categoryMap = createCategoryMap(validCategories);
+    // The taxonomy (shared/modules/ROOT/attachments/taxonomy.yml) when the
+    // docs repo has it; null keeps the valid-categories-only behavior.
+    const taxonomy = getTaxonomy({ contentCatalog, siteCatalog, logger });
+    const report = createTaxonomyReport();
     const pages = contentCatalog.findBy({ family: 'page' });
     pages.forEach((page) => {
       let pageCategories = page.asciidoc.attributes['page-categories'];
       if (!pageCategories) return;
       let pageCategoryList = pageCategories.split(',').map(c => c.trim());
-      const validatedCategories = validateCategories(pageCategoryList, page.asciidoc.attributes['page-relative-src-path'], categoryMap, logger);
+      const pageInfo = page.asciidoc.attributes['page-relative-src-path'];
+      if (taxonomy) pageCategoryList = checkTaxonomy(pageCategoryList, { taxonomy, categoryMap, page, report });
+      const validatedCategories = validateCategories(pageCategoryList, pageInfo, categoryMap, logger);
       page.asciidoc.attributes['page-categories'] = validatedCategories
       processEnvironmentAttributes(page, logger);
     })
+    if (taxonomy) logTaxonomyReport(report, logger);
   })
 }
 
