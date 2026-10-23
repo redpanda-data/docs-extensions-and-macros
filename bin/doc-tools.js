@@ -3026,6 +3026,11 @@ programCli
  * else the docs checkout at the current directory, else $REDPANDA_DOCS_PATH,
  * else the published file. The build runs the same rules
  * (extension-utils/metadata-check.js), so the two never disagree.
+ * --fix first rewrites `:page-categories:` in place: each value becomes its
+ * concept's preferred label, a deprecated value becomes its replacements, and
+ * a replacement that is a task is dropped (the task comes from the module).
+ * Values that need a judgment call (no replacement, or a content type) are
+ * left as they are and still warn.
  * Exit 0 without errors, 1 with errors, 2 when the check could not run.
  *
  * @why
@@ -3043,6 +3048,9 @@ programCli
  *
  * # Against a local taxonomy, failing on warnings
  * npx doc-tools check-metadata --taxonomy ../docs/shared/modules/ROOT/attachments/taxonomy.yml --strict
+ *
+ * # Rewrite deprecated categories to their replacements, then check
+ * npx doc-tools check-metadata --fix modules
  */
 programCli
   .command('check-metadata')
@@ -3052,6 +3060,7 @@ programCli
   .option('--taxonomy <path|url>', 'taxonomy.yml to use (default: the docs checkout, $REDPANDA_DOCS_PATH, then https://docs.redpanda.com/shared/_attachments/taxonomy.yml)')
   .option('--format <format>', 'Output format: text or json', 'text')
   .option('--strict', 'Treat warnings as errors')
+  .option('--fix', 'Rewrite page-categories in place to current taxonomy labels, then check')
   .option('--root <path>', 'Repository root (default: current directory)')
   .option('--output <path>', 'Also write the JSON result to this file')
   .action(async (paths, options) => {

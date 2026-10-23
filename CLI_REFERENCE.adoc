@@ -795,7 +795,7 @@ npx doc-tools check-build-log build.ndjson --blocking-sources redpanda-data/rp-c
 
 == check-metadata
 
-Check the taxonomy metadata in AsciiDoc page headers against the docs taxonomy (taxonomy.yml in the docs repository). On every page, `:page-categories:` values must resolve to a concept: an unknown value, a deprecated value, or two values that are the same concept warn, and each message names the replacement. On a solution overview (`:page-layout: solution`), `:page-solution-use-cases:`, `:page-solution-industries:`, `:page-solution-technologies:`, and `:page-solution-platforms:` must resolve within their own facet, and an unknown value or a duplicate concept is an error. `:page-topic-type:` is checked against the content types, as a warning. --strict turns every warning into an error. The taxonomy comes from --taxonomy (a path or URL), else the docs checkout at the current directory, else $REDPANDA_DOCS_PATH, else the published file. The build runs the same rules (extension-utils/metadata-check.js), so the two never disagree. Exit 0 without errors, 1 with errors, 2 when the check could not run.
+Check the taxonomy metadata in AsciiDoc page headers against the docs taxonomy (taxonomy.yml in the docs repository). On every page, `:page-categories:` values must resolve to a concept: an unknown value, a deprecated value, or two values that are the same concept warn, and each message names the replacement. On a solution overview (`:page-layout: solution`), `:page-solution-use-cases:`, `:page-solution-industries:`, `:page-solution-technologies:`, and `:page-solution-platforms:` must resolve within their own facet, and an unknown value or a duplicate concept is an error. `:page-topic-type:` is checked against the content types, as a warning. --strict turns every warning into an error. The taxonomy comes from --taxonomy (a path or URL), else the docs checkout at the current directory, else $REDPANDA_DOCS_PATH, else the published file. The build runs the same rules (extension-utils/metadata-check.js), so the two never disagree. --fix first rewrites `:page-categories:` in place: each value becomes its concept's preferred label, a deprecated value becomes its replacements, and a replacement that is a task is dropped (the task comes from the module). Values that need a judgment call (no replacement, or a content type) are left as they are and still warn. Exit 0 without errors, 1 with errors, 2 when the check could not run.
 
 *Why use it:*
 
@@ -822,6 +822,9 @@ Output format: text or json (default: "text")
 `--strict`::
 Treat warnings as errors
 
+`--fix`::
+Rewrite page-categories in place to current taxonomy labels, then check
+
 `--root <path>`::
 Repository root (default: current directory)
 
@@ -843,6 +846,9 @@ npx doc-tools check-metadata modules/manage/pages/iceberg --format json
 
 # Against a local taxonomy, failing on warnings
 npx doc-tools check-metadata --taxonomy ../docs/shared/modules/ROOT/attachments/taxonomy.yml --strict
+
+# Rewrite deprecated categories to their replacements, then check
+npx doc-tools check-metadata --fix modules
 ----
 
 == check-rendered-html

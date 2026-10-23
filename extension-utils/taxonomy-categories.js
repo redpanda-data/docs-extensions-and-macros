@@ -8,6 +8,7 @@
  */
 
 const { checkPageMetadata, CATEGORY_ATTRIBUTE, TOPIC_TYPE_ATTRIBUTE } = require('./metadata-check')
+const { normalizeKey } = require('./taxonomy')
 
 // Components whose pages are not Product Docs, so validate-attributes leaves
 // their categories to the legacy check alone. labs is retiring as it is, and
@@ -38,6 +39,14 @@ function createTaxonomyReport () {
  */
 function checkTaxonomy (list, { taxonomy, categoryMap, page, report }) {
   const isLegacy = (label) => categoryMap.categories.has(label) || categoryMap.subcategories.has(label)
+  // Legacy labels by lookup key, so a value that differs from its legacy label
+  // only in case (the use case 'Disaster recovery' and the old category
+  // 'Disaster Recovery') emits the legacy spelling, not a deprecated sibling.
+  const legacyByKey = new Map()
+  for (const label of [...categoryMap.categories.keys(), ...categoryMap.subcategories.keys()]) {
+    if (!legacyByKey.has(normalizeKey(label))) legacyByKey.set(normalizeKey(label), label)
+  }
+  const legacyFor = (label) => legacyByKey.get(normalizeKey(label))
   const component = page.src && page.src.component
   if (TAXONOMY_SKIPPED_COMPONENTS.includes(component)) return list
   const attrs = page.asciidoc.attributes
@@ -59,14 +68,24 @@ function checkTaxonomy (list, { taxonomy, categoryMap, page, report }) {
 
   const out = []
   for (const value of list) {
-    const resolved = isLegacy(value) ? null : taxonomy.resolve(value)
+    if (isLegacy(value)) {
+      out.push(value)
+      continue
+    }
+    const sameLegacy = legacyFor(value)
+    const resolved = taxonomy.resolve(value)
+    if (sameLegacy && resolved && !resolved.deprecated) {
+      if (!out.includes(sameLegacy)) out.push(sameLegacy)
+      continue
+    }
     if (!resolved) {
       out.push(value)
       continue
     }
     for (const id of resolved.ids) {
-      const legacy = taxonomy.legacyLabel(id, isLegacy)
-      if (legacy && !out.includes(legacy)) out.push(legacy)
+      const legacy = taxonomy.legacyLabel(id, (label) => Boolean(legacyFor(label)))
+      const spelled = legacy && legacyFor(legacy)
+      if (spelled && !out.includes(spelled)) out.push(spelled)
     }
   }
   return out

@@ -52,6 +52,16 @@ describe('validate-attributes with the taxonomy', () => {
     expect(lines.warn.filter((w) => /Invalid categor/.test(w))).toEqual([])
   })
 
+  test('a label that differs from a legacy category only in case keeps the legacy spelling', async () => {
+    const p = page('Disaster recovery, Stream processing')
+    const lines = await run([p])
+    const legacy = page('Disaster Recovery, Stream Processing')
+    await run([legacy])
+    expect(p.asciidoc.attributes['page-categories']).toBe('Disaster Recovery, Stream Processing, High Availability')
+    expect(p.asciidoc.attributes['page-categories']).toBe(legacy.asciidoc.attributes['page-categories'])
+    expect(lines.warn).toEqual([])
+  })
+
   test('a value only the taxonomy knows, with no legacy label, is dropped from page-categories without a warning', async () => {
     const p = page('Security, Postgres')
     const lines = await run([p])

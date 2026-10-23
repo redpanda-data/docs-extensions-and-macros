@@ -12,6 +12,16 @@
  * reports one finding per problem value with file, line, attribute, value,
  * severity, message, and replacement.
  *
+ * With --fix, it first rewrites `:page-categories:` in place (fixCategories),
+ * then checks the result. Each value becomes the preferred label of the
+ * concept it resolves to, and a deprecated value becomes its replacements.
+ * A replacement that is a task is dropped rather than written, because the
+ * task is derived from the Antora module. A deprecated value with no
+ * replacement (Integration, Streaming, GitOps), or whose replacement is a
+ * content type (Architecture), needs a judgment call and is left as it is,
+ * and so is any value the taxonomy does not know. An attribute left with no
+ * values is removed.
+ *
  * Exit codes: 0 no errors, 1 errors (or warnings with --strict), 2 the check
  * could not run (no taxonomy, an invalid taxonomy, a bad argument).
  */
@@ -34,8 +44,10 @@ const CONDITIONAL_RE = /^(?:ifdef|ifndef|ifeval|endif)::/
  * Read the attribute entries of an AsciiDoc header.
  *
  * @param {string} content
- * @returns {Array<{name: string, value: string, line: number}>} every entry, in
- *   order; an attribute set in two conditional branches appears twice
+ * @returns {Array<{name: string, value: string, line: number, start: number}>}
+ *   every entry, in order (`start` is its first line, `line` its last when the
+ *   value is soft-wrapped); an attribute set in two conditional branches
+ *   appears twice
  */
 function parseHeader (content) {
   const lines = String(content).split(/\r?\n/)
@@ -62,11 +74,12 @@ function parseHeader (content) {
     const m = ATTRIBUTE_RE.exec(line)
     if (!m) break
     let value = m[2] || ''
+    const start = i + 1
     // Soft-wrapped value: a line ending in " \" continues on the next.
     while (/\s\\$/.test(value) && i + 1 < lines.length) {
       value = value.replace(/\s\\$/, ' ') + lines[++i].trim()
     }
-    entries.push({ name: m[1], value: value.trim(), line: i + 1 })
+    entries.push({ name: m[1], value: value.trim(), line: i + 1, start })
   }
   return entries
 }
@@ -183,8 +196,116 @@ function checkFiles ({ root, files, taxonomy, strict = false, isLegacyCategory }
   }
 }
 
+// The schemes a page-categories value may name once it is rewritten. A task
+// is derived from the module and a content type is :page-topic-type:, so
+// neither is written into categories.
+const CATEGORY_SCHEMES = new Set(['topic', 'use-case', 'technology', 'industry'])
+
+/**
+ * What one page-categories value becomes under --fix.
+ *
+ * @returns {{values: string[], action: 'keep'|'relabel'|'replace'|'drop', reason?: string}}
+ *   `keep` leaves the value as written, with the reason when it needs a person
+ */
+function fixCategoryValue (value, taxonomy) {
+  if (value.includes('{')) return { values: [value], action: 'keep', reason: 'references an attribute' }
+  const hit = taxonomy.resolve(value)
+  if (!hit) return { values: [value], action: 'keep', reason: 'not in the taxonomy' }
+  const { concept } = hit
+  if (!hit.deprecated) {
+    if (!CATEGORY_SCHEMES.has(concept.scheme)) return { values: [value], action: 'keep', reason: `is a ${concept.scheme}, not a category` }
+    return concept.prefLabel === value ? { values: [value], action: 'keep' } : { values: [concept.prefLabel], action: 'relabel' }
+  }
+  if (!hit.ids.length) return { values: [value], action: 'keep', reason: 'deprecated with no replacement; choose per page' }
+  const schemes = hit.ids.map((id) => taxonomy.get(id).scheme)
+  if (schemes.some((sc) => !CATEGORY_SCHEMES.has(sc) && sc !== 'task')) {
+    return { values: [value], action: 'keep', reason: `replaced by a ${schemes.find((sc) => !CATEGORY_SCHEMES.has(sc) && sc !== 'task')}; choose per page` }
+  }
+  const values = hit.ids.filter((id) => CATEGORY_SCHEMES.has(taxonomy.get(id).scheme)).map((id) => taxonomy.label(id))
+  return { values, action: values.length ? 'replace' : 'drop' }
+}
+
+/**
+ * Rewrite the `:page-categories:` entries of one page (see the header comment).
+ * Soft-wrapped entries are reported and left alone.
+ *
+ * @param {string} content
+ * @param {import('../../extension-utils/taxonomy').Taxonomy} taxonomy
+ * @returns {{content: string, changes: Array<{line: number, before: string, after: string|null, edits: Array<Object>}>, kept: Array<{line: number, value: string, reason: string}>}}
+ *   `after` is null when the entry was removed
+ */
+function fixCategories (content, taxonomy) {
+  const text = String(content)
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const lines = text.split(/\r?\n/)
+  const changes = []
+  const kept = []
+  const remove = new Set()
+  for (const entry of parseHeader(text)) {
+    if (entry.name !== CATEGORY_ATTRIBUTE) continue
+    if (entry.start !== entry.line) {
+      kept.push({ line: entry.start, value: entry.value, reason: 'soft-wrapped value; fix it by hand' })
+      continue
+    }
+    const out = []
+    const seen = new Set()
+    const edits = []
+    for (const value of entry.value.split(',').map((v) => v.trim()).filter(Boolean)) {
+      const fix = fixCategoryValue(value, taxonomy)
+      if (fix.reason) kept.push({ line: entry.line, value, reason: fix.reason })
+      const written = []
+      for (const v of fix.values) {
+        const hit = v.includes('{') ? null : taxonomy.resolve(v)
+        const key = hit ? hit.concept.id : `value:${v}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        out.push(v)
+        written.push(v)
+      }
+      if (fix.action !== 'keep' || written.length !== fix.values.length) edits.push({ value, action: fix.action === 'keep' ? 'dedupe' : fix.action, to: written })
+    }
+    if (!edits.length) continue
+    const idx = entry.line - 1
+    const before = lines[idx]
+    const prefix = before.match(/^(:page-categories!?:)/)[1]
+    const after = out.length ? `${prefix} ${out.join(', ')}` : null
+    if (after === null) remove.add(idx)
+    else lines[idx] = after
+    changes.push({ line: entry.line, before, after, edits })
+  }
+  return {
+    content: remove.size ? lines.filter((_, i) => !remove.has(i)).join(eol) : lines.join(eol),
+    changes,
+    kept,
+  }
+}
+
+/** Apply fixCategories to files, writing the ones that change. */
+function fixFiles ({ root, files, taxonomy }) {
+  const fixed = []
+  for (const file of files) {
+    const abs = path.resolve(root, file)
+    const content = fs.readFileSync(abs, 'utf8')
+    const r = fixCategories(content, taxonomy)
+    if (r.changes.length) {
+      fs.writeFileSync(abs, r.content)
+      fixed.push({ file, changes: r.changes, kept: r.kept })
+    } else if (r.kept.length) {
+      fixed.push({ file, changes: [], kept: r.kept })
+    }
+  }
+  return fixed
+}
+
 function formatText (result) {
   const out = []
+  if (result.fixes) {
+    for (const f of result.fixes) {
+      for (const c of f.changes) out.push(`FIXED   ${f.file}:${c.line} ${c.before.trim()} -> ${c.after === null ? '(removed)' : c.after.trim()}`)
+    }
+    const changed = result.fixes.filter((f) => f.changes.length).length
+    out.push(`check-metadata --fix: rewrote page-categories in ${changed} file(s)`, '')
+  }
   for (const f of result.findings) {
     out.push(`${f.severity.toUpperCase().padEnd(7)} ${f.file}:${f.line} [${f.rule}] ${f.message}`)
   }
@@ -201,7 +322,7 @@ function splitList (values) {
 
 /**
  * @param {Array<string>} paths
- * @param {Object} options - commander options: changed, taxonomy, format, strict, root, output
+ * @param {Object} options - commander options: changed, taxonomy, format, strict, fix, root, output
  * @param {Object} [deps] - { fetch } for tests
  */
 async function runCli (paths, options = {}, { fetch } = {}) {
@@ -211,8 +332,9 @@ async function runCli (paths, options = {}, { fetch } = {}) {
     const root = path.resolve(options.root || process.cwd())
     const loaded = await loadTaxonomyFrom({ source: options.taxonomy, root, ...(fetch ? { fetch } : {}) })
     const files = selectFiles({ root, paths: splitList(paths), changed: options.changed })
+    const fixes = options.fix ? fixFiles({ root, files, taxonomy: loaded.taxonomy }) : undefined
     result = checkFiles({ root, files, taxonomy: loaded.taxonomy, strict: Boolean(options.strict), isLegacyCategory: loadLegacyCategories(root) })
-    result = { taxonomy: { source: loaded.source, schema: loaded.schemaSource, warnings: loaded.warnings }, ...result }
+    result = { taxonomy: { source: loaded.source, schema: loaded.schemaSource, warnings: loaded.warnings }, ...result, ...(fixes ? { fixes } : {}) }
   } catch (err) {
     console.error(`check-metadata: ${err.message}`)
     process.exitCode = 2
@@ -231,6 +353,9 @@ module.exports = {
   parseHeader,
   selectFiles,
   checkFiles,
+  fixCategoryValue,
+  fixCategories,
+  fixFiles,
   formatText,
   loadLegacyCategories,
   runCli,

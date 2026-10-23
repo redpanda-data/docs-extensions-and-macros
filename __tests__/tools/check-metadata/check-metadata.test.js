@@ -4,8 +4,8 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { spawnSync } = require('child_process')
-const { parseHeader, runCli } = require('../../../tools/check-metadata')
-const { loadTaxonomyFrom, PUBLIC_URL } = require('../../../extension-utils/taxonomy')
+const { parseHeader, runCli, fixCategories } = require('../../../tools/check-metadata')
+const { loadTaxonomyFrom, parseTaxonomy, PUBLIC_URL } = require('../../../extension-utils/taxonomy')
 
 const FIXTURES = path.join(__dirname, '..', '..', 'fixtures', 'taxonomy')
 const TAXONOMY = path.join(FIXTURES, 'taxonomy.yml')
@@ -82,9 +82,9 @@ endif::[]
 :page-categories: Body text
 `)
     expect(entries).toEqual([
-      { name: 'page-layout', value: 'solution', line: 2 },
-      { name: 'page-categories', value: 'Cloud only', line: 8 },
-      { name: 'page-categories', value: 'Security', line: 10 },
+      { name: 'page-layout', value: 'solution', line: 2, start: 2 },
+      { name: 'page-categories', value: 'Cloud only', line: 8, start: 8 },
+      { name: 'page-categories', value: 'Security', line: 10, start: 10 },
     ])
   })
 })
@@ -260,5 +260,75 @@ describe('loadTaxonomyFrom', () => {
   test('an HTML answer counts as not found', async () => {
     const fetch = async () => ({ ok: true, status: 200, headers: { get: () => 'text/html; charset=utf-8' }, text: async () => '<html>' })
     await expect(loadTaxonomyFrom({ root: makeRepo({}), env: {}, fetch })).rejects.toThrow(/no taxonomy\.yml found/)
+  })
+})
+
+describe('check-metadata --fix', () => {
+  const taxonomy = parseTaxonomy(fs.readFileSync(TAXONOMY, 'utf8'))
+  const header = (categories) => `= Page\n:description: A page.\n:page-categories: ${categories}\n\nBody.\n`
+  const fix = (categories) => fixCategories(header(categories), taxonomy)
+
+  test('replaces deprecated values and drops a replacement that is a task', () => {
+    const r = fix('Iceberg, Management, Security')
+    expect(r.content).toBe(header('Iceberg Topics, Security'))
+    expect(r.changes[0].edits).toEqual([
+      { value: 'Iceberg', action: 'replace', to: ['Iceberg Topics'] },
+      { value: 'Management', action: 'drop', to: [] },
+    ])
+  })
+
+  test('removes the attribute when nothing is left', () => {
+    const r = fix('Management')
+    expect(r.content).toBe('= Page\n:description: A page.\n\nBody.\n')
+    expect(r.changes[0].after).toBeNull()
+  })
+
+  test('leaves a deprecated value with no replacement, and an unknown value, for a person', () => {
+    const r = fix('Integration, Data Replication, Nonsense')
+    expect(r.content).toBe(header('Integration, Replication, Nonsense'))
+    expect(r.kept.map((k) => k.value)).toEqual(['Integration', 'Nonsense'])
+  })
+
+  test('writes the preferred label of a live concept', () => {
+    expect(fix('Disaster Recovery, Postgres').content).toBe(header('Disaster recovery, PostgreSQL'))
+  })
+
+  test('keeps one value per concept', () => {
+    expect(fix('Iceberg, Iceberg Topics').content).toBe(header('Iceberg Topics'))
+  })
+
+  test('a page that is already current is unchanged', () => {
+    const r = fix('Iceberg Topics, Security')
+    expect(r.changes).toEqual([])
+    expect(r.content).toBe(header('Iceberg Topics, Security'))
+  })
+
+  test('fixes each conditional branch and leaves values with attribute references', () => {
+    const page = '= Page\nifdef::env-cloud[]\n:page-categories: Management, Iceberg\nendif::[]\nifndef::env-cloud[]\n:page-categories: {x}, Data Replication\nendif::[]\n\nBody.\n'
+    const r = fixCategories(page, taxonomy)
+    expect(r.content).toBe('= Page\nifdef::env-cloud[]\n:page-categories: Iceberg Topics\nendif::[]\nifndef::env-cloud[]\n:page-categories: {x}, Replication\nendif::[]\n\nBody.\n')
+  })
+
+  test('leaves categories in the body alone', () => {
+    const page = header('Security') + '\n:page-categories: Management\n'
+    expect(fixCategories(page, taxonomy).content).toBe(page)
+  })
+
+  test('the CLI rewrites files, reports the fixes, and checks the result', async () => {
+    const root = makeRepo({ 'modules/a/pages/a.adoc': header('Iceberg, Management'), 'modules/a/pages/b.adoc': header('Integration') })
+    const { result, stdout, code } = await cli([], { root, taxonomy: TAXONOMY, fix: true })
+    expect(fs.readFileSync(path.join(root, 'modules/a/pages/a.adoc'), 'utf8')).toBe(header('Iceberg Topics'))
+    expect(fs.readFileSync(path.join(root, 'modules/a/pages/b.adoc'), 'utf8')).toBe(header('Integration'))
+    expect(result.fixes.map((f) => f.file)).toEqual(['modules/a/pages/a.adoc', 'modules/a/pages/b.adoc'])
+    expect(result.findings.map((f) => `${f.file} ${f.value}`)).toEqual(['modules/a/pages/b.adoc Integration'])
+    expect(stdout).toMatch(/FIXED {3}modules\/a\/pages\/a\.adoc:3 :page-categories: Iceberg, Management -> :page-categories: Iceberg Topics/)
+    expect(code).toBe(0)
+  })
+
+  test('without --fix nothing is written', async () => {
+    const root = makeRepo({ 'modules/a/pages/a.adoc': header('Iceberg') })
+    const { result } = await cli([], { root, taxonomy: TAXONOMY })
+    expect(result.fixes).toBeUndefined()
+    expect(fs.readFileSync(path.join(root, 'modules/a/pages/a.adoc'), 'utf8')).toBe(header('Iceberg'))
   })
 })
