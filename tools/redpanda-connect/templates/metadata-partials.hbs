@@ -1,5 +1,5 @@
 {{#if (renderConnectMetadata description)}}
-{{{generatedMarker "rpcn-connector-docs" "the component spec in redpanda-data/connect" "Metadata fields come from the connector's description in the Connect source. To change them, update the connector description upstream, or use the doc-tools CLI with the --overrides option: https://redpandadata.atlassian.net/wiki/spaces/DOC/pages/1247543314/Generate+reference+docs+for+Redpanda+Connect"}}}
+{{{generatedMarker "rpcn-connector-docs" "the component spec in redpanda-data/connect or redpanda-data/benthos" "Metadata fields come from the `== Metadata` section of the component description. This file is a doc-tools preview. The published partials are generated in redpanda-data/connect by `task docs`, and their first line names the file that registers the component. To change the text, edit the component spec in that file."}}}
 
 {{{renderConnectMetadata description}}}
 {{/if}}
