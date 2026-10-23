@@ -15,6 +15,7 @@ const {
 } = require('./collect')
 const { isStepScaffolding } = require('../../asciidoc-extensions/add-solution-file-provenance')
 const { normalizeCategories, isLeafCategory } = require('../../extension-utils/categories')
+const concepts = require('./concepts')
 const yaml = require('js-yaml')
 
 // The landing card shows the description in three clamped lines; 140
@@ -352,6 +353,10 @@ function buildAlongFindings (record, { fullIncludes = [] } = {}) {
  * @param {Object} [ctx.categoryMap] - from createCategoryMap
  * @param {Object} [ctx.facetVocab] - {industries: string[], useCases: string[]} from
  *   ROOT/partials/solution-facets.yml; when absent the two facet axes are not validated
+ * @param {Object} [ctx.taxonomy] - the docs taxonomy (extension-utils/taxonomy.js). When
+ *   set, use cases, industries, technologies, and platforms are validated against it
+ *   instead of facetVocab and the platform enum, and the record gets `concepts`,
+ *   `platformIds`, and `conceptFacets` for scoring and the catalog
  * @param {(spec: string) => Object|null|undefined} [ctx.resolveDoc] - resolve a page ID to a page
  * @param {Set<string>} [ctx.solutionIds] - all module names in the component
  * @param {(pathname: string) => Object|null|undefined} [ctx.pageByUrl] - a published URL
@@ -361,7 +366,7 @@ function buildAlongFindings (record, { fullIncludes = [] } = {}) {
  * @param {(key: string) => Array<string>} [ctx.cloudTwinsOf] - Cloud pages that single-source a doc
  * @returns {{errors: Array<string>, warnings: Array<string>}}
  */
-function validateSolution (record, { categoryMap, facetVocab, resolveDoc, solutionIds, pageByUrl, umbrellaLayouts, isCloudPage, cloudTwinsOf, fullIncludes } = {}) {
+function validateSolution (record, { categoryMap, facetVocab, taxonomy, resolveDoc, solutionIds, pageByUrl, umbrellaLayouts, isCloudPage, cloudTwinsOf, fullIncludes } = {}) {
   const errors = []
   const warnings = []
   const id = record.id
@@ -390,7 +395,7 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
   if (!ENUMS.status.includes(record.status)) err(`page-solution-status must be one of ${ENUMS.status.join(', ')} (found "${record.status}")`)
   if (!ENUMS.download.includes(record.download)) err(`page-solution-download must be one of ${ENUMS.download.join(', ')} (found "${record.download}")`)
 
-  const badPlatforms = record.platforms.filter((p) => !ENUMS.platforms.includes(p))
+  const badPlatforms = taxonomy ? [] : record.platforms.filter((p) => !ENUMS.platforms.includes(p))
   if (badPlatforms.length) err(`page-solution-platforms contains unknown values: ${badPlatforms.join(', ')} (allowed: ${ENUMS.platforms.join(', ')})`)
 
   if (!record.technologies.length) err('page-solution-technologies is required')
@@ -423,16 +428,19 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
   }
 
   // Categories: fatal if any value is unknown; parents are added
+  // With the taxonomy, a new label (Iceberg Topics) stands in for its legacy
+  // category here, so only a value neither list knows is fatal.
+  const legacyRaw = taxonomy && categoryMap ? concepts.legacyCategories(taxonomy, record.categoriesRaw, categoryMap) : record.categoriesRaw
   if (!record.categoriesRaw.length) err('page-categories is required')
   else if (categoryMap) {
-    const { categories, invalid } = normalizeCategories(record.categoriesRaw, categoryMap)
+    const { categories, invalid } = normalizeCategories(legacyRaw, categoryMap)
     if (invalid.length) err(`page-categories contains unknown values: ${invalid.join(', ')}. See shared/modules/ROOT/partials/valid-categories.yml`)
     record.categories = categories
   }
   // The landing page's Category facet: what the author wrote, at leaf level.
   // Parents that normalizeCategories adds (and broad parents written by hand)
   // say only "same product area", so they stay out of the facet.
-  record.categoryLeaves = record.categoriesRaw
+  record.categoryLeaves = legacyRaw
     .filter((c) => !categoryMap || categoryMap.categories.has(c) || categoryMap.subcategories.has(c))
     .filter((c) => isLeafCategory(c, categoryMap))
 
@@ -441,7 +449,17 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
   // becomes a list of near-duplicates ("CDC", "Change data capture") as soon
   // as more than one author writes one. The vocabulary is a reviewed file, so
   // adding a value is a deliberate act rather than a typo.
-  if (facetVocab) {
+  if (taxonomy) {
+    const result = concepts.solutionConcepts(taxonomy, record, categoryMap)
+    result.errors.forEach(err)
+    result.warnings.forEach(warn)
+    record.concepts = result.concepts
+    record.platformIds = result.platformIds
+    record.conceptFacets = result.facets
+    if (record.status === 'published' && !record.useCases.length) {
+      warn('page-solution-use-cases is empty; the solution will not appear under any use case on the landing page')
+    }
+  } else if (facetVocab) {
     for (const [attr, values] of [
       ['page-solution-use-cases', record.useCases],
       ['page-solution-industries', record.industries],

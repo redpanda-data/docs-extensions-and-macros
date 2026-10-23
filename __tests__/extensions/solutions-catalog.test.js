@@ -241,6 +241,9 @@ async function run ({
   // contentClassified and its converted HTML from documentsConverted on, as
   // in a real build.
   sources = {},
+  // A parsed docs taxonomy for siteCatalog.taxonomy; null is a build without
+  // taxonomy.yml.
+  taxonomy = null,
 } = {}) {
   const pages = [...(landing ? [landing] : []), ...solutions.flatMap((s) => s.pages), ...docs]
   const attachments = [...solutions.flatMap((s) => s.attachments), ...solutions.flatMap((s) => s.examples || [])]
@@ -249,7 +252,7 @@ async function run ({
     ...(facetsText === null ? [] : [makePartial({ relative: 'solution-facets.yml', text: facetsText })]),
   ]
   const catalog = makeCatalog({ pages, attachments, partials, components })
-  const siteCatalog = { attributeFile: { 'page-valid-categories': VALID_CATEGORIES }, unpublishedPages: [], addFile: jest.fn() }
+  const siteCatalog = { attributeFile: { 'page-valid-categories': VALID_CATEGORIES }, unpublishedPages: [], addFile: jest.fn(), taxonomy }
   const playbook = { site: { url: 'https://docs.redpanda.com' } }
 
   const savedEnv = { ...process.env }
@@ -2463,5 +2466,41 @@ describe('solutions-catalog: draft_downloads (preview only)', () => {
     const noDrafts = await run({ solutions: [makeSolution('leaderboard'), sandbox()], config: { draft_downloads: true } })
     expect(recordOf(noDrafts, 'sandbox')).toBeUndefined()
     expect(warningsOf(noDrafts)).not.toMatch(/draft_downloads is on/)
+  })
+})
+
+describe('solutions-catalog: with the docs taxonomy', () => {
+  const { parseTaxonomy } = require('../../extension-utils/taxonomy')
+  const taxonomy = parseTaxonomy(fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'taxonomy', 'taxonomy.yml')))
+  const solution = (attrs) => makeSolution('leaderboard', { attrs: { 'page-solution-use-cases': 'Stream processing', 'page-solution-technologies': 'Postgres, Redpanda Connect', 'page-categories': 'Clients', ...attrs } })
+
+  test('an unknown use case is fatal, with the taxonomy as the vocabulary', async () => {
+    await expect(run({ taxonomy, solutions: [solution({ 'page-solution-use-cases': 'Data mesh' })] }))
+      .rejects.toThrow(/page-solution-use-cases value 'Data mesh' is not in the taxonomy/)
+  })
+
+  test('an unknown platform is fatal; self-managed is the docker concept', async () => {
+    await expect(run({ taxonomy, solutions: [solution({ 'page-solution-platforms': 'mainframe' })] })).rejects.toThrow(/page-solution-platforms value 'mainframe'/)
+    const result = await run({ taxonomy, solutions: [solution()] })
+    const catalog = addedFile(result.siteCatalog, 'solutions.json')
+    expect(catalog.solutions[0].platforms).toEqual(['self-managed', 'cloud'])
+    expect(catalog.solutions[0].concepts.platforms.map((p) => p.id)).toEqual(['docker', 'cloud'])
+    expect(catalog.taxonomy.technologies.find((t) => t.id === 'redpanda-connect').component).toBe('connect')
+  })
+
+  test('a deprecated category warns and still builds', async () => {
+    const result = await run({ taxonomy, solutions: [solution({ 'page-categories': 'Clients, Iceberg' })] })
+    expect(warningsOf(result)).toContain("leaderboard: page-categories value 'Iceberg' is deprecated; use 'Iceberg Topics' instead")
+  })
+
+  test('a use case the doc carries as a category now counts toward the edge', async () => {
+    // Clients is a legacy category the fixture taxonomy lacks: it keeps its
+    // old weight as a pseudo-concept.
+    const docs = [makeDoc({ relative: 'unlisted.adoc', attrs: { 'page-categories': 'Stream Processing, Clients' } })]
+    const solutions = [noRelatedDocs(solution())]
+    const before = addedFile((await run({ docs, solutions })).siteCatalog, 'solutions-graph.json')
+    const after = addedFile((await run({ docs, solutions: [noRelatedDocs(solution())], taxonomy })).siteCatalog, 'solutions-graph.json')
+    expect(before.edges[0]).toMatchObject({ score: 0.4, shown: false })
+    expect(after.edges[0]).toMatchObject({ score: 0.6, shown: true, shared: { leaves: ['stream-processing', 'category:Clients'], broader: [] } })
   })
 })

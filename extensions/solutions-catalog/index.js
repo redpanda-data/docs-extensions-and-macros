@@ -38,6 +38,8 @@
 const { raiseListenerLimit } = require('../util/raise-listener-limit')
 const { createCategoryMap, normalizeCategories, parseCategoryList } = require('../../extension-utils/categories')
 const { getDeploymentType } = require('../../extension-utils/deployment-type')
+const { getTaxonomy, authoredCategories } = require('../../extension-utils/taxonomy')
+const concepts = require('./concepts')
 const collect = require('./collect')
 const validate = require('./validate')
 const relationships = require('./relationships')
@@ -379,7 +381,11 @@ module.exports.register = function ({ config = {} } = {}) {
     // unvalidated, matching how an unavailable category list is handled: a
     // missing vocabulary should not fail every build, only stop enforcing.
     const facetVocab = state.facetsFile ? validate.parseFacetVocab(state.facetsFile.contents) : null
-    if (!facetVocab) {
+    // The docs taxonomy, when the docs repo has it: facet values validate
+    // against it and recommendations score over its concept IDs. Without it,
+    // categories, solution-facets.yml, and the platform enum work as before.
+    const taxonomy = getTaxonomy({ contentCatalog, siteCatalog, logger })
+    if (!facetVocab && !taxonomy) {
       logger.warn('solutions-catalog: ROOT/partials/solution-facets.yml is missing or unparseable; page-solution-industries and page-solution-use-cases are not validated')
     }
 
@@ -399,7 +405,7 @@ module.exports.register = function ({ config = {} } = {}) {
     for (const record of collected.solutions) {
       collect.resolveRelatedDocLines(record, pageByUrl)
       const result = validate.validateSolution(record, {
-        categoryMap, facetVocab, resolveDoc, solutionIds, pageByUrl, umbrellaLayouts: UMBRELLA_LAYOUTS, isCloudPage, cloudTwinsOf,
+        categoryMap, facetVocab, taxonomy, resolveDoc, solutionIds, pageByUrl, umbrellaLayouts: UMBRELLA_LAYOUTS, isCloudPage, cloudTwinsOf,
         fullIncludes: state.fullIncludes.get(record.module) || [],
       })
       errors.push(...result.errors)
@@ -499,7 +505,10 @@ module.exports.register = function ({ config = {} } = {}) {
       const attrs = page.asciidoc.attributes || {}
       const raw = parseCategoryList(attrs['page-categories'])
       const categories = categoryMap ? normalizeCategories(raw, categoryMap).categories : raw
-      return { key: collect.pageKey(page), page, url: page.pub && page.pub.url, categories, deployment: getDeploymentType(attrs) }
+      const docConcepts = taxonomy
+        ? concepts.docConcepts(taxonomy, { categories: authoredCategories(attrs), categoryMap })
+        : null
+      return { key: collect.pageKey(page), page, url: page.pub && page.pub.url, categories, concepts: docConcepts, deployment: getDeploymentType(attrs) }
     })
     const graphInput = categoryMap ? docs : docs.map((d) => ({ ...d, categories: [] }))
     const { related, edges, warnings: rankWarnings } = relationships.computeRelatedSolutions({
@@ -507,6 +516,7 @@ module.exports.register = function ({ config = {} } = {}) {
       solutions: active,
       relationships: rel.entries,
       categoryMap,
+      taxonomy,
       maxRelated: settings.maxRelated,
       minScore: settings.minScore,
     })
@@ -552,7 +562,7 @@ module.exports.register = function ({ config = {} } = {}) {
     const publicRecords = []
     for (const record of active) {
       const steps = outputs.buildSteps(record)
-      const publicRecord = outputs.buildPublicRecord(record, { steps, relatedDocs: record.relatedDocs, relatedSolutions: record.relatedSolutions, publicRepo: settings.publicRepo })
+      const publicRecord = outputs.buildPublicRecord(record, { steps, relatedDocs: record.relatedDocs, relatedSolutions: record.relatedSolutions, publicRepo: settings.publicRepo, taxonomy })
       const nav = outputs.buildNav(publicRecord, { homeUrl })
       outputs.applyPageAttributes(record, publicRecord, nav)
       publicRecords.push(publicRecord)
@@ -561,7 +571,7 @@ module.exports.register = function ({ config = {} } = {}) {
     const siteUrl = (playbook && playbook.site && playbook.site.url) || ''
     const generatedAt = new Date().toISOString()
     state.records = active
-    state.catalog = outputs.buildCatalog(publicRecords, { siteUrl, generatedAt, categoryLeaves: new Map(active.map((r) => [r.id, r.categoryLeaves || r.categories])) })
+    state.catalog = outputs.buildCatalog(publicRecords, { siteUrl, generatedAt, categoryLeaves: new Map(active.map((r) => [r.id, r.categoryLeaves || r.categories])), taxonomy })
     state.graph = outputs.buildGraph(edges, { siteUrl, generatedAt, maxRelated: settings.maxRelated, minScore: settings.minScore, coverage })
     addAttributeToComponents(contentCatalog, ATTRIBUTE_NAME, JSON.stringify(state.catalog), logger)
 

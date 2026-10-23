@@ -100,6 +100,29 @@ This extension generates an Algolia index for each version of each component. Th
 
 NOTE: Only pages that include an `<article>` element with the `doc` class are indexed.
 
+When the build has the docs taxonomy (see <<Docs taxonomy>>), every Product Docs record also carries these attributes, next to `categories`:
+
+[cols="1,3"]
+|===
+|Attribute |Value
+
+|`topics`, `topicIds`
+|The topic concepts of the page's authored `page-categories`, with the broader concepts they imply (Replication implies High Availability). Labels and IDs.
+
+|`useCases`, `useCaseIds`
+|The use-case concepts of the page's categories.
+
+|`technologies`, `technologyIds`
+|The technology concepts of the page's categories, those a topic implies (Iceberg Topics implies Apache Iceberg), and the technology whose `component` is the page's component (a page in `connect` is about Redpanda Connect).
+
+|`deployment`, `deploymentIds`
+|The deployment concept of the page's `env-*` attributes, and its broader concept.
+|===
+
+`categories` is unchanged: it is still the legacy list that validate-attributes writes, because labs-home filters on it. Labs records get none of the new attributes, and keep their string `deployment`.
+
+The Algolia index settings are not in any repository. To filter or facet on the new attributes, add them to `attributesForFaceting` in the index settings.
+
 === Environment variables
 
 - `ALGOLIA_ADMIN_API_KEY` (required)
@@ -718,6 +741,17 @@ This extension does not require any environment variables.
 
 There are no configurable options for this extension. It operates based on site attributes defined in `add-global-attributes.js` to determine valid categories and subcategories.
 
+=== With the docs taxonomy
+
+When the build has the docs taxonomy (see <<Docs taxonomy>>), each `page-categories` value is also resolved through it:
+
+* A value from `valid-categories.yml` passes through unchanged, so `page-categories` is exactly what it was without the taxonomy. When the value is a deprecated concept, the build logs one warning per value, with the number of pages, a sample, and the replacement. Labs and solutions pages are left to the legacy check: labs is retiring, and solutions-catalog resolves solution categories itself.
+* A value only the taxonomy knows, such as a new label like `Iceberg Topics`, is replaced by the legacy category of the concept it resolves to, or dropped when there is none. It is not reported as invalid.
+* A value neither knows warns per page and is dropped, as before.
+* A legacy value the taxonomy does not resolve warns as a gap in `taxonomy.yml`.
+
+Nothing here fails the build. The authored list is kept in `page-categories-authored` for the extensions that resolve concepts from it.
+
 === Registration
 
 Register the `validate-attributes` extension in the Antora playbook under the `antora.extensions` key like so:
@@ -1067,6 +1101,20 @@ Each recommendation carries `why`, the reason a reader sees:
 * `editor-approved`: the `relationships.yml` reason, else empty.
 * `category`: `Uses <shared leaf categories>`, for example `Uses Stream Processing, Clients`. Parents are left out.
 
+==== Scoring with the docs taxonomy
+
+When the build has the docs taxonomy (see <<Docs taxonomy>>), category edges score over concept IDs instead of category names, with the same weights and `min_score`:
+
+* A doc's concepts are its authored `page-categories`, resolved (a deprecated value becomes its replacement; Iceberg becomes Iceberg Topics), with the broader concepts and `implies` targets they bring as *implied* concepts.
+* A solution's concepts are its categories resolved the same way, plus its `page-solution-use-cases` and `page-solution-technologies`. So a solution and a doc that share a topic, a use case, or a technology all count, whichever attribute each carries it in.
+* A shared concept is a *leaf* (`0.3`) when it is a topic, use case, or technology, both sides carry it directly, and it has no narrower concepts. Anything else shared (an implied concept, a topic with narrower ones such as High Availability, a task such as Operate) is the `0.1` bonus, capped at `0.1` per edge as before. Content type, industry, and deployment never score.
+* A legacy category that `taxonomy.yml` does not have yet keeps its old weight, as the pseudo-concept `category:<label>`, so a gap in the taxonomy drops no edge silently.
+* The platform filter reads platform concept IDs: a Cloud doc needs `cloud`, a Kubernetes doc `kubernetes`, and a Linux or Docker doc `docker` or `linux` (`self-managed` resolves to `docker`).
+
+Concept edges carry `shared: { leaves, broader }` in `solutions-graph.json` with the concept IDs behind the score, and their `reason` names the concepts by label. The technology of a doc's component (Redpanda Connect for `connect`) is not a scoring concept: as an implied bonus it would add an edge from every Connect page to every Redpanda Connect solution that could never show.
+
+Validation also changes with the taxonomy: `page-solution-use-cases`, `page-solution-industries`, `page-solution-technologies`, and `page-solution-platforms` are checked against it (through `extension-utils/metadata-check.js`, the rules `doc-tools check-metadata` runs) instead of `solution-facets.yml` and the platform enum. An unknown value, or a category that is the same concept as a use case, is fatal; a deprecated value, or a value from the wrong facet (Kubernetes as a technology), warns. A category that only the taxonomy knows (a new label) stands in for its legacy category, so it is not fatal.
+
 ==== Related docs list
 
 The overview's `== Related docs` section is a list with one item per doc: an xref to the doc, then what it does for this solution. The build reads each item from the converted HTML (its first paragraph, whitespace collapsed) and maps it to the doc its first link lands on. That text becomes the `why`. The list and `page-solution-related-docs` must agree: a doc in the list but not the attribute is a one-way link, because the doc page does not recommend the solution back, and is fatal once published (a warning on a draft); an attribute entry with no item warns, because its recommendation has no reason to show. Links to the solution's own steps are ignored.
@@ -1082,6 +1130,8 @@ Product Docs pages are single-sourced into the Cloud component through stub page
 
 `assets/data/solutions-graph.json`::
 `{ generatedAt, siteUrl, settings: { maxRelated, minScore }, edges: [{ doc, docUrl, solution, provenance, score, shown, rank, reason, why }], coverage }`. Every recommendation a reader sees is explained here, and so is every one they do not. `coverage` is the category coverage report: `{ solutions: { <slug>: { categories: { <category>: { pages, level: 'sub'|'top' } }, zeroMatch: [...] } }, uncategorizedEligiblePages, uncategorizedSample: [first 20 URLs] }`, where `pages` counts eligible doc pages (the same set recommendations use) that carry the category after normalization, and `zeroMatch` lists the solution's categories no doc page shares.
+
+With the docs taxonomy, each record in `solutions.json` also has `concepts: { platforms, technologies, useCases, industries, topics }`. Each item is `{ value, id, label }`, where `value` is the authored string it came from, and technologies add `kind` and, for a Redpanda product documented in its own component, `component`. The authored `platforms`, `technologies`, `useCases`, and `industries` stay as they were. The catalog also has `taxonomy: { source, platforms[{ id, label, altLabels, broader }], technologies[{ id, label, kind, component }] }`, so the UI can label a platform value (`self-managed` is Docker Compose) and map a component to its product without a hardcoded table. In Algolia, solution records then carry `technologies` as prefLabels (PostgreSQL for an authored Postgres; a value from another facet is dropped) with `technologyIds`, `topics` and `topicIds`, `deployment` and `deploymentIds` from the platforms, and, on the overview, `useCases` as prefLabels with `useCaseIds`. `platforms` stays as authored.
 
 === Coverage report
 
@@ -1191,6 +1241,22 @@ Two modules under `extension-utils/` replace copies that had drifted apart acros
 
 `extension-utils/categories`::
 `createCategoryMap(validCategories)` builds `{ categories: Set, subcategories: Set, parentMap: Map, withChildren: Set }` from the `page-valid-categories` list, where `withChildren` holds the top-level categories that actually have subcategories. `isLeafCategory(category, map)` reports whether a category is as specific as it gets (a subcategory, or a top-level category with no children), which is what the solutions scorer weighs. `parseCategoryList(value)` splits a comma list. `normalizeCategories(list, map)` returns `{ categories, invalid, parentsAdded }`: authored order kept, parents appended, unknown values removed. `validate-attributes` logs the `invalid` and `parentsAdded` results; `solutions-catalog` treats `invalid` as fatal. Adding a category or subcategory to `valid-categories.yml` needs no code change here.
+
+== Docs taxonomy
+
+`extension-utils/taxonomy.js` loads the docs taxonomy, the controlled vocabulary in the docs repository at `shared/modules/ROOT/attachments/taxonomy.yml`, and validates it against `taxonomy.schema.json` next to it. It is not an extension to register: validate-attributes and the Algolia indexer load it on first use and share it on `siteCatalog.taxonomy`.
+
+The file is read from the content catalog as an attachment of the `shared` component, so it is never merged into page attributes. <<Global attributes>> only reads `modules/ROOT/partials/`.
+
+The file has seven concept schemes (topic, task, content-type, use-case, industry, technology, deployment). Every concept has an `id`, a `prefLabel`, `altLabels`, a `definition`, a `broader` concept, `related` concepts, and `deprecated` with `replacedBy`. Every old category is either the label of a live concept or a deprecated concept whose `replacedBy` names its replacement.
+
+At load, the build fails when the file does not match the schema, when an ID repeats, when a label or altLabel repeats in any scheme (case-insensitive), or when a `broader`, `related`, `implies`, or `replacedBy` ID does not exist. When the file is absent, the build logs one warning and every consumer keeps its behavior without the taxonomy, so the docs repository and this package can deploy in either order. When the schema is absent, only the structural checks run.
+
+`Taxonomy#resolve(value)` returns the concept a label, altLabel, or ID names, and for a deprecated concept its `replacedBy` IDs. `Taxonomy#expand(ids)` adds the broader concepts and `implies` targets as implied. `pageFacets` turns a page's authored categories, deployment type, and component into the search facets.
+
+Outside Antora, `loadTaxonomyFrom({ source, root })` loads the same file from a path or URL, or else from the first that exists of the docs checkout at `root`, the docs checkout at `$REDPANDA_DOCS_PATH`, and the published copy at https://docs.redpanda.com/shared/_attachments/taxonomy.yml. It validates against the schema beside whichever it used.
+
+The metadata rules live in `extension-utils/metadata-check.js` (`checkPageMetadata`). validate-attributes runs them on Product Docs pages, solutions-catalog on solution overviews, and `doc-tools check-metadata` on page headers in a pull request, so the build and the PR check cannot disagree. See `check-metadata` in the CLI reference for the rules and their severities, and `.github/workflows/check-metadata.yml` for the reusable PR check.
 
 == Global attributes
 

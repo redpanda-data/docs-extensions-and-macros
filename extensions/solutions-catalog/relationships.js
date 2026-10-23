@@ -12,8 +12,15 @@
  *   category         0.3 per shared leaf category (a subcategory, or a top-level category
  *                    with no subcategories) + 0.1 per shared parent category (a top-level
  *                    one that has subcategories; capped at 0.1 per edge), cap 0.85
+ *                    With the docs taxonomy, the same weights apply to shared concept IDs
+ *                    instead (see concepts.js): 0.3 per topic, use case, or technology both
+ *                    sides carry directly and that has no narrower concepts, and the 0.1
+ *                    bonus for anything else shared (implied concepts, broad topics such as
+ *                    High Availability, tasks). A solution's use cases and technologies
+ *                    count as well as its categories.
  *   platform filter  category edges only: Cloud doc -> platforms includes cloud,
- *                    Kubernetes/Linux/Docker doc -> platforms includes self-managed
+ *                    Kubernetes doc -> platforms includes kubernetes,
+ *                    Linux/Docker doc -> platforms includes self-managed (the docker concept)
  *   threshold        min_score (default 0.6): a category-only edge needs two shared leaf
  *                    categories; parent-only or single-leaf overlap never shows
  *   rank             score desc, featured desc, shared leaf categories desc, lastModified desc,
@@ -31,6 +38,7 @@
 const path = require('path')
 const yaml = require('js-yaml')
 const { isLeafCategory } = require('../../extension-utils/categories')
+const concepts = require('./concepts')
 
 const SCORE_EXPLICIT = 1.0
 const SCORE_APPROVED_FLOOR = 0.9
@@ -89,6 +97,28 @@ function categoryScore (docCategories, solutionCategories, categoryMap) {
   return { score, sharedLeaves, sharedParents }
 }
 
+/**
+ * Concept overlap between a doc and a solution, with the category weights.
+ *
+ * @param {Map<string, string>} docConcepts - concept ID -> 'direct' | 'implied'
+ * @param {Map<string, string>} solutionConcepts
+ * @param {import('../../extension-utils/taxonomy').Taxonomy} taxonomy
+ * @param {Object} [categoryMap] - for legacy categories the taxonomy lacks
+ * @returns {{score: number, sharedLeaves: Array<string>, sharedParents: Array<string>}} labels, plus the IDs in `ids`
+ */
+function conceptScore (docConcepts, solutionConcepts, taxonomy, categoryMap) {
+  const { sharedLeaves, sharedParents } = concepts.sharedConcepts(taxonomy, docConcepts, solutionConcepts, categoryMap)
+  const raw = sharedLeaves.length * SCORE_PER_LEAF +
+    Math.min(SCORE_PARENT_CAP, sharedParents.length * SCORE_PER_PARENT)
+  const label = (id) => concepts.conceptLabel(taxonomy, id)
+  return {
+    score: Math.min(SCORE_CATEGORY_CAP, round(raw)),
+    sharedLeaves: sharedLeaves.map(label),
+    sharedParents: sharedParents.map(label),
+    ids: { leaves: sharedLeaves, broader: sharedParents },
+  }
+}
+
 /** Readable explanation of a category edge, naming what actually matched. */
 function formatCategoryReason ({ sharedLeaves, sharedParents }) {
   const parents = sharedParents.length
@@ -97,6 +127,14 @@ function formatCategoryReason ({ sharedLeaves, sharedParents }) {
   if (!sharedLeaves.length) return parents ? `shares only the ${parents}` : 'shares no categories'
   const leaves = `shares categories ${sharedLeaves.join(', ')}`
   return parents ? `${leaves} (and the ${parents})` : leaves
+}
+
+/** Readable explanation of a concept-scored edge, by concept label. */
+function formatConceptReason ({ sharedLeaves, sharedParents }) {
+  const broader = sharedParents.length ? `broader ${sharedParents.join(', ')}` : ''
+  if (!sharedLeaves.length) return broader ? `shares only the ${broader}` : 'shares no concepts'
+  const leaves = `shares ${sharedLeaves.join(', ')}`
+  return broader ? `${leaves} (and the ${broader})` : leaves
 }
 
 /**
@@ -115,8 +153,15 @@ function formatCategoryWhy ({ sharedLeaves }) {
  * @param {string} deployment - from getDeploymentType
  * @param {Array<string>} platforms - solution platforms
  */
-function platformCompatible (deployment, platforms) {
+function platformCompatible (deployment, platforms, platformIds) {
   if (!deployment) return true
+  if (Array.isArray(platformIds)) {
+    // Deployment concept IDs, broader concepts included.
+    const ids = new Set(platformIds)
+    if (deployment === 'Redpanda Cloud') return ids.has('cloud')
+    if (deployment === 'Kubernetes') return ids.has('kubernetes')
+    return ids.has('docker') || ids.has('linux')
+  }
   const set = new Set(platforms || [])
   if (deployment === 'Redpanda Cloud') return set.has('cloud')
   // A Kubernetes page recommends only solutions a Kubernetes reader can run
@@ -163,7 +208,7 @@ function compareCandidates (a, b) {
  *   `edges` is every (doc, solution) pair with any signal, for solutions-graph.json;
  *   `warnings` names every doc where max_related hid an explicit edge.
  */
-function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap, maxRelated = 3, minScore = DEFAULT_MIN_SCORE }) {
+function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap, taxonomy, maxRelated = 3, minScore = DEFAULT_MIN_SCORE }) {
   const related = new Map()
   const edges = []
   const warnings = []
@@ -178,7 +223,10 @@ function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap,
     for (const solution of solutions) {
       const rel = relByPair.get(`${solution.id} ${doc.key}`)
       const explicit = solution.relatedDocKeys && solution.relatedDocKeys.has(doc.key)
-      const cat = categoryScore(doc.categories, solution.categories, categoryMap)
+      const byConcepts = Boolean(taxonomy && doc.concepts && solution.concepts)
+      const cat = byConcepts
+        ? conceptScore(doc.concepts, solution.concepts, taxonomy, categoryMap)
+        : categoryScore(doc.categories, solution.categories, categoryMap)
 
       if (!explicit && !rel && cat.score === 0) continue // no signal at all
 
@@ -202,7 +250,7 @@ function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap,
       } else {
         provenance = 'category'
         score = cat.score
-        reason = formatCategoryReason(cat)
+        reason = byConcepts ? formatConceptReason(cat) : formatCategoryReason(cat)
         why = formatCategoryWhy(cat)
       }
 
@@ -217,6 +265,8 @@ function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap,
         reason,
         why,
       }
+      // The concepts behind the score, so the graph shows what matched by ID.
+      if (byConcepts && (cat.ids.leaves.length || cat.ids.broader.length)) edge.shared = cat.ids
 
       if (rel && rel.status === 'rejected') {
         edge.provenance = 'rejected'
@@ -229,7 +279,7 @@ function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap,
         edges.push(edge)
         continue
       }
-      if (provenance === 'category' && !platformCompatible(doc.deployment, solution.platforms)) {
+      if (provenance === 'category' && !platformCompatible(doc.deployment, solution.platforms, byConcepts ? solution.platformIds : undefined)) {
         edge.reason = `${edge.reason}; hidden: ${doc.deployment} page, solution platforms ${solution.platforms.join(', ')}`
         edges.push(edge)
         continue
@@ -344,7 +394,9 @@ module.exports = {
   createRelationshipsValidator,
   parseRelationships,
   categoryScore,
+  conceptScore,
   formatCategoryReason,
+  formatConceptReason,
   formatCategoryWhy,
   platformCompatible,
   computeRelatedSolutions,

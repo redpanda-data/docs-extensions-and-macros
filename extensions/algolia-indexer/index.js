@@ -1,6 +1,7 @@
 'use strict'
 
 const generateIndex = require('./generate-index')
+const { getTaxonomy } = require('../../extension-utils/taxonomy')
 const { raiseListenerLimit } = require('../util/raise-listener-limit')
 const algoliasearch = require('algoliasearch')
 const http = require('http')
@@ -51,8 +52,9 @@ function register ({
   })
   const index = client.initIndex(process.env.ALGOLIA_INDEX_NAME)
 
-  this.on('beforePublish', async ({ playbook, contentCatalog }) => {
-    const algolia = generateIndex(playbook, contentCatalog, { indexLatestOnly, excludes, logger })
+  this.on('beforePublish', async ({ playbook, contentCatalog, siteCatalog }) => {
+    const taxonomy = getTaxonomy({ contentCatalog, siteCatalog, logger })
+    const algolia = generateIndex(playbook, contentCatalog, { indexLatestOnly, excludes, logger, taxonomy })
 
     if (!algolia || Object.keys(algolia).length === 0) {
       logger.warn('No content to index for Algolia')
