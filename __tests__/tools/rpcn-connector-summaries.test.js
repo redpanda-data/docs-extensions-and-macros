@@ -885,7 +885,31 @@ describe('buildChangedDefaultsTable - whats-new changed default links', () => {
 
     expect(table).toContain('|`+${!count("items")}-${!timestamp_unix_nano()}+`\n|`+${!timestamp_unix_nano()}-${!uuid_v4()}+`\n');
     expect(table).toContain('|`+""+`\n|`+a\\|b+`\n');
-    expect(table).toContain('|none\n|`+5+`\n');
+    // A missing default reads as "no default", never as the value none.
+    expect(table).toContain('|_no default_\n|`+5+`\n');
+  });
+
+  test('renders a declared null default as null, not as no default', () => {
+    const table = buildChangedDefaultsTable([
+      { component: 'inputs:postgres_cdc', field: 'unchanged_toast_value', oldDefault: null, newDefault: '__x__', description: 'A.' },
+      { component: 'inputs:y', field: 'b', oldDefault: undefined, newDefault: null, description: 'B.' }
+    ], cap);
+
+    expect(table).toContain('|`+null+`\n|`+__x__+`\n');
+    expect(table).toContain('|_no default_\n|`+null+`\n');
+  });
+
+  test('keeps a null default and the string "null" in separate rows', () => {
+    const table = buildChangedDefaultsTable([
+      { component: 'inputs:a', field: 'f', oldDefault: null, newDefault: 'x', description: 'A.' },
+      { component: 'inputs:b', field: 'f', oldDefault: 'null', newDefault: 'x', description: 'A.' },
+      { component: 'inputs:c', field: 'g', oldDefault: { a: 1 }, newDefault: 'x', description: 'A.' },
+      { component: 'inputs:d', field: 'g', oldDefault: { b: 2 }, newDefault: 'x', description: 'A.' }
+    ], cap);
+
+    expect(table.match(/^\|`\+null\+`$/gm)).toHaveLength(2);
+    expect(table).toContain('`+{"a":1}+`');
+    expect(table).toContain('`+{"b":2}+`');
   });
 });
 
