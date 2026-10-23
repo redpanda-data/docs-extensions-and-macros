@@ -168,6 +168,17 @@ describe('triageCandidate', () => {
     expect(result.agent_reason).toMatch(/cannot be retired whole/)
   })
 
+  test('routes a hand_upstream candidate to AMBIGUOUS whatever the agent said', () => {
+    const handUpstream = 'SECTIONED: the override excludes or replaces source sections SSO.'
+    for (const verdict of ['UPSTREAM_OVERRIDE', 'RETIRE_OVERRIDE']) {
+      const raw = JSON.stringify({ verdict, reason: 'Agent reason.' })
+      const result = triage.triageCandidate(candidate({ hand_upstream: handUpstream }), raw)
+      expect(result.agent_verdict).toBe('AMBIGUOUS')
+      expect(result.triage_failed).toBe(false)
+      expect(result.agent_reason).toBe(`Agent reason. ${handUpstream}`)
+    }
+  })
+
   test('keeps RETIRE_OVERRIDE for a non-SPLIT candidate and UPSTREAM_OVERRIDE for a SPLIT one', () => {
     const retire = JSON.stringify({ verdict: 'RETIRE_OVERRIDE', reason: 'Source has caught up.' })
     const upstream = JSON.stringify({ verdict: 'UPSTREAM_OVERRIDE', reason: 'Override is clearer.' })

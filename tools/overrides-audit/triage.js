@@ -209,6 +209,13 @@ function triageCandidate (candidate, rawAgentResponse) {
     verdict = VERDICTS.AMBIGUOUS
     reason = `${reason} This override also carries audience-scoped paragraphs or docs-only markup that source does not, so it cannot be retired whole. Decide what to do with that content.`
   }
+  // The audit marks some candidates for a person to upstream by hand (see
+  // markSectioned in adapters/rpk.js). Neither automated outcome is safe for
+  // those, so route them to AMBIGUOUS whatever the agent said.
+  if (candidate && typeof candidate.hand_upstream === 'string') {
+    verdict = VERDICTS.AMBIGUOUS
+    reason = `${reason} ${candidate.hand_upstream}`
+  }
   return {
     ...candidate,
     agent_verdict: verdict,

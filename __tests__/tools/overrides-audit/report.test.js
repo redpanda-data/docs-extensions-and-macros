@@ -228,3 +228,55 @@ describe('buildAmbiguousDigest', () => {
     expect(out).toContain('oddly_labeled_prop')
   })
 })
+
+describe('buildUpstreamSection excludes rows with no source location', () => {
+  test('an UPSTREAM_OVERRIDE row with no source_file is excluded, not just carried along', () => {
+    const row = triaged({ name: 'plugin_cmd', agent_verdict: 'UPSTREAM_OVERRIDE' })
+    delete row.source_file
+    const out = report.buildUpstreamSection([row])
+    expect(out).not.toContain('plugin_cmd')
+    expect(out.toLowerCase()).toMatch(/nothing/)
+  })
+})
+
+describe('buildUnlocatableSection', () => {
+  test('empty array produces a non-empty "nothing this run" string', () => {
+    const out = report.buildUnlocatableSection([])
+    expect(typeof out).toBe('string')
+    expect(out.length).toBeGreaterThan(0)
+    expect(out.toLowerCase()).toMatch(/nothing/)
+  })
+
+  test('includes an UPSTREAM_OVERRIDE row with no source_file', () => {
+    const row = triaged({ name: 'rpk ai agent', agent_verdict: 'UPSTREAM_OVERRIDE', agent_reason: 'Source text is thin.' })
+    delete row.source_file
+    const out = report.buildUnlocatableSection([row])
+    expect(out).toContain('rpk ai agent')
+    expect(out).toContain('Source text is thin.')
+    expect(out).toContain('manual upstream PR')
+  })
+
+  test('excludes a row that DOES have a source_file', () => {
+    const located = triaged({ name: 'rpk topic create', agent_verdict: 'UPSTREAM_OVERRIDE' })
+    const out = report.buildUnlocatableSection([located])
+    expect(out).not.toContain('rpk topic create')
+    expect(out.toLowerCase()).toMatch(/nothing/)
+  })
+
+  test('excludes RETIRE_OVERRIDE and AMBIGUOUS rows even without a source_file', () => {
+    const retire = triaged({ name: 'retire_me', agent_verdict: 'RETIRE_OVERRIDE' })
+    delete retire.source_file
+    const ambiguous = triaged({ name: 'ambiguous_one', agent_verdict: 'AMBIGUOUS' })
+    delete ambiguous.source_file
+    const out = report.buildUnlocatableSection([retire, ambiguous])
+    expect(out).not.toContain('retire_me')
+    expect(out).not.toContain('ambiguous_one')
+  })
+
+  test('excludes a triage_failed row even when its agent_verdict is UPSTREAM_OVERRIDE', () => {
+    const row = triaged({ name: 'failed_one', agent_verdict: 'UPSTREAM_OVERRIDE', triage_failed: true })
+    delete row.source_file
+    const out = report.buildUnlocatableSection([row])
+    expect(out).not.toContain('failed_one')
+  })
+})
