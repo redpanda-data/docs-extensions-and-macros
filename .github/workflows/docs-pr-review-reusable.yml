@@ -1305,37 +1305,38 @@ jobs:
           # so the PR gets no comment, no terminal status, and keeps the
           # gate's pending claim until the 90-minute stale window expires.
           # Degrade to the pipeline's standard infra-failure posture instead:
-          # a comment carrying the same marker (so it still upserts in place),
-          # an error status, and needs-human-review. `error`, not `failure`:
+          # no comment (there is no report to give), an error status, and
+          # needs-human-review. `error`, not `failure`:
           # exactly-once treats failure as a finished review, so the SHA
           # could never be retried (see aggregate-review.sh).
           if ! bash .standards/scripts/aggregate-review.sh results comment.md; then
-            echo "::warning::aggregate-review.sh could not run — posting the unavailable fallback"
+            echo "::warning::aggregate-review.sh could not run — no comment; error status and needs-human-review instead"
             {
               echo "state=error"
               echo "description=automated review unavailable, human review required"
               echo "labels=needs-human-review"
+              echo "post_comment=false"
             } >> "$GITHUB_OUTPUT"
-            {
-              echo "<!-- docs-review:comment -->"
-              echo "## 📋 Docs review: ⚠️ Automated review unavailable: review by hand before approving"
-              echo
-              echo "The pipeline could not assemble a verdict for this revision (the"
-              echo "aggregation step failed to run), so there is no automated result here."
-              echo "See the [workflow run](${GITHUB_SERVER_URL}/${R}/actions/runs/${GITHUB_RUN_ID}) for details."
-            } > comment.md
+            : > comment.md
           fi
 
+      # No report (the review was unavailable, or nothing ran): post
+      # nothing, and delete an earlier report, which describes an older
+      # commit and could read as a current "Ready to approve". The status
+      # and the needs-human-review label carry the outcome instead.
       - name: Upsert the review comment
+        continue-on-error: true
         uses: actions/github-script@v7
         env:
           PR: ${{ inputs.pr_number }}
+          POST_COMMENT: ${{ steps.verdict.outputs.post_comment }}
         with:
           script: |
             const fs = require('fs');
             let body = fs.readFileSync('comment.md', 'utf8');
             const issue_number = Number(process.env.PR);
             const marker = '<!-- docs-review:comment -->';
+            const post = process.env.POST_COMMENT !== 'false' && body.trim() !== '';
             // GitHub rejects issue comments over 65,536 characters; five
             // model-written findings files can exceed that even after the
             // aggregator's per-file cap.
@@ -1347,6 +1348,15 @@ jobs:
               owner: context.repo.owner, repo: context.repo.repo, issue_number, per_page: 100,
             });
             const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (!post) {
+              if (existing) {
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  comment_id: existing.id,
+                });
+              }
+              return;
+            }
             if (existing) {
               await github.rest.issues.updateComment({
                 owner: context.repo.owner, repo: context.repo.repo,
