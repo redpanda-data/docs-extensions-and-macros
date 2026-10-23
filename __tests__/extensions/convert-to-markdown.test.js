@@ -354,4 +354,34 @@ describe('generateFrontmatter page-introduced-in', () => {
     expect(generateFrontmatter(page({ description: 'Reads rows.' })))
       .not.toContain('page-introduced-in')
   })
+
+  test('omits an empty value instead of writing true', () => {
+    const out = generateFrontmatter(page({ 'page-introduced-in': '', 'page-introduced-in-product': '' }))
+    expect(out).not.toContain('page-introduced-in')
+  })
+
+  test('writes a bare version, like the UI badge, and the product', () => {
+    const out = generateFrontmatter(page({ 'page-introduced-in': 'v4.113.1.', 'page-introduced-in-product': 'Redpanda Connect' }))
+    expect(out).toContain('page-introduced-in: 4.113.1\n')
+    expect(out).toContain('page-introduced-in-product: Redpanda Connect\n')
+  })
+
+  // Runs the registered pagesComposed listener, so the attribute must survive
+  // the whole conversion into the Markdown twin, not just generateFrontmatter.
+  test('reaches the Markdown twin through the extension listener', async () => {
+    const handlers = {}
+    const noop = () => {}
+    const context = { on: (event, fn) => { handlers[event] = fn }, getLogger: () => ({ info: noop, debug: noop, warn: noop, error: noop }) }
+    require('../../extensions/convert-to-markdown').register.call(context)
+    const twin = {
+      contents: Buffer.from('<html><body><article class="doc"><h1>sap_hana</h1><p>Reads rows.</p></article></body></html>'),
+      asciidoc: { doctitle: 'sap_hana', attributes: { 'page-introduced-in': '4.113.1' } },
+      src: { component: 'connect', version: 'master', path: 'modules/components/pages/inputs/sap_hana.adoc' },
+      pub: { url: '/connect/components/inputs/sap_hana/' }
+    }
+    await handlers.pagesComposed({ playbook: { site: { url: 'https://docs.redpanda.com' } }, contentCatalog: { getPages: () => [twin] } })
+    const markdown = twin.markdownContents.toString()
+    expect(markdown).toContain('page-introduced-in: 4.113.1')
+    expect(markdown).toContain('Reads rows.')
+  })
 })
