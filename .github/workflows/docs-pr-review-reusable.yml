@@ -33,11 +33,11 @@
 # host publishes git tags (`git ls-remote --tags` is empty), so @v1 is an
 # unresolvable ref: pin a commit SHA per caller.
 #
-# TWO-STEP PIN after this PR merges: the claude-skill `uses:` refs below
-# say @main because an action cannot reference its own not-yet-existing
-# SHA. Step 1: merge this PR (SHA-1). Step 2: a one-line follow-up commit
-# replaces @main with SHA-1 in every claude-skill ref (SHA-2). Callers
-# then pin @SHA-2 — from that point nothing in the pipeline floats.
+# TWO-STEP PIN: an action cannot reference its own not-yet-existing SHA,
+# so #303 merged with the claude-skill `uses:` refs at @main (step 1,
+# SHA-1 = 681c7a5). Step 2 replaced @main with SHA-1 in every claude-skill
+# ref. Callers pin the step-2 merge SHA, and from there nothing in the
+# pipeline floats. A change to the action needs the same two steps again.
 #
 # Design doc + decision record: https://claude.ai/code/artifact/36e1362f-11d3-4532-8fe1-a5191c8def9f
 #
@@ -595,7 +595,7 @@ jobs:
       id-token: write   # OIDC role for the ADP gateway credential
     timeout-minutes: 45
     steps:
-      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
+      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@681c7a5774f3dd72733ca1f6f4bbdb8633f548a5 # TWO-STEP PIN step 2: #303's merge SHA
         id: claude
         with:
           repo: ${{ github.repository }}
@@ -730,7 +730,7 @@ jobs:
 
       - name: Overrides review (content repos, decision 4)
         if: github.repository != 'redpanda-data/docs-team-standards' && needs.classify.outputs.overrides_json == 'true'
-        uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
+        uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@681c7a5774f3dd72733ca1f6f4bbdb8633f548a5 # TWO-STEP PIN step 2: #303's merge SHA
         with:
           repo: ${{ github.repository }}
           pr_number: ${{ inputs.pr_number }}
@@ -816,7 +816,7 @@ jobs:
       id-token: write   # OIDC role for the ADP gateway credential
     timeout-minutes: 45
     steps:
-      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
+      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@681c7a5774f3dd72733ca1f6f4bbdb8633f548a5 # TWO-STEP PIN step 2: #303's merge SHA
         with:
           repo: ${{ github.repository }}
           pr_number: ${{ inputs.pr_number }}
@@ -952,7 +952,7 @@ jobs:
 
       - name: Claude vision pass
         if: needs.classify.outputs.has_images == 'true'
-        uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
+        uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@681c7a5774f3dd72733ca1f6f4bbdb8633f548a5 # TWO-STEP PIN step 2: #303's merge SHA
         with:
           repo: ${{ github.repository }}
           pr_number: ${{ inputs.pr_number }}
@@ -1073,7 +1073,7 @@ jobs:
       # No --add-dir needed for the prompt to read it: a bare `Read` in the
       # action's allowlist is not scoped to the workspace in -p mode
       # (verified on CLI 2.1.258, reading a file outside the cwd).
-      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
+      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@681c7a5774f3dd72733ca1f6f4bbdb8633f548a5 # TWO-STEP PIN step 2: #303's merge SHA
         with:
           repo: ${{ github.repository }}
           pr_number: ${{ inputs.pr_number }}
@@ -1239,7 +1239,13 @@ jobs:
             } > comment.md
           fi
 
+      # continue-on-error for the same reason the aggregator is guarded: a
+      # failed upsert (a transient 5xx or a secondary rate limit) would skip
+      # the status step below and leave the gate's pending claim in place
+      # until the 90-minute stale window expires. The status step still
+      # posts the verdict; the run shows the upsert's failure.
       - name: Upsert the review comment
+        continue-on-error: true
         uses: actions/github-script@v7
         env:
           PR: ${{ inputs.pr_number }}

@@ -7,8 +7,9 @@ description: >
   split the doc-strings review runs in production; twin/review copy:
   docs-team-standards PR #2912, DOC-2496). Claude runs
   findings-only: read-only gh allowlist, no posting rights (the workflow
-  posts under its own identity), and the plugin's github-mutation-guard
-  hook backstops any mutating gh call.
+  posts under its own identity), and a gh shim on PATH that refuses any
+  mutating gh call, and any non-GitHub host in a URL, -R/--repo value,
+  GH_HOST or GH_REPO, before it reaches the real binary.
 
   Model auth is the ADP AI Gateway as the docs-pr-review agent
   (sdlc/prod/github/docs_pr_review_client, the adp_client_secret_id
@@ -374,6 +375,11 @@ runs:
           [[ "$v" == *://* ]] && { check_url "$v"; return; }
           if [[ "$v" == */*/* ]]; then gh_host_ok "${v%%/*}" || deny --repo "$v"; fi
         }
+        # GH_HOST, and GH_REPO's HOST/ part, pick the host for every call
+        # that names none, so an inherited value would route gh off GitHub
+        # with no URL or -R in the arguments for the checks below to see.
+        if [[ -n "${GH_HOST:-}" ]]; then gh_host_ok "$GH_HOST" || deny "(GH_HOST=$GH_HOST)" "$@"; fi
+        if [[ -n "${GH_REPO:-}" ]]; then check_repo "$GH_REPO"; fi
         prev=""
         for a in "$@"; do
           case "$a" in
@@ -453,6 +459,10 @@ runs:
           # shellcheck disable=SC2086 # word-split the probe on purpose
           R4=$(PATH="$SHIM_DIR:$PATH" gh $probe 2>&1 1>/dev/null || true)
           [[ "$R4" == *"refused:"* ]] || { echo "::error::gh shim failed to refuse a foreign host: gh $probe (got: $R4)"; exit 1; }
+        done
+        for env in "GH_HOST=example.com" "GH_REPO=example.com/o/r"; do
+          R5=$(env "$env" PATH="$SHIM_DIR:$PATH" gh pr view 1 2>&1 1>/dev/null || true)
+          [[ "$R5" == *"refused:"* ]] || { echo "::error::gh shim failed to refuse a foreign host from $env (got: $R5)"; exit 1; }
         done
         # ...and must not over-block the github.com URL pr-review is given.
         OK1=$(PATH="$SHIM_DIR:$PATH" gh pr view https://github.com/o/r/pull/1 2>&1 1>/dev/null || true)
