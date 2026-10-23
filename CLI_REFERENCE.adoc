@@ -42,6 +42,7 @@ display help for command
 * `doc-impact-recording` - Extract the docs MCP calls from a Claude Code transcript into a doc-impact eval recording
 * `lint-screenshots` - Lint image macros and image files in a docs repo against the screenshot standard (alt text, size, format, width)
 * `check-build-log` - Check an Antora JSON build log: fail on error or fatal records or too few pages, print a Markdown summary
+* `check-metadata` - Check page-categories and solution facet values in AsciiDoc page headers against the docs taxonomy
 * `check-rendered-html` - Scan rendered Antora HTML for unconverted AsciiDoc (literal backticks, xref:, include::, attributes, tables, empty sections) and broken anchors and links
 * `connect-docs-diff` - Diff two generated Connect docs trees and map each changed partial or example to its published page
 * `preview-string` - Render one embedded doc string (property, rpk command/flag, metric, helm key, CRD field, connect field) as it will publish
@@ -790,6 +791,58 @@ npx doc-tools check-build-log build.ndjson --site-dir build/site/connect --min-p
 
 # Block only on errors from these repositories; list the rest
 npx doc-tools check-build-log build.ndjson --blocking-sources redpanda-data/rp-connect-docs,redpanda-data/connect
+----
+
+== check-metadata
+
+Check the taxonomy metadata in AsciiDoc page headers against the docs taxonomy (taxonomy.yml in the docs repository). On every page, `:page-categories:` values must resolve to a concept: an unknown value, a deprecated value, or two values that are the same concept warn, and each message names the replacement. On a solution overview (`:page-layout: solution`), `:page-solution-use-cases:`, `:page-solution-industries:`, `:page-solution-technologies:`, and `:page-solution-platforms:` must resolve within their own facet, and an unknown value or a duplicate concept is an error. `:page-topic-type:` is checked against the content types, as a warning. --strict turns every warning into an error. The taxonomy comes from --taxonomy (a path or URL), else the docs checkout at the current directory, else $REDPANDA_DOCS_PATH, else the published file. The build runs the same rules (extension-utils/metadata-check.js), so the two never disagree. Exit 0 without errors, 1 with errors, 2 when the check could not run.
+
+*Why use it:*
+
+Categories, use cases, and technologies drive search facets and solution recommendations, and a free-text value becomes a near-duplicate the moment a second author writes one. This catches it on the PR, without a model, in a form the docs agents and the PR review can read.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools check-metadata [options] [paths...]
+----
+
+*Options:*
+
+`--changed <base>`::
+Check only .adoc files changed between the merge base with <base> and HEAD, for example origin/main
+
+`--taxonomy <path|url>`::
+taxonomy.yml to use (default: the docs checkout, $REDPANDA_DOCS_PATH, then https://docs.redpanda.com/shared/_attachments/taxonomy.yml)
+
+`--format <format>`::
+Output format: text or json (default: "text")
+
+`--strict`::
+Treat warnings as errors
+
+`--root <path>`::
+Repository root (default: current directory)
+
+`--output <path>`::
+Also write the JSON result to this file
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Pages changed on this branch (what the docs PR check runs)
+npx doc-tools check-metadata --changed origin/main
+
+# Specific pages or directories, JSON for a grader
+npx doc-tools check-metadata modules/manage/pages/iceberg --format json
+
+# Against a local taxonomy, failing on warnings
+npx doc-tools check-metadata --taxonomy ../docs/shared/modules/ROOT/attachments/taxonomy.yml --strict
 ----
 
 == check-rendered-html

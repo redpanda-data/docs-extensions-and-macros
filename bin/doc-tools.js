@@ -3009,6 +3009,57 @@ programCli
   })
 
 /**
+ * check-metadata
+ *
+ * @description
+ * Check the taxonomy metadata in AsciiDoc page headers against the docs
+ * taxonomy (taxonomy.yml in the docs repository). On every page,
+ * `:page-categories:` values must resolve to a concept: an unknown value, a
+ * deprecated value, or two values that are the same concept warn, and each
+ * message names the replacement. On a solution overview
+ * (`:page-layout: solution`), `:page-solution-use-cases:`,
+ * `:page-solution-industries:`, `:page-solution-technologies:`, and
+ * `:page-solution-platforms:` must resolve within their own facet, and an
+ * unknown value or a duplicate concept is an error. `:page-topic-type:` is
+ * checked against the content types, as a warning. --strict turns every
+ * warning into an error. The taxonomy comes from --taxonomy (a path or URL),
+ * else the docs checkout at the current directory, else $REDPANDA_DOCS_PATH,
+ * else the published file. The build runs the same rules
+ * (extension-utils/metadata-check.js), so the two never disagree.
+ * Exit 0 without errors, 1 with errors, 2 when the check could not run.
+ *
+ * @why
+ * Categories, use cases, and technologies drive search facets and solution
+ * recommendations, and a free-text value becomes a near-duplicate the moment
+ * a second author writes one. This catches it on the PR, without a model, in
+ * a form the docs agents and the PR review can read.
+ *
+ * @example
+ * # Pages changed on this branch (what the docs PR check runs)
+ * npx doc-tools check-metadata --changed origin/main
+ *
+ * # Specific pages or directories, JSON for a grader
+ * npx doc-tools check-metadata modules/manage/pages/iceberg --format json
+ *
+ * # Against a local taxonomy, failing on warnings
+ * npx doc-tools check-metadata --taxonomy ../docs/shared/modules/ROOT/attachments/taxonomy.yml --strict
+ */
+programCli
+  .command('check-metadata')
+  .description('Check page-categories and solution facet values in AsciiDoc page headers against the docs taxonomy')
+  .argument('[paths...]', 'Files, directories, or globs to check, relative to --root (default: modules/**/*.adoc). With --changed, filters the changed files')
+  .option('--changed <base>', 'Check only .adoc files changed between the merge base with <base> and HEAD, for example origin/main')
+  .option('--taxonomy <path|url>', 'taxonomy.yml to use (default: the docs checkout, $REDPANDA_DOCS_PATH, then https://docs.redpanda.com/shared/_attachments/taxonomy.yml)')
+  .option('--format <format>', 'Output format: text or json', 'text')
+  .option('--strict', 'Treat warnings as errors')
+  .option('--root <path>', 'Repository root (default: current directory)')
+  .option('--output <path>', 'Also write the JSON result to this file')
+  .action(async (paths, options) => {
+    const { runCli } = require('../tools/check-metadata')
+    await runCli(paths, options)
+  })
+
+/**
  * check-rendered-html
  *
  * @description
