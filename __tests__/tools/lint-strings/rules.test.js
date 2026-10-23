@@ -250,8 +250,15 @@ describe('conditional rule (env-cloud blocks in connect spec strings)', () => {
         expect.objectContaining({ severity: 'error', message: expect.stringContaining('has no matching') })
       ])
     }
-    const closer = CONDITIONAL_RULE.check(connectDecl('A.\n\nifndef::env-cloud[]\nB.\nendif::[\t]\n\nC.'))
-    expect(closer).toEqual([expect.objectContaining({ severity: 'error', message: expect.stringContaining('has whitespace inside its brackets. Write endif::[]') })])
+    // Asciidoctor rejects an endif with anything in its brackets and leaves
+    // the block open, so the rule reports the block as never closed too.
+    for (const [bracket, what] of [['\t', 'whitespace'], [' ', 'whitespace'], ['x', 'text']]) {
+      const closer = CONDITIONAL_RULE.check(connectDecl(`A.\n\nifndef::env-cloud[]\nB.\nendif::[${bracket}]\n\nC.`))
+      expect(closer).toEqual([
+        expect.objectContaining({ severity: 'error', message: expect.stringContaining(`has ${what} inside its brackets. Asciidoctor rejects it and leaves the block open`) }),
+        expect.objectContaining({ severity: 'error', message: expect.stringContaining('ifndef::env-cloud[] is never closed') })
+      ])
+    }
     // Negative controls: the block form with empty brackets, and a named endif, pass
     expect(messages('A.\n\nifndef::env-cloud[]\nB.\nendif::[]\n\nC.')).toEqual([])
     expect(messages('A.\n\nifdef::env-cloud[]\nB.\nendif::env-cloud[]\n\nC.')).toEqual([])
@@ -282,8 +289,10 @@ describe('conditional rule (env-cloud blocks in connect spec strings)', () => {
   test('the single-line form is rejected and does not open a block', () => {
     const found = messages('Prose.\n\nifndef::env-cloud[Only on self-managed.]\n\nAfter.')
     expect(found).toEqual([expect.stringContaining('is the single-line form')])
+    // Text in an endif's brackets leaves the block open in Asciidoctor
     expect(messages('Prose.\n\nifdef::env-cloud[]\nText.\nendif::[extra]\n\nAfter.')).toEqual([
-      expect.stringContaining('carries text in its brackets')
+      expect.stringContaining('has text inside its brackets'),
+      expect.stringContaining('is never closed')
     ])
   })
 
