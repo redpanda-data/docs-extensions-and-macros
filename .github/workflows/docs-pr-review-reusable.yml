@@ -171,7 +171,10 @@ on:
           earlier version, including the 5.38.0 this used to name, exits 1
           with "unknown command" and writes no result file, which the guard in
           screenshot_gate turns into a loud error rather than a silent pass.
-          Do not lower this below 5.45.0.
+          Do not lower this below 5.45.0. The same version runs
+          `doc-tools check-metadata` in adoc_review; a version without that
+          subcommand skips it (a notice in the job log, nothing in the
+          comment), so it applies from the first release that ships it.
         type: string
         default: '5.45.0'
       docs_app_id:
@@ -595,6 +598,64 @@ jobs:
       id-token: write   # OIDC role for the ADP gateway credential
     timeout-minutes: 45
     steps:
+      # Deterministic, no model: `doc-tools check-metadata` on the pages this
+      # PR changed, the same taxonomy check the docs repos' check-metadata
+      # workflow and the Antora build run. Its own checkout, with full
+      # history and blobs fetched on demand, because --changed diffs against
+      # the merge base with the PR's base branch. It is removed before the
+      # review's own checkout, and the result lives under RUNNER_TEMP (see
+      # screenshot_gate). The findings join this job's verdict and findings
+      # below; the review prompt does not read them.
+      - name: Check out the PR head for check-metadata
+        uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ inputs.pr_number }}/head
+          path: .metadata-check
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Deterministic checks (doc-tools check-metadata)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr_number }}
+          R: ${{ github.repository }}
+          DOC_TOOLS_VERSION: ${{ inputs.doc_tools_version }}
+          SRC: .metadata-check
+        run: |
+          set -uo pipefail
+          OUT_DIR="$RUNNER_TEMP/metadata-check"; mkdir -p "$OUT_DIR"
+          RESULT="$OUT_DIR/check-metadata.json"
+          # state: ran (a result to report) | missing (this doc-tools has no
+          # check-metadata: skipped, nothing reported) | failed (it could not
+          # run: reported as a check that did not run, never as a pass).
+          fail() { echo failed > "$OUT_DIR/state"; printf '%s\n' "$1" > "$OUT_DIR/reason"; echo "::warning::check-metadata: $1"; exit 0; }
+          BASE=$(gh api "repos/$R/pulls/$PR" --jq '.base.ref' 2> /dev/null) || BASE=""
+          [[ -n "$BASE" ]] || fail "could not read the pull request's base branch"
+          rc=0
+          ( cd "$SRC" && npx --yes --package "@redpanda-data/docs-extensions-and-macros@${DOC_TOOLS_VERSION}" \
+              doc-tools check-metadata --changed "origin/$BASE" --format json --output "$RESULT" ) > /dev/null 2> "$OUT_DIR/stderr.txt" || rc=$?
+          # Exit 1 is "errors found" only with a result file: an unknown
+          # subcommand (a doc_tools_version from before check-metadata) also
+          # exits 1, and writes none.
+          if [[ ( $rc -eq 0 || $rc -eq 1 ) && -s "$RESULT" ]] && jq -e '(.findings | type) == "array"' "$RESULT" > /dev/null 2>&1; then
+            echo ran > "$OUT_DIR/state"
+            jq -r '"check-metadata: \(.pages) page(s) with taxonomy metadata, \(.summary.errors) error(s), \(.summary.warnings) warning(s)"' "$RESULT"
+          elif grep -q "unknown command 'check-metadata'" "$OUT_DIR/stderr.txt"; then
+            echo missing > "$OUT_DIR/state"
+            echo "::notice::doc-tools ${DOC_TOOLS_VERSION} has no check-metadata subcommand; page metadata is not checked until doc_tools_version names a release that ships it"
+          else
+            fail "doc-tools check-metadata could not run (exit $rc): $(tr '\n' ' ' < "$OUT_DIR/stderr.txt" | head -c 300)"
+          fi
+
+      - name: Remove the check-metadata checkout
+        if: always()
+        run: rm -rf .metadata-check
+
       - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
         id: claude
         with:
@@ -634,6 +695,52 @@ jobs:
             {"verdict":"pass"|"fail","blocking":["..."],"suggestions":["..."]}
             where "fail" means at least one genuinely blocking violation of
             team standards.
+      # check-metadata into this branch: errors are blocking, warnings are
+      # suggestions, and a check that could not run is `not_run`. Every
+      # finding is also listed in findings.md, which the comment shows. A
+      # review that wrote no verdict stays unavailable: the deterministic
+      # result alone is not the review.
+      - name: Add the check-metadata findings to the review
+        if: always()
+        run: |
+          set -uo pipefail
+          DIR="$RUNNER_TEMP/metadata-check"
+          STATE=$(cat "$DIR/state" 2> /dev/null || echo none)
+          [[ "$STATE" == ran || "$STATE" == failed ]] || { echo "check-metadata: $STATE, nothing to add"; exit 0; }
+          mkdir -p review-output
+          V=review-output/verdict.json
+          F=review-output/findings.md
+          HAVE_VERDICT=false
+          [[ -f "$V" ]] && jq -e 'type == "object"' "$V" > /dev/null 2>&1 && HAVE_VERDICT=true
+          if [[ "$STATE" == failed ]]; then
+            REASON=$(cat "$DIR/reason")
+            if [[ "$HAVE_VERDICT" == true ]]; then
+              jq --arg r "Page metadata (doc-tools check-metadata): $REASON" \
+                '.not_run = (((.not_run // []) | if type == "array" then . else [.] end) + [$r])' "$V" > "$V.tmp" && mv "$V.tmp" "$V"
+            fi
+            exit 0
+          fi
+          cp "$DIR/check-metadata.json" review-output/check-metadata.json
+          if [[ "$(jq '.findings | length' "$DIR/check-metadata.json")" -gt 0 ]]; then
+            {
+              echo
+              echo "### Page metadata (doc-tools check-metadata)"
+              echo
+              jq -r '.findings[] | "- \(.severity): `\(.file):\(.line)` \(.message)"' "$DIR/check-metadata.json"
+            } >> "$F"
+          fi
+          if [[ "$HAVE_VERDICT" == true ]]; then
+            jq --slurpfile m "$DIR/check-metadata.json" '
+              def line: "page metadata: `\(.file):\(.line)` \(.message)";
+              def list(k): ((.[k] // []) | if type == "array" then . else [.] end);
+              ($m[0].findings | map(select(.severity == "error") | line)) as $errors
+              | ($m[0].findings | map(select(.severity != "error") | line)) as $warnings
+              | .blocking = (list("blocking") + $errors)
+              | .suggestions = (list("suggestions") + $warnings)
+              | if ($errors | length) > 0 then .verdict = "fail" else . end
+              ' "$V" > "$V.tmp" && mv "$V.tmp" "$V"
+          fi
+          jq -r '"check-metadata: added \(.summary.errors) error(s) and \(.summary.warnings) warning(s) to the review"' "$DIR/check-metadata.json"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
