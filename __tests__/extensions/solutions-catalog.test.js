@@ -2440,7 +2440,8 @@ describe('solutions-catalog: build-along files', () => {
 
 describe('solutions-catalog: the kubernetes platform', () => {
   test('kubernetes is an allowed platform, but a solution that sets none is never assumed to run there', () => {
-    expect(collect.ENUMS.platforms).toEqual(['self-managed', 'cloud', 'kubernetes'])
+    expect(collect.ENUMS.platforms).toBeUndefined()
+    expect(collect.FALLBACK_PLATFORMS).toEqual(['self-managed', 'cloud', 'kubernetes'])
     expect(collect.DEFAULT_PLATFORMS).toEqual(['self-managed', 'cloud'])
   })
 })
@@ -2472,7 +2473,8 @@ describe('solutions-catalog: draft_downloads (preview only)', () => {
 describe('solutions-catalog: with the docs taxonomy', () => {
   const { parseTaxonomy } = require('../../extension-utils/taxonomy')
   const taxonomy = parseTaxonomy(fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'taxonomy', 'taxonomy.yml')))
-  const solution = (attrs) => makeSolution('leaderboard', { attrs: { 'page-solution-use-cases': 'Stream processing', 'page-solution-technologies': 'Postgres, Redpanda Connect', 'page-categories': 'Clients', ...attrs } })
+  const facetAttrs = { 'page-solution-use-cases': 'Stream processing', 'page-solution-technologies': 'Postgres, Redpanda Connect', 'page-categories': 'Clients' }
+  const solution = (attrs) => makeSolution('leaderboard', { attrs: { ...facetAttrs, ...attrs } })
 
   test('an unknown use case is fatal, with the taxonomy as the vocabulary', async () => {
     await expect(run({ taxonomy, solutions: [solution({ 'page-solution-use-cases': 'Data mesh' })] }))
@@ -2502,5 +2504,36 @@ describe('solutions-catalog: with the docs taxonomy', () => {
     const after = addedFile((await run({ docs, solutions: [noRelatedDocs(solution())], taxonomy })).siteCatalog, 'solutions-graph.json')
     expect(before.edges[0]).toMatchObject({ score: 0.4, shown: false })
     expect(after.edges[0]).toMatchObject({ score: 0.6, shown: true, shared: { leaves: ['stream-processing', 'category:Clients'], broader: [] } })
+  })
+
+  test('verification runs are keyed by deployment concept IDs, except the base run', () => {
+    expect(collect.verificationPlatforms()).toEqual(['cloud', 'kubernetes'])
+    expect(collect.verificationPlatforms(taxonomy)).toEqual(['cloud', 'redpanda-self-managed', 'kubernetes', 'linux'])
+    const file = { contents: Buffer.from(JSON.stringify({ ...MANIFEST, linux_verify_script: 'PASS (9/9)', kubernetes_run_at: '2026-10-13T18:00:00Z' })) }
+    expect(collect.parseVerification(file).verified.runs).toEqual({ kubernetes: { runAt: '2026-10-13T18:00:00Z' } })
+    expect(collect.parseVerification(file, { platforms: collect.verificationPlatforms(taxonomy) }).verified.runs).toEqual({
+      kubernetes: { runAt: '2026-10-13T18:00:00Z' },
+      linux: { verifyScript: 'PASS (9/9)' },
+    })
+  })
+
+  test('a linux run reaches the record only with the taxonomy', async () => {
+    const verification = JSON.stringify({ ...MANIFEST, linux_verify_script: 'PASS (9/9)' })
+    const runsOf = async (opts) => addedFile((await run({ ...opts, solutions: [makeSolution('leaderboard', { attrs: facetAttrs, verification })] })).siteCatalog, 'solutions.json').solutions[0].verified.runs
+    expect(await runsOf({})).toBeUndefined()
+    expect(await runsOf({ taxonomy })).toEqual({ linux: { verifyScript: 'PASS (9/9)' } })
+  })
+
+  test('manifest platforms resolve through the deployment scheme', async () => {
+    const withPlatforms = (platforms) => makeSolution('leaderboard', {
+      attrs: { ...facetAttrs, 'page-solution-platforms': 'self-managed' },
+      verification: JSON.stringify({ ...MANIFEST, platforms }),
+    })
+    // docker is what self-managed means, so the run covers the page's claim.
+    expect(warningsOf(await run({ taxonomy, solutions: [withPlatforms(['docker'])] }))).not.toMatch(/verification\.json platforms|verified only/)
+    expect(warningsOf(await run({ taxonomy, solutions: [withPlatforms(['mainframe'])] }))).toMatch(/verification\.json platforms contains unknown values: mainframe/)
+    expect(warningsOf(await run({ taxonomy, solutions: [withPlatforms(['cloud'])] }))).toMatch(/page-solution-platforms includes self-managed but verification\.json verified only cloud/)
+    // Without the taxonomy, docker is not a known value.
+    expect(warningsOf(await run({ solutions: [withPlatforms(['docker'])] }))).toMatch(/verification\.json platforms contains unknown values: docker/)
   })
 })

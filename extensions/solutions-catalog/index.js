@@ -371,8 +371,13 @@ module.exports.register = function ({ config = {} } = {}) {
   })
 
   this.on('documentsConverted', ({ contentCatalog, siteCatalog, playbook }) => {
-    const collected = collect.collectSolutions(contentCatalog)
-    if (!collected) return
+    if (!contentCatalog.getComponent(collect.COMPONENT)) return
+    // The docs taxonomy, when the docs repo has it: facet values validate
+    // against it, recommendations score over its concept IDs, and its
+    // deployment IDs name the per-platform verification runs. Without it,
+    // categories, solution-facets.yml, and the fallback platforms work as before.
+    const taxonomy = getTaxonomy({ contentCatalog, siteCatalog, logger })
+    const collected = collect.collectSolutions(contentCatalog, { taxonomy })
 
     const validCategories = siteCatalog && siteCatalog.attributeFile && siteCatalog.attributeFile['page-valid-categories']
     const categoryMap = validCategories ? createCategoryMap(validCategories) : null
@@ -381,10 +386,6 @@ module.exports.register = function ({ config = {} } = {}) {
     // unvalidated, matching how an unavailable category list is handled: a
     // missing vocabulary should not fail every build, only stop enforcing.
     const facetVocab = state.facetsFile ? validate.parseFacetVocab(state.facetsFile.contents) : null
-    // The docs taxonomy, when the docs repo has it: facet values validate
-    // against it and recommendations score over its concept IDs. Without it,
-    // categories, solution-facets.yml, and the platform enum work as before.
-    const taxonomy = getTaxonomy({ contentCatalog, siteCatalog, logger })
     if (!facetVocab && !taxonomy) {
       logger.warn('solutions-catalog: ROOT/partials/solution-facets.yml is missing or unparseable; page-solution-industries and page-solution-use-cases are not validated')
     }

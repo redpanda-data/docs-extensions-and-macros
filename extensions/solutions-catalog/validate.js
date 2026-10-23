@@ -11,7 +11,7 @@
 
 const { parse } = require('node-html-parser')
 const {
-  RESERVED_IDS, LAYOUTS, ENUMS, SLUG_RX, VERSION_RX, VERIFICATION_FILE, ALLOWED_ATTACHMENTS, COMPONENT, stripVersion, pageKey,
+  RESERVED_IDS, LAYOUTS, ENUMS, FALLBACK_PLATFORMS, SLUG_RX, VERSION_RX, VERIFICATION_FILE, ALLOWED_ATTACHMENTS, COMPONENT, stripVersion, pageKey,
 } = require('./collect')
 const { isStepScaffolding } = require('../../asciidoc-extensions/add-solution-file-provenance')
 const { normalizeCategories, isLeafCategory } = require('../../extension-utils/categories')
@@ -251,8 +251,15 @@ const HEX_RX = /^[0-9a-f]+$/i
  * is evidence the monorepo writes, and a stale or partial one should be
  * visible in the build log without stopping the docs from publishing.
  */
-function verificationWarnings (record) {
+function verificationWarnings (record, { taxonomy } = {}) {
   const warnings = []
+  // A platform as its deployment concept IDs, so self-managed and docker match.
+  // Without the taxonomy, only the fallback values are known, compared as written.
+  const platformIds = (p) => {
+    if (!taxonomy) return FALLBACK_PLATFORMS.includes(p) ? [p] : null
+    const hit = typeof p === 'string' ? taxonomy.resolve(p, { schemes: ['deployment'], prefer: 'id' }) : null
+    return hit && hit.ids.length ? hit.ids : null
+  }
   const v = record.verified || {}
   const runAt = v.runAt
   if (runAt === undefined) warnings.push(`${VERIFICATION_FILE} has no run_at`)
@@ -267,11 +274,12 @@ function verificationWarnings (record) {
   }
   if (v.platforms !== undefined) {
     const list = Array.isArray(v.platforms) ? v.platforms : null
-    const unknown = list ? list.filter((p) => !ENUMS.platforms.includes(p)) : []
-    if (!list) warnings.push(`${VERIFICATION_FILE} platforms must be an array of ${ENUMS.platforms.join(', ')}`)
+    const unknown = list ? list.filter((p) => !platformIds(p)) : []
+    if (!list) warnings.push(`${VERIFICATION_FILE} platforms must be an array of ${taxonomy ? 'deployment concept IDs' : FALLBACK_PLATFORMS.join(', ')}`)
     else if (unknown.length) warnings.push(`${VERIFICATION_FILE} platforms contains unknown values: ${unknown.join(', ')}`)
     else {
-      const missing = (record.platforms || []).filter((p) => !list.includes(p))
+      const verifiedIds = new Set(list.flatMap((p) => platformIds(p)))
+      const missing = (record.platforms || []).filter((p) => !(platformIds(p) || [p]).every((id) => verifiedIds.has(id)))
       if (missing.length) warnings.push(`page-solution-platforms includes ${missing.join(', ')} but ${VERIFICATION_FILE} verified only ${list.join(', ') || 'nothing'}`)
     }
   }
@@ -355,7 +363,7 @@ function buildAlongFindings (record, { fullIncludes = [] } = {}) {
  *   ROOT/partials/solution-facets.yml; when absent the two facet axes are not validated
  * @param {Object} [ctx.taxonomy] - the docs taxonomy (extension-utils/taxonomy.js). When
  *   set, use cases, industries, technologies, and platforms are validated against it
- *   instead of facetVocab and the platform enum, and the record gets `concepts`,
+ *   instead of facetVocab and FALLBACK_PLATFORMS, and the record gets `concepts`,
  *   `platformIds`, and `conceptFacets` for scoring and the catalog
  * @param {(spec: string) => Object|null|undefined} [ctx.resolveDoc] - resolve a page ID to a page
  * @param {Set<string>} [ctx.solutionIds] - all module names in the component
@@ -395,8 +403,9 @@ function validateSolution (record, { categoryMap, facetVocab, taxonomy, resolveD
   if (!ENUMS.status.includes(record.status)) err(`page-solution-status must be one of ${ENUMS.status.join(', ')} (found "${record.status}")`)
   if (!ENUMS.download.includes(record.download)) err(`page-solution-download must be one of ${ENUMS.download.join(', ')} (found "${record.download}")`)
 
-  const badPlatforms = taxonomy ? [] : record.platforms.filter((p) => !ENUMS.platforms.includes(p))
-  if (badPlatforms.length) err(`page-solution-platforms contains unknown values: ${badPlatforms.join(', ')} (allowed: ${ENUMS.platforms.join(', ')})`)
+  // With the taxonomy, solutionConcepts checks platforms against the deployment scheme.
+  const badPlatforms = taxonomy ? [] : record.platforms.filter((p) => !FALLBACK_PLATFORMS.includes(p))
+  if (badPlatforms.length) err(`page-solution-platforms contains unknown values: ${badPlatforms.join(', ')} (allowed: ${FALLBACK_PLATFORMS.join(', ')})`)
 
   if (!record.technologies.length) err('page-solution-technologies is required')
   const denied = record.technologies.filter((t) => TECHNOLOGY_DENY_LIST.includes(t.toLowerCase()))
@@ -419,7 +428,7 @@ function validateSolution (record, { categoryMap, facetVocab, taxonomy, resolveD
     warn(`no ${VERIFICATION_FILE} attachment; readers get no verification evidence`)
   }
   if (record.verified) {
-    for (const w of verificationWarnings(record)) warn(w)
+    for (const w of verificationWarnings(record, { taxonomy })) warn(w)
   }
 
   if (record.status === 'deprecated' && !record.supersededBy) err('page-solution-superseded-by is required when status is deprecated')
