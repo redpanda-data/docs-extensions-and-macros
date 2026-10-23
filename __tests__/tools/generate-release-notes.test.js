@@ -179,6 +179,39 @@ describe('clusterSectionByArea', () => {
     expect(clusterSectionByArea(mixed)).toBe(expected);
   });
 
+  it('groups single-line entries written on adjacent lines, with no blank line between them', () => {
+    const adjacent = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Bug fixes', '',
+      'Security:: Alpha.',
+      'Kafka API:: Beta.',
+      'Security:: Gamma.', '',
+    ].join('\n');
+    const expected = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Bug fixes', '',
+      'Kafka API::', '* Beta.', '',
+      'Security::', '* Alpha.', '* Gamma.', '',
+    ].join('\n');
+    expect(clusterSectionByArea(adjacent)).toBe(expected);
+  });
+
+  it('keeps a grouped area with its bullets when single-line entries sit next to it', () => {
+    const tight = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Bug fixes', '',
+      'Security::', '* Alpha.', '',
+      'Kafka API:: Beta.', '',
+    ].join('\n');
+    const expected = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Bug fixes', '',
+      'Kafka API::', '* Beta.', '',
+      'Security::', '* Alpha.', '',
+    ].join('\n');
+    expect(clusterSectionByArea(tight)).toBe(expected);
+  });
+
   it('does not move entries across a category boundary', () => {
     // The Bug fixes "Security" entries do not absorb the Improvements "Security".
     const out = clusterSectionByArea(scattered);

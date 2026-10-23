@@ -197,7 +197,10 @@ function clusterSectionByArea(sectionText) {
 
   // Tokenize into paragraphs: maximal runs of non-blank lines. In this format
   // every heading, every single-line entry, and every grouped area is one such
-  // paragraph.
+  // paragraph. Single-line entries on adjacent lines, with no blank line
+  // between them, are valid AsciiDoc too, so each one starts its own paragraph.
+  // A grouped area's term line does not match ENTRY_RE, so its bullets stay in
+  // one paragraph with it.
   const lines = String(sectionText).replace(/\n+$/, '').split('\n');
   const paragraphs = [];
   let current = [];
@@ -205,6 +208,10 @@ function clusterSectionByArea(sectionText) {
     if (/^\s*$/.test(line)) {
       if (current.length) { paragraphs.push(current); current = []; }
     } else {
+      if (current.length === 1 && ENTRY_RE.test(current[0]) && ENTRY_RE.test(line)) {
+        paragraphs.push(current);
+        current = [];
+      }
       current.push(line);
     }
   }
