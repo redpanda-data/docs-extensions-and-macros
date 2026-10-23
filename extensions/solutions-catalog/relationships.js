@@ -324,21 +324,44 @@ function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap,
  * recommendations.
  *
  * @param {Object} input
- * @param {Array<{url: string, categories: Array<string>}>} input.docs - eligible doc pages
+ * @param {Array<{url: string, categories: Array<string>, authoredCategories?: Array<string>}>} input.docs -
+ *   eligible doc pages. With a taxonomy, `authoredCategories` (what the page
+ *   says, before legacy normalization drops labels valid-categories.yml lacks)
+ *   is counted when present.
  * @param {Array<Object>} input.solutions - active records (published or included drafts)
  * @param {Object} [input.categoryMap]
+ * @param {import('../../extension-utils/taxonomy').Taxonomy} [input.taxonomy] - when
+ *   present, a page counts for a category when they name the same concept, so a
+ *   page rewritten from Iceberg to Iceberg Topics still counts for a solution
+ *   that says Iceberg
  * @param {number} [input.sampleSize=20]
  * @returns {{solutions: Object, uncategorizedEligiblePages: number, uncategorizedSample: Array<string>}}
  */
-function computeCoverage ({ docs, solutions, categoryMap, sampleSize = 20 }) {
+function computeCoverage ({ docs, solutions, categoryMap, taxonomy, sampleSize = 20 }) {
+  // The keys a category label counts under: its concept IDs (a deprecated
+  // value's replacements), or the label itself without a taxonomy or a match.
+  const keysOf = (label) => {
+    const hit = taxonomy ? taxonomy.resolve(label) : null
+    return hit && hit.ids.length ? hit.ids.map((id) => `id:${id}`) : [`label:${label}`]
+  }
+  const categoriesOf = (doc) => (taxonomy && doc.authoredCategories ? doc.authoredCategories : doc.categories) || []
   const counts = new Map()
   const uncategorized = []
   for (const doc of docs) {
-    if (!doc.categories || !doc.categories.length) {
+    if (!categoriesOf(doc).length) {
       uncategorized.push(doc.url)
       continue
     }
-    for (const c of new Set(doc.categories)) counts.set(c, (counts.get(c) || 0) + 1)
+    for (const k of new Set(categoriesOf(doc).flatMap(keysOf))) counts.set(k, (counts.get(k) || 0) + 1)
+  }
+  const pagesFor = (label) => {
+    const keys = keysOf(label)
+    if (keys.length === 1) return counts.get(keys[0]) || 0
+    let n = 0
+    for (const doc of docs) {
+      if (categoriesOf(doc).flatMap(keysOf).some((k) => keys.includes(k))) n++
+    }
+    return n
   }
   const level = (c) => (categoryMap && categoryMap.categories.has(c) && !categoryMap.subcategories.has(c) ? 'top' : 'sub')
 
@@ -347,7 +370,7 @@ function computeCoverage ({ docs, solutions, categoryMap, sampleSize = 20 }) {
     const categories = {}
     const zeroMatch = []
     for (const c of solution.categories || []) {
-      const pages = counts.get(c) || 0
+      const pages = pagesFor(c)
       categories[c] = { pages, level: level(c) }
       if (pages === 0) zeroMatch.push(c)
     }

@@ -236,3 +236,27 @@ describe('Algolia solution records with the taxonomy', () => {
     expect(rec.categories).toEqual(['Iceberg', 'Tiered Storage', 'Deployment'])
   })
 })
+
+describe('category coverage with the taxonomy', () => {
+  const docs = [
+    // Legacy normalization drops the new labels from categories; the authored list keeps them.
+    { url: '/a/', categories: [], authoredCategories: ['Iceberg Topics', 'Replication'] },
+    { url: '/b/', categories: ['Iceberg'] },
+    { url: '/c/', categories: ['Security'] },
+  ]
+  const solutions = [{ id: 's', categories: ['Iceberg', 'Data Replication', 'Ghost'] }]
+
+  test('a page counts for a category when they name the same concept', () => {
+    const coverage = relationships.computeCoverage({ docs, solutions, categoryMap, taxonomy })
+    expect(coverage.solutions.s.categories.Iceberg.pages).toBe(2)
+    expect(coverage.solutions.s.categories['Data Replication'].pages).toBe(1)
+    expect(coverage.solutions.s.zeroMatch).toEqual(['Ghost'])
+  })
+
+  test('without the taxonomy, labels must match exactly, as before', () => {
+    const coverage = relationships.computeCoverage({ docs, solutions, categoryMap })
+    expect(coverage.solutions.s.categories.Iceberg.pages).toBe(1)
+    expect(coverage.solutions.s.zeroMatch).toEqual(['Data Replication', 'Ghost'])
+    expect(coverage.uncategorizedEligiblePages).toBe(1)
+  })
+})

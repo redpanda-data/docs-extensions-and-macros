@@ -509,7 +509,7 @@ module.exports.register = function ({ config = {} } = {}) {
       const docConcepts = taxonomy
         ? concepts.docConcepts(taxonomy, { categories: authoredCategories(attrs), categoryMap })
         : null
-      return { key: collect.pageKey(page), page, url: page.pub && page.pub.url, categories, concepts: docConcepts, deployment: getDeploymentType(attrs) }
+      return { key: collect.pageKey(page), page, url: page.pub && page.pub.url, categories, authoredCategories: raw, concepts: docConcepts, deployment: getDeploymentType(attrs) }
     })
     const graphInput = categoryMap ? docs : docs.map((d) => ({ ...d, categories: [] }))
     const { related, edges, warnings: rankWarnings } = relationships.computeRelatedSolutions({
@@ -532,7 +532,7 @@ module.exports.register = function ({ config = {} } = {}) {
 
     // Category coverage report: which of each solution's categories reach doc
     // pages, and how many eligible pages carry no categories at all.
-    const coverage = relationships.computeCoverage({ docs: graphInput, solutions: active, categoryMap })
+    const coverage = relationships.computeCoverage({ docs: graphInput, solutions: active, categoryMap, taxonomy })
     for (const [slug, entry] of Object.entries(coverage.solutions)) {
       logger.info(relationships.formatCoverageLine(slug, entry))
       // A category no eligible page carries is one the solution can never be
