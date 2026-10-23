@@ -172,7 +172,7 @@ describe('checkSources: every finding class', () => {
   test('a correct file ref with a quote passes with no findings', async () => {
     const { result } = await check('// source: redpanda-data/streaming-enterprise:src/config.go:5 "return 1073741824"\nThe default is 1 GiB.\n', { files: FILES })
     expect(result.findings).toEqual([])
-    expect(result.summary).toEqual({ errors: 0, warnings: 0, info: 0 })
+    expect(result.summary).toEqual({ checked: 1, failed: 0, notes: 0, errors: 0, warnings: 0, info: 0 })
   })
 
   test('quote matching is whitespace-normalised and spans the cited range', async () => {
@@ -223,7 +223,7 @@ describe('checkSources: every finding class', () => {
   test('unreachable is a warning, not a pass and not an error', async () => {
     const { rules, result } = await check('// source: redpanda-data/streaming-enterprise:src/config.go:5 "return 1073741824"\nClaim.\n', { files: FILES, unreachableRepos: ['streaming-enterprise'] })
     expect(rules).toEqual(['unreachable'])
-    expect(result.summary).toEqual({ errors: 0, warnings: 1, info: 0 })
+    expect(result.summary).toEqual({ checked: 1, failed: 0, notes: 0, errors: 0, warnings: 1, info: 0 })
   })
 
   test('PR refs report state as info; missing PRs are errors; unreachable is a warning', async () => {
@@ -279,6 +279,85 @@ describe('checkSources: every finding class', () => {
     expect(client.calls.getFile).toEqual(['streaming-enterprise@:src/config.go', 'streaming-enterprise@dev:src/config.go'])
     expect(client.calls.getPull).toEqual(['connect#1'])
     expect(result.fetches).toBe(3)
+  })
+})
+
+describe('the // Source: convention: case, asides, and free-form notes', () => {
+  test.each([
+    '// Source: redpanda-data/streaming-enterprise:src/config.go:5 "return 1073741824"',
+    '// source: redpanda-data/streaming-enterprise:src/config.go:5 "return 1073741824"',
+    '// SOURCE: redpanda-data/streaming-enterprise:src/config.go:5 "return 1073741824"',
+    '//Source:redpanda-data/streaming-enterprise:src/config.go:5 "return 1073741824"',
+    '  // Source : redpanda-data/streaming-enterprise:src/config.go:5 "return 1073741824"',
+    '// Source (verified 2026-10-20, cloudv2 origin/main): redpanda-data/streaming-enterprise:src/config.go:5 "return 1073741824"'
+  ])('%s is checked like the canonical form', async (comment) => {
+    const { result, client } = await check(`${comment}\nThe default is 1 GiB.\n`, { files: FILES })
+    expect(result.findings).toEqual([])
+    expect(result.summary).toMatchObject({ checked: 1, failed: 0, notes: 0 })
+    expect(client.calls.getFile).toEqual(['streaming-enterprise@:src/config.go'])
+  })
+
+  test('a wrong quote fails in every case variant and in the parenthesised form', async () => {
+    for (const marker of ['// Source:', '// source:', '// Source (verified 2026-10-20):']) {
+      const { rules } = await check(`${marker} redpanda-data/streaming-enterprise:src/config.go:5 "return 2147483648"\nClaim.\n`, { files: FILES })
+      expect(rules).toEqual(['quote-not-found'])
+    }
+  })
+
+  test.each([
+    ['prose', '// Source: triggers-table.tsx on cloudv2 origin/main, verified 2026-10-07 (cloudv2#30772).'],
+    ['a parenthesised aside then prose', '// Source (verified 2026-10-20, cloudv2 origin/main, cloudv2#31284): apps/adp-ui/src/x.tsx:12 renders "Save"'],
+    ['a path without owner/repo', '// Source: apps/frontend/src/foo.tsx:12-14 "label"'],
+    ['a one-colon path that looks like owner/repo', '// Source (verified 2026-09-03): oauth-clients/access-split-card.tsx: the Self-registration half'],
+    ['a bare repo#n', '// Source: cloudv2#31251 removed validateSystemPrompts'],
+    ['a URL followed by prose', '// Source: https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html (fetched 2026-09-22): access is on'],
+    ['an aside with the prose on the next lines', '// Source (AWS, verified 2026-10-19):'],
+    ['an aside that never closes with a colon', '// Source (AWS, verified 2026-10-16). S3 API Reference "Permissions" sections'],
+    ['an aside followed by more text before the colon', '// Source (verified at adp/v0.2.86, 2026-10-15), for the user prerequisite: a session needs a key'],
+    ['a URL, a quote, then prose', '// Source: https://api.freshservice.com/ "View List of Tickets" (verified 2026-09-22) documents filter']
+  ])('free-form note (%s) is an unchecked-note info finding, never an error', async (_, comment) => {
+    const { result, client } = await check(`${comment}\n// more prose on the next line\nClaim.\n`, { files: FILES })
+    expect(result.findings.map((f) => [f.rule, f.severity])).toEqual([['unchecked-note', 'info']])
+    expect(result.summary).toEqual({ checked: 0, failed: 0, notes: 1, errors: 0, warnings: 0, info: 1 })
+    expect(client.calls).toEqual({ getFile: [], getPull: [], headUrl: [] })
+  })
+
+  test('parseSourceComment returns { note } for prose', () => {
+    expect(parseSourceComment(' see the controller code')).toEqual({ note: 'see the controller code' })
+  })
+
+  test.each([
+    ['a malformed file ref', '// Source: redpanda-data/connect:main.go', /unrecognised ref/],
+    ['a lowercase Jira key', '// Source: doc-123', /unrecognised ref/],
+    ['a file ref followed by prose', '// Source: redpanda-data/streaming-enterprise:src/config.go:5 checked 2026-10-20', /unexpected text after the ref.*put prose on its own comment line/],
+    ['a quote followed by prose', '// Source: redpanda-data/streaming-enterprise:src/config.go:5 "return 1073741824" (checked)', /unexpected text after the ref/],
+    ['a PR ref followed by prose', '// Source: redpanda-data/connect#12 and later fixes', /unexpected text after the ref/],
+    ['a Jira key followed by prose', '// Source: DOC-1234 says so', /unexpected text after the ref/],
+    ['a foreign owner', '// Source (verified): someone-else/connect:main.go:3', /owner must be redpanda-data/],
+    ['an empty marker', '// Source:', /empty source comment/]
+  ])('a malformed ref (%s) is still an error in the new spelling', async (_, comment, re) => {
+    const { result } = await check(`${comment}\nClaim.\n`, { files: FILES })
+    expect(result.findings.map((f) => f.rule)).toEqual(['malformed'])
+    expect(result.findings[0].message).toMatch(re)
+    expect(result.summary).toMatchObject({ checked: 1, failed: 1, notes: 0, errors: 1 })
+  })
+
+  test('stacked comments in mixed case share the claim below them; a note is not a no-claim warning', async () => {
+    const doc = ['// Source: DOC-1', '// source: redpanda-data/docs#5', '// Source (aside): prose', 'Claim.', '', '// Source: a note above a blank line', ''].join('\n')
+    const found = extractSources(doc)
+    expect(found.map((s) => [s.line, s.claimLine])).toEqual([[1, 4], [2, 4], [3, 4], [6, null]])
+    const { rules } = await check(doc, { pulls: { 'docs#5': 'merged' } })
+    expect(rules).toEqual(['syntax-only', 'pr-state', 'unchecked-note', 'unchecked-note'])
+  })
+
+  test('Source comments inside listing blocks and comment blocks are still skipped', () => {
+    const doc = ['----', '// Source: DOC-2', '----', '////', '// SOURCE: DOC-3', '////', '// Source: DOC-4', 'Claim.'].join('\n')
+    expect(extractSources(doc).map((s) => s.line)).toEqual([7])
+  })
+
+  test('words that merely start with source are not source comments', () => {
+    const doc = ['//   source object and s3:PutObject permission', '// Sources are listed below', '// sourcemap: on', 'Claim.'].join('\n')
+    expect(extractSources(doc)).toEqual([])
   })
 })
 
@@ -375,7 +454,8 @@ describe('selectFiles and CLI', () => {
 
   test('runCli exit codes: 1 on errors, 0 on warnings only, 2 on a bad --diff', async () => {
     const root = makeRepo({
-      'modules/a/pages/bad.adoc': '// source: nonsense\nClaim.\n',
+      'modules/a/pages/bad.adoc': '// source: redpanda-data/connect:main.go\nClaim.\n',
+      'modules/a/pages/note.adoc': '// Source: free-form prose that is never checked\nClaim.\n',
       'modules/a/pages/warn.adoc': '// source: redpanda-data/streaming-enterprise:src/config.go:1\nClaim.\n'
     })
     const log = jest.spyOn(console, 'log').mockImplementation(() => {})
@@ -388,7 +468,9 @@ describe('selectFiles and CLI', () => {
       expect(process.exitCode).toBe(1)
       await runCli({ root, format: 'json' }, { client: stubClient({ unreachableRepos: ['streaming-enterprise'] }) })
       const json = JSON.parse(log.mock.calls[log.mock.calls.length - 1][0])
-      expect(json.summary).toEqual({ errors: 1, warnings: 1, info: 0 })
+      expect(json.summary).toEqual({ checked: 2, failed: 1, notes: 1, errors: 1, warnings: 1, info: 1 })
+      await runCli({ root, files: 'modules/a/pages/note.adoc' }, { client: stubClient() })
+      expect(process.exitCode).toBe(0)
       await runCli({ root, diff: 'main' }, { client: stubClient() })
       expect(process.exitCode).toBe(2)
     } finally {
@@ -399,10 +481,10 @@ describe('selectFiles and CLI', () => {
   })
 
   test('human output lists errors first and ends with a summary line', async () => {
-    const { result } = await check('// source: DOC-1\nA.\n\n// source: bad\nB.\n', {})
+    const { result } = await check('// source: DOC-1\nA.\n\n// source: doc-1\nB.\n\n// Source: a note\nC.\n', {})
     const text = formatHuman(result)
     expect(text.split('\n')[0]).toMatch(/^ERROR {3}modules\/ROOT\/pages\/p\.adoc:4 \[malformed\]/)
-    expect(text).toMatch(/check-sources: 2 source comment\(s\) in 1 file\(s\), 0 fetch\(es\): 1 error\(s\), 0 warning\(s\), 1 info$/)
+    expect(text).toMatch(/check-sources: 3 source comment\(s\) in 1 file\(s\): 2 checked, 1 failed, 1 unchecked note\(s\); 0 fetch\(es\): 1 error\(s\), 0 warning\(s\), 2 info$/)
   })
 
   test('the doc-tools binary registers the command and passes on a page with no sources', () => {

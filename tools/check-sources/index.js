@@ -10,9 +10,11 @@ const { spawnSync } = require('child_process')
  *
  * Convention: an AsciiDoc line comment directly above a claim,
  *
- *   // source: <ref> ["<short exact quote>"]
+ *   // Source: <ref> ["<short exact quote>"]
  *
- * where <ref> is one of
+ * The marker is case-insensitive (`// source:` works too), and a
+ * parenthesised aside before the colon is allowed:
+ * `// Source (verified 2026-10-20): ...`. <ref> is one of
  *
  *   redpanda-data/<repo>[@<git-ref>]:<path>:<line>[-<line>]   (default ref: the repo's default branch)
  *   redpanda-data/<repo>#<pr-number>
@@ -25,6 +27,13 @@ const { spawnSync } = require('child_process')
  * keys and URLs are checked for syntax only (URLs can be HEAD-checked with
  * --check-urls). A fetch that fails for auth or network reasons is reported
  * as `unreachable`, a warning, never a silent pass.
+ *
+ * Text after the marker that does not start with a ref is free-form
+ * provenance prose: an `unchecked-note` (info), counted in the summary and
+ * never an error. Text that starts with a ref is parsed strictly: the ref, an
+ * optional quote, nothing else. The one exception is an https URL followed by
+ * prose, which is a note, because vendor docs are often cited that way and
+ * URL refs are syntax-only anyway.
  */
 
 const OWNER = 'redpanda-data'
@@ -41,31 +50,53 @@ const SEVERITY = Object.freeze({
   'no-claim': 'warning',
   'pr-state': 'info',
   'quote-not-checked': 'info',
-  'syntax-only': 'info'
+  'syntax-only': 'info',
+  'unchecked-note': 'info'
 })
 
-const SOURCE_LINE_RE = /^\s*\/\/\s*source:(.*)$/
+// `// Source:` or `// Source (aside):`, any case. The aside is kept but never parsed.
+const SOURCE_LINE_RE = /^\s*\/\/\s*source\s*(?::|\((.*?)\)\s*:)(.*)$/i
+// `// Source (` without a `):` to close the aside is still provenance prose.
+const SOURCE_ASIDE_RE = /^\s*\/\/\s*source\s*\(/i
+const isSourceLine = (line) => SOURCE_LINE_RE.test(line) || SOURCE_ASIDE_RE.test(line)
 const REPO_RE = '[A-Za-z0-9._-]+'
 const FILE_REF_RE = new RegExp(`^([A-Za-z0-9._-]+)/(${REPO_RE})(?:@([^\\s:]+))?:([^\\s:]+):(\\d+)(?:-(\\d+))?$`)
 const PR_REF_RE = new RegExp(`^([A-Za-z0-9._-]+)/(${REPO_RE})#(\\d+)$`)
 const JIRA_RE = /^[A-Z][A-Z0-9]+-\d+$/
 
 /**
- * Parse the text after `// source:`. Returns { ref, quote } on success or
- * { error } describing why the line is malformed.
+ * Does this first token claim to be a ref? If so it is parsed strictly and a
+ * bad one is an error; if not, the comment is a free-form note. Paths without
+ * an owner/repo (`apps/ui/x.tsx:12`), bare `repo#n`, and prose are notes.
+ */
+function looksLikeRef (token) {
+  if (/^redpanda-data\//i.test(token)) return true
+  if (/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+#\d+$/.test(token)) return true
+  if (/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+(?:@[^\s:]+)?:[^\s:]+:\d/.test(token)) return true
+  if (/^[A-Za-z][A-Za-z0-9]+-\d+$/.test(token)) return true
+  return /^https?:\/\//i.test(token)
+}
+
+/**
+ * Parse the text after the `// Source:` marker. Returns { ref, quote } for a
+ * machine-readable ref, { note } for free-form prose, or { error } describing
+ * why a ref is malformed.
  */
 function parseSourceComment (rest) {
   const text = rest.trim()
-  if (!text) return { error: 'empty source comment: expected `// source: <ref> ["<quote>"]`' }
+  if (!text) return { error: 'empty source comment: expected `// Source: <ref> ["<quote>"]`' }
 
   let refText = text
   let quote = null
   const space = text.search(/\s/)
+  if (space !== -1) refText = text.slice(0, space)
+  if (!looksLikeRef(refText)) return { note: text }
   if (space !== -1) {
-    refText = text.slice(0, space)
     const tail = text.slice(space).trim()
     if (!(tail.length >= 2 && tail.startsWith('"') && tail.endsWith('"'))) {
-      return { error: `unexpected text after the ref: ${JSON.stringify(tail)} (a quote must be wrapped in double quotes and end the line)` }
+      // A URL inside prose is a citation, not a ref: its quote is never checked anyway.
+      if (/^https:\/\//i.test(refText)) return { note: text }
+      return { error: `unexpected text after the ref: ${JSON.stringify(tail)}. A ref takes only an optional quote, wrapped in double quotes, at the end of the line; put prose on its own comment line` }
     }
     quote = tail.slice(1, -1)
     if (!quote.trim()) return { error: 'empty quote' }
@@ -110,7 +141,7 @@ function parseRef (refText) {
 }
 
 /**
- * Find every `// source:` comment in an AsciiDoc document. Comments inside
+ * Find every `// Source:` comment (any case) in an AsciiDoc document. Comments inside
  * delimited listing, literal, passthrough, or comment blocks are content, not
  * source annotations, and are skipped.
  */
@@ -128,12 +159,18 @@ function extractSources (content) {
       if (fence === marker) { fence = null; continue }
     }
     if (fence !== null) continue
+    if (!isSourceLine(line)) continue
     const m = SOURCE_LINE_RE.exec(line)
-    if (!m) continue
-    const parsed = parseSourceComment(m[1])
+    // An aside that never closes with `):`, or `// Source (aside):` with nothing
+    // after the colon (the prose is on the next comment lines), is a note.
+    // A bare empty `// Source:` is malformed.
+    let parsed
+    if (!m) parsed = { note: line.trim().replace(/^\/\/\s*/, '') }
+    else if (m[1] !== undefined && !m[2].trim()) parsed = { note: `(${m[1]})` }
+    else parsed = parseSourceComment(m[2])
     // The claim is the first line below the stacked source comments.
     let j = i + 1
-    while (j < lines.length && SOURCE_LINE_RE.test(lines[j])) j++
+    while (j < lines.length && isSourceLine(lines[j])) j++
     const claimLine = j < lines.length && lines[j].trim() !== '' && !/^\s*\/\//.test(lines[j]) ? j + 1 : null
     out.push({ line: i + 1, raw: line.trim(), claimLine, ...parsed })
   }
@@ -309,7 +346,7 @@ function createGitHubClient ({ token = resolveToken(), fetchImpl = globalThis.fe
  * @param {string} [opts.root] - Directory paths are reported relative to
  * @param {object} opts.client - GitHub client (see createGitHubClient)
  * @param {boolean} [opts.checkUrls] - HEAD-check https URLs
- * @returns {Promise<{files: number, sources: number, findings: object[], summary: object, fetches: number}>}
+ * @returns {Promise<{files: number, sources: number, findings: object[], summary: {checked: number, failed: number, notes: number, errors: number, warnings: number, info: number}, fetches: number}>}
  */
 async function checkSources ({ files, root = process.cwd(), client, checkUrls = false }) {
   const findings = []
@@ -318,6 +355,8 @@ async function checkSources ({ files, root = process.cwd(), client, checkUrls = 
   const urlCache = new Map()
   let fetches = 0
   let sources = 0
+  let checked = 0
+  let notes = 0
 
   const add = (rule, where, message, extra = {}) => findings.push({ rule, severity: SEVERITY[rule], ...where, message, ...extra })
 
@@ -337,6 +376,8 @@ async function checkSources ({ files, root = process.cwd(), client, checkUrls = 
     for (const entry of extractSources(content)) {
       sources++
       const where = { file: rel, line: entry.line, source: entry.raw }
+      if (entry.note !== undefined) { notes++; add('unchecked-note', where, 'free-form note, not checked: start the comment with a ref to have it verified'); continue }
+      checked++
       if (entry.error) { add('malformed', where, entry.error); continue }
       if (entry.claimLine === null) add('no-claim', where, 'no claim directly below this source comment (next line is blank, another comment, or the end of the file)')
       const { ref, quote } = entry
@@ -388,13 +429,15 @@ async function checkSources ({ files, root = process.cwd(), client, checkUrls = 
   }
 
   const count = (sev) => findings.filter((f) => f.severity === sev).length
+  // A comment fails when it has at least one error; count comments, not findings.
+  const failed = new Set(findings.filter((f) => f.severity === 'error').map((f) => `${f.file}:${f.line}`)).size
   return {
     files: files.length,
     sources,
     fetches,
     authenticated: Boolean(client.authenticated),
     findings,
-    summary: { errors: count('error'), warnings: count('warning'), info: count('info') }
+    summary: { checked, failed, notes, errors: count('error'), warnings: count('warning'), info: count('info') }
   }
 }
 
@@ -437,7 +480,8 @@ function formatHuman (result) {
     out.push(`        ${f.source}`)
   }
   if (sorted.length) out.push('')
-  out.push(`check-sources: ${result.sources} source comment(s) in ${result.files} file(s), ${result.fetches} fetch(es)${result.authenticated ? '' : ' (unauthenticated)'}: ${result.summary.errors} error(s), ${result.summary.warnings} warning(s), ${result.summary.info} info`)
+  const { checked, failed, notes, errors, warnings, info } = result.summary
+  out.push(`check-sources: ${result.sources} source comment(s) in ${result.files} file(s): ${checked} checked, ${failed} failed, ${notes} unchecked note(s); ${result.fetches} fetch(es)${result.authenticated ? '' : ' (unauthenticated)'}: ${errors} error(s), ${warnings} warning(s), ${info} info`)
   return out.join('\n')
 }
 

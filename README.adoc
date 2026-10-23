@@ -72,21 +72,23 @@ A Model Context Protocol server that exposes doc-tools to Claude Code:
 
 === Source checks
 
-`doc-tools check-sources` checks the `// source:` comments that record where a claim on a page came from. Put the comment directly above the claim:
+`doc-tools check-sources` checks the `// Source:` comments that record where a claim on a page came from. Put the comment directly above the claim:
 
 [,asciidoc]
 ----
-// source: redpanda-data/streaming-enterprise:src/v/config/configuration.cc:1086-1094 "7 * 24h"
+// Source: redpanda-data/streaming-enterprise:src/v/config/configuration.cc:1086-1094 "7 * 24h"
 The default retention time is seven days.
 ----
 
-A ref is one of:
+The marker is case-insensitive, so `// source:` works too, and a parenthesised aside before the colon is allowed, for example `// Source (verified 2026-10-20):`. After the marker comes a ref, an optional quote in double quotes, and nothing else. A ref is one of:
 
 * `redpanda-data/<repo>[@<git-ref>]:<path>:<line>[-<line>]`: the cited lines must exist, and the optional quote in double quotes must appear in them (whitespace is normalised). Without `@<git-ref>`, the repo's default branch is used.
 * `redpanda-data/<repo>#<pr-number>`: the pull request must exist. Its state is reported.
 * A Jira key, such as `DOC-1234`, or an `https://` URL: syntax only. Add `--check-urls` to HEAD-check URLs.
 
-Malformed comments, missing files, line ranges past the end of the file, and quotes that are no longer in the cited lines are errors and exit 1. When a quote has moved, the message says where it is now. A fetch that fails for auth or network reasons is a warning, never a silent pass. Run `npx doc-tools check-sources --diff origin/main` to check only the pages changed on a branch. See link:CLI_REFERENCE.adoc#check-sources[CLI reference].
+When the text after the marker does not start with a ref, the comment is free-form provenance prose. It is reported as an `unchecked-note` (info), counted, and never fails the run. An `https://` URL followed by prose is also a note. Prefer a ref: only refs are verified. A comment that starts with a ref but has other text after it is malformed, so put prose on its own comment line.
+
+Malformed comments, missing files, line ranges past the end of the file, and quotes that are no longer in the cited lines are errors and exit 1. When a quote has moved, the message says where it is now. A fetch that fails for auth or network reasons is a warning, never a silent pass. The summary line counts the comments checked, the comments that failed, and the unchecked notes. Run `npx doc-tools check-sources --diff origin/main` to check only the pages changed on a branch. See link:CLI_REFERENCE.adoc#check-sources[CLI reference].
 
 == Support
 

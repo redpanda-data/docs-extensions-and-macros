@@ -2971,9 +2971,11 @@ programCli
  * check-sources
  *
  * @description
- * Check the `// source:` comments in AsciiDoc pages. A source comment sits
- * directly above the claim it supports: `// source: <ref>`, optionally
- * followed by a short exact quote in double quotes. A ref is a file range
+ * Check the `// Source:` comments in AsciiDoc pages. A source comment sits
+ * directly above the claim it supports: `// Source: <ref>`, optionally
+ * followed by a short exact quote in double quotes and nothing else. The
+ * marker is case-insensitive and may carry a parenthesised aside before the
+ * colon (`// Source (verified 2026-10-20): <ref>`). A ref is a file range
  * (`redpanda-data/<repo>[@<git-ref>]:<path>:<line>[-<line>]`, default ref is
  * the repo's default branch), a pull request (`redpanda-data/<repo>#<n>`), a
  * Jira key, or an https:// URL. File refs are fetched from GitHub once per
@@ -2981,7 +2983,11 @@ programCli
  * in them after whitespace is normalised (when it has moved, the message
  * says where it is now). PR refs must exist; their state (merged, open,
  * closed) is info. Jira keys and URLs are checked for syntax only, unless
- * --check-urls. Errors (exit 1): malformed, missing-file, line-out-of-range,
+ * --check-urls. Text after the marker that does not start with a ref (or
+ * that is an https URL followed by prose) is free-form provenance: an
+ * unchecked-note (info), counted in the summary, never an error. The summary
+ * counts comments checked, comments failed, and unchecked notes.
+ * Errors (exit 1): malformed, missing-file, line-out-of-range,
  * quote-not-found, pr-not-found, url-not-found. Warnings (exit 0):
  * unreachable (auth or network failure, never a silent pass) and no-claim
  * (nothing directly below the comment). Comments inside listing, literal,
@@ -3006,7 +3012,7 @@ programCli
  */
 programCli
   .command('check-sources')
-  .description('Check that `// source:` comments in AsciiDoc pages cite GitHub lines, PRs, Jira keys, or URLs that exist and still contain the quoted text')
+  .description('Check that `// Source:` comments in AsciiDoc pages cite GitHub lines, PRs, Jira keys, or URLs that exist and still contain the quoted text; free-form comments are counted as unchecked notes')
   .option('--root <path>', 'Docs repo root (default: current directory)')
   .option('--files <globs>', 'Comma-separated globs of .adoc files to check, relative to --root (default: modules/**/*.adoc). With --diff, filters the changed files')
   .option('--diff <base>', 'Check only .adoc files changed between the merge base with <base> and HEAD, for example origin/main')
