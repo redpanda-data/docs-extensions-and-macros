@@ -534,6 +534,7 @@ jobs:
       overrides_json: ${{ steps.c.outputs.overrides_json }}
       code_heavy: ${{ steps.c.outputs.code_heavy }}
       has_images: ${{ steps.c.outputs.has_images }}
+      best_fit: ${{ steps.c.outputs.best_fit }}
       ticket: ${{ steps.c.outputs.ticket }}
     steps:
       - id: c
@@ -576,6 +577,17 @@ jobs:
             # quickstart's docker-compose file) never trips this. Tune with data.
             echo "code_heavy=$([[ $CODE -ge 3 && $CODE -gt $ADOC ]] && echo true || echo false)"
             echo "has_images=$([[ $IMG -gt 0 ]] && echo true || echo false)"
+            # Best-fit: no routed branch applies (no .adoc, no images, not
+            # JSON-only, not code-heavy), e.g. a skill's SKILL.md, a
+            # workflow, a README, or one or two scripts. Instead of posting
+            # "no checks apply", best_fit_review picks the review that suits
+            # the change. Must stay the exact complement of the branch `if`s.
+            BEST_FIT=false
+            if [[ $TOTAL -gt 0 && $ADOC -eq 0 && $IMG -eq 0 && $JSON -ne $TOTAL ]] \
+               && ! [[ $CODE -ge 3 && $CODE -gt $ADOC ]]; then
+              BEST_FIT=true
+            fi
+            echo "best_fit=$BEST_FIT"
           } >> "$GITHUB_OUTPUT"
           TICKET=$(gh pr view "$PR" --repo "$R" --json title,body,headRefName \
             --jq '[.title, .body // "", .headRefName] | join(" ")' \
@@ -867,6 +879,83 @@ jobs:
           if-no-files-found: ignore
 
   # ──────────────────────────────────────────────────────────────────────
+  # Best-fit review for changes no routed branch covers (classify's
+  # best_fit): a skill, agent, or command file, a workflow, a README, one or
+  # two scripts. Claude reads the diff and applies the plugin skill that
+  # suits it, so every reviewed PR gets a report instead of "no checks
+  # apply". Same posture as code_review: the prompt spells out the code
+  # pass rather than invoking /code-review, which never loads here (see
+  # code_review). It runs no PR-head scripts, so it may hold id-token.
+  # ──────────────────────────────────────────────────────────────────────
+  best_fit_review:
+    needs: [gate, classify]
+    if: needs.classify.outputs.best_fit == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write   # OIDC role for the ADP gateway credential
+    timeout-minutes: 45
+    steps:
+      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
+        with:
+          repo: ${{ github.repository }}
+          pr_number: ${{ inputs.pr_number }}
+          plugin_ref: ${{ inputs.plugin_ref }}
+          aws_region: ${{ inputs.aws_region }}
+          aws_role_name_prefix: ${{ inputs.aws_role_name_prefix }}
+          aws_cred_account_id: ${{ secrets.aws_cred_account_id }}
+          adp_client_secret_id: ${{ inputs.adp_client_secret_id }}
+          plugin_app_id: ${{ inputs.docs_app_id }}
+          plugin_app_private_key: ${{ secrets.docs_app_private_key }}
+          cli_version: ${{ vars.CLAUDE_CLI_VERSION || '2.1.258' }}
+          output_dir: review-output
+          prompt: >
+            Review pull request ${{ inputs.pr_number }} in
+            ${{ github.repository }}. None of this pipeline's routed reviews
+            (AsciiDoc pages, images, JSON-only, code-heavy) applies to it, so
+            your job is to pick the review that best suits what it changes
+            and run it. Read the diff with `gh pr diff` and the PR body with
+            `gh pr view`. No git command other than `git status` is allowed;
+            use Grep and Read, and read the changed files in the working tree
+            for context the diff does not show.
+            Choose by what the files are, and load the matching
+            docs-team-standards skill with the Skill tool before reviewing:
+            a skill, agent, command, hook, or resource of the
+            docs-team-standards plugin → skill-authoring (also check the
+            change against any skill it edits or references, and that evals
+            or manifests it should update were updated); a GitHub workflow,
+            action, or script → review it as code (correctness bugs first:
+            what breaks, under which inputs, at which line; skip style);
+            product UI strings → ux-text; strings that generate reference
+            docs (property descriptions, CLI help, metric help) →
+            embedded-reference-strings; Antora config (antora.yml, nav.adoc,
+            playbooks) → antora-conventions; Markdown documentation (README,
+            CONTRIBUTING, guides) → the review skill's style and accuracy
+            checks. A mixed PR may need more than one; apply each to its
+            files. Verify factual claims against the repository rather than
+            trusting the PR description.
+            Apply this repository's own CLAUDE.md rules (in the working tree,
+            from the base branch) alongside the skills.
+            HEADLESS MODE: do NOT post anything to GitHub and do not apply
+            fixes. Write the review report to review-output/findings.md in
+            this structure: a one-line summary of what the PR does and which
+            review(s) you applied; "Merge-blockers" (numbered, each with the
+            file, the problem, and the fix; or "None"); "Suggestions"
+            (numbered; or "None"); "What works well" (brief). Calibrate
+            strictly: a merge-blocker is something broken, incorrect, or a
+            violation of a hard team standard, never a style preference.
+            Write review-output/verdict.json as
+            {"verdict":"pass"|"fail","blocking":["..."],"suggestions":["..."],"review_type":"<the skill or review you applied, e.g. skill-authoring>"}
+            where "fail" means at least one merge-blocker.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: best-fit-review
+          path: review-output/
+          if-no-files-found: ignore
+
+  # ──────────────────────────────────────────────────────────────────────
   # §5 — screenshot standards: deterministic lint + Claude vision pass.
   # The lint is `doc-tools lint-screenshots` from docs-extensions-and-macros
   # — the ONE implementation, promoted from cloud-docs' repo-local script,
@@ -1136,7 +1225,7 @@ jobs:
   # §6 — one verdict, one upserted comment, final informational status.
   # ──────────────────────────────────────────────────────────────────────
   aggregate:
-    needs: [gate, classify, adoc_review, json_validation_local, json_validation, code_review, screenshot_gate, ticket_delta]
+    needs: [gate, classify, adoc_review, json_validation_local, json_validation, code_review, best_fit_review, screenshot_gate, ticket_delta]
     if: always() && needs.gate.outputs.run_review == 'true'
     runs-on: ubuntu-latest
     # 25, not 15: preview-links.sh now waits up to 10 minutes for the
@@ -1205,6 +1294,7 @@ jobs:
           # Exactly one JSON job runs (docs-team-standards: _local).
           RESULT_JSON: ${{ needs.json_validation.result != 'skipped' && needs.json_validation.result || needs.json_validation_local.result }}
           RESULT_CODE: ${{ needs.code_review.result }}
+          RESULT_BEST_FIT: ${{ needs.best_fit_review.result }}
           RESULT_SHOTS: ${{ needs.screenshot_gate.result }}
           RESULT_TICKET: ${{ needs.ticket_delta.result }}
         run: |
@@ -1228,14 +1318,11 @@ jobs:
             } >> "$GITHUB_OUTPUT"
             {
               echo "<!-- docs-review:comment -->"
-              echo "## 📋 Docs review: ⚠️ automated review unavailable"
+              echo "## 📋 Docs review: ⚠️ Automated review unavailable: review by hand before approving"
               echo
               echo "The pipeline could not assemble a verdict for this revision (the"
               echo "aggregation step failed to run), so there is no automated result here."
-              echo "Human review is required. See the [workflow run](${GITHUB_SERVER_URL}/${R}/actions/runs/${GITHUB_RUN_ID}) for details."
-              echo
-              echo "**This workflow never merges.** Merge requires a documentation approval"
-              echo "from a docs team member."
+              echo "See the [workflow run](${GITHUB_SERVER_URL}/${R}/actions/runs/${GITHUB_RUN_ID}) for details."
             } > comment.md
           fi
 
