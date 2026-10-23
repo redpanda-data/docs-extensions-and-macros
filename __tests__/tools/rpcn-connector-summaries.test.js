@@ -898,6 +898,19 @@ describe('buildChangedDefaultsTable - whats-new changed default links', () => {
     expect(table).toContain('|`+null+`\n|`+__x__+`\n');
     expect(table).toContain('|_no default_\n|`+null+`\n');
   });
+
+  test('keeps a null default and the string "null" in separate rows', () => {
+    const table = buildChangedDefaultsTable([
+      { component: 'inputs:a', field: 'f', oldDefault: null, newDefault: 'x', description: 'A.' },
+      { component: 'inputs:b', field: 'f', oldDefault: 'null', newDefault: 'x', description: 'A.' },
+      { component: 'inputs:c', field: 'g', oldDefault: { a: 1 }, newDefault: 'x', description: 'A.' },
+      { component: 'inputs:d', field: 'g', oldDefault: { b: 2 }, newDefault: 'x', description: 'A.' }
+    ], cap);
+
+    expect(table.match(/^\|`\+null\+`$/gm)).toHaveLength(2);
+    expect(table).toContain('`+{"a":1}+`');
+    expect(table).toContain('`+{"b":2}+`');
+  });
 });
 
 describe('backfillPageDescriptions - self-healing page headers', () => {

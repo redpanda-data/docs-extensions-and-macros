@@ -728,8 +728,8 @@ function printDeltaReport(oldIndex, newIndex, opts = {}) {
     console.log('➤ Changed default values:');
     changedDefaultsList.forEach(entry => {
       const { component, field, oldDefault, newDefault } = entry;
-      const oldStr = JSON.stringify(oldDefault);
-      const newStr = JSON.stringify(newDefault);
+      const oldStr = oldDefault === undefined ? 'no default' : JSON.stringify(oldDefault);
+      const newStr = newDefault === undefined ? 'no default' : JSON.stringify(newDefault);
       console.log(`   • ${component} → ${field}`);
       console.log(`     Old: ${oldStr}`);
       console.log(`     New: ${newStr}`);
