@@ -22,8 +22,9 @@
 # in a reviewed pull request. Do not move the prompt to docs-team-standards,
 # and never fetch a prompt, a skill, or a resource from another repository's
 # branch at run time: that would change every caller's review the moment
-# someone merged elsewhere. A fetch pinned to a commit SHA is allowed. The writing
-# standard and terminology fetch below predates this rule; do not add to it.
+# someone merged elsewhere. A fetch pinned to a commit SHA is allowed. The
+# writing standard and terminology fetch below predates this rule; do not add
+# to it.
 # See CLAUDE.md, "Automation prompts stay in this repository".
 #
 # Each string is reviewed once. lint-strings fingerprints every declaration
