@@ -56,6 +56,89 @@ describe('capToTwoSentences - xref and filename protection', () => {
 
     expect(capToTwoSentences(description)).toBe('First sentence. Second sentence.');
   });
+
+  test('stops at a list so a table cell never holds half of one', () => {
+    // connect 4.111.1 inputs/oracledb_cdc logminer.window_strategy: the old
+    // cap kept the lead-in plus the first bullet and dropped the second.
+    const description = 'Controls how the SCN range mined per cycle is sized:\n\n- `scn_window` (default): Grows and shrinks a fixed SCN increment.\n- `redo_volume`: Sizes the range by a fixed redo-volume budget.'
+
+    expect(capToTwoSentences(description)).toBe('Controls how the SCN range mined per cycle is sized.')
+  })
+
+  test('stops at a list that follows without a blank line', () => {
+    expect(capToTwoSentences('Sets the compression codec:\n- `gzip`: smaller files.\n- `none`: no compression.')).toBe('Sets the compression codec.')
+  })
+
+  test('drops a colon lead-in that follows a complete sentence', () => {
+    // connect 4.113.0 shared tcp block (46 fields, for example
+    // caches/aws_dynamodb tcp): keeping the lead-in as a second sentence gave
+    // "These low-level controls are useful for."
+    const description = 'Configure TCP socket-level settings to optimize network performance and reliability. These low-level controls are useful for:\n\n- **Unresponsive hosts**: Set `connect_timeout` to limit how long a connection attempt can take (the default `0s` sets no limit)\n- **Long-lived connections**: Configure `keep_alive` settings to detect and recover from stale connections\n- **Unstable networks**: Tune keep-alive probes to balance between quick failure detection and avoiding false positives\n- **Linux systems with specific requirements**: Use `tcp_user_timeout` (Linux 2.6.37+) to control data acknowledgment timeouts\n\nMost users should keep the default values. Only modify these settings if you\'re experiencing connection stability issues or have specific network requirements.'
+
+    expect(capToTwoSentences(description)).toBe('Configure TCP socket-level settings to optimize network performance and reliability.')
+  })
+
+  test('drops a colon lead-in that follows two complete sentences', () => {
+    expect(capToTwoSentences('One. Two. You might use this option to:\n\n- a.\n- b.')).toBe('One. Two.')
+  })
+
+  test('never ends on a tail left by a mid-token period', () => {
+    // connect 4.113.0 inputs/kafka_franz fetch_max_partition_bytes: the
+    // dotted Java setting name split the second sentence, which came out as
+    // "bytes`." on its own.
+    const description = 'The maximum number of bytes that are consumed from a single partition in a fetch request. This field is equivalent to the Java setting `fetch.max.partition.bytes`.\n\nIf a single batch is larger than the `fetch_max_partition_bytes` value, the batch is still sent so that the client can make progress.'
+
+    expect(capToTwoSentences(description)).toBe('The maximum number of bytes that are consumed from a single partition in a fetch request.')
+  })
+
+  test('keeps a second sentence that contains a mid-token period', () => {
+    // connect 4.113.0 tcp.tcp_user_timeout: main gave "...the connection. 37+), ignored on other platforms."
+    const description = 'Maximum time to wait for acknowledgment of transmitted data before killing the connection. Linux-only (kernel 2.6.37+), ignored on other platforms. When enabled, keep_alive.idle must be greater than this value per RFC 5482. Zero disables.'
+
+    expect(capToTwoSentences(description))
+      .toBe('Maximum time to wait for acknowledgment of transmitted data before killing the connection. Linux-only (kernel 2.6.37+), ignored on other platforms.')
+  })
+
+  test('keeps two sentences of a first paragraph and drops the next paragraph', () => {
+    expect(capToTwoSentences('One. Two.\n\nThree.')).toBe('One. Two.')
+  })
+});
+
+describe('whats-new field tables prefer short descriptions', () => {
+  const longDesc = 'Controls how the SCN range mined per cycle is sized:\n\n- `scn_window` (default): Grows.\n- `redo_volume`: Sizes.'
+  const shortDesc = 'Sizes each mining cycle by an adaptive SCN window or by redo volume.'
+
+  test('generateConnectorDiffJson carries short_description into new fields', () => {
+    const comp = (children) => ({ inputs: [{ name: 'oracledb_cdc', type: 'input', config: { children } }] })
+    const oldIndex = comp([{ name: 'dsn', type: 'string', description: 'DSN.' }])
+    const newIndex = comp([
+      { name: 'dsn', type: 'string', description: 'DSN.' },
+      { name: 'window_strategy', type: 'string', description: longDesc, short_description: shortDesc }
+    ])
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, { oldVersion: '4.111.0', newVersion: '4.111.1' })
+    const field = diff.details.newFields.find(f => f.field === 'window_strategy')
+
+    expect(field.shortDescription).toBe(shortDesc)
+    expect(field.description).toBe(longDesc)
+  })
+
+  test('buildFieldsTable uses shortDescription when present', () => {
+    const table = buildFieldsTable([
+      { component: 'inputs:oracledb_cdc', field: 'logminer.window_strategy', description: longDesc, shortDescription: shortDesc, introducedIn: '4.111.1' }
+    ], capToTwoSentences, { showIntroducedIn: true })
+
+    expect(table).toContain(`|${shortDesc}\n`)
+    expect(table).not.toContain('scn_window')
+  })
+
+  test('buildFieldsTable falls back to the capped description', () => {
+    const table = buildFieldsTable([
+      { component: 'inputs:oracledb_cdc', field: 'logminer.window_strategy', description: longDesc, introducedIn: '4.111.1' }
+    ], capToTwoSentences, { showIntroducedIn: true })
+
+    expect(table).toContain('|Controls how the SCN range mined per cycle is sized.\n')
+    expect(table).not.toContain('- `scn_window`')
+  })
 });
 
 describe('augmentConnectorData - config components', () => {
