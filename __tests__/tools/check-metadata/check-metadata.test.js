@@ -332,3 +332,73 @@ describe('check-metadata --fix', () => {
     expect(fs.readFileSync(path.join(root, 'modules/a/pages/a.adoc'), 'utf8')).toBe(header('Iceberg'))
   })
 })
+
+describe('check-metadata --suggest', () => {
+  const TIERED = `= Tiered Storage
+:description: Offload Tiered Storage segments.
+
+include::manage:partial$tiered.adoc[]
+`
+  const repo = () => makeRepo({
+    'modules/manage/pages/tiered.adoc': TIERED,
+    'modules/manage/partials/tiered.adoc': '== Replication\n\nTiered Storage and Replication.\n',
+    'modules/manage/pages/tagged.adoc': '= Tiered Storage\n:page-categories: Tiered Storage\n\nx\n',
+    'modules/manage/pages/plain.adoc': '= Plain\n\nNothing to see.\n',
+  })
+
+  test('JSON lists each suggestion with file, facet, conceptId, label, score, and evidence', async () => {
+    const { result, code } = await cli([], { root: repo(), taxonomy: TAXONOMY, format: 'json', suggest: true })
+    expect(code).toBe(0)
+    const s = result.suggest
+    expect(s.minScore).toEqual({ docs: 5, solution: 3 })
+    expect(s.suggestions.map((x) => `${x.file} ${x.conceptId}`)).toEqual(['modules/manage/pages/tiered.adoc tiered-storage'])
+    const [first] = s.suggestions
+    expect(Object.keys(first)).toEqual(expect.arrayContaining(['file', 'kind', 'facet', 'attribute', 'conceptId', 'label', 'score', 'reason', 'implies', 'evidence']))
+    expect(first.evidence).toEqual(expect.arrayContaining([
+      expect.objectContaining({ term: 'Tiered Storage', location: 'title', line: 1 }),
+      expect.objectContaining({ location: 'body', line: 3, source: 'modules/manage/partials/tiered.adoc' }),
+    ]))
+  })
+
+  test('--min-score lowers the bar, and text output shows the evidence', async () => {
+    const { result, stdout } = await cli(['modules/manage/pages/tiered.adoc'], { root: repo(), taxonomy: TAXONOMY, suggest: true, minScore: '1' })
+    expect(result.suggest.suggestions.map((x) => x.conceptId)).toEqual(['tiered-storage', 'replication'])
+    expect(stdout).toMatch(/SUGGEST modules\/manage\/pages\/tiered\.adoc/)
+    expect(stdout).toMatch(/page-categories: Replication \[topic replication\] score [\d.]+, named in 1 heading and 1 body mention; implies High Availability/)
+    expect(stdout).toMatch(/"Replication" \(Replication\) at modules\/manage\/partials\/tiered\.adoc:1 heading/)
+  })
+
+  test('--suggest-empty-only skips pages that carry categories', async () => {
+    const root = repo()
+    const all = await cli([], { root, taxonomy: TAXONOMY, suggest: true, minScore: '0' })
+    const empty = await cli([], { root, taxonomy: TAXONOMY, suggest: true, minScore: '0', suggestEmptyOnly: true })
+    expect(all.result.suggest.suggestions.some((x) => x.file.endsWith('tagged.adoc'))).toBe(false) // carried already
+    expect(empty.result.suggest.suggestions.every((x) => !x.file.endsWith('tagged.adoc'))).toBe(true)
+    const root2 = makeRepo({ 'modules/a/pages/t.adoc': '= Replication\n:page-categories: Security\n\nx\n' })
+    expect((await cli([], { root: root2, taxonomy: TAXONOMY, suggest: true })).result.suggest.suggestions).toHaveLength(1)
+    expect((await cli([], { root: root2, taxonomy: TAXONOMY, suggest: true, suggestEmptyOnly: true })).result.suggest.suggestions).toHaveLength(0)
+  })
+
+  test('without --suggest there is no suggest block', async () => {
+    const { result } = await cli([], { root: repo(), taxonomy: TAXONOMY })
+    expect(result.suggest).toBeUndefined()
+  })
+
+  test('a bad --min-score or --limit, or either without --suggest, exits 2', async () => {
+    for (const options of [{ suggest: true, minScore: 'x' }, { suggest: true, limit: '0' }, { minScore: '3' }, { suggestEmptyOnly: true }]) {
+      const { code, stderr } = await cli([], { root: repo(), taxonomy: TAXONOMY, ...options })
+      expect(code).toBe(2)
+      expect(stderr).toMatch(/--(min-score|limit|suggest)/)
+    }
+  })
+
+  test('the doc-tools binary accepts the options', () => {
+    const root = repo()
+    const bin = path.join(__dirname, '..', '..', '..', 'bin', 'doc-tools.js')
+    const res = spawnSync(process.execPath, [bin, 'check-metadata', '--root', root, '--taxonomy', TAXONOMY, '--suggest', '--min-score', '1', '--limit', '1', '--format', 'json'], { encoding: 'utf8' })
+    expect(res.status).toBe(0)
+    const out = JSON.parse(res.stdout)
+    expect(out.suggest.limit).toEqual({ docs: 1, solution: 1 })
+    expect(out.suggest.suggestions.filter((x) => x.file.endsWith('tiered.adoc'))).toHaveLength(1)
+  })
+})

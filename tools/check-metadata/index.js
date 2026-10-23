@@ -22,6 +22,11 @@
  * and so is any value the taxonomy does not know. An attribute left with no
  * values is removed.
  *
+ * With --suggest, it also lists the taxonomy values each page's text names
+ * that its header does not carry yet (extension-utils/metadata-suggest.js),
+ * with a score and evidence, so authors and agents choose values instead of
+ * inventing them. Suggestions never change the exit code.
+ *
  * Exit codes: 0 no errors, 1 errors (or warnings with --strict), 2 the check
  * could not run (no taxonomy, an invalid taxonomy, a bad argument).
  */
@@ -32,6 +37,7 @@ const { spawnSync } = require('child_process')
 const yaml = require('js-yaml')
 const { loadTaxonomyFrom } = require('../../extension-utils/taxonomy')
 const { checkPageMetadata, isSolutionPage, CATEGORY_ATTRIBUTE, TOPIC_TYPE_ATTRIBUTE, SOLUTION_FACETS } = require('../../extension-utils/metadata-check')
+const { buildMatcher, suggestForPage, DEFAULT_MIN_SCORE, DEFAULT_LIMIT } = require('../../extension-utils/metadata-suggest')
 
 const CHECKED_ATTRIBUTES = new Set([CATEGORY_ATTRIBUTE, TOPIC_TYPE_ATTRIBUTE, 'page-layout', ...Object.keys(SOLUTION_FACETS)])
 const LEGACY_CATEGORIES_PATH = 'shared/modules/ROOT/partials/valid-categories.yml'
@@ -297,6 +303,71 @@ function fixFiles ({ root, files, taxonomy }) {
   return fixed
 }
 
+/**
+ * Resolve an include:: target to a file in the checkout, so a single-sourced
+ * page is read with the text it publishes. Partials and plain relative paths
+ * only: examples are code samples, not prose. Supported forms:
+ *   partial$x.adoc               the including file's module
+ *   module:partial$x.adoc        another module of the same component
+ *   component:module:partial$x   a component checked out at <root>/<component> (shared)
+ *   ./x.adoc, x.adoc             relative to the including file
+ *
+ * @returns {(target: string, from: string|null) => {content: string, file: string}|null}
+ */
+function makeIncludeReader (root) {
+  return (target, from) => {
+    const fromRel = from ? from.split(path.sep).join('/') : ''
+    const m = /^(.*\/)?modules\/([^/]+)\/(?:pages|partials)\//.exec(fromRel)
+    let rel = null
+    const family = /^(?:([^:$]+):)?(?:([^:$]+):)?(partial|example|attachment|image|page)\$(.+)$/.exec(target)
+    if (family) {
+      if (family[3] !== 'partial') return null
+      const [component, module] = family[2] !== undefined ? [family[1], family[2]] : [null, family[1]]
+      const base = component ? `${component}/` : (m ? m[1] || '' : '')
+      const mod = module || (m ? m[2] : 'ROOT')
+      rel = `${base}modules/${mod}/partials/${family[4]}`
+    } else if (from && !/^[a-z]+:\/\//i.test(target)) {
+      rel = path.posix.join(path.posix.dirname(fromRel), target)
+    }
+    if (!rel) return null
+    const abs = path.resolve(root, rel)
+    if (!abs.startsWith(path.resolve(root) + path.sep) || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) return null
+    return { content: fs.readFileSync(abs, 'utf8'), file: path.relative(root, abs).split(path.sep).join('/') }
+  }
+}
+
+/**
+ * Suggest taxonomy values for pages (`--suggest`), one flat list for agents.
+ *
+ * @param {Object} input
+ * @param {string} input.root
+ * @param {Array<string>} input.files
+ * @param {import('../../extension-utils/taxonomy').Taxonomy} input.taxonomy
+ * @param {number} [input.minScore] - default: DEFAULT_MIN_SCORE for each page's kind
+ * @param {number} [input.limit] - per facet; default: DEFAULT_LIMIT for each page's kind
+ * @param {boolean} [input.emptyOnly] - only pages that carry no page-categories
+ *   Partials and examples are skipped: they are read through the pages that include them.
+ * @returns {{minScore: Object, limit: Object, suggestions: Array<Object>, needs: Array<Object>}}
+ *   minScore and limit are per page kind ({docs, solution}), as applied
+ */
+function suggestFiles ({ root, files, taxonomy, minScore, limit, emptyOnly = false }) {
+  const matcher = buildMatcher(taxonomy)
+  const readInclude = makeIncludeReader(root)
+  const suggestions = []
+  const needs = []
+  for (const file of files) {
+    // A partial or an example is read through the pages that include it.
+    if (/(?:^|\/)(?:partials|examples)\//.test(file)) continue
+    const content = fs.readFileSync(path.resolve(root, file), 'utf8')
+    if (emptyOnly && parseHeader(content).some((e) => e.name === CATEGORY_ATTRIBUTE && e.value.trim())) continue
+    const r = suggestForPage(content, { taxonomy, parseHeader, matcher, minScore, limit, file, readInclude })
+    for (const s of r.suggestions) suggestions.push({ file, kind: r.kind, ...s })
+    for (const n of r.needs) needs.push({ file, kind: r.kind, ...n })
+  }
+  const perKind = (value, defaults) => (value === undefined ? { ...defaults } : { docs: value, solution: value })
+  return { minScore: perKind(minScore, DEFAULT_MIN_SCORE), limit: perKind(limit, DEFAULT_LIMIT), suggestions, needs }
+}
+
 function formatText (result) {
   const out = []
   if (result.fixes) {
@@ -308,6 +379,24 @@ function formatText (result) {
   }
   for (const f of result.findings) {
     out.push(`${f.severity.toUpperCase().padEnd(7)} ${f.file}:${f.line} [${f.rule}] ${f.message}`)
+  }
+  if (result.suggest) {
+    if (out.length) out.push('')
+    let last = null
+    for (const s of result.suggest.suggestions) {
+      if (s.file !== last) {
+        out.push(`SUGGEST ${s.file}`)
+        last = s.file
+      }
+      const implied = s.implies.length ? `; implies ${s.implies.map((i) => i.label).join(', ')}` : ''
+      out.push(`  ${s.attribute}: ${s.label} [${s.facet} ${s.conceptId}] score ${s.score}, ${s.reason}${implied}`)
+      for (const e of s.evidence) {
+        const where = e.location === 'path' ? 'path' : `${e.source || s.file}:${e.line} ${e.location}`
+        out.push(`      "${e.term}" (${e.via === 'prefLabel' ? '' : `${e.via} `}${e.label}) at ${where}`)
+      }
+    }
+    for (const n of result.suggest.needs) out.push(`NEEDS   ${n.file} ${n.message}`)
+    out.push(`check-metadata --suggest: ${result.suggest.suggestions.length} suggestion(s) for ${new Set(result.suggest.suggestions.map((s) => s.file)).size} page(s) at min score ${result.suggest.minScore.docs} (Product Docs) and ${result.suggest.minScore.solution} (solutions)`)
   }
   if (out.length) out.push('')
   for (const w of result.taxonomy.warnings) out.push(`note: ${w}`)
@@ -329,12 +418,20 @@ async function runCli (paths, options = {}, { fetch } = {}) {
   let result
   try {
     if (options.format && !['text', 'json'].includes(options.format)) throw new Error(`--format must be text or json, got ${options.format}`)
+    const minScore = options.minScore === undefined ? undefined : Number(options.minScore)
+    const limit = options.limit === undefined ? undefined : Number(options.limit)
+    if (minScore !== undefined && (!Number.isFinite(minScore) || minScore < 0)) throw new Error(`--min-score must be a number of 0 or more, got ${options.minScore}`)
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) throw new Error(`--limit must be a whole number of 1 or more, got ${options.limit}`)
+    if ((options.minScore !== undefined || options.limit !== undefined || options.suggestEmptyOnly) && !options.suggest) throw new Error('--min-score, --limit, and --suggest-empty-only need --suggest')
     const root = path.resolve(options.root || process.cwd())
     const loaded = await loadTaxonomyFrom({ source: options.taxonomy, root, ...(fetch ? { fetch } : {}) })
     const files = selectFiles({ root, paths: splitList(paths), changed: options.changed })
     const fixes = options.fix ? fixFiles({ root, files, taxonomy: loaded.taxonomy }) : undefined
     result = checkFiles({ root, files, taxonomy: loaded.taxonomy, strict: Boolean(options.strict), isLegacyCategory: loadLegacyCategories(root) })
     result = { taxonomy: { source: loaded.source, schema: loaded.schemaSource, warnings: loaded.warnings }, ...result, ...(fixes ? { fixes } : {}) }
+    if (options.suggest) {
+      result.suggest = suggestFiles({ root, files, taxonomy: loaded.taxonomy, minScore, limit, emptyOnly: Boolean(options.suggestEmptyOnly) })
+    }
   } catch (err) {
     console.error(`check-metadata: ${err.message}`)
     process.exitCode = 2
@@ -358,5 +455,7 @@ module.exports = {
   fixFiles,
   formatText,
   loadLegacyCategories,
+  makeIncludeReader,
+  suggestFiles,
   runCli,
 }

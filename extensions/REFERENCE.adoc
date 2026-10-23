@@ -837,6 +837,8 @@ Outside Antora, `loadTaxonomyFrom({ source, root })` loads the same file from a 
 
 The metadata rules live in `extension-utils/metadata-check.js` (`checkPageMetadata`). validate-attributes runs them on Product Docs pages, solutions-catalog on solution overviews, and `doc-tools check-metadata` on page headers in a pull request, so the build and the PR check cannot disagree. See `check-metadata` in the CLI reference for the rules and their severities, and `.github/workflows/check-metadata.yml` for the reusable PR check.
 
+Suggestions live in `extension-utils/metadata-suggest.js` (`suggestForPage`), which `doc-tools check-metadata --suggest` runs. It matches every live concept's labels against a page's title, description, path, headings, and body, deterministically and with no model, and returns up to a few concepts per facet that the page does not carry yet, each with a score and the evidence for it. It honors the facet cardinalities in the taxonomy, `implies`, and `broader`, and never suggests a deprecated concept. Another tool that tags content against the taxonomy should call it rather than match labels itself, so every tagger agrees.
+
 
 This extension collects Asciidoc attributes from the https://github.com/redpanda-data/docs-site[`shared` component] or a local YAML file and makes them available to all component versions. Having global attributes is useful for consistent configuration of local and production builds.
 
