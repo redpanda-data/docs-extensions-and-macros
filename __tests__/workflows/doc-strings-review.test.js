@@ -1635,6 +1635,20 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(review.with.prompt).not.toMatch(/Finish with one summary comment/)
     })
 
+    // A caller whose policy forbids committable suggestions (connect) sets
+    // committable_suggestions: false. The default keeps today's behavior.
+    test('committable suggestions default on, and turning them off swaps the block type only', () => {
+      const input = workflow.on.workflow_call.inputs.committable_suggestions
+      expect(input.type).toBe('boolean')
+      expect(input.default).toBe(true)
+      const expr = review.with.prompt.match(/\$\{\{\s*!inputs\.committable_suggestions && '([^']*)' \|\| '' \}\}/)
+      expect(expr).not.toBeNull()
+      expect(expr[1]).toMatch(/```text block/)
+      expect(expr[1]).toMatch(/Never post a ```suggestion block here/)
+      // The fingerprint footer stays, so the review-once state keeps working.
+      expect(review.with.prompt.indexOf(expr[0])).toBeGreaterThan(review.with.prompt.indexOf('<sub>doc-strings-review:fp=FINGERPRINT</sub>'))
+    })
+
     test('the prompt carries the connect suggestion rules and the regeneration footer', () => {
       const prompt = review.with.prompt
       expect(prompt).toMatch(/CONNECT STRINGS/)

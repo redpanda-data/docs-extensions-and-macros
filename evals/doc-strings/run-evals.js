@@ -127,8 +127,12 @@ function runRewriteCase (spec, io) {
   // below covers the whole repo, so untouched declarations compare against a
   // whole-repo report taken before the rewrite.
   const lintFullBefore = lib.runLint(repo.dir, repo.surface)
-  const finding = lintBefore.findings.find((f) => f.name === spec.target)
+  const finding = lintBefore.findings.find((f) => f.name === spec.target &&
+    (!spec.targetRule || f.rules.some((r) => r.id === spec.targetRule)))
   if (!finding) return harnessError(checks, `No lint finding for target ${spec.target}; fixture drifted`)
+  if (finding.file !== repo.targetRel) {
+    return harnessError(checks, `Precondition: finding for ${spec.target} is in ${finding.file}, layout targets ${repo.targetRel}`)
+  }
   const foundRules = finding.rules.map((r) => r.id)
   for (const rule of spec.expectRules) {
     if (!foundRules.includes(rule)) {
@@ -145,20 +149,27 @@ function runRewriteCase (spec, io) {
 
   // The workflow's --diff/--reviewed filtering leaves only the declarations a
   // push changed; this case's push changed exactly the target, so the report
-  // the review reads carries that one finding and its declaration.
-  // Production's lint report carries each declaration's fingerprint, which
-  // the review must echo in its footer; compute it the way lint-strings does.
+  // the review reads carries that one finding and its declaration. The
+  // workflow's lint marks both as in the diff and fingerprints them, and the
+  // prompt requires that fingerprint in each comment's footer, so the report
+  // carries it too; compute it the way lint-strings does. Without it a model
+  // either refuses to post or invents one.
   const fp = finding.fingerprint || lintStrings.fingerprint(finding)
   const declaration = (lintBefore.declarations || []).find((d) => d.name === spec.target)
   const lint = {
     ...lintBefore,
-    declarations: [declaration ? { ...declaration, fingerprint: fp } : { surface: finding.surface, name: finding.name, file: finding.file, line_start: finding.line_start, line_end: finding.line_end, string: finding.string, fingerprint: fp }],
-    findings: [{ ...finding, fingerprint: fp }],
+    declarations: [declaration ? { ...declaration, in_pr_diff: true, fingerprint: fp } : { surface: finding.surface, name: finding.name, file: finding.file, line_start: finding.line_start, line_end: finding.line_end, string: finding.string, in_pr_diff: true, fingerprint: fp }],
+    findings: [{ ...finding, in_pr_diff: true, fingerprint: fp }],
     summary: { ...lintBefore.summary, totalDeclarations: 1, flaggedDeclarations: 1, removedDeclarations: [] }
   }
   const model = io.callProduction({ repo, lint, diff })
   if (model.failed) return modelCallFailed(checks, model)
   checkImpactFile(checks, model, false)
+  checkBlockType(checks, model, io.committable)
+  // The workflow recovers reviewed strings from these footers on later
+  // pushes, matching fp=<16 hex digits>, so any other value re-reviews the
+  // string on every push.
+  checks.add('comment footer carries the finding\'s fingerprint', model.output.includes(`doc-strings-review:fp=${fp}`), `expected fp=${fp}`)
 
   // --- Execute the output ---
   const suggestions = lib.parseFences(model.output, 'suggestion')
@@ -220,13 +231,13 @@ function runRewriteCase (spec, io) {
 
   // --- Re-run the real linter over the applied output ---
   const lintAfter = lib.runLint(repo.dir, repo.surface)
-  const targetRulesAfter = lib.findingsFor(lintAfter, spec.target)
+  const targetRulesAfter = lib.findingsFor(lintAfter, spec.target, finding.file)
   const counts = severityCounts(targetRulesAfter)
   checks.add('re-lint: zero findings of any severity on the rewritten declaration',
     targetRulesAfter.length === 0,
     targetRulesAfter.length === 0 ? 'clean' : `remaining: ${JSON.stringify(targetRulesAfter)} (${JSON.stringify(counts)})`)
   checks.add('re-lint: untouched declarations kept exactly their findings',
-    JSON.stringify(lib.findingFingerprint(lintFullBefore, spec.target)) === JSON.stringify(lib.findingFingerprint(lintAfter, spec.target)),
+    JSON.stringify(lib.findingFingerprint(lintFullBefore, spec.target, finding.file)) === JSON.stringify(lib.findingFingerprint(lintAfter, spec.target, finding.file)),
     'finding fingerprints compared')
 
   // --- Re-extract and compare semantics ---
@@ -247,6 +258,16 @@ function runRewriteCase (spec, io) {
       str.trim().length > 0, JSON.stringify(str.slice(0, 120)))
     if (repo.surface === 'metrics') {
       checks.add('metrics contract: rewritten string has no terminal period', !/\.\s*$/.test(str), JSON.stringify(str.slice(-40)))
+    }
+    // Surface rules the lint cannot see, stated per case as the shape the
+    // re-extracted string must have (for example, a qualified xref kept).
+    if (spec.stringMustMatch) {
+      checks.add(`re-extraction: rewritten string matches ${spec.stringMustMatch}`,
+        new RegExp(spec.stringMustMatch).test(str), JSON.stringify(str.slice(0, 160)))
+    }
+    if (spec.stringMustNotMatch) {
+      checks.add(`re-extraction: rewritten string does not match ${spec.stringMustNotMatch}`,
+        !new RegExp(spec.stringMustNotMatch).test(str), JSON.stringify(str.slice(0, 160)))
     }
   }
 
@@ -377,6 +398,7 @@ function runProseReviewCase (spec, io, sabotage) {
   const model = io.callProduction({ repo, lint: lintDiff, diff })
   if (model.failed) return modelCallFailed(checks, model)
   checkImpactFile(checks, model, false)
+  checkBlockType(checks, model, io.committable)
 
   const suggestions = lib.parseFences(model.output, 'suggestion')
   if (!checks.add('at least one ```suggestion block (a vacuous string must draw one)',
@@ -480,7 +502,7 @@ function runNegativeReviewCase (spec, io, sabotage) {
 
   // Precondition: the REAL declaration-anchored lint finds nothing in this
   // diff (skipped under sabotage, where the diff is violating by design).
-  const lintDiff = lib.runLint(repo.dir, 'properties', ['--diff', base])
+  const lintDiff = lib.runLint(repo.dir, repo.surface, ['--diff', base])
   if (!sabotage && lintDiff.findings.length !== 0) {
     return harnessError(checks, `Precondition: conforming diff produced ${lintDiff.findings.length} lint findings`)
   }
@@ -558,6 +580,19 @@ function checkImpactFile (checks, model, expected) {
   return checks.add('doc-impact.json passes the dispatch step\'s schema check', ok.pass, ok.detail)
 }
 
+/**
+ * Which block the review carried its rewrite in: ```suggestion by default,
+ * ```text when the caller turns committable suggestions off.
+ */
+function checkBlockType (checks, model, committable) {
+  const { suggestion, text } = model.blockCounts || { suggestion: 0, text: 0 }
+  return committable
+    // A ```text block is fine here: a correct review may quote the current
+    // string in one. Only the off mode forbids a block type.
+    ? checks.add('rewrite carried in a ```suggestion block (committable suggestions on)', suggestion >= 1, `suggestion=${suggestion} text=${text}`)
+    : checks.add('rewrite carried in a ```text block and no ```suggestion block (committable suggestions off)', text >= 1 && suggestion === 0, `suggestion=${suggestion} text=${text}`)
+}
+
 function harnessError (checks, message) {
   checks.add('harness precondition', false, message)
   return { status: 'HARNESS_ERROR', checks: checks.rows, model: null }
@@ -590,16 +625,17 @@ const EXECUTORS = {
 // ---------------------------------------------------------------------------
 
 function parseArgs (argv) {
-  const options = { cases: null, sabotage: null, model: null, keepTemp: false }
+  const options = { cases: null, sabotage: null, model: null, keepTemp: false, committable: true }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     if (arg === '--case') options.cases = (options.cases || []).concat(argv[++i].split(','))
     else if (arg === '--sabotage') options.sabotage = argv[++i]
     else if (arg === '--model') options.model = argv[++i]
     else if (arg === '--keep-temp') options.keepTemp = true
+    else if (arg === '--no-committable-suggestions') options.committable = false
     else {
       console.error(`Unknown argument: ${arg}`)
-      console.error('Usage: node evals/doc-strings/run-evals.js [--case <id>[,<id>]] [--sabotage <negative-case-id>] [--model <model>] [--keep-temp]')
+      console.error('Usage: node evals/doc-strings/run-evals.js [--case <id>[,<id>]] [--sabotage <negative-case-id>] [--model <model>] [--keep-temp] [--no-committable-suggestions]')
       process.exit(2)
     }
   }
@@ -645,9 +681,10 @@ function main () {
 
     const io = {
       caseDir,
+      committable: options.committable,
       callModel (prompt) {
         fs.writeFileSync(path.join(caseDir, 'prompt.txt'), prompt)
-        const result = lib.runClaude(prompt, { cwd: workDir, model: options.model || 'sonnet' })
+        const result = lib.runClaude(prompt, { cwd: workDir, model: options.model || lib.TEMPLATE_MODEL })
         fs.writeFileSync(path.join(caseDir, 'model-output.txt'), result.output)
         if (result.stderr) fs.writeFileSync(path.join(caseDir, 'model-stderr.txt'), result.stderr)
         result.failed = result.timedOut || result.status !== 0
@@ -656,14 +693,14 @@ function main () {
       callProduction ({ repo, lint, diff }) {
         let result
         try {
-          result = production.runReview({ repoDir: repo.dir, lint, diff, model: options.model || production.PRODUCTION_MODEL })
+          result = production.runReview({ repoDir: repo.dir, lint, diff, model: options.model || production.PRODUCTION_MODEL, committableSuggestions: options.committable })
         } catch (err) {
           return { failed: true, harness: true, timedOut: false, status: 'harness', stderr: err.message, ms: 0, comments: [], files: {}, output: '' }
         }
         fs.writeFileSync(path.join(caseDir, 'prompt.txt'), result.prompt)
         fs.writeFileSync(path.join(caseDir, 'model-output.txt'), result.output)
         fs.writeFileSync(path.join(caseDir, 'transcript.txt'), result.transcript)
-        fs.writeFileSync(path.join(caseDir, 'inline-comments.json'), JSON.stringify(result.comments, null, 2))
+        fs.writeFileSync(path.join(caseDir, 'inline-comments.json'), JSON.stringify(result.rawComments || result.comments, null, 2))
         for (const [name, text] of Object.entries(result.files)) fs.writeFileSync(path.join(caseDir, name), text)
         if (result.stderr) fs.writeFileSync(path.join(caseDir, 'model-stderr.txt'), result.stderr)
         return result

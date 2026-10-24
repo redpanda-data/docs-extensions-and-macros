@@ -195,6 +195,16 @@ on:
           review runs us.anthropic.claude-opus-5 through the same provider).
         type: string
         default: "us.anthropic.claude-sonnet-5"
+      committable_suggestions:
+        description: >-
+          Post each rewrite as a GitHub ```suggestion block the author can
+          commit from the PR page. Set false for a repository whose review
+          policy forbids committable suggestions (connect's does): the same
+          full-span rewrite then goes in a ```text block, which can be copied
+          but offers no commit button. The comment's span and fingerprint
+          footer are the same in both modes.
+        type: boolean
+        default: true
     secrets:
       anthropic_api_key:
         description: >-
@@ -989,6 +999,7 @@ jobs:
             - ends with this line, exactly, using the declaration's
               fingerprint from lint-findings.json:
               <sub>doc-strings-review:fp=FINGERPRINT</sub>
+            ${{ !inputs.committable_suggestions && 'COMMITTABLE SUGGESTIONS ARE OFF for this repository. Wherever this prompt says to carry a ```suggestion block, carry the same full-span replacement in a ```text block instead, so the author can copy it but GitHub offers no commit button. Never post a ```suggestion block here.' || '' }}
 
             CONNECT STRINGS (surface connect): each declaration's detail
             names its kind and, for component text, the components that
@@ -1004,7 +1015,12 @@ jobs:
             - Every xref names its module: xref:components:...,
               xref:configuration:... or xref:guides:..., or a
               component:module:page xref. A module-less xref breaks when
-              Cloud includes the same text into its own pages.
+              Cloud includes the same text into its own pages. The module is
+              the one the page lives in, the path segment after
+              /connect/ in its docs URL: component pages (inputs/,
+              outputs/, processors/ ...) are in components, bloblang/ pages
+              are in guides. When you are not sure, look the page up with
+              the docs tools rather than guess.
             - An env-cloud block conditional is allowed when a paragraph
               behaves differently in Cloud: ifdef::env-cloud[] or
               ifndef::env-cloud[] alone on a line at column 0 with nothing
@@ -1035,9 +1051,9 @@ jobs:
               one-line label with no terminal period, and Description is
               plain text, not AsciiDoc.
             - End every connect suggestion comment, on the line before the
-              fingerprint line, with exactly: After you apply this
-              suggestion, run `CGO_ENABLED=1 TAGS=x_benthos_extra task docs`
-              and commit the regenerated docs, or the docs check fails.
+              fingerprint line, with exactly: After you make this change,
+              run `CGO_ENABLED=1 TAGS=x_benthos_extra task docs` and commit
+              the regenerated docs, or the docs check fails.
 
             REVIEW IN CONTEXT: judge each string as the reader of its page,
             not on its own. Read it together with its context entries and
