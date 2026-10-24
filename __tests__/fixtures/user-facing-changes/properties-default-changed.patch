@@ -1,0 +1,20 @@
+diff --git a/src/v/config/configuration.cc b/src/v/config/configuration.cc
+index 1111111..2222222 100644
+--- a/src/v/config/configuration.cc
++++ b/src/v/config/configuration.cc
+@@ -158,14 +158,14 @@ configuration::configuration(ctor_key)
+   , rpc_client_connections_per_peer(
+       *this,
+       "rpc_client_connections_per_peer",
+       "The maximum number of connections a broker will open to each of its "
+       "peers.",
+       {.example = "8"},
+-      128,
++      256,
+       {.min = 8})
+   , rpc_server_compress_replies(
+       *this,
+       "rpc_server_compress_replies",
+       "Enable compression for internal RPC server replies.",
+       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
+       false)

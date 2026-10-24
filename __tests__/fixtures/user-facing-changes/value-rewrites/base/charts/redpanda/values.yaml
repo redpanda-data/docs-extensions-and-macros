@@ -1,0 +1,11 @@
+image:
+  repository: docker.redpanda.com/redpandadata/redpanda
+  tag: ""
+# -- Number of brokers.
+statefulset:
+  replicas: 3
+tls:
+  enabled: true
+resources:
+  cpu:
+    cores: 1

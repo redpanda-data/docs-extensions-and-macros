@@ -1,0 +1,10 @@
+statefulset:
+  replicas: 3
+image:
+  tag: ''
+  repository: "docker.redpanda.com/redpandadata/redpanda"
+tls:
+  enabled: yes
+resources:
+  cpu:
+    cores: 1.0
