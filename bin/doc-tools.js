@@ -3245,8 +3245,14 @@ programCli
  * Topics implies Apache Iceberg) is suggested in page-solution-technologies.
  * Each suggestion has a score, a reason, and evidence (the matched term,
  * where, and the line). --min-score defaults to 5 for Product Docs pages and
- * 3 for solution overviews; --limit (per facet) to 3 and 6. Suggestions do
- * not change the exit code.
+ * 3 for solution overviews; --limit (per facet) to 3 and 6. Each suggestion
+ * also has the line it belongs on (its attribute's entry in the header, else
+ * the page's first line) and whether the page has no page-categories yet, and
+ * the JSON lists the pages without page-categories under
+ * `suggest.uncategorized`, with how many suggestions each got. Suggestions
+ * are under `suggest` in the JSON, apart from `findings`, and never change
+ * the exit code, with --strict or without. The reusable check-metadata
+ * workflow reports them as notices and in the job summary.
  * --suggest also lists candidates: frequent, distinctive terms on a page that
  * no concept's label or altLabel matches, in any scheme, for proposing new
  * concepts or altLabels. They are repeated capitalized terms in prose (Amazon
