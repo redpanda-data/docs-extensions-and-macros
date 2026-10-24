@@ -17,13 +17,18 @@ const { findRepoRoot } = require('./doc-tools-utils')
  * @param {string} options.dockerRepo - Docker repository used by the script.
  * @param {string} options.consoleTag - Console image tag passed to the script.
  * @param {string} options.consoleDockerRepo - Console Docker repository used by the script.
+ * @param {string[]} [generatorArgs] - Extra arguments passed through to the generator itself
+ *   (everything after the script's five positionals), for example `--output-dir`.
+ * @param {Object} [env] - Extra environment variables for the script (timing knobs such as
+ *   CLUSTER_READY_TIMEOUT and METRICS_SETTLE_MAX).
  */
-function runClusterDocs (mode, tag, options) {
+function runClusterDocs (mode, tag, options, generatorArgs = [], env = {}) {
   const script = path.join(__dirname, 'generate-cluster-docs.sh')
-  const args = [mode, tag, options.dockerRepo, options.consoleTag, options.consoleDockerRepo]
+  const args = [mode, tag, options.dockerRepo, options.consoleTag, options.consoleDockerRepo, ...generatorArgs]
   console.log(`Running ${script} with arguments: ${args.join(' ')}`)
-  const r = spawnSync('bash', [script, ...args], { stdio: 'inherit' })
-  if (r.status !== 0) process.exit(r.status)
+  const r = spawnSync('bash', [script, ...args], { stdio: 'inherit', env: { ...process.env, ...env } })
+  // A signal kill leaves status null; exit non-zero rather than fall through as success.
+  if (r.status !== 0) process.exit(r.status === null ? 1 : r.status)
 }
 
 /**
