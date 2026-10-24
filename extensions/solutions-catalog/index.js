@@ -532,6 +532,16 @@ module.exports.register = function ({ config = {} } = {}) {
     }
     logger.info(`solutions-catalog: ${decorated} doc pages decorated, ${coverage.uncategorizedEligiblePages} eligible doc pages without categories`)
 
+    // Outcome diagrams, for the catalog record and the overview's Markdown
+    // twin. A missing or unresolvable diagram is reported only for a
+    // published solution: drafts are still being drawn.
+    for (const record of active) {
+      const { outcome, problem, notes } = collect.resolveOutcome(record, contentCatalog)
+      if (outcome) record.outcome = outcome
+      if (record.status !== 'published') continue
+      for (const message of problem ? [problem] : notes) logger.warn(`solutions-catalog: ${record.id}: ${message}`)
+    }
+
     // Agent companions, generated here so the record can link one only when it
     // exists; published at beforePublish.
     state.companions = []

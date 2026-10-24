@@ -460,6 +460,10 @@ function buildRecord (mod, modulePages, moduleAttachments, { version, moduleExam
     relatedDocRefs: parseList(attrs['page-solution-related-docs']),
     relatedSolutionIds: parseList(attrs['page-solution-related-solutions']),
     supersededBy: attrs['page-solution-superseded-by'] ? String(attrs['page-solution-superseded-by']).trim() : '',
+    // The outcome diagram under the overview hero: a file name in the module's
+    // images/ and its one-sentence alt text. Resolved by resolveOutcome.
+    outcomeImage: attrs['page-solution-outcome-image'] ? String(attrs['page-solution-outcome-image']).trim() : '',
+    outcomeAlt: attrs['page-solution-outcome-alt'] ? String(attrs['page-solution-outcome-alt']).trim() : '',
     topicType: attrs['page-topic-type'],
     repo: deriveRepo(overview && overview.src && overview.src.origin && overview.src.origin.url),
     tag: solutionVersion ? `${mod}/${solutionVersion}` : '',
@@ -488,6 +492,84 @@ function buildRecord (mod, modulePages, moduleAttachments, { version, moduleExam
       .sort((a, b) => a.name.localeCompare(b.name)),
     lastModified: attrs['page-git-modified-date'] || null,
   }
+}
+
+/**
+ * Plain text of the root SVG's own `<title>` or `<desc>` (`tag`), with CDATA
+ * kept as text, child elements dropped, entities decoded, and whitespace
+ * collapsed. Only a `<title>` or `<desc>` among the root's leading children
+ * counts, where SVG puts the root's accessible name and description, so a
+ * child group's `<title>` (`<svg><g><title>Node A</title></g>`) is never read
+ * as the diagram's. Empty string when the root has no such element.
+ */
+function svgText (markup, tag) {
+  if (!markup) return ''
+  const text = String(markup)
+  const root = /<svg\b[^>]*>/i.exec(text)
+  if (!root) return ''
+  const leading = /\s*(?:<!--[\s\S]*?-->\s*)*<(title|desc)\b[^>]*>([\s\S]*?)<\/\1\s*>/iy
+  leading.lastIndex = root.index + root[0].length
+  let match
+  while ((match = leading.exec(text))) {
+    if (match[1].toLowerCase() !== tag) continue
+    const inner = match[2]
+      // CDATA is literal text: escape it so the tag strip below leaves it alone.
+      .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, (_, cdata) => cdata.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'))
+      .replace(/<[^>]*>/g, '')
+    return decode(inner).replace(/\s+/g, ' ').trim()
+  }
+  return ''
+}
+
+/**
+ * Resolve a solution's outcome diagram, named on the overview by
+ * :page-solution-outcome-image: (a file name in the module's images/), the way
+ * docs-ui's solution-outcome helper does.
+ *
+ * Returns `{ outcome, problem, notes }`. `outcome` is
+ * `{ image, alt, title, description }`: the image's published URL, the
+ * overview's :page-solution-outcome-alt: (the SVG's `<title>` when the
+ * attribute is absent), the SVG's root `<title>`, and its root `<desc>`, read
+ * from the image file in the content catalog so a reader who cannot see the
+ * SVG gets the outcome as text. Keys with no value are left out. `outcome` is
+ * null, with a `problem` to report, when the attribute is missing or the image
+ * does not resolve to a published file. `notes` lists what a resolved diagram
+ * still lacks: no alt attribute (docs-ui has no fallback, so the page's
+ * diagram has no accessible name), an SVG with no `<desc>`, or a raster image,
+ * which carries no text at all.
+ */
+function resolveOutcome (record, contentCatalog) {
+  const name = record.outcomeImage
+  if (!name) return { outcome: null, problem: 'the overview sets no page-solution-outcome-image, so the outcome diagram is missing from the page, its Markdown twin, and the catalog', notes: [] }
+  let image = null
+  if (contentCatalog && typeof contentCatalog.resolveResource === 'function') {
+    try {
+      image = contentCatalog.resolveResource(`image$${name}`, { component: COMPONENT, version: record.componentVersion, module: record.module }, 'image', ['image'])
+    } catch {
+      image = null
+    }
+  }
+  const url = image && image.pub && image.pub.url
+  if (!url) return { outcome: null, problem: `page-solution-outcome-image "${name}" is not in the module's images/`, notes: [] }
+  const isSvg = /\.svg$/i.test(name)
+  const markup = isSvg && image.contents ? image.contents.toString() : ''
+  const outcome = { image: url }
+  const title = svgText(markup, 'title')
+  const alt = record.outcomeAlt || title
+  if (alt) outcome.alt = alt
+  if (title) outcome.title = title
+  const description = svgText(markup, 'desc')
+  if (description) outcome.description = description
+  const notes = []
+  if (!record.outcomeAlt) {
+    notes.push(`the overview sets no page-solution-outcome-alt, so the outcome diagram ${name} has no accessible name on the page${title ? ' (the catalog and the Markdown twin fall back to the SVG <title>)' : ''}`)
+  }
+  if (!isSvg) {
+    notes.push(`the outcome diagram ${name} is not an SVG, so the Markdown twin and the catalog get no text description of the outcome; use an SVG with a <desc>`)
+  } else if (!description) {
+    notes.push(`the outcome diagram ${name} has no <desc>, so the Markdown twin shows the diagram without the outcome in text`)
+  }
+  return { outcome, problem: null, notes }
 }
 
 /**
@@ -600,4 +682,6 @@ module.exports = {
   plainTitle,
   collectSolutions,
   collectCompanionSources,
+  svgText,
+  resolveOutcome,
 }
