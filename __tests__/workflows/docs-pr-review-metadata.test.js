@@ -79,7 +79,7 @@ describe('docs PR review: the check-metadata step', () => {
     const r = runCheck({ npx: npxStub({ json: result([]) }) })
     expect({ status: r.status, out: r.all }).toMatchObject({ status: 0 })
     expect(r.state).toBe('ran')
-    expect(r.npxLog()).toBe(`${r.runnerTemp} no-token --yes --package @redpanda-data/docs-extensions-and-macros@9.9.9 doc-tools check-metadata --root ${r.srcDir} --changed origin/main --format json --output ${r.runnerTemp}/metadata-check/check-metadata.json\n`)
+    expect(r.npxLog()).toBe(`${r.runnerTemp} no-token --yes --package @redpanda-data/docs-extensions-and-macros@9.9.9 doc-tools check-metadata --root ${r.srcDir} --changed origin/main --suggest --format json --output ${r.runnerTemp}/metadata-check/check-metadata.json\n`)
   })
 
   test('the job that runs it holds no id-token, and the review waits for it without being skipped by it', () => {
@@ -187,6 +187,48 @@ describe('docs PR review: adding check-metadata to the review', () => {
     expect(r.findings).toContain("- error: `modules/manage/pages/a.adoc:2` page-categories value 'a \\`b\\` \\[c\\](d) \\<e\\>' is not in the taxonomy")
   })
 
+  const suggestion = (over = {}) => ({ file: 'modules/manage/pages/a.adoc', kind: 'docs', line: 1, uncategorized: true, facet: 'topic', attribute: 'page-categories', conceptId: 'tiered-storage', label: 'Tiered Storage', score: 14, reason: 'named in the title', implies: [], evidence: [], ...over })
+  const withSuggestions = (findingsList, suggestions) => ({ ...result(findingsList), suggest: { minScore: { docs: 5, solution: 3 }, suggestions, needs: [], candidates: [], uncategorized: [] } })
+
+  test('suggestions join the suggestions list, never blocking, and findings.md lists them', () => {
+    const r = runMerge({
+      state: 'ran',
+      json: withSuggestions([findings[1]], [suggestion(), suggestion({ file: 'modules/b/pages/b.adoc', line: 3, uncategorized: false, conceptId: 'replication', label: 'Replication', score: 6.5, reason: 'named in 1 heading' })]),
+      verdict: { verdict: 'pass', blocking: [], suggestions: ['prose'] },
+      findingsMd: '# Review\n',
+    })
+    expect({ status: r.status, out: r.all }).toMatchObject({ status: 0 })
+    expect(r.verdict).toEqual({
+      verdict: 'pass',
+      blocking: [],
+      suggestions: [
+        'prose',
+        "page metadata: `modules/manage/pages/a.adoc:2` page-categories value 'Iceberg' is deprecated; use 'Iceberg Topics' instead",
+        'page metadata suggestion: `modules/manage/pages/a.adoc:1` consider Tiered Storage (`tiered-storage`) in `:page-categories:`, score 14: named in the title',
+        'page metadata suggestion: `modules/b/pages/b.adoc:3` consider Replication (`replication`) in `:page-categories:`, score 6.5: named in 1 heading',
+      ],
+    })
+    expect(r.findings).toContain('### Suggested taxonomy values (doc-tools check-metadata --suggest)\n\n- `modules/b/pages/b.adoc:3`: Replication (`replication`) in `:page-categories:`, score 6.5: named in 1 heading\n- `modules/manage/pages/a.adoc:1` (no page-categories yet): Tiered Storage (`tiered-storage`) in `:page-categories:`, score 14: named in the title\n')
+    expect(r.stdout).toMatch(/added 0 error\(s\), 1 warning\(s\), and 2 suggestion\(s\) to the review/)
+  })
+
+  test('suggestions alone never fail the branch; at most 10 reach the list, with a count of the rest', () => {
+    const many = Array.from({ length: 13 }, (_, i) => suggestion({ file: `modules/a/pages/p${i}.adoc`, score: 20 - i }))
+    const r = runMerge({ state: 'ran', json: withSuggestions([], many), verdict: { verdict: 'pass', blocking: [], suggestions: [] } })
+    expect(r.verdict.verdict).toBe('pass')
+    expect(r.verdict.blocking).toEqual([])
+    expect(r.verdict.suggestions).toHaveLength(11)
+    expect(r.verdict.suggestions[0]).toMatch(/p0\.adoc:1` .*score 20/)
+    expect(r.verdict.suggestions[10]).toBe('page metadata: 3 more suggestion(s) in check-metadata.json')
+    expect(r.findings.split('\n').filter((l) => l.startsWith('- `modules/a/pages/'))).toHaveLength(13)
+  })
+
+  test('a result without suggestions (an older doc-tools) adds none', () => {
+    const r = runMerge({ state: 'ran', json: result([]), verdict: { verdict: 'pass', blocking: [], suggestions: [] }, findingsMd: '# Review\n' })
+    expect(r.verdict).toEqual({ verdict: 'pass', blocking: [], suggestions: [] })
+    expect(r.findings).toBe('# Review\n')
+  })
+
   test.each([['missing', 'success'], [null, 'skipped']])('state %s (job %s) changes nothing', (state, jobResult) => {
     const verdict = { verdict: 'pass', blocking: [], suggestions: [] }
     const r = runMerge({ state, jobResult, verdict, findingsMd: '# Review\n' })
@@ -222,6 +264,7 @@ describe('docs PR review: check-metadata with this repository\'s doc-tools', () 
     git(src, 'checkout', '-q', '-b', 'pr')
     write(src, 'modules/manage/pages/iceberg.adoc', '= Iceberg\n:page-categories: Iceberg\n\nBody.\n')
     write(src, 'modules/solutions/pages/index.adoc', '= A solution\n:page-layout: solution\n:page-solution-use-cases: Data mesh\n\nBody.\n')
+    write(src, 'modules/manage/pages/tiered.adoc', '= Tiered Storage\n:description: Offload Tiered Storage segments.\n\nTiered Storage keeps older segments.\n')
     git(src, 'add', '-A')
     git(src, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'pr')
 
@@ -245,5 +288,7 @@ exec node "${path.join(ROOT, 'bin', 'doc-tools.js')}" "$@"
     expect(merged.verdict.blocking.join('\n')).toMatch(/modules\/solutions\/pages\/index\.adoc:\d+` .*Data mesh/)
     expect(merged.verdict.suggestions.join('\n')).toMatch(/modules\/manage\/pages\/iceberg\.adoc:2` .*'Iceberg' is deprecated/)
     expect(merged.findings).not.toMatch(/old\.adoc/)
+    expect(merged.verdict.suggestions).toContainEqual(expect.stringMatching(/^page metadata suggestion: `modules\/manage\/pages\/tiered\.adoc:1` consider Tiered Storage \(`tiered-storage`\) in `:page-categories:`/))
+    expect(merged.verdict.blocking.join('\n')).not.toMatch(/tiered/)
   })
 })

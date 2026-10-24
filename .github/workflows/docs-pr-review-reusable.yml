@@ -650,7 +650,7 @@ jobs:
           # from the nearest directory with a package.json, and the PR head
           # has one. --root points the tool at the checkout instead.
           ( cd "$RUNNER_TEMP" && env -u GH_TOKEN npx --yes --package "@redpanda-data/docs-extensions-and-macros@${DOC_TOOLS_VERSION}" \
-              doc-tools check-metadata --root "$SRC" --changed "origin/$BASE" --format json --output "$RESULT" ) > /dev/null 2> "$OUT_DIR/stderr.txt" || rc=$?
+              doc-tools check-metadata --root "$SRC" --changed "origin/$BASE" --suggest --format json --output "$RESULT" ) > /dev/null 2> "$OUT_DIR/stderr.txt" || rc=$?
           # Exit 1 is "errors found" only with a result file: an unknown
           # subcommand (a doc_tools_version from before check-metadata) also
           # exits 1, and writes none.
@@ -744,7 +744,9 @@ jobs:
           name: metadata-check
           path: ${{ runner.temp }}/metadata-check
       # check-metadata into this branch: errors are blocking, warnings are
-      # suggestions, and a check that could not run is `not_run`, as is a
+      # suggestions, and so are the --suggest taxonomy values (the top 10 by
+      # score, all of them in findings.md), which never fail the branch. A
+      # check that could not run is `not_run`, as is a
       # metadata_check job that left no result. Every finding is also listed
       # in findings.md, which the comment shows. A review that wrote no
       # verdict stays unavailable: the deterministic result alone is not the
@@ -787,6 +789,19 @@ jobs:
                 .findings[] | "- \(.severity): `\(.file):\(.line)` \(.message | md)"' "$DIR/check-metadata.json"
             } >> "$F"
           fi
+          # Suggestions (--suggest): taxonomy values a changed page's text
+          # names at or above the default minimum score that its header does
+          # not carry. Never blocking; a doc-tools without them adds none.
+          if [[ "$(jq '(.suggest.suggestions // []) | length' "$DIR/check-metadata.json")" -gt 0 ]]; then
+            {
+              echo
+              echo "### Suggested taxonomy values (doc-tools check-metadata --suggest)"
+              echo
+              jq -r 'def md: gsub("(?<c>[`\\[\\]<>\\\\])"; "\\\(.c)");
+                .suggest.suggestions | sort_by(.file, -.score)[]
+                | "- `\(.file):\(.line // 1)`\(if .uncategorized then " (no page-categories yet)" else "" end): \(.label | md) (`\(.conceptId)`) in `:\(.attribute):`, score \(.score): \(.reason | md)"' "$DIR/check-metadata.json"
+            } >> "$F"
+          fi
           if [[ "$HAVE_VERDICT" == true ]]; then
             jq --slurpfile m "$DIR/check-metadata.json" '
               def md: gsub("(?<c>[`\\[\\]<>\\\\])"; "\\\(.c)");
@@ -795,11 +810,14 @@ jobs:
               ($m[0].findings | map(select(.severity == "error") | line)) as $errors
               | ($m[0].findings | map(select(.severity != "error") | line)) as $warnings
               | .blocking = (list("blocking") + $errors)
-              | .suggestions = (list("suggestions") + $warnings)
+              | ((($m[0].suggest.suggestions // []) | sort_by(-.score)) as $s
+                  | ($s[:10] | map("page metadata suggestion: `\(.file):\(.line // 1)` consider \(.label | md) (`\(.conceptId)`) in `:\(.attribute):`, score \(.score): \(.reason | md)"))
+                    + (if ($s | length) > 10 then ["page metadata: \(($s | length) - 10) more suggestion(s) in check-metadata.json"] else [] end)) as $suggested
+              | .suggestions = (list("suggestions") + $warnings + $suggested)
               | if ($errors | length) > 0 then .verdict = "fail" else . end
               ' "$V" > "$V.tmp" && mv "$V.tmp" "$V"
           fi
-          jq -r '"check-metadata: added \(.summary.errors) error(s) and \(.summary.warnings) warning(s) to the review"' "$DIR/check-metadata.json"
+          jq -r '"check-metadata: added \(.summary.errors) error(s), \(.summary.warnings) warning(s), and \((.suggest.suggestions // []) | length) suggestion(s) to the review"' "$DIR/check-metadata.json"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
