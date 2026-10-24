@@ -3254,8 +3254,13 @@ programCli
  * component pages), each with a count, the lines, and a likely facet from a
  * cue word after it (a connector, database, format, or product word). Terms
  * in the terminology lists (--terminology, default the docs glossary in the
- * checkout), common English, and words the page also writes in lowercase are
- * dropped. --candidates-only skips the check and the suggestions and
+ * checkout or $REDPANDA_DOCS_PATH) are dropped, and so are stop words and
+ * common English, language keywords (NULL, GROUP BY), Kubernetes object kinds
+ * (Pods, PersistentVolumeClaim), terms only ever on sales or licensing lines
+ * (Redpanda Sales, Enterprise Edition), and words the page also writes in
+ * lowercase. The product's own name is stripped from the front of a term
+ * (Redpanda Terraform counts as Terraform) and alone is no term. Connect
+ * component xrefs count for inputs, outputs, and caches only. --candidates-only skips the check and the suggestions and
  * aggregates candidates across the pages: one entry per term, with the pages
  * it is on, leaving out terms on more than a fifth of the pages
  * (boilerplate).
