@@ -1,0 +1,22 @@
+# Literal peter-evans form, two targets from one workflow, one with a payload.
+name: Trigger docs
+on:
+  release:
+    types: [published]
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger docs
+        uses: peter-evans/repository-dispatch@v4
+        with:
+          token: ${{ env.ACTIONS_BOT_TOKEN }}
+          repository: redpanda-data/docs
+          event-type: generate-crd-docs
+          client-payload: '{"tag": "${{ github.event.release.tag_name }}", "plugin": "k8s"}'
+      - name: Trigger connect docs
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          token: ${{ env.ACTIONS_BOT_TOKEN }}
+          repository: redpanda-data/rp-connect-docs
+          event-type: generate-helm-spec-docs

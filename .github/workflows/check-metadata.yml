@@ -1,0 +1,126 @@
+---
+name: Check page metadata
+# Reusable PR check: `doc-tools check-metadata` on the pages a pull request
+# changes. It checks :page-categories: and the solution facet values against
+# the docs taxonomy (taxonomy.yml in redpanda-data/docs), with the same rules
+# the Antora build runs, and needs no model, so it belongs to the "tests, no
+# model" layer of the docs automation.
+#
+# Warn by default: Product Docs pages still carry deprecated categories until
+# they are rewritten, and a check that turns every PR red teaches people to
+# ignore it. Errors still fail (an unknown value on a solution overview, for
+# example). Set strict: true to fail on warnings too.
+#
+# A caller, in a docs repository:
+#
+#   on:
+#     pull_request:
+#       paths: ['**/*.adoc']
+#   jobs:
+#     metadata:
+#       uses: redpanda-data/docs-extensions-and-macros/.github/workflows/check-metadata.yml@<sha>
+#       with:
+#         doc_tools_version: <exact version>
+#
+# The taxonomy comes from the caller's checkout when it is the docs repo, and
+# from https://docs.redpanda.com/shared/_attachments/taxonomy.yml otherwise.
+
+on:
+  workflow_call:
+    inputs:
+      doc_tools_version:
+        description: >-
+          Published @redpanda-data/docs-extensions-and-macros version to run
+          `doc-tools check-metadata` from. Exact version, never a range or a
+          tag, so a release cannot change a PR check without a deliberate
+          bump. It must be a release that ships check-metadata.
+        type: string
+        required: true
+      strict:
+        description: Fail on warnings as well as errors.
+        type: boolean
+        default: false
+      paths:
+        description: >-
+          Space-separated files, directories, or globs that limit the changed
+          pages checked, for example `modules docs/modules`. Empty checks every
+          changed .adoc file.
+        type: string
+        default: ''
+      taxonomy:
+        description: >-
+          taxonomy.yml path (in the caller's checkout) or URL. Empty uses the
+          checkout's shared/modules/ROOT/attachments/taxonomy.yml when there is
+          one, else the published file.
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  check-metadata:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Exit 1 on errors (or warnings with strict), 2 when the check could not
+      # run (no taxonomy, an invalid taxonomy). Every finding is also an
+      # annotation on the changed line.
+      - name: Check page metadata
+        env:
+          BASE: origin/${{ github.base_ref }}
+          DOC_TOOLS_VERSION: ${{ inputs.doc_tools_version }}
+          STRICT: ${{ inputs.strict }}
+          PATHS: ${{ inputs.paths }}
+          TAXONOMY: ${{ inputs.taxonomy }}
+        run: |
+          args=(check-metadata --changed "$BASE" --output check-metadata.json)
+          if [ "$STRICT" = "true" ]; then args+=(--strict); fi
+          if [ -n "$TAXONOMY" ]; then args+=(--taxonomy "$TAXONOMY"); fi
+          # Word-splitting PATHS is intended: it is a space-separated list. No
+          # globbing here; check-metadata expands globs itself.
+          set -f
+          # shellcheck disable=SC2206
+          if [ -n "$PATHS" ]; then args+=($PATHS); fi
+
+          set +e
+          npx --yes --package "@redpanda-data/docs-extensions-and-macros@${DOC_TOOLS_VERSION}" \
+            doc-tools "${args[@]}" > check-metadata.txt 2>&1
+          status=$?
+          set -e
+
+          cat check-metadata.txt
+          {
+            echo '### Page metadata'
+            echo
+            echo '```'
+            cat check-metadata.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -s check-metadata.json ]; then
+            jq -r '.findings[] | "::\(.severity) file=\(.file),line=\(.line),title=check-metadata \(.rule)::\(.message)"' check-metadata.json
+          elif [ "$status" -ne 2 ]; then
+            # No result file but no usage error either: the pinned version
+            # predates check-metadata, or npx failed. Never a silent pass.
+            echo "::error::doc-tools check-metadata wrote no result at doc_tools_version=${DOC_TOOLS_VERSION}"
+            exit 2
+          fi
+          exit "$status"
+
+      - name: Upload the result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: check-metadata
+          path: check-metadata.json
+          if-no-files-found: ignore

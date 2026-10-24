@@ -44,7 +44,21 @@ Per-surface contract:
 - rpk (src/go/rpk/pkg/cli/): Short = one line, capitalized, no period. Flag
   usage = capitalized, no period, never an echo of the flag name. In Long, an
   ALLCAPS line becomes a section heading; a standalone ==== or ---- line
-  breaks the generated page.`
+  breaks the generated page.
+- Connect and benthos (ConfigSpec Summary, Description, Footnotes, field
+  descriptions, annotated options, Bloblang docs): verbatim AsciiDoc page
+  bodies, published on the self-managed Connect docs and on the Cloud docs,
+  which set env-cloud. xref:, <<anchors>> and env-cloud conditionals are
+  allowed. A conditional is block form only: ifdef::env-cloud[] or
+  ifndef::env-cloud[] alone on a line at column 0 with nothing after the ],
+  not even spaces, the whole paragraph inside, endif::[] alone on a line, a
+  blank line before and after; never the single-line form, never in a
+  Summary or example summary, never inside a code fence, never
+  ifndef::env-cloud[] nested in ifdef::env-cloud[] or the reverse, and
+  env-cloud is the only attribute. The Cloud docs and the Cloud binaries set
+  env-cloud, and the text inside must read as a whole paragraph in both
+  outputs. Other attributes, glossterm:, prop: and include:: do not belong
+  in any source string.`
 
 /**
  * Upstream-port prompt (behaviors B1-B2): mirror of the docs repo's
@@ -69,7 +83,13 @@ ${JSON.stringify(candidate, null, 2)}
    byte-identical, including indentation, commas, and braces.
 3. The candidate text is already stripped of docs-only macros; if any xref:,
    glossterm:, include::, ifdef::, or {attribute} markup remains anywhere,
-   drop that markup (keep the plain text) rather than porting it.
+   drop that markup (keep the plain text) rather than porting it. That rule
+   is for property strings. In Connect and benthos ConfigSpec strings, xref:,
+   <<anchors>> and env-cloud block conditionals (ifdef::env-cloud[] or
+   ifndef::env-cloud[] alone on a line at column 0 with nothing after the ],
+   the paragraph inside, endif::[] alone on a line, blank lines around;
+   never single-line, never in a Summary or example summary) are allowed
+   and are kept.
 
 Edit only the description string of this one property. Do not reformat
 surrounding code and do not touch any other declaration.

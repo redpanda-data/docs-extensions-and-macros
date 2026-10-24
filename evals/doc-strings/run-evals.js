@@ -20,6 +20,8 @@
  *       The case is EXPECTED to FAIL; the run exits 0 only if it does.
  *   Options: --model <model> (default: the model production runs each case
  *   kind on), --keep-temp
+ *   node evals/doc-strings/run-evals.js --doc-impact [...]
+ *       Scores the PUBLISHED-CONTENT IMPACT pass instead; see doc-impact/run.js.
  *
  * The rewrite, prose-review and negative-review cases run the PRODUCTION
  * review: the prompt, tools and turn limit of doc-strings-review.yml at this
@@ -725,6 +727,15 @@ function main () {
   process.exit(harnessErrors.length ? 2 : failed.length === 0 ? 0 : 1)
 }
 
-if (require.main === module) main()
+if (require.main === module) {
+  if (process.argv.includes('--doc-impact')) {
+    // The doc-impact mode scores a different behavior with its own items and
+    // options; see doc-impact/run.js and the README.
+    require('./doc-impact/run').main(process.argv.slice(2).filter((a) => a !== '--doc-impact'))
+      .then((code) => process.exit(code), (err) => { console.error(err.stack); process.exit(2) })
+  } else {
+    main()
+  }
+}
 
 module.exports = { EXECUTORS, modelCallFailed, harnessError, makeChecks }

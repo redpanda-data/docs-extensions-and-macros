@@ -421,6 +421,7 @@ module.exports = {
   checkSuggestionComment,
   dispatchAccepts,
   REPO_ROOT,
+  SURFACE_LAYOUT,
   DOC_TOOLS,
   EVAL_FIXTURES,
   materializeRepo,

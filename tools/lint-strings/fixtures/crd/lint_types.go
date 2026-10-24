@@ -15,9 +15,12 @@ type WidgetSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="ClusterSource is immutable"
 	ClusterSource *ClusterSource `json:"cluster"`
 	// Text is the actual unescaped text of a widget. The Go name matches
-	// the json name (case only), so this conforms.
+	// the json name up to case, and it still opens with the Go name.
 	// +required
 	Text string `json:"text,omitempty"`
+	// maxBytes is the largest widget payload accepted. It opens with the
+	// YAML key instead of what the field does.
+	MaxBytes int `json:"maxBytes,omitempty"`
 	// Specifies how many replicas to run. Conforming: describes behavior,
 	// never names the field.
 	// +kubebuilder:default=3

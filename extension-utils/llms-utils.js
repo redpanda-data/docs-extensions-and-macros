@@ -1,5 +1,7 @@
 'use strict';
 
+const { decode } = require('html-entities');
+
 /**
  * Shared utilities for llms.txt generation and markdown processing.
  * Used by both convert-to-markdown.js and convert-llms-to-txt.js.
@@ -115,9 +117,11 @@ const MAX_INDEX_CHARS = 45000;
  */
 const MAX_INDEX_DESCRIPTION_CHARS = 200;
 
+// Titles and descriptions arrive as converted HTML, so tags are stripped and
+// entities decoded. Decoding comes after stripping: an escaped placeholder
+// such as `&lt;name&gt;` must survive as `<name>`, not be removed as a tag.
 function oneLine(text) {
-  return String(text || '')
-    .replace(/<[^>]+>/g, '')
+  return decode(String(text || '').replace(/<[^>]+>/g, ''))
     .replace(/\s+/g, ' ')
     .trim();
 }
