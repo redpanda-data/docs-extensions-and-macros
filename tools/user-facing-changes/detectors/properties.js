@@ -31,10 +31,23 @@ const { sameValue } = require('../values')
  * and as whitespace-collapsed text otherwise.
  */
 
-const ROUTES = [/^src\/v\/config\/(?!(?:.*\/)?tests?\/)[^/]+\.(?:cc|h)$/]
+// The cluster and broker stores in src/v/config, plus the three config
+// stores the broker page documents as its own sections: the Kafka client
+// the proxy and schema registry use (pandaproxy_client,
+// schema_registry_client), the HTTP Proxy (pandaproxy) and the Schema
+// Registry (schema_registry).
+const ROUTES = [
+  /^src\/v\/config\/(?!(?:.*\/)?tests?\/)[^/]+\.(?:cc|h)$/,
+  /^src\/v\/kafka\/client\/configuration\.(?:cc|h)$/,
+  /^src\/v\/pandaproxy\/(?:rest|schema_registry)\/configuration\.(?:cc|h)$/
+]
 
 const INITIALIZER = /(^|\n)[ \t]*[,:][ \t]*([a-z_][a-z0-9_]*)[ \t]*\(/g
-const META_FIELD = /\.(needs_restart|visibility|example|aliases|secret|required|doc_overrides|hidden)\s*=/
+// The metadata argument: a designated initializer right after the
+// description, spelled `{.x = ...}`, `meta{...}` or
+// `base_property::metadata{...}`, whichever fields it sets
+// (`.usable_before_ready` and `.gets_restored` alone are metadata too).
+const META_ARG = /^(?:(?:[A-Za-z_]\w*::)*(?:meta|metadata)\s*)?\{\s*(?:\.[a-z_]\w*\s*=|\})/
 
 /**
  * Parse member initializers out of snippets of a config .cc file.
@@ -66,10 +79,18 @@ function parseInitializers (snippets) {
       const descIdx = literals.findIndex((v, i) => i > nameIdx && v !== null)
       const rest = descIdx === -1 ? [] : args.slice(descIdx + 1)
       let meta = null
-      if (rest.length > 0 && /^(?:meta\s*)?\{/.test(rest[0]) && (META_FIELD.test(rest[0]) || (/^(?:meta\s*)?\{\s*\}$/.test(rest[0]) && rest.length > 1))) {
+      if (rest.length > 0 && META_ARG.test(rest[0]) && (!/\{\s*\}$/.test(rest[0]) || rest.length > 1)) {
         meta = rest.shift()
       }
       const defaultText = rest.length > 0 ? normalize(rest[0]) : null
+      // Everything after the default: bounds (`{.min = 1_MiB}`), the
+      // accepted values of an enum property, a legacy_default, a validator.
+      // The reference prints the Range and Accepted values rows from these.
+      // A validator (a lambda, `&validate_x`, `property<T>::noop_validator`)
+      // is not published, so only bounds, value lists and legacy defaults
+      // count.
+      const published = rest.slice(1).filter((a) => /^(?:[\w:<>]*\s*)?\{/.test(a.trim()) || /\blegacy_default\b/.test(a))
+      const constraintsText = published.length ? normalize(published.join(', ')) : null
       const metaFields = {}
       if (meta) {
         const re = /\.(needs_restart|visibility)\s*=\s*([A-Za-z_:]+)/g
@@ -82,6 +103,7 @@ function parseInitializers (snippets) {
         line,
         lineEnd: lineAt(text, close, startLine),
         defaultText,
+        constraintsText,
         visibility: metaFields.visibility || null,
         needsRestart: metaFields.needs_restart || null,
         hasDescription: descIdx !== -1
@@ -120,7 +142,14 @@ function parseHeaderTypes (snippets) {
 }
 
 function pageFor (file) {
+  if (/^src\/v\/(?:kafka\/client|pandaproxy)\//.test(file)) return PAGES.brokerProperties
   return /node_config/.test(path.basename(file)) ? PAGES.brokerProperties : PAGES.clusterProperties
+}
+
+/** Constraint text compared without layout: whitespace and trailing commas. */
+function sameConstraints (a, b) {
+  const canon = (t) => normalize(t).replace(/,\s*([}\])])/g, '$1').replace(/([{([])\s+/g, '$1').replace(/\s+([}\])])/g, '$1')
+  return canon(a || '') === canon(b || '')
 }
 
 function isDeprecatedType (type) {
@@ -138,6 +167,14 @@ function detect ({ files, sides, excerpt, note }) {
     const { base, head, partial } = sides(file)
     const baseParsed = parseInitializers(base)
     const headParsed = parseInitializers(head)
+    if (!partial) {
+      // With whole files an unbalanced initializer is a parser gap, not a
+      // cut window, and the property it hides would otherwise pass with no
+      // finding and no note.
+      for (const u of [...baseParsed.unresolved, ...headParsed.unresolved]) {
+        note(`${file.path}:${u.line}: could not parse the initializer of ${u.member}; a change to it is not reported`, { file: file.path, line: u.line })
+      }
+    }
     if (partial) {
       for (const u of [...baseParsed.unresolved, ...headParsed.unresolved]) {
         note(`${file.path}:${u.line}: initializer of ${u.member} is cut by the hunk; run with --repo to read the whole file`, { file: file.path, line: u.line })
@@ -165,6 +202,18 @@ function detect ({ files, sides, excerpt, note }) {
       headTypes = parseHeaderTypes(hs.head)
     }
     const page = pageFor(file.path)
+    // A member renamed with its name literal unchanged
+    // (`default_topic_replication` to `default_topic_replications`, both
+    // "default_topic_replication") is the same property to a user: pair
+    // the two by the literal and compare them as one.
+    const baseOnly = [...baseParsed.decls.values()].filter((d) => !headParsed.decls.has(d.member))
+    for (const hd of [...headParsed.decls.values()].filter((d) => !baseParsed.decls.has(d.member))) {
+      const bd = baseOnly.find((d) => d.name === hd.name && !headParsed.decls.has(d.member))
+      if (!bd) continue
+      baseParsed.decls.delete(bd.member)
+      baseParsed.decls.set(hd.member, { ...bd, member: hd.member })
+      if (baseTypes.has(bd.member) && !baseTypes.has(hd.member)) baseTypes.set(hd.member, baseTypes.get(bd.member))
+    }
     const members = new Set([...baseParsed.decls.keys(), ...headParsed.decls.keys()])
     for (const member of [...members].sort()) {
       const b = baseParsed.decls.get(member)
@@ -255,11 +304,28 @@ function detect ({ files, sides, excerpt, note }) {
           summary: `The visibility of \`${h.name}\` changed from \`${b.visibility}\` to \`${h.visibility}\` in \`${file.path}\`. A tunable is listed differently from a user property in the reference and in \`rpk cluster config\` output.`
         }))
       }
+      if (b.constraintsText !== h.constraintsText && !sameConstraints(b.constraintsText, h.constraintsText)) {
+        findings.push(makeFinding({
+          ...common,
+          name: h.name,
+          change_kind: 'behaviour',
+          // The reference prints Range and Accepted values rows from these
+          // arguments, so a changed bound or a dropped value contradicts it.
+          severity: 'high',
+          line: h.line,
+          evidence: excerpt(file, 'head', h.line, h.lineEnd),
+          detail: 'constraints-changed',
+          summary: `The arguments after the default of \`${h.name}\` changed in \`${file.path}\` (bounds, accepted values, legacy default or validator): \`${b.constraintsText || 'none'}\` to \`${h.constraintsText || 'none'}\`. The property reference's Range or Accepted values row, and any page that states the old limits or values, need checking.`
+        }))
+      }
       if (b.needsRestart && h.needsRestart && b.needsRestart !== h.needsRestart) {
         findings.push(makeFinding({
           ...common,
           name: h.name,
           change_kind: 'behaviour',
+          // A published page states the old restart requirement: high on
+          // the docs-gate ladder.
+          severity: 'high',
           line: h.line,
           evidence: excerpt(file, 'head', h.line, h.lineEnd),
           detail: 'restart-requirement-changed',

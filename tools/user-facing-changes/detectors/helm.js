@@ -15,7 +15,21 @@ const { makeFinding, PAGES } = require('../finding')
  * both sides and reports the file as unresolved otherwise.
  */
 
-const ROUTES = [/^charts\/([^/]+)\/(?:chart\/)?values\.yaml$/]
+// helm-charts and redpanda-operator keep each chart under charts/<name>/
+// (optionally one level down in chart/); the operator's own chart is
+// operator/chart/values.yaml in redpanda-operator.
+const ROUTES = [/^charts\/([^/]+)\/(?:chart\/)?values\.yaml$/, /^(operator)\/chart\/values\.yaml$/]
+
+// Values that move with every release cut: an image tag or digest, a chart
+// or app version. A change to one is reported at low severity, which never
+// opens the doc-impact gate on its own: the redpanda-operator release PRs
+// change sideCars.image.tag three times a patch cycle, and the reference
+// regenerates the value.
+const RELEASE_VALUE = /(?:^|\.)(?:tag|digest|version|appVersion)$/
+
+// helm-docs leaves a key marked `# @ignored` (and its subtree) out of the
+// reference, so a change to one is not a docs change.
+const IGNORED = /(^|\n)\s*@ignored\b/
 
 /**
  * Flatten a values document to dotted paths. Keys and lines come from the
@@ -44,6 +58,10 @@ function flatten (doc, doc11) {
       const key = String(pair.key && pair.key.value !== undefined ? pair.key.value : pair.key)
       const p = prefix ? `${prefix}.${key}` : key
       const line = lineOf(pair.key) || lineOf(pair.value)
+      // The comment above a key: on the key node, or on the map itself for
+      // the map's first key.
+      const comment = `${idx === 0 && node.commentBefore ? node.commentBefore : ''}\n${(pair.key && pair.key.commentBefore) || ''}`
+      if (IGNORED.test(comment)) return
       out.set(p, {
         node: pair.value,
         value: pair11 ? pair11.value : pair.value,
@@ -75,8 +93,11 @@ function parseValues (text) {
 }
 
 function chartOf (file) {
-  const m = ROUTES[0].exec(file)
-  return m ? m[1] : null
+  for (const re of ROUTES) {
+    const m = re.exec(file)
+    if (m) return m[1]
+  }
+  return null
 }
 
 function pageFor (file) {
@@ -138,19 +159,26 @@ function detect ({ files, readBase, readHead, note, excerpt }) {
     }
     for (const [key, e] of h) {
       const prev = b.get(key)
-      if (!prev || e.isMap || prev.isMap) continue
+      if (!prev) continue
+      // A map turned into a scalar (`a: {}` to `a: 5`) or back is a
+      // changed default; only a map on both sides is compared by its keys.
+      if (e.isMap && prev.isMap) continue
+      if (e.isMap !== prev.isMap && YAML.isMap(e.isMap ? e.node : prev.node) && (e.isMap ? e.node : prev.node).items.length > 0) continue
       // Parsed values, not text: `"x"` to `'x'`, `1` to `1.0` and (YAML 1.1)
       // `true` to `yes` are the same value to Helm.
       const before = valueText(prev.value)
       const after = valueText(e.value)
       if (before !== after) {
+        const release = RELEASE_VALUE.test(key)
         findings.push(makeFinding({
           ...common,
           name: key,
           change_kind: 'default-changed',
+          severity: release ? 'low' : undefined,
           line: e.line,
           evidence: keyExcerpt(excerpt, file, prev, e),
-          summary: `The default of \`${key}\` in the ${chart} chart's \`values.yaml\` changed from \`${before}\` to \`${after}\`. The Helm reference regenerates the default; any page that quotes the old value states the wrong one.`
+          detail: release ? 'release-value' : undefined,
+          summary: `The default of \`${key}\` in the ${chart} chart's \`values.yaml\` changed from \`${before ?? '{}'}\` to \`${after ?? '{}'}\`. The Helm reference regenerates the default; any page that quotes the old value states the wrong one.`
         }))
       }
     }

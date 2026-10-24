@@ -82,10 +82,13 @@ describe('crd detector: negative controls', () => {
     expect(detect(base, edit('// ChartVersion is the chart version.', '// The version of the chart to install.')).findings).toEqual([])
   })
 
-  test('a hidden field, an inline embed, a Go type change and a validation marker yield nothing', () => {
+  test('a published field\'s Go type change is a behaviour finding (review nit)', () => {
+    expect(kinds(detect(base, edit('Replicas *int32', 'Replicas *int64')))).toEqual([['behaviour', 'RedpandaSpec.replicas']])
+  })
+
+  test('a hidden field, an inline embed and a non-enum validation marker yield nothing', () => {
     expect(detect(base, edit('Internal string `json:"internal,omitempty"`', 'Internal int `json:"internal,omitempty"`')).findings).toEqual([])
     expect(detect(base, edit('\tEmbedded `json:",inline"`\n', '\tOther `json:",inline"`\n')).findings).toEqual([])
-    expect(detect(base, edit('Replicas *int32', 'Replicas *int64')).findings).toEqual([])
     expect(detect(base, edit('\t// +kubebuilder:default=3', '\t// +kubebuilder:validation:Minimum=1\n\t// +kubebuilder:default=3')).findings).toEqual([])
   })
 

@@ -132,6 +132,16 @@ function parseProto (snippets) {
   return { rpcs, fields, enums, unresolved }
 }
 
+/**
+ * A field type without its package: a message or enum moved to another
+ * package (`common.ACLResourceType` to `common.v1.ACLResourceType`,
+ * `TLSSettings` to `redpanda.core.common.v1.TLSSettings`) is the same type
+ * on the wire and in JSON. Map key and value types are compared the same way.
+ */
+function typeName (type) {
+  return String(type).replace(/\s+/g, '').replace(/[A-Za-z_][\w]*\.(?=[A-Za-z_])/g, '')
+}
+
 function pageFor (file) {
   if (/^proto\/redpanda\/core\//.test(file)) return PAGES.api.admin
   if (/^proto\/public\//.test(file)) return PAGES.api.controlplane
@@ -186,18 +196,26 @@ function detect ({ files, sides, excerpt, note }) {
     }
     for (const [key, f] of b.fields) {
       if (h.fields.has(key)) continue
-      findings.push(makeFinding({
-        ...common, name: `${f.message}.${f.name}`, change_kind: 'removed', line: f.line, evidence: excerpt(file, 'base', f.line, f.line),
-        summary: `Field \`${f.name}\` (number ${f.number}) was removed from message \`${f.message}\` in \`${file.path}\`. Request or response examples that carry it are wrong.`
-      }))
+      findings.push({
+        ...makeFinding({
+          ...common, name: `${f.message}.${f.name}`, change_kind: 'removed', line: f.line, evidence: excerpt(file, 'base', f.line, f.line),
+          summary: `Field \`${f.name}\` (number ${f.number}) was removed from message \`${f.message}\` in \`${file.path}\`. Request or response examples that carry it are wrong.`
+        }),
+        // A message moved to another file (a common package) keeps its
+        // fields' names and numbers: that pair is a move, not a change.
+        moveKey: `${f.message}.${f.name}#${f.number}`
+      })
     }
     for (const [key, f] of h.fields) {
       const prev = b.fields.get(key)
       if (!prev) {
-        findings.push(makeFinding({
-          ...common, name: `${f.message}.${f.name}`, change_kind: f.deprecated ? 'deprecated' : 'added', line: f.line, evidence: excerpt(file, 'head', f.line, f.line),
-          summary: `New field \`${f.name}\` (\`${f.type}\`, number ${f.number}) on message \`${f.message}\` in \`${file.path}\`. The API reference lists it on regeneration; examples for this message may need it.`
-        }))
+        findings.push({
+          ...makeFinding({
+            ...common, name: `${f.message}.${f.name}`, change_kind: f.deprecated ? 'deprecated' : 'added', line: f.line, evidence: excerpt(file, 'head', f.line, f.line),
+            summary: `New field \`${f.name}\` (\`${f.type}\`, number ${f.number}) on message \`${f.message}\` in \`${file.path}\`. The API reference lists it on regeneration; examples for this message may need it.`
+          }),
+          moveKey: `${f.message}.${f.name}#${f.number}`
+        })
         continue
       }
       if (prev.name !== f.name) {
@@ -210,7 +228,7 @@ function detect ({ files, sides, excerpt, note }) {
           ...common, name: `${f.message}.${f.name}`, change_kind: 'deprecated', line: f.line, evidence: excerpt(file, 'head', f.line, f.line),
           summary: `Field \`${f.name}\` of message \`${f.message}\` is now deprecated in \`${file.path}\`. Examples that set it now recommend a deprecated field.`
         }))
-      } else if (prev.type !== f.type) {
+      } else if (typeName(prev.type) !== typeName(f.type)) {
         findings.push(makeFinding({
           ...common, name: `${f.message}.${f.name}`, change_kind: 'behaviour', line: f.line, evidence: excerpt(file, 'head', f.line, f.line), detail: 'type-changed',
           summary: `Field \`${f.name}\` of message \`${f.message}\` changed type from \`${prev.type}\` to \`${f.type}\` in \`${file.path}\`. Examples that carry the old shape are wrong.`
@@ -235,4 +253,4 @@ function detect ({ files, sides, excerpt, note }) {
   return findings
 }
 
-module.exports = { id: 'api', surface: 'api', routes: ROUTES, detect, parseProto }
+module.exports = { id: 'api', surface: 'api', routes: ROUTES, detect, parseProto, typeName }

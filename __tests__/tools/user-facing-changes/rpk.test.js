@@ -57,13 +57,14 @@ describe('parseGo', () => {
     expect(unresolved).toEqual([])
     expect([...commands.keys()]).toEqual(['create'])
     expect(commands.get('create')).toMatchObject({ use: 'create', hidden: false, deprecated: null, line: 17 })
-    expect([...flags.keys()]).toEqual(['dry', 'timeout', 'format', 'retries', 'verbose', 'legacy'])
-    expect(flags.get('dry')).toMatchObject({ defaultText: 'false', target: '&dry', method: 'BoolVarP', line: 29 })
-    expect(flags.get('timeout').defaultText).toBe('30*time.Second')
-    expect(flags.get('format')).toMatchObject({ defaultText: '"text"', target: null })
-    expect(flags.get('retries')).toMatchObject({ defaultText: '3', target: '&retries' })
+    // Keyed by command and flag name, so two commands in one file keep their own flags.
+    expect([...flags.keys()]).toEqual(['dry', 'timeout', 'format', 'retries', 'verbose', 'legacy'].map((n) => `create\t${n}`))
+    expect(flags.get('create\tdry')).toMatchObject({ defaultText: 'false', target: '&dry', method: 'BoolVarP', line: 29 })
+    expect(flags.get('create\ttimeout').defaultText).toBe('30*time.Second')
+    expect(flags.get('create\tformat')).toMatchObject({ defaultText: '"text"', target: null })
+    expect(flags.get('create\tretries')).toMatchObject({ defaultText: '3', target: '&retries' })
     // Count flags have no default argument.
-    expect(flags.get('verbose').defaultText).toBeNull()
+    expect(flags.get('create\tverbose').defaultText).toBeNull()
     expect([...hidden]).toEqual(['legacy'])
   })
 

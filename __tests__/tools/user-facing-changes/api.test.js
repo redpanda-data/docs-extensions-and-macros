@@ -137,7 +137,7 @@ describe('api detector', () => {
     const src = 'syntax = "proto3";\npackage redpanda.core.admin.v2;\nservice ClusterService {\n  rpc GetHealth(GetHealthRequest) returns (GetHealthResponse) {}\n}\n'
     const r = detect({ [ADMIN]: src }, { [ADMIN]: src.replace('  rpc GetHealth(', '  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse) {}\n  rpc GetHealth(') })
     expect(kinds(r)).toEqual([['added', 'ClusterService.GetStatus']])
-    expect(r.findings[0].affected_pages).toEqual(['https://docs.redpanda.com/api/doc/admin/'])
+    expect(r.findings[0].affected_pages).toEqual(['https://docs.redpanda.com/api/doc/admin/v2/'])
   })
 })
 

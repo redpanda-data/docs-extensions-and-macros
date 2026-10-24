@@ -67,7 +67,7 @@ describe('configEnumTypes and parseEnums', () => {
 describe('enums detector', () => {
   test('a new value in an enum_property type is a behaviour finding (DOC-2600 class)', () => {
     const r = detect(base, { ...base, [MODEL_H]: MODEL.replace('    continuous, // the enterprise one', '    continuous, // the enterprise one\n    continuous_with_rack,') }, { detectors: ['enums'] })
-    expect(kinds(r)).toEqual([['behaviour', 'partition_autobalancing_mode::continuous_with_rack']])
+    expect(kinds(r)).toEqual([['behaviour', 'partition_autobalancing_mode=continuous_with_rack']])
     expect(r.findings[0]).toMatchObject({ surface: 'properties', severity: 'medium', file: MODEL_H, line: 8, detail: 'enum-value-added' })
     expect(r.findings[0].summary).toMatch(/identifier is reported/)
     expect(r.findings[0].affected_pages).toEqual(['https://docs.redpanda.com/streaming/current/reference/properties/cluster-properties/'])
@@ -75,14 +75,35 @@ describe('enums detector', () => {
 
   test('a removed value is high', () => {
     const r = detect(base, { ...base, [MODEL_H]: MODEL.replace('    continuous, // the enterprise one\n', '') }, { detectors: ['enums'] })
-    expect(kinds(r)).toEqual([['removed', 'partition_autobalancing_mode::continuous']])
+    expect(kinds(r)).toEqual([['removed', 'partition_autobalancing_mode=continuous']])
     expect(r.findings[0].severity).toBe('high')
   })
 
-  test('a new feature flag in the feature table is reported against the Admin API', () => {
-    const r = detect(base, { ...base, [FEATURE_TABLE]: FEATURES.replace('    node_isolation = 1ULL << 2U,', '    node_isolation = 1ULL << 2U,\n    manual_finalization = 1ULL << 3U,') }, { detectors: ['enums'] })
-    expect(kinds(r)).toEqual([['behaviour', 'feature::manual_finalization']])
-    expect(r.findings[0]).toMatchObject({ surface: 'feature-flags', affected_pages: ['https://docs.redpanda.com/api/doc/admin/'] })
+  test('feature flags are not read: the docs do not list them (review item 13)', () => {
+    // Negative control for the old behaviour, which filed a medium finding
+    // for every new value and a high one for every retired flag.
+    const r = detect(base, { ...base, [FEATURE_TABLE]: FEATURES.replace('    node_isolation = 1ULL << 2U,', '    manual_finalization = 1ULL << 3U,') }, { detectors: ['enums'] })
+    expect(r.findings).toEqual([])
+  })
+
+  test('an enum is matched by namespace, so a same-named enum elsewhere is not read', () => {
+    const CONFIG2 = CONFIG.replace('    property<bool> enable_rack_awareness;', '    enum_property<fips_mode_flag> fips_mode;\n    property<bool> enable_rack_awareness;')
+    const TYPES = 'src/v/config/types.h'
+    const FUND = 'src/v/model/fundamental.h'
+    const cfgEnum = 'namespace config {\nenum class fips_mode_flag : uint8_t {\n    disabled,\n    enabled,\n};\n}\n'
+    const modelEnum = 'namespace model {\nenum class fips_mode_flag : uint8_t {\n    disabled,\n    enabled,\n};\n}\n'
+    const b = { ...base, [CONFIG_H]: CONFIG2, [TYPES]: cfgEnum, [FUND]: modelEnum }
+    const add = (t) => t.replace('    enabled,', '    enabled,\n    permissive,')
+    // The config:: enum is the property's type: named after the property.
+    expect(kinds(detect(b, { ...b, [TYPES]: add(cfgEnum) }, { detectors: ['enums'] }))).toEqual([['behaviour', 'fips_mode=permissive']])
+    // The model:: enum of the same name is not.
+    expect(detect(b, { ...b, [FUND]: add(modelEnum) }, { detectors: ['enums'] }).findings).toEqual([])
+  })
+
+  test('enum_property<std::optional<T>> names T', () => {
+    const { configEnums } = require('../../../tools/user-facing-changes/detectors/enums')
+    const m = configEnums('namespace config {\nstruct c {\n    enum_property<std::optional<s3_url_style>> cloud_storage_url_style;\n};\n}\n')
+    expect(m.get('s3_url_style')).toEqual([{ ns: 'config', properties: ['cloud_storage_url_style'] }])
   })
 
   test('the config header text carried by the diff names the enum types when no checkout is available', () => {
@@ -91,7 +112,7 @@ describe('enums detector', () => {
     expect(detect(base, head, { whole: false, detectors: ['enums'] }).findings).toEqual([])
     // Hunk-only mode with the enum_property line inside a hunk's context: enough.
     const head2 = { ...head, [CONFIG_H]: CONFIG.replace('    enum_property<model::partition_autobalancing_mode> partition_autobalancing_mode;', '    enum_property<model::partition_autobalancing_mode> partition_autobalancing_mode;\n    property<bool> other;') }
-    expect(kinds(detect(base, head2, { whole: false, detectors: ['enums'] }))).toEqual([['behaviour', 'partition_autobalancing_mode::continuous_with_rack']])
+    expect(kinds(detect(base, head2, { whole: false, detectors: ['enums'] }))).toEqual([['behaviour', 'partition_autobalancing_mode=continuous_with_rack']])
   })
 })
 
@@ -104,7 +125,6 @@ describe('enums detector: negative controls', () => {
   test('a value that moves, a comment change, and an explicit-value change yield nothing', () => {
     expect(detect(base, { ...base, [MODEL_H]: MODEL.replace('    off,\n    node_add,', '    node_add,\n    off,') }, { detectors: ['enums'] }).findings).toEqual([])
     expect(detect(base, { ...base, [MODEL_H]: MODEL.replace('// the enterprise one', '// needs a license') }, { detectors: ['enums'] }).findings).toEqual([])
-    expect(detect(base, { ...base, [FEATURE_TABLE]: FEATURES.replace('1ULL << 2U', '1ULL << 7U') }, { detectors: ['enums'] }).findings).toEqual([])
   })
 
   test('a whole new enum is not this detector\'s (the property that exposes it is the properties detector\'s)', () => {

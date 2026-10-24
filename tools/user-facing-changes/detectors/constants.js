@@ -5,7 +5,7 @@ const { stripComments, skipString, lineAt, normalize } = require('../source')
 const { sameValue } = require('../values')
 const { makeFinding, PAGES } = require('../finding')
 const { parseInitializers } = require('./properties')
-const { parseGo, commandPath } = require('./rpk')
+const { parseGo, commandPath, commandPaths } = require('./rpk')
 
 /**
  * Defaults held in a named constant.
@@ -212,8 +212,10 @@ function detect ({ files, sides, excerpt, note, readHead, listHead }) {
         if (ownPkg && pkgOf(text) !== ownPkg) continue
         const parsed = parseGo([{ startLine: 1, text }])
         const use = parsed.commands.size === 1 ? [...parsed.commands.keys()][0] : null
-        const command = commandPath(candidate, use)
-        for (const [flag, f] of parsed.flags) {
+        const paths = commandPaths(candidate, parsed)
+        for (const f of parsed.flags.values()) {
+          const flag = f.name
+          const command = (f.command && paths.get(f.command)) || commandPath(candidate, use)
           if (parsed.hidden.has(flag)) continue
           for (const c of changed) {
             if (!usesGoIdentifier(f.defaultText, c.name)) continue

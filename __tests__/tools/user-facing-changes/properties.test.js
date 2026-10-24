@@ -150,7 +150,8 @@ describe('properties detector: whole files', () => {
       '"remote storage (sec).",\n      {.needs_restart = needs_restart::no,',
       '"remote storage (sec).",\n      {.needs_restart = needs_restart::yes,'))
     expect(kinds(r)).toEqual([['behaviour', 'cloud_storage_segment_max_upload_interval_sec']])
-    expect(r.findings[0]).toMatchObject({ severity: 'medium', detail: 'restart-requirement-changed' })
+    // High: the reference and procedures state the old restart requirement.
+    expect(r.findings[0]).toMatchObject({ severity: 'high', detail: 'restart-requirement-changed' })
     expect(r.findings[0].summary).toMatch(/now requires a restart/)
   })
 
@@ -159,7 +160,8 @@ describe('properties detector: whole files', () => {
     expect(kinds(r1)).toEqual([['behaviour', 'rpc_server_compress_replies']])
     const r2 = detect(base, edit('.visibility = visibility::tunable},\n      false)', '.visibility = visibility::deprecated},\n      false)'))
     expect(kinds(r2)).toEqual([['deprecated', 'rpc_server_compress_replies']])
-    expect(r2.findings[0].severity).toBe('high')
+    // Medium: a deprecated property still works, so no page is wrong yet.
+    expect(r2.findings[0].severity).toBe('medium')
   })
 
   test('a new property is added (medium) and a deleted one removed (high)', () => {

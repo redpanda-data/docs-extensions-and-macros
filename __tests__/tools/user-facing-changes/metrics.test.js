@@ -113,9 +113,14 @@ describe('metrics detector: negative controls', () => {
     expect(r.findings).toEqual([])
   })
 
-  test('a lambda body change (refactor), a label change and a comment change yield nothing', () => {
+  test('a group label change is one finding for the group (review item 12)', () => {
+    const r = detect(base, edit('{sm::shard_label});', '{sm::shard_label, partition_label});'))
+    expect(kinds(r)).toEqual([['behaviour', 'redpanda_kafka_*']])
+    expect(r.findings[0].detail).toBe('labels-changed')
+  })
+
+  test('a lambda body change (refactor) and a comment change yield nothing', () => {
     expect(detect(base, edit('[this] { return _start_offset; }', '[this] { return _log->start_offset(); }')).findings).toEqual([])
-    expect(detect(base, edit('{sm::shard_label});', '{sm::shard_label, partition_label});')).findings).toEqual([])
     expect(detect(base, edit('"not_a_metric"', '"still_not_a_metric"')).findings).toEqual([])
   })
 
