@@ -755,6 +755,111 @@ programCli
     console.log('  mcp/README.adoc')
   })
 
+/**
+ * check-dispatch-graph
+ *
+ * @description
+ * Health check for the repository_dispatch graph that connects Redpanda's
+ * engineering repos to its docs repos. Reads every workflow file on each
+ * configured repo's default branch, pairs the senders (peter-evans/repository-dispatch,
+ * `gh api .../dispatches`, curl, github-script) with the listeners
+ * (`on.repository_dispatch.types`), and reads each workflow's recent runs from
+ * the Actions API. Reports senders with no listener, docs listeners with no
+ * sender (informational when a cron backstops them), senders that have never
+ * fired, receivers failing more than the threshold, receiver payload variants
+ * no sender dispatches, and edges dispatched from more than one repo.
+ *
+ * @why
+ * A repository_dispatch is accepted with HTTP 204 whether or not a listener
+ * exists, and a receiver that fails every run looks, from the sender's side,
+ * exactly like one that works. Breaks in this graph went unnoticed for weeks
+ * until someone read the receivers' run history by hand. This command reads it
+ * by script, and .github/workflows/check-dispatch-graph.yml runs it weekly,
+ * files one issue, and closes it on the first run that finds the graph healthy.
+ *
+ * Exit codes: 0 clean, 1 findings (the output ends with the line
+ * DISPATCH_GRAPH_FINDINGS_CONFIRMED), 2 could not run (a repo or runs query
+ * could not be read, so the graph is incomplete; never reported as clean).
+ *
+ * @example
+ * # Check the default repo set against the live org
+ * export REDPANDA_GITHUB_TOKEN=...   # or GH_TOKEN; must read the private docs repos
+ * npx doc-tools check-dispatch-graph
+ *
+ * # Machine-readable
+ * npx doc-tools check-dispatch-graph --json > dispatch-graph.json
+ *
+ * # A narrower set of repos (role decides which side a missing counterpart is reported on)
+ * npx doc-tools check-dispatch-graph --repos redpanda-data/helm-charts:engineering,redpanda-data/docs:docs
+ *
+ * @requirements
+ * - A GitHub token that can read every configured repo and its Actions runs
+ *   (REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN or GH_TOKEN). The
+ *   docs repos are private, so an unauthenticated run exits 2.
+ */
+programCli
+  .command('check-dispatch-graph')
+  .description('Check the repository_dispatch graph between engineering and docs repos: senders without listeners, listeners without senders, never-fired senders, failing receivers (exit 0 clean, 1 findings, 2 could not run)')
+  .option('--repos <list>', 'Comma-separated owner/name[:role] entries (role engineering or docs) replacing the default repo set')
+  .option('--fail-threshold <fraction>', 'Flag a receiver whose fail rate over the window is above this fraction', '0.5')
+  .option('--window <n>', 'How many of the newest runs the fail rate is computed over', '20')
+  .option('--per-page <n>', 'How many runs to fetch per workflow (max 100)', '50')
+  .option('--json', 'Print the full result as JSON instead of the table')
+  .action(async (options) => {
+    const { runCheck, formatReport, createGitHubApi, DEFAULT_REPOS, SENTINEL } = require('../tools/dispatch-graph/check-dispatch-graph')
+
+    let repos = DEFAULT_REPOS
+    if (options.repos) {
+      repos = String(options.repos).split(',').map((entry) => entry.trim()).filter(Boolean).map((entry) => {
+        const [repo, role = 'docs'] = entry.split(':')
+        if (!/^[^/]+\/[^/]+$/.test(repo) || !['engineering', 'docs'].includes(role)) {
+          console.error(`Error: --repos entry "${entry}" must be owner/name or owner/name:engineering|docs`)
+          process.exit(2)
+        }
+        return { repo, role }
+      })
+    }
+    const threshold = Number(options.failThreshold)
+    const window = Number(options.window)
+    const perPage = Number(options.perPage)
+    if (!(threshold >= 0 && threshold <= 1) || !(window > 0) || !(perPage > 0 && perPage <= 100)) {
+      console.error('Error: --fail-threshold must be 0..1, --window > 0, --per-page 1..100')
+      process.exit(2)
+    }
+
+    // Exit 2 is reserved for "could not find out", so the weekly job can tell
+    // "an edge is broken" apart from "the API was down" and not file a false
+    // issue. An unauthenticated run cannot read the private docs repos and
+    // lands here too; it must never pass as clean.
+    let result
+    try {
+      const octokit = require('../cli-utils/octokit-client')
+      result = await runCheck({ repos, api: createGitHubApi(octokit), threshold, window, perPage })
+    } catch (err) {
+      console.error(`Error: Could not check the dispatch graph: ${err.message}`)
+      process.exit(2)
+    }
+
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2))
+    } else {
+      console.log(formatReport(result))
+    }
+
+    if (result.exitCode === 2) {
+      console.error(`\nError: ${result.unreadable.length} repo(s) or run record(s) could not be read, so the graph is incomplete. Not a clean result.`)
+      process.exit(2)
+    }
+    if (result.exitCode === 1) {
+      // Printed only where findings were actually established; the weekly
+      // script requires this line before filing an issue, so a usage error or
+      // a crash (both exit 1 under Commander) can never file one.
+      if (!options.json) console.log(`\n${SENTINEL}`)
+      process.exit(1)
+    }
+    process.exit(0)
+  })
+
 // ====================================================================
 // GENERATE SUBCOMMAND GROUP
 // ====================================================================
