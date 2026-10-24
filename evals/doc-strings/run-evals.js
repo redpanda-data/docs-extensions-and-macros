@@ -583,7 +583,9 @@ function checkImpactFile (checks, model, expected) {
 function checkBlockType (checks, model, committable) {
   const { suggestion, text } = model.blockCounts || { suggestion: 0, text: 0 }
   return committable
-    ? checks.add('rewrite carried in a ```suggestion block (committable suggestions on)', suggestion >= 1 && text === 0, `suggestion=${suggestion} text=${text}`)
+    // A ```text block is fine here: a correct review may quote the current
+    // string in one. Only the off mode forbids a block type.
+    ? checks.add('rewrite carried in a ```suggestion block (committable suggestions on)', suggestion >= 1, `suggestion=${suggestion} text=${text}`)
     : checks.add('rewrite carried in a ```text block and no ```suggestion block (committable suggestions off)', text >= 1 && suggestion === 0, `suggestion=${suggestion} text=${text}`)
 }
 
@@ -678,7 +680,7 @@ function main () {
       committable: options.committable,
       callModel (prompt) {
         fs.writeFileSync(path.join(caseDir, 'prompt.txt'), prompt)
-        const result = lib.runClaude(prompt, { cwd: workDir, model: options.model || 'sonnet' })
+        const result = lib.runClaude(prompt, { cwd: workDir, model: options.model || lib.TEMPLATE_MODEL })
         fs.writeFileSync(path.join(caseDir, 'model-output.txt'), result.output)
         if (result.stderr) fs.writeFileSync(path.join(caseDir, 'model-stderr.txt'), result.stderr)
         result.failed = result.timedOut || result.status !== 0
@@ -694,7 +696,7 @@ function main () {
         fs.writeFileSync(path.join(caseDir, 'prompt.txt'), result.prompt)
         fs.writeFileSync(path.join(caseDir, 'model-output.txt'), result.output)
         fs.writeFileSync(path.join(caseDir, 'transcript.txt'), result.transcript)
-        fs.writeFileSync(path.join(caseDir, 'inline-comments.json'), JSON.stringify(result.comments, null, 2))
+        fs.writeFileSync(path.join(caseDir, 'inline-comments.json'), JSON.stringify(result.rawComments || result.comments, null, 2))
         for (const [name, text] of Object.entries(result.files)) fs.writeFileSync(path.join(caseDir, name), text)
         if (result.stderr) fs.writeFileSync(path.join(caseDir, 'model-stderr.txt'), result.stderr)
         return result

@@ -164,10 +164,10 @@ node evals/doc-strings/run-evals.js --keep-temp   # keep fixture repos
 ----
 
 Without `--model`, review cases run on `claude-opus-5` (production) and the
-template cases on Sonnet. Pass `--model` only for a deliberate comparison: a
-result on any other model says nothing about what callers run. Name the model
-exactly. The `opus` and `sonnet` aliases resolve to the newest model the CLI
-knows, which is not necessarily the one a caller pins.
+template cases on `claude-sonnet-5`. Pass `--model` only for a deliberate
+comparison: a result on any other model says nothing about what callers run.
+Name the model exactly. The `opus` and `sonnet` aliases resolve to the newest
+model the CLI knows, which is not necessarily the one a caller pins.
 
 Requirements:
 

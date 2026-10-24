@@ -61,16 +61,11 @@ const SURFACE_LAYOUT = {
 /** Copy a fixture tree; a `go.mod.txt` becomes `go.mod` (kept renamed so the
  * fixture is not a nested Go module in this repo). */
 function copyTree (from, to) {
-  for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
-    const src = path.join(from, entry.name)
-    const dest = path.join(to, entry.name === 'go.mod.txt' ? 'go.mod' : entry.name)
-    if (entry.isDirectory()) {
-      fs.mkdirSync(dest, { recursive: true })
-      copyTree(src, dest)
-    } else {
-      fs.copyFileSync(src, dest)
-    }
-  }
+  fs.cpSync(from, to, { recursive: true })
+  // The fixture keeps its go.mod as go.mod.txt so Go tooling in this repo
+  // ignores it.
+  const mod = path.join(to, 'go.mod.txt')
+  if (fs.existsSync(mod)) fs.renameSync(mod, path.join(to, 'go.mod'))
 }
 
 // ---------------------------------------------------------------------------
@@ -181,6 +176,10 @@ function claudeAvailable () {
   return !result.error && result.status === 0
 }
 
+// The template cases' model, named exactly: a CLI alias such as `sonnet`
+// resolves to the newest model the CLI knows, so results drift.
+const TEMPLATE_MODEL = 'claude-sonnet-5'
+
 /**
  * Run the claude CLI headless with the prompt on stdin. The model gets no
  * tools: every case is self-contained in the prompt, and the harness - not
@@ -188,7 +187,7 @@ function claudeAvailable () {
  *
  * @returns {{ output, stderr, status, timedOut, ms }}
  */
-function runClaude (prompt, { cwd, model = 'sonnet', timeoutMs = 300000 } = {}) {
+function runClaude (prompt, { cwd, model = TEMPLATE_MODEL, timeoutMs = 300000 } = {}) {
   const started = Date.now()
   const result = spawnSync('claude', [
     '-p',
@@ -446,6 +445,7 @@ function checkSuggestionComment (comments, target) {
 }
 
 module.exports = {
+  TEMPLATE_MODEL,
   checkSuggestionComment,
   dispatchAccepts,
   REPO_ROOT,

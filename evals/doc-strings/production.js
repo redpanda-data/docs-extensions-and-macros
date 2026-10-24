@@ -79,7 +79,9 @@ function renderPrompt (prompt, vars) {
   const filled = prompt
     .replace(/\$\{\{\s*github\.repository\s*\}\}/g, vars.repository)
     .replace(/\$\{\{\s*github\.event\.pull_request\.number\s*\}\}/g, String(vars.prNumber))
-    .replace(/\$\{\{\s*!inputs\.committable_suggestions && '([^']*)' \|\| '' \}\}/g, (_, text) => (committable ? '' : text))
+    // Spacing-tolerant, and '' inside the quoted text is an Actions-escaped
+    // apostrophe.
+    .replace(/\$\{\{\s*!inputs\.committable_suggestions\s*&&\s*'((?:[^']|'')*)'\s*\|\|\s*''\s*\}\}/g, (_, text) => (committable ? '' : text.replace(/''/g, "'")))
   const left = filled.match(/\$\{\{[^}]*\}\}/g)
   if (left) throw new Error(`unfilled Actions expression(s) in the production prompt: ${[...new Set(left)].join(', ')}`)
   return filled
@@ -110,6 +112,16 @@ function fetchStandards () {
  * @param {string} [o.model]
  * @returns {{ output, comments, files, stderr, status, timedOut, ms, failed }}
  */
+/**
+ * The comments as the executors read them. With committable suggestions off
+ * the review writes the rewrite in a ```text block; it is handed on under the
+ * ```suggestion tag the executors parse.
+ */
+function normalizeComments (comments, committableSuggestions = true) {
+  if (committableSuggestions) return comments
+  return comments.map((c) => ({ ...c, body: c.body.replace(/```text\b/g, '```suggestion') }))
+}
+
 function runReview ({ repoDir, lint, diff, model = PRODUCTION_MODEL, committableSuggestions = true, timeoutMs = 600000 }) {
   const step = loadStep()
   const args = parseClaudeArgs(step.with.claude_args || '')
@@ -170,16 +182,20 @@ function runReview ({ repoDir, lint, diff, model = PRODUCTION_MODEL, committable
     blockCounts.suggestion += (c.body.match(/```suggestion\b/g) || []).length
     blockCounts.text += (c.body.match(/```text\b/g) || []).length
   }
-  const output = comments.map((c) => {
-    const body = committableSuggestions ? c.body : c.body.replace(/```text\b/g, '```suggestion')
-    return `FILE ${c.path} LINES ${c.startLine || c.line || 0}-${c.line || c.startLine || 0}\n${body}`
-  }).join('\n\n')
+  // Both the output text and the comments get the same rewrite: the
+  // executors check placement and footers on the comments, and with the raw
+  // ```text bodies every off-mode case would fail on a correct review.
+  const checked = normalizeComments(comments, committableSuggestions)
+  const output = checked.map((c) =>
+    `FILE ${c.path} LINES ${c.startLine || c.line || 0}-${c.line || c.startLine || 0}\n${c.body}`
+  ).join('\n\n')
   const timedOut = Boolean(r.error && r.error.code === 'ETIMEDOUT')
   return {
     prompt,
     output,
     transcript: r.stdout || '',
-    comments,
+    comments: checked,
+    rawComments: comments,
     blockCounts,
     files,
     stderr: r.stderr || '',
@@ -190,4 +206,4 @@ function runReview ({ repoDir, lint, diff, model = PRODUCTION_MODEL, committable
   }
 }
 
-module.exports = { runReview, loadStep, parseClaudeArgs, renderPrompt, PRODUCTION_MODEL, FETCHED_STANDARDS }
+module.exports = { runReview, normalizeComments, loadStep, parseClaudeArgs, renderPrompt, PRODUCTION_MODEL, FETCHED_STANDARDS }

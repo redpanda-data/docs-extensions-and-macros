@@ -201,8 +201,8 @@ on:
           commit from the PR page. Set false for a repository whose review
           policy forbids committable suggestions (connect's does): the same
           full-span rewrite then goes in a ```text block, which can be copied
-          but offers no commit button. The fingerprint footer and everything
-          else about the comment are unchanged.
+          but offers no commit button. The comment's span and fingerprint
+          footer are the same in both modes.
         type: boolean
         default: true
     secrets:
@@ -1051,9 +1051,9 @@ jobs:
               one-line label with no terminal period, and Description is
               plain text, not AsciiDoc.
             - End every connect suggestion comment, on the line before the
-              fingerprint line, with exactly: After you apply this
-              suggestion, run `CGO_ENABLED=1 TAGS=x_benthos_extra task docs`
-              and commit the regenerated docs, or the docs check fails.
+              fingerprint line, with exactly: After you make this change,
+              run `CGO_ENABLED=1 TAGS=x_benthos_extra task docs` and commit
+              the regenerated docs, or the docs check fails.
 
             REVIEW IN CONTEXT: judge each string as the reader of its page,
             not on its own. Read it together with its context entries and

@@ -27,6 +27,12 @@ describe('doc-strings evals: production review extraction', () => {
     expect(rendered).toMatch(/PR_NUMBER: 7/)
   })
 
+  test('the committable-suggestions expression tolerates spacing and escaped apostrophes', () => {
+    const prompt = "A ${{ !inputs.committable_suggestions  &&  'it''s off' ||  '' }} B"
+    expect(production.renderPrompt(prompt, { repository: 'r/r', prNumber: 1, committableSuggestions: false })).toBe("A it's off B")
+    expect(production.renderPrompt(prompt, { repository: 'r/r', prNumber: 1 })).toBe('A  B')
+  })
+
   test('committable suggestions render the way a caller input would', () => {
     const on = production.renderPrompt(step.with.prompt, { repository: 'r/r', prNumber: 1 })
     const off = production.renderPrompt(step.with.prompt, { repository: 'r/r', prNumber: 1, committableSuggestions: false })
@@ -118,6 +124,16 @@ describe('doc-strings evals: the suggestion comment must target the declaration'
   test('zero or two suggestion comments fail', () => {
     expect(lib.checkSuggestionComment([], target).problems.join()).toMatch(/found 0/)
     expect(lib.checkSuggestionComment([good, good], target).problems.join()).toMatch(/found 2/)
+  })
+
+  test('with committable suggestions off, a ```text rewrite is checked like a suggestion', () => {
+    // The review posts ```text in the off mode; runReview hands the executors
+    // the same comments under the tag they parse.
+    const offComment = { ...good, body: good.body.replace('```suggestion', '```text') }
+    expect(lib.checkSuggestionComment([offComment], target).problems.join()).toMatch(/found 0/)
+    const checked = production.normalizeComments([offComment], false)
+    expect(lib.checkSuggestionComment(checked, target).problems).toEqual([])
+    expect(production.normalizeComments([offComment], true)).toEqual([offComment])
   })
 
   test('the mock inline-comment tool rejects a call with no line and logs only a full one', () => {

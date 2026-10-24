@@ -1536,12 +1536,15 @@ const XREF_MODULES = new Set(['components', 'configuration', 'cookbooks', 'get-s
 // above so a new component kind needs no second list.
 const COMPONENT_PAGE_DIRS = new Set(Object.values(REGISTRATION_TYPES)
   .filter((t) => !t.startsWith('bloblang-'))
-  .map((t) => t.endsWith('s') ? t : `${t}s`))
+  .map((t) => `${t}s`))
 
-/** The fix a module-less xref needs. Only component pages have a module the
- * lint can know; any other page's module is in its docs URL. */
+/** The fix a module-less xref needs. Component pages and Bloblang pages have
+ * a module the lint can know (the review prompt says the same); any other
+ * page's module is in its docs URL. */
 function xrefModuleHint (target) {
-  if (COMPONENT_PAGE_DIRS.has(target.split('/')[0])) return `Name the module: xref:components:${target}[...].`
+  const dir = target.split('/')[0]
+  if (COMPONENT_PAGE_DIRS.has(dir)) return `Name the module: xref:components:${target}[...].`
+  if (dir === 'bloblang') return `Name the module: xref:guides:${target}[...].`
   return 'Name the module the page lives in. It is the path segment after /connect/ in the page\'s docs URL, so https://docs.redpanda.com/connect/configuration/interpolation/ is xref:configuration:interpolation.adoc[...].'
 }
 
