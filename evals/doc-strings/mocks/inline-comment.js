@@ -63,7 +63,7 @@ rl.on('line', (line) => {
   } else if (msg.method === 'tools/call') {
     const args = (msg.params && msg.params.arguments) || {}
     // GitHub rejects a review comment with no line, so the stand-in does too.
-    if (msg.params.name !== TOOL.name || typeof args.path !== 'string' || typeof args.body !== 'string' || !Number.isInteger(args.line)) {
+    if ((msg.params || {}).name !== TOOL.name || typeof args.path !== 'string' || typeof args.body !== 'string' || !Number.isInteger(args.line)) {
       send({ jsonrpc: '2.0', id: msg.id, result: { isError: true, content: [{ type: 'text', text: 'path, body and line are required' }] } })
       return
     }

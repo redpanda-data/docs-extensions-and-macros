@@ -5,8 +5,9 @@
 // Every connect release (vX.Y.Z, including prereleases) publishes a
 // redpanda-connect-docs.tar.gz asset whose root is `modules/`: the tree that
 // connect's docs generator writes under its docs/ directory. Only
-// modules/components/partials/** and modules/components/examples/** belong to
-// the reference. Releases from before the asset existed answer 404.
+// modules/components/partials/**, modules/components/examples/**, and
+// modules/components/attachments/** (the release's connect-<version>.json)
+// belong to the reference. Releases from before the asset existed answer 404.
 //
 // The same tree can come from a local directory instead (a connect checkout's
 // docs/ after running its generator), or from a local copy of the tarball.
@@ -19,7 +20,7 @@ const OWNER = 'redpanda-data'
 const REPO = 'connect'
 const ASSET_NAME = 'redpanda-connect-docs.tar.gz'
 const MODULE = 'components'
-const FAMILY_DIRS = { partials: 'partial', examples: 'example' }
+const FAMILY_DIRS = { partials: 'partial', examples: 'example', attachments: 'attachment' }
 const DOWNLOAD_ATTEMPTS = 3
 const DOWNLOAD_TIMEOUT_MS = 120000
 
@@ -28,10 +29,10 @@ function assetUrl (tag) {
 }
 
 // The Antora resource of a path inside the tree, or null for anything outside
-// modules/components/partials and modules/components/examples.
+// modules/components/partials, examples, and attachments.
 function toResource (entryPath) {
   const p = String(entryPath || '').replace(/\\/g, '/').replace(/^(\.\/)+/, '')
-  const m = p.match(/^modules\/components\/(partials|examples)\/(.+)$/)
+  const m = p.match(/^modules\/components\/(partials|examples|attachments)\/(.+)$/)
   if (!m || m[2].endsWith('/')) return null
   // A path that climbs out of its directory is not part of the tree.
   if (m[2].split('/').some((segment) => segment === '..' || segment === '')) return null
