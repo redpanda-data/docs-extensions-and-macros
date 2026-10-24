@@ -510,14 +510,17 @@ function runUnchangedLinesCase (spec, io, sabotage) {
   const lint = lib.runLint(repo.dir, repo.surface, ['--diff', base])
   const target = (lint.declarations || []).find((d) => d.name === spec.target)
   if (!target) return harnessError(checks, `Precondition: ${spec.target} must be a declaration to review, got ${JSON.stringify((lint.declarations || []).map((d) => d.name))}`)
+  // The prompt makes a lint finding the one reason to touch an unchanged
+  // line, so the case needs a lint-clean declaration to mean "keep them all".
+  if ((lint.findings || []).length) return harnessError(checks, `Precondition: the fixture must be lint-clean, got ${lint.findings.length} findings`)
   const changed = lib.changedLines(repo.dir, base, repo.targetRel)
   const head = fs.readFileSync(repo.targetAbs, 'utf8').split('\n')
   const keep = []
   for (let n = target.line_start; n <= target.line_end; n++) {
-    if (!changed.has(n) && /[A-Za-z0-9]/.test(head[n - 1])) keep.push(head[n - 1])
+    if (!changed.has(n)) keep.push(head[n - 1])
   }
   const touched = [...changed].filter((n) => n >= target.line_start && n <= target.line_end)
-  if (keep.length === 0 || touched.length === 0) {
+  if (!keep.some((l) => /[A-Za-z0-9]/.test(l)) || touched.length === 0) {
     return harnessError(checks, `Precondition: ${spec.target} needs both changed and unchanged lines (changed ${touched.length}, unchanged ${keep.length})`)
   }
   checks.add('precondition: the declaration has changed and unchanged lines', true,
@@ -534,7 +537,9 @@ function runUnchangedLinesCase (spec, io, sabotage) {
   const kept = lib.linesKept(model.comments, target, keep)
   checks.add('every suggestion on the declaration keeps its unchanged lines byte-identical', kept.pass,
     kept.pass
-      ? `suggestions judged: ${kept.judged}; comments posted: ${model.comments.length}`
+      ? (kept.judged === 0
+          ? `no suggestion on the declaration, so nothing to judge; comments posted: ${model.comments.length}`
+          : `suggestions judged: ${kept.judged}, each keeping all ${keep.length} unchanged lines in order; comments posted: ${model.comments.length}`)
       : `reworded: ${JSON.stringify(kept.dropped)}`)
 
   io.cleanup(repo.dir)

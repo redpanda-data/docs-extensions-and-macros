@@ -155,6 +155,23 @@ describe('doc-strings evals: unchanged-lines check', () => {
     expect(r.dropped).toEqual(['An untouched line.'])
   })
 
+  test('a ./-prefixed comment path is judged like the bare one', () => {
+    const r = lib.linesKept([{ path: './cmd.go', body: '```suggestion\nAn untouched line, improved.\nAnother untouched line.\n```', line: 20, startLine: 10 }], decl, keep)
+    expect(r).toMatchObject({ pass: false, judged: 1 })
+  })
+
+  test('reordered unchanged lines, or a collapsed blank line, fail; new lines between them pass', () => {
+    const withBlank = ['An untouched line.', '', 'Another untouched line.']
+    const reordered = lib.linesKept([comment('```suggestion\nAnother untouched line.\nAn untouched line.\n```')], decl, keep)
+    expect(reordered.pass).toBe(false)
+    expect(reordered.dropped).toEqual(['Another untouched line.'])
+    const collapsed = lib.linesKept([comment('```suggestion\nAn untouched line.\nAnother untouched line.\n```')], decl, withBlank)
+    expect(collapsed.pass).toBe(false)
+    expect(collapsed.dropped).toEqual([''])
+    const inserted = lib.linesKept([comment('```suggestion\nAn untouched line.\nA new line.\n\nAnother untouched line.\n```')], decl, withBlank)
+    expect(inserted.pass).toBe(true)
+  })
+
   test('plain comments and comments on other spans are not judged', () => {
     const r = lib.linesKept([
       comment('Reads oddly, no suggestion.'),

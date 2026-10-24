@@ -209,30 +209,39 @@ function parseFences (output, tag) {
 }
 
 /**
- * The lines a suggestion on a declaration dropped or reworded: for every
- * recorded comment whose range overlaps the declaration's span, each
- * ```suggestion block must contain every one of `keep` as a whole line
- * (trailing whitespace aside). Comments without a suggestion block change
- * nothing and are not judged.
+ * The unchanged lines a suggestion on a declaration dropped, reworded or
+ * moved: for every recorded comment whose range overlaps the declaration's
+ * span, each ```suggestion block must contain `keep`, the declaration's
+ * unchanged lines including blank ones, in order, as whole lines (trailing
+ * whitespace aside). New lines may sit between them, since that is where the
+ * changed lines go, but an unchanged line that is reworded, missing, out of
+ * order or a collapsed blank line fails. Comments without a suggestion block
+ * change nothing and are not judged. Paths compare without a leading `./`,
+ * as checkSuggestionComment does.
  *
  * @param {Array<{path, body, line, startLine}>} comments - recorded inline comments
  * @param {{file: string, line_start: number, line_end: number}} decl
- * @param {string[]} keep - exact text of the lines that must survive
+ * @param {string[]} keep - exact text of the unchanged lines, in file order
  * @returns {{pass: boolean, judged: number, dropped: string[]}}
  */
 function linesKept (comments, decl, keep) {
+  const norm = (p) => String(p || '').replace(/^\.\//, '')
+  const rtrim = (l) => l.replace(/\s+$/, '')
   let judged = 0
   const dropped = new Set()
   for (const comment of comments) {
-    if (comment.path !== decl.file) continue
+    if (norm(comment.path) !== norm(decl.file)) continue
     const end = Number(comment.line)
     const start = Number(comment.startLine || comment.line)
     if (!(start <= decl.line_end && end >= decl.line_start)) continue
     for (const body of parseFences(comment.body || '', 'suggestion')) {
       judged++
-      const lines = new Set(body.split('\n').map((l) => l.replace(/\s+$/, '')))
+      const lines = body.split('\n').map(rtrim)
+      let at = 0
       for (const want of keep) {
-        if (!lines.has(want.replace(/\s+$/, ''))) dropped.add(want)
+        const i = lines.indexOf(rtrim(want), at)
+        if (i === -1) dropped.add(want)
+        else at = i + 1
       }
     }
   }

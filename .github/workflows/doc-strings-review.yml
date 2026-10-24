@@ -1047,9 +1047,12 @@ jobs:
               finding only when this change makes it wrong: it now
               contradicts the changed lines or the code. Its wording, style
               and term choices are out of scope even where they break the
-              standard; the author did not write them in this PR. A
-              suggestion fixes the changed lines and any line the change
-              made wrong, and keeps every other line byte-identical.
+              standard; the author did not write them in this PR. A lint
+              finding is the one exception: the lint reports per
+              declaration, so fix what a finding names on any line, and
+              change nothing else on that line. A suggestion fixes the
+              changed lines, any line the change made wrong and any lint
+              finding, and keeps every other line byte-identical.
             - A string must agree with the strings around it. A flag's usage,
               its command's Long text and that text's examples describe the
               same behavior; a change to one that leaves another saying

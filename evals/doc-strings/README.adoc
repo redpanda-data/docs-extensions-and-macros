@@ -108,9 +108,13 @@ The evals are the contract the workflow will have to meet.
 zero doc-impact claims), `negative-metrics-file` (conforming probe file ->
 the model must claim `{"findings": []}`). *Any* invention fails the case.
 `unchanged-lines-kept` (rpk help text from streaming-enterprise PR 461 with
-a few changed paragraphs: any suggestion must keep every unchanged line
-byte-identical; its control runs the prompt with the changed-lines rule
-reverted)
+a few changed paragraphs, lint-clean: any suggestion must keep every
+unchanged line of the declaration, blank lines included, byte-identical and
+in order, with new lines allowed only between them; its control runs the
+prompt with the changed-lines rule reverted). A run that posts no suggestion
+passes and says "nothing to judge". The prompt lets a suggestion touch an
+unchanged line only to fix a lint finding on it, which this fixture has none
+of
 
 |D. Prose quality
 |`doc-strings-review.yml`'s prose-quality pass (added in #297): the Claude

@@ -214,9 +214,12 @@ const CASES = [
             '  finding only when this change makes it wrong: it now\n' +
             '  contradicts the changed lines or the code. Its wording, style\n' +
             '  and term choices are out of scope even where they break the\n' +
-            '  standard; the author did not write them in this PR. A\n' +
-            '  suggestion fixes the changed lines and any line the change\n' +
-            '  made wrong, and keeps every other line byte-identical.\n',
+            '  standard; the author did not write them in this PR. A lint\n' +
+            '  finding is the one exception: the lint reports per\n' +
+            '  declaration, so fix what a finding names on any line, and\n' +
+            '  change nothing else on that line. A suggestion fixes the\n' +
+            '  changed lines, any line the change made wrong and any lint\n' +
+            '  finding, and keeps every other line byte-identical.\n',
       replace: '- The whole declaration ships, so judge all of it, not only the\n' +
                '  lines this PR changed, and fix every problem it has in one\n' +
                '  suggestion.\n'
