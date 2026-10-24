@@ -27,12 +27,25 @@ real machinery:
 2. The real tools produce the genuine input the production workflow would
    feed the model (`doc-tools lint-strings --format json` findings, or a
    `doc-tools overrides audit` candidate row).
-3. The model is called headless (`claude -p`, no tools, prompt on stdin,
-   300s timeout) with a prompt that mirrors the production workflow prompt
-   plus a machine-parsed output contract.
-4. The harness *applies* the output - a GitHub `+```suggestion+` block
-   replacing the finding's `line_start..line_end`, or a `LINES a-b` +
-   `+```replacement+` span edit - to the fixture file.
+3. For the review's own behaviors (rewrite, prose quality, false-positive
+   guard), the model runs the *production* review: the prompt, allowed and
+   disallowed tools, MCP servers and turn limit of the "Claude review with
+   suggestions" step in `doc-strings-review.yml` at this commit, on Opus 5,
+   the model streaming-enterprise and redpanda-operator pass (see
+   `production.js`). The workspace gets the files the workflow writes before
+   that step: `lint-findings.json`, `pr-diff.patch`, and the writing standard
+   and terminology fetched from docs-team-standards. The one stand-in is the
+   GitHub inline-comment tool (`mocks/inline-comment.js`), which records each
+   comment instead of posting it. The CLI loads only the fixture repo's
+   settings (`--setting-sources project`), so your own CLAUDE.md, plugins and
+   skills stay out of the review, as they are on the Actions runner. The upstream-port and audit behaviors,
+   whose production prompts do not live in this repo, use the templates in
+   `prompts.js` (`claude -p`, no tools, 300s timeout).
+4. The harness *applies* the output - each recorded comment's
+   `+```suggestion+` block replacing the finding's `line_start..line_end`, or
+   a `LINES a-b` + `+```replacement+` span edit - to the fixture file. A
+   `doc-impact.json` the review writes is checked with the workflow's own
+   dispatch predicate.
 5. The verdict is re-computed mechanically:
    * re-run `lint-strings`: the rewritten declaration must have **zero
      findings of any severity**, and every untouched declaration must keep
@@ -51,8 +64,21 @@ real machinery:
    * C++ suggestions must keep every line within 80 columns.
 
 No check ever asks "does the model's answer *sound* right". The only prose
-inspection anywhere is fence parsing and the literal `NO_SUGGESTIONS`
-sentinel in a negative control - both structural.
+inspection anywhere is fence parsing and, for the audit control, the literal
+`NO_SUGGESTIONS` sentinel - both structural. The review's own negative
+control passes only when the production review posts no inline comment and
+writes no `doc-impact.json`.
+
+== Why the review cases run the production prompt
+
+The review's prompt lives in this repo on purpose: callers pin the workflow
+by SHA, so a prompt change reaches an engineering repo only through a
+reviewed pin bump (see `CLAUDE.md`). The eval reads the prompt from the same
+file, so a passing run is a statement about exactly what a pin bump ships.
+Never reintroduce a hand-written copy of the review prompt here. The copy
+that used to live in `prompts.js` shared no rule sentence with the shipped
+prompt by the time it was replaced, and its negative control passed on a
+string the real review flags (a restated concrete default).
 
 == The four behaviors under test
 
@@ -91,7 +117,9 @@ nothing.
 suggest a rewrite that restores substance, and the applied result must still
 lint clean), `terminology-misuse` (a lint-clean, substantive description that
 lowercases the product name, which `terminology.md` names as incorrect: the
-model must suggest the canonical casing). Both sabotage against the fully
+model must suggest the canonical casing; it reads the live `terminology.md`
+from docs-team-standards main, as production does, so an upstream edit to
+that file can change its result). Both sabotage against the fully
 conforming rewording `negative-property-diff` uses, where staying silent is
 correct and so fails the must-suggest check.
 |===
@@ -123,14 +151,22 @@ controls demonstrably fail on violating input.
 ----
 npm run eval:doc-strings                     # full suite (10 cases)
 node evals/doc-strings/run-evals.js --case metric-name-echo
-node evals/doc-strings/run-evals.js --model opus
+node evals/doc-strings/run-evals.js --model sonnet   # override the production model
 node evals/doc-strings/run-evals.js --keep-temp   # keep fixture repos
 ----
+
+Without `--model`, review cases run on Opus (production) and the template
+cases on Sonnet. Pass `--model` only for a deliberate comparison: a result on
+any other model says nothing about what callers run.
 
 Requirements:
 
 * The `claude` CLI on PATH and authenticated. When it is missing the suite
   prints `SKIPPED` and exits with code 3 - a skipped run never looks green.
+* `gh` authenticated with read access to redpanda-data/docs-team-standards,
+  for the writing standard and terminology the workflow fetches. A failed
+  fetch is a `HARNESS_ERROR`, never a review run without the standard.
+* `jq`, for the dispatch predicate.
 * The property-extractor venv (`tools/property-extractor/tmp/...`). It is
   created automatically on the first properties run (see
   `tools/lint-strings/surfaces/properties.js`).
@@ -156,12 +192,15 @@ negative-review, negative-audit). CommonJS, zero new dependencies.
 `expectRules` / `expectClassBefore` preconditions that are asserted against
 the REAL tool output before the model is called - fixture drift aborts as
 `HARNESS_ERROR` instead of silently testing something else.
-|`prompts.js` |Prompt templates mirroring the workflow prompts
-(`doc-strings-review.yml`, which ships here, and the not-yet-built
-`upstream-doc-strings.yml`) plus the per-surface
-contract from the doc-strings skill, and a machine-parsed OUTPUT CONTRACT
-section (the one deliberate delta from production, which posts via MCP
-instead).
+|`production.js` |Runs the production review step from
+`doc-strings-review.yml`: its prompt with Actions expressions filled (an
+unknown expression is an error), its tool lists and turn limit, the inline
+comment stand-in, and the workspace files the workflow writes.
+|`mocks/inline-comment.js` |Stdio MCP server with the production tool name,
+`create_inline_comment`, that appends each call to a log instead of posting.
+|`prompts.js` |Templates only for behaviors whose production prompt lives
+elsewhere (the docs repo's `upstream-doc-strings.yml`) and the audit control.
+Never a copy of the review prompt.
 |`lib.js` |Fixture materialization, real doc-tools invocations, fence
 parsing, and the mechanical comparators (blanked-literal normalization,
 extraction diffing, finding fingerprints).
