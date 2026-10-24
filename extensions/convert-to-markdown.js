@@ -119,9 +119,28 @@ function solutionOutcomeMarkdown(page, siteUrl) {
   try {
     if (siteUrl) url = new URL(outcome.image, siteUrl).toString()
   } catch {}
-  const alt = String(outcome.alt || '').replace(/\s+/g, ' ').replace(/([[\]\\])/g, '\\$1').trim()
+  // With a description, the image text is the SVG's short <title>: the alt
+  // and the <desc> usually say the same thing at length, and the paragraph
+  // after the image already carries it.
+  const imageText = (outcome.description && outcome.title) || outcome.alt || ''
+  const alt = String(imageText).replace(/\s+/g, ' ').replace(/([[\]\\])/g, '\\$1').trim()
   const image = `![${alt}](${url.replace(/\(/g, '%28').replace(/\)/g, '%29').replace(/\s/g, '%20')})`
-  return outcome.description ? `${image}\n\n${String(outcome.description).replace(/\s+/g, ' ').trim()}` : image
+  return outcome.description ? `${image}\n\n${markdownText(outcome.description)}` : image
+}
+
+/**
+ * Plain text as a one-line Markdown paragraph: whitespace collapsed, and the
+ * characters that would otherwise become markup escaped (`<` so a decoded
+ * `&lt;b&gt;` is not read as a tag, emphasis and code markers, and a leading
+ * heading, quote, or list marker).
+ */
+function markdownText(text) {
+  return String(text)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/([\\<*_`])/g, '\\$1')
+    .replace(/^([#>+-])/, '\\$1')
+    .replace(/^(\d+)([.)])(?=\s|$)/, '$1\\$2')
 }
 
 /** True when the element's class list holds `name` as a whole token. */

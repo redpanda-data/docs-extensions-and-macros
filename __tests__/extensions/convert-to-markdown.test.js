@@ -765,8 +765,25 @@ describe('solution outcome diagram in Markdown', () => {
     for (const text of ['What it delivers', 'Loose desc', 'Loose label']) expect(md).not.toContain(text)
   })
 
-  test('an outcome with no description is the image alone', () => {
-    expect(solutionOutcomeMarkdown(page({ outcome: { image: OUTCOME.image, alt: 'A' } }), SITE)).toBe('![A](https://docs.redpanda.com/solutions/g/_images/outcome.svg)')
+  test('an outcome with no description is the image alone, named by its alt', () => {
+    expect(solutionOutcomeMarkdown(page({ outcome: { image: OUTCOME.image, alt: 'A', title: 'T' } }), SITE)).toBe('![A](https://docs.redpanda.com/solutions/g/_images/outcome.svg)')
+  })
+
+  test('with a description, the image text is the SVG title, so the alt is not repeated before the desc', () => {
+    const md = solutionOutcomeMarkdown(page({ outcome: { ...OUTCOME, title: 'What it delivers' } }), SITE)
+    expect(md).toBe('![What it delivers](https://docs.redpanda.com/solutions/g/_images/outcome.svg)\n\nGame events flow into Redpanda. The results: a live board.')
+    expect(md).not.toContain(OUTCOME.alt)
+  })
+
+  test('escapes Markdown markup in the description paragraph', () => {
+    const md = (description) => solutionOutcomeMarkdown(page({ outcome: { image: OUTCOME.image, alt: 'A', description } }), SITE).split('\n\n')[1]
+    expect(md('a <b> * #c `d` _e_ \\f')).toBe('a \\<b> \\* #c \\`d\\` \\_e\\_ \\\\f')
+    expect(md('# Not a heading')).toBe('\\# Not a heading')
+    expect(md('- not a list')).toBe('\\- not a list')
+    expect(md('> not a quote')).toBe('\\> not a quote')
+    expect(md('1. not a list')).toBe('1\\. not a list')
+    // Plain prose is unchanged.
+    expect(md('Events flow in. 3 results: a board, 1.5x faster.')).toBe('Events flow in. 3 results: a board, 1.5x faster.')
   })
 
   test('keeps the site-relative URL without a site URL', () => {

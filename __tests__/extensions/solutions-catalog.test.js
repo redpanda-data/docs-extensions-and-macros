@@ -2499,6 +2499,7 @@ describe('solutions-catalog: outcome diagram', () => {
     const expected = {
       image: '/solutions/leaderboard/_images/outcome.svg',
       alt: 'Game events become a live board.',
+      title: 'What the leaderboard solution delivers',
       description: 'Game events flow into Redpanda, and each feature reads in its own group. The results: a live board & a feed.',
     }
     expect(json(solution.pages[0], 'page-solution').outcome).toEqual(expected)
@@ -2538,8 +2539,48 @@ describe('solutions-catalog: outcome diagram', () => {
     const solution = makeSolution('leaderboard', { attrs: OUTCOME_ATTRS })
     solution.attachments.push(makeImage({ text: '<svg><title>T</title></svg>' }))
     const result = await run({ solutions: [solution] })
-    expect(json(solution.pages[0], 'page-solution').outcome).toEqual({ image: '/solutions/leaderboard/_images/outcome.svg', alt: 'Game events become a live board.' })
+    expect(json(solution.pages[0], 'page-solution').outcome).toEqual({ image: '/solutions/leaderboard/_images/outcome.svg', alt: 'Game events become a live board.', title: 'T' })
     expect(warnings(result.logger)).toMatch(/outcome\.svg has no <desc>/)
+  })
+
+  test('a published solution with no alt attribute warns that the page diagram has no accessible name', async () => {
+    const solution = makeSolution('leaderboard', { attrs: { 'page-solution-outcome-image': 'outcome.svg' } })
+    solution.attachments.push(makeImage())
+    const result = await run({ solutions: [solution] })
+    // The catalog still falls back to the SVG <title>.
+    expect(json(solution.pages[0], 'page-solution').outcome.alt).toBe('What the leaderboard solution delivers')
+    expect(warnings(result.logger)).toMatch(/leaderboard: the overview sets no page-solution-outcome-alt, so the outcome diagram outcome\.svg has no accessible name on the page/)
+    expect(warnings(result.logger)).not.toMatch(/has no <desc>/)
+  })
+
+  test('a draft with no alt attribute builds silently', async () => {
+    const solution = makeSolution('leaderboard', { attrs: { 'page-solution-status': 'draft', 'page-solution-outcome-image': 'outcome.svg' } })
+    solution.attachments.push(makeImage())
+    const result = await run({ solutions: [solution], env: { SOLUTIONS_INCLUDE_DRAFTS: 'true' } })
+    expect(json(solution.pages[0], 'page-solution').outcome.image).toBe('/solutions/leaderboard/_images/outcome.svg')
+    expect(warnings(result.logger)).not.toMatch(/outcome/)
+  })
+
+  test('a raster image warns that it carries no text, never that it lacks a <desc>', async () => {
+    const solution = makeSolution('leaderboard', { attrs: { ...OUTCOME_ATTRS, 'page-solution-outcome-image': 'outcome.png' } })
+    solution.attachments.push(makeImage({ relative: 'outcome.png', text: 'not an svg <desc>ignored</desc>' }))
+    const result = await run({ solutions: [solution] })
+    expect(json(solution.pages[0], 'page-solution').outcome).toEqual({ image: '/solutions/leaderboard/_images/outcome.png', alt: 'Game events become a live board.' })
+    const text = warnings(result.logger)
+    expect(text).toMatch(/leaderboard: the outcome diagram outcome\.png is not an SVG, so the Markdown twin and the catalog get no text description/)
+    expect(text).not.toMatch(/has no <desc>/)
+    expect(text.match(/outcome\.png/g)).toHaveLength(1)
+  })
+
+  test('svgText reads only the root SVG\'s own title and desc, never a child group\'s', () => {
+    expect(collect.svgText('<svg><g><title>Node A</title></g></svg>', 'title')).toBe('')
+    expect(collect.svgText('<svg><rect/><title>late</title></svg>', 'title')).toBe('')
+    expect(collect.svgText('<svg><g><desc>child</desc></g><desc>never root</desc></svg>', 'desc')).toBe('')
+    // A comment or the other element before it is still a leading child.
+    expect(collect.svgText('<svg viewBox="0 0 1 1">\n  <!-- c -->\n  <title>Root</title>\n  <desc>D</desc><g><title>Node A</title></g></svg>', 'desc')).toBe('D')
+    expect(collect.svgText('<?xml version="1.0"?>\n<svg><title>Root</title><g><title>Node A</title></g></svg>', 'title')).toBe('Root')
+    // Markup with no <svg> root has no title.
+    expect(collect.svgText('<title>x</title>', 'title')).toBe('')
   })
 
   test('svgText reads the first title or desc as plain text', () => {

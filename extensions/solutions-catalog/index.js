@@ -536,11 +536,10 @@ module.exports.register = function ({ config = {} } = {}) {
     // twin. A missing or unresolvable diagram is reported only for a
     // published solution: drafts are still being drawn.
     for (const record of active) {
-      const { outcome, problem } = collect.resolveOutcome(record, contentCatalog)
+      const { outcome, problem, notes } = collect.resolveOutcome(record, contentCatalog)
       if (outcome) record.outcome = outcome
       if (record.status !== 'published') continue
-      if (problem) logger.warn(`solutions-catalog: ${record.id}: ${problem}`)
-      else if (!outcome.description) logger.warn(`solutions-catalog: ${record.id}: the outcome diagram ${record.outcomeImage} has no <desc>, so the Markdown twin shows the diagram without the outcome in text`)
+      for (const message of problem ? [problem] : notes) logger.warn(`solutions-catalog: ${record.id}: ${message}`)
     }
 
     // Agent companions, generated here so the record can link one only when it
