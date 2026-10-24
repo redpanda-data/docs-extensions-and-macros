@@ -2972,6 +2972,60 @@ programCli
   })
 
 /**
+ * recommendations-diff
+ *
+ * @description
+ * Report which solution recommendations a pull request changes, with no site
+ * build and no model. It reads the scoring inputs a published build wrote,
+ * assets/data/doc-concepts.json (every eligible Product Docs page with its
+ * concept IDs, every scored solution with its concepts, explicit related
+ * docs, the relationships.yml decisions, and max_related and min_score),
+ * from --origin (default https://docs.redpanda.com), and the taxonomy (the
+ * checkout's, $REDPANDA_DOCS_PATH, or the origin's). Then it reads each
+ * changed page at the merge base with --changed and at HEAD: a Product Docs
+ * page's page-categories, or a solution overview's facets and categories (a
+ * redpanda-solutions PR). Both sides are scored with the solutions-catalog
+ * extension's own scoring (relationships.computeRelatedSolutions), so the
+ * check and the build never disagree. A changed solution is scored against
+ * every published page, because it moves the rarity of its concepts; a
+ * changed doc page only against itself. Explicit related docs and editorial
+ * relationships come from the published build. The report lists, per page,
+ * each shown recommendation that appears, disappears (with the reason the
+ * build gives for hiding it), or changes rank, with scores and the shared
+ * concepts. It exits 0 whatever it finds, and when the published data cannot
+ * be read it reports status unavailable with the reason and still exits 0.
+ * Exit 2 only on a bad argument or a git failure.
+ *
+ * @why
+ * Recommendations change when a page's categories or a solution's facets
+ * change, and the effect is invisible until the site is built and someone
+ * looks at the right page. This shows it on the PR, from data the build
+ * already published.
+ *
+ * @example
+ * # In a docs repository, on a PR branch
+ * npx doc-tools recommendations-diff --changed origin/main
+ *
+ * # Against a deploy preview, writing the job summary and the JSON
+ * npx doc-tools recommendations-diff --changed origin/main --origin https://deploy-preview-123--redpanda-docs-preview.netlify.app --summary "$GITHUB_STEP_SUMMARY" --output recommendations-diff.json
+ */
+programCli
+  .command('recommendations-diff')
+  .description('Report the solution recommendations a PR adds, removes, or reranks, scored from the published doc-concepts index')
+  .requiredOption('--changed <base>', 'Compare HEAD with the merge base with <base>, for example origin/main')
+  .option('--origin <url>', 'Site to read assets/data/doc-concepts.json and the taxonomy from (default: $DOC_TOOLS_RECOMMENDATIONS_ORIGIN, then https://docs.redpanda.com)')
+  .option('--index <path|url>', 'doc-concepts.json to read instead of the origin\'s')
+  .option('--taxonomy <path|url>', 'taxonomy.yml to use (default: the checkout, $REDPANDA_DOCS_PATH, then the origin\'s)')
+  .option('--root <path>', 'Repository root (default: current directory)')
+  .option('--format <format>', 'Output format: text or json', 'text')
+  .option('--output <path>', 'Also write the JSON result to this file')
+  .option('--summary <path>', 'Append a Markdown summary to this file, for example $GITHUB_STEP_SUMMARY')
+  .action(async (options) => {
+    const { runCli } = require('../tools/recommendations-diff')
+    await runCli(options)
+  })
+
+/**
  * check-rendered-html
  *
  * @description

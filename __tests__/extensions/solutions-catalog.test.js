@@ -2565,6 +2565,32 @@ describe('solutions-catalog: with the docs taxonomy', () => {
     expect((await coverageOf({})).Development.pages).toBe(1)
   })
 
+  test('publishes doc-concepts.json, and scoring it gives the edges in solutions-graph.json', async () => {
+    const recsIndex = require('../../extensions/solutions-catalog/recs-index')
+    const docs = [
+      makeDoc(),
+      makeDoc({ relative: 'unlisted.adoc', attrs: { 'page-categories': 'Stream Processing, Clients' } }),
+      makeDoc({ relative: 'pg.adoc', attrs: { 'page-categories': 'Stream Processing, PostgreSQL' } }),
+    ]
+    const result = await run({ taxonomy, docs, solutions: [solution()] })
+    const index = addedFile(result.siteCatalog, 'assets/data/doc-concepts.json')
+    const graph = addedFile(result.siteCatalog, 'assets/data/solutions-graph.json')
+    expect(index).toMatchObject({ version: 1, siteUrl: 'https://docs.redpanda.com', settings: graph.settings })
+    expect(index.docs.map((d) => d.id)).toEqual(['streaming:develop:consumer-offsets.adoc', 'streaming:develop:pg.adoc', 'streaming:develop:unlisted.adoc'])
+    expect(index.docs.find((d) => d.id === 'streaming:develop:pg.adoc')).toMatchObject({ title: 'pg.adoc', concepts: { 'stream-processing': 'direct', postgresql: 'direct' } })
+    expect(index.solutions.map((x) => x.id)).toEqual(['leaderboard'])
+    const read = recsIndex.readDocConceptsIndex(index)
+    const { edges } = relationships.computeRelatedSolutions({ ...read, taxonomy, categoryMap: createCategoryMap(VALID_CATEGORIES), maxRelated: read.settings.maxRelated, minScore: read.settings.minScore })
+    const shape = (list) => list.map(({ doc, solution, provenance, score, shown, rank, reason }) => ({ doc, solution, provenance, score, shown, rank, reason }))
+    expect(shape(edges)).toEqual(shape(graph.edges))
+    expect(graph.edges.some((e) => e.shown && e.provenance === 'category')).toBe(true)
+  })
+
+  test('without the taxonomy there is no doc-concepts.json', async () => {
+    const result = await run({ solutions: [solution()] })
+    expect(addedFile(result.siteCatalog, 'assets/data/doc-concepts.json')).toBeUndefined()
+  })
+
   test('verification runs are keyed by deployment concept IDs, except the base run', () => {
     expect(collect.verificationPlatforms()).toEqual(['cloud', 'kubernetes'])
     expect(collect.verificationPlatforms(taxonomy)).toEqual(['cloud', 'redpanda-self-managed', 'kubernetes', 'linux'])
