@@ -20,6 +20,8 @@
  *       The case is EXPECTED to FAIL; the run exits 0 only if it does.
  *   Options: --model <model> (default: the model production runs each case
  *   kind on), --keep-temp
+ *   node evals/doc-strings/run-evals.js --doc-impact [...]
+ *       Scores the PUBLISHED-CONTENT IMPACT pass instead; see doc-impact/run.js.
  *
  * The rewrite, prose-review and negative-review cases run the PRODUCTION
  * review: the prompt, tools and turn limit of doc-strings-review.yml at this
@@ -108,9 +110,19 @@ function runRewriteCase (spec, io) {
   const repo = lib.materializeRepo(spec.layout, spec.edits)
   io.saveFixture('before', repo)
 
+  // Production always hands the review a source diff and a --diff lint
+  // report. The fixture's target file is the PR's change: commit a base
+  // without it, then add it back, so the review takes the same path.
+  const targetText = fs.readFileSync(repo.targetAbs, 'utf8')
+  fs.rmSync(repo.targetAbs)
+  const base = lib.gitInit(repo.dir)
+  fs.writeFileSync(repo.targetAbs, targetText)
+  lib.gitCommitAll(repo.dir, 'add the target file')
+  const diff = lib.gitDiff(repo.dir, base)
+
   // Genuine findings from the real linter - the same JSON the workflow feeds
   // the model.
-  const lintBefore = lib.runLint(repo.dir, repo.surface)
+  const lintBefore = lib.runLint(repo.dir, repo.surface, ['--diff', base])
   const finding = lintBefore.findings.find((f) => f.name === spec.target)
   if (!finding) return harnessError(checks, `No lint finding for target ${spec.target}; fixture drifted`)
   const foundRules = finding.rules.map((r) => r.id)
@@ -133,13 +145,14 @@ function runRewriteCase (spec, io) {
   // Production's lint report carries each declaration's fingerprint, which
   // the review must echo in its footer; compute it the way lint-strings does.
   const fp = finding.fingerprint || lintStrings.fingerprint(finding)
+  const declaration = (lintBefore.declarations || []).find((d) => d.name === spec.target)
   const lint = {
     ...lintBefore,
-    declarations: [{ surface: finding.surface, name: finding.name, file: finding.file, line_start: finding.line_start, line_end: finding.line_end, string: finding.string, fingerprint: fp }],
+    declarations: [declaration ? { ...declaration, fingerprint: fp } : { surface: finding.surface, name: finding.name, file: finding.file, line_start: finding.line_start, line_end: finding.line_end, string: finding.string, fingerprint: fp }],
     findings: [{ ...finding, fingerprint: fp }],
     summary: { ...lintBefore.summary, totalDeclarations: 1, flaggedDeclarations: 1, removedDeclarations: [] }
   }
-  const model = io.callProduction({ repo, lint, diff: null })
+  const model = io.callProduction({ repo, lint, diff })
   if (model.failed) return modelCallFailed(checks, model)
   checkImpactFile(checks, model, false)
 
@@ -378,12 +391,8 @@ function runProseReviewCase (spec, io, sabotage) {
   // its suggestion uses GitHub semantics (replace the cited lines), so
   // trusting either corrupts the fixture. The harness instead pulls the
   // description literals out of the suggestion and swaps them in for the
-  // vacuous block it inserted itself, which it knows byte-exactly. The span
-  // marker is still asserted for presence, since production inline comments
-  // need it.
-  checks.add('model names a declaration span (FILE ... LINES a-b)',
-    /LINES\s+\d+\s*-\s*\d+/.test(model.output), 'marker scan')
-
+  // vacuous block it inserted itself, which it knows byte-exactly.
+  //
   // Content-anchored application aside, the comment itself must land on the
   // declaration in the diffed file and carry its fingerprint footer:
   // production posts it there, and GitHub applies it to those lines.
@@ -570,12 +579,17 @@ function runNegativeAuditCase (spec, io, sabotage) {
  * predicate from the workflow (the check that decides whether the file
  * leaves the runner), so a wrong shape fails here exactly as it would be
  * discarded in production. `expected` says whether the case should file.
+ * No live case expects a filing today, so the predicate branch runs only in
+ * the unit tests (__tests__/evals); a case that should file would exercise it.
+ * An empty file counts as absent, because the dispatch step skips one
+ * (`[ -s doc-impact.json ]`).
  */
 function checkImpactFile (checks, model, expected) {
-  const text = model.files['doc-impact.json']
+  const raw = model.files['doc-impact.json']
+  const text = raw === undefined || raw.length === 0 ? undefined : raw
   if (!expected) {
     return checks.add('no doc-impact.json written (nothing here needs a DOC ticket)', text === undefined,
-      text === undefined ? 'absent' : `written: ${text.slice(0, 200)}`)
+      text === undefined ? (raw === undefined ? 'absent' : 'empty, which the dispatch step skips') : `written: ${text.slice(0, 200)}`)
   }
   if (!checks.add('doc-impact.json written', text !== undefined, text === undefined ? 'absent' : 'present')) return false
   const ok = lib.dispatchAccepts(text)
@@ -588,6 +602,10 @@ function harnessError (checks, message) {
 }
 
 function modelCallFailed (checks, model) {
+  // The review never ran (a failed standards fetch, an unfilled Actions
+  // expression, a missing workflow step): that is the harness's failure, not
+  // the model's, and must never count as a sabotage proof.
+  if (model.harness) return harnessError(checks, `production review could not run: ${model.stderr}`)
   checks.add('claude CLI call succeeded', false,
     model.timedOut ? `timed out after ${model.ms}ms` : `exit ${model.status}: ${model.stderr.slice(0, 400)}`)
   return { status: 'FAIL', checks: checks.rows, model }
@@ -680,7 +698,7 @@ function main () {
         try {
           result = production.runReview({ repoDir: repo.dir, lint, diff, promptEdits, model: options.model || production.PRODUCTION_MODEL })
         } catch (err) {
-          return { failed: true, timedOut: false, status: 'harness', stderr: err.message, ms: 0, comments: [], files: {}, output: '' }
+          return { failed: true, harness: true, timedOut: false, status: 'harness', stderr: err.message, ms: 0, comments: [], files: {}, output: '' }
         }
         fs.writeFileSync(path.join(caseDir, 'prompt.txt'), result.prompt)
         fs.writeFileSync(path.join(caseDir, 'model-output.txt'), result.output)
@@ -738,14 +756,30 @@ function main () {
   for (const c of summary) process.stdout.write(`${c.status.padEnd(14)} ${c.id}\n`)
   process.stdout.write(`Total wall time: ${(wallMs / 1000).toFixed(1)}s. Results: ${path.relative(process.cwd(), resultsRoot)}\n`)
 
+  const harnessErrors = summary.filter((c) => c.status === 'HARNESS_ERROR')
   if (options.sabotage) {
+    if (harnessErrors.length) {
+      process.stdout.write('SABOTAGE NOT RUN: the harness failed before the review ran, so this proves\nnothing. Fix the environment and re-run.\n')
+      process.exit(2)
+    }
     const proven = summary.length === 1 && summary[0].status === 'FAIL'
     process.stdout.write(proven
       ? 'SABOTAGE PROVEN: the negative control FAILED against a violating fixture,\nso a model that invents suggestions cannot pass it. Restore confidence: re-run\nthe suite without --sabotage.\n'
       : 'SABOTAGE NOT PROVEN: the negative control did not fail. The harness cannot\ncurrently catch invented findings - fix the assertions.\n')
     process.exit(proven ? 0 : 1)
   }
-  process.exit(failed.length === 0 ? 0 : 1)
+  process.exit(harnessErrors.length ? 2 : failed.length === 0 ? 0 : 1)
 }
 
-main()
+if (require.main === module) {
+  if (process.argv.includes('--doc-impact')) {
+    // The doc-impact mode scores a different behavior with its own items and
+    // options; see doc-impact/run.js and the README.
+    require('./doc-impact/run').main(process.argv.slice(2).filter((a) => a !== '--doc-impact'))
+      .then((code) => process.exit(code), (err) => { console.error(err.stack); process.exit(2) })
+  } else {
+    main()
+  }
+}
+
+module.exports = { EXECUTORS, modelCallFailed, harnessError, makeChecks }

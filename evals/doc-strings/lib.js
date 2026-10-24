@@ -104,7 +104,7 @@ function gitInit (dir) {
   run('git', ['config', 'user.email', 'eval@localhost'], dir)
   run('git', ['config', 'user.name', 'doc-strings-eval'], dir)
   run('git', ['add', '-A'], dir)
-  run('git', ['commit', '-q', '-m', 'base'], dir)
+  run('git', ['commit', '-q', '--allow-empty', '-m', 'base'], dir)
   return run('git', ['rev-parse', 'HEAD'], dir).stdout.trim()
 }
 
@@ -431,9 +431,12 @@ function dispatchAccepts (docImpactText) {
   const YAML = require('yaml')
   const wf = YAML.parse(fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'doc-strings-review.yml'), 'utf8'))
   const step = wf.jobs['doc-strings-review'].steps.find((s) => s.name === 'Dispatch doc-impact')
-  const m = step && step.run.match(/if ! jq -e '([\s\S]*?)'\s+doc-impact\.json/)
-  if (!m) throw new Error('the dispatch step\'s doc-impact.json predicate was not found in doc-strings-review.yml')
-  const r = spawnSync('jq', ['-e', m[1]], { input: docImpactText, encoding: 'utf8' })
+  let filter
+  try {
+    filter = step && require('./doc-impact/lib').extractDispatchFilter(step.run)
+  } catch (_) {}
+  if (!filter) throw new Error('the dispatch step\'s doc-impact.json predicate was not found in doc-strings-review.yml')
+  const r = spawnSync('jq', ['-e', filter], { input: docImpactText, encoding: 'utf8' })
   return { pass: r.status === 0, detail: r.status === 0 ? 'accepted' : `rejected (jq exit ${r.status}${r.stderr ? ': ' + r.stderr.trim().slice(0, 160) : ''})` }
 }
 
@@ -476,6 +479,7 @@ module.exports = {
   linesKept,
   changedLines,
   REPO_ROOT,
+  SURFACE_LAYOUT,
   DOC_TOOLS,
   EVAL_FIXTURES,
   materializeRepo,

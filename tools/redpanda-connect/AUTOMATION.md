@@ -581,7 +581,7 @@ npx doc-tools generate rpcn-connector-docs \
 | `--draft-missing` | Generate full page drafts for new connectors | false |
 | `--update-whats-new` | Update whats-new.adoc with changes | false |
 | `--include-bloblang` | Include Bloblang functions/methods | false |
-| `--overrides <path>` | JSON file with description overrides | `docs-data/overrides.json` |
+| `--overrides <path>` | Optional JSON file with description overrides | None |
 
 ### Examples
 
@@ -766,41 +766,8 @@ Templates are in `tools/redpanda-connect/templates/`:
 - `connector-examples.hbs` - Examples template
 - `connector-full.hbs` - Full page draft template
 
-### Updating Overrides
-Override file: `docs-data/overrides.json` (or `--overrides` flag)
-
-```json
-{
-  "inputs": {
-    "kafka": {
-      "fields": {
-        "addresses": {
-          "description": "Custom description override",
-          "examples": ["localhost:9092"]
-        }
-      }
-    }
-  }
-}
-```
-
-Supports `$ref` syntax for deduplication:
-```json
-{
-  "inputs": {
-    "kafka": {
-      "fields": {
-        "tls": { "$ref": "#/common/tls" }
-      }
-    }
-  },
-  "common": {
-    "tls": {
-      "description": "TLS configuration (reused across components)"
-    }
-  }
-}
-```
+### Fixing connector descriptions
+Field, component, and Bloblang descriptions come from the component specs in `redpanda-data/connect` and `redpanda-data/benthos`. To fix wrong or missing text, open a PR against the spec. The fix ships in the next Connect release.
 
 ## Troubleshooting
 
