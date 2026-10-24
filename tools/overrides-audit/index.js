@@ -14,6 +14,10 @@
  *     --extracted tools/property-extractor/gen/properties-output.json \
  *     [--surface properties|rpk] [--format json|human] [--output <file>]
  *
+ *   node tools/overrides-audit/index.js --surface rpk \
+ *     --overrides docs-data/rpk-overrides.json \
+ *     --extracted docs-data/rpk-v26.2.2.json
+ *
  * Also exposed as `doc-tools overrides audit` and the `audit_overrides`
  * MCP tool. See README.adoc in this directory for the classification rules
  * and the upstream_ref policy.
@@ -151,7 +155,7 @@ function main (argv) {
     .name('overrides-audit')
     .description('Classify docs-side override fields against extracted source strings')
     .requiredOption('--overrides <path>', 'Path to the overrides JSON file (for example docs-data/property-overrides.json)')
-    .option('--extracted <path>', 'Path to the extracted source JSON (property extractor raw output; required for the properties surface)')
+    .option('--extracted <path>', 'Path to the extracted source JSON: the property extractor raw output (properties surface) or the newest docs-data/rpk-v<version>.json snapshot, whose raw_tree is the pre-override help text (rpk surface)')
     .option('--surface <surface>', 'Override surface: properties or rpk', 'properties')
     .option('--format <format>', 'Output format: json or human', 'json')
     .option('--output <path>', 'Also write the JSON result to this file')

@@ -506,7 +506,7 @@ const tools = [
         },
         extracted: {
           type: 'string',
-          description: 'Path to the extracted source JSON: the property extractor\'s RAW --output file, without overrides applied (required for the properties surface, alternative to "repo")'
+          description: 'Path to the extracted source JSON. Properties: the property extractor\'s RAW --output file, without overrides applied (alternative to "repo"). rpk: the newest docs-data/rpk-v<version>.json snapshot; the audit compares against its raw_tree (pre-override help text)'
         },
         repo: {
           type: 'string',

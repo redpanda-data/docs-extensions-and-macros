@@ -3464,18 +3464,26 @@ const overridesGroup = new Command('overrides').description('Audit docs-side ove
  *   --extracted tools/property-extractor/gen/properties-output.json \
  *   --format human
  *
+ * # Audit the docs repo rpk overrides against the newest committed snapshot
+ * npx doc-tools overrides audit --surface rpk \
+ *   --overrides docs-data/rpk-overrides.json \
+ *   --extracted docs-data/rpk-v26.2.2.json \
+ *   --format human
+ *
  * @requirements
- * The --extracted file must be the property extractor's RAW output (its
- * --output file, without overrides applied). The enhanced output and the
- * versioned redpanda-properties-<tag>.json attachments already have
+ * For properties, the --extracted file must be the property extractor's RAW
+ * output (its --output file, without overrides applied). The enhanced output
+ * and the versioned redpanda-properties-<tag>.json attachments already have
  * overrides applied, so auditing against them classifies everything
- * REDUNDANT.
+ * REDUNDANT. For rpk, --extracted is the newest docs-data/rpk-v<version>.json
+ * snapshot: the audit reads its raw_tree (what the binary printed) and
+ * refuses a file that only carries the override-merged tree.
  */
 overridesGroup
   .command('audit')
   .description('Classify each override field as redundant, upstreamable, or keep against extracted source strings')
   .requiredOption('--overrides <path>', 'Path to the overrides JSON file (for example docs-data/property-overrides.json)')
-  .option('--extracted <path>', 'Path to the extracted source JSON (property extractor raw output; required for the properties surface)')
+  .option('--extracted <path>', 'Path to the extracted source JSON: the property extractor raw output (properties surface) or the newest docs-data/rpk-v<version>.json snapshot (rpk surface, compared against its raw_tree)')
   .addOption(new Option('--surface <surface>', 'Override surface to audit').choices(['properties', 'rpk']).default('properties'))
   .addOption(new Option('--format <format>', 'Output format').choices(['json', 'human']).default('json'))
   .option('--repo <path>', 'Redpanda checkout to extract raw source strings from (alternative to --extracted)')
