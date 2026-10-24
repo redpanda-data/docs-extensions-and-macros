@@ -35,12 +35,23 @@ const { raiseListenerLimit } = require('./util/raise-listener-limit')
  *   generator wrapped across a line break. An unlabeled URL becomes xref:...[]
  *   so Antora fills in the target page title, except when it carries a
  *   fragment, where link text has to be supplied (see linkTextFor).
+ * - A URL with a fragment is converted only when the anchor exists on the
+ *   target page: a section id, an explicit [[id]], [#id] or anchor:id[]
+ *   anchor, or one of those in a partial the page includes (property
+ *   headings live in generated partials). A URL whose page resolves but whose
+ *   anchor does not stays a URL and is reported as a broken anchor, since an
+ *   xref to it would pass Antora's page check and still land at the top of
+ *   the page.
  * - Targets in the latest version of a component emit an unversioned xref;
  *   targets pinned to an older version emit version@component:module:page.
  * - URLs pointing at a page's former path resolve through the page-aliases the
  *   page declares (see buildUrlMap).
  * - URLs carrying a query string are left raw, because an xref cannot express
  *   one; they are reported at info level rather than as warnings.
+ * - A resolver context may name a localComponent (see
+ *   cli-utils/docs-links-to-xrefs.js, which converts generated pages before
+ *   they are committed): targets in that component are written as
+ *   module:page xrefs, the form the docs repos use for same-component links.
  */
 
 // Rewrites for URL shapes that predate the current docs.redpanda.com site
@@ -80,6 +91,7 @@ module.exports.register = function ({ config = {} }) {
     const unmapped = new Map()
     const withQueryString = new Set()
     const withoutLinkText = new Set()
+    const missingAnchor = new Map()
     const files = contentCatalog
       .getPages((page) => page.out)
       .concat(contentCatalog.findBy({ family: 'partial' }))
@@ -96,10 +108,17 @@ module.exports.register = function ({ config = {} }) {
       }
       for (const url of result.withQueryString) withQueryString.add(url)
       for (const url of result.withoutLinkText) withoutLinkText.add(url)
+      for (const url of result.missingAnchor) {
+        if (!missingAnchor.has(url)) missingAnchor.set(url, new Set())
+        missingAnchor.get(url).add(file.path)
+      }
     }
     if (logUnconverted) {
       for (const [url, pages] of unmapped) {
         logger.warn(`No published page matches ${url} (found in: ${[...pages].join(', ')})`)
+      }
+      for (const [url, pages] of missingAnchor) {
+        logger.warn(`Anchor not found on the target page of ${url}; left as a URL (found in: ${[...pages].join(', ')})`)
       }
     }
     if (withQueryString.size) {
@@ -111,7 +130,7 @@ module.exports.register = function ({ config = {} }) {
     if (withoutLinkText.size) {
       logger.info(
         `Left ${withoutLinkText.size} docs URL${withoutLinkText.size === 1 ? '' : 's'} with a fragment as raw ` +
-          `link${withoutLinkText.size === 1 ? '' : 's'} (no link text could be resolved from the target page): ` +
+          `link${withoutLinkText.size === 1 ? '' : 's'} (the target page could not be read to check the fragment): ` +
           `${[...withoutLinkText].join(', ')}`
       )
     }
@@ -335,31 +354,49 @@ function resolveUrlPath (urlPath, resolverContext) {
   return undefined
 }
 
-function entryToXref (entry, fragment, label) {
+function entryToXref (entry, fragment, label, localComponent) {
   const versionPrefix = entry.latest || !entry.version ? '' : `${entry.version}@`
-  return `xref:${versionPrefix}${entry.component}:${entry.module}:${entry.relative}${fragment || ''}[${label || ''}]`
+  // Content that is itself part of a component (a page a generator writes into
+  // the docs repo) names a target in that component by module and page only,
+  // the way the docs repos write xrefs by hand. A version-pinned xref still
+  // has to name its component.
+  const componentPrefix = !versionPrefix && localComponent && entry.component === localComponent ? '' : `${entry.component}:`
+  return `xref:${versionPrefix}${componentPrefix}${entry.module}:${entry.relative}${fragment || ''}[${label || ''}]`
 }
 
 // Parsed heading id -> heading text, cached per target file.
 const headingsByFile = new WeakMap()
 const EXPLICIT_ANCHOR_PATTERNS = [
   /^\[\[([\w:.-]+)(?:,.*)?\]\]$/,
-  /^\[#([\w:.-]+)(?:[,.].*)?\]$/,
+  /^\[#([\w:-]+)(?:[,.%].*)?\]$/,
   /^\[id="?([\w:.-]+)"?(?:,.*)?\]$/,
 ]
 const HEADING_RX = /^(={1,6})\s+(\S.*)$/
+const INLINE_ANCHOR_RX = /\[\[([\w:.-]+)(?:,[^\]]*)?\]\]|\banchor:([\w:.-]+)\[/g
+
+/**
+ * The anchors a page publishes, id -> heading text (undefined for an anchor
+ * on something other than a heading), or undefined when the page has no
+ * contents to read. Cached per page.
+ */
+function pageAnchors (page, resolveInclude) {
+  const contents = page && page.contents && page.contents.toString()
+  if (!contents) return undefined
+  let anchors = headingsByFile.get(page)
+  if (!anchors) headingsByFile.set(page, (anchors = pageHeadingIds(contents, page, resolveInclude)))
+  return anchors
+}
 
 /**
  * Returns the link text for a converted URL, or undefined when the URL should
- * be left alone.
+ * be left alone. Callers check the fragment against pageAnchors first.
  *
  * A labeled URL keeps its label, and an unlabeled URL without a fragment gets
  * empty text so that Antora fills in the target page title. An unlabeled URL
  * *with* a fragment has to be given text explicitly: Antora cannot resolve a
  * section title, so `xref:page.adoc#anchor[]` renders the raw resource id as
  * the link text. Prefer the heading the fragment points at, then the page
- * title; if neither can be read, the caller leaves the URL as a raw link,
- * which still displays sensibly.
+ * title (an anchor on a paragraph or table has no heading of its own).
  */
 function linkTextFor (label, fragment, page, resolveInclude) {
   // A trailing ^ opens a URL link in a new window; an xref would print it.
@@ -367,11 +404,19 @@ function linkTextFor (label, fragment, page, resolveInclude) {
   label = (label || '').replace(/\^$/, '')
   if (label) return label
   if (!fragment) return ''
-  const contents = page && page.contents && page.contents.toString()
-  if (!contents) return undefined
-  let headings = headingsByFile.get(page)
-  if (!headings) headingsByFile.set(page, (headings = pageHeadingIds(contents, page, resolveInclude)))
-  return headings.get(fragment.slice(1)) || documentTitle(contents)
+  const anchors = pageAnchors(page, resolveInclude)
+  if (!anchors) return undefined
+  return anchors.get(fragmentId(fragment)) || documentTitle(page.contents.toString())
+}
+
+/** The anchor id of a URL fragment (`#a%2Fb` is `a/b`), without the `#`. */
+function fragmentId (fragment) {
+  const raw = fragment.slice(1)
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
 }
 
 // Only the first level of includes is followed, and only this many per page:
@@ -380,7 +425,7 @@ function linkTextFor (label, fragment, page, resolveInclude) {
 const MAX_INCLUDES_SEARCHED = 50
 
 /**
- * Collects the heading ids of a page plus those of the partials it includes.
+ * Collects the anchor ids of a page plus those of the partials it includes.
  * The reference pages that carry most anchor targets are thin wrappers around
  * generated partials — every property heading on the cluster and broker
  * property pages lives in one — and Antora has not resolved includes yet at
@@ -407,10 +452,14 @@ function pageHeadingIds (contents, page, resolveInclude) {
 }
 
 /**
- * Maps every heading id in a page to its text, covering explicit anchors
- * ([[id]], [#id], [id=...]) and the ids Asciidoctor generates from heading
- * text. Id generation is approximated: a mismatch only costs the page-title
- * fallback.
+ * Maps every anchor id in a page to its heading text: the ids Asciidoctor
+ * generates from heading text, explicit block anchors ([[id]], [#id],
+ * [id=...], on a heading or any other block) and inline anchors ([[id]] or
+ * anchor:id[] inside a line). An anchor that is not on a heading maps to
+ * undefined. Id generation is approximated with the docs sites' settings
+ * (idprefix empty, idseparator -); a heading whose id comes out differently
+ * is reported as a missing anchor and its URL is left as written, which
+ * still works.
  */
 function parseHeadingIds (contents) {
   const ids = new Map()
@@ -420,13 +469,18 @@ function parseHeadingIds (contents) {
     const anchor = EXPLICIT_ANCHOR_PATTERNS.reduce((found, pattern) => found || pattern.exec(line), null)
     if (anchor) {
       pendingId = anchor[1]
+      if (!ids.has(pendingId)) ids.set(pendingId, undefined)
       continue
+    }
+    for (const inline of line.matchAll(INLINE_ANCHOR_RX)) {
+      const id = inline[1] || inline[2]
+      if (!ids.has(id)) ids.set(id, undefined)
     }
     const heading = HEADING_RX.exec(line)
     if (heading) {
       const text = sanitizeLinkText(heading[2])
       const id = pendingId || autoId(text)
-      if (id && text && !ids.has(id)) ids.set(id, text)
+      if (id && text && ids.get(id) === undefined) ids.set(id, text)
     }
     if (line) pendingId = undefined
   }
@@ -467,8 +521,9 @@ function autoId (text) {
  * Rewrites every mappable docs URL in content. Returns the updated content,
  * the number of conversions, the internal URLs that matched no published page,
  * the internal URLs that carry a query string (which an xref cannot express),
- * and the internal URLs left alone because no link text could be resolved for
- * their fragment.
+ * the internal URLs left alone because their target page could not be read to
+ * check the fragment, and the internal URLs whose page resolves but whose
+ * anchor is not on it.
  */
 function convertContent (content, resolverContext) {
   const { hostnames, ignore = [] } = resolverContext
@@ -478,6 +533,7 @@ function convertContent (content, resolverContext) {
   const unmapped = []
   const withQueryString = []
   const withoutLinkText = []
+  const missingAnchor = []
   for (const match of scanContentUrls(content)) {
     let url
     try {
@@ -505,17 +561,31 @@ function convertContent (content, resolverContext) {
       unmapped.push(match.url)
       continue
     }
+    if (url.hash) {
+      const anchors = pageAnchors(entry.page, resolverContext.resolveInclude)
+      if (!anchors) {
+        withoutLinkText.push(match.url)
+        continue
+      }
+      // The page resolves but the anchor does not: an xref would pass
+      // Antora's check and still land at the top of the page. Keep the URL,
+      // which the site's broken-anchor checks can still see, and report it.
+      if (!anchors.has(fragmentId(url.hash))) {
+        missingAnchor.push(match.url)
+        continue
+      }
+    }
     const label = linkTextFor(match.label, url.hash, entry.page, resolverContext.resolveInclude)
     if (label === undefined) {
       withoutLinkText.push(match.url)
       continue
     }
-    result += content.slice(cursor, match.start) + entryToXref(entry, url.hash, label)
+    result += content.slice(cursor, match.start) + entryToXref(entry, url.hash, label, resolverContext.localComponent)
     cursor = match.end
     converted++
   }
   result += content.slice(cursor)
-  return { content: result, converted, unmapped, withQueryString, withoutLinkText }
+  return { content: result, converted, unmapped, withQueryString, withoutLinkText, missingAnchor }
 }
 
 module.exports.buildUrlMap = buildUrlMap

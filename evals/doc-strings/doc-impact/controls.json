@@ -1,0 +1,67 @@
+[
+  {
+    "id": "control-needs-docs",
+    "repo": "redpanda-data/streaming-enterprise",
+    "pr_url": "",
+    "base_sha": null,
+    "head_sha": null,
+    "title": "config: rename enable_rack_awareness to rack_awareness_enabled",
+    "body": "Renames the cluster property `enable_rack_awareness` to `rack_awareness_enabled` so it matches the other `*_enabled` properties. The old name is removed; there is no alias.",
+    "label": "needs_docs",
+    "label_strength": "strong",
+    "confirmed_by": "synthetic control",
+    "expected_pages": [
+      "https://docs.redpanda.com/streaming/current/manage/rack-awareness/",
+      "https://docs.redpanda.com/streaming/current/manage/kubernetes/k-rack-awareness/",
+      "https://docs.redpanda.com/streaming/current/manage/high-availability/",
+      "https://docs.redpanda.com/streaming/current/manage/kubernetes/k-high-availability/",
+      "https://docs.redpanda.com/streaming/current/develop/produce-data/leader-pinning/"
+    ],
+    "reason": "Positive control. Renames a property that published guides tell you to set or read by name, so those guides become wrong. expected_pages lists every non-generated page whose Markdown twin contained the old name when the control was written. A harness that never flags fails this control.",
+    "fixture": {
+      "layout": "properties",
+      "base_edits": [
+        {
+          "file": "src/v/config/configuration.cc",
+          "find": "  , cluster_id(\n      *this,\n      \"cluster_id\",\n      \"Cluster identifier.\",\n      {.needs_restart = needs_restart::no, .visibility = visibility::user},\n      std::nullopt)\n",
+          "replace": "  , cluster_id(\n      *this,\n      \"cluster_id\",\n      \"Cluster identifier.\",\n      {.needs_restart = needs_restart::no, .visibility = visibility::user},\n      std::nullopt)\n  , enable_rack_awareness(\n      *this,\n      \"enable_rack_awareness\",\n      \"Enable rack-aware replica assignment. When enabled, Redpanda places \"\n      \"the replicas of each partition on brokers in different racks, as \"\n      \"set by each broker's `rack` property.\",\n      {.needs_restart = needs_restart::no, .visibility = visibility::user},\n      false)\n"
+        },
+        {
+          "file": "src/v/config/configuration.h",
+          "find": "    property<std::optional<ss::sstring>> cluster_id;\n",
+          "replace": "    property<std::optional<ss::sstring>> cluster_id;\n\n    // Rack-aware replica placement.\n    property<bool> enable_rack_awareness;\n"
+        }
+      ],
+      "head_edits": [
+        {
+          "file": "src/v/config/configuration.cc",
+          "find": "  , enable_rack_awareness(\n      *this,\n      \"enable_rack_awareness\",\n      \"Enable rack-aware replica assignment. When enabled, Redpanda places \"\n      \"the replicas of each partition on brokers in different racks, as \"\n      \"set by each broker's `rack` property.\",\n      {.needs_restart = needs_restart::no, .visibility = visibility::user},\n      false)\n",
+          "replace": "  , rack_awareness_enabled(\n      *this,\n      \"rack_awareness_enabled\",\n      \"Enable rack-aware replica assignment. When enabled, Redpanda places \"\n      \"the replicas of each partition on brokers in different racks, as \"\n      \"set by each broker's `rack` property.\",\n      {.needs_restart = needs_restart::no, .visibility = visibility::user},\n      false)\n"
+        },
+        {
+          "file": "src/v/config/configuration.h",
+          "find": "\n    // Rack-aware replica placement.\n    property<bool> enable_rack_awareness;\n",
+          "replace": "\n    // Rack-aware replica placement.\n    property<bool> rack_awareness_enabled;\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "control-no-change",
+    "repo": "redpanda-data/streaming-enterprise",
+    "pr_url": "",
+    "base_sha": null,
+    "head_sha": null,
+    "title": "config: clarify kafka_batch_max_bytes description",
+    "body": "Wording-only clarification of the `kafka_batch_max_bytes` description. No behavior change.",
+    "label": "no_change",
+    "label_strength": "strong",
+    "confirmed_by": "synthetic control",
+    "expected_pages": [],
+    "reason": "Negative control. A wording-only rewording of one description, the same diff the negative-property-diff case uses. The generated property reference picks it up on regeneration, so no other page changes. A harness that always flags fails this control.",
+    "fixture": {
+      "layout": "properties",
+      "head_edits_from_case": "negative-property-diff"
+    }
+  }
+]
