@@ -12,6 +12,19 @@
  * concepts like the old parent categories: a weak bonus, never an edge on
  * their own.
  *
+ * Each shared concept also has a strength, by what it is (`conceptStrength`):
+ *
+ *   strong  a use case, or a technology that is not a format (a database, a
+ *           system, a Redpanda product): what the reader builds, or with what
+ *   topic   a leaf topic (Schema Registry, Iceberg Topics), or a legacy
+ *           category the taxonomy lacks: the subject area, which many pages
+ *           and solutions share
+ *   weak    a format technology (Avro, Protobuf, Apache Iceberg), and every
+ *           broader match: an implied concept, a topic with narrower ones,
+ *           a task
+ *
+ * relationships.js turns strengths into weights and requires a strong one.
+ *
  * A legacy category the taxonomy does not know yet (valid-categories.yml can
  * be ahead of taxonomy.yml) keeps its old signal as the pseudo-concept
  * `category:<label>`, so a gap in the taxonomy does not silently drop edges.
@@ -30,6 +43,14 @@ const { toLegacyCategories } = require('../../extension-utils/taxonomy-categorie
 const LEAF_SCHEMES = ['topic', 'use-case', 'technology']
 const BONUS_SCHEMES = ['task']
 const LEGACY_PREFIX = 'category:'
+
+// Strength of a shared concept. See the header.
+const STRENGTH_STRONG = 'strong'
+const STRENGTH_TOPIC = 'topic'
+const STRENGTH_WEAK = 'weak'
+// Technology kinds that only say how data is encoded or stored as files. Two
+// pages that both use Avro need not be about the same thing.
+const WEAK_TECHNOLOGY_KINDS = ['format']
 
 /** Add an ID unless it is already there as direct. */
 function add (concepts, id, weight) {
@@ -213,23 +234,51 @@ function scores (taxonomy, id) {
 }
 
 /**
- * Split the concepts a doc and a solution share into leaves and broader ones.
+ * Strength of a shared leaf concept: strong, topic, or weak (see the header).
+ * A broader match is always weak, so this is only asked of leaves.
+ */
+function conceptStrength (taxonomy, id) {
+  if (id.startsWith(LEGACY_PREFIX)) return STRENGTH_TOPIC
+  const concept = taxonomy.get(id)
+  if (!concept) return STRENGTH_WEAK
+  if (concept.scheme === 'use-case') return STRENGTH_STRONG
+  if (concept.scheme === 'technology') return WEAK_TECHNOLOGY_KINDS.includes(concept.kind) ? STRENGTH_WEAK : STRENGTH_STRONG
+  if (concept.scheme === 'topic') return STRENGTH_TOPIC
+  return STRENGTH_WEAK
+}
+
+/**
+ * Split the concepts a doc and a solution share into leaves and broader ones,
+ * and group them by strength.
  * A leaf is a topic, use case, or technology with no narrower concepts that
  * both sides carry directly; everything else shared (an implied concept, a
  * concept with narrower ones such as High Availability, a task) is broader.
  *
- * @returns {{sharedLeaves: string[], sharedParents: string[]}}
+ * @returns {{sharedLeaves: string[], sharedParents: string[], strong: string[], topics: string[], weak: string[]}}
+ *   `strong`, `topics`, and `weak` partition the leaves and parents together
  */
 function sharedConcepts (taxonomy, docSet, solutionSet, categoryMap) {
   const sharedLeaves = []
   const sharedParents = []
+  const byStrength = { [STRENGTH_STRONG]: [], [STRENGTH_TOPIC]: [], [STRENGTH_WEAK]: [] }
   for (const [id, docWeight] of docSet || []) {
     const solutionWeight = solutionSet && solutionSet.get(id)
     if (!solutionWeight || !scores(taxonomy, id)) continue
-    if (docWeight === 'direct' && solutionWeight === 'direct' && isLeafConcept(taxonomy, id, categoryMap)) sharedLeaves.push(id)
-    else sharedParents.push(id)
+    if (docWeight === 'direct' && solutionWeight === 'direct' && isLeafConcept(taxonomy, id, categoryMap)) {
+      sharedLeaves.push(id)
+      byStrength[conceptStrength(taxonomy, id)].push(id)
+    } else {
+      sharedParents.push(id)
+      byStrength[STRENGTH_WEAK].push(id)
+    }
   }
-  return { sharedLeaves, sharedParents }
+  return {
+    sharedLeaves,
+    sharedParents,
+    strong: byStrength[STRENGTH_STRONG],
+    topics: byStrength[STRENGTH_TOPIC],
+    weak: byStrength[STRENGTH_WEAK],
+  }
 }
 
 /**
@@ -250,6 +299,10 @@ module.exports = {
   LEAF_SCHEMES,
   BONUS_SCHEMES,
   LEGACY_PREFIX,
+  STRENGTH_STRONG,
+  STRENGTH_TOPIC,
+  STRENGTH_WEAK,
+  WEAK_TECHNOLOGY_KINDS,
   categoryConcepts,
   legacyCategories,
   docConcepts,
@@ -257,5 +310,6 @@ module.exports = {
   solutionConcepts,
   sharedConcepts,
   isLeafConcept,
+  conceptStrength,
   conceptLabel,
 }

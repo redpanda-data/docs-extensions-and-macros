@@ -88,35 +88,66 @@ describe('solution facets against the taxonomy', () => {
 })
 
 describe('concept scoring', () => {
-  test('shared leaf topics score 0.3 each; an implied technology adds the 0.1 bonus', () => {
-    const s = conceptsScore(doc('iceberg', ['Iceberg', 'Tiered Storage']), resolved())
-    expect(s.score).toBe(0.7)
-    expect(s.sharedLeaves).toEqual(['Iceberg Topics', 'Tiered Storage'])
-    expect(s.sharedParents).toEqual(['Apache Iceberg'])
+  test('the weights are named: strong 0.3, topic 0.2, weak 0.1 capped at 0.1, one strong concept required', () => {
+    expect(relationships.SCORE_STRONG).toBe(0.3)
+    expect(relationships.SCORE_TOPIC).toBe(0.2)
+    expect(relationships.SCORE_WEAK).toBe(0.1)
+    expect(relationships.SCORE_WEAK_CAP).toBe(0.1)
+    expect(relationships.MIN_STRONG_SHARED).toBe(1)
   })
 
-  test("a solution's use case counts when a doc carries it as a category", () => {
+  test('strength by kind: a use case and a non-format technology are strong, a topic is a topic, a format is weak', () => {
+    expect(concepts.conceptStrength(taxonomy, 'change-data-capture')).toBe('strong')
+    expect(concepts.conceptStrength(taxonomy, 'postgresql')).toBe('strong')
+    expect(concepts.conceptStrength(taxonomy, 'redpanda-connect')).toBe('strong')
+    expect(concepts.conceptStrength(taxonomy, 'schema-registry')).toBe('topic')
+    expect(concepts.conceptStrength(taxonomy, 'category:Troubleshooting')).toBe('topic')
+    expect(concepts.conceptStrength(taxonomy, 'avro')).toBe('weak')
+    expect(concepts.conceptStrength(taxonomy, 'apache-iceberg')).toBe('weak')
+  })
+
+  test('shared leaf topics score 0.2 each; an implied technology adds the 0.1 bonus; no strong concept', () => {
+    const s = conceptsScore(doc('iceberg', ['Iceberg', 'Tiered Storage']), resolved())
+    expect(s.score).toBe(0.5)
+    expect(s.strong).toBe(false)
+    expect(s.sharedLeaves).toEqual(['Iceberg Topics', 'Tiered Storage'])
+    expect(s.sharedParents).toEqual(['Apache Iceberg'])
+    expect(s.ids.strong).toEqual([])
+  })
+
+  test("a solution's use case counts, as a strong concept, when a doc carries it as a category", () => {
     const s = conceptsScore(doc('cdc', ['Change data capture', 'Tiered Storage']), resolved())
     expect(s.sharedLeaves).toEqual(['Change data capture', 'Tiered Storage'])
-    expect(s.score).toBe(0.6)
+    expect(s.score).toBe(0.5)
+    expect(s.strong).toBe(true)
+    expect(s.ids.strong).toEqual(['change-data-capture'])
+  })
+
+  test('a database technology is strong; formats are weak and capped together', () => {
+    const s = conceptsScore(doc('fmt', ['Postgres', 'Avro', 'Protobuf']), resolved({ technologies: ['Postgres', 'Avro', 'Protobuf'] }))
+    expect(s.sharedLeaves).toEqual(['PostgreSQL', 'Avro', 'Protobuf'])
+    expect(s.ids.strong).toEqual(['postgresql'])
+    expect(s.score).toBe(0.4)
   })
 
   test('a topic with narrower concepts and a shared task are bonuses only', () => {
     const s = conceptsScore(doc('ha', ['High Availability', 'Management']), resolved({ categoriesRaw: ['High Availability', 'Management'] }))
     expect(s.sharedLeaves).toEqual([])
     expect(s.score).toBe(0.1)
+    expect(s.strong).toBe(false)
   })
 
   test('a narrower topic implies its broader one for the bonus', () => {
     const s = conceptsScore(doc('rep', ['Data Replication']), resolved({ categoriesRaw: ['Data Replication'] }))
     expect(s.sharedLeaves).toEqual(['Replication'])
     expect(s.sharedParents).toEqual(['High Availability'])
-    expect(s.score).toBe(0.4)
+    expect(s.score).toBe(0.3)
   })
 
-  test('a legacy category the taxonomy lacks keeps its old weight', () => {
+  test('a legacy category the taxonomy lacks counts as a topic', () => {
     const s = conceptsScore(doc('ts', ['Troubleshooting']), resolved({ categoriesRaw: ['Troubleshooting'] }))
     expect(s.sharedLeaves).toEqual(['Troubleshooting'])
+    expect(s.score).toBe(0.2)
   })
 
   test('a deprecated value with no replacement scores nothing', () => {
@@ -129,28 +160,76 @@ describe('concept scoring', () => {
 })
 
 describe('computeRelatedSolutions with the taxonomy', () => {
+  const run = ({ docs, solutions = [resolved()], rels = [], minScore }) => relationships.computeRelatedSolutions({
+    docs, solutions, relationships: rels, categoryMap, taxonomy, ...(minScore === undefined ? {} : { minScore }),
+  })
+
   test('edges carry the shared concept IDs and a concept reason', () => {
-    const { edges, related } = relationships.computeRelatedSolutions({
-      docs: [doc('streaming:manage:iceberg.adoc', ['Iceberg', 'Tiered Storage'])],
-      solutions: [resolved()],
-      relationships: [],
-      categoryMap,
-      taxonomy,
-    })
+    const { edges, related } = run({ docs: [doc('streaming:manage:iceberg.adoc', ['Iceberg', 'Tiered Storage', 'Change data capture'])] })
     expect(edges[0]).toMatchObject({
       provenance: 'category',
-      score: 0.7,
+      score: 0.8,
       shown: true,
-      reason: 'shares Iceberg Topics, Tiered Storage (and the broader Apache Iceberg)',
-      why: 'Uses Iceberg Topics, Tiered Storage',
-      shared: { leaves: ['iceberg-topics', 'tiered-storage'], broader: ['apache-iceberg'] },
+      reason: 'shares Iceberg Topics, Tiered Storage, Change data capture (and the broader Apache Iceberg)',
+      why: 'Uses Iceberg Topics, Tiered Storage, Change data capture',
+      shared: { leaves: ['iceberg-topics', 'tiered-storage', 'change-data-capture'], broader: ['apache-iceberg'], strong: ['change-data-capture'] },
     })
     expect(related.get('streaming:manage:iceberg.adoc')).toHaveLength(1)
   })
 
+  test('topics alone never show, even above min_score', () => {
+    const solution = resolved({ categoriesRaw: ['Iceberg', 'Tiered Storage', 'Security'], useCases: ['Stream processing'], technologies: ['rpk'] })
+    const { edges, related } = run({ docs: [doc('d', ['Iceberg Topics', 'Tiered Storage', 'Security'])], solutions: [solution] })
+    expect(edges[0].score).toBe(0.7)
+    expect(edges[0].shown).toBe(false)
+    expect(edges[0].reason).toBe('shares Iceberg Topics, Tiered Storage, Security (and the broader Apache Iceberg); hidden: no shared use case or technology (formats do not count)')
+    expect(related.size).toBe(0)
+  })
+
+  // "Specify an Iceberg schema" recommended multiplayer-gaming and
+  // sports-data-fanout because all three name Schema Registry and a
+  // serialization format.
+  const icebergSchema = ['Iceberg Topics', 'Tiered Storage', 'Schema Registry', 'Data lakehouse', 'Avro', 'Protobuf']
+  const gaming = () => resolved({
+    id: 'multiplayer-gaming',
+    categoriesRaw: ['Schema Registry'],
+    useCases: ['Stream processing'],
+    technologies: ['Redpanda Connect', 'Protobuf', 'Postgres'],
+  })
+
+  test('Specify an Iceberg schema: Schema Registry and a format do not recommend a gaming solution', () => {
+    const { edges } = run({ docs: [doc('streaming:manage:iceberg/specify-iceberg-schema.adoc', icebergSchema)], solutions: [gaming()], minScore: 0.3 })
+    expect(edges[0]).toMatchObject({
+      solution: 'multiplayer-gaming',
+      provenance: 'category',
+      score: 0.3,
+      shown: false,
+      shared: { leaves: ['schema-registry', 'protobuf'], broader: [], strong: [] },
+    })
+    expect(edges[0].reason).toMatch(/hidden: no shared use case or technology/)
+  })
+
+  test('migrate-to-iceberg-topics still recommends cdc-to-lakehouse: a topic, a use case, and the implied format', () => {
+    const lakehouse = resolved({ categoriesRaw: ['Iceberg'], useCases: ['Change data capture', 'Data lakehouse'] })
+    const { edges } = run({ docs: [doc('streaming:manage:iceberg/migrate-to-iceberg-topics.adoc', ['Iceberg Topics', 'Schema Registry', 'Data lakehouse'])], solutions: [lakehouse] })
+    expect(edges[0]).toMatchObject({ score: 0.6, shown: true, shared: { leaves: ['iceberg-topics', 'data-lakehouse'], broader: ['apache-iceberg'], strong: ['data-lakehouse'] } })
+  })
+
+  test('explicit and approved edges ignore the strength rule; rejected still suppresses', () => {
+    const d = doc('streaming:manage:iceberg/specify-iceberg-schema.adoc', icebergSchema)
+    const explicit = run({ docs: [d], solutions: [Object.assign(gaming(), { relatedDocKeys: new Set([d.key]) })] }).edges[0]
+    expect(explicit).toMatchObject({ provenance: 'explicit', score: 1, shown: true })
+    const approved = run({ docs: [d], solutions: [gaming()], rels: [{ solutionId: 'multiplayer-gaming', docKey: d.key, status: 'approved', confidence: null, reason: 'Schemas' }] }).edges[0]
+    expect(approved).toMatchObject({ provenance: 'editor-approved', score: 0.9, shown: true })
+    const strongDoc = doc('cdc', ['Change data capture', 'Postgres', 'Tiered Storage'])
+    expect(run({ docs: [strongDoc] }).edges[0].shown).toBe(true)
+    const rejected = run({ docs: [strongDoc], rels: [{ solutionId: 'cdc-to-lakehouse', docKey: 'cdc', status: 'rejected', confidence: null, reason: 'Off topic' }] }).edges[0]
+    expect(rejected).toMatchObject({ provenance: 'rejected', shown: false })
+  })
+
   test('the platform filter reads platform IDs: a Docker page matches self-managed, a Kubernetes page does not', () => {
     const run = (deployment) => relationships.computeRelatedSolutions({
-      docs: [doc('d', ['Iceberg', 'Tiered Storage'], deployment)],
+      docs: [doc('d', ['Iceberg', 'Tiered Storage', 'Change data capture'], deployment)],
       solutions: [resolved()],
       relationships: [],
       categoryMap,
@@ -264,8 +343,9 @@ describe('category coverage with the taxonomy', () => {
 
 describe('review fixes: legacy mapping, platforms, and facet weights', () => {
   const { toLegacyCategories } = require('../../extension-utils/taxonomy-categories')
+  // The doc shares a use case with the solution, so only the platform decides.
   const shown = (solution, deployment) => relationships.computeRelatedSolutions({
-    docs: [doc('d', ['Iceberg', 'Tiered Storage'], deployment)],
+    docs: [doc('d', ['Iceberg', 'Tiered Storage', 'Change data capture'], deployment)],
     solutions: [solution],
     relationships: [],
     categoryMap,
@@ -341,7 +421,7 @@ describe('review fixes: legacy mapping, platforms, and facet weights', () => {
 
   test('a deployment the taxonomy cannot name leaves the page unfiltered, with one warning', () => {
     const { edges, warnings } = relationships.computeRelatedSolutions({
-      docs: [doc('a', ['Iceberg', 'Tiered Storage'], 'Mainframe'), doc('b', ['Iceberg', 'Tiered Storage'], 'Mainframe')],
+      docs: [doc('a', ['Iceberg', 'Tiered Storage', 'Change data capture'], 'Mainframe'), doc('b', ['Iceberg', 'Tiered Storage', 'Change data capture'], 'Mainframe')],
       solutions: [resolved()],
       relationships: [],
       categoryMap,

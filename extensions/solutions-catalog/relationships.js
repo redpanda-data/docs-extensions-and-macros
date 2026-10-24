@@ -12,19 +12,30 @@
  *   category         0.3 per shared leaf category (a subcategory, or a top-level category
  *                    with no subcategories) + 0.1 per shared parent category (a top-level
  *                    one that has subcategories; capped at 0.1 per edge), cap 0.85
- *                    With the docs taxonomy, the same weights apply to shared concept IDs
- *                    instead (see concepts.js): 0.3 per topic, use case, or technology both
- *                    sides carry directly and that has no narrower concepts, and the 0.1
- *                    bonus for anything else shared (implied concepts, broad topics such as
- *                    High Availability, tasks). A solution's use cases and technologies
- *                    count as well as its categories.
+ *   concept          with the docs taxonomy, category edges score shared concept IDs instead
+ *                    (see concepts.js), weighted by what each concept is:
+ *                      strong  0.3 per use case, or technology that is not a format
+ *                              (database, system, Redpanda product)       SCORE_STRONG
+ *                      topic   0.2 per leaf topic, or legacy category the taxonomy
+ *                              lacks                                       SCORE_TOPIC
+ *                      weak    0.1 per format technology (Avro, Protobuf, Apache Iceberg)
+ *                              or broader match (an implied concept, a topic with
+ *                              narrower ones such as High Availability, a task),
+ *                              capped at 0.1 per edge                      SCORE_WEAK, SCORE_WEAK_CAP
+ *                    cap 0.85. A concept edge also needs at least MIN_STRONG_SHARED (1)
+ *                    strong concept to show: topics and formats alone, however many,
+ *                    never recommend a solution. A solution's use cases and technologies
+ *                    count as well as its categories. Explicit, editor-approved, and
+ *                    rejected edges are not scored this way.
  *   platform filter  category edges only: Cloud doc -> platforms includes cloud,
  *                    Kubernetes doc -> platforms includes kubernetes,
  *                    Linux/Docker doc -> platforms includes self-managed (the docker concept).
  *                    With the taxonomy, by deployment concept, broader and narrower
  *                    concepts included (see platformCompatible)
  *   threshold        min_score (default 0.6): a category-only edge needs two shared leaf
- *                    categories; parent-only or single-leaf overlap never shows
+ *                    categories; parent-only or single-leaf overlap never shows. A concept
+ *                    edge needs a strong concept plus enough else: two strong concepts, or
+ *                    a strong one, a topic, and a weak match
  *   rank             score desc, featured desc, shared leaf categories desc, lastModified desc,
  *                    title asc; cap max_related. An explicit edge cut by the cap is kept in the
  *                    graph (shown: false) and reported as a warning, because an author asked for it
@@ -51,6 +62,21 @@ const SCORE_PER_PARENT = 0.1
 const SCORE_PARENT_CAP = 0.1
 const SCORE_CATEGORY_CAP = 0.85
 const DEFAULT_MIN_SCORE = 0.6
+
+// Concept weights, by strength (concepts.js conceptStrength). A use case or a
+// named system says what the reader builds; a topic says only which part of
+// the product is involved, and many solutions share one; a format or a broader
+// match says almost nothing.
+const SCORE_STRONG = 0.3
+const SCORE_TOPIC = 0.2
+const SCORE_WEAK = 0.1
+// Weak matches together add one bonus at most, as parent categories did, so
+// three formats cannot stand in for a strong concept.
+const SCORE_WEAK_CAP = 0.1
+// A concept edge with fewer strong concepts than this never shows, whatever
+// its score: "Specify an Iceberg schema" must not recommend a gaming solution
+// for sharing Schema Registry and Protobuf.
+const MIN_STRONG_SHARED = 1
 
 const SCHEMA_PATH = path.join(__dirname, '..', '..', 'docs-data', 'solutions-relationships.schema.json')
 
@@ -100,24 +126,28 @@ function categoryScore (docCategories, solutionCategories, categoryMap) {
 }
 
 /**
- * Concept overlap between a doc and a solution, with the category weights.
+ * Concept overlap between a doc and a solution, weighted by concept strength.
  *
  * @param {Map<string, string>} docConcepts - concept ID -> 'direct' | 'implied'
  * @param {Map<string, string>} solutionConcepts
  * @param {import('../../extension-utils/taxonomy').Taxonomy} taxonomy
  * @param {Object} [categoryMap] - for legacy categories the taxonomy lacks
- * @returns {{score: number, sharedLeaves: Array<string>, sharedParents: Array<string>}} labels, plus the IDs in `ids`
+ * @returns {{score: number, strong: boolean, sharedLeaves: Array<string>, sharedParents: Array<string>}}
+ *   labels, plus the IDs in `ids`; `strong` is whether the edge has the strong
+ *   concepts it needs to show
  */
 function conceptScore (docConcepts, solutionConcepts, taxonomy, categoryMap) {
-  const { sharedLeaves, sharedParents } = concepts.sharedConcepts(taxonomy, docConcepts, solutionConcepts, categoryMap)
-  const raw = sharedLeaves.length * SCORE_PER_LEAF +
-    Math.min(SCORE_PARENT_CAP, sharedParents.length * SCORE_PER_PARENT)
+  const shared = concepts.sharedConcepts(taxonomy, docConcepts, solutionConcepts, categoryMap)
+  const raw = shared.strong.length * SCORE_STRONG +
+    shared.topics.length * SCORE_TOPIC +
+    Math.min(SCORE_WEAK_CAP, shared.weak.length * SCORE_WEAK)
   const label = (id) => concepts.conceptLabel(taxonomy, id)
   return {
     score: Math.min(SCORE_CATEGORY_CAP, round(raw)),
-    sharedLeaves: sharedLeaves.map(label),
-    sharedParents: sharedParents.map(label),
-    ids: { leaves: sharedLeaves, broader: sharedParents },
+    strong: shared.strong.length >= MIN_STRONG_SHARED,
+    sharedLeaves: shared.sharedLeaves.map(label),
+    sharedParents: shared.sharedParents.map(label),
+    ids: { leaves: shared.sharedLeaves, broader: shared.sharedParents, strong: shared.strong },
   }
 }
 
@@ -342,6 +372,11 @@ function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap,
         edges.push(edge)
         continue
       }
+      if (provenance === 'category' && byConcepts && !cat.strong) {
+        edge.reason = `${edge.reason}; hidden: no shared use case or technology (formats do not count)`
+        edges.push(edge)
+        continue
+      }
       candidates.push({ edge, solution, score, sharedLeaves: cat.sharedLeaves.length })
     }
 
@@ -475,6 +510,11 @@ module.exports = {
   SCORE_PARENT_CAP,
   SCORE_CATEGORY_CAP,
   DEFAULT_MIN_SCORE,
+  SCORE_STRONG,
+  SCORE_TOPIC,
+  SCORE_WEAK,
+  SCORE_WEAK_CAP,
+  MIN_STRONG_SHARED,
   SCHEMA_PATH,
   createRelationshipsValidator,
   parseRelationships,

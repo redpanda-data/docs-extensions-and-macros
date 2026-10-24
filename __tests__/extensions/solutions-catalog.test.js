@@ -2496,14 +2496,14 @@ describe('solutions-catalog: with the docs taxonomy', () => {
   })
 
   test('a use case the doc carries as a category now counts toward the edge', async () => {
-    // Clients is a legacy category the fixture taxonomy lacks: it keeps its
-    // old weight as a pseudo-concept.
+    // Clients is a legacy category the fixture taxonomy lacks: it counts as a
+    // topic, as the pseudo-concept category:Clients. The use case is strong.
     const docs = [makeDoc({ relative: 'unlisted.adoc', attrs: { 'page-categories': 'Stream Processing, Clients' } })]
     const solutions = [noRelatedDocs(solution())]
     const before = addedFile((await run({ docs, solutions })).siteCatalog, 'solutions-graph.json')
     const after = addedFile((await run({ docs, solutions: [noRelatedDocs(solution())], taxonomy })).siteCatalog, 'solutions-graph.json')
     expect(before.edges[0]).toMatchObject({ score: 0.4, shown: false })
-    expect(after.edges[0]).toMatchObject({ score: 0.6, shown: true, shared: { leaves: ['stream-processing', 'category:Clients'], broader: [] } })
+    expect(after.edges[0]).toMatchObject({ score: 0.5, shown: false, shared: { leaves: ['stream-processing', 'category:Clients'], broader: [], strong: ['stream-processing'] } })
   })
 
   test('a solution that writes Cloud gets the Cloud-reach warning, as one that writes cloud does', async () => {
