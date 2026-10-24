@@ -113,7 +113,11 @@ function extractDiffExcludes (diffScript) {
 
 /** The jq filter the dispatch step uses to accept or discard doc-impact.json. */
 function extractDispatchFilter (dispatchScript) {
-  const m = dispatchScript.match(/jq -e '([\s\S]*?)'\s+doc-impact\.json/)
+  // The step keeps the filter in a shell variable (schema='...') and runs it
+  // against the model and gating reports; older copies inlined it as
+  // jq -e '...' doc-impact.json. Accept either, so the eval tracks the step.
+  const m = dispatchScript.match(/^\s*schema='([\s\S]*?)'\s*$/m) ||
+    dispatchScript.match(/jq -e '([\s\S]*?)'\s+doc-impact\.json/)
   if (!m) throw new Error('jq -e schema filter not found in the dispatch step')
   return m[1]
 }
