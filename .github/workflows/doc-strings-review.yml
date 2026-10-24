@@ -1215,13 +1215,6 @@ jobs:
             | grep -E '^[0-9a-f]{16}$' >> "$STATE_DIR/reviewed.txt" || true
           sort -u -o "$STATE_DIR/reviewed.txt" "$STATE_DIR/reviewed.txt"
           echo "Reviewed fingerprints now: $(grep -c . "$STATE_DIR/reviewed.txt" || true)"
-      - name: Save the review state
-        if: steps.record.outcome == 'success'
-        continue-on-error: true
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ runner.temp }}/doc-strings-review-state
-          key: doc-strings-review-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
       # Keep what the docs MCP server told this review, for the doc-impact
       # eval. The eval replays docs answers per PR, and answers fetched later
       # come from docs that may already hold the writer's fix, so a correct
@@ -1281,9 +1274,11 @@ jobs:
           retention-days: 90
           if-no-files-found: ignore
       - name: Dispatch doc-impact
+        id: dispatch
         if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0' || steps.enterprise.outputs.found != '0')
         continue-on-error: true
         env:
+          STATE_DIR: ${{ runner.temp }}/doc-strings-review-state
           GH_TOKEN: ${{ secrets.actions_bot_token }}
           DISPATCH_REPO: ${{ inputs.dispatch_repo }}
           REVIEW_OUTCOME: ${{ steps.review.outcome }}
@@ -1346,20 +1341,48 @@ jobs:
             echo "::warning::the enterprise gating report does not match the expected schema; dropping it."
             gating=""
           fi
+          # A gating finding is dispatched once per PR. The gating path has no
+          # reviewed fingerprints, so without this every push would dispatch
+          # the same findings again and add a comment to the open ticket.
+          # Keys (name and change kind) live in the per-PR review state.
+          sent="${STATE_DIR:-}/dispatched-gating.txt"
+          if [ -n "$gating" ] && [ -s "$gating" ] && [ -s "$sent" ]; then
+            jq --rawfile sent "$sent" '
+              ($sent | split("\n") | map(select(length > 0))) as $done
+              | .findings |= map(select(("\(.name) \(.change_kind)") as $k | ($done | index($k)) | not))
+            ' "$gating" > "$RUNNER_TEMP/enterprise-impact.new.json" && mv "$RUNNER_TEMP/enterprise-impact.new.json" "$gating"
+            if [ "$(jq '.findings | length' "$gating")" -eq 0 ]; then
+              echo "Every gating finding was dispatched on an earlier push; not dispatching it again."
+              gating=""
+            fi
+          fi
           # The mechanical enterprise gating findings (see the Detect step)
           # join the model's report, or stand in for it when no review ran.
           # A model report with more than ten findings already failed the
           # schema above and was dropped whole. The gating findings go FIRST,
           # so when the two together pass ten, the cap drops model findings
-          # before a mechanical one. The ticket body gains the gating section
-          # verbatim.
+          # before a mechanical one, and a name both reports carry keeps one
+          # slot (the gating one). When the cap drops model findings, the
+          # model's title and body may name them, so the ticket text is
+          # rebuilt from the findings that stay, as buildDocImpact does for
+          # its own report. The ticket body gains the gating section verbatim.
           if [ -n "$gating" ] && [ -s "$gating" ]; then
             if [ -n "$model" ]; then
               jq -s '
                 .[0] as $m | .[1] as $e |
-                (($e.findings // []) + ($m.findings // [])) as $all |
-                $m | .findings = $all[:10]
-                   | .proposed_ticket.body = (($m.proposed_ticket.body // "") + "\n\nEnterprise gating changes in this PR (detected mechanically):\n" + ($e.proposed_ticket.body // ""))
+                (reduce (($e.findings // []) + ($m.findings // []))[] as $f ([];
+                  if any(.[]; .name == $f.name) then . else . + [$f] end)) as $all |
+                $all[:10] as $kept |
+                ([$e.findings[]?.name]) as $gnames |
+                (([$m.findings[]?.name] | unique) - [$kept[].name]) as $dropped |
+                $m | .findings = $kept
+                   | if ($dropped | length) > 0 then
+                       .proposed_ticket.title = "Update docs for \([$kept[].name] | join(", ")) and \($dropped | length) more"
+                       | .proposed_ticket.body = ((["This PR changes published docs. The review found more changes than one ticket tracks; these are the ones listed:", ""]
+                           + [$kept[] | select(.name as $n | $gnames | index($n) | not) | "- \(.name) (\(.change_kind)): \(.summary)"]
+                           + ["- \($dropped | length) more finding(s) are not listed here; see the review comments on the PR."]) | join("\n"))
+                     else . end
+                   | .proposed_ticket.body = ((.proposed_ticket.body // "") + "\n\nEnterprise gating changes in this PR (detected mechanically):\n" + ($e.proposed_ticket.body // ""))
               ' "$model" "$gating" > "$report" \
                 || { rm -f "$report"; echo "::warning::could not merge the gating report into doc-impact.json; dispatching the gating report alone."; cp "$gating" "$report"; }
             else
@@ -1383,3 +1406,21 @@ jobs:
             --arg default "${DEFAULT_BRANCH:-}" \
             '{event_type: "doc-impact", client_payload: {source_repo: $repo, pr_number: $pr, pr_url: $url, base_ref: $base, default_branch: $default, impact: $impact[0]}}' \
           | gh api "repos/$DISPATCH_REPO/dispatches" --input -
+          # Record the gating findings this dispatch carried, so a later push
+          # does not send them again (see the filter above).
+          if [ -n "$gating" ] && [ -s "$gating" ] && [ -n "${STATE_DIR:-}" ]; then
+            mkdir -p "$STATE_DIR"
+            jq -r '.findings[] | "\(.name) \(.change_kind)"' "$gating" >> "$sent"
+            sort -u -o "$sent" "$sent"
+            echo "gating_recorded=true" >> "$GITHUB_OUTPUT"
+          fi
+      # Saved after the dispatch: the state holds the reviewed fingerprints
+      # (when the review ran) and the gating findings already dispatched
+      # (when a gating-only run dispatched some).
+      - name: Save the review state
+        if: steps.record.outcome == 'success' || steps.dispatch.outputs.gating_recorded == 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/doc-strings-review-state
+          key: doc-strings-review-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}

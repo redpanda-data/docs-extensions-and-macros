@@ -929,6 +929,47 @@ describe('doc-strings-review workflow: doc-impact dispatch merges gating finding
     expect(names).not.toContain('p9')
   })
 
+  test('when the cap drops model findings, the ticket names only the findings it carries', () => {
+    const model = { findings: Array.from({ length: 10 }, (_, i) => finding(`p${i}`)), proposed_ticket: { title: 'model title p9', body: 'model body p9' } }
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify(gating) })
+    const t = payload(r).proposed_ticket
+    expect(t.title).toMatch(/^Update docs for manual_finalization, p0, .*p8 and 1 more$/)
+    expect(t.title).not.toMatch(/p9/)
+    expect(t.body).not.toMatch(/p9/)
+    expect(t.body).toMatch(/1 more finding\(s\) are not listed here/)
+    expect(t.body).toMatch(/Enterprise gating changes in this PR/)
+  })
+
+  test('a name in both reports takes one slot, the gating one', () => {
+    const model = { findings: [finding('manual_finalization'), finding('cloud_storage_cache_size')], proposed_ticket: { title: 'model', body: 'model body' } }
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify(gating) })
+    const impact = payload(r)
+    expect(impact.findings.map((f) => [f.name, f.surface])).toEqual([['manual_finalization', 'enterprise-feature'], ['cloud_storage_cache_size', 'properties']])
+    expect(impact.proposed_ticket.title).toBe('model')
+  })
+
+  test('a gating finding is dispatched once per PR, and the dispatch records it', () => {
+    const state = fs.mkdtempSync(path.join(os.tmpdir(), 'review-state-'))
+    const first = dispatch({ 'enterprise-impact.json': JSON.stringify(gating) }, { STATE_DIR: state, REVIEW_OUTCOME: 'skipped' })
+    expect(fs.existsSync(path.join(first.dir, 'gh-argv'))).toBe(true)
+    expect(first.outputs.gating_recorded).toBe('true')
+    expect(fs.readFileSync(path.join(state, 'dispatched-gating.txt'), 'utf8')).toBe('manual_finalization x\n')
+    const again = dispatch({ 'enterprise-impact.json': JSON.stringify(gating) }, { STATE_DIR: state, REVIEW_OUTCOME: 'skipped' })
+    expect(again.status).toBe(0)
+    expect(fs.existsSync(path.join(again.dir, 'gh-argv'))).toBe(false)
+    expect(again.all).toMatch(/dispatched on an earlier push/)
+    // A new gating finding on a later push still goes out, without the old one.
+    const more = { ...gating, findings: [...gating.findings, finding('new_feature', 'enterprise-feature')] }
+    const third = dispatch({ 'enterprise-impact.json': JSON.stringify(more) }, { STATE_DIR: state, REVIEW_OUTCOME: 'skipped' })
+    expect(payload(third).findings.map((f) => f.name)).toEqual(['new_feature'])
+  })
+
+  test('the review state is saved after the dispatch, also on a gating-only run', () => {
+    const order = job.steps.map((s) => s.name)
+    expect(order.indexOf('Save the review state')).toBeGreaterThan(order.indexOf('Dispatch doc-impact'))
+    expect(stepNamed('Save the review state').if).toMatch(/steps\.dispatch\.outputs\.gating_recorded == 'true'/)
+  })
+
   test.each([
     ['skipped (a gating-only run)', 'skipped'],
     ['not run at all', '']
