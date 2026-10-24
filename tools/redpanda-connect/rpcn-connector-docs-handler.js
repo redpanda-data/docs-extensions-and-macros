@@ -644,7 +644,8 @@ function buildFieldsTable (fields, capFn, opts = {}) {
       })
     }
 
-    const desc = info.description ? capFn(info.description) : '// TODO: Add description'
+    // A | in the description would end the cell and shift the row.
+    const desc = info.description ? capFn(info.description).replace(/\|/g, '\\|') : '// TODO: Add description'
 
     section += `|${fieldName}\n`
     section += `|${desc}\n`
@@ -687,18 +688,23 @@ function buildChangedDefaultsTable (changedDefaults, capFn) {
   for (const [, info] of Object.entries(byFieldAndDefaults)) {
     // Values render as literal inline code, so interpolations like
     // ${!uuid_v4()} and characters like * or _ show as typed.
+    // Values render as literal inline code through pass:c, which, unlike
+    // `+...+`, also keeps values with ++ or with spaces at either end. Strings
+    // that are empty, start or end with whitespace, or contain a newline show
+    // as JSON, so " " and "\n" read as the values they are.
     const formatDefault = (val) => {
       if (val === undefined || val === null) return 'none'
       let text
-      if (typeof val === 'string') text = val === '' ? '""' : val
+      if (typeof val === 'string') text = (val === '' || /^\s|\s$|\n/.test(val)) ? JSON.stringify(val) : val
       else if (typeof val === 'number' || typeof val === 'boolean') text = String(val)
       else text = JSON.stringify(val)
-      return `\`+${text.replace(/\|/g, '\\|')}+\``
+      return `\`pass:c[${text.replace(/\]/g, '\\]').replace(/\|/g, '\\|')}]\``
     }
 
     const oldVal = formatDefault(info.oldDefault)
     const newVal = formatDefault(info.newDefault)
-    const desc = info.description ? capFn(info.description) : '// TODO: Add description'
+    // A | in the description would end the cell and shift the row.
+    const desc = info.description ? capFn(info.description).replace(/\|/g, '\\|') : '// TODO: Add description'
 
     const byType = {}
     for (const comp of info.components) {

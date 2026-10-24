@@ -870,6 +870,21 @@ describe('buildChangedDefaultsTable - whats-new changed default links', () => {
     expect(table).toContain('|batching.byte_size\n');
   });
 
+  test('keeps defaults with ++, brackets, edge spaces, or newlines literal, and escapes | in descriptions', () => {
+    const asciidoctor = require('@asciidoctor/core')();
+    const table = buildChangedDefaultsTable([
+      { component: 'inputs:socket', field: 'network', oldDefault: 'a++b', newDefault: 'x]y', description: 'A network type to assume (unix|tcp).' },
+      { component: 'processors:string_split', field: 'delimiter', oldDefault: ' ', newDefault: '\n', description: 'D.' }
+    ], (s) => s);
+    const logger = asciidoctor.MemoryLogger.create();
+    asciidoctor.LoggerManager.setLogger(logger);
+    const html = asciidoctor.convert(table);
+    const codes = [...html.matchAll(/<code>([^<]*)<\/code>/g)].map((m) => m[1]);
+    expect(codes).toEqual(expect.arrayContaining(['a++b', 'x]y', '" "', '"\\n"']));
+    expect(html).toContain('(unix|tcp)');
+    expect(logger.getMessages()).toEqual([]);
+  });
+
   test('renders old and new defaults as literal inline code', () => {
     const table = buildChangedDefaultsTable([
       {
@@ -883,9 +898,9 @@ describe('buildChangedDefaultsTable - whats-new changed default links', () => {
       { component: 'inputs:y', field: 'b', oldDefault: undefined, newDefault: 5, description: 'B.' }
     ], cap);
 
-    expect(table).toContain('|`+${!count("items")}-${!timestamp_unix_nano()}+`\n|`+${!timestamp_unix_nano()}-${!uuid_v4()}+`\n');
-    expect(table).toContain('|`+""+`\n|`+a\\|b+`\n');
-    expect(table).toContain('|none\n|`+5+`\n');
+    expect(table).toContain('|`pass:c[${!count("items")}-${!timestamp_unix_nano()}]`\n|`pass:c[${!timestamp_unix_nano()}-${!uuid_v4()}]`\n');
+    expect(table).toContain('|`pass:c[""]`\n|`pass:c[a\\|b]`\n');
+    expect(table).toContain('|none\n|`pass:c[5]`\n');
   });
 });
 
