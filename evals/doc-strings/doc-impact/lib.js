@@ -111,10 +111,15 @@ function extractDiffExcludes (diffScript) {
   return { excludes: entries, byteLimit: limit ? Number(limit[1]) * Number(limit[2]) : null }
 }
 
-/** The jq filter the dispatch step uses to accept or discard doc-impact.json. */
+/**
+ * The jq filter the dispatch step uses to accept or discard doc-impact.json.
+ * The step keeps it in a `schema='...'` variable, because the model report,
+ * the gating report and the merged report are all checked against it.
+ */
 function extractDispatchFilter (dispatchScript) {
-  const m = dispatchScript.match(/jq -e '([\s\S]*?)'\s+doc-impact\.json/)
-  if (!m) throw new Error('jq -e schema filter not found in the dispatch step')
+  const m = dispatchScript.match(/^\s*schema='([\s\S]*?)'\s*$/m)
+  if (!m) throw new Error("schema='...' filter not found in the dispatch step")
+  if (!/jq -e "\$schema" "\$model"/.test(dispatchScript)) throw new Error('the dispatch step no longer checks the model report against $schema')
   return m[1]
 }
 
