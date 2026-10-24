@@ -107,6 +107,14 @@ The evals are the contract the workflow will have to meet.
 |`negative-property-diff` (conforming rewording diff -> zero suggestions,
 zero doc-impact claims), `negative-metrics-file` (conforming probe file ->
 the model must claim `{"findings": []}`). *Any* invention fails the case.
+`unchanged-lines-kept` (rpk help text from streaming-enterprise PR 461 with
+a few changed paragraphs, lint-clean: any suggestion must keep every
+unchanged line of the declaration, blank lines included, byte-identical and
+in order, with new lines allowed only between them; its control runs the
+prompt with the changed-lines rule reverted). A run that posts no suggestion
+passes and says "nothing to judge". The prompt lets a suggestion touch an
+unchanged line only to fix a lint finding on it, which this fixture has none
+of
 
 |D. Prose quality
 |`doc-strings-review.yml`'s prose-quality pass (added in #297): the Claude
@@ -135,7 +143,14 @@ the case to FAIL*:
 ----
 node evals/doc-strings/run-evals.js --sabotage negative-property-diff
 node evals/doc-strings/run-evals.js --sabotage negative-metrics-file
+node evals/doc-strings/run-evals.js --sabotage unchanged-lines-kept
 ----
+
+A case can sabotage the prompt instead of the fixture: `sabotagePromptEdits`
+puts back the text a rule replaced, so the control runs the production
+prompt without that rule. Each edit must match the shipped prompt exactly
+once, and a jest test checks that, so rewording the rule without updating
+its control fails CI instead of running a control that proves nothing.
 
 Exit 0 means the proof succeeded (the model flagged the planted violation
 and the harness caught it as a FAIL verdict); exit 1 means the harness can
@@ -149,7 +164,7 @@ controls demonstrably fail on violating input.
 
 [source,bash]
 ----
-npm run eval:doc-strings                     # full suite (10 cases)
+npm run eval:doc-strings                     # full suite (11 cases)
 node evals/doc-strings/run-evals.js --case metric-name-echo
 node evals/doc-strings/run-evals.js --model sonnet   # override the production model
 node evals/doc-strings/run-evals.js --keep-temp   # keep fixture repos
@@ -174,7 +189,7 @@ Requirements:
 Exit codes: `0` all pass (or sabotage proven), `1` failures, `2` harness
 error, `3` skipped.
 
-Deliberately **not wired into CI**: a full run makes ten real model calls
+Deliberately **not wired into CI**: a full run makes eleven real model calls
 (a few minutes of wall time and real tokens). Run it when the workflow
 prompts, the lint rules, or the extraction change.
 

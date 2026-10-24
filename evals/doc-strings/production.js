@@ -69,6 +69,22 @@ function parseClaudeArgs (claudeArgs) {
   }
 }
 
+/**
+ * A control's change to the production prompt: each edit puts back the text
+ * a rule replaced, so the control runs the prompt without that rule. Every
+ * `find` must match exactly once, so a control whose rule was reworded
+ * fails loudly instead of running the unchanged prompt.
+ */
+function editPrompt (prompt, edits) {
+  let out = prompt
+  for (const edit of edits || []) {
+    const parts = out.split(edit.find)
+    if (parts.length !== 2) throw new Error(`prompt edit must match once, matched ${parts.length - 1}: ${JSON.stringify(edit.find.slice(0, 80))}`)
+    out = parts.join(edit.replace)
+  }
+  return out
+}
+
 /** The production prompt with its Actions expressions filled in. */
 function renderPrompt (prompt, vars) {
   const filled = prompt
@@ -104,12 +120,12 @@ function fetchStandards () {
  * @param {string} [o.model]
  * @returns {{ output, comments, files, stderr, status, timedOut, ms, failed }}
  */
-function runReview ({ repoDir, lint, diff, model = PRODUCTION_MODEL, timeoutMs = 600000 }) {
+function runReview ({ repoDir, lint, diff, model = PRODUCTION_MODEL, timeoutMs = 600000, promptEdits = [] }) {
   const step = loadStep()
   const args = parseClaudeArgs(step.with.claude_args || '')
   // A repository that doesn't exist, so a model that looks the PR up with
   // `gh pr view` gets an error rather than a real, unrelated PR.
-  const prompt = renderPrompt(step.with.prompt, { repository: 'example-org/doc-strings-eval-fixture', prNumber: 1 })
+  const prompt = renderPrompt(editPrompt(step.with.prompt, promptEdits), { repository: 'example-org/doc-strings-eval-fixture', prNumber: 1 })
 
   fs.writeFileSync(path.join(repoDir, 'lint-findings.json'), JSON.stringify(lint, null, 2))
   if (diff != null) {
@@ -172,4 +188,4 @@ function runReview ({ repoDir, lint, diff, model = PRODUCTION_MODEL, timeoutMs =
   }
 }
 
-module.exports = { runReview, loadStep, parseClaudeArgs, renderPrompt, PRODUCTION_MODEL, FETCHED_STANDARDS }
+module.exports = { runReview, loadStep, parseClaudeArgs, renderPrompt, PRODUCTION_MODEL, FETCHED_STANDARDS, editPrompt }

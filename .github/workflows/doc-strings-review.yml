@@ -1042,9 +1042,17 @@ jobs:
             REVIEW IN CONTEXT: judge each string as the reader of its page,
             not on its own. Read it together with its context entries and
             with the code that implements what it describes:
-            - The whole declaration ships, so judge all of it, not only the
-              lines this PR changed, and fix every problem it has in one
-              suggestion.
+            - The whole declaration ships, so read all of it, but review only
+              the lines this PR changed. A line the PR did not change is a
+              finding only when this change makes it wrong: it now
+              contradicts the changed lines or the code. Its wording, style
+              and term choices are out of scope even where they break the
+              standard; the author did not write them in this PR. A lint
+              finding is the one exception: the lint reports per
+              declaration, so fix what a finding names on any line, and
+              change nothing else on that line. A suggestion fixes the
+              changed lines, any line the change made wrong and any lint
+              finding, and keeps every other line byte-identical.
             - A string must agree with the strings around it. A flag's usage,
               its command's Long text and that text's examples describe the
               same behavior; a change to one that leaves another saying
