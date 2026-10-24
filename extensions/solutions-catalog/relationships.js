@@ -12,10 +12,41 @@
  *   category         0.3 per shared leaf category (a subcategory, or a top-level category
  *                    with no subcategories) + 0.1 per shared parent category (a top-level
  *                    one that has subcategories; capped at 0.1 per edge), cap 0.85
+ *   concept          with the docs taxonomy, category edges score shared concept IDs instead
+ *                    (see concepts.js), weighted by what each concept is:
+ *                      strong  0.3 per use case, or technology that is not a format
+ *                              (database, system, Redpanda product)       SCORE_STRONG
+ *                      topic   0.2 per leaf topic, or legacy category the taxonomy
+ *                              lacks                                       SCORE_TOPIC
+ *                      weak    0.1 per format technology (Avro, Protobuf, Apache Iceberg)
+ *                              or broader match (an implied concept, a topic with
+ *                              narrower ones such as High Availability, a task),
+ *                              capped at 0.1 per edge                      SCORE_WEAK, SCORE_WEAK_CAP
+ *                    Each weight is then multiplied by the concept's rarity across the
+ *                    solutions (see rarityFactor): 1 for a concept on at most a third of
+ *                    them (RARITY_FULL_SHARE), falling with an IDF curve,
+ *                    log((N+1)/(df+1)) / log((N+1)/(N/3+1)), to 0 for a concept on every
+ *                    solution. With 6 solutions, a concept on 1 or 2 counts in full, on 3
+ *                    0.66, on 4 0.397, on 5 0.182. Schema Registry, on 4 of 6, says little
+ *                    about which solution fits a page; Iceberg Topics, on 1, says a lot.
+ *                    The score is capped at 0.85. A concept edge also needs at least MIN_STRONG_SHARED (1)
+ *                    strong concept to show: topics and formats alone, however many,
+ *                    never recommend a solution. A strong concept on more than half the
+ *                    solutions (RARITY_COMMON_SHARE) is common and does not count toward
+ *                    MIN_STRONG_SHARED, though it still scores. With fewer than
+ *                    RARITY_MIN_SOLUTIONS (4) solutions, rarity is off: every concept
+ *                    counts in full. A solution's use cases and technologies count as
+ *                    well as its categories. Explicit, editor-approved, and rejected
+ *                    edges are not scored this way.
  *   platform filter  category edges only: Cloud doc -> platforms includes cloud,
- *                    Kubernetes/Linux/Docker doc -> platforms includes self-managed
+ *                    Kubernetes doc -> platforms includes kubernetes,
+ *                    Linux/Docker doc -> platforms includes self-managed (the docker concept).
+ *                    With the taxonomy, by deployment concept, broader and narrower
+ *                    concepts included (see platformCompatible)
  *   threshold        min_score (default 0.6): a category-only edge needs two shared leaf
- *                    categories; parent-only or single-leaf overlap never shows
+ *                    categories; parent-only or single-leaf overlap never shows. A concept
+ *                    edge needs a strong concept plus enough else: two strong concepts, or
+ *                    a strong one, a topic, and a weak match, all rare enough to count in full
  *   rank             score desc, featured desc, shared leaf categories desc, lastModified desc,
  *                    title asc; cap max_related. An explicit edge cut by the cap is kept in the
  *                    graph (shown: false) and reported as a warning, because an author asked for it
@@ -31,6 +62,7 @@
 const path = require('path')
 const yaml = require('js-yaml')
 const { isLeafCategory } = require('../../extension-utils/categories')
+const concepts = require('./concepts')
 
 const SCORE_EXPLICIT = 1.0
 const SCORE_APPROVED_FLOOR = 0.9
@@ -41,6 +73,34 @@ const SCORE_PER_PARENT = 0.1
 const SCORE_PARENT_CAP = 0.1
 const SCORE_CATEGORY_CAP = 0.85
 const DEFAULT_MIN_SCORE = 0.6
+
+// Concept weights, by strength (concepts.js conceptStrength). A use case or a
+// named system says what the reader builds; a topic says only which part of
+// the product is involved, and many solutions share one; a format or a broader
+// match says almost nothing.
+const SCORE_STRONG = 0.3
+const SCORE_TOPIC = 0.2
+const SCORE_WEAK = 0.1
+// Weak matches together add one bonus at most, as parent categories did, so
+// three formats cannot stand in for a strong concept.
+const SCORE_WEAK_CAP = 0.1
+// A concept edge with fewer strong concepts than this never shows, whatever
+// its score: "Specify an Iceberg schema" must not recommend a gaming solution
+// for sharing Schema Registry and Protobuf.
+const MIN_STRONG_SHARED = 1
+
+// Rarity: how many of the solutions carry a shared concept (its document
+// frequency, df). A concept most solutions carry cannot say which of them a
+// page should recommend. See rarityFactor.
+//
+// A concept on at most this share of the solutions counts in full.
+const RARITY_FULL_SHARE = 1 / 3
+// A strong concept on more than this share is common: it still scores, but it
+// does not count as the strong concept an edge needs to show.
+const RARITY_COMMON_SHARE = 0.5
+// With fewer solutions than this, every concept is on a large share of them,
+// so rarity says nothing and is off.
+const RARITY_MIN_SOLUTIONS = 4
 
 const SCHEMA_PATH = path.join(__dirname, '..', '..', 'docs-data', 'solutions-relationships.schema.json')
 
@@ -89,6 +149,95 @@ function categoryScore (docCategories, solutionCategories, categoryMap) {
   return { score, sharedLeaves, sharedParents }
 }
 
+/**
+ * Rarity factor of a concept that `df` of `total` solutions carry: an IDF
+ * weight, normalized so a concept on at most RARITY_FULL_SHARE of the
+ * solutions counts 1, and one on every solution counts 0.
+ *
+ *   factor = log((total + 1) / (df + 1)) / log((total + 1) / (full + 1)),
+ *   full = max(1, total * RARITY_FULL_SHARE), and 1 when df <= full
+ *
+ * Below RARITY_MIN_SOLUTIONS solutions, every factor is 1.
+ *
+ * @param {number} df - solutions that carry the concept
+ * @param {number} total - solutions scored
+ * @returns {number} between 0 and 1, rounded to 3 places
+ */
+function rarityFactor (df, total) {
+  if (total < RARITY_MIN_SOLUTIONS) return 1
+  const full = Math.max(1, total * RARITY_FULL_SHARE)
+  if (df <= full) return 1
+  return Math.max(0, round(Math.log((total + 1) / (df + 1)) / Math.log((total + 1) / (full + 1))))
+}
+
+/** Is a concept that `df` of `total` solutions carry on most of them? */
+function isCommonConcept (df, total) {
+  return total >= RARITY_MIN_SOLUTIONS && df / total > RARITY_COMMON_SHARE
+}
+
+/**
+ * Document frequency of every concept across the solutions, counted once per
+ * solution whether it carries the concept directly or as implied.
+ *
+ * @param {Array<{concepts?: Map<string, string>}>} solutions - the solutions scored
+ * @returns {{total: number, df: Map<string, number>, factor: (id: string) => number, common: (id: string) => boolean}}
+ */
+function conceptRarity (solutions) {
+  const df = new Map()
+  let total = 0
+  for (const solution of solutions || []) {
+    if (!solution.concepts) continue
+    total++
+    for (const id of solution.concepts.keys()) df.set(id, (df.get(id) || 0) + 1)
+  }
+  return {
+    total,
+    df,
+    factor: (id) => rarityFactor(df.get(id) || 0, total),
+    common: (id) => isCommonConcept(df.get(id) || 0, total),
+  }
+}
+
+/**
+ * Concept overlap between a doc and a solution, weighted by concept strength
+ * and, when `rarity` is given, by each concept's rarity across the solutions.
+ *
+ * @param {Map<string, string>} docConcepts - concept ID -> 'direct' | 'implied'
+ * @param {Map<string, string>} solutionConcepts
+ * @param {import('../../extension-utils/taxonomy').Taxonomy} taxonomy
+ * @param {Object} [categoryMap] - for legacy categories the taxonomy lacks
+ * @param {ReturnType<typeof conceptRarity>} [rarity] - without it, every concept counts in full
+ * @returns {{score: number, strong: boolean, common: Array<string>, sharedLeaves: Array<string>, sharedParents: Array<string>}}
+ *   labels, plus the IDs in `ids`; `strong` is whether the edge has the strong
+ *   concepts it needs to show, and `common` names the strong concepts that do
+ *   not count because most solutions carry them. `ids.strong` lists the strong
+ *   concepts that count; with rarity on, `ids.rarity` maps every shared concept
+ *   to its factor
+ */
+function conceptScore (docConcepts, solutionConcepts, taxonomy, categoryMap, rarity) {
+  const shared = concepts.sharedConcepts(taxonomy, docConcepts, solutionConcepts, categoryMap)
+  const factor = rarity ? rarity.factor : () => 1
+  const weigh = (ids, weight) => ids.reduce((sum, id) => sum + weight * factor(id), 0)
+  const raw = weigh(shared.strong, SCORE_STRONG) +
+    weigh(shared.topics, SCORE_TOPIC) +
+    Math.min(SCORE_WEAK_CAP, weigh(shared.weak, SCORE_WEAK))
+  const common = rarity ? shared.strong.filter(rarity.common) : []
+  const strong = shared.strong.filter((id) => !common.includes(id))
+  const label = (id) => concepts.conceptLabel(taxonomy, id)
+  const ids = { leaves: shared.sharedLeaves, broader: shared.sharedParents, strong }
+  if (rarity && rarity.total >= RARITY_MIN_SOLUTIONS) {
+    ids.rarity = Object.fromEntries([...shared.sharedLeaves, ...shared.sharedParents].map((id) => [id, factor(id)]))
+  }
+  return {
+    score: Math.min(SCORE_CATEGORY_CAP, round(raw)),
+    strong: strong.length >= MIN_STRONG_SHARED,
+    common: common.map(label),
+    sharedLeaves: shared.sharedLeaves.map(label),
+    sharedParents: shared.sharedParents.map(label),
+    ids,
+  }
+}
+
 /** Readable explanation of a category edge, naming what actually matched. */
 function formatCategoryReason ({ sharedLeaves, sharedParents }) {
   const parents = sharedParents.length
@@ -97,6 +246,14 @@ function formatCategoryReason ({ sharedLeaves, sharedParents }) {
   if (!sharedLeaves.length) return parents ? `shares only the ${parents}` : 'shares no categories'
   const leaves = `shares categories ${sharedLeaves.join(', ')}`
   return parents ? `${leaves} (and the ${parents})` : leaves
+}
+
+/** Readable explanation of a concept-scored edge, by concept label. */
+function formatConceptReason ({ sharedLeaves, sharedParents }) {
+  const broader = sharedParents.length ? `broader ${sharedParents.join(', ')}` : ''
+  if (!sharedLeaves.length) return broader ? `shares only the ${broader}` : 'shares no concepts'
+  const leaves = `shares ${sharedLeaves.join(', ')}`
+  return broader ? `${leaves} (and the ${broader})` : leaves
 }
 
 /**
@@ -108,21 +265,71 @@ function formatCategoryWhy ({ sharedLeaves }) {
   return sharedLeaves.length ? `Uses ${sharedLeaves.join(', ')}` : ''
 }
 
+// getDeploymentType values.
+const CLOUD_DEPLOYMENT = 'Redpanda Cloud'
+const SELF_MANAGED_PEERS = ['Linux', 'Docker']
+
 /**
  * Platform filter for category edges. A doc with no deployment marker matches
  * every solution.
  *
+ * Without the taxonomy, the fallback platform values are compared as written.
+ * With it, the doc's deployment (a getDeploymentType value) and the
+ * solution's platforms are deployment concepts, and they match when one is the
+ * other, or one is the other's broader concept: a solution that says Redpanda
+ * Self-Managed matches Linux, Docker, and Kubernetes pages, and a BYOC
+ * solution matches a Redpanda Cloud page. Linux and Docker pages share one
+ * audience, as they always have, so the base self-managed run (Docker
+ * Compose) matches a Linux page too. A Kubernetes page needs a solution with
+ * its own Kubernetes path.
+ *
  * @param {string} deployment - from getDeploymentType
- * @param {Array<string>} platforms - solution platforms
+ * @param {Array<string>} platforms - solution platforms, as authored (fallback check)
+ * @param {{taxonomy: Object, ids: Array<string>}} [byConcept] - the taxonomy and
+ *   the solution's resolved platform concept IDs (see solutionPlatformIds)
+ * @returns {boolean|null} null when the taxonomy has no deployment concept for
+ *   `deployment`, so the caller can say the page is left unfiltered
  */
-function platformCompatible (deployment, platforms) {
+function platformCompatible (deployment, platforms, byConcept) {
   if (!deployment) return true
+  if (byConcept && byConcept.taxonomy) {
+    const { taxonomy, ids } = byConcept
+    const idsOf = (value) => {
+      const hit = taxonomy.resolve(value, { schemes: ['deployment'] })
+      return hit ? hit.ids : []
+    }
+    const audience = new Set(idsOf(deployment))
+    if (!audience.size) return null
+    if (SELF_MANAGED_PEERS.includes(deployment)) {
+      for (const peer of SELF_MANAGED_PEERS) for (const id of idsOf(peer)) audience.add(id)
+    }
+    const broader = (id) => {
+      const concept = taxonomy.get(id)
+      return concept ? concept.broader : null
+    }
+    return (ids || []).some((s) => [...audience].some((d) => s === d || broader(d) === s || broader(s) === d))
+  }
   const set = new Set(platforms || [])
-  if (deployment === 'Redpanda Cloud') return set.has('cloud')
+  if (deployment === CLOUD_DEPLOYMENT) return set.has('cloud')
   // A Kubernetes page recommends only solutions a Kubernetes reader can run
   // there: the ones with their own Kubernetes path.
   if (deployment === 'Kubernetes') return set.has('kubernetes')
   return set.has('self-managed')
+}
+
+/** A validated solution's direct platform concept IDs (empty without the taxonomy). */
+function solutionPlatformIds (solution) {
+  const items = (solution && solution.conceptFacets && solution.conceptFacets.platforms) || []
+  return items.map((p) => p.id)
+}
+
+/**
+ * Does the solution run on Redpanda Cloud? With the taxonomy, by concept, so
+ * `Cloud`, `Redpanda Cloud`, and a narrower Cloud concept all count.
+ */
+function runsOnCloud (solution, taxonomy) {
+  return Boolean(platformCompatible(CLOUD_DEPLOYMENT, solution.platforms,
+    taxonomy && solution.conceptFacets ? { taxonomy, ids: solutionPlatformIds(solution) } : undefined))
 }
 
 function round (n) {
@@ -163,10 +370,14 @@ function compareCandidates (a, b) {
  *   `edges` is every (doc, solution) pair with any signal, for solutions-graph.json;
  *   `warnings` names every doc where max_related hid an explicit edge.
  */
-function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap, maxRelated = 3, minScore = DEFAULT_MIN_SCORE }) {
+function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap, taxonomy, maxRelated = 3, minScore = DEFAULT_MIN_SCORE }) {
   const related = new Map()
   const edges = []
   const warnings = []
+  const unfiltered = new Set()
+  // Rarity is computed over the solutions scored, so a draft built with
+  // include_drafts counts, and one left out does not.
+  const rarity = taxonomy ? conceptRarity(solutions) : null
 
   const relByPair = new Map()
   for (const rel of relationships || []) {
@@ -178,7 +389,10 @@ function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap,
     for (const solution of solutions) {
       const rel = relByPair.get(`${solution.id} ${doc.key}`)
       const explicit = solution.relatedDocKeys && solution.relatedDocKeys.has(doc.key)
-      const cat = categoryScore(doc.categories, solution.categories, categoryMap)
+      const byConcepts = Boolean(taxonomy && doc.concepts && solution.concepts)
+      const cat = byConcepts
+        ? conceptScore(doc.concepts, solution.concepts, taxonomy, categoryMap, rarity)
+        : categoryScore(doc.categories, solution.categories, categoryMap)
 
       if (!explicit && !rel && cat.score === 0) continue // no signal at all
 
@@ -202,7 +416,7 @@ function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap,
       } else {
         provenance = 'category'
         score = cat.score
-        reason = formatCategoryReason(cat)
+        reason = byConcepts ? formatConceptReason(cat) : formatCategoryReason(cat)
         why = formatCategoryWhy(cat)
       }
 
@@ -217,6 +431,8 @@ function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap,
         reason,
         why,
       }
+      // The concepts behind the score, so the graph shows what matched by ID.
+      if (byConcepts && (cat.ids.leaves.length || cat.ids.broader.length)) edge.shared = cat.ids
 
       if (rel && rel.status === 'rejected') {
         edge.provenance = 'rejected'
@@ -229,13 +445,27 @@ function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap,
         edges.push(edge)
         continue
       }
-      if (provenance === 'category' && !platformCompatible(doc.deployment, solution.platforms)) {
+      const compatible = provenance === 'category'
+        ? platformCompatible(doc.deployment, solution.platforms, byConcepts ? { taxonomy, ids: solutionPlatformIds(solution) } : undefined)
+        : true
+      if (compatible === null && !unfiltered.has(doc.deployment)) {
+        unfiltered.add(doc.deployment)
+        warnings.push(`the taxonomy has no deployment concept for ${doc.deployment} pages; their category recommendations are not filtered by platform`)
+      }
+      if (compatible === false) {
         edge.reason = `${edge.reason}; hidden: ${doc.deployment} page, solution platforms ${solution.platforms.join(', ')}`
         edges.push(edge)
         continue
       }
       if (score < minScore) {
         edge.reason = `${edge.reason}; hidden: score ${edge.score} below ${minScore}`
+        edges.push(edge)
+        continue
+      }
+      if (provenance === 'category' && byConcepts && !cat.strong) {
+        edge.reason = cat.common.length
+          ? `${edge.reason}; hidden: no shared use case or technology that few solutions carry (${cat.common.join(', ')} ${cat.common.length === 1 ? 'is' : 'are'} on most solutions)`
+          : `${edge.reason}; hidden: no shared use case or technology (formats do not count)`
         edges.push(edge)
         continue
       }
@@ -274,21 +504,53 @@ function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap,
  * recommendations.
  *
  * @param {Object} input
- * @param {Array<{url: string, categories: Array<string>}>} input.docs - eligible doc pages
+ * @param {Array<{url: string, categories: Array<string>, authoredCategories?: Array<string>}>} input.docs -
+ *   eligible doc pages. With a taxonomy, `authoredCategories` (what the page
+ *   says, before legacy normalization drops labels valid-categories.yml lacks)
+ *   is counted when present.
  * @param {Array<Object>} input.solutions - active records (published or included drafts)
  * @param {Object} [input.categoryMap]
+ * @param {import('../../extension-utils/taxonomy').Taxonomy} [input.taxonomy] - when
+ *   present, a page counts for a category when they name the same concept, so a
+ *   page rewritten from Iceberg to Iceberg Topics still counts for a solution
+ *   that says Iceberg
  * @param {number} [input.sampleSize=20]
  * @returns {{solutions: Object, uncategorizedEligiblePages: number, uncategorizedSample: Array<string>}}
  */
-function computeCoverage ({ docs, solutions, categoryMap, sampleSize = 20 }) {
+function computeCoverage ({ docs, solutions, categoryMap, taxonomy, sampleSize = 20 }) {
+  // The keys a category label counts under: its concept IDs (a deprecated
+  // value's replacements), or the label itself without a taxonomy or a match.
+  // Memoized: the same labels recur on thousands of pages.
+  const keyCache = new Map()
+  const keysOf = (label) => {
+    if (keyCache.has(label)) return keyCache.get(label)
+    const hit = taxonomy ? taxonomy.resolve(label) : null
+    const keys = hit && hit.ids.length ? hit.ids.map((id) => `id:${id}`) : [`label:${label}`]
+    keyCache.set(label, keys)
+    return keys
+  }
+  const categoriesOf = (doc) => (taxonomy && doc.authoredCategories ? doc.authoredCategories : doc.categories) || []
   const counts = new Map()
   const uncategorized = []
+  // Each doc's key set, computed once for the multi-key lookups below.
+  const docKeySets = []
   for (const doc of docs) {
-    if (!doc.categories || !doc.categories.length) {
+    if (!categoriesOf(doc).length) {
       uncategorized.push(doc.url)
       continue
     }
-    for (const c of new Set(doc.categories)) counts.set(c, (counts.get(c) || 0) + 1)
+    const keys = new Set(categoriesOf(doc).flatMap(keysOf))
+    docKeySets.push(keys)
+    for (const k of keys) counts.set(k, (counts.get(k) || 0) + 1)
+  }
+  const pagesFor = (label) => {
+    const keys = keysOf(label)
+    if (keys.length === 1) return counts.get(keys[0]) || 0
+    let n = 0
+    for (const set of docKeySets) {
+      if (keys.some((k) => set.has(k))) n++
+    }
+    return n
   }
   const level = (c) => (categoryMap && categoryMap.categories.has(c) && !categoryMap.subcategories.has(c) ? 'top' : 'sub')
 
@@ -297,7 +559,7 @@ function computeCoverage ({ docs, solutions, categoryMap, sampleSize = 20 }) {
     const categories = {}
     const zeroMatch = []
     for (const c of solution.categories || []) {
-      const pages = counts.get(c) || 0
+      const pages = pagesFor(c)
       categories[c] = { pages, level: level(c) }
       if (pages === 0) zeroMatch.push(c)
     }
@@ -340,13 +602,28 @@ module.exports = {
   SCORE_PARENT_CAP,
   SCORE_CATEGORY_CAP,
   DEFAULT_MIN_SCORE,
+  SCORE_STRONG,
+  SCORE_TOPIC,
+  SCORE_WEAK,
+  SCORE_WEAK_CAP,
+  MIN_STRONG_SHARED,
+  RARITY_FULL_SHARE,
+  RARITY_COMMON_SHARE,
+  RARITY_MIN_SOLUTIONS,
   SCHEMA_PATH,
   createRelationshipsValidator,
   parseRelationships,
   categoryScore,
+  rarityFactor,
+  isCommonConcept,
+  conceptRarity,
+  conceptScore,
   formatCategoryReason,
+  formatConceptReason,
   formatCategoryWhy,
   platformCompatible,
+  solutionPlatformIds,
+  runsOnCloud,
   computeRelatedSolutions,
   computeCoverage,
   formatCoverageLine,

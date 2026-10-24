@@ -8,6 +8,8 @@
 
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
 const { createCategoryMap, normalizeCategories } = require('../extension-utils/categories')
+const { getTaxonomy } = require('../extension-utils/taxonomy')
+const { checkTaxonomy, createTaxonomyReport, logTaxonomyReport } = require('../extension-utils/taxonomy-categories')
 
 module.exports.register = function ({ config }) {
   raiseListenerLimit(this)
@@ -19,15 +21,26 @@ module.exports.register = function ({ config }) {
     const validCategories = siteCatalog.attributeFile['page-valid-categories'];
     if (!validCategories) return logger.warn('No page-valid-categories attribute found - skipping attribute validation')
     const categoryMap = createCategoryMap(validCategories);
+    // The taxonomy (shared/modules/ROOT/attachments/taxonomy.yml) when the
+    // docs repo has it; null keeps the valid-categories-only behavior.
+    const taxonomy = getTaxonomy({ contentCatalog, siteCatalog, logger });
+    const report = createTaxonomyReport();
     const pages = contentCatalog.findBy({ family: 'page' });
     pages.forEach((page) => {
       let pageCategories = page.asciidoc.attributes['page-categories'];
-      if (!pageCategories) return;
-      const pageCategoryList = pageCategories.split(',').map(c => c.trim());
+      if (!pageCategories) {
+        // The taxonomy rules still check :page-topic-type:, as
+        // `doc-tools check-metadata` does on the same page.
+        if (taxonomy) checkTaxonomy([], { taxonomy, categoryMap, page, report });
+        return;
+      }
+      let pageCategoryList = pageCategories.split(',').map(c => c.trim());
+      if (taxonomy) pageCategoryList = checkTaxonomy(pageCategoryList, { taxonomy, categoryMap, page, report });
       const validatedCategories = validateCategories(pageCategoryList, page.asciidoc.attributes['page-relative-src-path'], categoryMap, logger);
       page.asciidoc.attributes['page-categories'] = validatedCategories
       processEnvironmentAttributes(page, logger);
     })
+    if (taxonomy) logTaxonomyReport(report, logger);
   })
 }
 

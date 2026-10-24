@@ -38,7 +38,7 @@ function buildSteps (record) {
  * its own configuration. The
  * internal record keeps `repo` for the release check either way.
  */
-function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions = [], publicRepo = false } = {}) {
+function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions = [], publicRepo = false, taxonomy } = {}) {
   const publicRecord = {
     id: record.id,
     title: record.title,
@@ -77,7 +77,53 @@ function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions 
   // TEMPORARY, preview only (draft_downloads): this draft downloads from its
   // draft release. Absent everywhere else.
   if (record.draftDownloads) publicRecord.draftDownloads = true
+  if (taxonomy && record.conceptFacets) publicRecord.concepts = buildRecordConcepts(record, taxonomy)
   return publicRecord
+}
+
+/**
+ * The solution's facets as taxonomy concepts, next to the authored values in
+ * `platforms`, `technologies`, `useCases`, and `industries` (which stay as
+ * authored). `value` is the authored string each concept came from, so the UI
+ * can label `self-managed` as Docker Compose without a map of its own.
+ */
+function buildRecordConcepts (record, taxonomy) {
+  const item = ({ value, id }) => ({ value, id, label: taxonomy.label(id) })
+  const f = record.conceptFacets
+  const topics = [...(record.concepts || new Map())]
+    .filter(([id, weight]) => weight === 'direct' && taxonomy.get(id) && taxonomy.get(id).scheme === 'topic')
+    .map(([id]) => ({ id, label: taxonomy.label(id) }))
+  return {
+    platforms: f.platforms.map(item),
+    technologies: f.technologies.map((t) => ({ ...item(t), ...technologyFields(taxonomy.get(t.id)) })),
+    useCases: f.useCases.map(item),
+    industries: f.industries.map(item),
+    topics,
+  }
+}
+
+function technologyFields (concept) {
+  const out = { kind: concept.kind }
+  if (concept.component) out.component = concept.component
+  return out
+}
+
+/**
+ * The taxonomy's platform and technology concepts, for the UI to label values
+ * and map an Antora component to its product without hardcoding either.
+ */
+function buildTaxonomySummary (taxonomy, { siteUrl = '' } = {}) {
+  return {
+    source: `${siteUrl.replace(/\/$/, '')}/shared/_attachments/taxonomy.yml`,
+    platforms: taxonomy.conceptIds('deployment').map((id) => {
+      const c = taxonomy.get(id)
+      return { id, label: c.prefLabel, altLabels: c.altLabels, broader: c.broader }
+    }),
+    technologies: taxonomy.conceptIds('technology').map((id) => {
+      const c = taxonomy.get(id)
+      return { id, label: c.prefLabel, ...technologyFields(c) }
+    }),
+  }
 }
 
 /** Sidebar model: solutions home, overview, ordered steps. */
@@ -245,12 +291,12 @@ function countValues (records, pick) {
  * from the facet (see redundantValues). Two categories that select the same
  * solutions are both kept: neither repeats a different axis.
  */
-function buildCatalog (publicRecords, { siteUrl = '', generatedAt = new Date().toISOString(), categoryLeaves } = {}) {
+function buildCatalog (publicRecords, { siteUrl = '', generatedAt = new Date().toISOString(), categoryLeaves, taxonomy } = {}) {
   const solutions = publicRecords
     .filter((r) => CATALOG_STATUSES.includes(r.status) || r.draft === true)
     .sort((a, b) => a.id.localeCompare(b.id))
   const facetCategories = (r) => (categoryLeaves && categoryLeaves.has(r.id) ? categoryLeaves.get(r.id) : r.categories)
-  return {
+  const catalog = {
     generatedAt,
     siteUrl,
     solutions,
@@ -271,6 +317,10 @@ function buildCatalog (publicRecords, { siteUrl = '', generatedAt = new Date().t
       platforms: discriminating(countValues(solutions, (r) => r.platforms), solutions.length),
     },
   }
+  // Labels for platform values and the component of each product, so the UI
+  // can drop its hardcoded maps (see the docs taxonomy in REFERENCE.adoc).
+  if (taxonomy) catalog.taxonomy = buildTaxonomySummary(taxonomy, { siteUrl })
+  return catalog
 }
 
 /** assets/data/solutions-graph.json: every edge with any signal. */
@@ -297,6 +347,8 @@ module.exports = {
   buildNav,
   applyPageAttributes,
   buildCatalog,
+  buildRecordConcepts,
+  buildTaxonomySummary,
   buildGraph,
   toJsonBuffer,
   discriminating,

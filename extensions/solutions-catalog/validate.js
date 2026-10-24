@@ -11,10 +11,12 @@
 
 const { parse } = require('node-html-parser')
 const {
-  RESERVED_IDS, LAYOUTS, ENUMS, SLUG_RX, VERSION_RX, VERIFICATION_FILE, ALLOWED_ATTACHMENTS, COMPONENT, stripVersion, pageKey,
+  RESERVED_IDS, LAYOUTS, ENUMS, FALLBACK_PLATFORMS, SLUG_RX, VERSION_RX, VERIFICATION_FILE, ALLOWED_ATTACHMENTS, COMPONENT, stripVersion, pageKey,
 } = require('./collect')
 const { isStepScaffolding } = require('../../asciidoc-extensions/add-solution-file-provenance')
 const { normalizeCategories, isLeafCategory } = require('../../extension-utils/categories')
+const concepts = require('./concepts')
+const { runsOnCloud } = require('./relationships')
 const yaml = require('js-yaml')
 
 // The landing card shows the description in three clamped lines; 140
@@ -250,8 +252,15 @@ const HEX_RX = /^[0-9a-f]+$/i
  * is evidence the monorepo writes, and a stale or partial one should be
  * visible in the build log without stopping the docs from publishing.
  */
-function verificationWarnings (record) {
+function verificationWarnings (record, { taxonomy } = {}) {
   const warnings = []
+  // A platform as its deployment concept IDs, so self-managed and docker match.
+  // Without the taxonomy, only the fallback values are known, compared as written.
+  const platformIds = (p) => {
+    if (!taxonomy) return FALLBACK_PLATFORMS.includes(p) ? [p] : null
+    const hit = typeof p === 'string' ? taxonomy.resolve(p, { schemes: ['deployment'], prefer: 'id' }) : null
+    return hit && hit.ids.length ? hit.ids : null
+  }
   const v = record.verified || {}
   const runAt = v.runAt
   if (runAt === undefined) warnings.push(`${VERIFICATION_FILE} has no run_at`)
@@ -266,11 +275,12 @@ function verificationWarnings (record) {
   }
   if (v.platforms !== undefined) {
     const list = Array.isArray(v.platforms) ? v.platforms : null
-    const unknown = list ? list.filter((p) => !ENUMS.platforms.includes(p)) : []
-    if (!list) warnings.push(`${VERIFICATION_FILE} platforms must be an array of ${ENUMS.platforms.join(', ')}`)
+    const unknown = list ? list.filter((p) => !platformIds(p)) : []
+    if (!list) warnings.push(`${VERIFICATION_FILE} platforms must be an array of ${taxonomy ? 'deployment concept IDs' : FALLBACK_PLATFORMS.join(', ')}`)
     else if (unknown.length) warnings.push(`${VERIFICATION_FILE} platforms contains unknown values: ${unknown.join(', ')}`)
     else {
-      const missing = (record.platforms || []).filter((p) => !list.includes(p))
+      const verifiedIds = new Set(list.flatMap((p) => platformIds(p)))
+      const missing = (record.platforms || []).filter((p) => !(platformIds(p) || [p]).every((id) => verifiedIds.has(id)))
       if (missing.length) warnings.push(`page-solution-platforms includes ${missing.join(', ')} but ${VERIFICATION_FILE} verified only ${list.join(', ') || 'nothing'}`)
     }
   }
@@ -352,6 +362,10 @@ function buildAlongFindings (record, { fullIncludes = [] } = {}) {
  * @param {Object} [ctx.categoryMap] - from createCategoryMap
  * @param {Object} [ctx.facetVocab] - {industries: string[], useCases: string[]} from
  *   ROOT/partials/solution-facets.yml; when absent the two facet axes are not validated
+ * @param {Object} [ctx.taxonomy] - the docs taxonomy (extension-utils/taxonomy.js). When
+ *   set, use cases, industries, technologies, and platforms are validated against it
+ *   instead of facetVocab and FALLBACK_PLATFORMS, and the record gets `concepts`,
+ *   `platformIds`, and `conceptFacets` for scoring and the catalog
  * @param {(spec: string) => Object|null|undefined} [ctx.resolveDoc] - resolve a page ID to a page
  * @param {Set<string>} [ctx.solutionIds] - all module names in the component
  * @param {(pathname: string) => Object|null|undefined} [ctx.pageByUrl] - a published URL
@@ -361,7 +375,7 @@ function buildAlongFindings (record, { fullIncludes = [] } = {}) {
  * @param {(key: string) => Array<string>} [ctx.cloudTwinsOf] - Cloud pages that single-source a doc
  * @returns {{errors: Array<string>, warnings: Array<string>}}
  */
-function validateSolution (record, { categoryMap, facetVocab, resolveDoc, solutionIds, pageByUrl, umbrellaLayouts, isCloudPage, cloudTwinsOf, fullIncludes } = {}) {
+function validateSolution (record, { categoryMap, facetVocab, taxonomy, resolveDoc, solutionIds, pageByUrl, umbrellaLayouts, isCloudPage, cloudTwinsOf, fullIncludes } = {}) {
   const errors = []
   const warnings = []
   const id = record.id
@@ -390,8 +404,9 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
   if (!ENUMS.status.includes(record.status)) err(`page-solution-status must be one of ${ENUMS.status.join(', ')} (found "${record.status}")`)
   if (!ENUMS.download.includes(record.download)) err(`page-solution-download must be one of ${ENUMS.download.join(', ')} (found "${record.download}")`)
 
-  const badPlatforms = record.platforms.filter((p) => !ENUMS.platforms.includes(p))
-  if (badPlatforms.length) err(`page-solution-platforms contains unknown values: ${badPlatforms.join(', ')} (allowed: ${ENUMS.platforms.join(', ')})`)
+  // With the taxonomy, solutionConcepts checks platforms against the deployment scheme.
+  const badPlatforms = taxonomy ? [] : record.platforms.filter((p) => !FALLBACK_PLATFORMS.includes(p))
+  if (badPlatforms.length) err(`page-solution-platforms contains unknown values: ${badPlatforms.join(', ')} (allowed: ${FALLBACK_PLATFORMS.join(', ')})`)
 
   if (!record.technologies.length) err('page-solution-technologies is required')
   const denied = record.technologies.filter((t) => TECHNOLOGY_DENY_LIST.includes(t.toLowerCase()))
@@ -414,7 +429,7 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
     warn(`no ${VERIFICATION_FILE} attachment; readers get no verification evidence`)
   }
   if (record.verified) {
-    for (const w of verificationWarnings(record)) warn(w)
+    for (const w of verificationWarnings(record, { taxonomy })) warn(w)
   }
 
   if (record.status === 'deprecated' && !record.supersededBy) err('page-solution-superseded-by is required when status is deprecated')
@@ -423,16 +438,19 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
   }
 
   // Categories: fatal if any value is unknown; parents are added
+  // With the taxonomy, a new label (Iceberg Topics) stands in for its legacy
+  // category here, so only a value neither list knows is fatal.
+  const legacyRaw = taxonomy && categoryMap ? concepts.legacyCategories(taxonomy, record.categoriesRaw, categoryMap) : record.categoriesRaw
   if (!record.categoriesRaw.length) err('page-categories is required')
   else if (categoryMap) {
-    const { categories, invalid } = normalizeCategories(record.categoriesRaw, categoryMap)
+    const { categories, invalid } = normalizeCategories(legacyRaw, categoryMap)
     if (invalid.length) err(`page-categories contains unknown values: ${invalid.join(', ')}. See shared/modules/ROOT/partials/valid-categories.yml`)
     record.categories = categories
   }
   // The landing page's Category facet: what the author wrote, at leaf level.
   // Parents that normalizeCategories adds (and broad parents written by hand)
   // say only "same product area", so they stay out of the facet.
-  record.categoryLeaves = record.categoriesRaw
+  record.categoryLeaves = legacyRaw
     .filter((c) => !categoryMap || categoryMap.categories.has(c) || categoryMap.subcategories.has(c))
     .filter((c) => isLeafCategory(c, categoryMap))
 
@@ -441,7 +459,17 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
   // becomes a list of near-duplicates ("CDC", "Change data capture") as soon
   // as more than one author writes one. The vocabulary is a reviewed file, so
   // adding a value is a deliberate act rather than a typo.
-  if (facetVocab) {
+  if (taxonomy) {
+    const result = concepts.solutionConcepts(taxonomy, record, categoryMap)
+    result.errors.forEach(err)
+    result.warnings.forEach(warn)
+    record.concepts = result.concepts
+    record.platformIds = result.platformIds
+    record.conceptFacets = result.facets
+    if (record.status === 'published' && !record.useCases.length) {
+      warn('page-solution-use-cases is empty; the solution will not appear under any use case on the landing page')
+    }
+  } else if (facetVocab) {
     for (const [attr, values] of [
       ['page-solution-use-cases', record.useCases],
       ['page-solution-industries', record.industries],
@@ -496,7 +524,7 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
     }
     if (isCloudPage && (isCloudPage(page) || (cloudTwinsOf && cloudTwinsOf(key).length))) cloudReach = true
   }
-  if (isCloudPage && record.platforms.includes('cloud') && record.relatedDocRefs.length && !cloudReach) {
+  if (isCloudPage && runsOnCloud(record, taxonomy) && record.relatedDocRefs.length && !cloudReach) {
     warn('page-solution-platforms includes cloud but no page-solution-related-docs entry is a Cloud page or has a single-sourced Cloud twin; Cloud readers get no explicit recommendation')
   }
 

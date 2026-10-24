@@ -1,0 +1,294 @@
+# A small taxonomy for unit tests, in the shape of
+# redpanda-data/docs shared/modules/ROOT/attachments/taxonomy.yml.
+# taxonomy.schema.json beside it is a copy of that repo's schema.
+schema-version: 1
+schemes:
+  - id: topic
+    prefLabel: Topic
+    scopeNote: The capability or subject.
+    cardinality: { docs: 0-3 }
+    hierarchy: two-level
+    assignment: authored
+    concepts:
+      - id: security
+        prefLabel: Security
+        altLabels: []
+        definition: Protecting a cluster and its data.
+        broader: null
+        related: []
+        deprecated: false
+        replacedBy: []
+      - id: high-availability
+        prefLabel: High Availability
+        altLabels: []
+        definition: Keeping a cluster available through failures.
+        broader: null
+        related: []
+        deprecated: false
+        replacedBy: []
+      - id: replication
+        prefLabel: Replication
+        altLabels: []
+        definition: Copying partition data across brokers.
+        broader: high-availability
+        related: []
+        deprecated: false
+        replacedBy: []
+      - id: tiered-storage
+        prefLabel: Tiered Storage
+        altLabels: []
+        definition: Offloading log segments to object storage.
+        broader: null
+        related: []
+        deprecated: false
+        replacedBy: []
+      - id: schema-registry
+        prefLabel: Schema Registry
+        altLabels: []
+        definition: Storing and evolving schemas for topic data.
+        broader: null
+        related: []
+        deprecated: false
+        replacedBy: []
+      - id: iceberg-topics
+        prefLabel: Iceberg Topics
+        altLabels: []
+        definition: Topics that write Apache Iceberg tables.
+        broader: null
+        related: [apache-iceberg]
+        implies: [apache-iceberg]
+        deprecated: false
+        replacedBy: []
+      - id: category-iceberg
+        prefLabel: Iceberg
+        altLabels: []
+        definition: The old Iceberg category, replaced by Iceberg Topics.
+        broader: null
+        related: []
+        deprecated: true
+        replacedBy: [iceberg-topics]
+      - id: category-data-replication
+        prefLabel: Data Replication
+        altLabels: []
+        definition: The old category, replaced by Replication.
+        broader: null
+        related: []
+        deprecated: true
+        replacedBy: [replication]
+      - id: category-integration
+        prefLabel: Integration
+        altLabels: []
+        definition: The old category with no single replacement.
+        broader: null
+        related: []
+        deprecated: true
+        replacedBy: []
+  - id: task
+    prefLabel: Task
+    scopeNote: What the reader is doing.
+    cardinality: { docs: 1-1 }
+    hierarchy: flat
+    assignment: defined
+    concepts:
+      - id: operate
+        prefLabel: Operate
+        altLabels: [Day-2 operations]
+        definition: Running a deployment day to day.
+        broader: null
+        related: []
+        deprecated: false
+        replacedBy: []
+      - id: category-management
+        prefLabel: Management
+        altLabels: []
+        definition: The old top-level category, replaced by Operate.
+        broader: null
+        related: []
+        deprecated: true
+        replacedBy: [operate]
+  - id: content-type
+    prefLabel: Content type
+    scopeNote: The kind of page.
+    cardinality: { docs: 1-1 }
+    hierarchy: flat
+    assignment: authored
+    concepts:
+      - id: concept
+        prefLabel: Concept
+        altLabels: [Concepts]
+        definition: Explains what something is and how it works.
+        broader: null
+        related: []
+        deprecated: false
+        replacedBy: []
+  - id: use-case
+    prefLabel: Use case
+    scopeNote: What the reader is building.
+    cardinality: { docs: 0-3, solutions: 1-3 }
+    hierarchy: flat
+    assignment: authored
+    concepts:
+      - id: stream-processing
+        prefLabel: Stream processing
+        altLabels: []
+        definition: Transforming events continuously as they flow.
+        broader: null
+        related: []
+        deprecated: false
+        replacedBy: []
+      - id: change-data-capture
+        prefLabel: Change data capture
+        altLabels: [CDC]
+        definition: Streaming row-level changes from a database.
+        broader: null
+        related: []
+        deprecated: false
+        replacedBy: []
+      - id: schema-management
+        prefLabel: Schema management
+        altLabels: []
+        definition: Governing the schemas producers and consumers share.
+        broader: null
+        related: []
+        deprecated: false
+        replacedBy: []
+      - id: data-lakehouse
+        prefLabel: Data lakehouse
+        altLabels: []
+        definition: Landing streams in open tables for analytics.
+        broader: null
+        related: []
+        deprecated: false
+        replacedBy: []
+      - id: disaster-recovery
+        prefLabel: Disaster recovery
+        altLabels: []
+        definition: Recovering from the loss of a whole cluster.
+        broader: null
+        related: []
+        deprecated: false
+        replacedBy: []
+  - id: industry
+    prefLabel: Industry
+    scopeNote: The vertical the content models.
+    cardinality: { docs: 0-2 }
+    hierarchy: flat
+    assignment: authored
+    concepts:
+      - id: gambling
+        prefLabel: Gambling
+        altLabels: [iGaming]
+        definition: Sports betting, casinos, and online gambling.
+        broader: null
+        related: []
+        deprecated: false
+        replacedBy: []
+  - id: technology
+    prefLabel: Technology
+    scopeNote: A named product, tool, format, language, or system.
+    cardinality: { docs: 0-n, solutions: 1-n }
+    hierarchy: flat
+    assignment: authored
+    concepts:
+      - id: redpanda-connect
+        prefLabel: Redpanda Connect
+        altLabels: []
+        definition: Redpanda's declarative data streaming service.
+        broader: null
+        related: []
+        deprecated: false
+        replacedBy: []
+        kind: redpanda-product
+        component: connect
+      - id: apache-iceberg
+        prefLabel: Apache Iceberg
+        altLabels: []
+        definition: The open table format for analytic datasets.
+        broader: null
+        related: []
+        deprecated: false
+        replacedBy: []
+        kind: format
+      - id: avro
+        prefLabel: Avro
+        altLabels: []
+        definition: A row-oriented binary serialization format.
+        broader: null
+        related: []
+        deprecated: false
+        replacedBy: []
+        kind: format
+      - id: protobuf
+        prefLabel: Protobuf
+        altLabels: []
+        definition: Protocol Buffers, a binary serialization format.
+        broader: null
+        related: []
+        deprecated: false
+        replacedBy: []
+        kind: format
+      - id: postgresql
+        prefLabel: PostgreSQL
+        altLabels: [Postgres]
+        definition: The open source relational database.
+        broader: null
+        related: []
+        deprecated: false
+        replacedBy: []
+        kind: database
+      - id: rpk
+        prefLabel: rpk
+        altLabels: []
+        definition: The Redpanda command-line tool.
+        broader: null
+        related: []
+        deprecated: false
+        replacedBy: []
+        kind: redpanda-product
+  - id: deployment
+    prefLabel: Deployment
+    scopeNote: Where it runs.
+    cardinality: { docs: 1-n, solutions: 1-n }
+    hierarchy: two-level
+    assignment: authored
+    concepts:
+      - id: cloud
+        prefLabel: Redpanda Cloud
+        altLabels: [Cloud]
+        definition: Redpanda as a fully managed service.
+        broader: null
+        related: []
+        deprecated: false
+        replacedBy: []
+      - id: redpanda-self-managed
+        prefLabel: Redpanda Self-Managed
+        altLabels: []
+        definition: Redpanda run on the customer's own infrastructure.
+        broader: null
+        related: []
+        deprecated: false
+        replacedBy: []
+      - id: docker
+        prefLabel: Docker Compose
+        altLabels: [self-managed, Docker]
+        definition: Redpanda in containers with Docker Compose.
+        broader: redpanda-self-managed
+        related: []
+        deprecated: false
+        replacedBy: []
+      - id: kubernetes
+        prefLabel: Kubernetes
+        altLabels: []
+        definition: Redpanda on Kubernetes.
+        broader: redpanda-self-managed
+        related: []
+        deprecated: false
+        replacedBy: []
+      - id: linux
+        prefLabel: Linux
+        altLabels: []
+        definition: Redpanda installed from packages on Linux.
+        broader: redpanda-self-managed
+        related: []
+        deprecated: false
+        replacedBy: []
