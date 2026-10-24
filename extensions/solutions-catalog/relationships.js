@@ -22,11 +22,22 @@
  *                              or broader match (an implied concept, a topic with
  *                              narrower ones such as High Availability, a task),
  *                              capped at 0.1 per edge                      SCORE_WEAK, SCORE_WEAK_CAP
- *                    cap 0.85. A concept edge also needs at least MIN_STRONG_SHARED (1)
+ *                    Each weight is then multiplied by the concept's rarity across the
+ *                    solutions (see rarityFactor): 1 for a concept on at most a third of
+ *                    them (RARITY_FULL_SHARE), falling with an IDF curve,
+ *                    log((N+1)/(df+1)) / log((N+1)/(N/3+1)), to 0 for a concept on every
+ *                    solution. With 6 solutions, a concept on 1 or 2 counts in full, on 3
+ *                    0.66, on 4 0.397, on 5 0.182. Schema Registry, on 4 of 6, says little
+ *                    about which solution fits a page; Iceberg Topics, on 1, says a lot.
+ *                    The score is capped at 0.85. A concept edge also needs at least MIN_STRONG_SHARED (1)
  *                    strong concept to show: topics and formats alone, however many,
- *                    never recommend a solution. A solution's use cases and technologies
- *                    count as well as its categories. Explicit, editor-approved, and
- *                    rejected edges are not scored this way.
+ *                    never recommend a solution. A strong concept on more than half the
+ *                    solutions (RARITY_COMMON_SHARE) is common and does not count toward
+ *                    MIN_STRONG_SHARED, though it still scores. With fewer than
+ *                    RARITY_MIN_SOLUTIONS (4) solutions, rarity is off: every concept
+ *                    counts in full. A solution's use cases and technologies count as
+ *                    well as its categories. Explicit, editor-approved, and rejected
+ *                    edges are not scored this way.
  *   platform filter  category edges only: Cloud doc -> platforms includes cloud,
  *                    Kubernetes doc -> platforms includes kubernetes,
  *                    Linux/Docker doc -> platforms includes self-managed (the docker concept).
@@ -35,7 +46,7 @@
  *   threshold        min_score (default 0.6): a category-only edge needs two shared leaf
  *                    categories; parent-only or single-leaf overlap never shows. A concept
  *                    edge needs a strong concept plus enough else: two strong concepts, or
- *                    a strong one, a topic, and a weak match
+ *                    a strong one, a topic, and a weak match, all rare enough to count in full
  *   rank             score desc, featured desc, shared leaf categories desc, lastModified desc,
  *                    title asc; cap max_related. An explicit edge cut by the cap is kept in the
  *                    graph (shown: false) and reported as a warning, because an author asked for it
@@ -77,6 +88,19 @@ const SCORE_WEAK_CAP = 0.1
 // its score: "Specify an Iceberg schema" must not recommend a gaming solution
 // for sharing Schema Registry and Protobuf.
 const MIN_STRONG_SHARED = 1
+
+// Rarity: how many of the solutions carry a shared concept (its document
+// frequency, df). A concept most solutions carry cannot say which of them a
+// page should recommend. See rarityFactor.
+//
+// A concept on at most this share of the solutions counts in full.
+const RARITY_FULL_SHARE = 1 / 3
+// A strong concept on more than this share is common: it still scores, but it
+// does not count as the strong concept an edge needs to show.
+const RARITY_COMMON_SHARE = 0.5
+// With fewer solutions than this, every concept is on a large share of them,
+// so rarity says nothing and is off.
+const RARITY_MIN_SOLUTIONS = 4
 
 const SCHEMA_PATH = path.join(__dirname, '..', '..', 'docs-data', 'solutions-relationships.schema.json')
 
@@ -126,28 +150,91 @@ function categoryScore (docCategories, solutionCategories, categoryMap) {
 }
 
 /**
- * Concept overlap between a doc and a solution, weighted by concept strength.
+ * Rarity factor of a concept that `df` of `total` solutions carry: an IDF
+ * weight, normalized so a concept on at most RARITY_FULL_SHARE of the
+ * solutions counts 1, and one on every solution counts 0.
+ *
+ *   factor = log((total + 1) / (df + 1)) / log((total + 1) / (full + 1)),
+ *   full = max(1, total * RARITY_FULL_SHARE), and 1 when df <= full
+ *
+ * Below RARITY_MIN_SOLUTIONS solutions, every factor is 1.
+ *
+ * @param {number} df - solutions that carry the concept
+ * @param {number} total - solutions scored
+ * @returns {number} between 0 and 1, rounded to 3 places
+ */
+function rarityFactor (df, total) {
+  if (total < RARITY_MIN_SOLUTIONS) return 1
+  const full = Math.max(1, total * RARITY_FULL_SHARE)
+  if (df <= full) return 1
+  return Math.max(0, round(Math.log((total + 1) / (df + 1)) / Math.log((total + 1) / (full + 1))))
+}
+
+/** Is a concept that `df` of `total` solutions carry on most of them? */
+function isCommonConcept (df, total) {
+  return total >= RARITY_MIN_SOLUTIONS && df / total > RARITY_COMMON_SHARE
+}
+
+/**
+ * Document frequency of every concept across the solutions, counted once per
+ * solution whether it carries the concept directly or as implied.
+ *
+ * @param {Array<{concepts?: Map<string, string>}>} solutions - the solutions scored
+ * @returns {{total: number, df: Map<string, number>, factor: (id: string) => number, common: (id: string) => boolean}}
+ */
+function conceptRarity (solutions) {
+  const df = new Map()
+  let total = 0
+  for (const solution of solutions || []) {
+    if (!solution.concepts) continue
+    total++
+    for (const id of solution.concepts.keys()) df.set(id, (df.get(id) || 0) + 1)
+  }
+  return {
+    total,
+    df,
+    factor: (id) => rarityFactor(df.get(id) || 0, total),
+    common: (id) => isCommonConcept(df.get(id) || 0, total),
+  }
+}
+
+/**
+ * Concept overlap between a doc and a solution, weighted by concept strength
+ * and, when `rarity` is given, by each concept's rarity across the solutions.
  *
  * @param {Map<string, string>} docConcepts - concept ID -> 'direct' | 'implied'
  * @param {Map<string, string>} solutionConcepts
  * @param {import('../../extension-utils/taxonomy').Taxonomy} taxonomy
  * @param {Object} [categoryMap] - for legacy categories the taxonomy lacks
- * @returns {{score: number, strong: boolean, sharedLeaves: Array<string>, sharedParents: Array<string>}}
+ * @param {ReturnType<typeof conceptRarity>} [rarity] - without it, every concept counts in full
+ * @returns {{score: number, strong: boolean, common: Array<string>, sharedLeaves: Array<string>, sharedParents: Array<string>}}
  *   labels, plus the IDs in `ids`; `strong` is whether the edge has the strong
- *   concepts it needs to show
+ *   concepts it needs to show, and `common` names the strong concepts that do
+ *   not count because most solutions carry them. `ids.strong` lists the strong
+ *   concepts that count; with rarity on, `ids.rarity` maps every shared concept
+ *   to its factor
  */
-function conceptScore (docConcepts, solutionConcepts, taxonomy, categoryMap) {
+function conceptScore (docConcepts, solutionConcepts, taxonomy, categoryMap, rarity) {
   const shared = concepts.sharedConcepts(taxonomy, docConcepts, solutionConcepts, categoryMap)
-  const raw = shared.strong.length * SCORE_STRONG +
-    shared.topics.length * SCORE_TOPIC +
-    Math.min(SCORE_WEAK_CAP, shared.weak.length * SCORE_WEAK)
+  const factor = rarity ? rarity.factor : () => 1
+  const weigh = (ids, weight) => ids.reduce((sum, id) => sum + weight * factor(id), 0)
+  const raw = weigh(shared.strong, SCORE_STRONG) +
+    weigh(shared.topics, SCORE_TOPIC) +
+    Math.min(SCORE_WEAK_CAP, weigh(shared.weak, SCORE_WEAK))
+  const common = rarity ? shared.strong.filter(rarity.common) : []
+  const strong = shared.strong.filter((id) => !common.includes(id))
   const label = (id) => concepts.conceptLabel(taxonomy, id)
+  const ids = { leaves: shared.sharedLeaves, broader: shared.sharedParents, strong }
+  if (rarity && rarity.total >= RARITY_MIN_SOLUTIONS) {
+    ids.rarity = Object.fromEntries([...shared.sharedLeaves, ...shared.sharedParents].map((id) => [id, factor(id)]))
+  }
   return {
     score: Math.min(SCORE_CATEGORY_CAP, round(raw)),
-    strong: shared.strong.length >= MIN_STRONG_SHARED,
+    strong: strong.length >= MIN_STRONG_SHARED,
+    common: common.map(label),
     sharedLeaves: shared.sharedLeaves.map(label),
     sharedParents: shared.sharedParents.map(label),
-    ids: { leaves: shared.sharedLeaves, broader: shared.sharedParents, strong: shared.strong },
+    ids,
   }
 }
 
@@ -288,6 +375,9 @@ function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap,
   const edges = []
   const warnings = []
   const unfiltered = new Set()
+  // Rarity is computed over the solutions scored, so a draft built with
+  // include_drafts counts, and one left out does not.
+  const rarity = taxonomy ? conceptRarity(solutions) : null
 
   const relByPair = new Map()
   for (const rel of relationships || []) {
@@ -301,7 +391,7 @@ function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap,
       const explicit = solution.relatedDocKeys && solution.relatedDocKeys.has(doc.key)
       const byConcepts = Boolean(taxonomy && doc.concepts && solution.concepts)
       const cat = byConcepts
-        ? conceptScore(doc.concepts, solution.concepts, taxonomy, categoryMap)
+        ? conceptScore(doc.concepts, solution.concepts, taxonomy, categoryMap, rarity)
         : categoryScore(doc.categories, solution.categories, categoryMap)
 
       if (!explicit && !rel && cat.score === 0) continue // no signal at all
@@ -373,7 +463,9 @@ function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap,
         continue
       }
       if (provenance === 'category' && byConcepts && !cat.strong) {
-        edge.reason = `${edge.reason}; hidden: no shared use case or technology (formats do not count)`
+        edge.reason = cat.common.length
+          ? `${edge.reason}; hidden: no shared use case or technology that few solutions carry (${cat.common.join(', ')} ${cat.common.length === 1 ? 'is' : 'are'} on most solutions)`
+          : `${edge.reason}; hidden: no shared use case or technology (formats do not count)`
         edges.push(edge)
         continue
       }
@@ -515,10 +607,16 @@ module.exports = {
   SCORE_WEAK,
   SCORE_WEAK_CAP,
   MIN_STRONG_SHARED,
+  RARITY_FULL_SHARE,
+  RARITY_COMMON_SHARE,
+  RARITY_MIN_SOLUTIONS,
   SCHEMA_PATH,
   createRelationshipsValidator,
   parseRelationships,
   categoryScore,
+  rarityFactor,
+  isCommonConcept,
+  conceptRarity,
   conceptScore,
   formatCategoryReason,
   formatConceptReason,

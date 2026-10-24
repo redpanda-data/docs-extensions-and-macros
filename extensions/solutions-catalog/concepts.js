@@ -23,7 +23,9 @@
  *           broader match: an implied concept, a topic with narrower ones,
  *           a task
  *
- * relationships.js turns strengths into weights and requires a strong one.
+ * relationships.js turns strengths into weights, scales each weight by the
+ * concept's rarity (how many of the solutions carry it), and requires a strong
+ * concept that most solutions do not carry.
  *
  * A legacy category the taxonomy does not know yet (valid-categories.yml can
  * be ahead of taxonomy.yml) keeps its old signal as the pseudo-concept

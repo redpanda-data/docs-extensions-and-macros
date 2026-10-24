@@ -253,6 +253,105 @@ describe('computeRelatedSolutions with the taxonomy', () => {
   })
 })
 
+describe('concept rarity across solutions', () => {
+  // Six solutions shaped like the catalog: Schema Registry on 4 of 6, Redpanda
+  // Connect on 4, Avro and PostgreSQL on 3, Schema management on 2, and the
+  // lakehouse concepts (Iceberg Topics, Data lakehouse) on 1.
+  const catalog = () => [
+    resolved({ id: 'cdc-to-lakehouse', categoriesRaw: ['Iceberg', 'Tiered Storage'], useCases: ['Change data capture', 'Data lakehouse'], technologies: ['Redpanda Connect', 'Apache Iceberg', 'Postgres'] }),
+    resolved({ id: 'disaster-recovery', categoriesRaw: ['Data Replication', 'High Availability'], useCases: ['Disaster recovery'], technologies: ['rpk'] }),
+    resolved({ id: 'kafka-migration', categoriesRaw: ['Security', 'Schema Registry'], useCases: [], technologies: ['Redpanda Connect', 'Avro'] }),
+    resolved({ id: 'kafka-migration-shadowing', categoriesRaw: ['Security', 'Schema Registry', 'High Availability'], useCases: [], technologies: ['Avro'] }),
+    resolved({ id: 'multiplayer-gaming', categoriesRaw: ['Schema Registry'], useCases: ['Schema management', 'Stream processing'], technologies: ['Redpanda Connect', 'Protobuf', 'Postgres'] }),
+    resolved({ id: 'sports-data-fanout', categoriesRaw: ['Schema Registry'], useCases: ['Schema management'], technologies: ['Redpanda Connect', 'Avro', 'Postgres'] }),
+  ]
+  const run = (docs, { solutions = catalog(), minScore } = {}) => relationships.computeRelatedSolutions({
+    docs, solutions, relationships: [], categoryMap, taxonomy, ...(minScore === undefined ? {} : { minScore }),
+  })
+  const edgeTo = (edges, solution) => edges.find((e) => e.solution === solution)
+
+  test('the rarity constants are named: full weight up to a third of the solutions, common above half, off below four', () => {
+    expect(relationships.RARITY_FULL_SHARE).toBeCloseTo(1 / 3)
+    expect(relationships.RARITY_COMMON_SHARE).toBe(0.5)
+    expect(relationships.RARITY_MIN_SOLUTIONS).toBe(4)
+  })
+
+  test('the rarity factor is a normalized IDF: 1 up to a third of the solutions, 0 on all of them', () => {
+    expect([1, 2, 3, 4, 5, 6].map((df) => relationships.rarityFactor(df, 6))).toEqual([1, 1, 0.66, 0.397, 0.182, 0])
+    expect([1, 2, 3, 4, 5, 6].map((df) => relationships.isCommonConcept(df, 6))).toEqual([false, false, false, true, true, true])
+    // Too few solutions to tell what is common: everything counts in full.
+    expect(relationships.rarityFactor(3, 3)).toBe(1)
+    expect(relationships.isCommonConcept(3, 3)).toBe(false)
+  })
+
+  test('conceptRarity counts each solution once per concept, implied concepts included', () => {
+    const rarity = relationships.conceptRarity(catalog())
+    expect(rarity.total).toBe(6)
+    expect(rarity.df.get('schema-registry')).toBe(4)
+    expect(rarity.df.get('redpanda-connect')).toBe(4)
+    expect(rarity.df.get('avro')).toBe(3)
+    expect(rarity.df.get('schema-management')).toBe(2)
+    expect(rarity.df.get('iceberg-topics')).toBe(1)
+    expect(rarity.df.get('apache-iceberg')).toBe(1)
+    expect(rarity.factor('schema-registry')).toBe(0.397)
+    expect(rarity.factor('iceberg-topics')).toBe(1)
+    expect(rarity.common('redpanda-connect')).toBe(true)
+  })
+
+  test('Specify an Iceberg schema: Schema Registry on most solutions no longer carries the gaming and fan-out solutions over min_score', () => {
+    const d = doc('streaming:manage:iceberg/specify-iceberg-schema.adoc', ['Iceberg Topics', 'Schema Registry', 'Schema management', 'Avro', 'Protobuf'])
+    const { edges, related } = run([d])
+    // Without rarity, each scored 0.2 + 0.3 + 0.1 = 0.6 and showed.
+    expect(edgeTo(edges, 'multiplayer-gaming')).toMatchObject({
+      score: 0.479,
+      shown: false,
+      shared: { leaves: ['schema-registry', 'schema-management', 'protobuf'], strong: ['schema-management'], rarity: { 'schema-registry': 0.397, 'schema-management': 1, protobuf: 1 } },
+    })
+    expect(edgeTo(edges, 'sports-data-fanout')).toMatchObject({
+      score: 0.445,
+      shown: false,
+      shared: { leaves: ['schema-registry', 'schema-management', 'avro'], rarity: { 'schema-registry': 0.397, avro: 0.66 } },
+    })
+    expect(edgeTo(edges, 'multiplayer-gaming').reason).toMatch(/hidden: score 0.479 below 0.6/)
+    expect(related.size).toBe(0)
+  })
+
+  test('a rare shared concept counts in full: migrate-to-iceberg-topics still recommends cdc-to-lakehouse', () => {
+    const d = doc('streaming:manage:iceberg/migrate-to-iceberg-topics.adoc', ['Iceberg Topics', 'Schema Registry', 'Data lakehouse'])
+    const { edges } = run([d])
+    expect(edgeTo(edges, 'cdc-to-lakehouse')).toMatchObject({
+      score: 0.6,
+      shown: true,
+      rank: 1,
+      shared: { leaves: ['iceberg-topics', 'data-lakehouse'], broader: ['apache-iceberg'], rarity: { 'iceberg-topics': 1, 'data-lakehouse': 1, 'apache-iceberg': 1 } },
+    })
+  })
+
+  test('a rare topic outranks a common one with the same kind of overlap', () => {
+    const rare = doc('rare', ['Tiered Storage', 'Change data capture'])
+    const common = doc('common', ['Schema Registry', 'Schema management'])
+    const { edges } = run([rare, common], { minScore: 0.3 })
+    // Without rarity, both are a topic and a use case: 0.5 each.
+    expect(edges.find((e) => e.doc === 'rare' && e.solution === 'cdc-to-lakehouse').score).toBe(0.5)
+    expect(edges.find((e) => e.doc === 'common' && e.solution === 'multiplayer-gaming').score).toBe(0.379)
+  })
+
+  test('a strong concept on most solutions still scores but does not count as strong', () => {
+    const d = doc('connect-tiered', ['Redpanda Connect', 'Tiered Storage'])
+    const e = edgeTo(run([d], { minScore: 0.3 }).edges, 'cdc-to-lakehouse')
+    expect(e).toMatchObject({ score: 0.319, shown: false, shared: { leaves: ['redpanda-connect', 'tiered-storage'], strong: [] } })
+    expect(e.reason).toMatch(/hidden: no shared use case or technology that few solutions carry \(Redpanda Connect is on most solutions\)/)
+  })
+
+  test('with fewer than RARITY_MIN_SOLUTIONS solutions, rarity is off and edges carry no rarity', () => {
+    const d = doc('streaming:manage:iceberg/specify-iceberg-schema.adoc', ['Iceberg Topics', 'Schema Registry', 'Schema management', 'Avro', 'Protobuf'])
+    const [, , , , gaming, sports] = catalog()
+    const { edges } = run([d], { solutions: [gaming, sports] })
+    expect(edgeTo(edges, 'multiplayer-gaming')).toMatchObject({ score: 0.6, shown: true })
+    expect(edgeTo(edges, 'multiplayer-gaming').shared).not.toHaveProperty('rarity')
+  })
+})
+
 describe('catalog output', () => {
   test('each solution lists its concepts next to the authored values', () => {
     const r = resolved({ industries: ['iGaming'] })
