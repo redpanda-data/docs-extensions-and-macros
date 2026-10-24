@@ -7,6 +7,23 @@
  */
 
 /**
+ * True when the `'` at `i` is a C++14 digit separator (`30'000ms`,
+ * `0xFF'FF`, `1'000'000'000`) rather than the start of a char literal: it
+ * sits between two digits (hex digits included) inside a token that starts
+ * with a decimal digit. `u8'a'` and `L'x'` start with a letter, so they stay
+ * char literals. Treating a separator as a quote unbalances every bracket
+ * after it, which hid any property whose initializer held an odd number of
+ * them.
+ */
+function isDigitSeparator (text, i) {
+  if (text[i] !== '\'') return false
+  if (!/[0-9A-Fa-f]/.test(text[i - 1] || '') || !/[0-9A-Fa-f]/.test(text[i + 1] || '')) return false
+  let j = i - 1
+  while (j >= 0 && /[0-9A-Za-z_'.]/.test(text[j])) j--
+  return /[0-9]/.test(text[j + 1] || '')
+}
+
+/**
  * Replace C, C++ and Go comments with spaces, leaving string literals
  * (including Go raw strings and C++ raw strings) intact. Newlines inside a
  * block comment survive so line counting is unaffected.
@@ -33,6 +50,7 @@ function stripComments (text) {
       if (i < n) { out += '  '; i += 2 }
       continue
     }
+    if (c === '\'' && isDigitSeparator(src, i)) { out += c; i++; continue }
     if (c === '"' || c === '\'' || c === '`') {
       // C++ raw string: R"delim( ... )delim"
       if (c === '"' && src[i - 1] === 'R' && /[^A-Za-z0-9_]/.test(src[i - 2] || ' ')) {
@@ -77,6 +95,7 @@ function matchBracket (text, open) {
   for (let i = open; i < n; i++) {
     const c = text[i]
     if (c === '"' || c === '\'' || c === '`') {
+      if (isDigitSeparator(text, i)) continue
       i = skipString(text, i)
       continue
     }
@@ -94,6 +113,7 @@ function matchBracket (text, open) {
 function skipString (text, i) {
   const quote = text[i]
   const n = text.length
+  if (isDigitSeparator(text, i)) return i
   if (quote === '"' && text[i - 1] === 'R') {
     const close = text.indexOf('(', i)
     const delim = close === -1 ? '' : text.slice(i + 1, close)
@@ -192,4 +212,4 @@ function normalize (text) {
   return String(text || '').replace(/\s+/g, ' ').trim()
 }
 
-module.exports = { stripComments, matchBracket, skipString, splitArgs, literalValue, lineAt, normalize }
+module.exports = { isDigitSeparator, stripComments, matchBracket, skipString, splitArgs, literalValue, lineAt, normalize }

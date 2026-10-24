@@ -14,6 +14,42 @@
  */
 
 const FILE_HEADER = /^diff --git a\/(.+?) b\/(.+)$/
+const QUOTED_HEADER = /^diff --git (?:"a\/((?:[^"\\]|\\.)*)"|a\/(\S+)) (?:"b\/((?:[^"\\]|\\.)*)"|b\/(.+))$/
+
+/**
+ * Undo git's C-style quoting of a path (core.quotePath): `\303\251` is the
+ * UTF-8 bytes of an accented letter, `\t` a tab, `\"` a quote.
+ */
+function unquote (s) {
+  const bytes = []
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]
+    if (c !== '\\') { bytes.push(...Buffer.from(c, 'utf8')); continue }
+    const n = s[i + 1]
+    if (/[0-7]/.test(n)) { bytes.push(parseInt(s.slice(i + 1, i + 4), 8)); i += 3; continue }
+    const map = { n: 10, t: 9, r: 13, '"': 34, '\\': 92, a: 7, b: 8, f: 12, v: 11 }
+    bytes.push(map[n] !== undefined ? map[n] : n.charCodeAt(0))
+    i++
+  }
+  return Buffer.from(bytes).toString('utf8')
+}
+
+/** A `--- a/x` or `+++ b/x` path: quoted or not, without git's trailing TAB. */
+function headerPath (rest) {
+  const t = rest.replace(/\t.*$/, '')
+  const q = /^"[ab]\/((?:[^"\\]|\\.)*)"$/.exec(t)
+  if (q) return unquote(q[1])
+  return t.replace(/^[ab]\//, '')
+}
+
+function fileHeader (raw) {
+  if (!raw.startsWith('diff --git ')) return null
+  if (raw.includes('"')) {
+    const q = QUOTED_HEADER.exec(raw)
+    if (q) return [raw, q[1] !== undefined ? unquote(q[1]) : q[2], q[3] !== undefined ? unquote(q[3]) : q[4]]
+  }
+  return FILE_HEADER.exec(raw)
+}
 const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/
 
 /**
@@ -30,10 +66,16 @@ function parseDiff (diffText) {
   let hunk = null
   let oldLine = 0
   let newLine = 0
+  // Lines the current hunk still holds on each side. While either is
+  // positive a line is hunk content, so a removed line whose text starts
+  // `-- ` (`--- x` once the sign is added) is never read as a header.
+  let remOld = 0
+  let remNew = 0
   const lines = String(diffText || '').split('\n')
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i]
-    const fh = FILE_HEADER.exec(raw)
+    const inHunk = hunk !== null && (remOld > 0 || remNew > 0) && raw.length > 0 && ' +-\\'.includes(raw[0])
+    const fh = inHunk ? null : fileHeader(raw)
     if (fh) {
       file = { path: fh[2], oldPath: fh[1], isNew: false, isDeleted: false, isBinary: false, hunks: [] }
       files.push(file)
@@ -41,15 +83,15 @@ function parseDiff (diffText) {
       continue
     }
     if (!file) continue
-    if (hunk === null || !raw.length || !' +-\\'.includes(raw[0]) || raw.startsWith('+++ ') || raw.startsWith('--- ')) {
+    if (!inHunk && (hunk === null || !raw.length || !' +-\\'.includes(raw[0]) || raw.startsWith('+++ ') || raw.startsWith('--- '))) {
       // Between the file header and the first hunk, or a malformed line.
       if (/^new file mode/.test(raw)) file.isNew = true
       else if (/^deleted file mode/.test(raw)) file.isDeleted = true
       else if (/^Binary files /.test(raw) || /^GIT binary patch/.test(raw)) file.isBinary = true
-      else if (raw.startsWith('rename to ')) file.path = raw.slice('rename to '.length)
-      else if (raw.startsWith('rename from ')) file.oldPath = raw.slice('rename from '.length)
-      else if (raw.startsWith('+++ b/')) file.path = raw.slice(6)
-      else if (raw.startsWith('--- a/')) file.oldPath = raw.slice(6)
+      else if (raw.startsWith('rename to ')) file.path = headerPath(raw.slice('rename to '.length).replace(/^"(.*)"$/, '"b/$1"'))
+      else if (raw.startsWith('rename from ')) file.oldPath = headerPath(raw.slice('rename from '.length).replace(/^"(.*)"$/, '"a/$1"'))
+      else if (raw.startsWith('+++ b/') || raw.startsWith('+++ "b/')) file.path = headerPath(raw.slice(4))
+      else if (raw.startsWith('--- a/') || raw.startsWith('--- "a/')) file.oldPath = headerPath(raw.slice(4))
       const hh = HUNK_HEADER.exec(raw)
       if (hh) {
         hunk = {
@@ -63,6 +105,8 @@ function parseDiff (diffText) {
         file.hunks.push(hunk)
         oldLine = hunk.oldStart
         newLine = hunk.newStart
+        remOld = hunk.oldCount
+        remNew = hunk.newCount
       }
       continue
     }
@@ -79,6 +123,8 @@ function parseDiff (diffText) {
       file.hunks.push(hunk)
       oldLine = hunk.oldStart
       newLine = hunk.newStart
+      remOld = hunk.oldCount
+      remNew = hunk.newCount
       continue
     }
     const sign = raw[0]
@@ -88,12 +134,16 @@ function parseDiff (diffText) {
       hunk.lines.push({ sign, text, oldLine, newLine })
       oldLine++
       newLine++
+      remOld--
+      remNew--
     } else if (sign === '-') {
       hunk.lines.push({ sign, text, oldLine, newLine: null })
       oldLine++
+      remOld--
     } else if (sign === '+') {
       hunk.lines.push({ sign, text, oldLine: null, newLine })
       newLine++
+      remNew--
     }
   }
   return files

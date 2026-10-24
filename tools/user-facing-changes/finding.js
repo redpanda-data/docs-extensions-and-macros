@@ -3,19 +3,22 @@
 /**
  * The finding shape every detector returns, and the vocabulary it uses.
  *
- * Kinds and severities follow the docs team's docs-gate skill
+ * Severities follow the severity ladder in the docs team's docs-gate skill
  * (docs-team-standards/skills/docs-gate/SKILL.md), so a mechanical finding
- * reads the same as one a reviewer would raise:
+ * ranks the same as one a reviewer would raise. docs-gate defines no
+ * vocabulary of change kinds; KINDS below is this tool's own.
  *
  *   high    published docs now contradict shipped behaviour: a default,
- *           name or surface the reference states no longer holds
- *           (removed, renamed, default-changed, deprecated, a license gate
- *           removed or its restricted value changed)
- *   medium  a user-facing change with nothing filed yet (added, a new
- *           license gate, a behaviour change such as a new enum value or a
- *           changed restart requirement)
- *   low     the obligation is met but incomplete (a regenerated reference
- *           string changed; the page follows on regeneration)
+ *           name, surface, limit or restart requirement the reference
+ *           states no longer holds (removed, renamed, default-changed, a
+ *           changed restart requirement or range, a license gate removed
+ *           or its restricted value changed)
+ *   medium  a user-facing change with nothing filed yet (added, deprecated
+ *           while it still works, a new license gate, a new enum value)
+ *   low     the generated reference picks the change up on regeneration
+ *           and no prose is likely to state it (an openapiv2 summary, an
+ *           image tag in a values file). Low findings never open the
+ *           doc-impact gate on their own.
  *
  * The five fields the doc-impact dispatch schema validates (surface, name,
  * change_kind, affected_pages, summary) are what the docs-site router
@@ -34,10 +37,7 @@ function severityFor (changeKind) {
     case 'removed':
     case 'renamed':
     case 'default-changed':
-    case 'deprecated':
       return 'high'
-    case 'low':
-      return 'low'
     default:
       return 'medium'
   }
@@ -59,7 +59,9 @@ const PAGES = {
   reference: `${DOCS}/streaming/current/reference/`,
   crd: `${DOCS}/streaming/current/reference/k-crd/`,
   api: {
-    admin: `${DOCS}/api/doc/admin/`,
+    // Admin API v2 (ShadowLinkService and the rest of
+    // proto/redpanda/core). /api/doc/admin/ is the v1 reference.
+    admin: `${DOCS}/api/doc/admin/v2/`,
     controlplane: `${DOCS}/api/doc/cloud-controlplane/`,
     dataplane: `${DOCS}/api/doc/cloud-dataplane/`,
     index: `${DOCS}/api/`
@@ -78,7 +80,10 @@ function makeFinding ({ detector, surface, name, change_kind: changeKind, severi
   if (!KINDS.includes(changeKind)) throw new Error(`unknown change_kind ${changeKind}`)
   const finding = {
     surface,
-    name,
+    // Names come from source text (a values key, a flag literal) and end up
+    // in a ticket title and in log lines: no control characters or
+    // newlines, so a name cannot start a workflow command line.
+    name: String(name).replace(/[\u0000-\u001f\u007f]+/g, ' ').trim(),
     change_kind: changeKind,
     severity: severity || severityFor(changeKind),
     file,

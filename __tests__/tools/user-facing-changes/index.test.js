@@ -47,7 +47,7 @@ describe('the registry', () => {
   })
 
   test('an empty diff, a binary-only diff and a diff of unrouted files all yield nothing, with no notes', () => {
-    expect(detectUserFacingChanges('')).toEqual({ findings: [], notes: [], byDetector: expect.any(Object), routed: expect.any(Object) })
+    expect(detectUserFacingChanges('')).toEqual({ findings: [], notes: [], errors: [], byDetector: expect.any(Object), routed: expect.any(Object) })
     const binary = 'diff --git a/docs/x.png b/docs/x.png\nindex 1..2 100644\nBinary files a/docs/x.png and b/docs/x.png differ\n'
     expect(detectUserFacingChanges(binary).findings).toEqual([])
     const r = detect({ 'README.md': 'a\n', 'tests/rptest/tests/tls_metrics_test.py': 'x = 1\n' }, { 'README.md': 'b\n', 'tests/rptest/tests/tls_metrics_test.py': 'x = 2\n' })
@@ -182,8 +182,11 @@ describe('buildDocImpact', () => {
     const report = buildDocImpact({ findings: Array.from({ length: 13 }, (_, i) => finding(i)) })
     expect(report.findings).toHaveLength(CAP)
     expect(report.proposed_ticket.title).toMatch(/p9 and 3 more$/)
-    expect(report.proposed_ticket.body).toMatch(/^- 3 more change\(s\) are not listed here/m)
-    expect(report.proposed_ticket.body).not.toMatch(/p12/)
+    // The overflow is named, not only counted (review nit).
+    expect(report.proposed_ticket.body).toMatch(/^- 3 more change\(s\) are not listed above: p10, p11, p12\./m)
+    // The findings array, which the receiver dedupes on, still stops at the cap.
+    expect(report.findings.map((f) => f.name)).not.toContain('p12')
+    expect(report.proposed_ticket.title).not.toMatch(/p12/)
   })
 
   test('a long title is cut to fit Jira\'s 255-character summary', () => {
@@ -254,7 +257,8 @@ describe('the CLI against a git checkout', () => {
   test('a git failure prints an empty report and the reason, and exits 0', () => {
     const r = run(['--repo', repo, '--diff', 'no-such-ref', '--format', 'json'], os.tmpdir())
     expect(r.status).toBe(0)
-    expect(JSON.parse(r.stdout)).toEqual({ findings: [], summary: expect.objectContaining({ total: 0 }) })
+    // The failure is in the report itself, not only on stderr (review item 7).
+    expect(JSON.parse(r.stdout)).toEqual({ findings: [], error: expect.stringMatching(/merge-base/), summary: expect.objectContaining({ total: 0 }) })
     expect(r.stderr).toMatch(/merge-base/)
     const r2 = run(['--format', 'json'], os.tmpdir())
     expect(r2.status).toBe(0)

@@ -3081,21 +3081,24 @@ programCli
  * detect-user-facing-changes
  *
  * @description
- * Find every user-facing change in an engineering diff whether or not a doc
+ * Find user-facing changes in an engineering diff whether or not a doc
  * string changed: configuration properties added, removed, renamed,
- * deprecated or given a new default, visibility or restart requirement;
- * rpk commands and flags added, removed, renamed, deprecated or given a new
- * default; metrics added, removed or renamed; API rpcs, fields and enum
- * values added, removed, renamed or deprecated; Helm values keys and CRD
- * fields added, removed or given a new default; new values in enums that a
- * configuration property or the feature table exposes; enterprise
- * license gating changes; and property and rpk flag defaults that changed
- * through a named constant. Defaults are compared by value (chrono and
- * size literals, digit separators, YAML 1.1 booleans), so a rewrite that
- * keeps the value is not reported. Prints them as a doc-impact report, the JSON the
- * doc-strings review dispatches to the docs team's Jira router, with each
- * finding's severity (the docs-gate ladder), file, line and the diff lines
- * as evidence. Deterministic: no model, no network.
+ * deprecated or given a new default, visibility, restart requirement,
+ * range or accepted values; rpk commands and flags added, removed,
+ * renamed, deprecated or given a new default; metrics added, removed,
+ * renamed or relabeled; API rpcs, fields and enum values added, removed,
+ * renamed or deprecated; Helm values keys and CRD fields added, removed or
+ * given a new default; new values in enums that a configuration property
+ * exposes; enterprise license gating changes; and property and rpk flag
+ * defaults that changed through a named constant. A declaration that moved
+ * to another file is not reported. Defaults are compared by value for
+ * properties, constants and rpk flags (chrono and size literals, digit
+ * separators), for Helm values (YAML 1.1 booleans) and for CRD JSON
+ * defaults, so a rewrite that keeps the value is not reported. Prints them
+ * as a doc-impact report, the JSON the doc-strings review dispatches to the
+ * docs team's Jira router, with each finding's severity (the docs-gate
+ * ladder), file, line and the diff lines as evidence. Deterministic: no
+ * model, no network.
  *
  * @example
  * # Changes on a branch against its merge base with dev
@@ -3104,19 +3107,21 @@ programCli
  * # A saved pull request diff, with no checkout
  * npx doc-tools detect-user-facing-changes --patch pr.diff --format human
  *
- * @exit 0 always: `{"findings":[]}` means nothing to report. Errors from git
- * print to stderr and still exit 0 with an empty report, so a caller's
- * fail-open gate stays closed rather than red.
+ * @exit 0 always, with the JSON printed: `{"findings":[]}` means nothing
+ * to report. A run that could not complete (a git failure, an unknown
+ * detector id, a detector crash) adds an `error` field and prints the
+ * reason to stderr, so a caller can tell it from a clean diff.
  */
 programCli
   .command('detect-user-facing-changes')
   .description('Find user-facing changes (properties, rpk, metrics, API, Helm, CRD, enums, enterprise gating, defaults held in constants) in an engineering diff, with or without a doc string change, and print them as a doc-impact report')
   .option('--repo <path>', 'Path to an engineering checkout. Nothing is cloned. Required with --diff; with --patch it lets the detectors read whole files at --base and --head.')
-  .option('--diff <base>', 'Base ref: changes in <base>...<head> (the merge base with <head>) are inspected')
+  .option('--diff <base>', 'Base ref. Inspects the changes between the merge base of <base> and <head>, and <head>.')
   .option('--head <ref>', 'Head ref (default: HEAD)')
   .option('--patch <file>', 'Read a saved unified diff instead of running git. Without --repo, each side of a file is rebuilt from the hunks, and a declaration cut by a hunk is reported as a note rather than guessed at.')
-  .option('--base <rev>', 'With --patch and --repo: the revision holding the pre-image files')
-  .option('--detectors <list>', `Comma-separated detector ids to run (default: all). Registered: ${require('../tools/user-facing-changes').DETECTORS.map((d) => d.id).join(', ')}`)
+  .option('--base <rev>', 'With --patch and --repo: the revision holding the pre-image files (default: the parent of --head)')
+  .option('--detectors <list>', `Comma-separated detector ids to run (default: all). An unknown id is an error. Registered: ${require('../tools/user-facing-changes').DETECTORS.map((d) => d.id).join(', ')}`)
+  .option('--dispatched <file>', 'File of finding fingerprints (one per line) already dispatched for this PR; those findings are left out')
   .option('--format <format>', 'Output format: json or human', 'json')
   .action((options) => {
     const { runCli } = require('../tools/user-facing-changes')
