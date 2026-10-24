@@ -2875,6 +2875,7 @@ programCli
   .option('--skip-rules <list>', 'Comma-separated rule ids to skip')
   .option('--only-rules <list>', 'Comma-separated rule ids to run exclusively')
   .option('--reviewed <file>', 'Diff mode: skip declarations whose fingerprint is listed in <file> (already reviewed on an earlier push)')
+  .option('--reviewer-comments <file>', 'Diff mode: skip declarations whose text a human reviewer wrote in one of the comment bodies in <file> (a JSON array of strings)')
   .option('--strict', 'Exit 1 when any error-severity finding exists (default: always exit 0 - suggest, never block)')
   .action((options) => {
     const { runCli } = require('../tools/lint-strings')
