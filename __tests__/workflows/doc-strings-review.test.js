@@ -651,6 +651,64 @@ describe('doc-strings-review workflow: no bot token while the model runs', () =>
     expect(assume.if).toMatch(/steps\.lint\.outputs\.declarations != '0' \|\| steps\.lint\.outputs\.removals != '0' \|\| steps\.enterprise\.outputs\.found != '0'\)/)
     expect(assume.if).toMatch(/\(hashFiles\('doc-impact\.json'\) != '' && \(steps\.review\.outcome == 'success' \|\| steps\.review\.outcome == 'failure'\)\) \|\| steps\.enterprise\.outputs\.found != '0'\)$/)
   })
+
+  // Evaluates a step's `if:` the way Actions does for the operators these
+  // conditions use, against a fake run. Unknown contexts throw, so a renamed
+  // step id fails here instead of evaluating to ''.
+  function evalIf (expr, ctx) {
+    const js = expr
+      .replace(/hashFiles\('([^']+)'\)/g, (_, f) => JSON.stringify(ctx.files.includes(f) ? 'hash' : ''))
+      .replace(/steps\.(\w+)\.(outputs\.(\w+)|outcome)/g, (_, id, __, out) => {
+        const st = ctx.steps[id]
+        if (!st) throw new Error(`no step ${id} in the fake run`)
+        return JSON.stringify(out ? (st.outputs[out] ?? '') : st.outcome)
+      })
+      .replace(/inputs\.(\w+)/g, (_, k) => JSON.stringify(ctx.inputs[k] ?? ''))
+      .replace(/(!?)==/g, (_, not) => (not ? '!==' : '==='))
+    // eslint-disable-next-line no-new-func
+    return Boolean(new Function(`return (${js})`)())
+  }
+  const oidc = { aws_region: 'us-east-2', aws_role_name_prefix: 'sdlc-' }
+  const run = ({ lint = '0', removals = '0', enterprise = '0', review = 'skipped', files = [], inputs = oidc }) => ({
+    inputs,
+    files,
+    steps: {
+      lint: { outputs: { declarations: lint, removals } },
+      enterprise: { outputs: { found: enterprise } },
+      review: { outcome: review, outputs: {} }
+    }
+  })
+
+  test.each([
+    ['a gating-only run (no doc string, no review)', { enterprise: '2' }, true],
+    ['a reviewed run that wrote doc-impact.json', { lint: '3', review: 'success', files: ['doc-impact.json'] }, true],
+    ['a review that failed after writing doc-impact.json', { lint: '3', review: 'failure', files: ['doc-impact.json'] }, true],
+    ['a review that wrote no report', { lint: '3', review: 'success' }, false],
+    ['a doc-impact.json with no review behind it', { lint: '3', review: 'skipped', files: ['doc-impact.json'] }, false],
+    ['nothing to report', {}, false],
+    ['a gating report on the plain-secret path', { enterprise: '2', inputs: {} }, false]
+  ])('the dispatch re-fetches the token for %s: %s', (_, shape, expected) => {
+    const assume = stepNamed('Assume the AWS role for the doc-impact dispatch')
+    expect(evalIf(assume.if, run(shape))).toBe(expected)
+  })
+
+  test('the pre-review scrub runs on a gating-only run, so the re-fetch is what the dispatch relies on', () => {
+    const scrub = stepNamed('Drop fetched credentials from the review\'s environment')
+    const dispatch = stepNamed('Dispatch doc-impact')
+    const gatingOnly = run({ enterprise: '1' })
+    expect(evalIf(scrub.if, gatingOnly)).toBe(true)
+    expect(evalIf(dispatch.if, gatingOnly)).toBe(true)
+    expect(dispatch.env.GH_TOKEN).not.toMatch(/bot-token/)
+    expect(dispatch.run).toMatch(/ACTIONS_BOT_TOKEN/)
+  })
+
+  test('both token fetch pairs use the same role and secret', () => {
+    const first = stepNamed('Assume the AWS role that can read the bot token')
+    const again = stepNamed('Assume the AWS role for the doc-impact dispatch')
+    expect(again.with).toEqual(first.with)
+    expect(stepNamed('Fetch the bot token for the doc-impact dispatch').with)
+      .toEqual(stepNamed('Fetch the bot token from Secrets Manager').with)
+  })
 })
 
 describe('doc-strings-review workflow: diff base (executed)', () => {
@@ -1131,12 +1189,21 @@ describe('doc-strings-review workflow: doc-impact dispatch merges gating finding
 
 describe('doc-strings-review workflow: checked-in run outputs (executed)', () => {
   const step = stepNamed('Remove run-output files the PR checked in')
-  const OUTPUTS = ['doc-impact.json', 'review-summary.md', 'lint-findings.json', 'pr-diff.patch', 'enterprise-impact.json', 'embedded-reference-strings.md', 'terminology.md']
+  const OUTPUTS = ['doc-impact.json', 'doc-impact.merged.json', 'review-summary.md', 'lint-findings.json', 'pr-diff.patch', 'pr-diff.full', 'pr-diff.err', 'enterprise-impact.json', 'enterprise-stderr.txt', 'embedded-reference-strings.md', 'terminology.md']
 
   test('runs straight after checkout, before any step reads or writes those files', () => {
     const idx = job.steps.indexOf(step)
     expect(job.steps[idx - 1].uses).toMatch(/^actions\/checkout@/)
     expect(step.if).toBeUndefined()
+    expect(idx).toBeLessThan(job.steps.findIndex((s) => s.id === 'lint'))
+    expect(idx).toBeLessThan(job.steps.findIndex((s) => s.id === 'review'))
+  })
+
+  test('a committed directory under an output name is removed, not a failed job', () => {
+    const r = execRun(step, { files: { 'doc-impact.json/x': 'planted', 'main.cc': 'int main() {}' } })
+    expect(r.status).toBe(0)
+    expect(r.exists('doc-impact.json')).toBe(false)
+    expect(r.exists('main.cc')).toBe(true)
   })
 
   test('removes every run-output file a PR could commit, and leaves source alone', () => {
@@ -1783,25 +1850,5 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(review.with.prompt).toMatch(/one exception to the suggestion rules above/)
       expect(review.with.prompt).toMatch(/still ends with the changed declaration's\s+fingerprint footer/)
     })
-  })
-})
-
-describe('doc-strings-review workflow: run-output files from the PR (executed)', () => {
-  const step = stepNamed('Remove run-output files the PR checked in')
-  const outputs = ['doc-impact.json', 'review-summary.md', 'lint-findings.json', 'pr-diff.patch', 'pr-diff.full', 'pr-diff.err', 'embedded-reference-strings.md', 'terminology.md']
-
-  test('runs after the checkout and before anything reads or writes them', () => {
-    const at = job.steps.indexOf(step)
-    expect(job.steps[at - 1].uses).toMatch(/^actions\/checkout@/)
-    expect(at).toBeLessThan(job.steps.findIndex((s) => s.id === 'lint'))
-    expect(at).toBeLessThan(job.steps.findIndex((s) => s.id === 'review'))
-  })
-
-  test('removes every file a later step trusts as this run\'s output', () => {
-    const files = Object.fromEntries(outputs.map((f) => [f, 'planted by the PR']))
-    const r = execRun(step, { files: { ...files, 'README.adoc': 'kept' } })
-    expect(r.status).toBe(0)
-    for (const f of outputs) expect(fs.existsSync(path.join(r.dir, f))).toBe(false)
-    expect(fs.existsSync(path.join(r.dir, 'README.adoc'))).toBe(true)
   })
 })

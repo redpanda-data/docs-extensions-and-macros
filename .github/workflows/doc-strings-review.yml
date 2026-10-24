@@ -828,7 +828,9 @@ jobs:
           # call failed, and the prompt then told the model that empty file
           # "is the authoritative writing standard" - worse than no file, since
           # the prompt's existence check takes the wrong branch. rm -f up front
-          # so a stale file can never be mistaken for a fresh fetch.
+          # so a stale file can never be mistaken for a fresh fetch. (The
+          # run-output cleanup after checkout removes them too; this keeps the
+          # step correct on its own.)
           rm -f embedded-reference-strings.md terminology.md
           [ -n "${GH_TOKEN:-}" ] || { echo "::notice::No bot token; lint-only review."; exit 0; }
           tmp=$(mktemp)
