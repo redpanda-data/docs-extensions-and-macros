@@ -12,6 +12,7 @@ const taxonomy = parseTaxonomy(fs.readFileSync(path.join(__dirname, '..', 'fixtu
 const matcher = buildMatcher(taxonomy, { allLabels: true })
 const candidates = (content, options) => pageCandidates(pageParts(content, parseHeader, { file: 'modules/a/pages/p.adoc' }), matcher, options)
 const terms = (list) => list.map((c) => c.term)
+const by = (list, term) => list.find((c) => c.term === term)
 
 const PAGE = `= Stream changes into a lakehouse
 :description: Capture changes with Debezium and write Parquet files.
@@ -74,6 +75,55 @@ describe('pageCandidates', () => {
 
   test('is deterministic', () => {
     expect(candidates(PAGE)).toEqual(candidates(PAGE))
+  })
+})
+
+describe('pageCandidates noise filters', () => {
+  // The noise a corpus-wide run surfaced: the product name, SQL keywords, a
+  // stop word from a Connect xref, Kubernetes kinds, and sales boilerplate.
+  const NOISY = `= Connect to the database
+
+We run Redpanda here, and Redpanda there. Redpanda Data builds it.
+The query returns NULL when a row is missing, and NULL again. Use GROUP BY and GROUP BY.
+See xref:connect:components:inputs/about.adoc[] and xref:connect:components:inputs/about.adoc[about inputs].
+See xref:connect:components:processors/mapping.adoc[] and xref:connect:components:processors/mapping.adoc[].
+See xref:connect:components:outputs/cache.adoc[] and xref:connect:components:outputs/cache.adoc[].
+Each of the Pods restarts, and the Pods come back. A PersistentVolumeClaim binds, and the PersistentVolumeClaim stays.
+Expose it through a NodePort Service, or a second NodePort Service. Two StorageClasses, and StorageClasses again.
+To get a license, contact Redpanda Sales. For a trial license, contact Redpanda Sales.
+This feature requires an Enterprise Edition license. Enterprise Edition licenses are sold by your account team.
+We deploy with Redpanda Terraform, and Terraform again.
+See xref:connect:components:outputs/redis.adoc[] and xref:connect:components:outputs/redis.adoc[]. Redis holds it.
+`
+  const found = candidates(NOISY, { max: Infinity })
+  const got = terms(found)
+
+  test.each([
+    ['the product name', ['Redpanda', 'Redpanda Data', 'Data']],
+    ['SQL and other language keywords', ['NULL', 'GROUP BY']],
+    ['stop words, including a Connect component named with one', ['about', 'About']],
+    ['Connect building blocks named with ordinary words', ['mapping', 'cache']],
+    ['generic Kubernetes object kinds', ['Pods', 'PersistentVolumeClaim', 'NodePort Service', 'StorageClasses']],
+    ['names that only appear in sales or licensing boilerplate', ['Redpanda Sales', 'Sales', 'Enterprise Edition']],
+  ])('drops %s', (_name, noise) => {
+    for (const t of noise) expect(got).not.toContain(t)
+  })
+
+  test('drops a label that starts with the product name, rather than what follows it', () => {
+    const small = parseTaxonomy('schema-version: 1\nschemes:\n  - id: technology\n    concepts:\n      - { id: redpanda-console, prefLabel: Redpanda Console }\n')
+    const parts = pageParts('= X\n\nWe use Redpanda Console, and Redpanda Console again.\n', parseHeader, {})
+    expect(pageCandidates(parts, buildMatcher(small, { allLabels: true }))).toEqual([])
+  })
+
+  test('keeps what follows the product name, and a system named in a Connect xref', () => {
+    expect(by(found, 'Terraform')).toEqual(expect.objectContaining({ count: 2 }))
+    expect(by(found, 'redis')).toEqual(expect.objectContaining({ facet: 'technology', cue: 'connector-name' }))
+  })
+
+  test('a term mentioned outside a sales line is kept', () => {
+    const page = '= X\n\nContact Redpanda Sales for a license.\nWe use Acme Widgets, and Acme Widgets.\nAcme Widgets license terms apply.\n'
+    expect(terms(candidates(page))).toContain('Acme Widgets')
+    expect(terms(candidates('= X\n\nAcme Widgets license, and the Acme Widgets license.\n'))).not.toContain('Acme Widgets')
   })
 })
 
