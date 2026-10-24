@@ -1,0 +1,7 @@
+= Cluster Configuration Properties
+:page-aliases: reference:tunable-properties.adoc, reference:cluster-properties.adoc
+:description: Cluster configuration properties.
+
+Cluster configuration properties are shared by all brokers.
+
+include::reference:partial$properties/cluster-properties.adoc[tags=!deprecated;!exclude-from-docs]

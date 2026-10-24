@@ -1,0 +1,6 @@
+# Fixture for __tests__/cli-utils/docs-links-to-xrefs.test.js: a one-version
+# docs component shaped like redpanda-data/docs (page aliases for moved pages,
+# a reference page that includes its headings from a partial).
+name: streaming
+title: Streaming
+version: '26.2'

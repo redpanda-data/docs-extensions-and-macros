@@ -2247,6 +2247,12 @@ automation
  * - Use --tag for released content (GA or beta releases). Tags reference specific release points.
  * - Use --branch for in-progress content (unreleased features). Branches track ongoing development.
  *
+ * Links: the Go doc comments link to docs.redpanda.com with absolute URLs. When the command
+ * runs inside a docs checkout (or is given --docs-root), every URL that matches a page of that
+ * checkout, directly or through a page alias, is rewritten as an xref so the committed page
+ * keeps one link form across regenerations. URLs that match no page are left as written and
+ * listed in the output.
+ *
  * @why
  * Kubernetes CRDs define complex APIs for deploying and managing Redpanda. The API schema
  * is defined in Go code with hundreds of fields across nested structures. Manual documentation
@@ -2281,6 +2287,7 @@ automation
  * - For GitHub URLs: Git and internet connection
  * - crd-ref-docs tool (automatically installed if missing)
  * - Go toolchain for running crd-ref-docs
+ * - To convert links: a docs checkout with Antora installed (npm install in redpanda-data/docs)
  */
 automation
   .command('crd-spec')
@@ -2291,6 +2298,7 @@ automation
   .option('-d, --depth <n>', 'How many levels deep', '10')
   .option('--templates-dir <dir>', 'Asciidoctor templates dir', '.github/crd-config/templates/asciidoctor/operator')
   .option('--output <file>', 'Where to write the generated AsciiDoc file', 'modules/reference/pages/k-crd.adoc')
+  .option('--docs-root <dir>', 'Docs checkout whose pages docs.redpanda.com URLs are converted into xrefs against (default: the current repo when run inside redpanda-data/docs)')
   .action(async (opts) => {
     verifyCrdDependencies()
 
@@ -2399,8 +2407,28 @@ automation
       process.exit(1)
     }
 
-    // docs.redpanda.com URLs are left as-is: the url-to-xref Antora
-    // extension converts them to validated xrefs at site build time.
+    // Go doc comments carry absolute docs.redpanda.com URLs (a Go comment
+    // cannot hold an xref). Convert them against the docs checkout so the
+    // committed page keeps one link form across regenerations, instead of
+    // flipping between xrefs and URLs and burying the real changes in the
+    // review diff (docs 2256). A URL that matches no page in the checkout is
+    // left as written and listed; the url-to-xref extension still converts
+    // cross-component URLs at site build time and warns about broken ones.
+    const docsRoot = opts.docsRoot || (inDocs ? repoRoot : null)
+    if (docsRoot) {
+      const { buildDocsResolverContext, convertDocsLinksInFile, formatDocsLinkReport } = require('../cli-utils/docs-links-to-xrefs.js')
+      let linkContext
+      try {
+        linkContext = await buildDocsResolverContext(docsRoot)
+      } catch (err) {
+        console.error(`Error: Cannot map docs URLs to xrefs: ${err.message}`)
+        process.exit(1)
+      }
+      console.log(`Mapping docs URLs against ${linkContext.pageCount} pages of the ${linkContext.component} component in ${docsRoot}`)
+      console.log(formatDocsLinkReport(convertDocsLinksInFile(opts.output, linkContext), opts.output))
+    } else {
+      console.warn('⚠️ No docs checkout to map against (pass --docs-root); docs.redpanda.com URLs are left as written.')
+    }
 
     if (tmpSrc) fs.rmSync(tmpSrc, { recursive: true, force: true })
     fs.rmSync(configTmp, { recursive: true, force: true })
