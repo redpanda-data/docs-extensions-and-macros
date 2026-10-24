@@ -310,7 +310,12 @@ function makeTitleOf (contentCatalog, record) {
   }
 }
 
-module.exports.register = function ({ config = {} } = {}) {
+// No default for the parameter itself: Antora (generator-context.js) calls a
+// register function whose .length is 0 with no arguments, and a defaulted
+// parameter does not count toward .length, so `({ config = {} } = {})` never
+// receives the playbook entry's settings. A destructured parameter without a
+// default has .length 1, and Antora then passes { config, playbook }.
+module.exports.register = function ({ config = {} }) {
   raiseListenerLimit(this)
   const logger = this.getLogger('solutions-catalog-extension')
   const settings = resolveConfig(config)

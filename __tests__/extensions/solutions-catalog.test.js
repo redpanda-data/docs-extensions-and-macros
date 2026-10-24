@@ -222,6 +222,26 @@ function createContext (config = {}) {
 }
 
 /**
+ * Register through Antora's real GeneratorContext, from a playbook entry, the
+ * way a build does. Antora picks how to call register from its .length, so
+ * this is what catches a signature that never receives the settings.
+ */
+async function createAntoraContext (config = {}) {
+  const GeneratorContext = require(path.join(path.dirname(require.resolve('@antora/site-generator')), 'generator-context.js'))
+  const ctx = new GeneratorContext(module)
+  const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }
+  ctx.getLogger = () => logger
+  const entry = { require: path.join(__dirname, '..', '..', 'extensions', 'solutions-catalog', 'index.js'), ...config }
+  await GeneratorContext.start(ctx, { dir: path.join(__dirname, '..', '..'), antora: { extensions: [entry] } })
+  const handlers = {}
+  for (const event of ['contentClassified', 'documentsConverted', 'navigationBuilt', 'beforePublish']) {
+    const [listener] = ctx.rawListeners(event)
+    if (listener) handlers[event] = (vars) => listener.call(ctx, vars)
+  }
+  return { ctx, handlers, logger }
+}
+
+/**
  * Register and run the three hooks over the given content. Returns everything a
  * test may want to inspect. Throws whatever the extension throws.
  */
@@ -244,6 +264,8 @@ async function run ({
   // A parsed docs taxonomy for siteCatalog.taxonomy; null is a build without
   // taxonomy.yml.
   taxonomy = null,
+  // Register through Antora's GeneratorContext instead of calling register.
+  viaAntora = false,
 } = {}) {
   const pages = [...(landing ? [landing] : []), ...solutions.flatMap((s) => s.pages), ...docs]
   const attachments = [...solutions.flatMap((s) => s.attachments), ...solutions.flatMap((s) => s.examples || [])]
@@ -258,7 +280,7 @@ async function run ({
   const savedEnv = { ...process.env }
   Object.assign(process.env, env)
   try {
-    const { handlers, logger } = createContext(config)
+    const { handlers, logger } = viaAntora ? await createAntoraContext(config) : createContext(config)
     const html = new Map()
     for (const page of pages) {
       const source = sources[`${page.src.module}/${page.src.relative}`]
@@ -469,6 +491,20 @@ describe('solutions-catalog: happy path', () => {
   test('warns about the pending relationship instead of using it', () => {
     const info = result.logger.info.mock.calls.map((c) => c[0]).join('\n')
     expect(info).toMatch(/1 pending relationship/)
+  })
+})
+
+describe('solutions-catalog: playbook settings through Antora', () => {
+  // Antora calls a register function with .length 0 with no arguments, so a
+  // signature like `({ config = {} } = {})` silently dropped every setting.
+  test('min_score and max_related from the playbook entry reach the graph', async () => {
+    const result = await run({ viaAntora: true, config: { min_score: 0.9, max_related: 1, network_checks: false } })
+    expect(addedFile(result.siteCatalog, 'assets/data/solutions-graph.json').settings).toEqual({ maxRelated: 1, minScore: 0.9 })
+  })
+
+  test('without settings, the defaults apply', async () => {
+    const result = await run({ viaAntora: true })
+    expect(addedFile(result.siteCatalog, 'assets/data/solutions-graph.json').settings).toEqual({ maxRelated: 3, minScore: 0.6 })
   })
 })
 
