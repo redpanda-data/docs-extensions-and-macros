@@ -6,6 +6,17 @@ const path = require('path')
 const { getDeploymentType } = require('../../extension-utils/deployment-type')
 const { parseCategoryList } = require('../../extension-utils/categories')
 const { pageFacets, authoredCategories } = require('../../extension-utils/taxonomy')
+const { TAXONOMY_SKIPPED_COMPONENTS } = require('../../extension-utils/taxonomy-categories')
+
+/**
+ * Taxonomy facets as index attributes. The deployment labels go in
+ * `deployments`, not `deployment`: lab records keep `deployment` as the
+ * env-* string ("Docker") that the labs filters read, and the taxonomy
+ * label ("Docker Compose") in the same attribute would split that facet.
+ */
+function taxonomyFacets ({ deployment, ...rest }) {
+  return { ...rest, deployments: deployment }
+}
 
 // Create encoder once at module scope for efficiency
 const textEncoder = new TextEncoder()
@@ -31,7 +42,7 @@ const METADATA_ONLY_LAYOUTS = ['home', 'component-home-v3', 'data-platform', 'so
  * @param {Object} config.logger - Logger to use
  * @param {Object} [config.taxonomy] - The site taxonomy (extension-utils/taxonomy.js). When
  *   set, Product Docs and solution records also carry topics, useCases, technologies, and
- *   deployment.
+ *   deployments (with the matching *Ids attributes).
  * @typedef {Object} SearchIndexData
  * @returns {SearchIndexData} A data object that contains the Algolia index
  */
@@ -295,8 +306,8 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
 
     const categories = parseCategoryList(page.asciidoc?.attributes['page-categories'])
 
-    const facets = taxonomy && !['labs', 'solutions'].includes(component.name)
-      ? pageFacets(taxonomy, { categories: authoredCategories(page.asciidoc?.attributes), deployment, component: component.name })
+    const facets = taxonomy && !TAXONOMY_SKIPPED_COMPONENTS.includes(component.name)
+      ? taxonomyFacets(pageFacets(taxonomy, { categories: authoredCategories(page.asciidoc?.attributes), deployment, component: component.name }))
       : null
 
     const commercialNames = page.asciidoc?.attributes['page-commercial-names']
@@ -378,7 +389,7 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
           indexItem.technologyIds = ids(concepts.technologies)
           indexItem.topics = labels(concepts.topics)
           indexItem.topicIds = ids(concepts.topics)
-          indexItem.deployment = labels(concepts.platforms)
+          indexItem.deployments = labels(concepts.platforms)
           indexItem.deploymentIds = ids(concepts.platforms)
           if (indexItem.solutionId && !indexItem.stepId) {
             indexItem.useCases = labels(concepts.useCases)

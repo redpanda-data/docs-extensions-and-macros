@@ -115,6 +115,16 @@ describe('validate-attributes with the taxonomy', () => {
     expect(lines.warn).toEqual(["page-topic-type 'concepts' should be the ID concept (1 page): streaming:e.adoc"])
   })
 
+  test('a page with no categories still gets its page-topic-type checked', async () => {
+    const p = { src: { component: 'streaming', relative: 'f.adoc' }, asciidoc: { attributes: { 'page-topic-type': 'concepts', 'page-relative-src-path': 'f.adoc' } } }
+    const lines = await run([p])
+    expect(lines.warn).toEqual(["page-topic-type 'concepts' should be the ID concept (1 page): streaming:f.adoc"])
+    expect(p.asciidoc.attributes['page-categories-authored']).toBeUndefined()
+    // Control: a valid content type on an uncategorized page is silent.
+    const ok = { src: { component: 'streaming', relative: 'g.adoc' }, asciidoc: { attributes: { 'page-topic-type': 'concept' } } }
+    expect((await run([ok])).warn).toEqual([])
+  })
+
   test('without taxonomy.yml the behavior is unchanged and no authored copy is written', async () => {
     const p = page('Iceberg Topics, Security')
     const lines = await run([p], { taxonomy: null })

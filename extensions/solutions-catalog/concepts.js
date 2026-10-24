@@ -21,6 +21,7 @@
 
 const { isLeafCategory } = require('../../extension-utils/categories')
 const { checkPageMetadata, CATEGORY_ATTRIBUTE } = require('../../extension-utils/metadata-check')
+const { toLegacyCategories } = require('../../extension-utils/taxonomy-categories')
 
 // Schemes whose shared concepts count toward a recommendation. A shared task is
 // what a shared legacy parent category was (Development, Management): the
@@ -77,7 +78,7 @@ function docConcepts (taxonomy, { categories, categoryMap } = {}) {
 /**
  * Resolve one facet's values within its scheme.
  *
- * @returns {{items: Array<{value: string, id: string}>, unknown: Array<string>, deprecated: Array<Object>, wrongScheme: Array<Object>}}
+ * @returns {{items: Array<{value: string, id: string, implied?: true}>, unknown: Array<string>, deprecated: Array<Object>, wrongScheme: Array<Object>}}
  */
 function resolveFacet (taxonomy, values, scheme, { prefer = 'label' } = {}) {
   const items = []
@@ -98,12 +99,19 @@ function resolveFacet (taxonomy, values, scheme, { prefer = 'label' } = {}) {
       ids = []
       wrongScheme.push({ value, id: hit.concept.id, scheme: hit.concept.scheme })
     }
+    let implied = false
     if (!ids.length) {
       for (const id of hit.ids) {
         for (const target of taxonomy.get(id).implies) if (taxonomy.get(target).scheme === scheme) ids.push(target)
       }
+      implied = ids.length > 0
     }
-    for (const id of ids) if (!items.some((i) => i.id === id)) items.push({ value, id })
+    for (const id of ids) {
+      if (items.some((i) => i.id === id)) continue
+      // An implied item (what a value from another facet implies here) is
+      // listed in the facet but scores as an implied concept, not a direct one.
+      items.push(implied ? { value, id, implied: true } : { value, id })
+    }
   }
   return { items, unknown, deprecated, wrongScheme }
 }
@@ -127,12 +135,15 @@ function solutionConcepts (taxonomy, record, categoryMap) {
   const isLegacy = categoryMap
     ? (label) => categoryMap.categories.has(label) || categoryMap.subcategories.has(label)
     : undefined
+  // Default platforms (collect.js DEFAULT_PLATFORMS, when the overview sets
+  // none) are not checked as if the author wrote them.
+  const authoredPlatforms = record.platformsAuthored === false ? [] : (record.platforms || [])
   const findings = checkPageMetadata({
     [CATEGORY_ATTRIBUTE]: record.categoriesRaw || [],
     'page-solution-use-cases': record.useCases || [],
     'page-solution-industries': record.industries || [],
     'page-solution-technologies': record.technologies || [],
-    'page-solution-platforms': record.platforms || [],
+    'page-solution-platforms': authoredPlatforms,
   }, { taxonomy, solution: true, isLegacyCategory: isLegacy })
   const errors = []
   const warnings = []
@@ -148,13 +159,35 @@ function solutionConcepts (taxonomy, record, categoryMap) {
   const technologies = facet(record.technologies, 'technology')
   const platforms = facet(record.platforms, 'deployment', { prefer: 'id' })
 
+  // A platform value that names a concept but no deployment (a technology, or
+  // a deprecated value with no deployment replacement) would leave the
+  // solution with no platform, and the platform filter would then hide it
+  // from every deployment-tagged page. That is an error, not a warning. An
+  // unknown value is already one.
+  const deploymentIds = taxonomy.conceptIds('deployment')
+  for (const value of authoredPlatforms) {
+    if (platforms.some((p) => p.value === value) || !taxonomy.resolve(value, { prefer: 'id' })) continue
+    errors.push(`page-solution-platforms value '${value}' names no deployment, so the solution would match no deployment-tagged page; use one of ${deploymentIds.join(', ')}`)
+  }
+  if (record.platformsAuthored === false) {
+    const unresolved = (record.platforms || []).filter((value) => !platforms.some((p) => p.value === value))
+    if (unresolved.length) {
+      warnings.push(`the default page-solution-platforms value${unresolved.length === 1 ? '' : 's'} ${unresolved.join(', ')} ${unresolved.length === 1 ? 'is' : 'are'} not a deployment in taxonomy.yml; set page-solution-platforms on the overview`)
+    }
+  }
+
   const direct = new Map(cats.concepts)
-  for (const { id } of [...useCases, ...technologies]) direct.set(id, 'direct')
+  const impliedItems = []
+  for (const item of [...useCases, ...technologies]) {
+    if (item.implied) impliedItems.push(item.id)
+    else direct.set(item.id, 'direct')
+  }
   const concepts = new Map()
   for (const [id, weight] of direct) add(concepts, id, weight)
   for (const [id, weight] of taxonomy.expand([...direct.keys()].filter((id) => taxonomy.get(id)))) {
     if (weight === 'implied') add(concepts, id, 'implied')
   }
+  for (const id of taxonomy.expand(impliedItems).keys()) add(concepts, id, 'implied')
 
   const platformIds = [...taxonomy.expand(platforms.map((p) => p.id)).keys()]
   return {
@@ -200,26 +233,12 @@ function sharedConcepts (taxonomy, docSet, solutionSet, categoryMap) {
 }
 
 /**
- * The legacy page-categories list for a list that may hold new labels: a value
- * valid-categories.yml knows stays; a value only the taxonomy knows becomes the
- * legacy category of what it resolves to, or goes when there is none; a value
- * neither knows stays, for the legacy check to reject.
+ * The legacy page-categories list for a list that may hold new labels. The
+ * mapping is validate-attributes' (toLegacyCategories), so a solution and a
+ * Product Docs page with the same value get the same legacy categories.
  */
 function legacyCategories (taxonomy, list, categoryMap) {
-  const isLegacy = (label) => categoryMap.categories.has(label) || categoryMap.subcategories.has(label)
-  const out = []
-  for (const value of list || []) {
-    const hit = isLegacy(value) ? null : taxonomy.resolve(value)
-    if (!hit) {
-      if (!out.includes(value)) out.push(value)
-      continue
-    }
-    for (const id of hit.ids) {
-      const legacy = taxonomy.legacyLabel(id, isLegacy)
-      if (legacy && !out.includes(legacy)) out.push(legacy)
-    }
-  }
-  return out
+  return toLegacyCategories(list, { taxonomy, categoryMap })
 }
 
 /** Display label of a concept ID, including legacy pseudo-concepts. */

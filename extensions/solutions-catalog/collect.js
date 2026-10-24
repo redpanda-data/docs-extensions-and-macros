@@ -429,12 +429,13 @@ function collectSolutions (contentCatalog, { component = COMPONENT, taxonomy } =
   const facetsFile = partials.find((f) => f.src.module === 'ROOT' && f.src.relative === 'solution-facets.yml')
 
   const solutions = []
+  const runPlatforms = verificationPlatforms(taxonomy) // once per build, not per module
   for (const [mod, modulePages] of byModule) {
     if (NON_SOLUTION_MODULES.includes(mod)) continue
     solutions.push(buildRecord(mod, modulePages, attachments.filter((a) => a.src.module === mod), {
       version,
       moduleExamples: examples.filter((e) => e.src.module === mod),
-      verificationPlatforms: verificationPlatforms(taxonomy),
+      verificationPlatforms: runPlatforms,
     }))
   }
   solutions.sort((a, b) => a.id.localeCompare(b.id))

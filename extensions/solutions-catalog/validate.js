@@ -16,6 +16,7 @@ const {
 const { isStepScaffolding } = require('../../asciidoc-extensions/add-solution-file-provenance')
 const { normalizeCategories, isLeafCategory } = require('../../extension-utils/categories')
 const concepts = require('./concepts')
+const { runsOnCloud } = require('./relationships')
 const yaml = require('js-yaml')
 
 // The landing card shows the description in three clamped lines; 140
@@ -523,7 +524,7 @@ function validateSolution (record, { categoryMap, facetVocab, taxonomy, resolveD
     }
     if (isCloudPage && (isCloudPage(page) || (cloudTwinsOf && cloudTwinsOf(key).length))) cloudReach = true
   }
-  if (isCloudPage && record.platforms.includes('cloud') && record.relatedDocRefs.length && !cloudReach) {
+  if (isCloudPage && runsOnCloud(record, taxonomy) && record.relatedDocRefs.length && !cloudReach) {
     warn('page-solution-platforms includes cloud but no page-solution-related-docs entry is a Cloud page or has a single-sourced Cloud twin; Cloud readers get no explicit recommendation')
   }
 

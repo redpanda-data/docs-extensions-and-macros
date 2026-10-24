@@ -472,7 +472,7 @@ module.exports.register = function ({ config = {} } = {}) {
       }
       // Cloud twin key -> the related doc it single-sources
       record.relatedDocTwins = new Map()
-      const runsOnCloud = record.platforms.includes('cloud')
+      const runsOnCloud = relationships.runsOnCloud(record, taxonomy)
       for (const ref of record.relatedDocRefs) {
         const page = resolveDoc(collect.stripVersion(ref))
         if (!page) continue
@@ -509,7 +509,7 @@ module.exports.register = function ({ config = {} } = {}) {
       const docConcepts = taxonomy
         ? concepts.docConcepts(taxonomy, { categories: authoredCategories(attrs), categoryMap })
         : null
-      return { key: collect.pageKey(page), page, url: page.pub && page.pub.url, categories, authoredCategories: raw, concepts: docConcepts, deployment: getDeploymentType(attrs) }
+      return { key: collect.pageKey(page), page, url: page.pub && page.pub.url, categories, authoredCategories: authoredCategories(attrs), concepts: docConcepts, deployment: getDeploymentType(attrs) }
     })
     const graphInput = categoryMap ? docs : docs.map((d) => ({ ...d, categories: [] }))
     const { related, edges, warnings: rankWarnings } = relationships.computeRelatedSolutions({

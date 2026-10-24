@@ -20,7 +20,9 @@
  *                    count as well as its categories.
  *   platform filter  category edges only: Cloud doc -> platforms includes cloud,
  *                    Kubernetes doc -> platforms includes kubernetes,
- *                    Linux/Docker doc -> platforms includes self-managed (the docker concept)
+ *                    Linux/Docker doc -> platforms includes self-managed (the docker concept).
+ *                    With the taxonomy, by deployment concept, broader and narrower
+ *                    concepts included (see platformCompatible)
  *   threshold        min_score (default 0.6): a category-only edge needs two shared leaf
  *                    categories; parent-only or single-leaf overlap never shows
  *   rank             score desc, featured desc, shared leaf categories desc, lastModified desc,
@@ -146,28 +148,71 @@ function formatCategoryWhy ({ sharedLeaves }) {
   return sharedLeaves.length ? `Uses ${sharedLeaves.join(', ')}` : ''
 }
 
+// getDeploymentType values.
+const CLOUD_DEPLOYMENT = 'Redpanda Cloud'
+const SELF_MANAGED_PEERS = ['Linux', 'Docker']
+
 /**
  * Platform filter for category edges. A doc with no deployment marker matches
  * every solution.
  *
+ * Without the taxonomy, the fallback platform values are compared as written.
+ * With it, the doc's deployment (a getDeploymentType value) and the
+ * solution's platforms are deployment concepts, and they match when one is the
+ * other, or one is the other's broader concept: a solution that says Redpanda
+ * Self-Managed matches Linux, Docker, and Kubernetes pages, and a BYOC
+ * solution matches a Redpanda Cloud page. Linux and Docker pages share one
+ * audience, as they always have, so the base self-managed run (Docker
+ * Compose) matches a Linux page too. A Kubernetes page needs a solution with
+ * its own Kubernetes path.
+ *
  * @param {string} deployment - from getDeploymentType
- * @param {Array<string>} platforms - solution platforms
+ * @param {Array<string>} platforms - solution platforms, as authored (fallback check)
+ * @param {{taxonomy: Object, ids: Array<string>}} [byConcept] - the taxonomy and
+ *   the solution's resolved platform concept IDs (see solutionPlatformIds)
+ * @returns {boolean|null} null when the taxonomy has no deployment concept for
+ *   `deployment`, so the caller can say the page is left unfiltered
  */
-function platformCompatible (deployment, platforms, platformIds) {
+function platformCompatible (deployment, platforms, byConcept) {
   if (!deployment) return true
-  if (Array.isArray(platformIds)) {
-    // Deployment concept IDs, broader concepts included.
-    const ids = new Set(platformIds)
-    if (deployment === 'Redpanda Cloud') return ids.has('cloud')
-    if (deployment === 'Kubernetes') return ids.has('kubernetes')
-    return ids.has('docker') || ids.has('linux')
+  if (byConcept && byConcept.taxonomy) {
+    const { taxonomy, ids } = byConcept
+    const idsOf = (value) => {
+      const hit = taxonomy.resolve(value, { schemes: ['deployment'] })
+      return hit ? hit.ids : []
+    }
+    const audience = new Set(idsOf(deployment))
+    if (!audience.size) return null
+    if (SELF_MANAGED_PEERS.includes(deployment)) {
+      for (const peer of SELF_MANAGED_PEERS) for (const id of idsOf(peer)) audience.add(id)
+    }
+    const broader = (id) => {
+      const concept = taxonomy.get(id)
+      return concept ? concept.broader : null
+    }
+    return (ids || []).some((s) => [...audience].some((d) => s === d || broader(d) === s || broader(s) === d))
   }
   const set = new Set(platforms || [])
-  if (deployment === 'Redpanda Cloud') return set.has('cloud')
+  if (deployment === CLOUD_DEPLOYMENT) return set.has('cloud')
   // A Kubernetes page recommends only solutions a Kubernetes reader can run
   // there: the ones with their own Kubernetes path.
   if (deployment === 'Kubernetes') return set.has('kubernetes')
   return set.has('self-managed')
+}
+
+/** A validated solution's direct platform concept IDs (empty without the taxonomy). */
+function solutionPlatformIds (solution) {
+  const items = (solution && solution.conceptFacets && solution.conceptFacets.platforms) || []
+  return items.map((p) => p.id)
+}
+
+/**
+ * Does the solution run on Redpanda Cloud? With the taxonomy, by concept, so
+ * `Cloud`, `Redpanda Cloud`, and a narrower Cloud concept all count.
+ */
+function runsOnCloud (solution, taxonomy) {
+  return Boolean(platformCompatible(CLOUD_DEPLOYMENT, solution.platforms,
+    taxonomy && solution.conceptFacets ? { taxonomy, ids: solutionPlatformIds(solution) } : undefined))
 }
 
 function round (n) {
@@ -212,6 +257,7 @@ function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap,
   const related = new Map()
   const edges = []
   const warnings = []
+  const unfiltered = new Set()
 
   const relByPair = new Map()
   for (const rel of relationships || []) {
@@ -279,7 +325,14 @@ function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap,
         edges.push(edge)
         continue
       }
-      if (provenance === 'category' && !platformCompatible(doc.deployment, solution.platforms, byConcepts ? solution.platformIds : undefined)) {
+      const compatible = provenance === 'category'
+        ? platformCompatible(doc.deployment, solution.platforms, byConcepts ? { taxonomy, ids: solutionPlatformIds(solution) } : undefined)
+        : true
+      if (compatible === null && !unfiltered.has(doc.deployment)) {
+        unfiltered.add(doc.deployment)
+        warnings.push(`the taxonomy has no deployment concept for ${doc.deployment} pages; their category recommendations are not filtered by platform`)
+      }
+      if (compatible === false) {
         edge.reason = `${edge.reason}; hidden: ${doc.deployment} page, solution platforms ${solution.platforms.join(', ')}`
         edges.push(edge)
         continue
@@ -340,26 +393,35 @@ function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap,
 function computeCoverage ({ docs, solutions, categoryMap, taxonomy, sampleSize = 20 }) {
   // The keys a category label counts under: its concept IDs (a deprecated
   // value's replacements), or the label itself without a taxonomy or a match.
+  // Memoized: the same labels recur on thousands of pages.
+  const keyCache = new Map()
   const keysOf = (label) => {
+    if (keyCache.has(label)) return keyCache.get(label)
     const hit = taxonomy ? taxonomy.resolve(label) : null
-    return hit && hit.ids.length ? hit.ids.map((id) => `id:${id}`) : [`label:${label}`]
+    const keys = hit && hit.ids.length ? hit.ids.map((id) => `id:${id}`) : [`label:${label}`]
+    keyCache.set(label, keys)
+    return keys
   }
   const categoriesOf = (doc) => (taxonomy && doc.authoredCategories ? doc.authoredCategories : doc.categories) || []
   const counts = new Map()
   const uncategorized = []
+  // Each doc's key set, computed once for the multi-key lookups below.
+  const docKeySets = []
   for (const doc of docs) {
     if (!categoriesOf(doc).length) {
       uncategorized.push(doc.url)
       continue
     }
-    for (const k of new Set(categoriesOf(doc).flatMap(keysOf))) counts.set(k, (counts.get(k) || 0) + 1)
+    const keys = new Set(categoriesOf(doc).flatMap(keysOf))
+    docKeySets.push(keys)
+    for (const k of keys) counts.set(k, (counts.get(k) || 0) + 1)
   }
   const pagesFor = (label) => {
     const keys = keysOf(label)
     if (keys.length === 1) return counts.get(keys[0]) || 0
     let n = 0
-    for (const doc of docs) {
-      if (categoriesOf(doc).flatMap(keysOf).some((k) => keys.includes(k))) n++
+    for (const set of docKeySets) {
+      if (keys.some((k) => set.has(k))) n++
     }
     return n
   }
@@ -422,6 +484,8 @@ module.exports = {
   formatConceptReason,
   formatCategoryWhy,
   platformCompatible,
+  solutionPlatformIds,
+  runsOnCloud,
   computeRelatedSolutions,
   computeCoverage,
   formatCoverageLine,

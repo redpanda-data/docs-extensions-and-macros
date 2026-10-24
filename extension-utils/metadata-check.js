@@ -129,13 +129,17 @@ function checkPageMetadata (attributes, { taxonomy, solution, isLegacyCategory }
           push('unknown-value', attribute, value, `${attribute} value '${value}' is not in the taxonomy; use an existing ${scheme}, or add it to taxonomy.yml in the docs repository first`)
           continue
         }
-        if (hit.deprecated) {
-          push('deprecated-value', attribute, value, deprecatedMessage(attribute, value, hit, taxonomy), { replacementIds: hit.ids, conceptIds: [hit.concept.id] })
+        // Only replacements in this facet's scheme count: a deprecated topic
+        // replaced by another topic says nothing about a technology, so it
+        // must not be suggested here or collide with a category.
+        const ids = hit.ids.filter((id) => taxonomy.get(id) && taxonomy.get(id).scheme === scheme)
+        if (hit.deprecated && (ids.length || hit.concept.scheme === scheme)) {
+          push('deprecated-value', attribute, value, deprecatedMessage(attribute, value, { ...hit, ids }, taxonomy), { replacementIds: ids, conceptIds: [hit.concept.id] })
         } else if (hit.concept.scheme !== scheme) {
-          push('wrong-facet', attribute, value, `${attribute} value '${value}' is ${describe(taxonomy, hit.concept.id)}, not a ${scheme}`, { conceptIds: [hit.concept.id] })
+          push('wrong-facet', attribute, value, `${attribute} value '${value}' is ${describe(taxonomy, hit.concept.id)}${hit.deprecated ? ', deprecated' : ''}, not a ${scheme}`, { conceptIds: [hit.concept.id] })
           continue
         }
-        noteConcepts(attribute, value, hit.ids)
+        noteConcepts(attribute, value, ids)
       }
     }
   }

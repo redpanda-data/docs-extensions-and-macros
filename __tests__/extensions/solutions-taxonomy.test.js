@@ -230,7 +230,8 @@ describe('Algolia solution records with the taxonomy', () => {
     expect(rec.technologies).toEqual(['PostgreSQL'])
     expect(rec.technologyIds).toEqual(['postgresql'])
     expect(rec.platforms).toEqual(['self-managed'])
-    expect(rec.deployment).toEqual(['Docker Compose'])
+    expect(rec.deployments).toEqual(['Docker Compose'])
+    expect(rec).not.toHaveProperty('deployment')
     expect(rec.useCaseIds).toEqual(['change-data-capture'])
     expect(rec.topicIds).toEqual(['iceberg-topics', 'tiered-storage'])
     expect(rec.categories).toEqual(['Iceberg', 'Tiered Storage', 'Deployment'])
@@ -258,5 +259,95 @@ describe('category coverage with the taxonomy', () => {
     expect(coverage.solutions.s.categories.Iceberg.pages).toBe(1)
     expect(coverage.solutions.s.zeroMatch).toEqual(['Data Replication', 'Ghost'])
     expect(coverage.uncategorizedEligiblePages).toBe(1)
+  })
+})
+
+describe('review fixes: legacy mapping, platforms, and facet weights', () => {
+  const { toLegacyCategories } = require('../../extension-utils/taxonomy-categories')
+  const shown = (solution, deployment) => relationships.computeRelatedSolutions({
+    docs: [doc('d', ['Iceberg', 'Tiered Storage'], deployment)],
+    solutions: [solution],
+    relationships: [],
+    categoryMap,
+    taxonomy,
+  }).edges[0].shown
+
+  test('a use-case spelling of a legacy category maps the same way on a solution and a docs page', () => {
+    const list = ['Disaster recovery', 'Stream processing']
+    expect(concepts.legacyCategories(taxonomy, list, categoryMap)).toEqual(['Disaster Recovery', 'Stream Processing'])
+    expect(concepts.legacyCategories(taxonomy, list, categoryMap)).toEqual(toLegacyCategories(list, { taxonomy, categoryMap }))
+    // Control: the legacy spelling itself passes through unchanged.
+    expect(concepts.legacyCategories(taxonomy, ['Disaster Recovery'], categoryMap)).toEqual(['Disaster Recovery'])
+  })
+
+  test('the broader self-managed platform matches every self-managed page, and not Cloud', () => {
+    const broad = resolved({ platforms: ['redpanda-self-managed'] })
+    expect(broad.result.errors).toEqual([])
+    expect(shown(broad, 'Linux')).toBe(true)
+    expect(shown(broad, 'Docker')).toBe(true)
+    expect(shown(broad, 'Kubernetes')).toBe(true)
+    expect(shown(broad, 'Redpanda Cloud')).toBe(false)
+    // Control: the narrower docker concept still needs its own Kubernetes path.
+    expect(shown(resolved({ platforms: ['docker'] }), 'Kubernetes')).toBe(false)
+  })
+
+  test('Cloud as a label counts as running on Cloud', () => {
+    expect(relationships.runsOnCloud(resolved({ platforms: ['Cloud'] }), taxonomy)).toBe(true)
+    expect(relationships.runsOnCloud(resolved({ platforms: ['Redpanda Cloud'] }), taxonomy)).toBe(true)
+    expect(shown(resolved({ platforms: ['Cloud'] }), 'Redpanda Cloud')).toBe(true)
+    // Controls: a self-managed solution does not, and without the taxonomy the
+    // fallback value is compared as written.
+    expect(relationships.runsOnCloud(resolved({ platforms: ['self-managed'] }), taxonomy)).toBe(false)
+    expect(relationships.runsOnCloud(record({ platforms: ['Cloud'] }))).toBe(false)
+    expect(relationships.runsOnCloud(record({ platforms: ['cloud'] }))).toBe(true)
+  })
+
+  test('a platform value from another facet is an error, not a warning that hides the solution', () => {
+    const r = resolved({ platforms: ['redpanda-connect'] })
+    expect(r.result.errors).toEqual([
+      "page-solution-platforms value 'redpanda-connect' names no deployment, so the solution would match no deployment-tagged page; use one of cloud, redpanda-self-managed, docker, kubernetes, linux",
+    ])
+    // Control: a deployment value is fine.
+    expect(resolved({ platforms: ['docker'] }).result.errors).toEqual([])
+  })
+
+  test('default platforms are not checked as authored values', () => {
+    const defaulted = resolved({ platforms: ['mainframe'], platformsAuthored: false })
+    expect(defaulted.result.errors).toEqual([])
+    expect(defaulted.result.warnings).toContain('the default page-solution-platforms value mainframe is not a deployment in taxonomy.yml; set page-solution-platforms on the overview')
+    // Control: the same value written by the author is fatal.
+    expect(resolved({ platforms: ['mainframe'], platformsAuthored: true }).result.errors).toHaveLength(1)
+  })
+
+  test('a deprecated value from another scheme is a wrong-facet warning, not a false duplicate', () => {
+    const r = resolved({ technologies: ['Iceberg'], categoriesRaw: ['Iceberg Topics'] })
+    expect(r.result.errors).toEqual([])
+    expect(r.result.warnings).toEqual(["page-solution-technologies value 'Iceberg' is Iceberg (topic), deprecated, not a technology"])
+    expect(r.conceptFacets.technologies.map((t) => t.id)).toEqual(['apache-iceberg'])
+    // Control: as a category, where its replacement is in scheme, the same
+    // value is deprecated and is the same concept as Iceberg Topics.
+    const dup = resolved({ categoriesRaw: ['Iceberg', 'Iceberg Topics'] })
+    expect(dup.result.warnings).toContain("page-categories value 'Iceberg' is deprecated; use 'Iceberg Topics' instead")
+    expect(dup.result.errors).toEqual(["page-categories value 'Iceberg Topics' is the same concept as page-categories value 'Iceberg': Iceberg Topics (topic). Keep one"])
+  })
+
+  test('a concept a wrong-facet value implies scores as implied, not direct', () => {
+    const viaTopic = resolved({ technologies: ['Iceberg Topics'], categoriesRaw: ['Tiered Storage'] })
+    expect(viaTopic.conceptFacets.technologies).toEqual([{ value: 'Iceberg Topics', id: 'apache-iceberg', implied: true }])
+    expect(viaTopic.concepts.get('apache-iceberg')).toBe('implied')
+    // Control: the technology written directly is direct.
+    expect(resolved({ technologies: ['Apache Iceberg'], categoriesRaw: ['Tiered Storage'] }).concepts.get('apache-iceberg')).toBe('direct')
+  })
+
+  test('a deployment the taxonomy cannot name leaves the page unfiltered, with one warning', () => {
+    const { edges, warnings } = relationships.computeRelatedSolutions({
+      docs: [doc('a', ['Iceberg', 'Tiered Storage'], 'Mainframe'), doc('b', ['Iceberg', 'Tiered Storage'], 'Mainframe')],
+      solutions: [resolved()],
+      relationships: [],
+      categoryMap,
+      taxonomy,
+    })
+    expect(edges.map((e) => e.shown)).toEqual([true, true])
+    expect(warnings).toEqual(['the taxonomy has no deployment concept for Mainframe pages; their category recommendations are not filtered by platform'])
   })
 })

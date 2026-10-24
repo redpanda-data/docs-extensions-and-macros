@@ -2506,6 +2506,29 @@ describe('solutions-catalog: with the docs taxonomy', () => {
     expect(after.edges[0]).toMatchObject({ score: 0.6, shown: true, shared: { leaves: ['stream-processing', 'category:Clients'], broader: [] } })
   })
 
+  test('a solution that writes Cloud gets the Cloud-reach warning, as one that writes cloud does', async () => {
+    const cloudComponent = () => {
+      const v = { version: '', asciidoc: { attributes: { 'env-cloud': true } } }
+      return { name: 'cloud', title: 'Cloud', latest: v, versions: [v] }
+    }
+    const warns = async (platforms) => warningsOf(await run({ taxonomy, components: makeComponents([cloudComponent()]), solutions: [solution({ 'page-solution-platforms': platforms })] }))
+    expect(await warns('self-managed, Cloud')).toMatch(/leaderboard: page-solution-platforms includes cloud but no page-solution-related-docs entry is a Cloud page/)
+    expect(await warns('self-managed, Redpanda Cloud')).toMatch(/Cloud readers get no explicit recommendation/)
+    // Control: a solution with no Cloud platform is not warned.
+    expect(await warns('self-managed')).not.toMatch(/Cloud readers get no explicit recommendation/)
+  })
+
+  test('coverage counts what a page authored, not the parents validate-attributes added', async () => {
+    // As validate-attributes leaves a page: page-categories rewritten with the
+    // legacy parent, the authored list kept beside it.
+    const docs = [makeDoc({ relative: 'unlisted.adoc', attrs: { 'page-categories': 'Stream Processing, Clients, Development', 'page-categories-authored': 'Stream Processing, Clients' } })]
+    const coverageOf = async (opts) => addedFile((await run({ docs, solutions: [noRelatedDocs(solution({ 'page-categories': 'Clients, Development' }))], ...opts })).siteCatalog, 'solutions-graph.json').coverage.solutions.leaderboard.categories
+    expect((await coverageOf({ taxonomy })).Development.pages).toBe(0)
+    expect((await coverageOf({ taxonomy })).Clients.pages).toBe(1)
+    // Control: without the taxonomy, coverage reads page-categories as before.
+    expect((await coverageOf({})).Development.pages).toBe(1)
+  })
+
   test('verification runs are keyed by deployment concept IDs, except the base run', () => {
     expect(collect.verificationPlatforms()).toEqual(['cloud', 'kubernetes'])
     expect(collect.verificationPlatforms(taxonomy)).toEqual(['cloud', 'redpanda-self-managed', 'kubernetes', 'linux'])
