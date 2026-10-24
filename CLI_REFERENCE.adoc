@@ -843,7 +843,7 @@ npx doc-tools lint-screenshots --warnings-as-errors
 
 == check-sources
 
-Check the `// Source:` comments in AsciiDoc pages. A source comment sits directly above the claim it supports: `// Source: <ref>`, optionally followed by a short exact quote in double quotes and nothing else. The marker is case-insensitive and may carry a parenthesised aside before the colon (`// Source (verified 2026-10-20): <ref>`). A ref is a file range (`redpanda-data/<repo>[@<git-ref>]:<path>:<line>[-<line>]`, default ref is the repo's default branch), a pull request (`redpanda-data/<repo>#<n>`), a Jira key, or an https:// URL. File refs are fetched from GitHub once per repo, ref, and path: the cited lines must exist and the quote must appear in them after whitespace is normalised (when it has moved, the message says where it is now). PR refs must exist; their state (merged, open, closed) is info. Jira keys and URLs are checked for syntax only, unless --check-urls. Text after the marker that does not start with a ref (or that is an https URL followed by prose) is free-form provenance: an unchecked-note (info), counted in the summary, never an error. The summary counts comments checked, comments failed, and unchecked notes. Errors (exit 1): malformed, missing-file, line-out-of-range, quote-not-found, pr-not-found, url-not-found. Warnings (exit 0): unreachable (auth or network failure, never a silent pass) and no-claim (nothing directly below the comment). Comments inside listing, literal, passthrough, and comment blocks are skipped. The GitHub token comes from REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, GH_TOKEN, GIT_CREDENTIALS, then `gh auth token`.
+Check the `// Source:` comments in AsciiDoc pages. A source comment sits directly above the claim it supports: `// Source: <ref>`, optionally followed by a short exact quote in double quotes and nothing else. The marker is case-insensitive and may carry a parenthesized aside before the colon (`// Source (verified 2026-10-20): <ref>`). A ref is a file range (`redpanda-data/<repo>[@<git-ref>]:<path>:<line>[-<line>]`, default ref is the repo's default branch), a pull request or issue (`redpanda-data/<repo>#<n>`), an uppercase Jira key, or an https:// URL. File refs are fetched from GitHub once per repo, ref, and path: the cited lines must exist and the quote must appear in them after whitespace is normalized (when it has moved, the message says where it is now). PR and issue refs must exist; their state (merged, open, closed) is info. Jira keys and URLs are checked for syntax only, unless --check-urls. Text after the marker that does not start with a ref (or that is an https URL or a Jira-style key followed by prose, such as `KIP-848 consumer group protocol`) is free-form provenance: an unchecked-note (info), counted in the summary, never an error. The summary counts comments checked, comments failed, and unchecked notes. Errors (exit 1): malformed, missing-file, repo-not-found (a 404 for a token that can see other private redpanda-data repos), line-out-of-range, quote-not-found, pr-not-found, url-not-found. Warnings (exit 0): unreachable (auth, rate-limit, timeout, or network failure, never a silent pass) and no-claim (nothing directly below the comment). Exit 2: a --files pattern that matches no .adoc file, or a --diff base git cannot resolve. Fetches run concurrently, time out after 30 seconds, and retry transient failures twice. Comments inside listing, literal, passthrough, and comment blocks are skipped. The GitHub token comes from REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, GH_TOKEN, GIT_CREDENTIALS, then `gh auth token`.
 
 *Why use it:*
 
@@ -862,7 +862,7 @@ doc-tools check-sources [options]
 Docs repo root (default: current directory)
 
 `--files <globs>`::
-Comma-separated globs of .adoc files to check, relative to --root (default: modules/**/*.adoc). With --diff, filters the changed files
+Globs of .adoc files to check, relative to --root (default: modules/**/*.adoc). Repeat the flag or separate globs with commas; commas inside {...} stay in the glob. Each glob must match a file. With --diff, filters the changed files
 
 `--diff <base>`::
 Check only .adoc files changed between the merge base with <base> and HEAD, for example origin/main
@@ -887,7 +887,7 @@ display help for command
 npx doc-tools check-sources --diff origin/main
 
 # Specific pages, JSON output
-npx doc-tools check-sources --files 'modules/manage/pages/*.adoc,modules/get-started/pages/*.adoc' --format json
+npx doc-tools check-sources --files 'modules/{manage,get-started}/pages/*.adoc' --format json
 
 # Also HEAD-check cited URLs
 npx doc-tools check-sources --check-urls
