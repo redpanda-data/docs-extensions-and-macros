@@ -145,19 +145,117 @@ disk, so there is nothing to restore afterwards.
 Both proofs were run against the live model when this harness landed; both
 controls demonstrably fail on violating input.
 
+== The must-read check
+
+The review workflow fetches `embedded-reference-strings.md` and
+`terminology.md` from docs-team-standards at run time, stages them in the
+workspace, and tells the model they are the writing standard it applies. A
+suggestion can look conforming without the model ever having opened either
+file, and nothing in the mechanical checks could tell the difference. So
+every production-path case (`rewrite`, `prose-review`, `negative-review`)
+carries one more check, graded from the run's tool calls and never from what
+the suggestion text claims.
+
+The production review now runs as a `stream-json` transcript
+(`transcript.jsonl` in the case's results directory), so every `tool_use`
+the model issued is recorded with its arguments, and every `tool_result` with
+the text the model was shown and where in the stream it arrived. The check,
+in `production.checkMustRead`, grades that text, not the command that
+produced it:
+
+* Each staged standard (`production.MUST_READ`, derived from the files the
+  harness stages so the two cannot drift) must have been shown to the model
+  in full: every line of the staged file, across one or more tool results.
+  A `Read` result is numbered, so each numbered line that matches the
+  workspace file counts, and ranged Reads that together cover the file count.
+  A `Bash` result counts only when the whole file is in its output, so a
+  `cat` piped into `head`, captured into a variable, cut off by the Bash
+  tool's output cap, or run in another directory on a different file shows
+  nothing. A `Read` of a file of the same name outside the workspace does not
+  count.
+* Production's allowed tools permit only the exact commands
+  `cat embedded-reference-strings.md` and `cat terminology.md` for these
+  files, so `grep`, `head` and multi-file `cat` are refused there. Grading by
+  output keeps the check right without modelling what each shell command
+  prints, and keeps it right if that list ever widens.
+* When the model posted an inline comment, those results must have arrived
+  before the first `mcp__github_inline_comment__create_inline_comment` call
+  the tool accepted. A read issued in the same turn as the comment does not
+  count: its result came back after the comment was written. A rejected
+  comment posted nothing, so it sets no deadline.
+* A call whose result never arrived (a turn limit, a cut-off session) shows
+  nothing. Calls a subagent made are not credited: the reviewer saw only the
+  subagent's summary.
+* With no inline comment (the negative control's correct outcome), the
+  reads only have to have happened: the prose-quality pass judges each
+  declaration against the standard, so silence without opening it is a
+  review from memory.
+
+A file that was not shown in full is reported by what happened: `never
+read`, `read only in part` (with how many lines were shown), `every read
+errored` (for example a Read over the tool's token cap), or `read never got
+a result`, so `must-read.json` points at a prompt problem or a tool problem
+as the case may be. A CLI that exits 0 but prints no stream-json events is a
+harness error, not a model that read nothing.
+
+The check is one more row in `evidence.json` (`must-read: standards opened
+before the first inline comment`), with the per-file call indices and the
+first comment's index under `must_read`, and the extracted calls in
+`tool-calls.json`. It does not short-circuit the other checks: a case that
+fails it still reports its lint, extraction and comment verdicts.
+
+=== Proving the must-read check can fail
+
+`--sabotage-must-read <id>` runs a production-path case twice. The first run
+is the baseline, on the unmodified prompt, and must PASS the must-read row.
+The second strips every sentence that names a staged standard from the
+production prompt (`production.stripStandardsInstructions`); the files are
+still in the workspace, the model is simply never told they are there or to
+apply them, and the row must FAIL. The run exits 0 only when both hold. A
+case whose baseline already fails the row proves nothing, and the run says
+so and exits 1:
+
+[source,bash]
+----
+node evals/doc-strings/run-evals.js --sabotage-must-read negative-property-diff
+----
+
+Claude Code shows the model the repository's `git status` when a session
+starts, which lists untracked files by name, so the sabotage also adds the
+two files to `.git/info/exclude`. Before that, a stripped-prompt run of
+`negative-property-diff` on `claude-opus-5` read both files from that
+listing alone. The files stay in the workspace, so a model that runs `ls`
+can still find and read them, and then the proof fails honestly: on
+2026-10-24 on `claude-opus-5`, `negative-property-diff` was PROVEN (baseline
+read both, stripped run read neither), and `metric-name-echo` was NOT PROVEN
+(the stripped run listed the directory and read both). Use
+`negative-property-diff` as the proof.
+
+The stripper cuts the prompt at sentence ends, line-ending colons, list
+items and blank lines, and also removes a following sentence that points
+back at a removed one ("If it is absent or empty, ..."). Mentions of "the
+writing standard's quality bar" become "this quality bar", the bar the prompt
+states inline. A stripped prompt that still contains either file name, or a
+removed span longer than one sentence, is a harness error (exit 2), not a
+weaker sabotage. `--sabotage` and `--sabotage-must-read` are exclusive, and
+neither takes `--case`: each run proves one assertion on the case it names.
+
 == Running
 
 [source,bash]
 ----
 npm run eval:doc-strings                     # full suite (10 cases)
 node evals/doc-strings/run-evals.js --case metric-name-echo
-node evals/doc-strings/run-evals.js --model sonnet   # override the production model
+node evals/doc-strings/run-evals.js --model claude-sonnet-5   # override the production model
+node evals/doc-strings/run-evals.js --sabotage-must-read negative-property-diff
 node evals/doc-strings/run-evals.js --keep-temp   # keep fixture repos
 ----
 
-Without `--model`, review cases run on Opus (production) and the template
-cases on Sonnet. Pass `--model` only for a deliberate comparison: a result on
-any other model says nothing about what callers run.
+Without `--model`, review cases run on `claude-opus-5` (production) and the
+template cases on Sonnet. Pass `--model` only for a deliberate comparison,
+and pass an exact model id (`claude-opus-5`, `claude-sonnet-5`), never an
+alias, so the results directory says what actually ran. A result on any
+other model says nothing about what callers run.
 
 Requirements:
 
@@ -174,13 +272,41 @@ Requirements:
 Exit codes: `0` all pass (or sabotage proven), `1` failures, `2` harness
 error, `3` skipped.
 
+Measured on `claude-opus-5` when the must-read check landed (full suite, 10
+cases, `--model claude-opus-5`, 2026-10-22). Before the check: 10/10 verdicts
+pass (8 in one pass, the other 2 were CLI timeouts under concurrent runs and
+passed when rerun alone). With the check: 8/10. The two failures,
+`prop-tautology-no-period` and `rpk-flag-lowercase-period`, failed on the
+must-read row alone: the model opened `embedded-reference-strings.md` and the
+source, posted a suggestion that passed every mechanical check, and never
+opened `terminology.md`. That is the gap the check exists to see, and it is a
+production-prompt finding, not a harness one: the prompt says to use the
+terminology file's canonical forms but never says to read it. (Those
+first sabotage proofs were single runs that counted any must-read failure;
+the baseline requirement above replaced them.)
+
+Why a partial read does not count, measured 2026-10-23 on `claude-opus-5`
+with the production prompt from #415 applied (it tells the model to read
+both files in full with the Read tool before the first suggestion), one run
+each of the six production-path cases `prop-empty-description`,
+`prop-tautology-no-period`, `metric-name-echo`, `rpk-flag-lowercase-period`,
+`terminology-misuse` and `negative-property-diff`: every run passed, and in
+6 of 6 runs each file was read whole, by a `Read` with no offset or limit
+(325 and 199 lines), before the first inline comment. The only shell call
+that named the files was a `wc -l` of all four workspace files, which opens
+neither. No run grepped or ranged a standard, so the strict rule costs no
+passing run while the prompt asks for a full read, and a run that greps one
+term out of a standard no longer passes as having applied it.
+
 Deliberately **not wired into CI**: a full run makes ten real model calls
 (a few minutes of wall time and real tokens). Run it when the workflow
 prompts, the lint rules, or the extraction change.
 
 Each run writes `results/<timestamp>/<case>/` with the exact prompt, the raw
 model output, before/after fixture snapshots, and `evidence.json` (every
-mechanical check with its measured detail). `results/` is gitignored.
+mechanical check with its measured detail). Production-path cases add
+`transcript.jsonl` (the whole stream), `tool-calls.json` and
+`must-read.json`. `results/` is gitignored.
 
 == Anatomy
 
@@ -195,7 +321,9 @@ the REAL tool output before the model is called - fixture drift aborts as
 |`production.js` |Runs the production review step from
 `doc-strings-review.yml`: its prompt with Actions expressions filled (an
 unknown expression is an error), its tool lists and turn limit, the inline
-comment stand-in, and the workspace files the workflow writes.
+comment stand-in, and the workspace files the workflow writes. Captures the
+run as stream-json and grades the must-read check from its tool calls;
+holds the sentence stripper the must-read sabotage uses.
 |`mocks/inline-comment.js` |Stdio MCP server with the production tool name,
 `create_inline_comment`, that appends each call to a log instead of posting.
 |`prompts.js` |Templates only for behaviors whose production prompt lives
@@ -228,6 +356,9 @@ exact-match `find`/`replace` pairs that throw when they no longer match.
      sabotage path is not accepted, because it cannot prove it can fail.
 2. Run the single case: `node evals/doc-strings/run-evals.js --case <id>`.
 3. If it is a negative control, prove it: `--sabotage <id>` must exit 0.
+4. If it runs the production review, it carries the must-read check
+   automatically. Prove the check still bites on it:
+   `--sabotage-must-read <id>` must exit 0.
 
 Iteration rule (the honest-eval contract): when a positive case fails on a
 legitimate model shortcoming, tighten the *prompt template* - that is the

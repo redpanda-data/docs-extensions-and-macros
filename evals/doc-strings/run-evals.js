@@ -18,6 +18,12 @@
  *   node evals/doc-strings/run-evals.js --sabotage <negative-case-id>
  *       Runs that negative control against a deliberately violating fixture.
  *       The case is EXPECTED to FAIL; the run exits 0 only if it does.
+ *   node evals/doc-strings/run-evals.js --sabotage-must-read <review-case-id>
+ *       Runs a production-path case with every sentence that names the staged
+ *       writing standard and terminology list stripped from the prompt. The
+ *       files are still in the workspace; the model is just never told to
+ *       apply them. The must-read check is EXPECTED to FAIL; the run exits 0
+ *       only if it does.
  *   Options: --model <model> (default: the model production runs each case
  *   kind on), --keep-temp
  *   node evals/doc-strings/run-evals.js --doc-impact [...]
@@ -26,7 +32,12 @@
  * The rewrite, prose-review and negative-review cases run the PRODUCTION
  * review: the prompt, tools and turn limit of doc-strings-review.yml at this
  * commit, on the model the callers pass (see production.js). Callers pin the
- * workflow by SHA, so this tests exactly what a pin bump ships. The upstream
+ * workflow by SHA, so this tests exactly what a pin bump ships. Each of those
+ * cases also carries a must-read check, graded from the stream-json
+ * transcript: the model has to have opened embedded-reference-strings.md and
+ * terminology.md (Read, or the allowed `cat`) before its first inline
+ * comment, because the prompt tells it to apply them and a review that never
+ * opened them did not. The upstream
  * and negative-audit cases still use prompts.js templates: they cover the
  * docs repo's upstream-doc-strings workflow, which does not live here.
  *
@@ -155,6 +166,7 @@ function runRewriteCase (spec, io) {
   const model = io.callProduction({ repo, lint, diff })
   if (model.failed) return modelCallFailed(checks, model)
   checkImpactFile(checks, model, false)
+  checkStandardsRead(checks, model)
 
   // --- Execute the output ---
   const suggestions = lib.parseFences(model.output, 'suggestion')
@@ -373,6 +385,7 @@ function runProseReviewCase (spec, io, sabotage) {
   const model = io.callProduction({ repo, lint: lintDiff, diff })
   if (model.failed) return modelCallFailed(checks, model)
   checkImpactFile(checks, model, false)
+  checkStandardsRead(checks, model)
 
   const suggestions = lib.parseFences(model.output, 'suggestion')
   if (!checks.add('at least one ```suggestion block (a vacuous string must draw one)',
@@ -494,6 +507,9 @@ function runNegativeReviewCase (spec, io, sabotage) {
   checks.add('zero inline comments posted', model.comments.length === 0,
     model.comments.length ? `posted ${model.comments.length}: ${model.comments.map((c) => c.path + ':' + (c.line || '?')).join(', ')}` : 'none')
   checkImpactFile(checks, model, false)
+  // Silence is only the right verdict if the standard was consulted: the
+  // prose-quality pass judges every declaration against it.
+  checkStandardsRead(checks, model)
 
   io.cleanup(repo.dir)
   return finish(checks.allPass() ? 'PASS' : 'FAIL', checks, model)
@@ -554,6 +570,21 @@ function checkImpactFile (checks, model, expected) {
   return checks.add('doc-impact.json passes the dispatch step\'s schema check', ok.pass, ok.detail)
 }
 
+/**
+ * The must-read gate: the production prompt stages the writing standard and
+ * the terminology list as files and tells the model to apply them, so the
+ * transcript has to show each one opened (Read, or the allowed `cat`) before
+ * the first inline comment. Graded from tool calls, never from what the
+ * suggestion text claims. production.checkMustRead holds the rule; this
+ * records its verdict as a check row and keeps the per-file evidence.
+ */
+function checkStandardsRead (checks, model) {
+  // A run with no transcript never gets here: a CLI that printed no
+  // stream-json is a harness error in production.runReview.
+  const verdict = model.mustRead
+  return checks.add('must-read: standards opened before the first inline comment', verdict.pass, verdict.detail)
+}
+
 function harnessError (checks, message) {
   checks.add('harness precondition', false, message)
   return { status: 'HARNESS_ERROR', checks: checks.rows, model: null }
@@ -573,6 +604,11 @@ function finish (status, checks, model) {
   return { status, checks: checks.rows, model }
 }
 
+// The case kinds that run the production review and so carry the must-read
+// check. The upstream and negative-audit kinds use prompts.js templates with
+// no tools, so there is no transcript to grade.
+const PRODUCTION_KINDS = ['rewrite', 'prose-review', 'negative-review']
+
 const EXECUTORS = {
   rewrite: runRewriteCase,
   upstream: runUpstreamCase,
@@ -585,25 +621,71 @@ const EXECUTORS = {
 // Driver
 // ---------------------------------------------------------------------------
 
+const USAGE = 'Usage: node evals/doc-strings/run-evals.js [--case <id>[,<id>]] [--sabotage <negative-case-id>] [--sabotage-must-read <review-case-id>] [--model <model>] [--keep-temp]'
+
+/**
+ * Parse the command line. Throws an Error whose message is the reason on any
+ * usage mistake, so a flag that lost its value or a combination that would
+ * be silently ignored stops the run instead of running something else.
+ */
 function parseArgs (argv) {
-  const options = { cases: null, sabotage: null, model: null, keepTemp: false }
+  const options = { cases: null, sabotage: null, sabotageMustRead: null, model: null, keepTemp: false }
+  const value = (i, flag) => {
+    const v = argv[i + 1]
+    if (v === undefined || v.startsWith('--')) throw new Error(`${flag} needs a value`)
+    return v
+  }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
-    if (arg === '--case') options.cases = (options.cases || []).concat(argv[++i].split(','))
-    else if (arg === '--sabotage') options.sabotage = argv[++i]
-    else if (arg === '--model') options.model = argv[++i]
+    if (arg === '--case') options.cases = (options.cases || []).concat(value(i++, arg).split(','))
+    else if (arg === '--sabotage') options.sabotage = value(i++, arg)
+    else if (arg === '--sabotage-must-read') options.sabotageMustRead = value(i++, arg)
+    else if (arg === '--model') options.model = value(i++, arg)
     else if (arg === '--keep-temp') options.keepTemp = true
-    else {
-      console.error(`Unknown argument: ${arg}`)
-      console.error('Usage: node evals/doc-strings/run-evals.js [--case <id>[,<id>]] [--sabotage <negative-case-id>] [--model <model>] [--keep-temp]')
-      process.exit(2)
-    }
+    else throw new Error(`Unknown argument: ${arg}`)
+  }
+  if (options.sabotage && options.sabotageMustRead) {
+    throw new Error('--sabotage and --sabotage-must-read are exclusive: each proves one assertion at a time')
+  }
+  if (options.cases && (options.sabotage || options.sabotageMustRead)) {
+    throw new Error('--case cannot be combined with --sabotage or --sabotage-must-read: each sabotage names its one case')
   }
   return options
 }
 
+/**
+ * The must-read sabotage verdict from its two runs: the baseline on the
+ * unmodified prompt and the stripped run. PROVEN only when the baseline
+ * passes the must-read row and the stripped run fails it, so the failure is
+ * caused by the stripping and not by a case (or a check) that fails anyway.
+ */
+function mustReadSabotageVerdict (summary) {
+  const rowOf = (r) => r && r.checks.find((c) => c.check.startsWith('must-read:'))
+  const base = summary.find((r) => r.baseline)
+  const sab = summary.find((r) => r.sabotage_must_read)
+  const baseRow = rowOf(base)
+  const sabRow = rowOf(sab)
+  if (!baseRow || !sabRow) {
+    return { proven: false, message: 'MUST-READ SABOTAGE NOT PROVEN: a run produced no must-read row; fix the harness.' }
+  }
+  if (!baseRow.pass) {
+    return { proven: false, message: `MUST-READ SABOTAGE NOT PROVEN: the baseline run on the unmodified prompt already fails the must-read row (${baseRow.detail.split(';')[0]}), so a failure with the instructions stripped proves nothing. Pick a case whose baseline passes.` }
+  }
+  if (sabRow.pass) {
+    return { proven: false, message: 'MUST-READ SABOTAGE NOT PROVEN: with the standards instructions stripped the must-read check still passed. The model opened the standards without being told to, or the check is not reading the transcript.' }
+  }
+  return { proven: true, message: `MUST-READ SABOTAGE PROVEN: the baseline passed the must-read row and, with the standards instructions stripped, it FAILED (${sabRow.detail.split(';')[0]}), so a review that never opens the staged standard cannot pass.` }
+}
+
 function main () {
-  const options = parseArgs(process.argv.slice(2))
+  let options
+  try {
+    options = parseArgs(process.argv.slice(2))
+  } catch (err) {
+    console.error(err.message)
+    console.error(USAGE)
+    process.exit(2)
+  }
   const startedAt = Date.now()
 
   if (!lib.claudeAvailable()) {
@@ -620,6 +702,12 @@ function main () {
       console.error(`--sabotage requires the id of a case with sabotageEdits. Available: ${CASES.filter((c) => Array.isArray(c.sabotageEdits)).map((c) => c.id).join(', ')}`)
       process.exit(2)
     }
+  } else if (options.sabotageMustRead) {
+    selected = CASES.filter((c) => c.id === options.sabotageMustRead)
+    if (selected.length === 0 || !PRODUCTION_KINDS.includes(selected[0].kind)) {
+      console.error(`--sabotage-must-read requires the id of a case that runs the production review. Available: ${CASES.filter((c) => PRODUCTION_KINDS.includes(c.kind)).map((c) => c.id).join(', ')}`)
+      process.exit(2)
+    }
   } else if (options.cases) {
     selected = CASES.filter((c) => options.cases.includes(c.id))
     const missing = options.cases.filter((id) => !CASES.some((c) => c.id === id))
@@ -630,12 +718,21 @@ function main () {
   }
 
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-  const resultsRoot = path.join(__dirname, 'results', options.sabotage ? `${stamp}-sabotage` : stamp)
+  const suffix = options.sabotage ? '-sabotage' : options.sabotageMustRead ? '-sabotage-must-read' : ''
+  const resultsRoot = path.join(__dirname, 'results', `${stamp}${suffix}`)
   fs.mkdirSync(resultsRoot, { recursive: true })
 
+  // The must-read sabotage runs its case twice: first on the unmodified
+  // prompt (the baseline, which must PASS the must-read row), then stripped
+  // (which must FAIL it). A row that fails both ways proves nothing: the case
+  // already fails it, or the check always fails.
+  const runs = options.sabotageMustRead
+    ? [{ spec: selected[0], strip: false, baseline: true }, { spec: selected[0], strip: true, baseline: false }]
+    : selected.map((spec) => ({ spec, strip: false, baseline: false }))
+
   const summary = []
-  for (const spec of selected) {
-    const caseDir = path.join(resultsRoot, spec.id)
+  for (const { spec, strip, baseline } of runs) {
+    const caseDir = path.join(resultsRoot, baseline ? `${spec.id}-baseline` : spec.id)
     fs.mkdirSync(caseDir, { recursive: true })
     const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-strings-eval-cwd-'))
 
@@ -652,13 +749,20 @@ function main () {
       callProduction ({ repo, lint, diff }) {
         let result
         try {
-          result = production.runReview({ repoDir: repo.dir, lint, diff, model: options.model || production.PRODUCTION_MODEL })
+          result = production.runReview({
+            repoDir: repo.dir, lint, diff, model: options.model || production.PRODUCTION_MODEL, withoutStandards: strip
+          })
         } catch (err) {
-          return { failed: true, harness: true, timedOut: false, status: 'harness', stderr: err.message, ms: 0, comments: [], files: {}, output: '' }
+          return { failed: true, harness: true, timedOut: false, status: 'harness', stderr: err.message, ms: 0, comments: [], files: {}, output: '', calls: [], mustRead: null }
         }
         fs.writeFileSync(path.join(caseDir, 'prompt.txt'), result.prompt)
         fs.writeFileSync(path.join(caseDir, 'model-output.txt'), result.output)
         fs.writeFileSync(path.join(caseDir, 'transcript.txt'), result.transcript)
+        // The whole stream, and the tool calls pulled out of it: this is the
+        // evidence the must-read check is graded from.
+        fs.writeFileSync(path.join(caseDir, 'transcript.jsonl'), result.stream)
+        fs.writeFileSync(path.join(caseDir, 'tool-calls.json'), JSON.stringify(result.calls.map((c) => ({ index: c.index, name: c.name, input: c.input, answered: c.answered, error: c.error, subagent: c.subagent, output_chars: c.output.length })), null, 2))
+        fs.writeFileSync(path.join(caseDir, 'must-read.json'), JSON.stringify(result.mustRead, null, 2))
         fs.writeFileSync(path.join(caseDir, 'inline-comments.json'), JSON.stringify(result.comments, null, 2))
         for (const [name, text] of Object.entries(result.files)) fs.writeFileSync(path.join(caseDir, name), text)
         if (result.stderr) fs.writeFileSync(path.join(caseDir, 'model-stderr.txt'), result.stderr)
@@ -672,7 +776,8 @@ function main () {
       }
     }
 
-    process.stdout.write(`\n=== ${spec.id}${options.sabotage ? ' [SABOTAGE]' : ''} ===\n    ${spec.description}\n`)
+    const label = options.sabotage ? ' [SABOTAGE]' : strip ? ' [SABOTAGE: standards instructions stripped]' : baseline ? ' [BASELINE: unmodified prompt]' : ''
+    process.stdout.write(`\n=== ${spec.id}${label} ===\n    ${spec.description}\n`)
     let result
     try {
       result = EXECUTORS[spec.kind](spec, io, Boolean(options.sabotage))
@@ -691,9 +796,14 @@ function main () {
       id: spec.id,
       kind: spec.kind,
       sabotage: Boolean(options.sabotage),
+      sabotage_must_read: strip,
+      baseline,
       status: result.status,
       model_ms: ms,
-      checks: result.checks
+      checks: result.checks,
+      must_read: result.model && result.model.mustRead
+        ? { pass: result.model.mustRead.pass, first_comment_index: result.model.mustRead.first_comment_index, files: result.model.mustRead.files }
+        : null
     }
     summary.push(record)
     fs.writeFileSync(path.join(caseDir, 'evidence.json'), JSON.stringify(record, null, 2))
@@ -703,6 +813,7 @@ function main () {
   fs.writeFileSync(path.join(resultsRoot, 'summary.json'), JSON.stringify({
     model: options.model || `production default (${production.PRODUCTION_MODEL} for review cases)`,
     sabotage: options.sabotage,
+    sabotage_must_read: options.sabotageMustRead,
     wall_ms: wallMs,
     cases: summary
   }, null, 2))
@@ -713,6 +824,15 @@ function main () {
   process.stdout.write(`Total wall time: ${(wallMs / 1000).toFixed(1)}s. Results: ${path.relative(process.cwd(), resultsRoot)}\n`)
 
   const harnessErrors = summary.filter((c) => c.status === 'HARNESS_ERROR')
+  if (options.sabotageMustRead) {
+    if (harnessErrors.length) {
+      process.stdout.write('MUST-READ SABOTAGE NOT RUN: the harness failed before the review ran, so this\nproves nothing. Fix the environment and re-run.\n')
+      process.exit(2)
+    }
+    const verdict = mustReadSabotageVerdict(summary)
+    process.stdout.write(verdict.message + '\n')
+    process.exit(verdict.proven ? 0 : 1)
+  }
   if (options.sabotage) {
     if (harnessErrors.length) {
       process.stdout.write('SABOTAGE NOT RUN: the harness failed before the review ran, so this proves\nnothing. Fix the environment and re-run.\n')
@@ -738,4 +858,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { EXECUTORS, modelCallFailed, harnessError, makeChecks }
+module.exports = { EXECUTORS, modelCallFailed, harnessError, makeChecks, parseArgs, mustReadSabotageVerdict }
