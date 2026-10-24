@@ -33,6 +33,14 @@ name: Check page metadata
 # `findings`. Suggestions never fail the job, strict or not. A
 # doc_tools_version from before suggestions carried their line puts every
 # notice on line 1.
+#
+# With recommendations (the default), it also runs `doc-tools
+# recommendations-diff`: which solution recommendations the changed pages'
+# categories, or a changed solution overview's facets, add, remove, or
+# rerank, scored by the solutions-catalog extension's own code against the
+# doc-concepts.json a published build wrote. No site build and no model. It
+# is informational and never fails the job; when the published data cannot
+# be read (no Solutions build at the origin yet), it is skipped with a notice.
 
 on:
   workflow_call:
@@ -61,6 +69,22 @@ on:
           taxonomy.yml path (in the caller's checkout) or URL. Empty uses the
           checkout's shared/modules/ROOT/attachments/taxonomy.yml when there is
           one, else the published file.
+        type: string
+        default: ''
+      recommendations:
+        description: >-
+          Also report the solution recommendations the PR adds, removes, or
+          reranks (`doc-tools recommendations-diff`), in the job summary.
+          Never fails the job. Needs a doc_tools_version that ships
+          recommendations-diff; an earlier one is skipped with a notice.
+        type: boolean
+        default: true
+      recommendations_origin:
+        description: >-
+          Site to read assets/data/doc-concepts.json (and the taxonomy, when
+          the checkout has none) from, for example a deploy preview while
+          Solutions are not on docs.redpanda.com. Empty uses
+          https://docs.redpanda.com.
         type: string
         default: ''
       suggest:
@@ -175,10 +199,41 @@ jobs:
           ' "$R" >> "$GITHUB_STEP_SUMMARY"
           jq -r '"check-metadata: \(.suggest.suggestions | length) suggestion(s) for \(.suggest.suggestions | map(.file) | unique | length) page(s)"' "$R"
 
+      # Informational only: always exits 0. The CLI writes its own summary
+      # section; a run that could not compare anything says why in a notice.
+      - name: Report recommendation changes
+        if: always() && inputs.recommendations
+        env:
+          BASE: origin/${{ github.base_ref }}
+          DOC_TOOLS_VERSION: ${{ inputs.doc_tools_version }}
+          ORIGIN: ${{ inputs.recommendations_origin }}
+          TAXONOMY: ${{ inputs.taxonomy }}
+        run: |
+          set -uo pipefail
+          args=(recommendations-diff --changed "$BASE" --output recommendations-diff.json --summary "$GITHUB_STEP_SUMMARY")
+          if [ -n "$ORIGIN" ]; then args+=(--origin "$ORIGIN"); fi
+          if [ -n "$TAXONOMY" ]; then args+=(--taxonomy "$TAXONOMY"); fi
+          rc=0
+          npx --yes --package "@redpanda-data/docs-extensions-and-macros@${DOC_TOOLS_VERSION}" \
+            doc-tools "${args[@]}" > recommendations-diff.txt 2>&1 || rc=$?
+          cat recommendations-diff.txt
+          if [ -s recommendations-diff.json ] && jq -e '.status | type == "string"' recommendations-diff.json > /dev/null 2>&1; then
+            if [ "$(jq -r .status recommendations-diff.json)" != ok ]; then
+              echo "::notice title=recommendations-diff::Recommendations not checked: $(jq -r '.reason // "unknown reason"' recommendations-diff.json)"
+            fi
+          elif grep -q "unknown command 'recommendations-diff'" recommendations-diff.txt; then
+            echo "::notice title=recommendations-diff::doc-tools ${DOC_TOOLS_VERSION} has no recommendations-diff; recommendations are not checked until doc_tools_version names a release that ships it"
+          else
+            echo "::notice title=recommendations-diff::doc-tools recommendations-diff could not run (exit ${rc}); see the step log"
+          fi
+          exit 0
+
       - name: Upload the result
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: check-metadata
-          path: check-metadata.json
+          path: |
+            check-metadata.json
+            recommendations-diff.json
           if-no-files-found: ignore
