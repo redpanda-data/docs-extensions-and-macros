@@ -30,11 +30,9 @@ function capToTwoSentences (description) {
   }
 
   const abbreviations = [
-    /https?:\/\/[^\s]+?(?=[.!?](?:\s|$)|\s|$)/gi,  // Protect URLs from being split by sentence detection (non-greedy, preserve trailing punctuation)
-    /\bxref:[^\s[\]]+\[[^\]]*\]/g,  // Protect Antora xref macros (e.g. xref:components:processors/try.adoc[`try`]) whose targets contain periods
-    /\b[\w/-]+\.(?:adoc|md|ya?ml|json|html)\b/gi,  // Protect bare doc/config filenames (try.adoc, config.yaml) from splitting
-    /\bv\d+\.\d+(?:\.\d+)?/gi,
-    /\d+\.\d+/g,
+    // A period inside a token (a URL, an xref target, a filename, a version
+    // or a decimal) has no whitespace after it, so it never ends a sentence.
+    // Only abbreviations that are followed by a space need protecting.
     /\be\.g\./gi,
     /\bi\.e\./gi,
     /\betc\./gi,
@@ -46,6 +44,21 @@ function capToTwoSentences (description) {
     /\bSt\./gi,
     /\bNo\./gi
   ]
+
+  // A table cell takes one paragraph of plain text. Keep only the text before
+  // the first blank line or list item, so a description such as
+  // "Controls how X is sized:\n\n- `a`: ...\n- `b`: ..." does not leak half a
+  // list into the cell. A lead-in that ends with a colon is left unterminated
+  // so the sentence match below drops it whenever a complete sentence comes
+  // before it ("Configure TCP settings. These controls are useful for:" keeps
+  // only the first sentence). Only a lead-in with nothing before it is kept,
+  // with the colon turned into a period.
+  let colonLeadIn = false
+  const firstBlock = description.split(/\n\s*\n|\n(?=\s*(?:[-*]|\d+\.)\s)/)[0].trim()
+  if (firstBlock && firstBlock !== description.trim() && !/^(?:[=#]|```|----)/.test(firstBlock)) {
+    description = firstBlock
+    colonLeadIn = firstBlock.endsWith(':')
+  }
 
   let normalized = description
   const placeholders = []
@@ -64,25 +77,19 @@ function capToTwoSentences (description) {
     return placeholder
   })
 
-  const sentenceRegex = /[^.!?]+[.!?]+(?:\s|$)/g
-  const sentences = normalized.match(sentenceRegex)
-
-  // If an unprotected mid-token period prevented the leading text from
-  // forming a complete match, merge that dropped prefix into the first
-  // sentence rather than silently discarding it.
-  if (sentences && sentences.length > 0) {
-    const firstIndex = normalized.indexOf(sentences[0])
-    if (firstIndex > 0) {
-      sentences[0] = normalized.slice(0, firstIndex) + sentences[0]
-    }
-  }
+  // A sentence ends at punctuation, optionally followed by a closing quote,
+  // parenthesis or bracket, then whitespace or the end of the text. Matching
+  // lazily up to that boundary keeps a period inside a token, such as the
+  // dotted name partition.assignment.strategy, in its sentence. Text after the
+  // last match (an unterminated colon lead-in, for example) is dropped.
+  const sentences = normalized.match(/[\s\S]+?[.!?]+["')\]`]*(?:\s|$)/g)
 
   if (!sentences || sentences.length === 0) {
     let result = normalized
     placeholders.forEach(({ placeholder, original }) => {
       result = result.replace(placeholder, original)
     })
-    return result
+    return colonLeadIn ? result.replace(/:$/, '.') : result
   }
 
   let maxSentences = 2
@@ -592,7 +599,7 @@ function buildFieldsTable (fields, capFn, opts = {}) {
     if (!byField[key]) {
       byField[key] = {
         field: field.field,
-        description: field.description,
+        description: field.shortDescription || field.description,
         introducedIn: field.introducedIn,
         components: []
       }
@@ -626,7 +633,8 @@ function buildFieldsTable (fields, capFn, opts = {}) {
       })
     }
 
-    const desc = info.description ? capFn(info.description) : '// TODO: Add description'
+    // A | in the description would end the cell and shift the row.
+    const desc = info.description ? capFn(info.description).replace(/\|/g, '\\|') : '// TODO: Add description'
 
     section += `|${fieldName}\n`
     section += `|${desc}\n`
@@ -655,7 +663,7 @@ function buildChangedDefaultsTable (changedDefaults, capFn) {
         field: change.field,
         oldDefault: change.oldDefault,
         newDefault: change.newDefault,
-        description: change.description,
+        description: change.shortDescription || change.description,
         components: []
       }
     }
@@ -667,16 +675,25 @@ function buildChangedDefaultsTable (changedDefaults, capFn) {
   section += '|Field |Old default |New default |Description |Affected components\n\n'
 
   for (const [, info] of Object.entries(byFieldAndDefaults)) {
+    // Values render as literal inline code, so interpolations like
+    // ${!uuid_v4()} and characters like * or _ show as typed.
+    // Values render as literal inline code through pass:c, which, unlike
+    // `+...+`, also keeps values with ++ or with spaces at either end. Strings
+    // that are empty, start or end with whitespace, or contain a newline show
+    // as JSON, so " " and "\n" read as the values they are.
     const formatDefault = (val) => {
       if (val === undefined || val === null) return 'none'
-      if (typeof val === 'string') return val
-      if (typeof val === 'number' || typeof val === 'boolean') return String(val)
-      return JSON.stringify(val)
+      let text
+      if (typeof val === 'string') text = (val === '' || /^\s|\s$|\n/.test(val)) ? JSON.stringify(val) : val
+      else if (typeof val === 'number' || typeof val === 'boolean') text = String(val)
+      else text = JSON.stringify(val)
+      return `\`pass:c[${text.replace(/\]/g, '\\]').replace(/\|/g, '\\|')}]\``
     }
 
     const oldVal = formatDefault(info.oldDefault)
     const newVal = formatDefault(info.newDefault)
-    const desc = info.description ? capFn(info.description) : '// TODO: Add description'
+    // A | in the description would end the cell and shift the row.
+    const desc = info.description ? capFn(info.description).replace(/\|/g, '\\|') : '// TODO: Add description'
 
     const byType = {}
     for (const comp of info.components) {

@@ -426,7 +426,10 @@ function wrapDescriptionPassthrough(str) {
   if (!str) return ''
   // Check if contains backticks (inline code) or other formatting markers
   if (/`/.test(str)) {
-    return `pass:q[${str}]`
+    // pass:q[] skips special-character substitution, so a placeholder such as
+    // <agent> would reach the HTML raw and be dropped as an unknown tag.
+    const escaped = str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    return `pass:q[${escaped}]`
   }
   return str
 }

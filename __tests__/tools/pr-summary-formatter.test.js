@@ -645,6 +645,24 @@ describe('Multi-Version PR Summary', () => {
     });
   });
 
+  describe('Deprecated field descriptions', () => {
+    it('uses the same short description in the per-release list and the action item', () => {
+      const release = createRelease('4.50.0', '4.51.0', [], { deprecatedFields: 1 });
+      release.details.deprecatedFields = [{
+        component: 'inputs:kafka_franz',
+        field: 'regexp_topics',
+        description: 'Whether listed topics are interpreted as regular expressions. This field is deprecated in favor of a longer explanation.',
+        shortDescription: 'Use the include patterns field instead.'
+      }];
+
+      const summary = generateMultiVersionPRSummary(createMasterDiff([release]));
+
+      expect(summary).toContain('`inputs:kafka_franz.regexp_topics` — Use the include patterns field instead.');
+      expect(summary).toContain('`inputs:kafka_franz.regexp_topics` (Use the include patterns field instead.)');
+      expect(summary).not.toContain('Whether listed topics');
+    });
+  });
+
   describe('Auto-detection', () => {
     it('should auto-detect multi-version format in generatePRSummary', () => {
       const masterDiff = createMasterDiff([

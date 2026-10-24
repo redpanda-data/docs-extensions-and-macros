@@ -136,4 +136,13 @@ describe('doc-strings evals: the suggestion comment must target the declaration'
     expect(logged).toEqual([{ path: 'a.cc', body: 'y', line: 3 }])
     fs.rmSync(dir, { recursive: true, force: true })
   })
+
+  test('a production review that never ran is a harness error, never a model failure', () => {
+    const runEvals = require('../../evals/doc-strings/run-evals')
+    const checks = runEvals.makeChecks()
+    const harness = runEvals.modelCallFailed(checks, { failed: true, harness: true, stderr: 'could not fetch terminology.md' })
+    expect(harness.status).toBe('HARNESS_ERROR')
+    const model = runEvals.modelCallFailed(runEvals.makeChecks(), { failed: true, timedOut: false, status: 1, stderr: 'boom' })
+    expect(model.status).toBe('FAIL')
+  })
 })

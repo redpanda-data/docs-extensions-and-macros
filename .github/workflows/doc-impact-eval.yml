@@ -1,0 +1,230 @@
+name: doc-impact eval
+
+# Advisory score for changes to the PUBLISHED-CONTENT IMPACT pass of
+# doc-strings-review.yml. Runs `run-evals.js --doc-impact` in replay mode on
+# the committed items twice, once with the prompt under test and once with
+# the base branch's prompt, and writes the per-metric delta to the job
+# summary. It posts nothing to the PR.
+#
+# Both runs use this checkout's harness, items and recordings. Only the
+# workflow file the prompt, tools and dispatch gate are cut from differs
+# (--workflow), so the delta measures the prompt change and nothing else.
+# On a pull_request the checkout is the merge ref, so the head side is this
+# PR applied to the current base and the base side is the base branch tip.
+#
+# Advisory: a lower score never fails the check. The check fails only when
+# the numbers cannot be trusted as a whole: the head run produced no
+# summary (the harness could not start), or an item on either side ended in
+# HARNESS_ERROR or MODEL_ERROR (for example, the gateway refused the model).
+# REPLAY_INCOMPLETE items are a warning: the model asked the docs server
+# something the recordings do not answer, and the fix is to re-record.
+# See the "Doc-impact assessment" section of evals/doc-strings/README.adoc.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - '.github/workflows/doc-strings-review.yml'
+      - '.github/workflows/doc-impact-eval.yml'
+      - 'evals/doc-strings/doc-impact/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: doc-impact-eval-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The model the engineering repositories' callers pin for the review
+  # (gateway_model in their doc-strings-review.yml shims). Keep in step.
+  MODEL: us.anthropic.claude-opus-5
+  # Pinned so the eval does not change under a CLI release.
+  CLAUDE_CODE_VERSION: 2.1.292
+
+jobs:
+  fork-notice:
+    name: Skipped on forks
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain the skip
+        run: |
+          msg="The doc-impact eval needs the model gateway credential, which a pull request from a fork does not get. A maintainer can run it with workflow_dispatch on a branch in this repository."
+          echo "::notice::$msg"
+          printf '## Doc-impact eval (advisory)\n\n%s\n' "$msg" >> "$GITHUB_STEP_SUMMARY"
+
+  eval:
+    name: Replay (${{ matrix.side }})
+    # A fork gets no secrets and no OIDC role, so the credential steps could
+    # not run. fork-notice says so instead of leaving a red check.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      # OIDC: assume this repository's AWS role to read the ADP credential.
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        side: [head, base]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check out the base branch's review workflow
+        if: matrix.side == 'base'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha || 'main' }}
+          path: base-ref
+          persist-credentials: false
+          sparse-checkout: .github/workflows/doc-strings-review.yml
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies and the claude CLI
+        run: |
+          npm ci
+          npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+          claude --version
+
+      # Credentials come last, after everything that installs or runs
+      # package scripts, and only the minted gateway token reaches the eval.
+      - name: Assume the AWS role
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ vars.RP_AWS_CRED_REGION }}
+          role-to-assume: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
+
+      # The doc-strings-review agent's own credential, the one the review
+      # itself uses, so eval spend attributes to the same agent.
+      - name: Fetch the ADP client credential
+        uses: aws-actions/aws-secretsmanager-get-secrets@v3
+        with:
+          secret-ids: |
+            ,sdlc/prod/github/docs_doc_strings_client
+          parse-json-secrets: true
+
+      # Same contract as the review workflow's mint step: the secret rides
+      # stdin, no audience for an agent credential, https only. The token is
+      # written to a private file, not GITHUB_ENV, so only the eval step reads it.
+      - name: Mint the ADP gateway token
+        env:
+          TOKEN_URL: https://aigw.d6kjl4h19241bg3ek3h0.clusters.rdpa.co/oauth/idp/token
+        run: |
+          set -euo pipefail
+          client_id="${DOCS_DOC_STRINGS_CLIENT_ID:-}"
+          client_secret="${DOCS_DOC_STRINGS_CLIENT_SECRET:-}"
+          if [ -z "$client_id" ] || [ -z "$client_secret" ]; then
+            echo "::error::ADP client credential missing (DOCS_DOC_STRINGS_CLIENT_ID, DOCS_DOC_STRINGS_CLIENT_SECRET)."
+            exit 1
+          fi
+          status=$(printf '%s' "$client_secret" | curl -sS --request POST \
+            --connect-timeout 10 --max-time 30 \
+            --retry 3 --retry-all-errors --retry-delay 2 \
+            --output "$RUNNER_TEMP/adp_token.json" --write-out '%{http_code}' \
+            --url "$TOKEN_URL" \
+            --header 'content-type: application/x-www-form-urlencoded' \
+            --data grant_type=client_credentials \
+            --data-urlencode client_id="$client_id" \
+            --data-urlencode client_secret@-) || status=000
+          token=$(jq -r '.access_token // empty' "$RUNNER_TEMP/adp_token.json" 2>/dev/null || true)
+          rm -f "$RUNNER_TEMP/adp_token.json"
+          if [ -z "$token" ]; then
+            echo "::error::failed to mint the ADP gateway token (HTTP $status)."
+            exit 1
+          fi
+          case "$token" in *[[:space:][:cntrl:]]*)
+            echo "::error::minted token contains whitespace or control characters."
+            exit 1 ;;
+          esac
+          echo "::add-mask::$token"
+          umask 077
+          printf '%s' "$token" > "$RUNNER_TEMP/gateway-token"
+
+      - name: Drop the long-lived credentials
+        run: |
+          for v in DOCS_DOC_STRINGS_CLIENT_ID DOCS_DOC_STRINGS_CLIENT_SECRET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_DEFAULT_REGION AWS_REGION; do
+            echo "$v=" >> "$GITHUB_ENV"
+          done
+
+      - name: Run the replay
+        env:
+          SIDE: ${{ matrix.side }}
+          CLAUDE_CODE_USE_BEDROCK: '1'
+          CLAUDE_CODE_SKIP_BEDROCK_AUTH: '1'
+          ANTHROPIC_BEDROCK_BASE_URL: https://aigw.d6kjl4h19241bg3ek3h0.clusters.rdpa.co/llm/v1/providers/claude-code-provider-adp
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: us.anthropic.claude-haiku-4-5-20251001-v1:0
+          # Required by Claude Code in Bedrock mode; the gateway ignores it.
+          AWS_REGION: us-west-2
+        run: |
+          set -uo pipefail
+          AWS_BEARER_TOKEN_BEDROCK=$(cat "$RUNNER_TEMP/gateway-token")
+          export AWS_BEARER_TOKEN_BEDROCK
+          rm -f "$RUNNER_TEMP/gateway-token"
+          mkdir -p out
+          args=(--doc-impact --include-unconfirmed --model "$MODEL" --json)
+          if [ "$SIDE" = base ]; then
+            args+=(--workflow base-ref/.github/workflows/doc-strings-review.yml)
+          fi
+          rc=0
+          node evals/doc-strings/run-evals.js "${args[@]}" > out/summary.json 2> >(tee out/run.log >&2) || rc=$?
+          echo "$rc" > out/exit-code
+          echo "run-evals exited $rc (0 complete, 2 some items unscored, 3 no claude CLI)"
+
+      - name: Upload the run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: doc-impact-${{ matrix.side }}
+          path: |
+            out/
+            evals/doc-strings/results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  compare:
+    name: Score delta
+    needs: eval
+    if: always() && needs.eval.result != 'skipped'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: evals/doc-strings/doc-impact
+
+      # A side whose credential steps failed uploads nothing; compare.js
+      # reports the missing summary.
+      - name: Download the runs
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          path: runs
+          pattern: doc-impact-*
+
+      - name: Write the delta to the job summary
+        env:
+          HEAD_LABEL: ${{ github.event_name == 'pull_request' && format('this PR ({0})', github.event.pull_request.head.sha) || github.ref_name }}
+          BASE_LABEL: ${{ format('{0} ({1})', github.event.pull_request.base.ref || 'main', github.event.pull_request.base.sha || 'tip') }}
+        run: |
+          set -uo pipefail
+          rc=0
+          node evals/doc-strings/doc-impact/compare.js \
+            --head runs/doc-impact-head/out/summary.json \
+            --base runs/doc-impact-base/out/summary.json \
+            --head-label "$HEAD_LABEL" --base-label "$BASE_LABEL" \
+            > delta.md || rc=$?
+          cat delta.md >> "$GITHUB_STEP_SUMMARY"
+          cat delta.md
+          exit "$rc"

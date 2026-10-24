@@ -113,7 +113,9 @@ function fetchStandards () {
 function runReview ({ repoDir, lint, diff, model = PRODUCTION_MODEL, committableSuggestions = true, timeoutMs = 600000 }) {
   const step = loadStep()
   const args = parseClaudeArgs(step.with.claude_args || '')
-  const prompt = renderPrompt(step.with.prompt, { repository: 'redpanda-data/redpanda', prNumber: 1, committableSuggestions })
+  // A repository that doesn't exist, so a model that looks the PR up with
+  // `gh pr view` gets an error rather than a real, unrelated PR.
+  const prompt = renderPrompt(step.with.prompt, { repository: 'example-org/doc-strings-eval-fixture', prNumber: 1, committableSuggestions })
 
   fs.writeFileSync(path.join(repoDir, 'lint-findings.json'), JSON.stringify(lint, null, 2))
   if (diff != null) {
@@ -135,6 +137,11 @@ function runReview ({ repoDir, lint, diff, model = PRODUCTION_MODEL, committable
 
   const cli = [
     '-p', '--output-format', 'text', '--model', model,
+    // Load only the fixture repo's settings. The Actions runner has no user
+    // settings, so a developer's own CLAUDE.md, plugins, and skills (such as
+    // docs-team-standards, which ships the same standards) must not reach the
+    // review here either.
+    '--setting-sources', 'project',
     '--strict-mcp-config', '--mcp-config', mcpPath,
     '--allowed-tools', args.allowed.join(','),
     '--disallowed-tools', args.disallowed.join(',')

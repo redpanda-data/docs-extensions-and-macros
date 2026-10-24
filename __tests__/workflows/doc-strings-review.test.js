@@ -548,6 +548,121 @@ describe('doc-strings-review workflow: source diff (executed)', () => {
   })
 })
 
+describe('doc-strings-review workflow: diff base (executed)', () => {
+  // The checkout is refs/pull/N/merge, GitHub's merge of the PR into the base
+  // branch as it is now. pull_request.base.sha is the base as of the event,
+  // so once the base branch moves on, base.sha..HEAD also carries the other
+  // PRs that arrived through the merge. This repo reproduces that shape: the
+  // PR branches from `stale`, main then gains another PR's commit, and HEAD
+  // is the merge of the PR into the new main tip.
+  const step = stepNamed('Resolve the diff base')
+  let root
+  let repo
+  let stale
+  let tip
+  const gitIn = (cwd, ...args) => {
+    const r = spawnSync('git', args, { cwd, encoding: 'utf8' })
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`)
+    return r.stdout.trim()
+  }
+  const write = (dir, file, body) => {
+    fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true })
+    fs.writeFileSync(path.join(dir, file), body)
+  }
+  const run = (cwd, env) => {
+    const out = path.join(root, `out-${Math.random().toString(16).slice(2)}`)
+    fs.writeFileSync(out, '')
+    const r = spawnSync('/bin/bash', ['-e', '-c', step.run], {
+      cwd,
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, HOME: root, GITHUB_OUTPUT: out, REF: '', PR_BASE_SHA: '', DEFAULT_BRANCH: '', ...env }
+    })
+    const outputs = Object.fromEntries(fs.readFileSync(out, 'utf8').split('\n').filter(Boolean).map((l) => l.split('=')))
+    return { ...r, outputs }
+  }
+  const changed = (cwd, base) => gitIn(cwd, 'diff', '--name-only', `${base}...HEAD`).split('\n').filter(Boolean).sort()
+
+  beforeAll(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-base-'))
+    repo = path.join(root, 'repo')
+    fs.mkdirSync(repo)
+    const git = (...args) => gitIn(repo, ...args)
+    git('init', '--quiet', '-b', 'main')
+    git('config', 'user.email', 'dsr-test@example.invalid')
+    git('config', 'user.name', 'dsr test')
+    write(repo, 'src/v/config/a.cc', 'a("old")\n')
+    write(repo, 'src/v/config/b.cc', 'b("old")\n')
+    git('add', '.')
+    git('commit', '--quiet', '-m', 'base')
+    stale = git('rev-parse', 'HEAD')
+    git('checkout', '--quiet', '-b', 'pr')
+    write(repo, 'src/v/config/a.cc', 'a("this PR")\n')
+    git('commit', '--quiet', '-am', 'this PR')
+    git('checkout', '--quiet', 'main')
+    write(repo, 'src/v/config/b.cc', 'b("another PR")\n')
+    git('commit', '--quiet', '-am', 'another PR')
+    tip = git('rev-parse', 'HEAD')
+    git('checkout', '--quiet', '-b', 'merge')
+    git('merge', '--quiet', '--no-ff', '--no-edit', 'pr')
+  })
+
+  afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
+
+  test('a merge checkout diffs against the first parent, not the stale base.sha', () => {
+    const r = run(repo, { REF: 'refs/pull/7/merge', PR_BASE_SHA: stale })
+    expect(r.status).toBe(0)
+    expect(r.outputs.base).toBe(tip)
+    expect(changed(repo, r.outputs.base)).toEqual(['src/v/config/a.cc'])
+    // Negative control: the old base attributes the other PR's file to this one.
+    expect(changed(repo, stale)).toEqual(['src/v/config/a.cc', 'src/v/config/b.cc'])
+  })
+
+  test('a merge checkout without its parents fails loudly', () => {
+    const shallow = path.join(root, 'shallow')
+    gitIn(root, 'clone', '--quiet', '--depth', '1', '--branch', 'merge', `file://${repo}`, shallow)
+    const r = run(shallow, { REF: 'refs/pull/7/merge', PR_BASE_SHA: stale })
+    expect(r.status).not.toBe(0)
+    expect(r.stdout + r.stderr).toMatch(/::error::.*not a two-parent merge commit/)
+    expect(r.outputs.base).toBeUndefined()
+  })
+
+  test('a non-merge checkout falls back to the merge base with the PR base', () => {
+    const head = path.join(root, 'head')
+    gitIn(root, 'clone', '--quiet', '--branch', 'pr', `file://${repo}`, head)
+    const r = run(head, { REF: 'refs/heads/pr', PR_BASE_SHA: tip })
+    expect(r.status).toBe(0)
+    expect(r.outputs.base).toBe(stale)
+    expect(changed(head, r.outputs.base)).toEqual(['src/v/config/a.cc'])
+  })
+
+  test('with no PR it falls back to the default branch', () => {
+    const head = path.join(root, 'dispatch')
+    gitIn(root, 'clone', '--quiet', '--branch', 'pr', `file://${repo}`, head)
+    const r = run(head, { REF: 'refs/heads/pr', DEFAULT_BRANCH: 'main' })
+    expect(r.status).toBe(0)
+    expect(r.outputs.base).toBe(stale)
+  })
+
+  test('with nothing to diff against it fails rather than diffing against nothing', () => {
+    const r = run(repo, { REF: 'refs/heads/merge' })
+    expect(r.status).not.toBe(0)
+    expect(r.stdout + r.stderr).toMatch(/::error::No merge ref, PR base or default branch/)
+  })
+
+  test('every diff in the job takes its base from this step', () => {
+    const order = job.steps.map((s) => s.name)
+    expect(order.indexOf('Resolve the diff base')).toBeLessThan(order.indexOf('Lint doc strings in the diff'))
+    expect(stepNamed('Lint doc strings in the diff').env.BASE).toBe('${{ steps.diffbase.outputs.base }}')
+    expect(stepNamed('Save the source diff for the review').env.BASE).toBe('${{ steps.diffbase.outputs.base }}')
+    expect(stepNamed('Detect enterprise gating changes').env.BASE).toBe('${{ steps.diffbase.outputs.base }}')
+    const checkout = job.steps.find((s) => (s.uses || '').startsWith('actions/checkout@'))
+    expect(checkout.with['fetch-depth']).not.toBe(1)
+    // base.sha may still feed the fallback, but nothing else reads it.
+    const readers = job.steps.filter((s) => JSON.stringify(s).includes('pull_request.base.sha')).map((s) => s.name)
+    expect(readers).toEqual(['Resolve the diff base'])
+  })
+})
+
 describe('doc-strings-review workflow: writing-standard fetch (executed)', () => {
   const step = stepNamed('Fetch the writing standard')
   const STANDARD = 'embedded-reference-strings.md'
@@ -605,7 +720,7 @@ describe('doc-strings-review workflow: doc-impact dispatch (executed)', () => {
     '${{ github.event.pull_request.html_url }}': 'https://github.com/redpanda-data/redpanda/pull/7'
   }
   const GH_RECORDER = '#!/bin/bash\nprintf \'%s\\n\' "$@" >> "$HOME/gh-argv"\ncat > "$HOME/gh-stdin"\n'
-  const env = { GH_TOKEN: 'bot', DISPATCH_REPO: 'redpanda-data/docs-site' }
+  const env = { GH_TOKEN: 'bot', DISPATCH_REPO: 'redpanda-data/docs-site', REVIEW_OUTCOME: 'success' }
 
   const valid = {
     findings: [{
@@ -620,7 +735,7 @@ describe('doc-strings-review workflow: doc-impact dispatch (executed)', () => {
 
   function dispatch (docImpact, extraEnv = {}) {
     return execRun(step, {
-      env: { ...env, ...extraEnv },
+      env: { RUNNER_TEMP: fs.mkdtempSync(path.join(os.tmpdir(), 'runner-temp-')), ...env, ...extraEnv },
       expressions,
       stubs: { gh: GH_RECORDER },
       files: docImpact === null ? {} : { 'doc-impact.json': JSON.stringify(docImpact) }
@@ -686,6 +801,233 @@ describe('doc-strings-review workflow: doc-impact dispatch (executed)', () => {
   test('no report and no token both skip quietly', () => {
     expect(dispatch(null).status).toBe(0)
     expect(dispatch(valid, { GH_TOKEN: '' }).status).toBe(0)
+  })
+})
+
+describe('doc-strings-review workflow: enterprise gating detection (executed)', () => {
+  // streaming-enterprise PR 579 added a license_required_feature value and
+  // changed license enforcement without touching a doc string, so the lint
+  // gate stayed shut and nothing was filed. This step is the mechanical
+  // backstop; these tests pin its fail-closed behaviour the same way the
+  // lint-step tests pin theirs.
+  const step = stepNamed('Detect enterprise gating changes')
+  const env = { BASE: 'abc123', PKG: RESOLVED_PKG }
+  const REPORT = JSON.stringify({
+    findings: [{ surface: 'enterprise-feature', name: 'manual_finalization', change_kind: 'enterprise-feature-added', affected_pages: ['https://docs.redpanda.com/current/get-started/licensing/overview/'], summary: 's' }],
+    proposed_ticket: { title: 't', body: 'b' }
+  })
+
+  const runnerTemp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'runner-temp-'))
+  const detect = (extra, files = {}) => {
+    const tmp = runnerTemp()
+    const r = execRun(step, { env: { ...env, RUNNER_TEMP: tmp, ...extra }, stubs: { npx: NPX_STUB }, files })
+    r.tmpExists = (f) => fs.existsSync(path.join(tmp, f))
+    return r
+  }
+
+  test('a finding opens the gate and leaves the report in RUNNER_TEMP, outside the checkout', () => {
+    const r = detect({ LINT_JSON: REPORT })
+    expect(r.status).toBe(0)
+    expect(r.outputs.found).toBe('1')
+    expect(r.tmpExists('enterprise-impact.json')).toBe(true)
+    expect(r.exists('enterprise-impact.json')).toBe(false)
+    const argv = fs.readFileSync(path.join(r.dir, 'npx-argv'), 'utf8')
+    expect(argv).toMatch(/^--package=/m)
+    expect(argv).toMatch(/^detect-enterprise-gating$/m)
+    expect(argv).toMatch(/^abc123$/m)
+  })
+
+  test('an empty report closes the gate and leaves no file behind', () => {
+    const r = detect({ LINT_JSON: '{"findings":[]}' })
+    expect(r.outputs.found).toBe('0')
+    expect(r.tmpExists('enterprise-impact.json')).toBe(false)
+  })
+
+  test.each([
+    ['a CLI failure', { LINT_EXIT: '1', LINT_JSON: '' }],
+    ['zero bytes of output', { LINT_JSON: '' }],
+    ['non-JSON output', { LINT_JSON: 'not json' }],
+    ['findings of the wrong shape', { LINT_JSON: '{"findings":{"a":1}}' }]
+  ])('%s closes the gate at 0, never empty', (_label, extra) => {
+    const r = detect(extra)
+    expect(r.status).toBe(0)
+    expect(r.outputs.found).toBe('0')
+    expect(r.tmpExists('enterprise-impact.json')).toBe(false)
+  })
+
+  test('every credential and dispatch gate also opens on a gating finding', () => {
+    for (const name of ['Assume the AWS role that can read the bot token', "Drop fetched credentials from the review's environment", 'Dispatch doc-impact']) {
+      expect(stepNamed(name).if).toMatch(/steps\.enterprise\.outputs\.found != '0'/)
+    }
+    // But the model review and the bearer mint do not: a gating-only run
+    // dispatches with the bot token and runs no model.
+    expect(stepNamed('Claude review with suggestions').if).not.toMatch(/steps\.enterprise/)
+    expect(stepNamed('Fetch the ADP client credential').if).not.toMatch(/steps\.enterprise/)
+    expect(stepNamed('Fetch the ADP client credential').if).toMatch(/steps\.lint\.outputs\.declarations/)
+  })
+})
+
+describe('doc-strings-review workflow: doc-impact dispatch merges gating findings (executed)', () => {
+  const step = stepNamed('Dispatch doc-impact')
+  const expressions = {
+    '${{ github.repository }}': 'redpanda-data/redpanda',
+    '${{ github.event.pull_request.number }}': '7',
+    '${{ github.event.pull_request.html_url }}': 'https://github.com/redpanda-data/redpanda/pull/7'
+  }
+  const GH_RECORDER = '#!/bin/bash\nprintf \'%s\\n\' "$@" >> "$HOME/gh-argv"\ncat > "$HOME/gh-stdin"\n'
+  const env = { GH_TOKEN: 'bot', DISPATCH_REPO: 'redpanda-data/docs-site', REVIEW_OUTCOME: 'success' }
+  const finding = (name, surface = 'properties') => ({
+    surface, name, change_kind: 'x', affected_pages: ['https://docs.redpanda.com/current/x/'], summary: `about ${name}`
+  })
+  const gating = { findings: [finding('manual_finalization', 'enterprise-feature')], proposed_ticket: { title: 'gating', body: '- manual_finalization (enterprise-feature-added): s' } }
+
+  // The gating report lives in RUNNER_TEMP (the Detect step writes it
+  // there); everything else in `files` lands in the checkout.
+  function dispatch (files, extraEnv = {}) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-temp-'))
+    const workspace = { ...files }
+    if ('enterprise-impact.json' in workspace) {
+      fs.writeFileSync(path.join(tmp, 'enterprise-impact.json'), workspace['enterprise-impact.json'])
+      delete workspace['enterprise-impact.json']
+    }
+    return execRun(step, { env: { RUNNER_TEMP: tmp, ...env, ...extraEnv }, expressions, stubs: { gh: GH_RECORDER }, files: workspace })
+  }
+  const payload = (r) => JSON.parse(fs.readFileSync(path.join(r.dir, 'gh-stdin'), 'utf8')).client_payload.impact
+
+  test('with no model report, the gating report is dispatched on its own', () => {
+    const r = dispatch({ 'enterprise-impact.json': JSON.stringify(gating) })
+    expect(r.status).toBe(0)
+    expect(payload(r).findings.map((f) => f.name)).toEqual(['manual_finalization'])
+    expect(payload(r).proposed_ticket.title).toBe('gating')
+  })
+
+  test('with both, the gating findings join the model report and the body gains the gating section', () => {
+    const model = { findings: [finding('cloud_storage_cache_size')], proposed_ticket: { title: 'model', body: 'model body' } }
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify(gating) })
+    const impact = payload(r)
+    expect(impact.findings.map((f) => f.name)).toEqual(['manual_finalization', 'cloud_storage_cache_size'])
+    expect(impact.proposed_ticket.title).toBe('model')
+    expect(impact.proposed_ticket.body).toMatch(/^model body/)
+    expect(impact.proposed_ticket.body).toMatch(/Enterprise gating changes in this PR/)
+    expect(impact.proposed_ticket.body).toMatch(/manual_finalization \(enterprise-feature-added\)/)
+  })
+
+  test('the merge never grows past the ten-finding cap the schema enforces', () => {
+    const model = { findings: Array.from({ length: 10 }, (_, i) => finding(`p${i}`)), proposed_ticket: { title: 'model', body: 'b' } }
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify(gating) })
+    expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(true)
+    expect(payload(r).findings).toHaveLength(10)
+  })
+
+  test('a full model report never pushes the mechanical findings out of the cap', () => {
+    // Ten model findings plus one gating finding: the cap has to drop a
+    // model finding, never the gating one the model could not see.
+    const model = { findings: Array.from({ length: 10 }, (_, i) => finding(`p${i}`)), proposed_ticket: { title: 'model', body: 'b' } }
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify(gating) })
+    const names = payload(r).findings.map((f) => f.name)
+    expect(names[0]).toBe('manual_finalization')
+    expect(names).not.toContain('p9')
+  })
+
+  test.each([
+    ['skipped (a gating-only run)', 'skipped'],
+    ['not run at all', '']
+  ])('when the review was %s, a doc-impact.json in the checkout is ignored', (_label, outcome) => {
+    // The PR's tree is the workspace. A committed doc-impact.json on a run
+    // where the model never ran is PR-authored, not run output, and must not
+    // ride the bot token: only the mechanical report goes out.
+    const planted = { findings: Array.from({ length: 10 }, (_, i) => finding(`planted${i}`)), proposed_ticket: { title: 'planted title', body: 'planted body' } }
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(planted), 'enterprise-impact.json': JSON.stringify(gating) }, { REVIEW_OUTCOME: outcome })
+    const impact = payload(r)
+    expect(impact.findings.map((f) => f.name)).toEqual(['manual_finalization'])
+    expect(impact.proposed_ticket.title).toBe('gating')
+    expect(JSON.stringify(impact)).not.toMatch(/planted/)
+  })
+
+  test('with the review skipped and no gating report, a checked-in doc-impact.json dispatches nothing', () => {
+    const r = dispatch({ 'doc-impact.json': JSON.stringify({ findings: [finding('planted')], proposed_ticket: { title: 't', body: 'b' } }) }, { REVIEW_OUTCOME: 'skipped' })
+    expect(r.status).toBe(0)
+    expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(false)
+  })
+
+  test('a gating report committed to the checkout is never read', () => {
+    // Only the Detect step's RUNNER_TEMP output counts as the gating report.
+    const r = execRun(step, {
+      env: { RUNNER_TEMP: fs.mkdtempSync(path.join(os.tmpdir(), 'runner-temp-')), ...env, REVIEW_OUTCOME: 'skipped' },
+      expressions,
+      stubs: { gh: GH_RECORDER },
+      files: { 'enterprise-impact.json': JSON.stringify(gating) }
+    })
+    expect(r.status).toBe(0)
+    expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(false)
+  })
+
+  test('a malformed gating report alone is still schema-checked and not dispatched', () => {
+    const r = dispatch({ 'enterprise-impact.json': JSON.stringify({ findings: [{ surface: 'enterprise-feature' }], proposed_ticket: { title: 't', body: 'b' } }) })
+    expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(false)
+    expect(r.all).toMatch(/::warning::/)
+    expect(r.status).toBe(0)
+  })
+
+  test.each([
+    ['unparseable', '{not json'],
+    ['findings of the wrong type', JSON.stringify({ findings: 'oops' })],
+    ['a finding of the wrong shape', JSON.stringify({ findings: [{ name: 'x' }], proposed_ticket: { title: 't', body: 'b' } })],
+    ['a page outside the docs site', JSON.stringify({ findings: [{ ...finding('x'), affected_pages: ['https://example.com/'] }], proposed_ticket: { title: 't', body: 'b' } })]
+  ])('a model report that is %s is dropped and the gating report still goes out', (_label, model) => {
+    // The gating finding is the one thing in the dispatch the model did not
+    // write, so a broken or steered model report must not be able to hide it.
+    const r = dispatch({ 'doc-impact.json': model, 'enterprise-impact.json': JSON.stringify(gating) })
+    expect(r.status).toBe(0)
+    expect(r.all).toMatch(/::warning::.*model/)
+    const impact = payload(r)
+    expect(impact.findings.map((f) => f.name)).toEqual(['manual_finalization'])
+    expect(impact.proposed_ticket.title).toBe('gating')
+  })
+
+  test('a malformed gating report is dropped and a valid model report still goes out', () => {
+    // The mirror case: a detector bug must not sink the model's findings.
+    const model = { findings: [finding('cloud_storage_cache_size')], proposed_ticket: { title: 'model', body: 'model body' } }
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify({ findings: 'x' }) })
+    expect(r.status).toBe(0)
+    expect(r.all).toMatch(/::warning::.*gating/)
+    const impact = payload(r)
+    expect(impact.findings.map((f) => f.name)).toEqual(['cloud_storage_cache_size'])
+    expect(impact.proposed_ticket.title).toBe('model')
+  })
+
+  test('a model report of more than ten findings is dropped whole, not trimmed', () => {
+    const model = { findings: Array.from({ length: 11 }, (_, i) => finding(`p${i}`)), proposed_ticket: { title: 'model', body: 'b' } }
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify(gating) })
+    const impact = payload(r)
+    expect(impact.findings.map((f) => f.name)).toEqual(['manual_finalization'])
+    expect(impact.proposed_ticket.title).toBe('gating')
+  })
+
+  test('a malformed model report with no gating report still dispatches nothing', () => {
+    const r = dispatch({ 'doc-impact.json': JSON.stringify({ findings: 'oops' }) })
+    expect(r.status).toBe(0)
+    expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(false)
+  })
+})
+
+describe('doc-strings-review workflow: checked-in run outputs (executed)', () => {
+  const step = stepNamed('Remove run-output files the PR checked in')
+  const OUTPUTS = ['doc-impact.json', 'review-summary.md', 'lint-findings.json', 'pr-diff.patch', 'enterprise-impact.json', 'embedded-reference-strings.md', 'terminology.md']
+
+  test('runs straight after checkout, before any step reads or writes those files', () => {
+    const idx = job.steps.indexOf(step)
+    expect(job.steps[idx - 1].uses).toMatch(/^actions\/checkout@/)
+    expect(step.if).toBeUndefined()
+  })
+
+  test('removes every run-output file a PR could commit, and leaves source alone', () => {
+    const files = Object.fromEntries(OUTPUTS.map((f) => [f, '{"findings":[]}']))
+    files['main.cc'] = 'int main() {}'
+    const r = execRun(step, { files })
+    expect(r.status).toBe(0)
+    for (const f of OUTPUTS) expect(r.exists(f)).toBe(false)
+    expect(r.exists('main.cc')).toBe(true)
   })
 })
 
@@ -1044,6 +1386,49 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(r.status).toBe(0)
       expect(fs.readFileSync(path.join(dir, 'state', 'reviewed.txt'), 'utf8').trim()).toBe('aaaaaaaaaaaaaaaa')
     })
+
+    // streaming-enterprise PR 461: the review argued with help text the
+    // author had applied from a docs reviewer's suggestion.
+    test('keeps what human reviewers wrote, never the author or a bot', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-state-'))
+      const out = path.join(dir, 'reviewer-comments.json')
+      const comments = [
+        { id: 1, user: { login: 'docs-reviewer', type: 'User' }, body: '```suggestion\nShort: "Delete topics",\n```' },
+        { id: 2, user: { login: 'pr-author', type: 'User' }, body: 'my own text, pasted to dodge the review' },
+        { id: 3, user: { login: 'claude[bot]', type: 'Bot' }, body: 'a bot suggestion' },
+        { id: 4, user: { login: 'other-reviewer', type: 'User' }, body: '' }
+      ]
+      const r = execRun(step, {
+        env: { ...env(dir), PR_AUTHOR: 'pr-author', REVIEWER_COMMENTS: out },
+        stubs: { gh: ghCommentsStub },
+        files: { 'comments.json': JSON.stringify(comments) }
+      })
+      expect(r.status).toBe(0)
+      // The stub serves the same payload for review comments and reviews, so
+      // the one human body arrives once from each.
+      expect(JSON.parse(fs.readFileSync(out, 'utf8'))).toEqual([comments[0].body, comments[0].body])
+    })
+
+    test('no author login means no reviewer file, so every string is reviewed', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-state-'))
+      const out = path.join(dir, 'reviewer-comments.json')
+      const r = execRun(step, {
+        env: { ...env(dir), PR_AUTHOR: '', REVIEWER_COMMENTS: out },
+        stubs: { gh: ghCommentsStub },
+        files: { 'comments.json': '[]' }
+      })
+      expect(r.status).toBe(0)
+      expect(fs.existsSync(out)).toBe(false)
+    })
+
+    test('a failed reviewer read leaves no file behind', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-state-'))
+      const out = path.join(dir, 'reviewer-comments.json')
+      fs.writeFileSync(out, '["stale"]')
+      const r = execRun(step, { env: { ...env(dir), PR_AUTHOR: 'pr-author', REVIEWER_COMMENTS: out }, stubs: { gh: '#!/bin/bash\nexit 1\n' } })
+      expect(r.status).toBe(0)
+      expect(fs.existsSync(out)).toBe(false)
+    })
   })
 
   describe('lint step', () => {
@@ -1059,10 +1444,30 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(argv).toContain(path.join(dir, 'reviewed.txt'))
     })
 
+    test('passes human review comments to the CLI when there are any', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-state-'))
+      const file = path.join(dir, 'reviewer-comments.json')
+      fs.writeFileSync(file, '["text"]')
+      const r = execRun(step, { env: { ...baseEnv, STATE_DIR: dir, REVIEWER_COMMENTS: file }, stubs: { npx: NPX_STUB } })
+      const argv = fs.readFileSync(path.join(r.dir, 'npx-argv'), 'utf8').split('\n')
+      expect(argv).toContain('--reviewer-comments')
+      expect(argv).toContain(file)
+    })
+
+    test('strings a reviewer wrote still open the gate, for the published-content check', () => {
+      const r = execRun(step, {
+        env: { ...baseEnv, STATE_DIR: path.join(os.tmpdir(), 'no-such-dsr-state'), LINT_JSON: '{"findings":[],"summary":{"totalDeclarations":0,"reviewerWritten":2}}' },
+        stubs: { npx: NPX_STUB }
+      })
+      expect(r.status).toBe(0)
+      expect(r.outputs.declarations).toBe('2')
+    })
+
     test('a first run passes no --reviewed at all', () => {
       const r = execRun(step, { env: { ...baseEnv, STATE_DIR: path.join(os.tmpdir(), 'no-such-dsr-state') }, stubs: { npx: NPX_STUB } })
       const argv = fs.readFileSync(path.join(r.dir, 'npx-argv'), 'utf8').split('\n')
       expect(argv).not.toContain('--reviewed')
+      expect(argv).not.toContain('--reviewer-comments')
       expect(r.status).toBe(0)
     })
   })
@@ -1106,6 +1511,35 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(r.status).toBe(0)
       expect(r.read('summary.md')).toMatch(/No lint report/)
     })
+  })
+
+  describe('doc-impact in the job summary', () => {
+    const step = stepNamed('Write doc-impact to the job summary')
+
+    test('lists affected pages for the docs team, one escaped line per field', () => {
+      const impact = {
+        findings: [{ surface: 'rpk', name: 'delete', change_kind: 'behavior', summary: 'Regex mode\nskips <b>internal</b> topics', affected_pages: ['https://docs.redpanda.com/x/'] }],
+        proposed_ticket: { title: 't', body: 'b' }
+      }
+      const r = execRun(step, { env: { GITHUB_STEP_SUMMARY: 'summary.md' }, files: { 'doc-impact.json': JSON.stringify(impact) } })
+      expect(r.status).toBe(0)
+      const out = r.read('summary.md')
+      expect(out).toMatch(/Nothing here is for the PR author/)
+      expect(out).toContain('- `delete` (rpk): Regex mode skips &lt;b>internal&lt;/b> topics')
+      expect(out).toContain('  - https://docs.redpanda.com/x/')
+    })
+
+    test('no doc-impact file writes nothing', () => {
+      const r = execRun(step, { env: { GITHUB_STEP_SUMMARY: 'summary.md' } })
+      expect(r.status).toBe(0)
+      expect(r.exists('summary.md')).toBe(false)
+    })
+  })
+
+  test('the prompt keeps published-content impact out of the PR summary', () => {
+    const prompt = stepNamed('Claude review with suggestions').with.prompt
+    expect(prompt).not.toMatch(/"Affected published content" section/)
+    expect(prompt).toMatch(/Never put published-content impact in it/)
   })
 
   describe('summary comment', () => {
@@ -1160,12 +1594,14 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       fs.writeFileSync(path.join(dir, 'reviewed.txt'), 'aaaaaaaaaaaaaaaa\n')
       const lint = {
         declarations: [{ fingerprint: 'bbbbbbbbbbbbbbbb' }, { fingerprint: 'aaaaaaaaaaaaaaaa' }, { fingerprint: '$(touch pwned)' }],
-        summary: { removedDeclarations: [{ fingerprint: 'cccccccccccccccc' }] }
+        summary: { removedDeclarations: [{ fingerprint: 'cccccccccccccccc' }], reviewerWrittenDeclarations: [{ fingerprint: 'dddddddddddddddd' }] }
       }
       const r = execRun(step, { env: { STATE_DIR: dir }, files: { 'lint-findings.json': JSON.stringify(lint) } })
       expect(r.status).toBe(0)
+      // Reviewer-written strings are recorded too, so their impact check
+      // runs once, not on every push.
       expect(fs.readFileSync(path.join(dir, 'reviewed.txt'), 'utf8').trim().split('\n'))
-        .toEqual(['aaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbb', 'cccccccccccccccc'])
+        .toEqual(['aaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbb', 'cccccccccccccccc', 'dddddddddddddddd'])
       expect(r.exists('pwned')).toBe(false)
     })
   })
@@ -1218,7 +1654,11 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(prompt).toMatch(/CONNECT STRINGS/)
       expect(prompt).toContain('`text ` + "`code`" + ` text`')
       expect(prompt).toMatch(/Every xref names its module/)
-      expect(prompt).toMatch(/Never put ifdef::env-cloud\[\]/)
+      // env-cloud block conditionals are allowed in the form the conditional rule checks
+      expect(prompt).not.toMatch(/Never put ifdef::env-cloud\[\]/)
+      expect(prompt).toMatch(/An env-cloud block conditional is allowed/)
+      expect(prompt).toMatch(/nothing\s+after the \], not even spaces/)
+      expect(prompt).toMatch(/a conditional in a Summary or example summary/)
       expect(prompt).toMatch(/cloud_ai/)
       expect(prompt).toContain('`CGO_ENABLED=1 TAGS=x_benthos_extra task docs`')
     })
