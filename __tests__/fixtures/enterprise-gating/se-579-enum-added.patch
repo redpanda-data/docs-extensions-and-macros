@@ -1,0 +1,29 @@
+diff --git a/src/v/features/enterprise_features.h b/src/v/features/enterprise_features.h
+index 5ed09357e5..ba1fce62b5 100644
+--- a/src/v/features/enterprise_features.h
++++ b/src/v/features/enterprise_features.h
+@@ -34,6 +34,7 @@ enum class license_required_feature {
+     leadership_pinning,
+     shadow_linking,
+     topic_deletion_disabled,
++    manual_finalization,
+ };
+ 
+ inline fmt::iterator format_to(license_required_feature f, fmt::iterator out) {
+@@ -64,6 +65,8 @@ inline fmt::iterator format_to(license_required_feature f, fmt::iterator out) {
+         return fmt::format_to(out, "shadow_linking");
+     case license_required_feature::topic_deletion_disabled:
+         return fmt::format_to(out, "topic_deletion_disabled");
++    case license_required_feature::manual_finalization:
++        return fmt::format_to(out, "manual_finalization");
+     }
+ }
+ 
+@@ -98,6 +101,7 @@ class enterprise_feature_report {
+     // | Cluster     | `iceberg_enabled`               | `true`        |
+     // | Cluster     | `enable_shadow_linking`         | `true`        |
+     // | Cluster     | `delete_topic_enable`           | `false`       |
++    // | Cluster     | `features_auto_finalization`    | `false`       |
+     // | Node        | `fips_mode`                     | `enabled`     |
+     // | Node        | `fips_mode`                     | `permissive`  |
+     // +-------------+---------------------------------+---------------+
