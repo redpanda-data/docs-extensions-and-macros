@@ -44,6 +44,7 @@ display help for command
 * `doc-impact-recording` - Extract the docs MCP calls from a Claude Code transcript into a doc-impact eval recording
 * `lint-screenshots` - Lint image macros and image files in a docs repo against the screenshot standard (alt text, size, format, width)
 * `check-build-log` - Check an Antora JSON build log: fail on error or fatal records or too few pages, print a Markdown summary
+* `check-metadata` - Check page-categories and solution facet values in AsciiDoc page headers against the docs taxonomy
 * `check-rendered-html` - Scan rendered Antora HTML for unconverted AsciiDoc (literal backticks, xref:, include::, attributes, tables, empty sections) and broken anchors and links
 * `connect-docs-diff` - Diff two generated Connect docs trees and map each changed partial or example to its published page
 * `preview-string` - Render one embedded doc string (property, rpk command/flag, metric, helm key, CRD field, connect field) as it will publish
@@ -883,6 +884,91 @@ npx doc-tools check-build-log build.ndjson --site-dir build/site/connect --min-p
 
 # Block only on errors from these repositories; list the rest
 npx doc-tools check-build-log build.ndjson --blocking-sources redpanda-data/rp-connect-docs,redpanda-data/connect
+----
+
+== check-metadata
+
+Check the taxonomy metadata in AsciiDoc page headers against the docs taxonomy (taxonomy.yml in the docs repository). On every page, `:page-categories:` values must resolve to a concept: an unknown value, a deprecated value, or two values that are the same concept warn, and each message names the replacement. On a solution overview (`:page-layout: solution`), `:page-solution-use-cases:`, `:page-solution-industries:`, `:page-solution-technologies:`, and `:page-solution-platforms:` must resolve within their own facet, and an unknown value or a duplicate concept is an error. `:page-topic-type:` is checked against the content types, as a warning. --strict turns every warning into an error. The taxonomy comes from --taxonomy (a path or URL), else the docs checkout at the current directory, else $REDPANDA_DOCS_PATH, else the published file. The build runs the same rules (extension-utils/metadata-check.js), so the two never disagree. --fix first rewrites `:page-categories:` in place: each value becomes its concept's preferred label, a deprecated value becomes its replacements, and a replacement that is a task is dropped (the task comes from the module). Values that need a judgment call (no replacement, or a content type) are left as they are and still warn. --suggest also lists, for each page, the topics, use cases, technologies, and industries its text names that its header does not carry yet, so authors and agents choose values from the taxonomy instead of inventing them. Matching is deterministic, with no model: every live concept's prefLabel and altLabels are matched case-insensitively on whole words against the title, `:description:`, the page path (module and directories), section headings, and body, code included and included partials followed. Words split on anything that is not a letter or digit, so the code literal `postgres_cdc` names PostgreSQL (altLabel Postgres) and Change data capture (altLabel CDC). A two-letter label such as Go matches only in its exact case and never as the first word of a sentence. Hits are weighted title 8, path 6, description 5, heading 1.5 each (up to 3), and body 1 + log2(n) (at most 3). A suggestion never names a deprecated concept, never takes a facet past its cardinality, and skips what the page carries or what that implies; on a solution overview a technology that a topic implies (Iceberg Topics implies Apache Iceberg) is suggested in page-solution-technologies. Each suggestion has a score, a reason, and evidence (the matched term, where, and the line). --min-score defaults to 5 for Product Docs pages and 3 for solution overviews; --limit (per facet) to 3 and 6. Suggestions do not change the exit code. --suggest also lists candidates: frequent, distinctive terms on a page that no concept's label or altLabel matches, in any scheme, for proposing new concepts or altLabels. They are repeated capitalized terms in prose (Amazon S3, Debezium) and component identifiers (`aws_s3` output, xrefs to Connect component pages), each with a count, the lines, and a likely facet from a cue word after it (a connector, database, format, or product word). Terms in the terminology lists (--terminology, default the docs glossary in the checkout), common English, and words the page also writes in lowercase are dropped. --candidates-only skips the check and the suggestions and aggregates candidates across the pages: one entry per term, with the pages it is on, leaving out terms on more than a fifth of the pages (boilerplate). Exit 0 without errors, 1 with errors, 2 when the check could not run.
+
+*Why use it:*
+
+Categories, use cases, and technologies drive search facets and solution recommendations, and a free-text value becomes a near-duplicate the moment a second author writes one. This catches it on the PR, without a model, in a form the docs agents and the PR review can read.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools check-metadata [options] [paths...]
+----
+
+*Options:*
+
+`--changed <base>`::
+Check only .adoc files changed between the merge base with <base> and HEAD, for example origin/main
+
+`--taxonomy <path|url>`::
+taxonomy.yml to use (default: the docs checkout, $REDPANDA_DOCS_PATH, then https://docs.redpanda.com/shared/_attachments/taxonomy.yml)
+
+`--format <format>`::
+Output format: text or json (default: "text")
+
+`--strict`::
+Treat warnings as errors
+
+`--fix`::
+Rewrite page-categories in place to current taxonomy labels, then check
+
+`--root <path>`::
+Repository root (default: current directory)
+
+`--output <path>`::
+Also write the JSON result to this file
+
+`--suggest`::
+Also suggest taxonomy values each page does not carry yet, matched from its title, description, path, headings, and body
+
+`--min-score <n>`::
+With --suggest, the lowest score to suggest (default: 5 on Product Docs pages, 3 on solution overviews)
+
+`--limit <n>`::
+With --suggest, the most suggestions per facet and page (default: 3 on Product Docs pages, 6 on solution overviews; never past the facet cardinality)
+
+`--suggest-empty-only`::
+With --suggest, suggest only for pages without :page-categories:
+
+`--candidates-only`::
+List only candidate terms, frequent distinctive terms that no concept matches, aggregated across the pages with the pages each appears in
+
+`--terminology <paths>`::
+With --suggest or --candidates-only, comma-separated terminology lists whose terms are never candidates: a glossary partials directory, a Markdown word list, or a text file (default: the docs glossary, shared/modules/terms/partials, in the checkout or $REDPANDA_DOCS_PATH)
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Pages changed on this branch (what the docs PR check runs)
+npx doc-tools check-metadata --changed origin/main
+
+# Specific pages or directories, JSON for a grader
+npx doc-tools check-metadata modules/manage/pages/iceberg --format json
+
+# Against a local taxonomy, failing on warnings
+npx doc-tools check-metadata --taxonomy ../docs/shared/modules/ROOT/attachments/taxonomy.yml --strict
+
+# Rewrite deprecated categories to their replacements, then check
+npx doc-tools check-metadata --fix modules
+
+# Suggest taxonomy values for new pages, as JSON for an agent
+npx doc-tools check-metadata --suggest --format json modules/manage/pages/new-page.adoc
+
+# Suggest only for changed pages that carry no categories, with a lower bar
+npx doc-tools check-metadata --changed origin/main --suggest --suggest-empty-only --min-score 3
+
+# Terms across a repository that no concept covers, filtered by the style guide's word lists
+npx doc-tools check-metadata --candidates-only --terminology shared/modules/terms/partials,../docs-team-standards/resources/writing-style/terminology.md --format json modules
 ----
 
 == check-rendered-html
