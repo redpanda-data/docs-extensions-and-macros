@@ -110,6 +110,29 @@ jobs:
           # run exactly that.
           TAG_RX='^v[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$'
 
+          # streaming-enterprise's release/RC tags, for the schedule's
+          # candidate list and the patch-RC check below. A manual run needs
+          # neither. Via gh api so the bot token stays in env: an ls-remote
+          # URL with embedded userinfo puts the token in argv and in git's
+          # verbatim URL echo on failure.
+          # The API call runs on its own so a failed later page fails the
+          # step: in a pipeline, `|| true` would also swallow that failure
+          # and keep the tags from the pages that did arrive.
+          se_tags=""
+          if [ "$EVENT_NAME" != "workflow_dispatch" ]; then
+            if ! se_refs=$(GH_TOKEN="$SE_TOKEN" gh api --paginate \
+                repos/redpanda-data/streaming-enterprise/git/refs/tags \
+                --jq '.[].ref'); then
+              echo "::error::Could not list streaming-enterprise tags" >&2
+              exit 1
+            fi
+            se_tags=$(grep -E "$TAG_RX" <<< "${se_refs//refs\/tags\//}" || true)
+            if [ -z "$se_tags" ]; then
+              echo "::error::Could not list streaming-enterprise release tags" >&2
+              exit 1
+            fi
+          fi
+
           candidates=()
           case "$EVENT_NAME" in
             workflow_dispatch)
@@ -122,9 +145,7 @@ jobs:
             schedule)
               # Newest 6 release/RC tags. RC tags never get a GitHub Release
               # in streaming-enterprise (they're plain tag pushes), so list
-              # git tag refs, not releases. Via gh api so the bot token stays
-              # in env: an ls-remote URL with embedded userinfo puts the
-              # token in argv and in git's verbatim URL echo on failure.
+              # git tag refs, not releases.
               # sort -V orders "v26.2.2-rc1" AFTER "v26.2.2", so a burst of
               # RCs could crowd their own GA tag out of tail -6; mapping -rc
               # to ~rc for the sort (~ sorts lowest, the same trick
@@ -132,11 +153,7 @@ jobs:
               # all of its RCs.
               while IFS= read -r tag; do
                 candidates+=("$tag")
-              done < <(GH_TOKEN="$SE_TOKEN" gh api --paginate \
-                  repos/redpanda-data/streaming-enterprise/git/refs/tags \
-                  --jq '.[].ref' \
-                | sed 's|^refs/tags/||' \
-                | grep -E "$TAG_RX" \
+              done < <(printf '%s\n' "$se_tags" \
                 | sed 's/-rc/~rc/' | sort -V | sed 's/~rc/-rc/' \
                 | tail -6)
               ;;
@@ -158,6 +175,26 @@ jobs:
             if ! printf '%s' "$tag" | grep -qE "$TAG_RX"; then
               echo "Skipping '$tag': not a release or RC tag" >&2
               continue
+            fi
+            # Skip a patch RC: an RC whose major.minor line already has a GA
+            # tag (v26.2.5-rc1 once v26.2.1 exists). The docs repo documents
+            # RCs only on its beta branch, and beta is always the next,
+            # unreleased line, so update-property-docs.yaml skips these
+            # without reading a schema; building one is a 25-40 minute Bazel
+            # run nothing consumes. The GA tag that follows still publishes.
+            # A first-of-line RC (v26.3.1-rc1 before any v26.3.x GA) is
+            # beta's and still builds. Manual runs keep building any tag:
+            # merge-rp-util.js's remediation for a missing schema is a
+            # workflow_dispatch of exactly that tag.
+            if [ "$EVENT_NAME" != "workflow_dispatch" ] && [[ "$tag" == *-rc* ]]; then
+              # v26.2.5-rc1 -> v26.2, then look for any v26.2.<n> without -rc.
+              line="${tag%.*}"
+              # Here-string, not a pipe: under pipefail, grep -q exiting on
+              # the first match can SIGPIPE the writer and fail the test.
+              if grep -qE "^${line//./\\.}\.[0-9]+$" <<< "$se_tags"; then
+                echo "::notice::Skipping '$tag': ${line#v} already has a GA tag, so the docs never read a schema for this patch RC." >&2
+                continue
+              fi
             fi
             # Published-and-complete check, not `gh release view`: view also
             # matches a DRAFT left behind by a mid-upload death of `gh
@@ -200,7 +237,7 @@ jobs:
             unsupported=""
             while IFS=: read -r flag _asset; do
               [ -z "$flag" ] && continue
-              printf '%s' "$main_cc" | grep -q "\"${flag}\"" \
+              grep -qF "\"${flag}\"" <<< "$main_cc" \
                 || unsupported="${unsupported}${unsupported:+, }--${flag}"
             done <<< "$RP_UTIL_SCHEMAS"
             if [ -n "$unsupported" ]; then

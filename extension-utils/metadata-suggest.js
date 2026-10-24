@@ -114,11 +114,11 @@ function words (text) {
   const out = []
   let last = 0
   for (const m of String(text).matchAll(WORD_RE)) {
-    // The first word of the text (after list or table markup), or the first
-    // word after a sentence-ending mark.
+    // The first word of the text (after list or table markup), the first
+    // word after a sentence-ending mark, or the first word of a table cell.
     const sentenceStart = out.length === 0
       ? /^[\s*.#|=>-]*$/.test(text.slice(0, m.index))
-      : /[.!?:]\s+$/.test(text.slice(last, m.index))
+      : /(?:[.!?:]\s+|\|\s*)$/.test(text.slice(last, m.index))
     out.push({ raw: m[0], key: foldWord(m[0].normalize('NFKC').toLowerCase()), index: m.index, sentenceStart })
     last = m.index + m[0].length
   }
@@ -129,8 +129,14 @@ function words (text) {
  * Build the label matcher for a taxonomy: every label of every concept in a
  * suggestable scheme, live labels pointing at their concept and deprecated
  * labels at their live replacements in suggestable schemes.
+ *
+ * @param {import('./taxonomy').Taxonomy} taxonomy
+ * @param {Object} [options]
+ * @param {boolean} [options.allLabels] - every label of every concept, in
+ *   every scheme and deprecated or not, each pointing at its own concept: what
+ *   candidates use to tell whether any concept already covers a term
  */
-function buildMatcher (taxonomy) {
+function buildMatcher (taxonomy, { allLabels = false } = {}) {
   const byFirst = new Map() // first word key -> [{ words, label, ids, via, exact }]
   const add = (label, ids, via) => {
     const ws = words(label)
@@ -142,6 +148,10 @@ function buildMatcher (taxonomy) {
     byFirst.get(first).push(entry)
   }
   for (const concept of taxonomy.concepts.values()) {
+    if (allLabels) {
+      ;[concept.prefLabel, ...concept.altLabels, concept.id.replace(/-/g, ' ')].forEach((label) => add(label, [concept.id], 'label'))
+      continue
+    }
     if (!SUGGEST_SCHEMES.includes(concept.scheme)) continue
     const labels = [concept.prefLabel, ...concept.altLabels]
     if (!concept.deprecated) {
@@ -243,7 +253,9 @@ function taggedLines (content, tags) {
  * @param {(target: string, from: string|null) => {content: string, file: string}|null} [options.readInclude]
  *   resolves an include:: target (partials only) so single-sourced pages are
  *   read with the text they publish
- * @returns {{title, description, path, headings: Array<{text, line, source?}>, body: Array<{text, line, source?, sourceLanguage?}>, attributes: Object, lineOf: Object}}
+ * @returns {{title, description, path, headings: Array<{text, line, source?}>, body: Array<{text, raw, line, source?, code?, sourceLanguage?}>, attributes: Object, lineOf: Object}}
+ *   a body line has its prose (`text`), its source (`raw`), and `code: true`
+ *   inside a listing or literal block
  */
 function pageParts (content, parseHeader, { file, readInclude } = {}) {
   const entries = parseHeader(content)
@@ -260,10 +272,18 @@ function pageParts (content, parseHeader, { file, readInclude } = {}) {
 
   const walk = (lines, source, depth, isPage) => {
     let inComment = false
+    let inListing = false
     for (const { text: line, line: n } of lines) {
       const at = source ? { line: n, source } : { line: n }
       if (/^\/{4,}\s*$/.test(line)) { inComment = !inComment; continue }
-      if (inComment || /^\/\//.test(line)) continue
+      if (inComment || (!inListing && /^\/\//.test(line))) continue
+      // Listing and literal blocks: code, matched like prose (code literals
+      // count) but never read as headings.
+      if (/^(?:-{4,}|\.{4,})\s*$/.test(line) || /^```/.test(line)) { inListing = !inListing; continue }
+      if (inListing && !INCLUDE_RE.test(line)) {
+        if (line.trim()) body.push({ text: proseOf(line), raw: line, code: true, ...at })
+        continue
+      }
       const h = /^(=+)\s+(\S.*)$/.exec(line)
       if (h) {
         if (isPage && h[1].length === 1 && !title) title = { text: proseOf(h[2]), ...at }
@@ -284,7 +304,7 @@ function pageParts (content, parseHeader, { file, readInclude } = {}) {
       if (src) { body.push({ text: '', ...at, sourceLanguage: src[1] }); continue }
       if (/^\[.*\]\s*$/.test(line)) continue // other block attribute lines
       if (!line.trim()) continue
-      body.push({ text: proseOf(line), ...at })
+      body.push({ text: proseOf(line), raw: line, ...at })
     }
   }
   const lines = String(content).split(/\r?\n/).map((text, i) => ({ text, line: i + 1 }))

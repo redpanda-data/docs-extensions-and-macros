@@ -25,7 +25,9 @@
  * With --suggest, it also lists the taxonomy values each page's text names
  * that its header does not carry yet (extension-utils/metadata-suggest.js),
  * with a score and evidence, so authors and agents choose values instead of
- * inventing them. Suggestions never change the exit code.
+ * inventing them, and the candidate terms that no concept matches
+ * (extension-utils/metadata-candidates.js). --candidates-only aggregates the
+ * candidates across the pages instead. Neither changes the exit code.
  *
  * Exit codes: 0 no errors, 1 errors (or warnings with --strict), 2 the check
  * could not run (no taxonomy, an invalid taxonomy, a bad argument).
@@ -37,10 +39,12 @@ const { spawnSync } = require('child_process')
 const yaml = require('js-yaml')
 const { loadTaxonomyFrom } = require('../../extension-utils/taxonomy')
 const { checkPageMetadata, isSolutionPage, CATEGORY_ATTRIBUTE, TOPIC_TYPE_ATTRIBUTE, SOLUTION_FACETS } = require('../../extension-utils/metadata-check')
-const { buildMatcher, suggestForPage, DEFAULT_MIN_SCORE, DEFAULT_LIMIT } = require('../../extension-utils/metadata-suggest')
+const { buildMatcher, suggestForPage, pageParts, DEFAULT_MIN_SCORE, DEFAULT_LIMIT } = require('../../extension-utils/metadata-suggest')
+const { loadTerminology, pageCandidates, aggregateCandidates } = require('../../extension-utils/metadata-candidates')
 
 const CHECKED_ATTRIBUTES = new Set([CATEGORY_ATTRIBUTE, TOPIC_TYPE_ATTRIBUTE, 'page-layout', ...Object.keys(SOLUTION_FACETS)])
 const LEGACY_CATEGORIES_PATH = 'shared/modules/ROOT/partials/valid-categories.yml'
+const GLOSSARY_PATH = 'shared/modules/terms/partials'
 const DEFAULT_GLOB = 'modules/**/*.adoc'
 
 const ATTRIBUTE_RE = /^:([A-Za-z0-9_][A-Za-z0-9_-]*)!?:(?:[ \t]+(.*?))?[ \t]*$/
@@ -345,27 +349,69 @@ function makeIncludeReader (root) {
  * @param {import('../../extension-utils/taxonomy').Taxonomy} input.taxonomy
  * @param {number} [input.minScore] - default: DEFAULT_MIN_SCORE for each page's kind
  * @param {number} [input.limit] - per facet; default: DEFAULT_LIMIT for each page's kind
+ * @param {{terms: Set<string>, sources: string[]}} [input.terminology] - from loadTerminology
+ * @param {boolean} [input.candidatesOnly] - only candidates, aggregated across the pages
  * @param {boolean} [input.emptyOnly] - only pages that carry no page-categories
  *   Partials and examples are skipped: they are read through the pages that include them.
- * @returns {{minScore: Object, limit: Object, suggestions: Array<Object>, needs: Array<Object>}}
- *   minScore and limit are per page kind ({docs, solution}), as applied
+ * @returns {{minScore: Object, limit: Object, terminology: string[], suggestions: Array<Object>, needs: Array<Object>, candidates: Array<Object>}}
+ *   minScore and limit are per page kind ({docs, solution}), as applied. With
+ *   candidatesOnly, only { terminology, candidates }, one entry per term with
+ *   its pages.
  */
-function suggestFiles ({ root, files, taxonomy, minScore, limit, emptyOnly = false }) {
+function suggestFiles ({ root, files, taxonomy, minScore, limit, emptyOnly = false, terminology, candidatesOnly = false }) {
   const matcher = buildMatcher(taxonomy)
+  const labelMatcher = buildMatcher(taxonomy, { allLabels: true })
   const readInclude = makeIncludeReader(root)
+  const terms = terminology ? terminology.terms : new Set()
   const suggestions = []
   const needs = []
+  const candidates = []
+  const perPage = []
   for (const file of files) {
     // A partial or an example is read through the pages that include it.
     if (/(?:^|\/)(?:partials|examples)\//.test(file)) continue
     const content = fs.readFileSync(path.resolve(root, file), 'utf8')
     if (emptyOnly && parseHeader(content).some((e) => e.name === CATEGORY_ATTRIBUTE && e.value.trim())) continue
+    const parts = pageParts(content, parseHeader, { file, readInclude })
+    // A corpus run counts a term once per page too, then keeps terms seen twice overall.
+    const found = pageCandidates(parts, labelMatcher, { terminology: terms, ...(candidatesOnly ? { minCount: 1, max: Infinity } : {}) })
+    if (candidatesOnly) {
+      perPage.push({ file, candidates: found })
+      continue
+    }
     const r = suggestForPage(content, { taxonomy, parseHeader, matcher, minScore, limit, file, readInclude })
     for (const s of r.suggestions) suggestions.push({ file, kind: r.kind, ...s })
     for (const n of r.needs) needs.push({ file, kind: r.kind, ...n })
+    for (const c of found) candidates.push({ file, ...c })
   }
+  const terminologySources = terminology ? terminology.sources : []
+  if (candidatesOnly) return { terminology: terminologySources, candidates: aggregateCandidates(perPage) }
   const perKind = (value, defaults) => (value === undefined ? { ...defaults } : { docs: value, solution: value })
-  return { minScore: perKind(minScore, DEFAULT_MIN_SCORE), limit: perKind(limit, DEFAULT_LIMIT), suggestions, needs }
+  return { minScore: perKind(minScore, DEFAULT_MIN_SCORE), limit: perKind(limit, DEFAULT_LIMIT), terminology: terminologySources, suggestions, needs, candidates }
+}
+
+/**
+ * Terminology lists that candidates are filtered by: the paths given, else the
+ * docs glossary in the checkout at root or at $REDPANDA_DOCS_PATH.
+ */
+function resolveTerminology (root, given, env = process.env) {
+  if (given && given.length) return loadTerminology(given.map((p) => path.resolve(root, p)))
+  const defaults = [path.join(root, GLOSSARY_PATH), ...(env.REDPANDA_DOCS_PATH ? [path.join(path.resolve(env.REDPANDA_DOCS_PATH), GLOSSARY_PATH)] : [])]
+  return loadTerminology(defaults.filter((p) => fs.existsSync(p)).slice(0, 1))
+}
+
+const lineRef = (l) => (l.source ? `${l.source}:${l.line}` : String(l.line))
+
+function formatCandidates (result) {
+  const out = []
+  for (const c of result.candidates) {
+    out.push(`TERM    "${c.term}" x${c.count} on ${c.pageCount} page(s) (${c.facet || 'no facet'}, ${c.cue})`)
+    for (const p of c.pages.slice(0, 5)) out.push(`  ${p.file} x${p.count} at ${p.lines.map(lineRef).join(', ')}`)
+    if (c.pages.length > 5) out.push(`  and ${c.pages.length - 5} more page(s)`)
+  }
+  if (out.length) out.push('')
+  out.push(`check-metadata --candidates-only: ${result.candidates.length} term(s) that no concept matches, in ${result.files} file(s); terminology from ${result.terminology.length ? result.terminology.join(', ') : 'nowhere (no glossary found; pass --terminology)'}`)
+  return out.join('\n')
 }
 
 function formatText (result) {
@@ -396,6 +442,7 @@ function formatText (result) {
       }
     }
     for (const n of result.suggest.needs) out.push(`NEEDS   ${n.file} ${n.message}`)
+    for (const c of result.suggest.candidates) out.push(`TERM    ${c.file} "${c.term}" x${c.count} at ${c.lines.map(lineRef).join(', ')} (${c.facet || 'no facet'}, ${c.cue}): no concept matches`)
     out.push(`check-metadata --suggest: ${result.suggest.suggestions.length} suggestion(s) for ${new Set(result.suggest.suggestions.map((s) => s.file)).size} page(s) at min score ${result.suggest.minScore.docs} (Product Docs) and ${result.suggest.minScore.solution} (solutions)`)
   }
   if (out.length) out.push('')
@@ -423,14 +470,28 @@ async function runCli (paths, options = {}, { fetch } = {}) {
     if (minScore !== undefined && (!Number.isFinite(minScore) || minScore < 0)) throw new Error(`--min-score must be a number of 0 or more, got ${options.minScore}`)
     if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) throw new Error(`--limit must be a whole number of 1 or more, got ${options.limit}`)
     if ((options.minScore !== undefined || options.limit !== undefined || options.suggestEmptyOnly) && !options.suggest) throw new Error('--min-score, --limit, and --suggest-empty-only need --suggest')
+    if (options.candidatesOnly && (options.suggest || options.fix || options.strict)) throw new Error('--candidates-only runs on its own, without --suggest, --fix, or --strict')
+    if (options.terminology && !options.suggest && !options.candidatesOnly) throw new Error('--terminology needs --suggest or --candidates-only')
     const root = path.resolve(options.root || process.cwd())
     const loaded = await loadTaxonomyFrom({ source: options.taxonomy, root, ...(fetch ? { fetch } : {}) })
     const files = selectFiles({ root, paths: splitList(paths), changed: options.changed })
+    if (options.candidatesOnly) {
+      const terminology = resolveTerminology(root, splitList(options.terminology))
+      const { candidates, terminology: sources } = suggestFiles({ root, files, taxonomy: loaded.taxonomy, terminology, candidatesOnly: true })
+      result = { taxonomy: { source: loaded.source, schema: loaded.schemaSource, warnings: loaded.warnings }, files: files.length, terminology: sources, candidates }
+      if (options.output) {
+        fs.mkdirSync(path.dirname(path.resolve(options.output)), { recursive: true })
+        fs.writeFileSync(path.resolve(options.output), JSON.stringify(result, null, 2) + '\n')
+      }
+      console.log(options.format === 'json' ? JSON.stringify(result, null, 2) : formatCandidates(result))
+      process.exitCode = 0
+      return result
+    }
     const fixes = options.fix ? fixFiles({ root, files, taxonomy: loaded.taxonomy }) : undefined
     result = checkFiles({ root, files, taxonomy: loaded.taxonomy, strict: Boolean(options.strict), isLegacyCategory: loadLegacyCategories(root) })
     result = { taxonomy: { source: loaded.source, schema: loaded.schemaSource, warnings: loaded.warnings }, ...result, ...(fixes ? { fixes } : {}) }
     if (options.suggest) {
-      result.suggest = suggestFiles({ root, files, taxonomy: loaded.taxonomy, minScore, limit, emptyOnly: Boolean(options.suggestEmptyOnly) })
+      result.suggest = suggestFiles({ root, files, taxonomy: loaded.taxonomy, minScore, limit, emptyOnly: Boolean(options.suggestEmptyOnly), terminology: resolveTerminology(root, splitList(options.terminology)) })
     }
   } catch (err) {
     console.error(`check-metadata: ${err.message}`)
@@ -456,6 +517,7 @@ module.exports = {
   formatText,
   loadLegacyCategories,
   makeIncludeReader,
+  resolveTerminology,
   suggestFiles,
   runCli,
 }

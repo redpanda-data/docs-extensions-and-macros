@@ -24,7 +24,8 @@ const {
   hasDefaultValue,
   parentPath,
   sectionTitle,
-  isPluginCommand
+  isPluginCommand,
+  wrapDescriptionPassthrough
 } = require('../../../tools/rpk-docs/helpers/index.js')
 
 describe('rpk Docs Helpers', () => {
@@ -380,6 +381,18 @@ describe('rpk Docs Helpers', () => {
     test('handles null inputs', () => {
       expect(isPluginCommand(null, pluginVersions)).toBe(false)
       expect(isPluginCommand('rpk connect', null)).toBe(false)
+    })
+  })
+
+  describe('wrapDescriptionPassthrough', () => {
+    test('leaves descriptions without backticks unchanged', () => {
+      expect(wrapDescriptionPassthrough('Delete one trigger. <name> is the full resource name.'))
+        .toBe('Delete one trigger. <name> is the full resource name.')
+    })
+
+    test('escapes special characters inside pass:q so placeholders survive', () => {
+      expect(wrapDescriptionPassthrough('List every trigger on <agent> (`my-agent`) & more.'))
+        .toBe('pass:q[List every trigger on &lt;agent&gt; (`my-agent`) &amp; more.]')
     })
   })
 })

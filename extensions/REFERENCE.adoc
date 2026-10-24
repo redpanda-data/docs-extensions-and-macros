@@ -839,6 +839,8 @@ The metadata rules live in `extension-utils/metadata-check.js` (`checkPageMetada
 
 Suggestions live in `extension-utils/metadata-suggest.js` (`suggestForPage`), which `doc-tools check-metadata --suggest` runs. It matches every live concept's labels against a page's title, description, path, headings, and body, deterministically and with no model, and returns up to a few concepts per facet that the page does not carry yet, each with a score and the evidence for it. It honors the facet cardinalities in the taxonomy, `implies`, and `broader`, and never suggests a deprecated concept. Another tool that tags content against the taxonomy should call it rather than match labels itself, so every tagger agrees.
 
+`extension-utils/metadata-candidates.js` finds the other side: frequent, distinctive terms on a page that no concept's label matches (`pageCandidates`), and the same across a repository with the pages each is on (`aggregateCandidates`). `doc-tools check-metadata --suggest` lists them per page and `--candidates-only` aggregates them. They are evidence for proposing a new concept or altLabel, deterministic like the suggestions.
+
 
 This extension collects Asciidoc attributes from the https://github.com/redpanda-data/docs-site[`shared` component] or a local YAML file and makes them available to all component versions. Having global attributes is useful for consistent configuration of local and production builds.
 
@@ -1351,6 +1353,7 @@ The extension exports these attributes to YAML frontmatter:
 - `page-categories`: Categories
 - `page-topic-type`: Topic type (tutorial, how-to, concept, reference)
 - `page-personas`: Target audience
+- `page-introduced-in`, `page-introduced-in-product`: Release that introduced the page's feature, as a bare `X.Y.Z`, and the product it belongs to (generated Connect reference pages, self-managed only)
 - Custom attributes from allowlist
 
 === Example output
@@ -1447,7 +1450,8 @@ The `convert-sitemap-to-markdown` extension generates human-readable markdown ve
 - Generates individual `.md` files for each sitemap
 - Creates master `sitemap-all.md` combining all pages
 - Organizes URLs by component/version
-- Includes page metadata (modified dates, priority)
+- Uses each page's document title and `:description:`, falling back to a title from the URL for files that aren't Antora pages
+- Includes page metadata (modified dates, priority) on a nested line under each entry, so the entry line keeps the `- [Title](url): description` form
 - Uses Antora content catalog (no filesystem operations)
 
 === Configuration
@@ -1491,8 +1495,10 @@ Total pages: 4,126
 
 ### Current
 
-- [Get Started](https://docs.redpanda.com/current/get-started/) (modified: 2024-03-29)
-- [Deploy](https://docs.redpanda.com/current/deploy/) (modified: 2024-03-28)
+- [Introduction to Redpanda](https://docs.redpanda.com/current/get-started/): Learn about Redpanda and its features.
+  - modified: 2024-03-29
+- [Deploy](https://docs.redpanda.com/current/deploy/)
+  - modified: 2024-03-28
 ----
 
 === Use cases

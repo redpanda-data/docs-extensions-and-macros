@@ -46,6 +46,8 @@
  * displayed default, which is otherwise `nil`.
  */
 
+const { spawnSync } = require('child_process')
+
 // Key names never contain dots or slashes: a dotted or slashed "key" in a
 // comment is prose or a URL (`# docker.redpanda.com/...:4.101.0`), and
 // treating it as a key both fabricates a path and truncates the description.
@@ -464,6 +466,31 @@ function filterEntriesBySchema (entries, schema) {
   return { accepted, rejected }
 }
 
+/**
+ * Convert Markdown to AsciiDoc with pandoc. `generate helm-spec` uses this for
+ * the helm-docs README and for each values.yaml comment it injects, so both
+ * get the same conversion. values.yaml comments are Markdown (helm-docs copies
+ * them into the README as is), so without it an injected comment's links and
+ * emphasis are published as literal Markdown.
+ *
+ * The `smart` extension is turned off on input. With it, pandoc turns straight
+ * quotes into curly ones and writes them as ``text'', which only AsciiDoc
+ * Python understood. Asciidoctor prints those backticks and apostrophes
+ * literally, so straight quotes are passed through instead.
+ *
+ * @param {string} markdown - Markdown text.
+ * @returns {string} AsciiDoc text, without a trailing newline.
+ * @throws {Error} When pandoc cannot be run or exits non-zero.
+ */
+function markdownToAsciiDoc (markdown) {
+  if (!markdown || !markdown.trim()) return markdown
+  const r = spawnSync('pandoc', ['-f', 'markdown-smart', '-t', 'asciidoc'], { input: markdown, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+  if (r.error) throw new Error(`pandoc failed: ${r.error.message}`)
+  if (r.status !== 0) throw new Error(`pandoc exited ${r.status}: ${(r.stderr || '').trim()}`)
+  if (r.stderr) process.stderr.write(r.stderr)
+  return r.stdout.replace(/\s+$/, '')
+}
+
 // Neutralize description lines that would otherwise parse as AsciiDoc
 // structure when injected at block level: section titles re-parent the
 // following sections, and an unclosed block delimiter swallows the rest of
@@ -484,11 +511,17 @@ function sanitizeDescription (text) {
  * sections and are inserted in alphabetical key order. Keys that are already
  * documented are skipped.
  *
+ * Descriptions and defaults come from values.yaml comments, which are
+ * Markdown. Pass `toAsciiDoc` (for example `markdownToAsciiDoc`) to convert
+ * them the way the rest of the document was converted. Without it, the text
+ * is inserted as is.
+ *
  * @param {string} adoc - The converted AsciiDoc document.
  * @param {Array<{path: string, description: string, default: string}>} entries
+ * @param {{toAsciiDoc?: (markdown: string) => string}} [options]
  * @returns {{doc: string, injected: string[], sectionsFound: number}}
  */
-function injectIntoAsciiDoc (adoc, entries) {
+function injectIntoAsciiDoc (adoc, entries, { toAsciiDoc = (text) => text } = {}) {
   // The label may itself contain brackets (`[storage.volume[0].name]` in the
   // connectors chart), so it is matched to end of line rather than to the
   // first closing bracket.
@@ -530,9 +563,9 @@ function injectIntoAsciiDoc (adoc, entries) {
     const section = [
       `=== link:++${urlPrefix}${entry.path}++[${entry.path}]`,
       '',
-      sanitizeDescription(entry.description),
+      sanitizeDescription(toAsciiDoc(entry.description)),
       '',
-      `*Default:* ${entry.default}`,
+      `*Default:* ${toAsciiDoc(entry.default)}`,
       '',
       '',
     ].join('\n')
@@ -562,6 +595,7 @@ module.exports = {
   parseValuesFile,
   extractCommentedValueDocs,
   injectIntoAsciiDoc,
+  markdownToAsciiDoc,
   filterEntriesBySchema,
   isPathAllowedBySchema,
   // Exported so the lint surface cannot hold its own copy. Every one of these

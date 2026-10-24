@@ -30,11 +30,9 @@ function capToTwoSentences (description) {
   }
 
   const abbreviations = [
-    /https?:\/\/[^\s]+?(?=[.!?](?:\s|$)|\s|$)/gi,  // Protect URLs from being split by sentence detection (non-greedy, preserve trailing punctuation)
-    /\bxref:[^\s[\]]+\[[^\]]*\]/g,  // Protect Antora xref macros (e.g. xref:components:processors/try.adoc[`try`]) whose targets contain periods
-    /\b[\w/-]+\.(?:adoc|md|ya?ml|json|html)\b/gi,  // Protect bare doc/config filenames (try.adoc, config.yaml) from splitting
-    /\bv\d+\.\d+(?:\.\d+)?/gi,
-    /\d+\.\d+/g,
+    // A period inside a token (a URL, an xref target, a filename, a version
+    // or a decimal) has no whitespace after it, so it never ends a sentence.
+    // Only abbreviations that are followed by a space need protecting.
     /\be\.g\./gi,
     /\bi\.e\./gi,
     /\betc\./gi,
@@ -79,21 +77,12 @@ function capToTwoSentences (description) {
     return placeholder
   })
 
-  const sentenceRegex = /[^.!?]+[.!?]+(?:\s|$)/g
-
-  // An unprotected mid-token period (`fetch.max.partition.bytes`) stops a
-  // match, and the regex then resumes after it, so the text before that
-  // period never belongs to any match. Merge each such gap into the sentence
-  // that follows it rather than silently discarding it, otherwise the second
-  // "sentence" can be a tail such as "bytes`.". Text after the last match
-  // (an unterminated colon lead-in, for example) is still dropped.
-  let sentences = null
-  let lastEnd = 0
-  for (const m of normalized.matchAll(sentenceRegex)) {
-    if (!sentences) sentences = []
-    sentences.push(normalized.slice(lastEnd, m.index) + m[0])
-    lastEnd = m.index + m[0].length
-  }
+  // A sentence ends at punctuation, optionally followed by a closing quote,
+  // parenthesis or bracket, then whitespace or the end of the text. Matching
+  // lazily up to that boundary keeps a period inside a token, such as the
+  // dotted name partition.assignment.strategy, in its sentence. Text after the
+  // last match (an unterminated colon lead-in, for example) is dropped.
+  const sentences = normalized.match(/[\s\S]+?[.!?]+["')\]`]*(?:\s|$)/g)
 
   if (!sentences || sentences.length === 0) {
     let result = normalized
@@ -644,7 +633,8 @@ function buildFieldsTable (fields, capFn, opts = {}) {
       })
     }
 
-    const desc = info.description ? capFn(info.description) : '// TODO: Add description'
+    // A | in the description would end the cell and shift the row.
+    const desc = info.description ? capFn(info.description).replace(/\|/g, '\\|') : '// TODO: Add description'
 
     section += `|${fieldName}\n`
     section += `|${desc}\n`
@@ -687,18 +677,23 @@ function buildChangedDefaultsTable (changedDefaults, capFn) {
   for (const [, info] of Object.entries(byFieldAndDefaults)) {
     // Values render as literal inline code, so interpolations like
     // ${!uuid_v4()} and characters like * or _ show as typed.
+    // Values render as literal inline code through pass:c, which, unlike
+    // `+...+`, also keeps values with ++ or with spaces at either end. Strings
+    // that are empty, start or end with whitespace, or contain a newline show
+    // as JSON, so " " and "\n" read as the values they are.
     const formatDefault = (val) => {
       if (val === undefined || val === null) return 'none'
       let text
-      if (typeof val === 'string') text = val === '' ? '""' : val
+      if (typeof val === 'string') text = (val === '' || /^\s|\s$|\n/.test(val)) ? JSON.stringify(val) : val
       else if (typeof val === 'number' || typeof val === 'boolean') text = String(val)
       else text = JSON.stringify(val)
-      return `\`+${text.replace(/\|/g, '\\|')}+\``
+      return `\`pass:c[${text.replace(/\]/g, '\\]').replace(/\|/g, '\\|')}]\``
     }
 
     const oldVal = formatDefault(info.oldDefault)
     const newVal = formatDefault(info.newDefault)
-    const desc = info.description ? capFn(info.description) : '// TODO: Add description'
+    // A | in the description would end the cell and shift the row.
+    const desc = info.description ? capFn(info.description).replace(/\|/g, '\\|') : '// TODO: Add description'
 
     const byType = {}
     for (const comp of info.components) {
