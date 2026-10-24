@@ -17,6 +17,16 @@
 #   5. a workflow artifact holding the docs MCP calls the review made and
 #      the answers it got, for the doc-impact eval (see the step).
 #
+# THE PROMPT LIVES HERE ON PURPOSE. Callers pin this workflow by SHA, so a
+# prompt change reaches an engineering repo only when that repo bumps its pin
+# in a reviewed pull request. Do not move the prompt to docs-team-standards,
+# and never fetch a prompt, a skill, or a resource at run time from a branch
+# of a repository other than the one under review: that would change every
+# caller's review the moment someone merged elsewhere. A fetch pinned to a commit SHA is allowed. The
+# writing standard and terminology fetch below predates this rule; do not add
+# to it.
+# See CLAUDE.md, "Automation prompts stay in this repository".
+#
 # Each string is reviewed once. lint-strings fingerprints every declaration
 # (surface, name, text), the fingerprints a review has seen are kept in the
 # Actions cache under the PR number, and a later push hands the model only
