@@ -1018,3 +1018,25 @@ describe('mergeOverrides honors summary overrides', () => {
     expect(data.inputs[0].summary).toBe('Consumes messages from a ZeroMQ socket.');
   });
 });
+
+describe('capToTwoSentences - periods inside tokens', () => {
+  test('keeps a sentence that contains a dotted name whole', () => {
+    const d = 'When using a consumer group, the strategies this client supports for assigning partitions to group members, in order of preference. This is the equivalent to the Java partition.assignment.strategy setting. Supported values:\n\n- `range`: Divides partitions.';
+    expect(capToTwoSentences(d)).toBe('When using a consumer group, the strategies this client supports for assigning partitions to group members, in order of preference. This is the equivalent to the Java partition.assignment.strategy setting.');
+  });
+
+  test('a dotted name in the first sentence does not split it', () => {
+    expect(capToTwoSentences('Sets kafka.compression for the producer. Defaults to snappy. Ignored otherwise.'))
+      .toBe('Sets kafka.compression for the producer. Defaults to snappy.');
+  });
+
+  test('URLs, xrefs, filenames, versions and decimals do not split a sentence', () => {
+    expect(capToTwoSentences('See https://example.com/a.b?c=1 for v4.2.0 and try.adoc, 0.5 at most. See xref:guides:a.adoc[A] too. Third.'))
+      .toBe('See https://example.com/a.b?c=1 for v4.2.0 and try.adoc, 0.5 at most. See xref:guides:a.adoc[A] too.');
+  });
+
+  test('a sentence ending in a closing quote or parenthesis still ends there', () => {
+    expect(capToTwoSentences('The default is "none." Next. Third.')).toBe('The default is "none." Next.');
+    expect(capToTwoSentences('Runs once (like a loop.) Next. Third.')).toBe('Runs once (like a loop.) Next.');
+  });
+});

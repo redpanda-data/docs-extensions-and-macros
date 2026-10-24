@@ -30,11 +30,9 @@ function capToTwoSentences (description) {
   }
 
   const abbreviations = [
-    /https?:\/\/[^\s]+?(?=[.!?](?:\s|$)|\s|$)/gi,  // Protect URLs from being split by sentence detection (non-greedy, preserve trailing punctuation)
-    /\bxref:[^\s[\]]+\[[^\]]*\]/g,  // Protect Antora xref macros (e.g. xref:components:processors/try.adoc[`try`]) whose targets contain periods
-    /\b[\w/-]+\.(?:adoc|md|ya?ml|json|html)\b/gi,  // Protect bare doc/config filenames (try.adoc, config.yaml) from splitting
-    /\bv\d+\.\d+(?:\.\d+)?/gi,
-    /\d+\.\d+/g,
+    // A period inside a token (a URL, an xref target, a filename, a version
+    // or a decimal) has no whitespace after it, so it never ends a sentence.
+    // Only abbreviations that are followed by a space need protecting.
     /\be\.g\./gi,
     /\bi\.e\./gi,
     /\betc\./gi,
@@ -79,21 +77,12 @@ function capToTwoSentences (description) {
     return placeholder
   })
 
-  const sentenceRegex = /[^.!?]+[.!?]+(?:\s|$)/g
-
-  // An unprotected mid-token period (`fetch.max.partition.bytes`) stops a
-  // match, and the regex then resumes after it, so the text before that
-  // period never belongs to any match. Merge each such gap into the sentence
-  // that follows it rather than silently discarding it, otherwise the second
-  // "sentence" can be a tail such as "bytes`.". Text after the last match
-  // (an unterminated colon lead-in, for example) is still dropped.
-  let sentences = null
-  let lastEnd = 0
-  for (const m of normalized.matchAll(sentenceRegex)) {
-    if (!sentences) sentences = []
-    sentences.push(normalized.slice(lastEnd, m.index) + m[0])
-    lastEnd = m.index + m[0].length
-  }
+  // A sentence ends at punctuation, optionally followed by a closing quote,
+  // parenthesis or bracket, then whitespace or the end of the text. Matching
+  // lazily up to that boundary keeps a period inside a token, such as the
+  // dotted name partition.assignment.strategy, in its sentence. Text after the
+  // last match (an unterminated colon lead-in, for example) is dropped.
+  const sentences = normalized.match(/[\s\S]+?[.!?]+["')\]`]*(?:\s|$)/g)
 
   if (!sentences || sentences.length === 0) {
     let result = normalized
