@@ -369,6 +369,7 @@ function compareDeclExtraction (before, after, targetKey) {
 
 module.exports = {
   REPO_ROOT,
+  SURFACE_LAYOUT,
   DOC_TOOLS,
   EVAL_FIXTURES,
   materializeRepo,

@@ -755,6 +755,111 @@ programCli
     console.log('  mcp/README.adoc')
   })
 
+/**
+ * check-dispatch-graph
+ *
+ * @description
+ * Health check for the repository_dispatch graph that connects Redpanda's
+ * engineering repos to its docs repos. Reads every workflow file on each
+ * configured repo's default branch, pairs the senders (peter-evans/repository-dispatch,
+ * `gh api .../dispatches`, curl, github-script) with the listeners
+ * (`on.repository_dispatch.types`), and reads each workflow's recent runs from
+ * the Actions API. Reports senders with no listener, docs listeners with no
+ * sender (informational when a cron backstops them), senders that have never
+ * fired, receivers failing more than the threshold, receiver payload variants
+ * no sender dispatches, and edges dispatched from more than one repo.
+ *
+ * @why
+ * A repository_dispatch is accepted with HTTP 204 whether or not a listener
+ * exists, and a receiver that fails every run looks, from the sender's side,
+ * exactly like one that works. Breaks in this graph went unnoticed for weeks
+ * until someone read the receivers' run history by hand. This command reads it
+ * by script, and .github/workflows/check-dispatch-graph.yml runs it weekly,
+ * files one issue, and closes it on the first run that finds the graph healthy.
+ *
+ * Exit codes: 0 clean, 1 findings (the output ends with the line
+ * DISPATCH_GRAPH_FINDINGS_CONFIRMED), 2 could not run (a repo or runs query
+ * could not be read, so the graph is incomplete; never reported as clean).
+ *
+ * @example
+ * # Check the default repo set against the live org
+ * export REDPANDA_GITHUB_TOKEN=...   # or GH_TOKEN; must read the private docs repos
+ * npx doc-tools check-dispatch-graph
+ *
+ * # Machine-readable
+ * npx doc-tools check-dispatch-graph --json > dispatch-graph.json
+ *
+ * # A narrower set of repos (role decides which side a missing counterpart is reported on)
+ * npx doc-tools check-dispatch-graph --repos redpanda-data/helm-charts:engineering,redpanda-data/docs:docs
+ *
+ * @requirements
+ * - A GitHub token that can read every configured repo and its Actions runs
+ *   (REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN or GH_TOKEN). The
+ *   docs repos are private, so an unauthenticated run exits 2.
+ */
+programCli
+  .command('check-dispatch-graph')
+  .description('Check the repository_dispatch graph between engineering and docs repos: senders without listeners, listeners without senders, never-fired senders, failing receivers (exit 0 clean, 1 findings, 2 could not run)')
+  .option('--repos <list>', 'Comma-separated owner/name[:role] entries (role engineering or docs) replacing the default repo set')
+  .option('--fail-threshold <fraction>', 'Flag a receiver whose fail rate over the window is above this fraction', '0.5')
+  .option('--window <n>', 'How many of the newest runs the fail rate is computed over', '20')
+  .option('--per-page <n>', 'How many runs to fetch per workflow (max 100)', '50')
+  .option('--json', 'Print the full result as JSON instead of the table')
+  .action(async (options) => {
+    const { runCheck, formatReport, createGitHubApi, DEFAULT_REPOS, SENTINEL } = require('../tools/dispatch-graph/check-dispatch-graph')
+
+    let repos = DEFAULT_REPOS
+    if (options.repos) {
+      repos = String(options.repos).split(',').map((entry) => entry.trim()).filter(Boolean).map((entry) => {
+        const [repo, role = 'docs'] = entry.split(':')
+        if (!/^[^/]+\/[^/]+$/.test(repo) || !['engineering', 'docs'].includes(role)) {
+          console.error(`Error: --repos entry "${entry}" must be owner/name or owner/name:engineering|docs`)
+          process.exit(2)
+        }
+        return { repo, role }
+      })
+    }
+    const threshold = Number(options.failThreshold)
+    const window = Number(options.window)
+    const perPage = Number(options.perPage)
+    if (!(threshold >= 0 && threshold <= 1) || !(window > 0) || !(perPage > 0 && perPage <= 100)) {
+      console.error('Error: --fail-threshold must be 0..1, --window > 0, --per-page 1..100')
+      process.exit(2)
+    }
+
+    // Exit 2 is reserved for "could not find out", so the weekly job can tell
+    // "an edge is broken" apart from "the API was down" and not file a false
+    // issue. An unauthenticated run cannot read the private docs repos and
+    // lands here too; it must never pass as clean.
+    let result
+    try {
+      const octokit = require('../cli-utils/octokit-client')
+      result = await runCheck({ repos, api: createGitHubApi(octokit), threshold, window, perPage })
+    } catch (err) {
+      console.error(`Error: Could not check the dispatch graph: ${err.message}`)
+      process.exit(2)
+    }
+
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2))
+    } else {
+      console.log(formatReport(result))
+    }
+
+    if (result.exitCode === 2) {
+      console.error(`\nError: ${result.unreadable.length} repo(s) or run record(s) could not be read, so the graph is incomplete. Not a clean result.`)
+      process.exit(2)
+    }
+    if (result.exitCode === 1) {
+      // Printed only where findings were actually established; the weekly
+      // script requires this line before filing an issue, so a usage error or
+      // a crash (both exit 1 under Commander) can never file one.
+      if (!options.json) console.log(`\n${SENTINEL}`)
+      process.exit(1)
+    }
+    process.exit(0)
+  })
+
 // ====================================================================
 // GENERATE SUBCOMMAND GROUP
 // ====================================================================
@@ -1824,17 +1929,25 @@ automation
       const outFile = path.join(outDir, `k-${name}${opts.outputSuffix}`)
       console.log(`pandoc ${md} → ${outFile}`)
       fs.mkdirSync(path.dirname(outFile), { recursive: true })
-      r = spawnSync('pandoc', [md, '-t', 'asciidoc', '-o', outFile], { stdio: 'inherit' })
-      if (r.status !== 0) process.exit(r.status)
+      const { markdownToAsciiDoc } = require('../cli-utils/helm-commented-values')
+      let converted
+      try {
+        converted = markdownToAsciiDoc(fs.readFileSync(md, 'utf8')) + '\n'
+      } catch (err) {
+        console.error(`Error: ${err.message}`)
+        process.exit(1)
+      }
 
       const { formatHelmSpec } = require('../cli-utils/format-helm-spec')
-      let doc = formatHelmSpec(fs.readFileSync(outFile, 'utf8'))
+      let doc = formatHelmSpec(converted)
 
       // helm-docs only renders keys that exist in the YAML tree, so optional
       // values that ship commented out never appear in the reference. Pull
       // documented commented-out keys from values.yaml and inject them. This
       // runs after formatHelmSpec so the injected body sections are not affected
-      // by the blank-line normalization that its header fix performs.
+      // by the blank-line normalization that its header fix performs. The
+      // comments are Markdown, so each one goes through markdownToAsciiDoc on
+      // the way in, like the README did.
       const valuesFile = path.join(chartPath, 'values.yaml')
       if (fs.existsSync(valuesFile)) {
         const { extractCommentedValueDocs, injectIntoAsciiDoc, filterEntriesBySchema } = require('../cli-utils/helm-commented-values')
@@ -1856,7 +1969,7 @@ automation
           }
 
           if (entries.length > 0) {
-            const { doc: withInjected, injected, sectionsFound } = injectIntoAsciiDoc(doc, entries)
+            const { doc: withInjected, injected, sectionsFound } = injectIntoAsciiDoc(doc, entries, { toAsciiDoc: markdownToAsciiDoc })
             doc = withInjected
             if (injected.length > 0) {
               console.log(`Documented ${injected.length} commented-out value(s): ${injected.join(', ')}`)
@@ -2134,6 +2247,12 @@ automation
  * - Use --tag for released content (GA or beta releases). Tags reference specific release points.
  * - Use --branch for in-progress content (unreleased features). Branches track ongoing development.
  *
+ * Links: the Go doc comments link to docs.redpanda.com with absolute URLs. When the command
+ * runs inside a docs checkout (or is given --docs-root), every URL that matches a page of that
+ * checkout, directly or through a page alias, is rewritten as an xref so the committed page
+ * keeps one link form across regenerations. URLs that match no page are left as written and
+ * listed in the output.
+ *
  * @why
  * Kubernetes CRDs define complex APIs for deploying and managing Redpanda. The API schema
  * is defined in Go code with hundreds of fields across nested structures. Manual documentation
@@ -2168,6 +2287,7 @@ automation
  * - For GitHub URLs: Git and internet connection
  * - crd-ref-docs tool (automatically installed if missing)
  * - Go toolchain for running crd-ref-docs
+ * - To convert links: a docs checkout with Antora installed (npm install in redpanda-data/docs)
  */
 automation
   .command('crd-spec')
@@ -2178,6 +2298,7 @@ automation
   .option('-d, --depth <n>', 'How many levels deep', '10')
   .option('--templates-dir <dir>', 'Asciidoctor templates dir', '.github/crd-config/templates/asciidoctor/operator')
   .option('--output <file>', 'Where to write the generated AsciiDoc file', 'modules/reference/pages/k-crd.adoc')
+  .option('--docs-root <dir>', 'Docs checkout whose pages docs.redpanda.com URLs are converted into xrefs against (default: the current repo when run inside redpanda-data/docs)')
   .action(async (opts) => {
     verifyCrdDependencies()
 
@@ -2286,8 +2407,28 @@ automation
       process.exit(1)
     }
 
-    // docs.redpanda.com URLs are left as-is: the url-to-xref Antora
-    // extension converts them to validated xrefs at site build time.
+    // Go doc comments carry absolute docs.redpanda.com URLs (a Go comment
+    // cannot hold an xref). Convert them against the docs checkout so the
+    // committed page keeps one link form across regenerations, instead of
+    // flipping between xrefs and URLs and burying the real changes in the
+    // review diff (docs 2256). A URL that matches no page in the checkout is
+    // left as written and listed; the url-to-xref extension still converts
+    // cross-component URLs at site build time and warns about broken ones.
+    const docsRoot = opts.docsRoot || (inDocs ? repoRoot : null)
+    if (docsRoot) {
+      const { buildDocsResolverContext, convertDocsLinksInFile, formatDocsLinkReport } = require('../cli-utils/docs-links-to-xrefs.js')
+      let linkContext
+      try {
+        linkContext = await buildDocsResolverContext(docsRoot)
+      } catch (err) {
+        console.error(`Error: Cannot map docs URLs to xrefs: ${err.message}`)
+        process.exit(1)
+      }
+      console.log(`Mapping docs URLs against ${linkContext.pageCount} pages of the ${linkContext.component} component in ${docsRoot}`)
+      console.log(formatDocsLinkReport(convertDocsLinksInFile(opts.output, linkContext), opts.output))
+    } else {
+      console.warn('⚠️ No docs checkout to map against (pass --docs-root); docs.redpanda.com URLs are left as written.')
+    }
 
     if (tmpSrc) fs.rmSync(tmpSrc, { recursive: true, force: true })
     fs.rmSync(configTmp, { recursive: true, force: true })
@@ -2875,10 +3016,65 @@ programCli
   .option('--skip-rules <list>', 'Comma-separated rule ids to skip')
   .option('--only-rules <list>', 'Comma-separated rule ids to run exclusively')
   .option('--reviewed <file>', 'Diff mode: skip declarations whose fingerprint is listed in <file> (already reviewed on an earlier push)')
+  .option('--reviewer-comments <file>', 'Diff mode: skip declarations whose text a human reviewer wrote in one of the comment bodies in <file> (a JSON array of strings)')
   .option('--strict', 'Exit 1 when any error-severity finding exists (default: always exit 0 - suggest, never block)')
   .action((options) => {
     const { runCli } = require('../tools/lint-strings')
     runCli(options)
+  })
+
+/**
+ * detect-enterprise-gating
+ *
+ * @description
+ * Find enterprise gating changes in a Redpanda core diff that no doc string
+ * announces: a value added to or removed from license_required_feature in
+ * src/v/features/enterprise_features.h, a property wrapped in or unwrapped
+ * from config::enterprise<> in src/v/config/configuration.h, or a changed
+ * restricted value of an enterprise<> property in
+ * src/v/config/configuration.cc. Prints them as a
+ * doc-impact report, the JSON the doc-strings review dispatches to the docs
+ * team's Jira router, so a licensing change reaches a DOC ticket even when
+ * the review has no doc string to look at.
+ *
+ * @example
+ * npx doc-tools detect-enterprise-gating --repo . --diff origin/dev
+ *
+ * @exit 0 always: `{"findings":[]}` means nothing to report. Errors from git
+ * print to stderr and still exit 0 with an empty report, so a caller's
+ * fail-open gate stays closed rather than red.
+ */
+programCli
+  .command('detect-enterprise-gating')
+  .description('Find enterprise gating changes (license_required_feature values, config::enterprise<> wrappers and restricted values) in a core diff and print them as a doc-impact report')
+  .requiredOption('--repo <path>', 'Path to a Redpanda core checkout. Nothing is cloned.')
+  .requiredOption('--diff <base>', 'Base ref: changes in <base>...HEAD are inspected')
+  .option('--format <format>', 'Output format: json or human', 'json')
+  .action((options) => {
+    const { spawnSync } = require('child_process')
+    const { detectGatingChanges, buildDocImpact, enterprisePropertyNames, ENUM_HEADER, CONFIG_HEADER, CONFIG_SOURCE } = require('../tools/enterprise-features/detect-gating-changes')
+    const empty = { findings: [] }
+    const result = spawnSync('git', ['diff', '--no-color', '--no-ext-diff', `${options.diff}...HEAD`, '--', ENUM_HEADER, CONFIG_HEADER, CONFIG_SOURCE], {
+      cwd: options.repo, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024
+    })
+    if (result.status !== 0) {
+      console.error(`git diff ${options.diff}...HEAD failed in ${options.repo}: ${(result.stderr || '').trim()}`)
+      console.log(JSON.stringify(empty))
+      return
+    }
+    // A configuration.cc change is tied to an enterprise property through
+    // the header at HEAD. Without it, header and enum changes still report.
+    const header = spawnSync('git', ['show', `HEAD:${CONFIG_HEADER}`], { cwd: options.repo, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+    if (header.status !== 0) console.error(`git show HEAD:${CONFIG_HEADER} failed in ${options.repo}; configuration.cc changes are not checked: ${(header.stderr || '').trim()}`)
+    const enterpriseNames = header.status === 0 ? enterprisePropertyNames(header.stdout) : []
+    const findings = detectGatingChanges(result.stdout, { enterpriseNames })
+    const report = buildDocImpact(findings) || empty
+    if (options.format === 'human') {
+      if (findings.length === 0) { console.log('No enterprise gating changes.'); return }
+      for (const f of findings) console.log(`${f.change_kind}: ${f.name}`)
+      return
+    }
+    console.log(JSON.stringify(report, null, 2))
   })
 
 /**
@@ -3063,6 +3259,113 @@ programCli
   .action((log, options) => {
     const { runCli } = require('../tools/connect-docs/check-build-log')
     runCli(log, options)
+  })
+
+/**
+ * check-metadata
+ *
+ * @description
+ * Check the taxonomy metadata in AsciiDoc page headers against the docs
+ * taxonomy (taxonomy.yml in the docs repository). On every page,
+ * `:page-categories:` values must resolve to a concept: an unknown value, a
+ * deprecated value, or two values that are the same concept warn, and each
+ * message names the replacement. On a solution overview
+ * (`:page-layout: solution`), `:page-solution-use-cases:`,
+ * `:page-solution-industries:`, `:page-solution-technologies:`, and
+ * `:page-solution-platforms:` must resolve within their own facet, and an
+ * unknown value or a duplicate concept is an error. `:page-topic-type:` is
+ * checked against the content types, as a warning. --strict turns every
+ * warning into an error. The taxonomy comes from --taxonomy (a path or URL),
+ * else the docs checkout at the current directory, else $REDPANDA_DOCS_PATH,
+ * else the published file. The build runs the same rules
+ * (extension-utils/metadata-check.js), so the two never disagree.
+ * --fix first rewrites `:page-categories:` in place: each value becomes its
+ * concept's preferred label, a deprecated value becomes its replacements, and
+ * a replacement that is a task is dropped (the task comes from the module).
+ * Values that need a judgment call (no replacement, or a content type) are
+ * left as they are and still warn.
+ * --suggest also lists, for each page, the topics, use cases, technologies,
+ * and industries its text names that its header does not carry yet, so
+ * authors and agents choose values from the taxonomy instead of inventing
+ * them. Matching is deterministic, with no model: every live concept's
+ * prefLabel and altLabels are matched case-insensitively on whole words
+ * against the title, `:description:`, the page path (module and directories),
+ * section headings, and body, code included and included partials followed.
+ * Words split on anything that is not a letter or digit, so the code literal
+ * `postgres_cdc` names PostgreSQL (altLabel Postgres) and Change data capture
+ * (altLabel CDC). A two-letter label such as Go matches only in its exact
+ * case and never as the first word of a sentence. Hits are weighted title 8,
+ * path 6, description 5, heading 1.5 each (up to 3), and body 1 + log2(n)
+ * (at most 3). A suggestion never names a deprecated concept, never takes a
+ * facet past its cardinality, and skips what the page carries or what that
+ * implies; on a solution overview a technology that a topic implies (Iceberg
+ * Topics implies Apache Iceberg) is suggested in page-solution-technologies.
+ * Each suggestion has a score, a reason, and evidence (the matched term,
+ * where, and the line). --min-score defaults to 5 for Product Docs pages and
+ * 3 for solution overviews; --limit (per facet) to 3 and 6. Suggestions do
+ * not change the exit code.
+ * --suggest also lists candidates: frequent, distinctive terms on a page that
+ * no concept's label or altLabel matches, in any scheme, for proposing new
+ * concepts or altLabels. They are repeated capitalized terms in prose (Amazon
+ * S3, Debezium) and component identifiers (`aws_s3` output, xrefs to Connect
+ * component pages), each with a count, the lines, and a likely facet from a
+ * cue word after it (a connector, database, format, or product word). Terms
+ * in the terminology lists (--terminology, default the docs glossary in the
+ * checkout), common English, and words the page also writes in lowercase are
+ * dropped. --candidates-only skips the check and the suggestions and
+ * aggregates candidates across the pages: one entry per term, with the pages
+ * it is on, leaving out terms on more than a fifth of the pages
+ * (boilerplate).
+ * Exit 0 without errors, 1 with errors, 2 when the check could not run.
+ *
+ * @why
+ * Categories, use cases, and technologies drive search facets and solution
+ * recommendations, and a free-text value becomes a near-duplicate the moment
+ * a second author writes one. This catches it on the PR, without a model, in
+ * a form the docs agents and the PR review can read.
+ *
+ * @example
+ * # Pages changed on this branch (what the docs PR check runs)
+ * npx doc-tools check-metadata --changed origin/main
+ *
+ * # Specific pages or directories, JSON for a grader
+ * npx doc-tools check-metadata modules/manage/pages/iceberg --format json
+ *
+ * # Against a local taxonomy, failing on warnings
+ * npx doc-tools check-metadata --taxonomy ../docs/shared/modules/ROOT/attachments/taxonomy.yml --strict
+ *
+ * # Rewrite deprecated categories to their replacements, then check
+ * npx doc-tools check-metadata --fix modules
+ *
+ * # Suggest taxonomy values for new pages, as JSON for an agent
+ * npx doc-tools check-metadata --suggest --format json modules/manage/pages/new-page.adoc
+ *
+ * # Suggest only for changed pages that carry no categories, with a lower bar
+ * npx doc-tools check-metadata --changed origin/main --suggest --suggest-empty-only --min-score 3
+ *
+ * # Terms across a repository that no concept covers, filtered by the style guide's word lists
+ * npx doc-tools check-metadata --candidates-only --terminology shared/modules/terms/partials,../docs-team-standards/resources/writing-style/terminology.md --format json modules
+ */
+programCli
+  .command('check-metadata')
+  .description('Check page-categories and solution facet values in AsciiDoc page headers against the docs taxonomy')
+  .argument('[paths...]', 'Files, directories, or globs to check, relative to --root (default: modules/**/*.adoc). With --changed, filters the changed files')
+  .option('--changed <base>', 'Check only .adoc files changed between the merge base with <base> and HEAD, for example origin/main')
+  .option('--taxonomy <path|url>', 'taxonomy.yml to use (default: the docs checkout, $REDPANDA_DOCS_PATH, then https://docs.redpanda.com/shared/_attachments/taxonomy.yml)')
+  .option('--format <format>', 'Output format: text or json', 'text')
+  .option('--strict', 'Treat warnings as errors')
+  .option('--fix', 'Rewrite page-categories in place to current taxonomy labels, then check')
+  .option('--root <path>', 'Repository root (default: current directory)')
+  .option('--output <path>', 'Also write the JSON result to this file')
+  .option('--suggest', 'Also suggest taxonomy values each page does not carry yet, matched from its title, description, path, headings, and body')
+  .option('--min-score <n>', 'With --suggest, the lowest score to suggest (default: 5 on Product Docs pages, 3 on solution overviews)')
+  .option('--limit <n>', 'With --suggest, the most suggestions per facet and page (default: 3 on Product Docs pages, 6 on solution overviews; never past the facet cardinality)')
+  .option('--suggest-empty-only', 'With --suggest, suggest only for pages without :page-categories:')
+  .option('--candidates-only', 'List only candidate terms, frequent distinctive terms that no concept matches, aggregated across the pages with the pages each appears in')
+  .option('--terminology <paths>', 'With --suggest or --candidates-only, comma-separated terminology lists whose terms are never candidates: a glossary partials directory, a Markdown word list, or a text file (default: the docs glossary, shared/modules/terms/partials, in the checkout or $REDPANDA_DOCS_PATH)')
+  .action(async (paths, options) => {
+    const { runCli } = require('../tools/check-metadata')
+    await runCli(paths, options)
   })
 
 /**
