@@ -116,7 +116,7 @@ on:
   workflow_call:
     inputs:
       surfaces:
-        description: "Comma-separated lint surfaces (properties,rpk,metrics,helm,crd,connect). Empty = all."
+        description: "Comma-separated lint surfaces (properties,rpk,metrics,api,helm,crd,connect). Empty = all. The user-facing change detectors follow it too."
         type: string
         default: ""
       dispatch_repo:
@@ -277,7 +277,7 @@ jobs:
             echo "::error::Could not read the changed-file list for PR $PR; refusing to run the review."
             exit 1
           fi
-          if printf '%s\n' "$files" | grep -qE '(^|/)\.claude/|(^|/)CLAUDE\.md$|^\.github/workflows/|^\.github/actions/|^action\.ya?ml$'; then
+          if printf '%s\n' "$files" | grep -qE '(^|/)\.claude/|(^|/)CLAUDE\.md$|^\.github/workflows/|^\.github/actions/|^action\.ya?ml$|(^|/)\.npmrc$'; then
             perm=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$AUTHOR/permission" -q .permission || echo none)
             if [ "$perm" != "admin" ] && [ "$perm" != "write" ]; then
               echo "::error::PR touches review configuration from a non-writer; skipping automated review."
@@ -514,7 +514,7 @@ jobs:
           REVIEWER_COMMENTS: ${{ runner.temp }}/doc-strings-reviewer-comments.json
         run: |
           set -uo pipefail
-          ARGS=(--repo . --diff "$BASE" --format json)
+          ARGS=(--repo "$PWD" --diff "$BASE" --format json)
           # Declarations reviewed on an earlier push are dropped before the
           # gate, so a push that changes no new string never reaches the model.
           if [ -s "${STATE_DIR:-}/reviewed.txt" ]; then ARGS+=(--reviewed "$STATE_DIR/reviewed.txt"); fi
@@ -527,8 +527,17 @@ jobs:
           # `npx --yes <pkg> doc-tools ...` form exits 1 with "could not
           # determine executable to run" and writes zero bytes, for every
           # version. Same fix as #198 for doc-tools-mcp.
+          # npx runs from RUNNER_TEMP, never the checkout: npm reads its
+          # project config (.npmrc, which can set node-options or the
+          # registry) from the nearest directory with a package.json, and the
+          # PR head has one. This job holds id-token: write, so whatever npm
+          # ran there could mint an OIDC token. The OIDC request variables are
+          # also unset for the CLI, which needs no credential. --repo points
+          # the tool at the checkout; the redirects still land in it.
+          npx_dir="${RUNNER_TEMP:-$(mktemp -d)}"
           status=0
-          npx --yes --package="$PKG" doc-tools lint-strings "${ARGS[@]}" \
+          ( cd "$npx_dir" && env -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL \
+              npx --yes --package="$PKG" doc-tools lint-strings "${ARGS[@]}" ) \
             > lint-findings.json 2> lint-stderr.txt || status=$?
           # Distinguish "clean" from "broken", and fail CLOSED on broken:
           # `jq` over a 0-byte file prints NOTHING and exits 0, so an
@@ -605,45 +614,102 @@ jobs:
         env:
           BASE: ${{ steps.diffbase.outputs.base }}
           PKG: ${{ steps.pkg.outputs.pkg }}
+          SURFACES: ${{ inputs.surfaces }}
+          STATE_DIR: ${{ runner.temp }}/doc-strings-review-state
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -uo pipefail
           report="$RUNNER_TEMP/user-facing-impact.json"
           errlog="$RUNNER_TEMP/user-facing-stderr.txt"
           rm -f "$report"
+          # A backport to a release branch (v26.2.x) carries a change the
+          # default-branch PR already dispatched; detecting it again files the
+          # same ticket once per branch.
+          if [ -n "${BASE_REF:-}" ] && [ "${BASE_REF:-}" != "${DEFAULT_BRANCH:-}" ] && printf '%s' "$BASE_REF" | grep -qE '^v[0-9]+\.[0-9]+\.x$'; then
+            echo "Backport to $BASE_REF; user-facing change detection runs on the default-branch PR."
+            echo "User-facing change detection skipped: backport to \`$BASE_REF\`." >> "$GITHUB_STEP_SUMMARY" || true
+            echo "found=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          ARGS=(--repo "$PWD" --diff "$BASE" --format json)
+          # The lint surfaces the caller chose decide the detectors too.
+          if [ -n "${SURFACES:-}" ]; then
+            detectors=""
+            for s in ${SURFACES//,/ }; do
+              case "$s" in
+                properties) d="properties,enums,enterprise-gating,constants" ;;
+                rpk) d="rpk,constants" ;;
+                metrics|api|helm|crd) d="$s" ;;
+                *) d="" ;;
+              esac
+              [ -n "$d" ] && detectors="${detectors:+$detectors,}$d"
+            done
+            detectors=$(printf '%s' "$detectors" | tr ',' '\n' | awk 'NF && !seen[$0]++' | paste -sd, -)
+            if [ -z "$detectors" ]; then
+              echo "No detector covers surfaces '$SURFACES'."
+              echo "found=0" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            ARGS+=(--detectors "$detectors")
+          fi
+          # Findings an earlier push of this PR already dispatched are left
+          # out (the Dispatch step records them), so a push that adds nothing
+          # new does not dispatch again.
+          if [ -s "${STATE_DIR:-}/dispatched-findings.txt" ]; then ARGS+=(--dispatched "$STATE_DIR/dispatched-findings.txt"); fi
+          # From RUNNER_TEMP, never the checkout, for the same reason as the
+          # lint step: the PR's .npmrc must not reach npm in this job.
           status=0
-          npx --yes --package="$PKG" doc-tools detect-user-facing-changes --repo . --diff "$BASE" --format json \
+          ( cd "$RUNNER_TEMP" && env -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL \
+              npx --yes --package="$PKG" doc-tools detect-user-facing-changes "${ARGS[@]}" ) \
             > "$report" 2> "$errlog" || status=$?
           found=0
-          if [ "$status" -eq 0 ] && [ -s "$report" ]; then
-            found=$(jq -r 'if (.findings | type) == "array" then (.findings | length) else 0 end' "$report" 2>/dev/null || echo 0)
-          else
-            echo "::warning::detect-user-facing-changes failed (exit $status) or produced no output; no detector findings."
+          ran=false
+          if [ "$status" -eq 0 ] && [ -s "$report" ] && jq -e '(.findings | type) == "array"' "$report" >/dev/null 2>&1; then
+            ran=true
+            found=$(jq -r '.findings | length' "$report" 2>/dev/null || echo 0)
+          fi
+          case "$found" in ''|*[!0-9]*) found=0 ;; esac
+          err=""
+          if [ "$ran" = true ]; then err=$(jq -r '.error // empty' "$report" 2>/dev/null || true); fi
+          if [ "$ran" != true ] || [ -n "$err" ]; then
+            # Not run, unreadable, or incomplete: never "no changes".
+            reason="${err:-exit $status, or output that is not a findings report}"
+            echo "::warning::detect-user-facing-changes did not complete ($reason); detector findings may be missing."
             sed -n '1,20p' "$errlog" >&2 || true
             {
               echo "## User-facing change detection"
               echo
-              echo "The detector did not run (exit $status); no mechanical findings this run. See the step log."
+              echo "The detector did not run or did not complete ($reason); mechanical findings may be missing this run. See the step log."
             } >> "$GITHUB_STEP_SUMMARY" || true
           fi
-          case "$found" in ''|*[!0-9]*) found=0 ;; esac
           if [ "$found" -gt 0 ]; then
             jq -r '
               def cell: tostring | gsub("\\|"; "\\|") | gsub("\n"; " ");
               "## User-facing change detection",
               "",
-              "Mechanical findings: \(.summary.total // (.findings | length)) (\((.summary.bySeverity // {}) | to_entries | map("\(.value) \(.key)") | join(", ")))\(if (.summary.total // 0) > (.findings | length) then "; the dispatch carries the first \(.findings | length) and the ticket counts the rest" else "" end). These open the doc-impact dispatch even when no doc string changed.",
+              "Mechanical findings: \(.summary.total // (.findings | length)) (\((.summary.bySeverity // {}) | to_entries | map("\(.value) \(.key)") | join(", ")))\(if (.summary.total // 0) > (.findings | length) then "; the dispatch carries the first \(.findings | length) and the ticket names the rest" else "" end). These open the doc-impact dispatch even when no doc string changed.",
               "",
               "| Severity | Surface | Change | Name | Where |",
               "|---|---|---|---|---|",
-              (.findings[] | "| \(.severity) | \(.surface) | \(.change_kind) | `\(.name | cell)` | \(.file // "?" | cell):\(.line // "?") |"),
-              ((.summary.notes // []) | if length > 0 then "", "Not resolved:", (.[] | "- \(.message | cell)") else empty end)
+              (.findings[] | "| \(.severity) | \(.surface) | \(.change_kind) | `\(.name | cell)` | \(.file // "?" | cell):\(.line // "?") |")
             ' "$report" >> "$GITHUB_STEP_SUMMARY" || echo "::warning::could not render the detector report."
           else
-            rm -f "$report"
-            if [ "$status" -eq 0 ]; then
-              echo "No user-facing changes detected." >> "$GITHUB_STEP_SUMMARY" || true
+            if [ "$ran" = true ] && [ -z "$err" ]; then
+              {
+                echo "No user-facing changes detected$(jq -r 'if (.summary.alreadyDispatched // 0) > 0 then " beyond the \(.summary.alreadyDispatched) an earlier push already dispatched" elif (.summary.total // 0) > 0 then " that open the doc-impact gate (\(.summary.total) low-severity change(s) ride along only)" else "" end' "$report" 2>/dev/null)."
+              } >> "$GITHUB_STEP_SUMMARY" || true
             fi
           fi
+          # Unresolved notes are shown whatever the count: a note is the only
+          # sign that a change may have been missed.
+          if [ "$ran" = true ]; then
+            jq -r '
+              def cell: tostring | gsub("\\|"; "\\|") | gsub("\n"; " ");
+              (.summary.notes // []) | if length > 0 then "", "Not resolved:", (.[] | "- \(.message | cell)") else empty end
+            ' "$report" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          fi
+          [ "$found" -gt 0 ] || rm -f "$report"
           echo "found=$found" >> "$GITHUB_OUTPUT"
           echo "User-facing change findings: $found"
       # The review reads the diff from a file, not `gh pr diff`: the API
@@ -1315,6 +1381,7 @@ jobs:
           retention-days: 90
           if-no-files-found: ignore
       - name: Dispatch doc-impact
+        id: dispatch
         if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0' || steps.detect.outputs.found != '0')
         continue-on-error: true
         env:
@@ -1419,3 +1486,24 @@ jobs:
             --arg default "${DEFAULT_BRANCH:-}" \
             '{event_type: "doc-impact", client_payload: {source_repo: $repo, pr_number: $pr, pr_url: $url, base_ref: $base, default_branch: $default, impact: $impact[0]}}' \
           | gh api "repos/$DISPATCH_REPO/dispatches" --input -
+          # Dispatched: remember the mechanical findings this carried, so the
+          # next push of this PR leaves them out (see Detect user-facing
+          # changes). Only after the dispatch succeeded; set -e stops above
+          # on a failure.
+          state="$RUNNER_TEMP/doc-strings-review-state"
+          mkdir -p "$state"
+          touch "$state/dispatched-findings.txt"
+          jq -r '.findings[] | select(.confidence == "mechanical") | .fingerprint // empty' "$report" \
+            | grep -E '^[0-9a-f]{16}$' >> "$state/dispatched-findings.txt" || true
+          sort -u -o "$state/dispatched-findings.txt" "$state/dispatched-findings.txt"
+          echo "recorded=true" >> "$GITHUB_OUTPUT"
+      # A second save of the same state directory, after the dispatch, so
+      # the dispatched fingerprints persist. Restore-by-prefix returns the
+      # newest entry, which is this one when both saves run.
+      - name: Save the dispatched-findings state
+        if: steps.dispatch.outputs.recorded == 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/doc-strings-review-state
+          key: doc-strings-review-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}-dispatched
