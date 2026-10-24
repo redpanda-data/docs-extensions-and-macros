@@ -91,21 +91,80 @@ function parseClaudeArgs (claudeArgs) {
  * removed. This is the must-read sabotage: the files are still in the
  * workspace, the model is simply never told they are there or to apply them,
  * so a harness that still reports "read before suggesting" is not reading
- * the transcript. A sentence ends at a period followed by whitespace or the
- * end of the text, so `terminology.md` and `lint-findings.json` do not split
- * one. The result must contain neither file name, or the sabotage is a
- * harness error rather than a weaker prompt.
+ * the transcript.
+ *
+ * The prompt is cut into units at a sentence end (., ? or ! before
+ * whitespace), at a colon that ends a line, before a bullet or numbered
+ * item, where a list item's unindented next line starts, and at a blank line, so removing one unit never takes a list item or
+ * the next paragraph with it. A unit is removed when it names a staged file,
+ * and so is a unit right after a removed one that opens with a pronoun
+ * pointing back at it ("If it is absent or empty, ..."), which would
+ * otherwise be left with no referent. References to "the writing standard"
+ * elsewhere are reworded to the bar the prompt states inline, so the stripped
+ * prompt reads as one that never had the files, not as a broken one.
+ *
+ * Guards, each a harness error rather than a weaker sabotage: no file name
+ * may survive, and every removed unit must be a single sentence that either
+ * names a file or is such a pronoun follow-on.
  */
+/**
+ * Throw unless a removed span is one unit: a second sentence end, a list item
+ * after its first line, or a blank line inside it means the splitter merged
+ * two units, and removing it would drop more than the sentence that names a
+ * file.
+ */
+function assertOneUnit (unit) {
+  const body = unit.replace(/^\s*\n/, '').trim()
+  if (/[.?!]\s+\S/.test(body) || /\n[ \t]*(?:[-*]|\d+\.)\s/.test(body) || /\n[ \t]*\n/.test(body)) {
+    throw new Error(`sabotage would remove more than one sentence: ${JSON.stringify(body.slice(0, 120))}`)
+  }
+}
+
 function stripStandardsInstructions (prompt) {
   const names = MUST_READ.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
   const naming = new RegExp(`(?:^|[^A-Za-z0-9_/-])(?:${names.join('|')})(?![A-Za-z0-9_-])`)
-  const sentences = prompt.split(/(?<=\.)(?=\s|$)/)
-  const kept = sentences.filter((s) => !naming.test(s))
-  const out = kept.join('').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n')
+  const units = []
+  for (const u of prompt.split(/(?<=[.?!])(?=\s)|(?<=:)(?=\n)|(?=\n[ \t]*(?:[-*]|\d+\.)\s)|(?=\n[ \t]*\n)/)) {
+    // A list item ends where an unindented line starts, punctuated or not;
+    // its continuation lines are indented.
+    if (/^\n?[ \t]*(?:[-*]|\d+\.)\s/.test(u)) units.push(...u.split(/(?<=.)(?=\n\S)/s))
+    else units.push(u)
+  }
+  const backReference = /^\s*(?:If (?:it|they)|It|They|This|These|Its|Their)\b/
+  const kept = []
+  const removed = []
+  let prevRemoved = false
+  for (const u of units) {
+    const drop = naming.test(u) || (prevRemoved && backReference.test(u))
+    if (drop) removed.push(u)
+    else kept.push(u)
+    prevRemoved = drop
+  }
+  removed.forEach(assertOneUnit)
+  const out = kept.join('')
+    .replace(/the(\s+)writing\s+standard's\s+quality\s+bar/g, 'this$1quality bar')
+    .replace(/\s+and\s+the\s+standard\s+supports\s+the\s+objection/g, '')
+    .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n')
   for (const n of MUST_READ) {
     if (out.includes(n)) throw new Error(`sabotage left ${n} in the prompt; the sentence splitter missed one`)
   }
   return out
+}
+
+/**
+ * Keep the staged standards out of `git status` for the must-read sabotage.
+ * Claude Code shows the model the repository's git status when a session
+ * starts, so untracked files are listed by name even when the prompt never
+ * mentions them; measured on claude-opus-5, a stripped-prompt run then
+ * opened both from that listing alone. An info/exclude entry hides them from
+ * the listing without moving them: a model that looks (ls, a Read) still
+ * finds them.
+ */
+function hideFromGitStatus (repoDir, names) {
+  const info = path.join(repoDir, '.git', 'info')
+  if (!fs.existsSync(path.join(repoDir, '.git'))) return
+  fs.mkdirSync(info, { recursive: true })
+  fs.appendFileSync(path.join(info, 'exclude'), names.map((n) => `/${n}\n`).join(''))
 }
 
 /** The production prompt with its Actions expressions filled in. */
@@ -133,22 +192,39 @@ function fetchStandards () {
 }
 
 /**
- * Every tool call in a stream-json transcript, in order, with whether its
- * result came back as an error, plus the final result event.
+ * Every tool call in a stream-json transcript, in order, plus the final result
+ * event and the number of JSON events the stream held (zero means the CLI did
+ * not emit stream-json at all, which is the harness's problem, not the
+ * model's).
+ *
+ * Each call records `seq`, the position of the event that issued it, and,
+ * once its tool_result arrives, `resultSeq`, `error` and `output` (the text
+ * the model was shown). A call whose result never arrived (turn limit hit,
+ * session cut off) keeps `answered: false`. Calls a subagent made carry
+ * `subagent: true`: their results went to the subagent, not to the reviewer.
  */
 function parseStream (raw) {
   const calls = []
   const byId = new Map()
   let result = null
+  let events = 0
+  let seq = 0
   for (const line of raw.split('\n')) {
     const t = line.trim()
     if (!t) continue
     let ev
     try { ev = JSON.parse(t) } catch { continue }
+    if (!ev || typeof ev !== 'object') continue
+    events++
+    seq++
+    const subagent = Boolean(ev.parent_tool_use_id)
     if (ev.type === 'assistant' && ev.message && Array.isArray(ev.message.content)) {
       for (const block of ev.message.content) {
         if (block && block.type === 'tool_use' && typeof block.name === 'string') {
-          const call = { index: calls.length, id: block.id, name: block.name, input: block.input || {}, error: false }
+          const call = {
+            index: calls.length, id: block.id, name: block.name, input: block.input || {},
+            seq, subagent, answered: false, resultSeq: null, error: false, output: ''
+          }
           calls.push(call)
           if (block.id) byId.set(block.id, call)
         }
@@ -156,14 +232,25 @@ function parseStream (raw) {
     } else if (ev.type === 'user' && ev.message && Array.isArray(ev.message.content)) {
       for (const block of ev.message.content) {
         if (block && block.type === 'tool_result' && byId.has(block.tool_use_id)) {
-          byId.get(block.tool_use_id).error = Boolean(block.is_error)
+          const call = byId.get(block.tool_use_id)
+          call.answered = true
+          call.resultSeq = seq
+          call.error = Boolean(block.is_error)
+          call.output = resultText(block.content)
         }
       }
     } else if (ev.type === 'result') {
       result = ev
     }
   }
-  return { calls, result }
+  return { calls, result, events }
+}
+
+/** The text of a tool_result's content, which is a string or a list of blocks. */
+function resultText (content) {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) return content.map((b) => (b && typeof b.text === 'string' ? b.text : '')).join('\n')
+  return ''
 }
 
 /** A directory with symlinks resolved, so /var and /private/var on macOS compare equal. */
@@ -171,203 +258,148 @@ function realDir (dir) {
   try { return fs.realpathSync(dir) } catch { return path.resolve(dir) }
 }
 
-// Shell programs that print some or all of a file. Only a `cat` whose output
-// reaches the model prints the whole file; the others print the lines they
-// select. A command that only names the file (ls, echo, wc, stat, test) has
-// not opened it at all.
-const SHELL_READERS = new Set(['cat', 'head', 'tail', 'grep', 'egrep', 'fgrep', 'rg', 'sed', 'awk', 'less', 'more', 'nl'])
-
-// The Read tool returns this many lines when the call sets no limit.
-const READ_DEFAULT_LINES = 2000
-
-/**
- * A shell command split into simple commands (at |, ||, &&, ;, &, parentheses
- * and newlines), each a list of words with quotes removed. Operators inside
- * quotes stay in the word, so `grep "a|b" terminology.md` is one command.
- * Redirection operators end a word, so `< terminology.md` yields the name.
- * Each segment records whether its output goes somewhere other than the
- * model: `piped` when a single | ends it, `redirected` when it has a >.
- */
-function shellSegments (command) {
-  const segments = []
-  let words = []
-  let word = ''
-  let quote = null
-  let inWord = false
-  let redirected = false
-  const endWord = () => { if (inWord) words.push(word); word = ''; inWord = false }
-  const endSegment = (piped = false) => {
-    endWord()
-    if (words.length) segments.push({ words, piped, redirected })
-    words = []
-    redirected = false
-  }
-  for (let i = 0; i < command.length; i++) {
-    const ch = command[i]
-    if (quote) {
-      if (ch === quote) quote = null
-      else if (ch === '\\' && quote === '"' && i + 1 < command.length) word += command[++i]
-      else word += ch
-      continue
-    }
-    if (ch === "'" || ch === '"') {
-      quote = ch
-      inWord = true
-    } else if (ch === '\\' && i + 1 < command.length) {
-      word += command[++i]
-      inWord = true
-    } else if (ch === '|') {
-      // `||` is a list operator; a lone `|` (or `|&`) pipes this command's output.
-      if (command[i + 1] === '|') { endSegment(); i++ } else endSegment(true)
-    } else if (ch === '&' && command[i + 1] === '>') {
-      // `&>` sends stdout and stderr to a file.
-      endWord()
-      redirected = true
-      i++
-    } else if (';&()\n'.includes(ch)) {
-      endSegment()
-    } else if (ch === '>') {
-      // `2>file` and `2>&1` move stderr only; stdout still reaches the model.
-      // Any other > (`>`, `>>`, `1>`, `>&2`) takes stdout away from it.
-      if (!(inWord && word === '2')) redirected = true
-      if (inWord && /^\d$/.test(word)) { word = ''; inWord = false }
-      endWord()
-      if (command[i + 1] === '&' && /\d/.test(command[i + 2] || '')) i += 2
-    } else if (/\s/.test(ch) || ch === '<') {
-      endWord()
-    } else {
-      word += ch
-      inWord = true
-    }
-  }
-  endSegment()
-  return segments
-}
-
-/** The staged file a path-like shell token or Read path refers to, if any. */
-function stagedFile (token, cwd) {
-  if (!token.includes('/')) return MUST_READ.includes(token) ? token : null
-  const abs = path.resolve(cwd, token)
-  return MUST_READ.includes(path.basename(abs)) && realDir(path.dirname(abs)) === realDir(cwd) ? path.basename(abs) : null
-}
-
-/** Line count of a staged file in the workspace, or null when it cannot be read. */
+/** The lines of a staged file in the workspace, without a trailing empty line, or null. */
 function stagedLines (file, cwd) {
   try {
-    const text = fs.readFileSync(path.join(cwd, file), 'utf8')
-    return text.split('\n').length - (text.endsWith('\n') ? 1 : 0)
+    const lines = fs.readFileSync(path.join(cwd, file), 'utf8').split('\n')
+    if (lines.length && lines[lines.length - 1] === '') lines.pop()
+    return lines
   } catch {
     return null
   }
 }
 
-/**
- * Whether a Read call returned the whole file. With no offset and no limit,
- * Read returns the first READ_DEFAULT_LINES lines, which is the whole of a
- * file no longer than that (a file that cannot be measured is taken to be).
- * A limit, or an offset past the first line, covers the whole file only when
- * it starts at line 1 and the limit reaches the file's last line.
- */
-function readIsWhole (input, lines) {
-  const offset = Number(input.offset) || 0
-  if (offset > 1) return false
-  if (input.limit == null) return lines == null || lines <= READ_DEFAULT_LINES
-  return lines != null && Number(input.limit) >= lines
-}
+// A line of Read tool output: the line number, a tab (or an arrow in older
+// CLI versions), then the line as the file holds it.
+const READ_LINE = /^\s*(\d+)(?:\t|→)(.*)$/
 
 /**
- * Every staged file a tool call opened, in the order it named them, each with
- * whether the call returned the whole file (`full`) or only part of it.
+ * Which lines of a staged file one tool result showed the model, judged from
+ * the output itself rather than from the command or the Read arguments. A
+ * Read result is numbered, so each numbered line that matches the file counts,
+ * and ranged Reads combine. A Bash result counts only when the whole file is
+ * in it, so a cat that was piped into head, captured into a variable,
+ * truncated by the tool's output cap, or run in another directory on a
+ * different file shows nothing. Returns a Set of 1-based line numbers.
  */
-function readTargets (call, cwd) {
-  if (call.name === 'Read' && typeof call.input.file_path === 'string') {
+function linesShown (call, file, lines, cwd) {
+  const shown = new Set()
+  if (!call.answered || !call.output) return shown
+  if (call.name === 'Read') {
+    if (typeof call.input.file_path !== 'string') return shown
     const abs = path.resolve(cwd, call.input.file_path)
-    if (realDir(path.dirname(abs)) !== realDir(cwd) || !MUST_READ.includes(path.basename(abs))) return []
-    const file = path.basename(abs)
-    return [{ file, full: readIsWhole(call.input, stagedLines(file, cwd)) }]
-  }
-  if (call.name === 'Bash' && typeof call.input.command === 'string') {
-    // A file is opened when a segment of the command runs one of
-    // SHELL_READERS and names it, one file per name. It was read in full only
-    // when that program is `cat` (which the step's allowed tools list) and
-    // its output is neither piped nor redirected: `cat a.md b.md` reads both
-    // whole, `grep`, `head`, `sed` or `cat a.md | head` read part of it. A
-    // path-qualified name has to resolve to the workspace; a bare name is
-    // relative to it.
-    const found = []
-    for (const { words, piped, redirected } of shellSegments(call.input.command)) {
-      // Skip leading VAR=value assignments to find the program.
-      let i = 0
-      while (i < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i])) i++
-      if (i >= words.length || !SHELL_READERS.has(path.basename(words[i]))) continue
-      const full = path.basename(words[i]) === 'cat' && !piped && !redirected
-      for (const token of words.slice(i + 1)) {
-        if (token.startsWith('-')) continue
-        const file = stagedFile(token, cwd)
-        if (!file) continue
-        const prev = found.find((f) => f.file === file)
-        if (!prev) found.push({ file, full })
-        else if (full) prev.full = true
-      }
+    if (path.basename(abs) !== file || realDir(path.dirname(abs)) !== realDir(cwd)) return shown
+    for (const l of call.output.split('\n')) {
+      const m = l.match(READ_LINE)
+      if (!m) continue
+      const n = Number(m[1])
+      if (n >= 1 && n <= lines.length && lines[n - 1] === m[2]) shown.add(n)
     }
-    return found
+    return shown
   }
-  return []
+  if (call.name === 'Bash') {
+    const whole = lines.join('\n').trimEnd()
+    if (whole && call.output.includes(whole)) lines.forEach((_, i) => shown.add(i + 1))
+  }
+  return shown
+}
+
+/** Whether a call names a staged file at all: the evidence for "tried but failed". */
+function mentions (call, file) {
+  if (call.name === 'Read') return typeof call.input.file_path === 'string' && path.basename(call.input.file_path) === file
+  if (call.name === 'Bash') return typeof call.input.command === 'string' && call.input.command.includes(file)
+  return false
 }
 
 /**
- * The must-read verdict for one run. Every file in MUST_READ has to have been
- * read in full, by a Read that returned the whole file or a `cat` of it whose
- * output reached the model, by a call that did not error; and when the model
- * posted any inline comment, such a read has to come before the first
- * comment: a standard consulted after the suggestions were posted did not
- * shape them. A grep, head, sed or ranged Read opened the file but showed the
- * model only part of it, so it is recorded and does not count.
+ * The must-read verdict for one run, graded from what each tool result
+ * showed the model. Every file in MUST_READ has to have been shown in full
+ * (every line, across one or more results), and when the model posted an
+ * inline comment, those results have to have arrived before the first
+ * comment that the tool accepted: a standard whose text came back after the
+ * suggestions were written did not shape them, even if the read was issued
+ * in the same turn. A rejected comment posted nothing, so it sets no
+ * deadline. Subagent calls do not count: the reviewer saw only the
+ * subagent's summary.
+ *
+ * A file that was not shown in full is reported by what happened: shown only
+ * in part, every attempt errored, an attempt never got a result, or never
+ * read at all.
  */
 function checkMustRead (calls, cwd, files = MUST_READ) {
-  const firstComment = calls.findIndex((c) => c.name === COMMENT_TOOL)
-  const reads = calls
-    .flatMap((c) => readTargets(c, cwd).map((t) => ({ call: c, file: t.file, full: t.full })))
-    .filter((r) => files.includes(r.file))
-    .map((r) => ({
-      file: r.file,
-      index: r.call.index,
-      tool: r.call.name,
-      how: r.call.name === 'Bash' ? r.call.input.command : r.call.input.file_path,
-      full: r.full,
-      error: r.call.error
-    }))
+  const own = calls.filter((c) => !c.subagent)
+  const firstCommentCall = own.find((c) => c.name === COMMENT_TOOL && c.answered && !c.error)
+  const firstComment = firstCommentCall ? firstCommentCall.index : -1
+  const deadline = firstCommentCall ? firstCommentCall.seq : Infinity
+  const reads = []
   const perFile = files.map((file) => {
-    const opened = reads.filter((r) => r.file === file && !r.error)
-    const ok = opened.filter((r) => r.full)
-    const before = firstComment === -1 ? ok : ok.filter((r) => r.index < firstComment)
+    const lines = stagedLines(file, cwd)
+    const total = lines ? lines.length : 0
+    const covered = new Set()
+    const coveredBefore = new Set()
+    const indices = []
+    const partial = []
+    const errored = []
+    const unanswered = []
+    for (const c of own) {
+      if (!mentions(c, file) && !(c.name === 'Bash' && c.output)) continue
+      const shown = lines ? linesShown(c, file, lines, cwd) : new Set()
+      const named = mentions(c, file)
+      if (shown.size === 0) {
+        if (!named) continue
+        if (!c.answered) unanswered.push(c.index)
+        else if (c.error) errored.push(c.index)
+        else partial.push(c.index)
+        reads.push({ file, index: c.index, tool: c.name, how: c.name === 'Bash' ? c.input.command : c.input.file_path, lines: 0, of: total, error: c.error, answered: c.answered })
+        continue
+      }
+      for (const n of shown) {
+        covered.add(n)
+        if (c.resultSeq < deadline) coveredBefore.add(n)
+      }
+      if (shown.size === total) indices.push(c.index)
+      else partial.push(c.index)
+      reads.push({ file, index: c.index, tool: c.name, how: c.name === 'Bash' ? c.input.command : c.input.file_path, lines: shown.size, of: total, error: c.error, answered: c.answered })
+    }
+    const read = total > 0 && covered.size === total
     return {
       file,
-      read: ok.length > 0,
-      read_before_first_comment: before.length > 0,
-      indices: ok.map((r) => r.index),
-      partial_indices: opened.filter((r) => !r.full).map((r) => r.index)
+      lines: total,
+      read,
+      read_before_first_comment: total > 0 && coveredBefore.size === total,
+      indices,
+      partial_indices: partial,
+      errored_indices: errored,
+      unanswered_indices: unanswered
     }
   })
-  const partial = perFile.filter((f) => !f.read && f.partial_indices.length > 0).map((f) => f.file)
-  const missing = perFile.filter((f) => !f.read && f.partial_indices.length === 0).map((f) => f.file)
-  const late = perFile.filter((f) => f.read && !f.read_before_first_comment).map((f) => f.file)
-  const pass = missing.length === 0 && partial.length === 0 && late.length === 0
+  const late = perFile.filter((f) => f.read && !f.read_before_first_comment)
+  const notRead = perFile.filter((f) => !f.read)
+  const pass = notRead.length === 0 && late.length === 0
   let detail
   if (pass) {
-    detail = perFile.map((f) => `${f.file} at call #${f.indices.join(',#')}`).join('; ') +
+    detail = perFile.map((f) => `${f.file} (${f.lines} lines) at call #${(f.indices.length ? f.indices : f.partial_indices).join(',#')}`).join('; ') +
       (firstComment === -1 ? '; no inline comment posted' : `; first inline comment at call #${firstComment}`)
   } else {
     const parts = []
-    if (missing.length) parts.push(`never read: ${missing.join(', ')}`)
+    const byKind = (pred) => notRead.filter(pred)
+    const missing = byKind((f) => !f.partial_indices.length && !f.errored_indices.length && !f.unanswered_indices.length)
+    const partial = byKind((f) => f.partial_indices.length)
+    const errored = byKind((f) => !f.partial_indices.length && f.errored_indices.length)
+    const unanswered = byKind((f) => !f.partial_indices.length && !f.errored_indices.length && f.unanswered_indices.length)
+    if (missing.length) parts.push(`never read: ${missing.map((f) => f.file).join(', ')}`)
     if (partial.length) {
-      parts.push(`read only in part (grep, head, sed or a ranged Read): ${partial.map((f) => {
-        const r = reads.find((x) => x.file === f && !x.error && !x.full)
-        return `${f} (#${r.index} ${r.tool}: ${String(r.how).slice(0, 80)})`
+      parts.push(`read only in part: ${partial.map((f) => {
+        const r = reads.filter((x) => x.file === f.file)
+        const best = Math.max(...r.map((x) => x.lines))
+        const first = r.find((x) => f.partial_indices.includes(x.index))
+        return `${f.file} (${best} of ${f.lines} lines shown; #${first.index} ${first.tool}: ${String(first.how).slice(0, 80)})`
       }).join(', ')}`)
     }
-    if (late.length) parts.push(`read only after the first inline comment (call #${firstComment}): ${late.join(', ')}`)
-    parts.push(`tool calls: [${calls.map((c) => c.name).join(', ') || 'none'}]`)
+    if (errored.length) parts.push(`every read errored: ${errored.map((f) => `${f.file} (#${f.errored_indices.join(',#')})`).join(', ')}`)
+    if (unanswered.length) parts.push(`read never got a result: ${unanswered.map((f) => `${f.file} (#${f.unanswered_indices.join(',#')})`).join(', ')}`)
+    if (late.length) parts.push(`read only after the first inline comment (call #${firstComment}): ${late.map((f) => f.file).join(', ')}`)
+    parts.push(`tool calls: [${own.map((c) => c.name).join(', ') || 'none'}]`)
     detail = parts.join('; ')
   }
   return { pass, files: perFile, first_comment_index: firstComment, reads, detail }
@@ -398,6 +430,7 @@ function runReview ({ repoDir, lint, diff, model = PRODUCTION_MODEL, timeoutMs =
       '# Source diff of this PR against its merge base.\n# Left out (generated docs, lockfiles, vendored code, test data): 0 file(s).\n\n' + diff)
   }
   for (const [name, text] of Object.entries(fetchStandards())) fs.writeFileSync(path.join(repoDir, name), text)
+  if (withoutStandards) hideFromGitStatus(repoDir, MUST_READ)
 
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-strings-prod-'))
   const log = path.join(scratch, 'inline-comments.jsonl')
@@ -438,12 +471,18 @@ function runReview ({ repoDir, lint, diff, model = PRODUCTION_MODEL, timeoutMs =
   fs.rmSync(scratch, { recursive: true, force: true })
 
   const stream = parseStream(r.stdout || '')
+  const timedOut = Boolean(r.error && r.error.code === 'ETIMEDOUT')
+  // A CLI that exits 0 with no stream-json events ignored --output-format: the
+  // must-read check would see no tool calls and blame the model for a review
+  // it cannot see. That is the harness's failure.
+  if (!timedOut && r.status === 0 && stream.events === 0) {
+    throw new Error('the claude CLI exited 0 but printed no stream-json events; check that it supports --output-format stream-json --verbose')
+  }
   const mustRead = checkMustRead(stream.calls, repoDir)
 
   // The executors parse model text. Present each recorded comment the way they
   // already read one: its span header, then its body with any suggestion block.
   const output = comments.map((c) => `FILE ${c.path} LINES ${c.startLine || c.line || 0}-${c.line || c.startLine || 0}\n${c.body}`).join('\n\n')
-  const timedOut = Boolean(r.error && r.error.code === 'ETIMEDOUT')
   return {
     prompt,
     output,
@@ -468,7 +507,9 @@ module.exports = {
   parseClaudeArgs,
   renderPrompt,
   stripStandardsInstructions,
+  assertOneUnit,
   parseStream,
+  linesShown,
   checkMustRead,
   PRODUCTION_MODEL,
   FETCHED_STANDARDS,

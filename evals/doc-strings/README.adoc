@@ -158,32 +158,45 @@ the suggestion text claims.
 
 The production review now runs as a `stream-json` transcript
 (`transcript.jsonl` in the case's results directory), so every `tool_use`
-the model issued is recorded with its arguments. The check, in
-`production.checkMustRead`:
+the model issued is recorded with its arguments, and every `tool_result` with
+the text the model was shown and where in the stream it arrived. The check,
+in `production.checkMustRead`, grades that text, not the command that
+produced it:
 
 * Each staged standard (`production.MUST_READ`, derived from the files the
-  harness stages so the two cannot drift) must have been read in full at
-  least once. A full read is a `Read` of that file in the workspace that
-  returns the whole file (no `offset` past line 1, and either no `limit` on a
-  file of at most 2000 lines, the Read tool's default, or a `limit` that
-  reaches the last line), or a `cat` of it, which the step's allowed tools
-  list, whose output is neither piped nor redirected. One command can read
-  both files (`cat a.md b.md`). A `grep`, `head`, `sed`, a ranged `Read` or a
-  `cat` piped into `head` opened the file but showed the model only part of
-  it: it is recorded under `partial_indices` and does not count, and a file
-  read only that way fails as `read only in part`. A command that only names
-  a file (`ls`, `wc`, `echo`, `test`) has not opened it. A read whose tool
-  result came back as an error does not count, nor does a file of the same
-  name outside the workspace. The command or path behind each read, and
-  whether it was full, is kept in `must-read.json`.
-* When the model posted any inline comment, every such read must come
-  before the first `mcp__github_inline_comment__create_inline_comment`
-  call. A standard consulted after the suggestions were posted did not shape
-  them.
+  harness stages so the two cannot drift) must have been shown to the model
+  in full: every line of the staged file, across one or more tool results.
+  A `Read` result is numbered, so each numbered line that matches the
+  workspace file counts, and ranged Reads that together cover the file count.
+  A `Bash` result counts only when the whole file is in its output, so a
+  `cat` piped into `head`, captured into a variable, cut off by the Bash
+  tool's output cap, or run in another directory on a different file shows
+  nothing. A `Read` of a file of the same name outside the workspace does not
+  count.
+* Production's allowed tools permit only the exact commands
+  `cat embedded-reference-strings.md` and `cat terminology.md` for these
+  files, so `grep`, `head` and multi-file `cat` are refused there. Grading by
+  output keeps the check right without modelling what each shell command
+  prints, and keeps it right if that list ever widens.
+* When the model posted an inline comment, those results must have arrived
+  before the first `mcp__github_inline_comment__create_inline_comment` call
+  the tool accepted. A read issued in the same turn as the comment does not
+  count: its result came back after the comment was written. A rejected
+  comment posted nothing, so it sets no deadline.
+* A call whose result never arrived (a turn limit, a cut-off session) shows
+  nothing. Calls a subagent made are not credited: the reviewer saw only the
+  subagent's summary.
 * With no inline comment (the negative control's correct outcome), the
   reads only have to have happened: the prose-quality pass judges each
   declaration against the standard, so silence without opening it is a
   review from memory.
+
+A file that was not shown in full is reported by what happened: `never
+read`, `read only in part` (with how many lines were shown), `every read
+errored` (for example a Read over the tool's token cap), or `read never got
+a result`, so `must-read.json` points at a prompt problem or a tool problem
+as the case may be. A CLI that exits 0 but prints no stream-json events is a
+harness error, not a model that read nothing.
 
 The check is one more row in `evidence.json` (`must-read: standards opened
 before the first inline comment`), with the per-file call indices and the
@@ -193,21 +206,39 @@ fails it still reports its lint, extraction and comment verdicts.
 
 === Proving the must-read check can fail
 
-`--sabotage-must-read <id>` runs a production-path case with every sentence
-that names a staged standard stripped from the production prompt
-(`production.stripStandardsInstructions`). The files are still in the
-workspace; the model is simply never told they are there or to apply them.
-The must-read row is *expected to FAIL*, and the run exits 0 only if it does:
+`--sabotage-must-read <id>` runs a production-path case twice. The first run
+is the baseline, on the unmodified prompt, and must PASS the must-read row.
+The second strips every sentence that names a staged standard from the
+production prompt (`production.stripStandardsInstructions`); the files are
+still in the workspace, the model is simply never told they are there or to
+apply them, and the row must FAIL. The run exits 0 only when both hold. A
+case whose baseline already fails the row proves nothing, and the run says
+so and exits 1:
 
 [source,bash]
 ----
-node evals/doc-strings/run-evals.js --sabotage-must-read prop-tautology-no-period
 node evals/doc-strings/run-evals.js --sabotage-must-read negative-property-diff
 ----
 
-A stripped prompt that still contains either file name is a harness error,
-not a weaker sabotage. `--sabotage` and `--sabotage-must-read` are exclusive:
-each run proves one assertion.
+Claude Code shows the model the repository's `git status` when a session
+starts, which lists untracked files by name, so the sabotage also adds the
+two files to `.git/info/exclude`. Before that, a stripped-prompt run of
+`negative-property-diff` on `claude-opus-5` read both files from that
+listing alone. The files stay in the workspace, so a model that runs `ls`
+can still find and read them, and then the proof fails honestly: on
+2026-10-24 on `claude-opus-5`, `negative-property-diff` was PROVEN (baseline
+read both, stripped run read neither), and `metric-name-echo` was NOT PROVEN
+(the stripped run listed the directory and read both). Use
+`negative-property-diff` as the proof.
+
+The stripper cuts the prompt at sentence ends, line-ending colons, list
+items and blank lines, and also removes a following sentence that points
+back at a removed one ("If it is absent or empty, ..."). Mentions of "the
+writing standard's quality bar" become "this quality bar", the bar the prompt
+states inline. A stripped prompt that still contains either file name, or a
+removed span longer than one sentence, is a harness error (exit 2), not a
+weaker sabotage. `--sabotage` and `--sabotage-must-read` are exclusive, and
+neither takes `--case`: each run proves one assertion on the case it names.
 
 == Running
 
@@ -216,7 +247,7 @@ each run proves one assertion.
 npm run eval:doc-strings                     # full suite (10 cases)
 node evals/doc-strings/run-evals.js --case metric-name-echo
 node evals/doc-strings/run-evals.js --model claude-sonnet-5   # override the production model
-node evals/doc-strings/run-evals.js --sabotage-must-read prop-tautology-no-period
+node evals/doc-strings/run-evals.js --sabotage-must-read negative-property-diff
 node evals/doc-strings/run-evals.js --keep-temp   # keep fixture repos
 ----
 
@@ -250,9 +281,9 @@ must-read row alone: the model opened `embedded-reference-strings.md` and the
 source, posted a suggestion that passed every mechanical check, and never
 opened `terminology.md`. That is the gap the check exists to see, and it is a
 production-prompt finding, not a harness one: the prompt says to use the
-terminology file's canonical forms but never says to read it. Must-read
-sabotage proofs: `negative-property-diff` (neither file read) and
-`metric-name-echo` (`terminology.md` never read) both exited 0.
+terminology file's canonical forms but never says to read it. (Those
+first sabotage proofs were single runs that counted any must-read failure;
+the baseline requirement above replaced them.)
 
 Why a partial read does not count, measured 2026-10-23 on `claude-opus-5`
 with the production prompt from #415 applied (it tells the model to read

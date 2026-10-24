@@ -140,239 +140,227 @@ describe('doc-strings evals: the suggestion comment must target the declaration'
 })
 
 describe('doc-strings evals: the must-read check', () => {
-  const cwd = '/work/repo'
-  const use = (id, name, input) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } })
-  const result = (id, isError = false) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: isError, content: 'x' }] } })
+  // A workspace with the two staged files on disk: the check grades what each
+  // tool result showed the model against these, line by line.
+  let ws
+  const STD = Array.from({ length: 325 }, (_, i) => `standard line ${i + 1}`)
+  const TERM = Array.from({ length: 199 }, (_, i) => `term ${i + 1}`)
+  const STD_PATH = () => path.join(ws, 'embedded-reference-strings.md')
+  beforeAll(() => {
+    ws = fs.mkdtempSync(path.join(os.tmpdir(), 'must-read-ws-'))
+    fs.writeFileSync(path.join(ws, 'embedded-reference-strings.md'), STD.join('\n') + '\n')
+    fs.writeFileSync(path.join(ws, 'terminology.md'), TERM.join('\n') + '\n')
+  })
+  afterAll(() => fs.rmSync(ws, { recursive: true, force: true }))
+
+  // Read output as the CLI prints it (checked against Claude Code 2.1.310):
+  // "<n>\t<line>", one per line, from the requested offset.
+  const numbered = (lines, from = 1) => lines.map((l, i) => `${from + i}\t${l}`).join('\n')
+  const use = (id, name, input, extra = {}) => ({ type: 'assistant', ...extra, message: { content: [{ type: 'tool_use', id, name, input }] } })
+  const turn = (...blocks) => ({ type: 'assistant', message: { content: blocks.map(([id, name, input]) => ({ type: 'tool_use', id, name, input })) } })
+  const result = (id, content = '', isError = false, extra = {}) => ({ type: 'user', ...extra, message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: isError, content }] } })
   const stream = (events) => events.map((e) => JSON.stringify(e)).join('\n') + '\n'
   const comment = (id) => use(id, production.COMMENT_TOOL, { path: 'a.cc', line: 3, body: '```suggestion\nx\n```' })
+  const posted = (id) => result(id, 'Inline comment recorded')
+  const readStd = (id) => [use(id, 'Read', { file_path: STD_PATH() }), result(id, numbered(STD))]
+  const readTerm = (id) => [use(id, 'Read', { file_path: path.join(ws, 'terminology.md') }), result(id, numbered(TERM))]
+  const verdict = (events) => production.checkMustRead(production.parseStream(stream(events)).calls, ws)
 
   test('the production model is an exact id, not an alias', () => {
     expect(production.PRODUCTION_MODEL).toMatch(/^claude-[a-z]+-\d/)
     expect(['opus', 'sonnet', 'haiku']).not.toContain(production.PRODUCTION_MODEL)
   })
 
-  test('parseStream keeps every tool call in order with its result status', () => {
-    const { calls, result: r } = production.parseStream(stream([
+  test('parseStream keeps every call in order with when its result arrived, its output, and whether it got one', () => {
+    const { calls, result: r, events } = production.parseStream(stream([
       use('t1', 'Read', { file_path: 'lint-findings.json' }),
-      result('t1'),
+      result('t1', [{ type: 'text', text: '1\t{}' }]),
       use('t2', 'Read', { file_path: '/work/repo/missing.md' }),
-      result('t2', true),
+      result('t2', 'File does not exist.', true),
+      use('t3', 'Bash', { command: 'cat terminology.md' }),
       { type: 'result', subtype: 'success', result: 'done' }
     ]))
-    expect(calls.map((c) => [c.index, c.name, c.error])).toEqual([[0, 'Read', false], [1, 'Read', true]])
+    expect(calls.map((c) => [c.index, c.name, c.answered, c.error, c.output])).toEqual([
+      [0, 'Read', true, false, '1\t{}'], [1, 'Read', true, true, 'File does not exist.'], [2, 'Bash', false, false, '']
+    ])
+    expect(calls[0].resultSeq).toBeGreaterThan(calls[0].seq)
     expect(r.result).toBe('done')
+    expect(events).toBe(6)
+    expect(production.parseStream('not json\n').events).toBe(0)
   })
 
-  test('both standards read before the first inline comment passes, by Read or by the allowed cat', () => {
-    const { calls } = production.parseStream(stream([
-      use('t1', 'Read', { file_path: 'pr-diff.patch' }), result('t1'),
-      use('t2', 'Read', { file_path: '/work/repo/embedded-reference-strings.md' }), result('t2'),
-      use('t3', 'Bash', { command: 'cat terminology.md' }), result('t3'),
-      comment('t4'), result('t4')
-    ]))
-    const v = production.checkMustRead(calls, cwd)
+  test('both standards shown in full before the first comment pass, by Read or by cat', () => {
+    const v = verdict([
+      ...readStd('t1'),
+      use('t2', 'Bash', { command: 'cat terminology.md' }), result('t2', TERM.join('\n')),
+      comment('t3'), posted('t3')
+    ])
     expect(v.pass).toBe(true)
-    expect(v.first_comment_index).toBe(3)
-    expect(v.files.map((f) => [f.file, f.indices])).toEqual([['embedded-reference-strings.md', [1]], ['terminology.md', [2]]])
+    expect(v.first_comment_index).toBe(2)
+    expect(v.files.map((f) => [f.file, f.indices])).toEqual([['embedded-reference-strings.md', [0]], ['terminology.md', [1]]])
   })
 
   test('a standard that was never opened fails and is named', () => {
-    const { calls } = production.parseStream(stream([
-      use('t1', 'Read', { file_path: 'embedded-reference-strings.md' }), result('t1'),
-      comment('t2'), result('t2')
-    ]))
-    const v = production.checkMustRead(calls, cwd)
+    const v = verdict([...readStd('t1'), comment('t2'), posted('t2')])
     expect(v.pass).toBe(false)
     expect(v.detail).toMatch(/never read: terminology\.md/)
   })
 
-  test('a standard opened only after the first inline comment fails', () => {
-    const { calls } = production.parseStream(stream([
-      use('t1', 'Read', { file_path: 'terminology.md' }), result('t1'),
-      comment('t2'), result('t2'),
-      use('t3', 'Read', { file_path: 'embedded-reference-strings.md' }), result('t3')
-    ]))
-    const v = production.checkMustRead(calls, cwd)
+  test('a standard opened only after the first comment fails', () => {
+    const v = verdict([...readTerm('t1'), comment('t2'), posted('t2'), ...readStd('t3')])
     expect(v.pass).toBe(false)
     expect(v.detail).toMatch(/read only after the first inline comment \(call #1\): embedded-reference-strings\.md/)
   })
 
-  test('a read that errored, a file of the same name elsewhere, and a shell command that does not name the file do not count', () => {
-    const { calls } = production.parseStream(stream([
-      use('t1', 'Read', { file_path: 'embedded-reference-strings.md' }), result('t1', true),
-      use('t2', 'Read', { file_path: '/elsewhere/terminology.md' }), result('t2'),
-      use('t3', 'Bash', { command: 'cat /elsewhere/terminology.md' }), result('t3'),
-      use('t4', 'Bash', { command: 'ls -la' }), result('t4')
-    ]))
-    const v = production.checkMustRead(calls, cwd)
-    expect(v.pass).toBe(false)
-    expect(v.detail).toMatch(/never read: embedded-reference-strings\.md, terminology\.md/)
+  test('reads issued in the same turn as the comment do not count: their results arrived after it was written', () => {
+    // Negative control for the ordering: the same three calls in two turns,
+    // with the reads' results back before the comment is issued, pass.
+    const sameTurn = verdict([
+      turn(['t1', 'Read', { file_path: STD_PATH() }], ['t2', 'Read', { file_path: path.join(ws, 'terminology.md') }], ['t3', production.COMMENT_TOOL, { path: 'a.cc', line: 3, body: 'x' }]),
+      result('t1', numbered(STD)), result('t2', numbered(TERM)), posted('t3')
+    ])
+    expect(sameTurn.pass).toBe(false)
+    expect(sameTurn.detail).toMatch(/read only after the first inline comment \(call #2\): embedded-reference-strings\.md, terminology\.md/)
+
+    const earlierTurn = verdict([
+      turn(['t1', 'Read', { file_path: STD_PATH() }], ['t2', 'Read', { file_path: path.join(ws, 'terminology.md') }]),
+      result('t1', numbered(STD)), result('t2', numbered(TERM)),
+      comment('t3'), posted('t3')
+    ])
+    expect(earlierTurn.pass).toBe(true)
   })
 
-  test('a grep or head of a staged file is a partial read: recorded with its command, and it does not count', () => {
-    const { calls } = production.parseStream(stream([
-      use('t1', 'Bash', { command: `cd ${cwd} && grep -n -i "broker" terminology.md | head -20` }), result('t1'),
-      use('t2', 'Bash', { command: `head -40 ${cwd}/embedded-reference-strings.md` }), result('t2')
-    ]))
-    const v = production.checkMustRead(calls, cwd)
+  test('a rejected comment sets no deadline; the first accepted one does', () => {
+    const v = verdict([
+      comment('t1'), result('t1', 'path, body and line are required', true),
+      ...readStd('t2'), ...readTerm('t3'),
+      comment('t4'), posted('t4')
+    ])
+    expect(v.pass).toBe(true)
+    expect(v.first_comment_index).toBe(3)
+    // Control: the same rejected-first stream with the reads after the
+    // accepted comment still fails.
+    const late = verdict([comment('t1'), result('t1', 'bad', true), comment('t2'), posted('t2'), ...readStd('t3'), ...readTerm('t4')])
+    expect(late.pass).toBe(false)
+    expect(late.first_comment_index).toBe(1)
+  })
+
+  test('a read that never got a result does not count, and is reported as such', () => {
+    const v = verdict([
+      use('t1', 'Read', { file_path: STD_PATH() }),
+      use('t2', 'Read', { file_path: path.join(ws, 'terminology.md') })
+    ])
     expect(v.pass).toBe(false)
-    expect(v.reads.map((r) => [r.file, r.tool, r.full])).toEqual([['terminology.md', 'Bash', false], ['embedded-reference-strings.md', 'Bash', false]])
-    expect(v.reads[0].how).toMatch(/grep/)
-    expect(v.files.map((f) => [f.file, f.indices, f.partial_indices])).toEqual([['embedded-reference-strings.md', [], [1]], ['terminology.md', [], [0]]])
-    expect(v.detail).toMatch(/read only in part \(grep, head, sed or a ranged Read\): embedded-reference-strings\.md \(#1 Bash: head -40/)
+    expect(v.detail).toMatch(/read never got a result: embedded-reference-strings\.md \(#0\), terminology\.md \(#1\)/)
+  })
+
+  test('a read that errored is reported as errored, not as never read', () => {
+    const v = verdict([
+      use('t1', 'Read', { file_path: STD_PATH() }), result('t1', 'File content (40000 tokens) exceeds maximum allowed tokens', true),
+      ...readTerm('t2')
+    ])
+    expect(v.pass).toBe(false)
+    expect(v.detail).toMatch(/every read errored: embedded-reference-strings\.md \(#0\)/)
     expect(v.detail).not.toMatch(/never read/)
   })
 
-  test('a cat whose output is piped or redirected is a partial read; a cat with only stderr redirected is a full one', () => {
-    const { calls } = production.parseStream(stream([
-      use('t1', 'Bash', { command: 'cat terminology.md | head -50' }), result('t1'),
-      use('t2', 'Bash', { command: 'cat embedded-reference-strings.md > /tmp/copy.md' }), result('t2'),
-      use('t3', 'Bash', { command: 'cat terminology.md &> /tmp/both.txt' }), result('t3')
-    ]))
-    const v = production.checkMustRead(calls, cwd)
-    expect(v.pass).toBe(false)
-    expect(v.reads.map((r) => [r.index, r.full])).toEqual([[0, false], [1, false], [2, false]])
-
-    const ok = production.parseStream(stream([
-      use('t1', 'Bash', { command: 'cat embedded-reference-strings.md 2>&1' }), result('t1'),
-      use('t2', 'Bash', { command: 'cat -n terminology.md 2>/dev/null || echo missing' }), result('t2')
-    ]))
-    expect(production.checkMustRead(ok.calls, cwd).pass).toBe(true)
-  })
-
-  describe('Read calls against the staged files on disk', () => {
-    let ws
-    beforeAll(() => {
-      ws = fs.mkdtempSync(path.join(os.tmpdir(), 'must-read-ws-'))
-      fs.writeFileSync(path.join(ws, 'embedded-reference-strings.md'), Array.from({ length: 325 }, (_, i) => `line ${i + 1}`).join('\n') + '\n')
-      fs.writeFileSync(path.join(ws, 'terminology.md'), Array.from({ length: 199 }, (_, i) => `term ${i + 1}`).join('\n') + '\n')
-    })
-    afterAll(() => fs.rmSync(ws, { recursive: true, force: true }))
-
-    test('a Read with no offset or limit of a file within the default 2000 lines is a full read', () => {
-      const { calls } = production.parseStream(stream([
-        use('t1', 'Read', { file_path: path.join(ws, 'embedded-reference-strings.md') }), result('t1'),
-        use('t2', 'Read', { file_path: 'terminology.md' }), result('t2'),
-        comment('t3'), result('t3')
-      ]))
-      const v = production.checkMustRead(calls, ws)
-      expect(v.pass).toBe(true)
-      expect(v.reads.map((r) => r.full)).toEqual([true, true])
-    })
-
-    test('a Read whose limit reaches the last line, from line 1, is a full read', () => {
-      const { calls } = production.parseStream(stream([
-        use('t1', 'Read', { file_path: 'embedded-reference-strings.md', offset: 1, limit: 325 }), result('t1'),
-        use('t2', 'Read', { file_path: 'terminology.md', limit: 2000 }), result('t2')
-      ]))
-      expect(production.checkMustRead(calls, ws).pass).toBe(true)
-    })
-
-    test('a Read with a limit short of the end, or an offset past line 1, is a partial read and fails', () => {
-      const { calls } = production.parseStream(stream([
-        use('t1', 'Read', { file_path: 'embedded-reference-strings.md', limit: 100 }), result('t1'),
-        use('t2', 'Read', { file_path: 'terminology.md', offset: 50 }), result('t2'),
-        comment('t3'), result('t3')
-      ]))
-      const v = production.checkMustRead(calls, ws)
-      expect(v.pass).toBe(false)
-      expect(v.reads.map((r) => [r.file, r.full])).toEqual([['embedded-reference-strings.md', false], ['terminology.md', false]])
-      expect(v.detail).toMatch(/read only in part[^;]*embedded-reference-strings\.md \(#0 Read[^;]*terminology\.md \(#1 Read/)
-    })
-
-    test('a partial read followed by a full read before the first comment passes on the full one', () => {
-      const { calls } = production.parseStream(stream([
-        use('t1', 'Bash', { command: 'grep -n broker terminology.md' }), result('t1'),
-        use('t2', 'Read', { file_path: 'terminology.md' }), result('t2'),
-        use('t3', 'Read', { file_path: 'embedded-reference-strings.md' }), result('t3'),
-        comment('t4'), result('t4')
-      ]))
-      const v = production.checkMustRead(calls, ws)
-      expect(v.pass).toBe(true)
-      expect(v.files.find((f) => f.file === 'terminology.md')).toMatchObject({ indices: [1], partial_indices: [0] })
-    })
-
-    test('a Read with no limit of a file longer than 2000 lines is a partial read', () => {
-      fs.writeFileSync(path.join(ws, 'terminology.md'), 'x\n'.repeat(2500))
-      const { calls } = production.parseStream(stream([
-        use('t1', 'Read', { file_path: 'embedded-reference-strings.md' }), result('t1'),
-        use('t2', 'Read', { file_path: 'terminology.md' }), result('t2')
-      ]))
-      const v = production.checkMustRead(calls, ws)
-      expect(v.pass).toBe(false)
-      expect(v.reads.map((r) => r.full)).toEqual([true, false])
-      fs.writeFileSync(path.join(ws, 'terminology.md'), Array.from({ length: 199 }, (_, i) => `term ${i + 1}`).join('\n') + '\n')
-    })
-  })
-
-  test('one shell command that prints both standards opens both', () => {
-    const { calls } = production.parseStream(stream([
-      use('t1', 'Bash', { command: 'cat embedded-reference-strings.md terminology.md' }), result('t1'),
-      comment('t2'), result('t2')
-    ]))
-    const v = production.checkMustRead(calls, cwd)
+  test('a cat the model saw counts even when a later command in the chain failed the call', () => {
+    const v = verdict([
+      ...readStd('t1'),
+      use('t2', 'Bash', { command: 'cat terminology.md && grep -q nothing lint-findings.json' }), result('t2', TERM.join('\n'), true)
+    ])
     expect(v.pass).toBe(true)
-    expect(v.files.map((f) => [f.file, f.indices])).toEqual([['embedded-reference-strings.md', [0]], ['terminology.md', [0]]])
   })
 
-  test('a command that only names a standard (ls, echo, wc, test) does not open it', () => {
+  test('output that never reached the model in full does not count: piped, captured, or truncated', () => {
+    const v = verdict([
+      ...readStd('t1'),
+      use('t2', 'Bash', { command: '(cat embedded-reference-strings.md terminology.md) | head -5' }), result('t2', STD.slice(0, 5).join('\n')),
+      use('t3', 'Bash', { command: 'x=$(cat terminology.md)' }), result('t3', ''),
+      use('t4', 'Bash', { command: 'cat embedded-reference-strings.md terminology.md' }),
+      result('t4', STD.join('\n') + '\n' + TERM.slice(0, 120).join('\n') + '\n\n... [output truncated]')
+    ])
+    expect(v.pass).toBe(false)
+    const term = v.files.find((f) => f.file === 'terminology.md')
+    expect(term).toMatchObject({ read: false, partial_indices: [1, 2, 3] })
+    expect(v.detail).toMatch(/read only in part: terminology\.md/)
+    // The untruncated cat of both credits both.
+    expect(verdict([use('t1', 'Bash', { command: 'cat embedded-reference-strings.md terminology.md' }), result('t1', STD.join('\n') + '\n' + TERM.join('\n'))]).pass).toBe(true)
+  })
+
+  test('grep and head show part of a file; a command that only names it shows none', () => {
+    const v = verdict([
+      use('t1', 'Bash', { command: 'grep -n broker terminology.md | head -20' }), result('t1', '12:term 12'),
+      use('t2', 'Bash', { command: 'head -40 embedded-reference-strings.md' }), result('t2', STD.slice(0, 40).join('\n')),
+      use('t3', 'Bash', { command: 'wc -l embedded-reference-strings.md terminology.md' }), result('t3', '325 embedded-reference-strings.md\n199 terminology.md')
+    ])
+    expect(v.pass).toBe(false)
+    expect(v.files.map((f) => [f.file, f.indices, f.partial_indices])).toEqual([['embedded-reference-strings.md', [], [1, 2]], ['terminology.md', [], [0, 2]]])
+  })
+
+  test('a file of the same name elsewhere does not count, by Read path or by content', () => {
+    const v = verdict([
+      use('t1', 'Read', { file_path: '/elsewhere/terminology.md' }), result('t1', numbered(TERM)),
+      use('t2', 'Bash', { command: 'cd /tmp/other && cat embedded-reference-strings.md' }), result('t2', 'a different file\nwith other text')
+    ])
+    expect(v.pass).toBe(false)
+    expect(v.files.every((f) => !f.read)).toBe(true)
+  })
+
+  test('ranged Reads that together cover a file count; one that stops short does not', () => {
+    const paged = verdict([
+      use('t1', 'Read', { file_path: STD_PATH(), offset: 1, limit: 200 }), result('t1', numbered(STD.slice(0, 200))),
+      use('t2', 'Read', { file_path: STD_PATH(), offset: 201, limit: 200 }), result('t2', numbered(STD.slice(200), 201)),
+      ...readTerm('t3')
+    ])
+    expect(paged.pass).toBe(true)
+    const short = verdict([
+      use('t1', 'Read', { file_path: STD_PATH(), limit: 100 }), result('t1', numbered(STD.slice(0, 100))),
+      ...readTerm('t2'), comment('t3'), posted('t3')
+    ])
+    expect(short.pass).toBe(false)
+    expect(short.detail).toMatch(/read only in part: embedded-reference-strings\.md \(100 of 325 lines shown; #0 Read/)
+  })
+
+  test('a Read result whose lines do not match the staged file is not credited', () => {
+    const v = verdict([
+      use('t1', 'Read', { file_path: STD_PATH() }), result('t1', numbered(STD.map((l) => l + ' edited'))),
+      ...readTerm('t2')
+    ])
+    expect(v.pass).toBe(false)
+  })
+
+  test('a Read through a symlinked spelling of the workspace still counts', () => {
+    const link = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'must-read-link-')), 'ws')
+    fs.symlinkSync(ws, link)
     const { calls } = production.parseStream(stream([
-      use('t1', 'Bash', { command: 'ls -la embedded-reference-strings.md terminology.md' }), result('t1'),
-      use('t2', 'Bash', { command: 'echo terminology.md && wc -c embedded-reference-strings.md' }), result('t2'),
-      use('t3', 'Bash', { command: 'test -s terminology.md; stat embedded-reference-strings.md 2>&1' }), result('t3')
+      use('t1', 'Read', { file_path: path.join(link, 'embedded-reference-strings.md') }), result('t1', numbered(STD)),
+      ...readTerm('t2')
     ]))
-    const v = production.checkMustRead(calls, cwd)
+    expect(production.checkMustRead(calls, link).pass).toBe(true)
+    expect(production.checkMustRead(calls, ws).pass).toBe(true)
+    fs.rmSync(path.dirname(link), { recursive: true, force: true })
+  })
+
+  test('reads a subagent made are not credited to the reviewer', () => {
+    const sub = { parent_tool_use_id: 'task1' }
+    const v = verdict([
+      use('task1', 'Task', { prompt: 'read the standards' }),
+      use('t1', 'Read', { file_path: STD_PATH() }, sub), result('t1', numbered(STD), false, sub),
+      use('t2', 'Read', { file_path: path.join(ws, 'terminology.md') }, sub), result('t2', numbered(TERM), false, sub),
+      result('task1', 'Both files say to use sentence case.')
+    ])
     expect(v.pass).toBe(false)
     expect(v.detail).toMatch(/never read: embedded-reference-strings\.md, terminology\.md/)
   })
 
-  test('a cat after && still counts, and only for the files it names', () => {
-    const { calls } = production.parseStream(stream([
-      use('t1', 'Bash', { command: `ls ${cwd} && LC_ALL=C cat terminology.md` }), result('t1'),
-      use('t2', 'Bash', { command: 'grep -n -i -E "cluster|cat embedded-reference-strings.md" lint-findings.json' }), result('t2'),
-      comment('t3'), result('t3')
-    ]))
-    const v = production.checkMustRead(calls, cwd)
-    expect(v.files.map((f) => [f.file, f.indices, f.partial_indices])).toEqual([['embedded-reference-strings.md', [], []], ['terminology.md', [0], []]])
-  })
-
-  test('a pipe inside a quoted grep pattern does not split the command', () => {
-    // Split at the quoted |, terminology.md would land in a segment whose
-    // program is "identifier" and not be attributed at all.
-    const { calls } = production.parseStream(stream([
-      use('t1', 'Bash', { command: 'grep -n -i "cluster|identifier|null" terminology.md | head -40' }), result('t1'),
-      use('t2', 'Bash', { command: "sed -n '1,200p' embedded-reference-strings.md" }), result('t2')
-    ]))
-    const v = production.checkMustRead(calls, cwd)
-    expect(v.pass).toBe(false)
-    expect(v.files.map((f) => [f.file, f.partial_indices])).toEqual([['embedded-reference-strings.md', [1]], ['terminology.md', [0]]])
-  })
-
-  test('a Read through a symlinked spelling of the workspace still counts', () => {
-    const real = fs.mkdtempSync(path.join(os.tmpdir(), 'must-read-real-'))
-    const link = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'must-read-link-')), 'ws')
-    fs.symlinkSync(real, link)
-    const { calls } = production.parseStream(stream([
-      use('t1', 'Read', { file_path: path.join(real, 'embedded-reference-strings.md') }), result('t1'),
-      use('t2', 'Read', { file_path: path.join(link, 'terminology.md') }), result('t2')
-    ]))
-    expect(production.checkMustRead(calls, link).pass).toBe(true)
-    expect(production.checkMustRead(calls, real).pass).toBe(true)
-    fs.rmSync(real, { recursive: true, force: true })
-    fs.rmSync(path.dirname(link), { recursive: true, force: true })
-  })
-
   test('with no inline comment, the reads only have to happen', () => {
-    const { calls } = production.parseStream(stream([
-      use('t1', 'Read', { file_path: 'embedded-reference-strings.md' }), result('t1'),
-      use('t2', 'Read', { file_path: 'terminology.md' }), result('t2')
-    ]))
-    const v = production.checkMustRead(calls, cwd)
+    const v = verdict([...readStd('t1'), ...readTerm('t2')])
     expect(v.pass).toBe(true)
     expect(v.detail).toMatch(/no inline comment posted/)
   })
 
-  test('the sabotage strips every sentence naming a standard and keeps the rest of the prompt', () => {
+  test('the sabotage strips every sentence naming a standard, leaves no dangling reference, and keeps the rest', () => {
     const step = production.loadStep()
     const full = production.renderPrompt(step.with.prompt, { repository: 'a/b', prNumber: 1 })
     const stripped = production.renderPrompt(step.with.prompt, { repository: 'a/b', prNumber: 1 }, { withoutStandards: true })
@@ -380,10 +368,21 @@ describe('doc-strings evals: the must-read check', () => {
       expect(full).toContain(name)
       expect(stripped).not.toContain(name)
     }
-    for (const kept of ['INLINE SUGGESTIONS', 'PROSE QUALITY', 'PUBLISHED-CONTENT IMPACT', 'lint-findings.json', 'pr-diff.patch']) {
+    for (const kept of ['INLINE SUGGESTIONS', 'PROSE QUALITY', 'PUBLISHED-CONTENT IMPACT', 'lint-findings.json', 'pr-diff.patch', 'here for the published-content check alone.']) {
       expect(stripped).toContain(kept)
     }
+    expect(stripped).not.toMatch(/If it is\s+absent or empty/)
+    expect(stripped).not.toMatch(/writing\s+standard's\s+quality\s+bar/)
     expect(stripped.length).toBeLessThan(full.length)
+  })
+
+  test('the sabotage removes only the naming sentence, not the list item or line after it', () => {
+    const out = production.stripStandardsInstructions('Do this first.\nCheck terminology.md for terms?\n- keep this bullet\nRules:\n- and this one\nRead embedded-reference-strings.md:\n- this bullet stays\nLast line.')
+    expect(out).toContain('- keep this bullet')
+    expect(out).toContain('Rules:\n- and this one')
+    expect(out).toContain('- this bullet stays')
+    expect(out).toContain('Do this first.')
+    expect(out).not.toMatch(/terminology\.md|embedded-reference-strings\.md/)
   })
 
   test('the sabotage refuses to run if a file name survives the split', () => {
@@ -391,5 +390,40 @@ describe('doc-strings evals: the must-read check', () => {
     // the name survives and the guard has to refuse rather than run a weaker
     // sabotage than it claims.
     expect(() => production.stripStandardsInstructions('See docs/terminology.md. Then stop.')).toThrow(/sabotage left terminology\.md/)
+  })
+
+  test('a removed span must be one unit: a second sentence, a later list item or a blank line is refused', () => {
+    // The guard behind the splitter, so a splitter regression cannot quietly
+    // widen the sabotage.
+    expect(() => production.assertOneUnit('\n- read terminology.md before you start')).not.toThrow()
+    expect(() => production.assertOneUnit(' Read terminology.md first.')).not.toThrow()
+    expect(() => production.assertOneUnit(' Read terminology.md first. Then stop.')).toThrow(/more than one sentence/)
+    expect(() => production.assertOneUnit(' Read terminology.md\n- and this bullet')).toThrow(/more than one sentence/)
+    expect(() => production.assertOneUnit(' Read terminology.md\n\nNext paragraph')).toThrow(/more than one sentence/)
+  })
+})
+
+describe('doc-strings evals: the must-read sabotage verdict and flags', () => {
+  const runEvals = require('../../evals/doc-strings/run-evals')
+  const row = (pass) => ({ check: 'must-read: standards opened before the first inline comment', pass, detail: pass ? 'ok' : 'never read: terminology.md; tool calls: []' })
+  const run = (baseline, pass) => ({ baseline, sabotage_must_read: !baseline, checks: [row(pass)] })
+
+  test('proven only when the baseline passes the row and the stripped run fails it', () => {
+    expect(runEvals.mustReadSabotageVerdict([run(true, true), run(false, false)]).proven).toBe(true)
+    // A case that already fails the row on the unmodified prompt (or a check
+    // that always fails) proves nothing.
+    const already = runEvals.mustReadSabotageVerdict([run(true, false), run(false, false)])
+    expect(already.proven).toBe(false)
+    expect(already.message).toMatch(/baseline run on the unmodified prompt already fails/)
+    expect(runEvals.mustReadSabotageVerdict([run(true, true), run(false, true)]).proven).toBe(false)
+    expect(runEvals.mustReadSabotageVerdict([run(false, false)]).proven).toBe(false)
+  })
+
+  test('a flag that lost its value, or --case with a sabotage, is a usage error', () => {
+    expect(() => runEvals.parseArgs(['--sabotage-must-read'])).toThrow(/needs a value/)
+    expect(() => runEvals.parseArgs(['--sabotage-must-read', '--keep-temp'])).toThrow(/needs a value/)
+    expect(() => runEvals.parseArgs(['--case', 'a', '--sabotage-must-read', 'b'])).toThrow(/cannot be combined/)
+    expect(() => runEvals.parseArgs(['--sabotage', 'a', '--sabotage-must-read', 'b'])).toThrow(/exclusive/)
+    expect(runEvals.parseArgs(['--sabotage-must-read', 'b', '--keep-temp'])).toMatchObject({ sabotageMustRead: 'b', keepTemp: true })
   })
 })
