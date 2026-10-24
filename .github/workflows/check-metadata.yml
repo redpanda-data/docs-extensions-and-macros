@@ -159,7 +159,7 @@ jobs:
           ' "$R"
           jq -r '
             def cell: tostring | gsub("\\|"; "\\|") | gsub("\n"; " ");
-            def ev: [.evidence[:3][] | "`\(.term)` \(if .location == "path" then "in the path" else "\(.location), line \(.line)" end)"] | join("; ");
+            def ev: .file as $f | [.evidence[:3][] | "`\(.term)` \(if .location == "path" then "in the path" else "\(.location), \(if .source and .source != $f then "\(.source):" else "line " end)\(.line)" end)"] | join("; ");
             .suggest as $s
             | ($s.suggestions | length) as $n
             | "### Suggested taxonomy values", "",

@@ -136,6 +136,11 @@ describe('check-metadata workflow: the suggestions step', () => {
     expect(r.summary).toMatch(/Pages with no page-categories whose text names no concept above the minimum score: `modules\/c\/pages\/empty\.adoc`\./)
   })
 
+  test('evidence from an included partial names the partial', () => {
+    const r = runReport(result({ suggestions: [suggestion({ evidence: [{ term: 'Tiered Storage', location: 'body', line: 3, source: 'modules/manage/partials/t.adoc' }, { term: 'Tiered Storage', location: 'title', line: 1, source: 'modules/manage/pages/a.adoc' }] })] }))
+    expect(r.summary).toContain('`Tiered Storage` body, modules/manage/partials/t.adoc:3; `Tiered Storage` title, line 1 |')
+  })
+
   test('at most 10 notices, the most GitHub shows per step; the summary keeps all of them', () => {
     const many = Array.from({ length: 14 }, (_, i) => suggestion({ file: `modules/a/pages/p${String(i).padStart(2, '0')}.adoc` }))
     const r = runReport(result({ suggestions: many }))
