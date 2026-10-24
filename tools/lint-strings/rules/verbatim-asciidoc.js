@@ -206,6 +206,8 @@ const CONDITIONAL_RULE = {
       }
       const [, indent, kind, attribute, body, trailing] = m
       const label = `${kind}::${attribute}[${body}]`
+      // What is between the brackets decides how Asciidoctor reads the line.
+      const bracket = body === '' ? 'empty' : body.trim() === '' ? 'whitespace' : 'text'
       if (fence !== null) {
         // Reported on its own: the form checks below assume prose around
         // the block, and a fence line is not prose.
@@ -230,16 +232,26 @@ const CONDITIONAL_RULE = {
         continue
       }
       if (kind === 'endif') {
-        if (body.trim() !== '') say(`${label} carries text in its brackets. Close a block with endif::[] on its own line.`)
         if (attribute && attribute !== CONDITIONAL_ATTRIBUTE) say(`${label} names "${attribute}". env-cloud is the only attribute; close the block with endif::[].`)
-        if (open.length === 0) say(`${label} has no matching ifdef::env-cloud[] or ifndef::env-cloud[] before it.`, 'error')
+        if (bracket !== 'empty') {
+          // Asciidoctor rejects an endif with anything in its brackets and
+          // leaves the block open, so it does not close one here either: the
+          // never-closed error below then reports the block it leaves open.
+          say(`${label} has ${bracket === 'text' ? 'text' : 'whitespace'} inside its brackets. Asciidoctor rejects it and leaves the block open, so the text after it is hidden from one audience. Write endif::[] with nothing between the brackets.`, 'error')
+        } else if (open.length === 0) say(`${label} has no matching ifdef::env-cloud[] or ifndef::env-cloud[] before it.`, 'error')
         else open.pop()
         if (i < lines.length - 1 && lines[i + 1].trim() !== '') say(`${label} needs a blank line after it, so the paragraph inside ends where the block ends.`)
         continue
       }
       // ifdef / ifndef
       if (attribute !== CONDITIONAL_ATTRIBUTE) say(`${label} tests "${attribute}". env-cloud is the only attribute a doc string may test.`)
-      if (body.trim() !== '') {
+      if (bracket === 'whitespace') {
+        // Asciidoctor reads any bracket content, whitespace included, as the
+        // single-line form, which opens no block: the text that follows shows
+        // for both audiences. So it is not pushed as an opener, and the endif
+        // that follows reports no matching opener.
+        say(`${label} has whitespace inside its brackets. Asciidoctor then reads it as the single-line form, which opens no block, so the text after it shows for both audiences. Write ${kind}::${attribute}[] with nothing between the brackets.`, 'error')
+      } else if (bracket === 'text') {
         say(`${label} is the single-line form. Use the block form: the directive alone on its line, the whole paragraph inside, then endif::[] on its own line.`)
       } else {
         if (attribute === CONDITIONAL_ATTRIBUTE) {

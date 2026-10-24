@@ -100,6 +100,29 @@ This extension generates an Algolia index for each version of each component. Th
 
 NOTE: Only pages that include an `<article>` element with the `doc` class are indexed.
 
+When the build has the docs taxonomy (see <<Docs taxonomy>>), every Product Docs record also carries these attributes, next to `categories`:
+
+[cols="1,3"]
+|===
+|Attribute |Value
+
+|`topics`, `topicIds`
+|The topic concepts of the page's authored `page-categories`, with the broader concepts they imply (Replication implies High Availability). Labels and IDs.
+
+|`useCases`, `useCaseIds`
+|The use-case concepts of the page's categories.
+
+|`technologies`, `technologyIds`
+|The technology concepts of the page's categories, those a topic implies (Iceberg Topics implies Apache Iceberg), and the technology whose `component` is the page's component (a page in `connect` is about Redpanda Connect).
+
+|`deployment`, `deploymentIds`
+|The deployment concept of the page's `env-*` attributes, and its broader concept.
+|===
+
+`categories` is unchanged: it is still the legacy list that validate-attributes writes, because labs-home filters on it. Labs records get none of the new attributes, and keep their string `deployment`.
+
+The Algolia index settings are not in any repository. To filter or facet on the new attributes, add them to `attributesForFaceting` in the index settings.
+
 === Environment variables
 
 - `ALGOLIA_ADMIN_API_KEY` (required)
@@ -730,6 +753,17 @@ This extension does not require any environment variables.
 
 There are no configurable options for this extension. It operates based on site attributes defined in `add-global-attributes.js` to determine valid categories and subcategories.
 
+=== With the docs taxonomy
+
+When the build has the docs taxonomy (see <<Docs taxonomy>>), each `page-categories` value is also resolved through it:
+
+* A value from `valid-categories.yml` passes through unchanged, so `page-categories` is exactly what it was without the taxonomy. When the value is a deprecated concept, the build logs one warning per value, with the number of pages, a sample, and the replacement. Labs and solutions pages are left to the legacy check: labs is retiring, and solutions-catalog resolves solution categories itself.
+* A value only the taxonomy knows, such as a new label like `Iceberg Topics`, is replaced by the legacy category of the concept it resolves to, or dropped when there is none. It is not reported as invalid.
+* A value neither knows warns per page and is dropped, as before.
+* A legacy value the taxonomy does not resolve warns as a gap in `taxonomy.yml`.
+
+Nothing here fails the build. The authored list is kept in `page-categories-authored` for the extensions that resolve concepts from it.
+
 === Registration
 
 Register the `validate-attributes` extension in the Antora playbook under the `antora.extensions` key like so:
@@ -787,7 +821,26 @@ antora:
     - require: '@redpanda-data/docs-extensions-and-macros/extensions/related-labs-extension.js'
 ----
 
-== Global attributes
+== Docs taxonomy
+
+`extension-utils/taxonomy.js` loads the docs taxonomy, the controlled vocabulary in the docs repository at `shared/modules/ROOT/attachments/taxonomy.yml`, and validates it against `taxonomy.schema.json` next to it. It is not an extension to register: validate-attributes and the Algolia indexer load it on first use and share it on `siteCatalog.taxonomy`.
+
+The file is read from the content catalog as an attachment of the `shared` component, so it is never merged into page attributes. <<Global attributes>> only reads `modules/ROOT/partials/`.
+
+The file has seven concept schemes (topic, task, content-type, use-case, industry, technology, deployment). Every concept has an `id`, a `prefLabel`, `altLabels`, a `definition`, a `broader` concept, `related` concepts, and `deprecated` with `replacedBy`. Every old category is either the label of a live concept or a deprecated concept whose `replacedBy` names its replacement.
+
+At load, the build fails when the file does not match the schema, when an ID repeats, when a label or altLabel repeats in any scheme (case-insensitive), or when a `broader`, `related`, `implies`, or `replacedBy` ID does not exist. When the file is absent, the build logs one warning and every consumer keeps its behavior without the taxonomy, so the docs repository and this package can deploy in either order. When the schema is absent, only the structural checks run.
+
+`Taxonomy#resolve(value)` returns the concept a label, altLabel, or ID names, and for a deprecated concept its `replacedBy` IDs. `Taxonomy#expand(ids)` adds the broader concepts and `implies` targets as implied. `pageFacets` turns a page's authored categories, deployment type, and component into the search facets.
+
+Outside Antora, `loadTaxonomyFrom({ source, root })` loads the same file from a path or URL, or else from the first that exists of the docs checkout at `root`, the docs checkout at `$REDPANDA_DOCS_PATH`, and the published copy at https://docs.redpanda.com/shared/_attachments/taxonomy.yml. It validates against the schema beside whichever it used.
+
+The metadata rules live in `extension-utils/metadata-check.js` (`checkPageMetadata`). validate-attributes runs them on Product Docs pages, solutions-catalog on solution overviews, and `doc-tools check-metadata` on page headers in a pull request, so the build and the PR check cannot disagree. See `check-metadata` in the CLI reference for the rules and their severities, and `.github/workflows/check-metadata.yml` for the reusable PR check.
+
+Suggestions live in `extension-utils/metadata-suggest.js` (`suggestForPage`), which `doc-tools check-metadata --suggest` runs. It matches every live concept's labels against a page's title, description, path, headings, and body, deterministically and with no model, and returns up to a few concepts per facet that the page does not carry yet, each with a score and the evidence for it. It honors the facet cardinalities in the taxonomy, `implies`, and `broader`, and never suggests a deprecated concept. Another tool that tags content against the taxonomy should call it rather than match labels itself, so every tagger agrees.
+
+`extension-utils/metadata-candidates.js` finds the other side: frequent, distinctive terms on a page that no concept's label matches (`pageCandidates`), and the same across a repository with the pages each is on (`aggregateCandidates`). `doc-tools check-metadata --suggest` lists them per page and `--candidates-only` aggregates them. They are evidence for proposing a new concept or altLabel, deterministic like the suggestions.
+
 
 This extension collects Asciidoc attributes from the https://github.com/redpanda-data/docs-site[`shared` component] or a local YAML file and makes them available to all component versions. Having global attributes is useful for consistent configuration of local and production builds.
 
@@ -1300,6 +1353,7 @@ The extension exports these attributes to YAML frontmatter:
 - `page-categories`: Categories
 - `page-topic-type`: Topic type (tutorial, how-to, concept, reference)
 - `page-personas`: Target audience
+- `page-introduced-in`, `page-introduced-in-product`: Release that introduced the page's feature, as a bare `X.Y.Z`, and the product it belongs to (generated Connect reference pages, self-managed only)
 - Custom attributes from allowlist
 
 === Example output
@@ -1396,7 +1450,8 @@ The `convert-sitemap-to-markdown` extension generates human-readable markdown ve
 - Generates individual `.md` files for each sitemap
 - Creates master `sitemap-all.md` combining all pages
 - Organizes URLs by component/version
-- Includes page metadata (modified dates, priority)
+- Uses each page's document title and `:description:`, falling back to a title from the URL for files that aren't Antora pages
+- Includes page metadata (modified dates, priority) on a nested line under each entry, so the entry line keeps the `- [Title](url): description` form
 - Uses Antora content catalog (no filesystem operations)
 
 === Configuration
@@ -1440,8 +1495,10 @@ Total pages: 4,126
 
 ### Current
 
-- [Get Started](https://docs.redpanda.com/current/get-started/) (modified: 2024-03-29)
-- [Deploy](https://docs.redpanda.com/current/deploy/) (modified: 2024-03-28)
+- [Introduction to Redpanda](https://docs.redpanda.com/current/get-started/): Learn about Redpanda and its features.
+  - modified: 2024-03-29
+- [Deploy](https://docs.redpanda.com/current/deploy/)
+  - modified: 2024-03-28
 ----
 
 === Use cases

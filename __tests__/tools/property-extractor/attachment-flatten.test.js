@@ -158,6 +158,68 @@ describe('the on-disk write-back is idempotent', () => {
     const description = onDisk(file).properties.p.description
     expect(description.split('include::').length - 1).toBe(1)
   })
+
+  describe('in the generated partials', () => {
+    // A second run reads a description the first run already wrote the
+    // include into, while `includes` still carries it, so the template
+    // rendered the directive once from each.
+    const saved = {}
+    beforeEach(() => {
+      for (const key of ['GENERATE_PARTIALS', 'OUTPUT_PARTIALS_DIR']) saved[key] = process.env[key]
+    })
+    afterEach(() => {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+    })
+
+    function partialAfterTwoRuns (includes) {
+      const { dir, file } = tmpInput({
+        properties: {
+          p: { name: 'p', description: 'Plain prose.', type: 'string', config_scope: 'cluster', includes }
+        }
+      })
+      const partials = path.join(dir, 'partials')
+      process.env.GENERATE_PARTIALS = '1'
+      process.env.OUTPUT_PARTIALS_DIR = partials
+      generateHandlebarsDocs.generateAllDocs(file, outDir(dir))
+      generateHandlebarsDocs.generateAllDocs(file, outDir(dir))
+      return fs.readFileSync(path.join(partials, 'properties', 'cluster-properties.adoc'), 'utf8')
+    }
+
+    it('renders an unconditional include once', () => {
+      const adoc = partialAfterTwoRuns(['reference:partial$x.adoc[]'])
+      expect(adoc.split('include::reference:partial$x.adoc[]').length - 1).toBe(1)
+      expect(adoc).toContain('Plain prose.')
+    })
+
+    it('renders each of several includes once', () => {
+      const adoc = partialAfterTwoRuns(['reference:partial$x.adoc[]', 'cloud-only: reference:partial$y.adoc[]'])
+      expect(adoc.split('include::reference:partial$x.adoc[]').length - 1).toBe(1)
+      expect(adoc.split('include::reference:partial$y.adoc[]').length - 1).toBe(1)
+    })
+
+    it('renders a scoped include once, inside one conditional', () => {
+      const adoc = partialAfterTwoRuns(['self-managed-only: reference:partial$x.adoc[]'])
+      expect(adoc.split('include::reference:partial$x.adoc[]').length - 1).toBe(1)
+      expect(adoc.split('ifndef::env-cloud[]\ninclude::reference:partial$x.adoc[]').length - 1).toBe(1)
+    })
+  })
+})
+
+describe('stripInlineIncludes', () => {
+  const { stripInlineIncludes } = require('../../../tools/property-extractor/helpers/applyPropertyLinks')
+
+  it('leaves an include a human wrote mid-description alone', () => {
+    const text = 'Before.\n\ninclude::reference:partial$x.adoc[]\n\nAfter.'
+    expect(stripInlineIncludes(text, [{ target: 'reference:partial$x.adoc[]' }])).toBe(text)
+  })
+
+  it('removes a trailing write-back copy and keeps the prose', () => {
+    const text = 'Prose.\n\ninclude::reference:partial$x.adoc[]'
+    expect(stripInlineIncludes(text, [{ target: 'reference:partial$x.adoc[]' }])).toBe('Prose.')
+  })
 })
 
 describe('includes are restored inline for the attachment, matching pre-includes-field behaviour', () => {

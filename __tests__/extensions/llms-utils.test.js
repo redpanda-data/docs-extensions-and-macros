@@ -154,6 +154,18 @@ describe('buildPageIndexes', () => {
     expect(current.contents).not.toMatch(/\]\([^)]*\.txt\)/)
   })
 
+  it('decodes entities in titles and descriptions after stripping tags', () => {
+    const escaped = [
+      page('streaming', '26.2', '/streaming/current/reference/rpk-trigger-get/', 'Get &amp; show', {
+        description: 'Get one trigger. &lt;name&gt; is the <code>full</code> resource name&#8217;s value.',
+      }),
+    ]
+    const [index] = buildPageIndexes({ pages: escaped, components, siteUrl, toMarkdownUrl })
+    expect(index.contents).toContain(
+      '- [Get & show](https://docs.example.com/streaming/current/reference/rpk-trigger-get.md): Get one trigger. <name> is the full resource name\u2019s value.'
+    )
+  })
+
   it('marks older versions and points to the latest', () => {
     const older = buildPageIndexes({ pages, components, siteUrl, toMarkdownUrl }).find((i) => i.version === '26.1')
     expect(older.isLatest).toBe(false)

@@ -70,6 +70,11 @@ function generateFrontmatter(page) {
     'page-eol-date',
     'page-git-created-date',
     'page-git-modified-date',
+    // Release that introduced the page's feature, and the product that
+    // release belongs to. Generated Connect reference pages set them on
+    // self-managed pages; the UI shows them as a "Since" badge.
+    'page-introduced-in',
+    'page-introduced-in-product',
     // Component-specific version attributes (from antora.yml)
     'latest-redpanda-tag', // Redpanda docker tag (e.g., v25.3.5)
     'latest-console-tag',
@@ -104,6 +109,16 @@ function generateFrontmatter(page) {
 
     // Only include page-beta-text if page-beta is true
     if (key === 'page-beta-text' && !attrs['page-beta']) {
+      return
+    }
+
+    if (key === 'page-introduced-in' || key === 'page-introduced-in-product') {
+      // Not boolean flags: an empty value (an unset attribute in a template)
+      // means there is nothing to record.
+      const text = String(value).trim()
+      if (!text) return
+      // A bare X.Y.Z, as the UI badge shows it.
+      frontmatter[key] = key === 'page-introduced-in' ? text.replace(/^v/i, '').replace(/\.+$/, '') : text
       return
     }
 
@@ -294,6 +309,7 @@ function createEnterpriseFeatureRules () {
 }
 
 module.exports.createEnterpriseFeatureRules = createEnterpriseFeatureRules
+module.exports.generateFrontmatter = generateFrontmatter
 module.exports.formatStatusMarker = formatStatusMarker
 module.exports.ENTERPRISE_MARKER = ENTERPRISE_MARKER
 
