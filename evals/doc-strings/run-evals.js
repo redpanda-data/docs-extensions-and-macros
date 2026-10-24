@@ -123,6 +123,10 @@ function runRewriteCase (spec, io) {
   // Genuine findings from the real linter - the same JSON the workflow feeds
   // the model.
   const lintBefore = lib.runLint(repo.dir, repo.surface, ['--diff', base])
+  // The --diff report covers only the files the PR changed; the re-lint
+  // below covers the whole repo, so untouched declarations compare against a
+  // whole-repo report taken before the rewrite.
+  const lintFullBefore = lib.runLint(repo.dir, repo.surface)
   const finding = lintBefore.findings.find((f) => f.name === spec.target &&
     (!spec.targetRule || f.rules.some((r) => r.id === spec.targetRule)))
   if (!finding) return harnessError(checks, `No lint finding for target ${spec.target}; fixture drifted`)
@@ -233,7 +237,7 @@ function runRewriteCase (spec, io) {
     targetRulesAfter.length === 0,
     targetRulesAfter.length === 0 ? 'clean' : `remaining: ${JSON.stringify(targetRulesAfter)} (${JSON.stringify(counts)})`)
   checks.add('re-lint: untouched declarations kept exactly their findings',
-    JSON.stringify(lib.findingFingerprint(lintBefore, spec.target, finding.file)) === JSON.stringify(lib.findingFingerprint(lintAfter, spec.target, finding.file)),
+    JSON.stringify(lib.findingFingerprint(lintFullBefore, spec.target, finding.file)) === JSON.stringify(lib.findingFingerprint(lintAfter, spec.target, finding.file)),
     'finding fingerprints compared')
 
   // --- Re-extract and compare semantics ---
