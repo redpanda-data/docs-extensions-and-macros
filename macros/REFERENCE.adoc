@@ -446,9 +446,12 @@ With `property-validate` set to `error`, an unknown property, an unsupported fie
 exact:: The written text is what `propval:` renders. Auto-safe when the statement is in the same sentence as its property and the file is not release or upgrade notes.
 equivalent:: Same value, different wording (`7 days` and `1 week`). Proposed, never applied.
 mismatch:: The written value differs from the data. Likely a doc error. Never applied.
-unverifiable:: Not comparable: unparseable, a field the property does not have, a sentence qualified to another audience or release ("In Redpanda Cloud", "in earlier versions", "If the default is"), or a Cloud default.
+unset:: The data default is null (not set), but the prose states a value. Redpanda often computes a fallback at runtime for an unset property, such as 10% of free disk for `compaction_ctrl_backlog_size`, so confirm the value in the source. Never applied.
+unverifiable:: Not comparable: unparseable, a field the property does not have, a sentence qualified to another audience or release ("In Redpanda Cloud", "in earlier versions", "If the default is"), content inside `ifdef::env-cloud[]` on a self-managed page, a Cloud default, or "no default" for a topic property, which inherits its cluster property.
 
-`--write` applies only auto-safe exact matches. The tool skips code blocks, tables, headings, attribute entries, comment lines, and generated content. For cloud-docs, pass the docs checkout with `--lender` so Cloud can borrow its GA data.
+Tables are scanned too. A statement in a cell belongs to the property that opens the row or cell, and a `Default` column states the default of the row's property. Table findings are reported but never applied.
+
+`--write` applies only auto-safe exact matches. The tool skips code blocks, headings, attribute entries, comment lines, `ifndef::env-cloud[]` content on a Cloud page, and generated content. For cloud-docs, pass the docs checkout with `--lender` so Cloud can borrow its GA data.
 
 [,bash]
 ----

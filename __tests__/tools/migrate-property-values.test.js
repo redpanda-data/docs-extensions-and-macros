@@ -201,6 +201,114 @@ describe('migrate-property-values', () => {
     })
   })
 
+  // Wrong defaults the first dry run against docs main missed, and its false
+  // positives. Each case is the pattern found in the docs.
+  describe('recall audit regressions', () => {
+    test('a description cell states the default of the property in the row\'s first cell', () => {
+      const content = [
+        '|===',
+        '| Property | Description',
+        '',
+        '| prop:log_segment_size[link=true,helm-path=auto]',
+        '| Segment size. Default is 1 GiB.',
+        '',
+        '| prop:log_segment_ms[link=true,helm-path=auto]',
+        'a| Segment lifetime.',
+        '',
+        'Default is 1 day.',
+        '|===',
+      ].join('\n')
+      const findings = scan(content)
+      expect(findings).toHaveLength(2)
+      expect(findings[0]).toMatchObject({ line: 5, property: 'log_segment_size', status: 'mismatch', association: 'table-row', autoSafe: false })
+      expect(findings[1]).toMatchObject({ line: 10, property: 'log_segment_ms', status: 'mismatch', association: 'table-row' })
+    })
+
+    test('"Default - `x`" and "No default" under a property cell', () => {
+      const content = [
+        '|===',
+        '| Policy | Cluster | Topic',
+        '',
+        '| Segment size',
+        '| prop:log_segment_size[] +',
+        'Default - `1073741824`',
+        '| prop:segment.bytes[] +',
+        'No default',
+        '',
+        '| Segment lifetime',
+        '| prop:log_segment_ms[] +',
+        'No default',
+        '|===',
+      ].join('\n')
+      const findings = scan(content)
+      expect(findings.map((f) => [f.line, f.property, f.status, f.reason])).toEqual([
+        [6, 'log_segment_size', 'mismatch', undefined],
+        // A topic property has no default of its own: it inherits one.
+        [8, 'segment.bytes', 'unverifiable', 'inherits-cluster-default'],
+        [12, 'log_segment_ms', 'mismatch', undefined],
+      ])
+    })
+
+    test('a Default column states the default of the property in its row', () => {
+      const content = [
+        '|===',
+        '| Cluster property | Default | Topic property',
+        '',
+        '| prop:log_segment_size[]',
+        '| 134217728 bytes (128 MiB)',
+        '| prop:segment.bytes[]',
+        '',
+        '| prop:log_segment_ms[]',
+        '| null (no limit)',
+        '| prop:segment.ms[]',
+        '|===',
+      ].join('\n')
+      const findings = scan(content)
+      expect(findings.map((f) => [f.line, f.property, f.status, f.association])).toEqual([
+        [5, 'log_segment_size', 'equivalent', 'table-default-column'],
+        [9, 'log_segment_ms', 'mismatch', 'table-default-column'],
+      ])
+    })
+
+    test('"By default, the property is empty." belongs to the row\'s property', () => {
+      const content = '|===\n| prop:log_segment_ms[]\n| Segment lifetime. By default, the property is empty.\n|==='
+      expect(only(content)).toMatchObject({ property: 'log_segment_ms', written: 'empty', status: 'mismatch' })
+    })
+
+    test('a macro attribute such as helm-path=auto does not qualify the sentence', () => {
+      expect(only('Set prop:log_segment_ms[link=true,helm-path=auto], which defaults to 1 day.')).toMatchObject({ status: 'mismatch' })
+      expect(only('Set prop:log_segment_ms[] with the Helm chart, which defaults to 1 day.')).toMatchObject({ status: 'unverifiable', qualifier: 'Helm' })
+    })
+
+    test('an ifdef::env-cloud[] block is Cloud content, not this page\'s self-managed default', () => {
+      const content = [
+        'ifdef::env-cloud[]',
+        '* prop:enable_transactions[]: Enables transactions. Default: `false`.',
+        'endif::[]',
+        'ifndef::env-cloud[]',
+        '* prop:enable_transactions[]: Enables transactions. Default: `false`.',
+        'endif::[]',
+      ].join('\n')
+      const findings = scan(content)
+      expect(findings.map((f) => [f.line, f.status, f.qualifier])).toEqual([
+        [2, 'unverifiable', 'ifdef::env-cloud'],
+        [5, 'mismatch', undefined],
+      ])
+      // On a Cloud page, ifndef::env-cloud[] content is not rendered at all.
+      const cloud = { ...REGISTRY, surface: 'cloud', properties: { ...REGISTRY.properties, enable_transactions: { ...REGISTRY.properties.enable_transactions, cloud_supported: true } } }
+      expect(scan(content, cloud).map((f) => f.line)).toEqual([2])
+    })
+
+    test('a stated value for a property whose data default is null is "unset", not a mismatch', () => {
+      const f = only('* prop:compaction_ctrl_backlog_size[]: Backlog size. (default: 10% of disk capacity)')
+      expect(f).toMatchObject({ status: 'unset', written: '10%' })
+      expect(f.note).toBe('not set in the data; the prose states 10%, which may be a runtime fallback')
+      expect(only('prop:compaction_ctrl_backlog_size[] defaults to 512 MiB.')).toMatchObject({ status: 'unset' })
+      // Saying it is not set still matches.
+      expect(only('prop:compaction_ctrl_backlog_size[] defaults to null.')).toMatchObject({ status: 'exact' })
+    })
+  })
+
   describe('what is skipped', () => {
     test('listing, literal, comment, passthrough and fenced blocks', () => {
       const content = [
@@ -213,8 +321,12 @@ describe('migrate-property-values', () => {
       expect(scan(content)).toEqual([])
     })
 
-    test('tables', () => {
-      expect(scan('|===\n| prop:log_segment_ms[] | defaults to 1 day\n|===')).toEqual([])
+    test('tables are reported but never written', () => {
+      const content = '|===\n| prop:log_segment_ms[] | defaults to 2 weeks\n|==='
+      const result = scanDocument(content, REGISTRY, { write: true })
+      expect(result.findings).toHaveLength(1)
+      expect(result.findings[0]).toMatchObject({ property: 'log_segment_ms', status: 'exact', autoSafe: false })
+      expect(result.content).toBe(content)
     })
 
     test('headings, attribute entries, block titles and comment lines', () => {
@@ -308,6 +420,15 @@ describe('migrate-property-values', () => {
       const md = renderMarkdown([{ ...result, label: 'docs' }])
       expect(md).toContain('### Mismatches (1)')
       expect(md).toContain('| modules/manage/pages/a.adoc:4 | `log_segment_size` | default | 1 GiB | 134217728 |')
+    })
+
+    test('reports unset findings in their own section and count', () => {
+      write('docs/modules/manage/pages/c.adoc', '* prop:compaction_ctrl_backlog_size[]: Backlog size. (default: 10% of disk capacity)\n')
+      const result = scanRepo({ docsDir: path.join(root, 'docs') })
+      expect(result.counts.unset).toBe(1)
+      const md = renderMarkdown([{ ...result, label: 'docs' }])
+      expect(md).toContain('### Not set in the data (1)')
+      expect(md).toContain('| modules/manage/pages/c.adoc:1 | `compaction_ctrl_backlog_size` | default | 10% | not set in the data; the prose states 10%, which may be a runtime fallback |')
     })
   })
 })

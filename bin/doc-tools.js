@@ -1142,8 +1142,8 @@ automation
  * the prop: macro selects it), and propose a propval: replacement. Mismatches
  * are likely doc errors. Dry run by default, writing a JSON and a Markdown
  * report; --write applies only exact matches stated in the same sentence as
- * their property, never a mismatch. Skips code blocks, tables, and generated
- * content.
+ * their property, never a mismatch or a table cell. Skips code blocks and
+ * generated content.
  *
  * @example
  * # Report on a docs checkout
@@ -1180,9 +1180,12 @@ automation
     fs.writeFileSync(path.join(reportDir, 'property-values-report.md'), renderMarkdown([result]))
     const { counts } = result
     console.log(`Checked against ${result.dataset} (${result.surface}).`)
-    console.log(`${result.findings.length} value statement(s) in ${result.files} files: ${counts.mismatch} mismatch, ${counts.exact} exact (${counts.autoSafe} auto-safe), ${counts.equivalent} equivalent, ${counts.unverifiable} unverifiable.`)
+    console.log(`${result.findings.length} value statement(s) in ${result.files} files: ${counts.mismatch} mismatch, ${counts.unset} unset, ${counts.exact} exact (${counts.autoSafe} auto-safe), ${counts.equivalent} equivalent, ${counts.unverifiable} unverifiable.`)
     for (const f of result.findings.filter((x) => x.status === 'mismatch')) {
       console.log(`  MISMATCH ${f.file}:${f.line} ${f.property} ${f.field}: written ${f.written}, data ${f.dataValue}`)
+    }
+    for (const f of result.findings.filter((x) => x.status === 'unset')) {
+      console.log(`  UNSET ${f.file}:${f.line} ${f.property} ${f.field}: ${f.note}`)
     }
     if (options.write) console.log(`Replaced auto-safe exact matches in ${result.changedFiles} file(s).`)
     else if (counts.autoSafe) console.log('Re-run with --write to replace the auto-safe exact matches.')
