@@ -420,6 +420,39 @@ function normalizeIncludes(propName, raw, warnings) {
 }
 
 /**
+ * Remove the inline copies of `includes` that the attachment write-back appended.
+ *
+ * generate-handlebars-docs.js writes each include back into the description
+ * on disk, so the attachment's tooltip still renders it, and leaves `includes`
+ * in place. A run that reads that file again (a reused gen/<tag>-properties.json,
+ * or generate-docs run twice without re-extraction) sees the directive in the
+ * description and in `includes`, and the template rendered it twice. Only the
+ * exact shapes the write-back produces are
+ * removed, so an include a human put in the prose is left alone.
+ *
+ * @param {string|undefined} description - Flattened description.
+ * @param {Array<{target: string, cloud_only?: boolean, self_managed_only?: boolean}>} items - Normalized includes.
+ * @returns {string|undefined}
+ */
+function stripInlineIncludes(description, items) {
+  if (typeof description !== 'string' || !description.includes('include::')) return description;
+  let text = description;
+  // The write-back appends in order, so peel from the end.
+  for (const item of [...items].reverse()) {
+    const directive = `include::${item.target}`;
+    let block = directive;
+    if (item.cloud_only) block = `ifdef::env-cloud[]\n${directive}\nendif::[]`;
+    else if (item.self_managed_only) block = `ifndef::env-cloud[]\n${directive}\nendif::[]`;
+    if (text.endsWith(`\n\n${block}`)) {
+      text = text.slice(0, -(block.length + 2));
+    } else if (text === block) {
+      text = '';
+    }
+  }
+  return text;
+}
+
+/**
  * Why the Cloud build cannot reach a link target, or null when it can.
  *
  * Two separate reasons, and only the first was obvious. `cloud_supported: false`
@@ -471,6 +504,7 @@ function applyPropertyLinks(properties) {
     }
     if (prop.includes !== undefined) {
       prop.includes = normalizeIncludes(propName, prop.includes, warnings);
+      prop.description = stripInlineIncludes(prop.description, prop.includes);
     }
     if (Array.isArray(prop.admonitions)) {
       prop.admonitions = prop.admonitions.filter((item) => {
@@ -589,3 +623,4 @@ module.exports.applyLinksToText = applyLinksToText;
 module.exports.renderLink = renderLink;
 module.exports.cloudUnreachable = cloudUnreachable;
 module.exports.normalizeIncludes = normalizeIncludes;
+module.exports.stripInlineIncludes = stripInlineIncludes;
