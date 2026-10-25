@@ -292,7 +292,7 @@ function scanLine (line, { registry, requireSeparator = true }) {
       start: valueStart,
       end: valueStart + parsed.length,
       association,
-      ...(qualifier ? { qualifier: qualifier[0] } : {}),
+      ...(qualifier ? { qualifier: qualifier[0].trim() } : {}),
     })
   }
 
@@ -641,7 +641,10 @@ function renderMarkdown (results, { title = 'Hand-written property values report
     }
     for (const status of ['exact', 'equivalent']) {
       const list = r.findings.filter((f) => f.status === status)
-      out.push('', `### ${status === 'exact' ? 'Exact (auto-safe)' : 'Equivalent (proposed, not applied)'} (${list.length})`, '')
+      const heading = status === 'exact'
+        ? `Exact (${list.length}, ${list.filter((f) => f.autoSafe).length} auto-safe)`
+        : `Equivalent, proposed and never applied (${list.length})`
+      out.push('', `### ${heading}`, '')
       if (!list.length) {
         out.push('None.')
         continue
