@@ -1442,7 +1442,7 @@ npx doc-tools generate migrate-property-refs --properties modules/reference/atta
 
 === generate migrate-property-values
 
-Report hand-written property values in prose ("defaults to 128 MiB", "the minimum is 1 minute") next to a property mention, check each against the property data for the repo's own version (selected exactly as the prop: macro selects it), and propose a propval: replacement. Mismatches are likely doc errors. Dry run by default, writing a JSON and a Markdown report; --write applies only exact matches stated in the same sentence as their property, never a mismatch. Skips code blocks, tables, and generated content.
+Report hand-written property values in prose ("defaults to 128 MiB", "the minimum is 1 minute") next to a property mention, check each against the property data for the repo's own version (selected exactly as the prop: macro selects it), and propose a propval: replacement. Mismatches are likely doc errors. Dry run by default, writing a JSON and a Markdown report; --write applies only exact matches stated in the same sentence as their property, never a mismatch or a table cell. Skips code blocks and generated content.
 
 *Usage:*
 
