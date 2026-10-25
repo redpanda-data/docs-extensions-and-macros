@@ -5,12 +5,12 @@
  * the files on disk with the build's own loaders:
  *
  *   property data  macros/prop.js loadPropertiesFor, the function prop: and
- *                  propval: call during a build. It takes an Antora content
- *                  catalog, so this module builds a minimal one from the
- *                  workspace: the component's antora.yml (name, version,
- *                  asciidoc attributes such as env-cloud) and its
- *                  modules/<module>/attachments files. Dataset selection by
- *                  release series, Cloud lending and the corrupt-file
+ *                  propval: call during a build, over the minimal content
+ *                  catalog that migrate-property-values also uses
+ *                  (extension-utils/component-catalog.js): the component's
+ *                  antora.yml (name, version, asciidoc attributes such as
+ *                  env-cloud) and its property attachments. Dataset selection
+ *                  by release series, Cloud lending and the corrupt-file
  *                  fallback are therefore exactly the build's.
  *   taxonomy       extension-utils/taxonomy.js loadTaxonomyFrom, the loader
  *                  `doc-tools check-metadata` uses: the workspace's
@@ -27,8 +27,8 @@
 
 const fs = require('fs')
 const path = require('path')
-const yaml = require('js-yaml')
 const { loadPropertiesFor } = require('../macros/prop')
+const { readComponent, catalogFor } = require('../extension-utils/component-catalog')
 const { loadTaxonomyFrom } = require('../extension-utils/taxonomy')
 const { loadLegacyCategories } = require('../tools/check-metadata')
 
@@ -48,67 +48,6 @@ function findComponentRoot (start) {
   }
 }
 
-/** One component version as Antora describes it: name, version and asciidoc attributes. */
-function readComponentDescriptor (root) {
-  const data = yaml.load(fs.readFileSync(path.join(root, 'antora.yml'), 'utf8')) || {}
-  // version: ~ (null) is Antora's unversioned component, whose version is ''.
-  const version = data.version === null || data.version === undefined || data.version === '~' ? '' : String(data.version)
-  const attributes = (data.asciidoc && data.asciidoc.attributes) || {}
-  return { name: String(data.name || ''), version, attributes, root }
-}
-
-/** The attachment files of a component, as content catalog entries. */
-function attachmentsOf (descriptor) {
-  const modulesDir = path.join(descriptor.root, 'modules')
-  if (!fs.existsSync(modulesDir)) return []
-  const out = []
-  for (const mod of fs.readdirSync(modulesDir, { withFileTypes: true })) {
-    if (!mod.isDirectory()) continue
-    const dir = path.join(modulesDir, mod.name, 'attachments')
-    if (!fs.existsSync(dir)) continue
-    const walk = (current) => {
-      for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-        const abs = path.join(current, entry.name)
-        if (entry.isDirectory()) walk(abs)
-        else if (entry.isFile()) out.push({ abs, module: mod.name, relative: path.relative(dir, abs).split(path.sep).join('/') })
-      }
-    }
-    walk(dir)
-  }
-  return out.map(({ abs, module, relative }) => {
-    const file = {
-      src: { component: descriptor.name, version: descriptor.version, module, family: 'attachment', relative, abspath: abs },
-    }
-    // Read lazily: only the property JSON is ever opened.
-    Object.defineProperty(file, 'contents', { get: () => fs.readFileSync(abs), enumerable: true })
-    return file
-  })
-}
-
-/**
- * A minimal Antora content catalog over component checkouts on disk: enough
- * of findBy and getComponent for loadPropertiesFor.
- *
- * @param {Array<{name: string, version: string, attributes: Object, root: string}>} descriptors
- */
-function createContentCatalog (descriptors) {
-  const files = descriptors.flatMap(attachmentsOf)
-  const components = new Map()
-  for (const d of descriptors) {
-    if (!components.has(d.name)) components.set(d.name, { name: d.name, versions: [] })
-    components.get(d.name).versions.push({ version: d.version, asciidoc: { attributes: d.attributes } })
-  }
-  for (const c of components.values()) c.latest = c.versions[0]
-  return {
-    findBy (criteria = {}) {
-      return files.filter((f) => Object.entries(criteria).every(([key, value]) => f.src[key] === value))
-    },
-    getComponent (name) {
-      return components.get(name)
-    },
-  }
-}
-
 /**
  * Everything the server needs for the pages under one component root.
  *
@@ -119,15 +58,16 @@ function createContentCatalog (descriptors) {
  * @returns {Promise<Object>}
  */
 async function loadWorkspace (root, { env = process.env, fetch: fetchImpl = globalThis.fetch } = {}) {
-  const component = readComponentDescriptor(root)
-  const descriptors = [component]
+  const own = readComponent(root)
+  const component = { name: own.component, version: own.version, attributes: own.attributes }
+  const components = [own]
   const notes = []
   const docsPath = env.REDPANDA_DOCS_PATH ? path.resolve(env.REDPANDA_DOCS_PATH) : null
   if (docsPath && docsPath !== path.resolve(root) && fs.existsSync(path.join(docsPath, 'antora.yml'))) {
-    const lender = readComponentDescriptor(docsPath)
-    if (lender.name !== component.name) descriptors.push(lender)
+    const lender = readComponent(docsPath)
+    if (lender.component !== own.component) components.push(lender)
   }
-  const contentCatalog = createContentCatalog(descriptors)
+  const contentCatalog = catalogFor(components)
 
   let properties = null
   try {
@@ -159,4 +99,4 @@ async function loadWorkspace (root, { env = process.env, fetch: fetchImpl = glob
   }
 }
 
-module.exports = { findComponentRoot, readComponentDescriptor, createContentCatalog, loadWorkspace }
+module.exports = { findComponentRoot, loadWorkspace }

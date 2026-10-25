@@ -16,7 +16,7 @@ An LSP server for AsciiDoc pages in Redpanda docs repositories. It checks a page
 |Data |Loader
 
 |Property JSON
-|`loadPropertiesFor` in `macros/prop.js`, over a minimal content catalog built from the component's `antora.yml` and `modules/*/attachments/`. The release series comes from the `version` in `antora.yml`, exactly as in the build.
+|`loadPropertiesFor` in `macros/prop.js`, over the minimal content catalog in `extension-utils/component-catalog.js` (the component's `antora.yml` and its `modules/reference/attachments/` property files), which `migrate-property-values` uses too. The release series comes from the `version` in `antora.yml`, exactly as in the build.
 
 |Taxonomy
 |`loadTaxonomyFrom` in `extension-utils/taxonomy.js`: the checkout's `shared/modules/ROOT/attachments/taxonomy.yml`, then `$REDPANDA_DOCS_PATH`, then the published file.

@@ -1153,4 +1153,5 @@ module.exports.describeDataset = describeDataset
 module.exports.buildPropvalContent = buildPropvalContent
 module.exports.resolvePropertyValue = resolvePropertyValue
 module.exports.unknownPropertyMessage = unknownPropertyMessage
+module.exports.PROPERTIES_JSON_RX = PROPERTIES_JSON_RX
 module.exports.unavailablePropertyMessage = unavailablePropertyMessage
