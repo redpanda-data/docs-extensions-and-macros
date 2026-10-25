@@ -58,7 +58,7 @@ describe('production workflow extraction', () => {
     const s = lib.extractClaudeSettings(wf.claudeArgs)
     expect(s.mcpConfig.mcpServers['redpanda-docs'].url).toMatch(/^https:\/\/docs\.redpanda\.com\//)
     expect(s.mcpTools.length).toBeGreaterThan(0)
-    expect(s.allowedTools).toEqual(expect.arrayContaining(['Read', 'Write']))
+    expect(s.allowedTools).toEqual(expect.arrayContaining(['Read(./**)', 'Edit(./doc-impact.json)']))
     expect(s.allowedTools.some((t) => t.startsWith('Bash'))).toBe(false)
     expect(s.maxTurns).toBeGreaterThan(0)
   })
