@@ -16,12 +16,24 @@ const { spawnSync } = require('child_process')
  * parenthesized aside before the colon is allowed:
  * `// Source (verified 2026-10-20): ...`. <ref> is one of
  *
- *   redpanda-data/<repo>[@<git-ref>]:<path>:<line>[-<line>]   (default ref: the repo's default branch)
+ *   [redpanda-data/]<repo>[@<git-ref>]:<path>#<symbol> "<quote>"   (a symbol ref; the quote is required)
+ *   redpanda-data/<repo>[@<git-ref>]:<path>:<line>[-<line>]   (a line ref)
  *   redpanda-data/<repo>#<number>   (a pull request or an issue)
  *   a Jira key such as DOC-1234
  *   an https:// URL
  *
- * File refs are fetched from GitHub: the line range must exist and, when a
+ * Without `@<git-ref>`, a file ref is version-aware: it is checked at the
+ * release the page's component version documents, resolved the way the docs
+ * build resolves latest-redpanda-tag and friends (see versions.js). A page
+ * with no antora.yml above it, or a repo docs do not track releases of (such
+ * as cloudv2), is checked on the default branch; the second is reported as
+ * unversioned. An explicit `@<git-ref>` pins the ref, for a fact deliberately
+ * about one release.
+ *
+ * A symbol ref survives edits to the cited file: the symbol must appear in
+ * the file (as a whole identifier), and the quote must appear within
+ * SYMBOL_WINDOW lines starting at one of its occurrences. A line ref is the
+ * fallback for a fact no symbol names: the line range must exist and, when a
  * quote is given, the quote must appear in that range after whitespace
  * normalization. PR and issue refs must exist; their state is reported as info. Jira
  * keys and URLs are checked for syntax only (URLs can be HEAD-checked with
@@ -44,6 +56,7 @@ const OWNER = 'redpanda-data'
 // Finding classes. Severity is fixed per class so the exit code is predictable.
 const SEVERITY = Object.freeze({
   malformed: 'error',
+  'symbol-not-found': 'error',
   'missing-file': 'error',
   'repo-not-found': 'error',
   'line-out-of-range': 'error',
@@ -52,6 +65,9 @@ const SEVERITY = Object.freeze({
   'url-not-found': 'error',
   unreachable: 'warning',
   'no-claim': 'warning',
+  'unresolved-version': 'warning',
+  'version-fallback': 'info',
+  unversioned: 'info',
   'pr-state': 'info',
   'quote-not-checked': 'info',
   'syntax-only': 'info',
@@ -65,6 +81,9 @@ const SOURCE_ASIDE_RE = /^\s*\/\/\s*source\s*\(/i
 const isSourceLine = (line) => SOURCE_LINE_RE.test(line) || SOURCE_ASIDE_RE.test(line)
 const REPO_RE = '[A-Za-z0-9._-]+'
 const FILE_REF_RE = new RegExp(`^([A-Za-z0-9._-]+)/(${REPO_RE})(?:@([^\\s:]+))?:([^\\s:]+):(\\d+)(?:-(\\d+))?$`)
+const SYMBOL_REF_RE = new RegExp(`^(?:([A-Za-z0-9._-]+)/)?(${REPO_RE})(?:@([^\\s:]+))?:([^\\s:#]+)#([^\\s#"]+)$`)
+// Lines from a symbol's occurrence in which its quoted value must appear.
+const SYMBOL_WINDOW = 30
 const PR_REF_RE = new RegExp(`^([A-Za-z0-9._-]+)/(${REPO_RE})#(\\d+)$`)
 const JIRA_RE = /^[A-Z][A-Z0-9]+-\d+$/
 
@@ -77,6 +96,7 @@ function looksLikeRef (token) {
   if (/^redpanda-data\//i.test(token)) return true
   if (/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+#\d+$/.test(token)) return true
   if (/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+(?:@[^\s:]+)?:[^\s:]+:\d/.test(token)) return true
+  if (/^(?:[A-Za-z0-9._-]+\/)?[A-Za-z0-9._-]+(?:@[^\s:]+)?:[^\s:#]+#[^\s#]+$/.test(token)) return true
   if (JIRA_RE.test(token)) return true
   return /^https?:\/\//i.test(token)
 }
@@ -109,11 +129,18 @@ function parseSourceComment (rest) {
 
   const ref = parseRef(refText)
   if (ref.error) return ref
+  if (ref.kind === 'symbol' && quote === null) return { error: `a symbol ref needs the quoted value it anchors: ${refText} "<value>"` }
   return { ref, quote }
 }
 
 function parseRef (refText) {
-  let m = FILE_REF_RE.exec(refText)
+  let m = SYMBOL_REF_RE.exec(refText)
+  if (m) {
+    const [, owner = OWNER, repo, gitRef, filePath, symbol] = m
+    if (owner !== OWNER) return { error: `owner must be ${OWNER}, got ${owner}` }
+    return { kind: 'symbol', text: refText, owner, repo, gitRef: gitRef || null, path: filePath, symbol }
+  }
+  m = FILE_REF_RE.exec(refText)
   if (m) {
     const [, owner, repo, gitRef, filePath, start, end] = m
     if (owner !== OWNER) return { error: `owner must be ${OWNER}, got ${owner}` }
@@ -141,7 +168,7 @@ function parseRef (refText) {
   }
   if (/^http:\/\//.test(refText)) return { error: `URLs must use https: ${refText}` }
   return {
-    error: `unrecognized ref ${JSON.stringify(refText)}: expected redpanda-data/<repo>[@<ref>]:<path>:<line>[-<line>], redpanda-data/<repo>#<pr>, a Jira key, or an https:// URL`
+    error: `unrecognized ref ${JSON.stringify(refText)}: expected <repo>[@<ref>]:<path>#<symbol>, redpanda-data/<repo>[@<ref>]:<path>:<line>[-<line>], redpanda-data/<repo>#<pr>, a Jira key, or an https:// URL`
   }
 }
 
@@ -209,6 +236,28 @@ function locateQuote (lines, quote, maxSpan = 10) {
   }
   // Keep only minimal windows: drop a hit that contains a tighter one.
   return hits.filter((h) => !hits.some((g) => g !== h && g.start >= h.start && g.end <= h.end && (g.start > h.start || g.end < h.end)))
+}
+
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * Where a symbol's quoted value is: the 1-based lines where the symbol occurs
+ * as a whole identifier, and the first occurrence whose window of
+ * SYMBOL_WINDOW lines contains the quote ({ line, quoteLine }), or null.
+ */
+function locateSymbol (lines, symbol, quote, window = SYMBOL_WINDOW) {
+  const rx = new RegExp(`(?<![A-Za-z0-9_])${escapeRe(symbol)}(?![A-Za-z0-9_])`)
+  const occurrences = []
+  for (let i = 0; i < lines.length; i++) if (rx.test(lines[i])) occurrences.push(i + 1)
+  const q = normalize(quote)
+  for (const start of occurrences) {
+    const end = Math.min(lines.length, start - 1 + window)
+    if (normalize(lines.slice(start - 1, end).join('\n')).includes(q)) {
+      const hit = locateQuote(lines.slice(start - 1, end), quote)[0]
+      return { occurrences, match: { line: start, quoteLine: hit ? start - 1 + hit.start : start } }
+    }
+  }
+  return { occurrences, match: null }
 }
 
 // --------------------------------------------------------------------
@@ -374,7 +423,7 @@ function createGitHubClient ({
           const refCheck = await request(`${apiBase}/repos/${owner}/${repo}/commits/${encodeURIComponent(ref)}`)
           if (refCheck.networkError) return { status: 'unreachable', reason: `${owner}/${repo}@${ref}: ${refCheck.networkError}` }
           if (refCheck.res.status === 404 || refCheck.res.status === 422) {
-            return { status: 'missing', reason: `ref ${ref} does not exist in ${owner}/${repo}` }
+            return { status: 'missing', refMissing: true, reason: `ref ${ref} does not exist in ${owner}/${repo}` }
           }
           if (!refCheck.res.ok) return failure(refCheck.res, `${owner}/${repo}@${ref}`)
         }
@@ -437,9 +486,13 @@ function createLimiter (n) {
  * @param {object} opts.client - GitHub client (see createGitHubClient)
  * @param {boolean} [opts.checkUrls] - HEAD-check https URLs
  * @param {number} [opts.concurrency] - Fetches in flight at once (default 8)
- * @returns {Promise<{files: number, sources: number, findings: object[], summary: {checked: number, failed: number, notes: number, errors: number, warnings: number, info: number}, fetches: number}>}
+ * @param {Function} [opts.resolveVersion] - (repo, component) => { refs, by } for unpinned file refs (see versions.js createVersionResolver)
+ * @returns {Promise<{files: number, sources: number, findings: object[], citations: object[], summary: {checked: number, failed: number, notes: number, errors: number, warnings: number, info: number}, fetches: number}>}
  */
-async function checkSources ({ files, root = process.cwd(), client, checkUrls = false, concurrency = 8 }) {
+async function checkSources ({ files, root = process.cwd(), client, checkUrls = false, concurrency = 8, resolveVersion }) {
+  const { readComponent, createVersionResolver } = require('./versions')
+  const resolver = resolveVersion || createVersionResolver({ root, latest: () => require('./versions').fetchLatestReleases({ token: resolveToken() }) })
+  const citations = []
   const findings = []
   const limit = createLimiter(Math.max(1, concurrency))
   const fileCache = new Map()
@@ -458,6 +511,28 @@ async function checkSources ({ files, root = process.cwd(), client, checkUrls = 
   }
   const fetchFile = (ref) => cached(fileCache, `${ref.owner}/${ref.repo}@${ref.gitRef || ''}:${ref.path}`,
     () => client.getFile({ owner: ref.owner, repo: ref.repo, ref: ref.gitRef, path: ref.path }))
+  // An unpinned file ref resolves to the release the page documents; a
+  // resolution can name several refs to try in order (operator tags moved
+  // from `v<x>` to `operator/v<x>`). Resolves to { got, usedRef, by, ... }.
+  const resolvedCache = new Map()
+  const fetchResolved = (ref, component) => {
+    const key = `${ref.owner}/${ref.repo}@${ref.gitRef || ''}:${ref.path}|${component ? component.file : ''}`
+    if (!resolvedCache.has(key)) {
+      resolvedCache.set(key, (async () => {
+        const res = ref.gitRef ? { refs: [ref.gitRef], by: 'pinned' } : await resolver(ref.repo, component)
+        if (res.error) return { resolution: res }
+        let got
+        let usedRef
+        for (const r of res.refs) {
+          usedRef = r
+          got = await fetchFile({ ...ref, gitRef: r })
+          if (!(got.status === 'missing' && got.refMissing)) break
+        }
+        return { resolution: res, got, usedRef }
+      })())
+    }
+    return resolvedCache.get(key)
+  }
   const fetchPull = (ref) => cached(prCache, `${ref.owner}/${ref.repo}#${ref.number}`, () => client.getPull(ref))
   const fetchUrl = (ref) => cached(urlCache, ref.url, () => client.headUrl(ref.url))
 
@@ -468,18 +543,19 @@ async function checkSources ({ files, root = process.cwd(), client, checkUrls = 
     const abs = path.resolve(root, file)
     const rel = path.relative(root, abs) || file
     const content = fs.readFileSync(abs, 'utf8')
+    const component = readComponent(root, abs)
     for (const entry of extractSources(content)) {
-      items.push({ entry, where: { file: rel, line: entry.line, source: entry.raw } })
+      items.push({ entry, component, where: { file: rel, line: entry.line, source: entry.raw } })
       const ref = entry.ref
       if (!ref) continue
-      if (ref.kind === 'file') fetchFile(ref)
+      if (ref.kind === 'file' || ref.kind === 'symbol') fetchResolved(ref, component)
       else if (ref.kind === 'pr') fetchPull(ref)
       else if (ref.kind === 'url' && checkUrls) fetchUrl(ref)
     }
   }
 
   // Pass 2: report in page order.
-  for (const { entry, where } of items) {
+  for (const { entry, where, component } of items) {
     sources++
     if (entry.note !== undefined) { notes++; add('unchecked-note', where, 'free-form note, not checked: start the comment with a ref to have it verified'); continue }
     checked++
@@ -487,12 +563,35 @@ async function checkSources ({ files, root = process.cwd(), client, checkUrls = 
     if (entry.claimLine === null) add('no-claim', where, 'no claim directly below this source comment (next line is blank, another comment, or the end of the file)')
     const { ref, quote } = entry
 
-    if (ref.kind === 'file') {
-      const got = await fetchFile(ref)
-      if (got.status === 'unreachable') { add('unreachable', where, got.reason); continue }
-      if (got.status === 'missing') { add(got.repoMissing ? 'repo-not-found' : 'missing-file', where, got.reason); continue }
+    if (ref.kind === 'file' || ref.kind === 'symbol') {
+      const { resolution, got, usedRef } = await fetchResolved(ref, component)
+      const at = usedRef || 'the default branch'
+      const citation = { ...where, repo: ref.repo, path: ref.path, symbol: ref.symbol || null, lines: ref.kind === 'file' ? [ref.startLine, ref.endLine] : null, quote, ref: usedRef || null, resolvedBy: resolution.by || null, status: 'ok' }
+      citations.push(citation)
+      if (resolution.error) { citation.status = 'unresolved'; add('unresolved-version', where, resolution.error); continue }
+      if (resolution.unversioned) add('unversioned', where, `${OWNER}/${ref.repo} has no release docs track, so this is checked on its default branch and is not version-aware`)
+      if (resolution.fallback) add('version-fallback', where, `checked at ${at}: ${resolution.by}`)
+      if (got.status === 'unreachable') { citation.status = 'unreachable'; add('unreachable', where, got.reason); continue }
+      if (got.status === 'missing') { citation.status = 'error'; add(got.repoMissing ? 'repo-not-found' : 'missing-file', where, got.reason); continue }
       const lines = splitLines(got.text)
+      if (ref.kind === 'symbol') {
+        const { occurrences, match } = locateSymbol(lines, ref.symbol, quote)
+        if (!occurrences.length) {
+          citation.status = 'error'
+          const hits = locateQuote(lines, quote)
+          add('symbol-not-found', where, `${ref.symbol} does not appear in ${ref.path} at ${at}.${hits.length ? ` The quote appears at line ${hits[0].start}.` : ''}`)
+        } else if (!match) {
+          citation.status = 'error'
+          const hits = locateQuote(lines, quote)
+          const hint = hits.length ? ` It appears elsewhere, at line ${hits.slice(0, 3).map((h) => h.start).join(', ')}.` : ' It does not appear anywhere in the file.'
+          add('quote-not-found', where, `quote not found within ${SYMBOL_WINDOW} lines of ${ref.symbol} (line ${occurrences.slice(0, 3).join(', ')}) in ${ref.path} at ${at}: the cited value changed.${hint}`, { movedTo: hits })
+        } else {
+          citation.line = match.quoteLine
+        }
+        continue
+      }
       if (ref.endLine > lines.length) {
+        citation.status = 'error'
         add('line-out-of-range', where, `${ref.path} has ${lines.length} lines; cited ${ref.startLine === ref.endLine ? 'line ' + ref.startLine : 'lines ' + ref.startLine + '-' + ref.endLine}`)
         continue
       }
@@ -503,7 +602,8 @@ async function checkSources ({ files, root = process.cwd(), client, checkUrls = 
           const hint = hits.length
             ? ` It now appears at ${hits.slice(0, 3).map((h) => h.start === h.end ? `line ${h.start}` : `lines ${h.start}-${h.end}`).join(', ')}${hits.length > 3 ? ` and ${hits.length - 3} more` : ''}.`
             : ' It does not appear anywhere in the file.'
-          add('quote-not-found', where, `quote not found in ${ref.path} ${ref.startLine === ref.endLine ? 'line ' + ref.startLine : 'lines ' + ref.startLine + '-' + ref.endLine}.${hint}`, { movedTo: hits })
+          citation.status = 'error'
+          add('quote-not-found', where, `quote not found in ${ref.path} ${ref.startLine === ref.endLine ? 'line ' + ref.startLine : 'lines ' + ref.startLine + '-' + ref.endLine} at ${at}.${hint}`, { movedTo: hits })
         }
       }
       continue
@@ -539,6 +639,9 @@ async function checkSources ({ files, root = process.cwd(), client, checkUrls = 
     fetches,
     authenticated: Boolean(client.authenticated),
     findings,
+    citations,
+    // The ref each repo was checked at, per resolution: what a release re-check compares.
+    resolved: [...new Map(citations.filter((c) => c.ref || c.resolvedBy).map((c) => [`${c.repo}|${c.ref}|${c.resolvedBy}`, { repo: c.repo, ref: c.ref, by: c.resolvedBy }])).values()],
     summary: { checked, failed, notes, errors: count('error'), warnings: count('warning'), info: count('info') }
   }
 }
@@ -597,6 +700,7 @@ function formatHuman (result) {
     out.push(`        ${f.source}`)
   }
   if (sorted.length) out.push('')
+  for (const r of result.resolved || []) out.push(`resolved ${OWNER}/${r.repo} at ${r.ref || 'the default branch'} (${r.by})`)
   const { checked, failed, notes, errors, warnings, info } = result.summary
   out.push(`check-sources: ${result.sources} source comment(s) in ${result.files} file(s): ${checked} checked, ${failed} failed, ${notes} unchecked note(s); ${result.fetches} fetch(es)${result.authenticated ? '' : ' (unauthenticated)'}: ${errors} error(s), ${warnings} warning(s), ${info} info`)
   return out.join('\n')
@@ -623,13 +727,15 @@ function splitList (values) {
   return out.map((s) => s.trim()).filter(Boolean)
 }
 
-async function runCli (options, { client } = {}) {
+async function runCli (options, { client, resolveVersion } = {}) {
   let result
   try {
     const root = path.resolve(options.root || process.cwd())
     const files = selectFiles({ root, files: splitList(options.files), diff: options.diff })
     if (options.diff && !files.length) console.error(`check-sources: no .adoc files changed against ${options.diff}${options.files && options.files.length ? ' that match --files' : ''}; nothing to check`)
-    result = await checkSources({ files, root, client: client || createGitHubClient(), checkUrls: Boolean(options.checkUrls) })
+    const gh = client || createGitHubClient()
+    const resolver = resolveVersion || require('./versions').createVersionResolver({ root, branch: options.branch || null, latest: () => require('./versions').fetchLatestReleases({ token: resolveToken() }) })
+    result = await checkSources({ files, root, client: gh, checkUrls: Boolean(options.checkUrls), resolveVersion: resolver })
   } catch (err) {
     console.error(`Error: ${err.message}`)
     process.exitCode = 2
@@ -649,6 +755,8 @@ module.exports = {
   parseRef,
   extractSources,
   locateQuote,
+  locateSymbol,
+  SYMBOL_WINDOW,
   checkSources,
   createGitHubClient,
   selectFiles,

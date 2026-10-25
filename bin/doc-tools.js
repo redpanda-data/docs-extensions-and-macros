@@ -3171,14 +3171,21 @@ programCli
  * directly above the claim it supports: `// Source: <ref>`, optionally
  * followed by a short exact quote in double quotes and nothing else. The
  * marker is case-insensitive and may carry a parenthesized aside before the
- * colon (`// Source (verified 2026-10-20): <ref>`). A ref is a file range
- * (`redpanda-data/<repo>[@<git-ref>]:<path>:<line>[-<line>]`, default ref is
- * the repo's default branch), a pull request or issue
+ * colon (`// Source (verified 2026-10-20): <ref>`). A ref is a symbol
+ * (`[redpanda-data/]<repo>[@<git-ref>]:<path>#<symbol> "<value>"`: the value
+ * must appear within 30 lines of the symbol), a file range
+ * (`redpanda-data/<repo>[@<git-ref>]:<path>:<line>[-<line>]`), a pull request or issue
  * (`redpanda-data/<repo>#<n>`), an uppercase Jira key, or an https:// URL. File refs are fetched from GitHub once per
  * repo, ref, and path: the cited lines must exist and the quote must appear
  * in them after whitespace is normalized (when it has moved, the message
  * says where it is now). PR and issue refs must exist; their state (merged,
- * open, closed) is info. Jira keys and URLs are checked for syntax only, unless
+ * open, closed) is info. A symbol or file ref without @<git-ref> is version-aware:
+ * it is checked at the release the page's component version (its antora.yml)
+ * documents, resolved like the build's latest-redpanda-tag,
+ * latest-console-tag, latest-operator-version, and latest-connect-tag
+ * (prerelease: redpanda-beta-tag; a v/* branch: its own antora.yml value or
+ * operator line); other repos use the default branch and are reported as
+ * unversioned. Jira keys and URLs are checked for syntax only, unless
  * --check-urls. Text after the marker that does not start with a ref (or
  * that is an https URL or a Jira-style key followed by prose, such as
  * `KIP-848 consumer group protocol`) is free-form provenance: an
@@ -3188,7 +3195,8 @@ programCli
  * token that can see other private redpanda-data repos), line-out-of-range,
  * quote-not-found, pr-not-found, url-not-found. Warnings (exit 0):
  * unreachable (auth, rate-limit, timeout, or network failure, never a silent
- * pass) and no-claim (nothing directly below the comment). Exit 2: a --files
+ * pass), no-claim (nothing directly below the comment), and unresolved-version
+ * (no release could be resolved for an unpinned ref). symbol-not-found is an error. Exit 2: a --files
  * pattern that matches no .adoc file, or a --diff base git cannot resolve.
  * Fetches run concurrently, time out after 30 seconds, and retry transient
  * failures twice. Comments inside listing, literal,
@@ -3220,6 +3228,7 @@ programCli
   .option('--format <format>', 'Output format: human or json', 'human')
   .option('--output <path>', 'Also write the JSON result to this file')
   .option('--check-urls', 'HEAD-check https:// URL refs (default: syntax only)')
+  .option('--branch <name>', 'Docs branch the pages are on, for version-aware refs: a v/* branch is an older version (default: GITHUB_BASE_REF, GITHUB_REF_NAME, then the checked-out branch)')
   .action(async (options) => {
     const { runCli } = require('../tools/check-sources')
     await runCli(options)

@@ -72,17 +72,20 @@ A Model Context Protocol server that exposes doc-tools to Claude Code:
 
 === Source checks
 
-`doc-tools check-sources` checks the `// Source:` comments that record where a claim on a page came from. Put the comment directly above the claim:
+`doc-tools check-sources` checks the `// Source:` comments that record where a claim on a page came from. Put the comment directly above the claim, and name the symbol the value belongs to and the value itself:
 
 [,asciidoc]
 ----
-// Source: redpanda-data/streaming-enterprise:src/v/config/configuration.cc:1086-1094 "7 * 24h"
+// source: streaming-enterprise:src/v/config/configuration.cc#log_retention_ms "7 * 24h"
 The default retention time is seven days.
 ----
 
+A citation without `@<git-ref>` is version-aware: it is checked at the release the page's component version documents, resolved the way the docs build resolves the version attributes (`extensions/version-fetcher/set-latest-version.js`). streaming-enterprise resolves to `latest-redpanda-tag` (the newest GA release for the latest component version, the `antora.yml` value on a `v/*` branch, and `redpanda-beta-tag`, the newest RC, for a prerelease), console to `latest-console-tag`, redpanda-operator to `latest-operator-version` (an older line gets its own newest release), and connect to `latest-connect-tag`. Other repos, such as cloudv2, are checked on the default branch and reported as `unversioned`. So the same comment checks against the current GA tag on `main` and against v26.1 on `v/26.1`. Pin a ref, `streaming-enterprise@v25.3.18:...#symbol "value"`, only for a fact deliberately about one release. The symbol must appear in the file as a whole identifier, and the quoted value within 30 lines of it, so the citation survives code moving around and fails only when the value changes.
+
 The marker is case-insensitive, so `// source:` works too, and a parenthesized aside before the colon is allowed, for example `// Source (verified 2026-10-20):`. After the marker comes a ref, an optional quote in double quotes, and nothing else. A ref is one of:
 
-* `redpanda-data/<repo>[@<git-ref>]:<path>:<line>[-<line>]`: the cited lines must exist, and the optional quote in double quotes must appear in them (whitespace is normalized). Without `@<git-ref>`, the repo's default branch is used.
+* `[redpanda-data/]<repo>[@<git-ref>]:<path>#<symbol> "<value>"`: the symbol must appear in the file and the value within 30 lines of it. The value is required.
+* `redpanda-data/<repo>[@<git-ref>]:<path>:<line>[-<line>]`: the fallback for a fact no symbol names. The cited lines must exist, and the optional quote in double quotes must appear in them (whitespace is normalized). Without `@<git-ref>`, it is version-aware in the same way.
 * `redpanda-data/<repo>#<number>`: the pull request or issue must exist. Its state is reported.
 * An uppercase Jira key, such as `DOC-1234`, or an `https://` URL: syntax only. Add `--check-urls` to HEAD-check URLs.
 

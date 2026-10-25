@@ -276,7 +276,7 @@ describe('checkSources: every finding class', () => {
     ].join('\n')
     const files = { ...FILES, 'streaming-enterprise@dev:src/config.go': CONFIG_GO }
     const { client, result } = await check(page, { files, pulls: { 'connect#1': 'merged' } })
-    expect(client.calls.getFile).toEqual(['streaming-enterprise@:src/config.go', 'streaming-enterprise@dev:src/config.go'])
+    expect([...client.calls.getFile].sort()).toEqual(['streaming-enterprise@:src/config.go', 'streaming-enterprise@dev:src/config.go'])
     expect(client.calls.getPull).toEqual(['connect#1'])
     expect(result.fetches).toBe(3)
   })
@@ -403,7 +403,7 @@ describe('createGitHubClient (stubbed fetch)', () => {
 
   test('a missing ref is reported as such', async () => {
     const client = createGitHubClient({ token: 't', fetchImpl: fakeFetch([[/contents/, 404], [/repos\/redpanda-data\/r$/, 200, '{}'], [/commits\/nope$/, 422]]) })
-    expect(await client.getFile({ owner: 'redpanda-data', repo: 'r', ref: 'nope', path: 'a' })).toEqual({ status: 'missing', reason: 'ref nope does not exist in redpanda-data/r' })
+    expect(await client.getFile({ owner: 'redpanda-data', repo: 'r', ref: 'nope', path: 'a' })).toEqual({ status: 'missing', refMissing: true, reason: 'ref nope does not exist in redpanda-data/r' })
   })
 
   test('401, 403, 5xx, and network errors are unreachable', async () => {
@@ -473,8 +473,8 @@ describe('createGitHubClient (stubbed fetch)', () => {
       expect((await get(base)).status).toBe('unreachable')
     })
     test('controls: 404 or 422 means the ref is missing; 200 means the file is missing at that ref', async () => {
-      expect(await get([...base, [/commits\/v1$/, 404]])).toEqual({ status: 'missing', reason: 'ref v1 does not exist in redpanda-data/r' })
-      expect(await get([...base, [/commits\/v1$/, 422]])).toEqual({ status: 'missing', reason: 'ref v1 does not exist in redpanda-data/r' })
+      expect(await get([...base, [/commits\/v1$/, 404]])).toEqual({ status: 'missing', refMissing: true, reason: 'ref v1 does not exist in redpanda-data/r' })
+      expect(await get([...base, [/commits\/v1$/, 422]])).toEqual({ status: 'missing', refMissing: true, reason: 'ref v1 does not exist in redpanda-data/r' })
       expect(await get([...base, [/commits\/v1$/, 200, '{}']])).toEqual({ status: 'missing', reason: 'a does not exist in redpanda-data/r at v1' })
     })
   })
