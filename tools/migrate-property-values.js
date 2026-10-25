@@ -98,7 +98,7 @@ function parseValue (text) {
     const word = bool[1].toLowerCase()
     return { written: bool[0], length: bool[0].length, backticked: false, kind: 'bool', bool: ['true', 'enabled', 'on'].includes(word), string: bool[1] }
   }
-  const number = text.match(/^(-?\d[\d,_']*(?:\.\d+)?)(?:\s*([A-Za-z]+)\b)?/)
+  const number = text.match(/^(-?\d(?:[,_']?\d)*(?:\.\d+)?)(?:\s*([A-Za-z]+)\b)?/)
   if (number) {
     const value = Number(number[1].replace(/[,_']/g, ''))
     if (Number.isNaN(value)) return undefined
@@ -187,13 +187,13 @@ function dataValueFor (entry, field) {
  * then raw. Undefined when neither rendering equals the written text.
  */
 function exactCall (name, field, entry, parsed) {
-  const target = norm(parsed.written).toLowerCase()
+  const target = norm(parsed.written)
   const human = fieldValue(entry, field, { format: FORMAT_HUMAN })
-  if (human.ok && norm(human.text).toLowerCase() === target) {
+  if (human.ok && norm(human.text) === target) {
     return { call: `propval:${name}[${field}]`, rendered: human.text }
   }
   const raw = fieldValue(entry, field, { format: FORMAT_RAW })
-  if (raw.ok && norm(raw.text).toLowerCase() === target) {
+  if (raw.ok && norm(raw.text) === target) {
     return { call: `propval:${name}[${field},format=raw]`, rendered: raw.text }
   }
   return undefined
@@ -348,7 +348,7 @@ function scanLine (line, { registry, requireSeparator = true }) {
   }
 
   // "`x` is `true` by default", "is set to 5 by default".
-  for (const m of line.matchAll(/\b(?:is|are)\s+(?:set\s+to\s+)?(`[^`]+`|enabled|disabled|true|false|unset|-?\d[\d,_']*(?:\.\d+)?(?:\s*[A-Za-z%]+)?)\s+by\s+default\b/gi)) {
+  for (const m of line.matchAll(/\b(?:is|are)\s+(?:set\s+to\s+)?(`[^`]+`|enabled|disabled|true|false|unset|-?\d(?:[,_']?\d)*(?:\.\d+)?(?:\s*[A-Za-z%]+)?)\s+by\s+default\b/gi)) {
     const valueStart = m.index + m[0].lastIndexOf(m[1])
     const owner = ownerBefore(m.index)
     if (owner && owner.association === 'same-sentence') add(owner.mention, 'default', 'by default', valueStart, 'same-sentence')
@@ -418,6 +418,14 @@ function classify (finding, registry) {
     return out
   }
   if (compared.status === 'unverifiable') {
+    const exact = exactCall(finding.name, finding.field, entry, finding.parsed)
+    if (exact) {
+      out.status = 'exact'
+      out.proposed = finding.parsed.backticked ? `\`${exact.call}\`` : exact.call
+      out.autoSafe = out.association === 'same-sentence'
+      delete out.note
+      return out
+    }
     out.status = 'unverifiable'
     out.reason = 'not-comparable'
     return out

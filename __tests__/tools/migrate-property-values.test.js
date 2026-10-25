@@ -43,9 +43,80 @@ describe('migrate-property-values', () => {
     ])('%j', (text, expected) => {
       expect(parseValue(text)).toMatchObject(expected)
     })
+
+    test.each([',', '_', "'"])('only includes %s when followed by a digit', (separator) => {
+      const written = `-1${separator}234${separator}567.5 ms`
+      expect(parseValue(`${written}, which`)).toMatchObject({ written, length: written.length, number: -1234567.5, unitKind: 'time' })
+      const parsed = parseValue(`3${separator} ms of prose`)
+      expect(parsed).toMatchObject({ written: '3', length: 1, number: 3 })
+      expect(parsed.unit).toBeUndefined()
+    })
   })
 
   describe('statuses', () => {
+    test.each([',', '_', "'"])('preserves prose after a trailing %s in --write', (separator) => {
+      const result = scanDocument(`prop:default_topic_replications[] defaults to 1${separator} ms of prose.`, REGISTRY, { write: true })
+      expect(result.findings[0]).toMatchObject({ status: 'exact', written: '1', autoSafe: true })
+      expect(result.content).toBe(`prop:default_topic_replications[] defaults to propval:default_topic_replications[default]${separator} ms of prose.`)
+    })
+
+    test.each([',', '_', "'"])('by-default matcher preserves grouped numbers and rejects trailing %s', (separator) => {
+      expect(only(`prop:log_retention_ms[] is 604${separator}800${separator}000 by default.`)).toMatchObject({ status: 'equivalent', written: `604${separator}800${separator}000` })
+      expect(scan(`prop:default_topic_replications[] is 3${separator} ms by default.`)).toEqual([])
+    })
+
+    test.each([
+      ['prop:enable_transactions[] defaults to `TRUE`.'],
+      ['prop:log_segment_ms[] defaults to 2 WEEKS.'],
+      ['prop:log_cleanup_policy[] defaults to `DELETE`.'],
+    ])('case-only differences remain equivalent and are not written: %s', (content) => {
+      const result = scanDocument(content, REGISTRY, { write: true })
+      expect(result.findings[0]).toMatchObject({ status: 'equivalent', autoSafe: false })
+      expect(result.content).toBe(content)
+    })
+
+    test.each([
+      ['DELETE', 'exact', 'propval:case_value[default]'],
+      ['Delete', 'exact', 'propval:case_value[default,format=raw]'],
+      ['delete', 'equivalent', 'propval:case_value[default]'],
+    ])('human and raw string renderings match case-sensitively: %s', (written, status, proposed) => {
+      const registry = { ...REGISTRY, properties: { case_value: { default: 'Delete', default_human_readable: 'DELETE' } } }
+      const content = `prop:case_value[] defaults to \`${written}\`.`
+      const result = scanDocument(content, registry, { write: true })
+      expect(result.findings[0]).toMatchObject({ status, proposed: status === 'exact' ? `\`${proposed}\`` : proposed, autoSafe: status === 'exact' })
+      expect(result.content).toBe(status === 'exact' ? `prop:case_value[] defaults to \`${proposed}\`.` : content)
+    })
+
+    test.each([
+      [{ default: [1, 2] }, '`[1, 2]`', ''],
+      [{ default: [1, 2], default_human_readable: 'two entries' }, '`[1, 2]`', ',format=raw'],
+      [{ default: { enabled: true } }, '`{enabled: true}`', ''],
+      [{ default: 3600000, default_human_readable: '1 hour' }, '1 hour', ''],
+      [{ default: 3600000, default_human_readable: '1 hour' }, '`1 hour`', ''],
+    ])('uses exact renderings when semantic comparison is unverifiable: %j, %s', (entry, written, format) => {
+      const registry = { ...REGISTRY, properties: { exact_value: entry } }
+      const call = `propval:exact_value[default${format}]`
+      const proposed = written.startsWith('`') ? `\`${call}\`` : call
+      const result = scanDocument(`Use prop:exact_value[], which defaults to ${written}.`, registry, { write: true })
+      expect(result.findings[0]).toMatchObject({ status: 'exact', autoSafe: true, proposed })
+      expect(result.findings[0].note).toBeUndefined()
+      expect(result.findings[0].reason).toBeUndefined()
+      expect(result.content).toBe(`Use prop:exact_value[], which defaults to ${proposed}.`)
+
+      const previous = `Use prop:exact_value[]. The default is ${written}.`
+      const deferred = scanDocument(previous, registry, { write: true })
+      expect(deferred.findings[0]).toMatchObject({ status: 'exact', autoSafe: false, proposed })
+      expect(deferred.content).toBe(previous)
+    })
+
+    test('keeps nonmatching structured values unverifiable', () => {
+      const registry = { ...REGISTRY, properties: { list_value: { default: [1, 2] } } }
+      const content = 'prop:list_value[] defaults to `[3]`.'
+      const result = scanDocument(content, registry, { write: true })
+      expect(result.findings[0]).toMatchObject({ status: 'unverifiable', reason: 'not-comparable', note: 'the data value is a list or object', autoSafe: false })
+      expect(result.content).toBe(content)
+    })
+
     test('exact: the written text is what propval: renders, and it is auto-safe', () => {
       const f = only('Set prop:log_segment_ms[], which defaults to 2 weeks.')
       expect(f).toMatchObject({ status: 'exact', autoSafe: true, property: 'log_segment_ms', proposed: 'propval:log_segment_ms[default]' })
