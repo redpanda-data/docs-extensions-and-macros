@@ -164,35 +164,11 @@ function checkFiles ({ root, files, taxonomy, strict = false, isLegacyCategory }
   let pages = 0
   let solutions = 0
   for (const file of files) {
-    const entries = parseHeader(fs.readFileSync(path.resolve(root, file), 'utf8')).filter((e) => CHECKED_ATTRIBUTES.has(e.name))
-    if (!entries.length) continue
+    const page = checkContent(fs.readFileSync(path.resolve(root, file), 'utf8'), { taxonomy, strict, isLegacyCategory })
+    if (!page.checked) continue
     pages++
-    // Values that reference attributes resolve only in a build.
-    const attributes = {}
-    const lineOf = {}
-    for (const e of entries) {
-      if (e.value.includes('{')) continue
-      attributes[e.name] = attributes[e.name] ? `${attributes[e.name]}, ${e.value}` : e.value
-      if (!lineOf[e.name]) lineOf[e.name] = []
-      lineOf[e.name].push(e)
-    }
-    const solution = isSolutionPage(attributes)
-    if (solution) solutions++
-    for (const f of checkPageMetadata(attributes, { taxonomy, solution, isLegacyCategory })) {
-      const entry = (lineOf[f.attribute] || []).find((e) => e.value.split(',').map((v) => v.trim()).includes(f.value)) || (lineOf[f.attribute] || [])[0]
-      findings.push({
-        file,
-        line: entry ? entry.line : 1,
-        attribute: f.attribute,
-        value: f.value,
-        severity: strict && f.severity === 'warning' ? 'error' : f.severity,
-        rule: f.rule,
-        message: f.message,
-        replacement: f.replacement,
-        replacementIds: f.replacementIds,
-        kind: solution ? 'solution' : 'docs',
-      })
-    }
+    if (page.solution) solutions++
+    for (const f of page.findings) findings.push({ file, ...f })
   }
   findings.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.value.localeCompare(b.value))
   const errors = findings.filter((f) => f.severity === 'error').length
@@ -204,6 +180,48 @@ function checkFiles ({ root, files, taxonomy, strict = false, isLegacyCategory }
     findings,
     summary: { errors, warnings: findings.length - errors },
   }
+}
+
+/**
+ * Check the header of one page's source. checkFiles runs this on each file,
+ * and the docs language server runs it on the unsaved editor buffer, so the
+ * editor and the PR check report the same findings.
+ *
+ * @param {string} content
+ * @param {Object} options - taxonomy, strict, isLegacyCategory as for checkFiles
+ * @returns {{checked: boolean, solution: boolean, findings: Array<Object>}}
+ *   `checked` is false when the header sets none of the checked attributes;
+ *   each finding carries `line` (1-based, the entry's last line)
+ */
+function checkContent (content, { taxonomy, strict = false, isLegacyCategory } = {}) {
+  const entries = parseHeader(content).filter((e) => CHECKED_ATTRIBUTES.has(e.name))
+  if (!entries.length) return { checked: false, solution: false, findings: [] }
+  // Values that reference attributes resolve only in a build.
+  const attributes = {}
+  const lineOf = {}
+  for (const e of entries) {
+    if (e.value.includes('{')) continue
+    attributes[e.name] = attributes[e.name] ? `${attributes[e.name]}, ${e.value}` : e.value
+    if (!lineOf[e.name]) lineOf[e.name] = []
+    lineOf[e.name].push(e)
+  }
+  const solution = isSolutionPage(attributes)
+  const findings = []
+  for (const f of checkPageMetadata(attributes, { taxonomy, solution, isLegacyCategory })) {
+    const entry = (lineOf[f.attribute] || []).find((e) => e.value.split(',').map((v) => v.trim()).includes(f.value)) || (lineOf[f.attribute] || [])[0]
+    findings.push({
+      line: entry ? entry.line : 1,
+      attribute: f.attribute,
+      value: f.value,
+      severity: strict && f.severity === 'warning' ? 'error' : f.severity,
+      rule: f.rule,
+      message: f.message,
+      replacement: f.replacement,
+      replacementIds: f.replacementIds,
+      kind: solution ? 'solution' : 'docs',
+    })
+  }
+  return { checked: true, solution, findings }
 }
 
 // The schemes a page-categories value may name once it is rewritten. A task
@@ -508,7 +526,10 @@ async function runCli (paths, options = {}, { fetch } = {}) {
 }
 
 module.exports = {
+  CATEGORY_SCHEMES,
+  LEGACY_CATEGORIES_PATH,
   parseHeader,
+  checkContent,
   selectFiles,
   checkFiles,
   fixCategoryValue,

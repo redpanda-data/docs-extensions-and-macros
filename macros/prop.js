@@ -773,10 +773,11 @@ function warnNoPropertyData (contentCatalog, component, version) {
 }
 
 /**
- * Report an unknown property name according to the property-validate mode.
+ * The warning for an unknown property name, with up to three names that share
+ * a prefix with it. Shared by the build (reportUnknownProperty) and the docs
+ * language server, so the editor shows exactly what the build logs.
  */
-function reportUnknownProperty ({ name, mode, registry, filePath }) {
-  if (mode === 'off') return
+function unknownPropertyMessage ({ name, registry, filePath }) {
   const fragment = name.trim().toLowerCase()
   const commonPrefix = (a, b) => {
     let i = 0
@@ -791,8 +792,16 @@ function reportUnknownProperty ({ name, mode, registry, filePath }) {
     .map((scored) => scored.candidate)
   const hint = candidates.length ? ` Did you mean: ${candidates.join(', ')}?` : ''
   const where = filePath ? ` in ${filePath}` : ''
-  const message = `prop:${name}[]${where}: '${name}' is not in the property data this page validates against (${describeDataset(registry)}). ` +
+  return `prop:${name}[]${where}: '${name}' is not in the property data this page validates against (${describeDataset(registry)}). ` +
     `Either the name is misspelled or the property does not exist in that release.${hint}`
+}
+
+/**
+ * Report an unknown property name according to the property-validate mode.
+ */
+function reportUnknownProperty ({ name, mode, registry, filePath }) {
+  if (mode === 'off') return
+  const message = unknownPropertyMessage({ name, registry, filePath })
   if (mode === 'error') throw new Error(message)
   logger.warn(message)
 }
@@ -815,15 +824,17 @@ function describeDataset (registry) {
  * property a Cloud reader cannot set, so it renders as plain code rather than
  * as a tooltip implying otherwise.
  */
-function reportUnavailableProperty ({ name, component, registry, mode, filePath }) {
-  if (mode === 'off') return
+function unavailablePropertyMessage ({ name, component, registry, filePath }) {
   const where = filePath ? ` in ${filePath}` : ''
   const which = component || 'this'
-  logger.warn(
-    `prop:${name}[]${where}: '${name}' is not available in the ${which} component, so it renders as plain code -- no link, and no tooltip. ` +
+  return `prop:${name}[]${where}: '${name}' is not available in the ${which} component, so it renders as plain code -- no link, and no tooltip. ` +
     `${describeDataset(registry)} marks it cloud_supported: false, meaning Redpanda has the property but this audience cannot set it. ` +
     'If that is wrong, fix cloud_supported in the property extractor; if it is right, reword the sentence and drop the macro.'
-  )
+}
+
+function reportUnavailableProperty ({ name, component, registry, mode, filePath }) {
+  if (mode === 'off') return
+  logger.warn(unavailablePropertyMessage({ name, component, registry, filePath }))
 }
 
 /**
@@ -1141,3 +1152,5 @@ module.exports.isAvailable = isAvailable
 module.exports.describeDataset = describeDataset
 module.exports.buildPropvalContent = buildPropvalContent
 module.exports.resolvePropertyValue = resolvePropertyValue
+module.exports.unknownPropertyMessage = unknownPropertyMessage
+module.exports.unavailablePropertyMessage = unavailablePropertyMessage
