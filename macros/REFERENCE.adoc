@@ -223,7 +223,7 @@ Registered together with the `enterprise` inline macro.
 
 This inline macro references a Redpanda configuration property in prose. The property renders as a marked `<code>` element (`property-ref` class plus a `data-property-name` attribute) that the docs UI decorates with a hover-documentation tooltip. Marking is opt-in: only properties referenced through this macro get tooltips, so ambiguous words such as `admin` or `rack` in unrelated contexts (Helm values, feature settings) are never decorated by mistake.
 
-The macro checks that a property is actually available to the audience reading the page, and links it only where a page documents it. It validates against the published property data: a `redpanda-properties-<tag>.json` attachment in the `reference` module, the same data the tooltips fetch at runtime. See <<prop-availability>> for which properties each doc set may reference and <<prop-version-selection>> for which file a given page uses. To migrate existing plain-backtick property mentions, use `doc-tools generate migrate-property-refs`.
+The macro checks that a property is actually available to the audience reading the page, and links it only where a page documents it. It validates against the published property data: a `redpanda-properties-<tag>.json` attachment in the `reference` module, the same data the tooltips fetch at runtime. See <<prop-availability>> for which properties each doc set may reference and <<prop-version-selection>> for which file a given page uses. To migrate existing plain-backtick property mentions, use `doc-tools generate migrate-property-refs`. To render a property's value (its default, minimum, unit, and so on) rather than its name, use <<propval>>.
 
 === Usage
 
@@ -323,6 +323,142 @@ Within a rank, the first page wins, ordered by path so the result is determinist
 Declaring the attribute is optional. Existing pages keep working through inference, and the declaration is worth adding when a property could plausibly be claimed by more than one page in the component, or to state the intent explicitly rather than relying on the generated partials happening to win.
 
 === Registration
+
+[,yaml]
+----
+asciidoc:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/macros/prop'
+----
+
+== propval
+
+This inline macro renders one value from the property data as plain text, so a sentence such as "defaults to 2 weeks" is generated from the same data as the property reference instead of typed by hand. Hand-typed values drift when a release changes a default, and nothing catches it.
+
+[,asciidoc]
+----
+Set prop:log_segment_ms[], which defaults to propval:log_segment_ms[default].
+The minimum is propval:log_segment_ms[min].
+Changing prop:cloud_storage_enabled[] requires a restart: propval:cloud_storage_enabled[restart].
+The exact default is `propval:log_segment_ms[default,format=raw]`.
+----
+
+Rendered against `redpanda-properties-v26.2.4.json`, those lines read: "defaults to 2 weeks", "The minimum is 1 minute", "requires a restart: yes", and "The exact default is `1209600000`".
+
+`propval:` is registered by the `prop` macro's extension, so a playbook that registers `macros/prop` has both. It shares every data decision with `prop:` rather than copying them: the same dataset for the page's version (<<prop-version-selection>>), the same `property-validate` modes, the same Cloud availability gate (<<prop-availability>>), and the same refusal to use a neighbouring release's data when a version has none.
+
+=== Usage
+
+The target is the property name. The first positional attribute (or `field=`) names the field, and defaults to `default`.
+
+[cols="1,2,2"]
+|===
+| Field | Source in the property JSON | Example (v26.2.4)
+
+| `default`
+| `default`, formatted as the reference table formats it. The human-readable form is the table's parenthetical (`default_human_readable`) when the data has one.
+| `log_segment_ms`: `2 weeks`; `fetch_max_bytes`: `55 MiB`; `cloud_storage_enabled`: `false`; `node_id`: `null`
+
+| `type`
+| `type`
+| `integer`
+
+| `unit`
+| `units`, else the unit the table derives from the name suffix (`_ms`, `_bytes`, and so on)
+| `milliseconds`
+
+| `min`, `max`
+| `minimum`, `maximum`, humanized with the unit
+| `log_segment_ms` min: `1 minute`
+
+| `restart`
+| `needs_restart`
+| `yes` or `no`
+
+| `nullable`
+| `nullable`
+| `yes` or `no`
+
+| `values`
+| `enum` (or `items.enum` for arrays), each value as inline code, because some values contain commas
+| `none`, `delete`, `compact`, `compact,delete`
+
+| `scope`
+| `config_scope`
+| `cluster`, `broker`, or `topic`
+
+| `introduced`
+| `version`
+| `v26.1.1`
+
+| `visibility`
+| `visibility`
+| `user`, `tunable`
+
+| `restored`
+| `gets_restored` (restored on Whole Cluster Restore)
+| `yes` or `no`
+
+| `aliases`
+| `aliases`
+| comma-separated names
+
+| `cloud-access`
+| `cloud_editable` and `cloud_readonly`, for cluster properties only
+| `editable`, `read-only`, or `not available`
+|===
+
+The JSON key names and table labels also work as field names: `minimum`, `maximum`, `needs_restart`, `units`, `enum`, `config_scope`, `version`, `gets_restored`.
+
+format::
+`human` (default) or `raw`. `raw` gives the exact value: the code value in the reference table for `default`, the plain number for `min` and `max`, `true` or `false` for the yes-or-no fields, and a JSON array for `values` and `aliases`.
+
+The output is a `<span>` with the stable class `property-value` and `data-property` and `data-field` attributes. It is plain text with no tooltip; mark the name with `prop:` for that. The macro works inside backticks, so `` `propval:x[default,format=raw]` `` renders as inline code.
+
+=== Formatting
+
+Values come from the reference generator's own helpers, so prose and the reference tables cannot disagree:
+
+* `default` uses `formatPropertyValue`, the helper that renders the table's Default cell. In the human form, a duration uses the table's parenthetical when the data has one.
+* A duration with no parenthetical in the data is humanized by a port of the extractor's `format_time_human_readable`, the function that produced the parenthetical: the largest unit that divides the value evenly, else the value in its own unit (`1500 milliseconds`).
+* A byte count renders in IEC units (`128 MiB`) only when the table's Unit row says bytes and the value is an exact multiple. Otherwise the exact number renders. `log_segment_size` and `segment.bytes` have no unit in the data or the table, so they render `134217728`. Adding `units` for them belongs in the property extractor, not in prose.
+* Negative numbers are sentinels (`-1` for unlimited) and render as written.
+* `null`, an empty string, and booleans render as the table renders them: `null`, `null`, `true`, `false`.
+
+=== Failures
+
+A value has no safe fallback, so whenever the build cannot verify one, `propval:` renders a visible placeholder such as `<unknown default>` (class `property-value property-value-unknown`) and logs why, naming the property, the field, and the dataset. It never renders a guessed value. The cases:
+
+* The page's version has no property data, or the component has none (the same diagnostic `prop:` logs, plus one for the `propval:` call).
+* The property is not in the page's dataset.
+* The property is not available on a Cloud page (`cloud_supported: false` on a cluster property).
+* The field is not one `propval:` supports.
+* The property has no such field in the data, for example `max` on a property with no maximum, or `default` on a deprecated property the data gives no default.
+* The value is an integer beyond JavaScript's exact range (the 2^64^-1 sentinel of `virtual_cluster_min_producer_ids`), which `JSON.parse` has already rounded.
+* On a Cloud page, the field is one the Cloud property reference does not show: `default`, `visibility`, `restored`, and `aliases`. The reference renders those only outside `env-cloud` (Cloud shows "Available in the Redpanda Cloud Console" in the Default row), so a Cloud page cannot state them either. Put the sentence in an `ifndef::env-cloud[]` block, or use a field the Cloud reference shows, such as `cloud-access`.
+
+With `property-validate` set to `error`, an unknown property, an unsupported field, or a field the property does not have fails the build. With `off`, the placeholder is still rendered and still reported, because `off` means "do not check names", and a silent `<unknown default>` would reach readers unnoticed.
+
+=== Migrating hand-written values
+
+`doc-tools generate migrate-property-values` finds hand-written values next to a property mention ("defaults to X", "the default is X", "default: X", "minimum X", "is X by default") and checks each against the data for the repo's own version, selected exactly as `prop:` selects it. It writes a JSON and a Markdown report. Each finding is one of:
+
+exact:: The written text is what `propval:` renders. Auto-safe when the statement is in the same sentence as its property and the file is not release or upgrade notes.
+equivalent:: Same value, different wording (`7 days` and `1 week`). Proposed, never applied.
+mismatch:: The written value differs from the data. Likely a doc error. Never applied.
+unverifiable:: Not comparable: unparseable, a field the property does not have, a sentence qualified to another audience or release ("In Redpanda Cloud", "in earlier versions", "If the default is"), or a Cloud default.
+
+`--write` applies only auto-safe exact matches. The tool skips code blocks, tables, headings, attribute entries, comment lines, and generated content. For cloud-docs, pass the docs checkout with `--lender` so Cloud can borrow its GA data.
+
+[,bash]
+----
+npx doc-tools generate migrate-property-values --docs-dir . --report-dir ./propval-report
+npx doc-tools generate migrate-property-values --docs-dir ../cloud-docs --lender . --report-dir ./propval-report-cloud
+----
+
+=== Registration
+
+Registered by the `prop` macro's extension:
 
 [,yaml]
 ----

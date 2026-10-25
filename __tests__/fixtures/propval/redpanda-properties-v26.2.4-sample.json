@@ -1,0 +1,678 @@
+{
+  "properties": {
+    "cloud_storage_enabled": {
+      "category": "other",
+      "cloud_byoc_only": false,
+      "cloud_editable": false,
+      "cloud_readonly": false,
+      "cloud_supported": false,
+      "config_scope": "cluster",
+      "default": false,
+      "defined_in": "src/v/config/configuration.cc",
+      "description": "Enable object storage. Must be set to `true` to use Tiered Storage, Remote Read Replicas, or Cloud Topics.",
+      "enterprise_constructor": "restricted_only",
+      "enterprise_restricted_value": [
+        "true"
+      ],
+      "enterprise_value": [
+        "true"
+      ],
+      "example": "`true`",
+      "gets_restored": true,
+      "is_deprecated": false,
+      "is_enterprise": true,
+      "is_secret": false,
+      "name": "cloud_storage_enabled",
+      "needs_restart": true,
+      "nullable": false,
+      "type": "boolean",
+      "visibility": "user"
+    },
+    "compaction_ctrl_backlog_size": {
+      "category": "other",
+      "cloud_byoc_only": false,
+      "cloud_editable": false,
+      "cloud_readonly": false,
+      "cloud_supported": false,
+      "config_scope": "cluster",
+      "default": null,
+      "defined_in": "src/v/config/configuration.cc",
+      "description": "Target backlog size for compaction controller. If not set the max backlog size is configured to 80% of total disk space available.",
+      "gets_restored": true,
+      "is_deprecated": false,
+      "is_enterprise": false,
+      "is_secret": false,
+      "name": "compaction_ctrl_backlog_size",
+      "needs_restart": false,
+      "nullable": true,
+      "type": "integer",
+      "visibility": "tunable"
+    },
+    "consumer_group_lag_collection_interval_sec": {
+      "category": "other",
+      "cloud_byoc_only": false,
+      "cloud_editable": false,
+      "cloud_readonly": false,
+      "cloud_supported": false,
+      "config_scope": "cluster",
+      "default": 60,
+      "default_human_readable": "1 minute",
+      "defined_in": "src/v/config/configuration.cc",
+      "description": "How often to run the collection loop when `enable_consumer_group_metrics` contains `consumer_lag`. Updates are never more frequent than `health_monitor_max_metadata_age`.\n\nReducing the value of `consumer_group_lag_collection_interval_sec` increases the metric collection frequency, which may raise resource utilization. In most environments, this impact is minimal, but it's best practice to monitor broker resource usage in high-scale settings.",
+      "gets_restored": true,
+      "is_deprecated": false,
+      "is_enterprise": false,
+      "is_secret": false,
+      "links": {
+        "`enable_consumer_group_metrics`": "#enable_consumer_group_metrics",
+        "`health_monitor_max_metadata_age`": "#health_monitor_max_metadata_age"
+      },
+      "name": "consumer_group_lag_collection_interval_sec",
+      "needs_restart": false,
+      "nullable": false,
+      "type": "integer",
+      "units": "seconds",
+      "visibility": "tunable"
+    },
+    "coproc_supervisor_server": {
+      "c_type": "deprecated_property",
+      "category": "other",
+      "config_scope": "broker",
+      "defined_in": "src/v/config/node_config.cc",
+      "description": null,
+      "gets_restored": true,
+      "is_deprecated": true,
+      "is_enterprise": false,
+      "name": "coproc_supervisor_server",
+      "needs_restart": true,
+      "nullable": false,
+      "type": "object"
+    },
+    "default_topic_replications": {
+      "category": "other",
+      "cloud_byoc_only": false,
+      "cloud_editable": false,
+      "cloud_readonly": true,
+      "cloud_supported": true,
+      "config_scope": "cluster",
+      "default": 1,
+      "defined_in": "src/v/config/configuration.cc",
+      "description": "Default replication factor for new topics.",
+      "example": "`1`",
+      "gets_restored": true,
+      "is_deprecated": false,
+      "is_enterprise": false,
+      "is_secret": false,
+      "minimum": 1,
+      "name": "default_topic_replications",
+      "needs_restart": false,
+      "nullable": false,
+      "type": "integer",
+      "visibility": "user"
+    },
+    "enable_transactions": {
+      "category": "other",
+      "cloud_byoc_only": false,
+      "cloud_editable": false,
+      "cloud_readonly": false,
+      "cloud_supported": false,
+      "config_scope": "cluster",
+      "default": true,
+      "defined_in": "src/v/config/configuration.cc",
+      "description": "Enable transactions (atomic writes).",
+      "example": "`false`",
+      "gets_restored": true,
+      "is_deprecated": false,
+      "is_enterprise": false,
+      "is_secret": false,
+      "name": "enable_transactions",
+      "needs_restart": true,
+      "nullable": false,
+      "type": "boolean",
+      "visibility": "user"
+    },
+    "fetch_max_bytes": {
+      "category": "other",
+      "cloud_byoc_only": false,
+      "cloud_editable": false,
+      "cloud_readonly": false,
+      "cloud_supported": false,
+      "config_scope": "cluster",
+      "default": 57671680,
+      "defined_in": "src/v/config/configuration.cc",
+      "description": "Maximum number of bytes returned in a fetch request.",
+      "gets_restored": true,
+      "is_deprecated": false,
+      "is_enterprise": false,
+      "is_secret": false,
+      "name": "fetch_max_bytes",
+      "needs_restart": false,
+      "nullable": false,
+      "type": "integer",
+      "visibility": "user"
+    },
+    "http_authentication": {
+      "category": "other",
+      "cloud_byoc_only": false,
+      "cloud_editable": false,
+      "cloud_readonly": true,
+      "cloud_supported": true,
+      "config_scope": "cluster",
+      "default": "BASIC",
+      "defined_in": "src/v/config/configuration.cc",
+      "description": "A list of supported HTTP authentication mechanisms.",
+      "enterprise_constructor": "restricted_only",
+      "enterprise_restricted_value": [
+        "OIDC"
+      ],
+      "enterprise_value": [
+        "OIDC"
+      ],
+      "gets_restored": true,
+      "is_deprecated": false,
+      "is_enterprise": true,
+      "is_secret": false,
+      "items": {
+        "enum": [
+          "BASIC",
+          "OIDC"
+        ],
+        "type": "string",
+        "x-enum-metadata": {
+          "BASIC": {
+            "is_enterprise": false
+          },
+          "OIDC": {
+            "is_enterprise": true
+          }
+        }
+      },
+      "name": "http_authentication",
+      "needs_restart": false,
+      "nullable": false,
+      "type": "array",
+      "visibility": "user"
+    },
+    "iceberg_target_lag_ms": {
+      "category": "other",
+      "cloud_byoc_only": true,
+      "cloud_editable": true,
+      "cloud_readonly": false,
+      "cloud_supported": true,
+      "config_scope": "cluster",
+      "default": 60000,
+      "default_human_readable": "1 minute",
+      "defined_in": "src/v/config/configuration.cc",
+      "description": "Default value for the `redpanda.iceberg.target.lag.ms` topic property, which controls how often the data in an Iceberg table is refreshed with new data from the corresponding Redpanda topic. Redpanda attempts to commit all data produced to the topic within the lag target, subject to resource availability.",
+      "example": "`4611686023427`",
+      "gets_restored": true,
+      "is_deprecated": false,
+      "is_enterprise": false,
+      "is_secret": false,
+      "maximum": 9223372036854,
+      "minimum": 10000,
+      "name": "iceberg_target_lag_ms",
+      "needs_restart": false,
+      "nullable": false,
+      "see_also": [
+        {
+          "content": "xref:reference:properties/topic-properties.adoc#redpanda-iceberg-target-lag-ms[`redpanda.iceberg.target.lag.ms`]",
+          "self_managed_only": true
+        }
+      ],
+      "type": "integer",
+      "units": "milliseconds",
+      "visibility": "user"
+    },
+    "kafka_api": {
+      "category": "redpanda",
+      "config_scope": "broker",
+      "default": [
+        {
+          "address": "127.0.0.1",
+          "name": "",
+          "port": 9092
+        }
+      ],
+      "defined_in": "src/v/config/node_config.cc",
+      "description": "IP address and port of the Kafka API endpoint that handles requests. Supports multiple listeners with different configurations.",
+      "example": ".Basic example\n[,yaml]\n----\nredpanda:\n  kafka_api:\n    - address: <bind-address>\n      port: <kafka-port>\n      authentication_method: sasl\n----\n\n.Multiple listeners example (for different networks or authentication methods)\n[,yaml]\n----\nredpanda:\n  kafka_api:\n    - name: <internal-listener-name>\n      address: <internal-bind-address>\n      port: <internal-kafka-port>\n      authentication_method: none\n    - name: <external-listener-name>\n      address: <external-bind-address>\n      port: <external-kafka-port>\n      authentication_method: sasl\n    - name: <mtls-listener-name>\n      address: <mtls-bind-address>\n      port: <mtls-kafka-port>\n      authentication_method: mtls_identity\n----\n\nReplace the following placeholders with your values:\n\n* `<bind-address>`: The IP address to bind the listener to (typically `0.0.0.0` for all interfaces)\n* `<kafka-port>`: The port number for the Kafka API endpoint\n* `<internal-listener-name>`: Name for internal network connections (for example, `internal`)\n* `<external-listener-name>`: Name for external network connections (for example, `external`)\n* `<mtls-listener-name>`: Name for mTLS connections (for example, `mtls`)\n* `<internal-bind-address>`: The IP address for internal connections\n* `<internal-kafka-port>`: The port number for internal Kafka API connections\n* `<external-bind-address>`: The IP address for external connections\n* `<external-kafka-port>`: The port number for external Kafka API connections\n* `<mtls-bind-address>`: The IP address for mTLS connections\n* `<mtls-kafka-port>`: The port number for mTLS Kafka API connections",
+      "gets_restored": true,
+      "is_deprecated": false,
+      "is_enterprise": false,
+      "is_secret": false,
+      "items": {
+        "type": "object"
+      },
+      "name": "kafka_api",
+      "needs_restart": true,
+      "nullable": false,
+      "see_also": [
+        "xref:reference:properties/cluster-properties.adoc#sasl_mechanisms[`sasl_mechanisms`]"
+      ],
+      "type": "array",
+      "visibility": "user"
+    },
+    "log_cleanup_policy": {
+      "category": "other",
+      "cloud_byoc_only": false,
+      "cloud_editable": false,
+      "cloud_readonly": false,
+      "cloud_supported": false,
+      "config_scope": "cluster",
+      "default": "delete",
+      "defined_in": "src/v/config/configuration.cc",
+      "description": "Default cleanup policy for topic logs.\n\nThe topic property `cleanup.policy` overrides the value of `log_cleanup_policy` at the topic level.",
+      "enum": [
+        "none",
+        "delete",
+        "compact",
+        "compact,delete"
+      ],
+      "example": "`compact,delete`",
+      "gets_restored": true,
+      "is_deprecated": false,
+      "is_enterprise": false,
+      "is_secret": false,
+      "name": "log_cleanup_policy",
+      "needs_restart": false,
+      "nullable": false,
+      "see_also": [
+        "xref:reference:properties/topic-properties.adoc#cleanup-policy[`cleanup.policy`]"
+      ],
+      "type": "string",
+      "visibility": "user"
+    },
+    "log_retention_ms": {
+      "aliases": [
+        "delete_retention_ms"
+      ],
+      "category": "other",
+      "cloud_byoc_only": false,
+      "cloud_editable": true,
+      "cloud_readonly": false,
+      "cloud_supported": true,
+      "config_scope": "cluster",
+      "default": 604800000,
+      "default_human_readable": "1 week",
+      "defined_in": "src/v/config/configuration.cc",
+      "description": "The amount of time to keep a log file before deleting it (in milliseconds). If set to `-1`, no time limit is applied. This is a cluster-wide default that applies when a topic does not set or disable its own `retention.ms`.",
+      "gets_restored": true,
+      "is_deprecated": false,
+      "is_enterprise": false,
+      "is_secret": false,
+      "name": "log_retention_ms",
+      "needs_restart": false,
+      "nullable": true,
+      "see_also": [
+        {
+          "content": "xref:reference:properties/topic-properties.adoc#retention-ms[`retention.ms`]",
+          "self_managed_only": true
+        }
+      ],
+      "type": "integer",
+      "units": "milliseconds",
+      "visibility": "user"
+    },
+    "log_segment_ms": {
+      "category": "other",
+      "cloud_byoc_only": false,
+      "cloud_editable": false,
+      "cloud_readonly": true,
+      "cloud_supported": true,
+      "config_scope": "cluster",
+      "default": 1209600000,
+      "default_human_readable": "2 weeks",
+      "defined_in": "src/v/config/configuration.cc",
+      "description": "Default lifetime of log segments. If `null`, the property is disabled, and no default lifetime is set. Any value under 60 seconds (60000 ms) is rejected. This property can also be set in the Kafka API using the Kafka-compatible alias, `log.roll.ms`.",
+      "example": "`3600000`",
+      "gets_restored": true,
+      "is_deprecated": false,
+      "is_enterprise": false,
+      "is_secret": false,
+      "minimum": 60000,
+      "name": "log_segment_ms",
+      "needs_restart": false,
+      "nullable": true,
+      "see_also": [
+        {
+          "content": "xref:reference:properties/topic-properties.adoc#segment-ms[`segment.ms`]",
+          "self_managed_only": true
+        }
+      ],
+      "type": "integer",
+      "units": "milliseconds",
+      "visibility": "user"
+    },
+    "log_segment_ms_min": {
+      "category": "other",
+      "cloud_byoc_only": false,
+      "cloud_editable": false,
+      "cloud_readonly": false,
+      "cloud_supported": false,
+      "config_scope": "cluster",
+      "default": 600000,
+      "default_human_readable": "10 minutes",
+      "defined_in": "src/v/config/configuration.cc",
+      "description": "Lower bound on topic `segment.ms`: lower values will be clamped to this value.",
+      "example": "`600000`",
+      "gets_restored": true,
+      "is_deprecated": false,
+      "is_enterprise": false,
+      "is_secret": false,
+      "minimum": 0,
+      "name": "log_segment_ms_min",
+      "needs_restart": false,
+      "nullable": false,
+      "type": "integer",
+      "units": "milliseconds",
+      "visibility": "tunable"
+    },
+    "log_segment_size": {
+      "category": "other",
+      "cloud_byoc_only": false,
+      "cloud_editable": false,
+      "cloud_readonly": false,
+      "cloud_supported": false,
+      "config_scope": "cluster",
+      "default": 134217728,
+      "defined_in": "src/v/config/configuration.cc",
+      "description": "Default log segment size in bytes for topics which do not set segment.bytes",
+      "example": "`2147483648`",
+      "gets_restored": true,
+      "is_deprecated": false,
+      "is_enterprise": false,
+      "is_secret": false,
+      "minimum": 1048576,
+      "name": "log_segment_size",
+      "needs_restart": false,
+      "nullable": false,
+      "type": "integer",
+      "visibility": "tunable"
+    },
+    "min_cleanable_dirty_ratio": {
+      "category": "other",
+      "cloud_byoc_only": false,
+      "cloud_editable": false,
+      "cloud_readonly": false,
+      "cloud_supported": false,
+      "config_scope": "cluster",
+      "default": 0.5,
+      "defined_in": "src/v/config/configuration.cc",
+      "description": "The minimum ratio between the number of bytes in \"dirty\" segments and the total number of bytes in closed segments that must be reached before a partition's log is eligible for compaction in a compact topic. The topic property `min.cleanable.dirty.ratio` overrides the value of `min_cleanable_dirty_ratio` at the topic level.",
+      "example": "`0.5`",
+      "gets_restored": true,
+      "is_deprecated": false,
+      "is_enterprise": false,
+      "is_secret": false,
+      "maximum": 1,
+      "minimum": 0,
+      "name": "min_cleanable_dirty_ratio",
+      "needs_restart": false,
+      "nullable": true,
+      "type": "number",
+      "visibility": "user"
+    },
+    "node_id": {
+      "admonitions": [
+        {
+          "text": "Redpanda assigns unique IDs automatically to prevent issues such as:\n\n- Brokers with empty disks rejoining the cluster.\n- Conflicts during recovery or scaling.\n\nManually setting or reusing `node_id` values, even for decommissioned brokers, can cause cluster inconsistencies and operational failures.",
+          "title": "Do not set `node_id` manually.",
+          "type": "WARNING"
+        }
+      ],
+      "category": "redpanda",
+      "config_scope": "broker",
+      "default": null,
+      "defined_in": "src/v/config/node_config.cc",
+      "description": "A number that uniquely identifies the broker within the cluster. If `null` (the default value), Redpanda automatically assigns an ID. If set, it must be non-negative value.\n\nBroker IDs are immutable. After a broker joins the cluster, its `node_id` *cannot* be changed.",
+      "gets_restored": true,
+      "is_deprecated": false,
+      "is_enterprise": false,
+      "is_secret": false,
+      "name": "node_id",
+      "needs_restart": true,
+      "nullable": true,
+      "type": "integer",
+      "visibility": "user"
+    },
+    "raft_heartbeat_interval_ms": {
+      "category": "other",
+      "cloud_byoc_only": false,
+      "cloud_editable": false,
+      "cloud_readonly": false,
+      "cloud_supported": false,
+      "config_scope": "cluster",
+      "default": 150,
+      "default_human_readable": "150 milliseconds",
+      "defined_in": "src/v/config/configuration.cc",
+      "description": "Number of milliseconds for Raft leader heartbeats.",
+      "example": "`150`",
+      "gets_restored": true,
+      "is_deprecated": false,
+      "is_enterprise": false,
+      "is_secret": false,
+      "minimum": 1,
+      "name": "raft_heartbeat_interval_ms",
+      "needs_restart": false,
+      "nullable": false,
+      "type": "integer",
+      "units": "milliseconds",
+      "visibility": "tunable"
+    },
+    "retention.ms": {
+      "acceptable_values": "",
+      "alternate_cluster_property": "",
+      "alternate_cluster_property_doc_file": "",
+      "category": "retention-compaction",
+      "cluster_property_doc_file": "cluster-properties.adoc",
+      "config_scope": "topic",
+      "corresponding_cluster_property": "log_retention_ms",
+      "default": 604800000,
+      "default_human_readable": "1 week",
+      "defined_in": "src/v/kafka/protocol/topic_properties.h",
+      "description": "A time-based retention limit that configures the maximum duration that a log's segment file for a topic is retained before it becomes eligible to be cleaned up. To consume all data, a consumer of the topic must read from a segment before its `retention.ms` elapses, otherwise the segment may be compacted and/or deleted.\n\nIf `retention.ms` is set to a positive value, it overrides the cluster property `log_retention_ms` for the topic.\n\nWhen both size-based (`retention.bytes`) and time-based (`retention.ms`) retention limits are set, the earliest occurring limit applies.\n\nThis property supports three states:\n\n* Positive value: Sets the maximum milliseconds to retain data. After this duration, segments become eligible for cleanup.\n* 0: Data is immediately eligible for cleanup.\n* Negative value: Disables time-based retention for this topic.",
+      "is_deprecated": false,
+      "is_enterprise": false,
+      "is_topic_property": true,
+      "name": "retention.ms",
+      "needs_restart": false,
+      "see_also": [
+        "xref:reference:properties/cluster-properties.adoc#log_retention_ms[`log_retention_ms`]",
+        {
+          "content": "xref:manage:cluster-maintenance/disk-utilization.adoc#configure-message-retention[Configure message retention]",
+          "self_managed_only": true
+        }
+      ],
+      "type": "integer"
+    },
+    "sasl_mechanism": {
+      "admonitions": [
+        {
+          "text": "While the cluster-wide `sasl_mechanisms` property may support additional mechanisms (PLAIN, GSSAPI), HTTP Proxy client connections only support SCRAM-SHA-256, SCRAM-SHA-512, and OAUTHBEARER mechanisms.",
+          "type": "NOTE"
+        }
+      ],
+      "category": "pandaproxy-client",
+      "config_scope": "broker",
+      "default": "",
+      "defined_in": "src/v/kafka/client/configuration.cc",
+      "description": "The SASL mechanism to use when the HTTP Proxy client connects to the Kafka API. These credentials are used when the HTTP Proxy API listener has `authentication_method`: `none` but the cluster requires authenticated access to the Kafka API. This property specifies which individual SASL mechanism the HTTP Proxy client should use, while the cluster-wide available mechanisms are configured using the `sasl_mechanisms` cluster property.\n\ninclude::shared:partial$http-proxy-ephemeral-credentials-breaking-change.adoc[]",
+      "enum": [
+        "SCRAM-SHA-256",
+        "SCRAM-SHA-512",
+        "OAUTHBEARER"
+      ],
+      "gets_restored": true,
+      "includes": [
+        "shared:partial$http-proxy-ephemeral-credentials-breaking-change.adoc[]"
+      ],
+      "is_deprecated": false,
+      "is_enterprise": false,
+      "is_secret": false,
+      "links": {
+        "`authentication_method`": "xref:reference:properties/broker-properties.adoc#http_based_auth_method"
+      },
+      "name": "sasl_mechanism",
+      "needs_restart": true,
+      "nullable": false,
+      "see_also": [
+        "xref:reference:properties/cluster-properties.adoc#sasl_mechanisms[`sasl_mechanisms`]"
+      ],
+      "type": "string",
+      "visibility": "user",
+      "x-enum-metadata": {
+        "OAUTHBEARER": {
+          "is_enterprise": true
+        },
+        "SCRAM-SHA-256": {
+          "is_enterprise": false
+        },
+        "SCRAM-SHA-512": {
+          "is_enterprise": false
+        }
+      }
+    },
+    "segment.bytes": {
+      "acceptable_values": "bytes (integer)",
+      "alternate_cluster_property": "compacted_log_segment_size",
+      "alternate_cluster_property_doc_file": "cluster-properties.adoc",
+      "category": "segment-message",
+      "cluster_property_doc_file": "cluster-properties.adoc",
+      "config_scope": "topic",
+      "corresponding_cluster_property": "log_segment_size",
+      "default": 134217728,
+      "defined_in": "src/v/kafka/server/handlers/topics/types.h",
+      "description": "The maximum size of an active log segment for a topic. When the size of an active segment exceeds `segment.bytes`, the segment is closed and a new active segment is created. The closed, inactive segment is then eligible to be cleaned up according to retention properties.\n\nWhen `segment.bytes` is set to a positive value, it overrides the cluster property:\n\n* `log_segment_size` for non-compacted topics\n* `compacted_log_segment_size` for compacted topics (when `cleanup.policy=compact`)",
+      "is_deprecated": false,
+      "is_enterprise": false,
+      "is_topic_property": true,
+      "name": "segment.bytes",
+      "needs_restart": false,
+      "see_also": [
+        {
+          "content": "xref:reference:properties/cluster-properties.adoc#log_segment_size[`log_segment_size`]",
+          "self_managed_only": true
+        },
+        {
+          "content": "xref:manage:cluster-maintenance/disk-utilization.adoc#configure-segment-size[Configure segment size]",
+          "self_managed_only": true
+        },
+        {
+          "content": "xref:manage:cluster-maintenance/disk-utilization.adoc#configure-message-retention[Configure message retention]",
+          "self_managed_only": true
+        },
+        "xref:manage:remote-read-replicas.adoc[Remote Read Replicas]",
+        {
+          "content": "xref:reference:properties/cluster-properties.adoc#compacted_log_segment_size[`compacted_log_segment_size`]",
+          "self_managed_only": true
+        }
+      ],
+      "type": "integer"
+    },
+    "storage_min_free_bytes": {
+      "category": "other",
+      "cloud_byoc_only": false,
+      "cloud_editable": false,
+      "cloud_readonly": false,
+      "cloud_supported": false,
+      "config_scope": "cluster",
+      "default": 5368709120,
+      "defined_in": "src/v/config/configuration.cc",
+      "description": "Threshold of minimum bytes free space before rejecting producers.",
+      "example": "`5368709120`",
+      "gets_restored": true,
+      "is_deprecated": false,
+      "is_enterprise": false,
+      "is_secret": false,
+      "minimum": 10485760,
+      "name": "storage_min_free_bytes",
+      "needs_restart": false,
+      "nullable": false,
+      "type": "integer",
+      "visibility": "tunable"
+    },
+    "tls_min_version": {
+      "category": "other",
+      "cloud_byoc_only": false,
+      "cloud_editable": false,
+      "cloud_readonly": true,
+      "cloud_supported": true,
+      "config_scope": "cluster",
+      "default": "v1.2",
+      "defined_in": "src/v/config/configuration.cc",
+      "description": "The minimum TLS version that Redpanda clusters support. This property prevents client applications from negotiating a downgrade to the TLS version when they make a connection to a Redpanda cluster.",
+      "enum": [
+        "v1.0",
+        "v1.1",
+        "v1.2",
+        "v1.3"
+      ],
+      "gets_restored": true,
+      "is_deprecated": false,
+      "is_enterprise": false,
+      "is_secret": false,
+      "name": "tls_min_version",
+      "needs_restart": true,
+      "nullable": false,
+      "type": "string",
+      "visibility": "user"
+    },
+    "virtual_cluster_min_producer_ids": {
+      "category": "other",
+      "cloud_byoc_only": false,
+      "cloud_editable": false,
+      "cloud_readonly": false,
+      "cloud_supported": false,
+      "config_scope": "cluster",
+      "default": 18446744073709551615,
+      "defined_in": "src/v/config/configuration.cc",
+      "description": "Minimum number of active producers per virtual cluster.",
+      "example": "`18446744073709551615`",
+      "gets_restored": true,
+      "is_deprecated": false,
+      "is_enterprise": false,
+      "is_secret": false,
+      "minimum": 1,
+      "name": "virtual_cluster_min_producer_ids",
+      "needs_restart": false,
+      "nullable": false,
+      "type": "integer",
+      "visibility": "tunable"
+    },
+    "write_caching_default": {
+      "category": "other",
+      "cloud_byoc_only": false,
+      "cloud_editable": false,
+      "cloud_readonly": false,
+      "cloud_supported": false,
+      "config_scope": "cluster",
+      "default": "false",
+      "defined_in": "src/v/config/configuration.cc",
+      "description": "The default write caching mode to apply to user topics. Write caching acknowledges a message as soon as it is received and acknowledged on a majority of brokers, without waiting for it to be written to disk. With `acks=all`, this provides lower latency while still ensuring that a majority of brokers acknowledge the write. \n\nFsyncs follow `raft_replica_max_pending_flush_bytes` and `raft_replica_max_flush_delay_ms`, whichever is reached first.\n\nThe `write_caching_default` cluster property can be overridden with the `write.caching` topic property, unless set to `disabled`, which takes precedence over topic overrides and disables write caching for the entire cluster.",
+      "enum": [
+        "true",
+        "false",
+        "disabled"
+      ],
+      "example": "`true`",
+      "gets_restored": true,
+      "is_deprecated": false,
+      "is_enterprise": false,
+      "is_secret": false,
+      "links": {
+        "`raft_replica_max_flush_delay_ms`": "#raft_replica_max_flush_delay_ms",
+        "`raft_replica_max_pending_flush_bytes`": "#raft_replica_max_pending_flush_bytes"
+      },
+      "name": "write_caching_default",
+      "needs_restart": false,
+      "nullable": false,
+      "see_also": [
+        "xref:reference:properties/topic-properties.adoc#write-caching[`write.caching`]",
+        "xref:develop:manage-topics/config-topics.adoc#configure-write-caching[Write caching]"
+      ],
+      "type": "string",
+      "visibility": "user"
+    }
+  }
+}

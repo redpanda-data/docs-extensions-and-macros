@@ -11,4 +11,5 @@
 ** xref:ROOT:macros-showcase.adoc[Property and enterprise macros]
 ** xref:ROOT:macros-showcase-kubernetes.adoc[On Kubernetes pages]
 ** xref:ROOT:release-status-test.adoc[Release status gating]
+** xref:ROOT:property-values-test.adoc[Property values (propval)]
 ** xref:reference:properties/cluster-properties.adoc[Declared reference page]

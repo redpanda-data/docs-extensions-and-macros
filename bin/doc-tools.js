@@ -1136,6 +1136,60 @@ automation
   })
 
 /**
+ * @description Report hand-written property values in prose ("defaults to
+ * 128 MiB", "the minimum is 1 minute") next to a property mention, check each
+ * against the property data for the repo's own version (selected exactly as
+ * the prop: macro selects it), and propose a propval: replacement. Mismatches
+ * are likely doc errors. Dry run by default, writing a JSON and a Markdown
+ * report; --write applies only exact matches stated in the same sentence as
+ * their property, never a mismatch. Skips code blocks, tables, and generated
+ * content.
+ *
+ * @example
+ * # Report on a docs checkout
+ * npx doc-tools generate migrate-property-values --docs-dir . --report-dir ./propval-report
+ *
+ * # Report on cloud-docs, which borrows the self-managed docs' property data
+ * npx doc-tools generate migrate-property-values --docs-dir ../cloud-docs --lender ../docs
+ *
+ * # Apply the auto-safe exact matches
+ * npx doc-tools generate migrate-property-values --docs-dir . --write
+ */
+automation
+  .command('migrate-property-values')
+  .description('Report hand-written property values in prose, check them against the property data, and propose propval: macros. Dry run unless --write is given; --write applies exact same-sentence matches only.')
+  .option('--docs-dir <path>', 'Docs repo root containing antora.yml and modules/', '.')
+  .option('--lender <path...>', 'Other component checkouts whose property data the repo borrows (cloud-docs borrows the docs repo\'s)')
+  .option('--report-dir <path>', 'Where to write property-values-report.json and property-values-report.md', '.')
+  .option('--write', 'Replace exact, same-sentence matches with propval: macros (mismatches are never rewritten)')
+  .action((options) => {
+    const { scanRepo, renderMarkdown } = require('../tools/migrate-property-values.js')
+    const result = scanRepo({
+      docsDir: path.resolve(options.docsDir),
+      lenderDirs: (options.lender || []).map((dir) => path.resolve(dir)),
+      write: Boolean(options.write),
+    })
+    if (result.error) {
+      console.error(`Error: ${result.error}`)
+      process.exit(1)
+    }
+    result.label = `${result.component}@${result.version || 'unversioned'}`
+    const reportDir = path.resolve(options.reportDir)
+    fs.mkdirSync(reportDir, { recursive: true })
+    fs.writeFileSync(path.join(reportDir, 'property-values-report.json'), JSON.stringify(result, null, 2) + '\n')
+    fs.writeFileSync(path.join(reportDir, 'property-values-report.md'), renderMarkdown([result]))
+    const { counts } = result
+    console.log(`Checked against ${result.dataset} (${result.surface}).`)
+    console.log(`${result.findings.length} value statement(s) in ${result.files} files: ${counts.mismatch} mismatch, ${counts.exact} exact (${counts.autoSafe} auto-safe), ${counts.equivalent} equivalent, ${counts.unverifiable} unverifiable.`)
+    for (const f of result.findings.filter((x) => x.status === 'mismatch')) {
+      console.log(`  MISMATCH ${f.file}:${f.line} ${f.property} ${f.field}: written ${f.written}, data ${f.dataValue}`)
+    }
+    if (options.write) console.log(`Replaced auto-safe exact matches in ${result.changedFiles} file(s).`)
+    else if (counts.autoSafe) console.log('Re-run with --write to replace the auto-safe exact matches.')
+    console.log(`Report: ${path.join(reportDir, 'property-values-report.md')}`)
+  })
+
+/**
  * generate property-docs
  *
  * @description

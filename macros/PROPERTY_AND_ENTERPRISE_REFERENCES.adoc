@@ -35,6 +35,29 @@ Every release series has its own copy of that data, and the build picks the copy
 
 *Once per paragraph is enough.* Mark the first mention of a property in a paragraph and leave later mentions as plain backticks -- a paragraph doesn't need three identical tooltips. The migration tool follows this rule, and the UI enforces it as a backstop: even if every mention is marked, only the first one per paragraph gets the tooltip.
 
+=== Property values: the propval macro
+
+`prop:` marks a property's *name*. Prose often states its *value* too: "defaults to 128 MiB", "the minimum is one minute". Typed by hand, those drift when a release changes a default, and nothing notices. A real example: the disk space page said `log_segment_size` defaults to 1 GiB long after the default became 128 MiB.
+
+`propval:` renders the value from the same property data instead:
+
+[,asciidoc]
+----
+Set prop:log_segment_ms[], which defaults to propval:log_segment_ms[default].
+----
+
+That renders "defaults to 2 weeks". Other fields are `type`, `unit`, `min`, `max`, `restart`, `nullable`, `values`, `scope`, `introduced`, `visibility`, `restored`, `aliases`, and `cloud-access`, and `format=raw` gives the exact value (`1209600000`). The full list is in link:REFERENCE.adoc#propval[the macros reference].
+
+*It reads the same data as prop:, chosen the same way.* A 25.3 page gets 25.3's value, a beta page gets the newest release candidate's, and a Cloud page gets the newest GA value. The code is shared, not copied, so the two macros can't drift apart.
+
+*It agrees with the reference tables.* Values are formatted by the same helpers that render the property reference pages, so "2 weeks" in prose and "2 weeks" in the Default cell come from one place. Byte counts read as `128 MiB` only where the reference says the unit is bytes; where the data gives no unit, the exact number renders rather than a guessed unit.
+
+*It never guesses.* When the build can't verify a value (no data for the page's version, an unknown property, a field the property doesn't have, a property Cloud readers can't set), the page shows a visible `<unknown default>` and the build log says why. A wrong number is worse than an obvious gap.
+
+*Cloud pages state fewer values.* The Cloud property reference shows no defaults, because Cloud configures them, so `propval:x[default]` on a Cloud page renders the placeholder with a warning. Keep default values in `ifndef::env-cloud[]` content, or use `cloud-access` to say whether a Cloud user can change the property.
+
+To find the hand-written values already in a repo, run `doc-tools generate migrate-property-values`. It reports every value stated next to a property mention, compares it with the data for that repo's version, and flags mismatches, which are usually real doc errors. `--write` replaces only exact matches, never a mismatch.
+
 === How "the build works out the page" (dynamic discovery)
 
 Rather than hardcoding "cluster properties live on the cluster-properties page," the macro reads the actual docs during the build. Every documented property appears as a heading in the generated property files, and each reference page pulls in one or more of those files. The macro follows that chain -- which pages exist, what they include, which property headings end up where -- and builds a lookup table per doc set.
@@ -106,7 +129,8 @@ Cloud is different from Kubernetes here, not just another context to adapt to. R
 
 * The extensions preview site's test page demonstrates every form of both macros, including intentional failure cases, and a Kubernetes-environment page shows the environment-specific behavior side by side.
 * The docs-ui preview's `property-tooltips-test` and `enterprise-macro-test` pages show every output shape the UI styles, including the negative cases (unmarked names must get nothing).
+* The extensions preview site's `property-values-test` page shows every `propval:` field, both formats, and each placeholder case.
 
 == The one-sentence version
 
-Nothing in the docs claims a name is a property or a feature is enterprise unless a writer said so explicitly *and* the build verified it against the source of truth.
+Nothing in the docs claims a name is a property, states a property's value, or marks a feature enterprise unless a writer said so explicitly *and* the build verified it against the source of truth.
