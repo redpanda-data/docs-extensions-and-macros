@@ -1,0 +1,53 @@
+{
+  "name": "redpanda-docs",
+  "displayName": "Redpanda Docs",
+  "description": "Completion, hover, and build checks for prop:, propval:, and :page-categories: in Redpanda docs.",
+  "version": "0.1.0",
+  "private": true,
+  "license": "ISC",
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Linters",
+    "Other"
+  ],
+  "activationEvents": [
+    "workspaceContains:antora.yml",
+    "onLanguage:asciidoc"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "asciidoc",
+        "extensions": [
+          ".adoc"
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "Redpanda Docs",
+      "properties": {
+        "redpandaDocs.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to bin/docs-language-server.js. Empty uses the copy of @redpanda-data/docs-extensions-and-macros installed in the workspace, so the editor runs the same version as the build."
+        },
+        "redpandaDocs.docsPath": {
+          "type": "string",
+          "default": "",
+          "description": "A local checkout of redpanda-data/docs, passed to the server as REDPANDA_DOCS_PATH. Cloud pages read their property data from it, and repositories without the taxonomy read taxonomy.yml from it."
+        }
+      }
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/redpanda-data/docs-extensions-and-macros",
+    "directory": "editors/vscode"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^10.1.2"
+  }
+}
