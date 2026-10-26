@@ -649,6 +649,106 @@ antora:
     - require: '@redpanda-data/docs-extensions-and-macros/extensions/url-to-xref'
 ----
 
+== Xref index
+
+This extension publishes one JSON file that lists every published page in the site with its resource ID, title, URL and section anchors, plus the aliases that still resolve and the partials and examples that can be included with their tag regions. Editor tooling, such as the docs language server, downloads it to complete and check `xref:` and `include::` targets in components that are not checked out locally. The file holds no page or partial bodies.
+
+Behavior details:
+
+* Anchors are read from the converted HTML, so they are the ids Asciidoctor produced: conditionals are resolved, included partials are expanded, and generated ids follow each page's own `idprefix` and `idseparator`.
+* Only published pages are listed. A page that the `unpublish-pages` extension removes is left out, whatever order the two extensions are registered in.
+* An alias is listed only when its target page is published.
+* Partials and examples are listed by path with their tag names only. Their contents are never written.
+* Ids that nobody links to are skipped: the ones the `@asciidoctor/tabs` extension generates for tabs and tab panels (`_tabs_N...`), and Asciidoctor's own `preamble`, `toc` and footnote ids.
+
+=== File format
+
+The file is minified JSON. Keys inside `pages`, `aliases`, `partials` and `examples` are sorted, so builds of the same content differ only in `generated`.
+
+[source,json]
+----
+{
+  "schema": 1,
+  "site": "https://docs.redpanda.com",
+  "generated": "2026-10-26T12:00:00.000Z",
+  "components": {
+    "streaming": {
+      "title": "Streaming",
+      "latest": "26.2",
+      "versions": [
+        {
+          "version": "26.2",
+          "pages": {
+            "manage:security/tls.adoc": {
+              "title": "Configure TLS",
+              "url": "/streaming/current/manage/security/tls/",
+              "sections": [
+                { "id": "_enable_tls", "title": "Enable TLS", "level": 1 },
+                { "id": "rotate", "title": "Rotate certificates", "level": 2 }
+              ],
+              "ids": ["cert-table"]
+            }
+          },
+          "aliases": {
+            "manage:security/old-tls.adoc": "26.2@streaming:manage:security/tls.adoc"
+          },
+          "partials": { "ROOT:tls-table.adoc": ["table"] },
+          "examples": { "ROOT:config.yaml": ["broker"] }
+        },
+        { "version": "26.3", "displayVersion": "26.3 Beta", "prerelease": true, "pages": {}, "aliases": {} }
+      ]
+    }
+  }
+}
+----
+
+schema::
+Integer. Incremented on any change a consumer must handle. Additive fields do not change it.
+
+components.<name>.latest::
+The version that unversioned xrefs resolve to. An empty string for an unversioned component.
+
+versions[].version::
+The component version as Antora knows it. An unversioned component (`version: ~`) has the empty string. The full resource ID of a file is `<version>@<component>:<key>`.
+
+versions[].displayVersion, versions[].prerelease::
+Present only when they differ from the version, or when the version is a prerelease.
+
+pages::
+Keyed by `module:relative`, for example `manage:security/tls.adoc`. `title` is the plain-text document title and `url` the site-relative URL. `sections` lists headings with an id in document order: `level` is 1 for `==`, 2 for `===`, and so on, and `title` is plain text. `ids` lists every other element id on the page (block and inline anchors), without titles. A page with no anchors has neither key.
+
+aliases::
+Keyed by `module:relative` of the alias in this component version. The value is the full resource ID of the published target page, which can be in another component or version.
+
+partials, examples::
+Keyed by `module:relative`. The value is the sorted list of `tag::name[]` regions in the file, empty when it has none. Absent when `includes` is `false`.
+
+=== Environment variables
+
+This extension does not require any environment variables.
+
+=== Configuration options
+
+output_path (optional)::
+Path of the file in the site output. Default: `assets/data/xref-index.json`, served at `<site.url>/assets/data/xref-index.json`.
+
+exclude_components (optional)::
+Component names to leave out entirely, with their pages, aliases, partials and examples. Default: none.
+
+includes (optional)::
+Whether to list partials and examples. Default: `true`.
+
+=== Registration
+
+Register the `xref-index` extension in the Antora playbook under the `antora.extensions` key like so:
+
+[source,yaml]
+----
+antora:
+  extensions:
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/xref-index'
+----
+
 == External link checker
 
 This extension collects every external http(s) URL referenced in page and partial content and verifies that it responds, reporting dead links in the build log. Internal links are covered by the url-to-xref extension plus Antora's own xref validation; this extension covers everything that points off-site.
