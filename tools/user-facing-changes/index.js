@@ -398,7 +398,10 @@ function runCli (options) {
     bySeverity,
     byDetector: result.byDetector,
     notes: result.notes,
-    alreadyDispatched
+    alreadyDispatched,
+    // Every finding, including those past the ticket's cap of ten: the
+    // workflow records them all as dispatched.
+    fingerprints: result.findings.map((f) => f.fingerprint)
   }
   console.log(JSON.stringify(report, null, 2))
 }

@@ -316,6 +316,8 @@ describe('the CLI', () => {
     fs.writeFileSync(patch, makeDiff({ [CC]: prop('') }, { [CC]: prop('\n  , b(*this, "b", "B.", {}, 2)') }))
     const first = JSON.parse(run(['--patch', patch, '--format', 'json']).stdout)
     expect(first.findings.map((f) => f.name)).toEqual(['b'])
+    // Every finding's fingerprint, past the ticket's cap too, for the workflow to record.
+    expect(first.summary.fingerprints).toEqual([first.findings[0].fingerprint])
     const seen = path.join(dir, 'seen.txt')
     fs.writeFileSync(seen, first.findings[0].fingerprint + '\n')
     const second = JSON.parse(run(['--patch', patch, '--dispatched', seen, '--format', 'json']).stdout)

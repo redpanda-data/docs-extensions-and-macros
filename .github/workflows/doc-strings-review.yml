@@ -1539,6 +1539,12 @@ jobs:
           touch "$state/dispatched-findings.txt"
           jq -r '.findings[] | select(.confidence == "mechanical") | .fingerprint // empty' "$report" \
             | grep -E '^[0-9a-f]{16}$' >> "$state/dispatched-findings.txt" || true
+          # The ticket carries ten findings and names the rest, so the
+          # overflow was dispatched too: record every detector fingerprint.
+          if [ -n "$gating" ] && [ -s "$gating" ]; then
+            jq -r '(.summary.fingerprints // [])[]' "$gating" \
+              | grep -E '^[0-9a-f]{16}$' >> "$state/dispatched-findings.txt" || true
+          fi
           sort -u -o "$state/dispatched-findings.txt" "$state/dispatched-findings.txt"
           echo "recorded=true" >> "$GITHUB_OUTPUT"
       # A second save of the same state directory, after the dispatch, so

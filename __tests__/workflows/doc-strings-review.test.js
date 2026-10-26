@@ -2026,6 +2026,17 @@ describe('doc-strings-review workflow: detector reporting (executed)', () => {
 
 describe('doc-strings-review workflow: dispatched findings are recorded (executed)', () => {
   const step = stepNamed('Dispatch doc-impact')
+  // Review 412 round 3: findings past the cap of ten are named in the
+  // ticket, so they count as dispatched and must not go out again.
+  test('a dispatch records the fingerprints of findings past the cap too', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-temp-'))
+    const f = (name, fp) => ({ surface: 'properties', name, change_kind: 'added', affected_pages: ['https://docs.redpanda.com/x/'], summary: 's', confidence: 'mechanical', fingerprint: fp })
+    const fps = Array.from({ length: 12 }, (_, i) => i.toString(16).padStart(16, '0'))
+    fs.writeFileSync(path.join(tmp, 'user-facing-impact.json'), JSON.stringify({ findings: fps.slice(0, 10).map((fp, i) => f(`p${i}`, fp)), proposed_ticket: { title: 't', body: 'b' }, summary: { fingerprints: fps } }))
+    const r = execRun(step, { env: { RUNNER_TEMP: tmp, GH_TOKEN: 'bot', DISPATCH_REPO: 'redpanda-data/docs-site', REVIEW_OUTCOME: 'skipped' }, stubs: { gh: '#!/bin/bash\ncat > /dev/null\n' } })
+    expect(r.status).toBe(0)
+    expect(fs.readFileSync(path.join(tmp, 'doc-strings-review-state', 'dispatched-findings.txt'), 'utf8').trim().split('\n')).toEqual(fps)
+  })
   test('a successful dispatch records the mechanical fingerprints, and a later step saves them', () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-temp-'))
     const f = (name, extra) => ({ surface: 'properties', name, change_kind: 'added', affected_pages: ['https://docs.redpanda.com/x/'], summary: 's', ...extra })
