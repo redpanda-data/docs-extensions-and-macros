@@ -45,6 +45,7 @@ const FUNC = /(^|\n)func\s+(?:\(\s*[A-Za-z_]\w*\s+\*?\s*[\w.]+\s*\)\s*)?([A-Za-z
 const MARK = /([A-Za-z_]\w*(?:\s*\.\s*(?:Flags|PersistentFlags)\s*\(\s*\))?)\s*\.\s*Mark(Hidden|Deprecated)\s*\(\s*([^,)]+)/g
 const DEPRECATE_CMD = /\bDeprecateCmd\s*\(/g
 const HELPER_CALL = /\b([A-Za-z_]\w*)\s*\.\s*(Install[A-Za-z0-9]*)\s*\(\s*([^()]*?(?:\(\s*\))?)\s*\)/g
+const PLAIN_HELPER_CALL = /(?<![.\w])([a-z]\w*)\s*\(\s*([A-Za-z_]\w*)\s*[,)]/g
 
 /** Top-level functions: name, body span and parameter list. */
 function parseFunctions (text) {
@@ -227,6 +228,13 @@ function parseGo (snippets, { resolveConst = null, loose = false } = {}) {
       const owner = commandOf(fn, m[3])
       if (!owner) continue
       helperCalls.push({ callee: m[2], receiver: m[1], command: owner.use || null, inHelper: !!owner.param, func: fn ? fn.name : null, line: lineAt(text, m.index, startLine) })
+    }
+    // Plain helper functions that take the command: `addFlags(cmd, &opts)`.
+    PLAIN_HELPER_CALL.lastIndex = 0
+    while ((m = PLAIN_HELPER_CALL.exec(text)) !== null) {
+      const fn = funcAt(m.index)
+      const owner = commandOf(fn, m[2], { strict: true })
+      if (owner) helperCalls.push({ callee: m[1], receiver: null, command: owner.use || null, inHelper: !!owner.param, func: fn ? fn.name : null, line: lineAt(text, m.index, startLine) })
     }
     // In-file children: `cmd.AddCommand(newChild(fs, p), ...)`.
     const addCmd = /\b([A-Za-z_]\w*)\s*\.\s*AddCommand\s*\(/g

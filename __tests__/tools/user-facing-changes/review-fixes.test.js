@@ -102,6 +102,26 @@ describe('a declaration moved to another file is not a removal plus an addition'
     })
   })
 
+  // Review 412 round 3: a plain helper function, not an Install* method.
+  test('rpk: a flag added in a plain helper that takes the command is found', () => {
+    const F = 'src/go/rpk/pkg/cli/foo/foo.go'
+    const src = (extra) => goFile(`func NewCommand() *cobra.Command {
+	var a, b string
+	cmd := &cobra.Command{
+		Use:   "foo",
+		Short: "Foo",
+	}
+	addFlags(cmd, &a, &b)
+	return cmd
+}
+
+func addFlags(cmd *cobra.Command, a, b *string) {
+	cmd.Flags().StringVar(a, "alpha", "", "Alpha")
+${extra}}
+`)
+    expect(kinds(detect({ [F]: src('') }, { [F]: src('\tcmd.Flags().StringVar(b, "beta", "", "Beta")\n') }, { detectors: ['rpk'] }))).toEqual([['added', 'rpk foo --beta']])
+  })
+
   test('rpk: flags moved into a helper in the same package (3004b8f049 shape)', () => {
     const B = 'src/go/rpk/pkg/cli/debug/bundle/bundle.go'
     const C = 'src/go/rpk/pkg/cli/debug/bundle/common.go'
