@@ -1,0 +1,28 @@
+= [Step title: an imperative verb phrase]
+// Step page of the __slug__ solution.
+:page-layout: solution-step
+:description: [One sentence: what the reader does in this step.]
+
+[What does the reader do in this step, and why now?]
+
+== What you do
+
+. [Instruction 1]
++
+[source,bash]
+----
+include::example$steps/step/commands.sh[tag=run,indent=0]
+----
+
+== In production
+
+[.production-note]
+.In production
+--
+include::partial$production/brokers-and-replication.adoc[tag=summary]
+For the full picture, see xref:step.adoc#prod-brokers-and-replication[Production considerations: brokers and replication].
+--
+
+== Production considerations
+
+include::partial$production/_all.adoc[]

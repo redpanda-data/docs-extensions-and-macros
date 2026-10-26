@@ -1,0 +1,5 @@
+// Every production topic of the __slug__ solution, once each.
+[#prod-brokers-and-replication]
+=== Brokers and replication
+
+include::partial$production/brokers-and-replication.adoc[tag=detail]

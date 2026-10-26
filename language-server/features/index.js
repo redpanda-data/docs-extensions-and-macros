@@ -9,4 +9,5 @@
 module.exports = [
   require('./metadata'),
   require('./properties'),
+  require('./snippets'),
 ]

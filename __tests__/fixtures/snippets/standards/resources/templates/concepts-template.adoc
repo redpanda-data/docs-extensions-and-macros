@@ -1,0 +1,5 @@
+= [Concept Name]
+:description: [One sentence describing what this page explains.]
+:page-topic-type: concepts
+
+[What is this concept, and why does it matter?]

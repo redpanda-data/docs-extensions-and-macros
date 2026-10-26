@@ -1,0 +1,6 @@
+// tag::summary[]
+[The rule and its reason.]
+// end::summary[]
+// tag::detail[]
+[In production: what to do instead.]
+// end::detail[]

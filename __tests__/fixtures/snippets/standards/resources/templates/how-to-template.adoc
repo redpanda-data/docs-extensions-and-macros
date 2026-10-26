@@ -1,0 +1,29 @@
+// How-to Template
+// Reader question: "How do I do X?"
+
+= [Verb] [Specific Task]
+:description: [One sentence describing what task this page helps accomplish.]
+:page-topic-type: how-to
+:learning-objective-1: [Verb] [specific outcome]
+
+[What can you accomplish with this task, and why would you do it?]
+
+* [ ] {learning-objective-1}
+
+== Prerequisites
+
+* xref:concepts.adoc[Understand X concepts]
+
+== [Task 1 title]
+
+. [Step 1]
++
+[source,bash]
+----
+include::example$commands.sh[tag=run]
+----
+
+[NOTE]
+====
+Costs $5 per run, see {url}.
+====
