@@ -64,8 +64,7 @@ real machinery:
    * C++ suggestions must keep every line within 80 columns.
 
 No check ever asks "does the model's answer *sound* right". The only prose
-inspection anywhere is fence parsing and, for the audit control, the literal
-`NO_SUGGESTIONS` sentinel - both structural. The review's own negative
+inspection anywhere is fence parsing, which is structural. The review's own negative
 control passes only when the production review posts no inline comment and
 writes no `doc-impact.json`.
 

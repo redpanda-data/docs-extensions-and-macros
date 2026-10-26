@@ -828,8 +828,9 @@ function main () {
   process.stdout.write(`Total wall time: ${(wallMs / 1000).toFixed(1)}s. Results: ${path.relative(process.cwd(), resultsRoot)}\n`)
 
   const harnessErrors = summary.filter((c) => c.status === 'HARNESS_ERROR')
+  const cliFailed = summary.some((c) => c.checks.some((row) => row.check === 'claude CLI call succeeded' && !row.pass))
   if (options.sabotageMustRead) {
-    if (harnessErrors.length) {
+    if (harnessErrors.length || cliFailed) {
       process.stdout.write('MUST-READ SABOTAGE NOT RUN: the harness failed before the review ran, so this\nproves nothing. Fix the environment and re-run.\n')
       process.exit(2)
     }
@@ -838,7 +839,7 @@ function main () {
     process.exit(verdict.proven ? 0 : 1)
   }
   if (options.sabotage) {
-    if (harnessErrors.length) {
+    if (harnessErrors.length || cliFailed) {
       process.stdout.write('SABOTAGE NOT RUN: the harness failed before the review ran, so this proves\nnothing. Fix the environment and re-run.\n')
       process.exit(2)
     }

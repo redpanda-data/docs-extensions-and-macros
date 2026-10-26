@@ -61,6 +61,16 @@ describe('doc-strings evals: the dispatch gate', () => {
     expect(lib.dispatchAccepts(JSON.stringify(bad)).pass).toBe(false)
     expect(lib.dispatchAccepts(JSON.stringify({ findings: [] })).pass).toBe(false)
   })
+
+  test('a missing jq is a harness error, not a rejected document', () => {
+    const result = spawnSync(process.execPath, ['-e', "require('./evals/doc-strings/lib').dispatchAccepts('{}')"], {
+      cwd: lib.REPO_ROOT,
+      env: { ...process.env, PATH: '' },
+      encoding: 'utf8'
+    })
+    expect(result.status).toBe(1)
+    expect(result.stderr).toMatch(/spawnSync jq ENOENT/)
+  })
 })
 
 describe('doc-strings evals: inline-comment stand-in', () => {
@@ -425,5 +435,48 @@ describe('doc-strings evals: the must-read sabotage verdict and flags', () => {
     expect(() => runEvals.parseArgs(['--case', 'a', '--sabotage-must-read', 'b'])).toThrow(/cannot be combined/)
     expect(() => runEvals.parseArgs(['--sabotage', 'a', '--sabotage-must-read', 'b'])).toThrow(/exclusive/)
     expect(runEvals.parseArgs(['--sabotage-must-read', 'b', '--keep-temp'])).toMatchObject({ sabotageMustRead: 'b', keepTemp: true })
+  })
+})
+
+describe('doc-strings evals: sabotage driver exit codes', () => {
+  test.each(['--sabotage', '--sabotage-must-read'].flatMap((flag) =>
+    [false, true, undefined].map((cliPass) => [flag, cliPass])
+  ))('%s with CLI success check %s', (flag, cliPass) => {
+    const filename = path.join(__dirname, '../../evals/doc-strings/run-evals.js')
+    const localRequire = require('module').createRequire(filename)
+    const exit = new Error('driver exited')
+    let exitCode
+    let output = ''
+    // Run the real driver with synthetic executor results and no disk writes
+    // or model calls. Both modes must reject CLI failures before grading proof.
+    const context = {
+      __dirname: path.dirname(filename),
+      module: { exports: {} },
+      require (name) {
+        if (name === 'fs') return { mkdirSync () {}, mkdtempSync: () => '/synthetic-workdir', writeFileSync () {}, rmSync () {} }
+        if (name === './lib') return { ...lib, claudeAvailable: () => true }
+        if (name === './cases') return { CASES: [{ id: 'negative', kind: 'negative-review', sabotageEdits: [] }] }
+        return localRequire(name)
+      },
+      process: {
+        argv: ['node', filename, flag, 'negative'],
+        cwd: () => lib.REPO_ROOT,
+        stdout: { write: (text) => { output += text } },
+        exit (code) { exitCode = code; throw exit }
+      }
+    }
+    require('vm').runInNewContext(fs.readFileSync(filename, 'utf8'), context, { filename })
+    let calls = 0
+    context.module.exports.EXECUTORS['negative-review'] = () => ({
+      status: 'FAIL',
+      checks: [
+        { check: 'must-read: standards opened before the first inline comment', pass: calls++ === 0, detail: 'synthetic evidence' },
+        ...(cliPass === undefined ? [] : [{ check: 'claude CLI call succeeded', pass: cliPass, detail: 'synthetic CLI result' }])
+      ],
+      model: null
+    })
+    expect(() => context.main()).toThrow(exit)
+    expect(exitCode).toBe(cliPass === false ? 2 : 0)
+    expect(output).toContain(cliPass === false ? 'SABOTAGE NOT RUN' : 'SABOTAGE PROVEN')
   })
 })
