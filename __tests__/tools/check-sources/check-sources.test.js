@@ -439,8 +439,8 @@ describe('createGitHubClient (stubbed fetch)', () => {
   // Review 419 blocker 1: a misspelled repo must not only ever warn.
   describe('a repo 404', () => {
     const fileIn = (client) => client.getFile({ owner: 'redpanda-data', repo: 'redpnda', ref: null, path: 'src/v/config/configuration.cc' })
-    test('is repo-not-found (an error) when the token sees other private repos in the org', async () => {
-      const client = createGitHubClient({ token: 't', fetchImpl: fakeFetch([[/contents/, 404], [/issues\/3$/, 404], [/repos\/redpanda-data\/redpnda$/, 404], [/orgs\/redpanda-data\/repos\?type=private/, 200, '[{"name":"streaming-enterprise"}]', 'application/json']]), sleep: async () => {} })
+    test('is repo-not-found (an error) for a classic token with the repo scope', async () => {
+      const client = createGitHubClient({ token: 't', fetchImpl: fakeFetch([[/contents/, 404], [/issues\/3$/, 404], [/repos\/redpanda-data\/redpnda$/, 404, '', 'application/json', { 'x-oauth-scopes': 'read:org, repo, workflow' }]]), sleep: async () => {} })
       const got = await fileIn(client)
       expect(got).toMatchObject({ status: 'missing', repoMissing: true })
       expect(got.reason).toMatch(/redpanda-data\/redpnda: repository does not exist/)
@@ -450,8 +450,10 @@ describe('createGitHubClient (stubbed fetch)', () => {
     })
     test.each([
       ['no token', null, [[/contents/, 404], [/repos\/redpanda-data\/redpnda$/, 404]]],
-      ['a token that sees no private repos', 't', [[/contents/, 404], [/repos\/redpanda-data\/redpnda$/, 404], [/orgs\/redpanda-data\/repos/, 200, '[]', 'application/json']]],
-      ['a token whose org lookup fails', 't', [[/contents/, 404], [/repos\/redpanda-data\/redpnda$/, 404], [/orgs\/redpanda-data\/repos/, 403]]]
+      // Review 419 round 3: a fine-grained or app token limited to selected
+      // repos sees some private repos but 404s on a real one such as cloudv2.
+      ['a selected-repos token that sees other private repos', 't', [[/contents/, 404], [/repos\/redpanda-data\/redpnda$/, 404], [/orgs\/redpanda-data\/repos/, 200, '[{"name":"streaming-enterprise"}]', 'application/json']]],
+      ['a classic token without the repo scope', 't', [[/contents/, 404], [/repos\/redpanda-data\/redpnda$/, 404, '', 'application/json', { 'x-oauth-scopes': 'public_repo, read:org' }]]]
     ])('stays unreachable (a warning) with %s, since the repo may be private', async (_, token, routes) => {
       const got = await fileIn(createGitHubClient({ token, fetchImpl: fakeFetch(routes), sleep: async () => {} }))
       expect(got.status).toBe('unreachable')

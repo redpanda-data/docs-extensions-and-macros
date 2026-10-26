@@ -3185,7 +3185,7 @@ programCli
  * unchecked-note (info), counted in the summary, never an error. The summary
  * counts comments checked, comments failed, and unchecked notes.
  * Errors (exit 1): malformed, missing-file, repo-not-found (a 404 for a
- * token that can see other private redpanda-data repos), line-out-of-range,
+ * classic token with the repo scope), line-out-of-range,
  * quote-not-found, pr-not-found, url-not-found. Warnings (exit 0):
  * unreachable (auth, rate-limit, timeout, or network failure, never a silent
  * pass) and no-claim (nothing directly below the comment). Exit 2: a --files

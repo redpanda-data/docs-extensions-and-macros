@@ -27,8 +27,9 @@ const { spawnSync } = require('child_process')
  * keys and URLs are checked for syntax only (URLs can be HEAD-checked with
  * --check-urls). A fetch that fails for auth or network reasons is reported
  * as `unreachable`, a warning, never a silent pass. A repo that 404s for a
- * token that can see other private repos in the org is `repo-not-found`, an
- * error: the name is wrong.
+ * classic token with the `repo` scope is `repo-not-found`, an error: the name
+ * is wrong. Any other token may be limited to selected repos, so its 404 is
+ * `unreachable`.
  *
  * Text after the marker that does not start with a ref is free-form
  * provenance prose: an `unchecked-note` (info), counted in the summary and
@@ -293,25 +294,11 @@ function createGitHubClient ({
     return { status: 'unreachable', reason: `${what}: HTTP ${res.status}, ${auth}` }
   }
 
-  // Can this token see private repos in the org? If so, a repo 404 means the
-  // repo does not exist, not that it is hidden.
-  const orgCache = new Map()
-  function seesPrivateRepos (owner) {
-    if (!token) return Promise.resolve(false)
-    if (!orgCache.has(owner)) {
-      orgCache.set(owner, (async () => {
-        const { res } = await request(`${apiBase}/orgs/${owner}/repos?type=private&per_page=1`)
-        if (!res || !res.ok) return false
-        try {
-          const list = await res.json()
-          return Array.isArray(list) && list.length > 0
-        } catch {
-          return false
-        }
-      })())
-    }
-    return orgCache.get(owner)
-  }
+  // Only a classic token with the `repo` scope (GitHub lists it in the
+  // X-OAuth-Scopes header) reads every private repo its owner can. A
+  // fine-grained PAT or an app installation token may be limited to selected
+  // repos, so a 404 for it could be a real private repo outside that set.
+  const hasRepoScope = (res) => (res.headers.get('x-oauth-scopes') || '').split(',').some((s) => s.trim() === 'repo')
 
   const repoCache = new Map()
   async function repoVisible (owner, repo) {
@@ -322,12 +309,12 @@ function createGitHubClient ({
         if (networkError) return { status: 'unreachable', reason: `${key}: ${networkError}` }
         if (res.ok) return { status: 'ok' }
         if (res.status === 404) {
-          if (await seesPrivateRepos(owner)) {
-            return { status: 'missing', repoMissing: true, reason: `${key}: repository does not exist (this token can see other private ${owner} repositories, so the name is wrong or the repo was renamed)` }
+          if (token && hasRepoScope(res)) {
+            return { status: 'missing', repoMissing: true, reason: `${key}: repository does not exist (this token has the repo scope, so the name is wrong, the repo was renamed, or you lack access to it)` }
           }
           return {
             status: 'unreachable',
-            reason: `${key}: repository not found or not visible to this ${token ? 'token, which sees no private ' + owner + ' repositories' : 'unauthenticated client (set ACTIONS_BOT_TOKEN or GITHUB_TOKEN, or run gh auth login)'}`
+            reason: `${key}: repository not found or not visible to this ${token ? 'token, which may be limited to selected repositories' : 'unauthenticated client (set ACTIONS_BOT_TOKEN or GITHUB_TOKEN, or run gh auth login)'}`
           }
         }
         return failure(res, key)
