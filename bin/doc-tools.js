@@ -1140,10 +1140,15 @@ automation
  * 128 MiB", "the minimum is 1 minute") next to a property mention, check each
  * against the property data for the repo's own version (selected exactly as
  * the prop: macro selects it), and propose a propval: replacement. Mismatches
- * are likely doc errors. Dry run by default, writing a JSON and a Markdown
- * report; --write applies only exact matches stated in the same sentence as
- * their property, never a mismatch or a table cell. Skips code blocks and
- * generated content.
+ * are likely doc errors. Also reads example command output in listing
+ * blocks (rpk topic describe, rpk cluster config get and export, Admin API
+ * cluster_config, kafka-configs --describe, Key/Value/Source records) and
+ * reports a row that asserts the default, such as SOURCE DEFAULT_CONFIG, but
+ * shows another value as stale example output, listed apart from prose
+ * findings. Dry run by default, writing a JSON and a Markdown report; --write
+ * applies only exact matches stated in the same sentence as their property,
+ * never a mismatch, a table cell or example output. Skips prose inside code
+ * blocks and generated content.
  *
  * @example
  * # Report on a docs checkout
@@ -1157,7 +1162,7 @@ automation
  */
 automation
   .command('migrate-property-values')
-  .description('Report hand-written property values in prose, check them against the property data, and propose propval: macros. Dry run unless --write is given; --write applies exact same-sentence matches only.')
+  .description('Report hand-written property values in prose and in example command output, check them against the property data, and propose propval: macros. Dry run unless --write is given; --write applies exact same-sentence prose matches only, never example output.')
   .option('--docs-dir <path>', 'Docs repo root containing antora.yml and modules/', '.')
   .option('--lender <path...>', 'Other component checkouts whose property data the repo borrows (cloud-docs borrows the docs repo\'s)')
   .option('--report-dir <path>', 'Where to write property-values-report.json and property-values-report.md', '.')
@@ -1186,6 +1191,11 @@ automation
     }
     for (const f of result.findings.filter((x) => x.status === 'unset')) {
       console.log(`  UNSET ${f.file}:${f.line} ${f.property} ${f.field}: ${f.note}`)
+    }
+    const examples = result.findings.filter((x) => x.status === 'example-output')
+    console.log(`${examples.length} value(s) in example output: ${counts.exampleStale} stale, ${examples.filter((x) => x.verdict === 'matches').length} matching, ${examples.filter((x) => x.verdict === 'unverifiable').length} unverifiable (never written).`)
+    for (const f of examples.filter((x) => x.verdict === 'stale')) {
+      console.log(`  EXAMPLE ${f.file}:${f.line} ${f.property}${f.clusterProperty ? ` (${f.clusterProperty})` : ''}: shown ${f.written}${f.source ? ` ${f.source}` : ''}, default ${f.dataRaw || f.dataValue}`)
     }
     if (options.write) console.log(`Replaced auto-safe exact matches in ${result.changedFiles} file(s).`)
     else if (counts.autoSafe) console.log('Re-run with --write to replace the auto-safe exact matches.')
