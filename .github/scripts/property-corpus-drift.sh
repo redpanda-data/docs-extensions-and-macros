@@ -22,10 +22,12 @@
 # refresh that exposes a real bug goes red there.
 #
 # Never overwrites someone else's work. A refresh that exposes a bug gets fixed
-# on the bot branch itself, so once the branch head is not the bot's own commit
-# this stops pushing and leaves the branch to whoever is fixing it.
+# on the bot branch itself, so while the PR is open and the branch head is not
+# the bot's own commit, this stops pushing and leaves it to whoever is fixing it.
 #
-# Exit: 0 no drift, 1 drift reported, 2 could not tell (fetch, git or gh failure).
+# Exit: 0 no drift, 1 drift reported in the refresh PR, 2 could not tell (fetch,
+# git or gh failure), 3 drift found but the open refresh PR has someone else's
+# commit, so nothing was pushed.
 set -euo pipefail
 
 DOCS_REF="${DOCS_REF:-main}"
@@ -235,6 +237,13 @@ git_remote() {
 CORPUS_FILES=("${CORPUS_DIR}/property-overrides.json" "${CORPUS_DIR}/property-snapshot.json")
 TITLE="test(property-extractor): refresh the overrides corpus to docs main and ${LATEST_TAG}"
 
+# Looked up first: the authorship guard below only applies while a PR is open.
+EXISTING="$(gh pr list --repo "$PR_REPO" --head "$PR_BRANCH" --state open \
+  --json number --jq '.[0].number // empty')" || {
+    echo "::error::Drift found but could not list pull requests in ${PR_REPO}." >&2
+    exit 2
+  }
+
 # ls-remote exits 2 for "no such branch" and anything else for a real failure,
 # which must not read as "no branch yet" and force-push over one.
 PUSH=true
@@ -245,10 +254,14 @@ if [ "$rc" -eq 0 ]; then
     || { echo "::error::Drift found but could not fetch ${PR_BRANCH}." >&2; exit 2; }
   HEAD_AUTHOR="$(git -C "$REPO_DIR" log -1 --format=%ae FETCH_HEAD)"
   if [ "$HEAD_AUTHOR" != "$BOT_EMAIL" ]; then
-    echo "::warning::${PR_BRANCH} has a commit from ${HEAD_AUTHOR}, so someone is working on it. Not pushing over it." >&2
-    exit 1
-  fi
-  if git -C "$REPO_DIR" diff --quiet FETCH_HEAD -- "${CORPUS_FILES[@]}"; then
+    # A closed PR's branch survives (GitHub deletes only on merge), and
+    # nobody is working on it, so rebuild it rather than stall every week.
+    if [ -n "$EXISTING" ]; then
+      echo "::warning::${PR_BRANCH} has a commit from ${HEAD_AUTHOR}, so someone is working on ${PR_REPO}#${EXISTING}. Not pushing over it." >&2
+      exit 3
+    fi
+    echo "${PR_BRANCH} has a commit from ${HEAD_AUTHOR} but no open pull request, so rebuilding it."
+  elif git -C "$REPO_DIR" diff --quiet FETCH_HEAD -- "${CORPUS_FILES[@]}"; then
     echo "${PR_BRANCH} already holds this refresh."
     PUSH=false
   fi
@@ -288,12 +301,6 @@ Opened by \`.github/workflows/property-corpus-drift.yml\`, which updates this
 PR on later runs rather than opening another.
 EOF
 )"
-
-EXISTING="$(gh pr list --repo "$PR_REPO" --head "$PR_BRANCH" --state open \
-  --json number --jq '.[0].number // empty')" || {
-    echo "::error::Drift found but could not list pull requests in ${PR_REPO}." >&2
-    exit 2
-  }
 
 if [ -n "$EXISTING" ]; then
   gh pr edit "$EXISTING" --repo "$PR_REPO" --title "$TITLE" --body "$BODY" >/dev/null \

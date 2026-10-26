@@ -323,9 +323,8 @@ describe('property-corpus-drift.sh', () => {
     expect(remoteHead(checkout.remote)).toBe(first);
   });
 
-  it('never pushes over a commit someone else added to the bot branch', () => {
-    // A refresh that exposes a bug gets its fix on this branch, as PR 329's
-    // did. Force-pushing next Monday would throw that fix away.
+  // A bot branch whose head is someone else's commit, as after a fix is pushed to it.
+  function botBranchWithHumanHead () {
     setLive({ matching: false, dropEntries: 3 });
     const checkout = makeCheckout();
     expect(run(checkout.env).status).toBe(1);
@@ -335,15 +334,34 @@ describe('property-corpus-drift.sh', () => {
     git(fixer, 'add', 'fix.txt');
     git(fixer, '-c', 'user.name=Someone', '-c', 'user.email=someone@example.com', 'commit', '--quiet', '-m', 'fix');
     git(fixer, 'push', '--quiet', 'origin', 'bot/refresh-property-corpus');
-    const fixed = remoteHead(checkout.remote);
+    return { remote: checkout.remote, fixed: remoteHead(checkout.remote) };
+  }
 
+  it('exits 3 and never pushes over a commit someone else added while the PR is open', () => {
+    // A refresh that exposes a bug gets its fix on this branch, as PR 329's
+    // did. Force-pushing next Monday would throw that fix away.
+    const { remote, fixed } = botBranchWithHumanHead();
     setLive({ matching: false, dropEntries: 5 });
     const again = makeCheckout();
-    const { status, stderr, ghCalls } = run({ ...again.env, GIT_REMOTE_URL: checkout.remote });
-    expect(status).toBe(1);
+    const { status, stderr, ghCalls } = run({ ...again.env, GIT_REMOTE_URL: remote, GH_STUB_EXISTING: '4321' });
+    expect(status).toBe(3);
     expect(stderr).toMatch(/has a commit from someone@example\.com/);
-    expect(remoteHead(checkout.remote)).toBe(fixed);
+    expect(remoteHead(remote)).toBe(fixed);
     expect(ghCalls).not.toMatch(/pr (create|edit)/);
+  });
+
+  it('rebuilds the branch and opens a new PR when the PR with a human commit was closed', () => {
+    // GitHub deletes the branch only on merge, so a closed PR leaves the human
+    // commit at its head. Guarding it with no PR open stalls the job silently.
+    const { remote, fixed } = botBranchWithHumanHead();
+    setLive({ matching: false, dropEntries: 5 });
+    const again = makeCheckout();
+    const { status, stdout, ghCalls } = run({ ...again.env, GIT_REMOTE_URL: remote });
+    expect(status).toBe(1);
+    expect(stdout).toMatch(/no open pull request, so rebuilding it/);
+    expect(remoteHead(remote)).not.toBe(fixed);
+    expect(git(remote, 'log', '-1', '--format=%ae', 'bot/refresh-property-corpus')).toBe(BOT_EMAIL);
+    expect(ghCalls).toMatch(/pr create .*--head bot\/refresh-property-corpus/);
   });
 
   it('fails closed with 2 when the remote cannot be read, rather than taking it for "no branch yet"', () => {
@@ -452,6 +470,8 @@ describe('property-corpus-drift.yml', () => {
     // report, or pass the build when the check could not run.
     const text = workflow();
     expect(text).toMatch(/1\)\s*echo "::notice::/);
+    // Exit 3, drift left to someone else's open PR, gets its own notice.
+    expect(text).toMatch(/3\)\s*echo "::notice::.*left alone/);
     expect(text).toMatch(/\*\)\s*echo "::error::.*exit 1/s);
   });
 

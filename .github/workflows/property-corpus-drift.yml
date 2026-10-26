@@ -109,7 +109,9 @@ jobs:
         run: |
           set -euo pipefail
           # Exit 1 means drift was found and reported, which is not a build
-          # failure here; exit 2 means the check could not run at all, which is.
+          # failure here; exit 3 means drift was found but the open refresh PR
+          # is someone else's to finish; exit 2 means the check could not run
+          # at all, which is a failure.
           # Distinguished explicitly so a token or network problem cannot pass
           # as "no drift".
           rc=0
@@ -117,6 +119,7 @@ jobs:
           case "$rc" in
             0) echo "Corpus is current." ;;
             1) echo "::notice::Corpus drift reported in a refresh pull request." ;;
+            3) echo "::notice::Corpus drift found, but the open refresh pull request has someone else's commit, so it was left alone." ;;
             *) echo "::error::The corpus drift check could not run."; exit 1 ;;
           esac
 
