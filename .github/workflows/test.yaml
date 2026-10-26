@@ -47,6 +47,7 @@ jobs:
               - '__tests__/tools/**'
               - '__tests__/cli-utils/**'
               - '__tests__/**/*tool*.test.js'
+              - 'vendor/**'
             property_extractor:
               - 'tools/property-extractor/**/*.py'
               - 'tools/property-extractor/requirements.txt'

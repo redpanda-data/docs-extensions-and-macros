@@ -1,0 +1,51 @@
+// Reference Template
+// Use for pages that provide specifications and lookup information.
+// Reader question: "What are my options?"
+
+= [Noun Phrase Title]
+:description: [One sentence describing what specifications this page documents.]
+:page-topic-type: reference
+:learning-objective-1: Look up [specific information type]
+:learning-objective-2: Find [configuration options/parameters]
+:learning-objective-3: Identify [valid values/options]
+
+// Intro: 1 sentence, ~10-20 words. State the scope of the reference, extremely brief.
+[One sentence stating what this reference documents.]
+
+Use this reference to:
+
+* [ ] {learning-objective-1}
+* [ ] {learning-objective-2}
+* [ ] {learning-objective-3}
+
+== [Category 1]
+
+=== [Item name]
+
+[Brief description]
+
+[cols="1,2,1"]
+|===
+| Property | Description | Default
+
+| `property_name`
+| [What it does]
+| `default_value`
+|===
+
+== Configuration options
+
+[cols="1,1,2,1"]
+|===
+| Option | Type | Description | Required
+
+| `option_name`
+| `string`
+| [Description]
+| Yes
+|===
+
+== See also
+
+* xref:concepts.adoc[]
+* xref:create-x.adoc[]

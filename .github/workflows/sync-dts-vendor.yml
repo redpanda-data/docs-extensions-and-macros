@@ -1,0 +1,94 @@
+name: sync-dts-vendor
+
+# Keeps vendor/dts/ in step with redpanda-data/docs-team-standards (DTS), the
+# source of the Vale style and the page templates that the docs language
+# server reads offline. Every day it clones DTS main, rewrites vendor/dts/ with
+# .github/scripts/sync-dts-vendor.js, and opens or updates one pull request
+# when the copy changed. A change in DTS lands with no file change in this
+# repo, so no PR-triggered check here could see it; hence a schedule.
+#
+# Drift cannot go unnoticed: a DTS change shows up here as an open PR within a
+# day, an unreadable DTS fails this job (it never reads as "in sync"), and the
+# Jest suite fails any PR whose vendor/dts/ no longer matches its manifest.
+#
+# Credentials: the org bot token, read through this repo's OIDC role, the same
+# way check-dispatch-graph.yml reads it. It reads the private DTS repo and
+# writes the PR branch here. Fetched only on the default branch: a
+# workflow_dispatch can be aimed at any branch, and checkout has no explicit
+# ref, so a modified script on that branch must not run holding the token.
+# The bot pushes with a PAT rather than github.token so that the PR it opens
+# triggers this repo's test workflow.
+
+on:
+  schedule:
+    - cron: '30 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: sync-dts-vendor
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.RP_AWS_CRED_REGION }}
+          role-to-assume: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
+
+      - name: Get the bot token
+        uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            ,sdlc/prod/github/actions_bot_token
+          parse-json-secrets: true
+
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Full history without blobs: the manifest records the last commit that
+      # touched the copied paths, which a depth-1 clone cannot answer. The
+      # token reaches git through GIT_CONFIG_* (never argv or .git/config).
+      - name: Clone docs-team-standards
+        run: |
+          set -euo pipefail
+          auth=$(printf 'x-access-token:%s' "$ACTIONS_BOT_TOKEN" | base64 -w0)
+          GIT_CONFIG_COUNT=1 \
+          GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+          GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" \
+            git clone --quiet --filter=blob:none --single-branch --branch main \
+              https://github.com/redpanda-data/docs-team-standards.git "$RUNNER_TEMP/dts"
+          echo "Cloned docs-team-standards@$(git -C "$RUNNER_TEMP/dts" rev-parse --short HEAD)"
+
+      - name: Sync vendor/dts
+        run: node .github/scripts/sync-dts-vendor.js --source "$RUNNER_TEMP/dts"
+
+      - name: Open or update the pull request
+        env:
+          GH_TOKEN: ${{ env.ACTIONS_BOT_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GIT_AUTHOR_NAME: vbotbuildovich
+          GIT_AUTHOR_EMAIL: 62446873+vbotbuildovich@users.noreply.github.com
+          GIT_COMMITTER_NAME: vbotbuildovich
+          GIT_COMMITTER_EMAIL: 62446873+vbotbuildovich@users.noreply.github.com
+        run: |
+          set -euo pipefail
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          bash .github/scripts/sync-dts-vendor-pr.sh
