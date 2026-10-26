@@ -27,6 +27,30 @@ An LSP server for AsciiDoc pages in Redpanda docs repositories. It checks a page
 
 A Cloud component (`env-cloud`) has no property data of its own. Set `REDPANDA_DOCS_PATH` to a local checkout of `redpanda-data/docs` and the server reads its property JSON as the streaming component, as the build does.
 
+== Module layout
+
+[,text]
+----
+language-server/
+  server.js          LSP wiring; loops over the registry, never names a feature
+  dispatch.js        the feature module contract; unions capabilities, merges results
+  workspace.js       shared build data per component, then each module's load()
+  lib/asciidoc.js    inert lines, attribute lists, header lookups, inline macro scanner, ranges
+  lib/lsp.js         SEVERITY, COMPLETION_KIND, SOURCE, diagnostic(), markdownHover()
+  features/
+    index.js         the only registry, alphabetical, one line per module
+    metadata.js      :page-categories: and :page-topic-type:
+    properties.js    prop: and propval:
+----
+
+== Contributing a feature
+
+A feature is one file, `features/<id>.js`, exporting a plain object with an `id` that matches the file name and any of the optional hooks documented at the top of `dispatch.js`: `load`, `diagnostics`, `completion`, `hover`, `codeActions`, `codeLens`, `definition`, `documentLinks`, `commands`, plus `languages`, `watch`, `triggerCharacters` and `codeActionKinds`. Add one line for it to `features/index.js`, in alphabetical order. Nothing else changes: the server advertises a capability as soon as one module implements its hook, and the VS Code client already selects AsciiDoc, JSON and YAML files, watches the usual data files, and passes the `redpandaDocs.*` settings to every `load` as `ctx.settings`.
+
+* *Reuse, do not duplicate.* A check must call the function the build or the `doc-tools` command runs, so the editor and the build report the same problem in the same words. If that logic is inline or in another repository, export it (or promote it into this package) in the same change, and delete any other copy. Share text helpers through `lib/`, not by copying them between features.
+* *Fail alone.* Data only your feature needs is loaded in `load(ws, ctx)` and stored at `ws.data[id]`. If it throws, only your feature is turned off for that component, and the reason is logged. A hook that throws is logged and contributes nothing. Missing data degrades to "not checked", never to "clean".
+* *Tests are required.* Each feature has `+__tests__/language-server/features/<id>.test.js+` (the first two features share `features.test.js`) with unit tests that include a negative control (valid input gives no diagnostic), and at least one request over stdio in `stdio.e2e.test.js` or its own e2e suite. Build fixtures with `buildWorkspace` from `+__tests__/language-server/fixture.js+`; a part only your feature needs is passed as a builder (`buildWorkspace(spec, { parts })`), not added to the shared file.
+
 == Run it
 
 [,bash]

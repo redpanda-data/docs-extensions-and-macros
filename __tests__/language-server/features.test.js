@@ -1,7 +1,9 @@
 'use strict'
 
 const { loadWorkspace } = require('../../language-server/workspace')
-const features = require('../../language-server/features')
+const { findMacros } = require('../../language-server/features/properties')
+const { forText } = require('../../language-server/dispatch')
+const features = { findMacros, ...forText() }
 const { makeWorkspace, noFetch } = require('./workspace-fixture')
 
 const URI = 'file:///page.adoc'

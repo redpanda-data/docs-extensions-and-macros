@@ -23,6 +23,11 @@
  * streaming file, as in the build. Outside a combined build that file is
  * found through $REDPANDA_DOCS_PATH, a local checkout of the docs repo, which
  * is read as the streaming component.
+ *
+ * That data is shared: any feature module reads it from the workspace. Data
+ * only one feature needs comes from that module's own load(ws, ctx) and is
+ * stored at ws.data[id]. A load that throws turns off only that module for
+ * this workspace: ws.disabled[id] holds the reason and ws.notes says why.
  */
 
 const fs = require('fs')
@@ -31,6 +36,10 @@ const { loadPropertiesFor } = require('../macros/prop')
 const { readComponent, catalogFor } = require('../extension-utils/component-catalog')
 const { loadTaxonomyFrom } = require('../extension-utils/taxonomy')
 const { loadLegacyCategories } = require('../tools/check-metadata')
+
+// Changes to these files reload the shared data above. Feature modules add
+// their own patterns with `watch`.
+const CORE_WATCH = [/(^|\/)(antora\.yml|taxonomy\.yml|taxonomy\.schema\.json|valid-categories\.yml|redpanda-properties-[^/]+\.json)$/]
 
 /** The nearest directory at or above `start` that holds an antora.yml. */
 function findComponentRoot (start) {
@@ -55,9 +64,11 @@ function findComponentRoot (start) {
  * @param {Object} [options]
  * @param {Object} [options.env=process.env]
  * @param {Function} [options.fetch=globalThis.fetch] - for the published taxonomy
+ * @param {Array<Object>} [options.modules=features/index.js] - feature modules whose load() to run
+ * @param {Object} [options.settings={}] - client settings (initializationOptions), passed to each load()
  * @returns {Promise<Object>}
  */
-async function loadWorkspace (root, { env = process.env, fetch: fetchImpl = globalThis.fetch } = {}) {
+async function loadWorkspace (root, { env = process.env, fetch: fetchImpl = globalThis.fetch, modules = require('./features'), settings = {} } = {}) {
   const own = readComponent(root)
   const component = { name: own.component, version: own.version, attributes: own.attributes }
   const components = [own]
@@ -88,7 +99,7 @@ async function loadWorkspace (root, { env = process.env, fetch: fetchImpl = glob
     notes.push(`taxonomy not loaded, so :page-categories: is not checked: ${err.message}`)
   }
 
-  return {
+  const ws = {
     root,
     component,
     properties,
@@ -96,7 +107,34 @@ async function loadWorkspace (root, { env = process.env, fetch: fetchImpl = glob
     taxonomySource,
     isLegacyCategory: loadLegacyCategories(root) || undefined,
     notes,
+    data: {},
+    disabled: {},
   }
+  await loadModules(ws, modules, { env, fetch: fetchImpl, settings })
+  return ws
 }
 
-module.exports = { findComponentRoot, loadWorkspace }
+/** Runs each module's load; a failure turns off only that module. */
+async function loadModules (ws, modules, ctx) {
+  const results = await Promise.all(modules.map(async (m) => {
+    if (typeof m.load !== 'function') return null
+    try {
+      return { ok: true, value: await m.load(ws, ctx) }
+    } catch (err) {
+      return { ok: false, error: err }
+    }
+  }))
+  modules.forEach((m, i) => {
+    const result = results[i]
+    if (!result) return
+    if (result.ok) {
+      ws.data[m.id] = result.value
+    } else {
+      const reason = (result.error && result.error.message) || String(result.error)
+      ws.disabled[m.id] = reason
+      ws.notes.push(`${m.id} is turned off for ${ws.component.name}: its data could not be loaded: ${reason}`)
+    }
+  })
+}
+
+module.exports = { findComponentRoot, loadWorkspace, CORE_WATCH }

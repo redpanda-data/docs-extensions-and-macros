@@ -24,6 +24,20 @@ first. The editor then uses the same version of the macros as the build.
 - `redpandaDocs.docsPath`: a local checkout of `redpanda-data/docs`. Cloud
   pages need it for property data, and repositories without the taxonomy
   read `taxonomy.yml` from it.
+- `redpandaDocs.componentPaths`: local checkouts of other docs components,
+  for features that resolve references across components.
+- `redpandaDocs.standardsPath`: a local checkout of
+  `redpanda-data/docs-team-standards`, for features that read its templates
+  or style rules.
+
+Changing a setting restarts the server.
+
+## Override schemas
+
+`docs-data/property-overrides.json` and `docs-data/rpk-overrides.json` are
+validated against the schemas in the workspace's installed
+`@redpanda-data/docs-extensions-and-macros`, so the editor and the build use
+the same version. Without the package installed they are not validated.
 
 ## Run it from source
 
