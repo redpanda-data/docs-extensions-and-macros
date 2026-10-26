@@ -35,6 +35,8 @@
 #      and timeouts are listed as couldn't check. It never fails the job.
 #      Results go to the job summary and, when there are broken links, the
 #      PR comment.
+#      pr-link-check.yml runs the same script on its own, for repos that
+#      don't call this workflow.
 #   7. One sticky PR comment with the result, the preview, and the changed
 #      pages, the notify_label, and a one-time review request to notify_team,
 #      whenever the PR changes a published page or breaks the build.

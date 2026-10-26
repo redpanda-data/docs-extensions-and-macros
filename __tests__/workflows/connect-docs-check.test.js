@@ -544,3 +544,50 @@ describe('connect-docs-check workflow: advisory link check', () => {
     expect(fs.readFileSync(summaryFile, 'utf8')).toContain('Checked 0 URLs')
   })
 })
+
+describe('pr-link-check workflow: the link check on its own', () => {
+  const standalone = YAML.parse(fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'pr-link-check.yml'), 'utf8'))
+  const linkJob = standalone.jobs['link-check']
+  const step = linkJob.steps.find((s) => s.name === 'Check the external links the PR adds (advisory)')
+  const ws = () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plc-ws-'))
+    fs.symlinkSync(REPO_ROOT, path.join(dir, 'dem'))
+    return dir
+  }
+
+  test('is reusable, needs no secrets, reads only, and runs on PRs only', () => {
+    expect(standalone.on.workflow_call).toBeNull()
+    expect(standalone.permissions).toEqual({})
+    expect(linkJob.permissions).toEqual({ contents: 'read', 'pull-requests': 'read' })
+    expect(linkJob.if).toMatch(/github\.event_name == 'pull_request'/)
+    expect(fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'pr-link-check.yml'), 'utf8')).not.toMatch(/secrets\./)
+    expect(step['continue-on-error']).toBe(true)
+  })
+
+  test('runs the same script as connect-docs-check', () => {
+    expect(step.run).toContain('tools/connect-docs/check-pr-links.js')
+    expect(stepNamed('Check the external links the PR adds (advisory)').run).toContain('tools/connect-docs/check-pr-links.js')
+  })
+
+  test('exits 0 when the PR diff cannot be fetched', () => {
+    const work = workDir()
+    const r = execRun(step, { env: { WORK: work, GITHUB_WORKSPACE: ws(), REPO: 'redpanda-data/benthos', PR_NUMBER: '7', GITHUB_STEP_SUMMARY: path.join(work, 'summary.md') }, stubs: { gh: 'exit 1' } })
+    expect(r.status).toBe(0)
+    expect(r.stdout).toContain('Could not fetch the PR diff')
+  })
+
+  test('exits 0 and writes the summary for a diff with no URLs', () => {
+    const work = workDir()
+    const summaryFile = path.join(work, 'summary.md')
+    const r = execRun(step, { env: { WORK: work, GITHUB_WORKSPACE: ws(), REPO: 'redpanda-data/benthos', PR_NUMBER: '7', GITHUB_STEP_SUMMARY: summaryFile }, stubs: { gh: 'printf "diff --git a/x.go b/x.go\\n+++ b/x.go\\n@@ -1 +1 @@\\n+package x\\n"' } })
+    expect(r.status).toBe(0)
+    expect(fs.readFileSync(summaryFile, 'utf8')).toContain('Checked 0 URLs')
+  })
+
+  test('exits 0 when the script fails', () => {
+    const work = workDir()
+    const r = execRun(step, { env: { WORK: work, GITHUB_WORKSPACE: work, REPO: 'redpanda-data/benthos', PR_NUMBER: '7', GITHUB_STEP_SUMMARY: path.join(work, 'summary.md') }, stubs: { gh: 'echo diff' } })
+    expect(r.status).toBe(0)
+    expect(r.stdout).toContain('The link check did not complete')
+  })
+})
