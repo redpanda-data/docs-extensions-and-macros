@@ -129,6 +129,22 @@ describe('enterprise-features parsers', () => {
       { feature: 'Tiered Storage', properties: ['cloud_storage_enabled'] },
     ])
   })
+
+  test('parseDisableTable takes the property from a dotted broker config key', () => {
+    const page = `|===
+| Feature | Action
+
+| xref:manage:security/fips-compliance.adoc[FIPS Compliance]
+|
+Set the broker property prop:fips_mode[] to \`disabled\`:
+
+rpk redpanda config set redpanda.fips_mode disabled
+|===
+`
+    expect(parseDisableTable(page)).toEqual([
+      { feature: 'FIPS Compliance', properties: ['fips_mode'] },
+    ])
+  })
 })
 
 describe('enterprise-features checks', () => {
