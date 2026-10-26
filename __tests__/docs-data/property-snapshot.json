@@ -1,5 +1,5 @@
 {
- "_comment": "Reduced mirror of modules/reference/attachments/redpanda-properties-<tag>.json from the docs repo: every property, with only the fields the rendering and link layers read. Taken from the branch that regenerates at the current tag, not from docs main, because a link key has to match the source prose the NEXT regeneration will produce: upstream cleans up doc strings between runs, and cloud_storage_azure_managed_identity_id is the worked example (its source string lost an inline <<anchor>> and a block of rendered *Type*: markup). cloud_supported is what makes the 'no Cloud link to a property Cloud does not publish' assertion real rather than assumed. Refresh per tools/property-extractor/README.adoc.",
+ "_comment": "Reduced mirror of modules/reference/attachments/redpanda-properties-<tag>.json from the docs repo: every property, with only the fields the rendering and link layers read. Taken from the highest-tag attachment on docs main, the same source the README recipe and property-corpus-drift.sh use. cloud_supported is what makes the 'no Cloud link to a property Cloud does not publish' assertion real rather than assumed. Refresh per tools/property-extractor/README.adoc.",
  "source_tag": "v26.2.4",
  "properties": {
   "abort_index_segment_size": {
