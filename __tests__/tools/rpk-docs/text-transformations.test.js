@@ -160,6 +160,36 @@ describe('applyToCode rules in inline code spans', () => {
   })
 })
 
+describe('flag and JSON argument formatting (DOC-2686)', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+  // The rule in redpanda-data/docs rpk-overrides.json that turned JSON keys
+  // and values into separate code spans
+  const transforms = {
+    replacements: [
+      { pattern: '"([a-z][-a-z0-9]+(?: [a-z][-a-z0-9]+){0,2})"', replacement: '`$1`', flags: 'g', description: 'Convert double-quoted subcommand names to backticks (1-3 word commands only)' }
+    ]
+  }
+
+  test('wraps every segment of a dotted flag with its value', () => {
+    const out = formatDescription('(true when set; pass --local-config.grounding-policy.enabled=false to disable)', transforms)
+    expect(out).toContain('`--local-config.grounding-policy.enabled=false`')
+  })
+
+  test('keeps a sentence period out of a flag span', () => {
+    expect(formatDescription('Set --brokers. Then run.', transforms)).toBe('Set `--brokers`. Then run.')
+  })
+
+  test('keeps a single-quoted JSON argument whole, as a passthrough span', () => {
+    const out = formatDescription('Pass --args \'{"topic":"oncall"}\' to fill the prompt.', transforms)
+    expect(out).toContain("`+'{\"topic\":\"oncall\"}'+`")
+    expect(out).not.toContain('`topic`')
+  })
+
+  test('still converts double-quoted names outside JSON', () => {
+    expect(formatDescription('Use a "subcommand name" here.', transforms)).toContain('`subcommand name`')
+  })
+})
+
 describe('known command path formatting', () => {
   const { formatDescription, registerKnownCommandPaths } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
 

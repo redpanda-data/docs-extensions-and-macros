@@ -1596,6 +1596,10 @@ function parseCobraFlags(helpText) {
 
   const flags = []
   let flagIndent = null
+  // Set while skipping --help: its description can wrap onto the next line
+  // ("-h, --help" then "help for create"), and that line must not be read
+  // as a continuation of the flag before it.
+  let skipping = false
   for (let i = start + 1; i < lines.length; i++) {
     const line = lines[i]
     if (/^\S/.test(line)) break // next section (Global Flags:, Use "...", ...)
@@ -1604,7 +1608,8 @@ function parseCobraFlags(helpText) {
     const m = line.match(/^\s+(?:-(\w),\s+)?--([\w.-]+)(?:\s+(\S+))?\s{2,}(.*)$/)
     if (m) {
       const [, shorthand, name, valueType, desc] = m
-      if (name === 'help') continue
+      skipping = name === 'help'
+      if (skipping) continue
       flagIndent = line.search(/\S/)
       const flag = {
         name,
@@ -1618,6 +1623,8 @@ function parseCobraFlags(helpText) {
         flag.description = flag.description.slice(0, def.index).trim()
       }
       flags.push(flag)
+    } else if (skipping) {
+      continue
     } else if (flags.length > 0 && flagIndent !== null && line.search(/\S/) > flagIndent) {
       // Wrapped description continuation: any line indented deeper than the
       // flag column that did not parse as a flag. Continuations can begin

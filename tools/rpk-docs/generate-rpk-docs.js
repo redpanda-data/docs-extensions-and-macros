@@ -1479,6 +1479,16 @@ function formatDescription(desc, customTransformations = null, options = {}) {
     return placeholder
   })
 
+  // Single-quoted JSON arguments ('{"topic":"oncall"}') are one literal.
+  // Protect each whole, as a passthrough span so AsciiDoc leaves its quotes
+  // alone; otherwise double-quote rules in the overrides turn each key and
+  // value into its own code span, and the result is no longer JSON.
+  preProcessed = preProcessed.replace(/'(?:\{"|\[["{])[^'\n]*[}\]]'/g, (match) => {
+    const placeholder = `__INLINE_CODE_${inlineCode.length}__`
+    inlineCode.push(`\`+${match}+\``)
+    return placeholder
+  })
+
   // === STEP 3: Apply remaining text transformations ===
   // Apply text transformations from overrides (textTransformations.replacements)
   // These are applied AFTER protecting code blocks so they don't affect code content
@@ -1726,8 +1736,9 @@ function formatDescription(desc, customTransformations = null, options = {}) {
     // Even indices are outside backticks, odd indices are inside
     if (i % 2 === 0) {
       // Outside backticks - apply flag wrapping
-      // Include =value when present (e.g., --format=json, --var=KEY=VALUE)
-      return part.replace(/(?<!rpk\s)(--[a-z][-a-z0-9]*(?:=[^\s,;.)\]]+)?)/gi, '`$1`')
+      // Include =value when present (e.g., --format=json, --var=KEY=VALUE),
+      // and every segment of a dotted name (--local-config.a.b=false)
+      return part.replace(/(?<!rpk\s)(--[a-z][-a-z0-9]*(?:\.[a-z][-a-z0-9]*)*(?:=[^\s,;.)\]]+)?)/gi, '`$1`')
     } else {
       // Inside backticks - don't modify
       return part
