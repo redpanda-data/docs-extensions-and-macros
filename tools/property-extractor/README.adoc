@@ -1245,7 +1245,9 @@ test, so it sat three months and 114 entries behind. That test now has its own
 `property-overrides-admin-fixture.json`; put new fixture data there or in the test
 itself, never in the mirror.
 
-Refresh both from a `docs` checkout:
+Every Monday, `.github/workflows/property-corpus-drift.yml` compares both files against `docs` main. When they have drifted, it runs the recipe below and opens or updates one pull request from `bot/refresh-property-corpus`. If that PR's tests fail, the refresh has exposed a real bug: push the fix to the same branch, and the job stops updating the branch once its latest commit isn't the bot's.
+
+To refresh by hand, for example between weekly runs, run the same recipe from a `docs` checkout:
 
 [,bash]
 ----
