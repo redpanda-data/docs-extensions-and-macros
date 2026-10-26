@@ -478,6 +478,14 @@ describe('properties', () => {
 // ---------------------------------------------------------------------------
 
 describe('metrics', () => {
+  // Review 412 round 3: make_histogram(name, description, labels, value).
+  test('a histogram with the description second reads its labels, not its value lambda', () => {
+    const F = 'src/v/kafka/server/probe.cc'
+    const src = (labels, body) => `void p::setup() {\n    _metrics.add_group("kafka", {\n      sm::make_histogram("latency_us", sm::description("Latency"), {${labels}}, [this] { return ${body}; }),\n    });\n}\n`
+    expect(detect({ [F]: src('a', 'h1()') }, { [F]: src('a', 'h2()') }, { detectors: ['metrics'] }).findings).toEqual([])
+    expect(kinds(detect({ [F]: src('a', 'h1()') }, { [F]: src('a, b', 'h1()') }, { detectors: ['metrics'] }))).toEqual([['behaviour', 'vectorized_kafka_latency_us']])
+  })
+
   test('an accessor receiver is a group, and the declared type picks the registry (group_probe.h, archival probe)', () => {
     const text = `class group_probe {
     void setup() {

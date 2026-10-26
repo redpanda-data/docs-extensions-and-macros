@@ -121,7 +121,11 @@ function parseMetrics (snippets, declText = '') {
       if (!name) continue
       // Labels: the definition's label list and any `.aggregate({...})`
       // chained on it. Dropping a label changes every query that uses it.
-      let labels = args.length > 3 ? normalize(args.slice(3).join(', ')) : ''
+      // Most makers take (name, value, description, labels...); the
+      // histogram overload (name, description, labels, value) puts the
+      // labels before the value.
+      const labelArgs = /\bdescription\s*\(/.test(args[1] || '') ? args.slice(2, -1) : args.slice(3)
+      let labels = labelArgs.length ? normalize(labelArgs.join(', ')) : ''
       const after = /^\s*\.\s*aggregate\s*\(/.exec(text.slice(close + 1))
       if (after) {
         const aOpen = close + 1 + after[0].length - 1
