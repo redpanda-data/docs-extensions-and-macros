@@ -514,3 +514,33 @@ printf '%s\\n' "$*" >> "$HOME/gh-calls"
     expect(calls(r)).toMatch(/pulls\/7\/requested_reviewers -f team_reviewers\[\]=documentation/)
   })
 })
+
+describe('connect-docs-check workflow: advisory link check', () => {
+  const LINK_CHECK = 'Check the external links the PR adds (advisory)'
+  const step = stepNamed(LINK_CHECK)
+
+  test('is advisory, runs on PRs only, and runs after the credential drops and before the comment', () => {
+    expect(step['continue-on-error']).toBe(true)
+    expect(step.if).toMatch(/github\.event_name == 'pull_request'/)
+    expect(indexOf(LINK_CHECK)).toBeGreaterThan(indexOf('Drop the preview credentials from the job environment'))
+    expect(indexOf(LINK_CHECK)).toBeLessThan(indexOf(COMMENT))
+    expect(JSON.stringify(step.env)).not.toMatch(/secrets\.|ACTIONS_BOT_TOKEN/)
+    expect(stepNamed(COMMENT).run).toContain('--link-check "$WORK/link-check.json"')
+  })
+
+  test('exits 0 when the PR diff cannot be fetched', () => {
+    const work = workDir()
+    const r = execRun(step, { env: { WORK: work, REPO: 'redpanda-data/connect', PR_NUMBER: '7', GITHUB_STEP_SUMMARY: path.join(work, 'summary.md') }, stubs: { gh: 'exit 1' } })
+    expect(r.status).toBe(0)
+    expect(r.stdout).toContain('Could not fetch the PR diff')
+  })
+
+  test('exits 0 and writes the summary for a diff with no URLs', () => {
+    const work = workDir()
+    fs.symlinkSync(REPO_ROOT, path.join(work, 'dem'))
+    const summaryFile = path.join(work, 'summary.md')
+    const r = execRun(step, { env: { WORK: work, REPO: 'redpanda-data/connect', PR_NUMBER: '7', GITHUB_STEP_SUMMARY: summaryFile }, stubs: { gh: 'printf "diff --git a/x.go b/x.go\\n+++ b/x.go\\n@@ -1 +1 @@\\n+package x\\n"' } })
+    expect(r.status).toBe(0)
+    expect(fs.readFileSync(summaryFile, 'utf8')).toContain('Checked 0 URLs')
+  })
+})

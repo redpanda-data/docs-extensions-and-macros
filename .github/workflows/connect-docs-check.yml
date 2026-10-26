@@ -26,7 +26,16 @@
 #      exist. With the diff, findings on a page the PR changes BLOCK and the
 #      rest are listed; without it, nothing blocks.
 #   5. A Netlify draft deploy preview, linked from a commit status.
-#   6. One sticky PR comment with the result, the preview, and the changed
+#   6. On pull_request runs only, an ADVISORY check of the external URLs the
+#      PR adds in doc-string sources (non-test Go files and .adoc files, from
+#      the PR diff; line comments and inline code are skipped). Each is
+#      fetched with the external-link-checker extension's rules (HEAD, then
+#      GET, browser-like user agent): 404 and 410 are broken and
+#      get a ::warning annotation at the file and line; 401, 403, 429, 5xx,
+#      and timeouts are listed as couldn't check. It never fails the job.
+#      Results go to the job summary and, when there are broken links, the
+#      PR comment.
+#   7. One sticky PR comment with the result, the preview, and the changed
 #      pages, the notify_label, and a one-time review request to notify_team,
 #      whenever the PR changes a published page or breaks the build.
 #
@@ -529,6 +538,30 @@ jobs:
           for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN DOCS_NETLIFY_PREVIEW_AUTH_TOKEN DOCS_NETLIFY_PREVIEW_SITE_ID; do
             echo "$v=" >> "$GITHUB_ENV"
           done
+      # External URLs the PR adds in doc strings, so a dead link is caught on
+      # the PR instead of by the weekly docs-site link check after merge.
+      # Advisory: it never fails the job. It reads the PR diff, so it runs on
+      # pull_request events only (not release runs), and after the credential
+      # drops, because it fetches URLs the PR chose.
+      - name: Check the external links the PR adds (advisory)
+        id: link_check
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -uo pipefail
+          if ! gh pr diff "$PR_NUMBER" --repo "$REPO" > "$WORK/pr.diff"; then
+            echo "::notice::Could not fetch the PR diff, so the links it adds were not checked."
+            exit 0
+          fi
+          node "$WORK/dem/tools/connect-docs/check-pr-links.js" --diff "$WORK/pr.diff" \
+            --output "$WORK/link-check.json" --summary "$WORK/link-check.md" || echo "::notice::The link check did not complete."
+          cat "$WORK/link-check.md" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          exit 0
       # One sticky comment per PR: whether the docs build passed, the preview,
       # and the published pages the PR changes, so the author and the docs
       # team review rendered pages, not Go strings. A PR that changes no
@@ -554,6 +587,7 @@ jobs:
           [ "$LOG_OUTCOME" = success ] && build=pass
           diff_args=()
           [ -f "$WORK/diff.json" ] && diff_args=(--diff "$WORK/diff.json")
+          [ -f "$WORK/link-check.json" ] && diff_args+=(--link-check "$WORK/link-check.json")
           notify=$(node "$WORK/dem/tools/connect-docs/pr-comment.js" --build "$build" "${diff_args[@]}" \
             --html-findings "${HTML_FINDINGS:-0}" --preview "$PREVIEW" --run-url "$RUN_URL" --sha "$HEAD_SHA" --output "$WORK/comment.md" | jq -r .notify)
           existing=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate \
