@@ -34,6 +34,7 @@
  *   archived-repo                  a configured repo that is archived; its workflows cannot run, so it sends nothing
  *   renamed-repo                   a configured repo that GitHub redirects to a new name; it is checked under the new name
  *   conditional-sender             a gated dispatch step that could not be located in the jobs API, so the workflow run counts
+ *   sender-disabled                a sending workflow that is disabled, so it dispatches nothing and is left out of the sender checks
  *
  * Could-not-run (exit 2) is anything that stops the check seeing the whole
  * graph: a repo that cannot be read, a runs query that fails. The findings
@@ -390,11 +391,12 @@ async function recordRuns ({ edges, api, perPage, window, threshold, concurrency
   })
 
   // A disabled workflow receives nothing: GitHub still answers the dispatch
-  // with 204. One workflow list per repo that holds a listener.
+  // with 204. A disabled sender sends nothing, so it is neither a dead edge
+  // nor a duplicate. One workflow list per repo in the graph.
   const states = new Map() // repo -> Map(file -> state)
   if (api.listWorkflows) {
-    const listenerRepos = [...new Set([...workflows.values()].filter((w) => w.listener).map((w) => w.repo))]
-    await mapLimit(listenerRepos, concurrency, async (repo) => {
+    const graphRepos = [...new Set([...workflows.values()].map((w) => w.repo))]
+    await mapLimit(graphRepos, concurrency, async (repo) => {
       try {
         extraCalls += 1
         const list = await api.listWorkflows(repo)
@@ -452,13 +454,28 @@ async function recordRuns ({ edges, api, perPage, window, threshold, concurrency
   const findings = []
   const info = []
   const reportedSenders = new Set()
+  const stateOf = (w) => states.get(w.repo) && states.get(w.repo).get(w.file)
   for (const e of edges) {
     const target = shortRepo(e.targetRepo)
     let anySenderFired = false
+    const activeSenders = []
     for (const s of e.senders) {
-      const summary = runs.get(`${s.repo}/${s.file}`)
-      if (!summary) continue
       const id = `${s.repo}/${s.file}`
+      const state = stateOf(s)
+      if (state && state !== 'active') {
+        if (!reportedSenders.has(`${id}#disabled`)) {
+          reportedSenders.add(`${id}#disabled`)
+          info.push({
+            kind: 'sender-disabled',
+            edge: e.key,
+            message: `${describeSender(s)} is ${state}, so it dispatches nothing and is left out of the sender checks.`,
+          })
+        }
+        continue
+      }
+      activeSenders.push(s)
+      const summary = runs.get(id)
+      if (!summary) continue
       if (s.conditional && summary.total > 0) {
         const check = stepChecks.get(s)
         if (check && check.succeeded > 0) {
@@ -521,7 +538,7 @@ async function recordRuns ({ edges, api, perPage, window, threshold, concurrency
     // behind by a repo move. Senders whose literal payloads differ (one
     // event, several plugin values) are distinct variants, not duplicates.
     const byPayload = new Map()
-    for (const s of e.senders) {
+    for (const s of activeSenders) {
       const sig = JSON.stringify(Object.entries(s.payload || {}).sort())
       if (!byPayload.has(sig)) byPayload.set(sig, [])
       byPayload.get(sig).push(s)
@@ -542,7 +559,7 @@ async function recordRuns ({ edges, api, perPage, window, threshold, concurrency
       })
     }
     for (const l of e.listeners) {
-      const state = states.get(l.repo) && states.get(l.repo).get(l.file)
+      const state = stateOf(l)
       if (state && state !== 'active') {
         findings.push({
           severity: 'error',
