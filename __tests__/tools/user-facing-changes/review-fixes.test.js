@@ -70,6 +70,38 @@ describe('a declaration moved to another file is not a removal plus an addition'
     expect(kinds(detect(base, changed, { detectors: ['rpk'] }))).toEqual([['default-changed', 'rpk plugin install --update']])
   })
 
+  // Review 412 round 3: a move between published pages leaves both pages
+  // stale, so it must stay a removal plus an addition.
+  describe('across published pages', () => {
+    const store = (cls, extra) => `${cls}::${cls}()\n  : keep_me(*this, "keep_me", "Keep.", {}, 1)${extra}\n{}\n`
+    const PROP = '\n  , foo_enabled(*this, "foo_enabled", "Foo.", {}, false)'
+    test('a property moved from node_config.cc (broker page) to configuration.cc (cluster page) is reported', () => {
+      const N = 'src/v/config/node_config.cc'
+      const C = 'src/v/config/configuration.cc'
+      const r = detect({ [N]: store('node_config', PROP), [C]: store('configuration', '') }, { [N]: store('node_config', ''), [C]: store('configuration', PROP) }, { detectors: ['properties'] })
+      expect(kinds(r).sort()).toEqual([['added', 'foo_enabled'], ['removed', 'foo_enabled']])
+    })
+    test('a property moved between two files of the cluster page is still a quiet move', () => {
+      const C = 'src/v/config/configuration.cc'
+      const D = 'src/v/config/cloud_configuration.cc'
+      const r = detect({ [C]: store('configuration', PROP), [D]: store('cloud_configuration', '') }, { [C]: store('configuration', ''), [D]: store('cloud_configuration', PROP) }, { detectors: ['properties'] })
+      expect(r.findings).toEqual([])
+    })
+    test('a Helm key moved from the redpanda chart to the console chart is reported', () => {
+      const R = 'charts/redpanda/values.yaml'
+      const K = 'charts/console/values.yaml'
+      const r = detect({ [R]: 'keep: 1\nfoo:\n  enabled: true\n', [K]: 'keep: 1\n' }, { [R]: 'keep: 1\n', [K]: 'keep: 1\nfoo:\n  enabled: true\n' }, { detectors: ['helm'] })
+      expect(r.findings.map((f) => [f.change_kind, f.file])).toEqual(expect.arrayContaining([['removed', R], ['added', K]]))
+    })
+    test('the same key changed in two charts is reported for each chart', () => {
+      const R = 'charts/redpanda/values.yaml'
+      const K = 'charts/console/values.yaml'
+      const v = (cpu) => `resources:\n  cpu: ${cpu}\n`
+      const r = detect({ [R]: v(1), [K]: v(1) }, { [R]: v(2), [K]: v(2) }, { detectors: ['helm'] })
+      expect(r.findings.map((f) => f.file).sort()).toEqual([K, R])
+    })
+  })
+
   test('rpk: flags moved into a helper in the same package (3004b8f049 shape)', () => {
     const B = 'src/go/rpk/pkg/cli/debug/bundle/bundle.go'
     const C = 'src/go/rpk/pkg/cli/debug/bundle/common.go'

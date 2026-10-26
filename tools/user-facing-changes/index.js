@@ -121,13 +121,13 @@ function detectUserFacingChanges (diffText, { readBase = null, readHead = null, 
     byDetector[detector.id] = found.length
     findings.push(...found)
   }
-  // One finding per (surface, name, change_kind): two detectors reading the
+  // One finding per (surface, page, name, change_kind): two detectors reading the
   // same file (properties and enterprise-gating both read configuration.h)
   // must not file the same change twice.
   const seen = new Set()
   const unique = []
   for (const f of findings.sort(compareFindings)) {
-    const key = `${f.surface}\0${f.name}\0${f.change_kind}`
+    const key = `${f.surface}\0${f.affected_pages[0]}\0${f.name}\0${f.change_kind}`
     if (seen.has(key)) continue
     seen.add(key)
     unique.push(f)
@@ -145,13 +145,17 @@ function detectUserFacingChanges (diffText, { readBase = null, readHead = null, 
  * declaration that moved to another file (rpk splitting a command into
  * its own file, a proto message moved into a common package) comes out as
  * a removal in one file and an addition in the other. Pair them across
- * files by the declaration's identity (`moveKey`, or the finding name):
+ * files on the same page by the declaration's identity (`moveKey`, or the
+ * finding name):
  * a pair is a move and reports nothing, unless both sides carry a
  * `moveValue` (a default) and the value changed on the way, which is then
  * reported once as a changed default.
  */
 function pairMoves (found) {
-  const keyOf = (f) => `${f.surface}\0${f.moveKey || f.name}`
+  // The page is part of the identity: a property moved from node_config.cc
+  // to configuration.cc, or a Helm key moved between charts, leaves two pages
+  // stale, so it stays a removal plus an addition.
+  const keyOf = (f) => `${f.surface}\0${f.affected_pages[0]}\0${f.moveKey || f.name}`
   const added = new Map()
   for (const f of found) {
     if (f.change_kind !== 'added') continue
