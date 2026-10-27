@@ -433,6 +433,9 @@ fi
     ['CLAUDE.md', true],
     ['CLAUDE.local.md', true],
     ['.mcp.json', true],
+    // npm reads a project .npmrc (node-options, registry) in this job.
+    ['.npmrc', true],
+    ['src/go/rpk/.npmrc', true],
     ['src/v/config/configuration.cc', false]
   ])('a non-writer touching %s aborts: %s', (changedPath, shouldAbort) => {
     const r = execRun(step, {
@@ -648,8 +651,8 @@ describe('doc-strings-review workflow: no bot token while the model runs', () =>
     // branch in the gate, OIDC callers would log "No bot token" for exactly
     // the change the gating detector exists to file.
     const assume = stepNamed('Assume the AWS role for the doc-impact dispatch')
-    expect(assume.if).toMatch(/steps\.lint\.outputs\.declarations != '0' \|\| steps\.lint\.outputs\.removals != '0' \|\| steps\.enterprise\.outputs\.found != '0'\)/)
-    expect(assume.if).toMatch(/\(hashFiles\('doc-impact\.json'\) != '' && \(steps\.review\.outcome == 'success' \|\| steps\.review\.outcome == 'failure'\)\) \|\| steps\.enterprise\.outputs\.found != '0'\)$/)
+    expect(assume.if).toMatch(/steps\.lint\.outputs\.declarations != '0' \|\| steps\.lint\.outputs\.removals != '0' \|\| steps\.detect\.outputs\.found != '0'\)/)
+    expect(assume.if).toMatch(/\(hashFiles\('doc-impact\.json'\) != '' && \(steps\.review\.outcome == 'success' \|\| steps\.review\.outcome == 'failure'\)\) \|\| steps\.detect\.outputs\.found != '0'\)$/)
   })
 
   // Evaluates a step's `if:` the way Actions does for the operators these
@@ -674,7 +677,7 @@ describe('doc-strings-review workflow: no bot token while the model runs', () =>
     files,
     steps: {
       lint: { outputs: { declarations: lint, removals } },
-      enterprise: { outputs: { found: enterprise } },
+      detect: { outputs: { found: enterprise } },
       review: { outcome: review, outputs: {} }
     }
   })
@@ -817,7 +820,7 @@ describe('doc-strings-review workflow: diff base (executed)', () => {
     expect(order.indexOf('Resolve the diff base')).toBeLessThan(order.indexOf('Lint doc strings in the diff'))
     expect(stepNamed('Lint doc strings in the diff').env.BASE).toBe('${{ steps.diffbase.outputs.base }}')
     expect(stepNamed('Save the source diff for the review').env.BASE).toBe('${{ steps.diffbase.outputs.base }}')
-    expect(stepNamed('Detect enterprise gating changes').env.BASE).toBe('${{ steps.diffbase.outputs.base }}')
+    expect(stepNamed('Detect user-facing changes').env.BASE).toBe('${{ steps.diffbase.outputs.base }}')
     const checkout = job.steps.find((s) => (s.uses || '').startsWith('actions/checkout@'))
     expect(checkout.with['fetch-depth']).not.toBe(1)
     // base.sha may still feed the fallback, but nothing else reads it.
@@ -980,17 +983,20 @@ describe('doc-strings-review workflow: doc-impact dispatch (executed)', () => {
   })
 })
 
-describe('doc-strings-review workflow: enterprise gating detection (executed)', () => {
+describe('doc-strings-review workflow: user-facing change detection (executed)', () => {
   // streaming-enterprise PR 579 added a license_required_feature value and
   // changed license enforcement without touching a doc string, so the lint
-  // gate stayed shut and nothing was filed. This step is the mechanical
-  // backstop; these tests pin its fail-closed behaviour the same way the
-  // lint-step tests pin theirs.
-  const step = stepNamed('Detect enterprise gating changes')
-  const env = { BASE: 'abc123', PKG: RESOLVED_PKG }
+  // gate stayed shut and nothing was filed; PR 203 changed a property
+  // default and PR 597 added an rpk flag the same way. This step is the
+  // mechanical backstop; these tests pin its fail-open-to-zero behaviour
+  // the same way the lint-step tests pin theirs, and that a failure is
+  // never silent: the job summary says the detector did not run.
+  const step = stepNamed('Detect user-facing changes')
+  const env = { BASE: 'abc123', PKG: RESOLVED_PKG, GITHUB_STEP_SUMMARY: 'summary.md' }
   const REPORT = JSON.stringify({
-    findings: [{ surface: 'enterprise-feature', name: 'manual_finalization', change_kind: 'enterprise-feature-added', affected_pages: ['https://docs.redpanda.com/current/get-started/licensing/overview/'], summary: 's' }],
-    proposed_ticket: { title: 't', body: 'b' }
+    findings: [{ surface: 'properties', name: 'rpc_client_connections_per_peer', change_kind: 'default-changed', severity: 'high', file: 'src/v/config/configuration.cc', line: 161, affected_pages: ['https://docs.redpanda.com/streaming/current/reference/properties/cluster-properties/'], summary: 's' }],
+    proposed_ticket: { title: 't', body: 'b' },
+    summary: { total: 1, bySeverity: { high: 1 }, notes: [{ detector: 'rpk', message: 'x.go:3: cobra.Command literal is cut by the hunk' }] }
   })
 
   const runnerTemp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'runner-temp-'))
@@ -998,52 +1004,103 @@ describe('doc-strings-review workflow: enterprise gating detection (executed)', 
     const tmp = runnerTemp()
     const r = execRun(step, { env: { ...env, RUNNER_TEMP: tmp, ...extra }, stubs: { npx: NPX_STUB }, files })
     r.tmpExists = (f) => fs.existsSync(path.join(tmp, f))
+    r.summary = () => r.read('summary.md') || ''
     return r
   }
 
-  test('a finding opens the gate and leaves the report in RUNNER_TEMP, outside the checkout', () => {
+  test('a finding opens the gate, leaves the report in RUNNER_TEMP outside the checkout, and lands in the job summary', () => {
     const r = detect({ LINT_JSON: REPORT })
     expect(r.status).toBe(0)
     expect(r.outputs.found).toBe('1')
-    expect(r.tmpExists('enterprise-impact.json')).toBe(true)
-    expect(r.exists('enterprise-impact.json')).toBe(false)
+    expect(r.tmpExists('user-facing-impact.json')).toBe(true)
+    expect(r.exists('user-facing-impact.json')).toBe(false)
     const argv = fs.readFileSync(path.join(r.dir, 'npx-argv'), 'utf8')
     expect(argv).toMatch(/^--package=/m)
-    expect(argv).toMatch(/^detect-enterprise-gating$/m)
+    expect(argv).toMatch(/^detect-user-facing-changes$/m)
     expect(argv).toMatch(/^abc123$/m)
+    expect(argv).toMatch(/^--repo$/m)
+    const summary = r.summary()
+    expect(summary).toMatch(/## User-facing change detection/)
+    expect(summary).toMatch(/Mechanical findings: 1 \(1 high\)/)
+    expect(summary).toMatch(/\| high \| properties \| default-changed \| `rpc_client_connections_per_peer` \| src\/v\/config\/configuration\.cc:161 \|/)
+    expect(summary).toMatch(/Not resolved:\n- x\.go:3/)
   })
 
-  test('an empty report closes the gate and leaves no file behind', () => {
+  test('an empty report closes the gate, leaves no file behind, and says so in the job summary', () => {
     const r = detect({ LINT_JSON: '{"findings":[]}' })
     expect(r.outputs.found).toBe('0')
-    expect(r.tmpExists('enterprise-impact.json')).toBe(false)
+    expect(r.tmpExists('user-facing-impact.json')).toBe(false)
+    expect(r.summary()).toMatch(/No user-facing changes detected/)
+    expect(r.all).not.toMatch(/::warning::/)
   })
 
   test.each([
     ['a CLI failure', { LINT_EXIT: '1', LINT_JSON: '' }],
-    ['zero bytes of output', { LINT_JSON: '' }],
+    ['zero bytes of output', { LINT_JSON: '' }]
+  ])('%s closes the gate at 0 with a visible warning and a job-summary line, never silently', (_label, extra) => {
+    const r = detect(extra)
+    expect(r.status).toBe(0)
+    expect(r.outputs.found).toBe('0')
+    expect(r.tmpExists('user-facing-impact.json')).toBe(false)
+    expect(r.all).toMatch(/::warning::detect-user-facing-changes did not complete/)
+    expect(r.summary()).toMatch(/The detector did not run or did not complete/)
+  })
+
+  test.each([
     ['non-JSON output', { LINT_JSON: 'not json' }],
     ['findings of the wrong shape', { LINT_JSON: '{"findings":{"a":1}}' }]
   ])('%s closes the gate at 0, never empty', (_label, extra) => {
     const r = detect(extra)
     expect(r.status).toBe(0)
     expect(r.outputs.found).toBe('0')
-    expect(r.tmpExists('enterprise-impact.json')).toBe(false)
+    expect(r.tmpExists('user-facing-impact.json')).toBe(false)
   })
 
-  test('every credential and dispatch gate also opens on a gating finding', () => {
+  test('the gate opens on a detector-only finding and stays closed on a no-change diff, with the real CLI output', () => {
+    // The npx stub replays what the real doc-tools CLI printed for two
+    // synthetic diffs: a property default change with no doc string
+    // touched, and a comment-only change to the same file. This is the
+    // chain the lint gate missed: detector -> step -> found -> dispatch if.
+    const run = (patch) => spawnSync(process.execPath, [path.join(__dirname, '..', '..', 'bin', 'doc-tools.js'), 'detect-user-facing-changes', '--patch', patch, '--format', 'json'], { encoding: 'utf8' })
+    const fixtures = path.join(__dirname, '..', 'fixtures', 'user-facing-changes')
+    const changed = run(path.join(fixtures, 'properties-default-changed.patch'))
+    expect(changed.status).toBe(0)
+    expect(JSON.parse(changed.stdout).findings.map((f) => [f.change_kind, f.name])).toEqual([['default-changed', 'rpc_client_connections_per_peer']])
+    const opened = detect({ LINT_JSON: changed.stdout })
+    expect(opened.outputs.found).toBe('1')
+    expect(opened.tmpExists('user-facing-impact.json')).toBe(true)
+
+    const unchanged = run(path.join(fixtures, 'properties-comment-only.patch'))
+    expect(unchanged.status).toBe(0)
+    expect(JSON.parse(unchanged.stdout).findings).toEqual([])
+    const closed = detect({ LINT_JSON: unchanged.stdout })
+    expect(closed.outputs.found).toBe('0')
+    expect(closed.tmpExists('user-facing-impact.json')).toBe(false)
+  })
+
+  test('every credential and dispatch gate also opens on a detector finding', () => {
     for (const name of ['Assume the AWS role that can read the bot token', "Drop fetched credentials from the review's environment", 'Dispatch doc-impact']) {
-      expect(stepNamed(name).if).toMatch(/steps\.enterprise\.outputs\.found != '0'/)
+      expect(stepNamed(name).if).toMatch(/steps\.detect\.outputs\.found != '0'/)
+      // EITHER declarations changed OR the detector found something.
+      expect(stepNamed(name).if).toMatch(/steps\.lint\.outputs\.declarations != '0' \|\| steps\.lint\.outputs\.removals != '0' \|\| steps\.detect\.outputs\.found != '0'/)
     }
-    // But the model review and the bearer mint do not: a gating-only run
+    // But the model review and the bearer mint do not: a detector-only run
     // dispatches with the bot token and runs no model.
-    expect(stepNamed('Claude review with suggestions').if).not.toMatch(/steps\.enterprise/)
-    expect(stepNamed('Fetch the ADP client credential').if).not.toMatch(/steps\.enterprise/)
+    expect(stepNamed('Claude review with suggestions').if).not.toMatch(/steps\.detect/)
+    expect(stepNamed('Fetch the ADP client credential').if).not.toMatch(/steps\.detect/)
     expect(stepNamed('Fetch the ADP client credential').if).toMatch(/steps\.lint\.outputs\.declarations/)
+    expect(stepNamed('Mint the ADP gateway token').if).not.toMatch(/steps\.detect/)
+    // The detector runs unconditionally, right after the lint, and never
+    // blocks: no `if`, and a failure inside is caught by the body.
+    expect(step.if).toBeUndefined()
+    expect(step['continue-on-error']).toBeUndefined()
+    const order = job.steps.map((s) => s.name)
+    expect(order.indexOf('Lint doc strings in the diff')).toBeLessThan(order.indexOf('Detect user-facing changes'))
+    expect(order.indexOf('Detect user-facing changes')).toBeLessThan(order.indexOf('Dispatch doc-impact'))
   })
 })
 
-describe('doc-strings-review workflow: doc-impact dispatch merges gating findings (executed)', () => {
+describe('doc-strings-review workflow: doc-impact dispatch merges mechanical findings (executed)', () => {
   const step = stepNamed('Dispatch doc-impact')
   const expressions = {
     '${{ github.repository }}': 'redpanda-data/redpanda',
@@ -1062,35 +1119,57 @@ describe('doc-strings-review workflow: doc-impact dispatch merges gating finding
   function dispatch (files, extraEnv = {}) {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-temp-'))
     const workspace = { ...files }
-    if ('enterprise-impact.json' in workspace) {
-      fs.writeFileSync(path.join(tmp, 'enterprise-impact.json'), workspace['enterprise-impact.json'])
-      delete workspace['enterprise-impact.json']
+    if ('user-facing-impact.json' in workspace) {
+      fs.writeFileSync(path.join(tmp, 'user-facing-impact.json'), workspace['user-facing-impact.json'])
+      delete workspace['user-facing-impact.json']
     }
     return execRun(step, { env: { RUNNER_TEMP: tmp, ...env, ...extraEnv }, expressions, stubs: { gh: GH_RECORDER }, files: workspace })
   }
   const payload = (r) => JSON.parse(fs.readFileSync(path.join(r.dir, 'gh-stdin'), 'utf8')).client_payload.impact
 
-  test('with no model report, the gating report is dispatched on its own', () => {
-    const r = dispatch({ 'enterprise-impact.json': JSON.stringify(gating) })
+  test('with no model report, the detector report is dispatched on its own', () => {
+    const r = dispatch({ 'user-facing-impact.json': JSON.stringify(gating) })
     expect(r.status).toBe(0)
     expect(payload(r).findings.map((f) => f.name)).toEqual(['manual_finalization'])
     expect(payload(r).proposed_ticket.title).toBe('gating')
   })
 
+  test('the detector report\'s run summary stays on the runner; the payload carries findings and the ticket only', () => {
+    // The CLI prints counts and unresolved notes under `summary` for the job
+    // summary step. The receiver reads findings and proposed_ticket, and
+    // the notes name files in a private PR, so they do not ride along.
+    const withSummary = { ...gating, summary: { total: 1, notes: [{ detector: 'rpk', message: 'private/path.go:3 cut' }] } }
+    const r = dispatch({ 'user-facing-impact.json': JSON.stringify(withSummary) })
+    expect(r.status).toBe(0)
+    const body = JSON.parse(fs.readFileSync(path.join(r.dir, 'gh-stdin'), 'utf8'))
+    expect(body.event_type).toBe('doc-impact')
+    expect(body.client_payload.impact.summary).toBeUndefined()
+    expect(JSON.stringify(body)).not.toMatch(/private\/path\.go/)
+    // The exact checks the docs-site router applies on receipt
+    // (doc-impact-dispatch.yml: pr_url string, impact.findings array, and
+    // the fields it reads per finding).
+    expect(typeof body.client_payload.pr_url).toBe('string')
+    expect(Array.isArray(body.client_payload.impact.findings)).toBe(true)
+    for (const f of body.client_payload.impact.findings) {
+      for (const k of ['surface', 'name', 'change_kind', 'summary']) expect(typeof f[k]).toBe('string')
+      expect(Array.isArray(f.affected_pages)).toBe(true)
+    }
+  })
+
   test('with both, the gating findings join the model report and the body gains the gating section', () => {
     const model = { findings: [finding('cloud_storage_cache_size')], proposed_ticket: { title: 'model', body: 'model body' } }
-    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify(gating) })
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'user-facing-impact.json': JSON.stringify(gating) })
     const impact = payload(r)
     expect(impact.findings.map((f) => f.name)).toEqual(['manual_finalization', 'cloud_storage_cache_size'])
     expect(impact.proposed_ticket.title).toBe('model')
     expect(impact.proposed_ticket.body).toMatch(/^model body/)
-    expect(impact.proposed_ticket.body).toMatch(/Enterprise gating changes in this PR/)
+    expect(impact.proposed_ticket.body).toMatch(/User-facing changes in this PR/)
     expect(impact.proposed_ticket.body).toMatch(/manual_finalization \(enterprise-feature-added\)/)
   })
 
   test('the merge never grows past the ten-finding cap the schema enforces', () => {
     const model = { findings: Array.from({ length: 10 }, (_, i) => finding(`p${i}`)), proposed_ticket: { title: 'model', body: 'b' } }
-    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify(gating) })
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'user-facing-impact.json': JSON.stringify(gating) })
     expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(true)
     expect(payload(r).findings).toHaveLength(10)
   })
@@ -1099,7 +1178,7 @@ describe('doc-strings-review workflow: doc-impact dispatch merges gating finding
     // Ten model findings plus one gating finding: the cap has to drop a
     // model finding, never the gating one the model could not see.
     const model = { findings: Array.from({ length: 10 }, (_, i) => finding(`p${i}`)), proposed_ticket: { title: 'model', body: 'b' } }
-    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify(gating) })
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'user-facing-impact.json': JSON.stringify(gating) })
     const names = payload(r).findings.map((f) => f.name)
     expect(names[0]).toBe('manual_finalization')
     expect(names).not.toContain('p9')
@@ -1113,7 +1192,7 @@ describe('doc-strings-review workflow: doc-impact dispatch merges gating finding
     // where the model never ran is PR-authored, not run output, and must not
     // ride the bot token: only the mechanical report goes out.
     const planted = { findings: Array.from({ length: 10 }, (_, i) => finding(`planted${i}`)), proposed_ticket: { title: 'planted title', body: 'planted body' } }
-    const r = dispatch({ 'doc-impact.json': JSON.stringify(planted), 'enterprise-impact.json': JSON.stringify(gating) }, { REVIEW_OUTCOME: outcome })
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(planted), 'user-facing-impact.json': JSON.stringify(gating) }, { REVIEW_OUTCOME: outcome })
     const impact = payload(r)
     expect(impact.findings.map((f) => f.name)).toEqual(['manual_finalization'])
     expect(impact.proposed_ticket.title).toBe('gating')
@@ -1132,14 +1211,14 @@ describe('doc-strings-review workflow: doc-impact dispatch merges gating finding
       env: { RUNNER_TEMP: fs.mkdtempSync(path.join(os.tmpdir(), 'runner-temp-')), ...env, REVIEW_OUTCOME: 'skipped' },
       expressions,
       stubs: { gh: GH_RECORDER },
-      files: { 'enterprise-impact.json': JSON.stringify(gating) }
+      files: { 'user-facing-impact.json': JSON.stringify(gating) }
     })
     expect(r.status).toBe(0)
     expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(false)
   })
 
   test('a malformed gating report alone is still schema-checked and not dispatched', () => {
-    const r = dispatch({ 'enterprise-impact.json': JSON.stringify({ findings: [{ surface: 'enterprise-feature' }], proposed_ticket: { title: 't', body: 'b' } }) })
+    const r = dispatch({ 'user-facing-impact.json': JSON.stringify({ findings: [{ surface: 'enterprise-feature' }], proposed_ticket: { title: 't', body: 'b' } }) })
     expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(false)
     expect(r.all).toMatch(/::warning::/)
     expect(r.status).toBe(0)
@@ -1153,7 +1232,7 @@ describe('doc-strings-review workflow: doc-impact dispatch merges gating finding
   ])('a model report that is %s is dropped and the gating report still goes out', (_label, model) => {
     // The gating finding is the one thing in the dispatch the model did not
     // write, so a broken or steered model report must not be able to hide it.
-    const r = dispatch({ 'doc-impact.json': model, 'enterprise-impact.json': JSON.stringify(gating) })
+    const r = dispatch({ 'doc-impact.json': model, 'user-facing-impact.json': JSON.stringify(gating) })
     expect(r.status).toBe(0)
     expect(r.all).toMatch(/::warning::.*model/)
     const impact = payload(r)
@@ -1164,9 +1243,9 @@ describe('doc-strings-review workflow: doc-impact dispatch merges gating finding
   test('a malformed gating report is dropped and a valid model report still goes out', () => {
     // The mirror case: a detector bug must not sink the model's findings.
     const model = { findings: [finding('cloud_storage_cache_size')], proposed_ticket: { title: 'model', body: 'model body' } }
-    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify({ findings: 'x' }) })
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'user-facing-impact.json': JSON.stringify({ findings: 'x' }) })
     expect(r.status).toBe(0)
-    expect(r.all).toMatch(/::warning::.*gating/)
+    expect(r.all).toMatch(/::warning::.*detector/)
     const impact = payload(r)
     expect(impact.findings.map((f) => f.name)).toEqual(['cloud_storage_cache_size'])
     expect(impact.proposed_ticket.title).toBe('model')
@@ -1174,7 +1253,7 @@ describe('doc-strings-review workflow: doc-impact dispatch merges gating finding
 
   test('a model report of more than ten findings is dropped whole, not trimmed', () => {
     const model = { findings: Array.from({ length: 11 }, (_, i) => finding(`p${i}`)), proposed_ticket: { title: 'model', body: 'b' } }
-    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify(gating) })
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'user-facing-impact.json': JSON.stringify(gating) })
     const impact = payload(r)
     expect(impact.findings.map((f) => f.name)).toEqual(['manual_finalization'])
     expect(impact.proposed_ticket.title).toBe('gating')
@@ -1189,7 +1268,7 @@ describe('doc-strings-review workflow: doc-impact dispatch merges gating finding
 
 describe('doc-strings-review workflow: checked-in run outputs (executed)', () => {
   const step = stepNamed('Remove run-output files the PR checked in')
-  const OUTPUTS = ['doc-impact.json', 'doc-impact.merged.json', 'review-summary.md', 'lint-findings.json', 'pr-diff.patch', 'pr-diff.full', 'pr-diff.err', 'enterprise-impact.json', 'enterprise-stderr.txt', 'embedded-reference-strings.md', 'terminology.md']
+  const OUTPUTS = ['doc-impact.json', 'doc-impact.merged.json', 'review-summary.md', 'lint-findings.json', 'pr-diff.patch', 'pr-diff.full', 'pr-diff.err', 'user-facing-impact.json', 'enterprise-impact.json', 'enterprise-stderr.txt', 'embedded-reference-strings.md', 'terminology.md']
 
   test('runs straight after checkout, before any step reads or writes those files', () => {
     const idx = job.steps.indexOf(step)
@@ -1850,5 +1929,133 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(review.with.prompt).toMatch(/one exception to the suggestion rules above/)
       expect(review.with.prompt).toMatch(/still ends with the changed declaration's\s+fingerprint footer/)
     })
+  })
+})
+
+describe('doc-strings-review workflow: npx never runs inside the PR checkout (executed)', () => {
+  // The job holds id-token: write. npm takes its project config from the
+  // nearest directory with a package.json, so a PR .npmrc with
+  // node-options=--require ./evil.js ran PR code inside doc-tools with
+  // ACTIONS_ID_TOKEN_REQUEST_TOKEN in its environment. Each step that runs
+  // npx must run it from RUNNER_TEMP, point --repo at the checkout, and
+  // leave the OIDC request variables out of npm's environment.
+  const RECORDER = `#!/bin/bash
+pwd > "$HOME/npx-cwd"
+printf '%s\\n' "$@" > "$HOME/npx-argv"
+env > "$HOME/npx-env"
+if [ -n "$LINT_JSON" ]; then printf '%s' "$LINT_JSON"; fi
+`
+  test.each([
+    ['Lint doc strings in the diff', '{"findings":[],"summary":{"totalDeclarations":1}}'],
+    ['Detect user-facing changes', '{"findings":[]}']
+  ])('%s', (name, json) => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-temp-'))
+    const r = execRun(stepNamed(name), {
+      env: { BASE: 'abc', SURFACES: '', PKG: RESOLVED_PKG, RUNNER_TEMP: tmp, GITHUB_STEP_SUMMARY: path.join(tmp, 'summary.md'), LINT_JSON: json, ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'secret', ACTIONS_ID_TOKEN_REQUEST_URL: 'https://x' },
+      stubs: { npx: RECORDER }
+    })
+    expect(r.status).toBe(0)
+    const cwd = fs.realpathSync(r.read('npx-cwd').trim())
+    expect(cwd).toBe(fs.realpathSync(tmp))
+    expect(cwd).not.toBe(fs.realpathSync(r.dir))
+    const argv = r.read('npx-argv').split('\n')
+    expect(fs.realpathSync(argv[argv.indexOf('--repo') + 1])).toBe(fs.realpathSync(r.dir))
+    expect(r.read('npx-env')).not.toMatch(/ACTIONS_ID_TOKEN_REQUEST_TOKEN/)
+  })
+})
+
+describe('doc-strings-review workflow: detector reporting (executed)', () => {
+  const step = stepNamed('Detect user-facing changes')
+  const run = (extra = {}, opts = {}) => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-temp-'))
+    const r = execRun(step, { env: { BASE: 'abc', PKG: RESOLVED_PKG, RUNNER_TEMP: tmp, GITHUB_STEP_SUMMARY: path.join(tmp, 'summary.md'), ...extra }, stubs: { npx: NPX_STUB }, ...opts })
+    r.summary = () => (fs.existsSync(path.join(tmp, 'summary.md')) ? fs.readFileSync(path.join(tmp, 'summary.md'), 'utf8') : '')
+    r.argv = () => (r.read('npx-argv') || '').split('\n')
+    return r
+  }
+
+  test('a report with an error field warns and never reads as "no changes" (review item 7)', () => {
+    const r = run({ LINT_JSON: '{"findings":[],"error":"git merge-base nosuchref HEAD failed"}' })
+    expect(r.outputs.found).toBe('0')
+    expect(r.all).toMatch(/::warning::detect-user-facing-changes did not complete \(git merge-base nosuchref/)
+    expect(r.summary()).toMatch(/did not run or did not complete/)
+    expect(r.summary()).not.toMatch(/No user-facing changes detected/)
+  })
+
+  test('findings of the wrong shape warn too', () => {
+    const r = run({ LINT_JSON: '{"findings":{"a":1}}' })
+    expect(r.outputs.found).toBe('0')
+    expect(r.all).toMatch(/::warning::/)
+  })
+
+  test('unresolved notes are shown when nothing was found', () => {
+    const r = run({ LINT_JSON: '{"findings":[],"summary":{"total":0,"notes":[{"detector":"properties","message":"configuration.cc:9: could not parse the initializer of x"}]}}' })
+    expect(r.outputs.found).toBe('0')
+    expect(r.summary()).toMatch(/Not resolved:\n- configuration\.cc:9: could not parse/)
+  })
+
+  test('a run with only low findings says so and keeps the gate shut', () => {
+    const r = run({ LINT_JSON: '{"findings":[],"summary":{"total":1,"gating":0}}' })
+    expect(r.outputs.found).toBe('0')
+    expect(r.summary()).toMatch(/1 low-severity change\(s\) ride along only/)
+  })
+
+  test('a backport to a release branch is skipped (review item 14)', () => {
+    const r = run({ BASE_REF: 'v26.2.x', DEFAULT_BRANCH: 'dev', LINT_JSON: '{"findings":[{"name":"x"}]}' })
+    expect(r.outputs.found).toBe('0')
+    expect(r.exists('npx-argv')).toBe(false)
+    // Negative control: the default branch is not skipped.
+    const r2 = run({ BASE_REF: 'dev', DEFAULT_BRANCH: 'dev', LINT_JSON: '{"findings":[]}' })
+    expect(r2.exists('npx-argv')).toBe(true)
+  })
+
+  test('inputs.surfaces picks the detectors (review nit)', () => {
+    const r = run({ SURFACES: 'properties,rpk,metrics,api', LINT_JSON: '{"findings":[]}' })
+    const argv = r.argv()
+    expect(argv[argv.indexOf('--detectors') + 1]).toBe('properties,enums,enterprise-gating,constants,rpk,metrics,api')
+    expect(run({ LINT_JSON: '{"findings":[]}' }).argv()).not.toContain('--detectors')
+  })
+
+  test('fingerprints an earlier push dispatched are passed to the CLI', () => {
+    const state = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-state-'))
+    fs.writeFileSync(path.join(state, 'dispatched-findings.txt'), 'aaaaaaaaaaaaaaaa\n')
+    const argv = run({ STATE_DIR: state, LINT_JSON: '{"findings":[]}' }).argv()
+    expect(argv[argv.indexOf('--dispatched') + 1]).toBe(path.join(state, 'dispatched-findings.txt'))
+  })
+})
+
+describe('doc-strings-review workflow: dispatched findings are recorded (executed)', () => {
+  const step = stepNamed('Dispatch doc-impact')
+  // Review 412 round 3: findings past the cap of ten are named in the
+  // ticket, so they count as dispatched and must not go out again.
+  test('a dispatch records the fingerprints of findings past the cap too', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-temp-'))
+    const f = (name, fp) => ({ surface: 'properties', name, change_kind: 'added', affected_pages: ['https://docs.redpanda.com/x/'], summary: 's', confidence: 'mechanical', fingerprint: fp })
+    const fps = Array.from({ length: 12 }, (_, i) => i.toString(16).padStart(16, '0'))
+    fs.writeFileSync(path.join(tmp, 'user-facing-impact.json'), JSON.stringify({ findings: fps.slice(0, 10).map((fp, i) => f(`p${i}`, fp)), proposed_ticket: { title: 't', body: 'b' }, summary: { fingerprints: fps } }))
+    const r = execRun(step, { env: { RUNNER_TEMP: tmp, GH_TOKEN: 'bot', DISPATCH_REPO: 'redpanda-data/docs-site', REVIEW_OUTCOME: 'skipped' }, stubs: { gh: '#!/bin/bash\ncat > /dev/null\n' } })
+    expect(r.status).toBe(0)
+    expect(fs.readFileSync(path.join(tmp, 'doc-strings-review-state', 'dispatched-findings.txt'), 'utf8').trim().split('\n')).toEqual(fps)
+  })
+  test('a successful dispatch records the mechanical fingerprints, and a later step saves them', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-temp-'))
+    const f = (name, extra) => ({ surface: 'properties', name, change_kind: 'added', affected_pages: ['https://docs.redpanda.com/x/'], summary: 's', ...extra })
+    fs.writeFileSync(path.join(tmp, 'user-facing-impact.json'), JSON.stringify({ findings: [f('a', { confidence: 'mechanical', fingerprint: '0123456789abcdef' })], proposed_ticket: { title: 't', body: 'b' } }))
+    const r = execRun(step, {
+      env: { RUNNER_TEMP: tmp, GH_TOKEN: 'bot', DISPATCH_REPO: 'redpanda-data/docs-site', REVIEW_OUTCOME: 'skipped' },
+      stubs: { gh: '#!/bin/bash\ncat > /dev/null\n' }
+    })
+    expect(r.status).toBe(0)
+    expect(fs.readFileSync(path.join(tmp, 'doc-strings-review-state', 'dispatched-findings.txt'), 'utf8')).toBe('0123456789abcdef\n')
+    expect(r.outputs.recorded).toBe('true')
+    // A failed dispatch records nothing.
+    const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-temp-'))
+    fs.copyFileSync(path.join(tmp, 'user-facing-impact.json'), path.join(tmp2, 'user-facing-impact.json'))
+    const r2 = execRun(step, { env: { RUNNER_TEMP: tmp2, GH_TOKEN: 'bot', DISPATCH_REPO: 'x/y', REVIEW_OUTCOME: 'skipped' }, stubs: { gh: '#!/bin/bash\ncat > /dev/null\nexit 1\n' } })
+    expect(r2.status).not.toBe(0)
+    expect(fs.existsSync(path.join(tmp2, 'doc-strings-review-state', 'dispatched-findings.txt'))).toBe(false)
+    const order = job.steps.map((s) => s.name)
+    expect(order.indexOf('Save the dispatched-findings state')).toBeGreaterThan(order.indexOf('Dispatch doc-impact'))
+    expect(stepNamed('Save the dispatched-findings state').if).toBe("steps.dispatch.outputs.recorded == 'true'")
   })
 })
