@@ -9,8 +9,10 @@ const { execRun } = require('./helpers/exec-run')
 /**
  * The docs PR review runs `doc-tools lint-screenshots` in its own job,
  * screenshot_lint, which checks out the PR head and holds no id-token.
- * screenshot_gate holds id-token for the vision pass, never checks out the
- * PR head, and reads the lint result from an artifact. These tests check
+ * screenshot_gate holds id-token for the vision pass, makes no direct
+ * PR-head checkout (the claude-skill action's own checkout only runs
+ * npm install -g, which ignores a project .npmrc), and reads the lint
+ * result from an artifact. These tests check
  * the jobs' permissions and wiring, and execute the lint step's run: body
  * (helpers/exec-run.js) against a hostile checkout whose .npmrc points npm
  * at 127.0.0.1:9: the step's npx must not see that registry. A copy of the
@@ -74,7 +76,7 @@ describe('docs PR review: screenshot jobs', () => {
     expect(LINT.env.SRC).toBe('${{ github.workspace }}/.screenshot-lint')
   })
 
-  test('screenshot_gate, which holds id-token, never checks out the PR head or runs npx', () => {
+  test('screenshot_gate, which holds id-token, makes no direct PR-head checkout and runs no npx', () => {
     expect(GATE_JOB.permissions['id-token']).toBe('write')
     for (const s of GATE_JOB.steps) {
       if (String(s.uses).startsWith('actions/checkout@')) expect(s.with && s.with.ref).toBeUndefined()

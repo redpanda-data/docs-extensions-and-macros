@@ -1066,9 +1066,11 @@ jobs:
   # whatever that served could mint an OIDC token. Nothing in it needs a
   # credential. As defense in depth, npx runs from RUNNER_TEMP with --root
   # pointing at the checkout, and without GH_TOKEN.
-  # screenshot_gate, which holds id-token for the vision pass, never checks
-  # out the PR head and reads the lint result from the screenshot-lint
-  # artifact.
+  # screenshot_gate, which holds id-token for the vision pass, makes no
+  # direct PR-head checkout, runs no npx, and reads the lint result from the
+  # screenshot-lint artifact. The claude-skill action it calls does check
+  # out the PR head, but only runs npm install -g there, which ignores a
+  # project .npmrc.
   # ──────────────────────────────────────────────────────────────────────
   screenshot_lint:
     needs: [gate, classify]
