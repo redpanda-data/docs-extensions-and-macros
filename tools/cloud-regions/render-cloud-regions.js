@@ -1,7 +1,10 @@
 const fs = require('fs');
 const path = require('path');
 const handlebars = require('handlebars');
+const { generatedMarker } = require('../../cli-utils/generated-marker');
 
+// The provenance marker the templates write on their first line
+handlebars.registerHelper('generatedMarker', generatedMarker);
 
 /**
  * Generates a formatted string representing cloud provider regions using a Handlebars template.
