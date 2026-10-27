@@ -1,0 +1,36 @@
+{
+  "item": "redpanda-operator-1615",
+  "recorded_at": "2026-09-12T10:00:00.000Z",
+  "server_url": "https://docs.redpanda.com/mcp",
+  "model": "claude-sonnet-5",
+  "source": "production",
+  "calls": [
+    {
+      "tool": "ask_redpanda_question",
+      "arguments": {
+        "question": "How do I enable rack awareness?",
+        "platform": "self-managed"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"results\":[{\"source_url\":\"https://docs.redpanda.com/streaming/current/manage/rack-awareness/\"}]}"
+        }
+      ],
+      "is_error": false
+    },
+    {
+      "tool": "get_api_reference_content",
+      "arguments": {
+        "url": "https://docs.redpanda.com/api/doc/admin/"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "page not found"
+        }
+      ],
+      "is_error": true
+    }
+  ]
+}
