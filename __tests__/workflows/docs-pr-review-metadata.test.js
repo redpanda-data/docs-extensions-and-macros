@@ -139,6 +139,9 @@ describe('docs PR review: adding check-metadata to the review', () => {
       verdict: 'fail',
       blocking: ["page metadata: `modules/manage/pages/a.adoc:2` page-solution-use-cases value 'Data mesh' is not in the taxonomy"],
       suggestions: ['prose', "page metadata: `modules/manage/pages/a.adoc:2` page-categories value 'Iceberg' is deprecated; use 'Iceberg Topics' instead"],
+      // Deterministic: an incremental re-review recomputes these instead of
+      // carrying them over (docs-team-standards' aggregate-review.sh).
+      check_blocking: ["page metadata: `modules/manage/pages/a.adoc:2` page-solution-use-cases value 'Data mesh' is not in the taxonomy"],
     })
     expect(r.findings).toMatch(/^# Review\n\n### Page metadata \(doc-tools check-metadata\)\n\n- error: `modules\/manage\/pages\/a\.adoc:2` page-solution-use-cases/)
     expect(r.exists('review-output/check-metadata.json')).toBe(true)
