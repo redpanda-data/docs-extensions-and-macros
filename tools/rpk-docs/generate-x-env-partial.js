@@ -28,17 +28,20 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { spawnSync } = require('child_process')
+const { generatedMarker } = require('../../cli-utils/generated-marker')
 
 // A healthy rpk exposes ~30 -X options. Refuse to overwrite the partial
 // with a suspiciously small table (for example, if -X list output ever
 // changes format and only partially parses).
 const MIN_OPTIONS = 20
 
+// The shared marker, so convert-to-markdown reports the partial as generated.
 const GENERATED_BANNER = `// tag::generated[]
-// Generated from rpk's own -X option data. Do not edit manually:
-// regenerate with doc-tools generate rpk-docs (which rewrites this
-// file alongside the rpk command pages) or, for a targeted refresh,
-// doc-tools generate rpk-env-partial.
+${generatedMarker(
+  'rpk-env-partial',
+  "rpk's own -X option data (rpk --print-tree)",
+  'Regenerate with doc-tools generate rpk-docs, which rewrites this file alongside the rpk command pages, or, for a targeted refresh, doc-tools generate rpk-env-partial.'
+)}
 `
 
 /**

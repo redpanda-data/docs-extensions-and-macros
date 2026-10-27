@@ -83,7 +83,9 @@ function splitToolList (value) {
 
 /**
  * Tool and MCP settings of the production review, reduced to what the
- * impact pass uses: the redpanda-docs MCP tools plus Read and Write. Bash
+ * impact pass uses: the redpanda-docs MCP tools plus the Read and file-write
+ * entries, as the workflow scopes them (`Read(./**)`, and `Edit(<path>)`,
+ * which is what lets Write create that one file). Bash
  * (gh, cat) is withheld because the eval has no checkout and no network for
  * gh; the inputs are files in the working directory instead.
  */
@@ -95,7 +97,7 @@ function extractClaudeSettings (claudeArgs) {
   const allowed = splitToolList(quotedArg(claudeArgs, '--allowed-tools'))
   const mcpTools = allowed.filter((t) => t.startsWith(`mcp__${MCP_SERVER}__`))
   if (mcpTools.length === 0) throw new Error(`no mcp__${MCP_SERVER}__* tools in --allowed-tools`)
-  const evalAllowed = mcpTools.concat(['Read', 'Write'].filter((t) => allowed.includes(t)))
+  const evalAllowed = mcpTools.concat(allowed.filter((t) => /^(Read|Write|Edit)(\(|$)/.test(t)))
   const disallowed = splitToolList(quotedArg(claudeArgs, '--disallowed-tools'))
   const maxTurns = Number((claudeArgs.match(/--max-turns\s+(\d+)/) || [])[1] || 40)
   return { mcpConfig, mcpTools, allowedTools: evalAllowed, disallowedTools: disallowed, maxTurns }

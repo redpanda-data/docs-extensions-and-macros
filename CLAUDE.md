@@ -6,6 +6,16 @@ This repository contains tools that help write and maintain Redpanda's technical
 
 This toolbox helps Redpanda's documentation team in several ways. When Redpanda releases a new version, these tools extract information from the code (like configuration options, commands, and features) and create documentation pages automatically. They provide reusable templates and shortcuts that ensure all docs look and work the same way. Instead of manually documenting hundreds of configuration options or commands, these tools do it automatically. The repository also includes a bridge that lets Claude Code (an AI assistant) help with documentation tasks through natural conversation.
 
+## Automation prompts stay in this repository
+
+The prompts written into this repository's workflows, such as the doc-strings review in `.github/workflows/doc-strings-review.yml`, live here on purpose. Do not move them to docs-team-standards. This covers workflow prompts only: the MCP server's prompts live in docs-team-standards. Never make a workflow fetch a prompt, a skill, or a resource at run time from a branch of a repository other than the one under review. A workflow may run docs-team-standards skills when it checks them out at a pinned commit SHA, as the docs-pr-review pipeline's `.github/actions/claude-skill` action does, because that changes only when a reviewed pin bump changes it. Load them the way that action does (a checkout at a 40-hex `plugin_ref`, `--plugin-dir`, and a probe that the skills loaded), never through a marketplace install on a runner: docs-team-standards is private, so that clone fails silently and Claude runs without the skills while the job stays green.
+
+The reason is change control. Engineering repos call these workflows pinned to a commit SHA, so a prompt change reaches a repo only when that repo bumps its pin, in a pull request its owners review. A prompt fetched at run time from another repository's default branch would change every engineering repo's review the moment someone merged there, with no release, no pin bump, and no review by the repos it affects.
+
+This holds even when the motive is evaluation. Evaluate these prompts here, beside the workflow, with a harness modeled on docs-team-standards' (`claude -p`, regex patterns, an LLM judge, the production model pinned) that reads the prompt from the workflow file itself, so the eval and the pinned prompt always move together.
+
+Known exception, not a precedent: the review currently fetches `resources/writing-style/embedded-reference-strings.md` and `resources/writing-style/terminology.md` from docs-team-standards at run time, unpinned. That predates this note. Do not extend it to more files.
+
 ## Documentation for this repository
 
 ### If you write documentation
