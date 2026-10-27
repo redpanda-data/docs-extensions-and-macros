@@ -1,0 +1,9 @@
+# Checks: 'master' and Pandaproxy outside third-party names
+extends: substitution
+message: "Use '%s' instead of '%s', unless you are quoting a third-party name."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/terminology.md
+level: warning
+ignorecase: false
+swap:
+  '[Mm]asters?': leader, primary, main, or parent
+  "[Pp]anda[Pp]roxy": HTTP Proxy

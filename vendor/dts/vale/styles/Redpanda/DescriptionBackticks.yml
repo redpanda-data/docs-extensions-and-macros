@@ -1,0 +1,9 @@
+# Checks: backticks in :description: without pass:q[...]
+extends: existence
+message: "Wrap the description in pass:q[...] so its backticks render as code instead of literally."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/content-architecture.md#page-metadata
+level: warning
+scope: raw
+nonword: true
+tokens:
+  - '(?m)^:description:[ \t]*(?![ \t]|pass:)[^\n]*\x60[^\x60\n]+\x60'

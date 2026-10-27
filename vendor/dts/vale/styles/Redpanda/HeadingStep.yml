@@ -1,0 +1,10 @@
+# Checks: step numbers and 'Task:'/'Scenario:' labels in headings
+extends: existence
+message: "Don't use step numbers or generic labels in headings ('%s'). Describe what the section does."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#heading-rules
+level: error
+scope: heading
+ignorecase: true
+nonword: true
+tokens:
+  - '^(?:step\s*\d+|(?:task|scenario)\s*:)'

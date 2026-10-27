@@ -1,0 +1,8 @@
+# Checks: 'via'
+extends: substitution
+message: "Use '%s' instead of '%s'."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/terminology.md#general-word-list
+level: warning
+ignorecase: true
+swap:
+  via: with, through, or using

@@ -1,0 +1,8 @@
+# Checks: bare redpanda.yaml in prose
+extends: existence
+message: "Format '%s' as inline code (`redpanda.yaml`)."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/terminology.md#redpanda-specific-word-list
+level: error
+ignorecase: true
+tokens:
+  - '\bredpanda\.yaml\b'

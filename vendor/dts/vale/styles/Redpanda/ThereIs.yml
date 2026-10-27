@@ -1,0 +1,8 @@
+# Checks: sentences that start with 'There is' or 'There are'
+extends: existence
+message: "Don't start a sentence with '%s'. Lead with the subject."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#specific-guidance
+level: suggestion
+ignorecase: false
+raw:
+  - '(?:^|[.!?]\s+)There\s+(?:is|are)\b'

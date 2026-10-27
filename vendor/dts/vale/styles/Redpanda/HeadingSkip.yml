@@ -1,0 +1,30 @@
+# Checks: skipped heading levels
+extends: script
+message: "This heading skips a level. Nest headings one level at a time."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#heading-rules
+level: error
+scope: raw
+script: |
+  text := import("text")
+  matches := []
+  prev := 0
+  pos := 0
+  delim := ""
+  for l in text.split(scope, "\n") {
+    t := text.trim_space(l)
+    if delim != "" {
+      if t == delim { delim = "" }
+    } else if text.re_match(`^(-{4,}|\.{4,}|/{4,}|\+{4,}|_{4,}|\*{4,})$`, t) {
+      delim = t
+    } else {
+      m := text.re_find(`^(=+) \S`, l)
+      if m != undefined {
+        lvl := len(m[0][1].text)
+        if prev > 0 && lvl > prev + 1 {
+          matches = append(matches, {begin: pos, end: pos + len(l)})
+        }
+        prev = lvl
+      }
+    }
+    pos += len(l) + 1
+  }

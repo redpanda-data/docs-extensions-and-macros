@@ -1,0 +1,41 @@
+# Checks: code blocks without a language
+extends: script
+message: "Give this code block a language, for example [,bash] or [,yaml]."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/review-procedure.md#9-formatting
+level: warning
+scope: raw
+script: |
+  text := import("text")
+  matches := []
+  pos := 0
+  delim := ""
+  attr := ""
+  attrpos := 0
+  attrlen := 0
+  for l in text.split(scope, "\n") {
+    t := text.trim_space(l)
+    if delim != "" {
+      if t == delim { delim = "" }
+    } else if text.re_match(`^-{4,}$`, t) {
+      delim = t
+      if !text.re_match(`^\[(source)?,\s*[\w+#.-]+`, attr) {
+        if attr != "" {
+          matches = append(matches, {begin: attrpos, end: attrpos + attrlen})
+        } else {
+          matches = append(matches, {begin: pos, end: pos + len(l)})
+        }
+      }
+    } else if text.re_match(`^(\.{4,}|/{4,}|\+{4,}|_{4,}|\*{4,})$`, t) {
+      delim = t
+    }
+    if delim == "" || t == "----" {
+      if text.re_match(`^\[.*\]$`, t) {
+        attr = t
+        attrpos = pos
+        attrlen = len(l)
+      } else if t != "" && !text.re_match(`^\.[^.\s]`, t) {
+        attr = ""
+      }
+    }
+    pos += len(l) + 1
+  }

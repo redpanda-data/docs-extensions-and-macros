@@ -1,0 +1,8 @@
+# Checks: 'X or higher' instead of 'X or later'
+extends: existence
+message: "Use 'or later' for minimum versions, not '%s'."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/terminology.md#general-word-list
+level: error
+ignorecase: true
+raw:
+  - '\b\d+(?:\.\d+)+(?:\.x)?\s+(?:and|or)\s+(?:higher|above|newer|greater)\b'

@@ -1,0 +1,10 @@
+# Checks: objectives that start with understand, know, or learn
+extends: existence
+message: "Start a learning objective with an observable action verb, not '%s'."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/learning-objectives-guide.md#the-verb-problem
+level: error
+scope: raw
+ignorecase: true
+nonword: true
+tokens:
+  - '(?m)(?<=^:learning-objective-\d+:[ \t]*)(?:understand|know|learn|be aware of|appreciate)\b'
