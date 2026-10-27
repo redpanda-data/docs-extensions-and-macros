@@ -326,11 +326,14 @@ function isDelimiter (line) {
 /**
  * Prose paragraphs and lists of a section. Blocks, includes, images, block
  * titles, attribute lists, comments, conditionals, and list continuations are
- * dropped, and so is a sentence that only introduces a dropped block.
+ * dropped, and so is a sentence that only introduces a dropped block. With
+ * `{ tables: true }`, a `|===` table becomes a Markdown table in place instead.
  */
-function prose (lines, ctx) {
+function prose (lines, ctx, { tables = false } = {}) {
   const out = []
   let skip = null
+  let cols = null
+  let rows = null
   // The build-along file list is for a reader saving files, not for an agent.
   // Current pages give it its own `== Files for this step` section, which no
   // reader of this module asks for; older pages titled a list inside the last
@@ -349,16 +352,29 @@ function prose (lines, ctx) {
   }
   for (const raw of lines) {
     const line = raw.replace(/\s+$/, '')
+    if (rows) {
+      if (!TABLE_RX.test(line)) { rows.push(line); continue }
+      out.push('', markdownTable(rows, cols), '')
+      rows = null
+      cols = null
+      continue
+    }
     if (skip) { if (line === skip) skip = null; continue }
     if (fileList) { if (line) continue; fileList = false }
     if (/^\.Files for this step\b/.test(line)) { fileList = true; continue }
-    if (isDelimiter(line)) { dropLeadIn(); skip = line; continue }
+    if (tables && TABLE_RX.test(line)) { rows = []; continue }
+    if (isDelimiter(line)) { dropLeadIn(); skip = line; cols = null; continue }
+    if (tables) {
+      const c = line.match(/^\[.*\bcols=(?:"([^"]*)"|([^,\]]+)).*\]$/)
+      if (c) { cols = columnCount(c[1] || c[2]); continue }
+    }
     if (/^(image|video|include)::/.test(line)) { dropLeadIn(); continue }
     if (/^(ifn?def|endif|ifeval)::/.test(line)) continue
     if (/^\[.*\]$/.test(line) || /^\.\S/.test(line) || /^\/\//.test(line) || line === '+' || line === '--') continue
     if (/^:[\w-]+:/.test(line) || /^={3,} /.test(line)) continue
     out.push(line.replace(/^(NOTE|TIP|IMPORTANT|WARNING|CAUTION): /, (_, k) => `**${k[0]}${k.slice(1).toLowerCase()}:** `))
   }
+  if (rows) out.push('', markdownTable(rows, cols), '')
   return out.join('\n').replace(/\n{3,}/g, '\n\n').trim().split('\n').map((l) => inline(l, ctx)).join('\n')
     .replace(/^\* \[[ x]\] /gm, '- ').replace(/^\*+ /gm, '- ').replace(/^\.+ /gm, '1. ')
 }
@@ -402,17 +418,16 @@ function subsections (lines) {
  * its paragraphs); older content carries a three-column table instead.
  */
 function productionGaps (lines, ctx) {
-  const tableStart = lines.findIndex((l) => /^\|={3,}$/.test(l))
-  const { lead, subs } = subsections(tableStart < 0 ? lines : lines.slice(0, tableStart))
+  // Only a table before the first topic heading is the old summary table; a
+  // table inside a topic is that topic's content and stays in its text.
+  const { lead, subs } = subsections(lines)
   const out = []
   const intro = prose(lead, ctx)
   if (intro) out.push(intro, '')
-  if (tableStart >= 0) {
-    const rows = table(lines, ctx)
-    if (rows) out.push(rows, '')
-  }
+  const rows = table(lead, ctx)
+  if (rows) out.push(rows, '')
   for (const s of subs) {
-    const body = prose(s.lines, ctx)
+    const body = prose(s.lines, ctx, { tables: true })
     if (body) out.push(`### ${inline(s.title, ctx)}`, '', body, '')
   }
   return out
@@ -426,22 +441,55 @@ function failureModes (lines, ctx) {
   return close < 0 ? '' : prose(lines.slice(close + 1), ctx)
 }
 
-/** A three-column AsciiDoc table -> Markdown. */
-function table (lines, ctx) {
-  const i = lines.findIndex((l) => /^\|={3,}$/.test(l))
-  const j = lines.findIndex((l, k) => k > i && /^\|={3,}$/.test(l))
-  if (i < 0 || j < 0) return ''
+const TABLE_RX = /^\|={3,}$/
+
+/** The cells of the lines between a table's `|===` delimiters. */
+function tableCells (lines) {
   const cells = []
-  for (const l of lines.slice(i + 1, j)) {
+  for (const l of lines) {
     // A line holds one cell or several ("| Area | In this solution | In production").
     if (l.startsWith('|')) cells.push(...l.slice(1).split(/\s\|\s/).map((c) => c.trim()))
     else if (l.trim() && cells.length) cells[cells.length - 1] += ' ' + l.trim()
   }
+  return cells
+}
+
+/** A `cols` attribute ("2,3,3", "3*", "3") -> its column count. */
+function columnCount (spec) {
+  const s = String(spec).trim()
+  const m = s.match(/^(\d+)\*/)
+  if (m) return Number(m[1])
+  return s.includes(',') ? s.split(',').length : Number(s) || null
+}
+
+/**
+ * Table body lines -> a Markdown table, the first row as the header. Without
+ * a column count, the cells on the first line give it. A trailing partial
+ * row is padded, or dropped when `whole` is set.
+ */
+function markdownTable (lines, n, { map = (c) => c, whole = false } = {}) {
+  const first = lines.find((l) => l.startsWith('|'))
+  const cols = n || (first ? first.slice(1).split(/\s\|\s/).length : 0)
+  const cells = tableCells(lines)
+  if (!cols) return ''
+  if (whole) cells.length -= cells.length % cols
+  if (!cells.length) return ''
   const rows = []
-  for (let k = 0; k + 2 < cells.length; k += 3) rows.push(cells.slice(k, k + 3).map((c) => inline(c, ctx).replace(/\|/g, '\\|')))
-  if (!rows.length) return ''
+  for (let k = 0; k < cells.length; k += cols) {
+    const row = cells.slice(k, k + cols)
+    while (row.length < cols) row.push('')
+    rows.push(row.map((c) => map(c).replace(/\|/g, '\\|')))
+  }
   const [head, ...body] = rows
-  return [`| ${head.join(' | ')} |`, '|---|---|---|', ...body.map((r) => `| ${r.join(' | ')} |`)].join('\n')
+  return [`| ${head.join(' | ')} |`, `|${'---|'.repeat(cols)}`, ...body.map((r) => `| ${r.join(' | ')} |`)].join('\n')
+}
+
+/** The first three-column AsciiDoc table in some lines -> Markdown. */
+function table (lines, ctx) {
+  const i = lines.findIndex((l) => TABLE_RX.test(l))
+  const j = lines.findIndex((l, k) => k > i && TABLE_RX.test(l))
+  if (i < 0 || j < 0) return ''
+  return markdownTable(lines.slice(i + 1, j), 3, { map: (c) => inline(c, ctx), whole: true })
 }
 
 /** The numbered "# N. claim" comments of a verify script, continuation lines folded in. */

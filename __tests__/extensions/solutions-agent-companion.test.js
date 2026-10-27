@@ -14,6 +14,7 @@ const {
   inline,
   parsePage,
   prose,
+  productionGaps,
   verifyChecks,
   findLeaks,
   partialResolver,
@@ -618,6 +619,66 @@ describe('agent companion: single-sourced production content', () => {
     const oldLast = last.replace(/== Production considerations[\s\S]*?(?=== Clean up)/, '')
     const r = generate({ pages: { index: oldIndex, one, 'verify-end-to-end': oldLast } })
     expect(sectionOf(whole(r), '## Production gaps')).toContain('One broker.\n\n| Area | In this solution | In production |\n|---|---|---|\n| Security | None | SASL |')
+  })
+
+  test('a table inside a topic stays in that topic, and the topics after it survive', () => {
+    const lines = [
+      'This solution runs on a single broker.',
+      '',
+      '[#prod-brokers]',
+      '=== Brokers',
+      '',
+      'Run three brokers.',
+      '',
+      '[#prod-security]',
+      '=== Security',
+      '',
+      'Grant ACLs per service:',
+      '',
+      '[cols="2,3,3"]',
+      '|===',
+      '| Principal | Allow | Group',
+      '',
+      '| Feed',
+      '| Write on `feed`',
+      '| None',
+      '',
+      '| Odds engine',
+      '| Read on `feed`',
+      '| Read on `odds`',
+      '|===',
+      '',
+      'Turn on audit logging.',
+      '',
+      '[#prod-sizing]',
+      '=== Sizing inputs',
+      '',
+      '[cols="2,3"]',
+      '|===',
+      '| Input | What to record',
+      '',
+      '| Peak rate',
+      '| Events per second.',
+      '|===',
+      '',
+      '[#prod-retention]',
+      '=== Data retention',
+      '',
+      'Keep seven days.',
+    ]
+    const md = productionGaps(lines, { slug: 'tiny' }).join('\n')
+    expect(md.match(/^### .*$/gm)).toEqual(['### Brokers', '### Security', '### Sizing inputs', '### Data retention'])
+    // The intro is only the intro: no table moved into it.
+    expect(md.startsWith('This solution runs on a single broker.\n\n### Brokers')).toBe(true)
+    expect(sectionOf(md, '### Security')).toContain(
+      'Grant ACLs per service:\n\n' +
+      '| Principal | Allow | Group |\n|---|---|---|\n' +
+      '| Feed | Write on `feed` | None |\n' +
+      '| Odds engine | Read on `feed` | Read on `odds` |\n\n' +
+      'Turn on audit logging.'
+    )
+    expect(sectionOf(md, '### Sizing inputs')).toContain('| Input | What to record |\n|---|---|\n| Peak rate | Events per second. |')
+    expect(sectionOf(md, '### Data retention')).toContain('Keep seven days.')
   })
 })
 
