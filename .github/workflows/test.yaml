@@ -56,6 +56,7 @@ jobs:
             all_tests:
               - '__tests__/**'
               - 'evals/**'
+              - 'extension-utils/**'
               - 'jest.config.js'
               - 'jest.unit.config.js'
               - '.github/workflows/**'
