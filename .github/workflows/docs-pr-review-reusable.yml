@@ -764,10 +764,11 @@ jobs:
           set -uo pipefail
           OUT="$RUNNER_TEMP/style-lint"; mkdir -p "$OUT"
           # One way out for every "could not lint" case: a pass verdict with
-          # the reason as its only suggestion, and the same reason at the top
-          # of findings.txt for the prose review to read.
+          # the reason in not_run, so the row reads "did not run" and not as
+          # a finding, and the same reason at the top of findings.txt for the
+          # prose review to read.
           skip() {
-            jq -n --arg n "Style lint did not run: $1" '{verdict:"pass", blocking:[], suggestions:[$n]}' > "$OUT/verdict.json"
+            jq -n --arg n "$1" '{verdict:"pass", blocking:[], suggestions:[], not_run:[$n]}' > "$OUT/verdict.json"
             printf '# style lint did not run: %s\n' "$1" > "$OUT/findings.txt"
             echo "style-lint: skipped ($1)"
             exit 0
