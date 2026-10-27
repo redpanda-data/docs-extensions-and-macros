@@ -926,6 +926,16 @@ describe('buildChangedDefaultsTable - whats-new changed default links', () => {
     expect(table).toContain('`pass:c[{"a":1}]`');
     expect(table).toContain('`pass:c[{"b":2}]`');
   });
+
+  test('shows a type change as JSON on both sides so it does not read as no change', () => {
+    const table = buildChangedDefaultsTable([
+      { component: 'inputs:a', field: 'n', oldDefault: '5', newDefault: 5, description: 'A.' },
+      { component: 'inputs:b', field: 'm', oldDefault: 'null', newDefault: null, description: 'B.' }
+    ], cap);
+
+    expect(table).toContain('|`pass:c["5"]`\n|`pass:c[5]`\n');
+    expect(table).toContain('|`pass:c["null"]`\n|`pass:c[null]`\n');
+  });
 });
 
 describe('backfillPageDescriptions - self-healing page headers', () => {
