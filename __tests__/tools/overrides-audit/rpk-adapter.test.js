@@ -184,6 +184,19 @@ describe('overrides-audit rpk adapter (prose classification)', () => {
       expect(row.differs_in).toEqual(['main', 'shortDesc', 'subcommand-table'])
     })
 
+    test('content items do not drop raw help sections from the candidate', () => {
+      // On the page the content item replaces the raw sections; rpk --help
+      // has no content items, so the candidate keeps them.
+      const text = 'Create one or more widgets.'
+      const { byKey } = auditWith({
+        'rpk widget create': { description: text, content: [{ type: 'note', position: 'after_description', content: 'A note.' }] }
+      })
+      const row = byKey['rpk widget create|description']
+      expect(row.class).toBe(CLASSES.UPSTREAMABLE)
+      expect(row.upstream_candidate_text).toContain(text)
+      expect(row.upstream_candidate_text).toBe(`${text}\n\nEXAMPLES\n\nCreate a widget named foo\n  rpk widget create foo`)
+    })
+
     test('a one-word change (capitalization, a backtick the formatter would not add) still counts', () => {
       const { byKey } = auditWith({
         'rpk widget delete': { flags: { regex: { description: 'Treat names as regular expressions (RE2 syntax).' } } }
@@ -274,10 +287,14 @@ describe('overrides-audit rpk adapter (prose classification)', () => {
       )
       expect(byKey['textTransformations|replacements']).toMatchObject({ class: CLASSES.KEEP, note: expect.stringContaining('1 global replacements rule') })
       expect(byKey['textTransformations|inlineCode'].class).toBe(CLASSES.KEEP)
-      expect(byKey['rpk widget create|$refs'].class).toBe(CLASSES.KEEP)
+      // Every definition these $refs reach is dead, so the $refs is dead too.
+      expect(byKey['rpk widget create|$refs'].class).toBe(CLASSES.REVIEW)
+      expect(byKey['rpk widget create|$refs'].note).toMatch(/Delete them together with the definitions/)
       const def = byKey['definitions/common-flags --size|flags.description']
       expect(def.class).toBe(CLASSES.REVIEW)
       expect(def.note).toMatch(/Dead override: .*referenced by 1 command/)
+      // rpk widget create has --size, so the text can move there.
+      expect(def.note).toMatch(/Move it into the flags of the referencing commands that have --size \(rpk widget create\)/)
       expect(def.content_hash).toMatch(/^[0-9a-f]{16}$/)
     })
   })
@@ -316,6 +333,42 @@ describe('overrides-audit rpk adapter (prose classification)', () => {
       })
       expect(byKey['rpk widget create --replication-factor|flags.introducedInVersion'].class).toBe(CLASSES.REVIEW)
       expect(byKey['rpk widget create --size|flags.introducedInVersion'].class).toBe(CLASSES.KEEP)
+    })
+
+    test('a definition flag no referencing command has: delete the definition and its $refs', () => {
+      const { byKey } = auditWith(
+        { 'rpk widget delete': { $refs: ['#/definitions/common-flags'] } },
+        { definitions: { 'common-flags': { brokers: { description: 'Seed brokers.' } } } }
+      )
+      expect(byKey['definitions/common-flags --brokers|flags.description'].note)
+        .toMatch(/No referencing command has --brokers in raw_tree: delete the definition and the \$refs entries/)
+      expect(byKey['rpk widget delete|$refs'].class).toBe(CLASSES.REVIEW)
+    })
+
+    test('a $refs that reaches a live definition stays KEEP', () => {
+      const { byKey } = auditWith(
+        {
+          'rpk widget create': { $refs: ['#/definitions/common-flags'] },
+          'rpk widget delete': { flags: { regex: { $ref: '#/definitions/common-flags/regex' } } }
+        },
+        { definitions: { 'common-flags': { regex: { description: 'Use RE2.' } } } }
+      )
+      expect(byKey['rpk widget create|$refs'].class).toBe(CLASSES.KEEP)
+      expect(byKey['definitions/common-flags --regex|flags.description'].class).toBe(CLASSES.KEEP)
+    })
+
+    test('a protected plugin (shim only in this snapshot) is not compared, not called dead', () => {
+      const tree = JSON.parse(JSON.stringify(snapshot))
+      tree.raw_tree.commands.push({ name: 'connect', description: 'Connect', commands: [{ name: 'install', description: 'Install connect', flags: [] }] })
+      const result = runAudit({
+        overrides: writeFixture('o.json', overridesWith({ 'rpk connect install': { description: 'Install Redpanda Connect.' } })),
+        extracted: writeFixture('s.json', tree),
+        surface: 'rpk'
+      })
+      const row = result.manifest[0]
+      expect(row.class).toBe(CLASSES.REVIEW)
+      expect(row.note).toMatch(/^Not compared: the connect plugin is absent from this snapshot/)
+      expect(row.note).not.toMatch(/Dead override|Delete/)
     })
 
     test('prose on commands the generator never renders is dead: root rpk and exclude: true', () => {

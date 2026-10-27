@@ -227,13 +227,16 @@ function renderCommand (rawNode, resolvedOverrides, commandPath, tt) {
  *
  * @param {string} commandPath - Full command name.
  * @param {Object} ctx - { resolvedOverrides, protectedPlugins }.
- * @returns {string|null} Why the command is not rendered, or null when it is.
+ * @returns {{reason: string, dead: boolean}|null} Why the command is not
+ *   rendered (dead: true when no run ever renders it), or null when it is.
  */
 function notRenderedReason (commandPath, ctx) {
-  if (commandPath === 'rpk') return 'the generator skips the root rpk command (the section index.adoc is hand-written)'
-  if (generator.shouldExcludeCommand(ctx.resolvedOverrides, commandPath)) return 'the command has exclude: true, so the generator writes no page for it'
+  if (commandPath === 'rpk') return { dead: true, reason: 'the generator skips the root rpk command (the section index.adoc is hand-written)' }
+  if (generator.shouldExcludeCommand(ctx.resolvedOverrides, commandPath)) return { dead: true, reason: 'the command has exclude: true, so the generator writes no page for it' }
+  // A protected plugin is absent (or shim-only) in this snapshot; a run with
+  // the plugin installed renders its pages, so its overrides are live.
   const plugin = (ctx.protectedPlugins || []).find((pl) => commandPath === `rpk ${pl}` || commandPath.startsWith(`rpk ${pl} `))
-  if (plugin) return `the command belongs to the protected plugin ${plugin}, whose pages the generator leaves untouched`
+  if (plugin) return { dead: false, reason: `the ${plugin} plugin is absent from this snapshot (shim only), so the generator leaves its pages untouched` }
   return null
 }
 
@@ -414,7 +417,9 @@ function classifyCommandEntry (commandName, entry, ctx) {
   const deadRow = (base) => proseRow({
     ...base,
     class: CLASSES.REVIEW,
-    note: `Dead override: ${deadReason}, so this text never reaches a page. Delete it or move it.`
+    note: deadReason.dead
+      ? `Dead override: ${deadReason.reason}, so this text never reaches a page. Delete it or move it.`
+      : `Not compared: ${deadReason.reason}. Re-run the audit against a snapshot with the plugin installed.`
   })
 
   // Rendered once per command: with every override, and with one field
@@ -457,9 +462,11 @@ function classifyCommandEntry (commandName, entry, ctx) {
         const parentWithout = renderCommand(parentNode, prunedOverrides, parentName, ctx.tt)
         if (!same(parentWith.subcommands, parentWithout.subcommands)) differsIn.push('subcommand-table')
       }
-      // The upstream candidate is what the page's description would be:
-      // the override's text plus any raw sections the generator keeps.
-      const candidate = generator.mergeCommandOverrides(node, { commands: { [commandName]: { description: value, content: entry.content } } }, commandName).description
+      // The upstream candidate is what `rpk --help` should print: the
+      // override's lead text plus the raw sections, unless the override
+      // carries its own. Content items replace sections on the page only,
+      // so they do not count here.
+      const candidate = generator.mergeCommandOverrides(node, { commands: { [commandName]: { description: value } } }, commandName).description
       rows.push(classifyProse({
         name: commandName,
         field,
@@ -546,6 +553,17 @@ function classifyCommandEntry (commandName, entry, ctx) {
           }))
         }
       }
+      continue
+    }
+
+    if (field === '$refs' && Array.isArray(value) && value.length > 0 &&
+      value.every((ref) => ctx.deadDefinitions.has(String(ref).replace(/^#\/definitions\//, '')))) {
+      rows.push({
+        name: commandName,
+        field,
+        class: CLASSES.REVIEW,
+        note: 'Dead override: every definition these $refs reach is dead (see the definitions/* rows), so they apply nothing. Delete them together with the definitions; a $refs entry left pointing at a deleted definition logs an error on every generate run.'
+      })
       continue
     }
 
@@ -646,7 +664,21 @@ function audit ({ overridesPath, extractedPath }) {
   generator.registerKnownCommandPaths(flat.map((c) => c.path))
   const protectedPlugins = generator.detectProtectedPlugins(flat)
 
-  const ctx = { rawTree, resolvedOverrides, tt, protectedPlugins }
+  // Shared flag definitions. resolveReferences merges a command-level $refs
+  // target at the top level of the command entry (for example
+  // commands['rpk topic create'].brokers), but mergeCommandOverrides reads
+  // only the entry's `flags` object, so that text never reaches a page. A
+  // definition is live only when something points at it with a $ref.
+  const overridesJson = JSON.stringify(overridesDoc)
+  const definitions = overridesDoc.definitions && typeof overridesDoc.definitions === 'object' ? overridesDoc.definitions : {}
+  const reachedByRef = (defName, flagName) =>
+    overridesJson.includes(`"$ref":${JSON.stringify(`#/definitions/${defName}`)}`) ||
+    (flagName !== undefined && overridesJson.includes(`"$ref":${JSON.stringify(`#/definitions/${defName}/${flagName}`)}`))
+  const deadDefinitions = new Set(Object.entries(definitions)
+    .filter(([defName, flags]) => flags && typeof flags === 'object' && !Object.keys(flags).some((flagName) => reachedByRef(defName, flagName)))
+    .map(([defName]) => defName))
+
+  const ctx = { rawTree, resolvedOverrides, tt, protectedPlugins, deadDefinitions }
   const manifest = []
 
   for (const [commandName, entry] of Object.entries(commands)) {
@@ -657,14 +689,7 @@ function audit ({ overridesPath, extractedPath }) {
     manifest.push(...classifyCommandEntry(commandName, entry, ctx))
   }
 
-  // Shared flag definitions. resolveReferences merges a command-level $refs
-  // target at the top level of the command entry (for example
-  // commands['rpk topic create'].brokers), but mergeCommandOverrides reads
-  // only the entry's `flags` object, so that text never reaches a page. A
-  // definition is live only when something points at it with a $ref.
-  const overridesJson = JSON.stringify(overridesDoc)
-  const definitions = overridesDoc.definitions
-  if (definitions && typeof definitions === 'object') {
+  if (Object.keys(definitions).length > 0) {
     for (const [defName, flags] of Object.entries(definitions)) {
       if (!flags || typeof flags !== 'object') continue
       const refs = Object.entries(commands)
@@ -674,8 +699,12 @@ function audit ({ overridesPath, extractedPath }) {
         if (!flagEntry || typeof flagEntry !== 'object') continue
         for (const [flagField, flagValue] of Object.entries(flagEntry)) {
           if (META_FIELDS.includes(flagField)) continue
-          const live = overridesJson.includes(`"$ref":${JSON.stringify(`#/definitions/${defName}`)}`) ||
-            overridesJson.includes(`"$ref":${JSON.stringify(`#/definitions/${defName}/${flagName}`)}`)
+          const live = reachedByRef(defName, flagName)
+          // Commands that would honor this text if it were moved into their flags.
+          const withFlag = refs.filter((name) => {
+            const node = findCommandNode(rawTree, name)
+            return node && (node.flags || []).some((f) => f && f.name === flagName)
+          })
           const row = {
             name: `definitions/${defName} --${flagName}`,
             field: `flags.${flagField}`,
@@ -687,7 +716,10 @@ function audit ({ overridesPath, extractedPath }) {
           }
           row.note = live
             ? 'Shared flag definition referenced through $ref; docs-layer structure.'
-            : `Dead override: shared flag definition referenced by ${refs.length} command(s) via $refs, which resolveReferences merges at the top level of the command entry, not into its flags, so the generator never applies this text. Delete it or move it into each command's flags.`
+            : `Dead override: shared flag definition referenced by ${refs.length} command(s) via $refs, which resolveReferences merges at the top level of the command entry, not into its flags, so the generator never applies this text. ` +
+              (withFlag.length === 0
+                ? `No referencing command has --${flagName} in raw_tree: delete the definition and the $refs entries that point to it.`
+                : `Move it into the flags of the referencing commands that have --${flagName} (${withFlag.join(', ')}), then delete the definition and its $refs entries.`)
           manifest.push(row)
         }
       }
