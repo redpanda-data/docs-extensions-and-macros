@@ -109,6 +109,36 @@ describe('rpk Docs Diff Generation', () => {
       const changes = compareFlags(oldFlag, newFlag)
       expect(changes.default).toEqual({ old: { a: 1, b: 2 }, new: { b: 3, a: 1 } })
     })
+
+    // A plugin flag scraped from --help, then the same flag from --print-tree
+    // once the plugin publishes its flags there
+    test('treats a scraped flag and its tree form as the same flag', () => {
+      const pairs = [
+        [{ name: 'all', type: 'bool', default: 'false' }, { name: 'all', type: 'bool', default: false, required: false }],
+        [{ name: 'format', type: 'string', default: '"text"' }, { name: 'format', type: 'string', default: 'text', required: false }],
+        [{ name: 'retries', type: 'int', default: '3' }, { name: 'retries', type: 'int64', default: 3, required: false }],
+        [{ name: 'brokers', type: 'strings' }, { name: 'brokers', type: 'stringSlice', default: [], required: false }],
+        [{ name: 'tags', type: 'strings', default: '[a,b]' }, { name: 'tags', type: 'stringSlice', default: '[a,b]', required: false }],
+        [{ name: 'name', type: 'string' }, { name: 'name', type: 'string', default: '', required: true }],
+        [{ name: 'timeout', type: 'duration', default: '30s' }, { name: 'timeout', type: 'duration', default: '30s', required: false }]
+      ]
+      for (const [scraped, tree] of pairs) {
+        expect(compareFlags(scraped, tree)).toBeNull()
+      }
+    })
+
+    test('still reports real default and type changes across the two forms', () => {
+      expect(compareFlags({ name: 'all', type: 'bool', default: 'false' }, { name: 'all', type: 'bool', default: true }).default)
+        .toEqual({ old: 'false', new: true })
+      expect(compareFlags({ name: 'n', type: 'int' }, { name: 'n', type: 'duration' }).type)
+        .toEqual({ old: 'int', new: 'duration' })
+    })
+
+    test('reports required changes only when both sides say', () => {
+      expect(compareFlags({ name: 'n', required: false }, { name: 'n', required: true }).required)
+        .toEqual({ old: false, new: true })
+      expect(compareFlags({ name: 'n' }, { name: 'n', required: true })).toBeNull()
+    })
   })
 
   describe('generateRpkDiff', () => {

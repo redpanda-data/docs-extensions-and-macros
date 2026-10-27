@@ -86,6 +86,40 @@ describe('enrichPluginTreeWithFlags', () => {
   })
 })
 
+describe('fillPluginFlags', () => {
+  const { fillPluginFlags, pluginTreeHasFlags } = require('../../../tools/rpk-docs/rpk-docs-handler.js')
+
+  const node = (subFlags) => ({
+    name: 'ai',
+    flags: [],
+    commands: [
+      { name: 'install', flags: [{ name: 'ai-version', type: 'string' }], commands: [] },
+      { name: 'agent', flags: [], commands: [{ name: 'create', flags: subFlags, commands: [] }] }
+    ]
+  })
+
+  test('uses the tree and runs no --help when plugin commands already have flags', () => {
+    const calls = []
+    const n = node([{ name: 'name', type: 'string', default: '', required: true }])
+    const result = fillPluginFlags(n, (argPath) => { calls.push(argPath); return null })
+    expect(result).toEqual({ source: 'tree', enriched: 0 })
+    expect(calls).toEqual([])
+  })
+
+  test('ignores the install shim when deciding, and falls back to --help', () => {
+    const n = node([])
+    expect(pluginTreeHasFlags(n)).toBe(false)
+    const help = 'Flags:\n      --name string   agent name\n'
+    const result = fillPluginFlags(n, (argPath) => argPath.join(' ') === 'ai agent create' ? help : null)
+    expect(result).toEqual({ source: 'help', enriched: 1 })
+    expect(n.commands[1].commands[0].flags.map(f => f.name)).toEqual(['name'])
+  })
+
+  test('reports none when neither source has flags', () => {
+    expect(fillPluginFlags(node([]), () => null)).toEqual({ source: 'none', enriched: 0 })
+  })
+})
+
 describe('mergeVisibleDeprecationsIntoOverrides', () => {
   const fs = require('fs')
   const path = require('path')

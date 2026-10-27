@@ -97,6 +97,42 @@ function getFlagsMap(command) {
  * @param {Object} newFlag - New flag object
  * @returns {Object|null} Differences or null if identical
  */
+// cobra's --help prints pflag's short names for some types ("strings" for
+// stringSlice, "int" for int64), while --print-tree prints the full name.
+// Plugin flags scraped from --help carry the short name, so compare both
+// forms as one.
+const FLAG_TYPE_ALIASES = {
+  stringSlice: 'strings',
+  intSlice: 'ints',
+  uintSlice: 'uints',
+  boolSlice: 'bools',
+  int64: 'int',
+  uint64: 'uint',
+  float64: 'float',
+  float32: 'float'
+}
+
+function comparableFlagType(type) {
+  return FLAG_TYPE_ALIASES[type] || type
+}
+
+// Plugin flags scraped from --help have string defaults ("true", "3",
+// "\"text\"") and none at all when the default is empty, while
+// --print-tree defaults are typed. Bring both to one form so a plugin that
+// starts publishing its flags in the tree does not show every default as
+// changed.
+function comparableFlagDefault(value) {
+  if (value === undefined || value === null || value === '') return null
+  if (Array.isArray(value)) return value.length === 0 ? null : value.map(String).join(',')
+  if (typeof value === 'boolean' || typeof value === 'number') return String(value)
+  if (typeof value !== 'string') return value
+  let v = value
+  if (v.length >= 2 && v.startsWith('"') && v.endsWith('"')) v = v.slice(1, -1)
+  if (v === '' || v === '[]') return null
+  if (v.startsWith('[') && v.endsWith(']')) v = v.slice(1, -1)
+  return v
+}
+
 function compareFlags(oldFlag, newFlag) {
   // Defensive checks for missing flags
   if (!oldFlag || !newFlag) {
@@ -105,11 +141,11 @@ function compareFlags(oldFlag, newFlag) {
 
   const changes = {}
 
-  if (oldFlag.type !== newFlag.type) {
+  if (comparableFlagType(oldFlag.type) !== comparableFlagType(newFlag.type)) {
     changes.type = { old: oldFlag.type, new: newFlag.type }
   }
 
-  if (!deepEqual(oldFlag.default, newFlag.default)) {
+  if (!deepEqual(comparableFlagDefault(oldFlag.default), comparableFlagDefault(newFlag.default))) {
     changes.default = { old: oldFlag.default, new: newFlag.default }
   }
 
@@ -117,7 +153,10 @@ function compareFlags(oldFlag, newFlag) {
     changes.description = { old: oldFlag.description, new: newFlag.description }
   }
 
-  if (oldFlag.required !== newFlag.required) {
+  // Flags scraped from --help never say whether they are required, so a
+  // missing value on either side is unknown, not a change.
+  if (oldFlag.required !== undefined && newFlag.required !== undefined &&
+      oldFlag.required !== newFlag.required) {
     changes.required = { old: oldFlag.required, new: newFlag.required }
   }
 
