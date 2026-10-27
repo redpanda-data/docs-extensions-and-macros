@@ -346,7 +346,12 @@ function createGitHubClient ({
       const { res, networkError } = await request(`${apiBase}/repos/${owner}/${repo}/contents/${encodedPath}${query}`, 'application/vnd.github.raw+json')
       if (networkError) return { status: 'unreachable', reason: `${what}: ${networkError}` }
       if (res.ok) {
-        const text = await res.text()
+        let text
+        try {
+          text = await res.text()
+        } catch (err) {
+          return { status: 'unreachable', reason: `${what}: failed to read response body: ${err && err.message ? err.message : err}` }
+        }
         if (isDirectoryListing(res, text)) return { status: 'missing', reason: `${what} is a directory` }
         return { status: 'ok', text }
       }
@@ -376,7 +381,12 @@ function createGitHubClient ({
       const { res, networkError } = await request(`${apiBase}/repos/${owner}/${repo}/issues/${number}`)
       if (networkError) return { status: 'unreachable', reason: `${what}: ${networkError}` }
       if (res.ok) {
-        const item = await res.json()
+        let item
+        try {
+          item = await res.json()
+        } catch (err) {
+          return { status: 'unreachable', reason: `${what}: failed to read response body: ${err && err.message ? err.message : err}` }
+        }
         const pull = item.pull_request
         return { status: 'ok', kind: pull ? 'pr' : 'issue', state: pull && pull.merged_at ? 'merged' : item.state, title: item.title }
       }
@@ -440,7 +450,12 @@ async function checkSources ({ files, root = process.cwd(), client, checkUrls = 
   const add = (rule, where, message, extra = {}) => findings.push({ rule, severity: SEVERITY[rule], ...where, message, ...extra })
 
   const cached = (cache, key, call) => {
-    if (!cache.has(key)) { fetches++; cache.set(key, limit(call)) }
+    // Pass 1 caches promises nothing awaits yet, so one must never reject:
+    // an unhandled rejection would kill the process before the summary.
+    if (!cache.has(key)) {
+      fetches++
+      cache.set(key, limit(call).catch((err) => ({ status: 'unreachable', reason: String((err && err.message) || err) })))
+    }
     return cache.get(key)
   }
   const fetchFile = (ref) => cached(fileCache, `${ref.owner}/${ref.repo}@${ref.gitRef || ''}:${ref.path}`,
