@@ -101,7 +101,7 @@ describe('version-aware refs', () => {
   test('a main-style component checks streaming-enterprise at the newest GA tag', async () => {
     const { rules, citation, lookups } = await run(SYMBOL, { files: { 'streaming-enterprise@v26.2.6:src/v/config/configuration.cc': CONFIG_CC } })
     expect(rules).toEqual([])
-    expect(citation).toMatchObject({ ref: 'v26.2.6', resolvedBy: 'latest-redpanda-tag (newest GA)', status: 'ok', line: 9 })
+    expect(citation).toMatchObject({ ref: 'v26.2.6', resolvedBy: 'latest-redpanda-tag (newest GA)', status: 'ok', line: 1, sourceLine: 9 })
     expect(lookups).toBe(1)
   })
 
@@ -145,7 +145,7 @@ describe('version-aware refs', () => {
     const files = { 'streaming-enterprise@v26.2.6:src/v/config/configuration.cc': CONFIG_CC_MOVED }
     const moved = await run(SYMBOL, { files })
     expect(moved.rules).toEqual([])
-    expect(moved.citation.line).toBe(11)
+    expect(moved.citation).toMatchObject({ line: 1, sourceLine: 11 })
     // The fallback form still works, version-aware too, and catches the move.
     const lineRef = '// Source: redpanda-data/streaming-enterprise:src/v/config/configuration.cc:9 "128_MiB"\nThe default segment size is 128 MiB.\n'
     expect((await run(lineRef, { files: { 'streaming-enterprise@v26.2.6:src/v/config/configuration.cc': CONFIG_CC } })).rules).toEqual([])

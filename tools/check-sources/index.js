@@ -573,7 +573,7 @@ async function checkSources ({ files, root = process.cwd(), client, checkUrls = 
           const hint = hits.length ? ` It appears elsewhere, at line ${hits.slice(0, 3).map((h) => h.start).join(', ')}.` : ' It does not appear anywhere in the file.'
           add('quote-not-found', where, `quote not found within ${SYMBOL_WINDOW} lines of ${ref.symbol} (line ${occurrences.slice(0, 3).join(', ')}) in ${ref.path} at ${at}: the cited value changed.${hint}`, { movedTo: hits })
         } else {
-          citation.line = match.quoteLine
+          citation.sourceLine = match.quoteLine
         }
         continue
       }
