@@ -62,6 +62,14 @@ describe('prop: and propval: diagnostics', () => {
     expect(features.diagnostics(page(':property-validate: off', 'prop:nope[]'), ws)).toEqual([])
   })
 
+  test('propval: with an unsupported format reports what the build reports', () => {
+    expect(features.diagnostics(page('', 'propval:log_segment_ms[default,format=RAW]'), ws)).toEqual([])
+    const [d] = features.diagnostics(page('', 'propval:log_segment_ms[default,format=pretty]'), ws)
+    expect(d.code).toBe('unsupported-format')
+    expect(d.severity).toBe(2)
+    expect(d.message).toBe('propval:log_segment_ms[default]: format=pretty is not supported; use format=raw for the exact value. Rendering the human-readable value.')
+  })
+
   test('propval: with an unsupported field reports what the build reports', () => {
     const [d] = features.diagnostics(page('', 'propval:log_segment_ms[bogus]'), ws)
     expect(d.code).toBe('unsupported-field')
@@ -210,6 +218,8 @@ describe('hover', () => {
     const value = (body) => features.hover(body, { line: 0, character: 3 }, ws).contents.value
     expect(value('propval:log_segment_ms[default]')).toMatch(/^\*\*Renders as:\*\* 2 weeks/)
     expect(value('propval:log_segment_ms[default,format=raw]')).toMatch(/^\*\*Renders as:\*\* 1209600000/)
+    // The build lowercases the format, so RAW renders the raw value too.
+    expect(value('propval:log_segment_ms[default,format=RAW]')).toMatch(/^\*\*Renders as:\*\* 1209600000/)
     expect(value('propval:log_segment_ms[values]')).toMatch(/`<unknown values>`/)
   })
 

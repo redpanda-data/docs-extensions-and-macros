@@ -1061,6 +1061,25 @@ function resolvePropertyValue ({ registry, name, field: requested, format, compo
   return { ok: true, field, registry, text: value.text, html: value.html }
 }
 
+/**
+ * The format a propval: renders with: the format attribute, case-insensitive,
+ * defaulting to human. An unsupported format renders the human-readable value
+ * and returns the warning the build logs. Exported so the language server
+ * reports the same format and message.
+ *
+ * @param {string} [opts.format] - The macro's format attribute.
+ * @param {string} opts.call - The macro, as named in the warning.
+ * @returns {{format: string, warning?: string}}
+ */
+function propvalFormat ({ format: requested, call }) {
+  const format = String(requested || propertyValues.FORMAT_HUMAN).trim().toLowerCase()
+  if (format === propertyValues.FORMAT_HUMAN || format === propertyValues.FORMAT_RAW) return { format }
+  return {
+    format: propertyValues.FORMAT_HUMAN,
+    warning: `${call}: format=${format} is not supported; use format=raw for the exact value. Rendering the human-readable value.`,
+  }
+}
+
 function propvalInlineMacro (config) {
   return function () {
     const self = this
@@ -1074,12 +1093,9 @@ function propvalInlineMacro (config) {
       const component = (config && config.file && config.file.src && config.file.src.component) || ''
       const version = (config && config.file && config.file.src && config.file.src.version) || ''
       const requested = String(attributes.field || 'default').trim()
-      let format = String(attributes.format || propertyValues.FORMAT_HUMAN).trim().toLowerCase()
       const where = filePath ? ` in ${filePath}` : ''
-      if (format !== propertyValues.FORMAT_HUMAN && format !== propertyValues.FORMAT_RAW) {
-        logger.warn(`propval:${name}[${requested}]${where}: format=${format} is not supported; use format=raw for the exact value. Rendering the human-readable value.`)
-        format = propertyValues.FORMAT_HUMAN
-      }
+      const { format, warning } = propvalFormat({ format: attributes.format, call: `propval:${name}[${requested}]${where}` })
+      if (warning) logger.warn(warning)
 
       const contentCatalog = config && config.contentCatalog
       const registry = contentCatalog ? loadProperties(config) : undefined
@@ -1152,6 +1168,7 @@ module.exports.isAvailable = isAvailable
 module.exports.describeDataset = describeDataset
 module.exports.buildPropvalContent = buildPropvalContent
 module.exports.resolvePropertyValue = resolvePropertyValue
+module.exports.propvalFormat = propvalFormat
 module.exports.unknownPropertyMessage = unknownPropertyMessage
 module.exports.PROPERTIES_JSON_RX = PROPERTIES_JSON_RX
 module.exports.unavailablePropertyMessage = unavailablePropertyMessage

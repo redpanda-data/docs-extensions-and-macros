@@ -5,14 +5,15 @@
  *
  *   prop:      unknownPropertyMessage, unavailablePropertyMessage, isAvailable
  *              (macros/prop.js)
- *   propval:   resolvePropertyValue (macros/prop.js), which formats values with
+ *   propval:   resolvePropertyValue and propvalFormat (macros/prop.js), which
+ *              formats values with
  *              extension-utils/property-values.js
  *
  * The property data is the workspace's `properties` (see workspace.js), which
  * the generated-content and override features read too.
  */
 
-const { unknownPropertyMessage, unavailablePropertyMessage, isAvailable, resolvePropertyValue, describeDataset } = require('../../macros/prop')
+const { unknownPropertyMessage, unavailablePropertyMessage, isAvailable, resolvePropertyValue, propvalFormat, describeDataset } = require('../../macros/prop')
 const propertyValues = require('../../extension-utils/property-values')
 const { scanMacros, inertLines, range, contains, headerAttribute } = require('../lib/asciidoc')
 const { COMPLETION_KIND, diagnostic, markdownHover } = require('../lib/lsp')
@@ -47,7 +48,9 @@ function macroDiagnostics (text, { properties: registry, component }) {
       continue
     }
     const requested = String(m.attributes.field || m.attributes[1] || 'default').trim()
-    const result = resolvePropertyValue({ registry, name, field: requested, format: m.attributes.format, component: component.name })
+    const { format, warning } = propvalFormat({ format: m.attributes.format, call: `propval:${name}[${requested}]` })
+    if (warning) out.push(diagnostic(m.range, warning, 'warning', 'unsupported-format'))
+    const result = resolvePropertyValue({ registry, name, field: requested, format, component: component.name })
     if (result.ok) continue
     const fatal = mode === 'error' && ['unknown-property', 'missing-field', 'unsupported-field'].includes(result.kind)
     const where = result.kind === 'unknown-property' || result.kind === 'unavailable' ? m.nameRange : m.range
@@ -138,7 +141,8 @@ function macroHover (m, { properties: registry, component }) {
   if (!entry) return markdownHover(unknownPropertyMessage({ name, registry }), m.nameRange)
   if (m.macro === 'propval') {
     const requested = String(m.attributes.field || m.attributes[1] || 'default').trim()
-    const result = resolvePropertyValue({ registry, name, field: requested, format: m.attributes.format, component: component.name })
+    const { format } = propvalFormat({ format: m.attributes.format, call: `propval:${name}[${requested}]` })
+    const result = resolvePropertyValue({ registry, name, field: requested, format, component: component.name })
     const head = result.ok
       ? `**Renders as:** ${result.text}`
       : `**Renders as:** \`<unknown ${result.field}>\`\n\n${result.message}`
