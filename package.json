@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "5.53.0",
+  "version": "5.56.0",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -33,6 +33,7 @@
     "test:cgo": "node __tests__/tools/cgo-detection.test.js",
     "test:all": "npm run test && npm run test:python && npm run test:cgo",
     "eval:doc-strings": "node evals/doc-strings/run-evals.js",
+    "eval:doc-impact": "node evals/doc-strings/run-evals.js --doc-impact",
     "generate:cli-docs": "node tools/generate-cli-docs.js",
     "bundle:admin": "doc-tools generate bundle-openapi --surface admin",
     "bundle:connect": "doc-tools generate bundle-openapi --surface connect",
@@ -101,7 +102,9 @@
     "./extensions/solutions-catalog/index": "./extensions/solutions-catalog/index.js",
     "./extension-utils/deployment-type": "./extension-utils/deployment-type.js",
     "./extension-utils/categories": "./extension-utils/categories.js",
-    "./docs-data/solutions-relationships.schema.json": "./docs-data/solutions-relationships.schema.json"
+    "./docs-data/solutions-relationships.schema.json": "./docs-data/solutions-relationships.schema.json",
+    "./macros/iceberg-explorer": "./macros/iceberg-explorer.js",
+    "./macros/iceberg-explorer.js": "./macros/iceberg-explorer.js"
   },
   "files": [
     "extensions",

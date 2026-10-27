@@ -46,11 +46,6 @@ npm install @redpanda-data/docs-extensions-and-macros
 # Generate connector documentation with latest data
 npx doc-tools generate rpcn-connector-docs --fetch-connectors
 
-# Generate with custom overrides
-npx doc-tools generate rpcn-connector-docs \
-  --fetch-connectors \
-  --overrides path/to/overrides.json
-
 # Generate and draft missing connectors
 npx doc-tools generate rpcn-connector-docs \
   --fetch-connectors \
@@ -176,11 +171,6 @@ You can generate connector documentation with various options:
 # Basic generation with fetching latest data
 npx doc-tools generate rpcn-connector-docs --fetch-connectors
 
-# Generate with custom overrides for descriptions/examples
-npx doc-tools generate rpcn-connector-docs \
-  --fetch-connectors \
-  --overrides overrides.json
-
 # Draft full pages for connectors missing documentation
 npx doc-tools generate rpcn-connector-docs \
   --fetch-connectors \
@@ -202,7 +192,7 @@ npx doc-tools generate rpcn-connector-docs \
 * `--fetch-connectors` - Fetch latest data using `rpk connect list`
 * `--connect-version <version>` - Specific Connect version to install and fetch (requires `--fetch-connectors`)
 * `--draft-missing` - Generate full draft pages for undocumented connectors
-* `--overrides <path>` - Apply custom descriptions/examples from JSON
+* `--overrides <path>` - Merge descriptions and examples from an optional JSON file. Nothing is merged unless you pass it
 * `--data-dir <path>` - Directory containing versioned connect JSON files
 * `--old-data <path>` - Specific old version file for diff comparison
 * `--include-bloblang` - Include Bloblang functions/methods
@@ -791,7 +781,9 @@ console.log('<!-- PR_SUMMARY_END -->');
 
 === Override system
 
-Overrides allow customizing extracted documentation:
+Connector field, component, and Bloblang descriptions come from the component specs in https://github.com/redpanda-data/connect[redpanda-data/connect^] and https://github.com/redpanda-data/benthos[redpanda-data/benthos^]. To fix wrong or missing text, open a PR against the spec. The fix ships in the next Connect release.
+
+The generator can also merge an optional JSON file passed with `--overrides` into the extracted data. Nothing is merged unless you pass the flag:
 
 [,json]
 ----
@@ -840,11 +832,9 @@ Overrides support:
 * Connector catalog enrichment
 * Version tracking and change detection
 * Handlebars template rendering
-* Override system for custom documentation
 
 === Current limitations
 
-* *Manual override maintenance*: Custom descriptions must be maintained in overrides.json
 * *Example quality*: Auto-generated examples may not represent best practices
 * *Duplicate YAML keys*: Some examples contain multiple configurations in one block, creating invalid YAML with duplicate top-level keys (for example, multiple `processors:` keys)
 * *CSV catalog dependency*: Relies on manually maintained CSV in Connect repository
@@ -876,25 +866,7 @@ This occurs when multiple separate configurations are concatenated into a single
 
 === Workarounds
 
-For unsupported patterns or issues, use overrides.json:
-
-[,json]
-----
-{
-  "inputs": [
-    {
-      "name": "problematic_connector",
-      "description": "Custom description overriding auto-extracted text",
-      "examples": [
-        {
-          "title": "Corrected example",
-          "config": "input:\n  problematic_connector:\n    field: value"
-        }
-      ]
-    }
-  ]
-}
-----
+To fix an unsupported pattern, a wrong description, or a broken example, edit the component spec in redpanda-data/connect or redpanda-data/benthos. The fix ships in the next Connect release.
 
 == Contributing
 
