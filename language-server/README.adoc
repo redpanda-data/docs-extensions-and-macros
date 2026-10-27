@@ -55,8 +55,10 @@ A feature is one file, `features/<id>.js`, exporting a plain object with an `id`
 
 [,bash]
 ----
-npx docs-language-server --stdio
+npx --no-install docs-language-server --stdio
 ----
+
+`--no-install` runs the copy installed in the docs repository. Without it, `npx` in a directory without this package installs whatever is published under the npm name `docs-language-server`, which is not this package.
 
 * VS Code: the extension in `editors/vscode`.
 * Claude Code: a plugin `.lsp.json` that runs the server for `.adoc` files:
@@ -66,7 +68,7 @@ npx docs-language-server --stdio
 {
   "redpanda-docs": {
     "command": "npx",
-    "args": ["docs-language-server", "--stdio"],
+    "args": ["--no-install", "docs-language-server", "--stdio"],
     "extensionToLanguage": { ".adoc": "asciidoc" }
   }
 }

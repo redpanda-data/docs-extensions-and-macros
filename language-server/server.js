@@ -2,7 +2,7 @@
 
 /**
  * The docs language server: LSP over stdio for pages and data files in a
- * Redpanda docs repository. Start it with `npx docs-language-server --stdio`;
+ * Redpanda docs repository. Start it with `npx --no-install docs-language-server --stdio`;
  * the VS Code extension in editors/vscode and Claude Code's LSP tool both do.
  *
  * Each document is checked against the build data of the component it
