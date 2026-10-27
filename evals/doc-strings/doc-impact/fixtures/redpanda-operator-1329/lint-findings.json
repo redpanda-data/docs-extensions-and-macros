@@ -1,0 +1,803 @@
+{
+  "findings": [
+    {
+      "surface": "crd",
+      "name": "gateway",
+      "file": "operator/api/redpanda/v1alpha2/console_types.go",
+      "line_start": 112,
+      "line_end": 112,
+      "string": null,
+      "declaration_text": "\tGateway                      *GatewayConfig                    `json:\"gateway,omitempty\"`",
+      "rules": [
+        {
+          "id": "inherited-type-description",
+          "severity": "warning",
+          "message": "\"gateway\" has no doc comment of its own, so the CRD reference and kubectl explain publish type `GatewayConfig`'s comment under it: \"GatewayConfig configures a Gateway API HTTPRoute for Console.\". That opens with the Go type name, which users never type - they type \"gateway\". Add a comment on the field; it takes precedence over the type's."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "be200631c4b08c3a"
+    },
+    {
+      "surface": "crd",
+      "name": "enabled",
+      "file": "operator/api/redpanda/v1alpha2/console_types.go",
+      "line_start": 202,
+      "line_end": 202,
+      "string": null,
+      "declaration_text": "\tEnabled     *bool                    `json:\"enabled,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"Enabled\" (json: \"enabled\") in GatewayConfig has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "e7f32f930d6dd8af"
+    },
+    {
+      "surface": "crd",
+      "name": "annotations",
+      "file": "operator/api/redpanda/v1alpha2/console_types.go",
+      "line_start": 203,
+      "line_end": 203,
+      "string": null,
+      "declaration_text": "\tAnnotations map[string]string        `json:\"annotations,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"Annotations\" (json: \"annotations\") in GatewayConfig has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "1a402afb3d50106d"
+    },
+    {
+      "surface": "crd",
+      "name": "parentRefs",
+      "file": "operator/api/redpanda/v1alpha2/console_types.go",
+      "line_start": 204,
+      "line_end": 204,
+      "string": null,
+      "declaration_text": "\tParentRefs  []GatewayParentReference `json:\"parentRefs,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"ParentRefs\" (json: \"parentRefs\") in GatewayConfig has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "5551117d38b32795"
+    },
+    {
+      "surface": "crd",
+      "name": "hostnames",
+      "file": "operator/api/redpanda/v1alpha2/console_types.go",
+      "line_start": 205,
+      "line_end": 205,
+      "string": null,
+      "declaration_text": "\tHostnames   []string                 `json:\"hostnames,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"Hostnames\" (json: \"hostnames\") in GatewayConfig has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "021dd2140ecb56bc"
+    },
+    {
+      "surface": "crd",
+      "name": "path",
+      "file": "operator/api/redpanda/v1alpha2/console_types.go",
+      "line_start": 206,
+      "line_end": 206,
+      "string": null,
+      "declaration_text": "\tPath        *string                  `json:\"path,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"Path\" (json: \"path\") in GatewayConfig has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "903d18773c43c0b7"
+    },
+    {
+      "surface": "crd",
+      "name": "name",
+      "file": "operator/api/redpanda/v1alpha2/console_types.go",
+      "line_start": 212,
+      "line_end": 212,
+      "string": null,
+      "declaration_text": "\tName        string                 `json:\"name\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"Name\" (json: \"name\") in GatewayParentReference has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "5acf2661969e4714"
+    },
+    {
+      "surface": "crd",
+      "name": "namespace",
+      "file": "operator/api/redpanda/v1alpha2/console_types.go",
+      "line_start": 213,
+      "line_end": 213,
+      "string": null,
+      "declaration_text": "\tNamespace   *string                `json:\"namespace,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"Namespace\" (json: \"namespace\") in GatewayParentReference has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "40fb3a18624d050e"
+    }
+  ],
+  "summary": {
+    "totalDeclarations": 15,
+    "flaggedDeclarations": 8,
+    "removedSurfaceLines": 0,
+    "removedSurfaceFiles": [],
+    "errors": 0,
+    "warnings": 8,
+    "info": 0,
+    "byRule": {
+      "inherited-type-description": {
+        "errors": 0,
+        "warnings": 1,
+        "info": 0
+      },
+      "undocumented-field": {
+        "errors": 0,
+        "warnings": 7,
+        "info": 0
+      }
+    },
+    "bySurface": {
+      "helm": {
+        "declarations": 3,
+        "flagged": 0,
+        "errors": 0,
+        "warnings": 0,
+        "info": 0
+      },
+      "crd": {
+        "declarations": 12,
+        "flagged": 8,
+        "errors": 0,
+        "warnings": 8,
+        "info": 0
+      }
+    },
+    "alreadyReviewed": 0,
+    "removedDeclarations": [],
+    "unverifiableDeclarations": 0,
+    "skippedDeclarations": []
+  },
+  "unsupported_surfaces": [],
+  "declarations": [
+    {
+      "surface": "helm",
+      "name": "gateway",
+      "file": "charts/console/chart/values.yaml",
+      "line_start": 110,
+      "line_end": 111,
+      "fingerprint": "ec0de92e5061a346",
+      "context": []
+    },
+    {
+      "surface": "helm",
+      "name": "gateway.parentRefs",
+      "file": "charts/console/chart/values.yaml",
+      "line_start": 114,
+      "line_end": 117,
+      "fingerprint": "1755e3d9fe3a1d9c",
+      "context": []
+    },
+    {
+      "surface": "helm",
+      "name": "gateway.pathType",
+      "file": "charts/console/chart/values.yaml",
+      "line_start": 124,
+      "line_end": 125,
+      "fingerprint": "249bb74cb4a5d08e",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "gateway",
+      "file": "operator/api/redpanda/v1alpha2/console_types.go",
+      "line_start": 112,
+      "line_end": 112,
+      "fingerprint": "be200631c4b08c3a",
+      "context": [
+        {
+          "name": "group",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 544,
+          "string": "API group of the referent. Defaults to \"gateway.networking.k8s.io\"."
+        },
+        {
+          "name": "type",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1015,
+          "string": "Selects how this listener is exposed externally. Unset inherits the cluster-wide external.type (NodePort/LoadBalancer). Set to \"tlsroute\" to route this listener via Gateway API: a TLSRoute is created for it (requires external.gateway with parentRefs) and it is excluded from the NodePort/LoadBalancer Service."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "enabled",
+      "file": "operator/api/redpanda/v1alpha2/console_types.go",
+      "line_start": 202,
+      "line_end": 202,
+      "fingerprint": "e7f32f930d6dd8af",
+      "context": [
+        {
+          "name": "enabled",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 158,
+          "string": "Specifies whether the sidecar is enabled."
+        },
+        {
+          "name": "enabled",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 191,
+          "string": "Specifies whether rack awareness is enabled. When enabled, Kubernetes failure zones are treated as racks. Redpanda maps each rack to a failure zone and places partition replicas across them. Requires `rbac.enabled` set to `true`."
+        },
+        {
+          "name": "enabled",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 487,
+          "string": "Specifies whether TLS is enabled for the listener."
+        },
+        {
+          "name": "enabled",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 515,
+          "string": "Specifies whether the external access is enabled."
+        },
+        {
+          "name": "gateway",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 527,
+          "string": "Configures Gateway API TLSRoute-based external access. When enabled, ClusterIP services and TLSRoute resources are created instead of NodePort/LoadBalancer services. The Gateway itself must be managed externally."
+        },
+        {
+          "name": "enabled",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 566,
+          "string": "Specifies whether usage reporting is enabled."
+        },
+        {
+          "name": "organization",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 568,
+          "string": "Specifies the name of the organization using the software. This can be useful for identifying and segmenting usage data by organization, if usage reporting is enabled.\nDeprecated: This value is no longer respected in the redpanda helm chart\nand will be removed in a future version."
+        },
+        {
+          "name": "hostPath",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 609,
+          "string": "Specifies the absolute path on the worker node to store the Redpanda data directory. If unspecified, then an `emptyDir` volume is used. If specified but `persistentVolume.enabled` is true, `storage.hostPath` has no effect."
+        },
+        {
+          "name": "enabled",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 989,
+          "string": "Specifies whether this Listener is enabled."
+        },
+        {
+          "name": "enabled",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1110,
+          "string": "Specifies whether the Controllers are enabled."
+        },
+        {
+          "name": "enabled",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1172,
+          "string": "Whether RBAC is enabled. Enable for features that need extra privileges, such as rack awareness. If you use the Redpanda Operator, you must deploy it with the `--set rbac.createRPKBundleCRs=true` flag to give it the required ClusterRoles."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "annotations",
+      "file": "operator/api/redpanda/v1alpha2/console_types.go",
+      "line_start": 203,
+      "line_end": 203,
+      "fingerprint": "1a402afb3d50106d",
+      "context": [
+        {
+          "name": "nodeAnnotation",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 193,
+          "string": "Specifies the key in Node labels or annotations to use to denote failure zones."
+        },
+        {
+          "name": "podAnnotations",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 224,
+          "string": "Adds custom annotations to the Pods that run Redpanda Console."
+        },
+        {
+          "name": "annotations",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 511,
+          "string": "Adds custom annotations to the external Service."
+        },
+        {
+          "name": "annotations",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 716,
+          "string": "Adds annotations to the PersistentVolumeClaims to provide additional information or metadata that can be used by other tools or libraries."
+        },
+        {
+          "name": "annotations",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 734,
+          "string": "Adds annotations to the job to provide additional information or metadata that can be used by other tools or libraries."
+        },
+        {
+          "name": "annotations",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 753,
+          "string": "Adds annotations to the job to provide additional information or metadata that can be used by other tools or libraries."
+        },
+        {
+          "name": "annotations",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 785,
+          "string": "Adds annotations to the StatefulSet to provide additional information or metadata.\nPlease use PodTemplate to add additional annotation or labels for Pods managed by Statefulset."
+        },
+        {
+          "name": "annotations",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1170,
+          "string": "Adds custom annotations to the RBAC resources."
+        },
+        {
+          "name": "annotations",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1181,
+          "string": "Adds custom annotations to the ServiceAccount resources."
+        },
+        {
+          "name": "enabled",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1303,
+          "string": "Specifies whether externalDNS annotations are added to LoadBalancer Services. If you enable externalDns, each LoadBalancer Service defined in `external.type` will be annotated with an external-dns hostname that matches `external.addresses[i]`.`external.domain`."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "parentRefs",
+      "file": "operator/api/redpanda/v1alpha2/console_types.go",
+      "line_start": 204,
+      "line_end": 204,
+      "fingerprint": "5551117d38b32795",
+      "context": [
+        {
+          "name": "type",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1015,
+          "string": "Selects how this listener is exposed externally. Unset inherits the cluster-wide external.type (NodePort/LoadBalancer). Set to \"tlsroute\" to route this listener via Gateway API: a TLSRoute is created for it (requires external.gateway with parentRefs) and it is excluded from the NodePort/LoadBalancer Service."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "hostnames",
+      "file": "operator/api/redpanda/v1alpha2/console_types.go",
+      "line_start": 205,
+      "line_end": 205,
+      "fingerprint": "021dd2140ecb56bc",
+      "context": [
+        {
+          "name": "hostTemplate",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1020,
+          "string": "HostTemplate is a Go template for per-broker TLSRoute SNI hostnames. Supports $POD_ORDINAL and $POD_NAME variables."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "path",
+      "file": "operator/api/redpanda/v1alpha2/console_types.go",
+      "line_start": 206,
+      "line_end": 206,
+      "fingerprint": "903d18773c43c0b7",
+      "context": [
+        {
+          "name": "hostPath",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 609,
+          "string": "Specifies the absolute path on the worker node to store the Redpanda data directory. If unspecified, then an `emptyDir` volume is used. If specified but `persistentVolume.enabled` is true, `storage.hostPath` has no effect."
+        },
+        {
+          "name": "mountType",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 631,
+          "string": "mountType can be one of:\n\n- `none`: Does not mount a volume. Tiered storage will use the same volume as the one defined for the Redpanda data directory.\n- `hostPath`: Uses the path specified in `hostPath` on the worker node that the Pod is running on.\n- `emptyDir`: Mounts an empty directory every time the Pod starts.\n- `persistentVolume`: Creates and mounts a PersistentVolumeClaim using the template defined in `persistentVolume`."
+        },
+        {
+          "name": "hostPath",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 638,
+          "string": "Specifies the absolute path on the worker node to store the Tiered Storage cache."
+        },
+        {
+          "name": "ballast_file_path",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 944,
+          "string": "Specifies the file path for ballast file. A ballast file is an empty file that takes up disk space. If Redpanda runs out of disk space and becomes unavailable, you can delete the ballast file as a last resort. This clears up some space and gives you time to delete topics or records and change your retention properties."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "pathType",
+      "file": "operator/api/redpanda/v1alpha2/console_types.go",
+      "line_start": 207,
+      "line_end": 207,
+      "fingerprint": "bc6b026b232846e7",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "name",
+      "file": "operator/api/redpanda/v1alpha2/console_types.go",
+      "line_start": 212,
+      "line_end": 212,
+      "fingerprint": "5acf2661969e4714",
+      "context": [
+        {
+          "name": "nameOverride",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 46,
+          "string": "Customizes the labels `app.kubernetes.io/component=<nameOverride>-statefulset` and `app.kubernetes.io/name=<nameOverride>` on the StatefulSet Pods. The default is `redpanda`."
+        },
+        {
+          "name": "fullnameOverride",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 50,
+          "string": "Customizes the name of the StatefulSet and Services. The default is `redpanda`."
+        },
+        {
+          "name": "secret_name",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 185,
+          "string": "Specifies the name of the Secret."
+        },
+        {
+          "name": "nameOverride",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 206,
+          "string": "Specifies a custom name for the Redpanda Console resources, overriding the default naming convention."
+        },
+        {
+          "name": "fullnameOverride",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 208,
+          "string": "Specifies a full custom name, which overrides the entire naming convention including release name and chart name."
+        },
+        {
+          "name": "priorityClassName",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 211,
+          "string": "Specifies the priority class name for the Pods that run Redpanda Console."
+        },
+        {
+          "name": "image",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 213,
+          "string": "Defines the container image for the Redpanda Console, including the repository, name, and tag."
+        },
+        {
+          "name": "nameOverride",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 350,
+          "string": "Specifies a custom name for the Redpanda Console resources, overriding the default naming convention."
+        },
+        {
+          "name": "fullnameOverride",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 352,
+          "string": "Specifies a full custom name, which overrides the entire naming convention including release name and chart name."
+        },
+        {
+          "name": "enabled",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 399,
+          "string": "Enables SASL authentication. If you enable SASL authentication, you must provide a Secret name in `secretRef`."
+        },
+        {
+          "name": "secretRef",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 403,
+          "string": "If `users` is empty, `secretRef` specifies the name of the Secret that contains your superuser credentials in the format <username>:<password>:<optional-authentication-mechanism>. Otherwise, `secretRef` specifies the name of the Secret that the chart creates to store the credentials in `users`."
+        },
+        {
+          "name": "name",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 413,
+          "string": "Name specifies the name of the bootstrap user created for the cluster, if unspecified\ndefaults to \"kubernetes-controller\"."
+        },
+        {
+          "name": "name",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 427,
+          "string": "Specifies the name of the superuser."
+        },
+        {
+          "name": "certs",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 435,
+          "string": "Lists all available certificates in the cluster. You can reference a specific certificate’s name in each listener’s `listeners.<listener name>.tls.cert` setting."
+        },
+        {
+          "name": "enabled",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 437,
+          "string": "Enables TLS globally for all listeners. Each listener must include a certificate name in its `<listener>.tls` object. To allow you to enable TLS for individual listeners, certificates are always loaded, even if TLS is disabled."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "namespace",
+      "file": "operator/api/redpanda/v1alpha2/console_types.go",
+      "line_start": 213,
+      "line_end": 213,
+      "fingerprint": "40fb3a18624d050e",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "sectionName",
+      "file": "operator/api/redpanda/v1alpha2/console_types.go",
+      "line_start": 214,
+      "line_end": 214,
+      "fingerprint": "43d413bfe2fc1ae5",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "gateway",
+      "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+      "line_start": 241,
+      "line_end": 243,
+      "fingerprint": "92a9be06965c0cff",
+      "context": [
+        {
+          "name": "group",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 544,
+          "string": "API group of the referent. Defaults to \"gateway.networking.k8s.io\"."
+        },
+        {
+          "name": "type",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1015,
+          "string": "Selects how this listener is exposed externally. Unset inherits the cluster-wide external.type (NodePort/LoadBalancer). Set to \"tlsroute\" to route this listener via Gateway API: a TLSRoute is created for it (requires external.gateway with parentRefs) and it is excluded from the NodePort/LoadBalancer Service."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "resources",
+      "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+      "line_start": 244,
+      "line_end": 246,
+      "fingerprint": "8cb12ec5c0d355ec",
+      "context": [
+        {
+          "name": "commonLabels",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 54,
+          "string": "Assigns custom labels to all resources generated by the Redpanda Helm chart. Specify labels as key/value pairs."
+        },
+        {
+          "name": "resources",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 163,
+          "string": "Specifies resource requests for the sidecar container.\nDEPRECATED: Use sideCars.resources"
+        },
+        {
+          "name": "nameOverride",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 206,
+          "string": "Specifies a custom name for the Redpanda Console resources, overriding the default naming convention."
+        },
+        {
+          "name": "extraEnvFrom",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 265,
+          "string": "Allows you to add extra environment variables from external resources to the Pods that run Redpanda Console."
+        },
+        {
+          "name": "secretMounts",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 280,
+          "string": "Mounts additional Secret resources inside the containers that run Redpanda Console."
+        },
+        {
+          "name": "monitoring",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 339,
+          "string": "Specifies monitoring resources"
+        },
+        {
+          "name": "nameOverride",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 350,
+          "string": "Specifies a custom name for the Redpanda Console resources, overriding the default naming convention."
+        },
+        {
+          "name": "commonLabels",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 354,
+          "string": "Assigns custom labels to all resources generated by the Connector Helm chart. Specify labels as key/value pairs."
+        },
+        {
+          "name": "gateway",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 527,
+          "string": "Configures Gateway API TLSRoute-based external access. When enabled, ClusterIP services and TLSRoute resources are created instead of NodePort/LoadBalancer services. The Gateway itself must be managed externally."
+        },
+        {
+          "name": "extraEnvFrom",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 763,
+          "string": "Specifies environment variables from external sources, such as ConfigMap resources, or Secret resources, to dynamically configure the job."
+        },
+        {
+          "name": "resources",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1112,
+          "string": "Specifies resource requests for the sidecar container.\nDEPRECATED: Use sideCars.resources"
+        },
+        {
+          "name": "cores",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1128,
+          "string": "Specifies the number of CPU cores available to the application. Redpanda makes use of a thread per core model. For details, see https://docs.redpanda.com/current/get-started/architecture/#thread-per-core-model. For this reason, Redpanda should only be given full cores. Note: You can increase cores, but decreasing cores is not currently supported. See the GitHub issue:https://github.com/redpanda-data/redpanda/issues/350. This setting is equivalent to `--smp`, `resources.requests.cpu`, and `resources.limits.cpu`. For production, use `4` or greater."
+        },
+        {
+          "name": "overprovisioned",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1130,
+          "string": "Specifies whether Redpanda assumes it has all of the provisioned CPU. This should be `true` unless the container has CPU affinity. Equivalent to: `--idle-poll-time-us 0`, `--thread-affinity 0`, and `--poll-aio 0`. If the value of full cores in `resources.cpu.cores` is less than `1`, this setting is set to `true`."
+        },
+        {
+          "name": "max",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1136,
+          "string": "Specifies the maximum resources that can be allocated to a container."
+        },
+        {
+          "name": "min",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1138,
+          "string": "Specifies the minimum resources required for a container."
+        }
+      ]
+    }
+  ]
+}

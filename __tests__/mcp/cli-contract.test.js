@@ -68,6 +68,32 @@ describe('CLI Contract Tests', () => {
     });
   });
 
+  describe('rpcn-connector-docs overrides', () => {
+    // Connect descriptions come from the connect and benthos specs, so the
+    // generator must not default to docs-data/overrides.json.
+    // The help entry for one flag, including its wrapped continuation lines.
+    const helpLine = (output, flag) => {
+      const lines = output.split('\n');
+      const i = lines.findIndex(l => l.includes(flag));
+      let j = i + 1;
+      while (j < lines.length && !/^\s{2}-/.test(lines[j])) j++;
+      return lines.slice(i, j).join(' ');
+    };
+
+    test('--overrides has no default', () => {
+      const result = executeCLI('generate rpcn-connector-docs --help');
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('--overrides');
+      expect(helpLine(result.output, '--overrides')).not.toMatch(/\(default:/);
+      expect(result.output).not.toContain('docs-data/overrides.json');
+    });
+
+    test('a flag with a default still shows it (negative control)', () => {
+      const result = executeCLI('generate rpcn-connector-docs --help');
+      expect(helpLine(result.output, '--data-dir')).toMatch(/\(default:/);
+    });
+  });
+
   describe('Generate Subcommands', () => {
     const requiredSubcommands = [
       {
