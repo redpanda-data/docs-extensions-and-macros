@@ -12,7 +12,7 @@ const DIFF = `diff --git a/internal/impl/snowflake/output.go b/internal/impl/sno
 index 1111111..2222222 100644
 --- a/internal/impl/snowflake/output.go
 +++ b/internal/impl/snowflake/output.go
-@@ -10,5 +10,7 @@ func spec() *service.ConfigSpec {
+@@ -10,5 +10,8 @@ func spec() *service.ConfigSpec {
  \t\tDescription("Context line: https://context.redpanda.test/kept").
 -\t\tField(service.NewStringField("a").Description("See https://docs.snowflake.com/en/removed[the old page].")).
 +\t\tField(service.NewStringField("a").Description("See https://docs.snowflake.com/en/user-guide/admin-privatelink[PrivateLink].")).
@@ -20,6 +20,7 @@ index 1111111..2222222 100644
 +\t\t// A comment with https://comment.redpanda.test/skipped
 +\t\tField(service.NewURLField("c").Default("http://localhost:4195").Example("https://%s.blob.core.windows.net"))
 +\t\tField(service.NewURLField("d").Description(\`Default \`+"\`https://ORG-ACCOUNT.snowflakecomputing.com\`"+\`.\`))
++\t\tField(service.NewURLField("e").Description(\`https://raw-start.redpanda.test/page\`).Example("Use \`https://QUOTED-CODE.redpanda.test\`"))
  \t\tVersion("4.80.0")
 diff --git a/internal/impl/snowflake/output_test.go b/internal/impl/snowflake/output_test.go
 --- a/internal/impl/snowflake/output_test.go
@@ -43,13 +44,14 @@ describe('extractAddedUrls', () => {
     expect(found).toEqual([
       { url: 'https://docs.snowflake.com/en/user-guide/admin-privatelink', file: 'internal/impl/snowflake/output.go', line: 11 },
       { url: 'https://raw.redpanda.test/page', file: 'internal/impl/snowflake/output.go', line: 12 },
+      { url: 'https://raw-start.redpanda.test/page', file: 'internal/impl/snowflake/output.go', line: 16 },
       { url: 'https://partial.redpanda.test/page', file: 'docs/modules/components/partials/x.adoc', line: 2 }
     ])
   })
 
   test('skips removed and context lines, comments, inline code, test files, placeholders, and local hosts', () => {
     const urls = found.map((f) => f.url).join(' ')
-    for (const skipped of ['removed', 'context.redpanda.test', 'comment.redpanda.test', 'test-file', 'localhost', 'blob.core', 'ORG-ACCOUNT']) {
+    for (const skipped of ['removed', 'context.redpanda.test', 'comment.redpanda.test', 'test-file', 'localhost', 'blob.core', 'ORG-ACCOUNT', 'QUOTED-CODE']) {
       expect(urls).not.toContain(skipped)
     }
   })

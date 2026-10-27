@@ -45,6 +45,22 @@ function fetchable (url) {
 }
 
 /**
+ * Whether the end of a Go source line prefix sits inside a double-quoted
+ * string literal. Raw strings and escapes are tracked; a line is assumed to
+ * start outside any string.
+ */
+function inGoQuotedString (prefix) {
+  let quote = null
+  for (let i = 0; i < prefix.length; i++) {
+    const c = prefix[i]
+    if (quote === '"' && c === '\\') i++
+    else if (quote && c === quote) quote = null
+    else if (!quote && (c === '"' || c === '`')) quote = c
+  }
+  return quote === '"'
+}
+
+/**
  * The URLs on lines a unified diff adds, in doc-string sources only, with the
  * file and new-side line number of each. Removed and context lines, and line
  * comments, are skipped.
@@ -78,9 +94,11 @@ function extractAddedUrls (diff) {
       if (file && isDocSource(file) && !/^\s*\/\//.test(content)) {
         for (const match of content.matchAll(URL_RX)) {
           // Right after a backtick is inline code (`https://ORG-ACCOUNT...`),
-          // a value to type rather than a link. The backtick count used
-          // for AsciiDoc does not work here: Go raw strings use backticks.
-          if (content[match.index - 1] === '`') continue
+          // a value to type rather than a link. In Go, only a backtick inside
+          // a double-quoted string is inline code: any other opens a raw
+          // string, whose URL is still checked.
+          if (content[match.index - 1] === '`' &&
+            (!file.endsWith('.go') || inGoQuotedString(content.slice(0, match.index - 1)))) continue
           const url = match[0].replace(TRAILING_PUNCT_RX, '')
           if (fetchable(url)) found.push({ url, file, line })
         }
