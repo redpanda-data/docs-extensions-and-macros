@@ -43,6 +43,7 @@ const { getAntoraValue, setAntoraValue } = require('../cli-utils/antora-utils')
 const programCli = new Command()
 
 const pkg = require('../package.json')
+const { generatedMarker } = require('../cli-utils/generated-marker')
 programCli
   .name('doc-tools')
   .description('Redpanda Document Automation CLI')
@@ -1984,6 +1985,10 @@ automation
         }
       }
 
+      // Same marker shape as every doc-tools generator; convert-to-markdown
+      // reads it and reports the provenance in the Markdown twins.
+      const helmMarker = generatedMarker('helm-docs', `the ${name} chart's values.yaml and README in redpanda-data/redpanda-operator`) + '\n\n'
+      doc = helmMarker + doc
       fs.writeFileSync(outFile, doc, 'utf8')
 
       console.log(`Done: Wrote ${outFile}`)
@@ -3050,9 +3055,10 @@ programCli
   .requiredOption('--repo <path>', 'Path to a Redpanda core checkout. Nothing is cloned.')
   .requiredOption('--diff <base>', 'Base ref: changes in <base>...HEAD are inspected')
   .option('--format <format>', 'Output format: json or human', 'json')
+  .option('--exclude <file>', 'File of already-dispatched findings, one "name change_kind" per line, to leave out of the report')
   .action((options) => {
     const { spawnSync } = require('child_process')
-    const { detectGatingChanges, buildDocImpact, enterprisePropertyNames, ENUM_HEADER, CONFIG_HEADER, CONFIG_SOURCE } = require('../tools/enterprise-features/detect-gating-changes')
+    const { detectGatingChanges, buildDocImpact, withoutSent, enterprisePropertyNames, ENUM_HEADER, CONFIG_HEADER, CONFIG_SOURCE } = require('../tools/enterprise-features/detect-gating-changes')
     const empty = { findings: [] }
     const result = spawnSync('git', ['diff', '--no-color', '--no-ext-diff', `${options.diff}...HEAD`, '--', ENUM_HEADER, CONFIG_HEADER, CONFIG_SOURCE], {
       cwd: options.repo, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024
@@ -3067,7 +3073,14 @@ programCli
     const header = spawnSync('git', ['show', `HEAD:${CONFIG_HEADER}`], { cwd: options.repo, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
     if (header.status !== 0) console.error(`git show HEAD:${CONFIG_HEADER} failed in ${options.repo}; configuration.cc changes are not checked: ${(header.stderr || '').trim()}`)
     const enterpriseNames = header.status === 0 ? enterprisePropertyNames(header.stdout) : []
-    const findings = detectGatingChanges(result.stdout, { enterpriseNames })
+    let findings = detectGatingChanges(result.stdout, { enterpriseNames })
+    if (options.exclude) {
+      try {
+        findings = withoutSent(findings, fs.readFileSync(options.exclude, 'utf8'))
+      } catch (err) {
+        console.error(`Could not read ${options.exclude}; nothing excluded: ${err.message}`)
+      }
+    }
     const report = buildDocImpact(findings) || empty
     if (options.format === 'human') {
       if (findings.length === 0) { console.log('No enterprise gating changes.'); return }

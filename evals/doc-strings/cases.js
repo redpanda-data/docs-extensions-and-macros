@@ -19,6 +19,11 @@
  *   verified like a rewrite (re-lint clean, extraction intact, substance
  *   restored). Its sabotage swaps in a fully conforming rewording, where the
  *   model must stay silent and the case therefore fails.
+ * - unchanged-lines: behavior C for lines the PR did not touch. A string
+ *   ships whole, but the author wrote only the changed lines; any
+ *   suggestion must keep every unchanged line of the declaration byte for
+ *   byte. Its sabotage is `sabotagePromptEdits`: the production prompt
+ *   with the rule that scopes review to changed lines reverted.
  * - negative-review / negative-audit: behavior C. Fully conforming input;
  *   the model FAILS the case by producing any suggestion or claiming any
  *   finding. `sabotageEdits` swaps in a violating fixture to prove the case
@@ -123,8 +128,7 @@ const CASES = [
       find: '      "Maximum size of a batch processed by the server. If the batch is "\n' +
             '      "compressed, the limit applies to the compressed batch size. Default "\n' +
             '      "is 1048576 bytes.",',
-      replace: '      "Controls how the server processes large requests. Default is "\n' +
-               '      "1048576 bytes.",'
+      replace: '      "Controls how the server processes large requests.",'
     }],
     // Sabotage: the same fully conforming rewording negative-property-diff
     // uses. The model must rightly stay silent on it, which makes this
@@ -135,11 +139,14 @@ const CASES = [
             '      "is 1048576 bytes.",',
       replace: '      "Maximum size in bytes of a batch processed by the server. If the "\n' +
                '      "batch is compressed, this limit applies to the compressed batch "\n' +
-               '      "size. Default is 1048576 bytes.",'
+               '      "size.",'
     }],
-    // The vacuous string dodges every rule (its default is concrete, so
-    // sentinel-default-unexplained stays silent) while saying nothing about WHAT is
-    // limited. The removed diff lines show the model the original, so a
+    // The vacuous string dodges every rule while saying nothing about WHAT
+    // is limited. Earlier versions of these fixtures also restated the
+    // concrete default ("Default is 1048576 bytes."), which the standard says
+    // to delete; the old hand-written prompt did not carry that rule, so the
+    // "conforming" text only looked conforming. Each fixture now plants only
+    // the defect its case tests. The removed diff lines show the model the original, so a
     // substantive rewrite names the thing: a batch.
     mustMentionAny: ['batch']
   },
@@ -150,14 +157,13 @@ const CASES = [
     layout: 'properties',
     target: 'kafka_batch_max_bytes',
     columnLimit: 80,
-    terminologyFixture: 'terminology.md',
     diffEdits: [{
       find: '      "Maximum size of a batch processed by the server. If the batch is "\n' +
             '      "compressed, the limit applies to the compressed batch size. Default "\n' +
             '      "is 1048576 bytes.",',
-      replace: '      "Maximum size of a batch the redpanda broker accepts. If the batch "\n' +
-               '      "is compressed, the limit applies to the compressed batch size. "\n' +
-               '      "Default is 1048576 bytes.",'
+      replace: '      "Maximum size in bytes of a batch the redpanda broker accepts. If "\n' +
+               '      "the batch is compressed, the limit applies to the compressed "\n' +
+               '      "batch size.",'
     }],
     // Sabotage: identical rewording with the canonical casing; the model
     // must stay silent there, so this case fails, proving it can fail.
@@ -165,9 +171,9 @@ const CASES = [
       find: '      "Maximum size of a batch processed by the server. If the batch is "\n' +
             '      "compressed, the limit applies to the compressed batch size. Default "\n' +
             '      "is 1048576 bytes.",',
-      replace: '      "Maximum size of a batch the Redpanda broker accepts. If the batch "\n' +
-               '      "is compressed, the limit applies to the compressed batch size. "\n' +
-               '      "Default is 1048576 bytes.",'
+      replace: '      "Maximum size in bytes of a batch the Redpanda broker accepts. If "\n' +
+               '      "the batch is compressed, the limit applies to the compressed "\n' +
+               '      "batch size.",'
     }],
     mustMentionAny: ['Redpanda'],
     mustNotMention: ['redpanda']
@@ -183,13 +189,40 @@ const CASES = [
             '      "is 1048576 bytes.",',
       replace: '      "Maximum size in bytes of a batch processed by the server. If the "\n' +
                '      "batch is compressed, this limit applies to the compressed batch "\n' +
-               '      "size. Default is 1048576 bytes.",'
+               '      "size.",'
     }],
     sabotageEdits: [{
       find: '      "Maximum size of a batch processed by the server. If the batch is "\n' +
             '      "compressed, the limit applies to the compressed batch size. Default "\n' +
             '      "is 1048576 bytes.",',
       replace: '      "batch max bytes",'
+    }]
+  },
+  {
+    // streaming-enterprise PR 461: the author rewrote the --regex paragraphs
+    // of rpk topic delete's Long text, and the review then rewrote lines
+    // nobody touched (quotes around a command, example topic names).
+    id: 'unchanged-lines-kept',
+    kind: 'unchanged-lines',
+    description: "rpk Long text with a few changed paragraphs; any suggestion must keep every line the PR did not change",
+    layout: 'rpk-pr461',
+    headFixture: 'delete.head.go',
+    target: 'delete',
+    sabotagePromptEdits: [{
+      find: '- The whole declaration ships, so read all of it, but review only\n' +
+            '  the lines this PR changed. A line the PR did not change is a\n' +
+            '  finding only when this change makes it wrong: it now\n' +
+            '  contradicts the changed lines or the code. Its wording, style\n' +
+            '  and term choices are out of scope even where they break the\n' +
+            '  standard; the author did not write them in this PR. A lint\n' +
+            '  finding is the one exception: the lint reports per\n' +
+            '  declaration, so fix what a finding names on any line, and\n' +
+            '  change nothing else on that line. A suggestion fixes the\n' +
+            '  changed lines, any line the change made wrong and any lint\n' +
+            '  finding, and keeps every other line byte-identical.\n',
+      replace: '- The whole declaration ships, so judge all of it, not only the\n' +
+               '  lines this PR changed, and fix every problem it has in one\n' +
+               '  suggestion.\n'
     }]
   },
   {
