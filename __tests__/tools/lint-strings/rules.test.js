@@ -242,6 +242,28 @@ describe('conditional rule (env-cloud blocks in connect spec strings)', () => {
     expect(closer).toHaveLength(1)
   })
 
+  test('whitespace inside the brackets of a directive is an error: Asciidoctor reads it as the single-line form', () => {
+    for (const kind of ['ifdef', 'ifndef']) {
+      const issues = CONDITIONAL_RULE.check(connectDecl(`A.\n\n${kind}::env-cloud[ ]\nB.\nendif::[]\n\nC.`))
+      expect(issues).toEqual([
+        expect.objectContaining({ severity: 'error', message: expect.stringContaining(`${kind}::env-cloud[ ] has whitespace inside its brackets`) }),
+        expect.objectContaining({ severity: 'error', message: expect.stringContaining('has no matching') })
+      ])
+    }
+    // Asciidoctor rejects an endif with anything in its brackets and leaves
+    // the block open, so the rule reports the block as never closed too.
+    for (const [bracket, what] of [['\t', 'whitespace'], [' ', 'whitespace'], ['x', 'text']]) {
+      const closer = CONDITIONAL_RULE.check(connectDecl(`A.\n\nifndef::env-cloud[]\nB.\nendif::[${bracket}]\n\nC.`))
+      expect(closer).toEqual([
+        expect.objectContaining({ severity: 'error', message: expect.stringContaining(`has ${what} inside its brackets. Asciidoctor rejects it and leaves the block open`) }),
+        expect.objectContaining({ severity: 'error', message: expect.stringContaining('ifndef::env-cloud[] is never closed') })
+      ])
+    }
+    // Negative controls: the block form with empty brackets, and a named endif, pass
+    expect(messages('A.\n\nifndef::env-cloud[]\nB.\nendif::[]\n\nC.')).toEqual([])
+    expect(messages('A.\n\nifdef::env-cloud[]\nB.\nendif::env-cloud[]\n\nC.')).toEqual([])
+  })
+
   test('contradictory nesting is reported: the inner text renders for neither audience', () => {
     expect(messages('A.\n\nifdef::env-cloud[]\nCloud.\n\nifndef::env-cloud[]\nNever.\nendif::[]\n\nendif::[]\n\nB.')).toEqual([
       expect.stringContaining('ifndef::env-cloud[] is inside ifdef::env-cloud[], so the text between them renders for neither audience')
@@ -267,8 +289,10 @@ describe('conditional rule (env-cloud blocks in connect spec strings)', () => {
   test('the single-line form is rejected and does not open a block', () => {
     const found = messages('Prose.\n\nifndef::env-cloud[Only on self-managed.]\n\nAfter.')
     expect(found).toEqual([expect.stringContaining('is the single-line form')])
+    // Text in an endif's brackets leaves the block open in Asciidoctor
     expect(messages('Prose.\n\nifdef::env-cloud[]\nText.\nendif::[extra]\n\nAfter.')).toEqual([
-      expect.stringContaining('carries text in its brackets')
+      expect.stringContaining('has text inside its brackets'),
+      expect.stringContaining('is never closed')
     ])
   })
 

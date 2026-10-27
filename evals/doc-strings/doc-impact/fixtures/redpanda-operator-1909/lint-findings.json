@@ -1,0 +1,285 @@
+{
+  "findings": [
+    {
+      "surface": "crd",
+      "name": "observedGeneration",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/rolestatus.go",
+      "line_start": 21,
+      "line_end": 21,
+      "string": null,
+      "declaration_text": "\tObservedGeneration       *int64                           `json:\"observedGeneration,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"ObservedGeneration\" (json: \"observedGeneration\") in RoleStatusApplyConfiguration has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "acc5fb5ade38358e"
+    },
+    {
+      "surface": "crd",
+      "name": "conditions",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/rolestatus.go",
+      "line_start": 22,
+      "line_end": 22,
+      "string": null,
+      "declaration_text": "\tConditions               []v1.ConditionApplyConfiguration `json:\"conditions,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"Conditions\" (json: \"conditions\") in RoleStatusApplyConfiguration has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "ff6b9059695ea33c"
+    },
+    {
+      "surface": "crd",
+      "name": "managedAcls",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/rolestatus.go",
+      "line_start": 23,
+      "line_end": 23,
+      "string": null,
+      "declaration_text": "\tManagedACLs              *bool                            `json:\"managedAcls,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"ManagedACLs\" (json: \"managedAcls\") in RoleStatusApplyConfiguration has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "0fa5f2220d288e26"
+    },
+    {
+      "surface": "crd",
+      "name": "managedRole",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/rolestatus.go",
+      "line_start": 24,
+      "line_end": 24,
+      "string": null,
+      "declaration_text": "\tManagedRole              *bool                            `json:\"managedRole,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"ManagedRole\" (json: \"managedRole\") in RoleStatusApplyConfiguration has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "850021ab3586e924"
+    },
+    {
+      "surface": "crd",
+      "name": "managedPrincipals",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/rolestatus.go",
+      "line_start": 25,
+      "line_end": 25,
+      "string": null,
+      "declaration_text": "\tManagedPrincipals        *bool                            `json:\"managedPrincipals,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"ManagedPrincipals\" (json: \"managedPrincipals\") in RoleStatusApplyConfiguration has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "1b3e773df9fe9470"
+    },
+    {
+      "surface": "crd",
+      "name": "effectiveRoleName",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/rolestatus.go",
+      "line_start": 26,
+      "line_end": 26,
+      "string": null,
+      "declaration_text": "\tEffectiveRoleName        *string                          `json:\"effectiveRoleName,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"EffectiveRoleName\" (json: \"effectiveRoleName\") in RoleStatusApplyConfiguration has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "ffe13c8023c98739"
+    },
+    {
+      "surface": "crd",
+      "name": "pendingEffectiveRoleName",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/rolestatus.go",
+      "line_start": 27,
+      "line_end": 27,
+      "string": null,
+      "declaration_text": "\tPendingEffectiveRoleName *string                          `json:\"pendingEffectiveRoleName,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"PendingEffectiveRoleName\" (json: \"pendingEffectiveRoleName\") in RoleStatusApplyConfiguration has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "c0c386fe6fc2fc1f"
+    }
+  ],
+  "summary": {
+    "totalDeclarations": 8,
+    "flaggedDeclarations": 7,
+    "removedSurfaceLines": 0,
+    "removedSurfaceFiles": [],
+    "errors": 0,
+    "warnings": 7,
+    "info": 0,
+    "byRule": {
+      "undocumented-field": {
+        "errors": 0,
+        "warnings": 7,
+        "info": 0
+      }
+    },
+    "bySurface": {
+      "crd": {
+        "declarations": 8,
+        "flagged": 7,
+        "errors": 0,
+        "warnings": 7,
+        "info": 0
+      }
+    },
+    "alreadyReviewed": 0,
+    "removedDeclarations": [],
+    "unverifiableDeclarations": 0,
+    "skippedDeclarations": []
+  },
+  "unsupported_surfaces": [],
+  "declarations": [
+    {
+      "surface": "crd",
+      "name": "observedGeneration",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/rolestatus.go",
+      "line_start": 21,
+      "line_end": 21,
+      "fingerprint": "acc5fb5ade38358e",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "conditions",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/rolestatus.go",
+      "line_start": 22,
+      "line_end": 22,
+      "fingerprint": "ff6b9059695ea33c",
+      "context": [
+        {
+          "name": "conditions",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/role_types.go",
+          "line_start": 134,
+          "string": "Conditions holds the conditions for the Redpanda role."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "managedAcls",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/rolestatus.go",
+      "line_start": 23,
+      "line_end": 23,
+      "fingerprint": "0fa5f2220d288e26",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "managedRole",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/rolestatus.go",
+      "line_start": 24,
+      "line_end": 24,
+      "fingerprint": "850021ab3586e924",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "managedPrincipals",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/rolestatus.go",
+      "line_start": 25,
+      "line_end": 25,
+      "fingerprint": "1b3e773df9fe9470",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "effectiveRoleName",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/rolestatus.go",
+      "line_start": 26,
+      "line_end": 26,
+      "fingerprint": "ffe13c8023c98739",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "pendingEffectiveRoleName",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/rolestatus.go",
+      "line_start": 27,
+      "line_end": 27,
+      "fingerprint": "c0c386fe6fc2fc1f",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "pendingEffectiveRoleName",
+      "file": "operator/api/redpanda/v1alpha2/role_types.go",
+      "line_start": 149,
+      "line_end": 155,
+      "fingerprint": "89a496019b404474",
+      "context": [
+        {
+          "name": "spec",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/role_types.go",
+          "line_start": 36,
+          "string": "Defines the desired state of the Redpanda role."
+        }
+      ]
+    }
+  ]
+}

@@ -27,6 +27,7 @@ function execRun (step, { env = {}, stubs = {}, expressions = {}, files = {}, de
     fs.chmodSync(p, 0o755)
   }
   for (const [name, body] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true })
     fs.writeFileSync(path.join(dir, name), body)
   }
 
