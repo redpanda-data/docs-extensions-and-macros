@@ -100,10 +100,21 @@ describe('fillPluginFlags', () => {
 
   test('uses the tree and runs no --help when plugin commands already have flags', () => {
     const calls = []
-    const n = node([{ name: 'name', type: 'string', default: '', required: true }])
+    const n = node([{ name: 'name', type: 'string', default: '', required: true, from_plugin: true }])
     const result = fillPluginFlags(n, (argPath) => { calls.push(argPath); return null })
     expect(result).toEqual({ source: 'tree', enriched: 0 })
     expect(calls).toEqual([])
+  })
+
+  test('uses plugin flags on the root of a plugin with no subcommands', () => {
+    // rpk check: one command, with rpk's own --version beside the plugin's flags
+    const n = { name: 'check', flags: [{ name: 'version', type: 'bool' }, { name: 'all', type: 'bool', from_plugin: true }], commands: [] }
+    expect(fillPluginFlags(n, () => { throw new Error('no --help expected') })).toEqual({ source: 'tree', enriched: 0 })
+  })
+
+  test('does not take rpk flags on the root or the shim for plugin flags', () => {
+    const n = { name: 'check', flags: [{ name: 'version', type: 'bool' }], commands: [] }
+    expect(pluginTreeHasFlags(n)).toBe(false)
   })
 
   test('ignores the install shim when deciding, and falls back to --help', () => {

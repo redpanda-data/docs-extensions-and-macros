@@ -1747,19 +1747,17 @@ function enrichPluginTreeWithFlags(node, execHelp) {
 }
 
 /**
- * Whether any plugin command below the plugin's root already has flags in
- * the tree. rpk includes plugin flags in --print-tree when the plugin lists
+ * Whether the tree already carries the plugin's own flags. rpk includes
+ * them in --print-tree, marked "from_plugin": true, when the plugin lists
  * them in its --help-autocomplete output; older rpk or plugin versions give
- * none. The root and the install/uninstall/upgrade shim are skipped: their
- * flags can come from rpk itself.
+ * none. The marker is what tells them apart from flags rpk defines on the
+ * same commands, such as rpk's own --version on rpk check.
  * @param {Object} node - The plugin's top-level command node
  * @returns {boolean}
  */
 function pluginTreeHasFlags(node) {
-  const any = (cmd) => (cmd.flags || []).length > 0 || (cmd.commands || []).some(any)
-  return (node.commands || [])
-    .filter(c => !PLUGIN_SHIM_SUBCOMMANDS.has(c.name))
-    .some(any)
+  const any = (cmd) => (cmd.flags || []).some(f => f.from_plugin === true) || (cmd.commands || []).some(any)
+  return any(node)
 }
 
 /**
