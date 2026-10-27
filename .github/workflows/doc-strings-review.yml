@@ -17,6 +17,16 @@
 #   5. a workflow artifact holding the docs MCP calls the review made and
 #      the answers it got, for the doc-impact eval (see the step).
 #
+# THE PROMPT LIVES HERE ON PURPOSE. Callers pin this workflow by SHA, so a
+# prompt change reaches an engineering repo only when that repo bumps its pin
+# in a reviewed pull request. Do not move the prompt to docs-team-standards,
+# and never fetch a prompt, a skill, or a resource at run time from a branch
+# of a repository other than the one under review: that would change every
+# caller's review the moment someone merged elsewhere. A fetch pinned to a commit SHA is allowed. The
+# writing standard and terminology fetch below predates this rule; do not add
+# to it.
+# See CLAUDE.md, "Automation prompts stay in this repository".
+#
 # Each string is reviewed once. lint-strings fingerprints every declaration
 # (surface, name, text), the fingerprints a review has seen are kept in the
 # Actions cache under the PR number, and a later push hands the model only
@@ -272,7 +282,12 @@ jobs:
             echo "::error::Could not read the changed-file list for PR $PR; refusing to run the review."
             exit 1
           fi
-          if printf '%s\n' "$files" | grep -qE '(^|/)\.claude/|(^|/)CLAUDE\.md$|^\.github/workflows/|^\.github/actions/|^action\.ya?ml$'; then
+          # Here-string, not a pipe: under pipefail, grep -q exiting on the
+          # first match makes printf fail with SIGPIPE once the list is past
+          # the pipe buffer, and the guard would wave a large PR through.
+          # CLAUDE.local.md and .mcp.json are on the list because Claude Code
+          # also reads them from the working directory.
+          if grep -qE '(^|/)\.claude/|(^|/)CLAUDE(\.local)?\.md$|^\.mcp\.json$|^\.github/workflows/|^\.github/actions/|^action\.ya?ml$' <<< "$files"; then
             perm=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$AUTHOR/permission" -q .permission || echo none)
             if [ "$perm" != "admin" ] && [ "$perm" != "write" ]; then
               echo "::error::PR touches review configuration from a non-writer; skipping automated review."
@@ -294,10 +309,12 @@ jobs:
       # enterprise-impact.json and enterprise-stderr.txt now live in
       # $RUNNER_TEMP, so no step reads them from here. They stay on the list
       # as defense in depth, in case a later change writes them here again.
+      # -r: a committed directory under one of these names would make rm -f
+      # fail the job; it is removed like a file.
       - name: Remove run-output files the PR checked in
         run: |
           set -euo pipefail
-          rm -f doc-impact.json doc-impact.merged.json review-summary.md \
+          rm -rf -- doc-impact.json doc-impact.merged.json review-summary.md \
             lint-findings.json pr-diff.patch pr-diff.full pr-diff.err \
             enterprise-impact.json enterprise-stderr.txt \
             embedded-reference-strings.md terminology.md
@@ -821,7 +838,9 @@ jobs:
           # call failed, and the prompt then told the model that empty file
           # "is the authoritative writing standard" - worse than no file, since
           # the prompt's existence check takes the wrong branch. rm -f up front
-          # so a stale file can never be mistaken for a fresh fetch.
+          # so a stale file can never be mistaken for a fresh fetch. (The
+          # run-output cleanup after checkout removes them too; this keeps the
+          # step correct on its own.)
           rm -f embedded-reference-strings.md terminology.md
           [ -n "${GH_TOKEN:-}" ] || { echo "::notice::No bot token; lint-only review."; exit 0; }
           tmp=$(mktemp)
@@ -843,21 +862,20 @@ jobs:
             rm -f "$tmp2"
             echo "::notice::terminology reference unavailable; term checks skipped."
           fi
-      # The next step hands untrusted PR content to a model with Bash
-      # access. Nothing it does not need should sit in its process
-      # environment, so stash the OIDC-fetched bot token in a runner-temp
-      # file for the dispatch step (whose allowed tool patterns cannot read
-      # it), then blank the token and the AWS session credentials from the
-      # job env. Callers on the plain-secret path are unaffected: this step
-      # only runs when the OIDC inputs are set.
+      # The next step hands untrusted PR content to a model. Nothing it does
+      # not need may exist while it runs, so blank the OIDC-fetched bot token
+      # and the AWS session credentials from the job env, and do not write the
+      # token anywhere. Scoping the review's Read rule to the workspace is not
+      # enough on its own: Claude Code auto-approves read-only Bash commands
+      # such as cat, so any file on the runner is readable. The dispatch step
+      # fetches the token again after the review. Callers on the plain-secret
+      # path are unaffected: this step only runs when the OIDC inputs are set.
       - name: Drop fetched credentials from the review's environment
         if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0' || steps.enterprise.outputs.found != '0') && inputs.aws_region != '' && inputs.aws_role_name_prefix != ''
         env:
           CLIENT_SECRET_ID: ${{ inputs.adp_client_secret_id }}
         run: |
           set -euo pipefail
-          umask 077
-          printf '%s' "${ACTIONS_BOT_TOKEN:-}" > "$RUNNER_TEMP/bot-token"
           # AWS_BEARER_TOKEN_BEDROCK deliberately survives: it is the model
           # auth in gateway mode, short-lived, and usable only against the
           # gateway. The long-lived client credential that can mint fresh
@@ -910,8 +928,9 @@ jobs:
               mcp__redpanda-docs__search_api_reference,
               mcp__redpanda-docs__ask_redpanda_question,
               mcp__redpanda-docs__get_api_reference_content,
-              Read,
-              Write,
+              Read(./**),
+              Edit(./doc-impact.json),
+              Edit(./review-summary.md),
               Bash(cat pr-diff.patch),
               Bash(gh pr view *),
               Bash(cat lint-findings.json),
@@ -1288,6 +1307,30 @@ jobs:
           path: ${{ runner.temp }}/doc-impact-mcp/recording.json
           retention-days: 90
           if-no-files-found: ignore
+      # The bot token was blanked before the review and never written to
+      # disk, so the dispatch fetches it again now that the model has exited.
+      # Only on the OIDC path, and only when this run has a report to send:
+      # a doc-impact.json the review wrote (the review ran), or a gating
+      # report (in $RUNNER_TEMP, so hashFiles can't see it; a gating-only run
+      # skips the review). The role and secret ids repeat the "Assume the AWS
+      # role that can read the bot token" and "Fetch the bot token from
+      # Secrets Manager" steps above; change both copies together.
+      - name: Assume the AWS role for the doc-impact dispatch
+        id: aws_dispatch
+        if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0' || steps.enterprise.outputs.found != '0') && inputs.aws_region != '' && inputs.aws_role_name_prefix != '' && ((hashFiles('doc-impact.json') != '' && (steps.review.outcome == 'success' || steps.review.outcome == 'failure')) || steps.enterprise.outputs.found != '0')
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: arn:aws:iam::${{ secrets.aws_cred_account_id }}:role/${{ inputs.aws_role_name_prefix }}${{ github.event.repository.name }}
+      - name: Fetch the bot token for the doc-impact dispatch
+        if: steps.aws_dispatch.outcome == 'success'
+        continue-on-error: true
+        uses: aws-actions/aws-secretsmanager-get-secrets@v3
+        with:
+          secret-ids: |
+            ,${{ inputs.bot_token_secret_id }}
+          parse-json-secrets: true
       - name: Dispatch doc-impact
         if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0' || steps.enterprise.outputs.found != '0')
         continue-on-error: true
@@ -1301,11 +1344,10 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
-          # The OIDC path stashes the token in a temp file (see the scrub
-          # step above) because it is deliberately blanked from the job env
-          # before the review runs.
-          if [ -z "${GH_TOKEN:-}" ] && [ -n "${RUNNER_TEMP:-}" ] && [ -s "$RUNNER_TEMP/bot-token" ]; then
-            GH_TOKEN="$(cat "$RUNNER_TEMP/bot-token")"
+          # On the OIDC path the token is fetched again after the review (the
+          # two steps above), because it is blanked before the review runs.
+          if [ -z "${GH_TOKEN:-}" ] && [ -n "${ACTIONS_BOT_TOKEN:-}" ]; then
+            GH_TOKEN="$ACTIONS_BOT_TOKEN"
             export GH_TOKEN
           fi
           [ -n "${GH_TOKEN:-}" ] || { echo "No bot token; skipping dispatch."; exit 0; }

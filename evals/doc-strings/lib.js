@@ -446,6 +446,7 @@ function dispatchAccepts (docImpactText) {
   } catch (_) {}
   if (!filter) throw new Error('the dispatch step\'s doc-impact.json predicate was not found in doc-strings-review.yml')
   const r = spawnSync('jq', ['-e', filter], { input: docImpactText, encoding: 'utf8' })
+  if (r.error) throw r.error
   return { pass: r.status === 0, detail: r.status === 0 ? 'accepted' : `rejected (jq exit ${r.status}${r.stderr ? ': ' + r.stderr.trim().slice(0, 160) : ''})` }
 }
 

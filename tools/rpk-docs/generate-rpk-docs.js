@@ -11,6 +11,8 @@ Object.entries(helpers).forEach(([name, fn]) => {
     handlebars.registerHelper(name, fn)
   }
 })
+// The provenance marker command.hbs writes under the page header
+handlebars.registerHelper('generatedMarker', require('../../cli-utils/generated-marker').generatedMarker)
 
 // Template paths
 const TEMPLATES_DIR = path.resolve(__dirname, './templates')

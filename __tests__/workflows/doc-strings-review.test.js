@@ -431,6 +431,8 @@ fi
     ['action.yml', true],
     ['.claude/settings.json', true],
     ['CLAUDE.md', true],
+    ['CLAUDE.local.md', true],
+    ['.mcp.json', true],
     ['src/v/config/configuration.cc', false]
   ])('a non-writer touching %s aborts: %s', (changedPath, shouldAbort) => {
     const r = execRun(step, {
@@ -450,6 +452,26 @@ esac
     } else {
       expect(r.status).toBe(0)
     }
+  })
+
+  test('a non-writer cannot slip a protected path past the guard in a large file list', () => {
+    // Under pipefail, `printf | grep -q` fails once the list outgrows the pipe
+    // buffer: grep exits on the first match, printf takes SIGPIPE, and the
+    // pipeline reads as no match. A protected path listed first, ahead of
+    // thousands of others, then waved a non-writer's PR through.
+    const r = execRun(step, {
+      env,
+      stubs: {
+        gh: `#!/bin/bash
+case "$*" in
+  *collaborators*) echo read ;;
+  *) echo '.github/workflows/doc-strings-review.yml'; for i in $(seq 1 5000); do printf 'modules/reference/pages/some/long/path/file-%05d.adoc\\n' "$i"; done ;;
+esac
+`
+      }
+    })
+    expect(r.status).not.toBe(0)
+    expect(r.all).toMatch(/::error::PR touches review configuration/)
   })
 
   test('a writer touching review configuration is allowed through', () => {
@@ -543,8 +565,149 @@ describe('doc-strings-review workflow: source diff (executed)', () => {
   // reaches the model in full when it can page through it with Read.
   test('the review can page through a large diff with Read', () => {
     const review = stepNamed('Claude review with suggestions')
-    expect(review.with.claude_args).toMatch(/--allowed-tools "[^"]*\bRead,/)
+    expect(review.with.claude_args).toMatch(/--allowed-tools "[^"]*\bRead\(\.\/\*\*\),/)
     expect(review.with.prompt).toMatch(/offset and limit/)
+  })
+
+  // A bare Read reaches any path on the runner, and a bare Write can write
+  // anywhere, including the runner's file-command files. File writes are
+  // governed by Edit(path) rules, so the two output files are the only
+  // writable paths.
+  test('the review cannot read or write outside the workspace', () => {
+    const review = stepNamed('Claude review with suggestions')
+    const allowed = review.with.claude_args.match(/--allowed-tools "([^"]*)"/)[1]
+      .split(',').map((t) => t.trim()).filter(Boolean)
+    expect(allowed).not.toContain('Read')
+    expect(allowed).not.toContain('Write')
+    expect(allowed).not.toContain('Glob')
+    expect(allowed).not.toContain('Grep')
+    expect(allowed).toContain('Read(./**)')
+    expect(allowed.filter((t) => t.startsWith('Edit('))).toEqual([
+      'Edit(./doc-impact.json)',
+      'Edit(./review-summary.md)'
+    ])
+  })
+})
+
+describe('doc-strings-review workflow: no bot token while the model runs', () => {
+  // Claude Code auto-approves read-only Bash commands such as cat, so a
+  // workspace-scoped Read rule does not stop the model reading a file
+  // elsewhere on the runner. The token must not exist anywhere while the
+  // review runs.
+  const steps = job.steps
+  const reviewIndex = steps.findIndex((s) => s.name === 'Claude review with suggestions')
+
+  test('no step writes the bot token to a file', () => {
+    for (const step of steps) {
+      if (typeof step.run !== 'string') continue
+      expect(step.run).not.toMatch(/ACTIONS_BOT_TOKEN[^\n]*>/)
+      expect(step.run).not.toMatch(/bot-token/)
+    }
+  })
+
+  test('the scrub step leaves no file behind and blanks the token', () => {
+    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'scrub-'))
+    const runnerTemp = path.join(tmp, 'runner-temp')
+    const githubEnv = path.join(tmp, 'github-env')
+    fs.mkdirSync(runnerTemp)
+    fs.writeFileSync(githubEnv, '')
+    const r = execRun(stepNamed('Drop fetched credentials from the review\'s environment'), {
+      env: {
+        ACTIONS_BOT_TOKEN: 'ghs_secret',
+        CLIENT_SECRET_ID: 'sdlc/prod/github/docs_doc_strings_client',
+        RUNNER_TEMP: runnerTemp,
+        GITHUB_ENV: githubEnv
+      }
+    })
+    expect(r.status).toBe(0)
+    // Nothing on disk the model could cat, and the token is blanked.
+    expect(fs.readdirSync(runnerTemp)).toEqual([])
+    const written = fs.readFileSync(githubEnv, 'utf8')
+    expect(written).toMatch(/^ACTIONS_BOT_TOKEN=$/m)
+    expect(written).not.toContain('ghs_secret')
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  test('the token is fetched again only after the review, before the dispatch', () => {
+    const fetches = steps
+      .map((s, i) => ({ s, i }))
+      .filter(({ s }) => typeof s.uses === 'string' && s.uses.startsWith('aws-actions/aws-secretsmanager-get-secrets') && /bot_token_secret_id/.test(s.with['secret-ids']))
+    const dispatchIndex = steps.findIndex((s) => s.name === 'Dispatch doc-impact')
+    const after = fetches.filter(({ i }) => i > reviewIndex)
+    expect(after).toHaveLength(1)
+    expect(after[0].i).toBeLessThan(dispatchIndex)
+    expect(after[0].s.if).toMatch(/aws_dispatch\.outcome == 'success'/)
+    const assume = stepNamed('Assume the AWS role for the doc-impact dispatch')
+    expect(assume.if).toMatch(/hashFiles\('doc-impact\.json'\) != ''/)
+    expect(steps.indexOf(assume)).toBeGreaterThan(reviewIndex)
+  })
+
+  test('a gating-only run re-fetches the token too, and a doc-impact.json counts only when the review ran', () => {
+    // A gating-only run has no doc string and skips the review; its report
+    // is in $RUNNER_TEMP, where hashFiles can't see it. Without its own
+    // branch in the gate, OIDC callers would log "No bot token" for exactly
+    // the change the gating detector exists to file.
+    const assume = stepNamed('Assume the AWS role for the doc-impact dispatch')
+    expect(assume.if).toMatch(/steps\.lint\.outputs\.declarations != '0' \|\| steps\.lint\.outputs\.removals != '0' \|\| steps\.enterprise\.outputs\.found != '0'\)/)
+    expect(assume.if).toMatch(/\(hashFiles\('doc-impact\.json'\) != '' && \(steps\.review\.outcome == 'success' \|\| steps\.review\.outcome == 'failure'\)\) \|\| steps\.enterprise\.outputs\.found != '0'\)$/)
+  })
+
+  // Evaluates a step's `if:` the way Actions does for the operators these
+  // conditions use, against a fake run. Unknown contexts throw, so a renamed
+  // step id fails here instead of evaluating to ''.
+  function evalIf (expr, ctx) {
+    const js = expr
+      .replace(/hashFiles\('([^']+)'\)/g, (_, f) => JSON.stringify(ctx.files.includes(f) ? 'hash' : ''))
+      .replace(/steps\.(\w+)\.(outputs\.(\w+)|outcome)/g, (_, id, __, out) => {
+        const st = ctx.steps[id]
+        if (!st) throw new Error(`no step ${id} in the fake run`)
+        return JSON.stringify(out ? (st.outputs[out] ?? '') : st.outcome)
+      })
+      .replace(/inputs\.(\w+)/g, (_, k) => JSON.stringify(ctx.inputs[k] ?? ''))
+      .replace(/(!?)==/g, (_, not) => (not ? '!==' : '==='))
+    // eslint-disable-next-line no-new-func
+    return Boolean(new Function(`return (${js})`)())
+  }
+  const oidc = { aws_region: 'us-east-2', aws_role_name_prefix: 'sdlc-' }
+  const run = ({ lint = '0', removals = '0', enterprise = '0', review = 'skipped', files = [], inputs = oidc }) => ({
+    inputs,
+    files,
+    steps: {
+      lint: { outputs: { declarations: lint, removals } },
+      enterprise: { outputs: { found: enterprise } },
+      review: { outcome: review, outputs: {} }
+    }
+  })
+
+  test.each([
+    ['a gating-only run (no doc string, no review)', { enterprise: '2' }, true],
+    ['a reviewed run that wrote doc-impact.json', { lint: '3', review: 'success', files: ['doc-impact.json'] }, true],
+    ['a review that failed after writing doc-impact.json', { lint: '3', review: 'failure', files: ['doc-impact.json'] }, true],
+    ['a review that wrote no report', { lint: '3', review: 'success' }, false],
+    ['a doc-impact.json with no review behind it', { lint: '3', review: 'skipped', files: ['doc-impact.json'] }, false],
+    ['nothing to report', {}, false],
+    ['a gating report on the plain-secret path', { enterprise: '2', inputs: {} }, false]
+  ])('the dispatch re-fetches the token for %s: %s', (_, shape, expected) => {
+    const assume = stepNamed('Assume the AWS role for the doc-impact dispatch')
+    expect(evalIf(assume.if, run(shape))).toBe(expected)
+  })
+
+  test('the pre-review scrub runs on a gating-only run, so the re-fetch is what the dispatch relies on', () => {
+    const scrub = stepNamed('Drop fetched credentials from the review\'s environment')
+    const dispatch = stepNamed('Dispatch doc-impact')
+    const gatingOnly = run({ enterprise: '1' })
+    expect(evalIf(scrub.if, gatingOnly)).toBe(true)
+    expect(evalIf(dispatch.if, gatingOnly)).toBe(true)
+    expect(dispatch.env.GH_TOKEN).not.toMatch(/bot-token/)
+    expect(dispatch.run).toMatch(/ACTIONS_BOT_TOKEN/)
+  })
+
+  test('both token fetch pairs use the same role and secret', () => {
+    const first = stepNamed('Assume the AWS role that can read the bot token')
+    const again = stepNamed('Assume the AWS role for the doc-impact dispatch')
+    expect(again.with).toEqual(first.with)
+    expect(stepNamed('Fetch the bot token for the doc-impact dispatch').with)
+      .toEqual(stepNamed('Fetch the bot token from Secrets Manager').with)
   })
 })
 
@@ -741,6 +904,19 @@ describe('doc-strings-review workflow: doc-impact dispatch (executed)', () => {
       files: docImpact === null ? {} : { 'doc-impact.json': JSON.stringify(docImpact) }
     })
   }
+
+  test('on the OIDC path the re-fetched token is used', () => {
+    const r = dispatch(valid, { GH_TOKEN: '', ACTIONS_BOT_TOKEN: 'refetched' })
+    expect(r.status).toBe(0)
+    expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(true)
+  })
+
+  test('with no token at all the dispatch is skipped', () => {
+    const r = dispatch(valid, { GH_TOKEN: '', ACTIONS_BOT_TOKEN: '' })
+    expect(r.status).toBe(0)
+    expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(false)
+    expect(r.all).toMatch(/No bot token/)
+  })
 
   test('a well-formed report is dispatched to the configured repo', () => {
     const r = dispatch(valid)
@@ -1013,12 +1189,21 @@ describe('doc-strings-review workflow: doc-impact dispatch merges gating finding
 
 describe('doc-strings-review workflow: checked-in run outputs (executed)', () => {
   const step = stepNamed('Remove run-output files the PR checked in')
-  const OUTPUTS = ['doc-impact.json', 'review-summary.md', 'lint-findings.json', 'pr-diff.patch', 'enterprise-impact.json', 'embedded-reference-strings.md', 'terminology.md']
+  const OUTPUTS = ['doc-impact.json', 'doc-impact.merged.json', 'review-summary.md', 'lint-findings.json', 'pr-diff.patch', 'pr-diff.full', 'pr-diff.err', 'enterprise-impact.json', 'enterprise-stderr.txt', 'embedded-reference-strings.md', 'terminology.md']
 
   test('runs straight after checkout, before any step reads or writes those files', () => {
     const idx = job.steps.indexOf(step)
     expect(job.steps[idx - 1].uses).toMatch(/^actions\/checkout@/)
     expect(step.if).toBeUndefined()
+    expect(idx).toBeLessThan(job.steps.findIndex((s) => s.id === 'lint'))
+    expect(idx).toBeLessThan(job.steps.findIndex((s) => s.id === 'review'))
+  })
+
+  test('a committed directory under an output name is removed, not a failed job', () => {
+    const r = execRun(step, { files: { 'doc-impact.json/x': 'planted', 'main.cc': 'int main() {}' } })
+    expect(r.status).toBe(0)
+    expect(r.exists('doc-impact.json')).toBe(false)
+    expect(r.exists('main.cc')).toBe(true)
   })
 
   test('removes every run-output file a PR could commit, and leaves source alone', () => {
