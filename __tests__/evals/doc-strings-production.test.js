@@ -34,7 +34,11 @@ describe('doc-strings evals: production review extraction', () => {
   test('the step allows the inline-comment tool the stand-in provides', () => {
     const args = production.parseClaudeArgs(step.with.claude_args)
     expect(args.allowed).toContain('mcp__github_inline_comment__create_inline_comment')
+    // The workspace-scoped file rules: the harness stages its inputs at the
+    // fixture root and reads both output files back from there.
     expect(args.allowed).toContain('Read(./**)')
+    expect(args.allowed).toContain('Edit(./doc-impact.json)')
+    expect(args.allowed).toContain('Edit(./review-summary.md)')
     expect(args.maxTurns).toMatch(/^\d+$/)
   })
 
