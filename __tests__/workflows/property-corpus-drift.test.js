@@ -268,6 +268,35 @@ describe('property-corpus-drift.sh', () => {
     expect(ghCalls).toMatch(/pr create .*--title test\(property-extractor\): refresh the overrides corpus to docs main and v26\.2\.10/);
   });
 
+  it('refreshes to the GA tag, not its RC, when both attachments are on docs main', () => {
+    // sort -V puts v26.3.1-rc1 above v26.3.1, so without the GA filter the
+    // refresh would pin the snapshot to the RC.
+    setLive({ matching: true });
+    const { env, remote } = makeCheckout();
+    const { status, ghCalls } = run({
+      ...env,
+      GH_STUB_ATTACHMENT_404: '1',
+      GH_STUB_LATEST_TAG: 'v26.3.1',
+      GH_STUB_ATTACHMENTS: 'redpanda-properties-v26.2.9.json redpanda-properties-v26.3.1-rc1.json redpanda-properties-v26.3.1.json',
+    });
+    expect(status).toBe(1);
+    expect(ghCalls).not.toMatch(/redpanda-properties-v26\.3\.1-rc1\.json/);
+    expect(JSON.parse(remoteFile(remote, 'property-snapshot.json')).source_tag).toBe('v26.3.1');
+  });
+
+  it('still refreshes to an RC when its x.y.z has no GA attachment yet', () => {
+    setLive({ matching: true });
+    const { env, remote } = makeCheckout();
+    const { status } = run({
+      ...env,
+      GH_STUB_ATTACHMENT_404: '1',
+      GH_STUB_LATEST_TAG: 'v26.4.0-rc2',
+      GH_STUB_ATTACHMENTS: 'redpanda-properties-v26.3.1.json redpanda-properties-v26.4.0-rc2.json',
+    });
+    expect(status).toBe(1);
+    expect(JSON.parse(remoteFile(remote, 'property-snapshot.json')).source_tag).toBe('v26.4.0-rc2');
+  });
+
   it('fails closed with 2 when no properties attachment can be found to refresh against', () => {
     setLive({ matching: false, dropEntries: 3 });
     const { env } = makeCheckout();

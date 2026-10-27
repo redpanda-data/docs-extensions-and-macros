@@ -185,9 +185,13 @@ fi
 # The tag docs main is actually on: the highest version among the attachments
 # there now, the same discovery as the README recipe. An old RC/beta cycle's
 # last file, if one is still sitting there, sorts lower and is skipped.
+# sort -V ranks v26.3.1-rc1 above v26.3.1, so a pre-release is dropped first
+# when the GA file for the same x.y.z is there too.
 if ! LATEST_TAG="$(gh api "repos/${DOCS_REPO}/contents/modules/reference/attachments?ref=${DOCS_REF}" --jq '.[].name' 2>/dev/null \
     | grep -oE '^redpanda-properties-v[0-9]+\.[0-9]+\.[0-9]+[^.]*\.json$' \
     | sed -E 's/^redpanda-properties-(.*)\.json$/\1/' \
+    | awk '{ t[NR] = $0; if ($0 ~ /^v[0-9]+\.[0-9]+\.[0-9]+$/) ga[$0] = 1 }
+        END { for (i = 1; i <= NR; i++) { match(t[i], /^v[0-9]+\.[0-9]+\.[0-9]+/); b = substr(t[i], 1, RLENGTH); if (b == t[i] || !(b in ga)) print t[i] } }' \
     | sort -V | tail -1)" || [ -z "$LATEST_TAG" ]; then
   echo "::error::Drift found but could not find a redpanda-properties-<tag>.json attachment on ${DOCS_REPO}@${DOCS_REF} to refresh against." >&2
   exit 2
