@@ -591,7 +591,7 @@ describe('solutions-catalog: metadata fatals (documentsConverted)', () => {
     ['deprecated without superseded-by', { 'page-solution-status': 'deprecated' }, /page-solution-superseded-by is required when status is deprecated/],
     ['overview layout', { 'page-layout': 'default' }, /pages\/index\.adoc must set :page-layout: solution/],
     ['related doc not fully qualified', { 'page-solution-related-docs': 'consumer-offsets.adoc' }, /must be a fully qualified page ID/],
-    ['related doc unresolved', { 'page-solution-related-docs': 'streaming:develop:nope.adoc' }, /does not resolve to a page/],
+    ['related doc in the component unresolved', { 'page-solution-related-docs': 'solutions:ROOT:nope.adoc' }, /does not resolve to a page/],
     ['related solution unknown', { 'page-solution-related-solutions': 'ghost' }, /page-solution-related-solutions entry "ghost" is not a solution/],
     ['related solution is itself', { 'page-solution-related-solutions': 'leaderboard' }, /must not list the solution itself/],
     ['steps missing', { 'page-solution-steps': undefined }, /page-solution-steps is required/],
@@ -605,6 +605,14 @@ describe('solutions-catalog: metadata fatals (documentsConverted)', () => {
     // undefined attrs must actually be absent, not the string "undefined"
     for (const [k, v] of Object.entries(attrs)) if (v === undefined) delete solution.pages[0].asciidoc.attributes[k]
     await expect(run({ solutions: [solution] })).rejects.toThrow(rx)
+  })
+
+  test('an unresolved Product Docs related doc warns by default and is fatal with strict', async () => {
+    const solution = () => makeSolution('leaderboard', { attrs: { 'page-solution-related-docs': 'streaming:develop:nope.adoc' } })
+    const result = await run({ solutions: [solution()] })
+    expect(result.logger.warn.mock.calls.map((c) => c[0]).join('\n')).toMatch(/leaderboard: page-solution-related-docs entry "streaming:develop:nope\.adoc" does not resolve to a page/)
+    await expect(run({ solutions: [solution()], config: { strict: true } })).rejects.toThrow(/streaming:develop:nope\.adoc" does not resolve to a page/)
+    await expect(run({ solutions: [solution()], env: { SOLUTIONS_STRICT: 'true' } })).rejects.toThrow(/does not resolve to a page/)
   })
 
   test('step layout must be solution-step', async () => {
@@ -1622,10 +1630,12 @@ describe('solutions-catalog: pure helpers', () => {
   })
 
   test('resolveConfig accepts camelCase and snake_case, with defaults and env', () => {
-    expect(extension.resolveConfig({}, {})).toEqual({ maxRelated: 3, minScore: 0.6, networkChecks: 'auto', includeDrafts: false, publicRepo: false })
-    expect(extension.resolveConfig({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: 'true', publicRepo: true }, {})).toEqual({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: true, publicRepo: true })
-    expect(extension.resolveConfig({ max_related: '2', network_checks: 'false', public_repo: 'true' }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' })).toEqual({ maxRelated: 2, minScore: 0.6, networkChecks: false, includeDrafts: true, publicRepo: true })
+    expect(extension.resolveConfig({}, {})).toEqual({ maxRelated: 3, minScore: 0.6, networkChecks: 'auto', includeDrafts: false, publicRepo: false, strict: false })
+    expect(extension.resolveConfig({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: 'true', publicRepo: true }, {})).toEqual({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: true, publicRepo: true, strict: false })
+    expect(extension.resolveConfig({ max_related: '2', network_checks: 'false', public_repo: 'true' }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' })).toEqual({ maxRelated: 2, minScore: 0.6, networkChecks: false, includeDrafts: true, publicRepo: true, strict: false })
     expect(extension.resolveConfig({ include_drafts: false }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' }).includeDrafts).toBe(false)
+    expect(extension.resolveConfig({}, { SOLUTIONS_STRICT: 'true' }).strict).toBe(true)
+    expect(extension.resolveConfig({ strict: false }, { SOLUTIONS_STRICT: 'true' }).strict).toBe(false)
     expect(extension.resolveConfig({ max_related: 'lots' }, {}).maxRelated).toBe(3)
   })
 
@@ -1880,7 +1890,14 @@ describe('solutions-catalog: link fragments', () => {
   test('same-page fragments and other pages in the build are checked too', async () => {
     await expect(run({ solutions: [withLink('#nowhere')] })).rejects.toThrow(/links to \/solutions\/leaderboard\/build-leaderboard\/#nowhere/)
     await expect(run({ solutions: [withLink('#verify')] })).resolves.toBeTruthy()
-    await expect(run({ solutions: [withLink('/streaming/26.2/develop/consumer-offsets/#gone')] })).rejects.toThrow(/links to \/streaming\/26.2\/develop\/consumer-offsets\/#gone/)
+  })
+
+  test('a fragment into a Product Docs page warns by default and is fatal with strict', async () => {
+    const link = '/streaming/26.2/develop/consumer-offsets/#gone'
+    const result = await run({ solutions: [withLink(link)] })
+    expect(warnings(result)).toMatch(/links to \/streaming\/26.2\/develop\/consumer-offsets\/#gone, but that page has no id "gone"/)
+    await expect(run({ solutions: [withLink(link)], config: { strict: true } })).rejects.toThrow(/links to \/streaming\/26.2\/develop\/consumer-offsets\/#gone/)
+    await expect(run({ solutions: [withLink(link)], env: { SOLUTIONS_STRICT: 'true' } })).rejects.toThrow(/#gone/)
   })
 
   test('links that do not land on a page in this build are not checked', async () => {
@@ -1893,7 +1910,7 @@ describe('solutions-catalog: link fragments', () => {
     const target = { pub: { url: '/t/' }, contents: Buffer.from('<h2 id="metrics">Metrics</h2><a id="anchor"></a>') }
     const page = { pub: { url: '/p/' }, contents: Buffer.from('<a href="../t/#metrics">a</a><a href="../t/#anchor">b</a><a href="../t/#_metrics">c</a>') }
     const found = validate.brokenFragments(page, (u) => (u === '/t/' ? target : null))
-    expect(found).toEqual([{ href: '../t/#_metrics', fragment: '_metrics', target: '/t/', suggestion: 'metrics' }])
+    expect(found).toEqual([{ href: '../t/#_metrics', fragment: '_metrics', target: '/t/', component: null, suggestion: 'metrics' }])
   })
 })
 

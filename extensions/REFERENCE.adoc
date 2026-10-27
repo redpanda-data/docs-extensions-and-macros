@@ -856,6 +856,9 @@ Adds `assets/data/solutions.json` and `assets/data/solutions-graph.json` to the 
 SOLUTIONS_INCLUDE_DRAFTS::
 `true` builds solutions whose status is `draft` (previews and local builds). Overridden by the `include_drafts` config key when that is set.
 
+SOLUTIONS_STRICT::
+`true` makes findings about Product Docs pages fatal (see the `strict` config key). Set it in the solutions repository's CI. Overridden by `strict` when that is set.
+
 CI::
 With `network_checks: auto`, the release check runs only when `CI` is set and a GitHub token is available (`REDPANDA_GITHUB_TOKEN`, `GITHUB_TOKEN`, `GH_TOKEN`, or `GIT_CREDENTIALS`, see `cli-utils/github-token.js`).
 
@@ -872,6 +875,9 @@ network_checks (optional)::
 
 include_drafts (optional)::
 `true` or `false`. When set, wins over `SOLUTIONS_INCLUDE_DRAFTS`. Default: follow the environment variable, else `false`.
+
+strict (optional)::
+`true` or `false`. When set, wins over `SOLUTIONS_STRICT`. Default: follow the environment variable, else `false`. Off, a `page-solution-related-docs` entry that does not resolve and a `#fragment` that matches no id on a page outside the `solutions` component are warnings, so a change merged in another repository cannot stop the site build. On, they are fatal, except that a fragment miss stays a warning for a draft. The solutions repository's own CI turns it on, so its authors still see them as errors.
 
 public_repo (optional)::
 `true` or `false`. Default `false`. The solutions repository is private, so by default no output names it: the public record has no `repo`, pages get no `page-solution-repo`, and the `.md` block carries neither `repository.url` nor `repository.ref`. Readers read every build-along file in full on the pages, and signed-in readers download it through the gated download endpoint. Set `true` only if the repository becomes public. The release check reads the repository from the content source either way.
@@ -969,7 +975,7 @@ On the overview (`pages/index.adoc`):
 
 | `page-solution-related-docs`
 | no (warns if empty)
-| Fully qualified page IDs (`component:module:path.adoc`). Each must resolve in the build (fatal otherwise). Must agree with the overview's `== Related docs` list, whose item for each doc is the reader-facing `why` on that doc's recommendation (see <<Related docs list>>). Warns on a landing or index page, which never shows recommendations, and, when `page-solution-platforms` includes `cloud`, when no entry is a Cloud page or has a single-sourced Cloud twin.
+| Fully qualified page IDs (`component:module:path.adoc`). Each must resolve in the build. An entry that does not resolve is fatal with `strict`, and a warning without it, because Product Docs pages change in their own repositories (an entry in the `solutions` component is always fatal). Must agree with the overview's `== Related docs` list, whose item for each doc is the reader-facing `why` on that doc's recommendation (see <<Related docs list>>). Warns on a landing or index page, which never shows recommendations, and, when `page-solution-platforms` includes `cloud`, when no entry is a Cloud page or has a single-sourced Cloud twin.
 
 | `page-solution-related-solutions`
 | no (warns if empty)
@@ -990,7 +996,7 @@ Published solutions must also pass the section checks on the converted HTML: the
 
 Production considerations live at the end of the last step in `page-solution-steps`, where the reader has the whole stack running, not on the overview. The last step needs an `h2` `Production considerations` with at least five `h3` topics under it (the content repo assembles it with `include::partial$production/_all.adoc[]`, one `[#prod-<topic>]` `=== <Topic>` per partial). Every `[.production-note]` block on any page of the solution (the in-context `== In production` note on a step) must contain a link, which points at its topic on the last step. Both checks are fatal for a published solution and warnings for a draft. The section left on the overview or on an earlier step is a warning. Every link into this module's own attachments (`link:{attachmentsdir}/...`, or any href that resolves under `/solutions/<slug>/_attachments/` once resolved against the page URL) must point at a file that exists in the module. Because `verification.json` is the only attachment a solution may have (see <<Build-along files>>), a link to any other file there is fatal. Links to another module's or another component's attachments are not checked here.
 
-Every link on a solution page that carries a `#fragment` and lands on a page in this build (the same page, another solution page, or a Product Docs page) must name an id in that page's converted HTML. This site renders headings with no id prefix and hyphens (`idprefix` empty, `idseparator` `-`), so `#_production_considerations` misses and `#production-considerations` hits; the message suggests the hyphenated id when the target has it. A miss is fatal for a published or deprecated solution and a warning for a draft. Links to attachments, to URLs that are not pages in the build, and off-site links are not checked.
+Every link on a solution page that carries a `#fragment` and lands on a page in this build (the same page, another solution page, or a Product Docs page) must name an id in that page's converted HTML. This site renders headings with no id prefix and hyphens (`idprefix` empty, `idseparator` `-`), so `#_production_considerations` misses and `#production-considerations` hits; the message suggests the hyphenated id when the target has it. A miss is fatal for a published or deprecated solution and a warning for a draft. A miss on a page outside the `solutions` component is a warning unless `strict` is on, so renaming a heading in the Product Docs cannot fail the site build. Links to attachments, to URLs that are not pages in the build, and off-site links are not checked.
 
 === Derived attributes
 

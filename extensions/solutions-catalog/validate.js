@@ -200,6 +200,7 @@ function brokenFragments (page, pageByUrl) {
       href: link.href,
       fragment: link.fragment,
       target: (target.pub && target.pub.url) || link.pathname,
+      component: (target.src && target.src.component) || null,
       suggestion: candidate !== link.fragment && ids.has(candidate) ? candidate : null,
     })
   }
@@ -365,9 +366,14 @@ function buildAlongFindings (record, { fullIncludes = [] } = {}) {
  * @param {Array<string>} [ctx.umbrellaLayouts] - layouts that never show recommendations
  * @param {(page: Object) => boolean} [ctx.isCloudPage] - when absent, Cloud reach is not checked
  * @param {(key: string) => Array<string>} [ctx.cloudTwinsOf] - Cloud pages that single-source a doc
+ * @param {boolean} [ctx.strict] - when false (the default), a finding about a page
+ *   outside the solutions component (a related doc that does not resolve, a
+ *   fragment that matches no id there) is a warning, so a change merged in
+ *   another repository cannot fail the site build. The solutions repository's
+ *   own CI turns this on.
  * @returns {{errors: Array<string>, warnings: Array<string>}}
  */
-function validateSolution (record, { categoryMap, facetVocab, resolveDoc, solutionIds, pageByUrl, umbrellaLayouts, isCloudPage, cloudTwinsOf, fullIncludes } = {}) {
+function validateSolution (record, { categoryMap, facetVocab, resolveDoc, solutionIds, pageByUrl, umbrellaLayouts, isCloudPage, cloudTwinsOf, fullIncludes, strict = false } = {}) {
   const errors = []
   const warnings = []
   const id = record.id
@@ -513,7 +519,11 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
     }
     const page = resolveDoc ? resolveDoc(stripVersion(ref)) : null
     if (resolveDoc && !page) {
-      err(`page-solution-related-docs entry "${ref}" does not resolve to a page in this build`)
+      // Product Docs pages live in other repositories, so outside the
+      // component this is a warning unless strict.
+      const external = stripVersion(ref).split(':')[0] !== COMPONENT
+      const report = external && !strict ? warn : err
+      report(`page-solution-related-docs entry "${ref}" does not resolve to a page in this build`)
       continue
     }
     if (!page) continue
@@ -621,10 +631,13 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
   // silently lands at the top of the page on this site, whose ids have no
   // prefix and use hyphens. Fatal once published, a warning while a draft.
   if (pageByUrl) {
-    const report = record.status === 'draft' ? warn : err
+    const reportOwn = record.status === 'draft' ? warn : err
     for (const { id: pageId, page } of pagesToScan) {
       for (const b of brokenFragments(page, pageByUrl)) {
         const hint = b.suggestion ? `; use #${b.suggestion}` : ''
+        // A page in another component can change in its own repository, so
+        // its fragments are a warning unless strict.
+        const report = b.component && b.component !== COMPONENT && !strict ? warn : reportOwn
         report(`${pageId}.adoc links to ${b.target}#${b.fragment}, but that page has no id "${b.fragment}"${hint}`)
       }
     }

@@ -30,8 +30,10 @@
  *   beforePublish        assets/data/solutions.json, assets/data/solutions-graph.json,
  *                        optional GitHub release check (network_checks)
  *
- * When the build has no `solutions` component every hook is a no-op, so the
- * extension can ship to docs-site before the content source exists.
+ * When the build has no `solutions` component every hook but beforeProcess is a
+ * no-op, so the extension can ship to docs-site before the content source
+ * exists. beforeProcess turns on asciidoc.sourcemap for the whole site, because
+ * the component is not known yet at that point (see the comment there).
  */
 
 const { raiseListenerLimit } = require('../util/raise-listener-limit')
@@ -69,6 +71,11 @@ const DEFAULTS = Object.freeze({
   // and signed-in readers download it through the gated endpoint, so its
   // owner/name is not published unless a playbook says the repository is public.
   publicRepo: false,
+  // Findings about Product Docs pages (a related doc that no longer resolves, a
+  // fragment that matches no id there) warn by default, because those pages
+  // change in other repositories and the site build would fail on someone
+  // else's merge. The solutions repository's CI sets strict to make them fatal.
+  strict: false,
 })
 
 /**
@@ -83,6 +90,7 @@ function resolveConfig (config = {}, env = process.env) {
   const networkChecks = pick('networkChecks', 'network_checks')
   const includeDraftsRaw = pick('includeDrafts', 'include_drafts')
   const publicRepoRaw = pick('publicRepo', 'public_repo')
+  const strictRaw = pick('strict', 'strict')
   const envDrafts = env.SOLUTIONS_INCLUDE_DRAFTS
   const includeDrafts = includeDraftsRaw !== undefined
     ? isTrue(includeDraftsRaw)
@@ -93,6 +101,9 @@ function resolveConfig (config = {}, env = process.env) {
     networkChecks: networkChecks === undefined ? DEFAULTS.networkChecks : normalizeTristate(networkChecks),
     includeDrafts,
     publicRepo: publicRepoRaw === undefined ? DEFAULTS.publicRepo : isTrue(publicRepoRaw),
+    strict: strictRaw !== undefined
+      ? isTrue(strictRaw)
+      : env.SOLUTIONS_STRICT !== undefined ? isTrue(env.SOLUTIONS_STRICT) : DEFAULTS.strict,
   }
 }
 
@@ -322,6 +333,7 @@ module.exports.register = function ({ config = {} } = {}) {
       const result = validate.validateSolution(record, {
         categoryMap, facetVocab, resolveDoc, solutionIds, pageByUrl, umbrellaLayouts: UMBRELLA_LAYOUTS, isCloudPage, cloudTwinsOf,
         fullIncludes: state.fullIncludes.get(record.module) || [],
+        strict: settings.strict,
       })
       errors.push(...result.errors)
       warnings.push(...result.warnings)
