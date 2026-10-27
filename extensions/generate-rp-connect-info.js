@@ -375,9 +375,14 @@ module.exports.register = function ({ config }) {
       const redpandaConnectUrl = connectPage?.pub?.url || ''
       const redpandaCloudUrl = cloudPage?.pub?.url || ''
 
-      // Extract description from page attributes or body content
+      // catalog.json rows carry a plain-text summary for every component. Page
+      // scraping is the info.csv fallback only: this runs before conversion, so
+      // pages have no parsed attributes yet, and connector pages pull their
+      // :description: and summary paragraph from includes the scan cannot follow.
       const pageSrc = connectPage || cloudPage
-      const description = extractDescription(pageSrc)
+      const description = trimmedRow.summary
+        ? cleanDescription(trimmedRow.summary)
+        : extractDescription(pageSrc)
 
       // Warn about missing docs (but not for deprecated or SQL drivers)
       if (deprecated !== 'y' && !connector.includes('sql_driver')) {
@@ -640,10 +645,12 @@ function cleanDescription (text, attributes = {}) {
   let description = String(text)
     // Convert xref links: xref:path[text] -> text
     .replace(/xref:[^[]+\[(.*?)\]/g, '$1')
-    // Convert HTTP links: https://url[text^] -> text
-    .replace(/https?:\/\/[^[\s]+\[(.*?)(?:\^)?\]/g, '$1')
-    // Remove "Introduced in version X.X.X" suffix
-    .replace(/\.\s*Introduced in version[\s\d.]+\.?$/i, '')
+    // Convert link macros and HTTP links: link:https://url[text^] -> text
+    .replace(/(?:link:)?https?:\/\/[^[\s]+\[(.*?)(?:\^)?\]/g, '$1')
+    // Convert cross references: <<anchor,text>> -> text, <<anchor>> -> anchor
+    .replace(/<<([^,>]+)(?:,\s*([^>]+))?>>/g, (_, anchor, label) => (label || anchor).trim())
+    // Remove "Introduced in version X.X.X" suffix, keeping the sentence's period
+    .replace(/\.\s*Introduced in version[\s\d.]+\.?$/i, '.')
     // Substitute attribute references when the value is known ({max-batch} ->
     // 100msgs); only drop the ones this page's attributes don't define.
     .replace(/\{([a-zA-Z][\w-]*)\}/g, (match, name) =>
@@ -656,6 +663,8 @@ function cleanDescription (text, attributes = {}) {
     .replace(/(^|[\s([])\*\*(\S(?:[^*]*\S)?)\*\*(?=[\s.,;:)\]!?]|$)/g, '$1$2')
     .replace(/(^|[\s([])\*(\S(?:[^*]*\S)?)\*(?=[\s.,;:)\]!?]|$)/g, '$1$2')
     .replace(/(^|[\s([])_(\S(?:[^_]*\S)?)_(?=[\s.,;:)\]!?]|$)/g, '$1$2')
+    // Escaped braces are literal text: \{api_version\} -> {api_version}
+    .replace(/\\([{}])/g, '$1')
     // Normalize whitespace, including the gap a removed attribute reference
     // leaves in front of punctuation
     .replace(/\s+/g, ' ')
@@ -663,8 +672,8 @@ function cleanDescription (text, attributes = {}) {
     .trim()
 
   if (description.length > DESCRIPTION_MAX_LENGTH) {
-    const sentences = description.match(/[^.!?]+[.!?]+/g)
-    const firstSentence = sentences && sentences.length > 0 ? sentences[0].trim() : ''
+    // A sentence ends at punctuation followed by whitespace, so "Kafka 2.8" stays whole
+    const firstSentence = description.split(/(?<=[.!?])\s+/)[0].trim()
     if (firstSentence && firstSentence.length <= DESCRIPTION_MAX_LENGTH) {
       description = firstSentence
     } else {
@@ -709,7 +718,9 @@ function extractDescription (pageSrc) {
         let cleanContent = afterDropdown
           // Remove admonition blocks: [WARNING]\n.Title\n====\nContent\n====
           .replace(/\[(WARNING|NOTE|TIP|CAUTION|IMPORTANT)\][^\n]*\n(?:\..*?\n)?====[\s\S]*?====\n*/g, '')
-          // Remove AsciiDoc conditionals: ifndef::env-cloud[] ... endif::[]
+          // Drop self-managed-only blocks whole: the card text is shared with Cloud
+          .replace(/^ifndef::env-cloud\[\][\s\S]*?^endif::[^\n]*\n?/gm, '')
+          // Remove the remaining conditional directive lines, keeping their content
           .replace(/^(ifndef|ifdef|ifeval|endif)::[^\n]*\n?/gm, '')
           // Remove code blocks: ```yml ... ``` or ---- ... ----
           .replace(/```[\s\S]*?```/g, '')

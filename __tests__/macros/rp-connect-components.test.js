@@ -110,9 +110,9 @@ describe('component_table macro rendering', () => {
 
   test('resolves logos, including fallbacks, instead of generic emoji', () => {
     // kafka must resolve to the Apache Kafka SVG (not an emoji fallback)
-    expect(html).toContain('<img src="../../_/img/logos/apache-kafka.svg" alt="kafka logo" />')
+    expect(html).toContain('<img src="../../_/img/logos/apache-kafka.svg" alt="" />')
     // elasticsearch_v8 resolves to the shared elasticsearch.svg
-    expect(html).toContain('<img src="../../_/img/logos/elasticsearch.svg" alt="elasticsearch_v8 logo" />')
+    expect(html).toContain('<img src="../../_/img/logos/elasticsearch.svg" alt="" />')
   })
 
   test('HTML-escapes connector names, commercial names, and descriptions', () => {
@@ -188,7 +188,7 @@ describe('connector logo lookup', () => {
     ['redis_script', 'redis.svg']
   ])('%s inherits the %s vendor logo instead of a generic emoji', (connector, file) => {
     const card = cardFor(html, connector)
-    expect(card).toContain(`<img src="../../_/img/logos/${file}" alt="${connector} logo" />`)
+    expect(card).toContain(`<img src="../../_/img/logos/${file}" alt="" />`)
     expect(card).not.toContain('card-icon-emoji')
   })
 })
@@ -271,6 +271,15 @@ describe('card descriptions come only from the component pages', () => {
     expect(cardFor(html, 'kafka')).toContain('<p class="card-description">Connects to Kafka brokers and consumes one or more topics.</p>')
   })
 
+  test('takes the description from the first type that has one', () => {
+    const csv = [
+      'connector,commercial_name,type,support_level,is_cloud_supported,is_licensed,redpandaConnectUrl,redpandaCloudUrl,description',
+      'http_server,HTTP,input,certified,n,No,/connect/components/inputs/http_server/,,',
+      'http_server,HTTP,output,certified,n,No,/connect/components/outputs/http_server/,,Sets up an HTTP server.'
+    ].join('\n')
+    expect(cardFor(renderComponentTable({ csv }), 'http_server')).toContain('<p class="card-description">Sets up an HTTP server.</p>')
+  })
+
   test('invents nothing when a component page has no description', () => {
     // The old hardcoded registry answered 'Stream messages to and from Apache
     // Kafka topics' for kafka (already drifted from upstream) and
@@ -344,7 +353,7 @@ describe('UI bundle path resolution', () => {
     ['../../../..', '../../../../_/img/logos/apache-kafka.svg']
   ])('a page whose rootPath is %s links its logos as %s', (rootPath, expected) => {
     const html = renderComponentTable({ rootPath })
-    expect(html).toContain(`<img src="${expected}" alt="kafka logo" />`)
+    expect(html).toContain(`<img src="${expected}" alt="" />`)
   })
 
   test('a top-level page renders a logo, not an emoji, for its relative path', () => {
@@ -357,12 +366,12 @@ describe('UI bundle path resolution', () => {
 
   test('falls back to a site-root-relative path when there is no Antora file', () => {
     const html = renderComponentTable({ file: null })
-    expect(html).toContain('<img src="/_/img/logos/apache-kafka.svg" alt="kafka logo" />')
+    expect(html).toContain('<img src="/_/img/logos/apache-kafka.svg" alt="" />')
   })
 
   test('does not read the UI path from a page attribute Antora never sets', () => {
     const html = renderComponentTable({ rootPath: '../../..', docAttributes: { 'page-ui-root-path': '/somewhere-else' } })
-    expect(html).toContain('<img src="../../../_/img/logos/apache-kafka.svg" alt="kafka logo" />')
+    expect(html).toContain('<img src="../../../_/img/logos/apache-kafka.svg" alt="" />')
     expect(html).not.toContain('/somewhere-else')
   })
 })
@@ -403,8 +412,24 @@ describe('the cloud view', () => {
     expect(card).toContain('badge-support')
   })
 
+  test('lists only the types available in Cloud, in the badges and the type filter', () => {
+    const csv = [
+      'connector,commercial_name,type,support_level,is_cloud_supported,is_licensed,redpandaConnectUrl,redpandaCloudUrl,description',
+      'http_server,HTTP,input,certified,y,No,/connect/components/inputs/http_server/,/cloud/connect/components/inputs/http_server/,Receive messages',
+      'http_server,HTTP,output,certified,n,No,/connect/components/outputs/http_server/,,Sets up an HTTP server'
+    ].join('\n')
+    const cloud = cardFor(renderComponentTable({ csv, attributes: {}, docAttributes: { 'env-cloud': '' } }), 'http_server')
+    expect(cloud).toContain('data-types="input"')
+    expect(cloud).toContain('>Input</a>')
+    expect(cloud.split('badge-group-label">Support')[0]).not.toContain('Output')
+    // Negative control: the self-managed view still lists both types
+    const all = cardFor(renderComponentTable({ csv }), 'http_server')
+    expect(all).toContain('data-types="input,output"')
+    expect(all).toContain('>Output</a>')
+  })
+
   test('still resolves logos at the page depth', () => {
-    expect(html).toContain('<img src="../../_/img/logos/apache-kafka.svg" alt="kafka logo" />')
+    expect(html).toContain('<img src="../../_/img/logos/apache-kafka.svg" alt="" />')
   })
 })
 
@@ -447,6 +472,19 @@ describe('badge CSS scoping', () => {
     // ".badge-legend-item .badge {" above does not, since something real
     // precedes it on the same line.
     expect(styleBlock).not.toMatch(/^[ \t]*\.badge[ \t]*\{/m)
+  })
+
+  test('the dark-mode .badge rule is scoped the same way', () => {
+    const styleBlock = renderComponentTable().match(/<style>([\s\S]*?)<\/style>/)[1]
+    expect(styleBlock).not.toMatch(/html\[data-theme="dark"\] \.badge[ \t]*[{,]/)
+    expect(styleBlock).toMatch(/html\[data-theme="dark"\] \.badge-group-badges \.badge,/)
+  })
+
+  test('icons are decorative to screen readers', () => {
+    const html = renderComponentTable()
+    expect(html).toContain('<span class="card-icon-emoji" aria-hidden="true">')
+    expect(html).not.toMatch(/<span class="card-icon-emoji">/)
+    expect(html).not.toMatch(/alt="[^"]+ logo"/)
   })
 
   // These four classes were never emitted by the macro in either theme (the

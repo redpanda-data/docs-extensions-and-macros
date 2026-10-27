@@ -400,6 +400,61 @@ describe('generate-rp-connect-info extractDescription', () => {
 
   test('drops the "Introduced in version" suffix', () => {
     const src = page('= Kafka\n\ncomponent_type_dropdown::[]\n\nDoes something useful with streams. Introduced in version 4.53.0.\n')
-    expect(extractDescription(src)).toBe('Does something useful with streams')
+    expect(extractDescription(src)).toBe('Does something useful with streams.')
+  })
+
+  test('keeps decimals inside the first sentence when truncating', () => {
+    const long = 'Supports Kafka 2.8 and later, including clusters that run with tiered storage, transactions, and idempotent producers enabled. More text follows here and keeps going.'
+    expect(long.length).toBeGreaterThan(150)
+    expect(ext.cleanDescription(long)).toBe('Supports Kafka 2.8 and later, including clusters that run with tiered storage, transactions, and idempotent producers enabled.')
+  })
+
+  test('converts <<anchor,text>>, link: macros, and escaped braces to plain text', () => {
+    expect(ext.cleanDescription('Parses common log <<formats,formats>> into structured data.')).toBe('Parses common log formats into structured data.')
+    expect(ext.cleanDescription('Sends to link:https://kafka.apache.org[Kafka^] brokers.')).toBe('Sends to Kafka brokers.')
+    expect(ext.cleanDescription('Calls /services/data/\\{api_version\\}/graphql on the org.')).toBe('Calls /services/data/{api_version}/graphql on the org.')
+  })
+
+  test('drops ifndef::env-cloud[] blocks whole in the body fallback', () => {
+    const src = page([
+      '= Iceberg',
+      '',
+      'component_type_dropdown::[]',
+      '',
+      'ifndef::env-cloud[]',
+      'For tested configurations that tune this output, see the self-managed guide.',
+      'endif::[]',
+      '',
+      'Writes data to Apache Iceberg tables through a REST catalog.',
+      ''
+    ].join('\n'))
+    expect(extractDescription(src)).toBe('Writes data to Apache Iceberg tables through a REST catalog.')
+  })
+})
+
+describe('card descriptions in a real build', () => {
+  // Connector pages pull :description: and the summary paragraph from
+  // includes, and at contentClassified a page has no parsed attributes, so the
+  // page scan finds nothing. catalog.json carries a summary for every row.
+  const includeOnlyPage = (relative) => ({
+    ...connectPage(relative),
+    asciidoc: undefined,
+    contents: Buffer.from('= x\ninclude::connect:components:partial$descriptions/inputs/x.adoc[tag=meta]\n\ncomponent_type_dropdown::[]\n\ninclude::connect:components:partial$descriptions/inputs/x.adoc[tag=body]\n')
+  })
+
+  it('uses the catalog.json summary, and the page scan only without one', async () => {
+    const files = [
+      ...referencePartials({ url: CONNECT_URL }),
+      connectPartial('platforms/catalog.json', { url: CONNECT_URL }, JSON.stringify([
+        { type: 'cache', name: 'redis', status: 'stable', cloud: true, support: 'certified', summary: 'Use a Redis instance as a cache.' },
+        { type: 'input', name: 'file', status: 'stable', cloud: false, support: 'certified', summary: '' }
+      ])),
+      includeOnlyPage('caches/redis.adoc'),
+      { ...connectPage('inputs/file.adoc'), contents: Buffer.from('= file\n:description: Consumes data from files on disk.\n') }
+    ]
+    const { csvData } = await run(files, { csvpath: csvFile })
+    const byName = Object.fromEntries(csvData.data.map((r) => [r.connector, r.description]))
+    expect(byName.redis).toBe('Use a Redis instance as a cache.')
+    expect(byName.file).toBe('Consumes data from files on disk.')
   })
 })

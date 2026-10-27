@@ -351,6 +351,9 @@ module.exports.register = function (registry, context) {
           isCloudConnectorSupported: false,
           description: description || '' // Add description from CSV
         };
+      } else if (!connectors[connector].description && description) {
+        // Each row is one type's page: take the first type that has a description
+        connectors[connector].description = description;
       }
 
       // Ensure type exists for the connector
@@ -564,20 +567,25 @@ module.exports.register = function (registry, context) {
       .map(([connector, details], id) => {
         const { types, isCloudConnectorSupported, isLicensed } = details;
 
-        // Get all unique types for this connector
-        const typesList = Array.from(types.keys());
+        // The Cloud view lists only the types available in Cloud, in the badges
+        // and in the type filter (http_server is an input in Cloud, not an output).
+        const cloudView = isCloud && !showAllInfo;
+        const shownTypes = Array.from(types.entries())
+          .filter(([, commercialNames]) => !cloudView || Object.values(commercialNames).some(({ isCloudSupported }) => isCloudSupported));
+        const typesList = shownTypes.map(([type]) => type);
         const typesDataAttr = typesList.join(',');
 
         // Get the first URL for the connector link
         const firstUrl = getFirstUrlFromTypesArray(Array.from(types.entries()), isCloud);
 
         // Generate type badges with links and tooltips
-        const typeBadges = Array.from(types.entries())
+        const typeBadges = shownTypes
           .map(([type, commercialNames]) => {
             const uniqueCommercialNames = Object.keys(commercialNames);
             const badges = [];
             uniqueCommercialNames.forEach(commercialName => {
               const { urls = {}, isCloudSupported } = commercialNames[commercialName];
+              if (cloudView && !isCloudSupported) return;
               const redpandaConnectUrl = urls.redpandaConnectUrl || '';
               const redpandaCloudUrl = urls.redpandaCloudUrl || '';
               let url = '';
@@ -656,9 +664,13 @@ module.exports.register = function (registry, context) {
             ? ' (not in GPU pipelines)'
             : '';
 
-        // Cloud support badge with tooltip
+        // Cloud support badge with tooltip, linked to the first Cloud-supported
+        // type's Cloud page so the self-managed catalog still reaches Cloud docs
+        const firstCloudUrl = (cloudEntries.find(({ urls = {} }) => urls.redpandaCloudUrl) || { urls: {} }).urls.redpandaCloudUrl;
         const cloudBadge = isCloudConnectorSupported && showAllInfo
-          ? `<span class="badge badge-cloud" title="Available in Redpanda Cloud${pipelineNote}">Cloud${pipelineNote}</span>`
+          ? firstCloudUrl
+            ? `<a href="${escapeHtml(firstCloudUrl)}" class="badge badge-cloud" title="Available in Redpanda Cloud${pipelineNote}">Cloud${pipelineNote}</a>`
+            : `<span class="badge badge-cloud" title="Available in Redpanda Cloud${pipelineNote}">Cloud${pipelineNote}</span>`
           : '';
 
         // Enterprise license badge with tooltip
@@ -717,8 +729,8 @@ module.exports.register = function (registry, context) {
                 ${(() => {
                   const icon = getConnectorIcon(connector, types, uiRootPath);
                   return icon.type === 'logo'
-                    ? `<img src="${escapeHtml(icon.url)}" alt="${escapeHtml(connector)} logo" />`
-                    : `<span class="card-icon-emoji">${icon.symbol}</span>`;
+                    ? `<img src="${escapeHtml(icon.url)}" alt="" />`
+                    : `<span class="card-icon-emoji" aria-hidden="true">${icon.symbol}</span>`;
                 })()}
               </div>
             </div>
@@ -1191,7 +1203,7 @@ module.exports.register = function (registry, context) {
           .badge-group-label {
             font-size: 0.6875rem;
             font-weight: 600;
-            color: #999;
+            color: #6b7280;
             text-transform: uppercase;
             letter-spacing: 0.05em;
           }
@@ -1301,7 +1313,7 @@ module.exports.register = function (registry, context) {
           }
 
           .badge-support-certified {
-            color: #059669;
+            color: #047857;
             border-color: #6ee7b7;
           }
 
@@ -1416,7 +1428,7 @@ module.exports.register = function (registry, context) {
             background: none;
             border: none;
             font-size: 2rem;
-            color: #999;
+            color: #6b7280;
             cursor: pointer;
             line-height: 1;
             padding: 0;
@@ -1520,7 +1532,8 @@ module.exports.register = function (registry, context) {
             color: #f15d61;
           }
 
-          html[data-theme="dark"] .badge {
+          html[data-theme="dark"] .badge-group-badges .badge,
+          html[data-theme="dark"] .badge-legend-item .badge {
             background: rgba(255, 255, 255, 0.07);
             border-color: rgba(255, 255, 255, 0.15);
             color: #d0d5dd;
