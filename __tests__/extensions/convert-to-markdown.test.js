@@ -360,7 +360,6 @@ describe('solution metadata in Markdown frontmatter', () => {
     status: 'draft',
     draft: true,
     featured: true,
-    duration: 45,
     download: 'authenticated',
     platforms: ['self-managed', 'cloud'],
     technologies: ['Redpanda', 'Schema Registry', 'Go'],
@@ -369,8 +368,8 @@ describe('solution metadata in Markdown frontmatter', () => {
     industries: ['Gaming'],
     personas: ['application-developer'],
     steps: [
-      { id: 'start-environment', title: 'Start the environment', url: '/solutions/multiplayer-gaming/start-environment/', order: 1, duration: 5 },
-      { id: 'build-leaderboard', title: 'Build the leaderboard', url: '/solutions/multiplayer-gaming/build-leaderboard/', order: 2, duration: null },
+      { id: 'start-environment', title: 'Start the environment', url: '/solutions/multiplayer-gaming/start-environment/', order: 1 },
+      { id: 'build-leaderboard', title: 'Build the leaderboard', url: '/solutions/multiplayer-gaming/build-leaderboard/', order: 2 },
     ],
     relatedDocs: [{ id: 'streaming:develop:consumer-offsets.adoc', title: 'Consumer offsets', url: '/streaming/develop/consumer-offsets/', provenance: 'explicit' }],
     relatedSolutions: [{ id: 'other', title: 'Other', url: '/solutions/other/' }],
@@ -407,7 +406,6 @@ describe('solution metadata in Markdown frontmatter', () => {
       id: 'multiplayer-gaming',
       version: 'v1.0.0',
       status: 'draft',
-      duration_minutes: 45,
       technologies: ['Redpanda', 'Schema Registry', 'Go'],
       platforms: ['self-managed', 'cloud'],
       categories: ['Topics and Partitions', 'Producers'],
@@ -467,13 +465,12 @@ describe('solution metadata in Markdown frontmatter', () => {
   })
 
   test('a field with nothing truthful to say is left out, not guessed', () => {
-    const sparse = { id: 'minimal', status: 'published', duration: 15, version: 'v0.1.0', tag: 'minimal/v0.1.0', download: 'none', repo: '', steps: [], technologies: [], platforms: [], categories: [], useCases: [], industries: [], relatedDocs: [] }
+    const sparse = { id: 'minimal', status: 'published', version: 'v0.1.0', tag: 'minimal/v0.1.0', download: 'none', repo: '', steps: [], technologies: [], platforms: [], categories: [], useCases: [], industries: [], relatedDocs: [] }
     const parsed = parse(generateFrontmatter(makePage({ record: sparse })))
     expect(parsed.solution).toEqual({
       id: 'minimal',
       version: 'v0.1.0',
       status: 'published',
-      duration_minutes: 15,
       repository: { download: 'none' },
     })
   })
@@ -515,7 +512,7 @@ describe('solution verification in Markdown frontmatter', () => {
     src: { component: 'solutions', version: '' },
     asciidoc: { doctitle: 'T', attributes: { 'page-solution': JSON.stringify(record) } },
   })
-  const BASE = { id: 'multiplayer-gaming', version: 'v1.0.0', tag: 'multiplayer-gaming/v1.0.0', repo: 'redpanda-data/solutions', status: 'published', duration: 45, download: 'authenticated', steps: [] }
+  const BASE = { id: 'multiplayer-gaming', version: 'v1.0.0', tag: 'multiplayer-gaming/v1.0.0', repo: 'redpanda-data/solutions', status: 'published', download: 'authenticated', steps: [] }
 
   test('projects the manifest with its own snake_case keys', () => {
     const block = buildSolutionMetadata(page({ ...BASE, verified: VERIFIED }))
@@ -560,7 +557,7 @@ describe('solution files in Markdown frontmatter', () => {
     src: { component: 'solutions', version: '' },
     asciidoc: { doctitle: 'T', attributes: { 'page-solution': JSON.stringify(record) } },
   })
-  const BASE = { id: 'mg', version: 'v1.0.0', tag: 'mg/v1.0.0', status: 'published', duration: 15, steps: [] }
+  const BASE = { id: 'mg', version: 'v1.0.0', tag: 'mg/v1.0.0', status: 'published', steps: [] }
 
   test('emits the files a reader may download', () => {
     const block = buildSolutionMetadata(page({ ...BASE, files: ['Makefile', 'services/leaderboard/main.go'] }))
@@ -570,6 +567,25 @@ describe('solution files in Markdown frontmatter', () => {
   test('omits the key when the solution renders no snippets', () => {
     expect(buildSolutionMetadata(page({ ...BASE, files: [] })).files).toBeUndefined()
     expect(buildSolutionMetadata(page(BASE)).files).toBeUndefined()
+  })
+})
+
+// An agent that lands on a solution's .md can find the companion written for it.
+describe('agent companion link in Markdown frontmatter', () => {
+  const { buildSolutionMetadata } = require('../../extensions/convert-to-markdown')
+  const page = (record) => ({
+    src: { component: 'solutions', version: '' },
+    asciidoc: { doctitle: 'T', attributes: { 'page-solution': JSON.stringify(record) } },
+  })
+  const BASE = { id: 'mg', version: 'v1.0.0', tag: 'mg/v1.0.0', status: 'published', steps: [] }
+
+  test('emits agent_companion when the build generated one', () => {
+    const block = buildSolutionMetadata(page({ ...BASE, agentCompanion: '/solutions/mg/agent-companion.md' }))
+    expect(block.agent_companion).toBe('/solutions/mg/agent-companion.md')
+  })
+
+  test('omits it otherwise', () => {
+    expect(buildSolutionMetadata(page(BASE)).agent_companion).toBeUndefined()
   })
 })
 
@@ -644,6 +660,45 @@ describe('edit link of a private origin in Markdown frontmatter', () => {
   test('FORCE_SHOW_EDIT_PAGE_LINK brings it back', () => {
     process.env.FORCE_SHOW_EDIT_PAGE_LINK = 'true'
     expect(parse(generateFrontmatter(page({ private: 'auth-required' })))['page-edit-url']).toMatch(/edit\/main/)
+  })
+})
+
+// A gated solution's twin tells an agent the tested build is a signed-in
+// download, and nothing else gets the line.
+describe('solutionDownloadNote', () => {
+  const { solutionDownloadNote } = require('../../extensions/convert-to-markdown')
+  const page = (record, component = 'solutions') => ({
+    src: { component, version: '' },
+    asciidoc: { attributes: { 'page-solution': JSON.stringify(record) } },
+  })
+  const BASE = { id: 'g', version: 'v1.2.0', url: '/solutions/g/', status: 'published', download: 'authenticated', verified: { suite: 'doc-detective' } }
+  const SITE = 'https://docs.redpanda.com'
+
+  test('names the version, the tested tree, and the absolute overview URL', () => {
+    expect(solutionDownloadNote(page(BASE), SITE)).toBe(
+      'Signed-in readers can download this solution as one zip at v1.2.0, the exact file tree that passed its recorded test run: https://docs.redpanda.com/solutions/g/. ' +
+      'Copying the files from these pages also works, but if the user wants to run the reference system as tested, point them to the download.')
+  })
+
+  test('makes no test-run claim without the verification manifest', () => {
+    const note = solutionDownloadNote(page({ ...BASE, verified: undefined }), SITE)
+    expect(note).toMatch(/^Signed-in readers can download this solution as one zip at v1\.2\.0: https:/)
+    expect(note).not.toMatch(/test run/)
+  })
+
+  test.each([
+    ['a draft', { status: 'draft' }],
+    ['a public download', { download: 'public' }],
+    ['no download', { download: 'none' }],
+    ['no version', { version: '' }],
+    ['no overview URL', { url: undefined }],
+  ])('is empty for %s', (_, patch) => {
+    expect(solutionDownloadNote(page({ ...BASE, ...patch }), SITE)).toBe('')
+  })
+
+  test('is empty outside the solutions component and for a bad record', () => {
+    expect(solutionDownloadNote(page(BASE, 'streaming'), SITE)).toBe('')
+    expect(solutionDownloadNote({ src: { component: 'solutions' }, asciidoc: { attributes: { 'page-solution': '{' } } }, SITE)).toBe('')
   })
 })
 

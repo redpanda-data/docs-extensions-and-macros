@@ -121,7 +121,7 @@ const OVERVIEW_ATTRS = {
   'page-topic-type': 'solution',
   description: 'Build a live leaderboard from game events.',
   'page-solution-version': 'v1.2.3',
-  // A retired attribute an older page may still set: ignored, never an error.
+  // Retired attributes an older page may still set: ignored, never an error.
   'page-solution-difficulty': 'intermediate',
   'page-solution-duration': '45',
   'page-solution-status': 'published',
@@ -154,7 +154,7 @@ function makeSolution (id, { attrs = {}, steps, overviewHtml, stepHtml, title, v
     module: id,
     relative: `${stepId}.adoc`,
     title: `Step ${stepId}`,
-    attrs: { 'page-layout': 'solution-step', description: `Step ${stepId}`, ...(i === 0 ? { 'page-solution-step-duration': '5' } : {}) },
+    attrs: { 'page-layout': 'solution-step', description: `Step ${stepId}`, },
     html: (stepHtml && stepHtml[stepId]) || (i === stepIds.length - 1 ? LAST_STEP_HTML(`Step ${stepId}`) : STEP_HTML(`Step ${stepId}`)),
   }))
   return {
@@ -236,6 +236,7 @@ async function run ({
   env = {},
   hooks = ['contentClassified', 'documentsConverted', 'navigationBuilt', 'beforePublish'],
   beforeNavigationBuilt,
+  afterContentClassified,
   // '<module>/<relative>' -> AsciiDoc source: the page holds it at
   // contentClassified and its converted HTML from documentsConverted on, as
   // in a real build.
@@ -263,6 +264,7 @@ async function run ({
       page.contents = Buffer.from(source)
     }
     if (hooks.includes('contentClassified')) await handlers.contentClassified({ contentCatalog: catalog, siteCatalog, playbook })
+    if (afterContentClassified) afterContentClassified(catalog)
     for (const [page, contents] of html) page.contents = contents
     if (hooks.includes('documentsConverted')) await handlers.documentsConverted({ contentCatalog: catalog, siteCatalog, playbook })
     if (beforeNavigationBuilt) beforeNavigationBuilt(siteCatalog)
@@ -304,7 +306,7 @@ describe('solutions-catalog: happy path', () => {
     expect(record.version).toBe('v1.2.3')
     expect(record.download).toBe('authenticated')
     expect(record.featured).toBe(true)
-    expect(record.duration).toBe(45)
+    expect(record).not.toHaveProperty('duration')
     // verification.json is the only attachment, and it is evidence, so the
     // compatibility list is empty; files is the build-along list.
     expect(record.attachments).toEqual([])
@@ -316,8 +318,7 @@ describe('solutions-catalog: happy path', () => {
     const record = json(overview, 'page-solution')
     expect(record.steps.map((s) => s.id)).toEqual(['start-environment', 'build-leaderboard', 'verify-end-to-end'])
     expect(record.steps.map((s) => s.order)).toEqual([1, 2, 3])
-    expect(record.steps[0].duration).toBe(5)
-    expect(record.steps[1].duration).toBeNull()
+    expect(record.steps[0]).not.toHaveProperty('duration')
     expect(record.steps[0].url).toBe('/solutions/leaderboard/start-environment/')
   })
 
@@ -383,7 +384,8 @@ describe('solutions-catalog: happy path', () => {
     expect(attr(step, 'page-solution-version')).toBe('v1.2.3')
     expect(attr(step, 'page-solution-difficulty')).toBeUndefined()
     expect(json(step, 'page-solution')).not.toHaveProperty('difficulty')
-    expect(attr(step, 'page-solution-duration')).toBe('45')
+    expect(attr(step, 'page-solution-duration')).toBeUndefined()
+    expect(json(step, 'page-solution')).not.toHaveProperty('duration')
     expect(attr(step, 'page-solution-status')).toBe('published')
     expect(attr(step, 'page-solution-download')).toBe('authenticated')
     expect(attr(step, 'page-solution-featured')).toBe('true')
@@ -404,7 +406,6 @@ describe('solutions-catalog: happy path', () => {
       url: '/solutions/leaderboard/',
       provenance: 'explicit',
       score: 1,
-      duration: 45,
       technologies: ['Go', 'Protobuf'],
     })
   })
@@ -578,10 +579,6 @@ describe('solutions-catalog: metadata fatals (documentsConverted)', () => {
     ['missing description', { description: undefined }, /description is required/],
     ['missing version', { 'page-solution-version': undefined }, /page-solution-version is required/],
     ['malformed version', { 'page-solution-version': '1.2.3' }, /must match vX\.Y\.Z/],
-    ['missing duration', { 'page-solution-duration': undefined }, /page-solution-duration is required/],
-    ['duration below range', { 'page-solution-duration': '2' }, /between 5 and 600/],
-    ['duration above range', { 'page-solution-duration': '601' }, /between 5 and 600/],
-    ['duration not an integer', { 'page-solution-duration': '45m' }, /between 5 and 600/],
     ['bad status', { 'page-solution-status': 'live' }, /page-solution-status must be one of/],
     ['bad download', { 'page-solution-download': 'maybe' }, /page-solution-download must be one of/],
     ['bad platform', { 'page-solution-platforms': 'mainframe' }, /page-solution-platforms contains unknown values: mainframe/],
@@ -613,10 +610,11 @@ describe('solutions-catalog: metadata fatals (documentsConverted)', () => {
     await expect(run({ solutions: [solution] })).rejects.toThrow(/step start-environment must set :page-layout: solution-step/)
   })
 
-  test('step duration must be an integer', async () => {
-    const solution = makeSolution('leaderboard')
+  test('duration attributes are retired: no value is an error, and none is required', async () => {
+    const solution = makeSolution('leaderboard', { attrs: { 'page-solution-duration': '45m' } })
     solution.pages[1].asciidoc.attributes['page-solution-step-duration'] = 'five'
-    await expect(run({ solutions: [solution] })).rejects.toThrow(/page-solution-step-duration must be an integer/)
+    await expect(run({ solutions: [solution] })).resolves.toBeTruthy()
+    await expect(run({ solutions: [makeSolution('leaderboard', { attrs: { 'page-solution-duration': undefined } })] })).resolves.toBeTruthy()
   })
 
   test('landing layout must be solutions-home', async () => {
@@ -631,11 +629,11 @@ describe('solutions-catalog: metadata fatals (documentsConverted)', () => {
   })
 
   test('collects every error into one throw', async () => {
-    const solution = makeSolution('leaderboard', { attrs: { 'page-solution-duration': undefined, 'page-solution-version': 'nope' } })
+    const solution = makeSolution('leaderboard', { attrs: { description: undefined, 'page-solution-version': 'nope' } })
     let message
     try { await run({ solutions: [solution] }) } catch (err) { message = err.message }
     expect(message).toMatch(/2 errors/)
-    expect(message).toMatch(/page-solution-duration is required/)
+    expect(message).toMatch(/description is required/)
     expect(message).toMatch(/must match vX\.Y\.Z/)
   })
 })
@@ -1578,6 +1576,192 @@ describe('solutions-catalog: snippet allowlist', () => {
 // The provenance attributes exist only when Antora attaches block source
 // locations, so the extension turns sourcemap on itself rather than relying on
 // every consuming playbook to set it.
+describe('solutions-catalog: agent companion', () => {
+  // Antora hands extensions AsciiDoc at contentClassified and HTML afterwards.
+  // Give a solution's pages their source for the first hook, then convert them.
+  const SOURCES = {
+    index: [
+      '= Solution leaderboard',
+      ':page-layout: solution',
+      ':page-solution-version: v1.2.3',
+      ':page-solution-steps: start-environment, build-leaderboard, verify-end-to-end',
+      '',
+      'Scores must be live.',
+      '',
+      '== What you build',
+      '',
+      'A leaderboard.',
+    ].join('\n'),
+    'start-environment': '= Start\n:page-layout: solution-step\n\n== Why\n\nDemo stack.\n',
+    'build-leaderboard': [
+      '= Build the leaderboard',
+      ':page-layout: solution-step',
+      ':page-solution-rule: Publish absolute state, never deltas.',
+      ':page-solution-adapt: Find consumers that aggregate.',
+      '',
+      '== Why',
+      '',
+      'A total is a fact. See xref:streaming:develop:consume-data/consumer-offsets.adoc[offsets].',
+    ].join('\n'),
+    'verify-end-to-end': '= Verify\n:page-layout: solution-step\n\n== Why\n\nIt agrees.\n',
+  }
+
+  function withSources (solution, id) {
+    const html = new Map()
+    for (const page of solution.pages) {
+      const stem = page.src.relative.replace(/\.adoc$/, '')
+      html.set(page, page.contents)
+      page.contents = Buffer.from(SOURCES[stem])
+      page.mediaType = 'text/asciidoc'
+    }
+    solution.examples = [...(solution.examples || []), {
+      src: { component: 'solutions', version: '', module: id, relative: 'scripts/verify.sh', family: 'example' },
+      contents: Buffer.from('#!/usr/bin/env bash\n# 1. The board agrees with the database.\ncheck\n'),
+    }]
+    const convert = () => {
+      for (const [page, contents] of html) { page.contents = contents; page.mediaType = 'text/html' }
+    }
+    return { solution, convert }
+  }
+
+  const companionCall = (siteCatalog) => siteCatalog.addFile.mock.calls.map(([f]) => f).find((f) => f.out.path.endsWith('agent-companion.md'))
+  const partCalls = (siteCatalog) => siteCatalog.addFile.mock.calls.map(([f]) => f).filter((f) => /agent-companion-part-\d+\.md$/.test(f.out.path))
+  // The core file and its parts, in order: the whole companion an agent downloads.
+  const companionText = (siteCatalog) => [companionCall(siteCatalog), ...partCalls(siteCatalog)].map((f) => f.contents.toString('utf8')).join('\n')
+
+  test('publishes solutions/<slug>/agent-companion.md from the pages and verify.sh, and links it from the record', async () => {
+    const { solution, convert } = withSources(makeSolution('leaderboard'), 'leaderboard')
+    const { siteCatalog, pages } = await run({ solutions: [solution], afterContentClassified: convert })
+    const file = companionCall(siteCatalog)
+    expect(file.out.path).toBe('solutions/leaderboard/agent-companion.md')
+    const md = companionText(siteCatalog)
+    expect(md).toMatch(/^# Agent companion: Solution leaderboard\n/)
+    expect(md).toContain('## Rules\n\nEvery rule must hold in the target system.\n\n1. Publish absolute state, never deltas. (from [Build the leaderboard](https://docs.redpanda.com/solutions/leaderboard/build-leaderboard/))')
+    expect(md).toContain('- [ ] Rule 1: Find consumers that aggregate.')
+    expect(md).toContain('[offsets](https://docs.redpanda.com/streaming/current/develop/consume-data/consumer-offsets/)')
+    expect(md).toContain('1. The board agrees with the database.')
+    expect(md).toContain('#### Start')
+
+    const overview = pages.find((p) => p.src.module === 'leaderboard' && p.src.relative === 'index.adoc')
+    expect(json(overview, 'page-solution').agentCompanion).toBe('/solutions/leaderboard/agent-companion.md')
+    expect(addedFile(siteCatalog, 'solutions.json').solutions[0].agentCompanion).toBe('/solutions/leaderboard/agent-companion.md')
+  })
+
+  test('publishes each part beside the core file, at the URL the core file lists', async () => {
+    const { solution, convert } = withSources(makeSolution('leaderboard'), 'leaderboard')
+    const { siteCatalog } = await run({ solutions: [solution], afterContentClassified: convert })
+    const parts = partCalls(siteCatalog)
+    expect(parts.map((f) => f.out.path)).toEqual(['solutions/leaderboard/agent-companion-part-1.md'])
+    const part = parts[0].contents.toString('utf8')
+    expect(part).toMatch(/^# Agent companion part 1 of 1: Solution leaderboard\n/)
+    expect(part).toContain('## Design contract')
+    const core = companionCall(siteCatalog).contents.toString('utf8')
+    expect(core).not.toContain('## Design contract')
+    expect(core).toContain('`curl -sf https://docs.redpanda.com/solutions/leaderboard/agent-companion-part-1.md`')
+  })
+
+  test('a draft that is not built gets no companion', async () => {
+    const { solution, convert } = withSources(makeSolution('leaderboard', { attrs: { 'page-solution-status': 'draft' } }), 'leaderboard')
+    const { siteCatalog } = await run({ solutions: [solution], afterContentClassified: convert })
+    expect(companionCall(siteCatalog)).toBeUndefined()
+  })
+
+  test('agent_companion: false turns it off, record key included', async () => {
+    const { solution, convert } = withSources(makeSolution('leaderboard'), 'leaderboard')
+    const { siteCatalog, pages } = await run({ solutions: [solution], afterContentClassified: convert, config: { agent_companion: false } })
+    expect(companionCall(siteCatalog)).toBeUndefined()
+    const overview = pages.find((p) => p.src.module === 'leaderboard' && p.src.relative === 'index.adoc')
+    expect(json(overview, 'page-solution')).not.toHaveProperty('agentCompanion')
+  })
+
+  const withoutRules = (solution) => {
+    // Same sources with the one rule and adapt line removed.
+    const saved = SOURCES['build-leaderboard']
+    SOURCES['build-leaderboard'] = saved.split('\n').filter((l) => !/^:page-solution-(rule|adapt):/.test(l)).join('\n')
+    try { return withSources(solution, solution.pages[0].src.module) } finally { SOURCES['build-leaderboard'] = saved }
+  }
+
+  test('a published solution with no rules fails the build', async () => {
+    const { solution, convert } = withoutRules(makeSolution('leaderboard'))
+    await expect(run({ solutions: [solution], afterContentClassified: convert })).rejects.toThrow(
+      /leaderboard: no step sets page-solution-rule, so the agent companion has no Rules/
+    )
+  })
+
+  test('a draft with no rules warns, and its companion does not tell the agent to start with Rules', async () => {
+    const { solution, convert } = withoutRules(makeSolution('leaderboard', { attrs: { 'page-solution-status': 'draft' } }))
+    const { siteCatalog, logger } = await run({ solutions: [solution], afterContentClassified: convert, config: { include_drafts: true } })
+    expect(logger.warn.mock.calls.map((c) => c[0]).join('\n')).toMatch(/solutions-catalog: leaderboard: no step sets page-solution-rule/)
+    const md = companionCall(siteCatalog).contents.toString('utf8')
+    expect(md).not.toMatch(/Start with the Rules|Acceptance is the finish line/)
+    expect(md).toContain('This solution states no rules yet')
+    expect(md).not.toMatch(/^## (Rules|Acceptance)$/m)
+  })
+
+  test('with rules the intro still points the agent at them', async () => {
+    const { solution, convert } = withSources(makeSolution('leaderboard'), 'leaderboard')
+    const { siteCatalog, logger } = await run({ solutions: [solution], afterContentClassified: convert })
+    const md = companionCall(siteCatalog).contents.toString('utf8')
+    expect(md).toContain('Start with the Rules')
+    expect(md).toContain('Work through Adapt to find where each rule lands in the target repository.')
+    expect(logger.warn.mock.calls.map((c) => c[0]).join('\n')).not.toMatch(/page-solution-rule/)
+  })
+
+  test('an xref with empty text is labeled with the target page title, not its slug', async () => {
+    const saved = SOURCES['build-leaderboard']
+    SOURCES['build-leaderboard'] = saved.replace('xref:streaming:develop:consume-data/consumer-offsets.adoc[offsets]', 'xref:streaming:develop:consumer-offsets.adoc[]')
+    let prepared
+    try { prepared = withSources(makeSolution('leaderboard'), 'leaderboard') } finally { SOURCES['build-leaderboard'] = saved }
+    const { siteCatalog } = await run({
+      solutions: [prepared.solution],
+      afterContentClassified: prepared.convert,
+      docs: [makeDoc({ title: 'Consumer <code>offsets</code> &amp; groups' })],
+    })
+    const md = companionText(siteCatalog)
+    expect(md).toContain('[Consumer offsets & groups](https://docs.redpanda.com/streaming/current/develop/consumer-offsets/)')
+    expect(md).not.toContain('[consumer offsets]')
+  })
+
+  test('include::partial$ lines resolve against the module\'s partials, and a missing one warns', async () => {
+    const saved = SOURCES['build-leaderboard']
+    SOURCES['build-leaderboard'] = saved + '\n\n== In production\n\n[.production-note]\n.In production\n--\ninclude::partial$production/compaction.adoc[tag=summary]\ninclude::partial$production/missing.adoc[tag=summary]\n--\n'
+    let prepared
+    try { prepared = withSources(makeSolution('leaderboard'), 'leaderboard') } finally { SOURCES['build-leaderboard'] = saved }
+    prepared.solution.examples.push(makePartial({
+      module: 'leaderboard',
+      relative: 'production/compaction.adoc',
+      text: '// tag::summary[]\nKeep publishing absolute totals.\n// end::summary[]\n// tag::detail[]\nDetail.\n// end::detail[]\n',
+    }))
+    const { siteCatalog, logger } = await run({ solutions: [prepared.solution], afterContentClassified: prepared.convert })
+    const md = companionText(siteCatalog)
+    expect(md).toContain('**In production:** Keep publishing absolute totals.')
+    expect(md).not.toContain('Detail.')
+    expect(logger.warn.mock.calls.map((c) => c[0]).join('\n')).toContain(
+      'solutions-catalog: leaderboard: AsciiDoc left in the agent companion (unresolved include: partial$production/missing.adoc (in build-leaderboard))'
+    )
+  })
+
+  test('a subsection too big for one part is published whole, with a build warning', async () => {
+    const saved = SOURCES['build-leaderboard']
+    SOURCES['build-leaderboard'] = saved + ' ' + 'A long reason. '.repeat(2000)
+    let prepared
+    try { prepared = withSources(makeSolution('leaderboard'), 'leaderboard') } finally { SOURCES['build-leaderboard'] = saved }
+    const { siteCatalog, logger } = await run({ solutions: [prepared.solution], afterContentClassified: prepared.convert })
+    expect(logger.warn.mock.calls.map((c) => c[0]).join('\n')).toMatch(
+      /solutions-catalog: leaderboard: agent companion part 1: subsection "1\. Build the leaderboard" of Design contract is \d+ characters, over the 24000-character part budget/
+    )
+    expect(partCalls(siteCatalog)[0].contents.toString('utf8')).toContain('A long reason. '.repeat(2000).trim())
+  })
+
+  test('pages that are no longer AsciiDoc at contentClassified yield no companion and no link', async () => {
+    const { siteCatalog, pages } = await run()
+    expect(companionCall(siteCatalog)).toBeUndefined()
+    expect(partCalls(siteCatalog)).toEqual([])
+    const overview = pages.find((p) => p.src.module === 'leaderboard' && p.src.relative === 'index.adoc')
+    expect(json(overview, 'page-solution')).not.toHaveProperty('agentCompanion')
+  })
+})
+
 describe('solutions-catalog: sourcemap', () => {
   test('enables asciidoc sourcemap before documents are converted', async () => {
     const { handlers } = createContext()
@@ -1622,9 +1806,9 @@ describe('solutions-catalog: pure helpers', () => {
   })
 
   test('resolveConfig accepts camelCase and snake_case, with defaults and env', () => {
-    expect(extension.resolveConfig({}, {})).toEqual({ maxRelated: 3, minScore: 0.6, networkChecks: 'auto', includeDrafts: false, publicRepo: false })
-    expect(extension.resolveConfig({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: 'true', publicRepo: true }, {})).toEqual({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: true, publicRepo: true })
-    expect(extension.resolveConfig({ max_related: '2', network_checks: 'false', public_repo: 'true' }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' })).toEqual({ maxRelated: 2, minScore: 0.6, networkChecks: false, includeDrafts: true, publicRepo: true })
+    expect(extension.resolveConfig({}, {})).toEqual({ maxRelated: 3, minScore: 0.6, networkChecks: 'auto', includeDrafts: false, draftDownloads: false, publicRepo: false, agentCompanion: true })
+    expect(extension.resolveConfig({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: 'true', publicRepo: true }, {})).toEqual({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: true, draftDownloads: false, publicRepo: true, agentCompanion: true })
+    expect(extension.resolveConfig({ max_related: '2', network_checks: 'false', public_repo: 'true' }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' })).toEqual({ maxRelated: 2, minScore: 0.6, networkChecks: false, includeDrafts: true, draftDownloads: false, publicRepo: true, agentCompanion: true })
     expect(extension.resolveConfig({ include_drafts: false }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' }).includeDrafts).toBe(false)
     expect(extension.resolveConfig({ max_related: 'lots' }, {}).maxRelated).toBe(3)
   })
@@ -2130,15 +2314,6 @@ describe('solutions-catalog: authoring drift', () => {
     await expect(run({ solutions: [makeSolution('leaderboard', { attrs: { 'page-solution-technologies': 'Redpanda Connect, Redpanda Migrator, Redpanda Operator, Go' } })] })).resolves.toBeTruthy()
   })
 
-  test('step durations that do not add up to the total warn, only when every step is timed', async () => {
-    const partly = await run()
-    expect(warningsOf(partly)).not.toMatch(/add up to/)
-    const solution = makeSolution('leaderboard')
-    for (const page of solution.pages.slice(1)) page.asciidoc.attributes['page-solution-step-duration'] = '10'
-    const timed = await run({ solutions: [solution] })
-    expect(warningsOf(timed)).toMatch(/leaderboard: page-solution-duration is 45 but the steps' page-solution-step-duration values add up to 30/)
-  })
-
   test('a landing or index page in related docs warns', async () => {
     const index = makeDoc({ relative: 'index.adoc', attrs: { 'page-layout': 'index' } })
     const solution = makeSolution('leaderboard', { attrs: { 'page-solution-related-docs': 'streaming:develop:consumer-offsets.adoc, streaming:develop:index.adoc' } })
@@ -2293,5 +2468,29 @@ describe('solutions-catalog: the kubernetes platform', () => {
   test('kubernetes is an allowed platform, but a solution that sets none is never assumed to run there', () => {
     expect(collect.ENUMS.platforms).toEqual(['self-managed', 'cloud', 'kubernetes'])
     expect(collect.DEFAULT_PLATFORMS).toEqual(['self-managed', 'cloud'])
+  })
+})
+
+// TEMPORARY, preview only: draft_downloads marks included drafts as
+// downloadable from their draft release. Remove with the setting at go-live.
+describe('solutions-catalog: draft_downloads (preview only)', () => {
+  const sandbox = () => makeSolution('sandbox', { attrs: { 'page-solution-status': 'draft' } })
+  const recordOf = (result, id) => addedFile(result.siteCatalog, 'solutions.json').solutions.find((s) => s.id === id)
+
+  test('marks included drafts, and only drafts', async () => {
+    const result = await run({ solutions: [makeSolution('leaderboard'), sandbox()], config: { include_drafts: true, draft_downloads: true } })
+    expect(recordOf(result, 'sandbox').draftDownloads).toBe(true)
+    expect(recordOf(result, 'leaderboard')).not.toHaveProperty('draftDownloads')
+    expect(warningsOf(result)).toMatch(/draft_downloads is on/)
+  })
+
+  test('reads SOLUTIONS_DRAFT_DOWNLOADS, and does nothing without include_drafts', async () => {
+    const env = await run({ solutions: [makeSolution('leaderboard'), sandbox()], env: { SOLUTIONS_INCLUDE_DRAFTS: 'true', SOLUTIONS_DRAFT_DOWNLOADS: 'true' } })
+    expect(recordOf(env, 'sandbox').draftDownloads).toBe(true)
+    const off = await run({ solutions: [makeSolution('leaderboard'), sandbox()], config: { include_drafts: true } })
+    expect(recordOf(off, 'sandbox')).not.toHaveProperty('draftDownloads')
+    const noDrafts = await run({ solutions: [makeSolution('leaderboard'), sandbox()], config: { draft_downloads: true } })
+    expect(recordOf(noDrafts, 'sandbox')).toBeUndefined()
+    expect(warningsOf(noDrafts)).not.toMatch(/draft_downloads is on/)
   })
 })
