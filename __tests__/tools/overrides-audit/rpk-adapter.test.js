@@ -121,7 +121,7 @@ describe('overrides-audit rpk adapter (prose classification)', () => {
       expect(row.differs_in).toBeUndefined()
       expect(row.content_hash).toMatch(/^[0-9a-f]{16}$/)
       // Retirement safety: deleting it leaves every command's output unchanged.
-      expect(result.cross_check).toEqual({ redundant_fields_removed: 1, commands_compared: 4, violations: [] })
+      expect(result.cross_check).toEqual({ redundant_fields_removed: 1, commands_compared: 3, violations: [] })
     })
 
     test('a flag description that only backticks a shell variable and ends with a period', () => {
@@ -142,6 +142,23 @@ describe('overrides-audit rpk adapter (prose classification)', () => {
       expect(result.manifest[0].class).toBe(CLASSES.REDUNDANT)
     })
 
+    test('the subcommand table counts: a lead-only override over raw text with sections is not REDUNDANT', () => {
+      // The parent page's subcommand table formats the unparsed description,
+      // so deleting this override turns the row 'Delete widgets.' into
+      // 'Delete widgets. NOTES.' even though the command's own page is unchanged.
+      const tree = JSON.parse(JSON.stringify(snapshot))
+      tree.raw_tree.commands[0].commands[1].description = 'Delete widgets\n\nNOTES\n\nThis deletes widgets for good.'
+      const result = runAudit({
+        overrides: writeFixture('o.json', overridesWith({ 'rpk widget delete': { description: 'Delete widgets' } })),
+        extracted: writeFixture('s.json', tree),
+        surface: 'rpk'
+      })
+      const row = result.manifest[0]
+      expect(row.class).not.toBe(CLASSES.REDUNDANT)
+      expect(row.differs_in).toEqual(['subcommand-table'])
+      expect(result.cross_check.violations).toEqual([])
+    })
+
     test('whitespace-only differences (re-wrapped lines) are redundant', () => {
       const { byKey } = auditWith({
         'rpk widget create': { flags: { dry: { description: 'Dry run:  validate the request;   do not create widgets.' } } }
@@ -151,17 +168,20 @@ describe('overrides-audit rpk adapter (prose classification)', () => {
   })
 
   describe('UPSTREAMABLE: differs in substance, plain prose', () => {
-    test('a reworded description is upstreamable verbatim with the raw text alongside', () => {
+    test('a reworded description is upstreamable with the raw text alongside', () => {
       const text = 'Create one or more widgets.\n\nAll widgets created with one invocation share the same `--size` value.'
       const { byKey } = auditWith({ 'rpk widget create': { description: text, upstream_ref: 'redpanda-data/streaming-enterprise#1' } })
       const row = byKey['rpk widget create|description']
       expect(row.class).toBe(CLASSES.UPSTREAMABLE)
-      expect(row.upstream_candidate_text).toBe(text)
+      // The candidate keeps the raw sections the page keeps, so setting Long
+      // to it would not drop EXAMPLES from rpk --help.
+      expect(row.upstream_candidate_text).toBe(`${text}\n\nEXAMPLES\n\nCreate a widget named foo\n  rpk widget create foo`)
+      expect(row.note).not.toMatch(/verbatim/)
       expect(row.upstream_ref).toBe('redpanda-data/streaming-enterprise#1')
       expect(row.source_text).toBe('Create widgets.\n\nAll widgets created with this command share the same `--size` value.')
       // The generator keeps the raw sections when the override has none
-      // (mergeCommandOverrides), so only the lead text differs.
-      expect(row.differs_in).toEqual(['main'])
+      // (mergeCommandOverrides), so only the lead text and its summaries differ.
+      expect(row.differs_in).toEqual(['main', 'shortDesc', 'subcommand-table'])
     })
 
     test('a one-word change (capitalization, a backtick the formatter would not add) still counts', () => {
@@ -171,6 +191,8 @@ describe('overrides-audit rpk adapter (prose classification)', () => {
       const row = byKey['rpk widget delete --regex|flags.description']
       expect(row.class).toBe(CLASSES.UPSTREAMABLE)
       expect(row.source_text).toBe('Treat names as regular expressions.')
+      // rpk flag usage strings take no terminal period.
+      expect(row.upstream_candidate_text).toBe('Treat names as regular expressions (RE2 syntax)')
     })
 
     test('a change confined to one section reports that section', () => {
@@ -190,7 +212,8 @@ describe('overrides-audit rpk adapter (prose classification)', () => {
       })
       const row = byKey['rpk widget delete|description']
       expect(row.class).toBe(CLASSES.UPSTREAMABLE)
-      expect(row.differs_in).toEqual(['section:NOTES'])
+      // The parent's subcommand table formats the unparsed text, so it changes too.
+      expect(row.differs_in).toEqual(['section:NOTES', 'subcommand-table'])
     })
   })
 
@@ -244,7 +267,7 @@ describe('overrides-audit rpk adapter (prose classification)', () => {
       expect(byKey['rpk widget create --size|flags.introducedInVersion'].class).toBe(CLASSES.KEEP)
     })
 
-    test('textTransformations and definitions are KEEP rows with counts', () => {
+    test('textTransformations are KEEP; definitions reached only through command-level $refs are dead', () => {
       const { byKey } = auditWith(
         { 'rpk widget create': { $refs: ['#/definitions/common-flags'] } },
         { definitions: { 'common-flags': { size: { description: 'Shared size text.' } } } }
@@ -253,8 +276,8 @@ describe('overrides-audit rpk adapter (prose classification)', () => {
       expect(byKey['textTransformations|inlineCode'].class).toBe(CLASSES.KEEP)
       expect(byKey['rpk widget create|$refs'].class).toBe(CLASSES.KEEP)
       const def = byKey['definitions/common-flags --size|flags.description']
-      expect(def.class).toBe(CLASSES.KEEP)
-      expect(def.note).toMatch(/referenced by 1 command/)
+      expect(def.class).toBe(CLASSES.REVIEW)
+      expect(def.note).toMatch(/Dead override: .*referenced by 1 command/)
       expect(def.content_hash).toMatch(/^[0-9a-f]{16}$/)
     })
   })
@@ -286,6 +309,29 @@ describe('overrides-audit rpk adapter (prose classification)', () => {
       expect(byKey['rpk widget create --replication-factor|flags.description'].note).toMatch(/not on this command in raw_tree/)
       expect(byKey['rpk --config|flags.description'].class).toBe(CLASSES.REVIEW)
     })
+
+    test('metadata on a flag the command does not have is dead too', () => {
+      const { byKey } = auditWith({
+        'rpk widget create': { flags: { 'replication-factor': { introducedInVersion: 'v1.0.0' }, size: { introducedInVersion: 'v1.0.0' } } }
+      })
+      expect(byKey['rpk widget create --replication-factor|flags.introducedInVersion'].class).toBe(CLASSES.REVIEW)
+      expect(byKey['rpk widget create --size|flags.introducedInVersion'].class).toBe(CLASSES.KEEP)
+    })
+
+    test('prose on commands the generator never renders is dead: root rpk and exclude: true', () => {
+      const { byKey, result } = auditWith({
+        rpk: { description: 'rpk is the Redpanda command-line tool.' },
+        'rpk widget delete': { exclude: true, description: 'Remove widgets.', flags: { regex: { description: 'Use RE2.' } } }
+      })
+      expect(byKey['rpk|description'].class).toBe(CLASSES.REVIEW)
+      expect(byKey['rpk|description'].note).toMatch(/Dead override: the generator skips the root rpk command/)
+      expect(byKey['rpk widget delete|description'].class).toBe(CLASSES.REVIEW)
+      expect(byKey['rpk widget delete|description'].note).toMatch(/exclude: true/)
+      expect(byKey['rpk widget delete --regex|flags.description'].class).toBe(CLASSES.REVIEW)
+      expect(byKey['rpk widget delete|exclude'].class).toBe(CLASSES.KEEP)
+      // Neither is compared in the cross-check: rpk widget and rpk widget create only.
+      expect(result.cross_check.commands_compared).toBe(2)
+    })
   })
 
   describe('inputs', () => {
@@ -306,10 +352,10 @@ describe('overrides-audit rpk adapter (prose classification)', () => {
         .toThrow(/needs --extracted/)
     })
 
-    test('never reads the merged tree: the merged root says MERGED, the audit compares against raw', () => {
-      const { byKey } = auditWith({ rpk: { description: 'rpk is the Redpanda CLI & toolbox.' } })
-      expect(byKey['rpk|description'].class).toBe(CLASSES.REDUNDANT)
-      expect(byKey['rpk|description'].source_text).toBe('`rpk` is the Redpanda CLI & toolbox.')
+    test('never reads the merged tree: the merged tree has no commands, the audit compares against raw', () => {
+      const { byKey } = auditWith({ 'rpk widget': { description: 'Manage widgets with `rpk widget`.' } })
+      expect(byKey['rpk widget|description'].class).toBe(CLASSES.UPSTREAMABLE)
+      expect(byKey['rpk widget|description'].source_text).toBe('Manage widgets.')
     })
 
     test('reports the snapshot version and renders a human report', () => {
@@ -319,6 +365,11 @@ describe('overrides-audit rpk adapter (prose classification)', () => {
       expect(report).toContain('surface: rpk')
       expect(report).toContain('UPSTREAMABLE')
       expect(report).toContain('rpk widget delete [description]')
+      expect(report).toContain('Cross-check (generator output with every REDUNDANT field removed):')
+      expect(report).toContain('commands compared: 3')
+      expect(report).toContain('consistency: OK')
+      expect(report).not.toContain('compare-properties.js')
+      expect(report).not.toContain('undefined')
     })
   })
 

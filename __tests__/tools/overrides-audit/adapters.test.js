@@ -130,7 +130,8 @@ describe('overrides-audit adapters', () => {
       expect(byKey['rpk topic create|seeAlso'].class).toBe(CLASSES.KEEP)
       expect(byKey['rpk topic create|introducedInVersion'].class).toBe(CLASSES.KEEP)
       expect(byKey['rpk topic create|pageAliases'].class).toBe(CLASSES.KEEP)
-      expect(byKey['definitions/common-tls-flags --tls-cert|flags.description'].class).toBe(CLASSES.KEEP)
+      // No $refs points at the definition, so the generator never applies it.
+      expect(byKey['definitions/common-tls-flags --tls-cert|flags.description'].class).toBe(CLASSES.REVIEW)
       expect(result.cross_check.violations).toEqual([])
       expect(formatHumanReport(result)).toContain('surface: rpk')
     })

@@ -11,8 +11,10 @@
  *   BEFORE overrides were applied. Never compare against `tree`: that is the
  *   override-merged view, so every override would classify REDUNDANT.
  * - everything else (seeAlso, pageAliases, content, platform scoping,
- *   textTransformations, definitions, ...) is docs-site structure that stays
- *   in the override layer by design: KEEP.
+ *   textTransformations, ...) is docs-site structure that stays in the
+ *   override layer by design: KEEP. Overrides the generator never applies
+ *   (commands it skips, flags a command lacks, definitions reached only
+ *   through command-level $refs) are REVIEW as dead.
  *
  * "Redundant" for rpk means: deleting the field changes nothing in the
  * generated page. Both sides are rendered through the generator's own
@@ -32,9 +34,6 @@ const { loadJson } = require('./properties')
 const generator = require('../../rpk-docs/generate-rpk-docs')
 
 const { CLASSES } = classify
-
-// Top-level keys of rpk-overrides.json that are not command entries.
-const NON_COMMAND_KEYS = ['$schema', '_notes', 'textTransformations', 'definitions', 'commands']
 
 // Per-command fields that stay in the override layer by design: page
 // structure, scoping, versions, deprecation notices and curated content the
@@ -59,6 +58,7 @@ const KEEP_BY_DESIGN_FIELDS = [
   'excludeExamples',
   'excludeAliases',
   'aliases',
+  'aliasNotes',
   'deprecated',
   'deprecatedMessage',
   'deprecatedInVersion',
@@ -82,7 +82,7 @@ const RPK_MACRO_PATTERNS = Object.freeze([
 // AsciiDoc block constructs. Help text carries its code samples as indented
 // lines and its tables as aligned columns; formatDescription converts those
 // to AsciiDoc on the way out. An override written directly in AsciiDoc block
-// syntax has no help-text equivalent, so it cannot go upstream verbatim and
+// syntax has no help-text equivalent, so it cannot go upstream as written and
 // cannot be auto-retired either: REVIEW.
 const BLOCK_PATTERNS = Object.freeze([
   { id: 'block-attribute', re: /(?:^|\n)\s*\[(?:source|,|NOTE|TIP|IMPORTANT|WARNING|CAUTION|cols|%|\.|#)[^\]]*\]\s*(?:\n|$)/ },
@@ -176,22 +176,65 @@ function renderFlag (description, tt) {
   return classify.normalizeText(generator.ensurePeriod(generator.formatDescription(description || '', tt)))
 }
 
+// The generator's summary formatting, used for the page `:description:`
+// attribute and for each row of a parent's subcommand table.
+const SHORT_DESC_OPTIONS = Object.freeze({ skipTableConversion: true, skipListConversion: true })
+
+function renderShortDesc (text, tt) {
+  return classify.normalizeText(generator.ensurePeriod(generator.capToTwoSentences(generator.formatDescription(text || '', tt, SHORT_DESC_OPTIONS))))
+}
+
 /**
  * Everything the generator emits for one command that an override can change
- * through its prose fields, rendered and normalized.
+ * through its prose fields, rendered and normalized: the description (main
+ * text and sections), the page `:description:` (shortDesc), the subcommand
+ * table rows, and the flags.
  *
  * @param {Object} rawNode - Command node from raw_tree.
  * @param {Object} resolvedOverrides - Overrides with $refs resolved.
  * @param {string} commandPath - Full command name.
  * @param {Object|null} tt - textTransformations.
- * @returns {Object} { description, flags } rendered parts.
+ * @returns {Object} { description, shortDesc, subcommands, flags } rendered parts.
  */
 function renderCommand (rawNode, resolvedOverrides, commandPath, tt) {
   const merged = generator.mergeCommandOverrides(rawNode, resolvedOverrides, commandPath)
+  const { mainDescription } = generator.parseDescriptionSections(merged.description || '')
+  // Mirrors the subcommand table build in generateRpkDocs: the same filter,
+  // and the override (or raw) description unparsed.
+  const parentIsPartial = generator.shouldUsePartialDir(resolvedOverrides, commandPath)
+  const subcommands = (rawNode.commands || [])
+    .filter((sub) => {
+      const subPath = `${commandPath} ${sub.name}`
+      return !generator.shouldExcludeCommand(resolvedOverrides, subPath) &&
+        (parentIsPartial || !generator.shouldUsePartialDir(resolvedOverrides, subPath))
+    })
+    .map((sub) => {
+      const subOverride = resolvedOverrides && resolvedOverrides.commands && resolvedOverrides.commands[`${commandPath} ${sub.name}`]
+      return [sub.name, renderShortDesc((subOverride && subOverride.description) || sub.description || '', tt)]
+    })
   return {
     description: renderDescription(merged.description, merged, tt),
+    shortDesc: renderShortDesc(mainDescription, tt),
+    subcommands,
     flags: (merged.flags || []).map((flag) => [flag.name, renderFlag(flag.description, tt)])
   }
+}
+
+/**
+ * Whether the generator writes a page for this command. It skips the root
+ * `rpk` command (the section's index.adoc is hand-written), commands with
+ * `exclude: true`, and the subtrees of protected plugins.
+ *
+ * @param {string} commandPath - Full command name.
+ * @param {Object} ctx - { resolvedOverrides, protectedPlugins }.
+ * @returns {string|null} Why the command is not rendered, or null when it is.
+ */
+function notRenderedReason (commandPath, ctx) {
+  if (commandPath === 'rpk') return 'the generator skips the root rpk command (the section index.adoc is hand-written)'
+  if (generator.shouldExcludeCommand(ctx.resolvedOverrides, commandPath)) return 'the command has exclude: true, so the generator writes no page for it'
+  const plugin = (ctx.protectedPlugins || []).find((pl) => commandPath === `rpk ${pl}` || commandPath.startsWith(`rpk ${pl} `))
+  if (plugin) return `the command belongs to the protected plugin ${plugin}, whose pages the generator leaves untouched`
+  return null
 }
 
 /**
@@ -293,6 +336,7 @@ function proseRow (fields) {
  * @param {string} args.name - Unit name.
  * @param {string} args.field - 'description' or 'flags.description'.
  * @param {string} args.overrideText - The override text as written.
+ * @param {string} [args.candidateText] - Starting point for the upstream string (defaults to overrideText).
  * @param {string|undefined} args.upstreamRef - upstream_ref from the override.
  * @param {boolean} args.equal - Whether the rendered output is unchanged without the override.
  * @param {string} args.sourceText - Rendered raw text (what the page shows without the override).
@@ -301,7 +345,7 @@ function proseRow (fields) {
  * @param {string[]} [args.differsIn] - Which rendered parts differ ('main', 'section:NAME').
  * @returns {Object} Manifest row.
  */
-function classifyProse ({ name, field, overrideText, upstreamRef, equal, sourceText, renderedText, scope, differsIn }) {
+function classifyProse ({ name, field, overrideText, candidateText, upstreamRef, equal, sourceText, renderedText, scope, differsIn }) {
   const common = {
     name,
     field,
@@ -342,15 +386,15 @@ function classifyProse ({ name, field, overrideText, upstreamRef, equal, sourceT
     return proseRow({
       ...common,
       class: CLASSES.REVIEW,
-      note: `Written in AsciiDoc block syntax (${blocks.join(', ')}); help text carries code and tables as indented lines, so this cannot go upstream verbatim. Rewrite in help-text form or keep deliberately.`
+      note: `Written in AsciiDoc block syntax (${blocks.join(', ')}); help text carries code and tables as indented lines, so this cannot go upstream as written. Rewrite in help-text form or keep deliberately.`
     })
   }
 
   return proseRow({
     ...common,
     class: CLASSES.UPSTREAMABLE,
-    upstream_candidate_text: overrideText,
-    note: 'Override prose differs from the raw help text and is free of docs-only markup; it can replace the Long/Short or flag usage string in src/go/rpk verbatim.'
+    upstream_candidate_text: candidateText !== undefined ? candidateText : overrideText,
+    note: 'Override prose differs from the raw help text and is free of docs-only markup. upstream_candidate_text is a starting point for the Long/Short or flag usage string in src/go/rpk, not a drop-in: edit it to the rpk string rules (embedded-reference-strings) first, for example remove backticks the formatter adds itself, and flag usage strings take no terminal period.'
   })
 }
 
@@ -366,10 +410,20 @@ function classifyCommandEntry (commandName, entry, ctx) {
   const rows = []
   const node = findCommandNode(ctx.rawTree, commandName)
   const scope = typeof entry.descriptionScope === 'string' ? entry.descriptionScope : undefined
+  const deadReason = node ? notRenderedReason(commandName, ctx) : null
+  const deadRow = (base) => proseRow({
+    ...base,
+    class: CLASSES.REVIEW,
+    note: `Dead override: ${deadReason}, so this text never reaches a page. Delete it or move it.`
+  })
 
   // Rendered once per command: with every override, and with one field
   // removed at a time. Both sides go through the same generator functions.
-  const withAll = node ? renderCommand(node, ctx.resolvedOverrides, commandName, ctx.tt) : null
+  const withAll = node && !deadReason ? renderCommand(node, ctx.resolvedOverrides, commandName, ctx.tt) : null
+  // A description also renders into the parent page's subcommand table.
+  const parentName = commandName.split(/\s+/).slice(0, -1).join(' ')
+  const parentNode = node && parentName ? findCommandNode(ctx.rawTree, parentName) : null
+  const parentRendered = parentNode && !notRenderedReason(parentName, ctx)
 
   for (const [field, value] of Object.entries(entry)) {
     if (META_FIELDS.includes(field)) continue
@@ -390,17 +444,33 @@ function classifyCommandEntry (commandName, entry, ctx) {
         }))
         continue
       }
-      const without = renderCommand(node, withoutField(ctx.resolvedOverrides, commandName, 'description'), commandName, ctx.tt)
+      if (deadReason) {
+        rows.push(deadRow({ name: commandName, field, content_hash: classify.contentHash(commandName, value), upstream_ref: entry.upstream_ref }))
+        continue
+      }
+      const prunedOverrides = withoutField(ctx.resolvedOverrides, commandName, 'description')
+      const without = renderCommand(node, prunedOverrides, commandName, ctx.tt)
+      const differsIn = describeDifference(withAll.description, without.description)
+      if (withAll.shortDesc !== without.shortDesc) differsIn.push('shortDesc')
+      if (parentRendered) {
+        const parentWith = renderCommand(parentNode, ctx.resolvedOverrides, parentName, ctx.tt)
+        const parentWithout = renderCommand(parentNode, prunedOverrides, parentName, ctx.tt)
+        if (!same(parentWith.subcommands, parentWithout.subcommands)) differsIn.push('subcommand-table')
+      }
+      // The upstream candidate is what the page's description would be:
+      // the override's text plus any raw sections the generator keeps.
+      const candidate = generator.mergeCommandOverrides(node, { commands: { [commandName]: { description: value, content: entry.content } } }, commandName).description
       rows.push(classifyProse({
         name: commandName,
         field,
         overrideText: value,
+        candidateText: candidate,
         upstreamRef: entry.upstream_ref,
-        equal: same(withAll.description, without.description),
+        equal: differsIn.length === 0,
         sourceText: without.description.main,
         renderedText: withAll.description.main,
         scope,
-        differsIn: describeDifference(withAll.description, without.description)
+        differsIn
       }))
       continue
     }
@@ -413,9 +483,25 @@ function classifyCommandEntry (commandName, entry, ctx) {
       for (const [flagName, flagEntry] of Object.entries(value)) {
         if (!flagEntry || typeof flagEntry !== 'object') continue
         const unitName = `${commandName} --${flagName}`
+        const rawFlag = node ? (node.flags || []).find((f) => f && f.name === flagName) : null
         for (const [flagField, flagValue] of Object.entries(flagEntry)) {
           if (META_FIELDS.includes(flagField)) continue
           if (flagField !== 'description') {
+            if (deadReason) {
+              rows.push(deadRow({ name: unitName, field: `flags.${flagField}` }))
+              continue
+            }
+            if (!rawFlag) {
+              rows.push({
+                name: unitName,
+                field: `flags.${flagField}`,
+                class: CLASSES.REVIEW,
+                note: node
+                  ? `Flag --${flagName} is not on this command in raw_tree, so the generator never applies this override. Delete or move it.`
+                  : 'Command not found in the snapshot\'s raw_tree; the override may be stale.'
+              })
+              continue
+            }
             rows.push({
               name: unitName,
               field: `flags.${flagField}`,
@@ -433,7 +519,10 @@ function classifyCommandEntry (commandName, entry, ctx) {
             rows.push(proseRow({ ...base, class: CLASSES.REVIEW, note: 'Command not found in the snapshot\'s raw_tree; the override may be stale.' }))
             continue
           }
-          const rawFlag = (node.flags || []).find((f) => f && f.name === flagName)
+          if (deadReason) {
+            rows.push(deadRow(base))
+            continue
+          }
           if (!rawFlag) {
             rows.push(proseRow({
               ...base,
@@ -448,6 +537,8 @@ function classifyCommandEntry (commandName, entry, ctx) {
             name: unitName,
             field: 'flags.description',
             overrideText: flagValue,
+            // rpk flag usage strings take no terminal period.
+            candidateText: flagValue.replace(/\.\s*$/, ''),
             upstreamRef: flagEntry.upstream_ref,
             equal: pick(withAll) === pick(without),
             sourceText: pick(without),
@@ -480,7 +571,7 @@ function classifyCommandEntry (commandName, entry, ctx) {
 
 /**
  * Retirement safety check: delete every REDUNDANT prose field from a copy of
- * the overrides, re-render every command in the raw tree with the full and
+ * the overrides, re-render every command the generator writes a page for with the full and
  * the pruned overrides, and report any command whose output differs. The
  * classifier's definition of REDUNDANT is exactly "output unchanged", so
  * `violations` is expected to be empty; a non-empty list is a classifier bug
@@ -489,9 +580,10 @@ function classifyCommandEntry (commandName, entry, ctx) {
  * @param {Object} rawTree - The raw command tree.
  * @param {Object} overridesDoc - Overrides as written.
  * @param {Object[]} manifest - Classified rows.
+ * @param {string[]} [protectedPlugins] - Plugins whose pages the generator skips.
  * @returns {Object} { redundant_fields_removed, commands_compared, violations }.
  */
-function crossCheck (rawTree, overridesDoc, manifest) {
+function crossCheck (rawTree, overridesDoc, manifest, protectedPlugins = []) {
   const pruned = JSON.parse(JSON.stringify(overridesDoc))
   let removed = 0
   for (const row of manifest) {
@@ -518,6 +610,7 @@ function crossCheck (rawTree, overridesDoc, manifest) {
   const tt = full.textTransformations || null
   const violations = []
   const commands = generator.flattenCommands(rawTree)
+    .filter(({ path: commandPath }) => !notRenderedReason(commandPath, { resolvedOverrides: full, protectedPlugins }))
   for (const { path: commandPath, command } of commands) {
     const a = renderCommand(command, full, commandPath, tt)
     const b = renderCommand(command, prunedResolved, commandPath, tt)
@@ -549,9 +642,11 @@ function audit ({ overridesPath, extractedPath }) {
   // every comparison are formatted exactly as the page would be.
   const resolvedOverrides = generator.resolveReferences(overridesDoc, overridesDoc)
   const tt = resolvedOverrides.textTransformations || null
-  generator.registerKnownCommandPaths(generator.flattenCommands(rawTree).map((c) => c.path))
+  const flat = generator.flattenCommands(rawTree)
+  generator.registerKnownCommandPaths(flat.map((c) => c.path))
+  const protectedPlugins = generator.detectProtectedPlugins(flat)
 
-  const ctx = { rawTree, resolvedOverrides, tt }
+  const ctx = { rawTree, resolvedOverrides, tt, protectedPlugins }
   const manifest = []
 
   for (const [commandName, entry] of Object.entries(commands)) {
@@ -562,11 +657,12 @@ function audit ({ overridesPath, extractedPath }) {
     manifest.push(...classifyCommandEntry(commandName, entry, ctx))
   }
 
-  // Shared flag definitions, merged into commands through $refs. Their text
-  // applies to every referencing command at once and the generator only
-  // honors it where the flag actually exists on the command, so they are
-  // docs-layer structure here: retire a shared description per command once
-  // every referencing command's row says REDUNDANT.
+  // Shared flag definitions. resolveReferences merges a command-level $refs
+  // target at the top level of the command entry (for example
+  // commands['rpk topic create'].brokers), but mergeCommandOverrides reads
+  // only the entry's `flags` object, so that text never reaches a page. A
+  // definition is live only when something points at it with a $ref.
+  const overridesJson = JSON.stringify(overridesDoc)
   const definitions = overridesDoc.definitions
   if (definitions && typeof definitions === 'object') {
     for (const [defName, flags] of Object.entries(definitions)) {
@@ -578,16 +674,20 @@ function audit ({ overridesPath, extractedPath }) {
         if (!flagEntry || typeof flagEntry !== 'object') continue
         for (const [flagField, flagValue] of Object.entries(flagEntry)) {
           if (META_FIELDS.includes(flagField)) continue
+          const live = overridesJson.includes(`"$ref":${JSON.stringify(`#/definitions/${defName}`)}`) ||
+            overridesJson.includes(`"$ref":${JSON.stringify(`#/definitions/${defName}/${flagName}`)}`)
           const row = {
             name: `definitions/${defName} --${flagName}`,
             field: `flags.${flagField}`,
-            class: CLASSES.KEEP
+            class: live ? CLASSES.KEEP : CLASSES.REVIEW
           }
           if (flagField === 'description' && typeof flagValue === 'string') {
             row.content_hash = classify.contentHash(row.name, flagValue)
             if (flagEntry.upstream_ref !== undefined) row.upstream_ref = flagEntry.upstream_ref
           }
-          row.note = `Shared flag definition referenced by ${refs.length} command(s) via $refs; applied per command, so it is docs-layer structure here.`
+          row.note = live
+            ? 'Shared flag definition referenced through $ref; docs-layer structure.'
+            : `Dead override: shared flag definition referenced by ${refs.length} command(s) via $refs, which resolveReferences merges at the top level of the command entry, not into its flags, so the generator never applies this text. Delete it or move it into each command's flags.`
           manifest.push(row)
         }
       }
@@ -616,7 +716,7 @@ function audit ({ overridesPath, extractedPath }) {
     snapshot_version: snapshot.rpk_version || null,
     manifest,
     summary: classify.summarize(manifest),
-    cross_check: crossCheck(rawTree, overridesDoc, manifest)
+    cross_check: crossCheck(rawTree, overridesDoc, manifest, protectedPlugins)
   }
 }
 
@@ -631,6 +731,5 @@ module.exports = {
   classifyProse,
   describeDifference,
   crossCheck,
-  NON_COMMAND_KEYS,
   KEEP_BY_DESIGN_FIELDS
 }

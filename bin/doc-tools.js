@@ -3491,7 +3491,7 @@ overridesGroup
   .option('--extracted <path>', 'Path to the extracted source JSON: the property extractor raw output (properties surface) or the newest docs-data/rpk-v<version>.json snapshot (rpk surface, compared against its raw_tree)')
   .addOption(new Option('--surface <surface>', 'Override surface to audit').choices(['properties', 'rpk']).default('properties'))
   .addOption(new Option('--format <format>', 'Output format').choices(['json', 'human']).default('json'))
-  .option('--repo <path>', 'Redpanda checkout to extract raw source strings from (alternative to --extracted)')
+  .option('--repo <path>', 'Redpanda checkout to extract raw source strings from (properties surface only; alternative to --extracted)')
   .option('--output <path>', 'Also write the JSON result to this file')
   .action((options) => {
     const { runAudit, formatHumanReport } = require('../tools/overrides-audit')

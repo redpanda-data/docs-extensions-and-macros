@@ -110,7 +110,7 @@ function formatHumanReport (result) {
 
   const sections = [
     ['REDUNDANT', 'Retire in the next auto-docs PR (source already matches)'],
-    ['UPSTREAMABLE', 'Send upstream verbatim'],
+    ['UPSTREAMABLE', 'Candidates to send upstream'],
     ['UPSTREAMABLE_SLOT', 'Migrate to a source metadata slot'],
     ['REDUNDANT_OR_UPSTREAMABLE', 'Needs a human ruling'],
     ['REVIEW', 'Needs attention (possible source bug, typo, or missing property)']
@@ -125,7 +125,17 @@ function formatHumanReport (result) {
     }
   }
 
-  if (result.cross_check) {
+  if (result.cross_check && result.surface === 'rpk') {
+    lines.push('')
+    lines.push('Cross-check (generator output with every REDUNDANT field removed):')
+    lines.push(`  redundant fields removed: ${result.cross_check.redundant_fields_removed}`)
+    lines.push(`  commands compared: ${result.cross_check.commands_compared}`)
+    if (result.cross_check.violations.length > 0) {
+      lines.push(`  CLASSIFIER BUG: output changed for ${result.cross_check.violations.join(', ')}`)
+    } else {
+      lines.push('  consistency: OK (no rendered command changes)')
+    }
+  } else if (result.cross_check) {
     lines.push('')
     lines.push('Cross-check (compare-properties.js):')
     lines.push(`  descriptions still masked by overrides: ${result.cross_check.changedDescriptions}`)

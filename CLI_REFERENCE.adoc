@@ -2504,7 +2504,7 @@ Override surface to audit (choices: "properties", "rpk", default: "properties")
 Output format (choices: "json", "human", default: "json")
 
 `--repo <path>`::
-Redpanda checkout to extract raw source strings from (alternative to --extracted)
+Redpanda checkout to extract raw source strings from (properties surface only; alternative to --extracted)
 
 `--output <path>`::
 Also write the JSON result to this file
