@@ -35,8 +35,9 @@ module.exports.register = function ({ config }) {
         return;
       }
       let pageCategoryList = pageCategories.split(',').map(c => c.trim());
+      const pageInfo = page.asciidoc.attributes['page-relative-src-path'];
       if (taxonomy) pageCategoryList = checkTaxonomy(pageCategoryList, { taxonomy, categoryMap, page, report });
-      const validatedCategories = validateCategories(pageCategoryList, page.asciidoc.attributes['page-relative-src-path'], categoryMap, logger);
+      const validatedCategories = validateCategories(pageCategoryList, pageInfo, categoryMap, logger);
       page.asciidoc.attributes['page-categories'] = validatedCategories
       processEnvironmentAttributes(page, logger);
     })

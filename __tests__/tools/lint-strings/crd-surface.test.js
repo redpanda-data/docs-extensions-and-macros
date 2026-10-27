@@ -60,7 +60,7 @@ describe('crd surface end-to-end (fixture repo with crd-ref-docs config)', () =>
       'StructuralSpec.config', 'StructuralSpec.expiration',
       'UndocumentedTarget.only', 'ValueSource.value',
       'WidgetReference.name', 'WidgetReference.subject', 'WidgetReference.version',
-      'WidgetSpec.cluster', 'WidgetSpec.replicas', 'WidgetSpec.text'
+      'WidgetSpec.cluster', 'WidgetSpec.maxBytes', 'WidgetSpec.replicas', 'WidgetSpec.text'
     ])
 
     const cluster = byName.get('WidgetSpec.cluster')
@@ -83,16 +83,33 @@ describe('crd surface end-to-end (fixture repo with crd-ref-docs config)', () =>
     expect(declarations.some((d) => d.meta.go_name === 'NotSerialized')).toBe(false) // json:"-"
   })
 
-  test('go-field-name-first flags "ClusterSource is..." but not a case-only match', () => {
+  test('go-field-name-first flags the Go name, case-only matches, and the json key', () => {
     const byName = new Map(findings.map((f) => [f.name, f]))
     const cluster = byName.get('cluster')
     expect(cluster.rules.map((r) => r.id)).toEqual(['go-field-name-first'])
     expect(cluster.rules[0].severity).toBe('warning')
-    expect(cluster.rules[0].message).toContain('ClusterSource')
-    expect(cluster.rules[0].message).toContain('"cluster"')
+    expect(cluster.rules[0].message).toContain('the Go field name "ClusterSource"')
+    expect(cluster.rules[0].message).toContain('the YAML key "cluster"')
 
-    // "Text is..." matches the json name up to case: conforming
-    expect(byName.has('text')).toBe(false)
+    // "Text is..." on json:"text" matches up to case only, and still opens
+    // with the Go name (the RetentionTime/retentionTime shape).
+    const text = byName.get('text')
+    expect(text.rules.map((r) => r.id)).toEqual(['go-field-name-first'])
+    expect(text.rules[0].message).toMatch(/^Description opens with the Go field name "Text"/)
+
+    // "maxBytes is..." opens with the json key.
+    const maxBytes = byName.get('maxBytes')
+    expect(maxBytes.rules.map((r) => r.id)).toEqual(['go-field-name-first'])
+    expect(maxBytes.rules[0].message).toMatch(/^Description opens with the YAML key "maxBytes"/)
+  })
+
+  test('go-field-name-first recommends a verb-led opener, never the json key', () => {
+    for (const f of findings) {
+      for (const r of f.rules.filter((rule) => rule.id === 'go-field-name-first')) {
+        expect(r.message).toContain('Start with what the field does, for example "Specifies ..."')
+        expect(r.message).not.toMatch(/Describe the json key/)
+      }
+    }
   })
 
   test('undocumented exported fields in a user-facing struct are warnings', () => {

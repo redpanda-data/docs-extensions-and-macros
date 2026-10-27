@@ -1,0 +1,21 @@
+# ${{ matrix.repo }} over a literal matrix fans out to one sender per repo.
+name: Publish
+on:
+  push:
+    tags: ['v*']
+jobs:
+  dispatch:
+    strategy:
+      fail-fast: false
+      matrix:
+        repo: ['redpanda-data/docs', 'redpanda-data/cloud-docs']
+        include:
+          - repo: redpanda-data/api-docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ env.ACTIONS_BOT_TOKEN }}
+          repository: ${{ matrix.repo }}
+          event-type: trigger-npm-update
+          client-payload: '{"commit_sha": "${{ github.sha }}"}'

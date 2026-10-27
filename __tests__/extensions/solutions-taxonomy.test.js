@@ -588,3 +588,59 @@ describe('review fixes: legacy mapping, platforms, and facet weights', () => {
     expect(warnings).toEqual(['the taxonomy has no deployment concept for Mainframe pages; their category recommendations are not filtered by platform'])
   })
 })
+
+describe('review follow-ups: coverage parents, facet order, platform spellings, rarity, replacements', () => {
+  test('a parent category normalization adds is not reported as zero-match', () => {
+    const docs = [1, 2, 3].map((n) => ({ url: `/${n}/`, categories: ['Disaster Recovery', 'High Availability'], authoredCategories: ['Disaster Recovery'] }))
+    const solutions = [{ id: 's', categories: ['Disaster Recovery', 'High Availability'], categoriesRaw: ['Disaster Recovery'] }]
+    const coverage = relationships.computeCoverage({ docs, solutions, categoryMap, taxonomy })
+    expect(coverage.solutions.s.categories).toEqual({ 'Disaster Recovery': { pages: 3, level: 'sub' } })
+    expect(coverage.solutions.s.zeroMatch).toEqual([])
+    // Control: without the taxonomy, the normalized list is compared as before.
+    expect(relationships.computeCoverage({ docs, solutions, categoryMap }).solutions.s.categories['High Availability'].pages).toBe(3)
+  })
+
+  test('a direct technology wins over an implied one for the same concept, in either order', () => {
+    for (const technologies of [['Iceberg Topics', 'Apache Iceberg'], ['Apache Iceberg', 'Iceberg Topics']]) {
+      const r = resolved({ technologies, categoriesRaw: ['Tiered Storage'] })
+      expect(r.conceptFacets.technologies).toEqual([{ value: 'Apache Iceberg', id: 'apache-iceberg' }])
+      expect(r.concepts.get('apache-iceberg')).toBe('direct')
+    }
+  })
+
+  test('a second spelling of one platform is a duplicate, not also a platform that names no deployment', () => {
+    const r = resolved({ platforms: ['cloud', 'Cloud'] })
+    expect(r.result.errors).toHaveLength(1)
+    expect(r.result.errors[0]).toMatch(/is the same concept as/)
+  })
+
+  test('a deprecated solution does not count toward concept rarity', () => {
+    const catalog = [
+      resolved({ id: 'a', technologies: ['Redpanda Connect'] }),
+      resolved({ id: 'b', technologies: ['Redpanda Connect'] }),
+      resolved({ id: 'c', technologies: ['rpk'] }),
+      resolved({ id: 'd', technologies: ['rpk'] }),
+    ]
+    const old = resolved({ id: 'old', status: 'deprecated', technologies: ['Redpanda Connect'] })
+    const factorWith = (solutions) => {
+      const { edges } = relationships.computeRelatedSolutions({ docs: [doc('x', ['Redpanda Connect', 'Tiered Storage'])], solutions, relationships: [], categoryMap, taxonomy })
+      return edges.find((e) => e.solution === 'a').score
+    }
+    expect(factorWith([...catalog, old])).toBe(factorWith(catalog))
+    // Control: the same solution published does lower the score.
+    expect(factorWith([...catalog, resolved({ id: 'old', technologies: ['Redpanda Connect'] })])).toBeLessThan(factorWith(catalog))
+  })
+
+  test('a deprecated value replaced only outside its facet names the replacement and its attribute', () => {
+    const { checkPageMetadata } = require('../../extension-utils/metadata-check')
+    const data = yaml.load(fs.readFileSync(path.join(FIXTURES, 'taxonomy.yml'), 'utf8'))
+    data.schemes.find((s) => s.id === 'technology').concepts.push({
+      id: 'iceberg-tables', prefLabel: 'Iceberg Tables', altLabels: [], definition: 'Old.', broader: null, related: [], deprecated: true, replacedBy: ['iceberg-topics'], kind: 'format',
+    })
+    const tax = parseTaxonomy(yaml.dump(data))
+    const findings = checkPageMetadata({ 'page-solution-technologies': 'Iceberg Tables' }, { taxonomy: tax, solution: true })
+    expect(findings.map((f) => f.message)).toEqual([
+      "page-solution-technologies value 'Iceberg Tables' is deprecated; it is replaced by 'Iceberg Topics' in page-categories",
+    ])
+  })
+})

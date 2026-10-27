@@ -134,7 +134,8 @@ function checkPageMetadata (attributes, { taxonomy, solution, isLegacyCategory }
         // must not be suggested here or collide with a category.
         const ids = hit.ids.filter((id) => taxonomy.get(id) && taxonomy.get(id).scheme === scheme)
         if (hit.deprecated && (ids.length || hit.concept.scheme === scheme)) {
-          push('deprecated-value', attribute, value, deprecatedMessage(attribute, value, { ...hit, ids }, taxonomy), { replacementIds: ids, conceptIds: [hit.concept.id] })
+          const elsewhere = hit.ids.filter((id) => !ids.includes(id) && taxonomy.get(id))
+          push('deprecated-value', attribute, value, deprecatedMessage(attribute, value, { ...hit, ids }, taxonomy, elsewhere), { replacementIds: ids, conceptIds: [hit.concept.id] })
         } else if (hit.concept.scheme !== scheme) {
           push('wrong-facet', attribute, value, `${attribute} value '${value}' is ${describe(taxonomy, hit.concept.id)}${hit.deprecated ? ', deprecated' : ''}, not a ${scheme}`, { conceptIds: [hit.concept.id] })
           continue
@@ -160,10 +161,23 @@ function checkPageMetadata (attributes, { taxonomy, solution, isLegacyCategory }
   return findings
 }
 
-function deprecatedMessage (attribute, value, hit, taxonomy) {
-  const instead = hit.ids.length
-    ? `use ${hit.ids.map((id) => `'${taxonomy.label(id)}'`).join(', ')} instead`
-    : 'no single value replaces it; see its definition in taxonomy.yml and choose per page'
+/** The solution attribute for a scheme, or page-categories, which takes any scheme. */
+function attributeForScheme (scheme) {
+  const facet = Object.entries(SOLUTION_FACETS).find(([, s]) => s === scheme)
+  return facet ? facet[0] : CATEGORY_ATTRIBUTE
+}
+
+// `elsewhere`: replacements outside the attribute's scheme, named with the
+// attribute they belong in, so the author is not told nothing replaces it.
+function deprecatedMessage (attribute, value, hit, taxonomy, elsewhere = []) {
+  let instead
+  if (hit.ids.length) {
+    instead = `use ${hit.ids.map((id) => `'${taxonomy.label(id)}'`).join(', ')} instead`
+  } else if (elsewhere.length) {
+    instead = `it is replaced by ${elsewhere.map((id) => `'${taxonomy.label(id)}' in ${attributeForScheme(taxonomy.get(id).scheme)}`).join(', ')}`
+  } else {
+    instead = 'no single value replaces it; see its definition in taxonomy.yml and choose per page'
+  }
   return `${attribute} value '${value}' is deprecated; ${instead}`
 }
 

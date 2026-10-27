@@ -130,9 +130,15 @@ function resolveFacet (taxonomy, values, scheme, { prefer = 'label' } = {}) {
       implied = ids.length > 0
     }
     for (const id of ids) {
-      if (items.some((i) => i.id === id)) continue
       // An implied item (what a value from another facet implies here) is
       // listed in the facet but scores as an implied concept, not a direct one.
+      // A direct value replaces an implied item for the same concept, so the
+      // order of the values does not change the score.
+      const at = items.findIndex((i) => i.id === id)
+      if (at !== -1) {
+        if (items[at].implied && !implied) items[at] = { value, id }
+        continue
+      }
       items.push(implied ? { value, id, implied: true } : { value, id })
     }
   }
@@ -189,7 +195,9 @@ function solutionConcepts (taxonomy, record, categoryMap) {
   // unknown value is already one.
   const deploymentIds = taxonomy.conceptIds('deployment')
   for (const value of authoredPlatforms) {
-    if (platforms.some((p) => p.value === value) || !taxonomy.resolve(value, { prefer: 'id' })) continue
+    // Each value on its own: a second spelling of one platform is deduplicated
+    // out of `platforms`, but it still names a deployment.
+    if (!taxonomy.resolve(value, { prefer: 'id' }) || resolveFacet(taxonomy, [value], 'deployment', { prefer: 'id' }).items.length) continue
     errors.push(`page-solution-platforms value '${value}' names no deployment, so the solution would match no deployment-tagged page; use one of ${deploymentIds.join(', ')}`)
   }
   if (record.platformsAuthored === false) {
