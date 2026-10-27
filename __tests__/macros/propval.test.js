@@ -220,6 +220,23 @@ describe('propval macro', () => {
     test('topic properties are not gated by cloud_supported', () => {
       expect(valueOf(onCloud('propval:retention.ms[type]'))).toBe('integer')
     })
+
+    test('introduced is not stated on Cloud, matching the Cloud property reference', () => {
+      const json = JSON.stringify({ properties: { new_prop: { name: 'new_prop', config_scope: 'cluster', cloud_supported: true, version: 'v26.2.1' } } })
+      const catalog = catalogOf([attachment('streaming', '26.2', 'v26.2.4', json)], { 'cloud-data-platform': { 'env-cloud': true } })
+      const warn = warnings()
+      expect(valueOf(convert('propval:new_prop[introduced]', { catalog, component: 'cloud-data-platform', version: '' }))).toBe('<unknown introduced>')
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("does not state 'introduced' for Cloud"))
+      expect(valueOf(convert('propval:new_prop[introduced]', { catalog }))).toBe('v26.2.1')
+    })
+
+    test('error mode fails the Cloud build on cloud-hidden fields and unavailable properties', () => {
+      const attributes = { 'property-validate': 'error' }
+      const onCloudStrict = (input) => convert(input, { catalog: cloud(), component: 'cloud-data-platform', version: '', attributes })
+      expect(() => onCloudStrict('propval:log_segment_ms[default]')).toThrow(/does not state 'default' for Cloud/)
+      expect(() => onCloudStrict('propval:log_segment_size[min]')).toThrow(/cloud_supported: false/)
+      expect(valueOf(onCloudStrict('propval:log_segment_ms[min]'))).toBe('1 minute')
+    })
   })
 
   describe('failures', () => {

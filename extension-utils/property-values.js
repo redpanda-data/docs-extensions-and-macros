@@ -42,7 +42,7 @@ const FIELDS = {
   nullable: {},
   values: {},
   scope: {},
-  introduced: {},
+  introduced: { cloudHidden: true },
   visibility: { cloudHidden: true },
   restored: { cloudHidden: true },
   aliases: { cloudHidden: true },

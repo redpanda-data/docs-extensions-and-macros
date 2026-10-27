@@ -435,9 +435,9 @@ A value has no safe fallback, so whenever the build cannot verify one, `propval:
 * The field is not one `propval:` supports.
 * The property has no such field in the data, for example `max` on a property with no maximum, or `default` on a deprecated property the data gives no default.
 * The value is an integer beyond JavaScript's exact range (the 2^64^-1 sentinel of `virtual_cluster_min_producer_ids`), which `JSON.parse` has already rounded.
-* On a Cloud page, the field is one the Cloud property reference does not show: `default`, `visibility`, `restored`, and `aliases`. The reference renders those only outside `env-cloud` (Cloud shows "Available in the Redpanda Cloud Console" in the Default row), so a Cloud page cannot state them either. Put the sentence in an `ifndef::env-cloud[]` block, or use a field the Cloud reference shows, such as `cloud-access`.
+* On a Cloud page, the field is one the Cloud property reference does not show: `default`, `introduced`, `visibility`, `restored`, and `aliases`. The reference renders those only outside `env-cloud` (Cloud shows "Available in the Redpanda Cloud Console" in the Default row), so a Cloud page cannot state them either. Put the sentence in an `ifndef::env-cloud[]` block, or use a field the Cloud reference shows, such as `cloud-access`.
 
-With `property-validate` set to `error`, an unknown property, an unsupported field, or a field the property does not have fails the build. With `off`, the placeholder is still rendered and still reported, because `off` means "do not check names", and a silent `<unknown default>` would reach readers unnoticed.
+With `property-validate` set to `error`, an unknown property, an unsupported field, a field the property does not have, a property not available on Cloud, or a field the Cloud reference does not show fails the build. The last two appear only in the Cloud build, so cloud-docs needs `property-validate: error` to catch single-sourced prose that would render a placeholder. With `off`, the placeholder is still rendered and still reported, because `off` means "do not check names", and a silent `<unknown default>` would reach readers unnoticed.
 
 === Migrating hand-written values
 
