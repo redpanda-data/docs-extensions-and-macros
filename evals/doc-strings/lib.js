@@ -97,7 +97,7 @@ function gitInit (dir) {
   run('git', ['config', 'user.email', 'eval@localhost'], dir)
   run('git', ['config', 'user.name', 'doc-strings-eval'], dir)
   run('git', ['add', '-A'], dir)
-  run('git', ['commit', '-q', '-m', 'base'], dir)
+  run('git', ['commit', '-q', '--allow-empty', '-m', 'base'], dir)
   return run('git', ['rev-parse', 'HEAD'], dir).stdout.trim()
 }
 
@@ -367,7 +367,63 @@ function compareDeclExtraction (before, after, targetKey) {
   return problems
 }
 
+/**
+ * Whether the doc-strings-review workflow's dispatch step would send this
+ * doc-impact.json. Runs the step's own jq predicate, read from the workflow
+ * file, so the eval and the gate cannot disagree about the shape.
+ *
+ * @returns {{ pass: boolean, detail: string }}
+ */
+function dispatchAccepts (docImpactText) {
+  const YAML = require('yaml')
+  const wf = YAML.parse(fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'doc-strings-review.yml'), 'utf8'))
+  const step = wf.jobs['doc-strings-review'].steps.find((s) => s.name === 'Dispatch doc-impact')
+  let filter
+  try {
+    filter = step && require('./doc-impact/lib').extractDispatchFilter(step.run)
+  } catch (_) {}
+  if (!filter) throw new Error('the dispatch step\'s doc-impact.json predicate was not found in doc-strings-review.yml')
+  const r = spawnSync('jq', ['-e', filter], { input: docImpactText, encoding: 'utf8' })
+  if (r.error) throw r.error
+  return { pass: r.status === 0, detail: r.status === 0 ? 'accepted' : `rejected (jq exit ${r.status}${r.stderr ? ': ' + r.stderr.trim().slice(0, 160) : ''})` }
+}
+
+/**
+ * Check the inline comment that carries a suggestion against the declaration
+ * it should replace. Production posts the comment on the lines it names and
+ * GitHub applies the suggestion to exactly those lines, so a correct
+ * replacement on the wrong file or range is a wrong review. The footer is how
+ * a later push recovers which declarations were reviewed.
+ *
+ * @param {Array<{path:string, line?:number, startLine?:number, body:string}>} comments
+ * @param {{file:string, lineStart:number, lineEnd:number, fingerprint?:string}} target
+ * @returns {{problems:string[], comment:object|null, start:number, end:number}}
+ */
+function checkSuggestionComment (comments, target) {
+  const withSuggestion = (comments || []).filter((c) => parseFences(c.body || '', 'suggestion').length > 0)
+  if (withSuggestion.length !== 1) {
+    return { problems: [`expected one comment with a suggestion, found ${withSuggestion.length}`], comment: null, start: 0, end: 0 }
+  }
+  const c = withSuggestion[0]
+  const problems = []
+  const norm = (p) => String(p || '').replace(/^\.\//, '')
+  if (norm(c.path) !== norm(target.file)) problems.push(`posted on ${c.path}, expected ${target.file}`)
+  if (!Number.isInteger(c.line)) problems.push('comment has no line')
+  const end = Number.isInteger(c.line) ? c.line : 0
+  const start = Number.isInteger(c.startLine) ? c.startLine : end
+  if (end && (start !== target.lineStart || end !== target.lineEnd)) {
+    problems.push(`posted on lines ${start}-${end}, expected ${target.lineStart}-${target.lineEnd}`)
+  }
+  if (target.fingerprint) {
+    const footer = `<sub>doc-strings-review:fp=${target.fingerprint}</sub>`
+    if (!String(c.body).includes(footer)) problems.push(`body lacks the footer ${footer}`)
+  }
+  return { problems, comment: c, start, end }
+}
+
 module.exports = {
+  checkSuggestionComment,
+  dispatchAccepts,
   REPO_ROOT,
   SURFACE_LAYOUT,
   DOC_TOOLS,
