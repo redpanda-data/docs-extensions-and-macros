@@ -47,7 +47,8 @@ real machinery:
    `+```suggestion+` block replacing the finding's `line_start..line_end`, or
    a `LINES a-b` + `+```replacement+` span edit - to the fixture file. A
    `doc-impact.json` the review writes is checked with the workflow's own
-   dispatch predicate.
+   dispatch predicate, and a `Write` call that came back with an error fails
+   the case, so a rule change that blocks the write cannot pass as silence.
 5. The verdict is re-computed mechanically:
    * re-run `lint-strings`: the rewritten declaration must have **zero
      findings of any severity**, and every untouched declaration must keep
@@ -144,9 +145,11 @@ node evals/doc-strings/run-evals.js --sabotage negative-connect-diff
 node evals/doc-strings/run-evals.js --sabotage negative-metrics-file
 ----
 
-Exit 0 means the proof succeeded (the model flagged the planted violation
-and the harness caught it as a FAIL verdict); exit 1 means the harness can
-no longer catch invented findings and must be fixed. Nothing is edited on
+Exit 0 means the proof succeeded: the row the case exists to assert failed
+(`zero inline comments posted` for a negative review, the empty findings or
+zero suggestions rows for a negative audit, the must-suggest row for a prose
+review). Any other failing row, such as must-read, does not count. Exit 1
+means the harness can no longer catch invented findings and must be fixed. Nothing is edited on
 disk, so there is nothing to restore afterwards.
 
 Both proofs were run against the live model when this harness landed; both
@@ -180,11 +183,12 @@ produced it:
   tool's output cap, or run in another directory on a different file shows
   nothing. A `Read` of a file of the same name outside the workspace does not
   count.
-* Production's allowed tools permit only the exact commands
+* Production's allowed tools list the exact commands
   `cat embedded-reference-strings.md` and `cat terminology.md` for these
-  files, so `grep`, `head` and multi-file `cat` are refused there. Grading by
-  output keeps the check right without modelling what each shell command
-  prints, and keeps it right if that list ever widens.
+  files, but Claude Code also auto-approves read-only Bash such as other
+  `cat`, `head` or `grep` forms, so the model can see a standard through a
+  command the list does not name. Grading by output keeps the check right
+  without modelling what each shell command prints.
 * When the model posted an inline comment, those results must have arrived
   before the first `mcp__github_inline_comment__create_inline_comment` call
   the tool accepted. A read issued in the same turn as the comment does not
