@@ -1,5 +1,49 @@
 # Changelog
 
+## [5.56.1](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.56.0...v5.56.1) (2026-10-27)
+
+
+### Bug fixes
+
+* **doc-impact:** dispatch each gating finding once and keep merged tickets honest ([#427](https://github.com/redpanda-data/docs-extensions-and-macros/issues/427)) ([3c3f8e6](https://github.com/redpanda-data/docs-extensions-and-macros/commit/3c3f8e625004e4e30c7072e5c7f3131629e13325))
+* **doc-strings-review:** review only the lines a PR changed ([#399](https://github.com/redpanda-data/docs-extensions-and-macros/issues/399)) ([ff12dca](https://github.com/redpanda-data/docs-extensions-and-macros/commit/ff12dca4c8bab0e18562356e55e286e549d44edc))
+
+## [5.56.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.55.0...v5.56.0) (2026-10-26)
+
+
+### Features
+
+* add check-dispatch-graph for the repository_dispatch graph ([#409](https://github.com/redpanda-data/docs-extensions-and-macros/issues/409)) ([69ca241](https://github.com/redpanda-data/docs-extensions-and-macros/commit/69ca2410b3d62dfcbc8f2e09de9cf14c7efd1e5a))
+* add page-introduced-in to the Markdown front matter ([#394](https://github.com/redpanda-data/docs-extensions-and-macros/issues/394)) ([3aa480a](https://github.com/redpanda-data/docs-extensions-and-macros/commit/3aa480a620f01f04ca2f5d7b8e958c95c127e95f))
+* **doc-strings-review:** file doc-impact for enterprise gating changes ([#382](https://github.com/redpanda-data/docs-extensions-and-macros/issues/382)) ([6480a4e](https://github.com/redpanda-data/docs-extensions-and-macros/commit/6480a4e4d350c84d46f6fceb5826139d7ca249c3))
+* **docs-pr-review:** report doc-tools check-metadata in the review ([#425](https://github.com/redpanda-data/docs-extensions-and-macros/issues/425)) ([9a0b5d4](https://github.com/redpanda-data/docs-extensions-and-macros/commit/9a0b5d4a3ddfcf32b1a5f8bb9e62caa93f08f433))
+* **docs-review:** host the DOC-2496 docs-pr-review pipeline ([#303](https://github.com/redpanda-data/docs-extensions-and-macros/issues/303)) ([681c7a5](https://github.com/redpanda-data/docs-extensions-and-macros/commit/681c7a5774f3dd72733ca1f6f4bbdb8633f548a5))
+* **lint-strings:** check env-cloud conditionals in connect spec strings ([#381](https://github.com/redpanda-data/docs-extensions-and-macros/issues/381)) ([c59938b](https://github.com/redpanda-data/docs-extensions-and-macros/commit/c59938bb64cd009c015ae08b19647c38ea963d17))
+* record generated-content provenance in the Markdown twins ([#397](https://github.com/redpanda-data/docs-extensions-and-macros/issues/397)) ([55c3e87](https://github.com/redpanda-data/docs-extensions-and-macros/commit/55c3e87aa5dc3edb007ea2e4c393df7d689519d0))
+* **sitemap-md:** use page titles and descriptions in Markdown sitemaps ([#403](https://github.com/redpanda-data/docs-extensions-and-macros/issues/403)) ([24c8bfc](https://github.com/redpanda-data/docs-extensions-and-macros/commit/24c8bfcf687ff78d1513fb86e043ebeaf08d4419))
+* **taxonomy:** load the docs taxonomy, check page metadata, and emit taxonomy facets ([#423](https://github.com/redpanda-data/docs-extensions-and-macros/issues/423)) ([81ec5e5](https://github.com/redpanda-data/docs-extensions-and-macros/commit/81ec5e5392ffdf27fd1870f99280a08918756340))
+
+
+### Bug fixes
+
+* convert commented-out Helm value docs to AsciiDoc and keep straight quotes ([#407](https://github.com/redpanda-data/docs-extensions-and-macros/issues/407)) ([2b678fc](https://github.com/redpanda-data/docs-extensions-and-macros/commit/2b678fc862fb81b25bbb478c0a274bba172d60ef))
+* **crd-spec:** convert docs URLs to xrefs against the docs checkout ([#414](https://github.com/redpanda-data/docs-extensions-and-macros/issues/414)) ([4457537](https://github.com/redpanda-data/docs-extensions-and-macros/commit/44575375b8d33d1d666cf70f3aafe59e0b0522cd))
+* **doc-strings-review:** keep the review's file tools inside the workspace ([#389](https://github.com/redpanda-data/docs-extensions-and-macros/issues/389)) ([0db9792](https://github.com/redpanda-data/docs-extensions-and-macros/commit/0db9792f1f8c0e3746aba45514806a1b1ea3978f))
+* **doc-strings-review:** read the staged standards before the first suggestion ([#415](https://github.com/redpanda-data/docs-extensions-and-macros/issues/415)) ([0b67e1f](https://github.com/redpanda-data/docs-extensions-and-macros/commit/0b67e1fd343fed65b8cca13be61042886b50b63a))
+* **doc-strings-review:** skip strings a human reviewer wrote ([#396](https://github.com/redpanda-data/docs-extensions-and-macros/issues/396)) ([2e3844f](https://github.com/redpanda-data/docs-extensions-and-macros/commit/2e3844f4e74a929dca893124d150787538917e4c))
+* keep every changed default literal and escape pipes in What's new descriptions ([#391](https://github.com/redpanda-data/docs-extensions-and-macros/issues/391)) ([212af80](https://github.com/redpanda-data/docs-extensions-and-macros/commit/212af80d9bf1f4c9c469fcd6ec83da9a96492280))
+* **lint-strings:** read docs.Field declarations on the connect surface ([#417](https://github.com/redpanda-data/docs-extensions-and-macros/issues/417)) ([3294fe5](https://github.com/redpanda-data/docs-extensions-and-macros/commit/3294fe582841c5b878b5d93cc47c66f3dc082c2a))
+* **lint-strings:** reject whitespace inside a conditional directive's brackets ([#404](https://github.com/redpanda-data/docs-extensions-and-macros/issues/404)) ([be365fa](https://github.com/redpanda-data/docs-extensions-and-macros/commit/be365faaa9d6084166e86f038aa95eee606c59e1))
+* **lint-strings:** steer CRD field comments to a verb-led opener ([#405](https://github.com/redpanda-data/docs-extensions-and-macros/issues/405)) ([f3f026a](https://github.com/redpanda-data/docs-extensions-and-macros/commit/f3f026a7f8f0e47d574870b29eab73841ed71a51))
+* **llms:** keep &lt;placeholders&gt; in page descriptions ([#402](https://github.com/redpanda-data/docs-extensions-and-macros/issues/402)) ([80198d6](https://github.com/redpanda-data/docs-extensions-and-macros/commit/80198d680c9082ffbd2340fe7f8091f99a2abc73))
+* **property-docs:** render each include once when the input was already generated ([#406](https://github.com/redpanda-data/docs-extensions-and-macros/issues/406)) ([97e67b3](https://github.com/redpanda-data/docs-extensions-and-macros/commit/97e67b30dc47c597f3fbc1700734f4625f1015a8))
+* **rpcn-docs:** keep sentences with dotted names whole in What's new summaries ([#400](https://github.com/redpanda-data/docs-extensions-and-macros/issues/400)) ([a3a061f](https://github.com/redpanda-data/docs-extensions-and-macros/commit/a3a061f526756a634a1df824ac52e4b2ac887b71))
+
+
+### Reusable workflows and CI
+
+* **rp-util-schema:** skip patch RCs the docs never read ([#393](https://github.com/redpanda-data/docs-extensions-and-macros/issues/393)) ([ac20687](https://github.com/redpanda-data/docs-extensions-and-macros/commit/ac2068786c163e491937852a1347d453ac258dc2))
+
 ## [5.55.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.54.0...v5.55.0) (2026-10-19)
 
 
