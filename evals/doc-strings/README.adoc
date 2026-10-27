@@ -344,7 +344,9 @@ new subsection rather than overwriting this one.
 
 All 13 cases, twice on `claude-opus-5` and twice on `claude-sonnet-5`, with
 committable suggestions on. The cases were those at commit `50911d28`, with
-the fingerprint fix described below. Both models ran at the same time, and 4
+the fingerprint fix described below. The cases changed after this run (the connect
+footer, the `xref` hint, the block-type check, and the declaration a rewrite
+case hands the review), so this table predates the cases that ship. Both models ran at the same time, and 4
 model calls timed out under that load, two per model. Those cases were rerun
 on their own and passed, and they are counted that way.
 
@@ -365,6 +367,11 @@ The failures:
 * Opus 5 failed `connect-short-description-markup` once. Asked to fix the
   `ShortDescription`, it also rewrote the field's `Description`, which was not
   in the change.
+  This may be the harness and not the model. When these runs were made, the
+  case handed the review the first `storage_account` declaration, a
+  `Description` at lines 17-18, paired with the `ShortDescription` finding at
+  17-19. The case now picks the declaration the finding is on, so rerun the
+  connect cases before relying on this result.
 
 An earlier run of the same comparison found a gap in this harness rather than
 in either model. The rewrite cases hand the review a `lint-findings.json`

@@ -150,6 +150,31 @@ describe('doc-strings evals: the suggestion comment must target the declaration'
     expect(production.normalizeComments([offComment], true)).toEqual([offComment])
   })
 
+  test('with committable suggestions off, only the last ```text fence is the rewrite', () => {
+    // A review may quote the current string in a ```text block before the
+    // rewrite; converting that quote too would fail "exactly one suggestion".
+    const rewrite = good.body.replace('```suggestion', '```text')
+    const quoted = { ...good, body: 'Current:\n```text\nold string\n```\n\n' + rewrite }
+    const [checked] = production.normalizeComments([quoted], false)
+    expect(lib.parseFences(checked.body, 'suggestion')).toHaveLength(1)
+    expect(lib.parseFences(checked.body, 'text')).toEqual(['old string'])
+    expect(lib.checkSuggestionComment([checked], target).problems).toEqual([])
+  })
+
+  test('a rewrite case hands the review the declaration its finding is on, not the first with that name', () => {
+    // connect-short-description-markup: storage_account has a Description at
+    // 17-18 in two declarations and the ShortDescription with the finding at 17-19.
+    const decls = [
+      { name: 'storage_account', file: 'common.go', line_start: 17, line_end: 18, fingerprint: 'a' },
+      { name: 'storage_account', file: 'common.go', line_start: 17, line_end: 18, fingerprint: 'b' },
+      { name: 'storage_account', file: 'common.go', line_start: 17, line_end: 19, fingerprint: 'c' }
+    ]
+    const finding = { name: 'storage_account', file: 'common.go', line_start: 17, line_end: 19 }
+    expect(lib.declarationForFinding(decls, finding).fingerprint).toBe('c')
+    expect(lib.declarationForFinding(decls, { ...finding, file: 'other.go' })).toBeUndefined()
+    expect(lib.declarationForFinding(undefined, finding)).toBeUndefined()
+  })
+
   test('the mock inline-comment tool rejects a call with no line and logs only a full one', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mock-'))
     const log = path.join(dir, 'log.jsonl')

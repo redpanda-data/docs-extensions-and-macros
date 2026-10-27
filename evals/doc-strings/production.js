@@ -431,6 +431,18 @@ function checkMustRead (calls, cwd, files = MUST_READ) {
 }
 
 /**
+ * The comments as the executors read them. With committable suggestions off
+ * the review writes the rewrite in a ```text block; it is handed on under the
+ * ```suggestion tag the executors parse. Only the last ```text fence in a
+ * comment is the rewrite. An earlier one quotes the current string, which
+ * the review may do in either mode.
+ */
+function normalizeComments (comments, committableSuggestions = true) {
+  if (committableSuggestions) return comments
+  return comments.map((c) => ({ ...c, body: c.body.replace(/```text\b(?![\s\S]*```text\b)/, '```suggestion') }))
+}
+
+/**
  * Write the workflow's pre-review files into the fixture repo and run the
  * production review step there.
  *
@@ -439,19 +451,10 @@ function checkMustRead (calls, cwd, files = MUST_READ) {
  * @param {object} o.lint        lint-strings JSON, as the workflow's lint step writes it
  * @param {string|null} o.diff   source diff, or null to leave pr-diff.patch absent
  * @param {string} [o.model]
+ * @param {boolean} [o.committableSuggestions]  false renders the prompt's off-mode line and normalizes ```text rewrites
  * @param {boolean} [o.withoutStandards]  sabotage: strip every sentence naming a staged standard
  * @returns {{ output, comments, files, calls, mustRead, stderr, status, timedOut, ms, failed }}
  */
-/**
- * The comments as the executors read them. With committable suggestions off
- * the review writes the rewrite in a ```text block; it is handed on under the
- * ```suggestion tag the executors parse.
- */
-function normalizeComments (comments, committableSuggestions = true) {
-  if (committableSuggestions) return comments
-  return comments.map((c) => ({ ...c, body: c.body.replace(/```text\b/g, '```suggestion') }))
-}
-
 function runReview ({ repoDir, lint, diff, model = PRODUCTION_MODEL, committableSuggestions = true, timeoutMs = 600000, withoutStandards = false, promptEdits = [] }) {
   const step = loadStep()
   const args = parseClaudeArgs(step.with.claude_args || '')

@@ -167,7 +167,7 @@ function runRewriteCase (spec, io) {
   // carries it too; compute it the way lint-strings does. Without it a model
   // either refuses to post or invents one.
   const fp = finding.fingerprint || lintStrings.fingerprint(finding)
-  const declaration = (lintBefore.declarations || []).find((d) => d.name === spec.target)
+  const declaration = lib.declarationForFinding(lintBefore.declarations, finding)
   const lint = {
     ...lintBefore,
     declarations: [declaration ? { ...declaration, in_pr_diff: true, fingerprint: fp } : { surface: finding.surface, name: finding.name, file: finding.file, line_start: finding.line_start, line_end: finding.line_end, string: finding.string, in_pr_diff: true, fingerprint: fp }],

@@ -393,6 +393,17 @@ function findingFingerprint (lintResult, excludeName, excludeFile) {
   return groups.sort()
 }
 
+/**
+ * The declaration a finding belongs to. A name alone is ambiguous: connect
+ * reuses a field name across declarations in one file, and a field's
+ * Description and ShortDescription are separate declarations with the same
+ * name. Match on the finding's file and line span instead.
+ */
+function declarationForFinding (declarations, finding) {
+  return (declarations || []).find((d) => d.name === finding.name && d.file === finding.file &&
+    d.line_start === finding.line_start && d.line_end === finding.line_end)
+}
+
 const LINE_FIELDS = ['line_start', 'line_end']
 
 /** Deep-copy an object minus the given keys. */
@@ -535,6 +546,7 @@ module.exports = {
   overlongLines,
   findingsFor,
   findingFingerprint,
+  declarationForFinding,
   comparePropertyExtraction,
   compareDeclExtraction,
   normalizeText,
