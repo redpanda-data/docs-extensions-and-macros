@@ -16,8 +16,10 @@ module.exports = {
   anchorName: require('./anchorName.js'),
   normalizePropertyAnchors: require('./normalizePropertyAnchors.js'),
   canonicalizePropertyXrefs: require('./canonicalizePropertyXrefs.js'),
-  parseRelatedTopic: require('./parseRelatedTopic.js'),
-  allTopicsConditional: require('./allTopicsConditional.js'),
+  seeAlsoView: require('./seeAlsoView.js'),
+  audienceScope: require('./audienceScope.js'),
+  applyPropertyLinks: require('./applyPropertyLinks.js'),
+  findAudienceScopeProblems: require('./findAudienceScopeProblems.js'),
   capitalize: require('./capitalize.js'),
   length: require('./length.js'),
 };

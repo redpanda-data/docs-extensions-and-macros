@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "5.51.0",
+  "version": "5.56.0",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -32,6 +32,8 @@
     "test:python": "./__tests__/tools/property-extractor/setup-and-test.sh",
     "test:cgo": "node __tests__/tools/cgo-detection.test.js",
     "test:all": "npm run test && npm run test:python && npm run test:cgo",
+    "eval:doc-strings": "node evals/doc-strings/run-evals.js",
+    "eval:doc-impact": "node evals/doc-strings/run-evals.js --doc-impact",
     "generate:cli-docs": "node tools/generate-cli-docs.js",
     "bundle:admin": "doc-tools generate bundle-openapi --surface admin",
     "bundle:connect": "doc-tools generate bundle-openapi --surface connect",
@@ -76,8 +78,6 @@
     "./extensions/find-related-labs": "./extensions/find-related-labs.js",
     "./extensions/convert-llms-to-txt": "./extensions/convert-llms-to-txt.js",
     "./extensions/convert-sitemap-to-markdown": "./extensions/convert-sitemap-to-markdown.js",
-    "./extensions/modify-redirects": "./extensions/produce-redirects.js",
-    "./extensions/produce-redirects": "./extensions/produce-redirects.js",
     "./extensions/algolia-indexer/index": "./extensions/algolia-indexer/index.js",
     "./extensions/aggregate-terms": "./extensions/aggregate-terms.js",
     "./extensions/resolve-xrefs-in-attachments": "./extensions/resolve-xrefs-in-attachments.js",
@@ -93,7 +93,11 @@
     "./macros/enterprise": "./macros/enterprise.js",
     "./macros/prop": "./macros/prop.js",
     "./extensions/property-page-index": "./extensions/property-page-index.js",
-    "./extensions/render-property-descriptions": "./extensions/render-property-descriptions.js"
+    "./extensions/render-property-descriptions": "./extensions/render-property-descriptions.js",
+    "./extensions/kapa-source-groups": "./extensions/kapa-source-groups.js",
+    "./docs-data/kapa-source-groups.json": "./docs-data/kapa-source-groups.json",
+    "./macros/iceberg-explorer": "./macros/iceberg-explorer.js",
+    "./macros/iceberg-explorer.js": "./macros/iceberg-explorer.js"
   },
   "files": [
     "extensions",
@@ -105,7 +109,8 @@
     "tools",
     "docker-compose",
     "mcp",
-    "docs-data/rpk-overrides.schema.json"
+    "docs-data/*.schema.json",
+    "docs-data/kapa-source-groups.json"
   ],
   "license": "ISC",
   "engines": {
@@ -160,6 +165,7 @@
     "jest-junit": "^16.0.0"
   },
   "peerDependencies": {
-    "@antora/asciidoc-loader": "^3.1.0"
+    "@antora/asciidoc-loader": "^3.1.0",
+    "@antora/logger": "^3.1.0"
   }
 }

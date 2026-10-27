@@ -32,7 +32,9 @@
 
 const loadAsciiDoc = require('@antora/asciidoc-loader')
 const bigIntJson = require('../cli-utils/big-int-json')
-const { buildPageIndex, propertyAnchor } = require('../macros/prop')
+// compareTags is the one set-available-attachment-versions.js uses to pick the
+// tooltip dataset, so the build-time choice and the runtime fetch cannot disagree.
+const { buildPageIndex, propertyAnchor, compareTags } = require('../macros/prop')
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
 
 const PROPERTIES_JSON_RX = /^redpanda-properties-(v\d+\.\d+\.\d+(?:-[\w.]+)?)\.json$/
@@ -57,7 +59,7 @@ module.exports.register = function () {
   // without that every <<anchor>> silently degraded to plain text.
   const anchorIndexes = new Map()
   this.once('contentClassified', ({ contentCatalog }) => {
-    for (const attachment of propertyAttachments(contentCatalog)) {
+    for (const attachment of newestPropertyAttachments(contentCatalog)) {
       const properties = readProperties(attachment, logger)
       if (!properties) continue
       const key = `${attachment.src.component}@${attachment.src.version || ''}`
@@ -72,7 +74,7 @@ module.exports.register = function () {
   // class="xref unresolved" while the same xref resolved fine on a real page.
   // Attachments are still published after this event.
   this.once('documentsConverted', ({ contentCatalog, siteAsciiDocConfig }) => {
-    const attachments = propertyAttachments(contentCatalog)
+    const attachments = newestPropertyAttachments(contentCatalog)
     if (!attachments.length) return
 
     for (const attachment of attachments) {
@@ -135,13 +137,13 @@ module.exports.register = function () {
       logger.info(`${where}: rendered ${rendered} property descriptions to HTML${failed ? `, ${failed} failed` : ''}`)
       if (unresolved.size) {
         logger.warn(
-          `${where}: ${unresolved.size} xref target(s) in property descriptions could not be resolved, so they stay as raw macros in the published attachment: ` +
+          `${where} (${basename(attachment)}): ${unresolved.size} xref target(s) in property descriptions could not be resolved, so they stay as raw macros in the published attachment: ` +
           `${[...unresolved].sort().join(', ')}.`
         )
       }
       if (brokenAnchors.size) {
         logger.warn(
-          `${where}: ${brokenAnchors.size} <<anchor>> reference(s) in property descriptions name no documented property, so they render as plain text: ` +
+          `${where} (${basename(attachment)}): ${brokenAnchors.size} <<anchor>> reference(s) in property descriptions name no documented property, so they render as plain text: ` +
           `${[...brokenAnchors].sort().join(', ')}. Property anchors replace dots with hyphens, so redpanda.storage.mode is <<redpanda-storage-mode>>. ` +
           'Fix them in the description or in docs-data/property-overrides.json.'
         )
@@ -158,6 +160,36 @@ function propertyAttachments (contentCatalog) {
   return (contentCatalog.findBy({ family: 'attachment' }) || []).filter(
     (file) => file.src.module === 'reference' && PROPERTIES_JSON_RX.test(basename(file))
   )
+}
+
+function tagOf (file) {
+  return basename(file).match(PROPERTIES_JSON_RX)[1]
+}
+
+
+/**
+ * The newest property dataset per component version, and only that one.
+ *
+ * A branch can ship more than one: doc-tools retains the 2 newest property
+ * JSONs on purpose, because the next generation run needs the older one as its
+ * --diff baseline. Only the newest is ever read as a dataset -- the docs UI
+ * resolves tooltips against available-properties-tag, which
+ * set-available-attachment-versions sets to the newest -- so rendering the
+ * older one is not just wasted work. This extension rewrites
+ * entry.description to resolve xrefs and then replaces the attachment
+ * contents, so converting a baseline would make the next diff report a
+ * description change for every property in it, and every dead <<anchor>> in a
+ * superseded dataset would be reported a second time against a file nobody
+ * publishes.
+ */
+function newestPropertyAttachments (contentCatalog) {
+  const newest = new Map()
+  for (const file of propertyAttachments(contentCatalog)) {
+    const key = `${file.src.component}@${file.src.version || ''}`
+    const held = newest.get(key)
+    if (!held || compareTags(tagOf(file), tagOf(held)) > 0) newest.set(key, file)
+  }
+  return [...newest.values()]
 }
 
 /**
@@ -229,9 +261,24 @@ function anchorIndex (contentCatalog, attachment, properties, logger) {
   }
   for (const [name, entry] of pages) {
     if (!entry || !entry.page) continue
-    index.set(propertyAnchor(name), { page: entry.page, name })
+    const anchor = propertyAnchor(name)
+    index.set(anchor, { page: entry.page, name, anchor })
+    // Legacy spelling. Before anchors replaced dots with hyphens they dropped
+    // them, so descriptions written then say <<redpandaremoteread>> for
+    // redpanda.remote.read, and some carry a stray hyphen (<<redpandastorage-mode>>).
+    // Those still name a documented property; only the spelling is old. Index
+    // the dot-and-hyphen-free form too, so they resolve to the real anchor
+    // instead of degrading to plain text and a warning on every build of every
+    // version still carrying them. A real anchor always wins over a legacy one.
+    const legacy = LEGACY_ANCHOR_PREFIX + legacyAnchorKey(name)
+    if (!index.has(legacy)) index.set(legacy, { page: entry.page, name, anchor })
   }
   return index
+}
+
+const LEGACY_ANCHOR_PREFIX = 'legacy:'
+function legacyAnchorKey (name) {
+  return name.replace(/[.-]/g, '')
 }
 
 /**
@@ -246,8 +293,8 @@ function anchorIndex (contentCatalog, attachment, properties, logger) {
 function resolveInternalRefs (description, anchors, report) {
   return description.replace(INTERNAL_REF_RX, (match, anchor, display) => {
     const text = (display || '').trim()
-    const target = anchors.get(anchor)
-    if (target) return `xref:reference:${target.page}.adoc#${anchor}[${attrlistValue(text || `\`${target.name}\``)}]`
+    const target = anchors.get(anchor) || anchors.get(LEGACY_ANCHOR_PREFIX + legacyAnchorKey(anchor))
+    if (target) return `xref:reference:${target.page}.adoc#${target.anchor || anchor}[${attrlistValue(text || `\`${target.name}\``)}]`
     // The anchor names no documented property, so there is nothing to link to.
     // Asciidoctor would render a same-page fragment, and a tooltip is shown on
     // arbitrary pages, so that link would go nowhere and still invite a click --

@@ -23,7 +23,9 @@ const {
   formatDefault,
   hasDefaultValue,
   parentPath,
-  isPluginCommand
+  sectionTitle,
+  isPluginCommand,
+  wrapDescriptionPassthrough
 } = require('../../../tools/rpk-docs/helpers/index.js')
 
 describe('rpk Docs Helpers', () => {
@@ -322,6 +324,40 @@ describe('rpk Docs Helpers', () => {
     })
   })
 
+  describe('sectionTitle', () => {
+    test('uses sentence case: capitalizes only the first word', () => {
+      expect(sectionTitle('CLIENT CREDENTIALS')).toBe('Client credentials')
+      expect(sectionTitle('REALLOCATION FAILURE DETAILS')).toBe('Reallocation failure details')
+    })
+
+    test('keeps acronyms upper case, including SSO', () => {
+      expect(sectionTitle('SSO')).toBe('SSO')
+      expect(sectionTitle('TLS SETTINGS')).toBe('TLS settings')
+      expect(sectionTitle('PRODUCER ID & EPOCH')).toBe('Producer ID & epoch')
+      expect(sectionTitle('TRANSACTIONAL ID')).toBe('Transactional ID')
+    })
+
+    test('capitalizes proper nouns, and Azure is not an acronym', () => {
+      expect(sectionTitle('AZURE')).toBe('Azure')
+      expect(sectionTitle('USING KAFKA')).toBe('Using Kafka')
+    })
+
+    test('capitalizes Schema Registry only as the full phrase', () => {
+      expect(sectionTitle('SCHEMA REGISTRY')).toBe('Schema Registry')
+      expect(sectionTitle('USING SCHEMA REGISTRY')).toBe('Using Schema Registry')
+      expect(sectionTitle('SCHEMA FORMAT')).toBe('Schema format')
+      expect(sectionTitle('KEY SCHEMA')).toBe('Key schema')
+    })
+
+    test('handles slashes', () => {
+      expect(sectionTitle('ENABLED/DISABLED')).toBe('Enabled/disabled')
+    })
+
+    test('returns an empty string for no name', () => {
+      expect(sectionTitle('')).toBe('')
+    })
+  })
+
   describe('isPluginCommand', () => {
     const pluginVersions = {
       connect: '4.94.0',
@@ -345,6 +381,18 @@ describe('rpk Docs Helpers', () => {
     test('handles null inputs', () => {
       expect(isPluginCommand(null, pluginVersions)).toBe(false)
       expect(isPluginCommand('rpk connect', null)).toBe(false)
+    })
+  })
+
+  describe('wrapDescriptionPassthrough', () => {
+    test('leaves descriptions without backticks unchanged', () => {
+      expect(wrapDescriptionPassthrough('Delete one trigger. <name> is the full resource name.'))
+        .toBe('Delete one trigger. <name> is the full resource name.')
+    })
+
+    test('escapes special characters inside pass:q so placeholders survive', () => {
+      expect(wrapDescriptionPassthrough('List every trigger on <agent> (`my-agent`) & more.'))
+        .toBe('pass:q[List every trigger on &lt;agent&gt; (`my-agent`) &amp; more.]')
     })
   })
 })

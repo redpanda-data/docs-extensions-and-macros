@@ -1,5 +1,16 @@
 'use strict'
 
+// The macro logs through @antora/logger rather than console.warn (see
+// macros/enterprise.js), so tests spy on this stable, mocked logger instead
+// of console -- restored by the afterEach below the same way a console spy
+// would be.
+jest.mock('@antora/logger', () => {
+  const logger = { warn: () => {}, info: () => {}, error: () => {}, debug: () => {} }
+  const getLogger = () => logger
+  getLogger.configure = () => getLogger
+  return getLogger
+})
+
 const {
   register,
   buildEnterpriseContent,
@@ -16,7 +27,6 @@ features:
     scope: redpanda
     xref: manage:tiered-storage.adoc
     xref-kubernetes: manage:kubernetes/tiered-storage/k-tiered-storage.adoc
-    xref-cloud: cloud-data-platform:manage:tiered-storage.adoc
     description: |
       Enables data storage in cloud object storage.
     expiration: |
@@ -164,7 +174,7 @@ features:
     })
 
     test('an unreleased feature on released docs renders as plain text and warns', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const html = onReleased('enterprise:Upcoming Feature[]')
       // No enterprise styling, no tooltip, no link: the reader cannot get it.
       expect(html).not.toContain('enterprise-feature')
@@ -175,7 +185,7 @@ features:
     })
 
     test('an unreleased feature on a prerelease page renders with an unreleased badge', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const html = onBeta('enterprise:Upcoming Feature[]')
       expect(html).toContain('class="enterprise-feature"')
       expect(html).toContain('unreleased')
@@ -183,7 +193,7 @@ features:
     })
 
     test('the display text override survives the plain rendering', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       expect(onReleased('enterprise:Upcoming Feature[text=the upcoming thing]')).toContain('the upcoming thing')
       warn.mockRestore()
     })
@@ -196,7 +206,7 @@ features:
     })
 
     test('enterprise-validate=off silences the report', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const html = convert('enterprise:Upcoming Feature[]', {
         catalog: catalog(), component: 'streaming', version: '26.2',
         attributes: { 'enterprise-validate': 'off' },
@@ -212,7 +222,7 @@ features:
     // promises readers a feature they cannot get and looks entirely normal.
     test('an unrecognized status is treated as unreleased, not as shipped', () => {
       const typo = STATUS_YAML.replace('status: unreleased', 'status: unreleaased')
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const html = convert('enterprise:Upcoming Feature[]', {
         catalog: catalogWithVersions(typo, VERSIONS), component: 'streaming', version: '26.2',
       })
@@ -233,7 +243,7 @@ features:
       ['status: unreleaased', "status 'unreleaased'"],
     ])('%s is invalid and fails closed', (line, expected) => {
       const yaml = STATUS_YAML.replace('status: unreleased', line)
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const html = convert('enterprise:Upcoming Feature[]', {
         catalog: catalogWithVersions(yaml, VERSIONS), component: 'streaming', version: '26.2',
       })
@@ -243,7 +253,7 @@ features:
 
     test('an absent status defaults to released', () => {
       const noStatus = STATUS_YAML.replace(/^\s*status: unreleased\n/m, '')
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const html = convert('enterprise:Upcoming Feature[]', {
         catalog: catalogWithVersions(noStatus, VERSIONS), component: 'streaming', version: '26.2',
       })
@@ -265,7 +275,7 @@ features:
     })
 
     test('a playbook attribute can declare prerelease-ness directly', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const html = convert('enterprise:Upcoming Feature[]', {
         catalog: catalog(), component: 'streaming', version: '26.2',
         attributes: { 'page-component-version-is-prerelease': 'true' },
@@ -309,7 +319,7 @@ features:
     })
 
     test('a feature mentioned before its since version renders as plain text and warns', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const html = convert('enterprise:Iceberg Topics[]', { catalog: catalog(), version: '24.1' })
       expect(html).not.toContain('enterprise-feature')
       expect(html).toContain('Iceberg Topics')
@@ -318,7 +328,7 @@ features:
     })
 
     test('the display text override survives the plain rendering', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const html = convert('enterprise:Iceberg Topics[text=Iceberg]', { catalog: catalog(), version: '24.1' })
       expect(html).toContain('Iceberg')
       warn.mockRestore()
@@ -331,7 +341,7 @@ features:
     })
 
     test('enterprise-validate=off silences the report', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const html = convert('enterprise:Iceberg Topics[]', {
         catalog: catalog(), version: '24.1', attributes: { 'enterprise-validate': 'off' },
       })
@@ -352,7 +362,7 @@ features:
 
     test('an unparsable since value warns, unlike an absent one', () => {
       const badSince = SINCE_YAML.replace("since: '26.3'", 'since: not-a-version')
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       convert('enterprise:Iceberg Topics[]', { catalog: fakeCatalog(badSince), version: '20.1' })
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("since: 'not-a-version'"))
       warn.mockClear()
@@ -362,7 +372,7 @@ features:
 
     test('enterprise-validate=off silences the unparsable since warning', () => {
       const badSince = SINCE_YAML.replace("since: '26.3'", 'since: not-a-version')
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       convert('enterprise:Iceberg Topics[]', {
         catalog: fakeCatalog(badSince), version: '20.1', attributes: { 'enterprise-validate': 'off' },
       })
@@ -371,7 +381,7 @@ features:
 
     test('the licensing table also warns on an unparsable since value', () => {
       const badSince = SINCE_YAML.replace("since: '26.3'", 'since: not-a-version')
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const html = convert('enterprise_features::redpanda[]', { catalog: fakeCatalog(badSince), version: '20.1' })
       expect(html).toContain('Iceberg Topics')
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("since: 'not-a-version'"))
@@ -454,6 +464,16 @@ features:
       expect(html).toContain('title="Requires a &quot;valid&quot; license."')
     })
 
+    test('escapes markup and ampersands in tooltip text', () => {
+      const html = buildEnterpriseContent({
+        ...defaults,
+        feature: 'X',
+        tooltip: 'Needs <b>a license</b> & object storage.',
+      })
+      expect(html).toContain('title="Needs &lt;b&gt;a license&lt;/b&gt; &amp; object storage."')
+      expect(html).not.toContain('<b>')
+    })
+
     test('renders plain text without a link when links are disabled', () => {
       const html = buildEnterpriseContent({ ...defaults, feature: 'Shadowing', links: false })
       expect(html).not.toContain('xref:')
@@ -478,7 +498,7 @@ features:
     })
 
     test('falls back to title for invalid values', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       expect(resolveTooltipAttribute('sparkles')).toBe('title')
       expect(warn).toHaveBeenCalled()
       warn.mockRestore()
@@ -637,7 +657,7 @@ features:
     // unreleased features are authored and the table renders them.
     test('a bad status in the table is reported on a prerelease page too', () => {
       const yaml = 'features:\n  - name: F\n    scope: redpanda\n    description: d\n    status: unrelesed\n'
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       convert('enterprise_features::redpanda[]', {
         catalog: catalogWithVersions(yaml, VERSIONS), component: 'streaming', version: '26.3',
       })
@@ -710,10 +730,24 @@ features:
     })
 
     test('warns on unknown feature names by default', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const html = convert('enterprise:Warp Drive[]', { catalog: fakeCatalog() })
       expect(html).toContain('Warp Drive')
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('does not match any feature'))
+      warn.mockRestore()
+    })
+
+    test('renders an unknown feature name plain, not styled with a generic fallback', () => {
+      // A typo has nothing behind it to style -- no xref, no real tooltip, no
+      // licence terms. Styling it anyway (a generic fallback tooltip and a
+      // link to the licensing page) let a typo pass for a real feature with
+      // nothing on the page to show a reader it was wrong. Mirrors prop:'s
+      // plain fallback for an unrecognized property name.
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
+      const html = convert('enterprise:Warp Drive[]', { catalog: fakeCatalog() })
+      expect(html).toContain('Warp Drive')
+      expect(html).not.toContain('class="enterprise-feature"')
+      expect(html).not.toContain('licensing')
       warn.mockRestore()
     })
 
@@ -725,7 +759,7 @@ features:
     })
 
     test('stays silent in off mode', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       convert('enterprise:Warp Drive[]', {
         catalog: fakeCatalog(),
         attributes: { 'enterprise-validate': 'off' },
@@ -736,7 +770,7 @@ features:
     })
 
     test('suggests close names in the warning', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       convert('enterprise:Tiered Storage Cache[]', { catalog: fakeCatalog() })
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('Did you mean: Tiered Storage'))
       warn.mockRestore()
@@ -749,10 +783,13 @@ features:
       expect(catalog.findBy).toHaveBeenCalledTimes(1)
     })
 
-    test('renders unvalidated without a catalog (graceful degradation)', () => {
+    test('renders plain with no catalog to check against', () => {
+      // Nothing to validate means nothing to assert, so no styling, tooltip,
+      // or link rather than an unchecked one -- mirrors prop:'s plain
+      // fallback for the same reason.
       const html = convert('enterprise:Anything Goes[]', {})
       expect(html).toContain('Anything Goes')
-      expect(html).toContain('class="enterprise-feature"')
+      expect(html).not.toContain('class="enterprise-feature"')
     })
 
     test('renders the feature table through the block macro', () => {
@@ -771,18 +808,9 @@ features:
       expect(html).toContain('k-tiered-storage')
     })
 
-    test('uses the Cloud feature page when env-cloud is set', () => {
-      const html = convert('enterprise:Tiered Storage[]', {
-        catalog: fakeCatalog(),
-        attributes: { 'env-cloud': '' },
-      })
-      expect(html).toContain('cloud-data-platform')
-    })
-
     test('falls back to the default xref without env attributes', () => {
       const html = convert('enterprise:Tiered Storage[]', { catalog: fakeCatalog() })
       expect(html).not.toContain('k-tiered-storage')
-      expect(html).not.toContain('cloud-data-platform')
       expect(html).toContain('tiered-storage')
     })
 
@@ -802,6 +830,104 @@ features:
       const emptyCatalog = { findBy: jest.fn(() => []) }
       const html = convert('enterprise_features::redpanda[]', { catalog: emptyCatalog })
       expect(html).toContain('cannot be rendered')
+    })
+  })
+
+  describe('Cloud pages', () => {
+    // Redpanda Cloud has no Enterprise Edition license, so both macros treat
+    // a page with env-cloud set as having no enterprise feature to mark or
+    // list at all -- regardless of what the registry says, and regardless of
+    // whether the mention was written directly on a Cloud page or arrives
+    // there via single-sourced self-managed prose (which convert()'s
+    // attributes option stands in for: env-cloud on the document is exactly
+    // what a Cloud stub page sets, whichever file the content came from).
+    test('renders plain text for a registered feature, with no styling, tooltip, or link', () => {
+      const html = convert('enterprise:Tiered Storage[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-cloud': '' },
+      })
+      expect(html).toContain('Tiered Storage')
+      expect(html).not.toContain('class="enterprise-feature"')
+      expect(html).not.toContain('Enterprise Edition license')
+      expect(html).not.toContain('tiered-storage.adoc')
+    })
+
+    test('warns by default, naming the page', () => {
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
+      convert('enterprise:Tiered Storage[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-cloud': '' },
+        filePath: 'modules/cloud/pages/stub.adoc',
+      })
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('modules/cloud/pages/stub.adoc'))
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('no Enterprise Edition license'))
+    })
+
+    test('fails the conversion in error mode', () => {
+      expect(() => convert('enterprise:Tiered Storage[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-cloud': '', 'enterprise-validate': 'error' },
+      })).toThrow(/no Enterprise Edition license/)
+    })
+
+    test('stays silent in off mode', () => {
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
+      convert('enterprise:Tiered Storage[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-cloud': '', 'enterprise-validate': 'off' },
+      })
+      expect(warn).not.toHaveBeenCalled()
+    })
+
+    test('never validates the target against the registry', () => {
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
+      const html = convert('enterprise:Not A Real Feature[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-cloud': '' },
+      })
+      expect(html).toContain('Not A Real Feature')
+      const registryWarnings = warn.mock.calls.filter(([msg]) => String(msg).includes('does not match'))
+      expect(registryWarnings).toHaveLength(0)
+    })
+
+    test('env-cloud: false is not treated as Cloud', () => {
+      const html = convert('enterprise:Tiered Storage[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-cloud': 'false' },
+      })
+      expect(html).toContain('class="enterprise-feature"')
+    })
+
+    test('renders NOTHING for the block macro, with the diagnostic in the log', () => {
+      // Not an admonition. enterprise-validate defaults to warn in all three
+      // docs-site playbooks, so an admonition would ship to
+      // docs.redpanda.com and explain an internal macro to a reader. The
+      // writer gets the message in the build log instead, and this keeps the
+      // inline and block macros behaving the same way on Cloud, which is what
+      // PROPERTY_AND_ENTERPRISE_REFERENCES.adoc claims.
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
+      const html = convert('enterprise_features::redpanda[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-cloud': '' },
+      })
+      expect(html).not.toContain('Tiered Storage')
+      expect(html).not.toContain('no Enterprise Edition license')
+      expect(html).not.toMatch(/admonitionblock|WARNING/)
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('enterprise_features::redpanda[]'))
+    })
+
+    test('still throws on the block macro when enterprise-validate is error', () => {
+      // Rendering nothing must not soften the strict mode: a Cloud page that
+      // calls the block macro under enterprise-validate: error still fails.
+      expect(() => convert('enterprise_features::redpanda[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-cloud': '', 'enterprise-validate': 'error' },
+      })).toThrow(/no Enterprise Edition license/)
+    })
+
+    test('rejects cloud as a scope on the block macro', () => {
+      expect(() => convert('enterprise_features::cloud[]', { catalog: fakeCatalog() }))
+        .toThrow(/needs a scope/)
     })
   })
 

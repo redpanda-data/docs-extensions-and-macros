@@ -191,6 +191,20 @@ else bad "enterprise: no diagnostic for the gated mention"; fi
 if has "$R" 'badge--beta'; then
   ok "enterprise: beta feature badged on a released page"
 else bad "enterprise: beta feature not badged"; fi
+
+# 5. Enterprise has no license concept on Cloud.
+if has "$C" 'class="enterprise-feature"'; then
+  bad "enterprise: styled a feature on a Cloud page (Cloud has no license concept)"
+else ok "enterprise: no styling on a Cloud page"; fi
+if grep -qs 'no Enterprise Edition license' "$LOG"; then
+  ok "enterprise: the Cloud gate reported why"
+else bad "enterprise: no diagnostic for the Cloud mention"; fi
+if has "$C" 'admonitionblock warning'; then
+  ok "enterprise_features: rendered a warning instead of a table on a Cloud page"
+else bad "enterprise_features: no warning admonition on a Cloud page"; fi
+if has "$C" 'class="tableblock'; then
+  bad "enterprise_features: rendered a real table on a Cloud page"
+else ok "enterprise_features: no table rendered on a Cloud page"; fi
 [[ $FIXTURE_FAIL -eq 0 ]] && echo "  all fixture assertions passed" || echo "  SOME FIXTURE ASSERTIONS FAILED"
 
 echo "full log: $LOG      site: $OUT/"

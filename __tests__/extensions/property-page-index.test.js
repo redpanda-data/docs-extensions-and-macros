@@ -1,5 +1,14 @@
 'use strict'
 
+// prop.js logs through @antora/logger rather than console.warn -- see the
+// same note in __tests__/macros/prop.test.js.
+jest.mock('@antora/logger', () => {
+  const logger = { warn: () => {}, info: () => {}, error: () => {}, debug: () => {} }
+  const getLogger = () => logger
+  getLogger.configure = () => getLogger
+  return getLogger
+})
+
 const extension = require('../../extensions/property-page-index')
 const { register } = require('../../macros/prop')
 
@@ -67,7 +76,7 @@ describe('property-page-index extension', () => {
   test('without the extension, the lazy path warns about mid-conversion indexing', () => {
     const catalog = makeCatalog()
     catalog.files[2].contents = Buffer.from('<article><h3>enable_transactions</h3></article>')
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+    const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
     convert('prop:enable_transactions[link=true]', catalog)
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('after conversion started'))
     warn.mockRestore()

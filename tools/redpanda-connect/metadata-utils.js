@@ -248,10 +248,10 @@ function descriptionWithMetadataInclude (item) {
  * auto-generated summary and description from a regenerated partial instead of
  * freezing them into the page body at first draft.
  *
- * The partial defines two tag regions, so pages address it twice: `attrs` in
+ * The partial defines two tag regions, so pages address it twice: `meta` in
  * the page header (sets `:description:`) and `body` where the prose renders.
  * @param {object} item connector data with `type`/`typeDir` and `name`
- * @param {string} [tag] tag region to include (`attrs` or `body`); omit for the whole file
+ * @param {string} [tag] tag region to include (`meta` or `body`); omit for the whole file
  * @returns {string}
  */
 function descriptionIncludeLine (item, tag) {
@@ -308,7 +308,7 @@ function lostMetadataSections (oldContent, newContent) {
  * edited.
  *
  * This is the one implementation: `summaryAttribute` (the description
- * partial's attrs region) and `backfillPageDescriptions` (the page-header
+ * partial's meta region) and `backfillPageDescriptions` (the page-header
  * self-heal) both call it, so the two paths cannot drift into publishing
  * different meta descriptions for the same summary.
  *

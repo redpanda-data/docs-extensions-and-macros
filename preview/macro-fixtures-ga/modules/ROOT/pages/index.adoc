@@ -1,0 +1,55 @@
+= Released fixtures
+
+This is version 26.2 of the SAME `macro-fixtures` component as
+xref:26.3@macro-fixtures::index.adoc[the beta fixtures] (26.3,
+`prerelease: true`). Build once, then flip the version selector on either
+page to see the other -- that toggle is the point of pairing these two.
+
+== An unreleased feature must not be presented as available
+
+enterprise:Preview Unreleased Feature[] is marked `status: unreleased` in the
+registry. This page's version is released, so the mention above must render
+as plain text with no enterprise styling, no tooltip, and no link, and the
+build must log a warning naming the fix: move the mention to the prerelease
+version, or wait for the feature to ship.
+
+== A public beta is fine on any version
+
+enterprise:Preview Beta Feature[] renders with a `beta` badge here and on the
+prerelease version alike, because a public beta is available to every reader
+regardless of which version they are looking at.
+
+== A since-gated feature is not shipped yet, as of this version
+
+enterprise:Preview Since-Gated Feature[] carries `since: '26.3'` in the
+registry -- no `status` key, so on its own it is an ordinary shipped feature.
+This page's version, 26.2, predates 26.3, so the mention above must still
+render as plain text with a warning, the same way the unreleased feature
+above does, but for a different reason: the *build* is not checking "which
+branch is this," it is checking "did version 26.2 exist on or after 26.3,"
+and the answer is no.
+
+xref:26.3@macro-fixtures::index.adoc[The same mention on the beta fixtures]
+renders fully styled, linked, and badge-free, because 26.3 is exactly the
+version the feature shipped in.
+
+== A shipped feature with no gate is unaffected by any of this
+
+enterprise:Tiered Storage[] renders as it always has, with no badge, because
+it carries neither `status` nor `since`.
+
+== The licensing table omits unreleased features here
+
+enterprise_features::redpanda[]
+
+Compare with xref:26.3@macro-fixtures::index.adoc[the beta version's table],
+which gains a row for the unreleased feature, badged.
+
+== Property data comes from this version's own file
+
+* prop:cloud_storage_enabled[link=true] renders marked and links here, checked
+  against `redpanda-properties-v26.2.1.json`.
+* prop:iceberg_delete_orphans_enabled[] does not exist in this version's
+  property data at all -- it ships only in the 26.3 release candidate -- so it
+  renders as plain code and the build warns that the name is not in the
+  dataset this page was checked against.

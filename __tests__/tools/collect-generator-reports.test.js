@@ -3,13 +3,14 @@
 const { collectGeneratorReports } = require('../../tools/redpanda-connect/pr-summary-formatter.js');
 
 describe('collectGeneratorReports', () => {
-  const accumulators = () => ({ descriptionReports: [], lostSectionWarnings: [] });
+  const accumulators = () => ({ descriptionReports: [], lostSectionWarnings: [], styleRegressionWarnings: [] });
 
   test('collects every report key the generator returns', () => {
     const into = accumulators();
     collectGeneratorReports({
       descriptionReports: [{ connector: 'outputs/x', message: 'structure' }],
       lostSectionWarnings: [{ partial: 'p.adoc', sections: ['Caveats'] }],
+      styleRegressionWarnings: [{ partial: 'q.adoc', issues: ['em dash'] }],
     }, into);
 
     // Both call sites feed the PR summary through this function, so a key
@@ -19,6 +20,7 @@ describe('collectGeneratorReports', () => {
     // reached the summary.
     expect(into.descriptionReports).toEqual([{ connector: 'outputs/x', message: 'structure' }]);
     expect(into.lostSectionWarnings).toEqual([{ partial: 'p.adoc', sections: ['Caveats'] }]);
+    expect(into.styleRegressionWarnings).toEqual([{ partial: 'q.adoc', issues: ['em dash'] }]);
   });
 
   test('accumulates across the partials and drafts call sites', () => {
@@ -33,5 +35,14 @@ describe('collectGeneratorReports', () => {
     expect(collectGeneratorReports(undefined, into)).toBe(into);
     collectGeneratorReports({}, into);
     expect(into).toEqual(accumulators());
+  });
+
+  test('backfills an accumulator built before styleRegressionWarnings existed', () => {
+    // An older call site passes only the two original keys. Collecting has to
+    // add the third rather than throw, so a stale caller still gets the
+    // reports it knows about into the summary.
+    const into = { descriptionReports: [], lostSectionWarnings: [] };
+    collectGeneratorReports({ styleRegressionWarnings: [{ partial: 'q.adoc', issues: ['\"e.g.\"'] }] }, into);
+    expect(into.styleRegressionWarnings).toEqual([{ partial: 'q.adoc', issues: ['\"e.g.\"'] }]);
   });
 });

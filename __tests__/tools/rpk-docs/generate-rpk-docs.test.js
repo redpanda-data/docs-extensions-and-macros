@@ -229,6 +229,36 @@ describe('rpk Docs Generation', () => {
       expect(formatDescription(input)).toContain('`$REDPANDA_BROKERS`')
     })
 
+    // Published on rpk-plugin-install.adoc before this fix: the merge step
+    // that joins a backticked env var with its adjacent path matched through
+    // a directly-adjacent closing paren or period, landing sentence
+    // punctuation inside the code span instead of outside it.
+    test('does not pull a directly adjacent closing paren into the path', () => {
+      const input = 'Destination directory to save the installed plugin (defaults to $HOME/.local/bin)'
+      expect(formatDescription(input)).toContain('(defaults to `$HOME/.local/bin`)')
+      expect(formatDescription(input)).not.toContain('`$HOME/.local/bin)`')
+    })
+
+    test('does not pull a directly adjacent sentence period into the path', () => {
+      const input = 'By default, this command installs plugins to $HOME/.local/bin. This can be changed with --dir'
+      expect(formatDescription(input)).toContain('`$HOME/.local/bin`. This')
+      expect(formatDescription(input)).not.toContain('`$HOME/.local/bin.`')
+    })
+
+    test('still merges the env var into a path with no trailing punctuation', () => {
+      const input = 'Plugins are installed to $HOME/.local/bin by default'
+      expect(formatDescription(input)).toContain('`$HOME/.local/bin`')
+    })
+
+    // CodeRabbit caught this on #292: requiring a character after the slash
+    // meant a bare trailing slash ($HOME/, $PWD/ -- both real in the rpk
+    // source) never merged at all, staying split as `$HOME`/.
+    test('merges a bare trailing slash with nothing after it', () => {
+      const input = 'Files live in $HOME/ by default'
+      expect(formatDescription(input)).toContain('`$HOME/`')
+      expect(formatDescription(input)).not.toContain('`$HOME`/')
+    })
+
     test('does not double-backtick already formatted flags', () => {
       const input = 'Use `--verbose` for output'
       // After the regex, we clean up double backticks, result should be same
@@ -1465,5 +1495,83 @@ describe('env vars partial output location', () => {
     expect(result).toEqual({ written: false })
     expect(fs.existsSync(path.join(root, 'rpk-env-vars.adoc'))).toBe(false)
     fs.rmSync(root, { recursive: true, force: true })
+  })
+
+  it('sections the partial by group when the tree carries group_title, in the main pipeline', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-env-grouped-'))
+    const outputDir = path.join(root, 'modules', 'reference', 'pages', 'rpk')
+    fs.mkdirSync(outputDir, { recursive: true })
+
+    await generateRpkDocs({
+      tree: {
+        name: 'rpk',
+        x_options: [
+          { name: 'brokers', env: 'RPK_BROKERS', group: 'admin', group_title: 'Admin API' },
+          { name: 'tls.enabled', group: 'admin', group_title: 'Admin API' },
+          { name: 'kafka.timeout', group: 'kafka', group_title: 'Kafka API' }
+        ],
+        commands: [{
+          name: 'widget',
+          description: 'Widget things.',
+          usage: 'rpk widget [flags]',
+          commands: []
+        }]
+      },
+      overrides: { commands: {} },
+      outputDir
+    })
+
+    const written = fs.readFileSync(path.join(root, 'modules', 'reference', 'partials', 'rpk-env-vars.adoc'), 'utf8')
+    expect(written).toContain('2+s|Admin API')
+    expect(written).toContain('2+s|Kafka API')
+
+    fs.rmSync(root, { recursive: true, force: true })
+  })
+})
+
+describe('inline code for paths and URLs in help prose', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  test('a path at the end of a sentence leaves the period outside the span', () => {
+    expect(formatDescription('Reads ~/.config/rpk/rpk.yaml.')).toBe('Reads `~/.config/rpk/rpk.yaml`.')
+    expect(formatDescription('Stored in /var/lib/redpanda/data, then synced.')).toBe('Stored in `/var/lib/redpanda/data`, then synced.')
+    expect(formatDescription('Under /tmp/x.')).toBe('Under `/tmp/x`.')
+  })
+
+  test('bare URLs are inline code, with sentence punctuation outside', () => {
+    expect(formatDescription('Point it at http://127.0.0.1:8081.')).toBe('Point it at `http://127.0.0.1:8081`.')
+    expect(formatDescription('See https://docs.redpanda.com/current/get-started/ for details.'))
+      .toBe('See `https://docs.redpanda.com/current/get-started/` for details.')
+    expect(formatDescription('Read the guide (https://docs.redpanda.com/x/).')).toBe('Read the guide (`https://docs.redpanda.com/x/`).')
+    expect(formatDescription('Query https://host/p?a=1&b=2, then stop.')).toBe('Query `https://host/p?a=1&b=2`, then stop.')
+  })
+
+  // Every later pass matches inside a URL it has not yet seen as one: the path
+  // passes took /tmp/file out of the first, the short-flag pass took -a out of
+  // the second, and the issue-link pass rewrote the anchor in the third.
+  test('a URL is one span whatever it contains', () => {
+    expect(formatDescription('Open https://host/tmp/file for details.')).toBe('Open `https://host/tmp/file` for details.')
+    expect(formatDescription('See https://host/etc/redpanda.yaml.')).toBe('See `https://host/etc/redpanda.yaml`.')
+    expect(formatDescription('See https://host/foo-a/bar now.')).toBe('See `https://host/foo-a/bar` now.')
+    expect(formatDescription('See https://host/page#12345 now.')).toBe('See `https://host/page#12345` now.')
+    expect(formatDescription('Set https://host/$HOME/x now.')).toBe('Set `https://host/$HOME/x` now.')
+  })
+
+  test('a bare command and the flags right after it form one span', () => {
+    const { registerKnownCommandPaths } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+    registerKnownCommandPaths(['rpk', 'rpk topic', 'rpk topic list'])
+    try {
+      expect(formatDescription('run rpk topic list -r -d to see more.')).toBe('run `rpk topic list -r -d` to see more.')
+      expect(formatDescription('check rpk topic list, then -r.')).toBe('check `rpk topic list`, then `-r`.')
+      expect(formatDescription('shows only with --internal (-i).')).toBe('shows only with `--internal` (`-i`).')
+    } finally {
+      registerKnownCommandPaths([])
+    }
+  })
+
+  test('link macros, generated issue links and existing code spans are left alone', () => {
+    expect(formatDescription('Use https://docs.redpanda.com/x[the guide] instead.')).toBe('Use https://docs.redpanda.com/x[the guide] instead.')
+    expect(formatDescription('Fixed in #2904.')).toBe('Fixed in https://github.com/redpanda-data/redpanda/issues/2904[#2904].')
+    expect(formatDescription('Already `https://a.b/c` coded.')).toBe('Already `https://a.b/c` coded.')
   })
 })

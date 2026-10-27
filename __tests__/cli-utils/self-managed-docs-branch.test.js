@@ -1,6 +1,6 @@
 'use strict'
 
-const { fetchRemoteAntoraVersion } = require('../../cli-utils/self-managed-docs-branch')
+const { fetchRemoteAntoraVersion, determineDocsBranch } = require('../../cli-utils/self-managed-docs-branch')
 
 const ANTORA_URL = 'https://raw.githubusercontent.com/redpanda-data/docs/main/antora.yml'
 
@@ -80,5 +80,33 @@ describe('fetchRemoteAntoraVersion', () => {
 
     await expect(fetchRemoteAntoraVersion({ fetchImpl, token: undefined }))
       .rejects.toThrow('version field missing')
+  })
+})
+
+describe('determineDocsBranch', () => {
+  const exists = () => true
+
+  it.each(['main', 'dev', 'jake/some-feature'])('maps the unversioned ref %s to docs main without fetching antora.yml', async (ref) => {
+    const fetchImpl = jest.fn()
+    const branchExists = jest.fn(exists)
+
+    await expect(determineDocsBranch(ref, { fetchImpl, branchExists })).resolves.toBe('main')
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(branchExists).toHaveBeenCalledWith('main')
+  })
+
+  it.each([
+    ['operator/v26.2.4', '26.2', 'main'],
+    ['v26.1.3', '26.2', 'v/26.1'],
+    ['release/v25.3.x', '26.2', 'v/25.3'],
+    ['operator/v2.4.5', '25.1', 'main'],
+    ['operator/v2.4.5', '25.2', 'v/24.3'],
+  ])('maps %s to the docs branch for version %s', async (ref, antoraVersion, expected) => {
+    await expect(determineDocsBranch(ref, { antoraVersion, branchExists: exists })).resolves.toBe(expected)
+  })
+
+  it('throws when the docs branch does not exist', async () => {
+    await expect(determineDocsBranch('operator/v23.1.0', { antoraVersion: '26.2', branchExists: () => false }))
+      .rejects.toThrow('Docs branch v/23.1 not found')
   })
 })

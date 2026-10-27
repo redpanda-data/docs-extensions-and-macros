@@ -1,0 +1,114 @@
+// Copyright 2026 Redpanda Data, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+//
+// A license header is a leading comment on nothing. It must not attach itself
+// to the first declaration in the file.
+
+syntax = "proto3";
+
+package redpanda.core.admin.v2;
+
+import "proto/redpanda/core/pbgen/rpc.proto";
+
+option (pbgen.cpp_namespace) = "proto::fixture";
+
+service FixtureService {
+    // GetFixture
+    //
+    // Returns a single fixture.
+    rpc GetFixture(GetFixtureRequest) returns (GetFixtureResponse) {
+        option (pbgen.rpc) = {
+            authz: SUPERUSER
+        };
+    }
+
+    // CreateFixture
+    //
+    // Creates a fixture. The description can run over several comment
+    // lines, and the resolved prose joins them.
+    //
+    // A blank comment line inside the description is a paragraph break and
+    // stays part of the description.
+    rpc CreateFixture(CreateFixtureRequest)
+        returns (CreateFixtureResponse) {
+        option (pbgen.rpc) = {
+            authz: SUPERUSER
+        };
+    }
+
+    // Reports the collapsed case: with no blank line the generator uses this
+    // whole comment as BOTH the summary and the description, so the API
+    // reference's nav item becomes a paragraph.
+    rpc CollapsedFixture(CollapsedFixtureRequest)
+        returns (CollapsedFixtureResponse) {
+        option (pbgen.rpc) = {
+            authz: SUPERUSER
+        };
+    }
+
+    // DeleteFixture.
+    //
+    // Deletes a fixture.
+    rpc DeleteFixture(DeleteFixtureRequest) returns (DeleteFixtureResponse) {
+        option (pbgen.rpc) = {
+            authz: SUPERUSER
+        };
+    }
+
+    // ListFixtures
+    // over two lines
+    //
+    // Lists every fixture.
+    rpc ListFixtures(ListFixturesRequest) returns (ListFixturesResponse) {
+        option (pbgen.rpc) = {
+            authz: SUPERUSER
+        };
+    }
+
+    // BodylessFixture
+    //
+    // A body-less rpc opens no block, so it must not swallow the
+    // declarations that follow it.
+    rpc BodylessFixture(BodylessFixtureRequest) returns (BodylessFixtureResponse);
+
+    // WatchFixture
+    //
+    // Confirms the rpc after a body-less one is still found.
+    rpc WatchFixture(WatchFixtureRequest) returns (WatchFixtureResponse) {
+        option (pbgen.rpc) = {
+            authz: SUPERUSER
+        };
+    }
+}
+
+// The request for a single fixture.
+message GetFixtureRequest {
+    // The node ID for the fixture. If unset, the broker handling the RPC
+    // returns information about itself.
+    optional int32 node_id = 1;
+
+    // Fixture name
+    string name = 2;
+
+    int32 undocumented = 3;
+
+    // Partition ID
+    int32 partition_id = 4;
+
+    // The protocol versions the fixture supports. See
+    // https://kafka.apache.org/protocol.html#protocol_compatibility
+    repeated int32 api_versions = 5;
+}
+
+// Fixture mode
+//
+// - Not specified
+// - Runs fast
+enum FixtureMode {
+    FIXTURE_MODE_UNSPECIFIED = 0;
+    // Per-value comments are discarded by protoc-gen-connect-openapi, so they
+    // are not extracted and must not be reported as declarations.
+    FIXTURE_MODE_FAST = 1;
+}

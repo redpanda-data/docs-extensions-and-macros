@@ -1,0 +1,15 @@
+# lint-strings test fixture mirroring operator/crd-ref-docs-config.yaml.
+processor:
+  ignoreTypes:
+  - 'List$'
+  - 'Deprecated.*$'
+  ignoreFields:
+  - 'migration$'
+  customMarkers:
+  - name: "hidefromdoc"
+    target: field
+  - name: "hidefromdoc"
+    target: type
+
+render:
+  kubernetesVersion: 1.28

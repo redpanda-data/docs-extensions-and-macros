@@ -1,6 +1,6 @@
 const yaml = require('js-yaml');
 const { spawnSync } = require('child_process');
-const { getGitHubToken } = require('./github-token');
+const { getGitHubApiToken } = require('./github-token');
 
 const ANTORA_URL = 'https://raw.githubusercontent.com/redpanda-data/docs/main/antora.yml'
 
@@ -23,7 +23,7 @@ const REJECTED_HINT = ' A GitHub token was sent but rejected, so it may be expir
  */
 async function fetchRemoteAntoraVersion(deps = {}) {
   const fetchImpl = deps.fetchImpl || fetch
-  const ghToken = 'token' in deps ? deps.token : getGitHubToken()
+  const ghToken = 'token' in deps ? deps.token : getGitHubApiToken()
 
   let resp = await fetchImpl(ANTORA_URL, ghToken ? { headers: { Authorization: `Bearer ${ghToken}` } } : undefined)
   const hint = ghToken ? REJECTED_HINT : TOKEN_HINT
@@ -43,51 +43,57 @@ async function fetchRemoteAntoraVersion(deps = {}) {
 }
 
 /**
- * Determines the appropriate documentation branch for a given operator tag based on the remote Antora version.
+ * Reports whether a branch exists in the docs repository.
  *
- * Normalizes the input tag, extracts the major.minor version, and applies version-specific logic to select the correct branch. Verifies that the chosen branch exists in the remote repository.
+ * @param {string} branch - Branch name, such as "main" or "v/25.1".
+ * @returns {boolean} True when `git ls-remote` finds the branch.
+ */
+function docsBranchExists(branch) {
+  const repo = 'https://github.com/redpanda-data/docs.git'
+  return spawnSync('git', ['ls-remote', '--exit-code', '--heads', repo, `refs/heads/${branch}`], {
+    stdio: 'ignore'
+  }).status === 0
+}
+
+/**
+ * Determines the appropriate documentation branch for a given operator tag or branch based on the remote Antora version.
  *
- * @param {string} operatorTag - The operator tag to evaluate (for example, "operator/v25.1.2" or "v25.1.2").
+ * Normalizes the input, extracts the major.minor version, and applies version-specific logic to select the correct branch. Verifies that the chosen branch exists in the remote repository.
+ * A ref with no version, such as `main`, `dev`, or a feature branch, holds content for the next release, which the docs repository keeps on `main`.
+ *
+ * @param {string} operatorRef - The operator tag or branch to evaluate (for example, "operator/v25.1.2", "v25.1.2", "release/v25.1.x", or "main").
+ * @param {object} [deps] - Injectable for tests: { antoraVersion, branchExists, fetchImpl, token }.
  * @returns {Promise<string>} The name of the documentation branch to use.
  *
- * @throws {Error} If the tag cannot be parsed or if the determined branch does not exist in the remote repository.
+ * @throws {Error} If the Antora version cannot be fetched or if the determined branch does not exist in the remote repository.
  */
-async function determineDocsBranch(operatorTag) {
-  // Strip any "operator/" prefix
-  const TAG = operatorTag.replace(/^(?:operator|release)\//, '')
-  // Pull in the remote Antora version
-  const ANTORA = await fetchRemoteAntoraVersion()
+async function determineDocsBranch(operatorRef, deps = {}) {
+  const branchExists = deps.branchExists || docsBranchExists
+  // Strip any "operator/" or "release/" prefix
+  const TAG = operatorRef.replace(/^(?:operator|release)\//, '')
   // Extract v<major>.<minor>
   const mm = TAG.match(/^v(\d+\.\d+)/)
   const filtered = mm ? `v${mm[1]}` : null
 
-  if (!filtered) {
-    throw new Error(`Could not parse major.minor from ${TAG}`)
-  }
-  // We started versioning the operator in line with Redpanda core versions. But when v2.4.x was the latest version, the docs were still on 25.1 and v25.1.x of the operator was still in beta. So we need to handle this special case.
   let branch
-  if (filtered === 'v2.4') {
-    if (ANTORA === '25.1') {
-      branch = 'main'
-    } else {
-      branch = 'v/24.3'
-    }
-  // For all other versions use the v<major>.<minor> branch unless it is the current version, in which case we use 'main'.
-  } else if (filtered === `v${ANTORA}`) {
+  if (!filtered) {
     branch = 'main'
   } else {
-    branch = `v/${filtered.slice(1)}`
+    // Pull in the remote Antora version
+    const ANTORA = deps.antoraVersion || await fetchRemoteAntoraVersion(deps)
+    // We started versioning the operator in line with Redpanda core versions. But when v2.4.x was the latest version, the docs were still on 25.1 and v25.1.x of the operator was still in beta. So we need to handle this special case.
+    if (filtered === 'v2.4') {
+      branch = ANTORA === '25.1' ? 'main' : 'v/24.3'
+    // For all other versions use the v<major>.<minor> branch unless it is the current version, in which case we use 'main'.
+    } else if (filtered === `v${ANTORA}`) {
+      branch = 'main'
+    } else {
+      branch = `v/${filtered.slice(1)}`
+    }
   }
 
-  // Verify branch exists
-  const repo = 'https://github.com/redpanda-data/docs.git'
-  const ref  = `refs/heads/${branch}`
-  const ok = spawnSync('git', ['ls-remote', '--exit-code', '--heads', repo, ref], {
-    stdio: 'ignore'
-  }).status === 0
-
-  if (!ok) {
-    throw new Error(`Docs branch ${branch} not found in ${repo}`)
+  if (!branchExists(branch)) {
+    throw new Error(`Docs branch ${branch} not found in https://github.com/redpanda-data/docs.git`)
   }
 
   return branch

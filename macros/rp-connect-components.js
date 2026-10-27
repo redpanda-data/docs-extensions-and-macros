@@ -99,6 +99,9 @@ const EMOJI_ICONS = {
   drop: '🗑️',
 }
 
+const logger = require('@antora/logger')('rp-connect-components-macro')
+const { isCloudAvailable, typeFromRelative } = require('../extensions/util/connect-catalog')
+
 /**
  * Registers macros for use in Redpanda Connect contexts in the Redpanda documentation.
   * @param {Registry} registry - The Antora registry where this block macro is registered.
@@ -336,8 +339,9 @@ module.exports.register = function (registry, context) {
    */
   function processConnectors(parsedData) {
     return parsedData.data.reduce((connectors, row) => {
-      const { connector, commercial_name, type, support_level, is_cloud_supported, is_licensed, redpandaConnectUrl, redpandaCloudUrl, description } = row;
-      const isCloudSupported = is_cloud_supported === 'y';
+      const { connector, commercial_name, type, support_level, is_licensed, redpandaConnectUrl, redpandaCloudUrl, description } = row;
+      // Available in standard or GPU Cloud pipelines
+      const isCloudSupported = isCloudAvailable(row);
 
       // Initialize the connector if it's not already in the map
       if (!connectors[connector]) {
@@ -362,7 +366,9 @@ module.exports.register = function (registry, context) {
             redpandaCloudUrl: redpandaCloudUrl || ''
           },
           supportLevel: support_level,
-          isCloudSupported: isCloudSupported
+          isCloudSupported: isCloudSupported,
+          gpuOnly: row.gpu_only === 'y',
+          noGpu: row.no_gpu === 'y'
         };
       }
 
@@ -418,8 +424,8 @@ module.exports.register = function (registry, context) {
     };
 
     parsedData.data.forEach(row => {
-      const { connector: driverName, commercial_name, support_level, is_cloud_supported } = row;
-      const isCloudSupported = is_cloud_supported === 'y';
+      const { connector: driverName, commercial_name, support_level } = row;
+      const isCloudSupported = isCloudAvailable(row);
       const supportLevel = support_level.toLowerCase();
 
       // Only process SQL drivers
@@ -639,10 +645,20 @@ module.exports.register = function (registry, context) {
             sqlDriverBadges += `<span class="badge badge-support badge-support-community" title="Community drivers: ${escapeHtml(communityDrivers)}">Community: ${escapeHtml(communityDrivers)}</span>`;
           }
         }
+        // Say which Cloud pipelines when every Cloud-available type agrees:
+        // the ollama processors run only in GPU pipelines, and jira only outside them.
+        const cloudEntries = Array.from(types.values())
+          .flatMap(commercialNames => Object.values(commercialNames))
+          .filter(({ isCloudSupported }) => isCloudSupported);
+        const pipelineNote = cloudEntries.length && cloudEntries.every(e => e.gpuOnly)
+          ? ' (GPU pipelines only)'
+          : cloudEntries.length && cloudEntries.every(e => e.noGpu)
+            ? ' (not in GPU pipelines)'
+            : '';
 
         // Cloud support badge with tooltip
         const cloudBadge = isCloudConnectorSupported && showAllInfo
-          ? `<span class="badge badge-cloud" title="Available in Redpanda Cloud">Cloud</span>`
+          ? `<span class="badge badge-cloud" title="Available in Redpanda Cloud${pipelineNote}">Cloud${pipelineNote}</span>`
           : '';
 
         // Enterprise license badge with tooltip
@@ -791,7 +807,7 @@ module.exports.register = function (registry, context) {
       const showAllInfo = attributes?.all
 
       const csvData = context.config?.attributes?.csvData || null;
-      if (!csvData) return console.error(`CSV data is not available for ${docAttributes['page-relative-src-path']}. Make sure your playbook includes the generate-rp-connect-info extension.`)
+      if (!csvData) return logger.error(`CSV data is not available for ${docAttributes['page-relative-src-path']}. Make sure your playbook includes the generate-rp-connect-info extension.`)
 
       // Path from this page to the UI bundle root, so logos resolve at any page depth
       const uiRootPath = resolveUiRootPath();
@@ -1994,16 +2010,17 @@ module.exports.register = function (registry, context) {
       const attributes = parent.getDocument().getAttributes();
       const component = attributes['page-component-title'];  // Current component (for example, 'Redpanda Cloud' or 'Redpanda Connect')
       const name = attributes['doctitle'];
-      const type = attributes['type'];
+      // Drafted pages no longer freeze :type:, so fall back to the page's directory.
+      const type = attributes['type'] || typeFromRelative(attributes['page-relative-src-path']);
       if (!name || !type) {
         return self.createBlock(parent, 'pass', '');
       }
       const csvData = context.config?.attributes?.csvData || null;
-      if (!csvData) return console.error(`CSV data is not available for ${attributes['page-relative-src-path']}. Make sure your playbook includes the generate-rp-connect-info extension.`);
+      if (!csvData) return logger.error(`CSV data is not available for ${attributes['page-relative-src-path']}. Make sure your playbook includes the generate-rp-connect-info extension.`);
       // Filter for the specific connector by name
       const componentRows = csvData.data.filter(row => row.connector.trim().toLowerCase() === name.trim().toLowerCase());
       if (componentRows.length === 0) {
-        console.warn(`No CSV data found for connector: ${name}. The connector may have been removed or renamed.`);
+        logger.warn(`No CSV data found for connector: ${name}. The connector may have been removed or renamed.`);
         // Build link to release notes using content catalog for proper URL resolution
         const isCloud = attributes['env-cloud'] !== undefined;
         let whatsNewUrl = isCloud
@@ -2069,7 +2086,7 @@ module.exports.register = function (registry, context) {
     self.process((parent, target, attrs) => {
       const type = attrs.type;
       const categoriesData = context.config?.attributes?.connectCategoriesData || null
-      if (!categoriesData) return console.error (`Category data is not available for ${parent.getDocument().getAttributes()['page-relative-src-path']}. Make sure your playbook includes the generate-rp-connect-categories extension.`)
+      if (!categoriesData) return logger.error(`Category data is not available for ${parent.getDocument().getAttributes()['page-relative-src-path']}. Make sure your playbook includes the generate-rp-connect-categories extension.`)
       const categories = categoriesData[type] || null;
       const currentTabsId = `tabs-${tabsCounter++}`; // Unique ID for this set of tabs
       if (!categories) return

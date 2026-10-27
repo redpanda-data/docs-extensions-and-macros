@@ -1,0 +1,101 @@
+== v26.2.2 (2026-08-21)
+
+=== Features
+
+rpk:: `rpk generate grafana-dashboard` gains a new `operations-stretch` dashboard: a Grafana dashboard for stretch clusters managed by the Redpanda Operator, covering cross-cluster Raft health, StretchCluster member status, and operator reconcile health. Generate it with `rpk generate grafana-dashboard --dashboard operations-stretch`.
+
+rpk:: `rpk generate grafana-dashboard` now offers a `load-factor` dashboard showing utilization relative to capacity for key broker resources (CPU, I/O scheduler, disk IOPS, memory, network bandwidth, client connections).
+
+Shadow Link:: `rpk` now supports Shadow Link role sync in Redpanda Cloud clusters.
+
+Shadow Link:: `rpk shadow update` now accepts a `--config-file` flag to apply a configuration file directly.
+
+=== Bug fixes
+
+Cluster:: The `leader_balancer_node_mute_timeout` property now registers under the correct config name.
+
+Schema Registry:: With `schema_registry_enable_authorization` enabled, a Schema Registry request that fails before its deferred authorization check no longer aborts the broker; such requests now return an error response.
+
+Cluster:: Removing a partition with a very large number of log segments (for example, during partition rebalancing) no longer crashes the broker.
+
+Storage:: A snapshot write that fails on a full disk (ENOSPC) now surfaces the I/O error instead of aborting the node with a misleading "snapshot writer has to be closed" assertion.
+
+Kafka API:: The internal Kafka client no longer sends a concurrent request on a freshly established SASL connection before authentication finishes, which previously caused the broker to drop the connection.
+
+Cloud Topics:: Timequeries on Cloud Topics no longer return an offset up to one indexing interval (`4 MiB` of records by default) later than the first record at or after the requested timestamp.
+
+Cloud Topics:: L0 batches in a Cloud Topic now preserve `last_offset_delta` in their header; previously an under-declared last offset could stall consumers, skip records, or halt exact-offset replication.
+
+Cloud Topics:: Timequeries on a Cloud Topic no longer fail by dropping the client connection or return an unfetchable offset below a partition's start offset.
+
+Storage:: Topics with `min.compaction.lag.ms` left unconfigured are no longer considered ineligible for compaction when produced batches hold timestamps in the future.
+
+Cluster:: Transient `TOPIC_AUTHORIZATION_FAILED` errors and SASL authentication failures no longer occur during application of a controller snapshot.
+
+Storage:: Corrupted storage now yields a bad CRC in returned record batches.
+
+Cloud Topics:: A Cloud Topic read replica on a cluster no longer prevents L0 objects on that cluster from being garbage collected.
+
+Kafka API:: The `DescribeLogDirs` request no longer crashes the broker.
+
+Iceberg:: Backpressure from the Iceberg coordinator no longer causes high CPU load on the translators.
+
+Storage:: Various `s3_fifo` users no longer grow unbounded under specific workloads.
+
+HTTP Proxy:: Consumer group fetches no longer fail indefinitely with `offset_out_of_range` after retention moves a topic's log start offset past 0; the consumer now recovers to the earliest available offset (`auto.offset.reset=earliest`).
+
+Kafka API:: Lifecycle fix on groups.
+
+Kafka API:: Redpanda no longer incorrectly accepts client-produced control batches.
+
+Shadow Link:: Updating a Shadow Link that uses PLAIN authentication no longer fails when the password is omitted; the stored password is preserved.
+
+Redpanda Connect:: `rpk connect install --connect-version` no longer rejects versions with a segment of three or more digits, which had blocked pinning any Redpanda Connect release since 4.100.0. Malformed versions with trailing characters are now rejected during validation rather than failing at download.
+
+Redpanda Connect:: `rpk connect upgrade` no longer fails to determine the currently installed Redpanda Connect version when that version has a segment of three or more digits, which had blocked upgrading any Connect install since 4.100.0.
+
+rpk:: `rpk security secrets list` no longer truncates its output at 100 secrets.
+
+Shadow Link:: `rpk shadow create` no longer fails secret-reference validation on clusters with more than one page of `REDPANDA_CLUSTER`-scoped secrets.
+
+Shadow Link:: `rpk shadow update` in editor mode now replaces the entire Shadow Link configuration instead of merging changed fields, so list-valued fields (for example, topic filters) can shrink or be cleared.
+
+rpk:: The xref:reference:rpk/rpk-topic/rpk-topic-describe-storage.adoc[rpk topic describe-storage] command now produces valid output for `tiered_v2` topics.
+
+Iceberg:: The Iceberg coordinator's snapshotting mechanism no longer stalls the reactor when a large number of Parquet files are pending commit.
+
+Cloud Topics:: Replication failures in Cloud Topics no longer trigger a rare crash.
+
+Kafka API:: The Kafka quota manager's garbage collection no longer triggers a use-after-free during shutdown.
+
+=== Improvements
+
+Cloud Topics:: Cloud Topics compaction now commits work in chunks, resulting in more stable compaction for partitions with a large amount of data.
+
+Schema Registry:: A new `schema_registry_replay_on_startup` cluster property (default off) hydrates the Schema Registry store at broker start-up rather than lazily on the first request.
+
+Schema Registry:: Some `schema_registry` and `pandaproxy` handler interfaces no longer make oversized allocations.
+
+Admin API:: The `/v1/usage` endpoint no longer causes oversized allocations for clusters with a large number of Iceberg-enabled topics.
+
+HTTP Proxy:: A consumer group now resumes from its committed offset on a fresh consumer instance instead of re-reading from the earliest available offset.
+
+Schema Registry:: The `schema_registry` recovery path now caches references when canonicalizing schemas.
+
+Storage:: The Cloud Topics and local storage compaction implementations now copy fewer records.
+
+Schema Registry:: Schema Registry now logs whether a 403 on `GET /schemas/ids/\{id\}` was caused by a schema ID that does not exist or by missing ACLs. The response returned to clients is unchanged.
+
+Schema Registry:: Schema Registry now replays the internal `_schemas` topic exactly once when recovering on startup, instead of running redundant concurrent replays; cold start of a large registry is significantly faster.
+
+Storage:: The key-value store now terminates the process on unrecoverable I/O errors in its flush path instead of silently stalling writes.
+
+rpk:: The default Redpanda Console image version in `rpk` container commands is now v3.9.0.
+
+rpk:: When producing or consuming with Schema Registry, `rpk topic produce` and `rpk topic consume` now read the topic's `redpanda.schema.registry.context` with a `DescribeConfigs` request (unless `--schema-context` is given).
+
+rpk:: `rpk topic alter-config` now supports a `--regex`/`-r` flag to alter the config of all topics matching one or more regular expressions.
+
+rpk:: `rpk topic produce` and `rpk topic consume` now resolve Schema Registry schemas in the context bound to the topic via `redpanda.schema.registry.context`, and add a `--schema-context` flag to select the context explicitly.
+
+rpk:: `rpk cluster health` now displays any nodes that may be in maintenance mode.

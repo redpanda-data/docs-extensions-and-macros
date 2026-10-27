@@ -185,3 +185,99 @@ describe('resolveDiffBaseline', () => {
     expect(() => resolveDiffBaseline(tmpDir, 'nested/v26.1.14')).toThrow(/attachments directory/);
   });
 });
+
+describe('repairPropertyAnchorsInJson', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const { repairPropertyAnchorsInJson } = require('../../cli-utils/diff-utils.js');
+
+  // The real file's shape: 4-space indent from the Python extractor, uint64 and
+  // int64 limits as maxima, and anchors written with the dots deleted rather
+  // than hyphenated.
+  const FIXTURE = [
+    '{',
+    '    "properties": {',
+    '        "flush.bytes": {',
+    '            "name": "flush.bytes",',
+    '            "config_scope": "topic",',
+    '            "maximum": 18446744073709551615,',
+    '            "minimum": -9223372036854775808,',
+    '            "description": "Bytes before a flush. See <<flushms, `flush.ms`>>."',
+    '        },',
+    '        "flush.ms": {',
+    '            "name": "flush.ms",',
+    '            "config_scope": "topic",',
+    '            "maximum": 9223372036854775807,',
+    '            "description": "See <<flushbytes, `flush.bytes`>> too. Set it to 18446744073709551615."',
+    '        }',
+    '    }',
+    '}'
+  ].join('\n');
+
+  let dir, file;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'anchor-repair-'));
+    file = path.join(dir, 'redpanda-properties-v26.2.1.json');
+    fs.writeFileSync(file, FIXTURE);
+  });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('rewrites the squashed anchors to the ids the pages actually emit', () => {
+    const n = repairPropertyAnchorsInJson(file);
+    const out = fs.readFileSync(file, 'utf8');
+
+    expect(n).toBe(2);
+    expect(out).toContain('<<flush-ms,');
+    expect(out).toContain('<<flush-bytes,');
+    expect(out).not.toContain('<<flushms,');
+    expect(out).not.toContain('<<flushbytes,');
+  });
+
+  it('leaves every 64-bit literal byte-exact, which a round-trip would not', () => {
+    repairPropertyAnchorsInJson(file);
+    const out = fs.readFileSync(file, 'utf8');
+
+    // These are the values JSON.stringify rounds. A parse/re-serialize would
+    // publish 18446744073709552000, which the server rejects.
+    expect(out).toContain('18446744073709551615');
+    expect(out).toContain('-9223372036854775808');
+    expect(out).toContain('9223372036854775807');
+    expect(out).not.toContain('18446744073709552000');
+    expect(out).not.toContain('9223372036854776000');
+  });
+
+  it('leaves a long integer inside a description alone', () => {
+    repairPropertyAnchorsInJson(file);
+    const out = JSON.parse(fs.readFileSync(file, 'utf8'));
+
+    expect(out.properties['flush.ms'].description).toContain('Set it to 18446744073709551615.');
+  });
+
+  it('changes nothing but anchors, and keeps the file parseable and formatted', () => {
+    repairPropertyAnchorsInJson(file);
+    const out = fs.readFileSync(file, 'utf8');
+
+    const mask = (v) => v.replace(/<<[^<>]*>>/g, 'X');
+    expect(mask(out)).toBe(mask(FIXTURE));
+    expect(() => JSON.parse(out)).not.toThrow();
+    // Indentation is the extractor's, not JSON.stringify's default.
+    expect(out).toMatch(/\n {8}"flush\.bytes": \{/);
+  });
+
+  it('is a no-op when every anchor is already correct', () => {
+    repairPropertyAnchorsInJson(file);
+    const once = fs.readFileSync(file, 'utf8');
+
+    expect(repairPropertyAnchorsInJson(file)).toBe(0);
+    expect(fs.readFileSync(file, 'utf8')).toBe(once);
+  });
+
+  it('does not throw on a missing or unparseable file', () => {
+    expect(repairPropertyAnchorsInJson(path.join(dir, 'nope.json'))).toBe(0);
+    const bad = path.join(dir, 'bad.json');
+    fs.writeFileSync(bad, '{ not json');
+    expect(repairPropertyAnchorsInJson(bad)).toBe(0);
+    expect(fs.readFileSync(bad, 'utf8')).toBe('{ not json');
+  });
+});

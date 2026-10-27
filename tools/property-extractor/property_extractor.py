@@ -183,9 +183,16 @@ class ConstexprCache:
         for search_dir in search_dirs:
             if not os.path.exists(search_dir):
                 continue
-                
+
             for root, dirs, files in os.walk(search_dir):
-                for file in files:
+                # Deterministic traversal, same reasoning as get_file_pairs:
+                # constexpr_cache and function_cache below are plain dict
+                # assignment, last-write-wins, and an identifier redefined in
+                # more than one file would otherwise resolve to whichever
+                # file the filesystem's own directory order happened to
+                # visit last.
+                dirs.sort()
+                for file in sorted(files):
                     if file.endswith(('.h', '.cc', '.hpp', '.cpp')):
                         file_path = os.path.join(root, file)
                         try:
@@ -616,9 +623,13 @@ def resolve_constexpr_identifier(identifier):
         if not os.path.exists(search_dir):
             continue
             
-        # Walk through the directory recursively
+        # Walk through the directory recursively. Deterministic order, same
+        # reasoning as the ConstantResolver scan above: this feeds a
+        # last-write-wins dict, so an identifier defined in more than one
+        # file would otherwise resolve non-deterministically.
         for root, dirs, files in os.walk(search_dir):
-            for file in files:
+            dirs.sort()
+            for file in sorted(files):
                 # Check both .h and .cc files since definitions can be in either
                 if file.endswith(('.h', '.cc', '.hpp', '.cpp')):
                     file_path = os.path.join(root, file)
@@ -686,7 +697,17 @@ def get_file_pairs(options):
 
     file_pairs = []
 
-    for i in file_iter:
+    # Sorted, not raw rglob/glob order: iteration order reflects the
+    # filesystem's own directory-entry order, which is not guaranteed stable
+    # across clones or machines. A property name registered in more than one
+    # file (api_doc_dir, in both pandaproxy/rest/ and
+    # pandaproxy/schema_registry/) hits the "different defined_in" branch in
+    # transform_files_with_properties below, which keeps whichever file was
+    # processed last -- non-deterministically, without the sort, since that
+    # depends on this exact order. Confirmed live: two regenerations of the
+    # same overrides-unchanged tag six minutes apart produced different
+    # defined_in values for api_doc_dir.
+    for i in sorted(file_iter):
         if os.path.exists(i.with_suffix(".cc")):
             file_pairs.append(FilePair(i.resolve(), i.with_suffix(".cc").resolve()))
 
@@ -963,6 +984,44 @@ def clean_private_fields_from_definitions(definitions):
 
 
 # The definitions.json file contains type definitions that the extractor uses to standardize and centralize type information. After extracting and transforming the properties from the source code, the function merge_properties_and_definitions looks up each property's type in the definitions. If a property's type (or the type of its items, in the case of arrays) matches one of the definitions, the transformer replaces that type with a JSON pointer ( such as #/definitions/<type>) to the corresponding entry in definitions.json. The final JSON output then includes both a properties section (with types now referencing the definitions) and a definitions section, so that consumers of the output can easily resolve the full type information.
+# Fields recorded for tooling only. lint-strings and preview-string read them
+# from the raw --output to anchor a finding to its declaration; nothing on the
+# docs site does. The enhanced JSON is copied verbatim into
+# modules/reference/attachments and downloaded by every browser that hovers a
+# prop: macro, so ~40 bytes per property (~56KB across the real ~1400-property
+# file) would be paid by readers for data no reader uses.
+TOOLING_ONLY_PROPERTY_FIELDS = ("line_start", "line_end")
+
+
+def strip_tooling_only_fields(properties):
+    """
+    Remove tooling-only span fields from properties bound for the PUBLISHED
+    JSON attachment.
+
+    Only the enhanced output is published; the raw --output keeps the spans,
+    because that is the file lint-strings and preview-string consume.
+
+    Args:
+        properties: Dictionary of properties
+
+    Returns:
+        The same dictionary, with the tooling-only fields removed
+    """
+    removed = 0
+    for prop in properties.values():
+        if not isinstance(prop, dict):
+            continue
+        for field in TOOLING_ONLY_PROPERTY_FIELDS:
+            if field in prop:
+                del prop[field]
+                removed += 1
+    if removed:
+        logging.info(
+            f"Stripped {removed} tooling-only span field(s) from the published properties JSON"
+        )
+    return properties
+
+
 def merge_properties_and_definitions(properties, definitions):
     # Do not overwrite the resolved type/default with a reference. Just return the resolved properties and definitions.
     return dict(properties=properties, definitions=definitions)
@@ -986,12 +1045,96 @@ def report_phantom_stubs():
         f"{'entry' if len(phantom_stub_entries) == 1 else 'entries'} matched no extracted property"
     )
     for entry in phantom_stub_entries:
+        scope_note = (
+            f"config_scope '{entry['config_scope']}' inferred from the name"
+            if entry.get("scope_inferred")
+            else f"config_scope '{entry['config_scope']}' from the override"
+        )
         logger.warning(
             f"Override key '{entry['name']}' matched no extracted property — created a stub entry "
-            f"with config_scope '{entry['config_scope']}'. If the property was renamed or removed, "
+            f"with {scope_note}. If the property was renamed or removed, "
             f"update docs-data/property-overrides.json."
         )
     logger.warning("=" * 70)
+
+
+def infer_topic_property_category(name):
+    """Map a topic property's dotted name to a category, for properties with
+    no explicit category override.
+
+    "other" is the fallback for a name that matches no group. It only renders
+    where a page includes tags=category-other: cloud-docs' topic properties
+    page does (cloud-docs#686); docs' topic-properties.adoc and
+    broker-properties.adoc do not yet, so on docs main a property that falls
+    to "other" is present in the partial but appears on no page. The point of
+    the fallback is that such a property is at least reachable by a known tag,
+    rather than untagged and unreachable by any include.
+    """
+    retention = [
+        "cleanup.policy", "compaction.strategy", "delete.retention.ms", "max.compaction.lag.ms",
+        "min.cleanable.dirty.ratio", "min.compaction.lag.ms", "retention.bytes", "retention.ms"
+    ]
+    segment = [
+        "compression.type", "max.message.bytes", "message.timestamp.type", "segment.bytes", "segment.ms"
+    ]
+    performance = [
+        "flush.bytes", "flush.ms", "redpanda.leaders.preference", "replication.factor", "write.caching"
+    ]
+    tiered = [
+        "initial.retention.local.target.bytes", "initial.retention.local.target.ms", "redpanda.remote.delete",
+        "redpanda.remote.read", "redpanda.remote.recovery", "redpanda.remote.write", "retention.local.target.bytes",
+        "retention.local.target.ms"
+    ]
+    remote_replica = ["redpanda.remote.readreplica"]
+    iceberg = [
+        "redpanda.iceberg.delete", "redpanda.iceberg.invalid.record.action", "redpanda.iceberg.mode",
+        "redpanda.iceberg.partition.spec", "redpanda.iceberg.target.lag.ms"
+    ]
+    schema_registry = [
+        "redpanda.key.schema.id.validation", "redpanda.key.subject.name.strategy", "redpanda.value.schema.id.validation",
+        "redpanda.value.subject.name.strategy", "confluent.key.schema.validation", "confluent.key.subject.name.strategy",
+        "confluent.value.schema.validation", "confluent.value.subject.name.strategy"
+    ]
+    if name in retention:
+        return "retention-compaction"
+    if name in segment:
+        return "segment-message"
+    if name in performance:
+        return "performance-cluster"
+    if name in tiered:
+        return "tiered-storage"
+    if name in remote_replica:
+        return "remote-read-replica"
+    if name in iceberg:
+        return "iceberg-integration"
+    if name in schema_registry:
+        return "schema-registry"
+    return "other"
+
+
+def _ensure_category_fallback(properties):
+    """Guarantee every property has a category, so the property.hbs/
+    topic-property.hbs templates' `{{#if category}}` always wraps it in a
+    tag::category-X[] region. A property with no category at all gets no
+    tag region and is silently excluded by every page that assembles its
+    content from specific category-tag includes -- present in the raw
+    generated partial, invisible everywhere it's actually read from.
+
+    Runs after overrides are applied (including override-created phantom
+    stub properties, which previously never received a category at all)
+    so this covers every property regardless of where it came from.
+    """
+    for prop_name, property_data in properties.items():
+        if not hasattr(property_data, "get") or property_data.get("category"):
+            continue
+        if property_data.get("config_scope") == "topic" or property_data.get("is_topic_property"):
+            property_data["category"] = infer_topic_property_category(property_data.get("name", prop_name))
+        else:
+            # No per-name taxonomy exists for cluster/broker properties today
+            # (unlike topic properties' infer_topic_property_category) --
+            # "other" at least guarantees a real, included tag region
+            # instead of silent exclusion.
+            property_data["category"] = "other"
 
 
 def apply_property_overrides(properties, overrides, overrides_file_path=None):
@@ -1003,7 +1146,7 @@ def apply_property_overrides(properties, overrides, overrides_file_path=None):
     - Otherwise, searches existing properties for an entry whose `"name"` equals the override key and applies the override if found.
     - If no matching property is found, creates a new property from the override and adds it under the override key.
     
-    The function supports overrides that add or replace description, version, example content, default, type, config_scope, related_topics, and other metadata. When examples reference external files, relative paths are resolved relative to overrides_file_path.
+    The function supports overrides that add or replace description, version, example content, default, type, config_scope, see_also (related_topics is the deprecated predecessor, still read for existing overrides), and other metadata. When examples reference external files, relative paths are resolved relative to overrides_file_path.
     
     Parameters:
         properties (dict): Mapping of existing property entries (modified in-place).
@@ -1065,25 +1208,99 @@ def apply_property_overrides(properties, overrides, overrides_file_path=None):
                 else:
                     # Create new property from override
                     logger.info(f"Creating new property from override: {prop}")
-                    new_property = _create_property_from_override(prop, override, overrides_file_path)
+                    new_property, scope_inferred = _create_property_from_override(prop, override, overrides_file_path)
                     properties[prop] = new_property
                     # Record the phantom stub so the run summary can flag it loudly
                     phantom_stub_entries.append({
                         "name": prop,
                         "config_scope": new_property.get("config_scope"),
+                        "scope_inferred": scope_inferred,
                     })
 
     for property_data in properties.values():
         if hasattr(property_data, "get") and property_data.get("description"):
             property_data["description"] = _normalize_config_ref_macros(property_data["description"])
+
+    _ensure_category_fallback(properties)
     return properties
+
+
+ADMONITION_TYPES = {"note", "tip", "important", "warning", "caution"}
+
+
+def _normalize_admonitions(admonitions):
+    """Validate an admonitions override and normalize each entry's `type`
+    to the uppercase form AsciiDoc's admonition block syntax expects
+    (`[NOTE]`, not `[note]`). Returns None (logging a warning) if the
+    override isn't shaped as a list of {type, text} entries, so a malformed
+    override doesn't silently render as nothing instead of surfacing the
+    mistake.
+    """
+    if not isinstance(admonitions, list):
+        logger.warning("admonitions for property must be an array")
+        return None
+    normalized = []
+    for entry in admonitions:
+        if (
+            not isinstance(entry, dict)
+            or not isinstance(entry.get("type"), str)
+            or not isinstance(entry.get("text"), str)
+        ):
+            logger.warning(
+                f"admonitions entry must contain string type and text values, got: {entry!r}"
+            )
+            continue
+        entry_type = str(entry["type"]).strip().lower()
+        if entry_type not in ADMONITION_TYPES:
+            logger.warning(
+                f"admonitions entry has unknown type '{entry['type']}', "
+                f"expected one of {sorted(ADMONITION_TYPES)}"
+            )
+            continue
+        normalized_entry = {"type": entry_type.upper(), "text": entry["text"]}
+        if "title" in entry:
+            if not isinstance(entry["title"], str):
+                logger.warning(f"admonitions entry title must be a string, got: {entry!r}")
+                continue
+            if entry["title"]:
+                normalized_entry["title"] = entry["title"]
+        # The entry is rebuilt rather than copied, so every field the templates
+        # read has to be carried across explicitly. These two scope the whole
+        # admonition block to one docs build; setting both would wrap it in
+        # ifdef and ifndef at once so it rendered in neither, which the schema
+        # rejects and the generator drops with a warning.
+        if entry.get("cloud_only") is True:
+            normalized_entry["cloud_only"] = True
+        # self_hosted_only is the deprecated spelling of self_managed_only, read
+        # so an override written against the older schema still scopes, and
+        # normalized to the current name so only one spelling reaches the
+        # templates.
+        if entry.get("self_managed_only") is True or entry.get("self_hosted_only") is True:
+            normalized_entry["self_managed_only"] = True
+        normalized.append(normalized_entry)
+    return normalized
 
 
 def _apply_override_to_existing_property(property_dict, override, overrides_file_path):
     """Apply overrides to an existing property."""
-    # Apply description override
+    # Apply description override. Either a plain string or, when a paragraph has
+    # to be scoped to one docs build, an array of paragraphs; the generator
+    # flattens the array into AsciiDoc so the audience conditional never has to
+    # be hand-written into the JSON string.
     if "description" in override:
         property_dict["description"] = override["description"]
+
+    # Declared links: {"<text in the prose>": "<target>"}. Carried through as
+    # data and turned into AsciiDoc by the generator, which is what keeps the
+    # description itself plain prose the overrides audit can compare to source.
+    if "links" in override:
+        property_dict["links"] = override["links"]
+
+    # Shared partials pulled into the property entry (the "internal use only"
+    # warning, the HTTP Proxy breaking-change notice). Carried as data so the
+    # description stays prose the overrides audit can compare against source.
+    if "includes" in override:
+        property_dict["includes"] = override["includes"]
     
     # Apply version override (introduced in version)
     if "version" in override:
@@ -1106,12 +1323,23 @@ def _apply_override_to_existing_property(property_dict, override, overrides_file
     if "config_scope" in override:
         property_dict["config_scope"] = override["config_scope"]
     
-    # Apply related_topics override
+    # Apply related_topics override (deprecated, see see_also)
     if "related_topics" in override:
         if isinstance(override["related_topics"], list):
             property_dict["related_topics"] = override["related_topics"]
         else:
             logger.warning(f"related_topics for property must be an array")
+
+    # Apply see_also override. Structural shape (plain string, or an object
+    # naming exactly one of cloud_only/self_managed_only) is enforced by
+    # docs-data/property-overrides.schema.json via `doc-tools validate
+    # property-overrides`, not here — this just passes the data through for
+    # seeAlsoView.js to normalize at render time.
+    if "see_also" in override:
+        if isinstance(override["see_also"], list):
+            property_dict["see_also"] = override["see_also"]
+        else:
+            logger.warning(f"see_also for property must be an array")
 
     # Apply exclude_from_docs override
     if "exclude_from_docs" in override:
@@ -1129,9 +1357,52 @@ def _apply_override_to_existing_property(property_dict, override, overrides_file
         else:
             logger.warning(f"accepted_values for property must be an array")
 
+    # Apply admonitions override - structured NOTE/TIP/IMPORTANT/WARNING/CAUTION
+    # callouts, rendered as real AsciiDoc admonition blocks by property.hbs/
+    # topic-property.hbs. Exists so a callout never has to be hand-written as
+    # markup mixed into the description text -- see minimize-overrides
+    # guidance: an admonition is structured data, not embedded prose markup.
+    if "admonitions" in override:
+        normalized = _normalize_admonitions(override["admonitions"])
+        if normalized is not None:
+            property_dict["admonitions"] = normalized
+
+
+def _infer_config_scope_from_name(prop_name):
+    """Guess a fabricated property's scope from the shape of its name.
+
+    Redpanda topic property names are dot-separated (`cleanup.policy`,
+    `redpanda.remote.read`); cluster and broker names are underscore-separated
+    (`log_retention_ms`). An override key that matched no extracted property
+    has no `defined_in` to classify it, so the name is the only signal left.
+
+    This used to default to "topic" unconditionally, which put underscored
+    names on the topic properties page. `cloud_topics_l1_indexing_interval` is
+    the case that surfaced it: a stale override keyed on a C++ member name
+    rather than the registered `cloud_topics_indexing_interval`, fabricated as
+    a topic property and rendered into topic-properties.adoc.
+    """
+    return "topic" if "." in prop_name else "cluster"
+
 
 def _create_property_from_override(prop_name, override, overrides_file_path):
-    """Create a new property from override specification."""
+    """Create a new property from override specification.
+
+    Returns ``(new_property, scope_inferred)``. The flag is True when the
+    override named no config_scope and the scope came from the name shape, so
+    the caller can say so in the run summary without a marker on the property
+    that would otherwise have to be stripped before output.
+    """
+    # An override that names its own scope is authoritative. Otherwise infer it
+    # from the name, because there is no defined_in to classify a fabricated
+    # property and a wrong guess lands it on the wrong reference page.
+    if "config_scope" in override and override["config_scope"]:
+        scope = override["config_scope"]
+        scope_inferred = False
+    else:
+        scope = _infer_config_scope_from_name(prop_name)
+        scope_inferred = True
+
     # Create base property structure
     new_property = {
         "name": prop_name,
@@ -1139,10 +1410,10 @@ def _create_property_from_override(prop_name, override, overrides_file_path):
         "type": override.get("type", "string"),
         "default": override.get("default", None),
         "defined_in": "override",  # Mark as override-created
-        "config_scope": override.get("config_scope", "topic"),  # Default to topic for new properties
-        "is_topic_property": override.get("config_scope", "topic") == "topic",
+        "config_scope": scope,
+        "is_topic_property": scope == "topic",
         "is_deprecated": override.get("is_deprecated", False),
-        "visibility": override.get("visibility", "user")
+        "visibility": override.get("visibility", "user"),
     }
     
     # Add version if specified
@@ -1154,19 +1425,26 @@ def _create_property_from_override(prop_name, override, overrides_file_path):
     if example_content:
         new_property["example"] = example_content
     
-    # Add related_topics if specified
+    # Add related_topics if specified (deprecated, see see_also)
     if "related_topics" in override:
         if isinstance(override["related_topics"], list):
             new_property["related_topics"] = override["related_topics"]
         else:
             logger.warning(f"related_topics for property '{prop_name}' must be an array")
-    
+
+    # Add see_also if specified
+    if "see_also" in override:
+        if isinstance(override["see_also"], list):
+            new_property["see_also"] = override["see_also"]
+        else:
+            logger.warning(f"see_also for property '{prop_name}' must be an array")
+
     # Add any other custom fields from override
     for key, value in override.items():
         if key not in ["description", "type", "default", "config_scope", "version",
                        "example", "example_file", "example_yaml", "related_topics",
-                       "is_deprecated", "visibility", "exclude_from_docs", "category",
-                       "accepted_values", "_comment"]:
+                       "see_also", "is_deprecated", "visibility", "exclude_from_docs",
+                       "category", "accepted_values", "admonitions", "_comment"]:
             new_property[key] = value
 
     # Add exclude_from_docs if specified
@@ -1184,7 +1462,15 @@ def _create_property_from_override(prop_name, override, overrides_file_path):
         else:
             logger.warning(f"accepted_values for property '{prop_name}' must be an array")
 
-    return new_property
+    # Add admonitions if specified - run through the same validation/normalization
+    # as the existing-property path so a malformed entry is dropped with a warning
+    # rather than silently rendering as an unstyled, lowercase-typed block.
+    if "admonitions" in override:
+        normalized = _normalize_admonitions(override["admonitions"])
+        if normalized is not None:
+            new_property["admonitions"] = normalized
+
+    return new_property, scope_inferred
 
 
 def _process_example_override(override, overrides_file_path=None):
@@ -2727,49 +3013,6 @@ def extract_topic_properties(source_path, cluster_properties=None):
             if prop_data.get("is_noop", False):
                 continue
 
-            # Assign category based on property name pattern or mapping
-            def infer_category(name):
-                retention = [
-                    "cleanup.policy", "compaction.strategy", "delete.retention.ms", "max.compaction.lag.ms",
-                    "min.cleanable.dirty.ratio", "min.compaction.lag.ms", "retention.bytes", "retention.ms"
-                ]
-                segment = [
-                    "compression.type", "max.message.bytes", "message.timestamp.type", "segment.bytes", "segment.ms"
-                ]
-                performance = [
-                    "flush.bytes", "flush.ms", "redpanda.leaders.preference", "replication.factor", "write.caching"
-                ]
-                tiered = [
-                    "initial.retention.local.target.bytes", "initial.retention.local.target.ms", "redpanda.remote.delete",
-                    "redpanda.remote.read", "redpanda.remote.recovery", "redpanda.remote.write", "retention.local.target.bytes",
-                    "retention.local.target.ms"
-                ]
-                remote_replica = ["redpanda.remote.readreplica"]
-                iceberg = [
-                    "redpanda.iceberg.delete", "redpanda.iceberg.invalid.record.action", "redpanda.iceberg.mode",
-                    "redpanda.iceberg.partition.spec", "redpanda.iceberg.target.lag.ms"
-                ]
-                schema_registry = [
-                    "redpanda.key.schema.id.validation", "redpanda.key.subject.name.strategy", "redpanda.value.schema.id.validation",
-                    "redpanda.value.subject.name.strategy", "confluent.key.schema.validation", "confluent.key.subject.name.strategy",
-                    "confluent.value.schema.validation", "confluent.value.subject.name.strategy"
-                ]
-                if name in retention:
-                    return "retention-compaction"
-                if name in segment:
-                    return "segment-message"
-                if name in performance:
-                    return "performance-cluster"
-                if name in tiered:
-                    return "tiered-storage"
-                if name in remote_replica:
-                    return "remote-read-replica"
-                if name in iceberg:
-                    return "iceberg-integration"
-                if name in schema_registry:
-                    return "schema-registry"
-                return "other"
-
             converted_properties[prop_name] = {
                 "name": prop_name,
                 "description": prop_data.get("description", ""),
@@ -2783,7 +3026,7 @@ def extract_topic_properties(source_path, cluster_properties=None):
                 "acceptable_values": prop_data.get("acceptable_values", ""),
                 "is_deprecated": False,
                 "is_topic_property": True,
-                "category": infer_category(prop_name)
+                "category": infer_topic_property_category(prop_name)
             }
 
             # Add default values if they exist (inherited from cluster properties)
@@ -3142,6 +3385,9 @@ def main():
 
     # 7. Clean private fields from definitions (keep JSON output clean)
     filtered_enhanced_definitions = clean_private_fields_from_definitions(filtered_enhanced_definitions)
+
+    # 8. Drop tooling-only spans: this JSON is the published attachment.
+    enhanced_properties = strip_tooling_only_fields(enhanced_properties)
 
     # Generate enhanced properties JSON (with overrides)
     enhanced_properties_and_definitions = merge_properties_and_definitions(

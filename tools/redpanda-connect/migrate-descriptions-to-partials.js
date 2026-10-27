@@ -11,7 +11,7 @@
  * to `modules/components/partials/descriptions/<type>/<name>.adoc` on every
  * run, with two tag regions. This script rewires existing pages to it:
  *
- *   header: include::...[tag=attrs]  inside the page's `// tag::meta[]` region
+ *   header: include::...[tag=meta]   inside the page's `// tag::meta[]` region
  *   body:   include::...[tag=body]   where the frozen prose is today
  *
  * The header rewire is mechanical and safe: it swaps one `:description:` line
@@ -36,7 +36,7 @@ const path = require('path');
 const { descriptionIncludeLine, normalizeTypeDir, flattenToAttributeValue } = require('./metadata-utils.js');
 
 // The page's meta tag region: the block single-source stubs inherit
-// :description: from, so the attrs include belongs inside it.
+// :description: from, so the meta include belongs inside it.
 const META_TAG_OPEN = /^\/\/\s*tag::meta\[\]\s*$/;
 const META_TAG_CLOSE = /^\/\/\s*end::meta\[\]\s*$/;
 
@@ -123,34 +123,34 @@ function migrateDescriptionsToPartials ({
         continue;
       }
       const partial = fs.readFileSync(partialPath, 'utf8');
-      const attrs = tagRegion(partial, 'attrs');
+      const meta = tagRegion(partial, 'meta');
       const body = tagRegion(partial, 'body');
-      if (!attrs || !body || contentLines(body).length === 0) {
+      if (!meta || !body || contentLines(body).length === 0) {
         // A blanked partial (description removed upstream) has both regions
         // but no content. Wiring a page to it would publish an empty page.
         results.skipped.push({ page: key, reason: 'description partial is empty' });
         continue;
       }
 
-      const includeAttrs = descriptionIncludeLine({ typeDir: partialTypeDir, name }, 'attrs');
+      const includeMeta = descriptionIncludeLine({ typeDir: partialTypeDir, name }, 'meta');
       const includeBody = descriptionIncludeLine({ typeDir: partialTypeDir, name }, 'body');
 
       let lines = fs.readFileSync(pagePath, 'utf8').split('\n');
       let changed = false;
 
       // --- header ---------------------------------------------------------
-      if (!lines.some((l) => l.trim() === includeAttrs)) {
+      if (!lines.some((l) => l.trim() === includeMeta)) {
         const open = lines.findIndex((l) => META_TAG_OPEN.test(l));
         const close = lines.findIndex((l, i) => i > open && META_TAG_CLOSE.test(l));
-        const attrValue = contentLines(attrs)
+        const metaValue = contentLines(meta)
           .find((l) => l.startsWith(':description:'));
         const pageAttr = lines.slice(0, introOf(lines)).find((l) => l.startsWith(':description:'));
-        if (!attrValue) {
-          // The connector has no summary, so the attrs region sets nothing.
+        if (!metaValue) {
+          // The connector has no summary, so the meta region sets nothing.
           // Replacing a hand-written :description: with it would drop the
           // page's meta description.
-          results.skipped.push({ page: key, reason: 'attrs region sets no :description:' });
-        } else if (pageAttr && flattenToAttributeValue(pageAttr) !== flattenToAttributeValue(attrValue)) {
+          results.skipped.push({ page: key, reason: 'meta region sets no :description:' });
+        } else if (pageAttr && flattenToAttributeValue(pageAttr) !== flattenToAttributeValue(metaValue)) {
           // The page's meta description is not the connector summary, so it
           // was authored by hand (often tuned for search) and swapping in the
           // include would silently discard that editorial work. 13 pages in
@@ -159,7 +159,7 @@ function migrateDescriptionsToPartials ({
           // header alone.
           results.skipped.push({ page: key, reason: 'hand-authored :description: differs from the summary (needs a human)' });
         } else if (open !== -1 && close > open) {
-          lines.splice(open + 1, close - open - 1, includeAttrs);
+          lines.splice(open + 1, close - open - 1, includeMeta);
           results.headers.push(key);
           changed = true;
         } else {
@@ -169,7 +169,7 @@ function migrateDescriptionsToPartials ({
           // :description: lines in the first place.
           const attrLine = lines.findIndex((l) => l.startsWith(':description:'));
           if (attrLine !== -1 && attrLine < introOf(lines)) {
-            lines.splice(attrLine, 1, '// tag::meta[]', includeAttrs, '// end::meta[]');
+            lines.splice(attrLine, 1, '// tag::meta[]', includeMeta, '// end::meta[]');
             results.headers.push(key);
             changed = true;
           } else {
@@ -183,7 +183,7 @@ function migrateDescriptionsToPartials ({
       // it could not see and the page ended up with two. AsciiDoc takes the
       // last assignment, so leaving the literal one there would make the
       // include a no-op and the page would keep publishing frozen text.
-      if (lines.some((l) => l.trim() === includeAttrs)) {
+      if (lines.some((l) => l.trim() === includeMeta)) {
         for (let i = introOf(lines) - 1; i >= 0; i--) {
           if (lines[i].startsWith(':description:')) {
             lines.splice(i, 1);

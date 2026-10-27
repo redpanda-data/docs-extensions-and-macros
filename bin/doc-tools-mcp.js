@@ -10,7 +10,6 @@
  * - Context-aware: Works from any repository based on cwd
  * - Antora intelligence: Understands component/module structure
  * - Automation: Run doc-tools generate commands
- * - Auto-discovery: Prompts loaded automatically from mcp/prompts/
  * - Validation: Startup checks ensure all resources are accessible
  * - Telemetry: Usage tracking for adoption metrics
  */
@@ -201,7 +200,7 @@ const tools = [
   },
   {
     name: 'generate_rpcn_connector_docs',
-    description: 'Generate Redpanda Connect connector documentation. Creates component documentation for all connectors. Writers use this when updating connector reference docs. Automatically uses docs-data/overrides.json if present.',
+    description: 'Generate Redpanda Connect connector documentation. Creates component documentation for all connectors. Writers use this when updating connector reference docs. Field, component, and Bloblang descriptions come from the component specs in redpanda-data/connect and redpanda-data/benthos, so fix wrong text with a PR there.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -221,6 +220,10 @@ const tools = [
           type: 'boolean',
           description: 'Include Bloblang functions and methods in generation (optional, defaults to false)'
         },
+        no_partials: {
+          type: 'boolean',
+          description: 'Skip the generated partials, config snippets, and Bloblang reference because the connect repo publishes them. What\'s new, diffs, drafts, nav, and the version bump still run (optional, defaults to false)'
+        },
         data_dir: {
           type: 'string',
           description: 'Directory where versioned connect JSON files live (optional)'
@@ -235,7 +238,7 @@ const tools = [
         },
         overrides: {
           type: 'string',
-          description: 'Path to optional JSON file with overrides (defaults to docs-data/overrides.json if present)'
+          description: 'Path to an optional JSON file of description overrides (optional). Nothing is merged unless you pass it.'
         },
         cloud_version: {
           type: 'string',
@@ -435,6 +438,94 @@ const tools = [
     }
   },
   {
+    name: 'lint_doc_strings',
+    description: 'Lint user-facing doc strings embedded in engineering source code (property descriptions, rpk Short/Long/flag usage, metric help, Helm values comments, CRD field comments, connect field descriptions). These strings ship verbatim to docs.redpanda.com. Deterministic, suggest-only, with exact file:line spans. Run it inside an engineering checkout (redpanda, redpanda-operator, connect).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        repo: {
+          type: 'string',
+          description: 'Absolute path to the engineering checkout to lint (required). Nothing is cloned.'
+        },
+        surface: {
+          type: 'string',
+          description: `Comma-separated surfaces to lint: ${Object.keys(require('../tools/lint-strings').SURFACES).join(', ')} (optional, defaults to all)`
+        },
+        diff: {
+          type: 'string',
+          description: 'Base git ref for declaration-anchored diff mode: lint only declarations whose span intersects lines changed in <ref>...HEAD (optional)'
+        },
+        skip_rules: {
+          type: 'string',
+          description: 'Comma-separated rule ids to skip (optional)'
+        },
+        only_rules: {
+          type: 'string',
+          description: 'Comma-separated rule ids to run exclusively (optional)'
+        }
+      },
+      required: ['repo']
+    }
+  },
+  {
+    name: 'preview_doc_string',
+    description: 'Render ONE embedded doc string from local engineering source to the final snippet published on docs.redpanda.com: properties through the real extractor and Handlebars template (with an optional override pane showing docs-repo masking), rpk through the real formatDescription() transformer, and metrics/helm/crd/connect in their published output shapes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        repo: {
+          type: 'string',
+          description: 'Absolute path to the engineering checkout (required)'
+        },
+        surface: {
+          type: 'string',
+          description: 'Which surface the declaration belongs to',
+          enum: ['properties', 'rpk', 'metrics', 'helm', 'crd', 'connect']
+        },
+        name: {
+          type: 'string',
+          description: 'Declaration name: property name, rpk command token or --flag, metric name, Helm key path, CRD json field (or Struct.field), connect component/field name'
+        },
+        overrides: {
+          type: 'string',
+          description: 'Path to a docs-repo overrides JSON (properties only): adds an "as shipped" pane and a MASKED-BY-OVERRIDE notice when the override differs (optional)'
+        }
+      },
+      required: ['repo', 'surface', 'name']
+    }
+  },
+  {
+    name: 'audit_overrides',
+    description: 'Audit docs-side override entries against extracted source strings. Classifies each override field as REDUNDANT (retire), UPSTREAMABLE (send prose upstream), KEEP_UNTIL_UPSTREAMED (markup-laden, stripped upstream candidate emitted), UPSTREAMABLE_SLOT, REDUNDANT_OR_UPSTREAMABLE, KEEP, or REVIEW. Writers use this to retire stale overrides and draft upstream source fixes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        overrides: {
+          type: 'string',
+          description: 'Path to the overrides JSON file (for example "docs-data/property-overrides.json")'
+        },
+        extracted: {
+          type: 'string',
+          description: 'Path to the extracted source JSON: the property extractor\'s RAW --output file, without overrides applied (required for the properties surface, alternative to "repo")'
+        },
+        repo: {
+          type: 'string',
+          description: 'Redpanda checkout to extract raw source strings from (properties surface only, alternative to "extracted")'
+        },
+        surface: {
+          type: 'string',
+          description: 'Override surface to audit (optional, defaults to "properties")',
+          enum: ['properties', 'rpk']
+        },
+        output: {
+          type: 'string',
+          description: 'Also write the JSON result to this file, relative to repo root (optional)'
+        }
+      },
+      required: ['overrides']
+    }
+  },
+  {
     name: 'run_doc_tools_command',
     description: 'Advanced: Run a raw doc-tools command. Only use this if none of the specific tools above fit your needs. Requires knowledge of doc-tools CLI syntax.',
     inputSchema: {
@@ -502,7 +593,7 @@ const resourceMap = {
 
 /**
  * Load resource content from team-standards directory
- * @param {string} uri - Resource URI (such as 'redpanda://style-guide')
+ * @param {string} uri - Resource URI (such as 'redpanda://personas')
  * @returns {Object} Resource content
  */
 function getResourceContent(uri) {

@@ -95,8 +95,12 @@ jobs:
             TEST_PATTERNS="__tests__/extensions/"
             for file in $CHANGED_FILES; do
               extension_name=$(basename "$file" .js)
-              # Add specific test file pattern (will be joined with | by Jest)
-              TEST_PATTERNS="$TEST_PATTERNS ${extension_name}"
+              # Anchored to .test.js so this doesn't match as a bare
+              # substring against unrelated suites elsewhere in the tree
+              # (e.g. "prop" would otherwise also select
+              # __tests__/tools/lint-strings/properties-surface.test.js,
+              # which needs an environment this job never bootstraps).
+              TEST_PATTERNS="$TEST_PATTERNS ${extension_name}\.test\.js"
             done
             echo "test-patterns=$TEST_PATTERNS" >> $GITHUB_OUTPUT
             echo "Changed extensions: $CHANGED_FILES"
@@ -149,8 +153,12 @@ jobs:
             TEST_PATTERNS="__tests__/macros/"
             for file in $CHANGED_FILES; do
               macro_name=$(basename "$file" .js)
-              # Add specific test file pattern (will be joined with | by Jest)
-              TEST_PATTERNS="$TEST_PATTERNS ${macro_name}"
+              # Anchored to .test.js so this doesn't match as a bare
+              # substring against unrelated suites elsewhere in the tree
+              # (e.g. "prop" would otherwise also select
+              # __tests__/tools/lint-strings/properties-surface.test.js,
+              # which needs an environment this job never bootstraps).
+              TEST_PATTERNS="$TEST_PATTERNS ${macro_name}\.test\.js"
             done
             echo "test-patterns=$TEST_PATTERNS" >> $GITHUB_OUTPUT
             echo "Changed macros: $CHANGED_FILES"
@@ -209,18 +217,79 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The lint-strings properties surface and preview-string shell out to the
+      # real Python property extractor, so their integration assertions - the
+      # only ones covering parser.py's line_start/line_end spans - need a venv
+      # and the tree-sitter-cpp grammar. Without them the suites self-skip, and
+      # no job used to satisfy the guard: this one ran jest on a bare npm ci,
+      # and test-property-extractor built the environment but ran only pytest.
+      # Six assertions were dark behind a green check. `make venv treesitter`
+      # only builds those two targets; it does not clone redpanda the way
+      # `make build` does.
+      - name: Set up Python for the property extractor
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'tools/property-extractor/requirements.txt'
+
+      - name: Cache the tree-sitter-cpp grammar
+        uses: actions/cache@v4
+        with:
+          path: tools/property-extractor/tree-sitter/tree-sitter-cpp
+          # Keyed on the files that hold the pinned grammar tag, so bumping the
+          # pin in either place invalidates the cache instead of resurrecting a
+          # checkout at the old tag.
+          key: tree-sitter-cpp-${{ runner.os }}-${{ hashFiles('tools/property-extractor/Makefile', 'tools/lint-strings/surfaces/properties.js') }}
+
+      - name: Bootstrap the property extractor (venv + tree-sitter grammar)
+        run: make -C tools/property-extractor venv treesitter
+
       - name: Run tools tests
-        run: npm test -- __tests__/tools/ __tests__/cli-utils/ __tests__/mcp/ --passWithNoTests
+        run: npm test -- __tests__/tools/ __tests__/cli-utils/ __tests__/mcp/ __tests__/workflows/ --passWithNoTests
 
   test-property-extractor:
     needs: detect-changes
-    if: needs.detect-changes.outputs.property_extractor == 'true' || needs.detect-changes.outputs.all_tests == 'true' || github.event_name == 'schedule'
+    # Skip on pull_request runs from a fork: forked PRs get neither the
+    # OIDC id-token nor repo secrets this job's AWS auth step below needs,
+    # so it would fail before "make build" ever runs. Same-repo PRs, pushes,
+    # and the weekly schedule run are unaffected.
+    if: (needs.detect-changes.outputs.property_extractor == 'true' || needs.detect-changes.outputs.all_tests == 'true' || github.event_name == 'schedule') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
+    env:
+      # Release tag the fixture step extracts from and the pytest suites read
+      # back (PROPERTY_FIXTURE_TAG in test_enterprise_properties.py). Pinned
+      # rather than dev: these suites verify the extractor's parsing and
+      # classification logic, so they need a deterministic input, and dev
+      # drifts under them (streaming-enterprise#63 converted two properties
+      # to enum_set_property on 2026-08-28, which this parser cannot read
+      # yet). Bump the pin together with any parser change that adds support
+      # for newer source shapes. The tree-sitter parser is slated to be
+      # replaced by rp_util runtime introspection (#278), which removes this
+      # coupling entirely.
+      PROPERTY_FIXTURE_TAG: v26.2.2
+    # Needed to assume the AWS role below, which fetches the bot token that
+    # authenticates the clone of streaming-enterprise (private) in the
+    # "Generate test fixtures" step.
+    permissions:
+      id-token: write
+      contents: read
     strategy:
       matrix:
         python-version: ['3.9', '3.11']
     steps:
       - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.RP_AWS_CRED_REGION }}
+          role-to-assume: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
+
+      - uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            ,sdlc/prod/github/actions_bot_token
+          parse-json-secrets: true
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -234,17 +303,10 @@ jobs:
         with:
           node-version: 20
 
-      - name: Get current date
-        id: date
-        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
-
-      - name: Cache Redpanda repository
-        uses: actions/cache@v4
-        with:
-          path: tools/property-extractor/tmp/redpanda
-          key: redpanda-repo-dev-${{ steps.date.outputs.date }}
-          restore-keys: |
-            redpanda-repo-dev-
+      # The streaming-enterprise checkout is deliberately NOT cached: caches
+      # created on the default branch are restorable by anyone who can open a
+      # PR (including from a fork), which would expose the private source
+      # tree. The Makefile's clone is shallow, so each run re-clones cheaply.
 
       - name: Cache tree-sitter build
         uses: actions/cache@v4
@@ -263,8 +325,17 @@ jobs:
 
       - name: Generate test fixtures
         working-directory: tools/property-extractor
+        env:
+          GH_TOKEN: ${{ env.ACTIONS_BOT_TOKEN }}
+          # Tree-sitter-only on purpose: these pytest suites verify the
+          # extractor against a deterministic pinned-tag input, not the
+          # rp_util merge (which has its own jest suites). Once the rp_util
+          # merge is wired into `make build` it hard-fails release tags with
+          # no published rp-util-schema-<tag> release, and without this skip
+          # every run of this job would couple to that release existing.
+          SKIP_RP_UTIL: "1"
         run: |
-          make build
+          make build TAG="$PROPERTY_FIXTURE_TAG"
 
       - name: Run property-extractor tests
         run: |
@@ -289,6 +360,34 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # The lint-strings properties surface and preview-string shell out to the
+      # real Python property extractor, so their integration assertions - the
+      # only ones covering parser.py's line_start/line_end spans - need a venv
+      # and the tree-sitter-cpp grammar. Without them the suites self-skip, and
+      # no job used to satisfy the guard: this one ran jest on a bare npm ci,
+      # and test-property-extractor built the environment but ran only pytest.
+      # Six assertions were dark behind a green check. `make venv treesitter`
+      # only builds those two targets; it does not clone redpanda the way
+      # `make build` does.
+      - name: Set up Python for the property extractor
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'tools/property-extractor/requirements.txt'
+
+      - name: Cache the tree-sitter-cpp grammar
+        uses: actions/cache@v4
+        with:
+          path: tools/property-extractor/tree-sitter/tree-sitter-cpp
+          # Keyed on the files that hold the pinned grammar tag, so bumping the
+          # pin in either place invalidates the cache instead of resurrecting a
+          # checkout at the old tag.
+          key: tree-sitter-cpp-${{ runner.os }}-${{ hashFiles('tools/property-extractor/Makefile', 'tools/lint-strings/surfaces/properties.js') }}
+
+      - name: Bootstrap the property extractor (venv + tree-sitter grammar)
+        run: make -C tools/property-extractor venv treesitter
 
       # jest.unit.config.js extends jest.config.js's testPathIgnorePatterns
       # instead of repeating them here, because a CLI --testPathIgnorePatterns
@@ -315,6 +414,12 @@ jobs:
 
       - name: Lint the guard workflow and its embedded bash
         run: docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.7 -color .github/workflows/guard-generated-files.yml
+
+      # connect-docs-check.yml is a PR check for connect, so it gets the same
+      # treatment. actionlint does not know job.workflow_sha yet (GitHub
+      # documents it in the job context), hence the one ignore.
+      - name: Lint the Connect docs check workflow and its embedded bash
+        run: docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.7 -color -ignore 'property "workflow_sha" is not defined' .github/workflows/connect-docs-check.yml
 
       - name: Shellcheck the guard script
         run: docker run --rm -v "$PWD":/mnt -w /mnt koalaman/shellcheck:v0.10.0 .github/scripts/guard-generated-files.sh

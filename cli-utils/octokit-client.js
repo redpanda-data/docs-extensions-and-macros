@@ -1,7 +1,7 @@
 'use strict'
 
 const { Octokit } = require('@octokit/rest')
-const { getGitHubToken } = require('./github-token')
+const { getGitHubApiToken } = require('./github-token')
 
 /**
  * Shared Octokit client instance for GitHub API access
@@ -14,7 +14,7 @@ const { getGitHubToken } = require('./github-token')
  */
 
 // Get authentication token from environment
-const token = getGitHubToken()
+const token = getGitHubApiToken()
 
 // Configure Octokit options
 const octokitOptions = {

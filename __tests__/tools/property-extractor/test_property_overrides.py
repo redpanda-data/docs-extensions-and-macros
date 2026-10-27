@@ -15,7 +15,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../tools/property-extractor'))
 
 import property_extractor
-from property_extractor import apply_property_overrides, report_phantom_stubs
+from property_extractor import apply_property_overrides, report_phantom_stubs, _normalize_admonitions
 
 
 class TestPhantomStubTracking(unittest.TestCase):
@@ -33,7 +33,10 @@ class TestPhantomStubTracking(unittest.TestCase):
         self.assertEqual(len(property_extractor.phantom_stub_entries), 1)
         entry = property_extractor.phantom_stub_entries[0]
         self.assertEqual(entry["name"], "ghost_property")
-        self.assertEqual(entry["config_scope"], "topic")
+        # Underscored name, so it is inferred as a cluster property rather than
+        # defaulted to topic.
+        self.assertEqual(entry["config_scope"], "cluster")
+        self.assertTrue(entry["scope_inferred"])
 
     def test_phantom_stub_records_override_scope(self):
         """The recorded scope reflects the override's config_scope, not just the default."""
@@ -43,6 +46,60 @@ class TestPhantomStubTracking(unittest.TestCase):
 
         self.assertEqual(len(property_extractor.phantom_stub_entries), 1)
         self.assertEqual(property_extractor.phantom_stub_entries[0]["config_scope"], "cluster")
+        self.assertFalse(property_extractor.phantom_stub_entries[0]["scope_inferred"])
+
+    def test_dotted_name_is_inferred_as_a_topic_property(self):
+        """A dot-separated name is a topic property, matching Redpanda's naming."""
+        apply_property_overrides({}, {"properties": {"ghost.topic.property": {}}})
+
+        entry = property_extractor.phantom_stub_entries[0]
+        self.assertEqual(entry["config_scope"], "topic")
+        self.assertTrue(entry["scope_inferred"])
+
+    def test_underscored_name_is_not_fabricated_as_a_topic_property(self):
+        """Regression: cloud_topics_l1_indexing_interval landed on the topic page.
+
+        The override was keyed on the C++ member name rather than the
+        registered cloud_topics_indexing_interval, so it matched nothing and
+        was fabricated. Defaulting every fabricated property to topic scope
+        put an underscored cluster-style name into topic-properties.adoc.
+        """
+        result = apply_property_overrides(
+            {}, {"properties": {"cloud_topics_l1_indexing_interval": {"version": "v26.1.1"}}}
+        )
+
+        prop = result["cloud_topics_l1_indexing_interval"]
+        self.assertEqual(prop["config_scope"], "cluster")
+        self.assertFalse(prop["is_topic_property"])
+
+    def test_explicit_scope_beats_the_name_shape(self):
+        """An override naming its own scope wins, even against the name shape."""
+        result = apply_property_overrides(
+            {}, {"properties": {"ghost.dotted.name": {"config_scope": "cluster"}}}
+        )
+
+        self.assertEqual(result["ghost.dotted.name"]["config_scope"], "cluster")
+        self.assertFalse(result["ghost.dotted.name"]["is_topic_property"])
+
+    def test_scope_inference_never_reaches_the_output(self):
+        """Whether the scope was inferred is reported beside the stub, never on it."""
+        result = apply_property_overrides({}, {"properties": {"ghost_property": {}}})
+
+        self.assertNotIn("_scope_inferred", result["ghost_property"])
+
+    def test_warning_says_whether_the_scope_was_guessed(self):
+        """The operator can tell an inferred scope from a declared one."""
+        apply_property_overrides({}, {"properties": {
+            "ghost_guessed": {},
+            "ghost_declared": {"config_scope": "broker"},
+        }})
+
+        with self.assertLogs(property_extractor.logger, level="WARNING") as captured:
+            report_phantom_stubs()
+
+        joined = "\n".join(captured.output)
+        self.assertIn("config_scope 'cluster' inferred from the name", joined)
+        self.assertIn("config_scope 'broker' from the override", joined)
 
     def test_no_phantom_stub_when_override_matches_property_key(self):
         """Overrides applied to an existing property key are not phantom stubs."""
@@ -96,7 +153,7 @@ class TestPhantomStubTracking(unittest.TestCase):
         output = "\n".join(captured.output)
         self.assertIn("matched no extracted property", output)
         self.assertIn("ghost_property", output)
-        self.assertIn("config_scope 'topic'", output)
+        self.assertIn("config_scope 'cluster'", output)
         self.assertIn("property-overrides.json", output)
 
     def test_report_logs_nothing_when_no_phantom_stubs(self):
@@ -110,6 +167,198 @@ class TestPhantomStubTracking(unittest.TestCase):
             logging.getLogger("viewer").warning("sentinel")
             report_phantom_stubs()
         self.assertEqual(captured.output, ["WARNING:viewer:sentinel"])
+
+
+class TestAdmonitionsOverride(unittest.TestCase):
+    """Structured NOTE/TIP/IMPORTANT/WARNING/CAUTION callouts, applied as an
+    override field instead of markup embedded in the description text."""
+
+    def test_normalizes_type_to_uppercase(self):
+        result = _normalize_admonitions([{"type": "note", "text": "Be careful."}])
+        self.assertEqual(result, [{"type": "NOTE", "text": "Be careful."}])
+
+    def test_preserves_optional_title(self):
+        result = _normalize_admonitions([{"type": "warning", "title": "Don't do this.", "text": "x"}])
+        self.assertEqual(result, [{"type": "WARNING", "title": "Don't do this.", "text": "x"}])
+
+    def test_omits_title_key_when_not_given(self):
+        result = _normalize_admonitions([{"type": "note", "text": "x"}])
+        self.assertNotIn("title", result[0])
+
+    def test_accepts_every_admonition_type(self):
+        entries = [{"type": t, "text": "x"} for t in
+                   ("note", "tip", "important", "warning", "caution")]
+        result = _normalize_admonitions(entries)
+        self.assertEqual([e["type"] for e in result],
+                          ["NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION"])
+
+    def test_drops_entry_with_unknown_type(self):
+        with self.assertLogs("viewer", level="WARNING") as captured:
+            result = _normalize_admonitions([
+                {"type": "note", "text": "kept"},
+                {"type": "danger", "text": "dropped, not a real AsciiDoc admonition type"},
+            ])
+        self.assertEqual(result, [{"type": "NOTE", "text": "kept"}])
+        self.assertIn("unknown type", "\n".join(captured.output))
+
+    def test_drops_entry_missing_text_or_type(self):
+        with self.assertLogs("viewer", level="WARNING"):
+            result = _normalize_admonitions([{"type": "note"}, {"text": "no type"}])
+        self.assertEqual(result, [])
+
+    def test_drops_entry_with_non_string_text(self):
+        with self.assertLogs("viewer", level="WARNING") as captured:
+            result = _normalize_admonitions([{"type": "note", "text": ["not", "a", "string"]}])
+        self.assertEqual(result, [])
+        self.assertIn("string type and text", "\n".join(captured.output))
+
+    def test_drops_entry_with_non_string_title(self):
+        with self.assertLogs("viewer", level="WARNING") as captured:
+            result = _normalize_admonitions([{"type": "note", "text": "x", "title": 123}])
+        self.assertEqual(result, [])
+        self.assertIn("title must be a string", "\n".join(captured.output))
+
+    def test_returns_none_for_non_list_input(self):
+        with self.assertLogs("viewer", level="WARNING") as captured:
+            result = _normalize_admonitions("not a list")
+        self.assertIsNone(result)
+        self.assertIn("must be an array", "\n".join(captured.output))
+
+    def test_applies_to_existing_property_via_override(self):
+        properties = {"seed_servers": {"name": "seed_servers", "description": "d"}}
+        overrides = {"properties": {"seed_servers": {
+            "admonitions": [{"type": "important", "text": "Only one broker should have an empty seed_servers list."}],
+        }}}
+
+        result = apply_property_overrides(properties, overrides)
+
+        self.assertEqual(result["seed_servers"]["admonitions"],
+                          [{"type": "IMPORTANT", "text": "Only one broker should have an empty seed_servers list."}])
+
+    def test_malformed_admonitions_override_does_not_set_field(self):
+        properties = {"x": {"name": "x", "description": "d"}}
+        overrides = {"properties": {"x": {"admonitions": "not a list"}}}
+
+        with self.assertLogs("viewer", level="WARNING"):
+            result = apply_property_overrides(properties, overrides)
+
+        self.assertNotIn("admonitions", result["x"])
+
+    def test_phantom_stub_normalizes_admonitions_type(self):
+        """A new property created from an unmatched override key must go
+        through the same normalization as an existing property, not a raw
+        passthrough -- otherwise it ships with a lowercase `type` that
+        AsciiDoc won't render as a real admonition block."""
+        overrides = {"properties": {"ghost_property": {
+            "admonitions": [{"type": "warning", "text": "x"}],
+        }}}
+
+        result = apply_property_overrides({}, overrides)
+
+        self.assertEqual(result["ghost_property"]["admonitions"],
+                          [{"type": "WARNING", "text": "x"}])
+
+    def test_phantom_stub_malformed_admonitions_does_not_set_field(self):
+        """A malformed admonitions value on a phantom stub is dropped with a
+        warning, not passed through unvalidated."""
+        overrides = {"properties": {"ghost_property": {"admonitions": "not a list"}}}
+
+        with self.assertLogs("viewer", level="WARNING"):
+            result = apply_property_overrides({}, overrides)
+
+        self.assertNotIn("admonitions", result["ghost_property"])
+
+
+class TestLinksAndAudienceScopes(unittest.TestCase):
+    """Fields the generator turns into AsciiDoc must survive the Python stage.
+
+    `_apply_override_to_existing_property` is a flat list of explicit
+    assignments with no catch-all passthrough (only the phantom-stub path has
+    one), so a new override field reaches the generator only if it is named
+    there. `_normalize_admonitions` rebuilds each entry from scratch rather than
+    copying it, so the same applies to every admonition field.
+    """
+
+    def test_links_survive_on_an_existing_property(self):
+        properties = {"real_property": {"name": "real_property", "description": "src"}}
+        overrides = {"properties": {"real_property": {"links": {"`x`": "#x"}}}}
+
+        result = apply_property_overrides(properties, overrides)
+
+        self.assertEqual(result["real_property"]["links"], {"`x`": "#x"})
+
+    def test_links_survive_on_a_phantom_stub(self):
+        overrides = {"properties": {"ghost_property": {"links": {"`x`": "#x"}}}}
+
+        result = apply_property_overrides({}, overrides)
+
+        self.assertEqual(result["ghost_property"]["links"], {"`x`": "#x"})
+
+    def test_includes_survive_on_an_existing_property(self):
+        properties = {"real_property": {"name": "real_property", "description": "src"}}
+        overrides = {"properties": {"real_property": {
+            "includes": ["reference:partial$internal-use-property.adoc[]"],
+        }}}
+
+        result = apply_property_overrides(properties, overrides)
+
+        self.assertEqual(
+            result["real_property"]["includes"],
+            ["reference:partial$internal-use-property.adoc[]"],
+        )
+
+    def test_includes_survive_on_a_phantom_stub(self):
+        overrides = {"properties": {"ghost_property": {
+            "includes": ["reference:partial$internal-use-property.adoc[]"],
+        }}}
+
+        result = apply_property_overrides({}, overrides)
+
+        self.assertEqual(
+            result["ghost_property"]["includes"],
+            ["reference:partial$internal-use-property.adoc[]"],
+        )
+
+    def test_array_description_is_passed_through_unflattened(self):
+        """The generator flattens the array into AsciiDoc, so Python must not
+        stringify or reorder it."""
+        properties = {"real_property": {"name": "real_property", "description": "src"}}
+        overrides = {"properties": {"real_property": {
+            "description": ["One.", "cloud-only: Cloud bit."],
+        }}}
+
+        result = apply_property_overrides(properties, overrides)
+
+        self.assertEqual(result["real_property"]["description"],
+                         ["One.", "cloud-only: Cloud bit."])
+
+    def test_admonition_audience_scopes_survive_normalization(self):
+        self.assertEqual(
+            _normalize_admonitions([
+                {"type": "tip", "text": "cloud", "cloud_only": True},
+                {"type": "note", "text": "sm", "self_managed_only": True},
+            ]),
+            [
+                {"type": "TIP", "text": "cloud", "cloud_only": True},
+                {"type": "NOTE", "text": "sm", "self_managed_only": True},
+            ],
+        )
+
+    def test_deprecated_self_hosted_only_normalizes_to_self_managed_only(self):
+        """The old spelling keeps parsing, and comes out under the current
+        name so only one spelling ever reaches the templates."""
+        self.assertEqual(
+            _normalize_admonitions([{"type": "note", "text": "t", "self_hosted_only": True}]),
+            [{"type": "NOTE", "text": "t", "self_managed_only": True}],
+        )
+
+    def test_admonition_scope_that_is_not_true_is_not_carried(self):
+        """Only an exact True scopes the block; a truthy string would otherwise
+        hide an admonition from one build on a typo."""
+        self.assertEqual(
+            _normalize_admonitions([{"type": "note", "text": "t", "cloud_only": "yes"}]),
+            [{"type": "NOTE", "text": "t"}],
+        )
 
 
 if __name__ == "__main__":

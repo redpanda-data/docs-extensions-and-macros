@@ -138,11 +138,19 @@ function parseJSDocComments(sourceFile) {
   // was documented with the first command's prose. That is exactly what
   // happened to `generate migrate-rpcn-descriptions`, which shipped a
   // regenerated section describing migrate-rpcn-metadata.
-  const pattern = /\/\*\*\s*((?:(?!\*\/)[\s\S])*?)\s*\*\/\s*(?:programCli|automation|validation)\s*\.command\(['"]([^'"]+)['"]\)/g;
+  //
+  // The group is captured too, because a command NAME is not unique: the same
+  // name can be registered under both `automation` (generate) and `validation`
+  // (validate). `kapa-source-groups` is, and keying on the bare name alone made
+  // the later registration silently overwrite the earlier, so the
+  // `generate kapa-source-groups` section shipped describing the validate
+  // command, complete with validate examples under a generate usage line.
+  // Same failure as the migrate-rpcn one above, one level up.
+  const pattern = /\/\*\*\s*((?:(?!\*\/)[\s\S])*?)\s*\*\/\s*(programCli|automation|validation)\s*\.command\(['"]([^'"]+)['"]\)/g;
 
   let match;
   while ((match = pattern.exec(content)) !== null) {
-    const [, commentText, commandName] = match;
+    const [, commentText, group, commandName] = match;
 
     // Parse the comment into sections
     const parsed = {
@@ -189,7 +197,12 @@ function parseJSDocComments(sourceFile) {
         .trim();
     }
 
-    comments[commandName] = parsed;
+    // Keyed by the CLI path a reader would type, so `generate x` and
+    // `validate x` cannot collide. The bare name is kept as well, for the
+    // top-level commands registered straight onto programCli.
+    const groupPrefix = { automation: 'generate ', validation: 'validate ', programCli: '' }[group]
+    comments[`${groupPrefix}${commandName}`] = parsed;
+    if (comments[commandName] === undefined) comments[commandName] = parsed;
   }
 
   return comments;
@@ -277,74 +290,37 @@ IMPORTANT: This documentation is auto-generated. Do not edit manually. Run \`npm
   const mainData = parseHelp(mainHelp);
   doc += generateCommandDoc('', mainData, null, 2);
 
-  // Top-level commands (excluding 'generate' which has subcommands)
-  const topLevelCommands = [
-    'install-test-dependencies',
-    'get-redpanda-version',
-    'get-console-version',
-    'link-readme',
-    'fetch',
-    'setup-mcp',
-    'validate-mcp',
-    'preview-prompt',
-    'mcp-version'
-  ];
+  // Walk the command tree the CLI itself reports, rather than three
+  // hardcoded lists. Those lists had drifted both ways at once: lint-strings,
+  // preview-string and overrides were undocumented while README.adoc points
+  // users here as the complete reference, and `preview-prompt` was still
+  // getting a section even though the command no longer exists (the generator
+  // fell back to the top-level help for it, so the section was real-looking
+  // and wrong). A command group is anything whose help lists Commands: of its
+  // own, so a new command or subcommand is documented the moment it is
+  // registered.
+  const documentCommand = (commandPath, level) => {
+    const label = commandPath.join(' ');
+    console.log(`${'  '.repeat(level - 1)}Generating docs for: ${label}`);
+    const data = parseHelp(getHelpOutput(label));
+    // Prefer the full command path, falling back to the bare name so that
+    // commands registered directly on programCli still resolve.
+    const jsdoc = jsdocs[label] || jsdocs[commandPath[commandPath.length - 1]];
+    doc += generateCommandDoc(label, data, jsdoc, level);
+    for (const child of data.commands) {
+      // Commander lists `help [command]` in every group; it is not a command
+      // anyone documents.
+      const childName = child.name.split(/[\s[<]/)[0];
+      if (childName === 'help') continue;
+      documentCommand([...commandPath, childName], level + 1);
+    }
+  };
 
-  topLevelCommands.forEach(cmd => {
-    console.log(`  Generating docs for: ${cmd}`);
-    const help = getHelpOutput(cmd);
-    const data = parseHelp(help);
-    const jsdoc = jsdocs[cmd];
-    doc += generateCommandDoc(cmd, data, jsdoc, 2);
-  });
-
-  // Generate command and its subcommands
-  console.log('  Generating docs for: generate');
-  const generateHelp = getHelpOutput('generate');
-  const generateData = parseHelp(generateHelp);
-  doc += generateCommandDoc('generate', generateData, null, 2);
-
-  // Generate subcommands
-  const generateSubcommands = [
-    'property-docs',
-    'metrics-docs',
-    'rpk-docs',
-    'rpk-env-partial',
-    'rpcn-connector-docs',
-    'helm-spec',
-    'cloud-regions',
-    'crd-spec',
-    'bundle-openapi',
-    'update-connect-version',
-    'migrate-rpcn-metadata',
-    'migrate-rpcn-descriptions'
-  ];
-
-  generateSubcommands.forEach(subcmd => {
-    console.log(`    Generating docs for: generate ${subcmd}`);
-    const help = getHelpOutput(`generate ${subcmd}`);
-    const data = parseHelp(help);
-    const jsdoc = jsdocs[subcmd];
-    doc += generateCommandDoc(`generate ${subcmd}`, data, jsdoc, 3);
-  });
-
-  // Validate command and its subcommands
-  console.log('  Generating docs for: validate');
-  const validateHelp = getHelpOutput('validate');
-  const validateData = parseHelp(validateHelp);
-  doc += generateCommandDoc('validate', validateData, null, 2);
-
-  const validateSubcommands = [
-    'enterprise-features'
-  ];
-
-  validateSubcommands.forEach(subcmd => {
-    console.log(`    Generating docs for: validate ${subcmd}`);
-    const help = getHelpOutput(`validate ${subcmd}`);
-    const data = parseHelp(help);
-    const jsdoc = jsdocs[subcmd];
-    doc += generateCommandDoc(`validate ${subcmd}`, data, jsdoc, 3);
-  });
+  for (const child of mainData.commands) {
+    const childName = child.name.split(/[\s[<]/)[0];
+    if (childName === 'help') continue;
+    documentCommand([childName], 2);
+  }
 
   // Write to file
   const outputPath = path.join(__dirname, '..', 'CLI_REFERENCE.adoc');

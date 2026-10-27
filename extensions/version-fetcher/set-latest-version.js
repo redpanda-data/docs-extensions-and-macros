@@ -8,15 +8,24 @@ module.exports.register = function ({ config }) {
   const GetLatestDockerTag = require('./fetch-latest-docker-tag');
   const GetLatestHelmChartVersionFromOperator = require('./get-latest-redpanda-helm-version-from-operator');
   const GetLatestConnectVersion = require('./get-latest-connect');
+  const { latestStablePerLine, releaseLineOf, isOlderReleaseLine } = require('./release-lines');
   const logger = this.getLogger('set-latest-version-extension');
 
-  const { getGitHubToken } = require('../../cli-utils/github-token');
+  const { getGitHubApiToken } = require('../../cli-utils/github-token');
   // Shared with tools/bundle-openapi.js so there is one major.minor derivation.
   const { toShortVersion } = require('../../cli-utils/version');
-  const token = getGitHubToken();
+  // API token, not the git one: GIT_CREDENTIALS (Antora's clone credential)
+  // is only a last resort here, because on Netlify it is scoped to the docs
+  // content repos and cannot see streaming-enterprise.
+  const token = getGitHubApiToken();
 
   if (!token) {
-    logger.warn('GitHub token not set (REDPANDA_GITHUB_TOKEN, GITHUB_TOKEN, or GH_TOKEN). Attempting unauthenticated request.');
+    // Unauthenticated requests still work for the public repos this
+    // extension queries (connect, redpanda-operator), but the Redpanda
+    // version now comes from the private streaming-enterprise repo, whose
+    // API 404s without a token -- the latest-redpanda-* attributes are then
+    // left unset and pages fall back to their antora.yml values.
+    logger.warn('GitHub token not set (REDPANDA_GITHUB_TOKEN, GITHUB_TOKEN, GH_TOKEN, or GIT_CREDENTIALS). The Redpanda version lookup against the private streaming-enterprise repo will fail and leave latest-redpanda-* attributes unset; other lookups proceed unauthenticated.');
   }
 
   this.on('contentClassified', async ({ contentCatalog }) => {
@@ -41,9 +50,20 @@ module.exports.register = function ({ config }) {
         latestOperatorResult,
         latestConnectResult,
       ] = await Promise.allSettled([
-        GetLatestRedpandaVersion(github, owner, 'redpanda', logger),
+        // streaming-enterprise, not the frozen public 'redpanda' repo: the public
+        // repo still answers API calls but stopped receiving releases on
+        // 2026-08-20, so resolving from it silently pins the docs to the last
+        // pre-freeze version forever.
+        GetLatestRedpandaVersion(github, owner, 'streaming-enterprise', logger),
         GetLatestDockerTag(dockerNamespace, 'console', logger),
-        GetLatestDockerTag(dockerNamespace, 'redpanda-operator', logger),
+        // Three pages (300 tags) so older docs versions can still find the
+        // newest patch of their own operator line. Docker Hub lists recent
+        // pushes first, so the first page holds every line that still gets
+        // patches. Today the second and third pages add only legacy lines
+        // (2.x, 22.3, 23.x) that no built docs version pins to. They are
+        // headroom for a line that stops getting patches and drops off the
+        // first page as newer tags are pushed.
+        GetLatestDockerTag(dockerNamespace, 'redpanda-operator', logger, { maxPages: 3 }),
         GetLatestConnectVersion(github, owner, 'connect', logger),
       ]);
       
@@ -85,6 +105,33 @@ module.exports.register = function ({ config }) {
       };
 
       const components = await contentCatalog.getComponents();
+
+      // An operator or Helm chart release supports only its own Redpanda line
+      // and the lines next to it, so a docs version for an older line must
+      // install that line's release, not the newest one. Resolve the newest
+      // operator tag of each line from the fetched tags, and that line's chart
+      // version from its release branch, once per line.
+      const operatorLines = latestStablePerLine(latestVersions.operator?.stableReleases);
+      const lineVersions = new Map();
+      for (const component of components) {
+        for (const { version } of component.versions) {
+          if (!isOlderReleaseLine(version, component.latest?.version)) continue;
+          const line = releaseLineOf(version);
+          if (lineVersions.has(line)) continue;
+          const operatorTag = operatorLines.get(line) || null;
+          lineVersions.set(line, { operator: operatorTag, helmChart: null });
+        }
+      }
+      await Promise.all([...lineVersions].map(async ([line, resolved]) => {
+        if (!resolved.operator) return;
+        try {
+          const chart = await GetLatestHelmChartVersionFromOperator(github, owner, 'redpanda-operator', resolved.operator, null, logger);
+          resolved.helmChart = chart?.latestStableRelease || null;
+        } catch (error) {
+          logger.warn(`Helm chart lookup for the ${line} line failed: ${error.message || error}`);
+        }
+      }));
+
       components.forEach(component => {
         const prerelease = component.latestPrerelease;
 
@@ -93,13 +140,45 @@ module.exports.register = function ({ config }) {
             asciidoc.attributes['page-component-version-is-prerelease'] = 'true';
           }
 
+          // Older docs versions get the newest operator and chart release of
+          // their own line. The latest version, prereleases, and unversioned
+          // components get the newest release overall. When an older line has
+          // no release to pin to, the newest release would not support it, so
+          // the version keeps the value its antora.yml sets, and gets the
+          // newest release only when antora.yml sets nothing.
+          let operatorVersion = latestVersions.operator?.latestStableRelease;
+          let helmChartVersion = latestVersions.helmChart?.latestStableRelease;
+          if (isOlderReleaseLine(version, component.latest?.version)) {
+            const line = releaseLineOf(version);
+            const resolved = lineVersions.get(line) || {};
+            const keepOrNewest = (key, newest, what) => {
+              const own = asciidoc.attributes[key];
+              if (own) {
+                logger.warn(`No ${what} release found for the ${line} line, so ${name} ${version} keeps ${key} from its antora.yml (${own}).`);
+                return own;
+              }
+              logger.warn(`No ${what} release found for the ${line} line and its antora.yml sets no ${key}, so ${name} ${version} uses the newest release (${newest || 'unknown'}).`);
+              return newest;
+            };
+            if (resolved.operator) {
+              operatorVersion = resolved.operator;
+            } else {
+              operatorVersion = keepOrNewest('latest-operator-version', operatorVersion, 'stable Redpanda Operator');
+            }
+            if (resolved.helmChart) {
+              helmChartVersion = resolved.helmChart;
+            } else {
+              helmChartVersion = keepOrNewest('latest-redpanda-helm-chart-version', helmChartVersion, 'Redpanda Helm chart');
+            }
+          }
+
           // Set operator and helm chart attributes via helper function. These keep
           // their raw fetched form, including the "v" prefix on
           // latest-operator-version, because docs pages pass that value straight
           // to `helm --version`. Only the short sibling is derived.
           updateAttributes(asciidoc, [
-            { condition: latestVersions.operator, key: 'latest-operator-version', value: latestVersions.operator?.latestStableRelease },
-            { condition: latestVersions.helmChart, key: 'latest-redpanda-helm-chart-version', value: latestVersions.helmChart?.latestStableRelease }
+            { condition: latestVersions.operator, key: 'latest-operator-version', value: operatorVersion },
+            { condition: latestVersions.helmChart, key: 'latest-redpanda-helm-chart-version', value: helmChartVersion }
           ]);
 
           // Set attributes for console and connect versions
@@ -178,6 +257,9 @@ module.exports.register = function ({ config }) {
       summary.forEach(([label, stableVersion, betaVersion]) => {
         logger.info(`- ${label}: ${stableVersion || 'unknown'}${betaVersion ? ', beta: ' + betaVersion : ''}`);
       });
+      [...lineVersions].sort(([a], [b]) => semver.rcompare(`${a}.0`, `${b}.0`)).forEach(([line, resolved]) => {
+        logger.info(`- ${line} docs: operator ${resolved.operator || 'antora.yml value (no release in line)'}, Helm chart ${resolved.helmChart || 'antora.yml value (no release in line)'}`);
+      });
     } catch (error) {
       logger.error(`Error updating versions: ${error}`);
     }
@@ -218,10 +300,15 @@ module.exports.register = function ({ config }) {
     return version.replace(/^v/, '');
   }
 
-  // Helper function to update multiple attributes based on a list of mappings
+  // Helper function to update multiple attributes based on a list of mappings.
+  // Gated on the value, not just the condition: gating on the enclosing object
+  // alone assigned `undefined` whenever the fetch returned an object without
+  // the field, and that clobbered the antora.yml fallback instead of falling
+  // back to it. The visible symptom was a literal {latest-operator-version} in
+  // the published release-notes pages.
   function updateAttributes(asciidoc, mappings) {
     mappings.forEach(({ condition, key, value }) => {
-      if (condition) {
+      if (condition && value) {
         asciidoc.attributes[key] = value;
         setShortVersionAttribute(asciidoc, key, value);
       }

@@ -534,7 +534,7 @@ describe('MCP Server Library - Repository Detection', () => {
         expect(result.version).toBe('v25.3.1');
         expect(result.docker_tag).toBe('docker.redpanda.com/redpandadata/redpanda:v25.3.1');
         expect(result.is_beta).toBe(false);
-        expect(result.notes_url).toBe('https://github.com/redpanda-data/redpanda/releases/tag/v25.3.1');
+        expect(result.notes_url).toBe('https://github.com/redpanda-data/streaming-enterprise/releases/tag/v25.3.1');
       });
 
       it('should return version information for beta release', () => {
@@ -1017,6 +1017,36 @@ describe('MCP Server Library - Repository Detection', () => {
           expect.arrayContaining(['--fetch-connectors', '--draft-missing']),
           expect.any(Object)
         );
+      });
+
+      it('does not pick up docs-data/overrides.json implicitly', () => {
+        // Even with the old default file present, no --overrides is passed:
+        // connector descriptions come from the connect and benthos specs.
+        fs.existsSync = jest.fn((p) => p.includes('package.json') || p.includes('doc-tools.js') || p.endsWith('overrides.json'));
+        fs.realpathSync = jest.fn((p) => p);
+        fs.readdirSync = jest.fn(() => []);
+        spawnSync.mockReturnValue({ status: 0, stdout: 'Generated 1 connectors\n', stderr: '', error: null });
+
+        const result = generateRpConnectDocs({});
+
+        expect(result.success).toBe(true);
+        const args = spawnSync.mock.calls[0][1];
+        expect(args).not.toContain('--overrides');
+        expect(args.some(a => String(a).includes('overrides.json'))).toBe(false);
+      });
+
+      it('passes --overrides when the caller gives a path (negative control)', () => {
+        fs.existsSync = jest.fn((p) => p.includes('package.json') || p.includes('doc-tools.js'));
+        fs.realpathSync = jest.fn((p) => p);
+        fs.readdirSync = jest.fn(() => []);
+        spawnSync.mockReturnValue({ status: 0, stdout: 'Generated 1 connectors\n', stderr: '', error: null });
+
+        generateRpConnectDocs({ overrides: 'custom/overrides.json' });
+
+        const args = spawnSync.mock.calls[0][1];
+        const i = args.indexOf('--overrides');
+        expect(i).toBeGreaterThan(-1);
+        expect(args[i + 1]).toBe('custom/overrides.json');
       });
 
       it('should handle output without connector count', () => {

@@ -100,6 +100,29 @@ This extension generates an Algolia index for each version of each component. Th
 
 NOTE: Only pages that include an `<article>` element with the `doc` class are indexed.
 
+When the build has the docs taxonomy (see <<Docs taxonomy>>), every Product Docs record also carries these attributes, next to `categories`:
+
+[cols="1,3"]
+|===
+|Attribute |Value
+
+|`topics`, `topicIds`
+|The topic concepts of the page's authored `page-categories`, with the broader concepts they imply (Replication implies High Availability). Labels and IDs.
+
+|`useCases`, `useCaseIds`
+|The use-case concepts of the page's categories.
+
+|`technologies`, `technologyIds`
+|The technology concepts of the page's categories, those a topic implies (Iceberg Topics implies Apache Iceberg), and the technology whose `component` is the page's component (a page in `connect` is about Redpanda Connect).
+
+|`deployment`, `deploymentIds`
+|The deployment concept of the page's `env-*` attributes, and its broader concept.
+|===
+
+`categories` is unchanged: it is still the legacy list that validate-attributes writes, because labs-home filters on it. Labs records get none of the new attributes, and keep their string `deployment`.
+
+The Algolia index settings are not in any repository. To filter or facet on the new attributes, add them to `attributesForFaceting` in the index settings.
+
 === Environment variables
 
 - `ALGOLIA_ADMIN_API_KEY` (required)
@@ -404,24 +427,76 @@ You can optionally display pages only if they match the component and version of
 
 == Redpanda Connect tag modifier
 
-This extension updates the playbook to use the latest release tag for the Redpanda Connect documentation. It ensures that the Redpanda Connect documentation is always pulled from the latest release tag available on GitHub.
+This extension adds the Redpanda Connect generated reference docs (field reference, examples, metadata, descriptions, config snippets, the Bloblang reference, and `platforms/catalog.json`) to the `connect` component that rp-connect-docs provides, from a Connect release.
+
+Every Connect release publishes the generated tree as a release asset named `redpanda-connect-docs.tar.gz`, at `\https://github.com/redpanda-data/connect/releases/download/<tag>/redpanda-connect-docs.tar.gz`. The playbook does not list the connect repository as a content source. If it still lists the upstream repository with `tags: latest`, the extension removes that source. See <<Playbooks that list the connect repository>>.
+
+At build time, when the playbook has the `connect` component, the extension:
+
+. Picks the release: the latest stable `vX.Y.Z` release by default, so the site never shows fields from unreleased code on connect's `main` branch. It asks the GitHub API for the latest release and falls back to the highest stable `vX.Y.Z` tag from `git ls-remote`. If neither works, the build stops with an error. The `tag` option picks a specific release instead.
+. Downloads that release's `redpanda-connect-docs.tar.gz` asset. With a GitHub token it downloads through the releases API, which keeps working if the connect repository becomes private. Without one, or if GitHub rejects the token, it uses the public download URL.
+. Adds `modules/components/partials/**` as partials, `modules/components/examples/**` as examples, and `modules/components/attachments/**` (the release's `connect-<version>.json`, read by the Bloblang playground) as attachments of the `components` module, in every version of the `connect` component. A file that another source, such as rp-connect-docs, already provides is skipped and counted in the log, so rp-connect-docs can keep committing its own copies until it stops.
+. When the playbook also registers `add-git-dates`, dates each page by the Connect release that last changed its reference. For every generated partial or example a page includes, directly or through another generated partial such as `bloblang/methods.adoc`, the extension compares the release with older releases that have the asset, newest first, and takes the publish date of the newest release that changed the file. A page that single-sources such a connect page, such as a Cloud stub, gets the same date. `add-git-dates` uses the date as `page-git-modified-date` when it is later than the page's last commit. The walk stops at v4.113.0, the first release with the asset, and after at most 10 older releases. A file that is unchanged for the whole walk keeps the page's git date. If the releases listing or an older release's download fails, the extension logs a warning and pages keep their git dates, so the build never stops for a date. Without `add-git-dates` in the playbook, the extension skips this step and downloads only the release it uses.
+
+A release from before the asset existed has none, and the download returns 404. A new release can also be missing it for a while: Connect publishes the release first and attaches the asset 15 to 20 minutes later in a separate job, which can fail.
+
+So when the latest release has no asset, the extension falls back to the newest older stable `vX.Y.Z` release that has one, and logs a warning that names both, such as `Redpanda Connect v4.114.0 has no redpanda-connect-docs.tar.gz asset yet; using v4.113.0`. It reads the asset lists of the 10 most recent releases from the GitHub releases API, so it downloads only the release it picks. If the API is unavailable, it tries the downloads of the next 3 lower stable tags from `git ls-remote` instead. A release picked with the `tag` option never falls back: if it has no asset, the build stops with an error that names the release.
+
+When no release it checks has the asset, the extension logs this and adds nothing. The `generate-rp-connect-info` extension then stops the build if connector pages are missing any generated set they include: the `fields/`, `descriptions/`, or `availability/` partials, or the `common/` or `advanced/` examples. This also catches an incomplete asset, which would otherwise publish pages with unresolved includes. Any other failure, such as a network error or a corrupt archive, stops the build, because building without the reference would publish connector pages with no fields.
+
+The extension shares the release it used, including a fallback release, so `generate-rp-connect-info` reads `catalog.json` and `info.csv` for the same release as the reference docs. It adds its files before any other `contentClassified` listener runs, wherever it is listed in the playbook.
+
+=== Preview unreleased Connect changes
+
+To build with reference docs that are not released yet, generate them in a connect checkout and point `REDPANDA_CONNECT_DOCS_DIR` at the result:
+
+[,bash]
+----
+export REDPANDA_CONNECT_DOCS_DIR=/path/to/connect/docs
+npx antora --fetch local-antora-playbook.yml
+----
+
+The value is a directory that contains `modules/` (a connect checkout's `docs/` directory after running its docs generator, or the checkout root), or a local copy of a `redpanda-connect-docs.tar.gz` file. It wins over the `tag` option and the latest release, and nothing is downloaded. Its files also replace any copy another source provides, such as the copies rp-connect-docs commits, and the log counts how many were replaced. Set `tag` as well to choose the release that `generate-rp-connect-info` reads `info.csv` from.
+
+=== Playbooks that list the connect repository
+
+Before the release asset, playbooks listed the connect repository as a content source:
+
+```yaml
+content:
+  sources:
+  - url: https://github.com/redpanda-data/connect
+    tags: latest
+    start_path: docs
+```
+
+Connect releases no longer include `docs/antora.yml`, so Antora cannot aggregate that source. When the upstream `redpanda-data/connect` repository is listed with `tags: latest` as its only ref, the extension removes the source from the playbook before Antora fetches content, logs a warning that it is no longer needed, and uses the release asset. Remove the source from the playbook to silence the warning.
+
+A connect source with explicit refs is kept, which is how you preview a connect branch: a branch, a specific tag, a fork, or a local clone whose directory is named `connect`. In that case the extension downloads no asset, and:
+
+* Only the `modules/components/partials/` and `modules/components/examples/` files of the `connect` component are kept from that source. Any file that another source already provides is skipped, and so is content from older Connect tags that name their component `redpanda-connect`.
+* `REDPANDA_CONNECT_DOCS_DIR` and the `tag` option are ignored.
+* The ref must have `docs/antora.yml` and the generated docs. If the generated sets are missing, the `generate-rp-connect-info` error names the connect source.
 
 === Environment variables
 
-- `REDPANDA_GITHUB_TOKEN` (optional): A Personal access token (PAT) that has `repo` permissions for the `redpanda-data` GitHub organization.
-
-NOTE: If you don't set the environment variable, the latest version of Redpanda Connect may not be fetched. When the environment variable is not set, the extension sends unauthenticated requests to GitHub. Unauthenticated requests may result in hitting the API rate limit and cause GitHub to reject the request. In this case the fallback version is used. This version is defined in the playbook where the extension is registered.
+- `REDPANDA_CONNECT_DOCS_DIR` (optional): A local directory, or a local `redpanda-connect-docs.tar.gz` file, to read the reference docs from instead of a release. See <<Preview unreleased Connect changes>>.
+- `REDPANDA_GITHUB_TOKEN` (optional): A GitHub token for the latest release lookup, the fallback release listing, the asset download, and the `git ls-remote` fallback. The extension also reads `ACTIONS_BOT_TOKEN`, `GITHUB_TOKEN`, `VBOT_GITHUB_API_TOKEN`, `GH_TOKEN`, and a github.com entry in `GIT_CREDENTIALS`, in that order. Without any GitHub token, the extension sends unauthenticated requests, which GitHub can rate limit, and which only work while the connect repository is public.
 
 === Configuration options
 
-There are no configurable options for this extension.
+`tag` (optional):: A Connect release tag, such as `v4.113.0`, to use instead of the latest stable release. A missing `v` prefix is added. If that release has no asset, the build stops: an explicit tag never falls back to an older release. `latest` is rejected, because the latest release is the default without `tag`. Ignored when the playbook keeps a connect content source with explicit refs.
 
 === Registration
+
+Register this extension together with `generate-rp-connect-info`:
 
 ```yaml
 antora:
   extensions:
     - require: '@redpanda-data/docs-extensions-and-macros/extensions/modify-connect-tag-playbook'
+      # tag: v4.113.0 # optional: a specific release instead of the latest
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/generate-rp-connect-info'
 ```
 
 == Version fetcher
@@ -439,8 +514,8 @@ The following attributes are available to all versions of all Antora components:
 `console-beta-version`:: The latest beta version of Redpanda Console.
 `operator-beta-version`:: The latest beta version of the Redpanda Operator.
 `helm-beta-version`:: The latest beta version of the Redpanda Helm chart.
-`latest-operator-version`:: The latest release version of the Redpanda Operator. This value keeps its `v` prefix (for example, `v25.1.3`) because pages pass it straight to `helm --version`.
-`latest-redpanda-helm-chart-version`:: The latest release version of the Redpanda Helm chart.
+`latest-operator-version`:: The latest release version of the Redpanda Operator for the component version's release line (see <<operator-and-chart-per-version>>). This value keeps its `v` prefix (for example, `v25.1.3`) because pages pass it straight to `helm --version`.
+`latest-redpanda-helm-chart-version`:: The latest release version of the Redpanda Helm chart for the component version's release line (see <<operator-and-chart-per-version>>). This value has no `v` prefix (for example, `25.3.11`).
 
 The following attributes are available to the latest version of each Antora component:
 
@@ -459,6 +534,19 @@ ever moves forwards.
 `<base>-version-short`:: Only the `major.minor` part (for example, `latest-redpanda-version-short` is `26.2` when `latest-redpanda-version` is `26.2.1`). Use this where a page needs the release line rather than an exact patch, such as a download directory or an install pack name.
 
 A short attribute is only set when a `major.minor` pair can be derived. Release channels that are not versions, such as `nightly` or `latest`, get a `-version` and a `-tag` but no `-version-short`, so a page never renders a fabricated release line.
+
+[[operator-and-chart-per-version]]
+==== Operator and Helm chart versions per component version
+
+An operator or Helm chart release supports its own Redpanda version and one minor version above and below it, so each component version gets the release of its own line:
+
+* A component version named `<major>.<minor>` that is older than the component's latest version gets the newest stable release in that line. For example, version `25.3` gets the newest `v25.3.x` operator and the newest `25.3.x` chart, even when a `26.2.x` release exists.
+* The component's latest version, any prerelease version ahead of it, and unversioned components get the newest stable release overall.
+* If an older line has no stable operator release (for example, lines that shipped only legacy `v2.x.y-<redpanda-version>` operator tags), the newest release does not support it, so both attributes keep the values the component version's `antora.yml` sets. If the line has an operator release but no chart release, only the chart attribute keeps its `antora.yml` value. An attribute that `antora.yml` leaves unset or empty falls back to the newest release overall. Either way, the build logs a warning that names the line.
+
+The release lines come from the fetched operator tags, so no version map needs updating when a line ships. The extension reads up to three pages (300 tags) of the operator's Docker Hub tags, newest pushes first.
+
+The chart version of a line is the newest stable `charts/redpanda/v<major>.<minor>.*` tag in the redpanda-operator repository, which marks a published chart (what `helm search repo` reports). A release branch's `Chart.yaml` can be ahead of the published chart, so the extension reads it only when the line has no chart tag, trying each path the chart has used in order: `charts/redpanda/chart/Chart.yaml`, then `charts/redpanda/Chart.yaml` (the layout of `release/v25.1.x`).
 
 ==== Seed a fallback in antora.yml
 
@@ -574,9 +662,35 @@ Responses are classified as follows:
 * 401/403/429: unverifiable — logged at info level, because bot-walled or rate-limited sites are not broken
 * Other statuses, network errors, and timeouts (after one retry): unverifiable — logged as a warning
 
+=== What is not checked
+
+The extension runs at `contentClassified`, on raw AsciiDoc, before Asciidoctor converts anything. Three kinds of URL are therefore left alone, because checking them reports a broken link where the published page has no link at all:
+
+Code blocks::
+URLs inside a listing (`----`), literal (`....`), passthrough (`++++`) or fenced (`+```+`) block. A fenced block counts as one even when the opening delimiter carries a language info string, such as `+```bash+` or `+```yml+`.
+
+Comments::
+URLs on a line comment (`//`) or inside a comment block (`////`). Asciidoctor drops these before rendering, so a generator's provenance note, a Doc Detective test step, or a writer's editorial aside never becomes a link.
+
+Unresolved attribute references::
+A URL still holding a literal `{name}` reference, such as `+https://github.com/{project-github}/issues+`. Attributes are substituted after this hook runs, so the real target is unknown here while the published URL is usually fine. These are logged at info level with the pages that reference them, and counted separately, so a genuinely undefined attribute is still visible.
+
+=== Report attribution
+
+Each finding names the repository, branch, and path the URL was found in, for example:
+
+----
+Broken external link https://example.com/gone (HTTP 404) referenced in: redpanda-data/docs@main:modules/manage/pages/x.adoc
+----
+
+An aggregated site builds the same Antora-relative path from several repositories and many version branches, so a path on its own does not identify a file well enough to act on.
+
 === Environment variables
 
-This extension does not require any environment variables.
+LINK_CHECK::
+Set to `true` to check links. Without it the extension registers and does nothing, so it can live in a playbook that preview builds also use without those builds making network requests.
++
+This is an environment variable rather than a configuration option for two reasons: Antora does not interpolate environment variables into playbook values, and Antora consumes a playbook entry's own `enabled` key itself, before the config reaches the extension, so that name is not available.
 
 === Configuration options
 
@@ -589,6 +703,11 @@ List of regular expressions. When set, only URLs matching at least one pattern a
 exclude (optional)::
 List of regular expressions. URLs matching any pattern are skipped.
 
+versions (optional)::
+Which component versions to check. `latest` checks only each component's latest version, plus every unversioned component; `all` checks every version in the build. Default: `latest`.
++
+A site that publishes many versions of a component republishes the same dead link once per branch, and those older branches are frozen content that nobody edits, so checking them fills the report with findings that cannot be acted on.
+
 concurrency (optional)::
 Number of simultaneous requests. Default: `10`.
 
@@ -597,6 +716,9 @@ Per-request timeout in milliseconds. Default: `10000`.
 
 fail_on_broken (optional)::
 Log broken links at error level so a build run with `--log-failure-level=error` fails. Default: `false`.
+
+report_file (optional)::
+Path to write a machine-readable JSON report to. Unset by default, in which case no report is written. Written every time the checker runs, including when there is nothing to say, so a consumer polling for this file can tell a clean run apart from one where the checker never ran at all. The report holds `counts`, a `results` array sorted broken-first, and `unresolvedAttributeReferences`; each result carries the URL, its classification and status, and a `refs` array of `{repo, refname, component, version, path}`. Intended for automation that has to act on the findings rather than read them.
 
 === Registration
 
@@ -607,7 +729,16 @@ Register the `external-link-checker` extension in the Antora playbook under the 
 antora:
   extensions:
     - require: '@redpanda-data/docs-extensions-and-macros/extensions/external-link-checker'
+      versions: latest
+      report_file: link-check.json
       fail_on_broken: false
+----
+
+That registration is inert on every build except one run with `LINK_CHECK=true`:
+
+[source,bash]
+----
+LINK_CHECK=true npx antora --fetch antora-playbook.yml
 ----
 
 == Validate attributes
@@ -621,6 +752,17 @@ This extension does not require any environment variables.
 === Configuration options
 
 There are no configurable options for this extension. It operates based on site attributes defined in `add-global-attributes.js` to determine valid categories and subcategories.
+
+=== With the docs taxonomy
+
+When the build has the docs taxonomy (see <<Docs taxonomy>>), each `page-categories` value is also resolved through it:
+
+* A value from `valid-categories.yml` passes through unchanged, so `page-categories` is exactly what it was without the taxonomy. When the value is a deprecated concept, the build logs one warning per value, with the number of pages, a sample, and the replacement. Labs and solutions pages are left to the legacy check: labs is retiring, and solutions-catalog resolves solution categories itself.
+* A value only the taxonomy knows, such as a new label like `Iceberg Topics`, is replaced by the legacy category of the concept it resolves to, or dropped when there is none. It is not reported as invalid.
+* A value neither knows warns per page and is dropped, as before.
+* A legacy value the taxonomy does not resolve warns as a gap in `taxonomy.yml`.
+
+Nothing here fails the build. The authored list is kept in `page-categories-authored` for the extensions that resolve concepts from it.
 
 === Registration
 
@@ -679,7 +821,26 @@ antora:
     - require: '@redpanda-data/docs-extensions-and-macros/extensions/related-labs-extension.js'
 ----
 
-== Global attributes
+== Docs taxonomy
+
+`extension-utils/taxonomy.js` loads the docs taxonomy, the controlled vocabulary in the docs repository at `shared/modules/ROOT/attachments/taxonomy.yml`, and validates it against `taxonomy.schema.json` next to it. It is not an extension to register: validate-attributes and the Algolia indexer load it on first use and share it on `siteCatalog.taxonomy`.
+
+The file is read from the content catalog as an attachment of the `shared` component, so it is never merged into page attributes. <<Global attributes>> only reads `modules/ROOT/partials/`.
+
+The file has seven concept schemes (topic, task, content-type, use-case, industry, technology, deployment). Every concept has an `id`, a `prefLabel`, `altLabels`, a `definition`, a `broader` concept, `related` concepts, and `deprecated` with `replacedBy`. Every old category is either the label of a live concept or a deprecated concept whose `replacedBy` names its replacement.
+
+At load, the build fails when the file does not match the schema, when an ID repeats, when a label or altLabel repeats in any scheme (case-insensitive), or when a `broader`, `related`, `implies`, or `replacedBy` ID does not exist. When the file is absent, the build logs one warning and every consumer keeps its behavior without the taxonomy, so the docs repository and this package can deploy in either order. When the schema is absent, only the structural checks run.
+
+`Taxonomy#resolve(value)` returns the concept a label, altLabel, or ID names, and for a deprecated concept its `replacedBy` IDs. `Taxonomy#expand(ids)` adds the broader concepts and `implies` targets as implied. `pageFacets` turns a page's authored categories, deployment type, and component into the search facets.
+
+Outside Antora, `loadTaxonomyFrom({ source, root })` loads the same file from a path or URL, or else from the first that exists of the docs checkout at `root`, the docs checkout at `$REDPANDA_DOCS_PATH`, and the published copy at https://docs.redpanda.com/shared/_attachments/taxonomy.yml. It validates against the schema beside whichever it used.
+
+The metadata rules live in `extension-utils/metadata-check.js` (`checkPageMetadata`). validate-attributes runs them on Product Docs pages, solutions-catalog on solution overviews, and `doc-tools check-metadata` on page headers in a pull request, so the build and the PR check cannot disagree. See `check-metadata` in the CLI reference for the rules and their severities, and `.github/workflows/check-metadata.yml` for the reusable PR check.
+
+Suggestions live in `extension-utils/metadata-suggest.js` (`suggestForPage`), which `doc-tools check-metadata --suggest` runs. It matches every live concept's labels against a page's title, description, path, headings, and body, deterministically and with no model, and returns up to a few concepts per facet that the page does not carry yet, each with a score and the evidence for it. It honors the facet cardinalities in the taxonomy, `implies`, and `broader`, and never suggests a deprecated concept. Another tool that tags content against the taxonomy should call it rather than match labels itself, so every tagger agrees.
+
+`extension-utils/metadata-candidates.js` finds the other side: frequent, distinctive terms on a page that no concept's label matches (`pageCandidates`), and the same across a repository with the pages each is on (`aggregateCandidates`). `doc-tools check-metadata --suggest` lists them per page and `--candidates-only` aggregates them. They are evidence for proposing a new concept or altLabel, deterministic like the suggestions.
+
 
 This extension collects Asciidoc attributes from the https://github.com/redpanda-data/docs-site[`shared` component] or a local YAML file and makes them available to all component versions. Having global attributes is useful for consistent configuration of local and production builds.
 
@@ -706,23 +867,7 @@ In this example, the `attributespath` option points to a local YAML file (`./loc
 
 == Produce redirects (customization of core Antora)
 
-This extension replaces the default https://gitlab.com/antora/antora/-/tree/v3.1.x/packages/redirect-producer[`produceRedirects()` function] in Antora to handle redirect loops caused by https://docs.antora.org/antora/latest/page/page-aliases/[page aliases]. Normally, page aliases in Antora are used to resolve outdated links without causing issues. However, with https://docs.antora.org/antora/latest/playbook/urls-html-extension-style/#html-extension-style-key[`indexify`], the same URL may inadvertently be used for both the source and target of a redirect, leading to loops. This problem is https://antora.zulipchat.com/#narrow/stream/282400-users/topic/Redirect.20Loop.20Issue.20with.20Page.20Renaming.20and.20Indexify/near/433691700[recognized as a bug] in core Antora. For example, creating a page alias for `modules/manage/security/authorization.adoc` to point to `modules/manage/security/authorization/index.adoc' can lead to a redirect loop where `manage/security/authorization/` points to `manage/security/authorization/`. Furthermore, omitting the alias would lead to `xref not found` errors because Antora relies on the alias to resolve the old xrefs. This extension is necessary until such behaviors are natively supported or fixed in Antora core.
-
-=== Environment variables
-
-This extension does not require any environment variables.
-
-=== Configuration options
-
-There are no configurable options for this extension.
-
-=== Registration
-
-```yaml
-antora:
-  extensions:
-  - '@redpanda-data/docs-extensions-and-macros/extensions/modify-redirects'
-```
+Antora's built-in `@antora/redirect-producer` already produces redirect rules for https://docs.antora.org/antora/latest/page/page-aliases/[page aliases], including the redirect-loop case caused by https://docs.antora.org/antora/latest/playbook/urls-html-extension-style/#html-extension-style-key[`indexify`] that once required a workaround. Antora runs the real module automatically on every build with no extension required. This project previously shipped a hand-copied override of that module to work around the loop, but the override had drifted from the upstream fix and reintroduced a worse bug (a self-referential alias could overwrite the real page it pointed at). The override has been removed; core Antora handles redirects natively.
 
 == Replace attributes in attachments
 
@@ -799,6 +944,8 @@ This extension does not require any environment variables.
 The extension accepts the following configuration options:
 
 termspath (optional):: Specifies the path to a local directory containing term files (in `.adoc` format). If this path is provided, the extension will attempt to load terms from this directory first. If this path is not provided or no valid terms are found in the specified directory, the extension will fall back to loading terms from the `shared` component.
+
+glossarypage (optional):: The resource ID of one page that holds the glossary for the whole site, such as `home:ROOT:glossary.adoc`. The extension appends every term to that page and sets every component's `glossary-page` attribute to it, so `glossterm` links from any component point at the one glossary. Any `reference:glossary.adoc` pages that components still have are filled too, so they stay complete until they are removed. If the page does not exist, the extension logs a warning and links each component to its own `reference:glossary.adoc`, as without this option. When the page exists, it takes precedence over a `glossary-page` attribute set in a component's `antora.yml`, so a per-component value only applies if this page is missing.
 
 Term files should follow the following structure:
 
@@ -1035,7 +1182,7 @@ This extension adds accurate git-based created and modified dates to documentati
 The extension adds the following attributes to each page:
 
 - `page-git-created-date`: The date when the file was first committed (YYYY-MM-DD format)
-- `page-git-modified-date`: The date when the file was last modified (YYYY-MM-DD format)
+- `page-git-modified-date`: The date when the file was last modified (YYYY-MM-DD format). For a page with Connect reference content, this is the date of the most recent Connect release that changed that content, when it is later than the page's last commit (see <<Redpanda Connect tag modifier>>).
 
 These attributes are available for use in UI templates (for metadata, display banners, etc.) and are exported to markdown files for AI consumption.
 
@@ -1206,7 +1353,37 @@ The extension exports these attributes to YAML frontmatter:
 - `page-categories`: Categories
 - `page-topic-type`: Topic type (tutorial, how-to, concept, reference)
 - `page-personas`: Target audience
+- `page-generated-content`: Always present: `none`, `partial` (the page includes generated files) or `all` (the page itself was generated)
+- `page-autogenerated`, `page-generated-by`, `page-generated-from`: Set when the page itself was written by a generator: the tool that wrote it, and the source it names (`page-generated-from` only when the marker names one)
+- `page-generated-sources`: One entry per include whose file was written by a generator: the include target, the generator, its version when the marker carries one, and the source it names
+- `page-introduced-in`, `page-introduced-in-product`: Release that introduced the page's feature, as a bare `X.Y.Z`, and the product it belongs to (generated Connect reference pages, self-managed only)
 - Custom attributes from allowlist
+
+=== Generated content provenance
+
+Every doc-tools generator writes one comment line near the top of each file it produces, built by `cli-utils/generated-marker.js`:
+
+----
+// This content is autogenerated. Do not edit manually. Generated by doc-tools (<generator>) from <source>. <how to change it>
+----
+
+The marker names no doc-tools version. Generated files are committed, so a version would rewrite the first line of every generated file on each release even when nothing else changed. A marker that does carry a token after `doc-tools` (`doc-tools 5.55.0 (rpk-docs)`) is still read, and the token is reported as the version when it is one. Pages generated during the site build, which are never committed, record the version of the package that built them.
+
+While the catalog still holds AsciiDoc (`contentClassified`), the extension reads that marker on every page and on every file the page includes, then records what it found as page attributes (`documentsConverted`) so both the Markdown twin and UI templates can use it. Every twin states `page-generated-content`, so `none` is a statement and not an absence. A page that is generated end to end gets `all`, `page-autogenerated: true`, `page-generated-by` and `page-generated-from`; a hand-written page that includes generated partials gets `partial` and `page-generated-sources`, for example:
+
+[,yaml]
+----
+page-generated-content: partial
+page-generated-sources:
+  - include: connect:components:partial$descriptions/inputs/postgres_cdc.adoc
+    generator: rpcn-connector-docs
+    version: null
+    source: the component spec in redpanda-data/connect
+----
+
+Older files that carry only `// This content is autogenerated. Do not edit manually.` are still recognized; they report a null generator and source, and the twin has no `page-generated-from`. A source is read only right after `doc-tools (<generator>)` or after `autogenerated`, so a later "from" in a legacy banner's prose is not taken for one. A comment counts as a marker only when it opens with `This content is autogenerated`, `Autogenerated`, `AUTO-GENERATED`, or `Generated by doc-tools`, so a hand-written comment such as `// Generated by running rpk cluster info` does not. The partials that ship in the Connect release asset carry connect's own banner, which names the file that registers the component as `<repository>[@<version>]:<path>` (for example `// This content is autogenerated from the component spec in redpanda-data/benthos@v4.84.0:internal/impl/pure/processor_mapping.go. Do not edit manually.`), or the repository when the generator could not read the name; either reports that source and a null generator. An extension that creates pages at build time sets `page.generatedProvenance` on the file itself, which this scan honors.
+
+Include detection is best effort. Each `include::` target at the start of a line is resolved as a partial in the page's context (falling back to pages and examples), so a page-relative include such as `include::shared.adoc[]` is looked up as `partial$shared.adoc`. Includes inside comment blocks or inactive `ifdef` branches are counted, targets with an attribute reference are skipped, and nested includes (a hand-written partial that includes a generated one) are not followed.
 
 === Example output
 
@@ -1240,6 +1417,7 @@ The `convert-llms-to-txt` extension generates AI-optimized documentation exports
 - Generates `llms.txt` from a curated `llms.adoc` page in the home component
 - Creates `llms-full.txt` with all documentation pages
 - Generates component-specific exports (e.g., `ROOT-full.txt`, `cloud-full.txt`)
+- Generates a page index (`llms.txt`) for every published component version, linked from the root `llms.txt`
 - Unpublishes the HTML version of llms.adoc
 - Replaces site-url attribute dynamically for preview builds
 
@@ -1263,7 +1441,8 @@ Create `modules/home/pages/llms.adoc` in your docs repository with curated docum
 2. Place `llms.txt` at site root
 3. Generate `llms-full.txt` with all pages
 4. Generate component-specific full.txt files
-5. Unpublish the HTML version
+5. Generate a page index for every published component version and link each one from `llms.txt`
+6. Unpublish the HTML version
 
 === Generated files
 
@@ -1272,6 +1451,16 @@ Create `modules/home/pages/llms.adoc` in your docs repository with curated docum
 - `{site-url}/ROOT-full.txt` - Self-Managed docs only
 - `{site-url}/cloud-full.txt` - Cloud docs only
 - `{site-url}/redpanda-connect-full.txt` - Connect docs only
+- `{site-url}/<component>/<version>/llms.txt` - Page index for one component version
+- `{site-url}/<component>/llms.txt` - Page index for a component without versions, such as `connect/llms.txt`
+
+=== Page indexes
+
+Each page index lists every published page in one component version as a markdown link to the page's `.md` URL, followed by the page description when it has one. Older versions get their own indexes, which say which version they cover and name the latest version.
+
+An index that would exceed 45,000 characters is split by URL directory, for example `streaming/current/manage/llms.txt`. A directory that is still too large on its own is split into numbered parts (`llms.txt`, `llms-2.txt`, and so on). The Agent-Friendly Documentation Spec passes an `llms.txt` at 50,000 characters or less and recommends this kind of split for large sites.
+
+The root `llms.txt` links to every page index in a *Page indexes* section. The index list is never truncated, because an index missing from the root leaves its pages unreachable from `llms.txt`. Page indexes do not link to other page indexes, so every page is one hop from the root.
 
 === Attributes
 
@@ -1290,7 +1479,8 @@ The `convert-sitemap-to-markdown` extension generates human-readable markdown ve
 - Generates individual `.md` files for each sitemap
 - Creates master `sitemap-all.md` combining all pages
 - Organizes URLs by component/version
-- Includes page metadata (modified dates, priority)
+- Uses each page's document title and `:description:`, falling back to a title from the URL for files that aren't Antora pages
+- Includes page metadata (modified dates, priority) on a nested line under each entry, so the entry line keeps the `- [Title](url): description` form
 - Uses Antora content catalog (no filesystem operations)
 
 === Configuration
@@ -1334,8 +1524,10 @@ Total pages: 4,126
 
 ### Current
 
-- [Get Started](https://docs.redpanda.com/current/get-started/) (modified: 2024-03-29)
-- [Deploy](https://docs.redpanda.com/current/deploy/) (modified: 2024-03-28)
+- [Introduction to Redpanda](https://docs.redpanda.com/current/get-started/): Learn about Redpanda and its features.
+  - modified: 2024-03-29
+- [Deploy](https://docs.redpanda.com/current/deploy/)
+  - modified: 2024-03-28
 ----
 
 === Use cases

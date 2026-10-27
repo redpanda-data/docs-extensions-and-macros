@@ -14,12 +14,13 @@ function dataset (descriptions) {
   return JSON.stringify({ properties })
 }
 
-function catalogWith (json, { pages = true, partialSource } = {}) {
+function catalogWith (json, { pages = true, partialSource, extraFiles = [] } = {}) {
   const files = [
     {
       src: { component: 'streaming', version: '26.2', module: 'reference', family: 'attachment', relative: 'redpanda-properties-v26.2.1.json', path: 'modules/reference/attachments/redpanda-properties-v26.2.1.json' },
       contents: Buffer.from(json),
     },
+    ...extraFiles,
   ]
   if (pages) {
     files.push({
@@ -60,7 +61,7 @@ function catalogWith (json, { pages = true, partialSource } = {}) {
   }
 }
 
-function run (contentCatalog, { extensions = [] } = {}) {
+function run (contentCatalog, { extensions = [], attributes = {} } = {}) {
   const warnings = []
   const context = {
     handlers: {},
@@ -78,7 +79,7 @@ function run (contentCatalog, { extensions = [] } = {}) {
   context.handlers.contentClassified({ contentCatalog })
   context.handlers.documentsConverted({
     contentCatalog,
-    siteAsciiDocConfig: { attributes: { 'attribute-missing': 'drop' }, extensions },
+    siteAsciiDocConfig: { attributes: { 'attribute-missing': 'drop', ...attributes }, extensions },
   })
   const attachment = contentCatalog.files.find((f) => f.src.family === 'attachment')
   const raw = attachment.contents.toString()
@@ -255,6 +256,29 @@ describe('render-property-descriptions extension', () => {
     expect(warnings.some((w) => w.includes('redpandastoragemode'))).toBe(true)
   })
 
+  it('resolves the legacy dot-free anchor spelling to the documented property', () => {
+    // Before property anchors replaced dots with hyphens they dropped them, so
+    // descriptions written then say <<redpandaremoteread>> for
+    // redpanda.remote.read, and a few carry a stray hyphen
+    // (<<redpandastorage-mode>>). Every release branch still ships those, and
+    // each one warned on every build although the property is documented.
+    const partial = '=== redpanda.remote.read\n\nReads.\n\n=== redpanda.storage.mode\n\nMode.\n\n=== other_property\n\nSomething else.\n'
+    const catalog = catalogWith(
+      dataset({
+        other_property: 'See <<redpandaremoteread,`redpanda.remote.read`>> and <<redpandastorage-mode>>.',
+        'redpanda.remote.read': 'Reads.',
+        'redpanda.storage.mode': 'Mode.'
+      }),
+      { partialSource: partial }
+    )
+    const { data, warnings } = run(catalog)
+    const html = data.properties.other_property.description_html
+    expect(html).toContain('href="/streaming/26.2/reference/properties/cluster-properties/#redpanda-remote-read"')
+    expect(html).toContain('href="/streaming/26.2/reference/properties/cluster-properties/#redpanda-storage-mode"')
+    expect(html).not.toContain('<<')
+    expect(warnings.some((w) => w.includes('redpandaremoteread') || w.includes('redpandastorage-mode'))).toBe(false)
+  })
+
   it('falls back to the anchor name when a broken reference has no display text', () => {
     const catalog = catalogWith(dataset({ lonely: 'See <<flushbytes>> for details.' }))
     const { data } = run(catalog)
@@ -285,5 +309,127 @@ describe('render-property-descriptions extension', () => {
     const catalog = catalogWith(dataset({ plain: 'A description.' }), { pages: false })
     const { data } = run(catalog)
     expect(data.properties.plain.description_html).toBeUndefined()
+  })
+
+  it('orders prerelease counters numerically when picking the newest dataset', () => {
+    // rc10 is newer than rc9. A string comparison says otherwise, and a branch
+    // retaining its two newest datasets can hold exactly that pair.
+    const mk = (tag, desc) => ({
+      src: { component: 'streaming', version: '26.2', module: 'reference', family: 'attachment', relative: `redpanda-properties-${tag}.json`, path: `modules/reference/attachments/redpanda-properties-${tag}.json` },
+      contents: Buffer.from(dataset({ p: desc })),
+    })
+    const older = dataset({ p: 'From rc9.' })
+    const catalog = catalogWith(older, { extraFiles: [mk('v26.2.2-rc10', 'From rc10.')] })
+    catalog.files[0].src.relative = 'redpanda-properties-v26.2.2-rc9.json'
+    run(catalog)
+    expect(JSON.parse(catalog.files[1].contents.toString()).properties.p.description_html).toBe('From rc10.')
+    expect(catalog.files[0].contents.toString()).toBe(older)
+  })
+
+  it('renders only the newest dataset when a branch ships a retained baseline', () => {
+    // doc-tools keeps the 2 newest property JSONs on purpose: the next
+    // generation run needs the older one as its --diff baseline. Converting a
+    // baseline rewrites the descriptions that diff reads, and reports every
+    // dead anchor in a superseded dataset a second time.
+    const baseline = dataset({ stale: 'See <<redpandastoragemode,the storage mode>>.' })
+    const catalog = catalogWith(baseline, {
+      extraFiles: [{
+        src: { component: 'streaming', version: '26.2', module: 'reference', family: 'attachment', relative: 'redpanda-properties-v26.2.2.json', path: 'modules/reference/attachments/redpanda-properties-v26.2.2.json' },
+        contents: Buffer.from(dataset({ current: 'A current description.' })),
+      }],
+    })
+    const { warnings } = run(catalog)
+    const [older, newer] = catalog.files
+    expect(JSON.parse(newer.contents.toString()).properties.current.description_html).toBe('A current description.')
+    expect(older.contents.toString()).toBe(baseline)
+    expect(warnings.some((w) => w.includes('redpandastoragemode'))).toBe(false)
+  })
+})
+
+// A glossterm: reference in a property description runs through the same
+// macros/glossary.js inline macro as a normal page, with the real site's
+// glossary-tooltip attribute (streaming/shared/modules/ROOT/partials/
+// global-attributes.yml sets glossary-tooltip: 'data-tippy-content'), so a
+// term whose hover-text breaks or injects through a directly-authored
+// glossterm: call (the bug macros/glossary.js's own tests cover, and its fix
+// resolves) breaks or injects through a property tooltip the same way --
+// description_html is embedded directly, unescaped, into the tooltip content
+// docs-ui hands to Tippy with allowHTML: true
+// (docs-ui/src/js/19-property-tooltips.js), same as the standalone case.
+//
+// description_html itself is raw, not-yet-parsed HTML text -- the same state
+// macros/glossary.test.js's convert() output is in before its
+// decodeAttributeOnce simulates the one browser parse a normal page gets
+// before docs-ui's own decode. Reusing that exact helper here asserts the
+// same escaping level reaches a property tooltip as reaches a standalone
+// glossary term: this only proves macros/glossary.js's fix applies here too,
+// not the full docs-ui-side decode chain (truncateDescriptionHtml's own
+// innerHTML probe, then Tippy's), which is a docs-ui-side concern this test
+// suite (docs-extensions-and-macros) cannot exercise.
+function decodeAttributeOnce (value) {
+  return value
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+}
+
+function termFile (termName, hoverText) {
+  return {
+    src: { component: 'shared', module: 'terms', family: 'partial', relative: `${termName}.adoc` },
+    contents: Buffer.from(`= ${termName}\n:term-name: ${termName}\n:hover-text: ${hoverText}\n\nBody.\n`),
+  }
+}
+
+describe('glossterm: references inside a description (shared with macros/glossary.js)', () => {
+  const attributes = { 'glossary-tooltip': 'data-tippy-content' }
+
+  it('escapes a malicious hover-text term the same way a directly-authored glossterm: call is escaped', () => {
+    const terms = [termFile('sql-engine', 'Danger `<img src=x onerror=alert(1)>` here. The "engine" runs queries.')]
+    const catalog = catalogWith(
+      dataset({ query_engine: 'Powered by the glossterm:sql-engine[] under the hood.' }),
+      { extraFiles: terms }
+    )
+    const { data } = run(catalog, { extensions: [glossary], attributes })
+
+    const html = data.properties.query_engine.description_html
+    // Not yet live: the raw description_html still has the img text escaped
+    // once, same as macros/glossary.test.js asserts for a directly-authored
+    // glossterm: call -- <code> is the only real tag in the attribute value.
+    expect(html).toContain(
+      '<a data-tippy-content="Danger <code>&amp;lt;img src=x onerror=alert(1)&amp;gt;</code> here. The &amp;quot;engine&amp;quot; runs queries."'
+    )
+    // After the one decode a normal page's own HTML parse would already have
+    // done, <code> is still the only live markup -- the img text is inert.
+    expect(decodeAttributeOnce(html)).toContain(
+      'Danger <code>&lt;img src=x onerror=alert(1)&gt;</code> here. The &quot;engine&quot; runs queries.'
+    )
+  })
+
+  it('does not let a literal quote in hover-text terminate the attribute early', () => {
+    const terms = [termFile('oxla', 'The engine. "Oxla" may appear in logs.')]
+    const catalog = catalogWith(
+      dataset({ query_engine: 'See glossterm:oxla[] for details.' }),
+      { extraFiles: terms }
+    )
+    const { data } = run(catalog, { extensions: [glossary], attributes })
+
+    const html = data.properties.query_engine.description_html
+    // A broken attribute would show a second, bare data-tippy-content
+    // attribute or truncate the link text -- assert the whole anchor and its
+    // attribute parse as one well-formed unit.
+    expect(html).toMatch(/^See <a data-tippy-content="[^"]*" href="[^"]*" class="glossary-term">oxla<\/a> for details\.$/)
+    expect(decodeAttributeOnce(html)).toContain('The engine. &quot;Oxla&quot; may appear in logs.')
+  })
+
+  it('renders a safe hover-text term identically to a directly-authored glossterm: call', () => {
+    const terms = [termFile('wal', 'Uses `fsync` to persist writes.')]
+    const catalog = catalogWith(
+      dataset({ durability: 'Backed by the glossterm:wal[] for crash recovery.' }),
+      { extraFiles: terms }
+    )
+    const { data } = run(catalog, { extensions: [glossary], attributes })
+
+    expect(decodeAttributeOnce(data.properties.durability.description_html)).toContain('<code>fsync</code>')
   })
 })

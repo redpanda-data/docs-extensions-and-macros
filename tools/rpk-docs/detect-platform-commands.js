@@ -47,6 +47,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const { maskComments } = require('../lint-strings/go-source')
 
 /** GOOS values recognized in filename suffixes and build tags */
 const KNOWN_GOOS = new Set([
@@ -248,7 +249,13 @@ function commandNameFromConstructor(funcName) {
  * @param {string} content - Go file content
  * @returns {Object<string, {useName: string|null, excluded: boolean}>}
  */
-function parseConstructors(content) {
+function parseConstructors(rawContent) {
+  // Mask comments first. Scanning raw text read a `Use: "..."` out of a
+  // commented-out or example command and reported it as the real one; the
+  // masker blanks comment bodies while preserving offsets, line breaks and
+  // every string literal, so the regexes below see only live code. Shared with
+  // the lint-strings Go surfaces rather than reimplemented here.
+  const content = maskComments(rawContent)
   const constructors = {}
   const funcRe = /^func\s+(\w+)\s*\([^)]*\)\s*\*cobra\.Command\s*\{/gm
   const matches = []

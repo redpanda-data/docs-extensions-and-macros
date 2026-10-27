@@ -6,10 +6,8 @@
  * lockfile disagreeing with the manifest, which npm then rewrites on the next
  * install and which makes a release look bumped when it is not.
  *
- * A release that forgets the bump entirely is worse than a no-op: the publish
- * step silently does nothing because the version already exists on the
- * registry, while the dispatch job still tells rp-connect-docs to npm update,
- * so the consumer pulls the same old tarball and reports success.
+ * release-please writes all three in the release PR. This test is what
+ * catches a hand edit that updates some of them and not the others.
  */
 
 const fs = require('fs');

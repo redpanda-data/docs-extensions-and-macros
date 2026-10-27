@@ -1,0 +1,37 @@
+== v26.2.3 (2026-09-17)
+
+=== Bug fixes
+
+Schema Registry:: JSON Schema compatibility checks now handle schemas that use fragment-only or fragment-bearing `$id` values. Previously these checks could resolve `$ref` values against the wrong subschema. Compatibility verdicts for affected schemas may change.
+
+Schema Registry:: JSON Schema compatibility checks no longer crash on schemas whose `$ref` targets a boolean or a non-schema value.
+
+Admin API:: The usage-reporting Admin API endpoint no longer causes memory fragmentation.
+
+Cloud Topics:: The write-request scheduler no longer consumes a full CPU core on shards whose backlog cannot be uploaded.
+
+rpk:: `rpk cloud login` no longer fails with `unable to find resource group` for users who have only cluster-level permissions. rpk now falls back to the resource group ID when it cannot read the name.
+
+Cloud Storage:: The internal HTTP client no longer performs an out-of-bounds read when decoding a URI that ends with a truncated percent-escape.
+
+Iceberg:: Iceberg producer throttling now uses `max_kafka_throttle_delay_ms` as the throttle ceiling and `quota_manager_gc_sec` as the producer GC window. These two settings were previously flipped at the point of use.
+
+Schema Registry:: Produce requests are now rejected if any schema-ID-validated key or value in a batch is invalid. Previously a batch could be accepted when only its last validated component was valid, which persisted invalid records.
+
+rpk:: The `operations-stretch` Grafana dashboard no longer mixes other operators' controllers into its reconcile, queue, and worker panels. Every panel now filters by new *Namespace* and *Job* pickers.
+
+=== Improvements
+
+Cluster:: Reconnection logic is hardened when inter-broker heartbeat requests hit a connection timeout.
+
+Iceberg:: Iceberg topics now persist statistics in Iceberg manifests. This allows more efficient pruning during queries.
+
+Iceberg:: Iceberg translation now honors several table properties that control how Parquet is written, including compression and Bloom filters.
+
+Kafka API:: The batch cache reclamation path is optimized to avoid reactor stalls on the fetch path.
+
+rpk:: The `operations-stretch` Grafana dashboard gains a *Kubernetes cluster* picker. It filters on the opt-in `redpanda_k8s_cluster` label set by the Redpanda operator chart's `monitoring.clusterLabel`.
+
+Cloud Storage:: The internal HTTP client now fails a request with a timeout when the connection makes no I/O progress for a configurable period (default 120s). Previously the request stalled until TCP retransmission gave up, about 15 minutes, when a remote endpoint hung.
+
+rpk:: `rpk -v` now logs where each configuration value came from: the loaded config files, the selected profile, and any values overridden by environment variables or `-X` flags. Secret values are never logged.

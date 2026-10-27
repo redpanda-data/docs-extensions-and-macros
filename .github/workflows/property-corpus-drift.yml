@@ -1,0 +1,172 @@
+---
+# Reports when the property test corpus falls behind redpanda-data/docs.
+#
+# __tests__/docs-data/property-overrides.json and property-snapshot.json mirror
+# that repo. property-corpus-rendering.test.js renders the real overrides file
+# rather than a fixture, because a fixture passes while the live corpus breaks;
+# that only holds while the mirror is current.
+#
+# Scheduled rather than PR-triggered on purpose: an overrides change lands in
+# the docs repo with no file change in THIS repo at all, so no PR check here
+# would ever see it. That is how the mirror previously fell three months and
+# 114 entries behind.
+#
+# Reports rather than blocks. A stale mirror means the corpus test covers older
+# data, which is a coverage gap and not a broken build, so failing unrelated
+# PRs here over a merge in another repo would be the wrong trade. The script
+# opens one issue and comments on it thereafter.
+#
+# The bash lives in .github/scripts/property-corpus-drift.sh, which the last
+# step runs from the checkout; __tests__/workflows/property-corpus-drift.test.js
+# asserts that and exercises every exit path against a stubbed gh.
+name: Property corpus drift
+
+on:
+  schedule:
+    # Mondays 07:00 UTC, an hour after the Kapa drift check so the two never
+    # contend for the same bot token.
+    - cron: '0 7 * * 1'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '__tests__/docs-data/property-overrides.json'
+      - '__tests__/docs-data/property-snapshot.json'
+      - '.github/scripts/property-corpus-drift.sh'
+      - '.github/workflows/property-corpus-drift.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  drift:
+    name: Check property test corpus
+    runs-on: ubuntu-latest
+    # A fork PR gets no secrets and a read-only token, so the OIDC step cannot
+    # assume the role: the account id expands to empty and the action errors
+    # out, leaving an external contributor a permanently red check they cannot
+    # fix. Skipped rather than failed, because this needs a credential a fork
+    # PR is not allowed to have. Same shape as kapa-source-groups-drift.yml.
+    #
+    # Schedule and workflow_dispatch always run: head.repo is unset for those.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      # Restricted to the default branch, not just "not a pull request".
+      # workflow_dispatch can be aimed at any branch a user with write access
+      # selects, and checkout (below) has no explicit ref, so it defaults to
+      # whatever branch that was -- meaning a plain event_name check still let
+      # someone edit this script or this workflow on their own branch,
+      # manually dispatch that branch, and receive the org-wide write-capable
+      # bot token running their code. github.ref for schedule is always the
+      # default branch, so this is a no-op restriction there, and for
+      # pull_request it is never refs/heads/main (a PR's ref is its head or
+      # merge ref), so this subsumes the pull_request exclusion outright.
+      #
+      # A PR run was only ever informational: the corpus in a refresh PR is
+      # ahead of docs main by design, so it reported drift in the log and filed
+      # nothing. The token-free check below preserves that signal.
+      - name: Configure AWS credentials
+        if: github.ref == 'refs/heads/main'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.RP_AWS_CRED_REGION }}
+          role-to-assume: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
+
+      - name: Get secrets from AWS Secrets Manager
+        if: github.ref == 'refs/heads/main'
+        uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            ,sdlc/prod/github/actions_bot_token
+          parse-json-secrets: true
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # redpanda-data/docs is private, so the default Actions token cannot read
+      # it and an unauthenticated raw.githubusercontent fetch 404s. The bot
+      # token above is what makes both the fetch and the issue report possible.
+      - name: Check corpus against the docs repo
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ env.ACTIONS_BOT_TOKEN }}
+          # A PR that updates the corpus is ahead of docs main on purpose, so a
+          # PR run reports in the log and files nothing. Left to itself it filed
+          # an issue against its own branch's work.
+          FILE_ISSUE: ${{ github.event_name != 'pull_request' }}
+        run: |
+          set -euo pipefail
+          # Exit 1 means drift was found and reported, which is not a build
+          # failure here; exit 2 means the check could not run at all, which is.
+          # Distinguished explicitly so a token or network problem cannot pass
+          # as "no drift".
+          rc=0
+          bash .github/scripts/property-corpus-drift.sh || rc=$?
+          case "$rc" in
+            0) echo "Corpus is current." ;;
+            1) echo "::notice::Corpus drift reported in an issue." ;;
+            *) echo "::error::The corpus drift check could not run."; exit 1 ;;
+          esac
+
+      # What can be told without a credential: that the two mirrors are
+      # internally consistent and declare what they mirror. It cannot compare
+      # against docs, which is private, and that comparison is what the
+      # scheduled run on main is for. Runs whenever the credentialed check
+      # above does not, which is now a wider set than "is a pull_request": a
+      # workflow_dispatch off the default branch used to fall through to the
+      # credentialed path; now it falls through to here instead of getting no
+      # check at all.
+      - name: Check the vendored corpus is well formed
+        if: github.ref != 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          node -e '
+            const fs = require("fs");
+            const dir = "__tests__/docs-data";
+            const problems = [];
+            const readJson = (name) => {
+              try {
+                return JSON.parse(fs.readFileSync(`${dir}/${name}`, "utf8"));
+              } catch (err) {
+                problems.push(`${name} is not valid JSON: ${err.message}`);
+                return null;
+              }
+            };
+
+            const overrides = readJson("property-overrides.json");
+            const snapshot = readJson("property-snapshot.json");
+
+            if (snapshot && !snapshot.source_tag) {
+              problems.push("property-snapshot.json has no source_tag, so the scheduled check cannot tell what it mirrors");
+            }
+
+            const overrideNames = Object.keys((overrides || {}).properties || {});
+            const snapshotNames = Object.keys((snapshot || {}).properties || {});
+            if (overrides && overrideNames.length === 0) problems.push("property-overrides.json mirrors no entries");
+            if (snapshot && snapshotNames.length === 0) problems.push("property-snapshot.json mirrors no properties");
+
+            // Every overridden property must exist in the snapshot, or the
+            // corpus test renders an override against a property it has no
+            // source data for.
+            if (overrideNames.length && snapshotNames.length) {
+              const known = new Set(snapshotNames);
+              const missing = overrideNames.filter((name) => !known.has(name));
+              if (missing.length) {
+                problems.push(`${missing.length} overridden propert(y/ies) absent from the snapshot: ${missing.slice(0, 10).join(", ")}`);
+              }
+            }
+
+            if (problems.length) {
+              for (const problem of problems) console.error(`::error::${problem}`);
+              process.exit(1);
+            }
+
+            console.log(`Corpus is well formed: ${overrideNames.length} overrides, ${snapshotNames.length} properties, mirroring ${snapshot.source_tag}.`);
+            console.log("Drift against the docs repo is checked by the scheduled run, the only path that holds a credential.");
+          '
