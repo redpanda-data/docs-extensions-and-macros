@@ -320,7 +320,8 @@ function diffRecommendations ({ root, base, index, taxonomy, categoryMap = null 
     const solutions = new Map(solutionsById)
     for (const c of changedSolutions) {
       const s = solutionFromSource({ content: side === 'base' ? c.baseContent : c.headContent, id: c.id, published: solutionsById.get(c.id), taxonomy, categoryMap })
-      if (s) solutions.set(c.id, s)
+      // Keep only what the build scores: it drops a draft it does not publish.
+      if (s && (s.status !== 'draft' || s.draft)) solutions.set(c.id, s)
       else solutions.delete(c.id)
     }
     return { docs, solutions }

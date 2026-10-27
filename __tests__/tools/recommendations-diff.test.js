@@ -214,6 +214,19 @@ describe('recommendations-diff: solution overviews (redpanda-solutions)', () => 
       disappear: [expect.objectContaining({ solution: 'cdc', score: 0.6, scoreNow: 0.3 })],
     })])
   })
+
+  test('a new draft that the published build left out moves no recommendations', async () => {
+    // Drafts sharing cdc's concepts would lower their rarity if scored.
+    const draft = (id) => overview(`Solution ${id}`, { useCases: 'Change data capture', technologies: 'PostgreSQL', status: 'draft' })
+    const root = makeRepo(
+      { 'antora.yml': 'name: solutions\n' },
+      { 'modules/d1/pages/index.adoc': draft('d1'), 'modules/d2/pages/index.adoc': draft('d2'), 'modules/d3/pages/index.adoc': draft('d3') },
+    )
+    const { result, code } = await cli({ changed: 'main', root, index: writeIndex(), taxonomy: TAXONOMY_FILE })
+    expect(code).toBe(0)
+    expect(result.changed.solutions).toHaveLength(3)
+    expect(result.docs).toEqual([])
+  })
 })
 
 describe('recommendations-diff: published data that cannot be read', () => {
