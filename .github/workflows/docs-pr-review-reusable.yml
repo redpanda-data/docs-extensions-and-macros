@@ -43,7 +43,8 @@
 #
 # Ordering contract: in an SME-gated repo the automated docs review never
 # runs before one SME approval (SME = (requested ∪ reviewed) − docs team −
-# author, recomputed from the API on every run — never cached). Everywhere
+# author − bots, where "reviewed" means any review that is not COMMENTED,
+# recomputed from the API on every run — never cached). Everywhere
 # it runs exactly once per (PR, head SHA), and it never merges anything.
 # The only physical merge gate is the docs-team approval (CODEOWNERS).
 #
@@ -81,9 +82,9 @@ on:
         type: number
       # ── ADP AI Gateway auth (docs-pr-review agent's service account) ───
       # No Anthropic API key anywhere: model auth is the gateway, which
-      # gives per-account spend attribution on the ADP cost page. Seven of
-      # the nine callers were granted the credential in devprod-infra #779;
-      # adp-cloud-docs and docs-template need a follow-up.
+      # gives per-account spend attribution on the ADP cost page. All nine
+      # callers were granted the docs-pr-review credential in devprod-infra
+      # #826 (merged 2026-09-18).
       sme_gate:
         description: >-
           true (default): hold the review until one SME approves. false for
@@ -145,9 +146,9 @@ on:
           (docs_team_agents_client is that agent's credential). Cost and usage
           attributes per agent and tags are per-agent and static, so sharing
           one secret between two workloads collapses their spend permanently.
-          The secret is created and granted in devprod-infra#826; until that
-          merges and the values are written, the fetch fails and every review
-          degrades to "automated review unavailable".
+          The secret was created and granted in devprod-infra#826 (merged
+          2026-09-18). If it is missing for a repo, the fetch fails and every
+          review degrades to "automated review unavailable".
         type: string
         default: 'sdlc/prod/github/docs_pr_review_client'
       plugin_ref:
@@ -170,7 +171,12 @@ on:
           earlier version, including the 5.38.0 this used to name, exits 1
           with "unknown command" and writes no result file, which the guard in
           screenshot_gate turns into a loud error rather than a silent pass.
-          Do not lower this below 5.45.0.
+          Do not lower this below 5.45.0. The same version runs
+          `doc-tools check-metadata` in metadata_check; a version without
+          that subcommand skips it (a notice in the job log, nothing in the
+          comment), and so does a run that finds no published taxonomy.yml,
+          so it applies from the first release that ships it and from when
+          the taxonomy is published.
         type: string
         default: '5.45.0'
       docs_app_id:
@@ -213,7 +219,8 @@ jobs:
       sme_approver: ${{ steps.eval.outputs.sme_approver }}
       sme_set: ${{ steps.eval.outputs.sme_set }}
       # How the SME requirement was satisfied — the review comment says so:
-      # approved | repo-not-gated | no-sme-needed-label | bot-author
+      # approved | repo-not-gated | no-sme-needed-label | author-is-sme-label |
+      # bot-author
       sme_mode: ${{ steps.eval.outputs.sme_mode }}
     steps:
       - id: eval
@@ -308,13 +315,15 @@ jobs:
           # Helpers ---------------------------------------------------------
           derive_smes() {
             # MIRROR: .github/workflows/sme-nag.yml derives the same set from
-            # `gh pr list --json reviewRequests,latestReviews` (a different API
+            # `gh pr list --json reviewRequests,reviews` (a different API
             # shape, so the code cannot be shared verbatim). The RULE must stay
             # identical — (requested ∪ reviewed) − docs team − author − bots —
             # or the nag will chase authors the gate is already satisfied
-            # with, or vice versa. Change both together.
+            # with, or vice versa. Change both together; docs-team-standards'
+            # scripts/test-sme-parity.sh (sme-parity.yml) fails CI if they drift.
             #
             # (requested ∪ reviewed) − docs team − author − bots, recomputed
+            # ("reviewed" = any review that is not COMMENTED),
             # from the API on EVERY run. Deliberately not cached anywhere: a
             # marker comment would be shared mutable state that anyone with
             # write access can edit or delete, and a stale snapshot silently
@@ -323,17 +332,24 @@ jobs:
             # is why the union with users-who-reviewed is what makes this
             # recomputable at any moment.
             local live reviewed
-            live=$(gh api "repos/$R/pulls/$PR" --jq '[.requested_reviewers[].login] | join(",")')
+            # From the PR object this run fetched at the top of the gate.
+            live=$(jq -r '[.requested_reviewers[].login] | join(",")' <<< "$PRJ")
             # Pipe into `jq -s`, never `--paginate --jq`: gh applies --jq to
             # each 30-item page separately and prints one line per page, so
             # a PR with >30 reviews yields "a,b\nc,d" and a bogus login
             # "b\nc" after split(",") — real SMEs silently dropped. (gh's
             # own --slurp cannot be combined with --jq.)
-            reviewed=$(gh api "repos/$R/pulls/$PR/reviews" --paginate \
-              | jq -rs '[.[][].user.login] | unique | join(",")')
-            jq -nr --arg live "$live" --arg reviewed "$reviewed" \
+            reviews=$(gh api "repos/$R/pulls/$PR/reviews" --paginate \
+              | jq -cs '[.[][] | {login: .user.login, state}]')
+            # A COMMENTED review does not make someone an SME (decision with
+            # Jake, 2026-10-19): the approval check below ignores COMMENTED,
+            # so a drive-by commenter counted here could never satisfy the
+            # gate, and the nag (which only fires on an empty set) would
+            # stay silent. Anyone with an APPROVED, CHANGES_REQUESTED or
+            # DISMISSED review still counts, even if they commented later.
+            jq -nr --arg live "$live" --argjson reviews "$reviews" \
               --arg team "$DOC_TEAM" --arg author "$AUTHOR" --arg bots "$BOT_LOGINS" '
-              (($live | split(",")) + ($reviewed | split(","))) | unique
+              (($live | split(",")) + ($reviews | map(select(.state != "COMMENTED") | .login))) | unique
               | map(select(. != "" and . != $author))
               | map(select(endswith("[bot]") | not))
               | map(select(. as $l | ($bots | split(",") | map(gsub("\\s";""))) | index($l) | not))
@@ -532,23 +548,37 @@ jobs:
           R: ${{ github.repository }}
         run: |
           set -euo pipefail
-          gh pr diff "$PR" --repo "$R" --name-only > files.txt
+          # The files API, not `gh pr diff --name-only`: the diff endpoint
+          # refuses any PR with more than 300 changed files (HTTP 406, e.g.
+          # rp-connect-docs#494), which failed classify and skipped every
+          # review on exactly the large regeneration PRs. The files API
+          # pages to 3,000 files; past that, say so instead of classifying
+          # on a silently partial list.
+          gh api --paginate "repos/$R/pulls/$PR/files" --jq '.[].filename' > files.txt
+          LISTED=$(grep -c . files.txt || true)
+          CHANGED=$(gh api "repos/$R/pulls/$PR" --jq '.changed_files')
+          if (( LISTED < CHANGED )); then
+            echo "::warning::the files API listed $LISTED of $CHANGED changed files (it stops at 3,000); classifying on the partial list"
+          fi
           TOTAL=$(grep -c . files.txt || true)
           ADOC=$(grep -cE '\.adoc$' files.txt || true)
           JSON=$(grep -cE '\.json$' files.txt || true)
           OVERRIDES=$(grep -ciE '(^|/)[^/]*overrides[^/]*\.json$' files.txt || true)
-          IMG=$(grep -cE '\.(png|svg|jpe?g|gif|webp)$' files.txt || true)
+          IMG=$(grep -ciE '\.(png|svg|jpe?g|gif|webp)$' files.txt || true)   # -i: .PNG, .JPG
           CODE=$(grep -cE '\.(go|java|py|js|ts|jsx|tsx|sh|sql|proto|c|cc|cpp|rs)$' files.txt || true)
           {
             echo "has_adoc=$([[ $ADOC -gt 0 ]] && echo true || echo false)"
             echo "only_json=$([[ $TOTAL -gt 0 && $JSON -eq $TOTAL ]] && echo true || echo false)"
             echo "overrides_json=$([[ $OVERRIDES -gt 0 ]] && echo true || echo false)"
             # Code-heavy heuristic (decision 3): ≥3 code files AND more code
-            # files than .adoc files. The callers are all content repos, so
-            # what this catches is EXAMPLE code shipped alongside a page (a
-            # lab, a quickstart's docker-compose + client snippets), not the
-            # main content — the code pass is additive to the prose
-            # review, never a substitute for it. Tune with data.
+            # files than .adoc files. In the content repos what this catches
+            # is EXAMPLE code shipped alongside a page (a lab, a quickstart's
+            # client snippets), not the main content — the code pass is
+            # additive to the prose review, never a substitute for it. In a
+            # tooling caller (docs-team-standards) it is the repo's own
+            # implementation; the code_review prompt tells the two apart.
+            # .yml/.yaml are not counted, so a workflow-only PR (or a
+            # quickstart's docker-compose file) never trips this. Tune with data.
             echo "code_heavy=$([[ $CODE -ge 3 && $CODE -gt $ADOC ]] && echo true || echo false)"
             echo "has_images=$([[ $IMG -gt 0 ]] && echo true || echo false)"
           } >> "$GITHUB_OUTPUT"
@@ -556,6 +586,96 @@ jobs:
             --jq '[.title, .body // "", .headRefName] | join(" ")' \
             | grep -oE 'DOC-[0-9]+' | head -1 || true)
           echo "ticket=$TICKET" >> "$GITHUB_OUTPUT"
+
+  # ──────────────────────────────────────────────────────────────────────
+  # §4 — doc-tools check-metadata over the .adoc changes.
+  # Deterministic, no model: the same taxonomy check the docs repos'
+  # check-metadata workflow and the Antora build run. Its own job because
+  # it checks out the PR head and runs npm next to it, and must not hold
+  # id-token: write while it does: npm reads a project .npmrc from the
+  # nearest directory with a package.json, so an edited .npmrc could pick
+  # the registry npx installs doc-tools from, and whatever that served
+  # could mint an OIDC token, assume the repo's AWS role and read the
+  # long-lived ADP client secret (see json_validation_local). Nothing here
+  # needs a credential. As defense in depth, npx also runs from
+  # RUNNER_TEMP with --root pointing at the checkout, so the PR's npm
+  # config is never in npm's lookup path, and without GH_TOKEN.
+  # adoc_review adds the result to its verdict and findings; the review
+  # prompt does not read it.
+  # ──────────────────────────────────────────────────────────────────────
+  metadata_check:
+    needs: [gate, classify]
+    if: needs.classify.outputs.has_adoc == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    timeout-minutes: 15
+    steps:
+      # Full history with blobs fetched on demand: --changed diffs against
+      # the merge base with the PR's base branch.
+      - name: Check out the PR head for check-metadata
+        uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ inputs.pr_number }}/head
+          path: .metadata-check
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Deterministic checks (doc-tools check-metadata)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr_number }}
+          R: ${{ github.repository }}
+          DOC_TOOLS_VERSION: ${{ inputs.doc_tools_version }}
+          SRC: ${{ github.workspace }}/.metadata-check
+        run: |
+          set -uo pipefail
+          OUT_DIR="$RUNNER_TEMP/metadata-check"; mkdir -p "$OUT_DIR"
+          RESULT="$OUT_DIR/check-metadata.json"
+          # state: ran (a result to report) | missing (this doc-tools has no
+          # check-metadata, or there is no published taxonomy.yml yet:
+          # skipped, nothing reported) | failed (it could not run: reported
+          # as a check that did not run, never as a pass).
+          fail() { echo failed > "$OUT_DIR/state"; printf '%s\n' "$1" > "$OUT_DIR/reason"; echo "::warning::check-metadata: $1"; exit 0; }
+          BASE=$(gh api "repos/$R/pulls/$PR" --jq '.base.ref' 2> /dev/null) || BASE=""
+          [[ -n "$BASE" ]] || fail "could not read the pull request's base branch"
+          rc=0
+          # From RUNNER_TEMP, never the checkout: npm takes its project config
+          # from the nearest directory with a package.json, and the PR head
+          # has one. --root points the tool at the checkout instead.
+          ( cd "$RUNNER_TEMP" && env -u GH_TOKEN npx --yes --package "@redpanda-data/docs-extensions-and-macros@${DOC_TOOLS_VERSION}" \
+              doc-tools check-metadata --root "$SRC" --changed "origin/$BASE" --suggest --format json --output "$RESULT" ) > /dev/null 2> "$OUT_DIR/stderr.txt" || rc=$?
+          # Exit 1 is "errors found" only with a result file: an unknown
+          # subcommand (a doc_tools_version from before check-metadata) also
+          # exits 1, and writes none.
+          if [[ ( $rc -eq 0 || $rc -eq 1 ) && -s "$RESULT" ]] && jq -e '(.findings | type) == "array"' "$RESULT" > /dev/null 2>&1; then
+            echo ran > "$OUT_DIR/state"
+            jq -r '"check-metadata: \(.pages) page(s) with taxonomy metadata, \(.summary.errors) error(s), \(.summary.warnings) warning(s)"' "$RESULT"
+          elif grep -q "unknown command 'check-metadata'" "$OUT_DIR/stderr.txt"; then
+            echo missing > "$OUT_DIR/state"
+            echo "::notice::doc-tools ${DOC_TOOLS_VERSION} has no check-metadata subcommand; page metadata is not checked until doc_tools_version names a release that ships it"
+          elif [[ $rc -eq 2 ]] && grep -q "^check-metadata: no taxonomy.yml found" "$OUT_DIR/stderr.txt"; then
+            # Not found anywhere (the repo, $REDPANDA_DOCS_PATH, or a 404 from
+            # docs.redpanda.com). Any other taxonomy problem, an invalid file
+            # or a failed fetch, is a check that could not run.
+            echo missing > "$OUT_DIR/state"
+            echo "::notice::check-metadata found no taxonomy.yml; page metadata is not checked until the taxonomy is published at docs.redpanda.com"
+          else
+            fail "doc-tools check-metadata could not run (exit $rc): $(tr '\n' ' ' < "$OUT_DIR/stderr.txt" | head -c 300)"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: metadata-check
+          path: ${{ runner.temp }}/metadata-check/
+          if-no-files-found: ignore
 
   # ──────────────────────────────────────────────────────────────────────
   # §4a — deterministic style lint. Informational: it never fails the review.
@@ -694,10 +814,15 @@ jobs:
   # §4 — /docs-team-standards:pr-review over the .adoc changes.
   # ──────────────────────────────────────────────────────────────────────
   adoc_review:
-    needs: [gate, classify, style_lint]
-    # Not skipped when style_lint fails: the lint is informational, so the
-    # prose review runs either way and checks by hand if it has no output.
-    if: ${{ !cancelled() && needs.classify.result == 'success' && needs.classify.outputs.has_adoc == 'true' }}
+    needs: [gate, classify, metadata_check, style_lint]
+    # !cancelled(), not the implicit success(): a failed metadata_check must
+    # not skip the review. The step that adds its result reports it as a
+    # check that did not run. Not skipped when style_lint fails either: the
+    # lint is informational, so the prose review runs either way and checks
+    # by hand if it has no output.
+    if: >-
+      !cancelled() && needs.classify.result == 'success' &&
+      needs.classify.outputs.has_adoc == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -731,8 +856,13 @@ jobs:
             /docs-team-standards:pr-review ${{ github.server_url }}/${{ github.repository }}/pull/${{ inputs.pr_number }}
             HEADLESS MODE — you are running in CI with no human present.
             The PR's head is ALREADY checked out in the working directory:
-            do not run `gh pr checkout` or `git remote` (both are refused
-            here); read files in place and use `gh pr diff` for the diff.
+            do not run `gh pr checkout` or any git command other than
+            `git status` (they are refused here). Read files in place, use
+            the Grep tool wherever pr-review says `git grep`, and use
+            `gh pr diff` for the diff. On a PR with more than 300 changed
+            files `gh pr diff` fails (HTTP 406): list the files with
+            `gh api --paginate repos/${{ github.repository }}/pulls/${{ inputs.pr_number }}/files`
+            instead, whose entries carry each file's patch.
             Do NOT post anything to GitHub; there is no approval step here,
             so the pr-review rule "never post without approval" means: never
             post. Where the pr-review flow would spawn the content-reviewer
@@ -756,6 +886,90 @@ jobs:
             {"verdict":"pass"|"fail","blocking":["..."],"suggestions":["..."]}
             where "fail" means at least one genuinely blocking violation of
             team standards.
+      # metadata_check's result. Under RUNNER_TEMP, not the workspace: the
+      # claude-skill action's own checkout runs `git clean` there.
+      # continue-on-error: a missing result is handled in the next step.
+      - uses: actions/download-artifact@v4
+        if: always()
+        continue-on-error: true
+        with:
+          name: metadata-check
+          path: ${{ runner.temp }}/metadata-check
+      # check-metadata into this branch: errors are blocking, warnings are
+      # suggestions, and so are the --suggest taxonomy values (the top 10 by
+      # score, all of them in findings.md), which never fail the branch. A
+      # check that could not run is `not_run`, as is a
+      # metadata_check job that left no result. Every finding is also listed
+      # in findings.md, which the comment shows. A review that wrote no
+      # verdict stays unavailable: the deterministic result alone is not the
+      # review. Messages carry page attribute values, so their markdown is
+      # escaped.
+      - name: Add the check-metadata findings to the review
+        if: always()
+        env:
+          METADATA_CHECK_RESULT: ${{ needs.metadata_check.result }}
+        run: |
+          set -uo pipefail
+          DIR="$RUNNER_TEMP/metadata-check"
+          STATE=$(cat "$DIR/state" 2> /dev/null || echo none)
+          REASON=""
+          if [[ "$STATE" == none && "${METADATA_CHECK_RESULT:-}" != skipped ]]; then
+            STATE=failed
+            REASON="the metadata_check job left no result (${METADATA_CHECK_RESULT:-unknown})"
+          fi
+          [[ "$STATE" == ran || "$STATE" == failed ]] || { echo "check-metadata: $STATE, nothing to add"; exit 0; }
+          mkdir -p review-output
+          V=review-output/verdict.json
+          F=review-output/findings.md
+          HAVE_VERDICT=false
+          [[ -f "$V" ]] && jq -e 'type == "object"' "$V" > /dev/null 2>&1 && HAVE_VERDICT=true
+          if [[ "$STATE" == failed ]]; then
+            [[ -n "$REASON" ]] || REASON=$(cat "$DIR/reason" 2> /dev/null || echo "no reason recorded")
+            if [[ "$HAVE_VERDICT" == true ]]; then
+              jq --arg r "Page metadata (doc-tools check-metadata): $REASON" \
+                '.not_run = (((.not_run // []) | if type == "array" then . else [.] end) + [$r])' "$V" > "$V.tmp" && mv "$V.tmp" "$V"
+            fi
+            exit 0
+          fi
+          cp "$DIR/check-metadata.json" review-output/check-metadata.json
+          if [[ "$(jq '.findings | length' "$DIR/check-metadata.json")" -gt 0 ]]; then
+            {
+              echo
+              echo "### Page metadata (doc-tools check-metadata)"
+              echo
+              jq -r 'def md: gsub("(?<c>[`\\[\\]<>\\\\])"; "\\\(.c)");
+                .findings[] | "- \(.severity): `\(.file):\(.line)` \(.message | md)"' "$DIR/check-metadata.json"
+            } >> "$F"
+          fi
+          # Suggestions (--suggest): taxonomy values a changed page's text
+          # names at or above the default minimum score that its header does
+          # not carry. Never blocking; a doc-tools without them adds none.
+          if [[ "$(jq '(.suggest.suggestions // []) | length' "$DIR/check-metadata.json")" -gt 0 ]]; then
+            {
+              echo
+              echo "### Suggested taxonomy values (doc-tools check-metadata --suggest)"
+              echo
+              jq -r 'def md: gsub("(?<c>[`\\[\\]<>\\\\])"; "\\\(.c)");
+                .suggest.suggestions | sort_by(.file, -.score)[]
+                | "- `\(.file):\(.line // 1)`\(if .uncategorized then " (no page-categories yet)" else "" end): \(.label | md) (`\(.conceptId)`) in `:\(.attribute):`, score \(.score): \(.reason | md)"' "$DIR/check-metadata.json"
+            } >> "$F"
+          fi
+          if [[ "$HAVE_VERDICT" == true ]]; then
+            jq --slurpfile m "$DIR/check-metadata.json" '
+              def md: gsub("(?<c>[`\\[\\]<>\\\\])"; "\\\(.c)");
+              def line: "page metadata: `\(.file):\(.line)` \(.message | md)";
+              def list(k): ((.[k] // []) | if type == "array" then . else [.] end);
+              ($m[0].findings | map(select(.severity == "error") | line)) as $errors
+              | ($m[0].findings | map(select(.severity != "error") | line)) as $warnings
+              | .blocking = (list("blocking") + $errors)
+              | ((($m[0].suggest.suggestions // []) | sort_by(-.score)) as $s
+                  | ($s[:10] | map("page metadata suggestion: `\(.file):\(.line // 1)` consider \(.label | md) (`\(.conceptId)`) in `:\(.attribute):`, score \(.score): \(.reason | md)"))
+                    + (if ($s | length) > 10 then ["page metadata: \(($s | length) - 10) more suggestion(s) in check-metadata.json"] else [] end)) as $suggested
+              | .suggestions = (list("suggestions") + $warnings + $suggested)
+              | if ($errors | length) > 0 then .verdict = "fail" else . end
+              ' "$V" > "$V.tmp" && mv "$V.tmp" "$V"
+          fi
+          jq -r '"check-metadata: added \(.summary.errors) error(s), \(.summary.warnings) warning(s), and \((.suggest.suggestions // []) | length) suggestion(s) to the review"' "$DIR/check-metadata.json"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -765,18 +979,23 @@ jobs:
 
   # ──────────────────────────────────────────────────────────────────────
   # §4 — JSON-only PRs (decision 4). docs-team-standards: the PR #2902
-  # deterministic validators. Content repos: headless overrides-review for
-  # *overrides*.json; plain jq validity for anything else.
+  # deterministic validators. Content repos: plain jq validity on every
+  # changed .json, plus headless overrides-review when any *overrides*.json
+  # changed; the last step folds the jq result into that verdict.
   # ──────────────────────────────────────────────────────────────────────
-  json_validation:
+  # docs-team-standards only. Its own job because it runs the PR head's
+  # scripts (validate-manifests.py) and must not hold id-token: write while
+  # it does: with it, an edited script could mint an OIDC token, assume the
+  # repo's AWS role and read the long-lived ADP client secret. Nothing here
+  # needs a credential. Uploads the same artifact name as json_validation;
+  # exactly one of the two runs, and aggregate reads whichever did.
+  json_validation_local:
     needs: [gate, classify]
-    if: needs.classify.outputs.only_json == 'true'
+    if: needs.classify.outputs.only_json == 'true' && github.repository == 'redpanda-data/docs-team-standards'
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
-      id-token: write   # OIDC role for the ADP gateway credential
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -784,15 +1003,16 @@ jobs:
           persist-credentials: false
 
       - name: Deterministic validation (docs-team-standards)
-        if: github.repository == 'redpanda-data/docs-team-standards'
         run: |
           set -euo pipefail
           mkdir -p review-output
           FAILED=0
           python3 scripts/validate-manifests.py || FAILED=1
-          if compgen -G "evaluations/tier-*/*.eval.json" > /dev/null; then
-            npx --yes ajv-cli@5.0.0 validate -s evaluations/schema.json \
-              -d "evaluations/tier-*/*.eval.json" || FAILED=1
+          # Same file set and flags as validate-skills.yml. A wrong glob here
+          # used to skip silently and report a pass that validated nothing.
+          if compgen -G "evaluations/suites/*.eval.json" > /dev/null; then
+            npx --yes ajv-cli@5.0.0 validate -s evaluations/schema.json --all-errors \
+              -d "evaluations/suites/*.eval.json" || FAILED=1
           fi
           if [[ "$FAILED" -eq 1 ]]; then
             jq -n '{verdict:"fail",blocking:["JSON validation failed (validate-manifests / eval schema) — see job log"],suggestions:[]}' > review-output/verdict.json
@@ -800,22 +1020,48 @@ jobs:
             jq -n '{verdict:"pass",blocking:[],suggestions:[]}' > review-output/verdict.json
           fi
 
-      - name: Basic JSON validity (content repos, non-overrides)
-        if: github.repository != 'redpanda-data/docs-team-standards' && needs.classify.outputs.overrides_json != 'true'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: json-validation
+          path: review-output/
+          if-no-files-found: ignore
+
+  json_validation:
+    needs: [gate, classify]
+    if: needs.classify.outputs.only_json == 'true' && github.repository != 'redpanda-data/docs-team-standards'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write   # OIDC role for the ADP gateway credential (overrides review)
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ inputs.pr_number }}/head
+          persist-credentials: false
+
+      # Runs on every content-repo JSON-only PR, including ones that also
+      # change an overrides file, so an unrelated .json beside it is still
+      # checked. Writes under RUNNER_TEMP, not review-output/: the
+      # claude-skill action's checkout runs `git clean` on the workspace.
+      - name: Basic JSON validity (content repos)
+        if: github.repository != 'redpanda-data/docs-team-standards'
         env:
           GH_TOKEN: ${{ github.token }}
+          OUT: ${{ runner.temp }}/json-validity.json
         run: |
           set -euo pipefail
-          mkdir -p review-output
           BAD=()
           while IFS= read -r f; do
             [[ -f "$f" ]] || continue   # deleted files
             jq -e . "$f" > /dev/null 2>&1 || BAD+=("$f")
-          done < <(gh pr diff "${{ inputs.pr_number }}" --repo "${{ github.repository }}" --name-only | grep -E '\.json$')
+          done < <(gh api --paginate "repos/${{ github.repository }}/pulls/${{ inputs.pr_number }}/files" --jq '.[].filename' | grep -E '\.json$')   # files API: see classify
           if [[ ${#BAD[@]} -gt 0 ]]; then
-            printf '%s\n' "${BAD[@]}" | jq -R . | jq -s '{verdict:"fail",blocking:(map("Invalid JSON: " + .)),suggestions:[]}' > review-output/verdict.json
+            printf '%s\n' "${BAD[@]}" | jq -R . | jq -s '{verdict:"fail",blocking:(map("Invalid JSON: " + .)),suggestions:[]}' > "$OUT"
           else
-            jq -n '{verdict:"pass",blocking:[],suggestions:[]}' > review-output/verdict.json
+            jq -n '{verdict:"pass",blocking:[],suggestions:[]}' > "$OUT"
           fi
 
       - name: Overrides review (content repos, decision 4)
@@ -841,6 +1087,35 @@ jobs:
             base branch) alongside the skill. Write findings to
             review-output/findings.md and review-output/verdict.json with schema
             {"verdict":"pass"|"fail","blocking":[...],"suggestions":[...]}.
+
+      # Fold the jq result into the job's single verdict.json. With no
+      # overrides file it IS the verdict. With one, invalid JSON joins the
+      # overrides verdict's blocking list. If the overrides review wrote no
+      # verdict, a jq failure still fails the job and says the review is
+      # missing; with no jq failure, verdict.json stays absent so the
+      # aggregate reports "unavailable" instead of a pass.
+      - name: Combine JSON verdicts (content repos)
+        if: always() && github.repository != 'redpanda-data/docs-team-standards'
+        env:
+          JQ_VERDICT: ${{ runner.temp }}/json-validity.json
+          OVERRIDES: ${{ needs.classify.outputs.overrides_json }}
+        run: |
+          set -euo pipefail
+          mkdir -p review-output
+          V=review-output/verdict.json
+          if [[ ! -f "$JQ_VERDICT" ]]; then
+            jq -n '{verdict:"fail",blocking:["JSON validity check did not run — see job log"],suggestions:[]}' > "$JQ_VERDICT"
+          fi
+          if [[ "$OVERRIDES" != "true" ]]; then
+            cp "$JQ_VERDICT" "$V"
+          elif [[ -f "$V" ]] && jq -e 'type == "object"' "$V" > /dev/null 2>&1; then
+            jq -s '.[0] as $o | .[1] as $j
+              | $o + {blocking: ((($o.blocking // []) | if type == "array" then . else [.] end) + $j.blocking)}
+              | if (.blocking | length) > 0 then .verdict = "fail" else . end' "$V" "$JQ_VERDICT" > "$V.tmp"
+            mv "$V.tmp" "$V"
+          elif jq -e '.verdict == "fail"' "$JQ_VERDICT" > /dev/null; then
+            jq '.blocking += ["Overrides review produced no verdict — human review required"]' "$JQ_VERDICT" > "$V"
+          fi
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -893,7 +1168,12 @@ jobs:
           prompt: >
             Review the code changed by pull request
             ${{ inputs.pr_number }} in this repository. Read the diff with
-            `gh pr diff`, then read the changed files in the working tree for
+            `gh pr diff` (on a PR with more than 300 changed files it fails
+            with HTTP 406; use `gh api --paginate
+            repos/${{ github.repository }}/pulls/${{ inputs.pr_number }}/files`,
+            whose entries carry each file's patch). No git command other
+            than `git status` is allowed; use Grep and Read. Then read the
+            changed files in the working tree for
             the context the diff alone does not show. Report correctness bugs
             first: something that is wrong, breaks, or does not do what the
             surrounding prose or code says it does. Note obvious
@@ -964,13 +1244,15 @@ jobs:
           LINT_DIR="$RUNNER_TEMP/screenshot-lint"; mkdir -p "$LINT_DIR"
           OUT="$LINT_DIR/screenshot-lint.json"
           if [[ ! -d modules ]]; then
-            # Not an Antora content repo (docs-site, docs-team-standards): nothing
-            # to lint, and the pipeline's posture is that "nothing to check"
-            # is a pass, not a red X.
-            jq -n '{verdict:"pass", blocking:[], suggestions:["No modules/ directory in this repo — screenshot lint skipped"]}' > "$OUT"
+            # Not an Antora content repo (docs-site, docs-team-standards): the
+            # lint cannot run. Not a failure (a red X on every image PR in a
+            # docs-only repo), but not a clean pass either: `not_run` makes the
+            # aggregate show that this check did not run, in the table and
+            # outside the collapsed details, instead of a bare ✅.
+            jq -n '{verdict:"pass", blocking:[], suggestions:[], not_run:["Screenshot lint (doc-tools lint-screenshots): this repo has no root modules/ directory, so the size and alt-text checks did not run"]}' > "$OUT"
             exit 0
           fi
-          gh pr diff "$PR" --repo "$R" --name-only > "$LINT_DIR/changed-files.txt"
+          gh api --paginate "repos/$R/pulls/$PR/files" --jq '.[].filename' > "$LINT_DIR/changed-files.txt"   # files API: see classify
           # --files: only pages changed in the PR plus pages that use a changed
           # image. A whole-repo scan would flag every pre-existing violation
           # in a repo that has never been linted (docs has dozens today).
@@ -988,13 +1270,20 @@ jobs:
             echo "::error::doc-tools lint-screenshots produced no output at doc_tools_version=${DOC_TOOLS_VERSION} — the pin may predate this subcommand, or npx failed to install it"
             exit 1
           fi
+          # `// []`: a result with no findings key is a clean lint, not a
+          # jq crash that turns into a red gate. The verdict also fails on
+          # any error-level finding, so it does not depend on .summary
+          # being present.
           jq '
             def line: "\(.file)\(if .line then ":\(.line)" else "" end)\(if .image then " [\(.image)]" else "" end) \(.message)";
-            {
-              verdict: (if .summary.errors > 0 then "fail" else "pass" end),
-              blocking:    [.findings[] | select(.severity == "error")   | line],
-              suggestions: [.findings[] | select(.severity == "warning") | line]
-            }' "$LINT_DIR/result.json" > "$OUT"
+            (.summary.errors // 0) as $errors
+            | (.findings // []) as $f
+            | {
+                blocking:    [$f[] | select(.severity == "error")   | line],
+                suggestions: [$f[] | select(.severity == "warning") | line]
+              }
+            | .verdict = (if (.blocking | length) > 0 or $errors > 0 then "fail" else "pass" end)
+            ' "$LINT_DIR/result.json" > "$OUT"
           jq -r '"screenshot-lint: verdict=\(.verdict), \(.blocking | length) blocking, \(.suggestions | length) suggestion(s)"' "$OUT"
 
       - name: Claude vision pass
@@ -1074,7 +1363,8 @@ jobs:
           jq -s '{
             verdict: (if (.[0].verdict=="fail" or .[1].verdict=="fail") then "fail" else "pass" end),
             blocking: ((.[0].blocking // []) + (.[1].blocking // [])),
-            suggestions: ((.[0].suggestions // []) + (.[1].suggestions // []))
+            suggestions: ((.[0].suggestions // []) + (.[1].suggestions // [])),
+            not_run: ((.[0].not_run // []) + (.[1].not_run // []))
           }' "$LINT" "$VISION" > "$FINAL"
           echo "merged the deterministic lint with the vision verdict"
 
@@ -1090,7 +1380,15 @@ jobs:
   # ──────────────────────────────────────────────────────────────────────
   ticket_delta:
     needs: [gate, classify, adoc_review]
-    if: needs.classify.outputs.ticket != '' && needs.classify.outputs.has_adoc == 'true'
+    # !cancelled(), not the implicit success(): a hard adoc_review failure
+    # (job timeout, plugin-load assertion, CLAUDE.md fetch) must degrade
+    # the delta (the prompt handles a missing findings.md), not skip it. A
+    # skipped delta drops its row from the comment instead of showing it
+    # unavailable. !cancelled() rather than always() so a cancelled run
+    # does not start a paid job.
+    if: >-
+      !cancelled() && needs.classify.result == 'success' &&
+      needs.classify.outputs.ticket != '' && needs.classify.outputs.has_adoc == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1108,6 +1406,9 @@ jobs:
         with:
           name: adoc-review
           path: ${{ runner.temp }}/prior-review
+      # No --add-dir needed for the prompt to read it: a bare `Read` in the
+      # action's allowlist is not scoped to the workspace in -p mode
+      # (verified on CLI 2.1.258, reading a file outside the cwd).
       - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
         with:
           repo: ${{ github.repository }}
@@ -1134,9 +1435,32 @@ jobs:
             NOT post to GitHub. Write the delta report (requirements the PR misses; PR
             content the ticket doesn't cover) to review-output/ticket-delta.md
             and review-output/verdict.json as
-            {"verdict":"pass"|"fail","blocking":[...],"suggestions":[...]}
+            {"verdict":"pass"|"fail","blocking":[...],"suggestions":[...],"ticket_source":"jira"|"pr-body"|"none"}
             where "fail" means the PR clearly misses a requirement the ticket
-            states.
+            states, and ticket_source says where you read the ticket's
+            requirements: "jira" only if you read the ticket itself,
+            "pr-body" if you used a description quoted in the PR body, and
+            "none" if you could read neither.
+      # This job has no Jira credential yet (DOCS_REVIEW_ROLLOUT.md, org
+      # setup item 6), so unless the PR body quotes the ticket, the delta
+      # had nothing to compare against and its "pass" means nothing. Mark
+      # that as a check that did not run, so the comment cannot show a bare
+      # ✅. A missing or unrecognised ticket_source counts as "none".
+      - name: Flag an unread ticket
+        if: always()
+        env:
+          TICKET: ${{ needs.classify.outputs.ticket }}
+        run: |
+          set -euo pipefail
+          V=review-output/verdict.json
+          [[ -f "$V" ]] && jq -e 'type == "object"' "$V" > /dev/null 2>&1 || exit 0
+          if jq -e '.ticket_source == "jira" or .ticket_source == "pr-body"' "$V" > /dev/null; then
+            exit 0
+          fi
+          jq --arg t "$TICKET" '.not_run = (((.not_run // []) | if type == "array" then . else [.] end)
+              + ["Ticket delta: \($t) was never read. This job cannot reach Jira, and the PR body quotes no ticket description, so there was nothing to compare the PR against. Quote the ticket description in the PR body to enable this check."])' \
+            "$V" > "$V.tmp" && mv "$V.tmp" "$V"
+          echo "::warning::ticket_delta read no ticket requirements; marked as not run"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -1148,7 +1472,7 @@ jobs:
   # §6 — one verdict, one upserted comment, final informational status.
   # ──────────────────────────────────────────────────────────────────────
   aggregate:
-    needs: [gate, classify, style_lint, adoc_review, json_validation, code_review, screenshot_gate, ticket_delta]
+    needs: [gate, classify, style_lint, adoc_review, json_validation_local, json_validation, code_review, screenshot_gate, ticket_delta]
     if: always() && needs.gate.outputs.run_review == 'true'
     runs-on: ubuntu-latest
     # 25, not 15: preview-links.sh now waits up to 10 minutes for the
@@ -1212,9 +1536,11 @@ jobs:
           SME_APPROVER: ${{ needs.gate.outputs.sme_approver }}
           SME_MODE: ${{ needs.gate.outputs.sme_mode }}
           TICKET: ${{ needs.classify.outputs.ticket }}
+          RESULT_CLASSIFY: ${{ needs.classify.result }}
           RESULT_ADOC: ${{ needs.adoc_review.result }}
           RESULT_LINT: ${{ needs.style_lint.result }}
-          RESULT_JSON: ${{ needs.json_validation.result }}
+          # Exactly one JSON job runs (docs-team-standards: _local).
+          RESULT_JSON: ${{ needs.json_validation.result != 'skipped' && needs.json_validation.result || needs.json_validation_local.result }}
           RESULT_CODE: ${{ needs.code_review.result }}
           RESULT_SHOTS: ${{ needs.screenshot_gate.result }}
           RESULT_TICKET: ${{ needs.ticket_delta.result }}
@@ -1227,11 +1553,13 @@ jobs:
           # gate's pending claim until the 90-minute stale window expires.
           # Degrade to the pipeline's standard infra-failure posture instead:
           # a comment carrying the same marker (so it still upserts in place),
-          # a failure status, and needs-human-review.
+          # an error status, and needs-human-review. `error`, not `failure`:
+          # exactly-once treats failure as a finished review, so the SHA
+          # could never be retried (see aggregate-review.sh).
           if ! bash .standards/scripts/aggregate-review.sh results comment.md; then
             echo "::warning::aggregate-review.sh could not run — posting the unavailable fallback"
             {
-              echo "state=failure"
+              echo "state=error"
               echo "description=automated review unavailable, human review required"
               echo "labels=needs-human-review"
             } >> "$GITHUB_OUTPUT"

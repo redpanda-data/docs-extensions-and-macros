@@ -224,6 +224,29 @@ describe('convertContent', () => {
     )
   })
 
+  // `^` at the end of link text means "open in a new window" on a URL link,
+  // but an xref has no such shorthand and would render the caret. An internal
+  // page opens in the same window.
+  test('drops the new-window caret from the link text', () => {
+    const url =
+      'https://docs.redpanda.com/streaming/current/reference/properties/cluster-properties/#kafka_batch_max_bytes'
+    expect(convert(`${url}[Batch size^]`).content).toBe(
+      'xref:streaming:reference:properties/cluster-properties.adoc#kafka_batch_max_bytes[Batch size]'
+    )
+    expect(convert('link:https://docs.redpanda.com/connect/configuration/secrets/[Secrets^]').content).toBe(
+      'xref:connect:configuration:secrets.adoc[Secrets]'
+    )
+  })
+
+  test('treats a caret-only label as no label', () => {
+    const url =
+      'https://docs.redpanda.com/streaming/current/reference/properties/cluster-properties/#kafka_batch_max_bytes'
+    expect(convert(`${url}[^]`).content).toBe(convert(url).content)
+    expect(convert('https://docs.redpanda.com/connect/configuration/secrets/[^]').content).toBe(
+      'xref:connect:configuration:secrets.adoc[]'
+    )
+  })
+
   // An xref with a fragment and no link text renders the raw resource id, so
   // the extension has to supply text of its own.
   test('labels an unlabeled fragment URL with the heading it points at', () => {
@@ -235,13 +258,52 @@ describe('convertContent', () => {
     )
   })
 
-  test('falls back to the page title when the fragment matches no heading', () => {
-    expect(
-      convert('https://docs.redpanda.com/streaming/current/reference/properties/cluster-properties/#no-such-anchor')
-        .content
-    ).toBe(
-      'xref:streaming:reference:properties/cluster-properties.adoc#no-such-anchor[Cluster Configuration Properties]'
+  test('leaves a URL raw and reports it when the page resolves but the anchor does not', () => {
+    const url = 'https://docs.redpanda.com/streaming/current/reference/properties/cluster-properties/#no-such-anchor'
+    for (const input of [url, `${url}[Batch size]`]) {
+      const { content, converted, missingAnchor, unmapped } = convert(input)
+      expect(content).toBe(input)
+      expect(converted).toBe(0)
+      expect(missingAnchor).toEqual([url])
+      expect(unmapped).toEqual([])
+    }
+  })
+
+  test('accepts explicit and inline anchors, and labels an anchor off a heading with the page title', () => {
+    const page = makePage({
+      component: 'streaming',
+      version: '25.3',
+      module: 'manage',
+      relative: 'tuning.adoc',
+      url: '/streaming/current/manage/tuning/',
+      contents: [
+        '= Tune Redpanda',
+        '',
+        '[[before-you-begin]]',
+        'Read this first.',
+        '',
+        '[#io-tuning.wide]',
+        '== Tune I/O',
+        '',
+        'Set the scheduler. [[scheduler]]It matters. See anchor:knob[the knob].',
+        '',
+      ].join('\n'),
+    })
+    const context = Object.assign(
+      buildUrlMap({
+        getComponents: () => [{ name: 'streaming', latest: { version: '25.3' } }],
+        getPages: (filter) => (filter ? [page].filter(filter) : [page]),
+        findBy: () => [],
+      }),
+      { hostnames: new Set(['docs.redpanda.com']), ignore: [], latestVersionSegment: 'current' }
     )
+    const base = 'https://docs.redpanda.com/streaming/current/manage/tuning/'
+    const run = (text) => convertContent(text, context)
+    expect(run(`${base}#before-you-begin`).content).toBe('xref:streaming:manage:tuning.adoc#before-you-begin[Tune Redpanda]')
+    expect(run(`${base}#io-tuning`).content).toBe('xref:streaming:manage:tuning.adoc#io-tuning[Tune I/O]')
+    expect(run(`${base}#scheduler`).content).toBe('xref:streaming:manage:tuning.adoc#scheduler[Tune Redpanda]')
+    expect(run(`${base}#knob[Knob]`).content).toBe('xref:streaming:manage:tuning.adoc#knob[Knob]')
+    expect(run(`${base}#tune-io`).missingAnchor).toEqual([`${base}#tune-io`])
   })
 
   test('resolves link text from a heading in an included partial', () => {
@@ -286,6 +348,23 @@ describe('convertContent', () => {
 
   test('keeps an unlabeled URL without a fragment as xref:...[] for Antora to title', () => {
     expect(convert('https://docs.redpanda.com/connect/configuration/secrets/').content).toBe(
+      'xref:connect:configuration:secrets.adoc[]'
+    )
+  })
+
+  // A page a generator writes into a docs repo links to its own component by
+  // module and page, the way the repo's hand-written xrefs do, so that a
+  // regeneration does not rewrite every same-component link into a form the
+  // repo never uses. A version-pinned target still names its component.
+  test('writes same-component targets as module:page xrefs when the context names a local component', () => {
+    const context = Object.assign(makeResolverContext(), { localComponent: 'streaming' })
+    expect(
+      convertContent('https://docs.redpanda.com/current/manage/kubernetes/manage-resources/', context).content
+    ).toBe('xref:manage:kubernetes/manage-resources.adoc[]')
+    expect(
+      convertContent('https://docs.redpanda.com/streaming/24.3/manage/security/authentication/', context).content
+    ).toBe('xref:24.3@streaming:manage:security/authentication.adoc[]')
+    expect(convertContent('https://docs.redpanda.com/connect/configuration/secrets/', context).content).toBe(
       'xref:connect:configuration:secrets.adoc[]'
     )
   })

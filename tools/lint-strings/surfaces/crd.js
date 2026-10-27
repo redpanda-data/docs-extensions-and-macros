@@ -405,27 +405,42 @@ const RULES = [
   },
   {
     name: 'go-field-name-first',
-    description: 'Description leads with the Go field name instead of the YAML key',
+    description: 'Description opens with the Go field name or the YAML key instead of what the field does',
     severity: 'warning',
     check: (decl) => {
       const text = (decl.string || '').trim()
       if (!text) return []
       const firstWord = (text.match(/^[A-Za-z0-9_]+/) || [null])[0]
       if (!firstWord) return []
-      if (firstWord === decl.meta.go_name &&
-          decl.meta.go_name.toLowerCase() !== decl.meta.json_name.toLowerCase()) {
-        return [{ message: `Description starts with the Go field name "${decl.meta.go_name}", but users type "${decl.meta.json_name}" in YAML. Describe the json key: "${decl.meta.json_name}" (or start with what the field does).` }]
-      }
-      return []
+      // Case-sensitive on purpose: `RetentionTime is...` on
+      // json:"retentionTime" opens with the Go name, and `retentionTime
+      // is...` opens with the key. Neither says what the field does.
+      const { go_name: goName, json_name: jsonName } = decl.meta
+      let opener = null
+      if (firstWord === goName) opener = `the Go field name "${goName}"`
+      else if (firstWord === jsonName) opener = `the YAML key "${jsonName}"`
+      if (!opener) return []
+      return [{ message: `Description opens with ${opener}. Start with what the field does, for example "Specifies ...". Don't open with the Go field name "${goName}" or the YAML key "${jsonName}".` }]
     }
   }
 ]
+
+/**
+ * Where a declaration lives, for removal matching. json names repeat across
+ * structs (`enabled`, `name`), so the key is the Go package directory, the
+ * struct and the json name. Go type names are unique per package, and a
+ * package is one directory.
+ */
+function identity (decl) {
+  return [path.dirname(decl.file), (decl.meta && decl.meta.struct) || null, decl.name]
+}
 
 module.exports = {
   name: 'crd',
   convention: CONVENTION,
   extract,
   scanFile,
+  identity,
   loadConfig,
   collectInlinedTypes,
   UNDESCRIBED_EXTERNAL_TYPES,

@@ -38,7 +38,15 @@ display help for command
 * `validate-mcp` - Validate MCP server configuration (tools, resources)
 * `sync-schemas` - Sync this package's docs-data/*.schema.json into a content repo's docs-data/
 * `mcp-version` - Show MCP server version and configuration information
+* `check-dispatch-graph` - Check the repository_dispatch graph between engineering and docs repos: senders without listeners, listeners without senders, never-fired senders, failing receivers (exit 0 clean, 1 findings, 2 could not run)
 * `lint-strings` - Lint user-facing doc strings embedded in engineering source code (properties, metrics, ...)
+* `detect-enterprise-gating` - Find enterprise gating changes (license_required_feature values, config::enterprise<> wrappers and restricted values) in a core diff and print them as a doc-impact report
+* `doc-impact-recording` - Extract the docs MCP calls from a Claude Code transcript into a doc-impact eval recording
+* `lint-screenshots` - Lint image macros and image files in a docs repo against the screenshot standard (alt text, size, format, width)
+* `check-build-log` - Check an Antora JSON build log: fail on error or fatal records or too few pages, print a Markdown summary
+* `check-metadata` - Check page-categories and solution facet values in AsciiDoc page headers against the docs taxonomy
+* `check-rendered-html` - Scan rendered Antora HTML for unconverted AsciiDoc (literal backticks, xref:, include::, attributes, tables, empty sections) and broken anchors and links
+* `connect-docs-diff` - Diff two generated Connect docs trees and map each changed partial or example to its published page
 * `preview-string` - Render one embedded doc string (property, rpk command/flag, metric, helm key, CRD field, connect field) as it will publish
 * `generate` - Run docs automations
 * `validate` - Validate docs data against internal sources of truth
@@ -488,7 +496,7 @@ Copy this package's docs-data/*.schema.json files into a content repo's own docs
 
 *Why use it:*
 
-Nothing keeps a content repo's schema copy in sync with this package's copy today, in either direction. A content repo's copy can legitimately be ahead of this package's (confirmed happening in practice: the docs repo's rpk-overrides.schema.json documents a real, working `asPartial` override field that this package's own copy is missing) — overwriting it in that case would delete real, correct documentation, not fix drift. This only overwrites when this package's copy is a strict superset of the destination; otherwise it reports which keys only the destination has and leaves the file alone (status 'diverged') unless --force is passed. --check never writes, for a CI gate.
+Nothing keeps a content repo's schema copy in sync with this package's copy today, in either direction. A content repo's copy can legitimately be ahead of this package's (confirmed happening in practice: the docs repo's rpk-overrides.schema.json documents a real, working `asPartial` override field that this package's own copy is missing) — overwriting it in that case would delete real, correct documentation, not fix drift. This only overwrites when this package's copy is a strict superset of the destination; otherwise it reports which keys only the destination has and leaves the file alone (status 'diverged') unless --force is passed. --check never writes, for a CI gate. A schema is also only synced into a repo that is plausibly its home: one that already has the schema, or that has the *.json the schema documents. Anything else is reported as 'not for this repo' and skipped, and never counts as drift. kapa-source-groups.json is the reason: it is generated into this package and read from node_modules by an Antora extension, so it never lives in a content repo at all, and planting its schema in redpanda-data/docs would leave a file describing data that repo will never have, with --check reporting its absence as drift on every run afterwards.
 
 *Usage:*
 
@@ -571,6 +579,62 @@ npx doc-tools mcp-version --stats
 
 None.
 
+== check-dispatch-graph
+
+Health check for the repository_dispatch graph that connects Redpanda's engineering repos to its docs repos. Reads every workflow file on each configured repo's default branch, pairs the senders (peter-evans/repository-dispatch, `gh api .../dispatches`, curl, github-script) with the listeners (`on.repository_dispatch.types`), and reads each workflow's recent runs from the Actions API. Reports senders with no listener, docs listeners with no sender (informational when a cron backstops them), senders that have never fired, receivers failing more than the threshold, receiver payload variants no sender dispatches, and edges dispatched from more than one repo.
+
+*Why use it:*
+
+A repository_dispatch is accepted with HTTP 204 whether or not a listener exists, and a receiver that fails every run looks, from the sender's side, exactly like one that works. Breaks in this graph went unnoticed for weeks until someone read the receivers' run history by hand. This command reads it by script, and .github/workflows/check-dispatch-graph.yml runs it weekly, files one issue, and closes it on the first run that finds the graph healthy. Exit codes: 0 clean, 1 findings (the output ends with the line DISPATCH_GRAPH_FINDINGS_CONFIRMED), 2 could not run (a repo or runs query could not be read, so the graph is incomplete; never reported as clean).
+
+*Usage:*
+
+[,bash]
+----
+doc-tools check-dispatch-graph [options]
+----
+
+*Options:*
+
+`--repos <list>`::
+Comma-separated owner/name[:role] entries (role engineering or docs) replacing the default repo set
+
+`--fail-threshold <fraction>`::
+Flag a receiver whose fail rate over the window is above this fraction (default: "0.5")
+
+`--window <n>`::
+How many of the newest runs the fail rate is computed over (default: "20")
+
+`--per-page <n>`::
+How many runs to fetch per workflow (max 100) (default: "50")
+
+`--json`::
+Print the full result as JSON instead of the table
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Check the default repo set against the live org
+export REDPANDA_GITHUB_TOKEN=...   # or GH_TOKEN; must read the private docs repos
+npx doc-tools check-dispatch-graph
+
+# Machine-readable
+npx doc-tools check-dispatch-graph --json > dispatch-graph.json
+
+# A narrower set of repos (role decides which side a missing counterpart is reported on)
+npx doc-tools check-dispatch-graph --repos redpanda-data/helm-charts:engineering,redpanda-data/docs:docs
+----
+
+*Requirements:*
+
+- A GitHub token that can read every configured repo and its Actions runs
+  (REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN or GH_TOKEN). The
+  docs repos are private, so an unauthenticated run exits 2.
+
 == lint-strings
 
 Deterministic lint for user-facing doc strings embedded in engineering source code (property descriptions, metric help strings, ...). These strings ship verbatim to docs.redpanda.com, so this command surfaces quality problems (empty descriptions, broken markup, name-echo tautologies, convention drift) at write time, with exact file:line spans for each declaration.
@@ -606,6 +670,12 @@ Comma-separated rule ids to skip
 `--only-rules <list>`::
 Comma-separated rule ids to run exclusively
 
+`--reviewed <file>`::
+Diff mode: skip declarations whose fingerprint is listed in <file> (already reviewed on an earlier push)
+
+`--reviewer-comments <file>`::
+Diff mode: skip declarations whose text a human reviewer wrote in one of the comment bodies in <file> (a JSON array of strings)
+
 `--strict`::
 Exit 1 when any error-severity finding exists (default: always exit 0 - suggest, never block)
 
@@ -624,6 +694,376 @@ npx doc-tools lint-strings --repo ~/redpanda --surface properties --format json
 
 # PR mode: only declarations whose span intersects the diff
 npx doc-tools lint-strings --repo ~/redpanda --diff origin/dev
+----
+
+== detect-enterprise-gating
+
+Find enterprise gating changes in a Redpanda core diff that no doc string announces: a value added to or removed from license_required_feature in src/v/features/enterprise_features.h, a property wrapped in or unwrapped from config::enterprise<> in src/v/config/configuration.h, or a changed restricted value of an enterprise<> property in src/v/config/configuration.cc. Prints them as a doc-impact report, the JSON the doc-strings review dispatches to the docs team's Jira router, so a licensing change reaches a DOC ticket even when the review has no doc string to look at.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools detect-enterprise-gating [options]
+----
+
+*Options:*
+
+`--repo <path>`::
+Path to a Redpanda core checkout. Nothing is cloned.
+
+`--diff <base>`::
+Base ref: changes in <base>...HEAD are inspected
+
+`--format <format>`::
+Output format: json or human (default: "json")
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+npx doc-tools detect-enterprise-gating --repo . --diff origin/dev
+----
+
+== doc-impact-recording
+
+Extracts every redpanda-docs MCP call and its result from a Claude Code transcript (the claude-code-action execution file, or `claude -p --output-format stream-json` output) and writes them as a doc-impact eval recording. Only the tool name, arguments and result content are kept. Writes nothing when the session made no docs calls.
+
+*Why use it:*
+
+The doc-impact eval replays docs answers per PR. Answers recorded later come from docs that may already contain the writer's fix, so the eval would score a correct "already documented" as a miss. The doc-strings review saves what the docs server told it at review time, and the eval miner turns that into the item's recording.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools doc-impact-recording [options]
+----
+
+*Options:*
+
+`--execution-file <path>`::
+Transcript: a JSON array of SDK messages or stream-json lines
+
+`--output <path>`::
+Recording file to write (not written when there are no docs calls)
+
+`--item <id>`::
+Item id to store in the recording
+
+`--server <name>`::
+MCP server name in the transcript tool names (default: "redpanda-docs")
+
+`--server-url <url>`::
+URL of that MCP server, stored in the recording
+
+`--model <name>`::
+Model to store (default: the model in the transcript init message)
+
+`--recorded-at <iso>`::
+Timestamp to store (default: now)
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# What the doc-strings review runs after its Claude step
+npx doc-tools doc-impact-recording --execution-file "$RUNNER_TEMP/claude-execution-output.json" \
+  --output recording.json --item redpanda-operator-1615 --server-url https://docs.redpanda.com/mcp
+----
+
+== lint-screenshots
+
+Deterministic checks from the docs screenshot standard, run against the .adoc pages under modules/ in a docs repo: every image macro (block and inline) has alt text, the alt text is at most 125 characters, does not start with "screenshot of" / "image of" / "picture of", and has no unquoted comma (Asciidoctor would split it into width/height); the referenced image file exists and is at most 100KB. Those are errors and exit 1. Warnings (exit 0 unless --warnings-as-errors) cover the rest of the standard: images above the 50KB target, JPEG/WebP where PNG or SVG belongs, captures wider than 1920px, and - in --files mode - changed images nothing references. Commented-out macros are skipped.
+
+*Why use it:*
+
+cloud-docs enforced these rules on every PR and its daily screenshot cron with a repo-local script; the other docs repos had nothing. One command in doc-tools lets every docs repo and the shared PR review pipeline run the same checks, so no two jobs disagree about the same 100KB limit.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools lint-screenshots [options]
+----
+
+*Options:*
+
+`--root <path>`::
+Docs repo root, the directory that holds modules/ (default: current directory)
+
+`--files <path>`::
+Changed-files list (one repo-relative path per line, for example from `gh pr diff --name-only`): lint only listed .adoc files and pages that reference a listed image
+
+`--format <format>`::
+Output format: human or json (default: "human")
+
+`--output <path>`::
+Also write the JSON result to this file
+
+`--max-alt-length <n>`::
+Alt text character limit (default: "125")
+
+`--max-bytes <n>`::
+Image size ceiling in bytes (error above this) (default: "102400")
+
+`--target-bytes <n>`::
+Image size target in bytes (warning above this) (default: "51200")
+
+`--max-width <n>`::
+Intrinsic image width limit in pixels (warning above this) (default: "1920")
+
+`--warnings-as-errors`::
+Exit 1 on warnings too
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Whole repo (from the docs repo root): what the cloud-docs PR check runs
+npx doc-tools lint-screenshots
+
+# PR mode: only pages changed in the PR, plus pages that use a changed image
+gh pr diff 123 --name-only > changed.txt
+npx doc-tools lint-screenshots --files changed.txt --format json --output review-output/screenshot-lint.json
+
+# Adopt the stricter items as blocking
+npx doc-tools lint-screenshots --warnings-as-errors
+----
+
+== check-build-log
+
+Check an Antora JSON log (`antora --log-format json`): exit 1 when any record is at level error or fatal, and, with --min-pages and --site-dir, when fewer HTML pages were written than expected. Prints a Markdown summary (counts by level, then the error and warning messages grouped and deduplicated, with file and line) for $GITHUB_STEP_SUMMARY. Warnings never fail the check. With --blocking-sources, only errors from those repositories (or with no source) fail it, so a broken page in another content source of the playbook is reported without blocking.
+
+*Why use it:*
+
+Antora's --log-failure-level fails the build but explains nothing in a job summary, and cannot catch a build that exits 0 having written no files, which is what Antora does on an unsupported Node version. The Connect docs PR check runs Antora with --log-failure-level=fatal so this command, not Antora, decides.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools check-build-log [options] <log>
+----
+
+*Options:*
+
+`--site-dir <dir>`::
+Output directory to count HTML pages in (with --min-pages)
+
+`--min-pages <n>`::
+Fail when fewer than <n> HTML pages were written under --site-dir
+
+`--blocking-sources <repos>`::
+Comma-separated owner/name repositories whose errors block (default: all). Errors with no source always block; others are listed only
+
+`--format <format>`::
+Output format: markdown or json (default: "markdown")
+
+`--output <path>`::
+Also write the output to this file
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+npx antora --log-format json --log-failure-level=fatal antora-playbook.yml > build.ndjson
+npx doc-tools check-build-log build.ndjson --site-dir build/site/connect --min-pages 400 >> "$GITHUB_STEP_SUMMARY"
+
+# Block only on errors from these repositories; list the rest
+npx doc-tools check-build-log build.ndjson --blocking-sources redpanda-data/rp-connect-docs,redpanda-data/connect
+----
+
+== check-metadata
+
+Check the taxonomy metadata in AsciiDoc page headers against the docs taxonomy (taxonomy.yml in the docs repository). On every page, `:page-categories:` values must resolve to a concept: an unknown value, a deprecated value, or two values that are the same concept warn, and each message names the replacement. On a solution overview (`:page-layout: solution`), `:page-solution-use-cases:`, `:page-solution-industries:`, `:page-solution-technologies:`, and `:page-solution-platforms:` must resolve within their own facet, and an unknown value or a duplicate concept is an error. `:page-topic-type:` is checked against the content types, as a warning. --strict turns every warning into an error. The taxonomy comes from --taxonomy (a path or URL), else the docs checkout at the current directory, else $REDPANDA_DOCS_PATH, else the published file. The build runs the same rules (extension-utils/metadata-check.js), so the two never disagree. --fix first rewrites `:page-categories:` in place: each value becomes its concept's preferred label, a deprecated value becomes its replacements, and a replacement that is a task is dropped (the task comes from the module). Values that need a judgment call (no replacement, or a content type) are left as they are and still warn. --suggest also lists, for each page, the topics, use cases, technologies, and industries its text names that its header does not carry yet, so authors and agents choose values from the taxonomy instead of inventing them. Matching is deterministic, with no model: every live concept's prefLabel and altLabels are matched case-insensitively on whole words against the title, `:description:`, the page path (module and directories), section headings, and body, code included and included partials followed. Words split on anything that is not a letter or digit, so the code literal `postgres_cdc` names PostgreSQL (altLabel Postgres) and Change data capture (altLabel CDC). A two-letter label such as Go matches only in its exact case and never as the first word of a sentence. Hits are weighted title 8, path 6, description 5, heading 1.5 each (up to 3), and body 1 + log2(n) (at most 3). A suggestion never names a deprecated concept, never takes a facet past its cardinality, and skips what the page carries or what that implies; on a solution overview a technology that a topic implies (Iceberg Topics implies Apache Iceberg) is suggested in page-solution-technologies. Each suggestion has a score, a reason, and evidence (the matched term, where, and the line). --min-score defaults to 5 for Product Docs pages and 3 for solution overviews; --limit (per facet) to 3 and 6. Suggestions do not change the exit code. --suggest also lists candidates: frequent, distinctive terms on a page that no concept's label or altLabel matches, in any scheme, for proposing new concepts or altLabels. They are repeated capitalized terms in prose (Amazon S3, Debezium) and component identifiers (`aws_s3` output, xrefs to Connect component pages), each with a count, the lines, and a likely facet from a cue word after it (a connector, database, format, or product word). Terms in the terminology lists (--terminology, default the docs glossary in the checkout), common English, and words the page also writes in lowercase are dropped. --candidates-only skips the check and the suggestions and aggregates candidates across the pages: one entry per term, with the pages it is on, leaving out terms on more than a fifth of the pages (boilerplate). Exit 0 without errors, 1 with errors, 2 when the check could not run.
+
+*Why use it:*
+
+Categories, use cases, and technologies drive search facets and solution recommendations, and a free-text value becomes a near-duplicate the moment a second author writes one. This catches it on the PR, without a model, in a form the docs agents and the PR review can read.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools check-metadata [options] [paths...]
+----
+
+*Options:*
+
+`--changed <base>`::
+Check only .adoc files changed between the merge base with <base> and HEAD, for example origin/main
+
+`--taxonomy <path|url>`::
+taxonomy.yml to use (default: the docs checkout, $REDPANDA_DOCS_PATH, then https://docs.redpanda.com/shared/_attachments/taxonomy.yml)
+
+`--format <format>`::
+Output format: text or json (default: "text")
+
+`--strict`::
+Treat warnings as errors
+
+`--fix`::
+Rewrite page-categories in place to current taxonomy labels, then check
+
+`--root <path>`::
+Repository root (default: current directory)
+
+`--output <path>`::
+Also write the JSON result to this file
+
+`--suggest`::
+Also suggest taxonomy values each page does not carry yet, matched from its title, description, path, headings, and body
+
+`--min-score <n>`::
+With --suggest, the lowest score to suggest (default: 5 on Product Docs pages, 3 on solution overviews)
+
+`--limit <n>`::
+With --suggest, the most suggestions per facet and page (default: 3 on Product Docs pages, 6 on solution overviews; never past the facet cardinality)
+
+`--suggest-empty-only`::
+With --suggest, suggest only for pages without :page-categories:
+
+`--candidates-only`::
+List only candidate terms, frequent distinctive terms that no concept matches, aggregated across the pages with the pages each appears in
+
+`--terminology <paths>`::
+With --suggest or --candidates-only, comma-separated terminology lists whose terms are never candidates: a glossary partials directory, a Markdown word list, or a text file (default: the docs glossary, shared/modules/terms/partials, in the checkout or $REDPANDA_DOCS_PATH)
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Pages changed on this branch (what the docs PR check runs)
+npx doc-tools check-metadata --changed origin/main
+
+# Specific pages or directories, JSON for a grader
+npx doc-tools check-metadata modules/manage/pages/iceberg --format json
+
+# Against a local taxonomy, failing on warnings
+npx doc-tools check-metadata --taxonomy ../docs/shared/modules/ROOT/attachments/taxonomy.yml --strict
+
+# Rewrite deprecated categories to their replacements, then check
+npx doc-tools check-metadata --fix modules
+
+# Suggest taxonomy values for new pages, as JSON for an agent
+npx doc-tools check-metadata --suggest --format json modules/manage/pages/new-page.adoc
+
+# Suggest only for changed pages that carry no categories, with a lower bar
+npx doc-tools check-metadata --changed origin/main --suggest --suggest-empty-only --min-score 3
+
+# Terms across a repository that no concept covers, filtered by the style guide's word lists
+npx doc-tools check-metadata --candidates-only --terminology shared/modules/terms/partials,../docs-team-standards/resources/writing-style/terminology.md --format json modules
+----
+
+== check-rendered-html
+
+Scan the rendered HTML of one or more Antora component paths for AsciiDoc that did not convert: literal backticks outside code, literal `xref:` or `include::` text, leftover {page-*} or {env-*} attribute references, `|===` table markup, Asciidoctor's "Unresolved include directive" text, links with the `unresolved` class, and empty sections (a heading followed directly by a heading of the same or higher level). Also checks links: a fragment with no matching id on its target page (broken-anchor), and a relative or root-relative link under a link root that is not in the build (broken-link). External links are ignored; links outside every link root, or into a root the build does not contain, are counted as unchecked. Only the page body is scanned. Reports findings per page and exits 0 unless --strict. With --changed-pages, findings are split into those on the listed pages and the rest, and --strict exits 1 only when a listed page has findings, so defects already on the base never fail a PR.
+
+*Why use it:*
+
+These defects reach readers without a single line in the Antora log: two backticks for an empty enum option, or a backtick glued to the next word, render as literal backticks on the published page.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools check-rendered-html [options] <site-dir>
+----
+
+*Options:*
+
+`--component <path>`::
+Component output path to scan under <site-dir>; repeat it or give a comma list, for example connect,cloud-data-platform/develop/connect (default: connect)
+
+`--link-root <path>`::
+Site path whose linked pages must exist; repeat it or give a comma list. Scanned components are always included. Links outside every root, or into a root not in the build, are counted as unchecked (default: connect,cloud-data-platform/develop/connect)
+
+`--pages <file>`::
+Only scan the pages listed in <file>, one path relative to <site-dir> per line
+
+`--changed-pages <file>`::
+Pages a PR changed: one path relative to <site-dir> per line (the sitePath from connect-docs-diff) or connect-docs-diff --format json output. All pages are still scanned; findings are split into changed and other pages, and --strict fails only on changed pages
+
+`--format <format>`::
+Output format: markdown or json (default: "markdown")
+
+`--output <path>`::
+Also write the output to this file
+
+`--strict`::
+Exit 1 when any finding exists, or with --changed-pages when a changed page has findings (default: always exit 0)
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+npx doc-tools check-rendered-html build/site --component connect >> "$GITHUB_STEP_SUMMARY"
+
+# Fail on any finding
+npx doc-tools check-rendered-html build/site --strict
+
+# Self-managed and Cloud Connect pages; fail only on the pages a PR changed
+npx doc-tools check-rendered-html build/site --component connect,cloud-data-platform/develop/connect \
+  --changed-pages changed-pages.txt --strict
+----
+
+== connect-docs-diff
+
+Compare two trees written by connect's docs generator, for example a PR's merge base and its head, and map each added, removed, or changed partial or example to the docs.redpanda.com page that includes it. Prints a Markdown table of changed pages with links, then a unified diff per file in collapsible blocks, capped in size. A tree root can be connect's docs/ directory, its modules/ directory, or the components/ directory.
+
+*Why use it:*
+
+Writers review Go string literals today and never see the page. The generated output is the published change: connect strings, benthos strings from a go.mod bump, and generator changes all show up here.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools connect-docs-diff [options] <base-dir> <head-dir>
+----
+
+*Options:*
+
+`--format <format>`::
+Output format: markdown or json (default: "markdown")
+
+`--site-url <url>`::
+Docs site the page links point at (default: "https://docs.redpanda.com")
+
+`--max-bytes <n>`::
+Cap on the Markdown output size; diffs past it are counted, not shown (default: "60000")
+
+`--output <path>`::
+Also write the output to this file
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+npx doc-tools connect-docs-diff base/modules head/modules >> "$GITHUB_STEP_SUMMARY"
+npx doc-tools connect-docs-diff base/modules head/modules --format json
 ----
 
 == preview-string
@@ -701,6 +1141,7 @@ display help for command
 * `rpk-plugin-stubs` - Reconcile single-source stub pages and nav against the docs repo's rpk plugin partials. Run from the consumer repo root.
 * `helm-spec` - Generate AsciiDoc documentation for Helm charts. Requires either --tag or --branch for GitHub URLs.
 * `cloud-regions` - Generate Markdown table of cloud regions and tiers from GitHub YAML file
+* `redpanda-release-notes` - Generate a Self-Managed release-notes section from an rpchangelog release body
 * `crd-spec` - Generate Asciidoc documentation for Kubernetes CRD references. Requires either --tag or --branch.
 * `bundle-openapi` - Bundle Redpanda OpenAPI fragments for admin and connect APIs. Requires either --tag or --branch.
 * `update-connect-version` - Update the Redpanda Connect version in antora.yml
@@ -831,10 +1272,13 @@ Description section partial template (default: "<repository-root>/tools/redpanda
 Custom Handlebars template for bloblang function/method partials
 
 `--overrides <path>`::
-Optional JSON file with overrides (default: "docs-data/overrides.json")
+Optional JSON file of description overrides to merge into the generated output. Nothing is merged unless you pass it. Connector descriptions come from the connect and benthos component specs, so fix wrong text there
 
 `--include-bloblang`::
 Include Bloblang functions and methods in generation
+
+`--no-partials`::
+Skip the generated partials, config snippets, and Bloblang reference because the connect repo publishes them. What's new, diffs, drafts, nav, and the version bump still run
 
 `--prune-orphaned-descriptions`::
 Allow the description-partial orphan sweep to blank more than 10% of the tree. Only use this when the connector dataset is confirmed complete: an incomplete dataset looks identical to a mass upstream deletion and the sweep blanks published content
@@ -1461,9 +1905,72 @@ npx doc-tools generate cloud-regions --ref staging
 - Token is resolved from REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, GH_TOKEN, or GIT_CREDENTIALS, in that priority order (an API call, so the git credential is the last resort)
 - Internet connection to access GitHub API
 
+=== generate redpanda-release-notes
+
+Converts a Self-Managed rpchangelog release body into a candidate AsciiDoc section and inserts it into the Redpanda Release Notes page, newest-first. Applies the mechanical guards: GA tags only (a prerelease is a no-op), the `:earliest-tracked-version:` floor, and idempotency (an already-present version is a no-op). The section carries de-noised source prose as plain bullets — it is a CANDIDATE for the curation step that rewrites voice, adds `Area::` labels, normalizes units, and phrases CVEs.
+
+*Why use it:*
+
+Release notes are the one reference surface whose source of truth is engineer-authored prose rather than code, so the deterministic part (parsing, de-noising, de-duplicating backports, ordering, insertion) is split from the editorial part. This command is the deterministic half; it is unit-tested and makes no editorial change.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools generate redpanda-release-notes [options]
+----
+
+*Options:*
+
+`--tag <tag>`::
+GA release tag, such as v26.2.3
+
+`--body <file>`::
+Phase 1: rpchangelog release body markdown to build a candidate from (relative to repo root, must stay inside the repository)
+
+`--section-file <file>`::
+Phase 2: a curated section (from the sm-release-notes skill) to insert (relative to repo root, must stay inside the repository)
+
+`--date <date>`::
+Authored release date as YYYY-MM-DD (required with --body; confirmed on the PR)
+
+`--page <file>`::
+Target release-notes page (relative to repo root, must stay inside the repository) (default: "modules/reference/pages/releases/redpanda.adoc")
+
+`--section-only`::
+Phase 1 only: print the candidate section and do not read or modify the page
+
+`--dry-run`::
+Print output to stdout instead of writing the page
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Phase 1: build the candidate the curation skill will edit (no page touched).
+# Paths must stay inside the repository; write the fetched body somewhere local.
+npx doc-tools generate redpanda-release-notes \
+  --tag v26.2.3 --date 2026-09-15 --body docs-data/v26.2.3-body.md --section-only > candidate.adoc
+
+# (the sm-release-notes skill curates candidate.adoc into curated.adoc)
+
+# Phase 2: insert the curated section into the page under the guards
+npx doc-tools generate redpanda-release-notes \
+  --tag v26.2.3 --section-file curated.adoc
+----
+
+*Requirements:*
+
+- Phase 1 needs --body (+ --date); phase 2 needs --section-file. Fetching the
+  body from the private streaming-enterprise release, and running the curation
+  skill between the two phases, are wired by the docs-repo workflow, not here.
+
 === generate crd-spec
 
-Generates Kubernetes Custom Resource Definition (CRD) reference documentation by parsing Go type definitions from the Redpanda Operator repository. Uses the crd-ref-docs tool to extract API field definitions, types, descriptions, and validation rules from Go struct tags and comments, then generates comprehensive AsciiDoc documentation. Supports both local Go source directories and GitHub URLs for operator versions. When to use --tag vs --branch: - Use --tag for released content (GA or beta releases). Tags reference specific release points. - Use --branch for in-progress content (unreleased features). Branches track ongoing development.
+Generates Kubernetes Custom Resource Definition (CRD) reference documentation by parsing Go type definitions from the Redpanda Operator repository. Uses the crd-ref-docs tool to extract API field definitions, types, descriptions, and validation rules from Go struct tags and comments, then generates comprehensive AsciiDoc documentation. Supports both local Go source directories and GitHub URLs for operator versions. When to use --tag vs --branch: - Use --tag for released content (GA or beta releases). Tags reference specific release points. - Use --branch for in-progress content (unreleased features). Branches track ongoing development. Links: the Go doc comments link to docs.redpanda.com with absolute URLs. When the command runs inside a docs checkout (or is given --docs-root), every URL that matches a page of that checkout, directly or through a page alias, is rewritten as an xref so the committed page keeps one link form across regenerations. URLs that match no page are left as written and listed in the output.
 
 *Why use it:*
 
@@ -1495,6 +2002,9 @@ Asciidoctor templates dir (default: ".github/crd-config/templates/asciidoctor/op
 
 `--output <file>`::
 Where to write the generated AsciiDoc file (default: "modules/reference/pages/k-crd.adoc")
+
+`--docs-root <dir>`::
+Docs checkout whose pages docs.redpanda.com URLs are converted into xrefs against (default: the current repo when run inside redpanda-data/docs)
 
 `-h, --help`::
 display help for command
@@ -1530,6 +2040,7 @@ npx doc-tools generate crd-spec \
 - For GitHub URLs: Git and internet connection
 - crd-ref-docs tool (automatically installed if missing)
 - Go toolchain for running crd-ref-docs
+- To convert links: a docs checkout with Antora installed (npm install in redpanda-data/docs)
 
 === generate bundle-openapi
 
@@ -1859,7 +2370,7 @@ with a local path option.
 
 === validate property-overrides
 
-Validates docs-data/property-overrides.json against its JSON Schema: unknown keys (a typo that would otherwise be silently dropped by the extractor), and the see_also shape (a plain string, or an object naming exactly one of cloud_only/self_hosted_only).
+Validates docs-data/property-overrides.json against its JSON Schema: unknown keys (a typo that would otherwise be silently dropped by the extractor), and the see_also shape (a plain string, or an object naming exactly one of cloud_only/self_managed_only).
 
 *Why use it:*
 
@@ -1962,6 +2473,9 @@ display help for command
 *Commands:*
 
 * `audit` - Classify each override field as redundant, upstreamable, or keep against extracted source strings
+* `triage-prompt` - Build the triage prompt for one UPSTREAMABLE/SPLIT candidate
+* `triage-parse` - Merge an LLM triage response into a candidate row
+* `report` - Build a plain-English markdown report section from triaged candidates
 * `help` - display help for command
 
 === overrides audit
@@ -1984,7 +2498,7 @@ Path to the overrides JSON file (for example docs-data/property-overrides.json)
 Path to the extracted source JSON (property extractor raw output; required for the properties surface)
 
 `--surface <surface>`::
-Override surface to audit (choices: "properties", "rpk", "connect", default: "properties")
+Override surface to audit (choices: "properties", "rpk", default: "properties")
 
 `--format <format>`::
 Output format (choices: "json", "human", default: "json")
@@ -1994,6 +2508,69 @@ Redpanda checkout to extract raw source strings from (alternative to --extracted
 
 `--output <path>`::
 Also write the JSON result to this file
+
+`-h, --help`::
+display help for command
+
+=== overrides triage-prompt
+
+Build the triage prompt for one UPSTREAMABLE/SPLIT candidate
+
+*Usage:*
+
+[,bash]
+----
+doc-tools overrides triage-prompt [options]
+----
+
+*Options:*
+
+`--candidate <path>`::
+Path to a single candidate row JSON file (one object, not an array)
+
+`-h, --help`::
+display help for command
+
+=== overrides triage-parse
+
+Merge an LLM triage response into a candidate row
+
+*Usage:*
+
+[,bash]
+----
+doc-tools overrides triage-parse [options]
+----
+
+*Options:*
+
+`--candidate <path>`::
+Path to the candidate row JSON file this response answers
+
+`--response <path>`::
+Path to the raw text file the LLM triage call returned
+
+`-h, --help`::
+display help for command
+
+=== overrides report
+
+Build a plain-English markdown report section from triaged candidates
+
+*Usage:*
+
+[,bash]
+----
+doc-tools overrides report [options]
+----
+
+*Options:*
+
+`--candidates <path>`::
+Path to a JSON array of triaged candidate rows
+
+`--section <section>`::
+Which report section to build (choices: "upstream", "retirement", "ambiguous")
 
 `-h, --help`::
 display help for command

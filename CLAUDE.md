@@ -6,6 +6,16 @@ This repository contains tools that help write and maintain Redpanda's technical
 
 This toolbox helps Redpanda's documentation team in several ways. When Redpanda releases a new version, these tools extract information from the code (like configuration options, commands, and features) and create documentation pages automatically. They provide reusable templates and shortcuts that ensure all docs look and work the same way. Instead of manually documenting hundreds of configuration options or commands, these tools do it automatically. The repository also includes a bridge that lets Claude Code (an AI assistant) help with documentation tasks through natural conversation.
 
+## Automation prompts stay in this repository
+
+The prompts written into this repository's workflows, such as the doc-strings review in `.github/workflows/doc-strings-review.yml`, live here on purpose. Do not move them to docs-team-standards. This covers workflow prompts only: the MCP server's prompts live in docs-team-standards. Never make a workflow fetch a prompt, a skill, or a resource at run time from a branch of a repository other than the one under review. A workflow may run docs-team-standards skills when it checks them out at a pinned commit SHA, as the docs-pr-review pipeline's `.github/actions/claude-skill` action does, because that changes only when a reviewed pin bump changes it. Load them the way that action does (a checkout at a 40-hex `plugin_ref`, `--plugin-dir`, and a probe that the skills loaded), never through a marketplace install on a runner: docs-team-standards is private, so that clone fails silently and Claude runs without the skills while the job stays green.
+
+The reason is change control. Engineering repos call these workflows pinned to a commit SHA, so a prompt change reaches a repo only when that repo bumps its pin, in a pull request its owners review. A prompt fetched at run time from another repository's default branch would change every engineering repo's review the moment someone merged there, with no release, no pin bump, and no review by the repos it affects.
+
+This holds even when the motive is evaluation. Evaluate these prompts here, beside the workflow, with a harness modeled on docs-team-standards' (`claude -p`, regex patterns, an LLM judge, the production model pinned) that reads the prompt from the workflow file itself, so the eval and the pinned prompt always move together.
+
+Known exception, not a precedent: the review currently fetches `resources/writing-style/embedded-reference-strings.md` and `resources/writing-style/terminology.md` from docs-team-standards at run time, unpinned. That predates this note. Do not extend it to more files.
+
 ## Documentation for this repository
 
 ### If you write documentation
@@ -319,27 +329,26 @@ npm run test:coverage
 
 ## Releasing a new version
 
-This package publishes to npm automatically. The `publish-to-npm` GitHub Action runs on every push to `main` and publishes a new release **whenever the `version` in `package.json` is higher than the version already on npm**. There is no separate tag or release step.
+Do not bump `version` in `package.json` in your pull request. A check (`pr-conventions`) fails any PR that changes it. The version is set by [release-please](https://github.com/googleapis/release-please), which reads the title of every PR merged to `main` since the last release.
 
-Because of that, a change to the tools only reaches documentation repositories once a new version is published. So when your pull request changes the tools (not just docs), bump the version as part of the same PR:
+PRs are squash-merged with the PR title as the commit subject, so the PR title is what release-please reads. If you edit the title in the merge box, keep it conventional. Give it a conventional-commit type. The `pr-conventions` check enforces this:
 
-```bash
-# In your branch, after making your changes:
-# 1. Bump the version in package.json following semver:
-#    - patch (5.2.2 -> 5.2.3) for bug fixes
-#    - minor (5.2.2 -> 5.3.0) for new, backward-compatible features
-#    - major (5.2.2 -> 6.0.0) for breaking changes
-# 2. Refresh the lockfile so it matches:
-npm install --package-lock-only
+| Title starts with | Effect |
+|---|---|
+| `feat:` or `feat(scope):` | Minor release (5.2.2 -> 5.3.0) |
+| `fix:`, `perf:`, `revert:`, `ci:` | Patch release (5.2.2 -> 5.2.3) |
+| any type followed by `!`, for example `feat!:` | Major release (5.2.2 -> 6.0.0) |
+| `docs:`, `chore:`, `test:`, `refactor:`, `build:`, `style:` | No release |
 
-# 3. Commit both files:
-git add package.json package-lock.json
-git commit -m "chore: bump version to <new-version>"
-```
+A change to a reusable workflow in `.github/workflows/` only reaches callers pinned to a `v<version>` tag once a new tag exists, so title those PRs `ci:` or `fix:` so that they release. Do not put a version number in the title.
 
-When the PR merges to `main`, the Action publishes the new version. Consuming repositories (such as `rp-connect-docs`) then pick it up the next time they update their `@redpanda-data/docs-extensions-and-macros` dependency.
+After each merge to `main`, release-please opens or updates a single release PR titled `chore(main): release <version>`. That PR carries the `package.json` and `package-lock.json` bump and the new `CHANGELOG.md` entry. Merging it is the release. The `publish-to-npm` workflow then:
 
-If two PRs bump to the same version, whichever merges second must rebase and bump again — the publish step is skipped if the version already exists on npm.
+1. Creates the `v<version>` git tag and GitHub release.
+2. Publishes that version to npm.
+3. Tells the docs repositories to update their `@redpanda-data/docs-extensions-and-macros` dependency.
+
+If publishing fails after the tag exists, open the failed `publish-to-npm` run and use **Re-run failed jobs** (not **Re-run all jobs**, which skips publishing). If that is no longer possible, run `publish-to-npm` manually with the `tag` input set to the release, for example `v5.52.0`.
 
 ### If your change touched a docs-data/*.schema.json file
 
@@ -351,7 +360,9 @@ After a content repo updates its `@redpanda-data/docs-extensions-and-macros` dep
 npx doc-tools sync-schemas
 ```
 
-This copies every `docs-data/*.schema.json` this package ships into the content repo's own `docs-data/`, reporting which files were created, updated, or already current. Use `npx doc-tools sync-schemas --check` in CI (see `docs`'s `validate-docs-data.yml` for the pattern) to fail the build instead of silently accumulating drift.
+This copies the `docs-data/*.schema.json` files this package ships into the content repo's own `docs-data/`, reporting which files were created, updated, or already current. Use `npx doc-tools sync-schemas --check` in CI (see `docs`'s `validate-docs-data.yml` for the pattern) to fail the build instead of silently accumulating drift.
+
+A schema is only synced into a repo that is plausibly its home: one that already has the schema, or that has the `*.json` the schema documents. Anything else is reported as "not for this repo" and skipped. `kapa-source-groups.json` is the reason: it is generated into *this* package and read from `node_modules` by an Antora extension, so it never lives in a content repo, and copying its schema into `redpanda-data/docs` would leave a file describing data that repo will never have, with `--check` calling its absence drift on every run afterwards.
 
 ## How this repository is organized
 

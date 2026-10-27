@@ -1,29 +1,618 @@
 'use strict';
 
-const { raiseListenerLimit } = require('./util/raise-listener-limit')
+// Sources the Redpanda Connect generated reference docs (field reference,
+// examples, metadata, descriptions, config snippets, Bloblang reference, and
+// platforms/catalog.json) for the `connect` component.
+//
+// The default: the playbook has no connect content source. Every connect
+// release publishes the generated tree as a redpanda-connect-docs.tar.gz
+// release asset (util/connect-docs-asset). In contentClassified, the extension
+// resolves the release to use, downloads that asset, and adds its partials and
+// examples to the `connect` component that rp-connect-docs provides:
+//
+// - The latest stable vX.Y.Z release by default, so the docs never show fields
+//   from unreleased code on connect's main branch.
+// - The `tag` extension config key picks a specific release instead.
+// - The REDPANDA_CONNECT_DOCS_DIR environment variable points at a local copy
+//   of the tree (a directory that contains modules/, such as a connect
+//   checkout's docs/ after running its generator, or a local copy of the
+//   tarball) to preview unreleased connect changes. It wins over everything,
+//   and its files replace any copy another source provides.
+//
+// Connect publishes a release first and attaches the asset later, in a
+// separate job that can also fail. So when the latest release has no asset
+// (404), the extension falls back to the newest older stable release that has
+// one, and logs a warning that names both. It checks the asset lists from the
+// GitHub releases API (at most FALLBACK_RELEASE_LIMIT releases), or, without
+// the API, probes the downloads of the next FALLBACK_PROBE_LIMIT lower stable
+// tags from git ls-remote. A release picked with the `tag` config never falls
+// back: a release picked with `tag` that has no asset stops the build. When
+// no release has the asset, nothing is added, and the guard in
+// generate-rp-connect-info stops the build if connector pages then have no
+// generated partials. Any other download or archive failure stops the build
+// here. A file another source already provides (rp-connect-docs still commits
+// its own copies until it migrates) is skipped.
+//
+// Playbooks that still list the upstream connect repo with `tags: latest` as
+// its only ref (the setup from before the release asset):
+//
+//   - url: https://github.com/redpanda-data/connect
+//     tags: latest
+//     start_path: docs
+//
+// That source is removed from the playbook in contextStarted, with a warning,
+// and the build continues with the release asset. Connect releases no longer
+// ship docs/antora.yml, so Antora could not aggregate it anyway.
+//
+// A connect source with explicit refs (a branch, a specific tag, a fork, or a
+// local clone named connect) is how people preview a connect branch, so it is
+// kept, and no asset is downloaded. Only the generated
+// modules/components/partials and modules/components/examples trees of the
+// `connect` component are kept from that source, and any file another source
+// already provides is dropped, because Antora fails the build on a duplicate
+// page or partial.
+//
+// The release asset tag is shared (util/connect-catalog), so
+// generate-rp-connect-info reads info.csv and catalog.json from the same ref
+// as the reference content.
 
-const GetLatestConnectTag = require('./version-fetcher/get-latest-connect');
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
+const getLatestConnectTag = require('./version-fetcher/get-latest-connect')
+const listConnectReleases = require('./version-fetcher/list-connect-releases')
+const { createGitHub } = require('./util/connect-github')
+const { isConnectSource, isConnectOrigin, githubRepoOf, setResolvedConnectRef } = require('./util/connect-catalog')
+const asset = require('./util/connect-docs-asset')
+const { getGitHubApiToken } = require('../cli-utils/github-token')
+const { gitAuthEnv } = require('../cli-utils/git-credential-env')
+
+const OWNER = 'redpanda-data'
+const REPO = 'connect'
+const COMPONENT = 'connect'
+const KEPT_PATHS = ['modules/components/partials/', 'modules/components/examples/']
+const CONNECT_URL = `https://github.com/${OWNER}/${REPO}`
+const LOCAL_DIR_ENV = 'REDPANDA_CONNECT_DOCS_DIR'
+// How many releases the API fallback looks at, and how many lower git tags
+// the probe fallback tries, when the latest release has no asset yet.
+const FALLBACK_RELEASE_LIMIT = 10
+const FALLBACK_PROBE_LIMIT = 3
+// Dating pages by release (only when add-git-dates is in the playbook): the
+// page size of the releases listing, the first release that has the asset
+// (no older release can be compared), and the most older releases the walk
+// downloads per build.
+const DATE_RELEASE_PAGE_SIZE = 100
+const FIRST_ASSET_RELEASE = 'v4.113.0'
+const DATE_RELEASE_LIMIT = 10
+// How deep the walk follows includes inside the asset's own partials, such as
+// bloblang/methods.adoc including every bloblang-methods/* partial.
+const NESTED_INCLUDE_DEPTH = 3
+
+// HTTPS, SSH (ssh://), and scp-style (git@host:owner/repo) URLs are all
+// remote content sources in Antora.
+function isRemote (url) {
+  return /^(https?|ssh):\/\//.test(url || '') || /^[\w.-]+@[\w.-]+:/.test(url || '')
+}
+
+// Only the redpanda-data/connect remote resolves to its own latest release.
+// A fork with the same repo name would otherwise be pinned to a tag looked up
+// on redpanda-data/connect.
+function isUpstreamConnect (url) {
+  const repo = githubRepoOf(url)
+  return !!repo && repo.owner === OWNER && repo.repo === REPO
+}
+
+// Removes user info from every URL in the text, so credentials embedded in a
+// content-source URL never reach the build log.
+function redact (text) {
+  return String(text || '').replace(/([a-z][a-z+.-]*:\/\/)[^@/\s]*@/gi, '$1')
+}
+
+// [major, minor, patch] of a stable vX.Y.Z tag, or null for anything else,
+// such as a prerelease.
+function stableVersion (tag) {
+  const m = /^v(\d+)\.(\d+)\.(\d+)$/.exec(tag || '')
+  return m ? m.slice(1).map(Number) : null
+}
+
+function compareVersions (a, b) {
+  return a[0] - b[0] || a[1] - b[1] || a[2] - b[2]
+}
+
+// Stable vX.Y.Z tags from `git ls-remote` output, highest first.
+function stableTags (lsRemoteOutput) {
+  const tags = new Set()
+  for (const line of String(lsRemoteOutput || '').split('\n')) {
+    const m = line.match(/refs\/tags\/(v\d+\.\d+\.\d+)$/)
+    if (m) tags.add(m[1])
+  }
+  return [...tags].sort((a, b) => compareVersions(stableVersion(b), stableVersion(a)))
+}
+
+// Highest stable vX.Y.Z tag from `git ls-remote` output. Used when the GitHub
+// API is unavailable, for example when an unauthenticated build is rate limited.
+function highestStableTag (lsRemoteOutput) {
+  return stableTags(lsRemoteOutput)[0] || null
+}
+
+// With a token, git authenticates through the shared credential helper, so a
+// private connect repo still lists its tags.
+function gitTags (url) {
+  const { execFileSync } = require('child_process')
+  const env = gitAuthEnv(getGitHubApiToken())
+  return execFileSync('git', ['ls-remote', '--tags', '--refs', url], { encoding: 'utf8', timeout: 60000, env })
+}
+
+function latestTagFromGit (url) {
+  return highestStableTag(gitTags(url))
+}
+
+function toTag (tagName) {
+  if (!tagName) return null
+  return tagName.startsWith('v') ? tagName : `v${tagName}`
+}
+
+// The upstream connect source with `tags: latest` as its only ref: the setup
+// from before the release asset. A source with any other refs, such as a fork
+// or a PR branch used to preview a connect change, keeps what the playbook
+// says.
+function wantsLatest (source) {
+  if (!isRemote(source.url) || !isConnectSource(source.url) || !isUpstreamConnect(source.url)) return false
+  const tags = Array.isArray(source.tags) ? source.tags : [source.tags]
+  const branches = source.branches == null ? [] : [].concat(source.branches)
+  return tags.length === 1 && tags[0] === 'latest' && branches.length === 0
+}
+
+// Removes the upstream connect sources that ask for the latest release, which
+// the release asset replaces. Mutates the playbook's source list in place and
+// returns the removed sources.
+function removeLatestConnectSources (playbook) {
+  const sources = playbook && playbook.content && playbook.content.sources
+  if (!Array.isArray(sources)) return []
+  const removed = []
+  for (let i = sources.length - 1; i >= 0; i--) {
+    if (wantsLatest(sources[i])) removed.unshift(...sources.splice(i, 1))
+  }
+  return removed
+}
+
+// Removes connect-sourced files that must not be published. Mutates the
+// content aggregate and returns what it dropped.
+function filterConnectContent (contentAggregate) {
+  const report = { kept: 0, outsideGenerated: 0, providedElsewhere: 0, otherComponents: 0 }
+  const fromConnect = (f) => isConnectOrigin(f.src && f.src.origin)
+  for (const bucket of contentAggregate) {
+    const files = bucket.files || []
+    if (!files.some(fromConnect)) continue
+    if (bucket.name !== COMPONENT) {
+      // Older connect tags name the component redpanda-connect and ship full
+      // pages. None of it belongs on the site.
+      report.otherComponents += files.filter(fromConnect).length
+      bucket.files = files.filter((f) => !fromConnect(f))
+      continue
+    }
+    const provided = new Set(files.filter((f) => !fromConnect(f)).map((f) => f.path))
+    bucket.files = files.filter((f) => {
+      if (!fromConnect(f)) return true
+      if (!KEPT_PATHS.some((p) => f.path.startsWith(p))) {
+        report.outsideGenerated++
+        return false
+      }
+      if (provided.has(f.path)) {
+        report.providedElsewhere++
+        return false
+      }
+      report.kept++
+      return true
+    })
+  }
+  // A bucket left with no files (an older connect tag's own component) would
+  // still register an empty component.
+  for (let i = contentAggregate.length - 1; i >= 0; i--) {
+    const b = contentAggregate[i]
+    if (!(b.files || []).length && (b.origins || []).every(isConnectOrigin)) contentAggregate.splice(i, 1)
+  }
+  return report
+}
+
+// True when the playbook lists the connect repo (or a local clone named
+// connect) as a content source, which keeps the git source behavior. Run it
+// after removeLatestConnectSources.
+function hasConnectSource (playbook) {
+  const sources = (playbook && playbook.content && playbook.content.sources) || []
+  return sources.some((source) => isConnectSource(source.url))
+}
+
+// The latest stable connect release tag: the GitHub API first, then the
+// highest stable vX.Y.Z tag from git ls-remote. Null when both fail.
+async function resolveLatestTag (url, logger) {
+  let tag = null
+  try {
+    tag = toTag(await getLatestConnectTag(await createGitHub(), OWNER, REPO, logger))
+  } catch (error) {
+    logger.warn(`GitHub API lookup of the latest Redpanda Connect release failed: ${error.message}`)
+  }
+  if (!tag) {
+    try {
+      tag = latestTagFromGit(url)
+      if (tag) logger.info(`Resolved the latest Redpanda Connect release from git tags: ${tag}`)
+    } catch (error) {
+      logger.warn(redact(`git ls-remote of ${url} failed: ${error.message}`))
+    }
+  }
+  return tag
+}
+
+// Downloads the asset of a release. Null on a 404; throws on any other failure.
+async function downloadRelease (tag, logger) {
+  try {
+    return await asset.downloadAsset(tag, { logger, token: getGitHubApiToken() })
+  } catch (error) {
+    throw new Error(`Could not download the Redpanda Connect reference docs for ${tag}: ${error.message}`)
+  }
+}
+
+// The newest stable release older than `latestTag` that has the asset, as
+// { tag, archive }, or null when none has it. The GitHub releases API lists
+// the most recent releases with their assets, so only the chosen release is
+// downloaded. Without the API, it probes the downloads of the next few lower
+// stable tags from git ls-remote instead.
+async function findOlderReleaseWithAsset (latestTag, url, logger) {
+  const latest = stableVersion(latestTag)
+  const isOlder = (tag) => {
+    const v = stableVersion(tag)
+    return !!v && (!latest || compareVersions(v, latest) < 0)
+  }
+  let releases = null
+  try {
+    releases = await listConnectReleases(await createGitHub(), OWNER, REPO, FALLBACK_RELEASE_LIMIT)
+  } catch (error) {
+    logger.warn(`GitHub API listing of Redpanda Connect releases failed: ${error.message}; probing the next ${FALLBACK_PROBE_LIMIT} lower release tags from git instead`)
+  }
+  if (releases) {
+    const found = releases
+      .filter((r) => r && !r.draft && !r.prerelease && isOlder(r.tag_name))
+      .sort((a, b) => compareVersions(stableVersion(b.tag_name), stableVersion(a.tag_name)))
+      .find((r) => (r.assets || []).some((a) => a && a.name === asset.ASSET_NAME))
+    if (!found) {
+      logger.info(`None of the ${releases.length} most recent Redpanda Connect releases has a ${asset.ASSET_NAME} release asset`)
+      return null
+    }
+    const archive = await downloadRelease(found.tag_name, logger)
+    return archive ? { tag: found.tag_name, archive } : null
+  }
+  let tags
+  try {
+    tags = stableTags(gitTags(url)).filter(isOlder).slice(0, FALLBACK_PROBE_LIMIT)
+  } catch (error) {
+    logger.warn(redact(`git ls-remote of ${url} failed: ${error.message}`))
+    return null
+  }
+  for (const tag of tags) {
+    const archive = await downloadRelease(tag, logger)
+    if (archive) return { tag, archive }
+  }
+  if (tags.length) logger.info(`None of the next ${tags.length} lower Redpanda Connect release tags (${tags.join(', ')}) has a ${asset.ASSET_NAME} release asset`)
+  return null
+}
+
+// The resource keys (`partial$<relative>`, `example$<relative>`) of generated
+// files that differ between two releases' assets, or are new in `files`.
+function changedReferenceKeys (files, previousFiles) {
+  const before = new Map()
+  for (const f of previousFiles) {
+    const r = asset.toResource(f.path)
+    if (r && !before.has(`${r.family}$${r.relative}`)) before.set(`${r.family}$${r.relative}`, f.contents)
+  }
+  const changed = new Set()
+  const seen = new Set()
+  for (const f of files) {
+    const r = asset.toResource(f.path)
+    if (!r || r.family === 'attachment') continue
+    const key = `${r.family}$${r.relative}`
+    // addConnectDocs retains the first copy of a resource in an asset.
+    if (seen.has(key)) continue
+    seen.add(key)
+    const old = before.get(key)
+    if (old === undefined || Buffer.compare(Buffer.from(old), Buffer.from(f.contents)) !== 0) changed.add(key)
+  }
+  return changed
+}
+
+// Includes of the connect components module in a page: `partial$x` and
+// `example$x` keys. In the connect component's own components module the
+// module may be implicit; elsewhere only fully qualified includes count. With
+// a content catalog, only files this asset added count, and includes inside
+// those files are followed too (up to NESTED_INCLUDE_DEPTH levels), so a page
+// that includes an aggregate partial is dated by the partials it pulls in.
+const INCLUDE_RX = /^include::([^[\s]+)\[/gm
+function includeKey (target, src) {
+  const own = src.component === COMPONENT && src.module === asset.MODULE
+  const q = target.match(/^connect:components:((?:partial|example)\$.+)$/) ||
+    (own ? target.match(/^(?:components:)?((?:partial|example)\$.+)$/) : null)
+  return q ? q[1] : null
+}
+function connectIncludes (page, contentCatalog, origin) {
+  const keys = []
+  const seen = new Set()
+  const visit = (file, depth) => {
+    for (const m of file.contents.toString('utf8').matchAll(INCLUDE_RX)) {
+      const key = includeKey(m[1], file.src)
+      if (!key) continue
+      if (!contentCatalog) {
+        keys.push(key)
+        continue
+      }
+      const included = contentCatalog.resolveResource(m[1], file.src)
+      // Only files inserted from this asset can acquire a release date.
+      if (!included || included.src.origin !== origin || seen.has(included)) continue
+      seen.add(included)
+      keys.push(key)
+      if (depth < NESTED_INCLUDE_DEPTH) visit(included, depth + 1)
+    }
+  }
+  visit(page, 1)
+  return keys
+}
+
+// Marks pages with the newest change date of their included asset references.
+// Catalog resolution excludes retained duplicates and respects each version.
+// Cloud stubs inherit the date of the connect page they actually include.
+function markReferenceChanges (contentCatalog, dates, origin) {
+  if (!dates.size) return 0
+  const marked = new Set()
+  const pages = contentCatalog.getPages()
+  const mark = (page, date) => {
+    if (!date) return
+    if (!page.connectReferenceModified || date > page.connectReferenceModified) page.connectReferenceModified = date
+    marked.add(page)
+  }
+  for (const page of pages) {
+    for (const key of connectIncludes(page, contentCatalog, origin)) mark(page, dates.get(key))
+  }
+  for (const page of pages) {
+    for (const m of page.contents.toString('utf8').matchAll(INCLUDE_RX)) {
+      if (!/^connect:([^:$]+):([^$]+\.adoc)$/.test(m[1])) continue
+      const included = contentCatalog.resolvePage(m[1], page.src)
+      if (marked.has(included)) mark(page, included.connectReferenceModified)
+    }
+  }
+  return marked.size
+}
+
+// The date of the newest release that changed each of `keys`, as a Map of
+// key to YYYY-MM-DD. It compares the release with older releases that have
+// the asset, newest first, so a file left unchanged by the current release
+// keeps the date of the release that last changed it. Bounded so the cost
+// does not grow with every connect release: the listing stops paging at the
+// first release older than FIRST_ASSET_RELEASE, and the walk downloads at
+// most DATE_RELEASE_LIMIT older releases. A file still unchanged at the end
+// of the walk gets no date. A failed listing, download, or read only costs
+// dates: it logs a warning, and every file not dated yet keeps its git date.
+async function referenceReleaseDates (tag, files, keys, logger) {
+  const dates = new Map()
+  if (!keys.size) return dates
+  const floor = stableVersion(FIRST_ASSET_RELEASE)
+  const releases = []
+  try {
+    const github = await createGitHub()
+    for (let page = 1; ; page++) {
+      const batch = await listConnectReleases(github, OWNER, REPO, DATE_RELEASE_PAGE_SIZE, page)
+      releases.push(...batch)
+      if (batch.length < DATE_RELEASE_PAGE_SIZE) break
+      // Newest first: past the first release older than the asset, no
+      // release can have it.
+      if (batch.some((r) => r && stableVersion(r.tag_name) && compareVersions(stableVersion(r.tag_name), floor) < 0)) break
+    }
+  } catch (error) {
+    logger.warn(`Couldn't list Redpanda Connect releases (${error.message}), so Connect pages keep their git modified dates`)
+    return dates
+  }
+  let newer = releases.find((r) => r && r.tag_name === tag)
+  if (!newer || !newer.published_at) return dates
+  const latest = stableVersion(tag)
+  const older = releases
+    .filter((r) => r && !r.draft && !r.prerelease && stableVersion(r.tag_name) && latest && compareVersions(stableVersion(r.tag_name), latest) < 0)
+    .filter((r) => compareVersions(stableVersion(r.tag_name), floor) >= 0)
+    .filter((r) => (r.assets || []).some((a) => a && a.name === asset.ASSET_NAME))
+    .sort((a, b) => compareVersions(stableVersion(b.tag_name), stableVersion(a.tag_name)))
+    .slice(0, DATE_RELEASE_LIMIT)
+  const pending = new Set(keys)
+  for (const release of older) {
+    let previousFiles
+    try {
+      const archive = await downloadRelease(release.tag_name, logger)
+      if (!archive) throw new Error(`the release lists a ${asset.ASSET_NAME} asset but its download returns 404`)
+      previousFiles = await asset.readTarGz(archive)
+    } catch (error) {
+      // Skipping the release would credit its changes to the newer release,
+      // so stop here: dates found so far are exact, the rest keep git dates.
+      logger.warn(`Couldn't read the Redpanda Connect ${release.tag_name} reference docs to date pages (${error.message}), so ${pending.size} generated files keep their pages' git modified dates`)
+      break
+    }
+    const changed = changedReferenceKeys(files, previousFiles)
+    for (const key of pending) {
+      if (!changed.has(key)) continue
+      if (newer.published_at) dates.set(key, String(newer.published_at).slice(0, 10))
+      pending.delete(key)
+    }
+    if (!pending.size) break
+    files = previousFiles
+    newer = release
+  }
+  return dates
+}
+
+// True when the playbook registers add-git-dates, the only reader of the
+// release dates. Without it, the dating step is skipped.
+function usesGitDates (playbook) {
+  const extensions = (playbook && playbook.antora && playbook.antora.extensions) || []
+  return [].concat(extensions).some((ext) => {
+    const id = typeof ext === 'string' ? ext : ext && ext.enabled !== false ? ext.require || ext.id : null
+    return /(^|[/\\])add-git-dates(\.js)?$/.test(String(id || ''))
+  })
+}
+
+// Adds the generated files to every version of the connect component.
+// Mutates the content catalog and returns what it added, replaced, and
+// skipped. A file another source already provides is skipped, unless
+// `replace` is set (a local directory, which previews unreleased changes and
+// so wins over committed copies).
+function addConnectDocs (contentCatalog, files, origin, { replace = false } = {}) {
+  const report = { added: 0, replaced: 0, providedElsewhere: 0, outsideGenerated: 0, versions: [] }
+  const component = contentCatalog.getComponent(COMPONENT)
+  if (!component) return report
+  report.versions = component.versions.map((v) => v.version)
+  for (const entry of files) {
+    const resource = asset.toResource(entry.path)
+    if (!resource) {
+      report.outsideGenerated++
+      continue
+    }
+    for (const version of report.versions) {
+      const src = { component: COMPONENT, version, module: asset.MODULE, family: resource.family, relative: resource.relative }
+      const existing = contentCatalog.getById(src)
+      if (existing && !replace) {
+        report.providedElsewhere++
+        continue
+      }
+      if (existing) contentCatalog.removeFile(existing)
+      contentCatalog.addFile({
+        path: resource.path,
+        contents: Buffer.from(entry.contents),
+        src: { ...src, path: resource.path, origin },
+      })
+      if (existing) report.replaced++
+      else report.added++
+    }
+  }
+  return report
+}
 
 module.exports.register = function ({ config }) {
   raiseListenerLimit(this)
-  const logger = this.getLogger('modify-connect-tag-playbook-extension');
+  const logger = this.getLogger('modify-connect-tag-playbook-extension')
+  const rawTag = config && config.tag != null ? String(config.tag).trim() : ''
+  // `latest` is the default; as a tag it would become the nonexistent vlatest.
+  if (rawTag.toLowerCase() === 'latest') {
+    throw new Error('The `tag` config of modify-connect-tag-playbook is `latest`. The latest stable Redpanda Connect release is the default, so remove `tag`, or set it to a release tag such as v4.113.0.')
+  }
+  const configuredTag = toTag(rawTag || null)
+  // Set in contextStarted: true when the playbook still lists a connect
+  // content source with explicit refs.
+  let gitSourceMode = false
+  // Set in contextStarted: true when add-git-dates is in the playbook.
+  let dateReferencePages = false
 
-  this.on('contextStarted', async ({ playbook }) => {
-    try {
-      // Fetch the latest release tag for redpanda-data/connect
-      const sourceUrl = 'https://github.com/redpanda-data/connect';
-      if (playbook && playbook.content && playbook.content.sources) {
-        const source = playbook.content.sources.find(source => source.url === sourceUrl);
-        if (source) {
-          const latestTag = await GetLatestConnectTag();
-          if (latestTag) {
-            source.tags[0] = `v${latestTag}`;
-            this.updateVariables({ playbook });
-          }
+  this.on('contextStarted', ({ playbook }) => {
+    // Clear a ref left over from an earlier build in the same process.
+    setResolvedConnectRef(null)
+    const removed = removeLatestConnectSources(playbook)
+    if (removed.length) {
+      this.updateVariables({ playbook })
+      logger.warn(
+        `The Redpanda Connect content source (${removed.map((s) => redact(s.url)).join(', ')} with tags: latest) is no longer needed and was removed from the playbook, ` +
+        `so the reference docs come from the ${asset.ASSET_NAME} release asset. Remove that source from the playbook.`
+      )
+    }
+    gitSourceMode = hasConnectSource(playbook)
+    dateReferencePages = usesGitDates(playbook)
+    if (gitSourceMode && (process.env[LOCAL_DIR_ENV] || '').trim()) {
+      logger.warn(`${LOCAL_DIR_ENV} is ignored because the playbook lists the connect repo as a content source`)
+    }
+  })
+
+  this.on('contentAggregated', ({ contentAggregate }) => {
+    if (!gitSourceMode) return
+    const r = filterConnectContent(contentAggregate)
+    if (r.kept + r.outsideGenerated + r.providedElsewhere + r.otherComponents === 0) return
+    logger.info(
+      `Redpanda Connect content: kept ${r.kept} generated files; skipped ${r.providedElsewhere} already provided by another source, ` +
+      `${r.outsideGenerated} outside the generated partials and examples, and ${r.otherComponents} from other components`
+    )
+  })
+
+  // Antora runs listeners of an event one at a time, in registration order,
+  // which follows the order of the playbook's extension list. Prepending puts
+  // this listener first wherever the extension is listed, so the files exist
+  // before generate-rp-connect-info's guard and any other contentClassified
+  // listener reads the connect partials.
+  const subscribe = typeof this.prependListener === 'function' ? this.prependListener : this.on
+  subscribe.call(this, 'contentClassified', async ({ contentCatalog }) => {
+    if (gitSourceMode) return
+    if (!contentCatalog.getComponent(COMPONENT)) return
+    const localDir = (process.env[LOCAL_DIR_ENV] || '').trim()
+    let files
+    let origin
+    let from
+    if (localDir) {
+      setResolvedConnectRef(configuredTag)
+      try {
+        files = await asset.readLocal(localDir)
+      } catch (error) {
+        throw new Error(`Could not read the Redpanda Connect reference docs from ${LOCAL_DIR_ENV} (${localDir}): ${error.message}`)
+      }
+      origin = { type: 'local', url: CONNECT_URL, startPath: 'docs', localDir }
+      from = `${LOCAL_DIR_ENV} (${localDir})`
+    } else {
+      let tag = configuredTag || (await resolveLatestTag(`${CONNECT_URL}.git`, logger))
+      if (!tag) {
+        throw new Error(
+          'Could not resolve the latest Redpanda Connect release, so the connect reference docs cannot be downloaded. ' +
+          `Set a GitHub token, check network access, or set the \`tag\` config of this extension or ${LOCAL_DIR_ENV}.`
+        )
+      }
+      setResolvedConnectRef(tag)
+      let archive = await downloadRelease(tag, logger)
+      // The latest release can be published before its asset is attached, or
+      // its asset job can fail. An explicit `tag` means that release only.
+      if (!archive && !configuredTag) {
+        const older = await findOlderReleaseWithAsset(tag, `${CONNECT_URL}.git`, logger)
+        if (older) {
+          logger.warn(`Redpanda Connect ${tag} has no ${asset.ASSET_NAME} asset yet; using ${older.tag}`)
+          tag = older.tag
+          archive = older.archive
+          setResolvedConnectRef(tag)
         }
       }
-    } catch (error) {
-      logger.error('Failed to update playbook with the latest Redpanda Connect tag:', error);
+      if (!archive && configuredTag) {
+        throw new Error(
+          `Redpanda Connect release ${tag} has no ${asset.ASSET_NAME} asset (404). ` +
+          `Set the \`tag\` config of modify-connect-tag-playbook to a release that has it, or remove \`tag\` to use the latest release.`
+        )
+      }
+      if (!archive) {
+        logger.info(`Redpanda Connect ${tag} has no ${asset.ASSET_NAME} release asset (404), so no generated reference docs were added from it`)
+        return
+      }
+      try {
+        files = await asset.readTarGz(archive)
+      } catch (error) {
+        throw new Error(`The ${asset.ASSET_NAME} release asset of Redpanda Connect ${tag} is corrupt: ${error.message}`)
+      }
+      origin = { type: 'release-asset', url: CONNECT_URL, startPath: 'docs', reftype: 'tag', refname: tag, tag, asset: asset.assetUrl(tag) }
+      from = `the ${tag} ${asset.ASSET_NAME} release asset`
     }
-  });
+    if (!files.some((f) => asset.toResource(f.path))) {
+      throw new Error(`${from} has no files under modules/components/partials, modules/components/examples, or modules/components/attachments`)
+    }
+    const r = addConnectDocs(contentCatalog, files, origin, { replace: !!localDir })
+    const versions = r.versions.filter(Boolean)
+    logger.info(
+      `Redpanda Connect reference docs from ${from}: added ${r.added} files to the ${COMPONENT} component` +
+      `${versions.length ? ` (${versions.join(', ')})` : ''}; ` +
+      (localDir
+        ? `replaced ${r.replaced} provided by another source; skipped ${r.outsideGenerated}`
+        : `skipped ${r.providedElsewhere} already provided by another source and ${r.outsideGenerated}`) +
+      ' outside the generated partials, examples, and attachments'
+    )
+    // Resolve only included files supplied by this asset. Retained copies
+    // from another source keep their git dates, even if the asset differs.
+    if (!localDir && dateReferencePages) {
+      const keys = new Set(contentCatalog.getPages().flatMap((page) => connectIncludes(page, contentCatalog, origin)))
+      const dates = await referenceReleaseDates(origin.tag, files, keys, logger)
+      const count = markReferenceChanges(contentCatalog, dates, origin)
+      logger.info(`Redpanda Connect ${origin.tag}: resolved last change dates for ${dates.size} included generated files; ${count} pages use those release dates when later than their last commit`)
+    }
+  })
 }
+
+module.exports._internal = { isRemote, isUpstreamConnect, redact, isConnectSource, isConnectOrigin, toTag, highestStableTag, stableTags, findOlderReleaseWithAsset, resolveLatestTag, FALLBACK_RELEASE_LIMIT, FALLBACK_PROBE_LIMIT, wantsLatest, removeLatestConnectSources, filterConnectContent, hasConnectSource, addConnectDocs, LOCAL_DIR_ENV, changedReferenceKeys, connectIncludes, markReferenceChanges, usesGitDates, FIRST_ASSET_RELEASE, DATE_RELEASE_LIMIT }

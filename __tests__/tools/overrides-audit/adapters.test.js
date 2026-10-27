@@ -35,8 +35,10 @@ describe('overrides-audit adapters', () => {
   describe('properties surface', () => {
     const extracted = {
       properties: {
-        prop_redundant: { name: 'prop_redundant', description: 'Same text.', type: 'string', defined_in: 'src/v/config/configuration.cc' },
-        prop_upstreamable: { name: 'prop_upstreamable', description: 'Old text.', type: 'string', defined_in: 'src/v/config/configuration.cc' }
+        // line_start is what says the source has a description to replace; without
+        // it the audit correctly reports there is nothing to upstream into.
+        prop_redundant: { name: 'prop_redundant', description: 'Same text.', type: 'string', defined_in: 'src/v/config/configuration.cc', line_start: 10 },
+        prop_upstreamable: { name: 'prop_upstreamable', description: 'Old text.', type: 'string', defined_in: 'src/v/config/configuration.cc', line_start: 20 }
       }
     }
     const overrides = {
@@ -150,43 +152,12 @@ describe('overrides-audit adapters', () => {
     })
   })
 
-  describe('connect surface (structural)', () => {
-    const connectOverrides = {
-      definitions: {
-        batching: { description: 'Configure a xref:configuration:batching.adoc[batching policy].' }
-      },
-      inputs: [
-        {
-          name: 'amqp_0_9',
-          summary: 'Connects to AMQP.',
-          config: {
-            children: [
-              { name: 'urls', description: 'A list of URLs.' },
-              { name: 'batching', $ref: '#/definitions/batching' },
-              {
-                name: 'queue_declare',
-                children: [{ name: 'auto_delete', description: 'Whether the queue auto-deletes.' }]
-              }
-            ]
-          }
-        },
-        { name: 'jira', version: '4.100.0' }
-      ]
-    }
-
-    test('enumerates definitions, summaries, and nested config descriptions', () => {
-      const result = runAudit({
-        overrides: writeFixture('connect-overrides.json', connectOverrides),
-        surface: 'connect'
-      })
-
-      const byKey = Object.fromEntries(result.manifest.map((row) => [`${row.name}|${row.field}`, row]))
-      expect(byKey['definitions/batching|description'].class).toBe(CLASSES.REVIEW)
-      expect(byKey['inputs/amqp_0_9|summary'].class).toBe(CLASSES.REVIEW)
-      expect(byKey['inputs/amqp_0_9/urls|config.description'].class).toBe(CLASSES.REVIEW)
-      expect(byKey['inputs/amqp_0_9/queue_declare/auto_delete|config.description'].class).toBe(CLASSES.REVIEW)
-      expect(byKey['inputs/amqp_0_9/batching|config.$ref'].class).toBe(CLASSES.KEEP)
-      expect(byKey['inputs/jira|version'].class).toBe(CLASSES.KEEP)
+  describe('retired connect surface', () => {
+    // Connect descriptions come from the connect and benthos specs, so there
+    // is no Connect overrides file to audit.
+    test('connect is rejected as an unknown surface', () => {
+      expect(() => runAudit({ overrides: writeFixture('connect-overrides.json', { inputs: [] }), surface: 'connect' }))
+        .toThrow("Unknown surface 'connect'. Valid surfaces: properties, rpk")
     })
   })
 })

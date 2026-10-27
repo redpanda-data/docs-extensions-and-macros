@@ -3,7 +3,7 @@ Unit tests for the see_also override field in property_extractor.
 
 see_also replaces related_topics' free-text 'cloud-only:'/'self-managed-only:'
 prefix convention with structured data (a plain string, or an object naming
-exactly one of cloud_only/self_hosted_only), validated by
+exactly one of cloud_only/self_managed_only), validated by
 docs-data/property-overrides.schema.json via `doc-tools validate
 property-overrides`. property_extractor.py's job is just to pass the field
 through unchanged onto the property record — normalizing and rendering it
@@ -35,14 +35,14 @@ class TestSeeAlsoOverride(unittest.TestCase):
 
     def test_see_also_applied_to_override_created_property(self):
         overrides = {"properties": {"ghost_property": {
-            "see_also": [{"content": "xref:a.adoc[]", "self_hosted_only": True}]
+            "see_also": [{"content": "xref:a.adoc[]", "self_managed_only": True}]
         }}}
 
         result = apply_property_overrides({}, overrides)
 
         self.assertEqual(
             result["ghost_property"]["see_also"],
-            [{"content": "xref:a.adoc[]", "self_hosted_only": True}],
+            [{"content": "xref:a.adoc[]", "self_managed_only": True}],
         )
 
     def test_non_list_see_also_is_rejected_with_a_warning_not_a_crash(self):

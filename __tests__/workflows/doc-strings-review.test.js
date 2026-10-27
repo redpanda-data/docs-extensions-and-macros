@@ -52,75 +52,28 @@ const runSteps = job.steps.filter((s) => typeof s.run === 'string')
  * substitution is what makes an unquoted input injectable, and `-e` without
  * `-o pipefail` is what let a failing gh in a pipeline look like success.
  */
-function execRun (step, { env = {}, stubs = {}, expressions = {}, files = {} } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-step-'))
-  const bin = path.join(dir, 'bin')
-  fs.mkdirSync(bin)
+const { execRun: execRunShared } = require('./helpers/exec-run')
 
-  for (const [name, body] of Object.entries(stubs)) {
-    const p = path.join(bin, name)
-    fs.writeFileSync(p, body.startsWith('#!') ? body : `#!/bin/bash\n${body}\n`)
-    fs.chmodSync(p, 0o755)
-  }
-  for (const [name, body] of Object.entries(files)) {
-    fs.writeFileSync(path.join(dir, name), body)
-  }
-
-  // Substituted the way the runner does it: textually, before bash. The map
-  // covers the expressions an EARLIER version of this workflow inlined into
-  // its run: bodies as well as the ones the current version uses, so a
-  // regression that moves an input back inline still executes here and fails
-  // on behaviour rather than on an unresolved-placeholder error.
-  const allExpressions = {
-    '${{ github.repository }}': env.GITHUB_REPOSITORY || 'redpanda-data/redpanda',
-    '${{ github.event.pull_request.number }}': env.PR || '7',
-    '${{ github.event.pull_request.html_url }}': 'https://github.com/redpanda-data/redpanda/pull/7',
-    '${{ inputs.doc_tools_package }}': env.PKG || RESOLVED_PKG,
-    '${{ steps.pkg.outputs.pkg }}': env.PKG || RESOLVED_PKG,
-    '${{ inputs.surfaces }}': env.SURFACES || '',
-    '${{ inputs.dispatch_repo }}': env.DISPATCH_REPO || 'redpanda-data/docs-site',
-    ...expressions
-  }
-  let body = step.run
-  for (const [expr, value] of Object.entries(allExpressions)) {
-    body = body.split(expr).join(value)
-  }
-  const unresolved = body.match(/\$\{\{[^}]*\}\}/g)
-  if (unresolved) throw new Error(`unresolved expressions in step body: ${unresolved.join(', ')}`)
-
-  const scriptPath = path.join(dir, 'step.sh')
-  fs.writeFileSync(scriptPath, body)
-  const outputFile = path.join(dir, 'github_output')
-  fs.writeFileSync(outputFile, '')
-
-  const result = spawnSync('/bin/bash', ['-e', scriptPath], {
-    cwd: dir,
-    encoding: 'utf8',
-    env: {
-      PATH: `${bin}:${process.env.PATH}`,
-      HOME: dir,
-      GITHUB_OUTPUT: outputFile,
-      ...env
+// This workflow's expression defaults; see helpers/exec-run.js for the runner.
+//
+// The map covers the expressions an EARLIER version of this workflow inlined
+// into its run: bodies as well as the ones the current version uses, so a
+// regression that moves an input back inline still executes here and fails on
+// behaviour rather than on an unresolved-placeholder error.
+function execRun (step, opts = {}) {
+  const env = opts.env || {}
+  return execRunShared(step, {
+    ...opts,
+    defaults: {
+      '${{ github.repository }}': env.GITHUB_REPOSITORY || 'redpanda-data/redpanda',
+      '${{ github.event.pull_request.number }}': env.PR || '7',
+      '${{ github.event.pull_request.html_url }}': 'https://github.com/redpanda-data/redpanda/pull/7',
+      '${{ inputs.doc_tools_package }}': env.PKG || RESOLVED_PKG,
+      '${{ steps.pkg.outputs.pkg }}': env.PKG || RESOLVED_PKG,
+      '${{ inputs.surfaces }}': env.SURFACES || '',
+      '${{ inputs.dispatch_repo }}': env.DISPATCH_REPO || 'redpanda-data/docs-site'
     }
   })
-
-  const outputs = {}
-  for (const line of fs.readFileSync(outputFile, 'utf8').split('\n')) {
-    const m = line.match(/^([^=]+)=(.*)$/)
-    if (m) outputs[m[1]] = m[2]
-  }
-
-  return {
-    status: result.status,
-    stdout: result.stdout || '',
-    stderr: result.stderr || '',
-    all: `${result.stdout || ''}${result.stderr || ''}`,
-    outputs,
-    dir,
-    exists: (f) => fs.existsSync(path.join(dir, f)),
-    size: (f) => (fs.existsSync(path.join(dir, f)) ? fs.statSync(path.join(dir, f)).size : -1),
-    read: (f) => (fs.existsSync(path.join(dir, f)) ? fs.readFileSync(path.join(dir, f), 'utf8') : null)
-  }
 }
 
 // An npx stub that reproduces npm exec's actual bin resolution: with no
@@ -185,13 +138,39 @@ describe('doc-strings-review workflow: static contracts', () => {
     }
   })
 
-  test('the caller contract does not point at a ref that cannot resolve', () => {
-    // The repo publishes no git tags, so a @v<version> example in the shim
-    // hands every caller an unresolvable ref.
+  test('the caller contract never shows a ref that would silently float', () => {
+    // This used to assert the opposite end of the same problem: with no tags in
+    // the repo, a `@v<version>` example handed callers an unresolvable ref, so
+    // the example said `@main`. publish-to-npm.yaml now tags every published
+    // version, but `@main` was always the worse failure: an unresolvable ref
+    // fails the caller's job loudly, while `@main` runs whatever landed here
+    // last, inside the caller's job, with their OIDC role and pull-requests:
+    // write, and with no review in their repository.
+    //
+    // So the contract is: the example must be an obvious placeholder, never a
+    // ref that resolves to moving code. People copy the block and skip the
+    // prose, which is exactly how the old example contradicted the paragraph
+    // beneath it.
     const shim = fs.readFileSync(WORKFLOW_PATH, 'utf8')
-    const refs = [...shim.matchAll(/doc-strings-review\.yml@([\w.\-/]+)/g)].map((m) => m[1])
+    const refs = [...shim.matchAll(/doc-strings-review\.yml@(\S+)/g)].map((m) => m[1])
     expect(refs.length).toBeGreaterThan(0)
-    for (const ref of refs) expect(ref).not.toMatch(/^v\d/)
+    for (const ref of refs) {
+      expect(ref).not.toBe('main')
+      expect(ref).not.toMatch(/^(main|master|HEAD)$/)
+      // A placeholder, i.e. not something git could resolve as-is.
+      expect(ref).toMatch(/[<>]/)
+    }
+  })
+
+  test('the caller contract tells security-sensitive callers to pin the SHA', () => {
+    // A tag is a movable pointer and this repo has no `v*` tag ruleset yet, so
+    // anyone with push access can re-point or delete a tag with no review.
+    // Until that ruleset exists the SHA is the only real pin, and the header
+    // has to say so rather than merely offer it as an alternative.
+    const header = fs.readFileSync(WORKFLOW_PATH, 'utf8')
+      .split('\n').filter((l) => l.startsWith('#')).join('\n')
+    expect(header).toMatch(/Prefer the commit SHA/i)
+    expect(header).toMatch(/ruleset/i)
   })
 
   test('doc_tools_package defaults to empty so the resolver decides', () => {
@@ -452,6 +431,8 @@ fi
     ['action.yml', true],
     ['.claude/settings.json', true],
     ['CLAUDE.md', true],
+    ['CLAUDE.local.md', true],
+    ['.mcp.json', true],
     ['src/v/config/configuration.cc', false]
   ])('a non-writer touching %s aborts: %s', (changedPath, shouldAbort) => {
     const r = execRun(step, {
@@ -473,6 +454,26 @@ esac
     }
   })
 
+  test('a non-writer cannot slip a protected path past the guard in a large file list', () => {
+    // Under pipefail, `printf | grep -q` fails once the list outgrows the pipe
+    // buffer: grep exits on the first match, printf takes SIGPIPE, and the
+    // pipeline reads as no match. A protected path listed first, ahead of
+    // thousands of others, then waved a non-writer's PR through.
+    const r = execRun(step, {
+      env,
+      stubs: {
+        gh: `#!/bin/bash
+case "$*" in
+  *collaborators*) echo read ;;
+  *) echo '.github/workflows/doc-strings-review.yml'; for i in $(seq 1 5000); do printf 'modules/reference/pages/some/long/path/file-%05d.adoc\\n' "$i"; done ;;
+esac
+`
+      }
+    })
+    expect(r.status).not.toBe(0)
+    expect(r.all).toMatch(/::error::PR touches review configuration/)
+  })
+
   test('a writer touching review configuration is allowed through', () => {
     const r = execRun(step, {
       env,
@@ -486,6 +487,342 @@ esac
       }
     })
     expect(r.status).toBe(0)
+  })
+})
+
+describe('doc-strings-review workflow: source diff (executed)', () => {
+  const step = stepNamed('Save the source diff for the review')
+  let repo
+  let base
+  const git = (...args) => {
+    const r = spawnSync('git', args, { cwd: repo, encoding: 'utf8' })
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`)
+    return r.stdout.trim()
+  }
+  const run = (env) => spawnSync('/bin/bash', ['-e', '-c', step.run], { cwd: repo, encoding: 'utf8', env: { ...process.env, ...env } })
+
+  beforeAll(() => {
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-diff-'))
+    git('init', '--quiet')
+    // The second commit adds ~322 files, which makes git start its automatic
+    // housekeeping (gc --auto / maintenance). That detaches and keeps writing
+    // into .git after the commit returns, so afterAll's rmSync races it and
+    // fails with ENOTEMPTY. Turn it off for this throwaway repo.
+    git('config', 'gc.auto', '0')
+    git('config', 'maintenance.auto', 'false')
+    git('config', 'user.email', 'dsr-test@example.invalid')
+    git('config', 'user.name', 'dsr test')
+    fs.mkdirSync(path.join(repo, 'internal/impl/kafka'), { recursive: true })
+    fs.writeFileSync(path.join(repo, 'internal/impl/kafka/input.go'), 'package kafka\n\nconst d = "old"\n')
+    git('add', '.')
+    git('commit', '--quiet', '-m', 'base')
+    base = git('rev-parse', 'HEAD')
+    // A regenerated-docs PR: more files than the PR diff API serves. The 320
+    // partials, the example config, and go.sum make 322 left-out files.
+    fs.writeFileSync(path.join(repo, 'internal/impl/kafka/input.go'), 'package kafka\n\nconst d = "new"\n')
+    const gen = path.join(repo, 'docs/modules/components/partials/fields/inputs')
+    fs.mkdirSync(gen, { recursive: true })
+    for (let i = 0; i < 320; i++) fs.writeFileSync(path.join(gen, `c${i}.adoc`), `= C${i}\n`)
+    const examples = path.join(repo, 'docs/modules/components/examples/common/inputs')
+    fs.mkdirSync(examples, { recursive: true })
+    fs.writeFileSync(path.join(examples, 'kafka.yaml'), 'input:\n  kafka: {}\n')
+    fs.writeFileSync(path.join(repo, 'go.sum'), 'x v1 h1:y\n')
+    git('add', '.')
+    git('commit', '--quiet', '-m', 'change')
+  })
+
+  // Retries cover any other late writer, so a slow runner cannot fail the suite
+  // after every test in it has passed.
+  afterAll(() => fs.rmSync(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }))
+
+  test('a PR over 300 files yields the source diff, with generated files counted, not included', () => {
+    const r = run({ BASE: base })
+    expect(r.status).toBe(0)
+    const patch = fs.readFileSync(path.join(repo, 'pr-diff.patch'), 'utf8')
+    expect(patch).toContain('+const d = "new"')
+    expect(patch).not.toContain('docs/modules/')
+    expect(patch).not.toContain('go.sum')
+    expect(patch).toMatch(/Left out \(generated docs, lockfiles, vendored code, test data\): 322 file\(s\)/)
+    expect(fs.existsSync(path.join(repo, 'pr-diff.err'))).toBe(false)
+  })
+
+  test('a bad base leaves no diff file and still succeeds under bash -e', () => {
+    fs.writeFileSync(path.join(repo, 'pr-diff.patch'), 'stale')
+    const r = run({ BASE: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef' })
+    expect(r.status).toBe(0)
+    expect(r.stdout + r.stderr).toMatch(/::warning::could not compute the source diff/)
+    expect(fs.existsSync(path.join(repo, 'pr-diff.patch'))).toBe(false)
+    expect(fs.existsSync(path.join(repo, 'pr-diff.err'))).toBe(false)
+  })
+
+  test('the review reads the saved diff, never gh pr diff', () => {
+    const review = stepNamed('Claude review with suggestions')
+    expect(review.with.claude_args).toContain('Bash(cat pr-diff.patch)')
+    expect(review.with.claude_args).not.toContain('gh pr diff')
+  })
+
+  // Bash output is cut off far below the diff cap, so a large diff only
+  // reaches the model in full when it can page through it with Read.
+  test('the review can page through a large diff with Read', () => {
+    const review = stepNamed('Claude review with suggestions')
+    expect(review.with.claude_args).toMatch(/--allowed-tools "[^"]*\bRead\(\.\/\*\*\),/)
+    expect(review.with.prompt).toMatch(/offset and limit/)
+  })
+
+  // A bare Read reaches any path on the runner, and a bare Write can write
+  // anywhere, including the runner's file-command files. File writes are
+  // governed by Edit(path) rules, so the two output files are the only
+  // writable paths.
+  test('the review cannot read or write outside the workspace', () => {
+    const review = stepNamed('Claude review with suggestions')
+    const allowed = review.with.claude_args.match(/--allowed-tools "([^"]*)"/)[1]
+      .split(',').map((t) => t.trim()).filter(Boolean)
+    expect(allowed).not.toContain('Read')
+    expect(allowed).not.toContain('Write')
+    expect(allowed).not.toContain('Glob')
+    expect(allowed).not.toContain('Grep')
+    expect(allowed).toContain('Read(./**)')
+    expect(allowed.filter((t) => t.startsWith('Edit('))).toEqual([
+      'Edit(./doc-impact.json)',
+      'Edit(./review-summary.md)'
+    ])
+  })
+})
+
+describe('doc-strings-review workflow: no bot token while the model runs', () => {
+  // Claude Code auto-approves read-only Bash commands such as cat, so a
+  // workspace-scoped Read rule does not stop the model reading a file
+  // elsewhere on the runner. The token must not exist anywhere while the
+  // review runs.
+  const steps = job.steps
+  const reviewIndex = steps.findIndex((s) => s.name === 'Claude review with suggestions')
+
+  test('no step writes the bot token to a file', () => {
+    for (const step of steps) {
+      if (typeof step.run !== 'string') continue
+      expect(step.run).not.toMatch(/ACTIONS_BOT_TOKEN[^\n]*>/)
+      expect(step.run).not.toMatch(/bot-token/)
+    }
+  })
+
+  test('the scrub step leaves no file behind and blanks the token', () => {
+    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'scrub-'))
+    const runnerTemp = path.join(tmp, 'runner-temp')
+    const githubEnv = path.join(tmp, 'github-env')
+    fs.mkdirSync(runnerTemp)
+    fs.writeFileSync(githubEnv, '')
+    const r = execRun(stepNamed('Drop fetched credentials from the review\'s environment'), {
+      env: {
+        ACTIONS_BOT_TOKEN: 'ghs_secret',
+        CLIENT_SECRET_ID: 'sdlc/prod/github/docs_doc_strings_client',
+        RUNNER_TEMP: runnerTemp,
+        GITHUB_ENV: githubEnv
+      }
+    })
+    expect(r.status).toBe(0)
+    // Nothing on disk the model could cat, and the token is blanked.
+    expect(fs.readdirSync(runnerTemp)).toEqual([])
+    const written = fs.readFileSync(githubEnv, 'utf8')
+    expect(written).toMatch(/^ACTIONS_BOT_TOKEN=$/m)
+    expect(written).not.toContain('ghs_secret')
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  test('the token is fetched again only after the review, before the dispatch', () => {
+    const fetches = steps
+      .map((s, i) => ({ s, i }))
+      .filter(({ s }) => typeof s.uses === 'string' && s.uses.startsWith('aws-actions/aws-secretsmanager-get-secrets') && /bot_token_secret_id/.test(s.with['secret-ids']))
+    const dispatchIndex = steps.findIndex((s) => s.name === 'Dispatch doc-impact')
+    const after = fetches.filter(({ i }) => i > reviewIndex)
+    expect(after).toHaveLength(1)
+    expect(after[0].i).toBeLessThan(dispatchIndex)
+    expect(after[0].s.if).toMatch(/aws_dispatch\.outcome == 'success'/)
+    const assume = stepNamed('Assume the AWS role for the doc-impact dispatch')
+    expect(assume.if).toMatch(/hashFiles\('doc-impact\.json'\) != ''/)
+    expect(steps.indexOf(assume)).toBeGreaterThan(reviewIndex)
+  })
+
+  test('a gating-only run re-fetches the token too, and a doc-impact.json counts only when the review ran', () => {
+    // A gating-only run has no doc string and skips the review; its report
+    // is in $RUNNER_TEMP, where hashFiles can't see it. Without its own
+    // branch in the gate, OIDC callers would log "No bot token" for exactly
+    // the change the gating detector exists to file.
+    const assume = stepNamed('Assume the AWS role for the doc-impact dispatch')
+    expect(assume.if).toMatch(/steps\.lint\.outputs\.declarations != '0' \|\| steps\.lint\.outputs\.removals != '0' \|\| steps\.enterprise\.outputs\.found != '0'\)/)
+    expect(assume.if).toMatch(/\(hashFiles\('doc-impact\.json'\) != '' && \(steps\.review\.outcome == 'success' \|\| steps\.review\.outcome == 'failure'\)\) \|\| steps\.enterprise\.outputs\.found != '0'\)$/)
+  })
+
+  // Evaluates a step's `if:` the way Actions does for the operators these
+  // conditions use, against a fake run. Unknown contexts throw, so a renamed
+  // step id fails here instead of evaluating to ''.
+  function evalIf (expr, ctx) {
+    const js = expr
+      .replace(/hashFiles\('([^']+)'\)/g, (_, f) => JSON.stringify(ctx.files.includes(f) ? 'hash' : ''))
+      .replace(/steps\.(\w+)\.(outputs\.(\w+)|outcome)/g, (_, id, __, out) => {
+        const st = ctx.steps[id]
+        if (!st) throw new Error(`no step ${id} in the fake run`)
+        return JSON.stringify(out ? (st.outputs[out] ?? '') : st.outcome)
+      })
+      .replace(/inputs\.(\w+)/g, (_, k) => JSON.stringify(ctx.inputs[k] ?? ''))
+      .replace(/(!?)==/g, (_, not) => (not ? '!==' : '==='))
+    // eslint-disable-next-line no-new-func
+    return Boolean(new Function(`return (${js})`)())
+  }
+  const oidc = { aws_region: 'us-east-2', aws_role_name_prefix: 'sdlc-' }
+  const run = ({ lint = '0', removals = '0', enterprise = '0', review = 'skipped', files = [], inputs = oidc }) => ({
+    inputs,
+    files,
+    steps: {
+      lint: { outputs: { declarations: lint, removals } },
+      enterprise: { outputs: { found: enterprise } },
+      review: { outcome: review, outputs: {} }
+    }
+  })
+
+  test.each([
+    ['a gating-only run (no doc string, no review)', { enterprise: '2' }, true],
+    ['a reviewed run that wrote doc-impact.json', { lint: '3', review: 'success', files: ['doc-impact.json'] }, true],
+    ['a review that failed after writing doc-impact.json', { lint: '3', review: 'failure', files: ['doc-impact.json'] }, true],
+    ['a review that wrote no report', { lint: '3', review: 'success' }, false],
+    ['a doc-impact.json with no review behind it', { lint: '3', review: 'skipped', files: ['doc-impact.json'] }, false],
+    ['nothing to report', {}, false],
+    ['a gating report on the plain-secret path', { enterprise: '2', inputs: {} }, false]
+  ])('the dispatch re-fetches the token for %s: %s', (_, shape, expected) => {
+    const assume = stepNamed('Assume the AWS role for the doc-impact dispatch')
+    expect(evalIf(assume.if, run(shape))).toBe(expected)
+  })
+
+  test('the pre-review scrub runs on a gating-only run, so the re-fetch is what the dispatch relies on', () => {
+    const scrub = stepNamed('Drop fetched credentials from the review\'s environment')
+    const dispatch = stepNamed('Dispatch doc-impact')
+    const gatingOnly = run({ enterprise: '1' })
+    expect(evalIf(scrub.if, gatingOnly)).toBe(true)
+    expect(evalIf(dispatch.if, gatingOnly)).toBe(true)
+    expect(dispatch.env.GH_TOKEN).not.toMatch(/bot-token/)
+    expect(dispatch.run).toMatch(/ACTIONS_BOT_TOKEN/)
+  })
+
+  test('both token fetch pairs use the same role and secret', () => {
+    const first = stepNamed('Assume the AWS role that can read the bot token')
+    const again = stepNamed('Assume the AWS role for the doc-impact dispatch')
+    expect(again.with).toEqual(first.with)
+    expect(stepNamed('Fetch the bot token for the doc-impact dispatch').with)
+      .toEqual(stepNamed('Fetch the bot token from Secrets Manager').with)
+  })
+})
+
+describe('doc-strings-review workflow: diff base (executed)', () => {
+  // The checkout is refs/pull/N/merge, GitHub's merge of the PR into the base
+  // branch as it is now. pull_request.base.sha is the base as of the event,
+  // so once the base branch moves on, base.sha..HEAD also carries the other
+  // PRs that arrived through the merge. This repo reproduces that shape: the
+  // PR branches from `stale`, main then gains another PR's commit, and HEAD
+  // is the merge of the PR into the new main tip.
+  const step = stepNamed('Resolve the diff base')
+  let root
+  let repo
+  let stale
+  let tip
+  const gitIn = (cwd, ...args) => {
+    const r = spawnSync('git', args, { cwd, encoding: 'utf8' })
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`)
+    return r.stdout.trim()
+  }
+  const write = (dir, file, body) => {
+    fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true })
+    fs.writeFileSync(path.join(dir, file), body)
+  }
+  const run = (cwd, env) => {
+    const out = path.join(root, `out-${Math.random().toString(16).slice(2)}`)
+    fs.writeFileSync(out, '')
+    const r = spawnSync('/bin/bash', ['-e', '-c', step.run], {
+      cwd,
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, HOME: root, GITHUB_OUTPUT: out, REF: '', PR_BASE_SHA: '', DEFAULT_BRANCH: '', ...env }
+    })
+    const outputs = Object.fromEntries(fs.readFileSync(out, 'utf8').split('\n').filter(Boolean).map((l) => l.split('=')))
+    return { ...r, outputs }
+  }
+  const changed = (cwd, base) => gitIn(cwd, 'diff', '--name-only', `${base}...HEAD`).split('\n').filter(Boolean).sort()
+
+  beforeAll(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-base-'))
+    repo = path.join(root, 'repo')
+    fs.mkdirSync(repo)
+    const git = (...args) => gitIn(repo, ...args)
+    git('init', '--quiet', '-b', 'main')
+    git('config', 'user.email', 'dsr-test@example.invalid')
+    git('config', 'user.name', 'dsr test')
+    write(repo, 'src/v/config/a.cc', 'a("old")\n')
+    write(repo, 'src/v/config/b.cc', 'b("old")\n')
+    git('add', '.')
+    git('commit', '--quiet', '-m', 'base')
+    stale = git('rev-parse', 'HEAD')
+    git('checkout', '--quiet', '-b', 'pr')
+    write(repo, 'src/v/config/a.cc', 'a("this PR")\n')
+    git('commit', '--quiet', '-am', 'this PR')
+    git('checkout', '--quiet', 'main')
+    write(repo, 'src/v/config/b.cc', 'b("another PR")\n')
+    git('commit', '--quiet', '-am', 'another PR')
+    tip = git('rev-parse', 'HEAD')
+    git('checkout', '--quiet', '-b', 'merge')
+    git('merge', '--quiet', '--no-ff', '--no-edit', 'pr')
+  })
+
+  afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
+
+  test('a merge checkout diffs against the first parent, not the stale base.sha', () => {
+    const r = run(repo, { REF: 'refs/pull/7/merge', PR_BASE_SHA: stale })
+    expect(r.status).toBe(0)
+    expect(r.outputs.base).toBe(tip)
+    expect(changed(repo, r.outputs.base)).toEqual(['src/v/config/a.cc'])
+    // Negative control: the old base attributes the other PR's file to this one.
+    expect(changed(repo, stale)).toEqual(['src/v/config/a.cc', 'src/v/config/b.cc'])
+  })
+
+  test('a merge checkout without its parents fails loudly', () => {
+    const shallow = path.join(root, 'shallow')
+    gitIn(root, 'clone', '--quiet', '--depth', '1', '--branch', 'merge', `file://${repo}`, shallow)
+    const r = run(shallow, { REF: 'refs/pull/7/merge', PR_BASE_SHA: stale })
+    expect(r.status).not.toBe(0)
+    expect(r.stdout + r.stderr).toMatch(/::error::.*not a two-parent merge commit/)
+    expect(r.outputs.base).toBeUndefined()
+  })
+
+  test('a non-merge checkout falls back to the merge base with the PR base', () => {
+    const head = path.join(root, 'head')
+    gitIn(root, 'clone', '--quiet', '--branch', 'pr', `file://${repo}`, head)
+    const r = run(head, { REF: 'refs/heads/pr', PR_BASE_SHA: tip })
+    expect(r.status).toBe(0)
+    expect(r.outputs.base).toBe(stale)
+    expect(changed(head, r.outputs.base)).toEqual(['src/v/config/a.cc'])
+  })
+
+  test('with no PR it falls back to the default branch', () => {
+    const head = path.join(root, 'dispatch')
+    gitIn(root, 'clone', '--quiet', '--branch', 'pr', `file://${repo}`, head)
+    const r = run(head, { REF: 'refs/heads/pr', DEFAULT_BRANCH: 'main' })
+    expect(r.status).toBe(0)
+    expect(r.outputs.base).toBe(stale)
+  })
+
+  test('with nothing to diff against it fails rather than diffing against nothing', () => {
+    const r = run(repo, { REF: 'refs/heads/merge' })
+    expect(r.status).not.toBe(0)
+    expect(r.stdout + r.stderr).toMatch(/::error::No merge ref, PR base or default branch/)
+  })
+
+  test('every diff in the job takes its base from this step', () => {
+    const order = job.steps.map((s) => s.name)
+    expect(order.indexOf('Resolve the diff base')).toBeLessThan(order.indexOf('Lint doc strings in the diff'))
+    expect(stepNamed('Lint doc strings in the diff').env.BASE).toBe('${{ steps.diffbase.outputs.base }}')
+    expect(stepNamed('Save the source diff for the review').env.BASE).toBe('${{ steps.diffbase.outputs.base }}')
+    expect(stepNamed('Detect enterprise gating changes').env.BASE).toBe('${{ steps.diffbase.outputs.base }}')
+    const checkout = job.steps.find((s) => (s.uses || '').startsWith('actions/checkout@'))
+    expect(checkout.with['fetch-depth']).not.toBe(1)
+    // base.sha may still feed the fallback, but nothing else reads it.
+    const readers = job.steps.filter((s) => JSON.stringify(s).includes('pull_request.base.sha')).map((s) => s.name)
+    expect(readers).toEqual(['Resolve the diff base'])
   })
 })
 
@@ -546,7 +883,7 @@ describe('doc-strings-review workflow: doc-impact dispatch (executed)', () => {
     '${{ github.event.pull_request.html_url }}': 'https://github.com/redpanda-data/redpanda/pull/7'
   }
   const GH_RECORDER = '#!/bin/bash\nprintf \'%s\\n\' "$@" >> "$HOME/gh-argv"\ncat > "$HOME/gh-stdin"\n'
-  const env = { GH_TOKEN: 'bot', DISPATCH_REPO: 'redpanda-data/docs-site' }
+  const env = { GH_TOKEN: 'bot', DISPATCH_REPO: 'redpanda-data/docs-site', REVIEW_OUTCOME: 'success' }
 
   const valid = {
     findings: [{
@@ -561,12 +898,25 @@ describe('doc-strings-review workflow: doc-impact dispatch (executed)', () => {
 
   function dispatch (docImpact, extraEnv = {}) {
     return execRun(step, {
-      env: { ...env, ...extraEnv },
+      env: { RUNNER_TEMP: fs.mkdtempSync(path.join(os.tmpdir(), 'runner-temp-')), ...env, ...extraEnv },
       expressions,
       stubs: { gh: GH_RECORDER },
       files: docImpact === null ? {} : { 'doc-impact.json': JSON.stringify(docImpact) }
     })
   }
+
+  test('on the OIDC path the re-fetched token is used', () => {
+    const r = dispatch(valid, { GH_TOKEN: '', ACTIONS_BOT_TOKEN: 'refetched' })
+    expect(r.status).toBe(0)
+    expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(true)
+  })
+
+  test('with no token at all the dispatch is skipped', () => {
+    const r = dispatch(valid, { GH_TOKEN: '', ACTIONS_BOT_TOKEN: '' })
+    expect(r.status).toBe(0)
+    expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(false)
+    expect(r.all).toMatch(/No bot token/)
+  })
 
   test('a well-formed report is dispatched to the configured repo', () => {
     const r = dispatch(valid)
@@ -576,6 +926,21 @@ describe('doc-strings-review workflow: doc-impact dispatch (executed)', () => {
     const payload = JSON.parse(fs.readFileSync(path.join(r.dir, 'gh-stdin'), 'utf8'))
     expect(payload.event_type).toBe('doc-impact')
     expect(payload.client_payload.impact.findings).toHaveLength(1)
+  })
+
+  test('the base and default branch travel with the payload so the router can flag a stacked PR', () => {
+    const r = dispatch(valid, { BASE_REF: 'CORE-1-parent', DEFAULT_BRANCH: 'dev' })
+    const payload = JSON.parse(fs.readFileSync(path.join(r.dir, 'gh-stdin'), 'utf8'))
+    expect(payload.client_payload.base_ref).toBe('CORE-1-parent')
+    expect(payload.client_payload.default_branch).toBe('dev')
+  })
+
+  test('a hostile base branch name is carried as data, not executed', () => {
+    const r = dispatch(valid, { BASE_REF: '$(touch PWNED)"; touch PWNED2; "', DEFAULT_BRANCH: 'dev' })
+    expect(r.exists('PWNED')).toBe(false)
+    expect(r.exists('PWNED2')).toBe(false)
+    const payload = JSON.parse(fs.readFileSync(path.join(r.dir, 'gh-stdin'), 'utf8'))
+    expect(payload.client_payload.base_ref).toBe('$(touch PWNED)"; touch PWNED2; "')
   })
 
   test.each([
@@ -612,6 +977,396 @@ describe('doc-strings-review workflow: doc-impact dispatch (executed)', () => {
   test('no report and no token both skip quietly', () => {
     expect(dispatch(null).status).toBe(0)
     expect(dispatch(valid, { GH_TOKEN: '' }).status).toBe(0)
+  })
+})
+
+describe('doc-strings-review workflow: enterprise gating detection (executed)', () => {
+  // streaming-enterprise PR 579 added a license_required_feature value and
+  // changed license enforcement without touching a doc string, so the lint
+  // gate stayed shut and nothing was filed. This step is the mechanical
+  // backstop; these tests pin its fail-closed behaviour the same way the
+  // lint-step tests pin theirs.
+  const step = stepNamed('Detect enterprise gating changes')
+  const env = { BASE: 'abc123', PKG: RESOLVED_PKG }
+  const REPORT = JSON.stringify({
+    findings: [{ surface: 'enterprise-feature', name: 'manual_finalization', change_kind: 'enterprise-feature-added', affected_pages: ['https://docs.redpanda.com/current/get-started/licensing/overview/'], summary: 's' }],
+    proposed_ticket: { title: 't', body: 'b' }
+  })
+
+  const runnerTemp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'runner-temp-'))
+  const detect = (extra, files = {}) => {
+    const tmp = runnerTemp()
+    const r = execRun(step, { env: { ...env, RUNNER_TEMP: tmp, ...extra }, stubs: { npx: NPX_STUB }, files })
+    r.tmpExists = (f) => fs.existsSync(path.join(tmp, f))
+    return r
+  }
+
+  test('a finding opens the gate and leaves the report in RUNNER_TEMP, outside the checkout', () => {
+    const r = detect({ LINT_JSON: REPORT })
+    expect(r.status).toBe(0)
+    expect(r.outputs.found).toBe('1')
+    expect(r.tmpExists('enterprise-impact.json')).toBe(true)
+    expect(r.exists('enterprise-impact.json')).toBe(false)
+    const argv = fs.readFileSync(path.join(r.dir, 'npx-argv'), 'utf8')
+    expect(argv).toMatch(/^--package=/m)
+    expect(argv).toMatch(/^detect-enterprise-gating$/m)
+    expect(argv).toMatch(/^abc123$/m)
+  })
+
+  test('an empty report closes the gate and leaves no file behind', () => {
+    const r = detect({ LINT_JSON: '{"findings":[]}' })
+    expect(r.outputs.found).toBe('0')
+    expect(r.tmpExists('enterprise-impact.json')).toBe(false)
+  })
+
+  test.each([
+    ['a CLI failure', { LINT_EXIT: '1', LINT_JSON: '' }],
+    ['zero bytes of output', { LINT_JSON: '' }],
+    ['non-JSON output', { LINT_JSON: 'not json' }],
+    ['findings of the wrong shape', { LINT_JSON: '{"findings":{"a":1}}' }]
+  ])('%s closes the gate at 0, never empty', (_label, extra) => {
+    const r = detect(extra)
+    expect(r.status).toBe(0)
+    expect(r.outputs.found).toBe('0')
+    expect(r.tmpExists('enterprise-impact.json')).toBe(false)
+  })
+
+  test('every credential and dispatch gate also opens on a gating finding', () => {
+    for (const name of ['Assume the AWS role that can read the bot token', "Drop fetched credentials from the review's environment", 'Dispatch doc-impact']) {
+      expect(stepNamed(name).if).toMatch(/steps\.enterprise\.outputs\.found != '0'/)
+    }
+    // But the model review and the bearer mint do not: a gating-only run
+    // dispatches with the bot token and runs no model.
+    expect(stepNamed('Claude review with suggestions').if).not.toMatch(/steps\.enterprise/)
+    expect(stepNamed('Fetch the ADP client credential').if).not.toMatch(/steps\.enterprise/)
+    expect(stepNamed('Fetch the ADP client credential').if).toMatch(/steps\.lint\.outputs\.declarations/)
+  })
+})
+
+describe('doc-strings-review workflow: doc-impact dispatch merges gating findings (executed)', () => {
+  const step = stepNamed('Dispatch doc-impact')
+  const expressions = {
+    '${{ github.repository }}': 'redpanda-data/redpanda',
+    '${{ github.event.pull_request.number }}': '7',
+    '${{ github.event.pull_request.html_url }}': 'https://github.com/redpanda-data/redpanda/pull/7'
+  }
+  const GH_RECORDER = '#!/bin/bash\nprintf \'%s\\n\' "$@" >> "$HOME/gh-argv"\ncat > "$HOME/gh-stdin"\n'
+  const env = { GH_TOKEN: 'bot', DISPATCH_REPO: 'redpanda-data/docs-site', REVIEW_OUTCOME: 'success' }
+  const finding = (name, surface = 'properties') => ({
+    surface, name, change_kind: 'x', affected_pages: ['https://docs.redpanda.com/current/x/'], summary: `about ${name}`
+  })
+  const gating = { findings: [finding('manual_finalization', 'enterprise-feature')], proposed_ticket: { title: 'gating', body: '- manual_finalization (enterprise-feature-added): s' } }
+
+  // The gating report lives in RUNNER_TEMP (the Detect step writes it
+  // there); everything else in `files` lands in the checkout.
+  function dispatch (files, extraEnv = {}) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-temp-'))
+    const workspace = { ...files }
+    if ('enterprise-impact.json' in workspace) {
+      fs.writeFileSync(path.join(tmp, 'enterprise-impact.json'), workspace['enterprise-impact.json'])
+      delete workspace['enterprise-impact.json']
+    }
+    return execRun(step, { env: { RUNNER_TEMP: tmp, ...env, ...extraEnv }, expressions, stubs: { gh: GH_RECORDER }, files: workspace })
+  }
+  const payload = (r) => JSON.parse(fs.readFileSync(path.join(r.dir, 'gh-stdin'), 'utf8')).client_payload.impact
+
+  test('with no model report, the gating report is dispatched on its own', () => {
+    const r = dispatch({ 'enterprise-impact.json': JSON.stringify(gating) })
+    expect(r.status).toBe(0)
+    expect(payload(r).findings.map((f) => f.name)).toEqual(['manual_finalization'])
+    expect(payload(r).proposed_ticket.title).toBe('gating')
+  })
+
+  test('with both, the gating findings join the model report and the body gains the gating section', () => {
+    const model = { findings: [finding('cloud_storage_cache_size')], proposed_ticket: { title: 'model', body: 'model body' } }
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify(gating) })
+    const impact = payload(r)
+    expect(impact.findings.map((f) => f.name)).toEqual(['manual_finalization', 'cloud_storage_cache_size'])
+    expect(impact.proposed_ticket.title).toBe('model')
+    expect(impact.proposed_ticket.body).toMatch(/^model body/)
+    expect(impact.proposed_ticket.body).toMatch(/Enterprise gating changes in this PR/)
+    expect(impact.proposed_ticket.body).toMatch(/manual_finalization \(enterprise-feature-added\)/)
+  })
+
+  test('the merge never grows past the ten-finding cap the schema enforces', () => {
+    const model = { findings: Array.from({ length: 10 }, (_, i) => finding(`p${i}`)), proposed_ticket: { title: 'model', body: 'b' } }
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify(gating) })
+    expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(true)
+    expect(payload(r).findings).toHaveLength(10)
+  })
+
+  test('a full model report never pushes the mechanical findings out of the cap', () => {
+    // Ten model findings plus one gating finding: the cap has to drop a
+    // model finding, never the gating one the model could not see.
+    const model = { findings: Array.from({ length: 10 }, (_, i) => finding(`p${i}`)), proposed_ticket: { title: 'model', body: 'b' } }
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify(gating) })
+    const names = payload(r).findings.map((f) => f.name)
+    expect(names[0]).toBe('manual_finalization')
+    expect(names).not.toContain('p9')
+  })
+
+  test.each([
+    ['skipped (a gating-only run)', 'skipped'],
+    ['not run at all', '']
+  ])('when the review was %s, a doc-impact.json in the checkout is ignored', (_label, outcome) => {
+    // The PR's tree is the workspace. A committed doc-impact.json on a run
+    // where the model never ran is PR-authored, not run output, and must not
+    // ride the bot token: only the mechanical report goes out.
+    const planted = { findings: Array.from({ length: 10 }, (_, i) => finding(`planted${i}`)), proposed_ticket: { title: 'planted title', body: 'planted body' } }
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(planted), 'enterprise-impact.json': JSON.stringify(gating) }, { REVIEW_OUTCOME: outcome })
+    const impact = payload(r)
+    expect(impact.findings.map((f) => f.name)).toEqual(['manual_finalization'])
+    expect(impact.proposed_ticket.title).toBe('gating')
+    expect(JSON.stringify(impact)).not.toMatch(/planted/)
+  })
+
+  test('with the review skipped and no gating report, a checked-in doc-impact.json dispatches nothing', () => {
+    const r = dispatch({ 'doc-impact.json': JSON.stringify({ findings: [finding('planted')], proposed_ticket: { title: 't', body: 'b' } }) }, { REVIEW_OUTCOME: 'skipped' })
+    expect(r.status).toBe(0)
+    expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(false)
+  })
+
+  test('a gating report committed to the checkout is never read', () => {
+    // Only the Detect step's RUNNER_TEMP output counts as the gating report.
+    const r = execRun(step, {
+      env: { RUNNER_TEMP: fs.mkdtempSync(path.join(os.tmpdir(), 'runner-temp-')), ...env, REVIEW_OUTCOME: 'skipped' },
+      expressions,
+      stubs: { gh: GH_RECORDER },
+      files: { 'enterprise-impact.json': JSON.stringify(gating) }
+    })
+    expect(r.status).toBe(0)
+    expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(false)
+  })
+
+  test('a malformed gating report alone is still schema-checked and not dispatched', () => {
+    const r = dispatch({ 'enterprise-impact.json': JSON.stringify({ findings: [{ surface: 'enterprise-feature' }], proposed_ticket: { title: 't', body: 'b' } }) })
+    expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(false)
+    expect(r.all).toMatch(/::warning::/)
+    expect(r.status).toBe(0)
+  })
+
+  test.each([
+    ['unparseable', '{not json'],
+    ['findings of the wrong type', JSON.stringify({ findings: 'oops' })],
+    ['a finding of the wrong shape', JSON.stringify({ findings: [{ name: 'x' }], proposed_ticket: { title: 't', body: 'b' } })],
+    ['a page outside the docs site', JSON.stringify({ findings: [{ ...finding('x'), affected_pages: ['https://example.com/'] }], proposed_ticket: { title: 't', body: 'b' } })]
+  ])('a model report that is %s is dropped and the gating report still goes out', (_label, model) => {
+    // The gating finding is the one thing in the dispatch the model did not
+    // write, so a broken or steered model report must not be able to hide it.
+    const r = dispatch({ 'doc-impact.json': model, 'enterprise-impact.json': JSON.stringify(gating) })
+    expect(r.status).toBe(0)
+    expect(r.all).toMatch(/::warning::.*model/)
+    const impact = payload(r)
+    expect(impact.findings.map((f) => f.name)).toEqual(['manual_finalization'])
+    expect(impact.proposed_ticket.title).toBe('gating')
+  })
+
+  test('a malformed gating report is dropped and a valid model report still goes out', () => {
+    // The mirror case: a detector bug must not sink the model's findings.
+    const model = { findings: [finding('cloud_storage_cache_size')], proposed_ticket: { title: 'model', body: 'model body' } }
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify({ findings: 'x' }) })
+    expect(r.status).toBe(0)
+    expect(r.all).toMatch(/::warning::.*gating/)
+    const impact = payload(r)
+    expect(impact.findings.map((f) => f.name)).toEqual(['cloud_storage_cache_size'])
+    expect(impact.proposed_ticket.title).toBe('model')
+  })
+
+  test('a model report of more than ten findings is dropped whole, not trimmed', () => {
+    const model = { findings: Array.from({ length: 11 }, (_, i) => finding(`p${i}`)), proposed_ticket: { title: 'model', body: 'b' } }
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify(gating) })
+    const impact = payload(r)
+    expect(impact.findings.map((f) => f.name)).toEqual(['manual_finalization'])
+    expect(impact.proposed_ticket.title).toBe('gating')
+  })
+
+  test('a malformed model report with no gating report still dispatches nothing', () => {
+    const r = dispatch({ 'doc-impact.json': JSON.stringify({ findings: 'oops' }) })
+    expect(r.status).toBe(0)
+    expect(fs.existsSync(path.join(r.dir, 'gh-argv'))).toBe(false)
+  })
+})
+
+describe('doc-strings-review workflow: checked-in run outputs (executed)', () => {
+  const step = stepNamed('Remove run-output files the PR checked in')
+  const OUTPUTS = ['doc-impact.json', 'doc-impact.merged.json', 'review-summary.md', 'lint-findings.json', 'pr-diff.patch', 'pr-diff.full', 'pr-diff.err', 'enterprise-impact.json', 'enterprise-stderr.txt', 'embedded-reference-strings.md', 'terminology.md']
+
+  test('runs straight after checkout, before any step reads or writes those files', () => {
+    const idx = job.steps.indexOf(step)
+    expect(job.steps[idx - 1].uses).toMatch(/^actions\/checkout@/)
+    expect(step.if).toBeUndefined()
+    expect(idx).toBeLessThan(job.steps.findIndex((s) => s.id === 'lint'))
+    expect(idx).toBeLessThan(job.steps.findIndex((s) => s.id === 'review'))
+  })
+
+  test('a committed directory under an output name is removed, not a failed job', () => {
+    const r = execRun(step, { files: { 'doc-impact.json/x': 'planted', 'main.cc': 'int main() {}' } })
+    expect(r.status).toBe(0)
+    expect(r.exists('doc-impact.json')).toBe(false)
+    expect(r.exists('main.cc')).toBe(true)
+  })
+
+  test('removes every run-output file a PR could commit, and leaves source alone', () => {
+    const files = Object.fromEntries(OUTPUTS.map((f) => [f, '{"findings":[]}']))
+    files['main.cc'] = 'int main() {}'
+    const r = execRun(step, { files })
+    expect(r.status).toBe(0)
+    for (const f of OUTPUTS) expect(r.exists(f)).toBe(false)
+    expect(r.exists('main.cc')).toBe(true)
+  })
+})
+
+describe('doc-strings-review workflow: ADP mint (executed)', () => {
+  // A curl stub that records its own argv and writes a token file, so the
+  // assertions are about what the mint ACTUALLY sends rather than about the
+  // YAML's text.
+  const CURL_STUB = `#!/bin/bash
+printf '%s\\n' "$@" > "$HOME/curl-argv"
+out=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "--output" ]; then out="$a"; fi
+  prev="$a"
+done
+[ -n "$out" ] && printf '{"access_token":"tok-abc"}' > "$out"
+printf '200'
+exit 0
+`
+  const JQ_STUB = `#!/bin/bash
+# Only the one query this step makes.
+f="\${!#}"
+grep -o '"access_token":"[^"]*"' "$f" 2>/dev/null | sed 's/.*:"//;s/"$//'
+exit 0
+`
+
+  function mint ({ secretId, tokenUrl, audience, credEnv }) {
+    const step = stepNamed('Mint the ADP gateway token')
+    // RUNNER_TEMP and GITHUB_ENV are runner-provided; without them
+    // `set -u` aborts the step before curl is ever reached. Pointing
+    // RUNNER_TEMP at the cwd keeps the token file inside the temp dir.
+    const dirEnv = {
+      CLIENT_SECRET_ID: secretId,
+      TOKEN_URL: tokenUrl,
+      TOKEN_AUDIENCE: audience,
+      RUNNER_TEMP: '.',
+      GITHUB_ENV: 'github_env',
+      ...credEnv
+    }
+    return execRun(step, {
+      env: dirEnv,
+      stubs: { curl: CURL_STUB, jq: JQ_STUB }
+    })
+  }
+
+  const IDP = 'https://aigw.d6kjl4h19241bg3ek3h0.clusters.rdpa.co/oauth/idp/token'
+  const CLOUD = 'https://auth.prd.cloud.redpanda.com/oauth/token'
+
+  test('the agent path sends NO audience parameter', () => {
+    const r = mint({
+      secretId: 'sdlc/prod/github/docs_doc_strings_client',
+      tokenUrl: IDP,
+      audience: '',
+      credEnv: {
+        DOCS_DOC_STRINGS_CLIENT_ID: 'serviceaccounts/doc-strings-review',
+        DOCS_DOC_STRINGS_CLIENT_SECRET: 's3cret'
+      }
+    })
+    const argv = r.read('curl-argv') || ''
+    expect(r.status).toBe(0)
+    expect(argv).toContain(IDP)
+    // The whole point: not `audience=` either, which satisfies neither endpoint.
+    expect(argv).not.toMatch(/audience/)
+  })
+
+  test('a standalone service account can still send an audience', () => {
+    const r = mint({
+      secretId: 'sdlc/prod/github/adp_priv_client',
+      tokenUrl: CLOUD,
+      audience: 'cloudv2-production.redpanda.cloud',
+      credEnv: { ADP_PRIV_CLIENT_ID: 'opaque', ADP_PRIV_CLIENT_SECRET: 's3cret' }
+    })
+    const argv = r.read('curl-argv') || ''
+    expect(r.status).toBe(0)
+    expect(argv).toContain(CLOUD)
+    expect(argv).toContain('audience=cloudv2-production.redpanda.cloud')
+  })
+
+  test('a non-https token endpoint is rejected before curl runs', () => {
+    const r = mint({
+      secretId: 'sdlc/prod/github/docs_doc_strings_client',
+      tokenUrl: 'http://aigw.d6kjl4h19241bg3ek3h0.clusters.rdpa.co/oauth/idp/token',
+      audience: '',
+      credEnv: {
+        DOCS_DOC_STRINGS_CLIENT_ID: 'serviceaccounts/doc-strings-review',
+        DOCS_DOC_STRINGS_CLIENT_SECRET: 's3cret'
+      }
+    })
+    expect(r.status).not.toBe(0)
+    expect(r.all).toContain('must be https')
+    expect(r.exists('curl-argv')).toBe(false)
+  })
+
+  test('the credential env names follow the secret id, not a fixed prefix', () => {
+    const r = mint({
+      secretId: 'sdlc/prod/github/docs_doc_strings_client',
+      tokenUrl: IDP,
+      audience: '',
+      credEnv: {
+        DOCS_DOC_STRINGS_CLIENT_ID: 'serviceaccounts/doc-strings-review',
+        DOCS_DOC_STRINGS_CLIENT_SECRET: 's3cret'
+      }
+    })
+    expect(r.read('curl-argv') || '').toContain('client_id=serviceaccounts/doc-strings-review')
+  })
+
+  test('the OLD fixed names no longer satisfy the new default secret', () => {
+    // The regression #302 fixed, asserted from the other side: a caller that
+    // supplies adp_priv_client's env names while pointing at the docs secret
+    // gets a warning and no mint, not a silent fail-open.
+    const r = mint({
+      secretId: 'sdlc/prod/github/docs_doc_strings_client',
+      tokenUrl: IDP,
+      audience: '',
+      credEnv: { ADP_PRIV_CLIENT_ID: 'opaque', ADP_PRIV_CLIENT_SECRET: 's3cret' }
+    })
+    expect(r.status).not.toBe(0)
+    expect(r.all).toContain('DOCS_DOC_STRINGS_CLIENT_ID')
+    expect(r.exists('curl-argv')).toBe(false)
+  })
+
+  test('a hyphenated secret segment is sanitised the way the secrets action does it', () => {
+    // aws-secretsmanager-get-secrets upper-cases and replaces every
+    // non-alphanumeric with _, so the JSON keys of a secret named
+    // .../docs-doc-strings-client arrive as DOCS_DOC_STRINGS_CLIENT_*. A prefix
+    // that only upper-cased produced DOCS-DOC-STRINGS-CLIENT_ID, an invalid
+    // bash name, and the indirect expansion aborted under set -u before the
+    // warning could print.
+    const r = mint({
+      secretId: 'sdlc/prod/github/docs-doc-strings-client',
+      tokenUrl: IDP,
+      audience: '',
+      credEnv: {
+        DOCS_DOC_STRINGS_CLIENT_ID: 'serviceaccounts/doc-strings-review',
+        DOCS_DOC_STRINGS_CLIENT_SECRET: 's3cret'
+      }
+    })
+    expect(r.status).toBe(0)
+    expect(r.read('curl-argv') || '').toContain('client_id=serviceaccounts/doc-strings-review')
+  })
+
+  test('the scrub step derives the credential env names exactly as the mint does', () => {
+    const derive = (run) => (run.match(/prefix=\$\(printf '%s' "\$CLIENT_SECRET_ID" \| [^\n]*\)/) || [])[0]
+    const mintLine = derive(stepNamed('Mint the ADP gateway token').run)
+    const scrubLine = derive(stepNamed('Drop fetched credentials from the review\'s environment').run)
+    expect(mintLine).toBeTruthy()
+    expect(scrubLine).toBe(mintLine)
+  })
+
+  test('the workflow defaults are the agent path', () => {
+    const inputs = workflow.on.workflow_call.inputs
+    expect(inputs.adp_client_secret_id.default).toBe('sdlc/prod/github/docs_doc_strings_client')
+    expect(inputs.adp_token_url.default).toBe(IDP)
+    expect(inputs.adp_token_audience.default).toBe('')
   })
 })
 
@@ -756,5 +1511,344 @@ describe('doc-strings-review workflow: package resolution (executed)', () => {
       stubs: { gh: '#!/bin/bash\nexit 0\n' }
     })
     expect(r.exists('PWNED')).toBe(false)
+  })
+})
+
+// Review once: the state that keeps a later push from re-reviewing a string,
+// the lint report that stands in when no model runs, and the single summary
+// comment. Each test pins the behavior that made the review noisy before.
+describe('doc-strings-review workflow: review once (executed)', () => {
+  const JQ = require('child_process').execSync('command -v jq').toString().trim()
+
+  // gh stub backed by a JSON file of comments: `--jq` filters apply to the
+  // stored payload with real jq, and POST/PATCH calls are recorded.
+  const ghCommentsStub = `#!/bin/bash
+args=("$@")
+filter=""; method=GET; body=""
+for i in "\${!args[@]}"; do
+  case "\${args[$i]}" in
+    --jq) filter="\${args[$((i+1))]}" ;;
+    --method) method="\${args[$((i+1))]}" ;;
+    -F) body="\${args[$((i+1))]#body=@}" ;;
+  esac
+done
+url=""
+for a in "$@"; do case "$a" in repos/*) url="$a" ;; esac; done
+printf '%s %s\\n' "$method" "$url" >> "$HOME/gh-calls"
+if [ "$method" != GET ]; then cp "$body" "$HOME/posted-body"; exit 0; fi
+case "$url" in
+  */issues/comments/*) payload=$(${JSON.stringify(JQ)} --argjson id "\${url##*/}" '.[] | select(.id == $id)' "$HOME/comments.json") ;;
+  *) payload=$(cat "$HOME/comments.json") ;;
+esac
+if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$filter"; else printf '%s' "$payload"; fi
+`
+
+  describe('recovering fingerprints from earlier suggestions', () => {
+    const step = stepNamed('Recover reviewed fingerprints from earlier suggestions')
+    const env = (dir) => ({ GH_TOKEN: 't', GITHUB_REPOSITORY: 'o/r', PR: '7', STATE_DIR: path.join(dir, 'state') })
+
+    test('only bot-authored markers count, merged with the cached state', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-state-'))
+      fs.mkdirSync(path.join(dir, 'state'))
+      fs.writeFileSync(path.join(dir, 'state', 'reviewed.txt'), 'aaaaaaaaaaaaaaaa\n')
+      const comments = [
+        // The footer as it actually reaches GitHub: claude-code-action strips
+        // HTML comments, so the marker is a visible <sub> line.
+        { id: 1, user: { login: 'claude[bot]', type: 'Bot' }, body: 'Fix it.\n<sub>doc-strings-review:fp=bbbbbbbbbbbbbbbb</sub>' },
+        { id: 2, user: { login: 'someone', type: 'User' }, body: '<!-- doc-strings-review:fp=cccccccccccccccc -->' }
+      ]
+      const r = execRun(step, { env: env(dir), stubs: { gh: ghCommentsStub }, files: { 'comments.json': JSON.stringify(comments) } })
+      expect(r.status).toBe(0)
+      expect(fs.readFileSync(path.join(dir, 'state', 'reviewed.txt'), 'utf8').trim().split('\n'))
+        .toEqual(['aaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbb'])
+    })
+
+    test('a failed comment read keeps the cached state and does not fail the step', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-state-'))
+      fs.mkdirSync(path.join(dir, 'state'))
+      fs.writeFileSync(path.join(dir, 'state', 'reviewed.txt'), 'aaaaaaaaaaaaaaaa\n')
+      const r = execRun(step, { env: env(dir), stubs: { gh: '#!/bin/bash\nexit 1\n' } })
+      expect(r.status).toBe(0)
+      expect(fs.readFileSync(path.join(dir, 'state', 'reviewed.txt'), 'utf8').trim()).toBe('aaaaaaaaaaaaaaaa')
+    })
+
+    // streaming-enterprise PR 461: the review argued with help text the
+    // author had applied from a docs reviewer's suggestion.
+    test('keeps what human reviewers wrote, never the author or a bot', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-state-'))
+      const out = path.join(dir, 'reviewer-comments.json')
+      const comments = [
+        { id: 1, user: { login: 'docs-reviewer', type: 'User' }, body: '```suggestion\nShort: "Delete topics",\n```' },
+        { id: 2, user: { login: 'pr-author', type: 'User' }, body: 'my own text, pasted to dodge the review' },
+        { id: 3, user: { login: 'claude[bot]', type: 'Bot' }, body: 'a bot suggestion' },
+        { id: 4, user: { login: 'other-reviewer', type: 'User' }, body: '' }
+      ]
+      const r = execRun(step, {
+        env: { ...env(dir), PR_AUTHOR: 'pr-author', REVIEWER_COMMENTS: out },
+        stubs: { gh: ghCommentsStub },
+        files: { 'comments.json': JSON.stringify(comments) }
+      })
+      expect(r.status).toBe(0)
+      // The stub serves the same payload for review comments and reviews, so
+      // the one human body arrives once from each.
+      expect(JSON.parse(fs.readFileSync(out, 'utf8'))).toEqual([comments[0].body, comments[0].body])
+    })
+
+    test('no author login means no reviewer file, so every string is reviewed', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-state-'))
+      const out = path.join(dir, 'reviewer-comments.json')
+      const r = execRun(step, {
+        env: { ...env(dir), PR_AUTHOR: '', REVIEWER_COMMENTS: out },
+        stubs: { gh: ghCommentsStub },
+        files: { 'comments.json': '[]' }
+      })
+      expect(r.status).toBe(0)
+      expect(fs.existsSync(out)).toBe(false)
+    })
+
+    test('a failed reviewer read leaves no file behind', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-state-'))
+      const out = path.join(dir, 'reviewer-comments.json')
+      fs.writeFileSync(out, '["stale"]')
+      const r = execRun(step, { env: { ...env(dir), PR_AUTHOR: 'pr-author', REVIEWER_COMMENTS: out }, stubs: { gh: '#!/bin/bash\nexit 1\n' } })
+      expect(r.status).toBe(0)
+      expect(fs.existsSync(out)).toBe(false)
+    })
+  })
+
+  describe('lint step', () => {
+    const step = stepNamed('Lint doc strings in the diff')
+    const baseEnv = { BASE: 'deadbeef', SURFACES: '', PKG: RESOLVED_PKG, LINT_JSON: '{"findings":[],"summary":{"totalDeclarations":0}}' }
+
+    test('passes the reviewed state to the CLI when there is one', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-state-'))
+      fs.writeFileSync(path.join(dir, 'reviewed.txt'), 'aaaaaaaaaaaaaaaa\n')
+      const r = execRun(step, { env: { ...baseEnv, STATE_DIR: dir }, stubs: { npx: NPX_STUB } })
+      const argv = fs.readFileSync(path.join(r.dir, 'npx-argv'), 'utf8').split('\n')
+      expect(argv).toContain('--reviewed')
+      expect(argv).toContain(path.join(dir, 'reviewed.txt'))
+    })
+
+    test('passes human review comments to the CLI when there are any', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-state-'))
+      const file = path.join(dir, 'reviewer-comments.json')
+      fs.writeFileSync(file, '["text"]')
+      const r = execRun(step, { env: { ...baseEnv, STATE_DIR: dir, REVIEWER_COMMENTS: file }, stubs: { npx: NPX_STUB } })
+      const argv = fs.readFileSync(path.join(r.dir, 'npx-argv'), 'utf8').split('\n')
+      expect(argv).toContain('--reviewer-comments')
+      expect(argv).toContain(file)
+    })
+
+    test('strings a reviewer wrote still open the gate, for the published-content check', () => {
+      const r = execRun(step, {
+        env: { ...baseEnv, STATE_DIR: path.join(os.tmpdir(), 'no-such-dsr-state'), LINT_JSON: '{"findings":[],"summary":{"totalDeclarations":0,"reviewerWritten":2}}' },
+        stubs: { npx: NPX_STUB }
+      })
+      expect(r.status).toBe(0)
+      expect(r.outputs.declarations).toBe('2')
+    })
+
+    test('a first run passes no --reviewed at all', () => {
+      const r = execRun(step, { env: { ...baseEnv, STATE_DIR: path.join(os.tmpdir(), 'no-such-dsr-state') }, stubs: { npx: NPX_STUB } })
+      const argv = fs.readFileSync(path.join(r.dir, 'npx-argv'), 'utf8').split('\n')
+      expect(argv).not.toContain('--reviewed')
+      expect(argv).not.toContain('--reviewer-comments')
+      expect(r.status).toBe(0)
+    })
+  })
+
+  describe('lint report in the job summary', () => {
+    const step = stepNamed('Write the lint report to the job summary')
+
+    test('renders findings as a table, escaping pipes so a string cannot break it', () => {
+      const lint = {
+        findings: [{ name: 'a_prop', file: 'src/v/config/configuration.cc', line_start: 10, rules: [{ id: 'too-short', severity: 'warning', message: 'Use a | b\nnot this' }] }],
+        summary: { totalDeclarations: 3, alreadyReviewed: 2, flaggedDeclarations: 1, removedDeclarations: [{ name: 'old_prop', surface: 'properties' }] }
+      }
+      const r = execRun(step, { env: { GITHUB_STEP_SUMMARY: 'summary.md' }, files: { 'lint-findings.json': JSON.stringify(lint) } })
+      expect(r.status).toBe(0)
+      const out = r.read('summary.md')
+      expect(out).toMatch(/New or changed declarations to review: 3\. Already reviewed on an earlier push: 2\./)
+      expect(out).toMatch(/Removed or renamed: `old_prop` \(properties\)/)
+      const row = out.split('\n').find((l) => l.includes('a_prop'))
+      expect(row).toContain('Use a \\| b not this')
+      expect(row.split(/(?<!\\)\|/).length - 2).toBe(4)
+    })
+
+    test('lists unattributed doc-method calls and counts partly evaluated text, so no gap is silent', () => {
+      const lint = {
+        findings: [],
+        summary: {
+          totalDeclarations: 1,
+          unverifiableDeclarations: 2,
+          skippedDeclarations: [{ surface: 'connect', file: 'internal/impl/x/y.go', line: 12, method: 'Description', reason: 'receiver d does not trace to a benthos spec' }]
+        }
+      }
+      const r = execRun(step, { env: { GITHUB_STEP_SUMMARY: 'summary.md' }, files: { 'lint-findings.json': JSON.stringify(lint) } })
+      expect(r.status).toBe(0)
+      const out = r.read('summary.md')
+      expect(out).toMatch(/could not fully evaluate .*: 2\./)
+      expect(out).toMatch(/could not attribute, so nothing reviewed them:\n\n- internal\/impl\/x\/y\.go:12 `\.Description\(\)`: receiver d does not trace to a benthos spec/)
+    })
+
+    test('no report file is said plainly rather than failing', () => {
+      const r = execRun(step, { env: { GITHUB_STEP_SUMMARY: 'summary.md' } })
+      expect(r.status).toBe(0)
+      expect(r.read('summary.md')).toMatch(/No lint report/)
+    })
+  })
+
+  describe('doc-impact in the job summary', () => {
+    const step = stepNamed('Write doc-impact to the job summary')
+
+    test('lists affected pages for the docs team, one escaped line per field', () => {
+      const impact = {
+        findings: [{ surface: 'rpk', name: 'delete', change_kind: 'behavior', summary: 'Regex mode\nskips <b>internal</b> topics', affected_pages: ['https://docs.redpanda.com/x/'] }],
+        proposed_ticket: { title: 't', body: 'b' }
+      }
+      const r = execRun(step, { env: { GITHUB_STEP_SUMMARY: 'summary.md' }, files: { 'doc-impact.json': JSON.stringify(impact) } })
+      expect(r.status).toBe(0)
+      const out = r.read('summary.md')
+      expect(out).toMatch(/Nothing here is for the PR author/)
+      expect(out).toContain('- `delete` (rpk): Regex mode skips &lt;b>internal&lt;/b> topics')
+      expect(out).toContain('  - https://docs.redpanda.com/x/')
+    })
+
+    test('no doc-impact file writes nothing', () => {
+      const r = execRun(step, { env: { GITHUB_STEP_SUMMARY: 'summary.md' } })
+      expect(r.status).toBe(0)
+      expect(r.exists('summary.md')).toBe(false)
+    })
+  })
+
+  test('the prompt keeps published-content impact out of the PR summary', () => {
+    const prompt = stepNamed('Claude review with suggestions').with.prompt
+    expect(prompt).not.toMatch(/"Affected published content" section/)
+    expect(prompt).toMatch(/Never put published-content impact in it/)
+  })
+
+  describe('summary comment', () => {
+    const step = stepNamed('Update the review summary comment')
+    const env = { GH_TOKEN: 't', GITHUB_REPOSITORY: 'o/r', PR: '7', HEAD_SHA: 'abcdef1234567' }
+
+    test('no summary file means no comment at all', () => {
+      const r = execRun(step, { env, stubs: { gh: ghCommentsStub }, files: { 'comments.json': '[]' } })
+      expect(r.status).toBe(0)
+      expect(r.exists('gh-calls')).toBe(false)
+    })
+
+    test('the first summary creates one comment', () => {
+      const r = execRun(step, {
+        env,
+        stubs: { gh: ghCommentsStub },
+        files: { 'comments.json': '[]', 'review-summary.md': 'Affected published content: x' }
+      })
+      expect(r.status).toBe(0)
+      expect(r.read('gh-calls')).toMatch(/^POST repos\/o\/r\/issues\/7\/comments$/m)
+      const body = r.read('posted-body')
+      expect(body.startsWith('<!-- doc-strings-review:summary -->')).toBe(true)
+      expect(body).toMatch(/push abcdef1/)
+    })
+
+    test('a later summary edits the same comment, newest push first, with one marker', () => {
+      const previous = '<!-- doc-strings-review:summary -->\n### Doc-strings review, push 1111111\n\nold news\n\n_Suggestions are optional. Each string is reviewed once; editing it gets a fresh review on the next push._\n'
+      const comments = [
+        { id: 5, user: { login: 'someone', type: 'User' }, body: 'quoting <!-- doc-strings-review:summary -->' },
+        { id: 9, user: { login: 'github-actions[bot]', type: 'Bot' }, body: previous }
+      ]
+      const r = execRun(step, {
+        env,
+        stubs: { gh: ghCommentsStub },
+        files: { 'comments.json': JSON.stringify(comments), 'review-summary.md': 'new news' }
+      })
+      expect(r.status).toBe(0)
+      expect(r.read('gh-calls')).toMatch(/^PATCH repos\/o\/r\/issues\/comments\/9$/m)
+      expect(r.read('gh-calls')).not.toMatch(/^POST/m)
+      const body = r.read('posted-body')
+      expect(body.split('<!-- doc-strings-review:summary -->').length - 1).toBe(1)
+      expect(body.indexOf('new news')).toBeLessThan(body.indexOf('old news'))
+      expect(body.split('_Suggestions are optional.').length - 1).toBe(1)
+    })
+  })
+
+  describe('recording what was reviewed', () => {
+    const step = stepNamed('Record the reviewed fingerprints')
+
+    test('adds pending and removed fingerprints, deduplicated, ignoring junk', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-state-'))
+      fs.writeFileSync(path.join(dir, 'reviewed.txt'), 'aaaaaaaaaaaaaaaa\n')
+      const lint = {
+        declarations: [{ fingerprint: 'bbbbbbbbbbbbbbbb' }, { fingerprint: 'aaaaaaaaaaaaaaaa' }, { fingerprint: '$(touch pwned)' }],
+        summary: { removedDeclarations: [{ fingerprint: 'cccccccccccccccc' }], reviewerWrittenDeclarations: [{ fingerprint: 'dddddddddddddddd' }] }
+      }
+      const r = execRun(step, { env: { STATE_DIR: dir }, files: { 'lint-findings.json': JSON.stringify(lint) } })
+      expect(r.status).toBe(0)
+      // Reviewer-written strings are recorded too, so their impact check
+      // runs once, not on every push.
+      expect(fs.readFileSync(path.join(dir, 'reviewed.txt'), 'utf8').trim().split('\n'))
+        .toEqual(['aaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbb', 'cccccccccccccccc', 'dddddddddddddddd'])
+      expect(r.exists('pwned')).toBe(false)
+    })
+  })
+
+  describe('static contracts', () => {
+    const review = stepNamed('Claude review with suggestions')
+
+    test('the model cannot post a top-level comment itself', () => {
+      expect(review.with.claude_args).not.toMatch(/add_issue_comment/)
+      expect(review.with.claude_args).toMatch(/create_inline_comment/)
+    })
+
+    test('state is saved only after a review that actually ran', () => {
+      expect(stepNamed('Record the reviewed fingerprints').if).toMatch(/steps\.review\.outputs\.execution_file != ''/)
+      expect(stepNamed('Save the review state').if).toMatch(/steps\.record\.outcome == 'success'/)
+    })
+
+    test('restore and save use the same per-PR key prefix', () => {
+      const restore = stepNamed('Restore the review state').with
+      const save = stepNamed('Save the review state').with
+      expect(save.key).toBe(restore.key)
+      expect(restore.key.startsWith(restore['restore-keys'])).toBe(true)
+      expect(save.path).toBe(restore.path)
+    })
+
+    test('the prompt caps inline comments and tells the model to mark each one', () => {
+      expect(review.with.prompt).toMatch(/AT MOST 10 inline comments/)
+      // Visible, because the action's comment tools strip HTML comments.
+      expect(review.with.prompt).toMatch(/<sub>doc-strings-review:fp=FINGERPRINT<\/sub>/)
+      expect(review.with.prompt).not.toMatch(/<!-- doc-strings-review:fp/)
+      expect(review.with.prompt).not.toMatch(/Finish with one summary comment/)
+    })
+
+    test('the prompt carries the connect suggestion rules and the regeneration footer', () => {
+      const prompt = review.with.prompt
+      expect(prompt).toMatch(/CONNECT STRINGS/)
+      expect(prompt).toContain('`text ` + "`code`" + ` text`')
+      expect(prompt).toMatch(/Every xref names its module/)
+      // env-cloud block conditionals are allowed in the form the conditional rule checks
+      expect(prompt).not.toMatch(/Never put ifdef::env-cloud\[\]/)
+      expect(prompt).toMatch(/An env-cloud block conditional is allowed/)
+      expect(prompt).toMatch(/nothing\s+after the \], not even spaces/)
+      expect(prompt).toMatch(/a conditional in a Summary or example summary/)
+      expect(prompt).toMatch(/cloud_ai/)
+      expect(prompt).toContain('`CGO_ENABLED=1 TAGS=x_benthos_extra task docs`')
+    })
+
+    test('the impact check leaves out the regenerated connector and Bloblang references', () => {
+      const prompt = review.with.prompt
+      expect(prompt).toMatch(/OTHER than the generated property, metric, rpk, connector\s+\(Redpanda Connect component pages\) or Bloblang function and\s+method reference/)
+      expect(prompt).toMatch(/a changed connector\s+summary, description, field or Bloblang text/)
+    })
+
+    test('the prompt reviews strings in their page context and keeps articles', () => {
+      expect(review.with.prompt).toMatch(/REVIEW IN CONTEXT/)
+      expect(review.with.prompt).toMatch(/Each entry carries context/)
+      expect(review.with.prompt).toMatch(/articles and subjects/)
+      expect(review.with.prompt).toMatch(/Every flag, command, path and URL goes in inline code/)
+      // The related-string comment is the named exception to the
+      // suggestion-block rule, and still carries the fingerprint footer.
+      expect(review.with.prompt).toMatch(/one exception to the suggestion rules above/)
+      expect(review.with.prompt).toMatch(/still ends with the changed declaration's\s+fingerprint footer/)
+    })
   })
 })

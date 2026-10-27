@@ -33,13 +33,13 @@ describe('property-extractor validate-overrides', () => {
       expect(result.valid).toBe(true)
     })
 
-    it('accepts a structured see_also item naming exactly one of cloud_only/self_hosted_only', () => {
+    it('accepts a structured see_also item naming exactly one of cloud_only/self_managed_only', () => {
       const result = validateSchema({
         properties: {
           audit_enabled: {
             see_also: [
               { content: 'xref:cloud.adoc[]', cloud_only: true },
-              { content: 'xref:sh.adoc[]', self_hosted_only: true },
+              { content: 'xref:sh.adoc[]', self_managed_only: true },
             ],
           },
         },
@@ -47,14 +47,14 @@ describe('property-extractor validate-overrides', () => {
       expect(result.valid).toBe(true)
     })
 
-    it('rejects a see_also item that sets both cloud_only and self_hosted_only', () => {
+    it('rejects a see_also item that sets both cloud_only and self_managed_only', () => {
       // Exactly the rpk-overrides mistake this shape is modeled on: setting both
       // wraps the item in ifdef::env-cloud[] AND ifndef::env-cloud[], so it never
       // renders in either build. The schema's oneOf blocks it structurally.
       const result = validateSchema({
         properties: {
           audit_enabled: {
-            see_also: [{ content: 'xref:a.adoc[]', cloud_only: true, self_hosted_only: true }],
+            see_also: [{ content: 'xref:a.adoc[]', cloud_only: true, self_managed_only: true }],
           },
         },
       })

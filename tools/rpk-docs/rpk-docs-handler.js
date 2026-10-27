@@ -12,6 +12,7 @@ const { downloadRpkBinary, RPK_RELEASE_TAG_RE, RPK_CDN_BASE } = require('../../c
 const { generateRpkDiff, printDiffReport, generateWhatsNewSection, flattenToMap } = require('./report-delta')
 const { loadAndValidateOverrides, ValidationResult } = require('./validate-overrides')
 const { validateDirectory, formatResults } = require('./validate-output')
+const { gitAuthEnv, redactCredentials } = require('../../cli-utils/git-credential-env')
 
 /**
  * Known rpk plugins that are managed separately (have install/uninstall commands)
@@ -241,12 +242,10 @@ function prepareSourceFromRef(sourceRef, sourcePath = null) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-source-'))
   const repoDir = path.join(tmpDir, 'redpanda')
 
-  // streaming-enterprise is private, so a token is required. Auth travels
-  // via a credential helper registered through GIT_CONFIG_* environment
-  // variables, never as a git -c argument, so the token cannot appear in
-  // this process's argv (visible to anything that can list processes) and
-  // never embedded in the remote URL, so no token is persisted in the
-  // clone's .git/config either.
+  // streaming-enterprise is private, so a token is required. gitAuthEnv
+  // hands it to git through a credential helper carried in the subprocess
+  // environment, so it never reaches argv, the remote URL, or the clone's
+  // .git/config.
   const { getGitHubToken } = require('../../cli-utils/github-token')
   const token = getGitHubToken()
   if (!token) {
@@ -255,15 +254,7 @@ function prepareSourceFromRef(sourceRef, sourcePath = null) {
       'Set GH_TOKEN, GITHUB_TOKEN, or REDPANDA_GITHUB_TOKEN so the clone can authenticate.'
     )
   }
-  const gitEnv = {
-    ...process.env,
-    RPK_SOURCE_CLONE_TOKEN: token,
-    GIT_CONFIG_COUNT: '2',
-    GIT_CONFIG_KEY_0: 'credential.helper',
-    GIT_CONFIG_VALUE_0: '',
-    GIT_CONFIG_KEY_1: 'credential.https://github.com.helper',
-    GIT_CONFIG_VALUE_1: '!f() { echo "username=x-access-token"; echo "password=$RPK_SOURCE_CLONE_TOKEN"; }; f'
-  }
+  const gitEnv = gitAuthEnv(token)
 
   console.log(`Sparse-cloning streaming-enterprise repo (ref: ${sourceRef}) to ${repoDir}...`)
 
@@ -287,7 +278,7 @@ function prepareSourceFromRef(sourceRef, sourcePath = null) {
     throw new Error(
       `Failed to clone streaming-enterprise repo with ref '${sourceRef}'.\n` +
       `Make sure the branch or tag exists.\n` +
-      `Error: ${cloneResult.stderr}`
+      `Error: ${redactCredentials(cloneResult.stderr)}`
     )
   }
 
@@ -302,7 +293,7 @@ function prepareSourceFromRef(sourceRef, sourcePath = null) {
   })
 
   if (sparseResult.status !== 0) {
-    throw new Error(`Failed to set sparse checkout: ${sparseResult.stderr}`)
+    throw new Error(`Failed to set sparse checkout: ${redactCredentials(sparseResult.stderr)}`)
   }
 
   console.log(`Sparse checkout complete`)
@@ -1146,15 +1137,21 @@ const WHATS_NEW_EXCLUDED_SUBTREES = ['rpk ai']
 
 /**
  * Return a copy of diffData without entries under the excluded subtrees.
+ * Commands marked asPartial in the overrides are dropped too: they render
+ * only as partials single-sourced into another component (for example,
+ * rpk sql for Redpanda SQL in Cloud), so they are not Self-Managed changes.
  * Only the published What's-new block filters; diff reports and PR
  * summaries keep the full picture.
  * @param {Object} diffData - Diff from generateRpkDiff
  * @param {string[]} [excluded] - Command-path prefixes to drop
+ * @param {Object} [overridesData] - rpk overrides; asPartial subtrees are dropped
  * @returns {Object} Filtered copy
  */
-function filterDiffForWhatsNew(diffData, excluded = WHATS_NEW_EXCLUDED_SUBTREES) {
+function filterDiffForWhatsNew(diffData, excluded = WHATS_NEW_EXCLUDED_SUBTREES, overridesData = null) {
+  const resolved = overridesData ? resolveReferences(overridesData, overridesData) : null
   const outside = (cmdPath) => !excluded.some(prefix =>
-    cmdPath === prefix || (typeof cmdPath === 'string' && cmdPath.startsWith(prefix + ' ')))
+    cmdPath === prefix || (typeof cmdPath === 'string' && cmdPath.startsWith(prefix + ' '))) &&
+    !(resolved && typeof cmdPath === 'string' && shouldUsePartialDir(resolved, cmdPath))
   const details = diffData.details || {}
   const filteredDetails = { ...details }
   for (const key of ['newCommands', 'newlyDeprecatedCommands', 'removedCommands', 'descriptionChanges']) {
@@ -1176,7 +1173,28 @@ function updateWhatsNewFile(diffData, whatsNewPath, version, options = {}) {
     ...options
   })
 
+  const startMarker = `// AUTOGEN-RPK-CHANGES ${version} START`
+  const endMarker = `// AUTOGEN-RPK-CHANGES ${version} END`
+  const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
   if (!whatsNewContent) {
+    // A re-run for a version that now has nothing to publish (for example,
+    // every change was filtered out as asPartial) must remove that version's
+    // earlier block, or the page keeps publishing what the filter excluded.
+    if (fs.existsSync(whatsNewPath)) {
+      const existing = fs.readFileSync(whatsNewPath, 'utf8')
+      if (existing.includes(startMarker)) {
+        const blockRe = new RegExp(`\\n*${escapeRe(startMarker)}[\\s\\S]*?${escapeRe(endMarker)}\\n*`)
+        let updated = existing.replace(blockRe, '\n\n')
+        // Drop the section heading too if the block was all it held, so no
+        // empty heading is left on the page.
+        const emptySectionRe = new RegExp(`^${escapeRe(sectionHeading)}[^\\n]*\\n\\s*(?=^== |(?![\\s\\S]))`, 'm')
+        updated = updated.replace(emptySectionRe, '')
+        fs.writeFileSync(whatsNewPath, updated.replace(/\s*$/, '\n'), 'utf8')
+        console.log(`Removed ${version} block from what's-new file (no changes left to publish): ${whatsNewPath}`)
+        return
+      }
+    }
     console.log('No Redpanda CLI changes to add to what\'s new')
     return
   }
@@ -1196,11 +1214,8 @@ function updateWhatsNewFile(diffData, whatsNewPath, version, options = {}) {
   // Redpanda CLI section instead of being dropped. Writers can edit or
   // remove blocks freely; the automation only ever touches content between
   // its own markers for the same version label.
-  const startMarker = `// AUTOGEN-RPK-CHANGES ${version} START`
-  const endMarker = `// AUTOGEN-RPK-CHANGES ${version} END`
   const sectionBody = whatsNewContent.replace(/^== [^\n]*\n+/, '')
   const block = `${startMarker}\n${sectionBody.trimEnd()}\n${endMarker}`
-  const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
   if (existingContent.includes(startMarker)) {
     // Replace this version's existing block (idempotent re-runs)
@@ -2154,7 +2169,7 @@ async function handleRpkDocsGeneration(options = {}) {
 
           // Update what's-new file if requested
           if (whatsNewPath) {
-            updateWhatsNewFile(filterDiffForWhatsNew(diffData), whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
+            updateWhatsNewFile(filterDiffForWhatsNew(diffData, WHATS_NEW_EXCLUDED_SUBTREES, overridesData), whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
           }
         } else {
           console.warn(`Warning: Could not load previous version ${diffVersion} for diff`)
@@ -2476,7 +2491,7 @@ async function handleRpkDocsGeneration(options = {}) {
 
         // Update what's-new file if requested
         if (whatsNewPath) {
-          updateWhatsNewFile(filterDiffForWhatsNew(diffData), whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
+          updateWhatsNewFile(filterDiffForWhatsNew(diffData, WHATS_NEW_EXCLUDED_SUBTREES, overridesData), whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
         }
       } else {
         console.warn(`Warning: Could not load previous version ${diffVersion} for diff`)

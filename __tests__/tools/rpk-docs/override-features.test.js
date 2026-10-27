@@ -759,6 +759,64 @@ Original fields content that should be replaced.`,
       expect(fs.existsSync(path.join(outputDir, 'rpk-ai'))).toBe(false)
     }, 30000)
 
+    // An asPartial parent's partial is included by a stub in the component that
+    // publishes the whole subtree, so its Subcommands table keeps rows for its
+    // asPartial children. Regular pages still drop rows for asPartial commands.
+    test('keeps subcommand rows inside an asPartial subtree', async () => {
+      const testTree = {
+        name: 'rpk',
+        description: 'Root command',
+        commands: [
+          {
+            name: 'sql',
+            description: 'Interact with a Redpanda SQL cluster.',
+            usage: 'rpk sql [flags]',
+            flags: [],
+            commands: [
+              {
+                name: 'debug',
+                description: 'Debug a Redpanda SQL cluster.',
+                usage: 'rpk sql debug [flags]',
+                flags: [],
+                commands: [
+                  { name: 'bundle', description: 'Collect a bundle.', usage: 'rpk sql debug bundle [flags]', flags: [] }
+                ]
+              }
+            ]
+          },
+          {
+            name: 'topic',
+            description: 'Manage topics.',
+            usage: 'rpk topic [flags]',
+            flags: [],
+            commands: [
+              { name: 'create', description: 'Create topics.', usage: 'rpk topic create [flags]', flags: [] },
+              { name: 'internal', description: 'Partial-only child.', usage: 'rpk topic internal [flags]', flags: [] }
+            ]
+          }
+        ],
+        global_flags: []
+      }
+
+      await generateRpkDocs({
+        tree: testTree,
+        overrides: { commands: { 'rpk sql': { asPartial: true }, 'rpk topic internal': { asPartial: true } } },
+        outputDir,
+        cloudSecretDir: secretDir,
+        rpkVersion: 'test',
+        pluginVersions: {}
+      })
+
+      const sql = fs.readFileSync(path.join(secretDir, 'rpk-sql', 'rpk-sql.adoc'), 'utf8')
+      expect(sql).toContain('xref:reference:rpk/rpk-sql/rpk-sql-debug.adoc[`rpk sql debug`]')
+      const debug = fs.readFileSync(path.join(secretDir, 'rpk-sql', 'rpk-sql-debug.adoc'), 'utf8')
+      expect(debug).toContain('xref:reference:rpk/rpk-sql/rpk-sql-debug-bundle.adoc[`rpk sql debug bundle`]')
+
+      const topic = fs.readFileSync(path.join(outputDir, 'rpk-topic', 'rpk-topic.adoc'), 'utf8')
+      expect(topic).toContain('rpk-topic-create.adoc')
+      expect(topic).not.toContain('rpk-topic-internal')
+    }, 30000)
+
     // The root `rpk` command must not generate an rpk.adoc; its reference is the
     // hand-written index.adoc landing page, which generation must leave untouched.
     test('skips the root rpk command and does not touch index.adoc', async () => {

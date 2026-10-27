@@ -36,6 +36,7 @@ const SEVERITIES = ['error', 'warning', 'info']
  *   - runOnUnverifiable: also run when decl.meta.unverifiable is set
  *     (all other rules are skipped for unverifiable declarations, so a
  *     non-literal source string can never produce an error)
+ *   A declaration skips any rule named in decl.meta.skip_rules.
  * @param {Object} options - { skipRules: [names], onlyRules: [names] }
  * @returns {Object} { findings, summary: { byRule, bySurface } }
  */
@@ -55,6 +56,10 @@ function runRules (declarations, rules, options = {}) {
       // Unverifiable declarations (for example, a metric description built
       // with fmt::format) only run rules that opt in; they must never error.
       if (decl.meta && decl.meta.unverifiable && !rule.runOnUnverifiable) continue
+      // A surface can opt one declaration out of a rule whose premise does
+      // not hold for it (connect's CLI help is not AsciiDoc, though the
+      // rest of the surface is).
+      if (decl.meta && Array.isArray(decl.meta.skip_rules) && decl.meta.skip_rules.includes(rule.name)) continue
 
       try {
         for (const issue of rule.check(decl) || []) {

@@ -43,6 +43,7 @@ const { getAntoraValue, setAntoraValue } = require('../cli-utils/antora-utils')
 const programCli = new Command()
 
 const pkg = require('../package.json')
+const { generatedMarker } = require('../cli-utils/generated-marker')
 programCli
   .name('doc-tools')
   .description('Redpanda Document Automation CLI')
@@ -558,7 +559,15 @@ programCli
  * copy is a strict superset of the destination; otherwise it reports which
  * keys only the destination has and leaves the file alone (status
  * 'diverged') unless --force is passed. --check never writes, for a CI
- * gate.
+ * gate. A schema is also only synced into a repo that is plausibly its
+ * home: one that already has the schema, or that has the *.json the schema
+ * documents. Anything else is reported as 'not for this repo' and skipped,
+ * and never counts as drift. kapa-source-groups.json is the reason: it is
+ * generated into this package and read from node_modules by an Antora
+ * extension, so it never lives in a content repo at all, and planting its
+ * schema in redpanda-data/docs would leave a file describing data that repo
+ * will never have, with --check reporting its absence as drift on every run
+ * afterwards.
  * @example
  * # Sync into ./docs-data (writes any missing or out-of-date schema)
  * npx doc-tools sync-schemas
@@ -604,8 +613,13 @@ programCli
           created: '+ created',
           updated: '↻ updated',
           diverged: options.force ? '↻ updated (forced)' : '⚠ diverged, left alone',
+          'not-applicable': '- not for this repo',
         }[status]
         console.log(`  ${label}  ${name}`)
+        if (status === 'not-applicable') {
+          // Said out loud, because a silently missing schema looks like a bug.
+          console.log(`      no ${name.replace(/\.schema\.json$/, '.json')} here, so this schema has no data file to document`)
+        }
         if (status === 'diverged' && !options.force) {
           hasUnresolvedDivergence = true
           for (const p of destOnlyPaths) console.log(`      only in the destination: ${p}`)
@@ -740,6 +754,111 @@ programCli
     console.log('For more information, see:')
     console.log('  mcp/WRITER_EXTENSION_GUIDE.adoc')
     console.log('  mcp/README.adoc')
+  })
+
+/**
+ * check-dispatch-graph
+ *
+ * @description
+ * Health check for the repository_dispatch graph that connects Redpanda's
+ * engineering repos to its docs repos. Reads every workflow file on each
+ * configured repo's default branch, pairs the senders (peter-evans/repository-dispatch,
+ * `gh api .../dispatches`, curl, github-script) with the listeners
+ * (`on.repository_dispatch.types`), and reads each workflow's recent runs from
+ * the Actions API. Reports senders with no listener, docs listeners with no
+ * sender (informational when a cron backstops them), senders that have never
+ * fired, receivers failing more than the threshold, receiver payload variants
+ * no sender dispatches, and edges dispatched from more than one repo.
+ *
+ * @why
+ * A repository_dispatch is accepted with HTTP 204 whether or not a listener
+ * exists, and a receiver that fails every run looks, from the sender's side,
+ * exactly like one that works. Breaks in this graph went unnoticed for weeks
+ * until someone read the receivers' run history by hand. This command reads it
+ * by script, and .github/workflows/check-dispatch-graph.yml runs it weekly,
+ * files one issue, and closes it on the first run that finds the graph healthy.
+ *
+ * Exit codes: 0 clean, 1 findings (the output ends with the line
+ * DISPATCH_GRAPH_FINDINGS_CONFIRMED), 2 could not run (a repo or runs query
+ * could not be read, so the graph is incomplete; never reported as clean).
+ *
+ * @example
+ * # Check the default repo set against the live org
+ * export REDPANDA_GITHUB_TOKEN=...   # or GH_TOKEN; must read the private docs repos
+ * npx doc-tools check-dispatch-graph
+ *
+ * # Machine-readable
+ * npx doc-tools check-dispatch-graph --json > dispatch-graph.json
+ *
+ * # A narrower set of repos (role decides which side a missing counterpart is reported on)
+ * npx doc-tools check-dispatch-graph --repos redpanda-data/helm-charts:engineering,redpanda-data/docs:docs
+ *
+ * @requirements
+ * - A GitHub token that can read every configured repo and its Actions runs
+ *   (REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN or GH_TOKEN). The
+ *   docs repos are private, so an unauthenticated run exits 2.
+ */
+programCli
+  .command('check-dispatch-graph')
+  .description('Check the repository_dispatch graph between engineering and docs repos: senders without listeners, listeners without senders, never-fired senders, failing receivers (exit 0 clean, 1 findings, 2 could not run)')
+  .option('--repos <list>', 'Comma-separated owner/name[:role] entries (role engineering or docs) replacing the default repo set')
+  .option('--fail-threshold <fraction>', 'Flag a receiver whose fail rate over the window is above this fraction', '0.5')
+  .option('--window <n>', 'How many of the newest runs the fail rate is computed over', '20')
+  .option('--per-page <n>', 'How many runs to fetch per workflow (max 100)', '50')
+  .option('--json', 'Print the full result as JSON instead of the table')
+  .action(async (options) => {
+    const { runCheck, formatReport, createGitHubApi, DEFAULT_REPOS, SENTINEL } = require('../tools/dispatch-graph/check-dispatch-graph')
+
+    let repos = DEFAULT_REPOS
+    if (options.repos) {
+      repos = String(options.repos).split(',').map((entry) => entry.trim()).filter(Boolean).map((entry) => {
+        const [repo, role = 'docs'] = entry.split(':')
+        if (!/^[^/]+\/[^/]+$/.test(repo) || !['engineering', 'docs'].includes(role)) {
+          console.error(`Error: --repos entry "${entry}" must be owner/name or owner/name:engineering|docs`)
+          process.exit(2)
+        }
+        return { repo, role }
+      })
+    }
+    const threshold = Number(options.failThreshold)
+    const window = Number(options.window)
+    const perPage = Number(options.perPage)
+    if (!(threshold >= 0 && threshold <= 1) || !(window > 0) || !(perPage > 0 && perPage <= 100)) {
+      console.error('Error: --fail-threshold must be 0..1, --window > 0, --per-page 1..100')
+      process.exit(2)
+    }
+
+    // Exit 2 is reserved for "could not find out", so the weekly job can tell
+    // "an edge is broken" apart from "the API was down" and not file a false
+    // issue. An unauthenticated run cannot read the private docs repos and
+    // lands here too; it must never pass as clean.
+    let result
+    try {
+      const octokit = require('../cli-utils/octokit-client')
+      result = await runCheck({ repos, api: createGitHubApi(octokit), threshold, window, perPage })
+    } catch (err) {
+      console.error(`Error: Could not check the dispatch graph: ${err.message}`)
+      process.exit(2)
+    }
+
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2))
+    } else {
+      console.log(formatReport(result))
+    }
+
+    if (result.exitCode === 2) {
+      console.error(`\nError: ${result.unreadable.length} repo(s) or run record(s) could not be read, so the graph is incomplete. Not a clean result.`)
+      process.exit(2)
+    }
+    if (result.exitCode === 1) {
+      // Printed only where findings were actually established; the weekly
+      // script requires this line before filing an issue, so a usage error or
+      // a crash (both exit 1 under Commander) can never file one.
+      if (!options.json) console.log(`\n${SENTINEL}`)
+      process.exit(1)
+    }
+    process.exit(0)
   })
 
 // ====================================================================
@@ -883,8 +1002,9 @@ automation
   .option('--template-metadata <path>', 'Metadata section partial template', path.resolve(__dirname, '../tools/redpanda-connect/templates/metadata-partials.hbs'))
   .option('--template-description <path>', 'Description section partial template', path.resolve(__dirname, '../tools/redpanda-connect/templates/descriptions-partials.hbs'))
   .option('--template-bloblang <path>', 'Custom Handlebars template for bloblang function/method partials')
-  .option('--overrides <path>', 'Optional JSON file with overrides', 'docs-data/overrides.json')
+  .option('--overrides <path>', 'Optional JSON file of description overrides to merge into the generated output. Nothing is merged unless you pass it. Connector descriptions come from the connect and benthos component specs, so fix wrong text there')
   .option('--include-bloblang', 'Include Bloblang functions and methods in generation')
+  .option('--no-partials', 'Skip the generated partials, config snippets, and Bloblang reference because the connect repo publishes them. What\'s new, diffs, drafts, nav, and the version bump still run')
   .option('--prune-orphaned-descriptions', 'Allow the description-partial orphan sweep to blank more than 10% of the tree. Only use this when the connector dataset is confirmed complete: an incomplete dataset looks identical to a mass upstream deletion and the sweep blanks published content')
   .option('--cloud-version <version>', 'Cloud binary version (default: auto-detect latest)')
   .option('--cgo-version <version>', 'cgo binary version (default: same as cloud-version)')
@@ -1810,17 +1930,25 @@ automation
       const outFile = path.join(outDir, `k-${name}${opts.outputSuffix}`)
       console.log(`pandoc ${md} → ${outFile}`)
       fs.mkdirSync(path.dirname(outFile), { recursive: true })
-      r = spawnSync('pandoc', [md, '-t', 'asciidoc', '-o', outFile], { stdio: 'inherit' })
-      if (r.status !== 0) process.exit(r.status)
+      const { markdownToAsciiDoc } = require('../cli-utils/helm-commented-values')
+      let converted
+      try {
+        converted = markdownToAsciiDoc(fs.readFileSync(md, 'utf8')) + '\n'
+      } catch (err) {
+        console.error(`Error: ${err.message}`)
+        process.exit(1)
+      }
 
       const { formatHelmSpec } = require('../cli-utils/format-helm-spec')
-      let doc = formatHelmSpec(fs.readFileSync(outFile, 'utf8'))
+      let doc = formatHelmSpec(converted)
 
       // helm-docs only renders keys that exist in the YAML tree, so optional
       // values that ship commented out never appear in the reference. Pull
       // documented commented-out keys from values.yaml and inject them. This
       // runs after formatHelmSpec so the injected body sections are not affected
-      // by the blank-line normalization that its header fix performs.
+      // by the blank-line normalization that its header fix performs. The
+      // comments are Markdown, so each one goes through markdownToAsciiDoc on
+      // the way in, like the README did.
       const valuesFile = path.join(chartPath, 'values.yaml')
       if (fs.existsSync(valuesFile)) {
         const { extractCommentedValueDocs, injectIntoAsciiDoc, filterEntriesBySchema } = require('../cli-utils/helm-commented-values')
@@ -1842,7 +1970,7 @@ automation
           }
 
           if (entries.length > 0) {
-            const { doc: withInjected, injected, sectionsFound } = injectIntoAsciiDoc(doc, entries)
+            const { doc: withInjected, injected, sectionsFound } = injectIntoAsciiDoc(doc, entries, { toAsciiDoc: markdownToAsciiDoc })
             doc = withInjected
             if (injected.length > 0) {
               console.log(`Documented ${injected.length} commented-out value(s): ${injected.join(', ')}`)
@@ -1857,6 +1985,10 @@ automation
         }
       }
 
+      // Same marker shape as every doc-tools generator; convert-to-markdown
+      // reads it and reports the provenance in the Markdown twins.
+      const helmMarker = generatedMarker('helm-docs', `the ${name} chart's values.yaml and README in redpanda-data/redpanda-operator`) + '\n\n'
+      doc = helmMarker + doc
       fs.writeFileSync(outFile, doc, 'utf8')
 
       console.log(`Done: Wrote ${outFile}`)
@@ -1989,6 +2121,124 @@ automation
   })
 
 /**
+ * generate redpanda-release-notes
+ *
+ * @description
+ * Converts a Self-Managed rpchangelog release body into a candidate AsciiDoc
+ * section and inserts it into the Redpanda Release Notes page, newest-first.
+ * Applies the mechanical guards: GA tags only (a prerelease is a no-op), the
+ * `:earliest-tracked-version:` floor, and idempotency (an already-present
+ * version is a no-op). The section carries de-noised source prose as plain
+ * bullets — it is a CANDIDATE for the curation step that rewrites voice, adds
+ * `Area::` labels, normalizes units, and phrases CVEs.
+ *
+ * @why
+ * Release notes are the one reference surface whose source of truth is
+ * engineer-authored prose rather than code, so the deterministic part
+ * (parsing, de-noising, de-duplicating backports, ordering, insertion) is
+ * split from the editorial part. This command is the deterministic half; it is
+ * unit-tested and makes no editorial change.
+ *
+ * @example
+ * # Phase 1: build the candidate the curation skill will edit (no page touched).
+ * # Paths must stay inside the repository; write the fetched body somewhere local.
+ * npx doc-tools generate redpanda-release-notes \
+ *   --tag v26.2.3 --date 2026-09-15 --body docs-data/v26.2.3-body.md --section-only > candidate.adoc
+ *
+ * # (the sm-release-notes skill curates candidate.adoc into curated.adoc)
+ *
+ * # Phase 2: insert the curated section into the page under the guards
+ * npx doc-tools generate redpanda-release-notes \
+ *   --tag v26.2.3 --section-file curated.adoc
+ *
+ * @requirements
+ * - Phase 1 needs --body (+ --date); phase 2 needs --section-file. Fetching the
+ *   body from the private streaming-enterprise release, and running the curation
+ *   skill between the two phases, are wired by the docs-repo workflow, not here.
+ */
+automation
+  .command('redpanda-release-notes')
+  .description('Generate a Self-Managed release-notes section from an rpchangelog release body')
+  .requiredOption('--tag <tag>', 'GA release tag, such as v26.2.3')
+  .option('--body <file>', 'Phase 1: rpchangelog release body markdown to build a candidate from (relative to repo root, must stay inside the repository)')
+  .option('--section-file <file>', 'Phase 2: a curated section (from the sm-release-notes skill) to insert (relative to repo root, must stay inside the repository)')
+  .option('--date <date>', 'Authored release date as YYYY-MM-DD (required with --body; confirmed on the PR)')
+  .option('--page <file>', 'Target release-notes page (relative to repo root, must stay inside the repository)', 'modules/reference/pages/releases/redpanda.adoc')
+  .option('--section-only', 'Phase 1 only: print the candidate section and do not read or modify the page')
+  .option('--dry-run', 'Print output to stdout instead of writing the page')
+  .action(async (options) => {
+    const {
+      generateReleaseNotes,
+      buildReleaseSection,
+      isGaTag,
+    } = require('../tools/redpanda-release-notes/generate-release-notes.js')
+    try {
+      const repoRoot = findRepoRoot()
+
+      // Exactly one input: --body (phase 1, build a candidate) XOR --section-file
+      // (phase 2, insert the curated section). Curation sits between them.
+      const hasBody = Boolean(options.body)
+      const hasSection = Boolean(options.sectionFile)
+      if (hasBody === hasSection) {
+        throw new Error('Provide exactly one of --body (phase 1) or --section-file (phase 2).')
+      }
+      if (hasBody && !options.date) {
+        throw new Error('--date is required with --body.')
+      }
+
+      const readInside = (rel, label) => {
+        const abs = resolveInsideRepo(repoRoot, rel, label)
+        if (!fs.existsSync(abs)) throw new Error(`File not found for ${label}: ${abs}`)
+        return abs
+      }
+
+      // Phase-1 candidate preview: emit the candidate for the curation step. No
+      // page is read or written — this is the LLM step's input, nothing else.
+      if (options.sectionOnly) {
+        if (!hasBody) throw new Error('--section-only applies to --body (candidate generation).')
+        // Same GA-only contract as the insert path: a non-GA tag is a clean
+        // no-op, not an "invalid version" throw from buildReleaseSection.
+        if (!isGaTag(options.tag)) {
+          console.log(`[release-notes] Skipped: not a GA tag: ${options.tag}`)
+          return
+        }
+        const body = fs.readFileSync(readInside(options.body, '--body'), 'utf8')
+        const section = buildReleaseSection({ body, version: options.tag, date: options.date })
+        process.stdout.write(section)
+        return
+      }
+
+      const pagePath = readInside(options.page, '--page')
+      const pageContent = fs.readFileSync(pagePath, 'utf8')
+      const genArgs = { tag: options.tag, date: options.date, pageContent }
+      if (hasBody) {
+        genArgs.body = fs.readFileSync(readInside(options.body, '--body'), 'utf8')
+      } else {
+        genArgs.section = fs.readFileSync(readInside(options.sectionFile, '--section-file'), 'utf8')
+      }
+      const result = generateReleaseNotes(genArgs)
+
+      if (result.status === 'skipped') {
+        // A guard miss is a clean no-op, not an error: the workflow runs this on
+        // every release and most runs have nothing to add.
+        console.log(`[release-notes] Skipped: ${result.reason}`)
+        return
+      }
+
+      if (options.dryRun) {
+        process.stdout.write(result.content)
+        console.log(`\nDone: (dry-run) updated page for ${options.tag} printed to stdout.`)
+      } else {
+        fs.writeFileSync(pagePath, result.content, 'utf8')
+        console.log(`Done: Inserted the ${options.tag} section into ${pagePath}`)
+      }
+    } catch (err) {
+      console.error(`Error: Failed to generate release notes: ${err.message}`)
+      process.exit(1)
+    }
+  })
+
+/**
  * generate crd-spec
  *
  * @description
@@ -2001,6 +2251,12 @@ automation
  * When to use --tag vs --branch:
  * - Use --tag for released content (GA or beta releases). Tags reference specific release points.
  * - Use --branch for in-progress content (unreleased features). Branches track ongoing development.
+ *
+ * Links: the Go doc comments link to docs.redpanda.com with absolute URLs. When the command
+ * runs inside a docs checkout (or is given --docs-root), every URL that matches a page of that
+ * checkout, directly or through a page alias, is rewritten as an xref so the committed page
+ * keeps one link form across regenerations. URLs that match no page are left as written and
+ * listed in the output.
  *
  * @why
  * Kubernetes CRDs define complex APIs for deploying and managing Redpanda. The API schema
@@ -2036,6 +2292,7 @@ automation
  * - For GitHub URLs: Git and internet connection
  * - crd-ref-docs tool (automatically installed if missing)
  * - Go toolchain for running crd-ref-docs
+ * - To convert links: a docs checkout with Antora installed (npm install in redpanda-data/docs)
  */
 automation
   .command('crd-spec')
@@ -2046,6 +2303,7 @@ automation
   .option('-d, --depth <n>', 'How many levels deep', '10')
   .option('--templates-dir <dir>', 'Asciidoctor templates dir', '.github/crd-config/templates/asciidoctor/operator')
   .option('--output <file>', 'Where to write the generated AsciiDoc file', 'modules/reference/pages/k-crd.adoc')
+  .option('--docs-root <dir>', 'Docs checkout whose pages docs.redpanda.com URLs are converted into xrefs against (default: the current repo when run inside redpanda-data/docs)')
   .action(async (opts) => {
     verifyCrdDependencies()
 
@@ -2154,8 +2412,28 @@ automation
       process.exit(1)
     }
 
-    // docs.redpanda.com URLs are left as-is: the url-to-xref Antora
-    // extension converts them to validated xrefs at site build time.
+    // Go doc comments carry absolute docs.redpanda.com URLs (a Go comment
+    // cannot hold an xref). Convert them against the docs checkout so the
+    // committed page keeps one link form across regenerations, instead of
+    // flipping between xrefs and URLs and burying the real changes in the
+    // review diff (docs 2256). A URL that matches no page in the checkout is
+    // left as written and listed; the url-to-xref extension still converts
+    // cross-component URLs at site build time and warns about broken ones.
+    const docsRoot = opts.docsRoot || (inDocs ? repoRoot : null)
+    if (docsRoot) {
+      const { buildDocsResolverContext, convertDocsLinksInFile, formatDocsLinkReport } = require('../cli-utils/docs-links-to-xrefs.js')
+      let linkContext
+      try {
+        linkContext = await buildDocsResolverContext(docsRoot)
+      } catch (err) {
+        console.error(`Error: Cannot map docs URLs to xrefs: ${err.message}`)
+        process.exit(1)
+      }
+      console.log(`Mapping docs URLs against ${linkContext.pageCount} pages of the ${linkContext.component} component in ${docsRoot}`)
+      console.log(formatDocsLinkReport(convertDocsLinksInFile(opts.output, linkContext), opts.output))
+    } else {
+      console.warn('⚠️ No docs checkout to map against (pass --docs-root); docs.redpanda.com URLs are left as written.')
+    }
 
     if (tmpSrc) fs.rmSync(tmpSrc, { recursive: true, force: true })
     fs.rmSync(configTmp, { recursive: true, force: true })
@@ -2630,7 +2908,7 @@ validation
  * Validates docs-data/property-overrides.json against its JSON Schema:
  * unknown keys (a typo that would otherwise be silently dropped by the
  * extractor), and the see_also shape (a plain string, or an object naming
- * exactly one of cloud_only/self_hosted_only).
+ * exactly one of cloud_only/self_managed_only).
  *
  * @why
  * property-overrides.json has no catch-all pass-through when an override
@@ -2742,10 +3020,386 @@ programCli
   .option('--format <format>', 'Output format: human or json', 'human')
   .option('--skip-rules <list>', 'Comma-separated rule ids to skip')
   .option('--only-rules <list>', 'Comma-separated rule ids to run exclusively')
+  .option('--reviewed <file>', 'Diff mode: skip declarations whose fingerprint is listed in <file> (already reviewed on an earlier push)')
+  .option('--reviewer-comments <file>', 'Diff mode: skip declarations whose text a human reviewer wrote in one of the comment bodies in <file> (a JSON array of strings)')
   .option('--strict', 'Exit 1 when any error-severity finding exists (default: always exit 0 - suggest, never block)')
   .action((options) => {
     const { runCli } = require('../tools/lint-strings')
     runCli(options)
+  })
+
+/**
+ * detect-enterprise-gating
+ *
+ * @description
+ * Find enterprise gating changes in a Redpanda core diff that no doc string
+ * announces: a value added to or removed from license_required_feature in
+ * src/v/features/enterprise_features.h, a property wrapped in or unwrapped
+ * from config::enterprise<> in src/v/config/configuration.h, or a changed
+ * restricted value of an enterprise<> property in
+ * src/v/config/configuration.cc. Prints them as a
+ * doc-impact report, the JSON the doc-strings review dispatches to the docs
+ * team's Jira router, so a licensing change reaches a DOC ticket even when
+ * the review has no doc string to look at.
+ *
+ * @example
+ * npx doc-tools detect-enterprise-gating --repo . --diff origin/dev
+ *
+ * @exit 0 always: `{"findings":[]}` means nothing to report. Errors from git
+ * print to stderr and still exit 0 with an empty report, so a caller's
+ * fail-open gate stays closed rather than red.
+ */
+programCli
+  .command('detect-enterprise-gating')
+  .description('Find enterprise gating changes (license_required_feature values, config::enterprise<> wrappers and restricted values) in a core diff and print them as a doc-impact report')
+  .requiredOption('--repo <path>', 'Path to a Redpanda core checkout. Nothing is cloned.')
+  .requiredOption('--diff <base>', 'Base ref: changes in <base>...HEAD are inspected')
+  .option('--format <format>', 'Output format: json or human', 'json')
+  .action((options) => {
+    const { spawnSync } = require('child_process')
+    const { detectGatingChanges, buildDocImpact, enterprisePropertyNames, ENUM_HEADER, CONFIG_HEADER, CONFIG_SOURCE } = require('../tools/enterprise-features/detect-gating-changes')
+    const empty = { findings: [] }
+    const result = spawnSync('git', ['diff', '--no-color', '--no-ext-diff', `${options.diff}...HEAD`, '--', ENUM_HEADER, CONFIG_HEADER, CONFIG_SOURCE], {
+      cwd: options.repo, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024
+    })
+    if (result.status !== 0) {
+      console.error(`git diff ${options.diff}...HEAD failed in ${options.repo}: ${(result.stderr || '').trim()}`)
+      console.log(JSON.stringify(empty))
+      return
+    }
+    // A configuration.cc change is tied to an enterprise property through
+    // the header at HEAD. Without it, header and enum changes still report.
+    const header = spawnSync('git', ['show', `HEAD:${CONFIG_HEADER}`], { cwd: options.repo, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+    if (header.status !== 0) console.error(`git show HEAD:${CONFIG_HEADER} failed in ${options.repo}; configuration.cc changes are not checked: ${(header.stderr || '').trim()}`)
+    const enterpriseNames = header.status === 0 ? enterprisePropertyNames(header.stdout) : []
+    const findings = detectGatingChanges(result.stdout, { enterpriseNames })
+    const report = buildDocImpact(findings) || empty
+    if (options.format === 'human') {
+      if (findings.length === 0) { console.log('No enterprise gating changes.'); return }
+      for (const f of findings) console.log(`${f.change_kind}: ${f.name}`)
+      return
+    }
+    console.log(JSON.stringify(report, null, 2))
+  })
+
+/**
+ * doc-impact-recording
+ *
+ * @description
+ * Extracts every redpanda-docs MCP call and its result from a Claude Code
+ * transcript (the claude-code-action execution file, or `claude -p
+ * --output-format stream-json` output) and writes them as a doc-impact eval
+ * recording. Only the tool name, arguments and result content are kept.
+ * Writes nothing when the session made no docs calls.
+ *
+ * @why
+ * The doc-impact eval replays docs answers per PR. Answers recorded later
+ * come from docs that may already contain the writer's fix, so the eval
+ * would score a correct "already documented" as a miss. The doc-strings
+ * review saves what the docs server told it at review time, and the eval
+ * miner turns that into the item's recording.
+ *
+ * @example
+ * # What the doc-strings review runs after its Claude step
+ * npx doc-tools doc-impact-recording --execution-file "$RUNNER_TEMP/claude-execution-output.json" \
+ *   --output recording.json --item redpanda-operator-1615 --server-url https://docs.redpanda.com/mcp
+ */
+programCli
+  .command('doc-impact-recording')
+  .description('Extract the docs MCP calls from a Claude Code transcript into a doc-impact eval recording')
+  .requiredOption('--execution-file <path>', 'Transcript: a JSON array of SDK messages or stream-json lines')
+  .requiredOption('--output <path>', 'Recording file to write (not written when there are no docs calls)')
+  .option('--item <id>', 'Item id to store in the recording')
+  .option('--server <name>', 'MCP server name in the transcript tool names', 'redpanda-docs')
+  .option('--server-url <url>', 'URL of that MCP server, stored in the recording')
+  .option('--model <name>', 'Model to store (default: the model in the transcript init message)')
+  .option('--recorded-at <iso>', 'Timestamp to store (default: now)')
+  .action((options) => {
+    const { runCli } = require('../tools/doc-impact-recording')
+    process.exit(runCli(options))
+  })
+
+/**
+ * lint-screenshots
+ *
+ * @description
+ * Deterministic checks from the docs screenshot standard, run against the
+ * .adoc pages under modules/ in a docs repo: every image macro (block and
+ * inline) has alt text, the alt text is at most 125 characters, does not
+ * start with "screenshot of" / "image of" / "picture of", and has no
+ * unquoted comma (Asciidoctor would split it into width/height); the
+ * referenced image file exists and is at most 100KB. Those are errors and
+ * exit 1. Warnings (exit 0 unless --warnings-as-errors) cover the rest of
+ * the standard: images above the 50KB target, JPEG/WebP where PNG or SVG
+ * belongs, captures wider than 1920px, and - in --files mode - changed
+ * images nothing references. Commented-out macros are skipped.
+ *
+ * @why
+ * cloud-docs enforced these rules on every PR and its daily screenshot cron
+ * with a repo-local script; the other docs repos had nothing. One command
+ * in doc-tools lets every docs repo and the shared PR review pipeline run
+ * the same checks, so no two jobs disagree about the same 100KB limit.
+ *
+ * @example
+ * # Whole repo (from the docs repo root): what the cloud-docs PR check runs
+ * npx doc-tools lint-screenshots
+ *
+ * # PR mode: only pages changed in the PR, plus pages that use a changed image
+ * gh pr diff 123 --name-only > changed.txt
+ * npx doc-tools lint-screenshots --files changed.txt --format json --output review-output/screenshot-lint.json
+ *
+ * # Adopt the stricter items as blocking
+ * npx doc-tools lint-screenshots --warnings-as-errors
+ */
+programCli
+  .command('lint-screenshots')
+  .description('Lint image macros and image files in a docs repo against the screenshot standard (alt text, size, format, width)')
+  .option('--root <path>', 'Docs repo root, the directory that holds modules/ (default: current directory)')
+  .option('--files <path>', 'Changed-files list (one repo-relative path per line, for example from `gh pr diff --name-only`): lint only listed .adoc files and pages that reference a listed image')
+  .option('--format <format>', 'Output format: human or json', 'human')
+  .option('--output <path>', 'Also write the JSON result to this file')
+  .option('--max-alt-length <n>', 'Alt text character limit', String(require('../tools/lint-screenshots').DEFAULTS.maxAltLength))
+  .option('--max-bytes <n>', 'Image size ceiling in bytes (error above this)', String(require('../tools/lint-screenshots').DEFAULTS.maxBytes))
+  .option('--target-bytes <n>', 'Image size target in bytes (warning above this)', String(require('../tools/lint-screenshots').DEFAULTS.targetBytes))
+  .option('--max-width <n>', 'Intrinsic image width limit in pixels (warning above this)', String(require('../tools/lint-screenshots').DEFAULTS.maxWidth))
+  .option('--warnings-as-errors', 'Exit 1 on warnings too')
+  .action((options) => {
+    const { runCli } = require('../tools/lint-screenshots')
+    runCli(options)
+  })
+
+/**
+ * check-build-log
+ *
+ * @description
+ * Check an Antora JSON log (`antora --log-format json`): exit 1 when any
+ * record is at level error or fatal, and, with --min-pages and --site-dir,
+ * when fewer HTML pages were written than expected. Prints a Markdown
+ * summary (counts by level, then the error and warning messages grouped and
+ * deduplicated, with file and line) for $GITHUB_STEP_SUMMARY. Warnings never
+ * fail the check. With --blocking-sources, only errors from those
+ * repositories (or with no source) fail it, so a broken page in another
+ * content source of the playbook is reported without blocking.
+ *
+ * @why
+ * Antora's --log-failure-level fails the build but explains nothing in a job
+ * summary, and cannot catch a build that exits 0 having written no files,
+ * which is what Antora does on an unsupported Node version. The Connect docs
+ * PR check runs Antora with --log-failure-level=fatal so this command, not
+ * Antora, decides.
+ *
+ * @example
+ * npx antora --log-format json --log-failure-level=fatal antora-playbook.yml > build.ndjson
+ * npx doc-tools check-build-log build.ndjson --site-dir build/site/connect --min-pages 400 >> "$GITHUB_STEP_SUMMARY"
+ *
+ * # Block only on errors from these repositories; list the rest
+ * npx doc-tools check-build-log build.ndjson --blocking-sources redpanda-data/rp-connect-docs,redpanda-data/connect
+ */
+programCli
+  .command('check-build-log')
+  .description('Check an Antora JSON build log: fail on error or fatal records or too few pages, print a Markdown summary')
+  .argument('<log>', 'Antora log written with --log-format json (one JSON record per line)')
+  .option('--site-dir <dir>', 'Output directory to count HTML pages in (with --min-pages)')
+  .option('--min-pages <n>', 'Fail when fewer than <n> HTML pages were written under --site-dir')
+  .option('--blocking-sources <repos>', 'Comma-separated owner/name repositories whose errors block (default: all). Errors with no source always block; others are listed only')
+  .option('--format <format>', 'Output format: markdown or json', 'markdown')
+  .option('--output <path>', 'Also write the output to this file')
+  .action((log, options) => {
+    const { runCli } = require('../tools/connect-docs/check-build-log')
+    runCli(log, options)
+  })
+
+/**
+ * check-metadata
+ *
+ * @description
+ * Check the taxonomy metadata in AsciiDoc page headers against the docs
+ * taxonomy (taxonomy.yml in the docs repository). On every page,
+ * `:page-categories:` values must resolve to a concept: an unknown value, a
+ * deprecated value, or two values that are the same concept warn, and each
+ * message names the replacement. On a solution overview
+ * (`:page-layout: solution`), `:page-solution-use-cases:`,
+ * `:page-solution-industries:`, `:page-solution-technologies:`, and
+ * `:page-solution-platforms:` must resolve within their own facet, and an
+ * unknown value or a duplicate concept is an error. `:page-topic-type:` is
+ * checked against the content types, as a warning. --strict turns every
+ * warning into an error. The taxonomy comes from --taxonomy (a path or URL),
+ * else the docs checkout at the current directory, else $REDPANDA_DOCS_PATH,
+ * else the published file. The build runs the same rules
+ * (extension-utils/metadata-check.js), so the two never disagree.
+ * --fix first rewrites `:page-categories:` in place: each value becomes its
+ * concept's preferred label, a deprecated value becomes its replacements, and
+ * a replacement that is a task is dropped (the task comes from the module).
+ * Values that need a judgment call (no replacement, or a content type) are
+ * left as they are and still warn.
+ * --suggest also lists, for each page, the topics, use cases, technologies,
+ * and industries its text names that its header does not carry yet, so
+ * authors and agents choose values from the taxonomy instead of inventing
+ * them. Matching is deterministic, with no model: every live concept's
+ * prefLabel and altLabels are matched case-insensitively on whole words
+ * against the title, `:description:`, the page path (module and directories),
+ * section headings, and body, code included and included partials followed.
+ * Words split on anything that is not a letter or digit, so the code literal
+ * `postgres_cdc` names PostgreSQL (altLabel Postgres) and Change data capture
+ * (altLabel CDC). A two-letter label such as Go matches only in its exact
+ * case and never as the first word of a sentence. Hits are weighted title 8,
+ * path 6, description 5, heading 1.5 each (up to 3), and body 1 + log2(n)
+ * (at most 3). A suggestion never names a deprecated concept, never takes a
+ * facet past its cardinality, and skips what the page carries or what that
+ * implies; on a solution overview a technology that a topic implies (Iceberg
+ * Topics implies Apache Iceberg) is suggested in page-solution-technologies.
+ * Each suggestion has a score, a reason, and evidence (the matched term,
+ * where, and the line). --min-score defaults to 5 for Product Docs pages and
+ * 3 for solution overviews; --limit (per facet) to 3 and 6. Suggestions do
+ * not change the exit code.
+ * --suggest also lists candidates: frequent, distinctive terms on a page that
+ * no concept's label or altLabel matches, in any scheme, for proposing new
+ * concepts or altLabels. They are repeated capitalized terms in prose (Amazon
+ * S3, Debezium) and component identifiers (`aws_s3` output, xrefs to Connect
+ * component pages), each with a count, the lines, and a likely facet from a
+ * cue word after it (a connector, database, format, or product word). Terms
+ * in the terminology lists (--terminology, default the docs glossary in the
+ * checkout), common English, and words the page also writes in lowercase are
+ * dropped. --candidates-only skips the check and the suggestions and
+ * aggregates candidates across the pages: one entry per term, with the pages
+ * it is on, leaving out terms on more than a fifth of the pages
+ * (boilerplate).
+ * Exit 0 without errors, 1 with errors, 2 when the check could not run.
+ *
+ * @why
+ * Categories, use cases, and technologies drive search facets and solution
+ * recommendations, and a free-text value becomes a near-duplicate the moment
+ * a second author writes one. This catches it on the PR, without a model, in
+ * a form the docs agents and the PR review can read.
+ *
+ * @example
+ * # Pages changed on this branch (what the docs PR check runs)
+ * npx doc-tools check-metadata --changed origin/main
+ *
+ * # Specific pages or directories, JSON for a grader
+ * npx doc-tools check-metadata modules/manage/pages/iceberg --format json
+ *
+ * # Against a local taxonomy, failing on warnings
+ * npx doc-tools check-metadata --taxonomy ../docs/shared/modules/ROOT/attachments/taxonomy.yml --strict
+ *
+ * # Rewrite deprecated categories to their replacements, then check
+ * npx doc-tools check-metadata --fix modules
+ *
+ * # Suggest taxonomy values for new pages, as JSON for an agent
+ * npx doc-tools check-metadata --suggest --format json modules/manage/pages/new-page.adoc
+ *
+ * # Suggest only for changed pages that carry no categories, with a lower bar
+ * npx doc-tools check-metadata --changed origin/main --suggest --suggest-empty-only --min-score 3
+ *
+ * # Terms across a repository that no concept covers, filtered by the style guide's word lists
+ * npx doc-tools check-metadata --candidates-only --terminology shared/modules/terms/partials,../docs-team-standards/resources/writing-style/terminology.md --format json modules
+ */
+programCli
+  .command('check-metadata')
+  .description('Check page-categories and solution facet values in AsciiDoc page headers against the docs taxonomy')
+  .argument('[paths...]', 'Files, directories, or globs to check, relative to --root (default: modules/**/*.adoc). With --changed, filters the changed files')
+  .option('--changed <base>', 'Check only .adoc files changed between the merge base with <base> and HEAD, for example origin/main')
+  .option('--taxonomy <path|url>', 'taxonomy.yml to use (default: the docs checkout, $REDPANDA_DOCS_PATH, then https://docs.redpanda.com/shared/_attachments/taxonomy.yml)')
+  .option('--format <format>', 'Output format: text or json', 'text')
+  .option('--strict', 'Treat warnings as errors')
+  .option('--fix', 'Rewrite page-categories in place to current taxonomy labels, then check')
+  .option('--root <path>', 'Repository root (default: current directory)')
+  .option('--output <path>', 'Also write the JSON result to this file')
+  .option('--suggest', 'Also suggest taxonomy values each page does not carry yet, matched from its title, description, path, headings, and body')
+  .option('--min-score <n>', 'With --suggest, the lowest score to suggest (default: 5 on Product Docs pages, 3 on solution overviews)')
+  .option('--limit <n>', 'With --suggest, the most suggestions per facet and page (default: 3 on Product Docs pages, 6 on solution overviews; never past the facet cardinality)')
+  .option('--suggest-empty-only', 'With --suggest, suggest only for pages without :page-categories:')
+  .option('--candidates-only', 'List only candidate terms, frequent distinctive terms that no concept matches, aggregated across the pages with the pages each appears in')
+  .option('--terminology <paths>', 'With --suggest or --candidates-only, comma-separated terminology lists whose terms are never candidates: a glossary partials directory, a Markdown word list, or a text file (default: the docs glossary, shared/modules/terms/partials, in the checkout or $REDPANDA_DOCS_PATH)')
+  .action(async (paths, options) => {
+    const { runCli } = require('../tools/check-metadata')
+    await runCli(paths, options)
+  })
+
+/**
+ * check-rendered-html
+ *
+ * @description
+ * Scan the rendered HTML of one or more Antora component paths for AsciiDoc
+ * that did not convert: literal backticks outside code, literal `xref:` or
+ * `include::` text, leftover {page-*} or {env-*} attribute references, `|===`
+ * table markup, Asciidoctor's "Unresolved include directive" text, links with
+ * the `unresolved` class, and empty sections (a heading followed directly by a
+ * heading of the same or higher level). Also checks links: a fragment with no
+ * matching id on its target page (broken-anchor), and a relative or
+ * root-relative link under a link root that is not in the build
+ * (broken-link). External links are ignored; links outside every link root,
+ * or into a root the build does not contain, are counted as unchecked. Only
+ * the page body is scanned. Reports findings per page and exits 0 unless
+ * --strict.
+ *
+ * With --changed-pages, findings are split into those on the listed pages and
+ * the rest, and --strict exits 1 only when a listed page has findings, so
+ * defects already on the base never fail a PR.
+ *
+ * @why
+ * These defects reach readers without a single line in the Antora log: two
+ * backticks for an empty enum option, or a backtick glued to the next word,
+ * render as literal backticks on the published page.
+ *
+ * @example
+ * npx doc-tools check-rendered-html build/site --component connect >> "$GITHUB_STEP_SUMMARY"
+ *
+ * # Fail on any finding
+ * npx doc-tools check-rendered-html build/site --strict
+ *
+ * # Self-managed and Cloud Connect pages; fail only on the pages a PR changed
+ * npx doc-tools check-rendered-html build/site --component connect,cloud-data-platform/develop/connect \
+ *   --changed-pages changed-pages.txt --strict
+ */
+programCli
+  .command('check-rendered-html')
+  .description('Scan rendered Antora HTML for unconverted AsciiDoc (literal backticks, xref:, include::, attributes, tables, empty sections) and broken anchors and links')
+  .argument('<site-dir>', 'Antora output directory (the --to-dir of the build)')
+  .option('--component <path>', 'Component output path to scan under <site-dir>; repeat it or give a comma list, for example connect,cloud-data-platform/develop/connect (default: connect)', (value, previous = []) => previous.concat(value))
+  .option('--link-root <path>', 'Site path whose linked pages must exist; repeat it or give a comma list. Scanned components are always included. Links outside every root, or into a root not in the build, are counted as unchecked (default: connect,cloud-data-platform/develop/connect)', (value, previous = []) => previous.concat(value))
+  .option('--pages <file>', 'Only scan the pages listed in <file>, one path relative to <site-dir> per line')
+  .option('--changed-pages <file>', 'Pages a PR changed: one path relative to <site-dir> per line (the sitePath from connect-docs-diff) or connect-docs-diff --format json output. All pages are still scanned; findings are split into changed and other pages, and --strict fails only on changed pages')
+  .option('--format <format>', 'Output format: markdown or json', 'markdown')
+  .option('--output <path>', 'Also write the output to this file')
+  .option('--strict', 'Exit 1 when any finding exists, or with --changed-pages when a changed page has findings (default: always exit 0)')
+  .action((siteDir, options) => {
+    const { runCli } = require('../tools/connect-docs/check-rendered-html')
+    runCli(siteDir, options)
+  })
+
+/**
+ * connect-docs-diff
+ *
+ * @description
+ * Compare two trees written by connect's docs generator, for example a PR's
+ * merge base and its head, and map each added, removed, or changed partial or
+ * example to the docs.redpanda.com page that includes it. Prints a Markdown
+ * table of changed pages with links, then a unified diff per file in
+ * collapsible blocks, capped in size. A tree root can be connect's docs/
+ * directory, its modules/ directory, or the components/ directory.
+ *
+ * @why
+ * Writers review Go string literals today and never see the page. The
+ * generated output is the published change: connect strings, benthos strings
+ * from a go.mod bump, and generator changes all show up here.
+ *
+ * @example
+ * npx doc-tools connect-docs-diff base/modules head/modules >> "$GITHUB_STEP_SUMMARY"
+ * npx doc-tools connect-docs-diff base/modules head/modules --format json
+ */
+programCli
+  .command('connect-docs-diff')
+  .description('Diff two generated Connect docs trees and map each changed partial or example to its published page')
+  .argument('<base-dir>', 'Generated tree of the base (merge base) commit')
+  .argument('<head-dir>', 'Generated tree of the head commit')
+  .option('--format <format>', 'Output format: markdown or json', 'markdown')
+  .option('--site-url <url>', 'Docs site the page links point at', 'https://docs.redpanda.com')
+  .option('--max-bytes <n>', 'Cap on the Markdown output size; diffs past it are counted, not shown', '60000')
+  .option('--output <path>', 'Also write the output to this file')
+  .action((baseDir, headDir, options) => {
+    const { runCli } = require('../tools/connect-docs/diff-generated')
+    runCli(baseDir, headDir, options)
   })
 
 /**
@@ -2827,7 +3481,7 @@ overridesGroup
   .description('Classify each override field as redundant, upstreamable, or keep against extracted source strings')
   .requiredOption('--overrides <path>', 'Path to the overrides JSON file (for example docs-data/property-overrides.json)')
   .option('--extracted <path>', 'Path to the extracted source JSON (property extractor raw output; required for the properties surface)')
-  .addOption(new Option('--surface <surface>', 'Override surface to audit').choices(['properties', 'rpk', 'connect']).default('properties'))
+  .addOption(new Option('--surface <surface>', 'Override surface to audit').choices(['properties', 'rpk']).default('properties'))
   .addOption(new Option('--format <format>', 'Output format').choices(['json', 'human']).default('json'))
   .option('--repo <path>', 'Redpanda checkout to extract raw source strings from (alternative to --extracted)')
   .option('--output <path>', 'Also write the JSON result to this file')
@@ -2841,6 +3495,92 @@ overridesGroup
         console.error(`JSON result written to ${options.output}`)
       }
       console.log(options.format === 'human' ? formatHumanReport(result) : JSON.stringify(result, null, 2))
+    } catch (err) {
+      fail(err.message)
+    }
+  })
+
+/**
+ * @description Build the plain-text prompt an external LLM triage call
+ * should send for one UPSTREAMABLE or SPLIT KEEP_UNTIL_UPSTREAMED audit row.
+ * Reads a single candidate object (not an array) from --candidate. See
+ * tools/overrides-audit/triage.js for the prompt contract.
+ *
+ * @why Separated from the actual LLM call so the workflow that runs it can
+ * use whatever action/model it wants; this command only builds the prompt.
+ *
+ * @example
+ * npx doc-tools overrides triage-prompt --candidate candidate.json
+ */
+overridesGroup
+  .command('triage-prompt')
+  .description('Build the triage prompt for one UPSTREAMABLE/SPLIT candidate')
+  .requiredOption('--candidate <path>', 'Path to a single candidate row JSON file (one object, not an array)')
+  .action((options) => {
+    const { buildTriagePrompt } = require('../tools/overrides-audit/triage')
+    try {
+      const candidate = JSON.parse(fs.readFileSync(path.resolve(options.candidate), 'utf8'))
+      console.log(buildTriagePrompt(candidate))
+    } catch (err) {
+      fail(err.message)
+    }
+  })
+
+/**
+ * @description Parse the raw text an LLM triage call returned for one
+ * candidate and merge it into that candidate's manifest row, adding
+ * agent_verdict / agent_reason / triage_failed. Any malformed, empty, or
+ * unexpected response degrades to a safe AMBIGUOUS verdict rather than
+ * throwing — a triage call failing is not a reason to fail the pipeline,
+ * it's a reason to ask a human. See tools/overrides-audit/triage.js.
+ *
+ * @example
+ * npx doc-tools overrides triage-parse --candidate candidate.json --response response.txt
+ */
+overridesGroup
+  .command('triage-parse')
+  .description('Merge an LLM triage response into a candidate row')
+  .requiredOption('--candidate <path>', 'Path to the candidate row JSON file this response answers')
+  .requiredOption('--response <path>', 'Path to the raw text file the LLM triage call returned')
+  .action((options) => {
+    const { triageCandidate } = require('../tools/overrides-audit/triage')
+    try {
+      const candidate = JSON.parse(fs.readFileSync(path.resolve(options.candidate), 'utf8'))
+      // A triage call that failed before writing its output leaves no
+      // response file. Treat that as an empty response so it reaches the
+      // AMBIGUOUS fallback instead of failing the command.
+      let rawResponse = ''
+      try {
+        rawResponse = fs.readFileSync(path.resolve(options.response), 'utf8')
+      } catch (err) {
+        if (err.code !== 'ENOENT') throw err
+      }
+      console.log(JSON.stringify(triageCandidate(candidate, rawResponse), null, 2))
+    } catch (err) {
+      fail(err.message)
+    }
+  })
+
+/**
+ * @description Render one plain-English markdown report section from a
+ * batch of triaged candidate rows (rows already carrying agent_verdict from
+ * triage-parse). See tools/overrides-audit/report.js for what each section
+ * contains and what happens to rows outside the requested verdict.
+ *
+ * @example
+ * npx doc-tools overrides report --candidates triaged.json --section upstream
+ */
+overridesGroup
+  .command('report')
+  .description('Build a plain-English markdown report section from triaged candidates')
+  .requiredOption('--candidates <path>', 'Path to a JSON array of triaged candidate rows')
+  .addOption(new Option('--section <section>', 'Which report section to build').choices(['upstream', 'retirement', 'ambiguous']).makeOptionMandatory())
+  .action((options) => {
+    const { buildUpstreamSection, buildRetirementSection, buildAmbiguousDigest } = require('../tools/overrides-audit/report')
+    const BUILDERS = { upstream: buildUpstreamSection, retirement: buildRetirementSection, ambiguous: buildAmbiguousDigest }
+    try {
+      const candidates = JSON.parse(fs.readFileSync(path.resolve(options.candidates), 'utf8'))
+      console.log(BUILDERS[options.section](candidates))
     } catch (err) {
       fail(err.message)
     }

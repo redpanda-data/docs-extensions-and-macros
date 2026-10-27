@@ -15,6 +15,7 @@ const crypto = require('crypto')
 // child_process export would not reach that already-bound local reference.
 jest.mock('child_process')
 const { spawnSync } = require('child_process')
+const { TOKEN_ENV_VAR } = require('../../../cli-utils/git-credential-env')
 
 const {
   updateOverridesWithIntroducedVersions,
@@ -592,9 +593,9 @@ describe('rpk Docs Handler', () => {
       // git config (a credential helper) instead of a -c argument.
       expect(cloneArgs.join(' ')).not.toContain('test-token-456')
       expect(cloneArgs.some((a) => a.includes('extraheader'))).toBe(false)
-      expect(cloneOptions.env.RPK_SOURCE_CLONE_TOKEN).toBe('test-token-456')
+      expect(cloneOptions.env[TOKEN_ENV_VAR]).toBe('test-token-456')
       expect(cloneOptions.env.GIT_CONFIG_KEY_1).toBe('credential.https://github.com.helper')
-      expect(cloneOptions.env.GIT_CONFIG_VALUE_1).toContain('$RPK_SOURCE_CLONE_TOKEN')
+      expect(cloneOptions.env.GIT_CONFIG_VALUE_1).toContain(`$${TOKEN_ENV_VAR}`)
 
       const [sparseCmd, sparseArgs, sparseOptions] = spawnSync.mock.calls[1]
       expect(sparseCmd).toBe('git')
@@ -604,7 +605,7 @@ describe('rpk Docs Handler', () => {
       // --filter=blob:none, the rpk blobs are fetched lazily here, not by
       // the clone above.
       expect(sparseOptions.env.GIT_CONFIG_VALUE_1).toBe(cloneOptions.env.GIT_CONFIG_VALUE_1)
-      expect(sparseOptions.env.RPK_SOURCE_CLONE_TOKEN).toBe('test-token-456')
+      expect(sparseOptions.env[TOKEN_ENV_VAR]).toBe('test-token-456')
     })
 
     test('surfaces a clear error when the clone itself fails', () => {
