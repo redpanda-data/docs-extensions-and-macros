@@ -31,14 +31,21 @@ inputs:
     description: Directory (relative to workspace) the skill writes findings/verdict into
     required: true
   repo:
-    description: owner/repo of the PR under review. Unused when pr_number is empty.
-    required: true
+    description: >
+      owner/repo of the PR under review. Required when pr_number is set.
+      Unused when pr_number is empty.
+    required: false
+    default: ''
   pr_number:
     description: >
       PR number under review. Its head is checked out for file reads, and
       the base branch's CLAUDE.md files are loaded. Leave empty when there
       is no PR under review: both steps are skipped, and the skill reads
       the caller's workspace. A non-empty value must be digits only.
+      With no PR, the caller is responsible for what the workspace
+      contains. Nothing is removed except .claude and .mcp.json, so a
+      CLAUDE.md or CLAUDE.local.md that the caller leaves there loads as
+      trusted rules.
     required: false
     default: ''
   plugin_ref:
@@ -165,14 +172,20 @@ runs:
         fi
 
     # pr_number lands in a git ref and an API path, so a non-empty value must
-    # be a plain number. Empty is valid: it means no PR is under review.
+    # be a plain number. Empty is valid: it means no PR is under review. A PR
+    # also needs repo, the repository the PR is in.
     - name: Assert pr_number is empty or a number
       shell: bash
       env:
         PR_NUMBER: ${{ inputs.pr_number }}
+        REPO: ${{ inputs.repo }}
       run: |
         if [[ -n "$PR_NUMBER" && ! "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
           echo "::error::pr_number must be empty or digits only (got '${PR_NUMBER}')"
+          exit 1
+        fi
+        if [[ -n "$PR_NUMBER" && -z "$REPO" ]]; then
+          echo "::error::repo is required when pr_number is set"
           exit 1
         fi
         if [[ -z "$PR_NUMBER" ]]; then

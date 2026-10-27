@@ -29,14 +29,33 @@ const prCheckout = steps.find((s) => s.uses && s.uses.startsWith('actions/checko
 const claudeMdStep = steps.find((s) => s.name && s.name.startsWith("Load this repo's CLAUDE.md"))
 const prNumberCheck = steps.find((s) => s.name === 'Assert pr_number is empty or a number')
 
-function runCheck (value) {
-  return execRun(prNumberCheck, { env: { PR_NUMBER: value } })
+function runCheck (value, repo = 'redpanda-data/docs') {
+  return execRun(prNumberCheck, { env: { PR_NUMBER: value, REPO: repo } })
 }
 
 describe('claude-skill pr_number input', () => {
   it('is optional and defaults to empty', () => {
     expect(action.inputs.pr_number.required).toBe(false)
     expect(action.inputs.pr_number.default).toBe('')
+  })
+
+  it('makes repo optional, because only the PR steps use it', () => {
+    expect(action.inputs.repo.required).toBe(false)
+    expect(action.inputs.repo.default).toBe('')
+    const users = steps.filter((s) => JSON.stringify(s).includes('inputs.repo'))
+    for (const s of users) {
+      expect([prCheckout, claudeMdStep, prNumberCheck]).toContain(s)
+    }
+  })
+
+  it('rejects a pr_number with no repo', () => {
+    const r = runCheck('2972', '')
+    expect(r.status).not.toBe(0)
+    expect(r.stdout + r.stderr).toMatch(/repo is required when pr_number is set/)
+  })
+
+  it('accepts an empty pr_number with no repo', () => {
+    expect(runCheck('', '').status).toBe(0)
   })
 
   it('gates the PR head checkout on a PR being under review', () => {
