@@ -564,4 +564,83 @@ describe('migrate-property-values', () => {
       expect(md).toContain('| modules/manage/pages/c.adoc:1 | `compaction_ctrl_backlog_size` | default | 10% | not set in the data; the prose states 10%, which may be a runtime fallback |')
     })
   })
+
+  describe('review fixes', () => {
+    test('a cloud-hidden field in a tagged region outside ifndef::env-cloud[] is proposed, not written', () => {
+      const line = 'Set prop:log_segment_ms[], which defaults to 2 weeks.'
+      const tagged = ['// tag::single-source[]', line, '// end::single-source[]'].join('\n')
+      const result = scanDocument(tagged, REGISTRY, { write: true })
+      expect(result.findings[0]).toMatchObject({ status: 'exact', autoSafe: false, note: 'proposed: page may be single-sourced; wrap in ifndef::env-cloud[] first' })
+      expect(result.content).toBe(tagged)
+      // Inside ifndef::env-cloud[] the line never reaches Cloud.
+      const guarded = ['// tag::single-source[]', 'ifndef::env-cloud[]', line, 'endif::[]', '// end::single-source[]'].join('\n')
+      expect(scanDocument(guarded, REGISTRY, { write: true }).findings[0]).toMatchObject({ status: 'exact', autoSafe: true })
+      // A file with no tag:: regions stays auto-safe.
+      expect(scanDocument(line, REGISTRY, { write: true }).content).toBe('Set prop:log_segment_ms[], which defaults to propval:log_segment_ms[default].')
+    })
+
+    test('any field of a property Cloud does not support is proposed in a tagged region', () => {
+      const registry = { ...REGISTRY, properties: { only_sm: { name: 'only_sm', type: 'integer', config_scope: 'cluster', cloud_supported: false, default: 3, minimum: 5 } } }
+      const content = '// tag::x[]\nThe prop:only_sm[] property has a minimum of 5.\n// end::x[]'
+      expect(scanDocument(content, registry, { write: true }).findings[0]).toMatchObject({ field: 'min', status: 'exact', autoSafe: false })
+    })
+
+    test('a comma (OR) condition naming env-cloud renders on Cloud', () => {
+      const ifdef = 'ifdef::env-cloud,env-kubernetes[]\nprop:log_segment_ms[] defaults to 2 weeks.\nendif::[]'
+      expect(only(ifdef)).toMatchObject({ status: 'unverifiable', qualifier: 'ifdef::env-cloud' })
+      const ifndef = '// tag::x[]\nifndef::env-cloud,env-kubernetes[]\nprop:log_segment_ms[] defaults to 2 weeks.\nendif::[]\n// end::x[]'
+      expect(only(ifndef)).toMatchObject({ status: 'exact', autoSafe: true })
+      const cloud = { ...REGISTRY, surface: 'cloud' }
+      expect(scan(ifndef, cloud)).toEqual([])
+    })
+
+    test('a .ms topic property compares as milliseconds', () => {
+      expect(only('The `retention.ms` property defaults to 1 day.')).toMatchObject({ property: 'retention.ms', status: 'mismatch' })
+      expect(only('The `retention.ms` property defaults to 7 days.')).toMatchObject({ status: 'equivalent' })
+    })
+
+    test('a hyphenated word is not a boolean', () => {
+      expect(parseValue('on-demand mode')).toMatchObject({ kind: 'string', string: 'on-demand' })
+      expect(scan('prop:enable_transactions[] defaults to on-demand.')).toEqual([])
+    })
+
+    test('"the default for prop:x[] is" reads the mention after the phrase', () => {
+      expect(only('The default for prop:log_segment_ms[] is 2 weeks.')).toMatchObject({ property: 'log_segment_ms', status: 'exact' })
+    })
+
+    test('a nested table keeps the outer table\'s Default column', () => {
+      const content = [
+        '|===',
+        '| Property | Default | Notes',
+        '',
+        '| prop:log_segment_ms[]',
+        '| 2 weeks',
+        'a|',
+        '!===',
+        '! a ! b',
+        '!===',
+        '',
+        '| prop:log_segment_size[]',
+        '| 134217728',
+        '| text',
+        '|===',
+      ].join('\n')
+      expect(scan(content).map((f) => [f.line, f.property, f.association])).toEqual([
+        [5, 'log_segment_ms', 'table-default-column'],
+        [12, 'log_segment_size', 'table-default-column'],
+      ])
+    })
+
+    test('another property in the sentence or list entry makes a finding proposed only', () => {
+      expect(only('Set `log_retention_ms` higher than prop:log_segment_ms[], which defaults to 2 weeks.')).toMatchObject({ property: 'log_segment_ms', status: 'exact', autoSafe: false })
+      expect(only('* prop:log_retention_ms[] sets retention. It accepts values like prop:log_segment_ms[], where the default is 2 weeks.')).toMatchObject({ property: 'log_segment_ms', status: 'exact', autoSafe: false })
+    })
+
+    test('a null default is exact but never auto-safe', () => {
+      const content = 'prop:compaction_ctrl_backlog_size[] defaults to null.'
+      const result = scanDocument(content, REGISTRY, { write: true })
+      expect(result.findings[0]).toMatchObject({ status: 'exact', autoSafe: false })
+      expect(result.content).toBe(content)
+    })
+  })
 })
