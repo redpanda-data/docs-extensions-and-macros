@@ -376,8 +376,9 @@ function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap,
   const warnings = []
   const unfiltered = new Set()
   // Rarity is computed over the solutions scored, so a draft built with
-  // include_drafts counts, and one left out does not.
-  const rarity = taxonomy ? conceptRarity(solutions) : null
+  // include_drafts counts, and one left out does not. A deprecated solution is
+  // never recommended, so it does not count either.
+  const rarity = taxonomy ? conceptRarity(solutions.filter((s) => s.status !== 'deprecated')) : null
 
   const relByPair = new Map()
   for (const rel of relationships || []) {
@@ -558,7 +559,10 @@ function computeCoverage ({ docs, solutions, categoryMap, taxonomy, sampleSize =
   for (const solution of solutions) {
     const categories = {}
     const zeroMatch = []
-    for (const c of solution.categories || []) {
+    // With the taxonomy, the solution side counts what it authored too, not
+    // the parents normalization adds, which no doc lists as authored.
+    const solutionCategories = (taxonomy && solution.categoriesRaw ? solution.categoriesRaw : solution.categories) || []
+    for (const c of solutionCategories) {
       const pages = pagesFor(c)
       categories[c] = { pages, level: level(c) }
       if (pages === 0) zeroMatch.push(c)
