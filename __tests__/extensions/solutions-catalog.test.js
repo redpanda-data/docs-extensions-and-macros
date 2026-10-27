@@ -2579,6 +2579,11 @@ describe('solutions-catalog: outcome diagram', () => {
     // A comment or the other element before it is still a leading child.
     expect(collect.svgText('<svg viewBox="0 0 1 1">\n  <!-- c -->\n  <title>Root</title>\n  <desc>D</desc><g><title>Node A</title></g></svg>', 'desc')).toBe('D')
     expect(collect.svgText('<?xml version="1.0"?>\n<svg><title>Root</title><g><title>Node A</title></g></svg>', 'title')).toBe('Root')
+    // A leading comment ends at its own -->, so it never reaches a child group's title.
+    expect(collect.svgText('<svg><!-- generated --><g><!-- node --><title>Node A</title></g></svg>', 'title')).toBe('')
+    // A self-closing <title/> is an empty leading child, not the start of one that runs on.
+    expect(collect.svgText('<svg><title/><desc>D</desc><g><title>Node</title></g></svg>', 'title')).toBe('')
+    expect(collect.svgText('<svg><title/><desc>D</desc><g><title>Node</title></g></svg>', 'desc')).toBe('D')
     // Markup with no <svg> root has no title.
     expect(collect.svgText('<title>x</title>', 'title')).toBe('')
   })

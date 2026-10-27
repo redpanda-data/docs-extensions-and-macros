@@ -782,6 +782,7 @@ describe('solution outcome diagram in Markdown', () => {
     expect(md('- not a list')).toBe('\\- not a list')
     expect(md('> not a quote')).toBe('\\> not a quote')
     expect(md('1. not a list')).toBe('1\\. not a list')
+    expect(md('See [the docs](https://example.com)')).toBe('See \\[the docs\\](https://example.com)')
     // Plain prose is unchanged.
     expect(md('Events flow in. 3 results: a board, 1.5x faster.')).toBe('Events flow in. 3 results: a board, 1.5x faster.')
   })

@@ -507,12 +507,15 @@ function svgText (markup, tag) {
   const text = String(markup)
   const root = /<svg\b[^>]*>/i.exec(text)
   if (!root) return ''
-  const leading = /\s*(?:<!--[\s\S]*?-->\s*)*<(title|desc)\b[^>]*>([\s\S]*?)<\/\1\s*>/iy
+  // A comment cannot cross its own `-->`, and a self-closing `<title/>` is an
+  // empty leading child, so neither can reach into a later sibling.
+  const leading = /\s*(?:<!--(?:(?!-->)[\s\S])*-->\s*)*(?:<(title|desc)\b[^>]*\/>|<(title|desc)\b[^>]*>([\s\S]*?)<\/\2\s*>)/iy
   leading.lastIndex = root.index + root[0].length
   let match
   while ((match = leading.exec(text))) {
-    if (match[1].toLowerCase() !== tag) continue
-    const inner = match[2]
+    if ((match[1] || match[2]).toLowerCase() !== tag) continue
+    if (match[1]) return ''
+    const inner = match[3]
       // CDATA is literal text: escape it so the tag strip below leaves it alone.
       .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, (_, cdata) => cdata.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'))
       .replace(/<[^>]*>/g, '')

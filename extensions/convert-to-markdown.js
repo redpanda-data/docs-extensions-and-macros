@@ -131,14 +131,14 @@ function solutionOutcomeMarkdown(page, siteUrl) {
 /**
  * Plain text as a one-line Markdown paragraph: whitespace collapsed, and the
  * characters that would otherwise become markup escaped (`<` so a decoded
- * `&lt;b&gt;` is not read as a tag, emphasis and code markers, and a leading
- * heading, quote, or list marker).
+ * `&lt;b&gt;` is not read as a tag, emphasis and code markers, link brackets,
+ * and a leading heading, quote, or list marker).
  */
 function markdownText(text) {
   return String(text)
     .replace(/\s+/g, ' ')
     .trim()
-    .replace(/([\\<*_`])/g, '\\$1')
+    .replace(/([\\<*_`[\]])/g, '\\$1')
     .replace(/^([#>+-])/, '\\$1')
     .replace(/^(\d+)([.)])(?=\s|$)/, '$1\\$2')
 }

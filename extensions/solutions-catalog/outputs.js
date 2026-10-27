@@ -72,8 +72,9 @@ function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions 
   if (publicRepo && record.repo) publicRecord.repo = record.repo
   // Evidence, not a default: no manifest means no key at all.
   if (record.verified) publicRecord.verified = record.verified
-  // The outcome diagram under the overview hero, { image, alt, description }:
-  // only when the overview names one and it resolves.
+  // The outcome diagram under the overview hero,
+  // { image, alt, title, description }: only when the overview names one and
+  // it resolves.
   if (record.outcome) publicRecord.outcome = record.outcome
   // Only when the companion was generated for this build.
   if (record.agentCompanion) publicRecord.agentCompanion = record.agentCompanion
