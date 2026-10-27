@@ -413,7 +413,7 @@ The JSON key names and table labels also work as field names: `minimum`, `maximu
 format::
 `human` (default) or `raw`. `raw` gives the exact value: the code value in the reference table for `default`, the plain number for `min` and `max`, `true` or `false` for the yes-or-no fields, and a JSON array for `values` and `aliases`.
 
-The output is a `<span>` with the stable class `property-value` and `data-property` and `data-field` attributes. It is plain text with no tooltip; mark the name with `prop:` for that. The macro works inside backticks, so `` `propval:x[default,format=raw]` `` renders as inline code.
+The output is a `<span>` with the stable class `property-value` and `data-property` and `data-field` attributes. It is plain text with no tooltip; mark the name with `prop:` for that. The macro works inside backticks, so `` `propval:x[default,format=raw]` `` renders as inline code. Don't put `values` inside backticks: it already renders each value as inline code, and backticks would nest one code element inside another.
 
 === Formatting
 
@@ -424,6 +424,7 @@ Values come from the reference generator's own helpers, so prose and the referen
 * A byte count renders in IEC units (`128 MiB`) only when the table's Unit row says bytes and the value is an exact multiple. Otherwise the exact number renders. `log_segment_size` and `segment.bytes` have no unit in the data or the table, so they render `134217728`. Adding `units` for them belongs in the property extractor, not in prose.
 * Negative numbers are sentinels (`-1` for unlimited) and render as written.
 * `null`, an empty string, and booleans render as the table renders them: `null`, `null`, `true`, `false`.
+* A topic property that the data leaves unset, such as `retention.bytes`, renders `null` for `default`, as the table does. The topic inherits its cluster property (`corresponding_cluster_property` in the data), so in prose, point to that property with `prop:`, such as "inherits prop:retention_bytes[]", rather than saying the default is `null`.
 
 === Failures
 
