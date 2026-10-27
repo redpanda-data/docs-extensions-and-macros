@@ -65,6 +65,10 @@ METRICS_SETTLE_MIN="${METRICS_SETTLE_MIN:-120}"
 METRICS_SETTLE_MAX="${METRICS_SETTLE_MAX:-300}"
 METRICS_SETTLE_STABLE="${METRICS_SETTLE_STABLE:-60}"
 METRICS_POLL_INTERVAL="${METRICS_POLL_INTERVAL:-15}"
+# A settle cap below the floor would always end with the "still changing" warning.
+if (( METRICS_SETTLE_MIN > METRICS_SETTLE_MAX )); then
+  METRICS_SETTLE_MIN="$METRICS_SETTLE_MAX"
+fi
 
 # Adjust Docker repo for release candidates
 shopt -s nocasematch
@@ -82,6 +86,8 @@ export REDPANDA_VERSION="$TAG"
 export REDPANDA_DOCKER_REPO="$DOCKER_REPO"
 export REDPANDA_CONSOLE_VERSION="$CONSOLE_TAG"
 export REDPANDA_CONSOLE_DOCKER_REPO="$CONSOLE_REPO"
+# The compose files read CONSOLE_DOCKER_REPO.
+export CONSOLE_DOCKER_REPO="$CONSOLE_REPO"
 
 ###############################################################################
 # Python virtual environment (needed by the generator and by the health poll)
@@ -133,7 +139,9 @@ trap teardown EXIT
 ###############################################################################
 BROKER_SERVICES="$(cd "$COMPOSE_DIR" && docker compose -p "$PROJECT_NAME" config --services | grep '^redpanda-' || true)"
 EXPECTED_BROKERS="$(printf '%s\n' "$BROKER_SERVICES" | grep -c . || true)"
-EXPECTED_BROKERS="${EXPECTED_BROKERS:-1}"
+if (( EXPECTED_BROKERS == 0 )); then
+  EXPECTED_BROKERS=1
+fi
 
 # One Admin API URL per broker. Partition-, consumer-group- and
 # transform-scoped metrics are exported only by the broker hosting them, and
@@ -147,8 +155,14 @@ for svc in $BROKER_SERVICES; do
     ADMIN_URLS+=("http://localhost:${BASH_REMATCH[1]}")
   fi
 done
-if (( ${#ADMIN_URLS[@]} == 0 )); then
+# A missing broker would make the merged metric set depend on partition
+# placement again, so fail instead of scraping a subset.
+if [[ -z "$BROKER_SERVICES" ]]; then
+  echo "⚠️  No redpanda-* services found in the compose project; scraping $ADMIN_URL only."
   ADMIN_URLS=("$ADMIN_URL")
+elif (( ${#ADMIN_URLS[@]} < EXPECTED_BROKERS )); then
+  echo "❌ Found the Admin API port for ${#ADMIN_URLS[@]} of $EXPECTED_BROKERS brokers. Refusing to scrape a subset."
+  exit 1
 fi
 # Joined explicitly: IFS is newline-tab here, so "${ADMIN_URLS[*]}" would print one URL per line.
 echo "Admin API endpoints to scrape:$(printf " %s" "${ADMIN_URLS[@]}")"
