@@ -379,6 +379,18 @@ function detectGatingChanges (diffText, { enterpriseNames = [] } = {}) {
 }
 
 /**
+ * Drop findings already dispatched for this PR. `sent` is the text of the
+ * review state's dispatched-gating.txt: one `name change_kind` key per line.
+ * Filtering here, before buildDocImpact, keeps the ticket title and body to
+ * the findings that remain, and lets an eleventh finding in once the first
+ * ten are sent.
+ */
+function withoutSent (findings, sent) {
+  const done = new Set(String(sent || '').split('\n').map((l) => l.trim()).filter(Boolean))
+  return findings.filter((f) => !done.has(`${f.name} ${f.change_kind}`))
+}
+
+/**
  * Shape findings as the doc-impact report the review workflow dispatches
  * (the same JSON the model writes to doc-impact.json), or null when there is
  * nothing to report.
@@ -419,6 +431,7 @@ module.exports = {
   CONFIG_SOURCE,
   detectGatingChanges,
   buildDocImpact,
+  withoutSent,
   enumChanges,
   enterprisePropertyChanges,
   enterprisePropertyNames,

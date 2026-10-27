@@ -530,3 +530,34 @@ describe('detectGatingChanges: edge cases from review', () => {
     expect(detectGatingChanges(diff).map((f) => [f.change_kind, f.name])).toEqual([['enterprise-gate-removed', 'features_auto_finalization']])
   })
 })
+
+describe('withoutSent', () => {
+  const { withoutSent } = require('../../../tools/enterprise-features/detect-gating-changes')
+  const f = (name, kind = 'enterprise-feature-added') => ({ surface: 'enterprise-feature', name, change_kind: kind, affected_pages: [], summary: 's' })
+
+  test('the ticket is rebuilt from the findings not yet sent', () => {
+    // Push 1 sent manual_finalization; push 2 adds new_feature.
+    const report = buildDocImpact(withoutSent([f('manual_finalization'), f('new_feature')], 'manual_finalization enterprise-feature-added\n'))
+    expect(report.findings.map((x) => x.name)).toEqual(['new_feature'])
+    expect(report.proposed_ticket.title).toBe('Update enterprise feature docs for new_feature')
+    expect(report.proposed_ticket.body).not.toMatch(/manual_finalization/)
+  })
+
+  test('the key is name and change kind, so a second change to a sent name still goes out', () => {
+    const left = withoutSent([f('audit_enabled', 'enterprise-gate-added'), f('audit_enabled', 'enterprise-restricted-value-changed')], 'audit_enabled enterprise-gate-added\n')
+    expect(left.map((x) => x.change_kind)).toEqual(['enterprise-restricted-value-changed'])
+  })
+
+  test('sent findings are filtered before the cap, so an eleventh still goes out', () => {
+    const many = Array.from({ length: 11 }, (_, i) => f(`f${i}`))
+    const sent = many.slice(0, 10).map((x) => `${x.name} ${x.change_kind}`).join('\n')
+    const report = buildDocImpact(withoutSent(many, sent))
+    expect(report.findings.map((x) => x.name)).toEqual(['f10'])
+    expect(report.proposed_ticket.title).not.toMatch(/more$/)
+  })
+
+  test('an empty or missing state keeps every finding', () => {
+    expect(withoutSent([f('a')], '')).toHaveLength(1)
+    expect(withoutSent([f('a')], undefined)).toHaveLength(1)
+  })
+})
