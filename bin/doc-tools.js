@@ -43,6 +43,7 @@ const { getAntoraValue, setAntoraValue } = require('../cli-utils/antora-utils')
 const programCli = new Command()
 
 const pkg = require('../package.json')
+const { generatedMarker } = require('../cli-utils/generated-marker')
 programCli
   .name('doc-tools')
   .description('Redpanda Document Automation CLI')
@@ -1984,6 +1985,10 @@ automation
         }
       }
 
+      // Same marker shape as every doc-tools generator; convert-to-markdown
+      // reads it and reports the provenance in the Markdown twins.
+      const helmMarker = generatedMarker('helm-docs', `the ${name} chart's values.yaml and README in redpanda-data/redpanda-operator`) + '\n\n'
+      doc = helmMarker + doc
       fs.writeFileSync(outFile, doc, 'utf8')
 
       console.log(`Done: Wrote ${outFile}`)
