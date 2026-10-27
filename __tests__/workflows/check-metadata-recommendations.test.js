@@ -8,9 +8,10 @@ const { execRun } = require('./helpers/exec-run')
 
 /**
  * The reusable check-metadata workflow runs `doc-tools recommendations-diff`
- * by default and never fails on it. These tests execute the step's run: body
- * (helpers/exec-run.js) with npx stubbed: a result, published data that
- * could not be read, a doc-tools without the subcommand, and a crash.
+ * when the recommendations input is on and never fails on it. These tests
+ * execute the step's run: body (helpers/exec-run.js) with npx stubbed: a
+ * result, published data that could not be read, a doc-tools without the
+ * subcommand, and a crash.
  */
 
 const ROOT = path.join(__dirname, '..', '..')
@@ -42,9 +43,9 @@ function run ({ npx, origin = '', taxonomy = '' }) {
 const OK = { status: 'ok', docs: [], summary: { docs: 0, appear: 0, disappear: 0, rerank: 0 } }
 
 describe('check-metadata workflow: recommendations-diff', () => {
-  test('the recommendations input defaults to true, with an empty origin', () => {
+  test('the recommendations input defaults to false, with an empty origin', () => {
     const inputs = workflow.on.workflow_call.inputs
-    expect(inputs.recommendations).toMatchObject({ type: 'boolean', default: true })
+    expect(inputs.recommendations).toMatchObject({ type: 'boolean', default: false })
     expect(inputs.recommendations_origin).toMatchObject({ type: 'string', default: '' })
     expect(STEP.if).toMatch(/inputs\.recommendations\b/)
     expect(STEP.env).toMatchObject({ ORIGIN: '${{ inputs.recommendations_origin }}', BASE: 'origin/${{ github.base_ref }}' })

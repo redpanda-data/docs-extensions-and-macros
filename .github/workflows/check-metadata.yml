@@ -34,13 +34,14 @@ name: Check page metadata
 # doc_tools_version from before suggestions carried their line puts every
 # notice on line 1.
 #
-# With recommendations (the default), it also runs `doc-tools
-# recommendations-diff`: which solution recommendations the changed pages'
-# categories, or a changed solution overview's facets, add, remove, or
-# rerank, scored by the solutions-catalog extension's own code against the
-# doc-concepts.json a published build wrote. No site build and no model. It
-# is informational and never fails the job; when the published data cannot
-# be read (no Solutions build at the origin yet), it is skipped with a notice.
+# With recommendations (off by default until a doc-tools release ships the
+# subcommand), it also runs `doc-tools recommendations-diff`: which solution
+# recommendations the changed pages' categories, or a changed solution
+# overview's facets, add, remove, or rerank, scored by the solutions-catalog
+# extension's own code against the doc-concepts.json a published build
+# wrote. No site build and no model. It is informational and never fails the
+# job; when the published data cannot be read (no Solutions build at the
+# origin yet), it is skipped with a notice.
 
 on:
   workflow_call:
@@ -77,8 +78,9 @@ on:
           reranks (`doc-tools recommendations-diff`), in the job summary.
           Never fails the job. Needs a doc_tools_version that ships
           recommendations-diff; an earlier one is skipped with a notice.
+          Off by default until a doc-tools release ships recommendations-diff.
         type: boolean
-        default: true
+        default: false
       recommendations_origin:
         description: >-
           Site to read assets/data/doc-concepts.json (and the taxonomy, when
