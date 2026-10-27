@@ -433,6 +433,36 @@ describe('doc-strings evals: the must-read sabotage verdict and flags', () => {
     expect(runEvals.mustReadSabotageVerdict([run(false, false)]).proven).toBe(false)
   })
 
+  test('plain --sabotage is proven only by the case\'s own row failing', () => {
+    const mustRead = (pass) => ({ check: 'must-read: standards opened before the first inline comment', pass, detail: 'x' })
+    const own = (pass) => ({ check: 'zero inline comments posted', pass, detail: 'x' })
+    const one = (kind, checks) => [{ id: 'c', kind, status: checks.every((c) => c.pass) ? 'PASS' : 'FAIL', checks }]
+    expect(runEvals.sabotageVerdict(one('negative-review', [own(false), mustRead(true)])).proven).toBe(true)
+    // The model stayed silent on the planted violation but skipped a standard:
+    // the case FAILs, yet its own assertion held, so that proves nothing.
+    const wrongReason = runEvals.sabotageVerdict(one('negative-review', [own(true), mustRead(false)]))
+    expect(wrongReason.proven).toBe(false)
+    expect(wrongReason.message).toMatch(/zero inline comments posted\) passed/)
+    expect(runEvals.sabotageVerdict(one('negative-review', [mustRead(false)])).proven).toBe(false)
+    const suggest = { check: 'at least one ```suggestion block (a vacuous string must draw one)', pass: false, detail: 'found 0' }
+    expect(runEvals.sabotageVerdict(one('prose-review', [mustRead(true), suggest])).proven).toBe(true)
+    expect(runEvals.sabotageVerdict(one('negative-audit', [{ check: 'claimed findings array is empty', pass: false, detail: 'x' }])).proven).toBe(true)
+  })
+
+  test('a Write that came back with an error fails the case', () => {
+    const call = (name, error, extra = {}) => ({ index: 3, name, input: { file_path: 'doc-impact.json' }, answered: true, error, subagent: false, output: 'Permission denied', ...extra })
+    const rowFor = (calls) => {
+      const checks = runEvals.makeChecks()
+      runEvals.checkWrites(checks, { calls })
+      return checks.rows[0]
+    }
+    expect(rowFor([call('Write', false)]).pass).toBe(true)
+    expect(rowFor([call('Read', true)]).pass).toBe(true)
+    const refused = rowFor([call('Write', true)])
+    expect(refused.pass).toBe(false)
+    expect(refused.detail).toMatch(/#3 doc-impact\.json: Permission denied/)
+  })
+
   test('a flag that lost its value, or --case with a sabotage, is a usage error', () => {
     expect(() => runEvals.parseArgs(['--sabotage-must-read'])).toThrow(/needs a value/)
     expect(() => runEvals.parseArgs(['--sabotage-must-read', '--keep-temp'])).toThrow(/needs a value/)
@@ -475,6 +505,7 @@ describe('doc-strings evals: sabotage driver exit codes', () => {
       status: 'FAIL',
       checks: [
         { check: 'must-read: standards opened before the first inline comment', pass: calls++ === 0, detail: 'synthetic evidence' },
+        { check: 'zero inline comments posted', pass: false, detail: 'synthetic evidence' },
         ...(cliPass === undefined ? [] : [{ check: 'claude CLI call succeeded', pass: cliPass, detail: 'synthetic CLI result' }])
       ],
       model: null
