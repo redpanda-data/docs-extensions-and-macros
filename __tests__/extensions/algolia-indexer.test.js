@@ -297,3 +297,76 @@ describe('algolia-indexer generate-index (Solutions records)', () => {
     expect(record.solutionId).toBeUndefined()
   })
 })
+
+describe('algolia-indexer taxonomy facets', () => {
+  const fs = require('fs')
+  const path = require('path')
+  const { parseTaxonomy } = require('../../extension-utils/taxonomy')
+  const taxonomy = parseTaxonomy(fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'taxonomy', 'taxonomy.yml')))
+
+  function indexWith (page, comp, options = {}) {
+    const result = generateIndex(
+      { site: { url: 'https://docs.redpanda.com' } },
+      {
+        getPages: (fn) => [page].filter((p) => fn(p) !== undefined),
+        getComponent: () => comp,
+        getComponentVersion: () => comp.latest,
+        getComponents: () => [comp]
+      },
+      { logger: noopLogger, ...options }
+    )
+    return result[comp.name][page.src.version][0]
+  }
+
+  const docPage = () => makePage(buildArticle({ h1: 'Iceberg Topics' }), {
+    asciidoc: {
+      attributes: {
+        // What validate-attributes leaves behind: the legacy list with parents,
+        // and the authored list next to it.
+        'page-categories': 'Iceberg, Data Replication, Deployment, High Availability',
+        'page-categories-authored': 'Iceberg, Data Replication',
+        'env-kubernetes': 'true'
+      }
+    }
+  })
+
+  test('keeps categories as the legacy list and adds topics, technologies, and deployment', () => {
+    const record = indexWith(docPage(), component, { taxonomy })
+    expect(record.categories).toEqual(['Iceberg', 'Data Replication', 'Deployment', 'High Availability'])
+    expect(record.topics).toEqual(['Iceberg Topics', 'Replication', 'High Availability'])
+    expect(record.topicIds).toEqual(['iceberg-topics', 'replication', 'high-availability'])
+    expect(record.technologies).toEqual(['Apache Iceberg'])
+    expect(record.technologyIds).toEqual(['apache-iceberg'])
+    expect(record.useCases).toEqual([])
+    expect(record.deployment).toEqual(['Kubernetes', 'Redpanda Self-Managed'])
+    expect(record.deploymentIds).toEqual(['kubernetes', 'redpanda-self-managed'])
+  })
+
+  test('resolves the authored list, so legacy parents do not become topics or tasks', () => {
+    const record = indexWith(docPage(), component, { taxonomy })
+    expect(record.topicIds).not.toContain('category-deployment')
+    expect(Object.keys(record)).not.toContain('tasks')
+  })
+
+  test('a page in the connect component is about Redpanda Connect', () => {
+    const connect = { name: 'connect', title: 'Connect', latest: { version: '' } }
+    const page = makePage(buildArticle({}), { src: { component: 'connect', version: '', origin: {} }, asciidoc: { attributes: { 'page-categories': 'Stream Processing' } } })
+    const record = indexWith(page, connect, { taxonomy })
+    expect(record.useCases).toEqual(['Stream processing'])
+    expect(record.technologies).toEqual(['Redpanda Connect'])
+  })
+
+  test('without a taxonomy, records are unchanged', () => {
+    const record = indexWith(docPage(), component)
+    expect(record.categories).toEqual(['Iceberg', 'Data Replication', 'Deployment', 'High Availability'])
+    for (const key of ['topics', 'topicIds', 'useCases', 'technologies', 'deployment']) expect(record).not.toHaveProperty(key)
+  })
+
+  test('labs records keep their string deployment and get no taxonomy fields', () => {
+    const labs = { name: 'labs', title: 'Labs', latest: { version: '' } }
+    const page = makePage(buildArticle({}), { src: { component: 'labs', version: '', origin: {} }, asciidoc: { attributes: { 'page-categories': 'Iceberg', 'env-docker': 'true' } } })
+    const record = indexWith(page, labs, { taxonomy })
+    expect(record.deployment).toBe('Docker')
+    expect(record).not.toHaveProperty('topics')
+  })
+})

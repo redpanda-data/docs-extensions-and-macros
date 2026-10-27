@@ -3,6 +3,10 @@
 
 {description}
 
+NOTE: The explorer UI lives in the docs-ui bundle. Until that module ships, each block below renders its fallback paragraph instead of an explorer. What this page verifies is the markup: one mount point per block, carrying the author's attributes.
+
+NOTE: This preview component is unversioned (`version: ~`), and Antora sets `page-version` from the component version and locks it, so no `data-version` appears below. A page header cannot override it. Versioned sites get `data-version` on every mount point.
+
 == Default explorer
 
 The simplest usage renders the explorer with built-in sample data:
@@ -13,23 +17,18 @@ The simplest usage renders the explorer with built-in sample data:
 
 == With author-supplied defaults
 
-An author can seed the initial config and sample data by passing a JSON body:
+An author can seed the initial config by passing a JSON body. The explorer reads
+the `config` key only; other keys are forwarded but ignored.
 
 [iceberg-explorer]
 ----
 {
-  "config": "key:mode=schema_id_prefix;value:mode=schema_latest,layout=flat;headers:value_type=string",
-  "schema": {
-    "key": [
-      { "name": "user_id", "type": "long" },
-      { "name": "region", "type": "string" }
-    ]
-  }
+  "config": "key:mode=schema_id_prefix;value:mode=schema_latest,layout=flat;headers:value_type=string"
 }
 ----
 
 == With a pinned initial config attribute
 
-[iceberg-explorer,config="value:mode=binary"]
+[iceberg-explorer,config="value:mode=binary",height=420]
 --
 --

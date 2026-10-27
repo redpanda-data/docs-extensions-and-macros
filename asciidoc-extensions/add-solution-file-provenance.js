@@ -32,6 +32,8 @@
  * Restricted to the `solutions` component.
  */
 
+const { escapeHtml } = require('../extension-utils/html-utils')
+
 const SOLUTIONS_COMPONENT = 'solutions'
 const EXAMPLE_FAMILY = 'example'
 
@@ -43,13 +45,8 @@ const MARKER_PREFIX = 'sol-snippet-'
 const INCLUDE_RX = /^\s*include::[^[\]]+\[(.*)\]\s*$/
 const TAG_RX = /(?:^|,)\s*tags?=([^,]*)/
 
-function htmlEscape (value) {
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-}
+// The shared escape, under the name this module has always exported.
+const htmlEscape = escapeHtml
 
 /** The one tag an include directive selected, or '' when it did not name one. */
 function tagFromDirective (line) {

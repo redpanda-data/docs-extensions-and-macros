@@ -91,6 +91,7 @@
  */
 
 const semver = require('semver')
+const { escapeHtml } = require('../extension-utils/html-utils')
 const logger = require('@antora/logger')('prop-macro')
 
 const $propertyRegistry = Symbol('$propertyRegistry')
@@ -867,19 +868,8 @@ function buildPropContent ({ name, text, link, page, scope, role, helmPath = fal
   // attribute, docUrl from a page's published URL, and name from a dataset
   // key: an unescaped quote in any of them ends the attribute early and the
   // remainder becomes stray attributes on every marked property in the build.
-  const docAttr = docUrl ? ` data-doc-url="${escapeAttribute(docUrl)}"` : ''
-  return `<code class="${escapeAttribute(role)}" data-property-name="${escapeAttribute(name)}"${docAttr}>${inner}</code>`
-}
-
-/**
- * Escape a value for use inside a double-quoted HTML attribute.
- */
-function escapeAttribute (value) {
-  return String(value === undefined || value === null ? '' : value)
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
+  const docAttr = docUrl ? ` data-doc-url="${escapeHtml(docUrl)}"` : ''
+  return `<code class="${escapeHtml(role)}" data-property-name="${escapeHtml(name)}"${docAttr}>${inner}</code>`
 }
 
 function propInlineMacro (config) {

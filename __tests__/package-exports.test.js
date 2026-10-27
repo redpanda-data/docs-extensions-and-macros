@@ -4,26 +4,31 @@ const fs = require('fs')
 const path = require('path')
 
 /**
- * Every extension file must be reachable through the package exports map.
- * The map enumerates subpaths explicitly, so a new extension that ships
- * without an entry loads fine in this repo but throws
+ * Every extension and macro file must be reachable through the package exports
+ * map. The map enumerates subpaths explicitly, so a new extension or macro that
+ * ships without an entry loads fine in this repo but throws
  * ERR_PACKAGE_PATH_NOT_EXPORTED in every consumer — found the hard way when
  * set-available-attachment-versions broke the docs-site build despite the
  * file being present in the published package.
+ *
+ * The directory list is derived from the filesystem rather than a hand-kept
+ * list, so a new macro is guarded the moment it lands.
  */
-describe('package exports cover all extensions', () => {
+describe('package exports cover all extensions and macros', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'))
 
   const exportedTargets = new Set(
     Object.values(pkg.exports || {}).map((v) => (typeof v === 'object' ? v.require : v))
   )
 
-  const extensionFiles = fs
-    .readdirSync(path.join(__dirname, '..', 'extensions'))
-    .filter((f) => f.endsWith('.js'))
-    .map((f) => `./extensions/${f}`)
+  const sourceFiles = ['extensions', 'macros'].flatMap((dir) =>
+    fs
+      .readdirSync(path.join(__dirname, '..', dir))
+      .filter((f) => f.endsWith('.js'))
+      .map((f) => `./${dir}/${f}`)
+  )
 
-  test.each(extensionFiles)('%s is exported', (file) => {
+  test.each(sourceFiles)('%s is exported', (file) => {
     expect(exportedTargets).toContain(file)
   })
 
@@ -38,7 +43,7 @@ describe('package exports cover all extensions', () => {
     expect(offenders).toEqual([])
   })
 
-  test.each(extensionFiles)('%s is reachable by its conventional specifier', (file) => {
+  test.each(sourceFiles)('%s is reachable by its conventional specifier', (file) => {
     const specifier = file.replace(/\.js$/, '')
     expect(Object.keys(pkg.exports || {})).toContain(specifier)
   })
