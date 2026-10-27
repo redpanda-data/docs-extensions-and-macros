@@ -71,6 +71,20 @@ describe('helm detector', () => {
     const r2 = detect({ [K]: 'replicaCount: 1\n' }, { [K]: 'replicaCount: 2\n' })
     expect(r2.findings[0].affected_pages).toEqual(['https://docs.redpanda.com/streaming/current/reference/k-connector-helm-spec/'])
   })
+
+  test('the connect chart routes to its page in the Connect docs', () => {
+    const C = 'charts/connect/values.yaml'
+    const r = detect({ [C]: 'replicaCount: 1\n' }, { [C]: 'replicaCount: 1\nnewKey: true\n' })
+    expect(kinds(r)).toEqual([['added', 'newKey']])
+    expect(r.findings[0]).toMatchObject({ severity: 'medium', affected_pages: ['https://docs.redpanda.com/connect/reference/k-connect-helm-spec/'] })
+  })
+
+  test('a chart with no Helm reference page (kminion) is low and never opens the gate', () => {
+    const K = 'charts/kminion/values.yaml'
+    const r = detect({ [K]: 'replicaCount: 1\n' }, { [K]: 'replicaCount: 2\nnewKey: true\n' })
+    expect(kinds(r).sort()).toEqual([['added', 'newKey'], ['default-changed', 'replicaCount']])
+    for (const f of r.findings) expect(f).toMatchObject({ severity: 'low', detail: 'no-docs-page' })
+  })
 })
 
 describe('helm detector: negative controls', () => {

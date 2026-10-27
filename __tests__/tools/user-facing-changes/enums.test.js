@@ -1,10 +1,11 @@
 'use strict'
 
 const { detect, kinds } = require('./helpers')
-const { configEnumTypes, parseEnums, FEATURE_TABLE } = require('../../../tools/user-facing-changes/detectors/enums')
+const { configEnumTypes, parseEnums } = require('../../../tools/user-facing-changes/detectors/enums')
 
 const CONFIG_H = 'src/v/config/configuration.h'
 const MODEL_H = 'src/v/model/metadata.h'
+const FEATURE_TABLE = 'src/v/features/feature_table.h'
 
 // Synthetic headers: a config header naming enum_property types, the
 // model header defining one of them plus an internal enum, and a feature

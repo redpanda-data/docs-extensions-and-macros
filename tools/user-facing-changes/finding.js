@@ -54,7 +54,8 @@ const PAGES = {
     redpanda: `${DOCS}/streaming/current/reference/k-redpanda-helm-spec/`,
     console: `${DOCS}/streaming/current/reference/k-console-helm-spec/`,
     connectors: `${DOCS}/streaming/current/reference/k-connector-helm-spec/`,
-    operator: `${DOCS}/streaming/current/reference/k-operator-helm-spec/`
+    operator: `${DOCS}/streaming/current/reference/k-operator-helm-spec/`,
+    connect: `${DOCS}/connect/reference/k-connect-helm-spec/`
   },
   reference: `${DOCS}/streaming/current/reference/`,
   crd: `${DOCS}/streaming/current/reference/k-crd/`,

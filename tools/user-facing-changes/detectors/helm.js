@@ -100,9 +100,10 @@ function chartOf (file) {
   return null
 }
 
+// A chart with no Helm reference page (kminion) has nothing to regenerate:
+// its findings are low, so they ride along but never open the gate.
 function pageFor (file) {
-  const chart = chartOf(file)
-  return PAGES.helm[chart] || PAGES.reference
+  return PAGES.helm[chartOf(file)] || null
 }
 
 /**
@@ -135,7 +136,8 @@ function detect ({ files, readBase, readHead, note, excerpt }) {
       continue
     }
     const chart = chartOf(file.path)
-    const common = { detector: 'helm', surface: 'helm', file: file.path, page: pageFor(file.path) }
+    const page = pageFor(file.path)
+    const common = { detector: 'helm', surface: 'helm', file: file.path, page: page || PAGES.reference, ...(page ? {} : { severity: 'low', detail: 'no-docs-page' }) }
     const topMost = (keys, other) => keys.filter((k) => {
       const parent = k.includes('.') ? k.slice(0, k.lastIndexOf('.')) : null
       return parent === null || other.has(parent)
@@ -174,10 +176,10 @@ function detect ({ files, readBase, readHead, note, excerpt }) {
           ...common,
           name: key,
           change_kind: 'default-changed',
-          severity: release ? 'low' : undefined,
+          severity: release ? 'low' : common.severity,
           line: e.line,
           evidence: keyExcerpt(excerpt, file, prev, e),
-          detail: release ? 'release-value' : undefined,
+          detail: release ? 'release-value' : common.detail,
           summary: `The default of \`${key}\` in the ${chart} chart's \`values.yaml\` changed from \`${before ?? '{}'}\` to \`${after ?? '{}'}\`. The Helm reference regenerates the default; any page that quotes the old value states the wrong one.`
         }))
       }
