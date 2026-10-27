@@ -19,9 +19,13 @@
  *
  * WHAT IS LEFT OUT
  * ----------------
- * Only what the site already serves goes in. Pages without an output (the
- * unpublish-pages extension removes them at documentsConverted) are skipped,
- * aliases are listed only when their target is published, and components in
+ * Only what the site already serves goes in. The index is built at
+ * beforePublish, so pages whose output an extension removed before then are
+ * skipped: unpublish-pages at documentsConverted, and add-pages-to-root and
+ * convert-llms-to-txt at beforePublish when they are registered before this
+ * extension. Field-only pages from generate-fields-only-pages and URLs in
+ * siteCatalog.unpublishedPages are skipped in any order. Aliases are listed
+ * only when their target is published, and components in
  * `exclude_components` are skipped entirely. Partials and examples are not
  * published, so for them the index carries the path and the tag names only,
  * never the contents. Set `includes: false` to leave them out.
@@ -38,13 +42,18 @@ const DEFAULT_OUTPUT_PATH = 'assets/data/xref-index.json'
 
 const HEADING_RX = /<h([1-6])\b([^>]*)>([\s\S]*?)<\/h\1>/g
 const ID_ATTR_RX = /\sid="([^"]+)"/
-const ANY_ID_RX = /<([a-z][a-z0-9]*)\b[^>]*?\sid="([^"]+)"/g
+const OPEN_TAG_RX = /<([a-z][a-z0-9]*)\b([^>]*)>/g
+const CLASS_ATTR_RX = /\sclass="([^"]*)"/
+const SVG_RX = /<svg\b[\s\S]*?<\/svg>/gi
+// The section number Asciidoctor writes into a heading when sectnums is set.
+const SECTNUM_RX = /^(?:\d+\.)+ /
 const TAG_RX = /\btag::([\w.-]+)\[\]/g
 // Ids nobody writes an xref to: the ones @asciidoctor/tabs generates for every
 // tab and panel (on tab-heavy pages they outnumber the real anchors), and the
 // structural ids Asciidoctor itself emits for the preamble, the in-page TOC and
-// footnotes.
-const NOISE_ID_RX = /^(?:_tabs_\d+|preamble$|toc$|_footnote(?:def|ref)_\d+$)/
+// footnotes. Tabs whose block has an explicit id are caught by class instead.
+const NOISE_ID_RX = /^(?:_tabs_\d+|preamble$|toc$|footnotes$|_footnote(?:def|ref)_\d+$)/
+const NOISE_CLASSES = new Set(['tab', 'tabpanel'])
 
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }
 
@@ -68,20 +77,30 @@ function htmlToText (html) {
  * document order, with their level and text) and every other element id.
  *
  * @param {string} html Article HTML as Asciidoctor produced it
+ * @param {object} [options]
+ * @param {boolean} [options.sectnums] Whether the page numbers its sections, so titles start with the number
  * @returns {{ sections: Array<{id: string, title: string, level: number}>, ids: string[] }}
  */
-function extractAnchors (html) {
+function extractAnchors (html, options = {}) {
+  // Ids inside inline SVG (passthrough or embedded diagrams) are drawing
+  // internals, not anchors.
+  html = html.replace(SVG_RX, '')
   const sections = []
   const headingIds = new Set()
   for (const [, level, attrs, inner] of html.matchAll(HEADING_RX)) {
     const id = (attrs.match(ID_ATTR_RX) || [])[1]
     if (!id || NOISE_ID_RX.test(id)) continue
     headingIds.add(id)
-    sections.push({ id, title: htmlToText(inner), level: Number(level) - 1 })
+    let title = htmlToText(inner)
+    if (options.sectnums) title = title.replace(SECTNUM_RX, '')
+    sections.push({ id, title, level: Number(level) - 1 })
   }
   const ids = new Set()
-  for (const [, , id] of html.matchAll(ANY_ID_RX)) {
-    if (headingIds.has(id) || NOISE_ID_RX.test(id)) continue
+  for (const [, , attrs] of html.matchAll(OPEN_TAG_RX)) {
+    const id = (attrs.match(ID_ATTR_RX) || [])[1]
+    if (!id || headingIds.has(id) || NOISE_ID_RX.test(id)) continue
+    const classes = ((attrs.match(CLASS_ATTR_RX) || [])[1] || '').split(/\s+/)
+    if (classes.some((c) => NOISE_CLASSES.has(c))) continue
     ids.add(id)
   }
   return { sections, ids: [...ids] }
@@ -99,9 +118,18 @@ function localId (src) {
   return `${src.module}:${src.relative}`
 }
 
-/** A full resource ID, `version@component:module:relative`. */
+/**
+ * A full resource ID, `version@component:module:relative`. An unversioned
+ * component has no `version@` prefix, as in Antora's own form.
+ */
 function resourceId (src) {
-  return `${src.version}@${src.component}:${src.module}:${src.relative}`
+  const prefix = src.version ? `${src.version}@` : ''
+  return `${prefix}${src.component}:${src.module}:${src.relative}`
+}
+
+function hasSectnums (page) {
+  const attrs = page.asciidoc && page.asciidoc.attributes
+  return Boolean(attrs && attrs.sectnums != null)
 }
 
 function sortObject (obj) {
@@ -117,6 +145,7 @@ function sortObject (obj) {
  * @param {boolean} [options.includes] Whether to list partials and examples (default true)
  * @param {string} [options.siteUrl] The playbook's site.url
  * @param {Map|WeakMap} [options.anchorsByPage] Anchors captured earlier, by page file
+ * @param {string[]} [options.unpublishedUrls] Page URLs another extension has unpublished
  * @returns {object} The index, ready to serialize
  */
 function buildXrefIndex (contentCatalog, options = {}) {
@@ -131,7 +160,10 @@ function buildXrefIndex (contentCatalog, options = {}) {
     const entry = { title: component.title, latest: component.latest ? component.latest.version : undefined, versions: [] }
     for (const cv of component.versions) {
       const v = { version: cv.version, pages: {}, aliases: {} }
-      if (cv.displayVersion && cv.displayVersion !== cv.version) v.displayVersion = cv.displayVersion
+      // Antora fills in "default" for an unversioned component; that is not an
+      // authored display version.
+      const defaulted = cv.version === '' && cv.displayVersion === 'default'
+      if (cv.displayVersion && cv.displayVersion !== cv.version && !defaulted) v.displayVersion = cv.displayVersion
       if (cv.prerelease) v.prerelease = true
       if (withIncludes) {
         v.partials = {}
@@ -144,12 +176,14 @@ function buildXrefIndex (contentCatalog, options = {}) {
   }
   const slot = (src) => versionsByKey.get(`${src.version}@${src.component}`)
 
+  const unpublishedUrls = new Set(options.unpublishedUrls || [])
   const published = new Set()
-  for (const page of contentCatalog.getPages((p) => p.out && p.pub && p.pub.url)) {
+  const isPublished = (p) => p.out && p.pub && p.pub.url && !p.isFieldOnlyPage && !unpublishedUrls.has(p.pub.url)
+  for (const page of contentCatalog.getPages(isPublished)) {
     const v = slot(page.src)
     if (!v) continue
     published.add(page)
-    const anchors = (anchorsByPage && anchorsByPage.get(page)) || extractAnchors(page.contents ? page.contents.toString() : '')
+    const anchors = (anchorsByPage && anchorsByPage.get(page)) || extractAnchors(page.contents ? page.contents.toString() : '', { sectnums: hasSectnums(page) })
     const record = {
       title: htmlToText((page.asciidoc && (page.asciidoc.doctitle || page.asciidoc.navtitle)) || page.title || page.src.stem),
       url: page.pub.url,
@@ -188,7 +222,6 @@ function buildXrefIndex (contentCatalog, options = {}) {
   return {
     schema: SCHEMA_VERSION,
     site: options.siteUrl,
-    generated: new Date().toISOString(),
     components: sortObject(components),
   }
 }
@@ -208,27 +241,28 @@ module.exports.register = function ({ config = {} }) {
   // pagesComposed they are wrapped in the UI layout, whose nav and footer
   // headings would pollute every page.
   const anchorsByPage = new WeakMap()
-  let index
 
-  this.on('documentsConverted', ({ contentCatalog }) => {
-    for (const page of contentCatalog.getPages((p) => p.out && p.contents)) {
-      anchorsByPage.set(page, extractAnchors(page.contents.toString()))
+  const capture = (contentCatalog) => {
+    for (const page of contentCatalog.getPages((p) => p.out && p.contents && !anchorsByPage.has(p))) {
+      anchorsByPage.set(page, extractAnchors(page.contents.toString(), { sectnums: hasSectnums(page) }))
     }
-  })
+  }
+  this.on('documentsConverted', ({ contentCatalog }) => capture(contentCatalog))
+  // Pages added after documentsConverted still hold the article body here.
+  this.on('navigationBuilt', ({ contentCatalog }) => capture(contentCatalog))
 
-  // navigationBuilt comes after every documentsConverted listener, so pages that
-  // unpublish-pages removed are already gone whatever the registration order.
-  this.on('navigationBuilt', ({ playbook, contentCatalog }) => {
-    index = buildXrefIndex(contentCatalog, {
+  // Built at beforePublish, not earlier, because extensions also remove page
+  // output in beforePublish (add-pages-to-root, convert-llms-to-txt,
+  // generate-fields-only-pages). Listeners run in registration order, so
+  // register this extension after them.
+  this.on('beforePublish', ({ playbook, contentCatalog, siteCatalog }) => {
+    const index = buildXrefIndex(contentCatalog, {
       excludeComponents,
       includes,
       siteUrl: playbook.site && playbook.site.url,
       anchorsByPage,
+      unpublishedUrls: siteCatalog.unpublishedPages,
     })
-  })
-
-  this.on('beforePublish', ({ siteCatalog }) => {
-    if (!index) return
     const json = JSON.stringify(index)
     siteCatalog.addFile({ contents: Buffer.from(json, 'utf8'), out: { path: outputPath } })
     const pages = Object.values(index.components)

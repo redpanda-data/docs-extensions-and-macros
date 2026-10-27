@@ -656,21 +656,24 @@ This extension publishes one JSON file that lists every published page in the si
 Behavior details:
 
 * Anchors are read from the converted HTML, so they are the ids Asciidoctor produced: conditionals are resolved, included partials are expanded, and generated ids follow each page's own `idprefix` and `idseparator`.
-* Only published pages are listed. A page that the `unpublish-pages` extension removes is left out, whatever order the two extensions are registered in.
+* Only published pages are listed. The index is built at `beforePublish`, so a page is left out when its output is removed before then:
+** by `unpublish-pages`, whatever order the two extensions are registered in.
+** by `generate-fields-only-pages` (field-only pages), whatever the order.
+** by `add-pages-to-root` or `convert-llms-to-txt`, only when they are registered before `xref-index`. Register `xref-index` after them.
 * An alias is listed only when its target page is published.
 * Partials and examples are listed by path with their tag names only. Their contents are never written.
-* Ids that nobody links to are skipped: the ones the `@asciidoctor/tabs` extension generates for tabs and tab panels (`_tabs_N...`), and Asciidoctor's own `preamble`, `toc` and footnote ids.
+* Ids that nobody links to are skipped: the ones the `@asciidoctor/tabs` extension generates for tabs and tab panels, ids inside inline SVG, and Asciidoctor's own `preamble`, `toc`, `footnotes` and footnote ids. Ids inside other passthrough HTML are still listed.
+* On a page with `sectnums`, section titles are recorded without their number.
 
 === File format
 
-The file is minified JSON. Keys inside `pages`, `aliases`, `partials` and `examples` are sorted, so builds of the same content differ only in `generated`.
+The file is minified JSON. Keys inside `pages`, `aliases`, `partials` and `examples` are sorted, so builds of the same content produce the same file.
 
 [source,json]
 ----
 {
   "schema": 1,
   "site": "https://docs.redpanda.com",
-  "generated": "2026-10-26T12:00:00.000Z",
   "components": {
     "streaming": {
       "title": "Streaming",
@@ -709,7 +712,7 @@ components.<name>.latest::
 The version that unversioned xrefs resolve to. An empty string for an unversioned component.
 
 versions[].version::
-The component version as Antora knows it. An unversioned component (`version: ~`) has the empty string. The full resource ID of a file is `<version>@<component>:<key>`.
+The component version as Antora knows it. An unversioned component (`version: ~`) has the empty string. The full resource ID of a file is `<version>@<component>:<key>`, or `<component>:<key>` for an unversioned component.
 
 versions[].displayVersion, versions[].prerelease::
 Present only when they differ from the version, or when the version is a prerelease.
@@ -740,7 +743,7 @@ Whether to list partials and examples. Default: `true`.
 
 === Registration
 
-Register the `xref-index` extension in the Antora playbook under the `antora.extensions` key like so:
+Register the `xref-index` extension in the Antora playbook under the `antora.extensions` key, after `add-pages-to-root` and `convert-llms-to-txt`, like so:
 
 [source,yaml]
 ----

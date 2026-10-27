@@ -65,6 +65,9 @@ const SOURCES = {
     ].join('\n'),
     'modules/manage/pages/plain.adoc': '= Plain Page\n\nNo sections here.\n',
     'modules/manage/pages/hidden.adoc': '= Hidden Page\n:page-unpublish: true\n\n== Hidden section\n',
+    'modules/manage/pages/late.adoc': '= LateGone Page\n\n== LateGone section\n',
+    'modules/manage/pages/fields.adoc': '= FieldOnly Page\n\n== FieldOnly section\n',
+    'modules/manage/pages/numbered.adoc': '= Numbered Page\n:sectnums:\n\n== First Section\n\n=== Sub Section\n',
   },
   'streaming-26.3': {
     'antora.yml': 'name: streaming\ntitle: Streaming\nversion: 26.3\nprerelease: true\ndisplay_version: 26.3 Beta\n',
@@ -84,12 +87,33 @@ const SOURCES = {
       '',
     ].join('\n'),
     'modules/ROOT/examples/config.yaml': '# tag::broker[]\nredpanda: {}\n# end::broker[]\n',
+    'modules/ROOT/pages/glossary.adoc': '= Glossary\n:page-aliases: old-glossary.adoc\n',
   },
   secret: {
     'antora.yml': 'name: secret\ntitle: Secret\nversion: ~\n',
     'modules/ROOT/pages/index.adoc': '= Secret Page\n\n== Secret section\n',
   },
 }
+
+// Stand-ins for add-pages-to-root and convert-llms-to-txt (remove output at
+// beforePublish) and generate-fields-only-pages (marks pages isFieldOnlyPage
+// and removes their output at beforePublish).
+const LATE_UNPUBLISH = `module.exports.register = function () {
+  this.on('beforePublish', ({ contentCatalog }) => {
+    const page = contentCatalog.getPages((p) => p.src.relative === 'late.adoc')[0]
+    delete page.out
+  })
+}
+`
+const FIELD_ONLY = `module.exports.register = function () {
+  this.on('documentsConverted', ({ contentCatalog }) => {
+    for (const p of contentCatalog.getPages((p) => p.src.relative === 'fields.adoc')) p.isFieldOnlyPage = true
+  })
+  this.on('beforePublish', ({ contentCatalog }) => {
+    for (const p of contentCatalog.getPages((p) => p.isFieldOnlyPage)) delete p.out
+  })
+}
+`
 
 async function build (workDir, extensionConfig) {
   const outDir = path.join(workDir, 'out')
@@ -108,11 +132,16 @@ async function build (workDir, extensionConfig) {
     `    url: ${UI_BUNDLE}`,
     'antora:',
     '  extensions:',
+    // Removes output at beforePublish; registered before xref-index, as the
+    // REFERENCE asks.
+    `  - require: ${path.join(workDir, 'late-unpublish.js')}`,
     // Registered BEFORE unpublish-pages on purpose: the index must still leave
     // out the page that extension removes.
     "  - require: '@redpanda-data/docs-extensions-and-macros/extensions/xref-index'",
     ...extensionConfig.map((line) => `    ${line}`),
     "  - require: '@redpanda-data/docs-extensions-and-macros/extensions/unpublish-pages'",
+    // Registered after xref-index: field-only pages are skipped in any order.
+    `  - require: ${path.join(workDir, 'field-only.js')}`,
     '',
   ].join('\n')
   const playbookPath = path.join(workDir, `antora-playbook-${Date.now()}.yml`)
@@ -123,6 +152,7 @@ async function build (workDir, extensionConfig) {
 
 describe('xref-index end-to-end', () => {
   let workDir
+  let outDir
   let raw
   let index
 
@@ -132,12 +162,14 @@ describe('xref-index end-to-end', () => {
       for (const [rel, contents] of Object.entries(files)) write(path.join(workDir, dir), rel, contents)
       gitInit(path.join(workDir, dir))
     }
+    fs.writeFileSync(path.join(workDir, 'late-unpublish.js'), LATE_UNPUBLISH)
+    fs.writeFileSync(path.join(workDir, 'field-only.js'), FIELD_ONLY)
     const repoRoot = path.join(__dirname, '..', '..')
     const packageDir = path.join(workDir, 'node_modules', '@redpanda-data')
     fs.mkdirSync(packageDir, { recursive: true })
     fs.symlinkSync(repoRoot, path.join(packageDir, 'docs-extensions-and-macros'), 'dir')
 
-    const outDir = await build(workDir, ['exclude_components: [secret]'])
+    outDir = await build(workDir, ['exclude_components: [secret]'])
     raw = fs.readFileSync(path.join(outDir, 'assets', 'data', 'xref-index.json'), 'utf8')
     index = JSON.parse(raw)
   })
@@ -183,7 +215,17 @@ describe('xref-index end-to-end', () => {
     const shared = version('shared', '')
     expect(shared.partials).toEqual({ 'ROOT:tls-table.adoc': ['other', 'table'] })
     expect(shared.examples).toEqual({ 'ROOT:config.yaml': ['broker'] })
-    expect(shared.pages).toEqual({})
+    expect(Object.keys(shared.pages)).toEqual(['ROOT:glossary.adoc'])
+  })
+
+  test('an unversioned component has no version@ prefix and no defaulted displayVersion', () => {
+    const shared = version('shared', '')
+    expect(shared.aliases).toEqual({ 'ROOT:old-glossary.adoc': 'shared:ROOT:glossary.adoc' })
+    expect(shared.displayVersion).toBeUndefined()
+  })
+
+  test('carries no build timestamp, so the same content gives the same file', () => {
+    expect(Object.keys(index).sort()).toEqual(['components', 'schema', 'site'])
   })
 
   // Negative controls: what must NOT be in the index.
@@ -199,6 +241,24 @@ describe('xref-index end-to-end', () => {
   test('leaves out a page that unpublish-pages removed, even when registered first', () => {
     expect(version('streaming', '26.2').pages['manage:hidden.adoc']).toBeUndefined()
     expect(raw).not.toContain('Hidden')
+  })
+
+  test('leaves out pages whose output is removed at beforePublish', () => {
+    const pages = version('streaming', '26.2').pages
+    expect(pages['manage:late.adoc']).toBeUndefined()
+    expect(pages['manage:fields.adoc']).toBeUndefined()
+    expect(raw).not.toContain('LateGone')
+    expect(raw).not.toContain('FieldOnly')
+    // Negative control: the site really did not publish them.
+    expect(fs.existsSync(path.join(outDir, 'streaming', 'current', 'manage', 'late', 'index.html'))).toBe(false)
+    expect(fs.existsSync(path.join(outDir, 'streaming', 'current', 'manage', 'plain', 'index.html'))).toBe(true)
+  })
+
+  test('strips section numbers from titles on a sectnums page', () => {
+    expect(version('streaming', '26.2').pages['manage:numbered.adoc'].sections).toEqual([
+      { id: '_first_section', title: 'First Section', level: 1 },
+      { id: '_sub_section', title: 'Sub Section', level: 2 },
+    ])
   })
 
   test('leaves out an excluded component entirely', () => {
