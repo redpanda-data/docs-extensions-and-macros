@@ -34,7 +34,7 @@ describe('doc-strings evals: production review extraction', () => {
   test('the step allows the inline-comment tool the stand-in provides', () => {
     const args = production.parseClaudeArgs(step.with.claude_args)
     expect(args.allowed).toContain('mcp__github_inline_comment__create_inline_comment')
-    expect(args.allowed).toContain('Read')
+    expect(args.allowed).toContain('Read(./**)')
     expect(args.maxTurns).toMatch(/^\d+$/)
   })
 
