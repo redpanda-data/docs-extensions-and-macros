@@ -150,8 +150,11 @@ function insertReleaseSection(pageContent, sectionText) {
  * every release, on a backfill, and on a section grouped by hand.
  *
  * A category with any other kind of entry (a phase-1 candidate's plain `*`
- * bullets, or a multi-line entry) is left exactly as it is, so this is a safe
- * no-op on anything it does not recognize. A curated category (one with at least
+ * bullets, or a multi-line entry) is not grouped, so this is a safe no-op on
+ * anything it does not recognize. Its entries keep their order and text. The
+ * one change is that single-line entries on adjacent lines come out with a
+ * blank line between them, which AsciiDoc renders the same way. Line endings
+ * in the output are LF. A curated category (one with at least
  * one `Area::` entry) that is left as it is logs a warning, because it then
  * ships ungrouped. Area keys are trimmed, so `Kafka API` and `Kafka API ` are one
  * area, written as the trimmed label. Headings and any prose outside a category
@@ -200,8 +203,9 @@ function clusterSectionByArea(sectionText) {
   // paragraph. Single-line entries on adjacent lines, with no blank line
   // between them, are valid AsciiDoc too, so each one starts its own paragraph.
   // A grouped area's term line does not match ENTRY_RE, so its bullets stay in
-  // one paragraph with it.
-  const lines = String(sectionText).replace(/\n+$/, '').split('\n');
+  // one paragraph with it. CRLF and CR line endings become LF first: `.` in
+  // the patterns above does not match `\r`, so a CRLF line would match nothing.
+  const lines = String(sectionText).replace(/\r\n?/g, '\n').replace(/\n+$/, '').split('\n');
   const paragraphs = [];
   let current = [];
   for (const line of lines) {

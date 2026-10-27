@@ -212,6 +212,22 @@ describe('clusterSectionByArea', () => {
     expect(clusterSectionByArea(tight)).toBe(expected);
   });
 
+  it('groups a section file with CRLF line endings, and writes LF', () => {
+    const crlf = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Bug fixes', '',
+      'Security::', '* Alpha.', '',
+      'Kafka API:: Beta.', '',
+    ].join('\r\n');
+    const expected = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Bug fixes', '',
+      'Kafka API::', '* Beta.', '',
+      'Security::', '* Alpha.', '',
+    ].join('\n');
+    expect(clusterSectionByArea(crlf)).toBe(expected);
+  });
+
   it('does not move entries across a category boundary', () => {
     // The Bug fixes "Security" entries do not absorb the Improvements "Security".
     const out = clusterSectionByArea(scattered);
