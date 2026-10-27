@@ -73,7 +73,7 @@ const MENTION_RX = /prop:([A-Za-z][A-Za-z0-9_.]*)\[[^\]]*\]|(?<![`\\])`([A-Za-z]
 // Value phrases. Each captures the text after the phrase, which parseValue
 // then reads one value from.
 const PHRASES = [
-  { field: 'default', rx: /\b(?:defaults?\s+to|default\s+(?:value\s+)?(?:is|of|for|=|:)|default\s*:|default\s+[-\u2013]\s+|is\s+set\s+to\s+(?=\S+\s+by\s+default)|by\s+default\s+(?:is|it\s+is)|default\s+setting\s+is)\s*/gi },
+  { field: 'default', rx: /\b(?:defaults?\s+to|default\s+(?:value\s+)?(?:is|of|=|:)|default\s+for\s+(?=prop:|xref:|`)|default\s*:|default\s+[-\u2013]\s+|is\s+set\s+to\s+(?=\S+\s+by\s+default)|by\s+default\s+(?:is|it\s+is)|default\s+setting\s+is)\s*/gi },
   { field: 'min', rx: /\b(?:minimum|min\.?)(?:\s+(?:value|allowed\s+value))?\s*(?:is|of|=|:)?\s+(?:of\s+)?/gi },
   { field: 'max', rx: /\b(?:maximum|max\.?)(?:\s+(?:value|allowed\s+value))?\s*(?:is|of|=|:)?\s+(?:of\s+)?/gi },
 ]
@@ -316,10 +316,10 @@ function scanLine (line, { registry, requireSeparator = true, subject: rowSubjec
     // A conditional ("If the cluster default is X") states no default.
     const own = text(sentenceAt(valueStart), sentenceAt(valueStart))
     const qualifier = stripMacroAttributes(context).match(QUALIFIER_RX) || own.match(/^\s*(?:If|When|Unless|Suppose)\b/) || (blockQualifier ? [blockQualifier] : null)
-    // Other properties in the statement's sentence, or a list entry about
+    // Other properties on the line (the paragraph), or a list entry about
     // another property, make the binding a guess, so it is never auto-safe.
     const named = new Set([mention.name])
-    for (const m of mentions) if (sentenceAt(m.start) === sentenceAt(valueStart)) named.add(m.name)
+    for (const m of mentions) named.add(m.name)
     if (subject && subject.name) named.add(subject.name)
     findings.push({
       name: mention.name,
@@ -822,7 +822,9 @@ function scanDocument (content, registry, options = {}) {
   let lastBlock = null
   let table = null
   const helmPage = options.path && HELM_PATH_RX.test(options.path)
-  const taggedFile = TAG_RX.test(content)
+  // A tagged file, or any partial (cloud-docs includes some partials whole),
+  // may be included in a Cloud page.
+  const taggedFile = TAG_RX.test(content) || /(?:^|\/)partials\//.test(options.path || '')
   const devConfig = content.match(DEV_CONFIG_RX)
 
   // Read the command output in a closed block and report its value rows.
@@ -887,7 +889,7 @@ function scanDocument (content, registry, options = {}) {
       // cloud-docs can include this line. On Cloud, propval: renders a
       // placeholder for a field the Cloud reference hides and for a property
       // Cloud does not support, so outside ifndef::env-cloud[] a tagged file
-      // (one an including page can take in part) is proposed only.
+      // or a partial (either can be included in a Cloud page) is proposed only.
       const cloudPlaceholder = (FIELDS[raw.field] && FIELDS[raw.field].cloudHidden) ||
         (entry.config_scope === 'cluster' && entry.cloud_supported === false)
       if (result.autoSafe && !cloudSurface && cloudPlaceholder && !cloudExcluded && taggedFile) {

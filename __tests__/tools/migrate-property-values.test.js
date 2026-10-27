@@ -579,6 +579,14 @@ describe('migrate-property-values', () => {
       expect(scanDocument(line, REGISTRY, { write: true }).content).toBe('Set prop:log_segment_ms[], which defaults to propval:log_segment_ms[default].')
     })
 
+    test('a cloud-hidden field in an untagged partial is proposed, not written', () => {
+      const content = 'prop:log_segment_ms[] defaults to 2 weeks.'
+      const result = scanDocument(content, REGISTRY, { write: true, path: 'modules/manage/partials/x.adoc' })
+      expect(result.findings[0]).toMatchObject({ status: 'exact', autoSafe: false, note: 'proposed: page may be single-sourced; wrap in ifndef::env-cloud[] first' })
+      expect(result.content).toBe(content)
+      expect(scanDocument(content, REGISTRY, { write: true, path: 'modules/manage/pages/x.adoc' }).findings[0]).toMatchObject({ autoSafe: true })
+    })
+
     test('any field of a property Cloud does not support is proposed in a tagged region', () => {
       const registry = { ...REGISTRY, properties: { only_sm: { name: 'only_sm', type: 'integer', config_scope: 'cluster', cloud_supported: false, default: 3, minimum: 5 } } }
       const content = '// tag::x[]\nThe prop:only_sm[] property has a minimum of 5.\n// end::x[]'
@@ -606,6 +614,7 @@ describe('migrate-property-values', () => {
 
     test('"the default for prop:x[] is" reads the mention after the phrase', () => {
       expect(only('The default for prop:log_segment_ms[] is 2 weeks.')).toMatchObject({ property: 'log_segment_ms', status: 'exact' })
+      expect(scan('Set prop:default_topic_replications[]. The default for 5 brokers is fine.')).toEqual([])
     })
 
     test('a nested table keeps the outer table\'s Default column', () => {
@@ -634,6 +643,10 @@ describe('migrate-property-values', () => {
     test('another property in the sentence or list entry makes a finding proposed only', () => {
       expect(only('Set `log_retention_ms` higher than prop:log_segment_ms[], which defaults to 2 weeks.')).toMatchObject({ property: 'log_segment_ms', status: 'exact', autoSafe: false })
       expect(only('* prop:log_retention_ms[] sets retention. It accepts values like prop:log_segment_ms[], where the default is 2 weeks.')).toMatchObject({ property: 'log_segment_ms', status: 'exact', autoSafe: false })
+      // leader-pinning.adoc:81: the other property is earlier in the paragraph, not the list subject.
+      const registry = { ...REGISTRY, properties: { ...REGISTRY.properties, default_leaders_preference: { name: 'default_leaders_preference', type: 'string', config_scope: 'cluster', default: 'none' }, 'redpanda.leaders.preference': { name: 'redpanda.leaders.preference', type: 'string', config_scope: 'topic', default: 'none' } } }
+      const leader = '* Set the cluster configuration property prop:default_leaders_preference[link=true,helm-path=auto], which specifies the default Leader Pinning configuration for all topics that don\u2019t have prop:redpanda.leaders.preference[] explicitly set. It accepts values in the same format as prop:redpanda.leaders.preference[], where the default is `none`.'
+      expect(only(leader, registry)).toMatchObject({ property: 'redpanda.leaders.preference', status: 'exact', autoSafe: false })
     })
 
     test('a null default is exact but never auto-safe', () => {
