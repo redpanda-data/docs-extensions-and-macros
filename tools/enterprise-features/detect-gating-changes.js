@@ -26,10 +26,13 @@
  * so a test can hand it a saved patch; the CLI wrapper runs git.
  *
  * Detection is by added and removed lines, paired by name, so a value that
- * merely moves within the enum is not reported. Both signals the header
- * carries for an enum value are used (the member line inside the enum, and
- * the `case license_required_feature::<name>:` line in format_to), so a
- * hunk header that happens not to name the enum still detects.
+ * merely moves within the enum is not reported. Only the member line inside
+ * the enum counts; `case license_required_feature::<name>:` labels are
+ * ignored, because they move whenever the formatter is rewritten.
+ *
+ * Not covered: node properties (src/v/config/node_config.h, where
+ * `fips_mode` is gated) are not scanned, and a restricted value that names a
+ * constant defined elsewhere is not seen (see restrictedValueChanges).
  *
  * Each finding names ONE affected page, the licensing overview. The docs-site
  * receiver falls back to matching a finding with no name match against open
@@ -54,15 +57,20 @@ const REGISTRY_URL = 'https://github.com/redpanda-data/docs/blob/main/shared/mod
 function splitFiles (diffText) {
   const files = []
   let current = null
+  let inHunk = false
   for (const raw of String(diffText || '').split('\n')) {
     const m = /^diff --git a\/(.+?) b\/(.+)$/.exec(raw)
     if (m) {
       current = { path: m[2], lines: [] }
       files.push(current)
+      inHunk = false
       continue
     }
     if (!current) continue
-    if (/^(\+\+\+|---|index |new file|deleted file|similarity|rename|old mode|new mode)/.test(raw)) continue
+    // File header lines come before the first hunk. Inside a hunk, a removed
+    // `--x;` or an added `++x;` reads as `---x;` or `+++x;` and is content.
+    if (raw.startsWith('@@')) inHunk = true
+    if (!inHunk && /^(\+\+\+|---|index |new file|deleted file|similarity|rename|old mode|new mode)/.test(raw)) continue
     current.lines.push(raw)
   }
   return files
@@ -92,7 +100,7 @@ function enumChanges (lines) {
     const sign = line[0]
     if (sign !== '+' && sign !== '-') continue
     const target = sign === '+' ? added : removed
-    const member = inEnum && /^\s*([a-z][a-z0-9_]*)\s*,?\s*(\/\/.*)?$/.exec(body)
+    const member = inEnum && /^\s*([a-z][a-z0-9_]*)\s*(?:=\s*[^,/]+?)?\s*,?\s*(\/\/.*)?$/.exec(body)
     if (member) target.add(member[1])
   }
   return {
@@ -107,6 +115,8 @@ function enumChanges (lines) {
 // at a `;`, and also at a brace, an access specifier or a preprocessor line,
 // so a declaration never absorbs the line before it.
 const ENTERPRISE_DECL = /^\s*(?:config::)?enterprise<[\s\S]*>\s*([a-z][a-z0-9_]*)\s*;\s*$/
+// Any templated member declaration, wrapped or not (`property<bool> x;`).
+const ANY_DECL = /^\s*[\w:]+<[\s\S]*>\s*([a-z][a-z0-9_]*)\s*;\s*$/
 
 // Comments and attributes are dropped before joining: a `/* ... */` or
 // `[[attr]]` line above a declaration has no `;` or brace, so it would
@@ -186,24 +196,29 @@ function enterprisePropertyNames (headerText) {
  * configuration.h. A declaration changed in place shows as a -/+ pair with
  * the same name; the wrapper is on exactly one side. Each side of each hunk
  * (context plus its own changed lines) is joined into statements, so a
- * declaration that wraps across lines is read whole.
- * @returns {{added: string[], removed: string[]}}
+ * declaration that wraps across lines is read whole. A wrapped declaration
+ * that is removed and declared nowhere on the new side, wrapped or not, is
+ * `deleted`: the property is gone, not ungated.
+ * @returns {{added: string[], removed: string[], deleted: string[]}}
  */
 function enterprisePropertyChanges (lines) {
   const added = new Set()
   const removed = new Set()
-  const collect = (side, target) => {
+  const declaredNew = new Set()
+  const collect = (side, target, declared) => {
     for (const st of joinStatements(side)) {
       if (!st.changed) continue
       const m = ENTERPRISE_DECL.exec(st.text)
       if (m) target.add(m[1])
+      const any = declared && ANY_DECL.exec(st.text)
+      if (any) declared.add(any[1])
     }
   }
   let oldSide = []
   let newSide = []
   const flushHunk = () => {
     collect(oldSide, removed)
-    collect(newSide, added)
+    collect(newSide, added, declaredNew)
     oldSide = []
     newSide = []
   }
@@ -216,9 +231,11 @@ function enterprisePropertyChanges (lines) {
     else if (sign === ' ') { oldSide.push({ text }); newSide.push({ text }) }
   }
   flushHunk()
+  const gone = [...removed].filter((n) => !added.has(n))
   return {
     added: [...added].filter((n) => !removed.has(n)).sort(),
-    removed: [...removed].filter((n) => !added.has(n)).sort()
+    removed: gone.filter((n) => declaredNew.has(n)).sort(),
+    deleted: gone.filter((n) => !declaredNew.has(n)).sort()
   }
 }
 
@@ -253,6 +270,14 @@ function restrictedValueChanges (lines, enterpriseNames) {
     const body = line.slice(1)
     const opens = /^\s*,\s*([a-z][a-z0-9_]*)\s*\(/.exec(body)
     if (opens) { init = opens[1]; changed = false; continue }
+    // `*this, <value>, "name",` on one line carries the whole restricted
+    // argument list.
+    const oneLine = /^\s*\*this\s*,.*"([a-z][a-z0-9_]*)"\s*,/.exec(body)
+    if (oneLine && enterpriseNames.has(oneLine[1])) {
+      if (sign !== ' ') found.add(oneLine[1])
+      changed = false
+      continue
+    }
     if (/^\s*\*this\s*,/.test(body)) { changed = sign !== ' '; continue }
     // The name literal closes the restricted arguments. A string literal
     // that is neither this initializer's name nor an enterprise property
@@ -307,7 +332,7 @@ function detectGatingChanges (diffText, { enterpriseNames = [] } = {}) {
         })
       }
     } else if (file.path === CONFIG_HEADER) {
-      const { added, removed } = enterprisePropertyChanges(file.lines)
+      const { added, removed, deleted } = enterprisePropertyChanges(file.lines)
       for (const name of added) {
         findings.push({
           surface: 'enterprise-property',
@@ -326,6 +351,15 @@ function detectGatingChanges (diffText, { enterpriseNames = [] } = {}) {
           summary: `\`${name}\` is no longer wrapped in \`config::enterprise<>\` in \`${CONFIG_HEADER}\`, so it no longer needs a license. The registry entry that names it (${REGISTRY_URL}) and its row on ${DISABLE_PAGE} need to change.`
         })
       }
+      for (const name of deleted) {
+        findings.push({
+          surface: 'enterprise-property',
+          name,
+          change_kind: 'enterprise-property-removed',
+          affected_pages: [LICENSING_OVERVIEW],
+          summary: `\`${name}\`, a \`config::enterprise<>\` property, was removed from \`${CONFIG_HEADER}\`. From the first release that contains this change the property no longer exists, so its row on ${DISABLE_PAGE} goes and the registry entry that names it (${REGISTRY_URL}) needs a new source pointer or a note, never deletion: a published external name stays in the registry.`
+        })
+      }
     } else if (file.path === CONFIG_SOURCE) {
       // A property whose wrapper changed in the header is already reported
       // above; its initializer changes with it.
@@ -342,6 +376,18 @@ function detectGatingChanges (diffText, { enterpriseNames = [] } = {}) {
     }
   }
   return findings
+}
+
+/**
+ * Drop findings already dispatched for this PR. `sent` is the text of the
+ * review state's dispatched-gating.txt: one `name change_kind` key per line.
+ * Filtering here, before buildDocImpact, keeps the ticket title and body to
+ * the findings that remain, and lets an eleventh finding in once the first
+ * ten are sent.
+ */
+function withoutSent (findings, sent) {
+  const done = new Set(String(sent || '').split('\n').map((l) => l.trim()).filter(Boolean))
+  return findings.filter((f) => !done.has(`${f.name} ${f.change_kind}`))
 }
 
 /**
@@ -385,6 +431,7 @@ module.exports = {
   CONFIG_SOURCE,
   detectGatingChanges,
   buildDocImpact,
+  withoutSent,
   enumChanges,
   enterprisePropertyChanges,
   enterprisePropertyNames,

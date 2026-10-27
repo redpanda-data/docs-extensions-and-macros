@@ -1,5 +1,13 @@
 # Changelog
 
+## [5.56.1](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.56.0...v5.56.1) (2026-10-27)
+
+
+### Bug fixes
+
+* **doc-impact:** dispatch each gating finding once and keep merged tickets honest ([#427](https://github.com/redpanda-data/docs-extensions-and-macros/issues/427)) ([3c3f8e6](https://github.com/redpanda-data/docs-extensions-and-macros/commit/3c3f8e625004e4e30c7072e5c7f3131629e13325))
+* **doc-strings-review:** review only the lines a PR changed ([#399](https://github.com/redpanda-data/docs-extensions-and-macros/issues/399)) ([ff12dca](https://github.com/redpanda-data/docs-extensions-and-macros/commit/ff12dca4c8bab0e18562356e55e286e549d44edc))
+
 ## [5.56.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.55.0...v5.56.0) (2026-10-26)
 
 
