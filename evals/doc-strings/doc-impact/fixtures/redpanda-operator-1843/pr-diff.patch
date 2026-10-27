@@ -1,0 +1,2107 @@
+# Source diff of this PR against its merge base.
+# Left out (generated docs, lockfiles, vendored code, test data): 5 file(s).
+
+diff --git a/.changes/unreleased/charts-redpanda-Added-20260908-160000.yaml b/.changes/unreleased/charts-redpanda-Added-20260908-160000.yaml
+new file mode 100644
+index 00000000..cd9427a7
+--- /dev/null
++++ b/.changes/unreleased/charts-redpanda-Added-20260908-160000.yaml
+@@ -0,0 +1,5 @@
++project: charts/redpanda
++kind: Added
++body: |-
++    New `commonAnnotations` value adds the given annotations to every object the chart renders, including the StatefulSet itself. The StatefulSet's Pod template and volume claim templates are deliberately left unannotated: the claim templates are immutable on a live cluster, and annotating the Pod template would restart every broker. Annotations set on an individual resource take precedence. Useful for policy-engine required annotations or ArgoCD sync waves, for example `argocd.argoproj.io/sync-wave: "1"`.
++time: 2026-09-08T16:00:00.000000-07:00
+diff --git a/.changes/unreleased/operator-Changed-20260912-090000.yaml b/.changes/unreleased/operator-Changed-20260912-090000.yaml
+new file mode 100644
+index 00000000..cc8913d9
+--- /dev/null
++++ b/.changes/unreleased/operator-Changed-20260912-090000.yaml
+@@ -0,0 +1,5 @@
++project: operator
++kind: Changed
++body: |-
++    Breaking change for Redpanda Connect pipelines, which are still in beta: the operator chart's `commonAnnotations` value is renamed to `connectAnnotations`, and the operator's `--common-annotations` flag to `--connect-annotations`. The value only ever annotated the resources the Connect Pipeline controller creates, never the operator chart's own objects, so the old name read as a chart-wide knob it never was. Rename it before upgrading: the chart's values schema rejects unknown keys, so the old name fails `helm upgrade` rather than being silently ignored.
++time: 2026-09-12T09:00:00.000000-07:00
+diff --git a/.changes/unreleased/operator-Fixed-20260908-160100.yaml b/.changes/unreleased/operator-Fixed-20260908-160100.yaml
+new file mode 100644
+index 00000000..8b4b347d
+--- /dev/null
++++ b/.changes/unreleased/operator-Fixed-20260908-160100.yaml
+@@ -0,0 +1,5 @@
++project: operator
++kind: Fixed
++body: |-
++    Objects rendered by the operator chart no longer carry `annotations: null` when no annotations are configured. ArgoCD compared that null against the live object's absent map and kept the ServiceMonitor (and every other chart object) permanently OutOfSync (#1085).
++time: 2026-09-08T16:00:00.000000-07:00
+diff --git a/charts/redpanda/chart/README.md b/charts/redpanda/chart/README.md
+index 03141923..52aaaf40 100644
+--- a/charts/redpanda/chart/README.md
++++ b/charts/redpanda/chart/README.md
+@@ -152,6 +152,12 @@ Default Kubernetes cluster domain.
+ 
+ **Default:** `"cluster.local."`
+ 
++### [commonAnnotations](https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values&path=commonAnnotations)
++
++Additional annotations to add to all Kubernetes objects the chart renders, except the StatefulSet Pod template (annotating the Pods would restart the brokers). Annotations set on an individual resource, and the Helm hook annotations the chart needs, take precedence. Console objects rendered by the console subchart's own templates take theirs from `console.commonAnnotations`. For example, `argocd.argoproj.io/sync-wave: "1"`.
++
++**Default:** `{}`
++
+ ### [commonLabels](https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values&path=commonLabels)
+ 
+ Additional labels to add to all Kubernetes objects. For example, `my.k8s.service: redpanda`.
+diff --git a/charts/redpanda/chart/cert_issuers.go b/charts/redpanda/chart/cert_issuers.go
+index 79c8b200..41fb802b 100644
+--- a/charts/redpanda/chart/cert_issuers.go
++++ b/charts/redpanda/chart/cert_issuers.go
+@@ -70,9 +70,10 @@ func certIssuersAndCAs(state *RenderState) ([]*certmanagerv1.Issuer, []*certmana
+ 					Kind:       "Issuer",
+ 				},
+ 				ObjectMeta: metav1.ObjectMeta{
+-					Name:      fmt.Sprintf(`%s-%s-selfsigned-issuer`, Fullname(state), name),
+-					Namespace: state.Release.Namespace,
+-					Labels:    FullLabels(state),
++					Name:        fmt.Sprintf(`%s-%s-selfsigned-issuer`, Fullname(state), name),
++					Namespace:   state.Release.Namespace,
++					Labels:      FullLabels(state),
++					Annotations: FullAnnotations(state),
+ 				},
+ 				Spec: certmanagerv1.IssuerSpec{
+ 					IssuerConfig: certmanagerv1.IssuerConfig{
+@@ -93,9 +94,10 @@ func certIssuersAndCAs(state *RenderState) ([]*certmanagerv1.Issuer, []*certmana
+ 					Kind:       "Certificate",
+ 				},
+ 				ObjectMeta: metav1.ObjectMeta{
+-					Name:      fmt.Sprintf(`%s-%s-root-certificate`, Fullname(state), name),
+-					Namespace: state.Release.Namespace,
+-					Labels:    FullLabels(state),
++					Name:        fmt.Sprintf(`%s-%s-root-certificate`, Fullname(state), name),
++					Namespace:   state.Release.Namespace,
++					Labels:      FullLabels(state),
++					Annotations: FullAnnotations(state),
+ 				},
+ 				Spec: certmanagerv1.CertificateSpec{
+ 					Duration:   helmette.MustDuration(helmette.Default("43800h", data.Duration)),
+@@ -127,9 +129,10 @@ func certIssuersAndCAs(state *RenderState) ([]*certmanagerv1.Issuer, []*certmana
+ 					Kind:       "Issuer",
+ 				},
+ 				ObjectMeta: metav1.ObjectMeta{
+-					Name:      fmt.Sprintf(`%s-%s-root-issuer`, Fullname(state), name),
+-					Namespace: state.Release.Namespace,
+-					Labels:    FullLabels(state),
++					Name:        fmt.Sprintf(`%s-%s-root-issuer`, Fullname(state), name),
++					Namespace:   state.Release.Namespace,
++					Labels:      FullLabels(state),
++					Annotations: FullAnnotations(state),
+ 				},
+ 				Spec: certmanagerv1.IssuerSpec{
+ 					IssuerConfig: certmanagerv1.IssuerConfig{
+diff --git a/charts/redpanda/chart/certs.go b/charts/redpanda/chart/certs.go
+index ee2bf2b5..5b3ff83b 100644
+--- a/charts/redpanda/chart/certs.go
++++ b/charts/redpanda/chart/certs.go
+@@ -80,9 +80,10 @@ func ClientCerts(state *RenderState) []*certmanagerv1.Certificate {
+ 				Kind:       "Certificate",
+ 			},
+ 			ObjectMeta: metav1.ObjectMeta{
+-				Name:      fmt.Sprintf("%s-%s-cert", fullname, name),
+-				Labels:    FullLabels(state),
+-				Namespace: state.Release.Namespace,
++				Name:        fmt.Sprintf("%s-%s-cert", fullname, name),
++				Labels:      FullLabels(state),
++				Namespace:   state.Release.Namespace,
++				Annotations: FullAnnotations(state),
+ 			},
+ 			Spec: certmanagerv1.CertificateSpec{
+ 				DNSNames:   names,
+@@ -129,9 +130,10 @@ func ClientCerts(state *RenderState) []*certmanagerv1.Certificate {
+ 				Kind:       "Certificate",
+ 			},
+ 			ObjectMeta: metav1.ObjectMeta{
+-				Name:      fmt.Sprintf("%s-%s-client", fullname, name),
+-				Namespace: state.Release.Namespace,
+-				Labels:    FullLabels(state),
++				Name:        fmt.Sprintf("%s-%s-client", fullname, name),
++				Namespace:   state.Release.Namespace,
++				Labels:      FullLabels(state),
++				Annotations: FullAnnotations(state),
+ 			},
+ 			Spec: certmanagerv1.CertificateSpec{
+ 				CommonName: fmt.Sprintf("%s--%s-client", fullname, name),
+diff --git a/charts/redpanda/chart/chart_test.go b/charts/redpanda/chart/chart_test.go
+index c7ed2bbb..a00283c4 100644
+--- a/charts/redpanda/chart/chart_test.go
++++ b/charts/redpanda/chart/chart_test.go
+@@ -40,6 +40,7 @@ import (
+ 	"golang.org/x/mod/modfile"
+ 	"golang.org/x/mod/module"
+ 	appsv1 "k8s.io/api/apps/v1"
++	batchv1 "k8s.io/api/batch/v1"
+ 	corev1 "k8s.io/api/core/v1"
+ 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+ 	applycorev1 "k8s.io/client-go/applyconfigurations/core/v1"
+@@ -1128,6 +1129,128 @@ func TestLabels(t *testing.T) {
+ 	}
+ }
+ 
++func TestAnnotations(t *testing.T) {
++	ctx := testutil.Context(t)
++	client, err := helm.New(helm.Options{ConfigHome: testutil.TempDir(t)})
++	require.NoError(t, err)
++
++	// render templates the chart and returns the resultant objects alongside
++	// the RenderState they were rendered from.
++	render := func(t *testing.T, values *redpandachart.PartialValues) ([]kube.Object, *redpandachart.RenderState) {
++		// This guarantee does not currently extend to console.
++		values.Console = &consolechart.PartialValues{Enabled: ptr.To(false)}
++
++		helmValues, err := redpandachart.Chart.LoadValues(values)
++		require.NoError(t, err)
++
++		dot, err := redpandachart.Chart.Dot(nil, helmette.Release{
++			Name:      "redpanda",
++			Namespace: "redpanda",
++			Service:   "Helm",
++		}, helmValues)
++		require.NoError(t, err)
++
++		state, err := redpandachart.RenderStateFromDot(dot)
++		require.NoError(t, err)
++
++		manifests, err := client.Template(ctx, ".", helm.TemplateOptions{
++			Name:      dot.Release.Name,
++			Namespace: dot.Release.Namespace,
++			// Nor does it extend to tests.
++			SkipTests: true,
++			Values:    values,
++		})
++		require.NoError(t, err)
++
++		objs, err := kube.DecodeYAML(manifests, redpandachart.Scheme)
++		require.NoError(t, err)
++
++		return objs, state
++	}
++
++	t.Run("applied to all objects", func(t *testing.T) {
++		for _, annotations := range []map[string]string{
++			{"foo": "bar"},
++			{"baz": "1", "quux": "2"},
++		} {
++			objs, state := render(t, &redpandachart.PartialValues{CommonAnnotations: annotations})
++
++			expected := redpandachart.FullAnnotations(state)
++			require.Subset(t, expected, annotations, "FullAnnotations does not contain CommonAnnotations")
++
++			for _, obj := range objs {
++				// The StatefulSet object is annotated, but neither its pod
++				// template nor its volume claim templates are. VCTs are
++				// immutable on a live StatefulSet, so stamping commonAnnotations
++				// there makes adding/changing/removing the value fail with
++				// Forbidden, and annotating the pod template would roll every
++				// broker.
++				if sts, ok := obj.(*appsv1.StatefulSet); ok {
++					require.Subset(t, sts.GetAnnotations(), expected, "%T/%s", sts, sts.Name)
++					for key := range annotations {
++						require.NotContains(t, sts.Spec.Template.GetAnnotations(), key, "%T/%s's pod template", sts, sts.Name)
++						for _, pvc := range sts.Spec.VolumeClaimTemplates {
++							require.NotContains(t, pvc.GetAnnotations(), key, "%T/%s's PVC %q", sts, sts.Name, pvc.Name)
++						}
++					}
++					continue
++				}
++
++				// Every other object carries commonAnnotations.
++				require.Subset(t, obj.GetAnnotations(), expected, "%T %q", obj, obj.GetName())
++
++				if job, ok := obj.(*batchv1.Job); ok {
++					// The post-install job's pod template is annotated,
++					// mirroring the treatment of CommonLabels.
++					require.Subset(t, job.Spec.Template.GetAnnotations(), expected, "%T/%s's pod template", job, job.Name)
++				}
++			}
++		}
++	})
++
++	// CommonAnnotations is a floor of defaults, not an override. Both
++	// per-resource annotations and the annotations the chart itself requires
++	// take precedence over it.
++	t.Run("yields to chart internal annotations", func(t *testing.T) {
++		objs, _ := render(t, &redpandachart.PartialValues{
++			CommonAnnotations: map[string]string{
++				"helm.sh/hook":               "bogus",
++				"helm.sh/hook-delete-policy": "bogus",
++				"helm.sh/hook-weight":        "99",
++			},
++		})
++
++		var asserted bool
++		for _, obj := range objs {
++			if job, ok := obj.(*batchv1.Job); ok {
++				require.Equal(t, "post-install,post-upgrade", job.GetAnnotations()["helm.sh/hook"], "%T/%s", job, job.Name)
++				require.Equal(t, "before-hook-creation", job.GetAnnotations()["helm.sh/hook-delete-policy"], "%T/%s", job, job.Name)
++				require.Equal(t, "-5", job.GetAnnotations()["helm.sh/hook-weight"], "%T/%s", job, job.Name)
++				asserted = true
++			}
++		}
++		require.True(t, asserted, "expected the post-install job to be rendered")
++	})
++
++	t.Run("yields to per resource annotations", func(t *testing.T) {
++		objs, _ := render(t, &redpandachart.PartialValues{
++			CommonAnnotations: map[string]string{"shared": "common"},
++			ServiceAccount: &redpandachart.PartialServiceAccountCfg{
++				Annotations: map[string]string{"shared": "per-resource"},
++			},
++		})
++
++		var asserted bool
++		for _, obj := range objs {
++			if sa, ok := obj.(*corev1.ServiceAccount); ok {
++				require.Equal(t, "per-resource", sa.GetAnnotations()["shared"], "%T/%s", sa, sa.Name)
++				asserted = true
++			}
++		}
++		require.True(t, asserted, "expected a service account to be rendered")
++	})
++}
++
+ func TestAppVersion(t *testing.T) {
+ 	const project = "charts/redpanda"
+ 	output, err := exec.Command("changie", "latest", "-j", project).CombinedOutput()
+diff --git a/charts/redpanda/chart/configmap.tpl.go b/charts/redpanda/chart/configmap.tpl.go
+index fc883a07..da367e4a 100644
+--- a/charts/redpanda/chart/configmap.tpl.go
++++ b/charts/redpanda/chart/configmap.tpl.go
+@@ -40,9 +40,10 @@ func RedpandaConfigMap(state *RenderState, pool Pool) *corev1.ConfigMap {
+ 			APIVersion: "v1",
+ 		},
+ 		ObjectMeta: metav1.ObjectMeta{
+-			Name:      fmt.Sprintf("%s%s", Fullname(state), pool.Suffix()),
+-			Namespace: state.Release.Namespace,
+-			Labels:    FullLabels(state),
++			Name:        fmt.Sprintf("%s%s", Fullname(state), pool.Suffix()),
++			Namespace:   state.Release.Namespace,
++			Labels:      FullLabels(state),
++			Annotations: FullAnnotations(state),
+ 		},
+ 		Data: map[string]string{
+ 			clusterconfiguration.BootstrapTemplateFile:    bootstrap,
+@@ -182,9 +183,10 @@ func RPKProfile(state *RenderState) *corev1.ConfigMap {
+ 			APIVersion: "v1",
+ 		},
+ 		ObjectMeta: metav1.ObjectMeta{
+-			Name:      fmt.Sprintf("%s-rpk", Fullname(state)),
+-			Namespace: state.Release.Namespace,
+-			Labels:    FullLabels(state),
++			Name:        fmt.Sprintf("%s-rpk", Fullname(state)),
++			Namespace:   state.Release.Namespace,
++			Labels:      FullLabels(state),
++			Annotations: FullAnnotations(state),
+ 		},
+ 		Data: map[string]string{
+ 			"profile": helmette.ToYaml(rpkProfile(state)),
+diff --git a/charts/redpanda/chart/helpers.go b/charts/redpanda/chart/helpers.go
+index bf41ea86..c43d3ae2 100644
+--- a/charts/redpanda/chart/helpers.go
++++ b/charts/redpanda/chart/helpers.go
+@@ -87,6 +87,15 @@ func FullLabels(state *RenderState) map[string]string {
+ 	return helmette.Merge(labels, defaults)
+ }
+ 
++// FullAnnotations returns the chart-wide commonAnnotations, never nil so
++// rendered objects carry `annotations: {}` rather than `null`.
++func FullAnnotations(state *RenderState) map[string]string {
++	if state.Values.CommonAnnotations == nil {
++		return map[string]string{}
++	}
++	return state.Values.CommonAnnotations
++}
++
+ // Use AppVersion if image.tag is not set
+ func Tag(state *RenderState) string {
+ 	tag := string(state.Values.Image.Tag)
+diff --git a/charts/redpanda/chart/poddisruptionbudget.go b/charts/redpanda/chart/poddisruptionbudget.go
+index 3cbf0fed..0a88fea4 100644
+--- a/charts/redpanda/chart/poddisruptionbudget.go
++++ b/charts/redpanda/chart/poddisruptionbudget.go
+@@ -46,9 +46,10 @@ func PodDisruptionBudget(state *RenderState) *policyv1.PodDisruptionBudget {
+ 			Kind:       "PodDisruptionBudget",
+ 		},
+ 		ObjectMeta: metav1.ObjectMeta{
+-			Name:      Fullname(state),
+-			Namespace: state.Release.Namespace,
+-			Labels:    FullLabels(state),
++			Name:        Fullname(state),
++			Namespace:   state.Release.Namespace,
++			Labels:      FullLabels(state),
++			Annotations: FullAnnotations(state),
+ 		},
+ 		Spec: policyv1.PodDisruptionBudgetSpec{
+ 			Selector: &metav1.LabelSelector{
+diff --git a/charts/redpanda/chart/post_install_upgrade_job.go b/charts/redpanda/chart/post_install_upgrade_job.go
+index 0e27d2dc..ceb8bb20 100644
+--- a/charts/redpanda/chart/post_install_upgrade_job.go
++++ b/charts/redpanda/chart/post_install_upgrade_job.go
+@@ -124,6 +124,7 @@ func PostInstallUpgradeJob(state *RenderState) *batchv1.Job {
+ 					"helm.sh/hook-delete-policy": "before-hook-creation",
+ 					"helm.sh/hook-weight":        "-5",
+ 				},
++				FullAnnotations(state),
+ 			),
+ 		},
+ 		Spec: batchv1.JobSpec{
+@@ -138,6 +139,7 @@ func PostInstallUpgradeJob(state *RenderState) *batchv1.Job {
+ 								postInstallJobPodLabels(state),
+ 								helmette.Default(map[string]string{}, state.Values.CommonLabels),
+ 							),
++							Annotations: FullAnnotations(state),
+ 						},
+ 						Spec: corev1.PodSpec{
+ 							RestartPolicy:                corev1.RestartPolicyNever,
+diff --git a/charts/redpanda/chart/rbac.go b/charts/redpanda/chart/rbac.go
+index 11fe39eb..6b50e1f7 100644
+--- a/charts/redpanda/chart/rbac.go
++++ b/charts/redpanda/chart/rbac.go
+@@ -44,6 +44,7 @@ func Roles(state *RenderState) []*rbacv1.Role {
+ 			map[string]string{},
+ 			state.Values.ServiceAccount.Annotations, // For backwards compatibility
+ 			state.Values.RBAC.Annotations,
++			FullAnnotations(state),
+ 		)
+ 
+ 		roles = append(roles, &role)
+@@ -78,6 +79,7 @@ func ClusterRoles(state *RenderState) []*rbacv1.ClusterRole {
+ 			map[string]string{},
+ 			state.Values.ServiceAccount.Annotations, // For backwards compatibility
+ 			state.Values.RBAC.Annotations,
++			FullAnnotations(state),
+ 		)
+ 
+ 		clusterRoles = append(clusterRoles, &role)
+@@ -104,6 +106,7 @@ func RoleBindings(state *RenderState) []*rbacv1.RoleBinding {
+ 					map[string]string{},
+ 					state.Values.ServiceAccount.Annotations, // For backwards compatibility
+ 					state.Values.RBAC.Annotations,
++					FullAnnotations(state),
+ 				),
+ 			},
+ 			RoleRef: rbacv1.RoleRef{
+@@ -141,6 +144,7 @@ func ClusterRoleBindings(state *RenderState) []*rbacv1.ClusterRoleBinding {
+ 					map[string]string{},
+ 					state.Values.ServiceAccount.Annotations, // For backwards compatibility
+ 					state.Values.RBAC.Annotations,
++					FullAnnotations(state),
+ 				),
+ 			},
+ 			RoleRef: rbacv1.RoleRef{
+diff --git a/charts/redpanda/chart/secrets.go b/charts/redpanda/chart/secrets.go
+index 1f9f095c..d983d3a2 100644
+--- a/charts/redpanda/chart/secrets.go
++++ b/charts/redpanda/chart/secrets.go
+@@ -63,9 +63,10 @@ func SecretSTSLifecycle(state *RenderState) *corev1.Secret {
+ 			Kind:       "Secret",
+ 		},
+ 		ObjectMeta: metav1.ObjectMeta{
+-			Name:      fmt.Sprintf("%s-sts-lifecycle", Fullname(state)),
+-			Namespace: state.Release.Namespace,
+-			Labels:    FullLabels(state),
++			Name:        fmt.Sprintf("%s-sts-lifecycle", Fullname(state)),
++			Namespace:   state.Release.Namespace,
++			Labels:      FullLabels(state),
++			Annotations: FullAnnotations(state),
+ 		},
+ 		Type:       corev1.SecretTypeOpaque,
+ 		StringData: map[string]string{},
+@@ -262,9 +263,10 @@ func SecretSASLUsers(state *RenderState) *corev1.Secret {
+ 				Kind:       "Secret",
+ 			},
+ 			ObjectMeta: metav1.ObjectMeta{
+-				Name:      state.Values.Auth.SASL.SecretRef,
+-				Namespace: state.Release.Namespace,
+-				Labels:    FullLabels(state),
++				Name:        state.Values.Auth.SASL.SecretRef,
++				Namespace:   state.Release.Namespace,
++				Labels:      FullLabels(state),
++				Annotations: FullAnnotations(state),
+ 			},
+ 			Type:       corev1.SecretTypeOpaque,
+ 			StringData: map[string]string{},
+@@ -315,9 +317,10 @@ func SecretBootstrapUser(state *RenderState) *corev1.Secret {
+ 			Kind:       "Secret",
+ 		},
+ 		ObjectMeta: metav1.ObjectMeta{
+-			Name:      secretName,
+-			Namespace: state.Release.Namespace,
+-			Labels:    FullLabels(state),
++			Name:        secretName,
++			Namespace:   state.Release.Namespace,
++			Labels:      FullLabels(state),
++			Annotations: FullAnnotations(state),
+ 		},
+ 		Immutable: ptr.To(true),
+ 		Type:      corev1.SecretTypeOpaque,
+@@ -338,9 +341,10 @@ func SecretFSValidator(state *RenderState, pool Pool) *corev1.Secret {
+ 			Kind:       "Secret",
+ 		},
+ 		ObjectMeta: metav1.ObjectMeta{
+-			Name:      fmt.Sprintf("%.49s-fs-validator", fmt.Sprintf("%s%s", Fullname(state), pool.Suffix())),
+-			Namespace: state.Release.Namespace,
+-			Labels:    FullLabels(state),
++			Name:        fmt.Sprintf("%.49s-fs-validator", fmt.Sprintf("%s%s", Fullname(state), pool.Suffix())),
++			Namespace:   state.Release.Namespace,
++			Labels:      FullLabels(state),
++			Annotations: FullAnnotations(state),
+ 		},
+ 		Type:       corev1.SecretTypeOpaque,
+ 		StringData: map[string]string{},
+@@ -394,9 +398,10 @@ func SecretConfigurator(state *RenderState, pool Pool, ordinalOffset int) *corev
+ 			Kind:       "Secret",
+ 		},
+ 		ObjectMeta: metav1.ObjectMeta{
+-			Name:      fmt.Sprintf("%.51s-configurator", fmt.Sprintf("%s%s", Fullname(state), pool.Suffix())),
+-			Namespace: state.Release.Namespace,
+-			Labels:    FullLabels(state),
++			Name:        fmt.Sprintf("%.51s-configurator", fmt.Sprintf("%s%s", Fullname(state), pool.Suffix())),
++			Namespace:   state.Release.Namespace,
++			Labels:      FullLabels(state),
++			Annotations: FullAnnotations(state),
+ 		},
+ 		Type:       corev1.SecretTypeOpaque,
+ 		StringData: map[string]string{},
+diff --git a/charts/redpanda/chart/service.gateway.go b/charts/redpanda/chart/service.gateway.go
+index fe6b7280..d4870dbc 100644
+--- a/charts/redpanda/chart/service.gateway.go
++++ b/charts/redpanda/chart/service.gateway.go
+@@ -47,9 +47,10 @@ func GatewayServices(state *RenderState) []*corev1.Service {
+ 			Kind:       "Service",
+ 		},
+ 		ObjectMeta: metav1.ObjectMeta{
+-			Name:      fmt.Sprintf("%s-gateway-bootstrap", Fullname(state)),
+-			Namespace: state.Release.Namespace,
+-			Labels:    labels,
++			Name:        fmt.Sprintf("%s-gateway-bootstrap", Fullname(state)),
++			Namespace:   state.Release.Namespace,
++			Labels:      labels,
++			Annotations: FullAnnotations(state),
+ 		},
+ 		Spec: corev1.ServiceSpec{
+ 			Ports:                    ports,
+@@ -77,9 +78,10 @@ func GatewayServices(state *RenderState) []*corev1.Service {
+ 				Kind:       "Service",
+ 			},
+ 			ObjectMeta: metav1.ObjectMeta{
+-				Name:      gatewayBrokerServiceName(podname),
+-				Namespace: state.Release.Namespace,
+-				Labels:    labels,
++				Name:        gatewayBrokerServiceName(podname),
++				Namespace:   state.Release.Namespace,
++				Labels:      labels,
++				Annotations: FullAnnotations(state),
+ 			},
+ 			Spec: corev1.ServiceSpec{
+ 				Ports:                    ports,
+diff --git a/charts/redpanda/chart/service.loadbalancer.go b/charts/redpanda/chart/service.loadbalancer.go
+index e8f29d80..903b133a 100644
+--- a/charts/redpanda/chart/service.loadbalancer.go
++++ b/charts/redpanda/chart/service.loadbalancer.go
+@@ -114,7 +114,7 @@ func LoadBalancerServices(state *RenderState) []*corev1.Service {
+ 				Name:        fmt.Sprintf("lb-%s", podname),
+ 				Namespace:   state.Release.Namespace,
+ 				Labels:      labels,
+-				Annotations: annotations,
++				Annotations: helmette.Merge(annotations, FullAnnotations(state)),
+ 			},
+ 			Spec: corev1.ServiceSpec{
+ 				ExternalTrafficPolicy:    corev1.ServiceExternalTrafficPolicyLocal,
+diff --git a/charts/redpanda/chart/service.nodeport.go b/charts/redpanda/chart/service.nodeport.go
+index 0487de00..36f4b844 100644
+--- a/charts/redpanda/chart/service.nodeport.go
++++ b/charts/redpanda/chart/service.nodeport.go
+@@ -136,7 +136,7 @@ func NodePortService(state *RenderState) *corev1.Service {
+ 			Name:        fmt.Sprintf("%s-external", ServiceName(state)),
+ 			Namespace:   state.Release.Namespace,
+ 			Labels:      FullLabels(state),
+-			Annotations: annotations,
++			Annotations: helmette.Merge(annotations, FullAnnotations(state)),
+ 		},
+ 		Spec: corev1.ServiceSpec{
+ 			ExternalTrafficPolicy:    corev1.ServiceExternalTrafficPolicyLocal,
+diff --git a/charts/redpanda/chart/service_internal.go b/charts/redpanda/chart/service_internal.go
+index 51d99be2..36ac7c10 100644
+--- a/charts/redpanda/chart/service_internal.go
++++ b/charts/redpanda/chart/service_internal.go
+@@ -91,7 +91,7 @@ func ServiceInternal(state *RenderState) *corev1.Service {
+ 			Name:        ServiceName(state),
+ 			Namespace:   state.Release.Namespace,
+ 			Labels:      helmette.Merge(FullLabels(state), MonitoringEnabledLabel(state)),
+-			Annotations: annotations,
++			Annotations: helmette.Merge(annotations, FullAnnotations(state)),
+ 		},
+ 		Spec: corev1.ServiceSpec{
+ 			Type:                     corev1.ServiceTypeClusterIP,
+diff --git a/charts/redpanda/chart/serviceaccount.go b/charts/redpanda/chart/serviceaccount.go
+index 83586013..a742a4dc 100644
+--- a/charts/redpanda/chart/serviceaccount.go
++++ b/charts/redpanda/chart/serviceaccount.go
+@@ -14,6 +14,8 @@ import (
+ 	corev1 "k8s.io/api/core/v1"
+ 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+ 	"k8s.io/utils/ptr"
++
++	"github.com/redpanda-data/redpanda-operator/gotohelm/helmette"
+ )
+ 
+ // Create the name of the service account to use
+@@ -45,7 +47,7 @@ func ServiceAccount(state *RenderState) *corev1.ServiceAccount {
+ 			Name:        ServiceAccountName(state),
+ 			Namespace:   state.Release.Namespace,
+ 			Labels:      FullLabels(state),
+-			Annotations: state.Values.ServiceAccount.Annotations,
++			Annotations: helmette.Merge(state.Values.ServiceAccount.Annotations, FullAnnotations(state)),
+ 		},
+ 		AutomountServiceAccountToken: ptr.To(false),
+ 	}
+diff --git a/charts/redpanda/chart/servicemonitor.go b/charts/redpanda/chart/servicemonitor.go
+index 48a5c005..ccc4385c 100644
+--- a/charts/redpanda/chart/servicemonitor.go
++++ b/charts/redpanda/chart/servicemonitor.go
+@@ -56,9 +56,10 @@ func ServiceMonitor(state *RenderState) *monitoringv1.ServiceMonitor {
+ 			Kind:       monitoringv1.ServiceMonitorsKind,
+ 		},
+ 		ObjectMeta: metav1.ObjectMeta{
+-			Name:      Fullname(state),
+-			Namespace: state.Release.Namespace,
+-			Labels:    helmette.Merge(FullLabels(state), state.Values.Monitoring.Labels),
++			Name:        Fullname(state),
++			Namespace:   state.Release.Namespace,
++			Labels:      helmette.Merge(FullLabels(state), state.Values.Monitoring.Labels),
++			Annotations: FullAnnotations(state),
+ 		},
+ 		Spec: monitoringv1.ServiceMonitorSpec{
+ 			Endpoints: []monitoringv1.Endpoint{endpoint},
+diff --git a/charts/redpanda/chart/statefulset.go b/charts/redpanda/chart/statefulset.go
+index 343356c1..faf7eca2 100644
+--- a/charts/redpanda/chart/statefulset.go
++++ b/charts/redpanda/chart/statefulset.go
+@@ -1316,6 +1316,9 @@ func StatefulSet(state *RenderState, pool Pool) *appsv1.StatefulSet {
+ 			Labels: helmette.Merge(map[string]string{
+ 				"app.kubernetes.io/component": fmt.Sprintf("%s%s", Name(state), pool.Suffix()),
+ 			}, poolLabels, FullLabels(state)),
++			// Only the StatefulSet object itself. Its volumeClaimTemplates are
++			// immutable, and annotating the Pod template would roll every broker.
++			Annotations: FullAnnotations(state),
+ 		},
+ 		Spec: appsv1.StatefulSetSpec{
+ 			Selector: &metav1.LabelSelector{
+diff --git a/charts/redpanda/chart/templates/_cert-issuers.go.tpl b/charts/redpanda/chart/templates/_cert-issuers.go.tpl
+index 15ba881b..273db688 100644
+Binary files a/charts/redpanda/chart/templates/_cert-issuers.go.tpl and b/charts/redpanda/chart/templates/_cert-issuers.go.tpl differ
+diff --git a/charts/redpanda/chart/templates/_certs.go.tpl b/charts/redpanda/chart/templates/_certs.go.tpl
+index 9868b782..4fa0b84c 100644
+Binary files a/charts/redpanda/chart/templates/_certs.go.tpl and b/charts/redpanda/chart/templates/_certs.go.tpl differ
+diff --git a/charts/redpanda/chart/templates/_chart.go.tpl b/charts/redpanda/chart/templates/_chart.go.tpl
+index 2f34affc..4a1fa04f 100644
+Binary files a/charts/redpanda/chart/templates/_chart.go.tpl and b/charts/redpanda/chart/templates/_chart.go.tpl differ
+diff --git a/charts/redpanda/chart/templates/_configmap.go.tpl b/charts/redpanda/chart/templates/_configmap.go.tpl
+index 7a863771..55ede221 100644
+Binary files a/charts/redpanda/chart/templates/_configmap.go.tpl and b/charts/redpanda/chart/templates/_configmap.go.tpl differ
+diff --git a/charts/redpanda/chart/templates/_helpers.go.tpl b/charts/redpanda/chart/templates/_helpers.go.tpl
+index b9be1505..08af0e60 100644
+Binary files a/charts/redpanda/chart/templates/_helpers.go.tpl and b/charts/redpanda/chart/templates/_helpers.go.tpl differ
+diff --git a/charts/redpanda/chart/templates/_poddisruptionbudget.go.tpl b/charts/redpanda/chart/templates/_poddisruptionbudget.go.tpl
+index a38d6b3a..fe302413 100644
+Binary files a/charts/redpanda/chart/templates/_poddisruptionbudget.go.tpl and b/charts/redpanda/chart/templates/_poddisruptionbudget.go.tpl differ
+diff --git a/charts/redpanda/chart/templates/_post-install-upgrade-job.go.tpl b/charts/redpanda/chart/templates/_post-install-upgrade-job.go.tpl
+index d59a5e16..82462547 100644
+Binary files a/charts/redpanda/chart/templates/_post-install-upgrade-job.go.tpl and b/charts/redpanda/chart/templates/_post-install-upgrade-job.go.tpl differ
+diff --git a/charts/redpanda/chart/templates/_rbac.go.tpl b/charts/redpanda/chart/templates/_rbac.go.tpl
+index 0b448475..a4cd6188 100644
+Binary files a/charts/redpanda/chart/templates/_rbac.go.tpl and b/charts/redpanda/chart/templates/_rbac.go.tpl differ
+diff --git a/charts/redpanda/chart/templates/_secrets.go.tpl b/charts/redpanda/chart/templates/_secrets.go.tpl
+index 5aa99a36..c071cf90 100644
+Binary files a/charts/redpanda/chart/templates/_secrets.go.tpl and b/charts/redpanda/chart/templates/_secrets.go.tpl differ
+diff --git a/charts/redpanda/chart/templates/_service.gateway.go.tpl b/charts/redpanda/chart/templates/_service.gateway.go.tpl
+index e6b2dfa8..72325cdb 100644
+Binary files a/charts/redpanda/chart/templates/_service.gateway.go.tpl and b/charts/redpanda/chart/templates/_service.gateway.go.tpl differ
+diff --git a/charts/redpanda/chart/templates/_service.internal.go.tpl b/charts/redpanda/chart/templates/_service.internal.go.tpl
+index 55c76214..e02cfcf8 100644
+Binary files a/charts/redpanda/chart/templates/_service.internal.go.tpl and b/charts/redpanda/chart/templates/_service.internal.go.tpl differ
+diff --git a/charts/redpanda/chart/templates/_service.loadbalancer.go.tpl b/charts/redpanda/chart/templates/_service.loadbalancer.go.tpl
+index edb6e259..c81c1670 100644
+Binary files a/charts/redpanda/chart/templates/_service.loadbalancer.go.tpl and b/charts/redpanda/chart/templates/_service.loadbalancer.go.tpl differ
+diff --git a/charts/redpanda/chart/templates/_service.nodeport.go.tpl b/charts/redpanda/chart/templates/_service.nodeport.go.tpl
+index c37d18b5..b3e7ecc4 100644
+Binary files a/charts/redpanda/chart/templates/_service.nodeport.go.tpl and b/charts/redpanda/chart/templates/_service.nodeport.go.tpl differ
+diff --git a/charts/redpanda/chart/templates/_serviceaccount.go.tpl b/charts/redpanda/chart/templates/_serviceaccount.go.tpl
+index f118dda0..27df2651 100644
+Binary files a/charts/redpanda/chart/templates/_serviceaccount.go.tpl and b/charts/redpanda/chart/templates/_serviceaccount.go.tpl differ
+diff --git a/charts/redpanda/chart/templates/_servicemonitor.go.tpl b/charts/redpanda/chart/templates/_servicemonitor.go.tpl
+index 0d3f2f4c..b73d4d04 100644
+Binary files a/charts/redpanda/chart/templates/_servicemonitor.go.tpl and b/charts/redpanda/chart/templates/_servicemonitor.go.tpl differ
+diff --git a/charts/redpanda/chart/templates/_statefulset.go.tpl b/charts/redpanda/chart/templates/_statefulset.go.tpl
+index 0f938671..8475952c 100644
+Binary files a/charts/redpanda/chart/templates/_statefulset.go.tpl and b/charts/redpanda/chart/templates/_statefulset.go.tpl differ
+diff --git a/charts/redpanda/chart/templates/_tlsroute.go.tpl b/charts/redpanda/chart/templates/_tlsroute.go.tpl
+index e8d8e669..f3de3784 100644
+Binary files a/charts/redpanda/chart/templates/_tlsroute.go.tpl and b/charts/redpanda/chart/templates/_tlsroute.go.tpl differ
+diff --git a/charts/redpanda/chart/templates/_values.go.tpl b/charts/redpanda/chart/templates/_values.go.tpl
+index c999237a..2ff1497e 100644
+Binary files a/charts/redpanda/chart/templates/_values.go.tpl and b/charts/redpanda/chart/templates/_values.go.tpl differ
+diff --git a/charts/redpanda/chart/tlsroute.go b/charts/redpanda/chart/tlsroute.go
+index c9d95605..f0e744bb 100644
+--- a/charts/redpanda/chart/tlsroute.go
++++ b/charts/redpanda/chart/tlsroute.go
+@@ -29,6 +29,7 @@ func TLSRoutes(state *RenderState) []*gatewayv1.TLSRoute {
+ 
+ 	gw := state.Values.External.Gateway
+ 	labels := FullLabels(state)
++	annotations := FullAnnotations(state)
+ 	fullname := Fullname(state)
+ 
+ 	pods := gatewayPodNames(state)
+@@ -39,7 +40,7 @@ func TLSRoutes(state *RenderState) []*gatewayv1.TLSRoute {
+ 		if !ptr.Deref(listener.Enabled, state.Values.External.Enabled) || !listener.IsGatewayListener() {
+ 			continue
+ 		}
+-		rs := tlsRoutesForListener(fullname, state.Release.Namespace, labels, gw.ParentRefs, pods, ptr.Deref(listener.Host, ""), ptr.Deref(listener.HostTemplate, ""), name, "kafka", listener.Port)
++		rs := tlsRoutesForListener(fullname, state.Release.Namespace, labels, annotations, gw.ParentRefs, pods, ptr.Deref(listener.Host, ""), ptr.Deref(listener.HostTemplate, ""), name, "kafka", listener.Port)
+ 		routes = append(routes, rs...)
+ 	}
+ 
+@@ -47,7 +48,7 @@ func TLSRoutes(state *RenderState) []*gatewayv1.TLSRoute {
+ 		if !ptr.Deref(listener.Enabled, state.Values.External.Enabled) || !listener.IsGatewayListener() {
+ 			continue
+ 		}
+-		rs := tlsRoutesForListener(fullname, state.Release.Namespace, labels, gw.ParentRefs, pods, ptr.Deref(listener.Host, ""), ptr.Deref(listener.HostTemplate, ""), name, "http", listener.Port)
++		rs := tlsRoutesForListener(fullname, state.Release.Namespace, labels, annotations, gw.ParentRefs, pods, ptr.Deref(listener.Host, ""), ptr.Deref(listener.HostTemplate, ""), name, "http", listener.Port)
+ 		routes = append(routes, rs...)
+ 	}
+ 
+@@ -55,7 +56,7 @@ func TLSRoutes(state *RenderState) []*gatewayv1.TLSRoute {
+ 		if !ptr.Deref(listener.Enabled, state.Values.External.Enabled) || !listener.IsGatewayListener() {
+ 			continue
+ 		}
+-		rs := tlsRoutesForListener(fullname, state.Release.Namespace, labels, gw.ParentRefs, pods, ptr.Deref(listener.Host, ""), ptr.Deref(listener.HostTemplate, ""), name, "admin", listener.Port)
++		rs := tlsRoutesForListener(fullname, state.Release.Namespace, labels, annotations, gw.ParentRefs, pods, ptr.Deref(listener.Host, ""), ptr.Deref(listener.HostTemplate, ""), name, "admin", listener.Port)
+ 		routes = append(routes, rs...)
+ 	}
+ 
+@@ -63,14 +64,14 @@ func TLSRoutes(state *RenderState) []*gatewayv1.TLSRoute {
+ 		if !ptr.Deref(listener.Enabled, state.Values.External.Enabled) || !listener.IsGatewayListener() {
+ 			continue
+ 		}
+-		rs := tlsRoutesForListener(fullname, state.Release.Namespace, labels, gw.ParentRefs, pods, ptr.Deref(listener.Host, ""), ptr.Deref(listener.HostTemplate, ""), name, "schema", listener.Port)
++		rs := tlsRoutesForListener(fullname, state.Release.Namespace, labels, annotations, gw.ParentRefs, pods, ptr.Deref(listener.Host, ""), ptr.Deref(listener.HostTemplate, ""), name, "schema", listener.Port)
+ 		routes = append(routes, rs...)
+ 	}
+ 
+ 	return routes
+ }
+ 
+-func tlsRoutesForListener(fullname string, namespace string, labels map[string]string, parentRefs []gatewayv1.ParentReference, pods []string, host string, hostTemplate string, name string, listenerTag string, port int32) []*gatewayv1.TLSRoute {
++func tlsRoutesForListener(fullname string, namespace string, labels map[string]string, annotations map[string]string, parentRefs []gatewayv1.ParentReference, pods []string, host string, hostTemplate string, name string, listenerTag string, port int32) []*gatewayv1.TLSRoute {
+ 	// Invariants (host present; kafka multi-broker requires hostTemplate) are
+ 	// enforced upfront by validateGatewayListeners so misconfigurations surface
+ 	// as a single clear error before any rendering. By the time we get here the
+@@ -86,9 +87,10 @@ func tlsRoutesForListener(fullname string, namespace string, labels map[string]s
+ 			Kind:       "TLSRoute",
+ 		},
+ 		ObjectMeta: metav1.ObjectMeta{
+-			Name:      fmt.Sprintf("%s-%s-%s-bootstrap", fullname, listenerTag, name),
+-			Namespace: namespace,
+-			Labels:    labels,
++			Name:        fmt.Sprintf("%s-%s-%s-bootstrap", fullname, listenerTag, name),
++			Namespace:   namespace,
++			Labels:      labels,
++			Annotations: annotations,
+ 		},
+ 		Spec: gatewayv1.TLSRouteSpec{
+ 			CommonRouteSpec: gatewayv1.CommonRouteSpec{
+@@ -125,9 +127,10 @@ func tlsRoutesForListener(fullname string, namespace string, labels map[string]s
+ 				Kind:       "TLSRoute",
+ 			},
+ 			ObjectMeta: metav1.ObjectMeta{
+-				Name:      fmt.Sprintf("%s-%s-%s-%d", fullname, listenerTag, name, i),
+-				Namespace: namespace,
+-				Labels:    labels,
++				Name:        fmt.Sprintf("%s-%s-%s-%d", fullname, listenerTag, name, i),
++				Namespace:   namespace,
++				Labels:      labels,
++				Annotations: annotations,
+ 			},
+ 			Spec: gatewayv1.TLSRouteSpec{
+ 				CommonRouteSpec: gatewayv1.CommonRouteSpec{
+diff --git a/charts/redpanda/chart/tlsroute_test.go b/charts/redpanda/chart/tlsroute_test.go
+index 0072b8a3..20cbdb85 100644
+--- a/charts/redpanda/chart/tlsroute_test.go
++++ b/charts/redpanda/chart/tlsroute_test.go
+@@ -141,6 +141,7 @@ func TestTLSRoutesForHTTPListenerAllowsBootstrapOnlyHost(t *testing.T) {
+ 		"redpanda",
+ 		"default",
+ 		map[string]string{"app": "redpanda"},
++		map[string]string{"my.co/team": "platform"},
+ 		[]gatewayv1.ParentReference{{Name: "shared-gateway"}},
+ 		[]string{"redpanda-0", "redpanda-1"},
+ 		"proxy.example.com",
+diff --git a/charts/redpanda/chart/values.go b/charts/redpanda/chart/values.go
+index a9672d68..1c7fc546 100644
+--- a/charts/redpanda/chart/values.go
++++ b/charts/redpanda/chart/values.go
+@@ -84,33 +84,34 @@ type Values struct {
+ 	// Global is an untyped map of values that are "global" to this chart and
+ 	// all its sub-charts.
+ 	// See also: https://helm.sh/docs/chart_template_guide/subcharts_and_globals/#global-chart-values
+-	Global           map[string]any             `json:"global,omitempty"`
+-	NameOverride     string                     `json:"nameOverride"`
+-	FullnameOverride string                     `json:"fullnameOverride"`
+-	ClusterDomain    string                     `json:"clusterDomain"`
+-	CommonLabels     map[string]string          `json:"commonLabels"`
+-	Image            Image                      `json:"image" jsonschema:"required,description=Values used to define the container image to be used for Redpanda"`
+-	Service          *Service                   `json:"service"`
+-	LicenseKey       string                     `json:"license_key" jsonschema:"deprecated,pattern=^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?\\.(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$|^$"`
+-	AuditLogging     AuditLogging               `json:"auditLogging"`
+-	Enterprise       Enterprise                 `json:"enterprise"`
+-	RackAwareness    RackAwareness              `json:"rackAwareness"`
+-	Console          consolechart.PartialValues `json:"console,omitempty"`
+-	Auth             Auth                       `json:"auth"`
+-	TLS              TLS                        `json:"tls"`
+-	External         ExternalConfig             `json:"external"`
+-	Logging          Logging                    `json:"logging"`
+-	Monitoring       Monitoring                 `json:"monitoring"`
+-	Resources        RedpandaResources          `json:"resources"`
+-	Storage          Storage                    `json:"storage"`
+-	PostInstallJob   PostInstallJob             `json:"post_install_job"`
+-	Statefulset      Statefulset                `json:"statefulset"`
+-	ServiceAccount   ServiceAccountCfg          `json:"serviceAccount"`
+-	RBAC             RBAC                       `json:"rbac"`
+-	Tuning           Tuning                     `json:"tuning"`
+-	Listeners        Listeners                  `json:"listeners"`
+-	Config           Config                     `json:"config"`
+-	Tests            *struct {
++	Global            map[string]any             `json:"global,omitempty"`
++	NameOverride      string                     `json:"nameOverride"`
++	FullnameOverride  string                     `json:"fullnameOverride"`
++	ClusterDomain     string                     `json:"clusterDomain"`
++	CommonLabels      map[string]string          `json:"commonLabels"`
++	CommonAnnotations map[string]string          `json:"commonAnnotations"`
++	Image             Image                      `json:"image" jsonschema:"required,description=Values used to define the container image to be used for Redpanda"`
++	Service           *Service                   `json:"service"`
++	LicenseKey        string                     `json:"license_key" jsonschema:"deprecated,pattern=^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?\\.(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$|^$"`
++	AuditLogging      AuditLogging               `json:"auditLogging"`
++	Enterprise        Enterprise                 `json:"enterprise"`
++	RackAwareness     RackAwareness              `json:"rackAwareness"`
++	Console           consolechart.PartialValues `json:"console,omitempty"`
++	Auth              Auth                       `json:"auth"`
++	TLS               TLS                        `json:"tls"`
++	External          ExternalConfig             `json:"external"`
++	Logging           Logging                    `json:"logging"`
++	Monitoring        Monitoring                 `json:"monitoring"`
++	Resources         RedpandaResources          `json:"resources"`
++	Storage           Storage                    `json:"storage"`
++	PostInstallJob    PostInstallJob             `json:"post_install_job"`
++	Statefulset       Statefulset                `json:"statefulset"`
++	ServiceAccount    ServiceAccountCfg          `json:"serviceAccount"`
++	RBAC              RBAC                       `json:"rbac"`
++	Tuning            Tuning                     `json:"tuning"`
++	Listeners         Listeners                  `json:"listeners"`
++	Config            Config                     `json:"config"`
++	Tests             *struct {
+ 		Enabled bool `json:"enabled"`
+ 	} `json:"tests"`
+ 	Force       bool        `json:"force"`
+diff --git a/charts/redpanda/chart/values.schema.json b/charts/redpanda/chart/values.schema.json
+index 0f081bc8..a74840bc 100644
+--- a/charts/redpanda/chart/values.schema.json
++++ b/charts/redpanda/chart/values.schema.json
+@@ -174,6 +174,12 @@
+     "clusterDomain": {
+       "type": "string"
+     },
++    "commonAnnotations": {
++      "additionalProperties": {
++        "type": "string"
++      },
++      "type": "object"
++    },
+     "commonLabels": {
+       "additionalProperties": {
+         "type": "string"
+diff --git a/charts/redpanda/chart/values.yaml b/charts/redpanda/chart/values.yaml
+index 37becf6b..03640ae2 100644
+--- a/charts/redpanda/chart/values.yaml
++++ b/charts/redpanda/chart/values.yaml
+@@ -33,6 +33,13 @@ clusterDomain: cluster.local.
+ # -- Additional labels to add to all Kubernetes objects.
+ # For example, `my.k8s.service: redpanda`.
+ commonLabels: {}
++# -- Additional annotations to add to all Kubernetes objects the chart renders,
++# except the StatefulSet Pod template (annotating the Pods would restart the
++# brokers). Annotations set on an individual resource, and the Helm hook
++# annotations the chart needs, take precedence. Console objects rendered by the
++# console subchart's own templates take theirs from `console.commonAnnotations`.
++# For example, `argocd.argoproj.io/sync-wave: "1"`.
++commonAnnotations: {}
+ 
+ # -- Redpanda Docker image settings.
+ image:
+diff --git a/charts/redpanda/chart/values_partial.gen.go b/charts/redpanda/chart/values_partial.gen.go
+index eebbe6d3..d19b58dd 100644
+--- a/charts/redpanda/chart/values_partial.gen.go
++++ b/charts/redpanda/chart/values_partial.gen.go
+@@ -25,33 +25,34 @@ import (
+ )
+ 
+ type PartialValues struct {
+-	Global           map[string]any              "json:\"global,omitempty\""
+-	NameOverride     *string                     "json:\"nameOverride,omitempty\""
+-	FullnameOverride *string                     "json:\"fullnameOverride,omitempty\""
+-	ClusterDomain    *string                     "json:\"clusterDomain,omitempty\""
+-	CommonLabels     map[string]string           "json:\"commonLabels,omitempty\""
+-	Image            *PartialImage               "json:\"image,omitempty\" jsonschema:\"required,description=Values used to define the container image to be used for Redpanda\""
+-	Service          *PartialService             "json:\"service,omitempty\""
+-	LicenseKey       *string                     "json:\"license_key,omitempty\" jsonschema:\"deprecated,pattern=^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?\\\\.(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$|^$\""
+-	AuditLogging     *PartialAuditLogging        "json:\"auditLogging,omitempty\""
+-	Enterprise       *PartialEnterprise          "json:\"enterprise,omitempty\""
+-	RackAwareness    *PartialRackAwareness       "json:\"rackAwareness,omitempty\""
+-	Console          *consolechart.PartialValues "json:\"console,omitempty\""
+-	Auth             *PartialAuth                "json:\"auth,omitempty\""
+-	TLS              *PartialTLS                 "json:\"tls,omitempty\""
+-	External         *PartialExternalConfig      "json:\"external,omitempty\""
+-	Logging          *PartialLogging             "json:\"logging,omitempty\""
+-	Monitoring       *PartialMonitoring          "json:\"monitoring,omitempty\""
+-	Resources        *PartialRedpandaResources   "json:\"resources,omitempty\""
+-	Storage          *PartialStorage             "json:\"storage,omitempty\""
+-	PostInstallJob   *PartialPostInstallJob      "json:\"post_install_job,omitempty\""
+-	Statefulset      *PartialStatefulset         "json:\"statefulset,omitempty\""
+-	ServiceAccount   *PartialServiceAccountCfg   "json:\"serviceAccount,omitempty\""
+-	RBAC             *PartialRBAC                "json:\"rbac,omitempty\""
+-	Tuning           *PartialTuning              "json:\"tuning,omitempty\""
+-	Listeners        *PartialListeners           "json:\"listeners,omitempty\""
+-	Config           *PartialConfig              "json:\"config,omitempty\""
+-	Tests            *struct {
++	Global            map[string]any              "json:\"global,omitempty\""
++	NameOverride      *string                     "json:\"nameOverride,omitempty\""
++	FullnameOverride  *string                     "json:\"fullnameOverride,omitempty\""
++	ClusterDomain     *string                     "json:\"clusterDomain,omitempty\""
++	CommonLabels      map[string]string           "json:\"commonLabels,omitempty\""
++	CommonAnnotations map[string]string           "json:\"commonAnnotations,omitempty\""
++	Image             *PartialImage               "json:\"image,omitempty\" jsonschema:\"required,description=Values used to define the container image to be used for Redpanda\""
++	Service           *PartialService             "json:\"service,omitempty\""
++	LicenseKey        *string                     "json:\"license_key,omitempty\" jsonschema:\"deprecated,pattern=^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?\\\\.(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$|^$\""
++	AuditLogging      *PartialAuditLogging        "json:\"auditLogging,omitempty\""
++	Enterprise        *PartialEnterprise          "json:\"enterprise,omitempty\""
++	RackAwareness     *PartialRackAwareness       "json:\"rackAwareness,omitempty\""
++	Console           *consolechart.PartialValues "json:\"console,omitempty\""
++	Auth              *PartialAuth                "json:\"auth,omitempty\""
++	TLS               *PartialTLS                 "json:\"tls,omitempty\""
++	External          *PartialExternalConfig      "json:\"external,omitempty\""
++	Logging           *PartialLogging             "json:\"logging,omitempty\""
++	Monitoring        *PartialMonitoring          "json:\"monitoring,omitempty\""
++	Resources         *PartialRedpandaResources   "json:\"resources,omitempty\""
++	Storage           *PartialStorage             "json:\"storage,omitempty\""
++	PostInstallJob    *PartialPostInstallJob      "json:\"post_install_job,omitempty\""
++	Statefulset       *PartialStatefulset         "json:\"statefulset,omitempty\""
++	ServiceAccount    *PartialServiceAccountCfg   "json:\"serviceAccount,omitempty\""
++	RBAC              *PartialRBAC                "json:\"rbac,omitempty\""
++	Tuning            *PartialTuning              "json:\"tuning,omitempty\""
++	Listeners         *PartialListeners           "json:\"listeners,omitempty\""
++	Config            *PartialConfig              "json:\"config,omitempty\""
++	Tests             *struct {
+ 		Enabled *bool "json:\"enabled,omitempty\""
+ 	} "json:\"tests,omitempty\""
+ 	Force       *bool               "json:\"force,omitempty\""
+diff --git a/operator/chart/README.md b/operator/chart/README.md
+index 6362fa7b..69dc9c41 100644
+--- a/operator/chart/README.md
++++ b/operator/chart/README.md
+@@ -40,12 +40,6 @@ Sets the Kubernetes cluster domain.
+ 
+ **Default:** `"cluster.local"`
+ 
+-### [commonAnnotations](https://artifacthub.io/packages/helm/redpanda-data/operator?modal=values&path=commonAnnotations)
+-
+-Additional annotations to add to all resources managed by the operator. Useful for satisfying OPA Gatekeeper RequiredAnnotations constraints. For example, `owner: "platform-team@example.com"`.
+-
+-**Default:** `{}`
+-
+ ### [commonLabels](https://artifacthub.io/packages/helm/redpanda-data/operator?modal=values&path=commonLabels)
+ 
+ Additional labels to add to all Kubernetes objects. For example, `my.k8s.service: redpanda-operator`.
+@@ -128,6 +122,12 @@ Sets the port for the webhook server to listen on.
+ 
+ **Default:** `9443`
+ 
++### [connectAnnotations](https://artifacthub.io/packages/helm/redpanda-data/operator?modal=values&path=connectAnnotations)
++
++Additional annotations the operator adds to the resources it creates for Redpanda Connect pipelines. Passed to the operator as `--connect-annotations`. Per-pipeline `spec.annotations` take precedence. For example, `owner: "platform-team@example.com"`.
++
++**Default:** `{}`
++
+ ### [connectController](https://artifacthub.io/packages/helm/redpanda-data/operator?modal=values&path=connectController)
+ 
+ Enables the Redpanda Connect controller for managing Connect pipeline CRs. Requires an operator-level enterprise license that includes the Redpanda Connect product, configured via `enterprise.licenseSecretRef`; without one, every Pipeline reconciles to `License=False` / `LicenseInvalid` and gets no workload. Note: Pipeline CRs carry an operator finalizer — disabling this while Pipeline CRs exist blocks their deletion until the controller is re-enabled (or the finalizer is removed by hand). Delete Pipelines before disabling.
+diff --git a/operator/chart/certificates.go b/operator/chart/certificates.go
+index 85a07f07..ca35c94f 100644
+--- a/operator/chart/certificates.go
++++ b/operator/chart/certificates.go
+@@ -40,7 +40,7 @@ func Certificate(dot *helmette.Dot) *certmanagerv1.Certificate {
+ 			Name:        CertificateName(dot),
+ 			Namespace:   dot.Release.Namespace,
+ 			Labels:      Labels(dot),
+-			Annotations: values.Annotations,
++			Annotations: Annotations(dot, nil),
+ 		},
+ 		Spec: certmanagerv1.CertificateSpec{
+ 			DNSNames: []string{
+@@ -80,7 +80,7 @@ func Issuer(dot *helmette.Dot) *certmanagerv1.Issuer {
+ 			Name:        cleanForK8sWithSuffix(Fullname(dot), "selfsigned-issuer"),
+ 			Namespace:   dot.Release.Namespace,
+ 			Labels:      Labels(dot),
+-			Annotations: values.Annotations,
++			Annotations: Annotations(dot, nil),
+ 		},
+ 		Spec: certmanagerv1.IssuerSpec{
+ 			IssuerConfig: certmanagerv1.IssuerConfig{
+diff --git a/operator/chart/chart_test.go b/operator/chart/chart_test.go
+index f2ec85de..4907cfc5 100644
+--- a/operator/chart/chart_test.go
++++ b/operator/chart/chart_test.go
+@@ -27,6 +27,8 @@ import (
+ 	"github.com/stretchr/testify/assert"
+ 	"github.com/stretchr/testify/require"
+ 	"golang.org/x/tools/txtar"
++	appsv1 "k8s.io/api/apps/v1"
++	batchv1 "k8s.io/api/batch/v1"
+ 	corev1 "k8s.io/api/core/v1"
+ 	rbacv1 "k8s.io/api/rbac/v1"
+ 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+@@ -557,6 +559,63 @@ func TestGenerateCases(t *testing.T) {
+ 	require.NoError(t, os.WriteFile("testdata/template-cases-generated.txtar", archive, 0o644))
+ }
+ 
++// TestAnnotations asserts that the chart's `annotations` value reaches every
++// object the chart renders except Pod templates, that no object is rendered
++// with a nil annotations map (#1085), and that the value cannot change the Helm
++// hook annotations on the chart's hook Jobs, ServiceAccounts and RBAC.
++func TestAnnotations(t *testing.T) {
++	hookKeys := []string{"helm.sh/hook", "helm.sh/hook-weight", "helm.sh/hook-delete-policy"}
++
++	render := func(t *testing.T, values PartialValues) map[string]map[string]string {
++		values.CRDs = &PartialCRDs{Enabled: ptr.To(true)}
++		values.Monitoring = &PartialMonitoringConfig{Enabled: ptr.To(true), RulesEnabled: ptr.To(true)}
++		values.Webhook = &PartialWebhook{Enabled: ptr.To(true)}
++
++		objs, err := Chart.Render(nil, helmette.Release{Name: "operator", Namespace: "redpanda"}, values)
++		require.NoError(t, err)
++
++		annotations := map[string]map[string]string{}
++		for _, obj := range objs {
++			key := fmt.Sprintf("%T %q", obj, obj.GetName())
++			got := obj.GetAnnotations()
++			require.NotNil(t, got, "%s has nil annotations (#1085)", key)
++			annotations[key] = got
++
++			switch obj := obj.(type) {
++			case *appsv1.Deployment:
++				require.NotContains(t, obj.Spec.Template.Annotations, "my.co/owner", "%s pod template", key)
++			case *batchv1.Job:
++				require.NotContains(t, obj.Spec.Template.Annotations, "my.co/owner", "%s pod template", key)
++			}
++		}
++		return annotations
++	}
++
++	base := render(t, PartialValues{})
++	got := render(t, PartialValues{
++		Annotations: map[string]string{
++			"my.co/owner":                "ops",
++			"helm.sh/hook":               "bogus",
++			"helm.sh/hook-weight":        "999",
++			"helm.sh/hook-delete-policy": "bogus",
++		},
++	})
++	require.Equal(t, len(base), len(got))
++
++	var hooks int
++	for key, annotations := range got {
++		require.Equal(t, "ops", annotations["my.co/owner"], key)
++
++		if _, isHook := base[key]["helm.sh/hook"]; isHook {
++			hooks++
++			for _, hookKey := range hookKeys {
++				require.Equal(t, base[key][hookKey], annotations[hookKey], "%s: %s", key, hookKey)
++			}
++		}
++	}
++	require.NotZero(t, hooks, "expected hook objects to be rendered")
++}
++
+ func makeSureTagIsNotEmptyString(values PartialValues, fuzzer *fuzz.Fuzzer) {
+ 	if values.Image != nil && values.Image.Tag != nil && len(*values.Image.Tag) == 0 {
+ 		t := values.Image.Tag
+diff --git a/operator/chart/configmap.go b/operator/chart/configmap.go
+index f429ff6f..4d2a9ec2 100644
+--- a/operator/chart/configmap.go
++++ b/operator/chart/configmap.go
+@@ -29,7 +29,7 @@ func ConfigMap(dot *helmette.Dot) *corev1.ConfigMap {
+ 			Name:        cleanForK8sWithSuffix(Fullname(dot), "config"),
+ 			Namespace:   dot.Release.Namespace,
+ 			Labels:      Labels(dot),
+-			Annotations: values.Annotations,
++			Annotations: Annotations(dot, nil),
+ 		},
+ 		Data: map[string]string{
+ 			"controller_manager_config.yaml": helmette.ToYaml(values.Config),
+diff --git a/operator/chart/deployment.go b/operator/chart/deployment.go
+index d6a91569..af9d7171 100644
+--- a/operator/chart/deployment.go
++++ b/operator/chart/deployment.go
+@@ -68,7 +68,7 @@ func SingleClusterDeployment(dot *helmette.Dot) *appsv1.Deployment {
+ 			Name:        Fullname(dot),
+ 			Labels:      Labels(dot),
+ 			Namespace:   dot.Release.Namespace,
+-			Annotations: values.Annotations,
++			Annotations: Annotations(dot, nil),
+ 		},
+ 		Spec: appsv1.DeploymentSpec{
+ 			Replicas: ptr.To(values.ReplicaCount),
+@@ -410,16 +410,16 @@ func operatorArguments(dot *helmette.Dot) []string {
+ 		defaults["--enable-shadowlinks"] = "true"
+ 	}
+ 
+-	if len(values.CommonAnnotations) > 0 {
+-		// Build comma-separated key=value pairs for --common-annotations flag.
++	if len(values.ConnectAnnotations) > 0 {
++		// Build comma-separated key=value pairs for --connect-annotations flag.
+ 		annotationArg := ""
+-		for key, value := range helmette.SortedMap(values.CommonAnnotations) {
++		for key, value := range helmette.SortedMap(values.ConnectAnnotations) {
+ 			if annotationArg != "" {
+ 				annotationArg = annotationArg + ","
+ 			}
+ 			annotationArg = annotationArg + quoteFlagMapPair(fmt.Sprintf("%s=%s", key, value))
+ 		}
+-		defaults["--common-annotations"] = annotationArg
++		defaults["--connect-annotations"] = annotationArg
+ 	}
+ 
+ 	if values.Webhook.Enabled {
+@@ -445,7 +445,7 @@ func operatorArguments(dot *helmette.Dot) []string {
+ }
+ 
+ // quoteFlagMapPair CSV-quotes a single key=value pair destined for a
+-// comma-joined pflag StringToString flag (--common-annotations,
++// comma-joined pflag StringToString flag (--connect-annotations,
+ // --connect-monitoring-labels). pflag parses multi-pair values with
+ // encoding/csv, so an unquoted comma (or double quote) inside a value splits
+ // mid-pair and fails flag parsing — a values-only change that would
+diff --git a/operator/chart/deployment_test.go b/operator/chart/deployment_test.go
+index aaf8a4f0..0bf454d2 100644
+--- a/operator/chart/deployment_test.go
++++ b/operator/chart/deployment_test.go
+@@ -154,12 +154,12 @@ func TestChangeDefaultFlag(t *testing.T) {
+ 	})
+ }
+ 
+-// TestCommonAnnotationsFlagRoundTrip proves the rendered --common-annotations
++// TestConnectAnnotationsFlagRoundTrip proves the rendered --connect-annotations
+ // value parses back through the exact pflag machinery the operator binary
+ // uses. pflag's StringToString splits multi-pair values with encoding/csv, so
+ // an unquoted comma inside an annotation value used to split mid-pair and
+ // crash-loop the operator at startup — a values-only breakage.
+-func TestCommonAnnotationsFlagRoundTrip(t *testing.T) {
++func TestConnectAnnotationsFlagRoundTrip(t *testing.T) {
+ 	annotations := map[string]string{
+ 		"owner":       "platform-team@example.com",
+ 		"description": "primary, staging, and dev clusters", // commas — the regression
+@@ -167,22 +167,22 @@ func TestCommonAnnotationsFlagRoundTrip(t *testing.T) {
+ 	}
+ 
+ 	spec := renderDeployment(t, map[string]any{
+-		"commonAnnotations": annotations,
++		"connectAnnotations": annotations,
+ 	}).Spec.Template.Spec
+ 
+ 	var rendered string
+ 	for _, arg := range spec.Containers[0].Args {
+-		if strings.HasPrefix(arg, "--common-annotations=") {
+-			rendered = strings.TrimPrefix(arg, "--common-annotations=")
++		if strings.HasPrefix(arg, "--connect-annotations=") {
++			rendered = strings.TrimPrefix(arg, "--connect-annotations=")
+ 		}
+ 	}
+-	require.NotEmpty(t, rendered, "expected a --common-annotations argument")
++	require.NotEmpty(t, rendered, "expected a --connect-annotations argument")
+ 
+ 	// Parse with the same flag type the operator binary registers.
+ 	parsed := map[string]string{}
+ 	fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
+-	fs.StringToStringVar(&parsed, "common-annotations", nil, "")
+-	require.NoError(t, fs.Parse([]string{"--common-annotations=" + rendered}),
++	fs.StringToStringVar(&parsed, "connect-annotations", nil, "")
++	require.NoError(t, fs.Parse([]string{"--connect-annotations=" + rendered}),
+ 		"the rendered flag value must survive pflag's CSV parsing")
+ 	assert.Equal(t, annotations, parsed)
+ }
+diff --git a/operator/chart/helpers.go b/operator/chart/helpers.go
+index 0eeb23af..4fe1c0e9 100644
+--- a/operator/chart/helpers.go
++++ b/operator/chart/helpers.go
+@@ -75,6 +75,19 @@ func SelectorLabels(dot *helmette.Dot) map[string]string {
+ 	}
+ }
+ 
++// Annotations returns an object's annotations: the chart's `annotations` value
++// overlaid by the object's own (which win), never nil — a rendered
++// `annotations: null` differs from a live object's absent map and shows up as
++// permanent drift in ArgoCD (#1085).
++func Annotations(dot *helmette.Dot, overrides map[string]string) map[string]string {
++	values := helmette.Unwrap[Values](dot.Values)
++
++	return helmette.Merge(
++		helmette.Default(map[string]string{}, overrides),
++		helmette.Default(map[string]string{}, values.Annotations),
++	)
++}
++
+ func cleanForK8s(s string) string {
+ 	return helmette.TrimSuffix("-", helmette.Trunc(63, s))
+ }
+diff --git a/operator/chart/multicluster_deployment.go b/operator/chart/multicluster_deployment.go
+index 0c7f9dbb..24ebbc52 100644
+--- a/operator/chart/multicluster_deployment.go
++++ b/operator/chart/multicluster_deployment.go
+@@ -46,7 +46,7 @@ func MulticlusterDeployment(dot *helmette.Dot) *appsv1.Deployment {
+ 			Name:        Fullname(dot),
+ 			Labels:      Labels(dot),
+ 			Namespace:   dot.Release.Namespace,
+-			Annotations: values.Annotations,
++			Annotations: Annotations(dot, nil),
+ 		},
+ 		Spec: appsv1.DeploymentSpec{
+ 			Replicas: ptr.To(values.ReplicaCount),
+diff --git a/operator/chart/post_upgrade_migration_job.go b/operator/chart/post_upgrade_migration_job.go
+index aa9ca49d..aa666ee6 100644
+--- a/operator/chart/post_upgrade_migration_job.go
++++ b/operator/chart/post_upgrade_migration_job.go
+@@ -36,12 +36,12 @@ func PostUpgradeMigrationJob(dot *helmette.Dot) *batchv1.Job {
+ 			Labels: helmette.Merge(
+ 				Labels(dot),
+ 			),
+-			Annotations: map[string]string{
++			Annotations: Annotations(dot, map[string]string{
+ 				"helm.sh/hook":               "post-upgrade",
+ 				"helm.sh/hook-delete-policy": "before-hook-creation,hook-succeeded,hook-failed",
+ 				// run this after the CRD job
+ 				"helm.sh/hook-weight": "-4",
+-			},
++			}),
+ 		},
+ 		Spec: batchv1.JobSpec{
+ 			Template: corev1.PodTemplateSpec{
+diff --git a/operator/chart/pre_install_crd_job.go b/operator/chart/pre_install_crd_job.go
+index 53c877fb..8f9a3464 100644
+--- a/operator/chart/pre_install_crd_job.go
++++ b/operator/chart/pre_install_crd_job.go
+@@ -41,11 +41,11 @@ func PreInstallCRDJob(dot *helmette.Dot) *batchv1.Job {
+ 			Labels: helmette.Merge(
+ 				Labels(dot),
+ 			),
+-			Annotations: map[string]string{
++			Annotations: Annotations(dot, map[string]string{
+ 				"helm.sh/hook":               "pre-install,pre-upgrade",
+ 				"helm.sh/hook-delete-policy": "before-hook-creation,hook-succeeded,hook-failed",
+ 				"helm.sh/hook-weight":        "-5",
+-			},
++			}),
+ 		},
+ 		Spec: batchv1.JobSpec{
+ 			Template: corev1.PodTemplateSpec{
+diff --git a/operator/chart/prometheusrule.go b/operator/chart/prometheusrule.go
+index 2e1c2f6c..52b357bc 100644
+--- a/operator/chart/prometheusrule.go
++++ b/operator/chart/prometheusrule.go
+@@ -98,7 +98,7 @@ func PrometheusRule(dot *helmette.Dot) *monitoringv1.PrometheusRule {
+ 			Name:        cleanForK8sWithSuffix(Fullname(dot), "reconcile-health"),
+ 			Labels:      Labels(dot),
+ 			Namespace:   dot.Release.Namespace,
+-			Annotations: values.Annotations,
++			Annotations: Annotations(dot, nil),
+ 		},
+ 		Spec: monitoringv1.PrometheusRuleSpec{
+ 			Groups: []monitoringv1.RuleGroup{
+diff --git a/operator/chart/rbac.go b/operator/chart/rbac.go
+index 1917fa33..c10c5153 100644
+--- a/operator/chart/rbac.go
++++ b/operator/chart/rbac.go
+@@ -120,7 +120,7 @@ func ClusterRoles(dot *helmette.Dot) []rbacv1.ClusterRole {
+ 			ObjectMeta: metav1.ObjectMeta{
+ 				Name:        cleanForK8sWithSuffix(Fullname(dot)+"-"+dot.Release.Namespace, "metrics-reader"),
+ 				Labels:      Labels(dot),
+-				Annotations: values.Annotations,
++				Annotations: Annotations(dot, nil),
+ 			},
+ 			Rules: []rbacv1.PolicyRule{
+ 				{
+@@ -153,12 +153,9 @@ func ClusterRoles(dot *helmette.Dot) []rbacv1.ClusterRole {
+ 				Kind:       "ClusterRole",
+ 			},
+ 			ObjectMeta: metav1.ObjectMeta{
+-				Name:   bundle.Name + "-" + dot.Release.Namespace,
+-				Labels: Labels(dot),
+-				Annotations: helmette.Merge(
+-					helmette.Default(map[string]string{}, values.Annotations),
+-					helmette.Default(map[string]string{}, bundle.Annotations),
+-				),
++				Name:        bundle.Name + "-" + dot.Release.Namespace,
++				Labels:      Labels(dot),
++				Annotations: Annotations(dot, bundle.Annotations),
+ 			},
+ 			Rules: rules,
+ 		})
+@@ -192,7 +189,7 @@ func ClusterRoleBindings(dot *helmette.Dot) []rbacv1.ClusterRoleBinding {
+ 			ObjectMeta: metav1.ObjectMeta{
+ 				Name:        metricsRoleName,
+ 				Labels:      Labels(dot),
+-				Annotations: values.Annotations,
++				Annotations: Annotations(dot, nil),
+ 			},
+ 			RoleRef: rbacv1.RoleRef{
+ 				APIGroup: "rbac.authorization.k8s.io",
+@@ -219,12 +216,9 @@ func ClusterRoleBindings(dot *helmette.Dot) []rbacv1.ClusterRoleBinding {
+ 				Kind:       "ClusterRoleBinding",
+ 			},
+ 			ObjectMeta: metav1.ObjectMeta{
+-				Name:   bundle.Name + "-" + dot.Release.Namespace,
+-				Labels: Labels(dot),
+-				Annotations: helmette.Merge(
+-					helmette.Default(map[string]string{}, values.Annotations),
+-					helmette.Default(map[string]string{}, bundle.Annotations),
+-				),
++				Name:        bundle.Name + "-" + dot.Release.Namespace,
++				Labels:      Labels(dot),
++				Annotations: Annotations(dot, bundle.Annotations),
+ 			},
+ 			RoleRef: rbacv1.RoleRef{
+ 				APIGroup: "rbac.authorization.k8s.io",
+diff --git a/operator/chart/service.go b/operator/chart/service.go
+index 992b2b76..be6cab54 100644
+--- a/operator/chart/service.go
++++ b/operator/chart/service.go
+@@ -50,11 +50,7 @@ func OperatorService(dot *helmette.Dot) *corev1.Service {
+ 		svcType = corev1.ServiceTypeClusterIP
+ 	}
+ 
+-	annotations := helmette.Merge(
+-		map[string]string{},
+-		helmette.Default(map[string]string{}, values.Annotations),
+-		helmette.Default(map[string]string{}, values.Multicluster.Service.Annotations),
+-	)
++	annotations := Annotations(dot, values.Multicluster.Service.Annotations)
+ 
+ 	return &corev1.Service{
+ 		TypeMeta: metav1.TypeMeta{
+@@ -126,12 +122,10 @@ func OperatorPeerServices(dot *helmette.Dot) []corev1.Service {
+ 		if p.Name == self {
+ 			continue
+ 		}
+-		annotations := helmette.Merge(
+-			map[string]string{},
+-			helmette.Default(map[string]string{}, values.Annotations),
+-			helmette.Default(map[string]string{}, values.Multicluster.Service.Annotations),
++		annotations := Annotations(dot, helmette.Merge(
+ 			helmette.Default(map[string]string{}, p.Annotations),
+-		)
++			helmette.Default(map[string]string{}, values.Multicluster.Service.Annotations),
++		))
+ 		svcs = append(svcs, corev1.Service{
+ 			TypeMeta: metav1.TypeMeta{
+ 				APIVersion: "v1",
+@@ -183,7 +177,7 @@ func OperatorServiceExport(dot *helmette.Dot) *mcsv1alpha1.ServiceExport {
+ 			Name:        Fullname(dot),
+ 			Namespace:   dot.Release.Namespace,
+ 			Labels:      Labels(dot),
+-			Annotations: helmette.Default(map[string]string{}, values.Annotations),
++			Annotations: Annotations(dot, nil),
+ 		},
+ 	}
+ }
+@@ -226,7 +220,7 @@ func OperatorServiceImports(dot *helmette.Dot) []mcsv1alpha1.ServiceImport {
+ 				Name:        p.Name,
+ 				Namespace:   dot.Release.Namespace,
+ 				Labels:      Labels(dot),
+-				Annotations: helmette.Default(map[string]string{}, values.Annotations),
++				Annotations: Annotations(dot, nil),
+ 			},
+ 			Spec: mcsv1alpha1.ServiceImportSpec{
+ 				Type: mcsv1alpha1.ClusterSetIP,
+@@ -259,7 +253,7 @@ func WebhookService(dot *helmette.Dot) *corev1.Service {
+ 			Name:        fmt.Sprintf("%s-webhook-service", Name(dot)),
+ 			Namespace:   dot.Release.Namespace,
+ 			Labels:      Labels(dot),
+-			Annotations: values.Annotations,
++			Annotations: Annotations(dot, nil),
+ 		},
+ 		Spec: corev1.ServiceSpec{
+ 			Selector: SelectorLabels(dot),
+@@ -274,8 +268,6 @@ func WebhookService(dot *helmette.Dot) *corev1.Service {
+ }
+ 
+ func MetricsService(dot *helmette.Dot) *corev1.Service {
+-	values := helmette.Unwrap[Values](dot.Values)
+-
+ 	return &corev1.Service{
+ 		TypeMeta: metav1.TypeMeta{
+ 			APIVersion: "v1",
+@@ -285,7 +277,7 @@ func MetricsService(dot *helmette.Dot) *corev1.Service {
+ 			Name:        cleanForK8sWithSuffix(Fullname(dot), "metrics-service"),
+ 			Namespace:   dot.Release.Namespace,
+ 			Labels:      Labels(dot),
+-			Annotations: values.Annotations,
++			Annotations: Annotations(dot, nil),
+ 		},
+ 		Spec: corev1.ServiceSpec{
+ 			Selector: SelectorLabels(dot),
+@@ -315,9 +307,9 @@ func MutatingWebhookConfiguration(dot *helmette.Dot) *admissionregistrationv1.Mu
+ 		ObjectMeta: metav1.ObjectMeta{
+ 			Name:      fmt.Sprintf("%s-mutating-webhook-configuration", Fullname(dot)),
+ 			Namespace: dot.Release.Namespace,
+-			Annotations: map[string]string{
++			Annotations: Annotations(dot, map[string]string{
+ 				"cert-manager.io/inject-ca-from": fmt.Sprintf("%s/%s", dot.Release.Namespace, CertificateName(dot)),
+-			},
++			}),
+ 		},
+ 		Webhooks: []admissionregistrationv1.MutatingWebhook{
+ 			{
+@@ -365,9 +357,9 @@ func ValidatingWebhookConfiguration(dot *helmette.Dot) *admissionregistrationv1.
+ 		ObjectMeta: metav1.ObjectMeta{
+ 			Name:      fmt.Sprintf("%s-validating-webhook-configuration", Fullname(dot)),
+ 			Namespace: dot.Release.Namespace,
+-			Annotations: map[string]string{
++			Annotations: Annotations(dot, map[string]string{
+ 				"cert-manager.io/inject-ca-from": fmt.Sprintf("%s/%s", dot.Release.Namespace, CertificateName(dot)),
+-			},
++			}),
+ 		},
+ 		Webhooks: []admissionregistrationv1.ValidatingWebhook{
+ 			{
+diff --git a/operator/chart/serviceaccount.go b/operator/chart/serviceaccount.go
+index ced81352..e1d24040 100644
+--- a/operator/chart/serviceaccount.go
++++ b/operator/chart/serviceaccount.go
+@@ -48,7 +48,7 @@ func ServiceAccount(dot *helmette.Dot) *corev1.ServiceAccount {
+ 			Name:        ServiceAccountName(dot),
+ 			Labels:      Labels(dot),
+ 			Namespace:   dot.Release.Namespace,
+-			Annotations: values.ServiceAccount.Annotations,
++			Annotations: Annotations(dot, values.ServiceAccount.Annotations),
+ 		},
+ 		AutomountServiceAccountToken: values.ServiceAccount.AutomountServiceAccountToken,
+ 	}
+@@ -72,17 +72,14 @@ func CRDJobServiceAccount(dot *helmette.Dot) *corev1.ServiceAccount {
+ 			Name:      CRDJobServiceAccountName(dot),
+ 			Labels:    Labels(dot),
+ 			Namespace: dot.Release.Namespace,
+-			Annotations: helmette.Merge(
+-				helmette.Default(
+-					map[string]string{},
+-					values.ServiceAccount.Annotations,
+-				),
++			Annotations: Annotations(dot, helmette.Merge(
++				helmette.Default(map[string]string{}, values.ServiceAccount.Annotations),
+ 				map[string]string{
+ 					"helm.sh/hook":               "pre-install,pre-upgrade",
+ 					"helm.sh/hook-delete-policy": "before-hook-creation,hook-succeeded,hook-failed",
+ 					"helm.sh/hook-weight":        "-10",
+ 				},
+-			),
++			)),
+ 		},
+ 		AutomountServiceAccountToken: ptr.To(false),
+ 	}
+@@ -102,17 +99,14 @@ func MigrationJobServiceAccount(dot *helmette.Dot) *corev1.ServiceAccount {
+ 			Name:      MigrationJobServiceAccountName(dot),
+ 			Labels:    Labels(dot),
+ 			Namespace: dot.Release.Namespace,
+-			Annotations: helmette.Merge(
+-				helmette.Default(
+-					map[string]string{},
+-					values.ServiceAccount.Annotations,
+-				),
++			Annotations: Annotations(dot, helmette.Merge(
++				helmette.Default(map[string]string{}, values.ServiceAccount.Annotations),
+ 				map[string]string{
+ 					"helm.sh/hook":               "post-upgrade",
+ 					"helm.sh/hook-delete-policy": "before-hook-creation,hook-succeeded,hook-failed",
+ 					"helm.sh/hook-weight":        "-10",
+ 				},
+-			),
++			)),
+ 		},
+ 		AutomountServiceAccountToken: ptr.To(false),
+ 	}
+diff --git a/operator/chart/servicemonitor.go b/operator/chart/servicemonitor.go
+index e66adc50..94a8e323 100644
+--- a/operator/chart/servicemonitor.go
++++ b/operator/chart/servicemonitor.go
+@@ -96,7 +96,7 @@ func ServiceMonitor(dot *helmette.Dot) *monitoringv1.ServiceMonitor {
+ 			Name:        cleanForK8sWithSuffix(Fullname(dot), "metrics-monitor"),
+ 			Labels:      helmette.Merge(Labels(dot), values.Monitoring.Labels),
+ 			Namespace:   dot.Release.Namespace,
+-			Annotations: values.Annotations,
++			Annotations: Annotations(dot, nil),
+ 		},
+ 		Spec: monitoringv1.ServiceMonitorSpec{
+ 			Endpoints: []monitoringv1.Endpoint{endpoint},
+diff --git a/operator/chart/templates/_certificates.go.tpl b/operator/chart/templates/_certificates.go.tpl
+index 9068d7fb..fa1f585d 100644
+--- a/operator/chart/templates/_certificates.go.tpl
++++ b/operator/chart/templates/_certificates.go.tpl
+@@ -22,7 +22,7 @@
+ {{- break -}}
+ {{- end -}}
+ {{- $_is_returning = true -}}
+-{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "secretName" "" "issuerRef" (dict "name" "")) "status" (dict)) (mustMergeOverwrite (dict) (dict "apiVersion" "cert-manager.io/v1" "kind" "Certificate")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.CertificateName" (dict "a" (list $dot)))) "r") "namespace" $dot.Release.Namespace "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "annotations" $values.annotations)) "spec" (mustMergeOverwrite (dict "secretName" "" "issuerRef" (dict "name" "")) (dict "dnsNames" (list (printf "%s-webhook-service.%s.svc" (get (fromJson (include "operator.Name" (dict "a" (list $dot)))) "r") $dot.Release.Namespace) (printf "%s-webhook-service.%s.svc.%s" (get (fromJson (include "operator.Name" (dict "a" (list $dot)))) "r") $dot.Release.Namespace $values.clusterDomain)) "issuerRef" (mustMergeOverwrite (dict "name" "") (dict "kind" "Issuer" "name" (get (fromJson (include "operator.cleanForK8sWithSuffix" (dict "a" (list (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "selfsigned-issuer")))) "r"))) "secretName" $values.webhookSecretName "privateKey" (mustMergeOverwrite (dict) (dict "rotationPolicy" "Never"))))))) | toJson -}}
++{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "secretName" "" "issuerRef" (dict "name" "")) "status" (dict)) (mustMergeOverwrite (dict) (dict "apiVersion" "cert-manager.io/v1" "kind" "Certificate")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.CertificateName" (dict "a" (list $dot)))) "r") "namespace" $dot.Release.Namespace "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "annotations" (get (fromJson (include "operator.Annotations" (dict "a" (list $dot (coalesce nil))))) "r"))) "spec" (mustMergeOverwrite (dict "secretName" "" "issuerRef" (dict "name" "")) (dict "dnsNames" (list (printf "%s-webhook-service.%s.svc" (get (fromJson (include "operator.Name" (dict "a" (list $dot)))) "r") $dot.Release.Namespace) (printf "%s-webhook-service.%s.svc.%s" (get (fromJson (include "operator.Name" (dict "a" (list $dot)))) "r") $dot.Release.Namespace $values.clusterDomain)) "issuerRef" (mustMergeOverwrite (dict "name" "") (dict "kind" "Issuer" "name" (get (fromJson (include "operator.cleanForK8sWithSuffix" (dict "a" (list (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "selfsigned-issuer")))) "r"))) "secretName" $values.webhookSecretName "privateKey" (mustMergeOverwrite (dict) (dict "rotationPolicy" "Never"))))))) | toJson -}}
+ {{- break -}}
+ {{- end -}}
+ {{- end -}}
+@@ -38,7 +38,7 @@
+ {{- break -}}
+ {{- end -}}
+ {{- $_is_returning = true -}}
+-{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict) "status" (dict)) (mustMergeOverwrite (dict) (dict "apiVersion" "cert-manager.io/v1" "kind" "Issuer")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.cleanForK8sWithSuffix" (dict "a" (list (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "selfsigned-issuer")))) "r") "namespace" $dot.Release.Namespace "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "annotations" $values.annotations)) "spec" (mustMergeOverwrite (dict) (mustMergeOverwrite (dict) (dict "selfSigned" (mustMergeOverwrite (dict) (dict)))) (dict))))) | toJson -}}
++{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict) "status" (dict)) (mustMergeOverwrite (dict) (dict "apiVersion" "cert-manager.io/v1" "kind" "Issuer")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.cleanForK8sWithSuffix" (dict "a" (list (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "selfsigned-issuer")))) "r") "namespace" $dot.Release.Namespace "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "annotations" (get (fromJson (include "operator.Annotations" (dict "a" (list $dot (coalesce nil))))) "r"))) "spec" (mustMergeOverwrite (dict) (mustMergeOverwrite (dict) (dict "selfSigned" (mustMergeOverwrite (dict) (dict)))) (dict))))) | toJson -}}
+ {{- break -}}
+ {{- end -}}
+ {{- end -}}
+diff --git a/operator/chart/templates/_configmap.go.tpl b/operator/chart/templates/_configmap.go.tpl
+index fc719920..a8c226f0 100644
+--- a/operator/chart/templates/_configmap.go.tpl
++++ b/operator/chart/templates/_configmap.go.tpl
+@@ -7,7 +7,7 @@
+ {{- $_is_returning := false -}}
+ {{- $values := $dot.Values.AsMap -}}
+ {{- $_is_returning = true -}}
+-{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict)) (mustMergeOverwrite (dict) (dict "apiVersion" "v1" "kind" "ConfigMap")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.cleanForK8sWithSuffix" (dict "a" (list (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "config")))) "r") "namespace" $dot.Release.Namespace "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "annotations" $values.annotations)) "data" (dict "controller_manager_config.yaml" (toYaml $values.config))))) | toJson -}}
++{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict)) (mustMergeOverwrite (dict) (dict "apiVersion" "v1" "kind" "ConfigMap")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.cleanForK8sWithSuffix" (dict "a" (list (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "config")))) "r") "namespace" $dot.Release.Namespace "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "annotations" (get (fromJson (include "operator.Annotations" (dict "a" (list $dot (coalesce nil))))) "r"))) "data" (dict "controller_manager_config.yaml" (toYaml $values.config))))) | toJson -}}
+ {{- break -}}
+ {{- end -}}
+ {{- end -}}
+diff --git a/operator/chart/templates/_deployment.go.tpl b/operator/chart/templates/_deployment.go.tpl
+index c8dc76c1..4902fb07 100644
+--- a/operator/chart/templates/_deployment.go.tpl
++++ b/operator/chart/templates/_deployment.go.tpl
+@@ -22,7 +22,7 @@
+ {{- range $_ := (list 1) -}}
+ {{- $_is_returning := false -}}
+ {{- $values := $dot.Values.AsMap -}}
+-{{- $dep := (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "selector" (coalesce nil) "template" (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil))) "strategy" (dict)) "status" (dict)) (mustMergeOverwrite (dict) (dict "apiVersion" "apps/v1" "kind" "Deployment")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "namespace" $dot.Release.Namespace "annotations" $values.annotations)) "spec" (mustMergeOverwrite (dict "selector" (coalesce nil) "template" (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil))) "strategy" (dict)) (dict "replicas" ($values.replicaCount | int) "selector" (mustMergeOverwrite (dict) (dict "matchLabels" (get (fromJson (include "operator.SelectorLabels" (dict "a" (list $dot)))) "r"))) "strategy" $values.strategy "template" (get (fromJson (include "operator.StrategicMergePatch" (dict "a" (list (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil))) (dict "metadata" (mustMergeOverwrite (dict) (dict "labels" $values.podTemplate.metadata.labels "annotations" $values.podTemplate.metadata.annotations)) "spec" $values.podTemplate.spec)) (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil))) (dict "metadata" (mustMergeOverwrite (dict) (dict "annotations" $values.podAnnotations "labels" (merge (dict) (get (fromJson (include "operator.SelectorLabels" (dict "a" (list $dot)))) "r") $values.podLabels))) "spec" (mustMergeOverwrite (dict "containers" (coalesce nil)) (dict "automountServiceAccountToken" false "terminationGracePeriodSeconds" ((10 | int64) | int64) "imagePullSecrets" $values.imagePullSecrets "serviceAccountName" (get (fromJson (include "operator.ServiceAccountName" (dict "a" (list $dot)))) "r") "nodeSelector" $values.nodeSelector "tolerations" $values.tolerations "priorityClassName" $values.priorityClassName "volumes" (get (fromJson (include "operator.operatorPodVolumes" (dict "a" (list $dot)))) "r") "containers" (get (fromJson (include "operator.operatorContainers" (dict "a" (list $dot (coalesce nil))))) "r"))))))))) "r"))))) -}}
++{{- $dep := (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "selector" (coalesce nil) "template" (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil))) "strategy" (dict)) "status" (dict)) (mustMergeOverwrite (dict) (dict "apiVersion" "apps/v1" "kind" "Deployment")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "namespace" $dot.Release.Namespace "annotations" (get (fromJson (include "operator.Annotations" (dict "a" (list $dot (coalesce nil))))) "r"))) "spec" (mustMergeOverwrite (dict "selector" (coalesce nil) "template" (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil))) "strategy" (dict)) (dict "replicas" ($values.replicaCount | int) "selector" (mustMergeOverwrite (dict) (dict "matchLabels" (get (fromJson (include "operator.SelectorLabels" (dict "a" (list $dot)))) "r"))) "strategy" $values.strategy "template" (get (fromJson (include "operator.StrategicMergePatch" (dict "a" (list (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil))) (dict "metadata" (mustMergeOverwrite (dict) (dict "labels" $values.podTemplate.metadata.labels "annotations" $values.podTemplate.metadata.annotations)) "spec" $values.podTemplate.spec)) (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil))) (dict "metadata" (mustMergeOverwrite (dict) (dict "annotations" $values.podAnnotations "labels" (merge (dict) (get (fromJson (include "operator.SelectorLabels" (dict "a" (list $dot)))) "r") $values.podLabels))) "spec" (mustMergeOverwrite (dict "containers" (coalesce nil)) (dict "automountServiceAccountToken" false "terminationGracePeriodSeconds" ((10 | int64) | int64) "imagePullSecrets" $values.imagePullSecrets "serviceAccountName" (get (fromJson (include "operator.ServiceAccountName" (dict "a" (list $dot)))) "r") "nodeSelector" $values.nodeSelector "tolerations" $values.tolerations "priorityClassName" $values.priorityClassName "volumes" (get (fromJson (include "operator.operatorPodVolumes" (dict "a" (list $dot)))) "r") "containers" (get (fromJson (include "operator.operatorContainers" (dict "a" (list $dot (coalesce nil))))) "r"))))))))) "r"))))) -}}
+ {{- if (not (empty $values.affinity)) -}}
+ {{- $_ := (set $dep.spec.template.spec "affinity" $values.affinity) -}}
+ {{- end -}}
+@@ -198,9 +198,9 @@
+ {{- if $values.crds.enabled -}}
+ {{- $_ := (set $defaults "--enable-shadowlinks" "true") -}}
+ {{- end -}}
+-{{- if (gt ((get (fromJson (include "_shims.len" (dict "a" (list $values.commonAnnotations)))) "r") | int) (0 | int)) -}}
++{{- if (gt ((get (fromJson (include "_shims.len" (dict "a" (list $values.connectAnnotations)))) "r") | int) (0 | int)) -}}
+ {{- $annotationArg := "" -}}
+-{{- range $key, $value := $values.commonAnnotations -}}
++{{- range $key, $value := $values.connectAnnotations -}}
+ {{- if (ne $annotationArg "") -}}
+ {{- $annotationArg = (printf "%s%s" $annotationArg ",") -}}
+ {{- end -}}
+@@ -209,7 +209,7 @@
+ {{- if $_is_returning -}}
+ {{- break -}}
+ {{- end -}}
+-{{- $_ := (set $defaults "--common-annotations" $annotationArg) -}}
++{{- $_ := (set $defaults "--connect-annotations" $annotationArg) -}}
+ {{- end -}}
+ {{- if $values.webhook.enabled -}}
+ {{- $_ := (set $defaults "--webhook-cert-path" "/tmp/k8s-webhook-server/serving-certs") -}}
+diff --git a/operator/chart/templates/_helpers.go.tpl b/operator/chart/templates/_helpers.go.tpl
+index bd54d6de..58b5b96e 100644
+--- a/operator/chart/templates/_helpers.go.tpl
++++ b/operator/chart/templates/_helpers.go.tpl
+@@ -71,6 +71,18 @@
+ {{- end -}}
+ {{- end -}}
+ 
++{{- define "operator.Annotations" -}}
++{{- $dot := (index .a 0) -}}
++{{- $overrides := (index .a 1) -}}
++{{- range $_ := (list 1) -}}
++{{- $_is_returning := false -}}
++{{- $values := $dot.Values.AsMap -}}
++{{- $_is_returning = true -}}
++{{- (dict "r" (merge (dict) (default (dict) $overrides) (default (dict) $values.annotations))) | toJson -}}
++{{- break -}}
++{{- end -}}
++{{- end -}}
++
+ {{- define "operator.cleanForK8s" -}}
+ {{- $s := (index .a 0) -}}
+ {{- range $_ := (list 1) -}}
+@@ -139,9 +151,9 @@
+ {{- break -}}
+ {{- end -}}
+ {{- range $_, $vol := $original.spec.volumes -}}
+-{{- $_169_overrideVol_1_ok_2 := (get (fromJson (include "_shims.dicttest" (dict "a" (list $overrideVolumes $vol.name (dict "name" ""))))) "r") -}}
+-{{- $overrideVol_1 := (index $_169_overrideVol_1_ok_2 0) -}}
+-{{- $ok_2 := (index $_169_overrideVol_1_ok_2 1) -}}
++{{- $_182_overrideVol_1_ok_2 := (get (fromJson (include "_shims.dicttest" (dict "a" (list $overrideVolumes $vol.name (dict "name" ""))))) "r") -}}
++{{- $overrideVol_1 := (index $_182_overrideVol_1_ok_2 0) -}}
++{{- $ok_2 := (index $_182_overrideVol_1_ok_2 1) -}}
+ {{- if $ok_2 -}}
+ {{- $newVolumes = (concat (default (list) $newVolumes) (list $overrideVol_1)) -}}
+ {{- $_ := (unset $overrideVolumes $vol.name) -}}
+@@ -245,9 +257,9 @@
+ {{- end -}}
+ {{- $merged := (coalesce nil) -}}
+ {{- range $_, $container := $original.spec.containers -}}
+-{{- $_308_override_3_ok_4 := (get (fromJson (include "_shims.dicttest" (dict "a" (list $overrideContainers $container.name (coalesce nil))))) "r") -}}
+-{{- $override_3 := (index $_308_override_3_ok_4 0) -}}
+-{{- $ok_4 := (index $_308_override_3_ok_4 1) -}}
++{{- $_321_override_3_ok_4 := (get (fromJson (include "_shims.dicttest" (dict "a" (list $overrideContainers $container.name (coalesce nil))))) "r") -}}
++{{- $override_3 := (index $_321_override_3_ok_4 0) -}}
++{{- $ok_4 := (index $_321_override_3_ok_4 1) -}}
+ {{- if $ok_4 -}}
+ {{- $env := (concat (default (list) $container.env) (default (list) $override_3.env)) -}}
+ {{- $container = (merge (dict) $override_3 $container) -}}
+@@ -272,9 +284,9 @@
+ {{- end -}}
+ {{- $merged = (list) -}}
+ {{- range $_, $container := $original.spec.initContainers -}}
+-{{- $_339_override_5_ok_6 := (get (fromJson (include "_shims.dicttest" (dict "a" (list $overrideContainers $container.name (coalesce nil))))) "r") -}}
+-{{- $override_5 := (index $_339_override_5_ok_6 0) -}}
+-{{- $ok_6 := (index $_339_override_5_ok_6 1) -}}
++{{- $_352_override_5_ok_6 := (get (fromJson (include "_shims.dicttest" (dict "a" (list $overrideContainers $container.name (coalesce nil))))) "r") -}}
++{{- $override_5 := (index $_352_override_5_ok_6 0) -}}
++{{- $ok_6 := (index $_352_override_5_ok_6 1) -}}
+ {{- if $ok_6 -}}
+ {{- $env := (concat (default (list) $container.env) (default (list) $override_5.env)) -}}
+ {{- $container = (merge (dict) $override_5 $container) -}}
+@@ -299,9 +311,9 @@
+ {{- end -}}
+ {{- $mergedEphemeralContainers := (coalesce nil) -}}
+ {{- range $_, $container := $original.spec.ephemeralContainers -}}
+-{{- $_370_override_7_ok_8 := (get (fromJson (include "_shims.dicttest" (dict "a" (list $overrideEphemeralContainers $container.name (coalesce nil))))) "r") -}}
+-{{- $override_7 := (index $_370_override_7_ok_8 0) -}}
+-{{- $ok_8 := (index $_370_override_7_ok_8 1) -}}
++{{- $_383_override_7_ok_8 := (get (fromJson (include "_shims.dicttest" (dict "a" (list $overrideEphemeralContainers $container.name (coalesce nil))))) "r") -}}
++{{- $override_7 := (index $_383_override_7_ok_8 0) -}}
++{{- $ok_8 := (index $_383_override_7_ok_8 1) -}}
+ {{- if $ok_8 -}}
+ {{- $env := (concat (default (list) $container.env) (default (list) $override_7.env)) -}}
+ {{- $container = (merge (dict) $override_7 $container) -}}
+diff --git a/operator/chart/templates/_multicluster_deployment.go.tpl b/operator/chart/templates/_multicluster_deployment.go.tpl
+index 97c369f2..71075cd9 100644
+--- a/operator/chart/templates/_multicluster_deployment.go.tpl
++++ b/operator/chart/templates/_multicluster_deployment.go.tpl
+@@ -15,7 +15,7 @@
+ {{- if (eq ((get (fromJson (include "_shims.len" (dict "a" (list $values.multicluster.peers)))) "r") | int) (0 | int)) -}}
+ {{- $_ := (fail "peers must be specified in multicluster mode") -}}
+ {{- end -}}
+-{{- $dep := (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "selector" (coalesce nil) "template" (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil))) "strategy" (dict)) "status" (dict)) (mustMergeOverwrite (dict) (dict "apiVersion" "apps/v1" "kind" "Deployment")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "namespace" $dot.Release.Namespace "annotations" $values.annotations)) "spec" (mustMergeOverwrite (dict "selector" (coalesce nil) "template" (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil))) "strategy" (dict)) (dict "replicas" ($values.replicaCount | int) "selector" (mustMergeOverwrite (dict) (dict "matchLabels" (get (fromJson (include "operator.SelectorLabels" (dict "a" (list $dot)))) "r"))) "strategy" $values.strategy "template" (get (fromJson (include "operator.StrategicMergePatch" (dict "a" (list (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil))) (dict "metadata" (mustMergeOverwrite (dict) (dict "labels" $values.podTemplate.metadata.labels "annotations" $values.podTemplate.metadata.annotations)) "spec" $values.podTemplate.spec)) (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil))) (dict "metadata" (mustMergeOverwrite (dict) (dict "annotations" $values.podAnnotations "labels" (merge (dict) (get (fromJson (include "operator.SelectorLabels" (dict "a" (list $dot)))) "r") $values.podLabels))) "spec" (mustMergeOverwrite (dict "containers" (coalesce nil)) (dict "automountServiceAccountToken" false "terminationGracePeriodSeconds" ((10 | int64) | int64) "imagePullSecrets" $values.imagePullSecrets "serviceAccountName" (get (fromJson (include "operator.ServiceAccountName" (dict "a" (list $dot)))) "r") "nodeSelector" $values.nodeSelector "tolerations" $values.tolerations "volumes" (get (fromJson (include "operator.multiclusterOperatorPodVolumes" (dict "a" (list $dot)))) "r") "containers" (get (fromJson (include "operator.multiclusterOperatorContainers" (dict "a" (list $dot (coalesce nil))))) "r"))))))))) "r"))))) -}}
++{{- $dep := (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "selector" (coalesce nil) "template" (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil))) "strategy" (dict)) "status" (dict)) (mustMergeOverwrite (dict) (dict "apiVersion" "apps/v1" "kind" "Deployment")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "namespace" $dot.Release.Namespace "annotations" (get (fromJson (include "operator.Annotations" (dict "a" (list $dot (coalesce nil))))) "r"))) "spec" (mustMergeOverwrite (dict "selector" (coalesce nil) "template" (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil))) "strategy" (dict)) (dict "replicas" ($values.replicaCount | int) "selector" (mustMergeOverwrite (dict) (dict "matchLabels" (get (fromJson (include "operator.SelectorLabels" (dict "a" (list $dot)))) "r"))) "strategy" $values.strategy "template" (get (fromJson (include "operator.StrategicMergePatch" (dict "a" (list (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil))) (dict "metadata" (mustMergeOverwrite (dict) (dict "labels" $values.podTemplate.metadata.labels "annotations" $values.podTemplate.metadata.annotations)) "spec" $values.podTemplate.spec)) (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil))) (dict "metadata" (mustMergeOverwrite (dict) (dict "annotations" $values.podAnnotations "labels" (merge (dict) (get (fromJson (include "operator.SelectorLabels" (dict "a" (list $dot)))) "r") $values.podLabels))) "spec" (mustMergeOverwrite (dict "containers" (coalesce nil)) (dict "automountServiceAccountToken" false "terminationGracePeriodSeconds" ((10 | int64) | int64) "imagePullSecrets" $values.imagePullSecrets "serviceAccountName" (get (fromJson (include "operator.ServiceAccountName" (dict "a" (list $dot)))) "r") "nodeSelector" $values.nodeSelector "tolerations" $values.tolerations "volumes" (get (fromJson (include "operator.multiclusterOperatorPodVolumes" (dict "a" (list $dot)))) "r") "containers" (get (fromJson (include "operator.multiclusterOperatorContainers" (dict "a" (list $dot (coalesce nil))))) "r"))))))))) "r"))))) -}}
+ {{- if (not (empty $values.affinity)) -}}
+ {{- $_ := (set $dep.spec.template.spec "affinity" $values.affinity) -}}
+ {{- end -}}
+diff --git a/operator/chart/templates/_post-install-crd-job.go.tpl b/operator/chart/templates/_post-install-crd-job.go.tpl
+index a0a2f52f..5c62e477 100644
+--- a/operator/chart/templates/_post-install-crd-job.go.tpl
++++ b/operator/chart/templates/_post-install-crd-job.go.tpl
+@@ -12,7 +12,7 @@
+ {{- break -}}
+ {{- end -}}
+ {{- $_is_returning = true -}}
+-{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "template" (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil)))) "status" (dict)) (mustMergeOverwrite (dict) (dict "apiVersion" "batch/v1" "kind" "Job")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (printf "%s-crds" (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r")) "namespace" $dot.Release.Namespace "labels" (merge (dict) (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r")) "annotations" (dict "helm.sh/hook" "pre-install,pre-upgrade" "helm.sh/hook-delete-policy" "before-hook-creation,hook-succeeded,hook-failed" "helm.sh/hook-weight" "-5"))) "spec" (mustMergeOverwrite (dict "template" (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil)))) (dict "template" (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil))) (dict "metadata" (mustMergeOverwrite (dict) (dict "annotations" $values.podAnnotations "labels" (merge (dict) (get (fromJson (include "operator.SelectorLabels" (dict "a" (list $dot)))) "r") $values.podLabels))) "spec" (mustMergeOverwrite (dict "containers" (coalesce nil)) (dict "restartPolicy" "OnFailure" "automountServiceAccountToken" false "terminationGracePeriodSeconds" ((10 | int64) | int64) "imagePullSecrets" $values.imagePullSecrets "serviceAccountName" (get (fromJson (include "operator.CRDJobServiceAccountName" (dict "a" (list $dot)))) "r") "nodeSelector" $values.nodeSelector "tolerations" $values.tolerations "volumes" (list (get (fromJson (include "operator.serviceAccountTokenVolume" (dict "a" (list)))) "r")) "containers" (get (fromJson (include "operator.crdJobContainers" (dict "a" (list $dot)))) "r")))))))))) | toJson -}}
++{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "template" (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil)))) "status" (dict)) (mustMergeOverwrite (dict) (dict "apiVersion" "batch/v1" "kind" "Job")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (printf "%s-crds" (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r")) "namespace" $dot.Release.Namespace "labels" (merge (dict) (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r")) "annotations" (get (fromJson (include "operator.Annotations" (dict "a" (list $dot (dict "helm.sh/hook" "pre-install,pre-upgrade" "helm.sh/hook-delete-policy" "before-hook-creation,hook-succeeded,hook-failed" "helm.sh/hook-weight" "-5"))))) "r"))) "spec" (mustMergeOverwrite (dict "template" (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil)))) (dict "template" (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil))) (dict "metadata" (mustMergeOverwrite (dict) (dict "annotations" $values.podAnnotations "labels" (merge (dict) (get (fromJson (include "operator.SelectorLabels" (dict "a" (list $dot)))) "r") $values.podLabels))) "spec" (mustMergeOverwrite (dict "containers" (coalesce nil)) (dict "restartPolicy" "OnFailure" "automountServiceAccountToken" false "terminationGracePeriodSeconds" ((10 | int64) | int64) "imagePullSecrets" $values.imagePullSecrets "serviceAccountName" (get (fromJson (include "operator.CRDJobServiceAccountName" (dict "a" (list $dot)))) "r") "nodeSelector" $values.nodeSelector "tolerations" $values.tolerations "volumes" (list (get (fromJson (include "operator.serviceAccountTokenVolume" (dict "a" (list)))) "r")) "containers" (get (fromJson (include "operator.crdJobContainers" (dict "a" (list $dot)))) "r")))))))))) | toJson -}}
+ {{- break -}}
+ {{- end -}}
+ {{- end -}}
+diff --git a/operator/chart/templates/_post-upgrade-migration-job.go.tpl b/operator/chart/templates/_post-upgrade-migration-job.go.tpl
+index 5872585e..de0eeeed 100644
+--- a/operator/chart/templates/_post-upgrade-migration-job.go.tpl
++++ b/operator/chart/templates/_post-upgrade-migration-job.go.tpl
+@@ -7,7 +7,7 @@
+ {{- $_is_returning := false -}}
+ {{- $values := $dot.Values.AsMap -}}
+ {{- $_is_returning = true -}}
+-{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "template" (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil)))) "status" (dict)) (mustMergeOverwrite (dict) (dict "apiVersion" "batch/v1" "kind" "Job")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (printf "%s-migration" (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r")) "namespace" $dot.Release.Namespace "labels" (merge (dict) (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r")) "annotations" (dict "helm.sh/hook" "post-upgrade" "helm.sh/hook-delete-policy" "before-hook-creation,hook-succeeded,hook-failed" "helm.sh/hook-weight" "-4"))) "spec" (mustMergeOverwrite (dict "template" (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil)))) (dict "template" (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil))) (dict "metadata" (mustMergeOverwrite (dict) (dict "annotations" $values.podAnnotations "labels" (merge (dict) (get (fromJson (include "operator.SelectorLabels" (dict "a" (list $dot)))) "r") $values.podLabels))) "spec" (mustMergeOverwrite (dict "containers" (coalesce nil)) (dict "restartPolicy" "OnFailure" "automountServiceAccountToken" false "terminationGracePeriodSeconds" ((10 | int64) | int64) "imagePullSecrets" $values.imagePullSecrets "serviceAccountName" (get (fromJson (include "operator.MigrationJobServiceAccountName" (dict "a" (list $dot)))) "r") "nodeSelector" $values.nodeSelector "tolerations" $values.tolerations "volumes" (list (get (fromJson (include "operator.serviceAccountTokenVolume" (dict "a" (list)))) "r")) "containers" (get (fromJson (include "operator.migrationJobContainers" (dict "a" (list $dot)))) "r")))))))))) | toJson -}}
++{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "template" (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil)))) "status" (dict)) (mustMergeOverwrite (dict) (dict "apiVersion" "batch/v1" "kind" "Job")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (printf "%s-migration" (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r")) "namespace" $dot.Release.Namespace "labels" (merge (dict) (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r")) "annotations" (get (fromJson (include "operator.Annotations" (dict "a" (list $dot (dict "helm.sh/hook" "post-upgrade" "helm.sh/hook-delete-policy" "before-hook-creation,hook-succeeded,hook-failed" "helm.sh/hook-weight" "-4"))))) "r"))) "spec" (mustMergeOverwrite (dict "template" (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil)))) (dict "template" (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "containers" (coalesce nil))) (dict "metadata" (mustMergeOverwrite (dict) (dict "annotations" $values.podAnnotations "labels" (merge (dict) (get (fromJson (include "operator.SelectorLabels" (dict "a" (list $dot)))) "r") $values.podLabels))) "spec" (mustMergeOverwrite (dict "containers" (coalesce nil)) (dict "restartPolicy" "OnFailure" "automountServiceAccountToken" false "terminationGracePeriodSeconds" ((10 | int64) | int64) "imagePullSecrets" $values.imagePullSecrets "serviceAccountName" (get (fromJson (include "operator.MigrationJobServiceAccountName" (dict "a" (list $dot)))) "r") "nodeSelector" $values.nodeSelector "tolerations" $values.tolerations "volumes" (list (get (fromJson (include "operator.serviceAccountTokenVolume" (dict "a" (list)))) "r")) "containers" (get (fromJson (include "operator.migrationJobContainers" (dict "a" (list $dot)))) "r")))))))))) | toJson -}}
+ {{- break -}}
+ {{- end -}}
+ {{- end -}}
+diff --git a/operator/chart/templates/_prometheusrule.go.tpl b/operator/chart/templates/_prometheusrule.go.tpl
+index 198a5ae3..ae2b1135 100644
+--- a/operator/chart/templates/_prometheusrule.go.tpl
++++ b/operator/chart/templates/_prometheusrule.go.tpl
+@@ -13,7 +13,7 @@
+ {{- end -}}
+ {{- $scope := (printf `job="%s", namespace="%s"` (get (fromJson (include "operator.cleanForK8sWithSuffix" (dict "a" (list (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "metrics-service")))) "r") $dot.Release.Namespace) -}}
+ {{- $_is_returning = true -}}
+-{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict)) (mustMergeOverwrite (dict) (dict "kind" "PrometheusRule" "apiVersion" "monitoring.coreos.com/v1")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.cleanForK8sWithSuffix" (dict "a" (list (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "reconcile-health")))) "r") "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "namespace" $dot.Release.Namespace "annotations" $values.annotations)) "spec" (mustMergeOverwrite (dict) (dict "groups" (list (mustMergeOverwrite (dict "name" "") (dict "name" "redpanda-operator.controller-runtime.recording" "rules" (list (mustMergeOverwrite (dict "expr" 0) (dict "record" "operator:reconcile_rate:5m" "expr" (printf `sum by (controller, job, namespace) (rate(controller_runtime_reconcile_total{%s}[5m]))` $scope))) (mustMergeOverwrite (dict "expr" 0) (dict "record" "operator:reconcile_churn_rate:5m" "expr" (printf `sum by (controller, job, namespace) (rate(controller_runtime_reconcile_total{result!="requeue_after", %s}[5m]))` $scope))) (mustMergeOverwrite (dict "expr" 0) (dict "record" "operator:reconcile_error_rate:5m" "expr" (printf `sum by (controller, job, namespace) (rate(controller_runtime_reconcile_errors_total{%s}[5m]))` $scope))) (mustMergeOverwrite (dict "expr" 0) (dict "record" "operator:reconcile_steady_state_rate:5m" "expr" (printf `sum by (controller, job, namespace) (rate(operator_controller_reconcile_steady_state_total{%s}[5m]))` $scope))) (mustMergeOverwrite (dict "expr" 0) (dict "record" "operator:reconcile_p99_seconds:5m" "expr" (printf `histogram_quantile(0.99, sum by (le, controller, job, namespace) (rate(controller_runtime_reconcile_time_seconds_bucket{%s}[5m])))` $scope))) (mustMergeOverwrite (dict "expr" 0) (dict "record" "operator:workqueue_p99_seconds:5m" "expr" (printf `histogram_quantile(0.99, sum by (le, name, job, namespace) (rate(workqueue_queue_duration_seconds_bucket{%s}[5m])))` $scope))) (mustMergeOverwrite (dict "expr" 0) (dict "record" "operator:workqueue_over_10s_ratio:5m" "expr" (printf `1 - (sum by (name, job, namespace) (rate(workqueue_queue_duration_seconds_bucket{le="10", %s}[5m])) / sum by (name, job, namespace) (rate(workqueue_queue_duration_seconds_bucket{le="+Inf", %s}[5m])))` $scope $scope)))))) (mustMergeOverwrite (dict "name" "") (dict "name" "redpanda-operator.controller-runtime.alerts" "rules" (list (mustMergeOverwrite (dict "expr" 0) (dict "alert" "OperatorReconcileErrors" "expr" (printf `operator:reconcile_error_rate:5m{%s} > 0.1` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "5m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "Redpanda operator controller {{ $labels.controller }} in {{ $labels.namespace }} is failing reconciles" "description" "Controller {{ $labels.controller }} has been returning errors at >0.1/s for 5+ minutes. Check the operator pod logs and the relevant resource's status."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "OperatorReconcileChurn" "expr" (printf `operator:reconcile_churn_rate:5m{%s} > 5` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "5m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "Redpanda operator controller {{ $labels.controller }} in {{ $labels.namespace }} has high non-interval reconcile churn" "description" "Controller {{ $labels.controller }} has completed >5 reconciles per second for 5+ minutes with a result other than requeue_after. Investigate errors, explicit requeues, or success-result event loops."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "OperatorReconcileRunaway" "expr" (printf `operator:reconcile_rate:5m{%s} > 30` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "15m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "Redpanda operator controller {{ $labels.controller }} in {{ $labels.namespace }} is reconciling at an extreme rate" "description" "Controller {{ $labels.controller }} has completed >30 reconciles per second for 15+ minutes. This total-rate backstop includes requeue_after results because the result label cannot distinguish scheduled interval work from event-driven spin loops."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "OperatorReconcileStalled" "expr" (printf `max_over_time(operator:reconcile_rate:5m{%s}[1h]) > 0 and operator:reconcile_rate:5m{%s} == 0` $scope $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "10m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "Redpanda operator controller {{ $labels.controller }} in {{ $labels.namespace }} has stopped reconciling" "description" "Controller {{ $labels.controller }} was active in the last hour but has reconciled zero times in the past 10 minutes. The controller may have stopped responding to events."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "OperatorWorkerPoolSaturated" "expr" (printf `operator:workqueue_over_10s_ratio:5m{%s} > 0.01` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "10m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "Redpanda operator controller {{ $labels.name }} in {{ $labels.namespace }} reconcile queue is backlogged" "description" "More than 1% of items on controller {{ $labels.name }}'s workqueue have taken over 10 seconds to be dequeued, sustained for 10+ minutes. Work is arriving faster than the worker pool drains it. Consider increasing MaxConcurrentReconciles or investigating per-reconcile latency (operator:reconcile_p99_seconds:5m).")))))) (mustMergeOverwrite (dict "name" "") (dict "name" "redpanda-operator.stretchcluster.alerts" "rules" (list (mustMergeOverwrite (dict "expr" 0) (dict "alert" "StretchClusterMemberUnreachable" "expr" (printf `operator_stretchcluster_member_reachable{%s} == 0` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "2m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "Redpanda operator cannot reach StretchCluster member {{ $labels.member }}" "description" "The multicluster manager's reachability probe has reported member {{ $labels.member }} of StretchCluster {{ $labels.stretchcluster }} as unreachable for 2+ minutes. Sustained unreachability is a real network outage or a peer apiserver that's down — sync operations targeting that peer (CA, bootstrap user, status updates) will be skipped until it recovers."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "StretchClusterBrokerCountSkew" "expr" (printf `operator_stretchcluster_brokers{%s} - operator_stretchcluster_brokers_ready{%s} > 0` $scope $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "10m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "StretchCluster {{ $labels.stretchcluster }} member {{ $labels.member }} has fewer ready brokers than desired" "description" "Member {{ $labels.member }} of StretchCluster {{ $labels.stretchcluster }} has had ready_brokers < desired_brokers for 10+ minutes. Expected briefly during scale operations; sustained skew means a broker pod is failing to start or pass readiness."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "StretchClusterSpecDrift" "expr" (printf `operator_stretchcluster_spec_drift{%s} > 0` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "5m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "StretchCluster {{ $labels.stretchcluster }} spec has drifted on member {{ $labels.member }}" "description" "Member {{ $labels.member }}'s local StretchCluster.spec differs from this operator's view for 5+ minutes. Reconciliation is blocked across all peers until specs match — reapply the canonical manifest to {{ $labels.member }} to clear the drift."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "StretchClusterReplicationUnhealthy" "expr" (printf `operator_stretchcluster_replication_health{%s} == 0` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "5m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "StretchCluster {{ $labels.stretchcluster }} reports unhealthy replication" "description" "The admin API reports StretchCluster {{ $labels.stretchcluster }} as unhealthy for 5+ minutes. Check broker readiness across members, cross-region network health, and partition replication status (rpk cluster health).")))))))))))) | toJson -}}
++{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict)) (mustMergeOverwrite (dict) (dict "kind" "PrometheusRule" "apiVersion" "monitoring.coreos.com/v1")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.cleanForK8sWithSuffix" (dict "a" (list (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "reconcile-health")))) "r") "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "namespace" $dot.Release.Namespace "annotations" (get (fromJson (include "operator.Annotations" (dict "a" (list $dot (coalesce nil))))) "r"))) "spec" (mustMergeOverwrite (dict) (dict "groups" (list (mustMergeOverwrite (dict "name" "") (dict "name" "redpanda-operator.controller-runtime.recording" "rules" (list (mustMergeOverwrite (dict "expr" 0) (dict "record" "operator:reconcile_rate:5m" "expr" (printf `sum by (controller, job, namespace) (rate(controller_runtime_reconcile_total{%s}[5m]))` $scope))) (mustMergeOverwrite (dict "expr" 0) (dict "record" "operator:reconcile_churn_rate:5m" "expr" (printf `sum by (controller, job, namespace) (rate(controller_runtime_reconcile_total{result!="requeue_after", %s}[5m]))` $scope))) (mustMergeOverwrite (dict "expr" 0) (dict "record" "operator:reconcile_error_rate:5m" "expr" (printf `sum by (controller, job, namespace) (rate(controller_runtime_reconcile_errors_total{%s}[5m]))` $scope))) (mustMergeOverwrite (dict "expr" 0) (dict "record" "operator:reconcile_steady_state_rate:5m" "expr" (printf `sum by (controller, job, namespace) (rate(operator_controller_reconcile_steady_state_total{%s}[5m]))` $scope))) (mustMergeOverwrite (dict "expr" 0) (dict "record" "operator:reconcile_p99_seconds:5m" "expr" (printf `histogram_quantile(0.99, sum by (le, controller, job, namespace) (rate(controller_runtime_reconcile_time_seconds_bucket{%s}[5m])))` $scope))) (mustMergeOverwrite (dict "expr" 0) (dict "record" "operator:workqueue_p99_seconds:5m" "expr" (printf `histogram_quantile(0.99, sum by (le, name, job, namespace) (rate(workqueue_queue_duration_seconds_bucket{%s}[5m])))` $scope))) (mustMergeOverwrite (dict "expr" 0) (dict "record" "operator:workqueue_over_10s_ratio:5m" "expr" (printf `1 - (sum by (name, job, namespace) (rate(workqueue_queue_duration_seconds_bucket{le="10", %s}[5m])) / sum by (name, job, namespace) (rate(workqueue_queue_duration_seconds_bucket{le="+Inf", %s}[5m])))` $scope $scope)))))) (mustMergeOverwrite (dict "name" "") (dict "name" "redpanda-operator.controller-runtime.alerts" "rules" (list (mustMergeOverwrite (dict "expr" 0) (dict "alert" "OperatorReconcileErrors" "expr" (printf `operator:reconcile_error_rate:5m{%s} > 0.1` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "5m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "Redpanda operator controller {{ $labels.controller }} in {{ $labels.namespace }} is failing reconciles" "description" "Controller {{ $labels.controller }} has been returning errors at >0.1/s for 5+ minutes. Check the operator pod logs and the relevant resource's status."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "OperatorReconcileChurn" "expr" (printf `operator:reconcile_churn_rate:5m{%s} > 5` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "5m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "Redpanda operator controller {{ $labels.controller }} in {{ $labels.namespace }} has high non-interval reconcile churn" "description" "Controller {{ $labels.controller }} has completed >5 reconciles per second for 5+ minutes with a result other than requeue_after. Investigate errors, explicit requeues, or success-result event loops."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "OperatorReconcileRunaway" "expr" (printf `operator:reconcile_rate:5m{%s} > 30` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "15m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "Redpanda operator controller {{ $labels.controller }} in {{ $labels.namespace }} is reconciling at an extreme rate" "description" "Controller {{ $labels.controller }} has completed >30 reconciles per second for 15+ minutes. This total-rate backstop includes requeue_after results because the result label cannot distinguish scheduled interval work from event-driven spin loops."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "OperatorReconcileStalled" "expr" (printf `max_over_time(operator:reconcile_rate:5m{%s}[1h]) > 0 and operator:reconcile_rate:5m{%s} == 0` $scope $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "10m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "Redpanda operator controller {{ $labels.controller }} in {{ $labels.namespace }} has stopped reconciling" "description" "Controller {{ $labels.controller }} was active in the last hour but has reconciled zero times in the past 10 minutes. The controller may have stopped responding to events."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "OperatorWorkerPoolSaturated" "expr" (printf `operator:workqueue_over_10s_ratio:5m{%s} > 0.01` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "10m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "Redpanda operator controller {{ $labels.name }} in {{ $labels.namespace }} reconcile queue is backlogged" "description" "More than 1% of items on controller {{ $labels.name }}'s workqueue have taken over 10 seconds to be dequeued, sustained for 10+ minutes. Work is arriving faster than the worker pool drains it. Consider increasing MaxConcurrentReconciles or investigating per-reconcile latency (operator:reconcile_p99_seconds:5m).")))))) (mustMergeOverwrite (dict "name" "") (dict "name" "redpanda-operator.stretchcluster.alerts" "rules" (list (mustMergeOverwrite (dict "expr" 0) (dict "alert" "StretchClusterMemberUnreachable" "expr" (printf `operator_stretchcluster_member_reachable{%s} == 0` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "2m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "Redpanda operator cannot reach StretchCluster member {{ $labels.member }}" "description" "The multicluster manager's reachability probe has reported member {{ $labels.member }} of StretchCluster {{ $labels.stretchcluster }} as unreachable for 2+ minutes. Sustained unreachability is a real network outage or a peer apiserver that's down — sync operations targeting that peer (CA, bootstrap user, status updates) will be skipped until it recovers."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "StretchClusterBrokerCountSkew" "expr" (printf `operator_stretchcluster_brokers{%s} - operator_stretchcluster_brokers_ready{%s} > 0` $scope $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "10m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "StretchCluster {{ $labels.stretchcluster }} member {{ $labels.member }} has fewer ready brokers than desired" "description" "Member {{ $labels.member }} of StretchCluster {{ $labels.stretchcluster }} has had ready_brokers < desired_brokers for 10+ minutes. Expected briefly during scale operations; sustained skew means a broker pod is failing to start or pass readiness."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "StretchClusterSpecDrift" "expr" (printf `operator_stretchcluster_spec_drift{%s} > 0` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "5m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "StretchCluster {{ $labels.stretchcluster }} spec has drifted on member {{ $labels.member }}" "description" "Member {{ $labels.member }}'s local StretchCluster.spec differs from this operator's view for 5+ minutes. Reconciliation is blocked across all peers until specs match — reapply the canonical manifest to {{ $labels.member }} to clear the drift."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "StretchClusterReplicationUnhealthy" "expr" (printf `operator_stretchcluster_replication_health{%s} == 0` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "5m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "StretchCluster {{ $labels.stretchcluster }} reports unhealthy replication" "description" "The admin API reports StretchCluster {{ $labels.stretchcluster }} as unhealthy for 5+ minutes. Check broker readiness across members, cross-region network health, and partition replication status (rpk cluster health).")))))))))))) | toJson -}}
+ {{- break -}}
+ {{- end -}}
+ {{- end -}}
+diff --git a/operator/chart/templates/_rbac.go.tpl b/operator/chart/templates/_rbac.go.tpl
+index 91038a7b..ea2e1e0c 100644
+--- a/operator/chart/templates/_rbac.go.tpl
++++ b/operator/chart/templates/_rbac.go.tpl
+@@ -24,7 +24,7 @@
+ {{- (dict "r" (coalesce nil)) | toJson -}}
+ {{- break -}}
+ {{- end -}}
+-{{- $clusterRoles := (list (mustMergeOverwrite (dict "metadata" (dict) "rules" (coalesce nil)) (mustMergeOverwrite (dict) (dict "apiVersion" "rbac.authorization.k8s.io/v1" "kind" "ClusterRole")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.cleanForK8sWithSuffix" (dict "a" (list (printf "%s%s" (printf "%s%s" (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "-") $dot.Release.Namespace) "metrics-reader")))) "r") "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "annotations" $values.annotations)) "rules" (list (mustMergeOverwrite (dict "verbs" (coalesce nil)) (dict "verbs" (list "get") "nonResourceURLs" (list "/metrics"))))))) -}}
++{{- $clusterRoles := (list (mustMergeOverwrite (dict "metadata" (dict) "rules" (coalesce nil)) (mustMergeOverwrite (dict) (dict "apiVersion" "rbac.authorization.k8s.io/v1" "kind" "ClusterRole")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.cleanForK8sWithSuffix" (dict "a" (list (printf "%s%s" (printf "%s%s" (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "-") $dot.Release.Namespace) "metrics-reader")))) "r") "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "annotations" (get (fromJson (include "operator.Annotations" (dict "a" (list $dot (coalesce nil))))) "r"))) "rules" (list (mustMergeOverwrite (dict "verbs" (coalesce nil)) (dict "verbs" (list "get") "nonResourceURLs" (list "/metrics"))))))) -}}
+ {{- range $_, $bundle := (get (fromJson (include "operator.rbacBundles" (dict "a" (list $dot)))) "r") -}}
+ {{- if (not $bundle.Enabled) -}}
+ {{- continue -}}
+@@ -40,7 +40,7 @@
+ {{- if $_is_returning -}}
+ {{- break -}}
+ {{- end -}}
+-{{- $clusterRoles = (concat (default (list) $clusterRoles) (list (mustMergeOverwrite (dict "metadata" (dict) "rules" (coalesce nil)) (mustMergeOverwrite (dict) (dict "apiVersion" "rbac.authorization.k8s.io/v1" "kind" "ClusterRole")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (printf "%s%s" (printf "%s%s" $bundle.Name "-") $dot.Release.Namespace) "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "annotations" (merge (dict) (default (dict) $values.annotations) (default (dict) $bundle.Annotations)))) "rules" $rules)))) -}}
++{{- $clusterRoles = (concat (default (list) $clusterRoles) (list (mustMergeOverwrite (dict "metadata" (dict) "rules" (coalesce nil)) (mustMergeOverwrite (dict) (dict "apiVersion" "rbac.authorization.k8s.io/v1" "kind" "ClusterRole")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (printf "%s%s" (printf "%s%s" $bundle.Name "-") $dot.Release.Namespace) "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "annotations" (get (fromJson (include "operator.Annotations" (dict "a" (list $dot $bundle.Annotations)))) "r"))) "rules" $rules)))) -}}
+ {{- end -}}
+ {{- if $_is_returning -}}
+ {{- break -}}
+@@ -62,12 +62,12 @@
+ {{- break -}}
+ {{- end -}}
+ {{- $metricsRoleName := (get (fromJson (include "operator.cleanForK8sWithSuffix" (dict "a" (list (printf "%s%s" (printf "%s%s" (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "-") $dot.Release.Namespace) "metrics-reader")))) "r") -}}
+-{{- $bindings := (list (mustMergeOverwrite (dict "metadata" (dict) "roleRef" (dict "apiGroup" "" "kind" "" "name" "")) (mustMergeOverwrite (dict) (dict "apiVersion" "rbac.authorization.k8s.io/v1" "kind" "ClusterRoleBinding")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" $metricsRoleName "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "annotations" $values.annotations)) "roleRef" (mustMergeOverwrite (dict "apiGroup" "" "kind" "" "name" "") (dict "apiGroup" "rbac.authorization.k8s.io" "kind" "ClusterRole" "name" $metricsRoleName)) "subjects" (list (mustMergeOverwrite (dict "kind" "" "name" "") (dict "kind" "ServiceAccount" "name" (get (fromJson (include "operator.ServiceAccountName" (dict "a" (list $dot)))) "r") "namespace" $dot.Release.Namespace)))))) -}}
++{{- $bindings := (list (mustMergeOverwrite (dict "metadata" (dict) "roleRef" (dict "apiGroup" "" "kind" "" "name" "")) (mustMergeOverwrite (dict) (dict "apiVersion" "rbac.authorization.k8s.io/v1" "kind" "ClusterRoleBinding")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" $metricsRoleName "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "annotations" (get (fromJson (include "operator.Annotations" (dict "a" (list $dot (coalesce nil))))) "r"))) "roleRef" (mustMergeOverwrite (dict "apiGroup" "" "kind" "" "name" "") (dict "apiGroup" "rbac.authorization.k8s.io" "kind" "ClusterRole" "name" $metricsRoleName)) "subjects" (list (mustMergeOverwrite (dict "kind" "" "name" "") (dict "kind" "ServiceAccount" "name" (get (fromJson (include "operator.ServiceAccountName" (dict "a" (list $dot)))) "r") "namespace" $dot.Release.Namespace)))))) -}}
+ {{- range $_, $bundle := (get (fromJson (include "operator.rbacBundles" (dict "a" (list $dot)))) "r") -}}
+ {{- if (not $bundle.Enabled) -}}
+ {{- continue -}}
+ {{- end -}}
+-{{- $bindings = (concat (default (list) $bindings) (list (mustMergeOverwrite (dict "metadata" (dict) "roleRef" (dict "apiGroup" "" "kind" "" "name" "")) (mustMergeOverwrite (dict) (dict "apiVersion" "rbac.authorization.k8s.io/v1" "kind" "ClusterRoleBinding")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (printf "%s%s" (printf "%s%s" $bundle.Name "-") $dot.Release.Namespace) "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "annotations" (merge (dict) (default (dict) $values.annotations) (default (dict) $bundle.Annotations)))) "roleRef" (mustMergeOverwrite (dict "apiGroup" "" "kind" "" "name" "") (dict "apiGroup" "rbac.authorization.k8s.io" "kind" "ClusterRole" "name" (printf "%s%s" (printf "%s%s" $bundle.Name "-") $dot.Release.Namespace))) "subjects" (list (mustMergeOverwrite (dict "kind" "" "name" "") (dict "kind" "ServiceAccount" "name" $bundle.Subject "namespace" $dot.Release.Namespace))))))) -}}
++{{- $bindings = (concat (default (list) $bindings) (list (mustMergeOverwrite (dict "metadata" (dict) "roleRef" (dict "apiGroup" "" "kind" "" "name" "")) (mustMergeOverwrite (dict) (dict "apiVersion" "rbac.authorization.k8s.io/v1" "kind" "ClusterRoleBinding")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (printf "%s%s" (printf "%s%s" $bundle.Name "-") $dot.Release.Namespace) "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "annotations" (get (fromJson (include "operator.Annotations" (dict "a" (list $dot $bundle.Annotations)))) "r"))) "roleRef" (mustMergeOverwrite (dict "apiGroup" "" "kind" "" "name" "") (dict "apiGroup" "rbac.authorization.k8s.io" "kind" "ClusterRole" "name" (printf "%s%s" (printf "%s%s" $bundle.Name "-") $dot.Release.Namespace))) "subjects" (list (mustMergeOverwrite (dict "kind" "" "name" "") (dict "kind" "ServiceAccount" "name" $bundle.Subject "namespace" $dot.Release.Namespace))))))) -}}
+ {{- end -}}
+ {{- if $_is_returning -}}
+ {{- break -}}
+diff --git a/operator/chart/templates/_service.go.tpl b/operator/chart/templates/_service.go.tpl
+index 264f4cc7..b67af594 100644
+--- a/operator/chart/templates/_service.go.tpl
++++ b/operator/chart/templates/_service.go.tpl
+@@ -15,7 +15,7 @@
+ {{- if (eq $svcType "") -}}
+ {{- $svcType = "ClusterIP" -}}
+ {{- end -}}
+-{{- $annotations := (merge (dict) (dict) (default (dict) $values.annotations) (default (dict) $values.multicluster.service.annotations)) -}}
++{{- $annotations := (get (fromJson (include "operator.Annotations" (dict "a" (list $dot $values.multicluster.service.annotations)))) "r") -}}
+ {{- $_is_returning = true -}}
+ {{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict) "status" (dict "loadBalancer" (dict))) (mustMergeOverwrite (dict) (dict "apiVersion" "v1" "kind" "Service")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "namespace" $dot.Release.Namespace "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "annotations" $annotations)) "spec" (mustMergeOverwrite (dict) (dict "type" $svcType "selector" (get (fromJson (include "operator.SelectorLabels" (dict "a" (list $dot)))) "r") "ports" (list (mustMergeOverwrite (dict "port" 0 "targetPort" 0) (dict "name" "raft" "port" ((9443 | int) | int) "targetPort" ((9443 | int) | int) "protocol" "TCP"))) "publishNotReadyAddresses" true))))) | toJson -}}
+ {{- break -}}
+@@ -43,7 +43,7 @@
+ {{- if (eq $p.name $self) -}}
+ {{- continue -}}
+ {{- end -}}
+-{{- $annotations := (merge (dict) (dict) (default (dict) $values.annotations) (default (dict) $values.multicluster.service.annotations) (default (dict) $p.annotations)) -}}
++{{- $annotations := (get (fromJson (include "operator.Annotations" (dict "a" (list $dot (merge (dict) (default (dict) $p.annotations) (default (dict) $values.multicluster.service.annotations)))))) "r") -}}
+ {{- $svcs = (concat (default (list) $svcs) (list (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict) "status" (dict "loadBalancer" (dict))) (mustMergeOverwrite (dict) (dict "apiVersion" "v1" "kind" "Service")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" $p.name "namespace" $dot.Release.Namespace "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "annotations" $annotations)) "spec" (mustMergeOverwrite (dict) (dict "type" "ClusterIP" "ports" (list (mustMergeOverwrite (dict "port" 0 "targetPort" 0) (dict "name" "raft" "port" ((9443 | int) | int) "targetPort" ((9443 | int) | int) "protocol" "TCP"))))))))) -}}
+ {{- end -}}
+ {{- if $_is_returning -}}
+@@ -66,7 +66,7 @@
+ {{- break -}}
+ {{- end -}}
+ {{- $_is_returning = true -}}
+-{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict) "status" (dict)) (mustMergeOverwrite (dict) (dict "apiVersion" "multicluster.x-k8s.io/v1alpha1" "kind" "ServiceExport")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "namespace" $dot.Release.Namespace "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "annotations" (default (dict) $values.annotations)))))) | toJson -}}
++{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict) "status" (dict)) (mustMergeOverwrite (dict) (dict "apiVersion" "multicluster.x-k8s.io/v1alpha1" "kind" "ServiceExport")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "namespace" $dot.Release.Namespace "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "annotations" (get (fromJson (include "operator.Annotations" (dict "a" (list $dot (coalesce nil))))) "r")))))) | toJson -}}
+ {{- break -}}
+ {{- end -}}
+ {{- end -}}
+@@ -87,7 +87,7 @@
+ {{- if (eq $p.name $self) -}}
+ {{- continue -}}
+ {{- end -}}
+-{{- $imports = (concat (default (list) $imports) (list (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "ports" (coalesce nil) "type" "") "status" (dict)) (mustMergeOverwrite (dict) (dict "apiVersion" "multicluster.x-k8s.io/v1alpha1" "kind" "ServiceImport")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" $p.name "namespace" $dot.Release.Namespace "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "annotations" (default (dict) $values.annotations))) "spec" (mustMergeOverwrite (dict "ports" (coalesce nil) "type" "") (dict "type" "ClusterSetIP" "ports" (list (mustMergeOverwrite (dict "port" 0) (dict "name" "raft" "protocol" "TCP" "port" ((9443 | int) | int)))))))))) -}}
++{{- $imports = (concat (default (list) $imports) (list (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "ports" (coalesce nil) "type" "") "status" (dict)) (mustMergeOverwrite (dict) (dict "apiVersion" "multicluster.x-k8s.io/v1alpha1" "kind" "ServiceImport")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" $p.name "namespace" $dot.Release.Namespace "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "annotations" (get (fromJson (include "operator.Annotations" (dict "a" (list $dot (coalesce nil))))) "r"))) "spec" (mustMergeOverwrite (dict "ports" (coalesce nil) "type" "") (dict "type" "ClusterSetIP" "ports" (list (mustMergeOverwrite (dict "port" 0) (dict "name" "raft" "protocol" "TCP" "port" ((9443 | int) | int)))))))))) -}}
+ {{- end -}}
+ {{- if $_is_returning -}}
+ {{- break -}}
+@@ -109,7 +109,7 @@
+ {{- break -}}
+ {{- end -}}
+ {{- $_is_returning = true -}}
+-{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict) "status" (dict "loadBalancer" (dict))) (mustMergeOverwrite (dict) (dict "apiVersion" "v1" "kind" "Service")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (printf "%s-webhook-service" (get (fromJson (include "operator.Name" (dict "a" (list $dot)))) "r")) "namespace" $dot.Release.Namespace "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "annotations" $values.annotations)) "spec" (mustMergeOverwrite (dict) (dict "selector" (get (fromJson (include "operator.SelectorLabels" (dict "a" (list $dot)))) "r") "ports" (list (mustMergeOverwrite (dict "port" 0 "targetPort" 0) (dict "port" ((443 | int) | int) "targetPort" (9443 | int))))))))) | toJson -}}
++{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict) "status" (dict "loadBalancer" (dict))) (mustMergeOverwrite (dict) (dict "apiVersion" "v1" "kind" "Service")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (printf "%s-webhook-service" (get (fromJson (include "operator.Name" (dict "a" (list $dot)))) "r")) "namespace" $dot.Release.Namespace "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "annotations" (get (fromJson (include "operator.Annotations" (dict "a" (list $dot (coalesce nil))))) "r"))) "spec" (mustMergeOverwrite (dict) (dict "selector" (get (fromJson (include "operator.SelectorLabels" (dict "a" (list $dot)))) "r") "ports" (list (mustMergeOverwrite (dict "port" 0 "targetPort" 0) (dict "port" ((443 | int) | int) "targetPort" (9443 | int))))))))) | toJson -}}
+ {{- break -}}
+ {{- end -}}
+ {{- end -}}
+@@ -118,9 +118,8 @@
+ {{- $dot := (index .a 0) -}}
+ {{- range $_ := (list 1) -}}
+ {{- $_is_returning := false -}}
+-{{- $values := $dot.Values.AsMap -}}
+ {{- $_is_returning = true -}}
+-{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict) "status" (dict "loadBalancer" (dict))) (mustMergeOverwrite (dict) (dict "apiVersion" "v1" "kind" "Service")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.cleanForK8sWithSuffix" (dict "a" (list (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "metrics-service")))) "r") "namespace" $dot.Release.Namespace "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "annotations" $values.annotations)) "spec" (mustMergeOverwrite (dict) (dict "selector" (get (fromJson (include "operator.SelectorLabels" (dict "a" (list $dot)))) "r") "ports" (list (mustMergeOverwrite (dict "port" 0 "targetPort" 0) (dict "name" "https" "port" ((8443 | int) | int) "targetPort" "https")))))))) | toJson -}}
++{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict) "status" (dict "loadBalancer" (dict))) (mustMergeOverwrite (dict) (dict "apiVersion" "v1" "kind" "Service")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.cleanForK8sWithSuffix" (dict "a" (list (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "metrics-service")))) "r") "namespace" $dot.Release.Namespace "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "annotations" (get (fromJson (include "operator.Annotations" (dict "a" (list $dot (coalesce nil))))) "r"))) "spec" (mustMergeOverwrite (dict) (dict "selector" (get (fromJson (include "operator.SelectorLabels" (dict "a" (list $dot)))) "r") "ports" (list (mustMergeOverwrite (dict "port" 0 "targetPort" 0) (dict "name" "https" "port" ((8443 | int) | int) "targetPort" "https")))))))) | toJson -}}
+ {{- break -}}
+ {{- end -}}
+ {{- end -}}
+@@ -136,7 +135,7 @@
+ {{- break -}}
+ {{- end -}}
+ {{- $_is_returning = true -}}
+-{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict)) (mustMergeOverwrite (dict) (dict "apiVersion" "admissionregistration.k8s.io/v1" "kind" "MutatingWebhookConfiguration")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (printf "%s-mutating-webhook-configuration" (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r")) "namespace" $dot.Release.Namespace "annotations" (dict "cert-manager.io/inject-ca-from" (printf "%s/%s" $dot.Release.Namespace (get (fromJson (include "operator.CertificateName" (dict "a" (list $dot)))) "r"))))) "webhooks" (list (mustMergeOverwrite (dict "name" "" "clientConfig" (dict) "sideEffects" (coalesce nil) "admissionReviewVersions" (coalesce nil)) (dict "admissionReviewVersions" (list "v1" "v1beta1") "clientConfig" (mustMergeOverwrite (dict) (dict "service" (mustMergeOverwrite (dict "namespace" "" "name" "") (dict "name" (printf "%s-webhook-service" (get (fromJson (include "operator.Name" (dict "a" (list $dot)))) "r")) "namespace" $dot.Release.Namespace "path" "/mutate-redpanda-vectorized-io-v1alpha1-cluster")))) "failurePolicy" "Fail" "name" "mcluster.kb.io" "rules" (list (mustMergeOverwrite (dict) (mustMergeOverwrite (dict) (dict "apiGroups" (list "redpanda.vectorized.io") "apiVersions" (list "v1alpha1") "resources" (list "clusters"))) (dict "operations" (list "CREATE" "UPDATE")))) "sideEffects" "None")))))) | toJson -}}
++{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict)) (mustMergeOverwrite (dict) (dict "apiVersion" "admissionregistration.k8s.io/v1" "kind" "MutatingWebhookConfiguration")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (printf "%s-mutating-webhook-configuration" (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r")) "namespace" $dot.Release.Namespace "annotations" (get (fromJson (include "operator.Annotations" (dict "a" (list $dot (dict "cert-manager.io/inject-ca-from" (printf "%s/%s" $dot.Release.Namespace (get (fromJson (include "operator.CertificateName" (dict "a" (list $dot)))) "r"))))))) "r"))) "webhooks" (list (mustMergeOverwrite (dict "name" "" "clientConfig" (dict) "sideEffects" (coalesce nil) "admissionReviewVersions" (coalesce nil)) (dict "admissionReviewVersions" (list "v1" "v1beta1") "clientConfig" (mustMergeOverwrite (dict) (dict "service" (mustMergeOverwrite (dict "namespace" "" "name" "") (dict "name" (printf "%s-webhook-service" (get (fromJson (include "operator.Name" (dict "a" (list $dot)))) "r")) "namespace" $dot.Release.Namespace "path" "/mutate-redpanda-vectorized-io-v1alpha1-cluster")))) "failurePolicy" "Fail" "name" "mcluster.kb.io" "rules" (list (mustMergeOverwrite (dict) (mustMergeOverwrite (dict) (dict "apiGroups" (list "redpanda.vectorized.io") "apiVersions" (list "v1alpha1") "resources" (list "clusters"))) (dict "operations" (list "CREATE" "UPDATE")))) "sideEffects" "None")))))) | toJson -}}
+ {{- break -}}
+ {{- end -}}
+ {{- end -}}
+@@ -152,7 +151,7 @@
+ {{- break -}}
+ {{- end -}}
+ {{- $_is_returning = true -}}
+-{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict)) (mustMergeOverwrite (dict) (dict "apiVersion" "admissionregistration.k8s.io/v1" "kind" "ValidatingWebhookConfiguration")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (printf "%s-validating-webhook-configuration" (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r")) "namespace" $dot.Release.Namespace "annotations" (dict "cert-manager.io/inject-ca-from" (printf "%s/%s" $dot.Release.Namespace (get (fromJson (include "operator.CertificateName" (dict "a" (list $dot)))) "r"))))) "webhooks" (list (mustMergeOverwrite (dict "name" "" "clientConfig" (dict) "sideEffects" (coalesce nil) "admissionReviewVersions" (coalesce nil)) (dict "admissionReviewVersions" (list "v1" "v1beta1") "clientConfig" (mustMergeOverwrite (dict) (dict "service" (mustMergeOverwrite (dict "namespace" "" "name" "") (dict "name" (printf "%s-webhook-service" (get (fromJson (include "operator.Name" (dict "a" (list $dot)))) "r")) "namespace" $dot.Release.Namespace "path" "/validate-redpanda-vectorized-io-v1alpha1-cluster")))) "failurePolicy" "Fail" "name" "mcluster.kb.io" "rules" (list (mustMergeOverwrite (dict) (mustMergeOverwrite (dict) (dict "apiGroups" (list "redpanda.vectorized.io") "apiVersions" (list "v1alpha1") "resources" (list "clusters"))) (dict "operations" (list "CREATE" "UPDATE")))) "sideEffects" "None")))))) | toJson -}}
++{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict)) (mustMergeOverwrite (dict) (dict "apiVersion" "admissionregistration.k8s.io/v1" "kind" "ValidatingWebhookConfiguration")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (printf "%s-validating-webhook-configuration" (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r")) "namespace" $dot.Release.Namespace "annotations" (get (fromJson (include "operator.Annotations" (dict "a" (list $dot (dict "cert-manager.io/inject-ca-from" (printf "%s/%s" $dot.Release.Namespace (get (fromJson (include "operator.CertificateName" (dict "a" (list $dot)))) "r"))))))) "r"))) "webhooks" (list (mustMergeOverwrite (dict "name" "" "clientConfig" (dict) "sideEffects" (coalesce nil) "admissionReviewVersions" (coalesce nil)) (dict "admissionReviewVersions" (list "v1" "v1beta1") "clientConfig" (mustMergeOverwrite (dict) (dict "service" (mustMergeOverwrite (dict "namespace" "" "name" "") (dict "name" (printf "%s-webhook-service" (get (fromJson (include "operator.Name" (dict "a" (list $dot)))) "r")) "namespace" $dot.Release.Namespace "path" "/validate-redpanda-vectorized-io-v1alpha1-cluster")))) "failurePolicy" "Fail" "name" "mcluster.kb.io" "rules" (list (mustMergeOverwrite (dict) (mustMergeOverwrite (dict) (dict "apiGroups" (list "redpanda.vectorized.io") "apiVersions" (list "v1alpha1") "resources" (list "clusters"))) (dict "operations" (list "CREATE" "UPDATE")))) "sideEffects" "None")))))) | toJson -}}
+ {{- break -}}
+ {{- end -}}
+ {{- end -}}
+diff --git a/operator/chart/templates/_serviceaccount.go.tpl b/operator/chart/templates/_serviceaccount.go.tpl
+index caebddf3..708b2312 100644
+--- a/operator/chart/templates/_serviceaccount.go.tpl
++++ b/operator/chart/templates/_serviceaccount.go.tpl
+@@ -43,7 +43,7 @@
+ {{- break -}}
+ {{- end -}}
+ {{- $_is_returning = true -}}
+-{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict)) (mustMergeOverwrite (dict) (dict "kind" "ServiceAccount" "apiVersion" "v1")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.ServiceAccountName" (dict "a" (list $dot)))) "r") "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "namespace" $dot.Release.Namespace "annotations" $values.serviceAccount.annotations)) "automountServiceAccountToken" $values.serviceAccount.automountServiceAccountToken))) | toJson -}}
++{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict)) (mustMergeOverwrite (dict) (dict "kind" "ServiceAccount" "apiVersion" "v1")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.ServiceAccountName" (dict "a" (list $dot)))) "r") "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "namespace" $dot.Release.Namespace "annotations" (get (fromJson (include "operator.Annotations" (dict "a" (list $dot $values.serviceAccount.annotations)))) "r"))) "automountServiceAccountToken" $values.serviceAccount.automountServiceAccountToken))) | toJson -}}
+ {{- break -}}
+ {{- end -}}
+ {{- end -}}
+@@ -59,7 +59,7 @@
+ {{- break -}}
+ {{- end -}}
+ {{- $_is_returning = true -}}
+-{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict)) (mustMergeOverwrite (dict) (dict "kind" "ServiceAccount" "apiVersion" "v1")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.CRDJobServiceAccountName" (dict "a" (list $dot)))) "r") "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "namespace" $dot.Release.Namespace "annotations" (merge (dict) (default (dict) $values.serviceAccount.annotations) (dict "helm.sh/hook" "pre-install,pre-upgrade" "helm.sh/hook-delete-policy" "before-hook-creation,hook-succeeded,hook-failed" "helm.sh/hook-weight" "-10")))) "automountServiceAccountToken" false))) | toJson -}}
++{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict)) (mustMergeOverwrite (dict) (dict "kind" "ServiceAccount" "apiVersion" "v1")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.CRDJobServiceAccountName" (dict "a" (list $dot)))) "r") "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "namespace" $dot.Release.Namespace "annotations" (get (fromJson (include "operator.Annotations" (dict "a" (list $dot (merge (dict) (default (dict) $values.serviceAccount.annotations) (dict "helm.sh/hook" "pre-install,pre-upgrade" "helm.sh/hook-delete-policy" "before-hook-creation,hook-succeeded,hook-failed" "helm.sh/hook-weight" "-10")))))) "r"))) "automountServiceAccountToken" false))) | toJson -}}
+ {{- break -}}
+ {{- end -}}
+ {{- end -}}
+@@ -70,7 +70,7 @@
+ {{- $_is_returning := false -}}
+ {{- $values := $dot.Values.AsMap -}}
+ {{- $_is_returning = true -}}
+-{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict)) (mustMergeOverwrite (dict) (dict "kind" "ServiceAccount" "apiVersion" "v1")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.MigrationJobServiceAccountName" (dict "a" (list $dot)))) "r") "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "namespace" $dot.Release.Namespace "annotations" (merge (dict) (default (dict) $values.serviceAccount.annotations) (dict "helm.sh/hook" "post-upgrade" "helm.sh/hook-delete-policy" "before-hook-creation,hook-succeeded,hook-failed" "helm.sh/hook-weight" "-10")))) "automountServiceAccountToken" false))) | toJson -}}
++{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict)) (mustMergeOverwrite (dict) (dict "kind" "ServiceAccount" "apiVersion" "v1")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.MigrationJobServiceAccountName" (dict "a" (list $dot)))) "r") "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "namespace" $dot.Release.Namespace "annotations" (get (fromJson (include "operator.Annotations" (dict "a" (list $dot (merge (dict) (default (dict) $values.serviceAccount.annotations) (dict "helm.sh/hook" "post-upgrade" "helm.sh/hook-delete-policy" "before-hook-creation,hook-succeeded,hook-failed" "helm.sh/hook-weight" "-10")))))) "r"))) "automountServiceAccountToken" false))) | toJson -}}
+ {{- break -}}
+ {{- end -}}
+ {{- end -}}
+diff --git a/operator/chart/templates/_servicemonitor.go.tpl b/operator/chart/templates/_servicemonitor.go.tpl
+index 9fbe2560..78ca08d4 100644
+--- a/operator/chart/templates/_servicemonitor.go.tpl
++++ b/operator/chart/templates/_servicemonitor.go.tpl
+@@ -30,7 +30,7 @@
+ {{- $_ := (set $endpoint "relabelings" (concat (default (list) $endpoint.relabelings) (list (mustMergeOverwrite (dict) (dict "targetLabel" $labelName "replacement" $labelValue))))) -}}
+ {{- end -}}
+ {{- $_is_returning = true -}}
+-{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "endpoints" (coalesce nil) "selector" (dict) "namespaceSelector" (dict))) (mustMergeOverwrite (dict) (dict "kind" "ServiceMonitor" "apiVersion" "monitoring.coreos.com/v1")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.cleanForK8sWithSuffix" (dict "a" (list (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "metrics-monitor")))) "r") "labels" (merge (dict) (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") $values.monitoring.labels) "namespace" $dot.Release.Namespace "annotations" $values.annotations)) "spec" (mustMergeOverwrite (dict "endpoints" (coalesce nil) "selector" (dict) "namespaceSelector" (dict)) (dict "endpoints" (list $endpoint) "namespaceSelector" (mustMergeOverwrite (dict) (dict "matchNames" (list $dot.Release.Namespace))) "selector" (mustMergeOverwrite (dict) (dict "matchLabels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r")))))))) | toJson -}}
++{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict "endpoints" (coalesce nil) "selector" (dict) "namespaceSelector" (dict))) (mustMergeOverwrite (dict) (dict "kind" "ServiceMonitor" "apiVersion" "monitoring.coreos.com/v1")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.cleanForK8sWithSuffix" (dict "a" (list (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "metrics-monitor")))) "r") "labels" (merge (dict) (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") $values.monitoring.labels) "namespace" $dot.Release.Namespace "annotations" (get (fromJson (include "operator.Annotations" (dict "a" (list $dot (coalesce nil))))) "r"))) "spec" (mustMergeOverwrite (dict "endpoints" (coalesce nil) "selector" (dict) "namespaceSelector" (dict)) (dict "endpoints" (list $endpoint) "namespaceSelector" (mustMergeOverwrite (dict) (dict "matchNames" (list $dot.Release.Namespace))) "selector" (mustMergeOverwrite (dict) (dict "matchLabels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r")))))))) | toJson -}}
+ {{- break -}}
+ {{- end -}}
+ {{- end -}}
+diff --git a/operator/chart/values.go b/operator/chart/values.go
+index e42a2a80..bc826c12 100644
+--- a/operator/chart/values.go
++++ b/operator/chart/values.go
+@@ -135,7 +135,7 @@ type Values struct {
+ 	ReadinessProbe        *corev1.Probe                 `json:"readinessProbe,omitempty"`
+ 	CRDs                  CRDs                          `json:"crds"`
+ 	VectorizedControllers VectorizedControllers         `json:"vectorizedControllers"`
+-	CommonAnnotations     map[string]string             `json:"commonAnnotations"`
++	ConnectAnnotations    map[string]string             `json:"connectAnnotations"`
+ 	ConnectController     ConnectController             `json:"connectController"`
+ 	Controllers           Controllers                   `json:"controllers"`
+ 	Multicluster          Multicluster                  `json:"multicluster"`
+diff --git a/operator/chart/values.schema.json b/operator/chart/values.schema.json
+index 6a65a027..7a18d9af 100644
+--- a/operator/chart/values.schema.json
++++ b/operator/chart/values.schema.json
+@@ -611,12 +611,6 @@
+     "clusterDomain": {
+       "type": "string"
+     },
+-    "commonAnnotations": {
+-      "additionalProperties": {
+-        "type": "string"
+-      },
+-      "type": "object"
+-    },
+     "commonLabels": {
+       "additionalProperties": {
+         "type": "string"
+@@ -674,6 +668,12 @@
+       },
+       "type": "object"
+     },
++    "connectAnnotations": {
++      "additionalProperties": {
++        "type": "string"
++      },
++      "type": "object"
++    },
+     "connectController": {
+       "additionalProperties": false,
+       "properties": {
+diff --git a/operator/chart/values.yaml b/operator/chart/values.yaml
+index 5bc30e2d..aa6995a4 100644
+--- a/operator/chart/values.yaml
++++ b/operator/chart/values.yaml
+@@ -146,10 +146,11 @@ podLabels: {}
+ # - `--additional-controllers`: Additional controllers to deploy. The supported value is `decommission`, which runs the NodePool-aware broker decommissioner; `legacy-decommission` opts into the deprecated controller. For more information about the Decommission controller, see [Use the Decommission controller](https://docs.redpanda.com/current/manage/kubernetes/k-decommission-brokers/#Automated). PVC remediation is handled by the PVCUnbinder via `--unbind-pvcs-after`.
+ additionalCmdFlags: []
+ 
+-# -- Additional annotations to add to all resources managed by the operator.
+-# Useful for satisfying OPA Gatekeeper RequiredAnnotations constraints.
+-# For example, `owner: "platform-team@example.com"`.
+-commonAnnotations: {}
++# -- Additional annotations the operator adds to the resources it creates for
++# Redpanda Connect pipelines. Passed to the operator as `--connect-annotations`.
++# Per-pipeline `spec.annotations` take precedence. For example,
++# `owner: "platform-team@example.com"`.
++connectAnnotations: {}
+ 
+ # -- Enables the Redpanda Connect controller for managing Connect pipeline CRs.
+ # Requires an operator-level enterprise license that includes the Redpanda
+diff --git a/operator/chart/values_partial.gen.go b/operator/chart/values_partial.gen.go
+index 33c8daf7..c7c0febb 100644
+--- a/operator/chart/values_partial.gen.go
++++ b/operator/chart/values_partial.gen.go
+@@ -49,7 +49,7 @@ type PartialValues struct {
+ 	ReadinessProbe        *corev1.Probe                 "json:\"readinessProbe,omitempty\""
+ 	CRDs                  *PartialCRDs                  "json:\"crds,omitempty\""
+ 	VectorizedControllers *PartialVectorizedControllers "json:\"vectorizedControllers,omitempty\""
+-	CommonAnnotations     map[string]string             "json:\"commonAnnotations,omitempty\""
++	ConnectAnnotations    map[string]string             "json:\"connectAnnotations,omitempty\""
+ 	ConnectController     *PartialConnectController     "json:\"connectController,omitempty\""
+ 	Controllers           *PartialControllers           "json:\"controllers,omitempty\""
+ 	Multicluster          *PartialMulticluster          "json:\"multicluster,omitempty\""
+diff --git a/operator/cmd/run/run.go b/operator/cmd/run/run.go
+index 67fd6ea7..4c68de8c 100644
+--- a/operator/cmd/run/run.go
++++ b/operator/cmd/run/run.go
+@@ -162,7 +162,7 @@ type RunOptions struct {
+ 	licenseFilePath           string
+ 
+ 	// Connect (Pipeline CRD) controller configuration.
+-	commonAnnotations               map[string]string
++	connectAnnotations              map[string]string
+ 	connectMonitoringEnabled        bool
+ 	connectMonitoringScrapeInterval string
+ 	connectMonitoringLabels         map[string]string
+@@ -196,7 +196,7 @@ func (o *RunOptions) BindFlags(cmd *cobra.Command) {
+ 	// Controller flags.
+ 	cmd.Flags().BoolVar(&o.enableConsoleController, "enable-console", true, "Specifies whether or not to enabled the redpanda Console controller")
+ 	cmd.Flags().BoolVar(&o.enableConnectController, "enable-connect", false, "Specifies whether or not to enable the Redpanda Connect controller (requires enterprise license)")
+-	cmd.Flags().StringToStringVar(&o.commonAnnotations, "common-annotations", nil, "Annotations to propagate to all operator-managed resources (key=value pairs)")
++	cmd.Flags().StringToStringVar(&o.connectAnnotations, "connect-annotations", nil, "Annotations the operator adds to the Redpanda Connect pipeline resources it creates (key=value pairs)")
+ 	cmd.Flags().BoolVar(&o.connectMonitoringEnabled, "connect-monitoring-enabled", false, "Enable PodMonitor creation for Connect pipelines")
+ 	cmd.Flags().StringVar(&o.connectMonitoringScrapeInterval, "connect-monitoring-scrape-interval", "", "Prometheus scrape interval for Connect pipeline PodMonitors (e.g. 30s)")
+ 	cmd.Flags().StringToStringVar(&o.connectMonitoringLabels, "connect-monitoring-labels", nil, "Additional labels for Connect pipeline PodMonitors (key=value pairs)")
+@@ -602,10 +602,10 @@ func Run(
+ 			setupLog.Info("starting Connect controller")
+ 
+ 			if err := (&pipelinecontroller.Controller{
+-				Ctl:               pipelineCtl,
+-				LicenseFilePath:   opts.licenseFilePath,
+-				CommonAnnotations: opts.commonAnnotations,
+-				DefaultImage:      opts.connectDefaultImage,
++				Ctl:                pipelineCtl,
++				LicenseFilePath:    opts.licenseFilePath,
++				ConnectAnnotations: opts.connectAnnotations,
++				DefaultImage:       opts.connectDefaultImage,
+ 				Monitoring: pipelinecontroller.MonitoringConfig{
+ 					Enabled:        opts.connectMonitoringEnabled,
+ 					ScrapeInterval: opts.connectMonitoringScrapeInterval,
+diff --git a/operator/internal/controller/pipeline/controller.go b/operator/internal/controller/pipeline/controller.go
+index 4b74053a..e3ad385a 100644
+--- a/operator/internal/controller/pipeline/controller.go
++++ b/operator/internal/controller/pipeline/controller.go
+@@ -64,9 +64,9 @@ type Controller struct {
+ 	// LicenseFilePath is the path to the operator-level enterprise license file,
+ 	// configured via enterprise.licenseSecretRef in the operator Helm chart values.
+ 	LicenseFilePath string
+-	// CommonAnnotations are annotations from the operator Helm chart values
++	// ConnectAnnotations are annotations from the operator Helm chart values
+ 	// that are propagated to all resources managed by the operator.
+-	CommonAnnotations map[string]string
++	ConnectAnnotations map[string]string
+ 	// DefaultImage is the operator-level Redpanda Connect image override. When
+ 	// set, it's used as the fallback for Pipeline CRs that don't pin their own
+ 	// .spec.image. Per-Pipeline .spec.image still wins. When empty, falls
+@@ -453,7 +453,7 @@ func (c *Controller) rendererFor(pipeline *redpandav1alpha2.Pipeline, clusterCon
+ 	return &render{
+ 		pipeline:            pipeline,
+ 		labels:              Labels(pipeline),
+-		commonAnnotations:   c.CommonAnnotations,
++		connectAnnotations:  c.ConnectAnnotations,
+ 		defaultImage:        c.DefaultImage,
+ 		monitoring:          c.Monitoring,
+ 		clusterConn:         clusterConn,
+diff --git a/operator/internal/controller/pipeline/controller_test.go b/operator/internal/controller/pipeline/controller_test.go
+index 18567af3..1b4c93ce 100644
+--- a/operator/internal/controller/pipeline/controller_test.go
++++ b/operator/internal/controller/pipeline/controller_test.go
+@@ -983,7 +983,7 @@ func cleanObjectForGolden(scheme *runtime.Scheme, obj client.Object) {
+ 	obj.SetUID("")
+ }
+ 
+-func TestRender_CommonAnnotations(t *testing.T) {
++func TestRender_ConnectAnnotations(t *testing.T) {
+ 	pipeline := &redpandav1alpha2.Pipeline{
+ 		ObjectMeta: metav1.ObjectMeta{
+ 			Name:      "annotated-pipeline",
+@@ -998,7 +998,7 @@ func TestRender_CommonAnnotations(t *testing.T) {
+ 	r := &render{
+ 		pipeline: pipeline,
+ 		labels:   labels,
+-		commonAnnotations: map[string]string{
++		connectAnnotations: map[string]string{
+ 			"compliance/owner": "platform-team",
+ 			"compliance/env":   "production",
+ 		},
+@@ -1012,9 +1012,9 @@ func TestRender_CommonAnnotations(t *testing.T) {
+ 	for _, obj := range objs {
+ 		annotations := obj.(metav1.ObjectMetaAccessor).GetObjectMeta().GetAnnotations()
+ 		assert.Equal(t, "platform-team", annotations["compliance/owner"],
+-			"commonAnnotations should propagate to %T", obj)
++			"connectAnnotations should propagate to %T", obj)
+ 		assert.Equal(t, "production", annotations["compliance/env"],
+-			"commonAnnotations should propagate to %T", obj)
++			"connectAnnotations should propagate to %T", obj)
+ 	}
+ 
+ 	// Verify pod template also has annotations.
+@@ -1041,7 +1041,7 @@ func TestRender_PodAnnotations(t *testing.T) {
+ 	r := &render{
+ 		pipeline: pipeline,
+ 		labels:   labels,
+-		commonAnnotations: map[string]string{
++		connectAnnotations: map[string]string{
+ 			"compliance/owner": "platform-team",
+ 		},
+ 	}
+@@ -1049,21 +1049,21 @@ func TestRender_PodAnnotations(t *testing.T) {
+ 	objs, err := r.Render(t.Context())
+ 	require.NoError(t, err)
+ 
+-	// ConfigMap should only have commonAnnotations, not pod annotations.
++	// ConfigMap should only have connectAnnotations, not pod annotations.
+ 	cm := objs[0].(*corev1.ConfigMap)
+ 	assert.Equal(t, "platform-team", cm.Annotations["compliance/owner"])
+ 	assert.Empty(t, cm.Annotations["ad.datadoghq.com/connect.checks"],
+ 		"spec.annotations should not propagate to ConfigMap")
+ 
+-	// Pod template should have both commonAnnotations and spec.annotations.
++	// Pod template should have both connectAnnotations and spec.annotations.
+ 	dp := objs[1].(*appsv1.Deployment)
+ 	podAnn := dp.Spec.Template.ObjectMeta.Annotations
+ 	assert.Equal(t, "platform-team", podAnn["compliance/owner"],
+-		"commonAnnotations should be on pod template")
++		"connectAnnotations should be on pod template")
+ 	assert.Contains(t, podAnn["ad.datadoghq.com/connect.checks"], "openmetrics",
+ 		"spec.annotations should be on pod template")
+ 
+-	// Deployment metadata should only have commonAnnotations.
++	// Deployment metadata should only have connectAnnotations.
+ 	assert.Empty(t, dp.Annotations["ad.datadoghq.com/connect.checks"],
+ 		"spec.annotations should not propagate to Deployment metadata")
+ }
+@@ -1086,7 +1086,7 @@ func TestRender_PodAnnotations_Override(t *testing.T) {
+ 	r := &render{
+ 		pipeline: pipeline,
+ 		labels:   labels,
+-		commonAnnotations: map[string]string{
++		connectAnnotations: map[string]string{
+ 			"shared-key": "from-common",
+ 		},
+ 	}
+@@ -1097,7 +1097,7 @@ func TestRender_PodAnnotations_Override(t *testing.T) {
+ 	dp := objs[1].(*appsv1.Deployment)
+ 	podAnn := dp.Spec.Template.ObjectMeta.Annotations
+ 	assert.Equal(t, "from-pipeline", podAnn["shared-key"],
+-		"per-pipeline annotations should override commonAnnotations on pod template")
++		"per-pipeline annotations should override connectAnnotations on pod template")
+ }
+ 
+ func TestRender_LicenseSecretAndEnvVar(t *testing.T) {
+@@ -1694,7 +1694,7 @@ func TestRender_PodMonitor_Enabled(t *testing.T) {
+ 	assert.Equal(t, Labels(pipeline), pm.Spec.Selector.MatchLabels)
+ }
+ 
+-func TestRender_PodMonitor_CommonAnnotations(t *testing.T) {
++func TestRender_PodMonitor_ConnectAnnotations(t *testing.T) {
+ 	pipeline := &redpandav1alpha2.Pipeline{
+ 		ObjectMeta: metav1.ObjectMeta{Name: "pm-annotated", Namespace: "default"},
+ 		Spec:       redpandav1alpha2.PipelineSpec{ConfigYAML: "input:\n  stdin: {}\noutput:\n  stdout: {}\n"},
+@@ -1703,7 +1703,7 @@ func TestRender_PodMonitor_CommonAnnotations(t *testing.T) {
+ 	r := &render{
+ 		pipeline: pipeline,
+ 		labels:   Labels(pipeline),
+-		commonAnnotations: map[string]string{
++		connectAnnotations: map[string]string{
+ 			"compliance/owner": "platform-team",
+ 		},
+ 		monitoring: MonitoringConfig{Enabled: true},
+diff --git a/operator/internal/controller/pipeline/render.go b/operator/internal/controller/pipeline/render.go
+index 0a7af652..7a825e2f 100644
+--- a/operator/internal/controller/pipeline/render.go
++++ b/operator/internal/controller/pipeline/render.go
+@@ -40,9 +40,9 @@ const (
+ 
+ // render implements [kube.Renderer] for Pipeline resources.
+ type render struct {
+-	pipeline          *redpandav1alpha2.Pipeline
+-	labels            map[string]string
+-	commonAnnotations map[string]string
++	pipeline           *redpandav1alpha2.Pipeline
++	labels             map[string]string
++	connectAnnotations map[string]string
+ 	// defaultImage is the chart-level default Redpanda Connect image, used
+ 	// when the Pipeline CR omits .spec.image. Empty when the operator was
+ 	// installed without setting connectController.image.{repository,tag}.
+@@ -214,26 +214,26 @@ func Labels(pipeline *redpandav1alpha2.Pipeline) map[string]string {
+ }
+ 
+ func (r *render) annotations() map[string]string {
+-	if len(r.commonAnnotations) == 0 {
++	if len(r.connectAnnotations) == 0 {
+ 		return nil
+ 	}
+-	out := make(map[string]string, len(r.commonAnnotations))
+-	for k, v := range r.commonAnnotations {
++	out := make(map[string]string, len(r.connectAnnotations))
++	for k, v := range r.connectAnnotations {
+ 		out[k] = v
+ 	}
+ 	return out
+ }
+ 
+ // podAnnotations returns annotations for the pod template, merging
+-// commonAnnotations with per-pipeline spec.annotations. Per-pipeline
++// connectAnnotations with per-pipeline spec.annotations. Per-pipeline
+ // annotations take precedence.
+ func (r *render) podAnnotations() map[string]string {
+ 	specAnn := r.pipeline.Spec.Annotations
+-	if len(r.commonAnnotations) == 0 && len(specAnn) == 0 {
++	if len(r.connectAnnotations) == 0 && len(specAnn) == 0 {
+ 		return nil
+ 	}
+-	out := make(map[string]string, len(r.commonAnnotations)+len(specAnn))
+-	for k, v := range r.commonAnnotations {
++	out := make(map[string]string, len(r.connectAnnotations)+len(specAnn))
++	for k, v := range r.connectAnnotations {
+ 		out[k] = v
+ 	}
+ 	for k, v := range specAnn {

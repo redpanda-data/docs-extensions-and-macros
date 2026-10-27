@@ -19,6 +19,8 @@
  *       Runs that negative control against a deliberately violating fixture.
  *       The case is EXPECTED to FAIL; the run exits 0 only if it does.
  *   Options: --model <model> (default sonnet), --keep-temp
+ *   node evals/doc-strings/run-evals.js --doc-impact [...]
+ *       Scores the PUBLISHED-CONTENT IMPACT pass instead; see doc-impact/run.js.
  *
  * Exit codes: 0 all pass (or sabotage proven), 1 failures, 2 harness error,
  * 3 SKIPPED (claude CLI unavailable).
@@ -659,4 +661,11 @@ function main () {
   process.exit(failed.length === 0 ? 0 : 1)
 }
 
-main()
+if (process.argv.includes('--doc-impact')) {
+  // The doc-impact mode scores a different behavior with its own items and
+  // options; see doc-impact/run.js and the README.
+  require('./doc-impact/run').main(process.argv.slice(2).filter((a) => a !== '--doc-impact'))
+    .then((code) => process.exit(code), (err) => { console.error(err.stack); process.exit(2) })
+} else {
+  main()
+}

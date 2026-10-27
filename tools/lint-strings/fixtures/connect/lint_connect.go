@@ -23,6 +23,14 @@ When a consumer group is specified this input consumes one or more topics.
 
 This fixture exercises the ` + "`raw` + interpreted + `raw`" + ` concatenation idiom.
 
+ifndef::env-cloud[]
+Set the consumer group in the input config so this paragraph publishes only to the self-managed docs.
+endif::[]
+
+ifdef::env-cloud[]
+The consumer group is managed for you, so this paragraph publishes only to the Cloud docs.
+endif::[]
+
 == Metadata
 
 This heading and the table below are legitimate AsciiDoc:

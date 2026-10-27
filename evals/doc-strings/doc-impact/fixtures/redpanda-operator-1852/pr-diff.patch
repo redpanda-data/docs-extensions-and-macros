@@ -1,0 +1,921 @@
+# Source diff of this PR against its merge base.
+# Left out (generated docs, lockfiles, vendored code, test data): 1 file(s).
+
+diff --git a/.changes/unreleased/charts-redpanda-Added-20260901-142100.yaml b/.changes/unreleased/charts-redpanda-Added-20260901-142100.yaml
+new file mode 100644
+index 00000000..7429abde
+--- /dev/null
++++ b/.changes/unreleased/charts-redpanda-Added-20260901-142100.yaml
+@@ -0,0 +1,4 @@
++project: charts/redpanda
++kind: Added
++body: 'Added ability to override redpanda listen address using address value in listeners to enable IPv6 address :: to be used for listening, instead of IPv4-only 0.0.0.0 default'
++time: 2026-09-01T14:21:00+00:00
+diff --git a/charts/redpanda/chart/README.md b/charts/redpanda/chart/README.md
+index e4b88340..03141923 100644
+--- a/charts/redpanda/chart/README.md
++++ b/charts/redpanda/chart/README.md
+@@ -331,7 +331,7 @@ Listener settings.  Override global settings configured above for individual lis
+ **Default:**
+ 
+ ```
+-{"admin":{"external":{"default":{"advertisedPorts":[31644],"port":9645,"tls":{"cert":"external"}}},"port":9644,"tls":{"cert":"default","requireClientAuth":false}},"http":{"authenticationMethod":null,"enabled":true,"external":{"default":{"advertisedPorts":[30082],"authenticationMethod":null,"port":8083,"tls":{"cert":"external","requireClientAuth":false}}},"port":8082,"tls":{"cert":"default","requireClientAuth":false}},"kafka":{"authenticationMethod":null,"external":{"default":{"advertisedPorts":[31092],"authenticationMethod":null,"port":9094,"tls":{"cert":"external"}}},"port":9093,"tls":{"cert":"default","requireClientAuth":false}},"rpc":{"port":33145,"tls":{"cert":"default","requireClientAuth":false}},"schemaRegistry":{"authenticationMethod":null,"enabled":true,"external":{"default":{"advertisedPorts":[30081],"authenticationMethod":null,"port":8084,"tls":{"cert":"external","requireClientAuth":false}}},"port":8081,"tls":{"cert":"default","requireClientAuth":false}}}
++{"admin":{"address":null,"external":{"default":{"address":null,"advertisedPorts":[31644],"port":9645,"tls":{"cert":"external"}}},"port":9644,"tls":{"cert":"default","requireClientAuth":false}},"http":{"address":null,"authenticationMethod":null,"enabled":true,"external":{"default":{"address":null,"advertisedPorts":[30082],"authenticationMethod":null,"port":8083,"tls":{"cert":"external","requireClientAuth":false}}},"port":8082,"tls":{"cert":"default","requireClientAuth":false}},"kafka":{"address":null,"authenticationMethod":null,"external":{"default":{"address":null,"advertisedPorts":[31092],"authenticationMethod":null,"port":9094,"tls":{"cert":"external"}}},"port":9093,"tls":{"cert":"default","requireClientAuth":false}},"rpc":{"address":null,"port":33145,"tls":{"cert":"default","requireClientAuth":false}},"schemaRegistry":{"address":null,"authenticationMethod":null,"enabled":true,"external":{"default":{"address":null,"advertisedPorts":[30081],"authenticationMethod":null,"port":8084,"tls":{"cert":"external","requireClientAuth":false}}},"port":8081,"tls":{"cert":"default","requireClientAuth":false}}}
+ ```
+ 
+ ### [listeners.admin](https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values&path=listeners.admin)
+@@ -341,9 +341,15 @@ Admin API listener (only one).
+ **Default:**
+ 
+ ```
+-{"external":{"default":{"advertisedPorts":[31644],"port":9645,"tls":{"cert":"external"}}},"port":9644,"tls":{"cert":"default","requireClientAuth":false}}
++{"address":null,"external":{"default":{"address":null,"advertisedPorts":[31644],"port":9645,"tls":{"cert":"external"}}},"port":9644,"tls":{"cert":"default","requireClientAuth":false}}
+ ```
+ 
++### [listeners.admin.address](https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values&path=listeners.admin.address)
++
++The address to bind this listener to.
++
++**Default:** "0.0.0.0"
++
+ ### [listeners.admin.external](https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values&path=listeners.admin.external)
+ 
+ Optional external access settings.
+@@ -351,7 +357,7 @@ Optional external access settings.
+ **Default:**
+ 
+ ```
+-{"default":{"advertisedPorts":[31644],"port":9645,"tls":{"cert":"external"}}}
++{"default":{"address":null,"advertisedPorts":[31644],"port":9645,"tls":{"cert":"external"}}}
+ ```
+ 
+ ### [listeners.admin.external.default](https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values&path=listeners.admin.external.default)
+@@ -361,9 +367,15 @@ Name of the external listener.
+ **Default:**
+ 
+ ```
+-{"advertisedPorts":[31644],"port":9645,"tls":{"cert":"external"}}
++{"address":null,"advertisedPorts":[31644],"port":9645,"tls":{"cert":"external"}}
+ ```
+ 
++### [listeners.admin.external.default.address](https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values&path=listeners.admin.external.default.address)
++
++The address to bind this listener to.
++
++**Default:** "0.0.0.0"
++
+ ### [listeners.admin.external.default.tls](https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values&path=listeners.admin.external.default.tls)
+ 
+ The port advertised to this listener's external clients. List one port if you want to use the same port for each broker (would be the case when using NodePort service). Otherwise, list the port you want to use for each broker in order of StatefulSet replicas. If undefined, `listeners.admin.port` is used.
+@@ -405,9 +417,21 @@ HTTP API listeners (aka PandaProxy).
+ **Default:**
+ 
+ ```
+-{"authenticationMethod":null,"enabled":true,"external":{"default":{"advertisedPorts":[30082],"authenticationMethod":null,"port":8083,"tls":{"cert":"external","requireClientAuth":false}}},"port":8082,"tls":{"cert":"default","requireClientAuth":false}}
++{"address":null,"authenticationMethod":null,"enabled":true,"external":{"default":{"address":null,"advertisedPorts":[30082],"authenticationMethod":null,"port":8083,"tls":{"cert":"external","requireClientAuth":false}}},"port":8082,"tls":{"cert":"default","requireClientAuth":false}}
+ ```
+ 
++### [listeners.http.address](https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values&path=listeners.http.address)
++
++The address to bind this listener to.
++
++**Default:** "0.0.0.0"
++
++### [listeners.http.external.default.address](https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values&path=listeners.http.external.default.address)
++
++The address to bind this listener to.
++
++**Default:** "0.0.0.0"
++
+ ### [listeners.kafka](https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values&path=listeners.kafka)
+ 
+ Kafka API listeners.
+@@ -415,9 +439,21 @@ Kafka API listeners.
+ **Default:**
+ 
+ ```
+-{"authenticationMethod":null,"external":{"default":{"advertisedPorts":[31092],"authenticationMethod":null,"port":9094,"tls":{"cert":"external"}}},"port":9093,"tls":{"cert":"default","requireClientAuth":false}}
++{"address":null,"authenticationMethod":null,"external":{"default":{"address":null,"advertisedPorts":[31092],"authenticationMethod":null,"port":9094,"tls":{"cert":"external"}}},"port":9093,"tls":{"cert":"default","requireClientAuth":false}}
+ ```
+ 
++### [listeners.kafka.address](https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values&path=listeners.kafka.address)
++
++The address to bind this listener to.
++
++**Default:** "0.0.0.0"
++
++### [listeners.kafka.external.default.address](https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values&path=listeners.kafka.external.default.address)
++
++The address to bind this listener to.
++
++**Default:** "0.0.0.0"
++
+ ### [listeners.kafka.external.default.advertisedPorts](https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values&path=listeners.kafka.external.default.advertisedPorts)
+ 
+ If undefined, `listeners.kafka.external.default.port` is used.
+@@ -443,9 +479,15 @@ RPC listener (this is never externally accessible).
+ **Default:**
+ 
+ ```
+-{"port":33145,"tls":{"cert":"default","requireClientAuth":false}}
++{"address":null,"port":33145,"tls":{"cert":"default","requireClientAuth":false}}
+ ```
+ 
++### [listeners.rpc.address](https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values&path=listeners.rpc.address)
++
++The address to bind this listener to.
++
++**Default:** "0.0.0.0"
++
+ ### [listeners.schemaRegistry](https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values&path=listeners.schemaRegistry)
+ 
+ Schema registry listeners.
+@@ -453,9 +495,21 @@ Schema registry listeners.
+ **Default:**
+ 
+ ```
+-{"authenticationMethod":null,"enabled":true,"external":{"default":{"advertisedPorts":[30081],"authenticationMethod":null,"port":8084,"tls":{"cert":"external","requireClientAuth":false}}},"port":8081,"tls":{"cert":"default","requireClientAuth":false}}
++{"address":null,"authenticationMethod":null,"enabled":true,"external":{"default":{"address":null,"advertisedPorts":[30081],"authenticationMethod":null,"port":8084,"tls":{"cert":"external","requireClientAuth":false}}},"port":8081,"tls":{"cert":"default","requireClientAuth":false}}
+ ```
+ 
++### [listeners.schemaRegistry.address](https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values&path=listeners.schemaRegistry.address)
++
++The address to bind this listener to.
++
++**Default:** "0.0.0.0"
++
++### [listeners.schemaRegistry.external.default.address](https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values&path=listeners.schemaRegistry.external.default.address)
++
++The address to bind this listener to.
++
++**Default:** "0.0.0.0"
++
+ ### [logging](https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values&path=logging)
+ 
+ Log-level settings.
+diff --git a/charts/redpanda/chart/templates/_configmap.go.tpl b/charts/redpanda/chart/templates/_configmap.go.tpl
+index 146d3c25..417fca61 100644
+Binary files a/charts/redpanda/chart/templates/_configmap.go.tpl and b/charts/redpanda/chart/templates/_configmap.go.tpl differ
+diff --git a/charts/redpanda/chart/templates/_values.go.tpl b/charts/redpanda/chart/templates/_values.go.tpl
+index 24e9ed8b..e7d3775f 100644
+Binary files a/charts/redpanda/chart/templates/_values.go.tpl and b/charts/redpanda/chart/templates/_values.go.tpl differ
+diff --git a/charts/redpanda/chart/values.schema.json b/charts/redpanda/chart/values.schema.json
+index 5cdf4bc9..7f4a9a6b 100644
+--- a/charts/redpanda/chart/values.schema.json
++++ b/charts/redpanda/chart/values.schema.json
+@@ -4707,6 +4707,16 @@
+         "admin": {
+           "additionalProperties": false,
+           "properties": {
++            "address": {
++              "oneOf": [
++                {
++                  "type": "string"
++                },
++                {
++                  "type": "null"
++                }
++              ]
++            },
+             "appProtocol": {
+               "type": "string"
+             },
+@@ -4729,6 +4739,16 @@
+                 "^[A-Za-z_][A-Za-z0-9_]*$": {
+                   "additionalProperties": false,
+                   "properties": {
++                    "address": {
++                      "oneOf": [
++                        {
++                          "type": "string"
++                        },
++                        {
++                          "type": "null"
++                        }
++                      ]
++                    },
+                     "advertisedPorts": {
+                       "items": {
+                         "type": "integer"
+@@ -4902,6 +4922,16 @@
+         "http": {
+           "additionalProperties": false,
+           "properties": {
++            "address": {
++              "oneOf": [
++                {
++                  "type": "string"
++                },
++                {
++                  "type": "null"
++                }
++              ]
++            },
+             "appProtocol": {
+               "type": "string"
+             },
+@@ -4928,6 +4958,16 @@
+                 "^[A-Za-z_][A-Za-z0-9_]*$": {
+                   "additionalProperties": false,
+                   "properties": {
++                    "address": {
++                      "oneOf": [
++                        {
++                          "type": "string"
++                        },
++                        {
++                          "type": "null"
++                        }
++                      ]
++                    },
+                     "advertisedPorts": {
+                       "items": {
+                         "type": "integer"
+@@ -5105,6 +5145,16 @@
+         "kafka": {
+           "additionalProperties": false,
+           "properties": {
++            "address": {
++              "oneOf": [
++                {
++                  "type": "string"
++                },
++                {
++                  "type": "null"
++                }
++              ]
++            },
+             "appProtocol": {
+               "type": "string"
+             },
+@@ -5132,6 +5182,16 @@
+                 "^[A-Za-z_][A-Za-z0-9_]*$": {
+                   "additionalProperties": false,
+                   "properties": {
++                    "address": {
++                      "oneOf": [
++                        {
++                          "type": "string"
++                        },
++                        {
++                          "type": "null"
++                        }
++                      ]
++                    },
+                     "advertisedPorts": {
+                       "items": {
+                         "type": "integer"
+@@ -5310,6 +5370,16 @@
+         "rpc": {
+           "additionalProperties": false,
+           "properties": {
++            "address": {
++              "oneOf": [
++                {
++                  "type": "string"
++                },
++                {
++                  "type": "null"
++                }
++              ]
++            },
+             "port": {
+               "type": "integer"
+             },
+@@ -5380,6 +5450,16 @@
+         "schemaRegistry": {
+           "additionalProperties": false,
+           "properties": {
++            "address": {
++              "oneOf": [
++                {
++                  "type": "string"
++                },
++                {
++                  "type": "null"
++                }
++              ]
++            },
+             "appProtocol": {
+               "type": "string"
+             },
+@@ -5402,6 +5482,16 @@
+                 "^[A-Za-z_][A-Za-z0-9_]*$": {
+                   "additionalProperties": false,
+                   "properties": {
++                    "address": {
++                      "oneOf": [
++                        {
++                          "type": "string"
++                        },
++                        {
++                          "type": "null"
++                        }
++                      ]
++                    },
+                     "advertisedPorts": {
+                       "items": {
+                         "type": "integer"
+diff --git a/charts/redpanda/chart/values.yaml b/charts/redpanda/chart/values.yaml
+index 34f51c49..37becf6b 100644
+--- a/charts/redpanda/chart/values.yaml
++++ b/charts/redpanda/chart/values.yaml
+@@ -871,6 +871,9 @@ tuning:
+ listeners:
+   # -- Admin API listener (only one).
+   admin:
++    # -- (string) The address to bind this listener to.
++    # @default -- "0.0.0.0"
++    address: null
+     # -- The port for both internal and external connections to the Admin API.
+     port: 9644
+     # -- Optional instrumentation hint - https://kubernetes.io/docs/concepts/services-networking/service/#application-protocol
+@@ -879,6 +882,9 @@ listeners:
+     external:
+       # -- Name of the external listener.
+       default:
++        # -- (string) The address to bind this listener to.
++        # @default -- "0.0.0.0"
++        address: null
+         port: 9645
+         # Override the global `external.enabled` for only this listener.
+         # enabled: true
+@@ -901,6 +907,9 @@ listeners:
+       requireClientAuth: false
+   # -- Kafka API listeners.
+   kafka:
++    # -- (string) The address to bind this listener to.
++    # @default -- "0.0.0.0"
++    address: null
+     # -- The port for internal client connections.
+     port: 9093
+     # default is "sasl"
+@@ -913,6 +922,9 @@ listeners:
+     external:
+       default:
+         # enabled: true
++        # -- (string) The address to bind this listener to.
++        # @default -- "0.0.0.0"
++        address: null
+         # -- The port used for external client connections.
+         port: 9094
+         # prefixTemplate: ""
+@@ -938,6 +950,9 @@ listeners:
+         # hostTemplate: redpanda-$POD_ORDINAL-broker.example.com
+   # -- RPC listener (this is never externally accessible).
+   rpc:
++    # -- (string) The address to bind this listener to.
++    # @default -- "0.0.0.0"
++    address: null
+     port: 33145
+     tls:
+       # Optional flag to override the global TLS enabled flag.
+@@ -947,6 +962,9 @@ listeners:
+   # -- Schema registry listeners.
+   schemaRegistry:
+     enabled: true
++    # -- (string) The address to bind this listener to.
++    # @default -- "0.0.0.0"
++    address: null
+     port: 8081
+     # default is "http_basic"
+     authenticationMethod:
+@@ -958,6 +976,9 @@ listeners:
+     external:
+       default:
+         # enabled: true
++        # -- (string) The address to bind this listener to.
++        # @default -- "0.0.0.0"
++        address: null
+         port: 8084
+         advertisedPorts:
+         - 30081
+@@ -970,6 +991,9 @@ listeners:
+   # -- HTTP API listeners (aka PandaProxy).
+   http:
+     enabled: true
++    # -- (string) The address to bind this listener to.
++    # @default -- "0.0.0.0"
++    address: null
+     port: 8082
+     # default is "http_basic"
+     authenticationMethod:
+@@ -981,6 +1005,9 @@ listeners:
+     external:
+       default:
+         # enabled: true
++        # -- (string) The address to bind this listener to.
++        # @default -- "0.0.0.0"
++        address: null
+         port: 8083
+         # prefixTemplate: ""
+         advertisedPorts:
+diff --git a/charts/redpanda/chart_test.go b/charts/redpanda/chart_test.go
+index 16c2aa62..40704b80 100644
+--- a/charts/redpanda/chart_test.go
++++ b/charts/redpanda/chart_test.go
+@@ -926,8 +926,9 @@ func mTLSValuesUsingCertManager() *redpanda.PartialValues {
+ 				},
+ 			},
+ 			RPC: &struct {
+-				Port *int32                       `json:"port,omitempty" jsonschema:"required"`
+-				TLS  *redpanda.PartialInternalTLS `json:"tls,omitempty" jsonschema:"required"`
++				Address *string                      `json:"address,omitempty"`
++				Port    *int32                       `json:"port,omitempty" jsonschema:"required"`
++				TLS     *redpanda.PartialInternalTLS `json:"tls,omitempty" jsonschema:"required"`
+ 			}{
+ 				TLS: &redpanda.PartialInternalTLS{
+ 					Cert:              ptr.To("rpc"),
+@@ -992,8 +993,9 @@ func mTLSValuesWithProvidedCerts(serverTLSSecretName, clientTLSSecretName string
+ 				},
+ 			},
+ 			RPC: &struct {
+-				Port *int32                       `json:"port,omitempty" jsonschema:"required"`
+-				TLS  *redpanda.PartialInternalTLS `json:"tls,omitempty" jsonschema:"required"`
++				Address *string                      `json:"address,omitempty"`
++				Port    *int32                       `json:"port,omitempty" jsonschema:"required"`
++				TLS     *redpanda.PartialInternalTLS `json:"tls,omitempty" jsonschema:"required"`
+ 			}{
+ 				TLS: &redpanda.PartialInternalTLS{
+ 					RequireClientAuth: ptr.To(true),
+diff --git a/charts/redpanda/configmap.tpl.go b/charts/redpanda/configmap.tpl.go
+index fae9186d..a6d185a2 100644
+--- a/charts/redpanda/configmap.tpl.go
++++ b/charts/redpanda/configmap.tpl.go
+@@ -647,7 +647,7 @@ func rpcListenersTLS(state *RenderState) map[string]any {
+ 
+ func rpcListeners(state *RenderState) map[string]any {
+ 	return map[string]any{
+-		"address": "0.0.0.0",
++		"address": ptr.Deref(state.Values.Listeners.RPC.Address, "0.0.0.0"),
+ 		"port":    state.Values.Listeners.RPC.Port,
+ 	}
+ }
+diff --git a/charts/redpanda/values.go b/charts/redpanda/values.go
+index 1beed5c2..0d48fdef 100644
+--- a/charts/redpanda/values.go
++++ b/charts/redpanda/values.go
+@@ -1063,11 +1063,21 @@ type Listeners struct {
+ 	Kafka          ListenerConfig[KafkaAuthenticationMethod] `json:"kafka" jsonschema:"required"`
+ 	SchemaRegistry ListenerConfig[NoAuth]                    `json:"schemaRegistry" jsonschema:"required"`
+ 	RPC            struct {
+-		Port int32       `json:"port" jsonschema:"required"`
+-		TLS  InternalTLS `json:"tls" jsonschema:"required"`
++		Address *string     `json:"address,omitempty"`
++		Port    int32       `json:"port" jsonschema:"required"`
++		TLS     InternalTLS `json:"tls" jsonschema:"required"`
+ 	} `json:"rpc" jsonschema:"required"`
+ }
+ 
++// +gotohelm:ignore=true
++func (Listeners) JSONSchemaExtend(schema *jsonschema.Schema) {
++	rpc, ok := schema.Properties.Get("rpc")
++	if !ok {
++		panic(fmt.Sprintf("missing field %q on %T", "rpc", schema.Title))
++	}
++	makeNullable(rpc, "address")
++}
++
+ // InUseServerCerts returns a set of names (As a sorted slice) of all TLS
+ // certificates that are referenced via listeners and enabled.
+ func (l *Listeners) InUseServerCerts(tls *TLS) []string {
+@@ -1796,6 +1806,7 @@ type ListenerConfig[T ~string] struct {
+ 	External map[string]ExternalListener[T] `json:"external"`
+ 	Port     int32                          `json:"port" jsonschema:"required"`
+ 	TLS      InternalTLS                    `json:"tls" jsonschema:"required"`
++	Address  *string                        `json:"address,omitempty"`
+ 
+ 	AppProtocol          *string `json:"appProtocol,omitempty"`
+ 	AuthenticationMethod *T      `json:"authenticationMethod,omitempty"`
+@@ -1818,6 +1829,7 @@ func (l *ListenerConfig[T]) AsString() ListenerConfig[string] {
+ 		External:             ext,
+ 		Port:                 l.Port,
+ 		TLS:                  l.TLS,
++		Address:              l.Address,
+ 		AppProtocol:          l.AppProtocol,
+ 		AuthenticationMethod: auth,
+ 	}
+@@ -1825,7 +1837,7 @@ func (l *ListenerConfig[T]) AsString() ListenerConfig[string] {
+ 
+ // +gotohelm:ignore=true
+ func (ListenerConfig[T]) JSONSchemaExtend(schema *jsonschema.Schema) {
+-	makeNullable(schema, "authenticationMethod")
++	makeNullable(schema, "authenticationMethod", "address")
+ 
+ 	external, _ := schema.Properties.Get("external")
+ 
+@@ -1892,7 +1904,7 @@ func (l *ListenerConfig[T]) TrustStores(tls *TLS) []*TrustStore {
+ func (l *ListenerConfig[T]) Listeners(auth *T) []map[string]any {
+ 	internal := map[string]any{
+ 		"name":    "internal",
+-		"address": "0.0.0.0",
++		"address": ptr.Deref(l.Address, "0.0.0.0"),
+ 		"port":    l.Port,
+ 	}
+ 
+@@ -1914,7 +1926,7 @@ func (l *ListenerConfig[T]) Listeners(auth *T) []map[string]any {
+ 		listener := map[string]any{
+ 			"name":    k,
+ 			"port":    l.Port,
+-			"address": "0.0.0.0",
++			"address": ptr.Deref(l.Address, "0.0.0.0"),
+ 		}
+ 
+ 		if am := ptr.Deref(l.AuthenticationMethod, defaultAuth); am != "" {
+@@ -1962,6 +1974,7 @@ type ExternalListener[T ~string] struct {
+ 	// TODO CHECK NODE PORT USAGE
+ 	NodePort *int32       `json:"nodePort"`
+ 	TLS      *ExternalTLS `json:"tls"`
++	Address  *string      `json:"address,omitempty"`
+ 
+ 	AuthenticationMethod *T      `json:"authenticationMethod,omitempty"`
+ 	PrefixTemplate       *string `json:"prefixTemplate,omitempty"`
+@@ -2001,6 +2014,7 @@ func (l *ExternalListener[T]) AsString() ExternalListener[string] {
+ 		Port:                 l.Port,
+ 		NodePort:             l.NodePort,
+ 		TLS:                  l.TLS,
++		Address:              l.Address,
+ 		AuthenticationMethod: auth,
+ 		PrefixTemplate:       l.PrefixTemplate,
+ 		Type:                 l.Type,
+@@ -2011,7 +2025,7 @@ func (l *ExternalListener[T]) AsString() ExternalListener[string] {
+ 
+ // +gotohelm:ignore=true
+ func (ExternalListener[T]) JSONSchemaExtend(schema *jsonschema.Schema) {
+-	makeNullable(schema, "authenticationMethod")
++	makeNullable(schema, "authenticationMethod", "address")
+ }
+ 
+ func (l *ExternalListener[T]) IsEnabled() bool {
+diff --git a/charts/redpanda/values_partial.gen.go b/charts/redpanda/values_partial.gen.go
+index 569aff85..2c91f75e 100644
+--- a/charts/redpanda/values_partial.gen.go
++++ b/charts/redpanda/values_partial.gen.go
+@@ -236,8 +236,9 @@ type PartialListeners struct {
+ 	Kafka          *PartialListenerConfig[KafkaAuthenticationMethod] "json:\"kafka,omitempty\" jsonschema:\"required\""
+ 	SchemaRegistry *PartialListenerConfig[NoAuth]                    "json:\"schemaRegistry,omitempty\" jsonschema:\"required\""
+ 	RPC            *struct {
+-		Port *int32              "json:\"port,omitempty\" jsonschema:\"required\""
+-		TLS  *PartialInternalTLS "json:\"tls,omitempty\" jsonschema:\"required\""
++		Address *string             "json:\"address,omitempty\""
++		Port    *int32              "json:\"port,omitempty\" jsonschema:\"required\""
++		TLS     *PartialInternalTLS "json:\"tls,omitempty\" jsonschema:\"required\""
+ 	} "json:\"rpc,omitempty\" jsonschema:\"required\""
+ }
+ 
+@@ -344,6 +345,7 @@ type PartialListenerConfig[T ~string] struct {
+ 	External             map[string]PartialExternalListener[T] "json:\"external,omitempty\""
+ 	Port                 *int32                                "json:\"port,omitempty\" jsonschema:\"required\""
+ 	TLS                  *PartialInternalTLS                   "json:\"tls,omitempty\" jsonschema:\"required\""
++	Address              *string                               "json:\"address,omitempty\""
+ 	AppProtocol          *string                               "json:\"appProtocol,omitempty\""
+ 	AuthenticationMethod *T                                    "json:\"authenticationMethod,omitempty\""
+ }
+@@ -423,6 +425,7 @@ type PartialExternalListener[T ~string] struct {
+ 	Port                 *int32              "json:\"port,omitempty\" jsonschema:\"required\""
+ 	NodePort             *int32              "json:\"nodePort,omitempty\""
+ 	TLS                  *PartialExternalTLS "json:\"tls,omitempty\""
++	Address              *string             "json:\"address,omitempty\""
+ 	AuthenticationMethod *T                  "json:\"authenticationMethod,omitempty\""
+ 	PrefixTemplate       *string             "json:\"prefixTemplate,omitempty\""
+ 	Type                 *string             "json:\"type,omitempty\" jsonschema:\"enum=tlsroute\""
+diff --git a/charts/redpanda/values_test.go b/charts/redpanda/values_test.go
+index 191de07e..6e00d7a6 100644
+--- a/charts/redpanda/values_test.go
++++ b/charts/redpanda/values_test.go
+@@ -647,8 +647,9 @@ func TestInUseServerCerts(t *testing.T) {
+ 				HTTP:           ListenerConfig[HTTPAuthenticationMethod]{Port: 8082, TLS: InternalTLS{Cert: "default"}},
+ 				SchemaRegistry: ListenerConfig[NoAuth]{Port: 8081, TLS: InternalTLS{Cert: "default"}},
+ 				RPC: struct {
+-					Port int32       `json:"port" jsonschema:"required"`
+-					TLS  InternalTLS `json:"tls" jsonschema:"required"`
++					Address *string     `json:"address,omitempty"`
++					Port    int32       `json:"port" jsonschema:"required"`
++					TLS     InternalTLS `json:"tls" jsonschema:"required"`
+ 				}{Port: 33145, TLS: InternalTLS{Cert: "default"}},
+ 			},
+ 			Expected: []string{"default"},
+@@ -683,8 +684,9 @@ func TestInUseServerCerts(t *testing.T) {
+ 				HTTP:           ListenerConfig[HTTPAuthenticationMethod]{Port: 8082, TLS: InternalTLS{Enabled: ptr.To(false), Cert: "default"}},
+ 				SchemaRegistry: ListenerConfig[NoAuth]{Port: 8081, TLS: InternalTLS{Enabled: ptr.To(false), Cert: "default"}},
+ 				RPC: struct {
+-					Port int32       `json:"port" jsonschema:"required"`
+-					TLS  InternalTLS `json:"tls" jsonschema:"required"`
++					Address *string     `json:"address,omitempty"`
++					Port    int32       `json:"port" jsonschema:"required"`
++					TLS     InternalTLS `json:"tls" jsonschema:"required"`
+ 				}{Port: 33145, TLS: InternalTLS{Enabled: ptr.To(false), Cert: "default"}},
+ 			},
+ 			Expected: []string{"external"},
+@@ -719,8 +721,9 @@ func TestInUseServerCerts(t *testing.T) {
+ 				HTTP:           ListenerConfig[HTTPAuthenticationMethod]{Port: 8082, TLS: InternalTLS{Cert: "default"}},
+ 				SchemaRegistry: ListenerConfig[NoAuth]{Port: 8081, TLS: InternalTLS{Cert: "default"}},
+ 				RPC: struct {
+-					Port int32       `json:"port" jsonschema:"required"`
+-					TLS  InternalTLS `json:"tls" jsonschema:"required"`
++					Address *string     `json:"address,omitempty"`
++					Port    int32       `json:"port" jsonschema:"required"`
++					TLS     InternalTLS `json:"tls" jsonschema:"required"`
+ 				}{Port: 33145, TLS: InternalTLS{Cert: "default"}},
+ 			},
+ 			Expected: []string{"default", "external"},
+@@ -748,8 +751,9 @@ func TestInUseServerCerts(t *testing.T) {
+ 				HTTP:           ListenerConfig[HTTPAuthenticationMethod]{Port: 8082, TLS: InternalTLS{Enabled: ptr.To(false), Cert: "default"}},
+ 				SchemaRegistry: ListenerConfig[NoAuth]{Port: 8081, TLS: InternalTLS{Enabled: ptr.To(false), Cert: "default"}},
+ 				RPC: struct {
+-					Port int32       `json:"port" jsonschema:"required"`
+-					TLS  InternalTLS `json:"tls" jsonschema:"required"`
++					Address *string     `json:"address,omitempty"`
++					Port    int32       `json:"port" jsonschema:"required"`
++					TLS     InternalTLS `json:"tls" jsonschema:"required"`
+ 				}{Port: 33145, TLS: InternalTLS{Enabled: ptr.To(false), Cert: "default"}},
+ 			},
+ 			Expected: []string{},
+@@ -793,8 +797,9 @@ func TestInUseServerCerts(t *testing.T) {
+ 					TLS:  InternalTLS{Enabled: ptr.To(false), Cert: "default"},
+ 				},
+ 				RPC: struct {
+-					Port int32       `json:"port" jsonschema:"required"`
+-					TLS  InternalTLS `json:"tls" jsonschema:"required"`
++					Address *string     `json:"address,omitempty"`
++					Port    int32       `json:"port" jsonschema:"required"`
++					TLS     InternalTLS `json:"tls" jsonschema:"required"`
+ 				}{Port: 33145, TLS: InternalTLS{Enabled: ptr.To(false), Cert: "default"}},
+ 			},
+ 			Expected: []string{"external"},
+@@ -840,8 +845,9 @@ func TestInUseServerCerts(t *testing.T) {
+ 				HTTP:           ListenerConfig[HTTPAuthenticationMethod]{Port: 8082, TLS: InternalTLS{Enabled: ptr.To(false), Cert: "default"}},
+ 				SchemaRegistry: ListenerConfig[NoAuth]{Port: 8081, TLS: InternalTLS{Enabled: ptr.To(false), Cert: "default"}},
+ 				RPC: struct {
+-					Port int32       `json:"port" jsonschema:"required"`
+-					TLS  InternalTLS `json:"tls" jsonschema:"required"`
++					Address *string     `json:"address,omitempty"`
++					Port    int32       `json:"port" jsonschema:"required"`
++					TLS     InternalTLS `json:"tls" jsonschema:"required"`
+ 				}{Port: 33145, TLS: InternalTLS{Enabled: ptr.To(false), Cert: "default"}},
+ 			},
+ 			Expected: []string{"admin-ext", "kafka-ext"},
+@@ -867,8 +873,9 @@ func TestInUseServerCerts(t *testing.T) {
+ 				HTTP:           ListenerConfig[HTTPAuthenticationMethod]{Port: 8082, TLS: InternalTLS{Enabled: ptr.To(false), Cert: "default"}},
+ 				SchemaRegistry: ListenerConfig[NoAuth]{Port: 8081, TLS: InternalTLS{Enabled: ptr.To(false), Cert: "default"}},
+ 				RPC: struct {
+-					Port int32       `json:"port" jsonschema:"required"`
+-					TLS  InternalTLS `json:"tls" jsonschema:"required"`
++					Address *string     `json:"address,omitempty"`
++					Port    int32       `json:"port" jsonschema:"required"`
++					TLS     InternalTLS `json:"tls" jsonschema:"required"`
+ 				}{Port: 33145, TLS: InternalTLS{Enabled: ptr.To(false), Cert: "default"}},
+ 			},
+ 			Expected: []string{},
+diff --git a/operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go b/operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go
+index 65933c15..6ef7eaae 100644
+--- a/operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go
++++ b/operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go
+@@ -1001,6 +1001,8 @@ type Listeners struct {
+ 
+ // RPC configures settings for the RPC API listeners.
+ type RPC struct {
++	// The address to bind this listener to. Default 0.0.0.0
++	Address *string `json:"address,omitempty"`
+ 	// Specifies the container port number for the internal listener.
+ 	Port *int `json:"port,omitempty"`
+ 	// Configures TLS settings for the internal listener.
+@@ -1008,6 +1010,8 @@ type RPC struct {
+ }
+ 
+ type Listener struct {
++	// The address to bind this listener to. Default 0.0.0.0
++	Address *string `json:"address,omitempty"`
+ 	// Specifies whether this Listener is enabled.
+ 	Enabled *bool `json:"enabled,omitempty"`
+ 	// Specifies the authentication method for this listener. For example, 'mtls_identity', `sasl` or `http_basic`.
+diff --git a/operator/api/redpanda/v1alpha2/zz_generated.deepcopy.go b/operator/api/redpanda/v1alpha2/zz_generated.deepcopy.go
+index ca60e2c1..e8585b1c 100644
+--- a/operator/api/redpanda/v1alpha2/zz_generated.deepcopy.go
++++ b/operator/api/redpanda/v1alpha2/zz_generated.deepcopy.go
+@@ -2840,6 +2840,11 @@ func (in *LicenseSecretRef) DeepCopy() *LicenseSecretRef {
+ // DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
+ func (in *Listener) DeepCopyInto(out *Listener) {
+ 	*out = *in
++	if in.Address != nil {
++		in, out := &in.Address, &out.Address
++		*out = new(string)
++		**out = **in
++	}
+ 	if in.Enabled != nil {
+ 		in, out := &in.Enabled, &out.Enabled
+ 		*out = new(bool)
+@@ -3975,6 +3980,11 @@ func (in *RBAC) DeepCopy() *RBAC {
+ // DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
+ func (in *RPC) DeepCopyInto(out *RPC) {
+ 	*out = *in
++	if in.Address != nil {
++		in, out := &in.Address, &out.Address
++		*out = new(string)
++		**out = **in
++	}
+ 	if in.Port != nil {
+ 		in, out := &in.Port, &out.Port
+ 		*out = new(int)
+diff --git a/operator/config/crd/bases/cluster.redpanda.com_redpandas.yaml b/operator/config/crd/bases/cluster.redpanda.com_redpandas.yaml
+index 790aa846..d4411cd2 100644
+--- a/operator/config/crd/bases/cluster.redpanda.com_redpandas.yaml
++++ b/operator/config/crd/bases/cluster.redpanda.com_redpandas.yaml
+@@ -2153,6 +2153,10 @@ spec:
+                       admin:
+                         description: Configures settings for the Admin API listeners.
+                         properties:
++                          address:
++                            description: The address to bind this listener to. Default
++                              0.0.0.0
++                            type: string
+                           appProtocol:
+                             type: string
+                           authenticationMethod:
+@@ -2167,6 +2171,10 @@ spec:
+                               description: ExternalListener configures settings for
+                                 the external listeners.
+                               properties:
++                                address:
++                                  description: The address to bind this listener to.
++                                    Default 0.0.0.0
++                                  type: string
+                                 advertisedPorts:
+                                   description: Specifies the network port that the
+                                     external Service listens on.
+@@ -2406,6 +2414,10 @@ spec:
+                       http:
+                         description: Configures settings for the HTTP Proxy listeners.
+                         properties:
++                          address:
++                            description: The address to bind this listener to. Default
++                              0.0.0.0
++                            type: string
+                           appProtocol:
+                             type: string
+                           authenticationMethod:
+@@ -2420,6 +2432,10 @@ spec:
+                               description: ExternalListener configures settings for
+                                 the external listeners.
+                               properties:
++                                address:
++                                  description: The address to bind this listener to.
++                                    Default 0.0.0.0
++                                  type: string
+                                 advertisedPorts:
+                                   description: Specifies the network port that the
+                                     external Service listens on.
+@@ -2664,6 +2680,10 @@ spec:
+                       kafka:
+                         description: Configures settings for the Kafka API listeners.
+                         properties:
++                          address:
++                            description: The address to bind this listener to. Default
++                              0.0.0.0
++                            type: string
+                           appProtocol:
+                             type: string
+                           authenticationMethod:
+@@ -2678,6 +2698,10 @@ spec:
+                               description: ExternalListener configures settings for
+                                 the external listeners.
+                               properties:
++                                address:
++                                  description: The address to bind this listener to.
++                                    Default 0.0.0.0
++                                  type: string
+                                 advertisedPorts:
+                                   description: Specifies the network port that the
+                                     external Service listens on.
+@@ -2917,6 +2941,10 @@ spec:
+                       rpc:
+                         description: Configures settings for the RPC API listener.
+                         properties:
++                          address:
++                            description: The address to bind this listener to. Default
++                              0.0.0.0
++                            type: string
+                           port:
+                             description: Specifies the container port number for the
+                               internal listener.
+@@ -3005,6 +3033,10 @@ spec:
+                       schemaRegistry:
+                         description: Configures settings for the Schema Registry listeners.
+                         properties:
++                          address:
++                            description: The address to bind this listener to. Default
++                              0.0.0.0
++                            type: string
+                           appProtocol:
+                             type: string
+                           authenticationMethod:
+@@ -3019,6 +3051,10 @@ spec:
+                               description: ExternalListener configures settings for
+                                 the external listeners.
+                               properties:
++                                address:
++                                  description: The address to bind this listener to.
++                                    Default 0.0.0.0
++                                  type: string
+                                 advertisedPorts:
+                                   description: Specifies the network port that the
+                                     external Service listens on.
+@@ -36274,6 +36310,10 @@ spec:
+                       admin:
+                         description: Configures settings for the Admin API listeners.
+                         properties:
++                          address:
++                            description: The address to bind this listener to. Default
++                              0.0.0.0
++                            type: string
+                           appProtocol:
+                             type: string
+                           authenticationMethod:
+@@ -36288,6 +36328,10 @@ spec:
+                               description: ExternalListener configures settings for
+                                 the external listeners.
+                               properties:
++                                address:
++                                  description: The address to bind this listener to.
++                                    Default 0.0.0.0
++                                  type: string
+                                 advertisedPorts:
+                                   description: Specifies the network port that the
+                                     external Service listens on.
+@@ -36527,6 +36571,10 @@ spec:
+                       http:
+                         description: Configures settings for the HTTP Proxy listeners.
+                         properties:
++                          address:
++                            description: The address to bind this listener to. Default
++                              0.0.0.0
++                            type: string
+                           appProtocol:
+                             type: string
+                           authenticationMethod:
+@@ -36541,6 +36589,10 @@ spec:
+                               description: ExternalListener configures settings for
+                                 the external listeners.
+                               properties:
++                                address:
++                                  description: The address to bind this listener to.
++                                    Default 0.0.0.0
++                                  type: string
+                                 advertisedPorts:
+                                   description: Specifies the network port that the
+                                     external Service listens on.
+@@ -36785,6 +36837,10 @@ spec:
+                       kafka:
+                         description: Configures settings for the Kafka API listeners.
+                         properties:
++                          address:
++                            description: The address to bind this listener to. Default
++                              0.0.0.0
++                            type: string
+                           appProtocol:
+                             type: string
+                           authenticationMethod:
+@@ -36799,6 +36855,10 @@ spec:
+                               description: ExternalListener configures settings for
+                                 the external listeners.
+                               properties:
++                                address:
++                                  description: The address to bind this listener to.
++                                    Default 0.0.0.0
++                                  type: string
+                                 advertisedPorts:
+                                   description: Specifies the network port that the
+                                     external Service listens on.
+@@ -37038,6 +37098,10 @@ spec:
+                       rpc:
+                         description: Configures settings for the RPC API listener.
+                         properties:
++                          address:
++                            description: The address to bind this listener to. Default
++                              0.0.0.0
++                            type: string
+                           port:
+                             description: Specifies the container port number for the
+                               internal listener.
+@@ -37126,6 +37190,10 @@ spec:
+                       schemaRegistry:
+                         description: Configures settings for the Schema Registry listeners.
+                         properties:
++                          address:
++                            description: The address to bind this listener to. Default
++                              0.0.0.0
++                            type: string
+                           appProtocol:
+                             type: string
+                           authenticationMethod:
+@@ -37140,6 +37208,10 @@ spec:
+                               description: ExternalListener configures settings for
+                                 the external listeners.
+                               properties:
++                                address:
++                                  description: The address to bind this listener to.
++                                    Default 0.0.0.0
++                                  type: string
+                                 advertisedPorts:
+                                   description: Specifies the network port that the
+                                     external Service listens on.
