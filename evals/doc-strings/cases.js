@@ -19,6 +19,11 @@
  *   verified like a rewrite (re-lint clean, extraction intact, substance
  *   restored). Its sabotage swaps in a fully conforming rewording, where the
  *   model must stay silent and the case therefore fails.
+ * - unchanged-lines: behavior C for lines the PR did not touch. A string
+ *   ships whole, but the author wrote only the changed lines; any
+ *   suggestion must keep every unchanged line of the declaration byte for
+ *   byte. Its sabotage is `sabotagePromptEdits`: the production prompt
+ *   with the rule that scopes review to changed lines reverted.
  * - negative-review / negative-audit: behavior C. Fully conforming input;
  *   the model FAILS the case by producing any suggestion or claiming any
  *   finding. `sabotageEdits` swaps in a violating fixture to prove the case
@@ -239,6 +244,33 @@ const CASES = [
     sabotageEdits: [{
       find: 'f = f.Description("Only things whose name starts with this prefix are read.")',
       replace: 'f = f.Description("Only things whose name starts with this prefix are read. To filter on other attributes, use a xref:bloblang/about.adoc[Bloblang] mapping.")'
+    }]
+  },
+  {
+    // streaming-enterprise PR 461: the author rewrote the --regex paragraphs
+    // of rpk topic delete's Long text, and the review then rewrote lines
+    // nobody touched (quotes around a command, example topic names).
+    id: 'unchanged-lines-kept',
+    kind: 'unchanged-lines',
+    description: "rpk Long text with a few changed paragraphs; any suggestion must keep every line the PR did not change",
+    layout: 'rpk-pr461',
+    headFixture: 'delete.head.go',
+    target: 'delete',
+    sabotagePromptEdits: [{
+      find: '- The whole declaration ships, so read all of it, but review only\n' +
+            '  the lines this PR changed. A line the PR did not change is a\n' +
+            '  finding only when this change makes it wrong: it now\n' +
+            '  contradicts the changed lines or the code. Its wording, style\n' +
+            '  and term choices are out of scope even where they break the\n' +
+            '  standard; the author did not write them in this PR. A lint\n' +
+            '  finding is the one exception: the lint reports per\n' +
+            '  declaration, so fix what a finding names on any line, and\n' +
+            '  change nothing else on that line. A suggestion fixes the\n' +
+            '  changed lines, any line the change made wrong and any lint\n' +
+            '  finding, and keeps every other line byte-identical.\n',
+      replace: '- The whole declaration ships, so judge all of it, not only the\n' +
+               '  lines this PR changed, and fix every problem it has in one\n' +
+               '  suggestion.\n'
     }]
   },
   {

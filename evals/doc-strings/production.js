@@ -87,6 +87,22 @@ function parseClaudeArgs (claudeArgs) {
 }
 
 /**
+ * A control's change to the production prompt: each edit puts back the text
+ * a rule replaced, so the control runs the prompt without that rule. Every
+ * `find` must match exactly once, so a control whose rule was reworded
+ * fails loudly instead of running the unchanged prompt.
+ */
+function editPrompt (prompt, edits) {
+  let out = prompt
+  for (const edit of edits || []) {
+    const parts = out.split(edit.find)
+    if (parts.length !== 2) throw new Error(`prompt edit must match once, matched ${parts.length - 1}: ${JSON.stringify(edit.find.slice(0, 80))}`)
+    out = parts.join(edit.replace)
+  }
+  return out
+}
+
+/**
  * Throw unless a removed span is one unit: a second sentence end, a list item
  * after its first line, or a blank line inside it means the splitter merged
  * two units, and removing it would drop more than the sentence that names a
@@ -436,12 +452,12 @@ function normalizeComments (comments, committableSuggestions = true) {
   return comments.map((c) => ({ ...c, body: c.body.replace(/```text\b/g, '```suggestion') }))
 }
 
-function runReview ({ repoDir, lint, diff, model = PRODUCTION_MODEL, committableSuggestions = true, timeoutMs = 600000, withoutStandards = false }) {
+function runReview ({ repoDir, lint, diff, model = PRODUCTION_MODEL, committableSuggestions = true, timeoutMs = 600000, withoutStandards = false, promptEdits = [] }) {
   const step = loadStep()
   const args = parseClaudeArgs(step.with.claude_args || '')
   // A repository that doesn't exist, so a model that looks the PR up with
   // `gh pr view` gets an error rather than a real, unrelated PR.
-  const prompt = renderPrompt(step.with.prompt, { repository: 'example-org/doc-strings-eval-fixture', prNumber: 1, committableSuggestions }, { withoutStandards })
+  const prompt = renderPrompt(editPrompt(step.with.prompt, promptEdits), { repository: 'example-org/doc-strings-eval-fixture', prNumber: 1, committableSuggestions }, { withoutStandards })
 
   fs.writeFileSync(path.join(repoDir, 'lint-findings.json'), JSON.stringify(lint, null, 2))
   if (diff != null) {
@@ -549,6 +565,7 @@ module.exports = {
   checkMustRead,
   PRODUCTION_MODEL,
   FETCHED_STANDARDS,
+  editPrompt,
   MUST_READ,
   COMMENT_TOOL
 }

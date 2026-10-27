@@ -545,6 +545,53 @@ function runNegativeReviewCase (spec, io, sabotage) {
   return finish(checks.allPass() ? 'PASS' : 'FAIL', checks, model)
 }
 
+function runUnchangedLinesCase (spec, io, sabotage) {
+  const checks = makeChecks()
+  const repo = lib.materializeRepo(spec.layout)
+  const base = lib.gitInit(repo.dir)
+  fs.copyFileSync(path.join(lib.EVAL_FIXTURES, spec.layout, spec.headFixture), repo.targetAbs)
+  lib.gitCommitAll(repo.dir, 'reword the regex paragraphs')
+  io.saveFixture('after', repo)
+
+  const lint = lib.runLint(repo.dir, repo.surface, ['--diff', base])
+  const target = (lint.declarations || []).find((d) => d.name === spec.target)
+  if (!target) return harnessError(checks, `Precondition: ${spec.target} must be a declaration to review, got ${JSON.stringify((lint.declarations || []).map((d) => d.name))}`)
+  // The prompt makes a lint finding the one reason to touch an unchanged
+  // line, so the case needs a lint-clean declaration to mean "keep them all".
+  if ((lint.findings || []).length) return harnessError(checks, `Precondition: the fixture must be lint-clean, got ${lint.findings.length} findings`)
+  const changed = lib.changedLines(repo.dir, base, repo.targetRel)
+  const head = fs.readFileSync(repo.targetAbs, 'utf8').split('\n')
+  const keep = []
+  for (let n = target.line_start; n <= target.line_end; n++) {
+    if (!changed.has(n)) keep.push(head[n - 1])
+  }
+  const touched = [...changed].filter((n) => n >= target.line_start && n <= target.line_end)
+  if (!keep.some((l) => /[A-Za-z0-9]/.test(l)) || touched.length === 0) {
+    return harnessError(checks, `Precondition: ${spec.target} needs both changed and unchanged lines (changed ${touched.length}, unchanged ${keep.length})`)
+  }
+  checks.add('precondition: the declaration has changed and unchanged lines', true,
+    `changed lines ${JSON.stringify(touched)}; unchanged lines to keep: ${keep.length}`)
+  if (sabotage) {
+    checks.add('sabotage mode: the prompt runs with the changed-lines rule reverted', true,
+      `${spec.sabotagePromptEdits.length} prompt edit(s)`)
+  }
+
+  const diff = lib.gitDiff(repo.dir, base)
+  const model = io.callProduction({ repo, lint, diff, promptEdits: sabotage ? spec.sabotagePromptEdits : [] })
+  if (model.failed) return modelCallFailed(checks, model)
+
+  const kept = lib.linesKept(model.comments, target, keep)
+  checks.add(ROW_KEEPS_UNCHANGED, kept.pass,
+    kept.pass
+      ? (kept.judged === 0
+          ? `no suggestion on the declaration, so nothing to judge; comments posted: ${model.comments.length}`
+          : `suggestions judged: ${kept.judged}, each keeping all ${keep.length} unchanged lines in order; comments posted: ${model.comments.length}`)
+      : `reworded: ${JSON.stringify(kept.dropped)}`)
+
+  io.cleanup(repo.dir)
+  return finish(checks.allPass() ? 'PASS' : 'FAIL', checks, model)
+}
+
 function runNegativeAuditCase (spec, io, sabotage) {
   const checks = makeChecks()
   const repo = lib.materializeRepo(spec.layout, sabotage ? spec.sabotageEdits : [])
@@ -666,10 +713,12 @@ const ROW_MUST_SUGGEST = 'at least one ```suggestion block (a vacuous string mus
 const ROW_NO_COMMENTS = 'zero inline comments posted'
 const ROW_NO_FINDINGS = 'claimed findings array is empty'
 const ROW_NO_SUGGESTIONS = 'zero ```suggestion blocks in the model output'
+const ROW_KEEPS_UNCHANGED = 'every suggestion on the declaration keeps its unchanged lines byte-identical'
 const SABOTAGE_ROWS = {
   'prose-review': [ROW_MUST_SUGGEST],
   'negative-review': [ROW_NO_COMMENTS],
-  'negative-audit': [ROW_NO_FINDINGS, ROW_NO_SUGGESTIONS]
+  'negative-audit': [ROW_NO_FINDINGS, ROW_NO_SUGGESTIONS],
+  'unchanged-lines': [ROW_KEEPS_UNCHANGED]
 }
 
 // The case kinds that run the production review and so carry the must-read
@@ -682,6 +731,7 @@ const EXECUTORS = {
   upstream: runUpstreamCase,
   'prose-review': runProseReviewCase,
   'negative-review': runNegativeReviewCase,
+  'unchanged-lines': runUnchangedLinesCase,
   'negative-audit': runNegativeAuditCase
 }
 
@@ -783,8 +833,9 @@ function main () {
   let selected = CASES
   if (options.sabotage) {
     selected = CASES.filter((c) => c.id === options.sabotage)
-    if (selected.length === 0 || !Array.isArray(selected[0].sabotageEdits)) {
-      console.error(`--sabotage requires the id of a case with sabotageEdits. Available: ${CASES.filter((c) => Array.isArray(c.sabotageEdits)).map((c) => c.id).join(', ')}`)
+    const hasSabotage = (c) => Array.isArray(c.sabotageEdits) || Array.isArray(c.sabotagePromptEdits)
+    if (selected.length === 0 || !hasSabotage(selected[0])) {
+      console.error(`--sabotage requires the id of a case with sabotageEdits or sabotagePromptEdits. Available: ${CASES.filter(hasSabotage).map((c) => c.id).join(', ')}`)
       process.exit(2)
     }
   } else if (options.sabotageMustRead) {
@@ -832,11 +883,11 @@ function main () {
         result.failed = result.timedOut || result.status !== 0
         return result
       },
-      callProduction ({ repo, lint, diff }) {
+      callProduction ({ repo, lint, diff, promptEdits }) {
         let result
         try {
           result = production.runReview({
-            repoDir: repo.dir, lint, diff, model: options.model || production.PRODUCTION_MODEL, committableSuggestions: options.committable, withoutStandards: strip
+            repoDir: repo.dir, lint, diff, promptEdits, model: options.model || production.PRODUCTION_MODEL, committableSuggestions: options.committable, withoutStandards: strip
           })
         } catch (err) {
           return { failed: true, harness: true, timedOut: false, status: 'harness', stderr: err.message, ms: 0, comments: [], files: {}, output: '', calls: [], mustRead: null }

@@ -177,6 +177,74 @@ describe('doc-strings evals: the suggestion comment must target the declaration'
   })
 })
 
+describe('doc-strings evals: unchanged-lines check', () => {
+  const decl = { file: 'cmd.go', line_start: 10, line_end: 20 }
+  const keep = ['An untouched line.', 'Another untouched line.']
+  const comment = (body, line = 20, startLine = 10) => ({ path: 'cmd.go', body, line, startLine })
+
+  test('a suggestion that keeps every unchanged line passes', () => {
+    const r = lib.linesKept([comment('```suggestion\nAn untouched line.\nA changed line, fixed.\nAnother untouched line.\n```')], decl, keep)
+    expect(r).toEqual({ pass: true, judged: 1, dropped: [] })
+  })
+
+  test('a suggestion that rewords an unchanged line fails and names it', () => {
+    const r = lib.linesKept([comment('```suggestion\nAn untouched line, improved.\nAnother untouched line.\n```')], decl, keep)
+    expect(r.pass).toBe(false)
+    expect(r.dropped).toEqual(['An untouched line.'])
+  })
+
+  test('a ./-prefixed comment path is judged like the bare one', () => {
+    const r = lib.linesKept([{ path: './cmd.go', body: '```suggestion\nAn untouched line, improved.\nAnother untouched line.\n```', line: 20, startLine: 10 }], decl, keep)
+    expect(r).toMatchObject({ pass: false, judged: 1 })
+  })
+
+  test('reordered unchanged lines, or a collapsed blank line, fail; new lines between them pass', () => {
+    const withBlank = ['An untouched line.', '', 'Another untouched line.']
+    const reordered = lib.linesKept([comment('```suggestion\nAnother untouched line.\nAn untouched line.\n```')], decl, keep)
+    expect(reordered.pass).toBe(false)
+    expect(reordered.dropped).toEqual(['Another untouched line.'])
+    const collapsed = lib.linesKept([comment('```suggestion\nAn untouched line.\nAnother untouched line.\n```')], decl, withBlank)
+    expect(collapsed.pass).toBe(false)
+    expect(collapsed.dropped).toEqual([''])
+    const inserted = lib.linesKept([comment('```suggestion\nAn untouched line.\nA new line.\n\nAnother untouched line.\n```')], decl, withBlank)
+    expect(inserted.pass).toBe(true)
+  })
+
+  test('plain comments and comments on other spans are not judged', () => {
+    const r = lib.linesKept([
+      comment('Reads oddly, no suggestion.'),
+      comment('```suggestion\nunrelated\n```', 40, 38),
+      { path: 'other.go', body: '```suggestion\nunrelated\n```', line: 15 }
+    ], decl, keep)
+    expect(r).toEqual({ pass: true, judged: 0, dropped: [] })
+  })
+
+  test('changedLines reads post-image line numbers from git', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dse-changed-'))
+    fs.writeFileSync(path.join(dir, 'f.txt'), 'a\nb\nc\nd\n')
+    const base = lib.gitInit(dir)
+    fs.writeFileSync(path.join(dir, 'f.txt'), 'a\nB\nc\nd\ne\n')
+    lib.gitCommitAll(dir, 'edit')
+    expect([...lib.changedLines(dir, base, 'f.txt')].sort()).toEqual([2, 5])
+  })
+})
+
+describe('doc-strings evals: prompt controls', () => {
+  const { CASES } = require('../../evals/doc-strings/cases')
+
+  // A control that silently ran the unchanged prompt would prove nothing,
+  // so each control edit must match the shipped prompt exactly once.
+  test.each(CASES.filter((c) => c.sabotagePromptEdits).map((c) => [c.id, c]))('%s: its control edit applies to the shipped prompt', (_, spec) => {
+    const prompt = production.loadStep().with.prompt
+    const edited = production.editPrompt(prompt, spec.sabotagePromptEdits)
+    expect(edited).not.toBe(prompt)
+  })
+
+  test('an edit that does not match is an error', () => {
+    expect(() => production.editPrompt('text', [{ find: 'absent', replace: 'x' }])).toThrow(/must match once/)
+  })
+})
+
 describe('doc-strings evals: the must-read check', () => {
   // A workspace with the two staged files on disk: the check grades what each
   // tool result showed the model against these, line by line.
@@ -471,6 +539,7 @@ describe('doc-strings evals: the must-read sabotage verdict and flags', () => {
     const suggest = { check: 'at least one ```suggestion block (a vacuous string must draw one)', pass: false, detail: 'found 0' }
     expect(runEvals.sabotageVerdict(one('prose-review', [mustRead(true), suggest])).proven).toBe(true)
     expect(runEvals.sabotageVerdict(one('negative-audit', [{ check: 'claimed findings array is empty', pass: false, detail: 'x' }])).proven).toBe(true)
+    expect(runEvals.sabotageVerdict(one('unchanged-lines', [{ check: 'every suggestion on the declaration keeps its unchanged lines byte-identical', pass: false, detail: 'x' }])).proven).toBe(true)
   })
 
   test('a Write that came back with an error fails the case', () => {

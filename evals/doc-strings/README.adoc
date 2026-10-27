@@ -114,6 +114,14 @@ The evals are the contract the workflow will have to meet.
 zero doc-impact claims), `negative-connect-diff` (the same for a connect
 field rewording), `negative-metrics-file` (conforming probe file ->
 the model must claim `{"findings": []}`). *Any* invention fails the case.
+`unchanged-lines-kept` (rpk help text from streaming-enterprise PR 461 with
+a few changed paragraphs, lint-clean: any suggestion must keep every
+unchanged line of the declaration, blank lines included, byte-identical and
+in order, with new lines allowed only between them; its control runs the
+prompt with the changed-lines rule reverted). A run that posts no suggestion
+passes and says "nothing to judge". The prompt lets a suggestion touch an
+unchanged line only to fix a lint finding on it, which this fixture has none
+of
 
 |D. Prose quality
 |`doc-strings-review.yml`'s prose-quality pass (added in #297): the Claude
@@ -143,14 +151,21 @@ the case to FAIL*:
 node evals/doc-strings/run-evals.js --sabotage negative-property-diff
 node evals/doc-strings/run-evals.js --sabotage negative-connect-diff
 node evals/doc-strings/run-evals.js --sabotage negative-metrics-file
+node evals/doc-strings/run-evals.js --sabotage unchanged-lines-kept
 ----
+
+A case can sabotage the prompt instead of the fixture: `sabotagePromptEdits`
+puts back the text a rule replaced, so the control runs the production
+prompt without that rule. Each edit must match the shipped prompt exactly
+once, and a jest test checks that, so rewording the rule without updating
+its control fails CI instead of running a control that proves nothing.
 
 Exit 0 means the proof succeeded: the row the case exists to assert failed
 (`zero inline comments posted` for a negative review, the empty findings or
 zero suggestions rows for a negative audit, the must-suggest row for a prose
 review). Any other failing row, such as must-read, does not count. Exit 1
-means the harness can no longer catch invented findings and must be fixed. Nothing is edited on
-disk, so there is nothing to restore afterwards.
+means the harness can no longer catch invented findings and must be fixed.
+Nothing is edited on disk, so there is nothing to restore afterwards.
 
 Both proofs were run against the live model when this harness landed; both
 controls demonstrably fail on violating input.
@@ -255,7 +270,7 @@ neither takes `--case`: each run proves one assertion on the case it names.
 
 [source,bash]
 ----
-npm run eval:doc-strings                     # full suite (13 cases)
+npm run eval:doc-strings                     # full suite (14 cases)
 node evals/doc-strings/run-evals.js --case metric-name-echo
 node evals/doc-strings/run-evals.js --model claude-sonnet-5   # override the production model
 node evals/doc-strings/run-evals.js --sabotage-must-read negative-property-diff
@@ -309,7 +324,7 @@ neither. No run grepped or ranged a standard, so the strict rule costs no
 passing run while the prompt asks for a full read, and a run that greps one
 term out of a standard no longer passes as having applied it.
 
-Deliberately **not wired into CI**: a full run makes thirteen real model calls
+Deliberately **not wired into CI**: a full run makes fourteen real model calls
 (a few minutes of wall time and real tokens). Run it when the workflow
 prompts, the lint rules, or the extraction change.
 
