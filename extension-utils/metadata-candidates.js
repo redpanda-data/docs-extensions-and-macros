@@ -84,7 +84,7 @@ am aren't couldn't did didn't doesn't don't few further hadn't hasn't haven't ha
 i i'm me mine my myself nor ours ourselves own she shan't shouldn't themselves very wasn't we're weren't won't wouldn't yours
 yourself yourselves itself whom
 manage manager show hide logs log home overview dashboard details detail general advanced basic premium standard
-support sales data admin user users account accounts team teams project projects organization organizations
+support sales data user users account accounts team teams project projects organization organizations
 `.trim().split(/\s+/)) COMMON_WORDS.add(w)
 
 // Keywords of SQL, Bloblang, and common programming languages. A term made
@@ -118,10 +118,12 @@ initcontainer sidecar volume volumemount affinity toleration taint kubelet
 // counts as Terraform and "Redpanda Support" is dropped as a common word.
 const PRODUCT_WORDS = new Set(['redpanda'])
 
-// A line that sells rather than documents: licensing, sales contact, pricing.
-// A term every one of whose mentions is on such a line (Redpanda Sales,
-// Enterprise Edition) is boilerplate.
-const SALES_LINE_RE = /\b(?:sales|licen[cs](?:e|es|ed|ing)|trial|pricing|purchase|subscri(?:be|ption)|account team|contact (?:us|your|redpanda)|enterprise edition|upgrade to)\b/i
+// A line that sells rather than documents: sales contact, pricing, buying.
+// A term every one of whose mentions is on such a line (Enterprise Edition) is
+// boilerplate. Words that technical lines use too (subscription, trial,
+// upgrade to, license) are left out, so "Pub/Sub subscription" and
+// "Azure subscription" lines still count.
+const SALES_LINE_RE = /\b(?:contact (?:redpanda )?sales|account team|pricing|request a (?:trial|license)|purchase|enterprise edition)\b/i
 
 /** Why a term, as its words, is not a candidate, or null. */
 function excluded (ws) {
@@ -238,16 +240,16 @@ function pageCandidates (parts, matcher, { terminology = new Set(), minCount = 2
   const found = new Map() // key -> { spellings: Map, count, lines, cues: Map }
   const note = (raw, part, cue) => {
     // Strip the product's own name from the front; nothing left, no term.
-    let parts = raw.split(/\s+/)
-    if (PRODUCT_WORDS.has(parts[0].toLowerCase())) {
+    let words = raw.split(/\s+/)
+    if (PRODUCT_WORDS.has(words[0].toLowerCase())) {
       // Redpanda Console is a label: the whole term is covered, not "Console".
       if (matchText(matcher, raw).length) return
-      while (parts.length && PRODUCT_WORDS.has(parts[0].toLowerCase())) parts = parts.slice(1)
+      while (words.length && PRODUCT_WORDS.has(words[0].toLowerCase())) words = words.slice(1)
     }
-    if (!parts.length) return
-    const identifier = parts.length === 1 && /[_-]/.test(parts[0])
-    if (excluded(identifier ? parts[0].split(/[_-]/) : parts)) return
-    const term = parts.join(' ')
+    if (!words.length) return
+    const identifier = words.length === 1 && /[_-]/.test(words[0])
+    if (excluded(identifier ? words[0].split(/[_-]/) : words)) return
+    const term = words.join(' ')
     const key = keyOf(term)
     if (!found.has(key)) found.set(key, { spellings: new Map(), count: 0, sales: 0, lines: [], cues: new Map() })
     const f = found.get(key)

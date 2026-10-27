@@ -123,7 +123,20 @@ See xref:connect:components:outputs/redis.adoc[] and xref:connect:components:out
   test('a term mentioned outside a sales line is kept', () => {
     const page = '= X\n\nContact Redpanda Sales for a license.\nWe use Acme Widgets, and Acme Widgets.\nAcme Widgets license terms apply.\n'
     expect(terms(candidates(page))).toContain('Acme Widgets')
-    expect(terms(candidates('= X\n\nAcme Widgets license, and the Acme Widgets license.\n'))).not.toContain('Acme Widgets')
+    expect(terms(candidates('= X\n\nContact Redpanda Sales about Acme Widgets.\nPurchase Acme Widgets today.\n'))).not.toContain('Acme Widgets')
+  })
+
+  test('a technical line that says subscription, upgrade to, or license is not a sales line', () => {
+    const pubsub = terms(candidates('= X\n\nCreate a Google Cloud Pub/Sub subscription for the topic.\nThe Google Cloud Pub/Sub subscription must exist first.\n'))
+    expect(pubsub).toContain('Sub')
+    const azure = terms(candidates('= X\n\nSelect your Azure subscription, then open Azure Private Link.\nIn the Azure subscription, approve the Azure Private Link endpoint.\n'))
+    expect(azure).toContain('Azure Private Link')
+    expect(terms(candidates('= X\n\nBefore you upgrade to version 25.1, back up Shadow Indexing.\nAfter you upgrade to 25.1, check Shadow Indexing.\n'))).toContain('Shadow Indexing')
+    expect(terms(candidates('= X\n\nContinuous Data Balancing requires an enterprise license.\nApply the license key to use Continuous Data Balancing.\n'))).toContain('Continuous Data Balancing')
+  })
+
+  test('Admin API is a candidate', () => {
+    expect(terms(candidates('= X\n\nUse the Admin API to check health.\nThe Admin API listens on port 9644.\n'))).toContain('Admin API')
   })
 })
 
