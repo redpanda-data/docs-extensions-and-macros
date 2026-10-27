@@ -117,11 +117,13 @@ jobs:
           set -e
 
           cat check-metadata.txt
+          # The summary leaves out the --suggest TERM lines (terms no concept
+          # matches): they stay in the log above and in check-metadata.json.
           {
             echo '### Page metadata'
             echo
             echo '```'
-            cat check-metadata.txt
+            grep -v '^TERM ' check-metadata.txt || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
