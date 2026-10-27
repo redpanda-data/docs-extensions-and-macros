@@ -108,8 +108,7 @@ const FLAG_TYPE_ALIASES = {
   boolSlice: 'bools',
   int64: 'int',
   uint64: 'uint',
-  float64: 'float',
-  float32: 'float'
+  float64: 'float'
 }
 
 function comparableFlagType(type) {

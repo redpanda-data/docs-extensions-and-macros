@@ -2957,8 +2957,11 @@ async function generateRpkDocs(options = {}) {
         name: flag.shorthand ? `-${flag.shorthand}, --${flag.name}` : `--${flag.name}`,
         type: flag.type || '-',
         description: ensurePeriod(formatDescription(flag.description || '', textTransformations)),
-        deprecated: flag.deprecated,
-        deprecatedMessage: flag.deprecatedMessage,
+        // --print-tree gives pflag's deprecation message as the deprecated
+        // value itself; overrides give deprecated: true plus a message
+        deprecated: Boolean(flag.deprecated),
+        deprecatedMessage: flag.deprecatedMessage ||
+          (typeof flag.deprecated === 'string' ? flag.deprecated : undefined),
         cloudOnly: flag.cloudOnly,
         selfHostedOnly: flag.selfHostedOnly,
         validValues: flag.validValues,

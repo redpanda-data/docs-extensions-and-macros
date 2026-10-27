@@ -132,6 +132,9 @@ describe('rpk Docs Diff Generation', () => {
         .toEqual({ old: 'false', new: true })
       expect(compareFlags({ name: 'n', type: 'int' }, { name: 'n', type: 'duration' }).type)
         .toEqual({ old: 'int', new: 'duration' })
+      // pflag prints float32 unshortened, so float32 to float64 is a real change
+      expect(compareFlags({ name: 'r', type: 'float32' }, { name: 'r', type: 'float64' }).type)
+        .toEqual({ old: 'float32', new: 'float64' })
     })
 
     test('reports required changes only when both sides say', () => {
