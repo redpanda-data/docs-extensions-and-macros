@@ -43,6 +43,7 @@ const { getAntoraValue, setAntoraValue } = require('../cli-utils/antora-utils')
 const programCli = new Command()
 
 const pkg = require('../package.json')
+const { generatedMarker } = require('../cli-utils/generated-marker')
 programCli
   .name('doc-tools')
   .description('Redpanda Document Automation CLI')
@@ -1984,6 +1985,10 @@ automation
         }
       }
 
+      // Same marker shape as every doc-tools generator; convert-to-markdown
+      // reads it and reports the provenance in the Markdown twins.
+      const helmMarker = generatedMarker('helm-docs', `the ${name} chart's values.yaml and README in redpanda-data/redpanda-operator`) + '\n\n'
+      doc = helmMarker + doc
       fs.writeFileSync(outFile, doc, 'utf8')
 
       console.log(`Done: Wrote ${outFile}`)
@@ -3192,7 +3197,7 @@ programCli
  * unchecked-note (info), counted in the summary, never an error. The summary
  * counts comments checked, comments failed, and unchecked notes.
  * Errors (exit 1): malformed, missing-file, repo-not-found (a 404 for a
- * token that can see other private redpanda-data repos), line-out-of-range,
+ * classic token with the repo scope), line-out-of-range,
  * quote-not-found, pr-not-found, url-not-found. Warnings (exit 0):
  * unreachable (auth, rate-limit, timeout, or network failure, never a silent
  * pass), no-claim (nothing directly below the comment), and unresolved-version
