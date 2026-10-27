@@ -45,6 +45,7 @@ const validate = require('./validate')
 const relationships = require('./relationships')
 const outputs = require('./outputs')
 const companion = require('./agent-companion')
+const recsIndex = require('./recs-index')
 
 const ATTRIBUTE_NAME = 'solutions-catalog'
 const ASSET_DIR = 'assets/data'
@@ -323,6 +324,7 @@ module.exports.register = function ({ config = {} }) {
     relationshipsData: null,
     catalog: null,
     graph: null,
+    docConcepts: null,
     records: [],
     draftUrls: [],
     facetsFile: null,
@@ -579,6 +581,18 @@ module.exports.register = function ({ config = {} }) {
     state.records = active
     state.catalog = outputs.buildCatalog(publicRecords, { siteUrl, generatedAt, categoryLeaves: new Map(active.map((r) => [r.id, r.categoryLeaves || r.categories])), taxonomy })
     state.graph = outputs.buildGraph(edges, { siteUrl, generatedAt, maxRelated: settings.maxRelated, minScore: settings.minScore, coverage })
+    // The scoring inputs, for `doc-tools recommendations-diff` (recs-index.js).
+    // Concept scoring needs the taxonomy, so there is no index without it.
+    state.docConcepts = taxonomy
+      ? recsIndex.buildDocConceptsIndex({
+        docs: docs.map((d) => ({ ...d, title: collect.plainTitle(d.page.asciidoc && d.page.asciidoc.doctitle) })),
+        solutions: active,
+        relationships: rel.entries,
+        settings: { maxRelated: settings.maxRelated, minScore: settings.minScore },
+        siteUrl,
+        generatedAt,
+      })
+      : null
     addAttributeToComponents(contentCatalog, ATTRIBUTE_NAME, JSON.stringify(state.catalog), logger)
 
     logger.info(`solutions-catalog: ${state.catalog.solutions.length} solution${state.catalog.solutions.length === 1 ? '' : 's'} in the catalog, ${edges.length} graph edges`)
@@ -611,6 +625,11 @@ module.exports.register = function ({ config = {} }) {
     siteCatalog.addFile({ contents: outputs.toJsonBuffer(state.catalog), out: { path: `${ASSET_DIR}/${CATALOG_FILENAME}` } })
     siteCatalog.addFile({ contents: outputs.toJsonBuffer(state.graph), out: { path: `${ASSET_DIR}/${GRAPH_FILENAME}` } })
     logger.info(`solutions-catalog: published ${ASSET_DIR}/${CATALOG_FILENAME} and ${ASSET_DIR}/${GRAPH_FILENAME}`)
+    if (state.docConcepts) {
+      if (siteUrl && !state.docConcepts.siteUrl) state.docConcepts.siteUrl = siteUrl
+      siteCatalog.addFile({ contents: outputs.toJsonBuffer(state.docConcepts), out: { path: `${ASSET_DIR}/${recsIndex.INDEX_FILENAME}` } })
+      logger.info(`solutions-catalog: published ${ASSET_DIR}/${recsIndex.INDEX_FILENAME} (${state.docConcepts.docs.length} doc pages)`)
+    }
     for (const { path, markdown } of state.companions) {
       siteCatalog.addFile({ contents: Buffer.from(markdown, 'utf8'), out: { path } })
     }
@@ -626,6 +645,7 @@ module.exports.ATTRIBUTE_NAME = ATTRIBUTE_NAME
 module.exports.ASSET_DIR = ASSET_DIR
 module.exports.CATALOG_FILENAME = CATALOG_FILENAME
 module.exports.GRAPH_FILENAME = GRAPH_FILENAME
+module.exports.DOC_CONCEPTS_FILENAME = recsIndex.INDEX_FILENAME
 module.exports.EXCLUDED_DOC_COMPONENTS = EXCLUDED_DOC_COMPONENTS
 module.exports.UMBRELLA_LAYOUTS = UMBRELLA_LAYOUTS
 module.exports.DEFAULTS = DEFAULTS

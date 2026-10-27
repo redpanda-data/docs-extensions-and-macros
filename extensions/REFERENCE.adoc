@@ -839,6 +839,7 @@ Everything Antora-independent lives in pure modules next to `index.js`:
 * `validate.js` holds every rule and returns `{ errors, warnings }`; errors are collected across all solutions and thrown once.
 * `relationships.js` parses and validates `relationships.yml` and computes the scored graph.
 * `outputs.js` shapes `page-solution`, `solutions.json`, and `solutions-graph.json`.
+* `recs-index.js` writes and reads `doc-concepts.json`, the scoring inputs `doc-tools recommendations-diff` reruns.
 
 === Hooks
 
@@ -849,7 +850,7 @@ documentsConverted::
 Register directly before `validate-attributes`, and after `unpublish-pages` and `add-git-dates`. Collects records, normalizes `page-categories` (parents added, unknown values fatal), runs every validation rule, applies `page-solution-status`, computes `page-related-solutions` for eligible Product Docs pages, writes the derived attributes onto solution pages, and sets the `solutions-catalog` component attribute on every component version. The attribute is set here rather than at `beforePublish` because Antora composes pages before `beforePublish` fires.
 
 beforePublish::
-Adds `assets/data/solutions.json` and `assets/data/solutions-graph.json` to the site, and `solutions/<slug>/agent-companion.md` for every solution built (see <<Agent companion>>). With `network_checks` on, verifies through the GitHub API that the release `<slug>/<version>` carries the asset `<slug>-<version>.zip` and warns if not (informational: the release workflow creates both after the merge that changes the version).
+Adds `assets/data/solutions.json` and `assets/data/solutions-graph.json` to the site (and, with the docs taxonomy, `assets/data/doc-concepts.json`), and `solutions/<slug>/agent-companion.md` for every solution built (see <<Agent companion>>). With `network_checks` on, verifies through the GitHub API that the release `<slug>/<version>` carries the asset `<slug>-<version>.zip` and warns if not (informational: the release workflow creates both after the merge that changes the version).
 
 === Environment variables
 
@@ -1150,6 +1151,9 @@ Product Docs pages are single-sourced into the Cloud component through stub page
 
 `assets/data/solutions-graph.json`::
 `{ generatedAt, siteUrl, settings: { maxRelated, minScore }, edges: [{ doc, docUrl, solution, provenance, score, shown, rank, reason, why }], coverage }`. Every recommendation a reader sees is explained here, and so is every one they do not. `coverage` is the category coverage report: `{ solutions: { <slug>: { categories: { <category>: { pages, level: 'sub'|'top' } }, zeroMatch: [...] } }, uncategorizedEligiblePages, uncategorizedSample: [first 20 URLs] }`, where `pages` counts eligible doc pages (the same set recommendations use) that carry the category after normalization, and `zeroMatch` lists the solution's categories no doc page shares.
+
+`assets/data/doc-concepts.json`::
+Only with the docs taxonomy. The inputs of the recommendation scoring, as the build computed them, so `doc-tools recommendations-diff` can rerun the same scoring on a pull request without building the site: `{ version: 1, generatedAt, siteUrl, settings: { maxRelated, minScore }, docs: [{ id, title, url, deployment, concepts }], solutions: [{ id, title, url, status, draft, featured, lastModified, platforms, platformIds, concepts, relatedDocs, relatedDocTwins }], relationships: [{ solutionId, docKey, status, confidence, reason }] }`. `docs` holds every eligible Product Docs page (the set recommendations use), with its resource ID (`component:module:relative`). `concepts` maps each concept ID to `direct` or `implied`, in the order the build derived them; the order is kept because it is the order of the shared concepts in an edge's `reason`. A solution's `concepts` is the full set behind its score (implied concepts and legacy `category:<label>` pseudo-concepts included), which the display facets in `solutions.json` do not carry. `relatedDocs` are the explicit edges (Cloud twins included) and `relatedDocTwins` maps a twin to the doc it single-sources. `relationships` holds the approved and rejected relationships.yml entries. `recs-index.js` writes and reads the file, and `relationships.computeRelatedSolutions` over what it reads gives the edges in `solutions-graph.json`.
 
 With the docs taxonomy, each record in `solutions.json` also has `concepts: { platforms, technologies, useCases, industries, topics }`. Each item is `{ value, id, label }`, where `value` is the authored string it came from, and technologies add `kind` and, for a Redpanda product documented in its own component, `component`. The authored `platforms`, `technologies`, `useCases`, and `industries` stay as they were. The catalog also has `taxonomy: { source, platforms[{ id, label, altLabels, broader }], technologies[{ id, label, kind, component }] }`, so the UI can label a platform value (`self-managed` is Docker Compose) and map a component to its product without a hardcoded table. In Algolia, solution records then carry `technologies` as prefLabels (PostgreSQL for an authored Postgres; a value from another facet is dropped) with `technologyIds`, `topics` and `topicIds`, `deployments` and `deploymentIds` from the platforms, and, on the overview, `useCases` as prefLabels with `useCaseIds`. `platforms` stays as authored.
 
