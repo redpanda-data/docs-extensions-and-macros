@@ -281,3 +281,39 @@ describe('repairPropertyAnchorsInJson', () => {
     expect(fs.readFileSync(bad, 'utf8')).toBe('{ not json');
   });
 });
+
+describe('diffDirs cleanup', () => {
+  const { diffDirs } = require('../../cli-utils/diff-utils.js');
+  let tmpDir, originalCwd, logSpy;
+
+  beforeEach(() => {
+    originalCwd = process.cwd();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'diff-dirs-test-'));
+    process.chdir(tmpDir);
+    for (const side of ['old', 'new']) {
+      fs.mkdirSync(path.join('tmp', side), { recursive: true });
+      fs.writeFileSync(path.join('tmp', side, 'metrics.adoc'), `${side}\n`);
+    }
+    logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('keeps an --output-dir under tmp/ when cleanup is false', () => {
+    diffDirs('metrics', 'v1', 'v2', 'tmp/old', path.resolve('tmp/new'), { cleanup: false });
+    expect(fs.existsSync('tmp/diffs/metrics/v1_to_v2/changes.patch')).toBe(true);
+    expect(fs.existsSync('tmp/new/metrics.adoc')).toBe(true);
+    expect(fs.existsSync('tmp/old/metrics.adoc')).toBe(true);
+  });
+
+  it('still removes explicit temp dirs under tmp/ by default', () => {
+    diffDirs('metrics', 'v1', 'v2', 'tmp/old', 'tmp/new');
+    expect(fs.existsSync('tmp/diffs/metrics/v1_to_v2/changes.patch')).toBe(true);
+    expect(fs.existsSync('tmp/new')).toBe(false);
+    expect(fs.existsSync('tmp/old')).toBe(false);
+  });
+});
