@@ -120,6 +120,14 @@ describe('renderPartial', () => {
       expect(out.trimEnd().endsWith('// end::generated[]')).toBe(true)
     }
   })
+
+  test('writes the shared marker, so the Markdown twin reports the partial as generated', () => {
+    const { readGeneratedMarker } = require('../../../extensions/convert-to-markdown')
+    const marker = readGeneratedMarker(renderPartial(xOptionsFromTree(JSON.stringify(grouped))))
+    expect(marker).not.toBeNull()
+    expect(marker.generator).toBe('rpk-env-partial')
+    expect(marker.source).toBe("rpk's own -X option data (rpk --print-tree)")
+  })
 })
 
 describe('keyToEnvVar and keyToAnchor', () => {
