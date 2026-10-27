@@ -103,6 +103,19 @@ function editPrompt (prompt, edits) {
 }
 
 /**
+ * Throw unless a removed span is one unit: a second sentence end, a list item
+ * after its first line, or a blank line inside it means the splitter merged
+ * two units, and removing it would drop more than the sentence that names a
+ * file.
+ */
+function assertOneUnit (unit) {
+  const body = unit.replace(/^\s*\n/, '').trim()
+  if (/[.?!]\s+\S/.test(body) || /\n[ \t]*(?:[-*]|\d+\.)\s/.test(body) || /\n[ \t]*\n/.test(body)) {
+    throw new Error(`sabotage would remove more than one sentence: ${JSON.stringify(body.slice(0, 120))}`)
+  }
+}
+
+/**
  * The production prompt with every sentence that names a staged standard
  * removed. This is the must-read sabotage: the files are still in the
  * workspace, the model is simply never told they are there or to apply them,
@@ -123,19 +136,6 @@ function editPrompt (prompt, edits) {
  * may survive, and every removed unit must be a single sentence that either
  * names a file or is such a pronoun follow-on.
  */
-/**
- * Throw unless a removed span is one unit: a second sentence end, a list item
- * after its first line, or a blank line inside it means the splitter merged
- * two units, and removing it would drop more than the sentence that names a
- * file.
- */
-function assertOneUnit (unit) {
-  const body = unit.replace(/^\s*\n/, '').trim()
-  if (/[.?!]\s+\S/.test(body) || /\n[ \t]*(?:[-*]|\d+\.)\s/.test(body) || /\n[ \t]*\n/.test(body)) {
-    throw new Error(`sabotage would remove more than one sentence: ${JSON.stringify(body.slice(0, 120))}`)
-  }
-}
-
 function stripStandardsInstructions (prompt) {
   const names = MUST_READ.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
   const naming = new RegExp(`(?:^|[^A-Za-z0-9_/-])(?:${names.join('|')})(?![A-Za-z0-9_-])`)

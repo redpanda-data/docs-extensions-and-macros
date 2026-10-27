@@ -170,6 +170,7 @@ function runRewriteCase (spec, io) {
   const model = io.callProduction({ repo, lint, diff })
   if (model.failed) return modelCallFailed(checks, model)
   checkImpactFile(checks, model, false)
+  checkWrites(checks, model)
   checkStandardsRead(checks, model)
 
   // --- Execute the output ---
@@ -389,10 +390,11 @@ function runProseReviewCase (spec, io, sabotage) {
   const model = io.callProduction({ repo, lint: lintDiff, diff })
   if (model.failed) return modelCallFailed(checks, model)
   checkImpactFile(checks, model, false)
+  checkWrites(checks, model)
   checkStandardsRead(checks, model)
 
   const suggestions = lib.parseFences(model.output, 'suggestion')
-  if (!checks.add('at least one ```suggestion block (a vacuous string must draw one)',
+  if (!checks.add(ROW_MUST_SUGGEST,
     suggestions.length >= 1, `found ${suggestions.length}`)) {
     return finish('FAIL', checks, model)
   }
@@ -508,9 +510,10 @@ function runNegativeReviewCase (spec, io, sabotage) {
 
   // Production's silence is no inline comment at all: "posting none is the
   // common, correct outcome".
-  checks.add('zero inline comments posted', model.comments.length === 0,
+  checks.add(ROW_NO_COMMENTS, model.comments.length === 0,
     model.comments.length ? `posted ${model.comments.length}: ${model.comments.map((c) => c.path + ':' + (c.line || '?')).join(', ')}` : 'none')
   checkImpactFile(checks, model, false)
+  checkWrites(checks, model)
   // Silence is only the right verdict if the standard was consulted: the
   // prose-quality pass judges every declaration against it.
   checkStandardsRead(checks, model)
@@ -555,7 +558,7 @@ function runUnchangedLinesCase (spec, io, sabotage) {
   if (model.failed) return modelCallFailed(checks, model)
 
   const kept = lib.linesKept(model.comments, target, keep)
-  checks.add('every suggestion on the declaration keeps its unchanged lines byte-identical', kept.pass,
+  checks.add(ROW_KEEPS_UNCHANGED, kept.pass,
     kept.pass
       ? (kept.judged === 0
           ? `no suggestion on the declaration, so nothing to judge; comments posted: ${model.comments.length}`
@@ -589,10 +592,10 @@ function runNegativeAuditCase (spec, io, sabotage) {
     `blocks: ${jsonBlocks.length}${jsonBlocks[0] && !jsonBlocks[0].ok ? `, parse error: ${jsonBlocks[0].error}` : ''}`)
   if (ok) {
     const findings = jsonBlocks[0].value.findings
-    checks.add('claimed findings array is empty', Array.isArray(findings) && findings.length === 0,
+    checks.add(ROW_NO_FINDINGS, Array.isArray(findings) && findings.length === 0,
       `claimed: ${JSON.stringify(findings)}`)
   }
-  checks.add('zero ```suggestion blocks in the model output',
+  checks.add(ROW_NO_SUGGESTIONS,
     lib.parseFences(model.output, 'suggestion').length === 0, 'fence scan')
 
   io.cleanup(repo.dir)
@@ -619,6 +622,18 @@ function checkImpactFile (checks, model, expected) {
   if (!checks.add('doc-impact.json written', text !== undefined, text === undefined ? 'absent' : 'present')) return false
   const ok = lib.dispatchAccepts(text)
   return checks.add('doc-impact.json passes the dispatch step\'s schema check', ok.pass, ok.detail)
+}
+
+/**
+ * Every Write the reviewer made must have succeeded. No case expects
+ * doc-impact.json, so the file-absent row cannot tell a correct silence from a
+ * CLI or rule change that blocks the write; a refused Write in the transcript
+ * can.
+ */
+function checkWrites (checks, model) {
+  const failed = (model.calls || []).filter((c) => c.name === 'Write' && !c.subagent && c.answered && c.error)
+  return checks.add('every Write the reviewer made succeeded', failed.length === 0,
+    failed.length ? failed.map((c) => `#${c.index} ${c.input.file_path}: ${c.output.slice(0, 200)}`).join('; ') : 'ok')
 }
 
 /**
@@ -653,6 +668,21 @@ function modelCallFailed (checks, model) {
 
 function finish (status, checks, model) {
   return { status, checks: checks.rows, model }
+}
+
+// The rows each kind's --sabotage proof is keyed on: the assertion the
+// violating fixture must break. Any other failing row (must-read, a refused
+// Write) proves nothing about the case.
+const ROW_MUST_SUGGEST = 'at least one ```suggestion block (a vacuous string must draw one)'
+const ROW_NO_COMMENTS = 'zero inline comments posted'
+const ROW_NO_FINDINGS = 'claimed findings array is empty'
+const ROW_NO_SUGGESTIONS = 'zero ```suggestion blocks in the model output'
+const ROW_KEEPS_UNCHANGED = 'every suggestion on the declaration keeps its unchanged lines byte-identical'
+const SABOTAGE_ROWS = {
+  'prose-review': [ROW_MUST_SUGGEST],
+  'negative-review': [ROW_NO_COMMENTS],
+  'negative-audit': [ROW_NO_FINDINGS, ROW_NO_SUGGESTIONS],
+  'unchanged-lines': [ROW_KEEPS_UNCHANGED]
 }
 
 // The case kinds that run the production review and so carry the must-read
@@ -727,6 +757,22 @@ function mustReadSabotageVerdict (summary) {
     return { proven: false, message: 'MUST-READ SABOTAGE NOT PROVEN: with the standards instructions stripped the must-read check still passed. The model opened the standards without being told to, or the check is not reading the transcript.' }
   }
   return { proven: true, message: `MUST-READ SABOTAGE PROVEN: the baseline passed the must-read row and, with the standards instructions stripped, it FAILED (${sabRow.detail.split(';')[0]}), so a review that never opens the staged standard cannot pass.` }
+}
+
+/**
+ * The plain --sabotage verdict from its one run: PROVEN only when the row the
+ * case exists to assert failed, not when any row did.
+ */
+function sabotageVerdict (summary) {
+  const run = summary.length === 1 ? summary[0] : null
+  const names = run ? SABOTAGE_ROWS[run.kind] || [] : []
+  const rows = run ? run.checks.filter((c) => names.includes(c.check)) : []
+  const broke = rows.find((c) => !c.pass)
+  if (broke) {
+    return { proven: true, message: `SABOTAGE PROVEN: against a violating fixture the case's own row FAILED (${broke.check}),\nso a model that gets this case wrong cannot pass it. Restore confidence: re-run\nthe suite without --sabotage.` }
+  }
+  const why = rows.length ? `its own row (${rows.map((c) => c.check).join(', ')}) passed` : 'the run produced none of its own rows'
+  return { proven: false, message: `SABOTAGE NOT PROVEN: ${why}. Another row failing is not proof; fix the assertions.` }
 }
 
 function main () {
@@ -892,11 +938,9 @@ function main () {
       process.stdout.write('SABOTAGE NOT RUN: the harness failed before the review ran, so this proves\nnothing. Fix the environment and re-run.\n')
       process.exit(2)
     }
-    const proven = summary.length === 1 && summary[0].status === 'FAIL'
-    process.stdout.write(proven
-      ? 'SABOTAGE PROVEN: the negative control FAILED against a violating fixture,\nso a model that invents suggestions cannot pass it. Restore confidence: re-run\nthe suite without --sabotage.\n'
-      : 'SABOTAGE NOT PROVEN: the negative control did not fail. The harness cannot\ncurrently catch invented findings - fix the assertions.\n')
-    process.exit(proven ? 0 : 1)
+    const verdict = sabotageVerdict(summary)
+    process.stdout.write(verdict.message + '\n')
+    process.exit(verdict.proven ? 0 : 1)
   }
   process.exit(harnessErrors.length ? 2 : failed.length === 0 ? 0 : 1)
 }
@@ -912,4 +956,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { EXECUTORS, modelCallFailed, harnessError, makeChecks, parseArgs, mustReadSabotageVerdict }
+module.exports = { EXECUTORS, modelCallFailed, harnessError, makeChecks, parseArgs, mustReadSabotageVerdict, sabotageVerdict, checkWrites }
