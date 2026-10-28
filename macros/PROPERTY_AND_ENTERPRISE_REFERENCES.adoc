@@ -56,7 +56,7 @@ That renders "defaults to 2 weeks". Other fields are `type`, `unit`, `min`, `max
 
 *Cloud pages state fewer values.* The Cloud property reference shows no defaults, because Cloud configures them, so `propval:x[default]` on a Cloud page renders the placeholder with a warning. Keep default values in `ifndef::env-cloud[]` content, or use `cloud-access` to say whether a Cloud user can change the property.
 
-To find the hand-written values already in a repo, run `doc-tools generate migrate-property-values`. It reports every value stated next to a property mention, compares it with the data for that repo's version, and flags mismatches, which are usually real doc errors. `--write` replaces only exact matches, never a mismatch.
+To find the hand-written values already in a repo, run `doc-tools generate migrate-property-values`. It reports every value stated next to a property mention, compares it with the data for that repo's version, and flags mismatches, which are usually real doc errors. It also reports stale example output, such as an `rpk topic describe` row with source `DEFAULT_CONFIG` that shows an old default. `--write` replaces only exact matches, never a mismatch or example output.
 
 === How "the build works out the page" (dynamic discovery)
 

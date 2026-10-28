@@ -1108,12 +1108,14 @@ function propvalInlineMacro (config) {
         return self.createInline(parent, 'quoted', buildPropvalContent({ name, field: result.field, text: result.text, html: result.html }))
       }
       // Authoring errors fail the build in error mode, like an unknown prop:
-      // name. Everything else is reported and rendered as the placeholder.
-      // A placeholder is reported even in off mode: off means "do not check
-      // names", but a value cannot fall back to anything, and a silent
-      // <unknown default> would reach readers unnoticed.
+      // name. So do cloud-hidden and unavailable: they appear only in the
+      // Cloud build of single-sourced prose, where a warning alone would let
+      // the placeholder ship. Everything else is reported and rendered as the
+      // placeholder. A placeholder is reported even in off mode: off means
+      // "do not check names", but a value cannot fall back to anything, and a
+      // silent <unknown default> would reach readers unnoticed.
       const { message } = result
-      if (mode === 'error' && ['unknown-property', 'missing-field', 'unsupported-field'].includes(result.kind)) {
+      if (mode === 'error' && ['unknown-property', 'missing-field', 'unsupported-field', 'cloud-hidden', 'unavailable'].includes(result.kind)) {
         throw new Error(message)
       }
       logger.warn(message)

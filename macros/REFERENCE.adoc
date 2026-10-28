@@ -413,7 +413,7 @@ The JSON key names and table labels also work as field names: `minimum`, `maximu
 format::
 `human` (default) or `raw`. `raw` gives the exact value: the code value in the reference table for `default`, the plain number for `min` and `max`, `true` or `false` for the yes-or-no fields, and a JSON array for `values` and `aliases`.
 
-The output is a `<span>` with the stable class `property-value` and `data-property` and `data-field` attributes. It is plain text with no tooltip; mark the name with `prop:` for that. The macro works inside backticks, so `` `propval:x[default,format=raw]` `` renders as inline code.
+The output is a `<span>` with the stable class `property-value` and `data-property` and `data-field` attributes. It is plain text with no tooltip; mark the name with `prop:` for that. The macro works inside backticks, so `` `propval:x[default,format=raw]` `` renders as inline code. Don't put `values` inside backticks: it already renders each value as inline code, and backticks would nest one code element inside another.
 
 === Formatting
 
@@ -424,6 +424,7 @@ Values come from the reference generator's own helpers, so prose and the referen
 * A byte count renders in IEC units (`128 MiB`) only when the table's Unit row says bytes and the value is an exact multiple. Otherwise the exact number renders. `log_segment_size` and `segment.bytes` have no unit in the data or the table, so they render `134217728`. Adding `units` for them belongs in the property extractor, not in prose.
 * Negative numbers are sentinels (`-1` for unlimited) and render as written.
 * `null`, an empty string, and booleans render as the table renders them: `null`, `null`, `true`, `false`.
+* A topic property that the data leaves unset, such as `retention.bytes`, renders `null` for `default`, as the table does. The topic inherits its cluster property (`corresponding_cluster_property` in the data), so in prose, point to that property with `prop:`, such as "inherits prop:retention_bytes[]", rather than saying the default is `null`.
 
 === Failures
 
@@ -435,29 +436,46 @@ A value has no safe fallback, so whenever the build cannot verify one, `propval:
 * The field is not one `propval:` supports.
 * The property has no such field in the data, for example `max` on a property with no maximum, or `default` on a deprecated property the data gives no default.
 * The value is an integer beyond JavaScript's exact range (the 2^64^-1 sentinel of `virtual_cluster_min_producer_ids`), which `JSON.parse` has already rounded.
-* On a Cloud page, the field is one the Cloud property reference does not show: `default`, `visibility`, `restored`, and `aliases`. The reference renders those only outside `env-cloud` (Cloud shows "Available in the Redpanda Cloud Console" in the Default row), so a Cloud page cannot state them either. Put the sentence in an `ifndef::env-cloud[]` block, or use a field the Cloud reference shows, such as `cloud-access`.
+* On a Cloud page, the field is one the Cloud property reference does not show: `default`, `introduced`, `visibility`, `restored`, and `aliases`. The reference renders those only outside `env-cloud` (Cloud shows "Available in the Redpanda Cloud Console" in the Default row), so a Cloud page cannot state them either. Put the sentence in an `ifndef::env-cloud[]` block, or use a field the Cloud reference shows, such as `cloud-access`.
 
-With `property-validate` set to `error`, an unknown property, an unsupported field, or a field the property does not have fails the build. With `off`, the placeholder is still rendered and still reported, because `off` means "do not check names", and a silent `<unknown default>` would reach readers unnoticed.
+With `property-validate` set to `error`, an unknown property, an unsupported field, a field the property does not have, a property not available on Cloud, or a field the Cloud reference does not show fails the build. The last two appear only in the Cloud build, so cloud-docs needs `property-validate: error` to catch single-sourced prose that would render a placeholder. With `off`, the placeholder is still rendered and still reported, because `off` means "do not check names", and a silent `<unknown default>` would reach readers unnoticed.
 
 === Migrating hand-written values
 
 `doc-tools generate migrate-property-values` finds hand-written values next to a property mention ("defaults to X", "the default is X", "default: X", "minimum X", "is X by default") and checks each against the data for the repo's own version, selected exactly as `prop:` selects it. It writes a JSON and a Markdown report. Each finding is one of:
 
-exact:: The written text is what `propval:` renders. Auto-safe when the statement is in the same sentence as its property and the file is not release or upgrade notes.
+exact:: The written text is what `propval:` renders. Auto-safe when the statement is in the same sentence as its property, no other property is named in that paragraph line or its list entry, the data value is not null, and the file is not release or upgrade notes. On a self-managed page, a `default` (or another field the Cloud reference hides), or any field of a property Cloud does not support, is auto-safe only inside `ifndef::env-cloud[]` or in a page (not a partial) with no `tag::` regions. Otherwise the page may be single-sourced into cloud-docs, where `propval:` renders a placeholder, so the finding is proposed only: wrap the sentence in `ifndef::env-cloud[]` first.
 equivalent:: Same value, different wording (`7 days` and `1 week`). Proposed, never applied.
 mismatch:: The written value differs from the data. Likely a doc error. Never applied.
 unset:: The data default is null (not set), but the prose states a value. Redpanda often computes a fallback at runtime for an unset property, such as 10% of free disk for `compaction_ctrl_backlog_size`, so confirm the value in the source. Never applied.
 unverifiable:: Not comparable: unparseable, a field the property does not have, a sentence qualified to another audience or release ("In Redpanda Cloud", "in earlier versions", "If the default is"), content inside `ifdef::env-cloud[]` on a self-managed page, a Cloud default, or "no default" for a topic property, which inherits its cluster property.
+example-output:: A value shown in command output inside a listing, literal, or fenced block. These findings are counted and listed apart from prose findings, and never applied. Each has a verdict: `stale`, `matches`, or `unverifiable` with a reason.
 
 Tables are scanned too. A statement in a cell belongs to the property that opens the row or cell, and a `Default` column states the default of the row's property. Table findings are reported but never applied.
 
-`--write` applies only auto-safe exact matches. The tool skips code blocks, headings, attribute entries, comment lines, `ifndef::env-cloud[]` content on a Cloud page, and generated content. For cloud-docs, pass the docs checkout with `--lender` so Cloud can borrow its GA data.
+`--write` applies only auto-safe exact matches. The tool skips prose inside code blocks, headings, attribute entries, comment lines, `ifndef::env-cloud[]` content on a Cloud page, and generated content. For cloud-docs, pass the docs checkout with `--lender` so Cloud can borrow its GA data.
 
 [,bash]
 ----
 npx doc-tools generate migrate-property-values --docs-dir . --report-dir ./propval-report
 npx doc-tools generate migrate-property-values --docs-dir ../cloud-docs --lender . --report-dir ./propval-report-cloud
 ----
+
+==== Example output
+
+The tool reads these output shapes: `rpk topic describe` config tables (`KEY VALUE SOURCE`), `name=value (SOURCE)` lines, `kafka-configs --describe` lines (the first synonym's source), Key/Value/Source records in JSON or YAML (debug bundles, Topic resource status), `rpk cluster config get` output in the same block or an Input/Output pair, `rpk cluster config export` YAML, and Admin API `/v1/cluster_config` JSON. `rpk cluster config status` output states no values. A topic property is compared with the cluster property it inherits, taken from the data's `corresponding_cluster_property`, or `alternate_cluster_property` when the same output shows `cleanup.policy` set to compact. A Kafka broker alias such as `log.segment.bytes` is not in the data, so the Redpanda-named synonym row is compared. Values are compared exactly as raw bytes, milliseconds, booleans, or enum text. `-1` matches a limit that the data leaves unset.
+
+A row is compared only when it asserts the default. A row with source `DEFAULT_CONFIG` or `DEFAULT` asserts it. Output with no source column (`config get`, `export`, Admin API) asserts it only when the text just before the block mentions the default. The following are `unverifiable`, with the first matching reason:
+
+* `not-default-source`: Another source, such as `DYNAMIC_TOPIC_CONFIG` or `STATIC_BROKER_CONFIG`.
+* `ifdef::env-cloud` on a self-managed page, or `cloud-default` on a Cloud page.
+* `set-earlier-on-page`: The page sets the cluster property before the block, as `name=value`, `name: value` (including Helm `config.cluster.name`), or `rpk cluster config set name value`. A topic-level override doesn't count, because it would change the row's source.
+* `helm-operator-context`: A Kubernetes page (`kubernetes/` path or `k-` file name), or a command run through `kubectl` or `helm`. The chart or operator may set the value.
+* `dev-or-bootstrap-config`: The page starts Redpanda in `dev-container` mode, with `rpk container start`, or from a bootstrap file.
+* `current-value`: Output with no source column, and no mention of the default before it.
+* `unset-in-data` or `not-comparable`.
+
+The report lists stale examples in their own table. It lists unverifiable rows whose value differs from the default in a context that may set them (other than `not-default-source`) for a human to check.
 
 === Registration
 

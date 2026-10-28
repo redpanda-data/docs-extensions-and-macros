@@ -340,6 +340,128 @@ describe('migrate-property-values', () => {
     })
   })
 
+  describe('example output', () => {
+    const examples = (content, registry = REGISTRY, options = {}) => scan(content, registry, options).filter((f) => f.kind === 'example-output')
+    const describeOutput = (rows) => [
+      '[,bash]', '----', 'rpk topic describe test_topic', 'SUMMARY', '=======', 'NAME        test_topic', '',
+      'CONFIGS', '=======', 'KEY                     VALUE                          SOURCE', ...rows, '----',
+    ].join('\n')
+
+    test('a DEFAULT_CONFIG row in rpk topic describe output is compared with the cluster default it inherits', () => {
+      const [stale, ok] = examples(describeOutput([
+        'segment.bytes           1073741824                     DEFAULT_CONFIG',
+        'retention.ms            604800000                      DEFAULT_CONFIG',
+      ]))
+      expect(stale).toMatchObject({ line: 11, property: 'segment.bytes', clusterProperty: 'log_segment_size', mappedBy: 'corresponding_cluster_property', written: '1073741824', dataRaw: '134217728', source: 'DEFAULT_CONFIG', status: 'example-output', verdict: 'stale', phrase: 'config-table', autoSafe: false })
+      expect(ok).toMatchObject({ property: 'retention.ms', clusterProperty: 'log_retention_ms', verdict: 'matches' })
+    })
+
+    test('a DYNAMIC_TOPIC_CONFIG row with a non-default value is not flagged', () => {
+      const [f] = examples(describeOutput(['cleanup.policy          compact                        DYNAMIC_TOPIC_CONFIG']))
+      expect(f).toMatchObject({ property: 'cleanup.policy', status: 'example-output', verdict: 'unverifiable', reason: 'not-default-source', differs: true })
+    })
+
+    test('a cluster property set earlier on the page is not flagged', () => {
+      const content = 'Run `rpk cluster config set log_segment_size 1073741824`.\n\n' + describeOutput(['segment.bytes           1073741824                     DEFAULT_CONFIG'])
+      expect(examples(content)[0]).toMatchObject({ verdict: 'unverifiable', reason: 'set-earlier-on-page', note: 'the page sets log_segment_size at line 1' })
+      // Helm values set it the same way.
+      const helm = '[,yaml]\n----\nconfig:\n  cluster:\n    log_segment_size: 1073741824\n----\n\n' + describeOutput(['segment.bytes           1073741824                     DEFAULT_CONFIG'])
+      expect(examples(helm)[0]).toMatchObject({ reason: 'set-earlier-on-page' })
+      // A topic-level override of another topic does not change a DEFAULT_CONFIG row.
+      const other = 'rpk topic create t2 -c segment.bytes=1073741824\n\n' + describeOutput(['segment.bytes           1073741824                     DEFAULT_CONFIG'])
+      expect(examples(other)[0]).toMatchObject({ verdict: 'stale' })
+    })
+
+    test('ifdef::env-cloud output is a Cloud value on a self-managed page, and ifndef::env-cloud output is skipped on a Cloud page', () => {
+      const cloudBlock = 'ifdef::env-cloud[]\n' + describeOutput(['segment.bytes           1073741824                     DEFAULT_CONFIG']) + '\nendif::[]'
+      expect(examples(cloudBlock)[0]).toMatchObject({ verdict: 'unverifiable', reason: 'ifdef::env-cloud', differs: true })
+      const cloud = { ...REGISTRY, surface: 'cloud' }
+      const selfManaged = 'ifndef::env-cloud[]\n' + describeOutput(['retention.ms            1                              DEFAULT_CONFIG']) + '\nendif::[]'
+      expect(examples(selfManaged, cloud)).toEqual([])
+      expect(examples(describeOutput(['retention.ms            1                              DEFAULT_CONFIG']), cloud)[0]).toMatchObject({ verdict: 'unverifiable', reason: 'cloud-default' })
+    })
+
+    test('-1 matches a limit the data leaves unset, and a compacted topic inherits alternate_cluster_property', () => {
+      const [bytes, policy, segment] = examples(describeOutput([
+        'retention.bytes         -1                             DEFAULT_CONFIG',
+        'cleanup.policy          compact                        DYNAMIC_TOPIC_CONFIG',
+        'segment.bytes           268435456                      DEFAULT_CONFIG',
+      ]))
+      expect(bytes).toMatchObject({ property: 'retention.bytes', clusterProperty: 'retention_bytes', verdict: 'matches', note: '-1 is how Kafka reports an unset limit' })
+      expect(policy).toMatchObject({ reason: 'not-default-source' })
+      expect(segment).toMatchObject({ clusterProperty: 'compacted_log_segment_size', mappedBy: 'alternate_cluster_property', verdict: 'matches' })
+    })
+
+    test('rpk cluster config get, in one block or as an Input/Output pair', () => {
+      expect(examples('On a cluster with default settings:\n\n----\n$ rpk cluster config get log_cleanup_policy\ncompact\n----')[0]).toMatchObject({ property: 'log_cleanup_policy', written: 'compact', verdict: 'stale', phrase: 'cluster-config-get', line: 5 })
+      // Without that, the output is the cluster's current value.
+      expect(examples('Check that compaction is on:\n\n----\n$ rpk cluster config get log_cleanup_policy\ncompact\n----')[0]).toMatchObject({ verdict: 'unverifiable', reason: 'current-value', differs: true })
+      const pair = 'The default is:\n\n.Input\n[,bash]\n----\nrpk cluster config get default_topic_replications\n----\n\n.Output\n[,bash,role=no-copy]\n----\n1\n----'
+      expect(examples(pair)[0]).toMatchObject({ property: 'default_topic_replications', verdict: 'matches', line: 12 })
+      // Several gets with no output state nothing.
+      expect(examples('----\nrpk cluster config get log_segment_size\nrpk cluster config get log_retention_ms\n----')).toEqual([])
+    })
+
+    test('rpk cluster config export and Admin API cluster_config responses', () => {
+      const exported = 'Export the defaults:\n\n----\nrpk cluster config export\nlog_segment_size: 1073741824\nlog_cleanup_policy: delete\n----'
+      const [size, policy] = examples(exported)
+      expect(size).toMatchObject({ property: 'log_segment_size', verdict: 'stale', phrase: 'cluster-config-export' })
+      expect(policy).toMatchObject({ verdict: 'matches' })
+      const api = 'A new cluster returns its defaults:\n\n[,bash]\n----\ncurl http://localhost:9644/v1/cluster_config\n----\n\n[,json]\n----\n{\n  "log_segment_size": 1073741824,\n  "enable_transactions": true\n}\n----'
+      const [apiSize, tx] = examples(api)
+      expect(apiSize).toMatchObject({ property: 'log_segment_size', verdict: 'stale', phrase: 'admin-api-cluster-config', line: 11 })
+      expect(tx).toMatchObject({ property: 'enable_transactions', verdict: 'matches' })
+      // The schema endpoint is not a config response.
+      expect(examples('----\ncurl http://localhost:9644/v1/cluster_config/schema\n----\n\n----\n{\n  "log_segment_size": 1\n}\n----')).toEqual([])
+    })
+
+    test('rpk cluster config status output states no values', () => {
+      expect(examples('----\nrpk cluster config status\nNODE  CONFIG-VERSION  NEEDS-RESTART  INVALID  UNKNOWN\n0     17              false          []       []\n----')).toEqual([])
+    })
+
+    test('kafka-configs --describe output and name=value (SOURCE) lines', () => {
+      const kafka = '----\nkafka-configs.sh --bootstrap-server localhost:9092 --entity-type topics --entity-name t --describe --all\nAll configs for topic t are:\n  segment.bytes=1073741824 sensitive=false synonyms={DEFAULT_CONFIG:log_segment_size=1073741824}\n  cleanup.policy=compact sensitive=false synonyms={DYNAMIC_TOPIC_CONFIG:cleanup.policy=compact, DEFAULT_CONFIG:log_cleanup_policy=delete}\n----'
+      const [size, policy] = examples(kafka)
+      expect(size).toMatchObject({ property: 'segment.bytes', source: 'DEFAULT_CONFIG', verdict: 'stale', phrase: 'name-equals-value' })
+      expect(policy).toMatchObject({ source: 'DYNAMIC_TOPIC_CONFIG', reason: 'not-default-source' })
+      expect(examples('----\nsegment.bytes=134217728 (DEFAULT_CONFIG)\n----')[0]).toMatchObject({ verdict: 'matches' })
+    })
+
+    test('Key/Value/Source records in JSON compare the Redpanda-named synonym', () => {
+      const json = [
+        '```json', '{', '  "Configs": [', '    {',
+        '      "Key": "log.segment.bytes",', '      "Value": "1073741824",', '      "Source": "DEFAULT_CONFIG",',
+        '      "Synonyms": [', '        {', '          "Key": "log_segment_size",', '          "Value": "1073741824",', '          "Source": "DEFAULT_CONFIG"', '        }', '      ]',
+        '    }', '  ]', '}', '```',
+      ].join('\n')
+      const found = examples(json)
+      expect(found).toHaveLength(1)
+      expect(found[0]).toMatchObject({ property: 'log_segment_size', written: '1073741824', line: 11, verdict: 'stale', phrase: 'records' })
+    })
+
+    test('Topic resource status on a Kubernetes page is a Helm or operator context', () => {
+      const yaml = '----\nkubectl get topic t -o yaml\nstatus:\n  topicConfiguration:\n    - configType: LONG\n      name: segment.bytes\n      source: DEFAULT_CONFIG\n      value: "1073741824"\n    - name: retention.ms\n      source: DEFAULT_CONFIG\n      value: "604800000"\n----'
+      const [size, retention] = examples(yaml, REGISTRY, { path: 'modules/manage/pages/kubernetes/k-manage-topics.adoc' })
+      expect(size).toMatchObject({ property: 'segment.bytes', verdict: 'unverifiable', reason: 'helm-operator-context', differs: true, line: 8 })
+      expect(retention).toMatchObject({ reason: 'helm-operator-context', differs: false })
+      // kubectl in the command makes the same output context-dependent on any page.
+      expect(examples(yaml)[0]).toMatchObject({ reason: 'helm-operator-context' })
+    })
+
+    test('a page that starts Redpanda in dev-container mode or from a bootstrap file states no defaults', () => {
+      const content = 'Start a cluster with `rpk container start`.\n\n' + describeOutput(['write.caching           true                           DEFAULT_CONFIG'])
+      expect(examples(content)[0]).toMatchObject({ property: 'write.caching', reason: 'dev-or-bootstrap-config', differs: true })
+    })
+
+    test('example output is never written, and prose inside blocks is still ignored', () => {
+      const content = describeOutput(['segment.bytes           1073741824                     DEFAULT_CONFIG', 'retention.ms            604800000                      DEFAULT_CONFIG']) + '\n----\n`log_segment_ms` defaults to 1 day.\n----'
+      const result = scanDocument(content, REGISTRY, { write: true })
+      expect(result.content).toBe(content)
+      expect(result.findings.every((f) => f.kind === 'example-output' && f.autoSafe === false)).toBe(true)
+      expect(result.findings).toHaveLength(2)
+    })
+  })
+
   describe('scanRepo', () => {
     let root
     const write = (relative, content) => {
@@ -422,6 +544,17 @@ describe('migrate-property-values', () => {
       expect(md).toContain('| modules/manage/pages/a.adoc:4 | `log_segment_size` | default | 1 GiB | 134217728 |')
     })
 
+    test('counts example output separately and lists stale examples in their own section', () => {
+      write('docs/modules/manage/pages/d.adoc', ['----', 'KEY            VALUE       SOURCE', 'segment.bytes  1073741824  DEFAULT_CONFIG', 'retention.ms   604800000   DEFAULT_CONFIG', '----'].join('\n'))
+      write('docs/modules/manage/pages/kubernetes/k-e.adoc', ['----', 'KEY            VALUE       SOURCE', 'segment.bytes  67108864    DEFAULT_CONFIG', '----'].join('\n'))
+      const result = scanRepo({ docsDir: path.join(root, 'docs') })
+      expect(result.counts).toMatchObject({ exact: 3, mismatch: 1, 'example-output': 3, exampleStale: 1 })
+      const md = renderMarkdown([{ ...result, label: 'docs' }])
+      expect(md).toContain('### Example output (3: 1 stale, 1 matching, 1 unverifiable)')
+      expect(md).toContain('| modules/manage/pages/d.adoc:3 | `segment.bytes` | log_segment_size | 1073741824 | 134217728 | DEFAULT_CONFIG | config-table |')
+      expect(md).toContain('| modules/manage/pages/kubernetes/k-e.adoc:3 | `segment.bytes` | log_segment_size | 67108864 | 134217728 | helm-operator-context |')
+    })
+
     test('reports unset findings in their own section and count', () => {
       write('docs/modules/manage/pages/c.adoc', '* prop:compaction_ctrl_backlog_size[]: Backlog size. (default: 10% of disk capacity)\n')
       const result = scanRepo({ docsDir: path.join(root, 'docs') })
@@ -429,6 +562,98 @@ describe('migrate-property-values', () => {
       const md = renderMarkdown([{ ...result, label: 'docs' }])
       expect(md).toContain('### Not set in the data (1)')
       expect(md).toContain('| modules/manage/pages/c.adoc:1 | `compaction_ctrl_backlog_size` | default | 10% | not set in the data; the prose states 10%, which may be a runtime fallback |')
+    })
+  })
+
+  describe('review fixes', () => {
+    test('a cloud-hidden field in a tagged region outside ifndef::env-cloud[] is proposed, not written', () => {
+      const line = 'Set prop:log_segment_ms[], which defaults to 2 weeks.'
+      const tagged = ['// tag::single-source[]', line, '// end::single-source[]'].join('\n')
+      const result = scanDocument(tagged, REGISTRY, { write: true })
+      expect(result.findings[0]).toMatchObject({ status: 'exact', autoSafe: false, note: 'proposed: page may be single-sourced; wrap in ifndef::env-cloud[] first' })
+      expect(result.content).toBe(tagged)
+      // Inside ifndef::env-cloud[] the line never reaches Cloud.
+      const guarded = ['// tag::single-source[]', 'ifndef::env-cloud[]', line, 'endif::[]', '// end::single-source[]'].join('\n')
+      expect(scanDocument(guarded, REGISTRY, { write: true }).findings[0]).toMatchObject({ status: 'exact', autoSafe: true })
+      // A file with no tag:: regions stays auto-safe.
+      expect(scanDocument(line, REGISTRY, { write: true }).content).toBe('Set prop:log_segment_ms[], which defaults to propval:log_segment_ms[default].')
+    })
+
+    test('a cloud-hidden field in an untagged partial is proposed, not written', () => {
+      const content = 'prop:log_segment_ms[] defaults to 2 weeks.'
+      const result = scanDocument(content, REGISTRY, { write: true, path: 'modules/manage/partials/x.adoc' })
+      expect(result.findings[0]).toMatchObject({ status: 'exact', autoSafe: false, note: 'proposed: page may be single-sourced; wrap in ifndef::env-cloud[] first' })
+      expect(result.content).toBe(content)
+      expect(scanDocument(content, REGISTRY, { write: true, path: 'modules/manage/pages/x.adoc' }).findings[0]).toMatchObject({ autoSafe: true })
+    })
+
+    test('any field of a property Cloud does not support is proposed in a tagged region', () => {
+      const registry = { ...REGISTRY, properties: { only_sm: { name: 'only_sm', type: 'integer', config_scope: 'cluster', cloud_supported: false, default: 3, minimum: 5 } } }
+      const content = '// tag::x[]\nThe prop:only_sm[] property has a minimum of 5.\n// end::x[]'
+      expect(scanDocument(content, registry, { write: true }).findings[0]).toMatchObject({ field: 'min', status: 'exact', autoSafe: false })
+    })
+
+    test('a comma (OR) condition naming env-cloud renders on Cloud', () => {
+      const ifdef = 'ifdef::env-cloud,env-kubernetes[]\nprop:log_segment_ms[] defaults to 2 weeks.\nendif::[]'
+      expect(only(ifdef)).toMatchObject({ status: 'unverifiable', qualifier: 'ifdef::env-cloud' })
+      const ifndef = '// tag::x[]\nifndef::env-cloud,env-kubernetes[]\nprop:log_segment_ms[] defaults to 2 weeks.\nendif::[]\n// end::x[]'
+      expect(only(ifndef)).toMatchObject({ status: 'exact', autoSafe: true })
+      const cloud = { ...REGISTRY, surface: 'cloud' }
+      expect(scan(ifndef, cloud)).toEqual([])
+    })
+
+    test('a .ms topic property compares as milliseconds', () => {
+      expect(only('The `retention.ms` property defaults to 1 day.')).toMatchObject({ property: 'retention.ms', status: 'mismatch' })
+      expect(only('The `retention.ms` property defaults to 7 days.')).toMatchObject({ status: 'equivalent' })
+    })
+
+    test('a hyphenated word is not a boolean', () => {
+      expect(parseValue('on-demand mode')).toMatchObject({ kind: 'string', string: 'on-demand' })
+      expect(scan('prop:enable_transactions[] defaults to on-demand.')).toEqual([])
+    })
+
+    test('"the default for prop:x[] is" reads the mention after the phrase', () => {
+      expect(only('The default for prop:log_segment_ms[] is 2 weeks.')).toMatchObject({ property: 'log_segment_ms', status: 'exact' })
+      expect(scan('Set prop:default_topic_replications[]. The default for 5 brokers is fine.')).toEqual([])
+    })
+
+    test('a nested table keeps the outer table\'s Default column', () => {
+      const content = [
+        '|===',
+        '| Property | Default | Notes',
+        '',
+        '| prop:log_segment_ms[]',
+        '| 2 weeks',
+        'a|',
+        '!===',
+        '! a ! b',
+        '!===',
+        '',
+        '| prop:log_segment_size[]',
+        '| 134217728',
+        '| text',
+        '|===',
+      ].join('\n')
+      expect(scan(content).map((f) => [f.line, f.property, f.association])).toEqual([
+        [5, 'log_segment_ms', 'table-default-column'],
+        [12, 'log_segment_size', 'table-default-column'],
+      ])
+    })
+
+    test('another property in the sentence or list entry makes a finding proposed only', () => {
+      expect(only('Set `log_retention_ms` higher than prop:log_segment_ms[], which defaults to 2 weeks.')).toMatchObject({ property: 'log_segment_ms', status: 'exact', autoSafe: false })
+      expect(only('* prop:log_retention_ms[] sets retention. It accepts values like prop:log_segment_ms[], where the default is 2 weeks.')).toMatchObject({ property: 'log_segment_ms', status: 'exact', autoSafe: false })
+      // leader-pinning.adoc:81: the other property is earlier in the paragraph, not the list subject.
+      const registry = { ...REGISTRY, properties: { ...REGISTRY.properties, default_leaders_preference: { name: 'default_leaders_preference', type: 'string', config_scope: 'cluster', default: 'none' }, 'redpanda.leaders.preference': { name: 'redpanda.leaders.preference', type: 'string', config_scope: 'topic', default: 'none' } } }
+      const leader = '* Set the cluster configuration property prop:default_leaders_preference[link=true,helm-path=auto], which specifies the default Leader Pinning configuration for all topics that don\u2019t have prop:redpanda.leaders.preference[] explicitly set. It accepts values in the same format as prop:redpanda.leaders.preference[], where the default is `none`.'
+      expect(only(leader, registry)).toMatchObject({ property: 'redpanda.leaders.preference', status: 'exact', autoSafe: false })
+    })
+
+    test('a null default is exact but never auto-safe', () => {
+      const content = 'prop:compaction_ctrl_backlog_size[] defaults to null.'
+      const result = scanDocument(content, REGISTRY, { write: true })
+      expect(result.findings[0]).toMatchObject({ status: 'exact', autoSafe: false })
+      expect(result.content).toBe(content)
     })
   })
 })
