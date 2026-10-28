@@ -1888,6 +1888,13 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   // Clean up double backticks (moved AFTER restoration to catch nested backticks)
   result = result.replace(/``+/g, '`')
 
+  // A dotfile name is code as a whole: filename rules that match from the
+  // first letter leave the leading dot outside the span (".`bootstrap.yaml`"
+  // on rpk redpanda start). Only a dot that starts a word moves inside, so a
+  // sentence-final period before a span is untouched, and only before a
+  // file name (a span with an extension).
+  result = result.replace(/(^|[\s(["'])\.`([^`\s]+\.[A-Za-z0-9]+)`/gm, '$1`.$2`')
+
   // Final pass: escape {word} (no hyphens) inside any backtick spans that were created
   // dynamically during processing (after the initial inline-code protection step).
   // Skip `+...+` passthrough spans — they already prevent attribute substitution.

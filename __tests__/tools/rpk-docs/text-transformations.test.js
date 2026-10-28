@@ -332,3 +332,24 @@ describe('known command paths wrapped across lines (rpk shadow create)', () => {
     expect(out).toBe('See `rpk cloud login`\nfor details.')
   })
 })
+
+describe('dotfile names (rpk redpanda start)', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+  // The docs repo's .yaml filename rule matches from the first letter
+  const yamlRule = { replacements: [{ pattern: "(?<![`\"'\\w/])([a-z][-a-z0-9_]*\\.ya?ml)(?![`\\w])", replacement: '`$1`', flags: 'gi' }] }
+
+  test('the leading dot of a dotfile stays inside the code span', () => {
+    const out = formatDescription('These apply when the cluster is first\nbootstrapped and no .bootstrap.yaml is present; on later starts they are ignored.', yamlRule)
+    expect(out).toContain('no `.bootstrap.yaml` is present')
+    expect(out).not.toContain('.`bootstrap.yaml`')
+  })
+
+  test('a dot before a span that is not a file name is untouched', () => {
+    expect(formatDescription('a .`rpk` prefix', null)).toBe('a .`rpk` prefix')
+  })
+
+  test('a sentence-final period before a code span is untouched', () => {
+    const out = formatDescription('Edit the file.`redpanda.yaml` holds the config.', yamlRule)
+    expect(out).toContain('file.`redpanda.yaml`')
+  })
+})
