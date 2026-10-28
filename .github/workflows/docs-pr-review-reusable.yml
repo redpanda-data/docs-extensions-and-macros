@@ -5,7 +5,7 @@
 # in docs-team-standards, read at the caller's plugin_ref, so they change
 # without editing this file or any caller:
 #   - which repos are reviewed (scope.include_repos), and which PRs are
-#     exempt: the ADP repos, and the reference and rpk automations' PRs
+#     exempt: the ADP docs repo (adp-docs), and the reference and rpk automations' PRs
 #     ("auto-docs:" titles and their branches);
 #   - incremental re-review: after any earlier doc review on the PR (this
 #     pipeline's report, or a review by anyone), only the commits since
@@ -41,11 +41,13 @@
 # host publishes git tags (`git ls-remote --tags` is empty), so @v1 is an
 # unresolvable ref: pin a commit SHA per caller.
 #
-# TWO-STEP PIN after this PR merges: the claude-skill `uses:` refs below
-# say @main because an action cannot reference its own not-yet-existing
-# SHA. Step 1: merge this PR (SHA-1). Step 2: a one-line follow-up commit
-# replaces @main with SHA-1 in every claude-skill ref (SHA-2). Callers
-# then pin @SHA-2 — from that point nothing in the pipeline floats.
+# TWO-STEP PIN: an action cannot reference its own not-yet-existing SHA,
+# so #303 merged with the claude-skill `uses:` refs at @main (step 1,
+# SHA-1 = 681c7a5). Step 2 replaced @main with SHA-1 in every claude-skill
+# ref. Callers pin the step-2 merge SHA, and from there nothing in the
+# pipeline floats. A change to the action needs the same two steps again:
+# #418 changed it (the gh shim refuses a non-GitHub GH_HOST or GH_REPO),
+# so every claude-skill ref now pins #418's merge SHA, 0fac2b8.
 #
 # Design doc + decision record: https://claude.ai/code/artifact/36e1362f-11d3-4532-8fe1-a5191c8def9f
 #
@@ -58,7 +60,7 @@
 # the PR's head SHA and it shows up in the PR's checks list. pending =
 # review running, success/failure = the review's verdict. It is
 # informational — nothing here blocks a merge. The labels the workflow
-# applies (`needs-human-review`, `screenshot-standards`) are listed in
+# applies (`screenshot-standards`) are listed in
 # .github/DOCS_REVIEW_ROLLOUT.md.
 #
 # Exactly-once = two layers: the caller's `concurrency` group serializes
@@ -784,7 +786,7 @@ jobs:
         with:
           name: review-scope
           path: ${{ runner.temp }}/review-scope
-      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
+      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@0fac2b82207dd97787654a990cd6baf95b2bfcbe # pinned: #418's merge SHA
         id: claude
         with:
           repo: ${{ github.repository }}
@@ -825,12 +827,19 @@ jobs:
             {"verdict":"pass"|"fail","blocking":["..."],"suggestions":["..."]}
             where "fail" means at least one genuinely blocking violation of
             team standards.
-            Also add to verdict.json "needs_human": a list of one-sentence
-            items that need a person rather than a code change, such as an
-            SME question the PR leaves unanswered, a product or policy
-            decision, or a claim you could not check against the repository
-            or its sources. Leave it empty when there are none, and do not
-            repeat merge-blockers there.
+            Also add to verdict.json "needs_human": open questions for the
+            writer, one sentence each. Include a question only when the PR's
+            own content raises it and a person, not a code change, has to
+            answer it: a product fact the page asserts that needs an SME's
+            confirmation (a default, a flag, a version, a behavior), or a
+            product decision the content depends on. Do NOT include anything
+            about this review itself (a command, build, or source you could
+            not run, read, or reach here), the PR's process or status (test
+            PR, draft, when to merge or close, labels, target branch),
+            questions about this review pipeline's own policy, or anything
+            already in "blocking" or "suggestions". These questions do not
+            block approval. Leave the list empty when there are none, which
+            is the usual case.
             ${{ needs.gate.outputs.mode == 'incremental' && format('INCREMENTAL RE-REVIEW. This PR was already reviewed at commit {0} ({1}). Review ONLY what changed since then. The diff of those changes is in {2}/review-scope/delta.patch and the files it touches are listed in {2}/review-scope/files.txt: use them instead of `gh pr diff` or the files API, which show the whole PR. Read the changed files in the working tree for context, but report a merge-blocker or a suggestion only when these changes introduce it or expose it. Earlier merge-blockers: {2}/review-scope/prior-blockers.json lists the blockers this pipeline reported before; the entries whose artifact is "adoc-review" and whose src is "model" are yours. Check each against the CURRENT files in the working tree, and add to verdict.json a "prior" list with one object per such entry, holding its exact "text" from that file and a "status" of "resolved" or "open". Do not repeat an open earlier blocker in "blocking": the pipeline carries it over. An entry you leave out of "prior" is carried over as open.', needs.gate.outputs.baseline_sha, needs.gate.outputs.baseline_source, runner.temp) || '' }}
             ${{ needs.classify.outputs.large == 'true' && 'This is a large PR: review the riskiest files first, and if you run out of time or turns before covering every changed file, add one entry to a "not_reviewed" list in verdict.json naming the files you did not review, so the report does not read as complete and the PR is not approved on a partial review.' || '' }}
       # metadata_check's result. Under RUNNER_TEMP, not the workspace: the
@@ -1028,7 +1037,7 @@ jobs:
 
       - name: Overrides review (content repos, decision 4)
         if: github.repository != 'redpanda-data/docs-team-standards' && needs.classify.outputs.overrides_json == 'true'
-        uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
+        uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@0fac2b82207dd97787654a990cd6baf95b2bfcbe # pinned: #418's merge SHA
         with:
           repo: ${{ github.repository }}
           pr_number: ${{ inputs.pr_number }}
@@ -1051,12 +1060,19 @@ jobs:
             base branch) alongside the skill. Write findings to
             review-output/findings.md and review-output/verdict.json with schema
             {"verdict":"pass"|"fail","blocking":[...],"suggestions":[...]}.
-            Also add to verdict.json "needs_human": a list of one-sentence
-            items that need a person rather than a code change, such as an
-            SME question the PR leaves unanswered, a product or policy
-            decision, or a claim you could not check against the repository
-            or its sources. Leave it empty when there are none, and do not
-            repeat merge-blockers there.
+            Also add to verdict.json "needs_human": open questions for the
+            writer, one sentence each. Include a question only when the PR's
+            own content raises it and a person, not a code change, has to
+            answer it: a product fact the page asserts that needs an SME's
+            confirmation (a default, a flag, a version, a behavior), or a
+            product decision the content depends on. Do NOT include anything
+            about this review itself (a command, build, or source you could
+            not run, read, or reach here), the PR's process or status (test
+            PR, draft, when to merge or close, labels, target branch),
+            questions about this review pipeline's own policy, or anything
+            already in "blocking" or "suggestions". These questions do not
+            block approval. Leave the list empty when there are none, which
+            is the usual case.
             ${{ needs.gate.outputs.mode == 'incremental' && format('INCREMENTAL RE-REVIEW. This PR was already reviewed at commit {0} ({1}). Review ONLY what changed since then. The diff of those changes is in {2}/review-scope/delta.patch and the files it touches are listed in {2}/review-scope/files.txt: use them instead of `gh pr diff` or the files API, which show the whole PR. Read the changed files in the working tree for context, but report a merge-blocker or a suggestion only when these changes introduce it or expose it. Earlier merge-blockers: {2}/review-scope/prior-blockers.json lists the blockers this pipeline reported before; the entries whose artifact is "json-validation" and whose src is "model" are yours. Check each against the CURRENT files in the working tree, and add to verdict.json a "prior" list with one object per such entry, holding its exact "text" from that file and a "status" of "resolved" or "open". Do not repeat an open earlier blocker in "blocking": the pipeline carries it over. An entry you leave out of "prior" is carried over as open.', needs.gate.outputs.baseline_sha, needs.gate.outputs.baseline_source, runner.temp) || '' }}
             ${{ needs.classify.outputs.large == 'true' && 'This is a large PR: review the riskiest files first, and if you run out of time or turns before covering every changed file, add one entry to a "not_reviewed" list in verdict.json naming the files you did not review, so the report does not read as complete and the PR is not approved on a partial review.' || '' }}
 
@@ -1134,7 +1150,7 @@ jobs:
         with:
           name: review-scope
           path: ${{ runner.temp }}/review-scope
-      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
+      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@0fac2b82207dd97787654a990cd6baf95b2bfcbe # pinned: #418's merge SHA
         with:
           repo: ${{ github.repository }}
           pr_number: ${{ inputs.pr_number }}
@@ -1179,12 +1195,19 @@ jobs:
             review-output/findings.md and review-output/verdict.json
             with schema {"verdict":"pass"|"fail","blocking":[...],"suggestions":[...]}
             where "fail" means a confirmed correctness bug.
-            Also add to verdict.json "needs_human": a list of one-sentence
-            items that need a person rather than a code change, such as an
-            SME question the PR leaves unanswered, a product or policy
-            decision, or a claim you could not check against the repository
-            or its sources. Leave it empty when there are none, and do not
-            repeat merge-blockers there.
+            Also add to verdict.json "needs_human": open questions for the
+            writer, one sentence each. Include a question only when the PR's
+            own content raises it and a person, not a code change, has to
+            answer it: a product fact the page asserts that needs an SME's
+            confirmation (a default, a flag, a version, a behavior), or a
+            product decision the content depends on. Do NOT include anything
+            about this review itself (a command, build, or source you could
+            not run, read, or reach here), the PR's process or status (test
+            PR, draft, when to merge or close, labels, target branch),
+            questions about this review pipeline's own policy, or anything
+            already in "blocking" or "suggestions". These questions do not
+            block approval. Leave the list empty when there are none, which
+            is the usual case.
             ${{ needs.gate.outputs.mode == 'incremental' && format('INCREMENTAL RE-REVIEW. This PR was already reviewed at commit {0} ({1}). Review ONLY what changed since then. The diff of those changes is in {2}/review-scope/delta.patch and the files it touches are listed in {2}/review-scope/files.txt: use them instead of `gh pr diff` or the files API, which show the whole PR. Read the changed files in the working tree for context, but report a merge-blocker or a suggestion only when these changes introduce it or expose it. Earlier merge-blockers: {2}/review-scope/prior-blockers.json lists the blockers this pipeline reported before; the entries whose artifact is "code-review" and whose src is "model" are yours. Check each against the CURRENT files in the working tree, and add to verdict.json a "prior" list with one object per such entry, holding its exact "text" from that file and a "status" of "resolved" or "open". Do not repeat an open earlier blocker in "blocking": the pipeline carries it over. An entry you leave out of "prior" is carried over as open.', needs.gate.outputs.baseline_sha, needs.gate.outputs.baseline_source, runner.temp) || '' }}
             ${{ needs.classify.outputs.large == 'true' && 'This is a large PR: review the riskiest files first, and if you run out of time or turns before covering every changed file, add one entry to a "not_reviewed" list in verdict.json naming the files you did not review, so the report does not read as complete and the PR is not approved on a partial review.' || '' }}
       - uses: actions/upload-artifact@v4
@@ -1199,7 +1222,9 @@ jobs:
   # best_fit): a skill, agent, or command file, a workflow, a README, one or
   # two scripts. Claude reads the diff and applies the plugin skill that
   # suits it, so every reviewed PR gets a report instead of "no checks
-  # apply". Same posture as code_review: the prompt spells out the code
+  # apply". It also runs next to a routed review when plugin files change
+  # (classify); then the prompt limits it to those files, so it does not
+  # re-review what the routed review owns. Same posture as code_review: the prompt spells out the code
   # pass rather than invoking /code-review, which never loads here (see
   # code_review). It runs no PR-head scripts, so it may hold id-token.
   # ──────────────────────────────────────────────────────────────────────
@@ -1220,7 +1245,7 @@ jobs:
         with:
           name: review-scope
           path: ${{ runner.temp }}/review-scope
-      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
+      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@0fac2b82207dd97787654a990cd6baf95b2bfcbe # pinned: #418's merge SHA
         with:
           repo: ${{ github.repository }}
           pr_number: ${{ inputs.pr_number }}
@@ -1237,10 +1262,9 @@ jobs:
           timeout_minutes: ${{ needs.classify.outputs.review_minutes || '20' }}
           prompt: >
             Review pull request ${{ inputs.pr_number }} in
-            ${{ github.repository }}. None of this pipeline's routed reviews
-            (AsciiDoc pages, images, JSON-only, code-heavy) applies to it, so
-            your job is to pick the review that best suits what it changes
-            and run it. Read the diff with `gh pr diff` and the PR body with
+            ${{ github.repository }}.
+            ${{ (needs.classify.outputs.has_adoc == 'true' || needs.classify.outputs.has_images == 'true' || needs.classify.outputs.json_review == 'true' || needs.classify.outputs.code_heavy == 'true') && format('Other reviews in this pipeline already cover part of this PR ({0}{1}{2}{3}). You run because it also changes docs-team-standards plugin files (skills/, agents/, commands/, hooks/, resources/), which those reviews do not check against skill-authoring. Review ONLY those plugin files, choosing the skill below that suits each, and do not report on the files the other reviews own.', needs.classify.outputs.has_adoc == 'true' && 'AsciiDoc pages; ' || '', needs.classify.outputs.has_images == 'true' && 'images; ' || '', needs.classify.outputs.json_review == 'true' && 'JSON; ' || '', needs.classify.outputs.code_heavy == 'true' && 'code; ' || '') || 'None of this pipeline''s routed reviews (AsciiDoc pages, images, JSON, code-heavy) applies to it, so your job is to pick the review that best suits what it changes and run it.' }}
+            Read the diff with `gh pr diff` and the PR body with
             `gh pr view`. On a PR with more than 300 changed files
             `gh pr diff` fails (HTTP 406): use `gh api --paginate
             repos/${{ github.repository }}/pulls/${{ inputs.pr_number }}/files`
@@ -1277,12 +1301,19 @@ jobs:
             Write review-output/verdict.json as
             {"verdict":"pass"|"fail","blocking":["..."],"suggestions":["..."],"review_type":"<the skill or review you applied, e.g. skill-authoring>"}
             where "fail" means at least one merge-blocker.
-            Also add to verdict.json "needs_human": a list of one-sentence
-            items that need a person rather than a code change, such as an
-            SME question the PR leaves unanswered, a product or policy
-            decision, or a claim you could not check against the repository
-            or its sources. Leave it empty when there are none, and do not
-            repeat merge-blockers there.
+            Also add to verdict.json "needs_human": open questions for the
+            writer, one sentence each. Include a question only when the PR's
+            own content raises it and a person, not a code change, has to
+            answer it: a product fact the page asserts that needs an SME's
+            confirmation (a default, a flag, a version, a behavior), or a
+            product decision the content depends on. Do NOT include anything
+            about this review itself (a command, build, or source you could
+            not run, read, or reach here), the PR's process or status (test
+            PR, draft, when to merge or close, labels, target branch),
+            questions about this review pipeline's own policy, or anything
+            already in "blocking" or "suggestions". These questions do not
+            block approval. Leave the list empty when there are none, which
+            is the usual case.
             ${{ needs.gate.outputs.mode == 'incremental' && format('INCREMENTAL RE-REVIEW. This PR was already reviewed at commit {0} ({1}). Review ONLY what changed since then. The diff of those changes is in {2}/review-scope/delta.patch and the files it touches are listed in {2}/review-scope/files.txt: use them instead of `gh pr diff` or the files API, which show the whole PR. Read the changed files in the working tree for context, but report a merge-blocker or a suggestion only when these changes introduce it or expose it. Earlier merge-blockers: {2}/review-scope/prior-blockers.json lists the blockers this pipeline reported before; the entries whose artifact is "best-fit-review" and whose src is "model" are yours. Check each against the CURRENT files in the working tree, and add to verdict.json a "prior" list with one object per such entry, holding its exact "text" from that file and a "status" of "resolved" or "open". Do not repeat an open earlier blocker in "blocking": the pipeline carries it over. An entry you leave out of "prior" is carried over as open.', needs.gate.outputs.baseline_sha, needs.gate.outputs.baseline_source, runner.temp) || '' }}
             ${{ needs.classify.outputs.large == 'true' && 'This is a large PR: review the riskiest files first, and if you run out of time or turns before covering every changed file, add one entry to a "not_reviewed" list in verdict.json naming the files you did not review, so the report does not read as complete and the PR is not approved on a partial review.' || '' }}
       - uses: actions/upload-artifact@v4
@@ -1309,7 +1340,9 @@ jobs:
       contents: read
       pull-requests: read
       id-token: write   # OIDC role for the ADP gateway credential
-    timeout-minutes: 30
+    # 45, like the other model jobs: the vision pass gets 35 minutes on a
+    # large PR (classify), plus the lint and the action's setup.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1385,8 +1418,10 @@ jobs:
           path: ${{ runner.temp }}/review-scope
       - name: Claude vision pass
         if: needs.classify.outputs.has_images == 'true'
-        uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
+        uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@0fac2b82207dd97787654a990cd6baf95b2bfcbe # pinned: #418's merge SHA
         with:
+          # Longer for large PRs (classify: large); see classify for why.
+          timeout_minutes: ${{ needs.classify.outputs.review_minutes || '20' }}
           repo: ${{ github.repository }}
           pr_number: ${{ inputs.pr_number }}
           plugin_ref: ${{ inputs.plugin_ref }}
@@ -1425,6 +1460,7 @@ jobs:
             {"verdict":"pass"|"fail","blocking":[...],"suggestions":[...]}
             covering only the judgment checks.
             ${{ needs.gate.outputs.mode == 'incremental' && format('INCREMENTAL RE-REVIEW. This PR was already reviewed at commit {0} ({1}). Review ONLY what changed since then. The diff of those changes is in {2}/review-scope/delta.patch and the files it touches are listed in {2}/review-scope/files.txt: use them instead of `gh pr diff` or the files API, which show the whole PR. Read the changed files in the working tree for context, but report a merge-blocker or a suggestion only when these changes introduce it or expose it. Earlier merge-blockers: {2}/review-scope/prior-blockers.json lists the blockers this pipeline reported before; the entries whose artifact is "screenshot-gate" and whose src is "model" are yours. Check each against the CURRENT files in the working tree, and add to verdict.json a "prior" list with one object per such entry, holding its exact "text" from that file and a "status" of "resolved" or "open". Do not repeat an open earlier blocker in "blocking": the pipeline carries it over. An entry you leave out of "prior" is carried over as open.', needs.gate.outputs.baseline_sha, needs.gate.outputs.baseline_source, runner.temp) || '' }}
+            ${{ needs.classify.outputs.large == 'true' && 'This is a large PR: review the riskiest files first, and if you run out of time or turns before covering every changed image, add one entry to a "not_reviewed" list in verdict.json naming the images you did not review, so the report does not read as complete and the PR is not approved on a partial review.' || '' }}
 
       - name: Merge deterministic + vision verdicts
         if: always()
@@ -1517,7 +1553,7 @@ jobs:
       # No --add-dir needed for the prompt to read it: a bare `Read` in the
       # action's allowlist is not scoped to the workspace in -p mode
       # (verified on CLI 2.1.258, reading a file outside the cwd).
-      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
+      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@0fac2b82207dd97787654a990cd6baf95b2bfcbe # pinned: #418's merge SHA
         with:
           repo: ${{ github.repository }}
           pr_number: ${{ inputs.pr_number }}
@@ -1551,12 +1587,19 @@ jobs:
             requirements: "jira" only if you read the ticket itself,
             "pr-body" if you used a description quoted in the PR body, and
             "none" if you could read neither.
-            Also add to verdict.json "needs_human": a list of one-sentence
-            items that need a person rather than a code change, such as an
-            SME question the PR leaves unanswered, a product or policy
-            decision, or a claim you could not check against the repository
-            or its sources. Leave it empty when there are none, and do not
-            repeat merge-blockers there.
+            Also add to verdict.json "needs_human": open questions for the
+            writer, one sentence each. Include a question only when the PR's
+            own content raises it and a person, not a code change, has to
+            answer it: a product fact the page asserts that needs an SME's
+            confirmation (a default, a flag, a version, a behavior), or a
+            product decision the content depends on. Do NOT include anything
+            about this review itself (a command, build, or source you could
+            not run, read, or reach here), the PR's process or status (test
+            PR, draft, when to merge or close, labels, target branch),
+            questions about this review pipeline's own policy, or anything
+            already in "blocking" or "suggestions". These questions do not
+            block approval. Leave the list empty when there are none, which
+            is the usual case.
             ${{ needs.classify.outputs.large == 'true' && 'This is a large PR: review the riskiest files first, and if you run out of time or turns before covering every changed file, add one entry to a "not_reviewed" list in verdict.json naming the files you did not review, so the report does not read as complete and the PR is not approved on a partial review.' || '' }}
       # This job has no Jira credential yet (DOCS_REVIEW_ROLLOUT.md, org
       # setup item 6), so unless the PR body quotes the ticket, the delta
@@ -1743,16 +1786,16 @@ jobs:
           # so the PR gets no comment, no terminal status, and keeps the
           # gate's pending claim until the 90-minute stale window expires.
           # Degrade to the pipeline's standard infra-failure posture instead:
-          # no comment (there is no report to give), an error status, and
-          # needs-human-review. `error`, not `failure`:
+          # no comment (there is no report to give) and an error status.
+          # `error`, not `failure`:
           # exactly-once treats failure as a finished review, so the SHA
           # could never be retried (see aggregate-review.sh).
           if ! bash .standards/scripts/aggregate-review.sh results comment.md; then
-            echo "::warning::aggregate-review.sh could not run — no comment; error status and needs-human-review instead"
+            echo "::warning::aggregate-review.sh could not run — no comment; error status instead"
             {
               echo "state=error"
               echo "description=automated review unavailable, human review required"
-              echo "labels=needs-human-review"
+              echo "labels="
               echo "post_comment=false"
             } >> "$GITHUB_OUTPUT"
             : > comment.md
@@ -1766,7 +1809,7 @@ jobs:
       # No report (the review was unavailable, or nothing ran): post
       # nothing, and delete an earlier report, which describes an older
       # commit and could read as a current "Ready to approve". The status
-      # and the needs-human-review label carry the outcome instead.
+      # carries the outcome instead.
       - name: Upsert the review comment
         continue-on-error: true
         uses: actions/github-script@v7
@@ -1847,6 +1890,15 @@ jobs:
                 echo "::warning::could not add label '$L' to $R#$PR"
             done
           fi
+          # needs-human-review is retired (an unavailable review now shows only
+          # as the error status). Remove the copy this pipeline added on
+          # earlier runs; one a person added stays.
+          ADDED_BY=$(gh api --paginate "repos/$R/issues/$PR/events" \
+            | jq -s -r '[.[][] | select(.event == "labeled" and .label.name == "needs-human-review")] | last | .actor.login // ""') || ADDED_BY=""
+          if [[ "$ADDED_BY" == "github-actions[bot]" ]]; then
+            gh api -X DELETE "repos/$R/issues/$PR/labels/needs-human-review" > /dev/null 2>&1 \
+              && echo "Removed the retired needs-human-review label" || true
+          fi
           # Informational status (decision 7 corrected): docs-review is NOT
           # a required check; the docs-team approval is the physical gate.
           gh api "repos/$R/statuses/$HEAD_SHA" \
@@ -1857,9 +1909,10 @@ jobs:
 
       # Approve a PR that passed (aggregate-review.sh decides, from the
       # config's approval criteria; approval.md lists the non-blocking
-      # suggestions). When a later review finds merge-blockers, dismiss this
-      # pipeline's own earlier approval so it cannot be mistaken for a
-      # current one. Only reviews by github-actions[bot] that carry the
+      # suggestions). Whenever a run does not approve (merge-blockers, a
+      # review unavailable, or approval withheld for any criterion, such as
+      # a person's change request), dismiss this pipeline's own earlier
+      # approvals so none can be mistaken for a current one. Only reviews by github-actions[bot] that carry the
       # marker are touched; a person's approval never is.
       # continue-on-error: approving needs the org or repo setting "Allow
       # GitHub Actions to create and approve pull requests". Without it
@@ -1873,10 +1926,12 @@ jobs:
           HEAD_SHA: ${{ needs.gate.outputs.head_sha }}
           APPROVE: ${{ steps.verdict.outputs.approve }}
           STATE: ${{ steps.verdict.outputs.state }}
+          WITHHELD: ${{ steps.verdict.outputs.approval_withheld }}
         run: |
           set -euo pipefail
           MARK='<!-- docs-review:approval -->'
-          if [[ "$APPROVE" == "true" && -s approval.md ]]; then
+          if [[ "$APPROVE" == "true" ]]; then
+            [[ -s approval.md ]] || { echo "::warning::approve=true but approval.md is empty: not approving"; exit 1; }
             jq -n --rawfile body approval.md --arg sha "$HEAD_SHA" \
               '{event: "APPROVE", commit_id: $sha, body: $body}' > approve.json
             if ! gh api -X POST "repos/$R/pulls/$PR/reviews" --input approve.json > /dev/null; then
@@ -1884,13 +1939,18 @@ jobs:
               exit 1
             fi
             echo "Approved $R#$PR at $HEAD_SHA"
-          elif [[ "$STATE" == "failure" ]]; then
+          else
+            case "$STATE" in
+              failure) WHY="found merge-blockers" ;;
+              error)   WHY="could not complete (a review was unavailable)" ;;
+              *)       WHY="did not approve it${WITHHELD:+: ${WITHHELD}}" ;;
+            esac
             gh api --paginate "repos/$R/pulls/$PR/reviews" \
               | jq -s -r --arg m "$MARK" '[.[][] | select(.state == "APPROVED" and .user.login == "github-actions[bot]"
                                                      and ((.body // "") | contains($m)))] | .[].id' \
               | while read -r id; do
                   gh api -X PUT "repos/$R/pulls/$PR/reviews/$id/dismissals" -f event=DISMISS \
-                    -f message="Withdrawn: the docs review of ${HEAD_SHA:0:7} found merge-blockers. See the review comment." > /dev/null \
+                    -f message="Withdrawn: the docs review of ${HEAD_SHA:0:7} ${WHY:0:300}. See the review comment, or the run's summary." > /dev/null \
                     && echo "Dismissed the pipeline's earlier approval $id" \
                     || echo "::warning::could not dismiss the pipeline's earlier approval $id"
                 done

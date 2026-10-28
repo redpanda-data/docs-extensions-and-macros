@@ -7,8 +7,15 @@ description: >
   split the doc-strings review runs in production; twin/review copy:
   docs-team-standards PR #2912, DOC-2496). Claude runs
   findings-only: read-only gh allowlist, no posting rights (the workflow
-  posts under its own identity), and the plugin's github-mutation-guard
-  hook backstops any mutating gh call.
+  posts under its own identity), and a gh shim on PATH that refuses any
+  mutating gh call, and any non-GitHub host in a URL, -R/--repo value,
+  GH_HOST or GH_REPO, before it reaches the real binary.
+
+  A caller with no PR under review (the docs update-release-notes
+  workflow, which curates a release before any PR exists) leaves
+  pr_number empty. The action then skips the PR checkout and the
+  base-branch CLAUDE.md step, and runs the skill against the caller's
+  workspace as it is, so files the caller downloaded first stay in place.
 
   Model auth is the ADP AI Gateway as the docs-pr-review agent
   (sdlc/prod/github/docs_pr_review_client, the adp_client_secret_id
@@ -25,11 +32,23 @@ inputs:
     description: Directory (relative to workspace) the skill writes findings/verdict into
     required: true
   repo:
-    description: owner/repo of the PR under review
-    required: true
+    description: >
+      owner/repo of the PR under review. Required when pr_number is set.
+      Unused when pr_number is empty.
+    required: false
+    default: ''
   pr_number:
-    description: PR number under review (its head is checked out for file reads)
-    required: true
+    description: >
+      PR number under review. Its head is checked out for file reads, and
+      the base branch's CLAUDE.md files are loaded. Leave empty when there
+      is no PR under review: both steps are skipped, and the skill reads
+      the caller's workspace. A non-empty value must be digits only.
+      With no PR, the caller is responsible for what the workspace
+      contains. Nothing is removed except .claude and .mcp.json, so a
+      CLAUDE.md or CLAUDE.local.md that the caller leaves there loads as
+      trusted rules.
+    required: false
+    default: ''
   plugin_ref:
     description: >
       Commit SHA of redpanda-data/docs-team-standards to check out as the
@@ -153,12 +172,36 @@ runs:
           exit 1
         fi
 
+    # pr_number lands in a git ref and an API path, so a non-empty value must
+    # be a plain number. Empty is valid: it means no PR is under review. A PR
+    # also needs repo, the repository the PR is in.
+    - name: Assert pr_number is empty or a number
+      shell: bash
+      env:
+        PR_NUMBER: ${{ inputs.pr_number }}
+        REPO: ${{ inputs.repo }}
+      run: |
+        if [[ -n "$PR_NUMBER" && ! "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+          echo "::error::pr_number must be empty or digits only (got '${PR_NUMBER}')"
+          exit 1
+        fi
+        if [[ -n "$PR_NUMBER" && -z "$REPO" ]]; then
+          echo "::error::repo is required when pr_number is set"
+          exit 1
+        fi
+        if [[ -z "$PR_NUMBER" ]]; then
+          echo "::notice::no PR under review: skipping the PR checkout and the base-branch CLAUDE.md step"
+        fi
+
     # PR head, so the skill can Read/Grep the changed files. Same-repo
     # branches only (fork PRs are excluded by the caller workflow).
     # persist-credentials: false — github.token must not be left in the
     # checkout's git config, where Claude's allowlisted git commands and any
     # script in the PR head could use it as an authenticated Git path.
+    # Skipped with no PR: a checkout into the workspace root would delete the
+    # files the caller staged there for the skill.
     - uses: actions/checkout@v4
+      if: inputs.pr_number != ''
       with:
         repository: ${{ inputs.repo }}
         ref: refs/pull/${{ inputs.pr_number }}/head
@@ -170,7 +213,8 @@ runs:
     # register MCP servers — so a same-repo PR could add a hook that reads
     # GH_TOKEN or the gateway bearer from this step's environment. Remove
     # them from the workspace before any claude invocation; the skills
-    # come from the pinned plugin checkout, not from the PR.
+    # come from the pinned plugin checkout, not from the PR. This also runs
+    # with no PR, because the caller's workspace can hold the same files.
     - name: Remove project-level Claude config from the PR head
       shell: bash
       run: |
@@ -195,7 +239,9 @@ runs:
     # has none, and nothing would restore over it.
     # Consequence: a PR that edits CLAUDE.md is reviewed under the OLD rules;
     # the new ones apply to the next PR after it merges.
+    # Skipped with no PR: there is no base branch, and no PR head to replace.
     - name: Load this repo's CLAUDE.md/CLAUDE.local.md files from the base branch
+      if: inputs.pr_number != ''
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
@@ -374,6 +420,11 @@ runs:
           [[ "$v" == *://* ]] && { check_url "$v"; return; }
           if [[ "$v" == */*/* ]]; then gh_host_ok "${v%%/*}" || deny --repo "$v"; fi
         }
+        # GH_HOST, and GH_REPO's HOST/ part, pick the host for every call
+        # that names none, so an inherited value would route gh off GitHub
+        # with no URL or -R in the arguments for the checks below to see.
+        if [[ -n "${GH_HOST:-}" ]]; then gh_host_ok "$GH_HOST" || deny "(GH_HOST=$GH_HOST)" "$@"; fi
+        if [[ -n "${GH_REPO:-}" ]]; then check_repo "$GH_REPO"; fi
         prev=""
         for a in "$@"; do
           case "$a" in
@@ -453,6 +504,10 @@ runs:
           # shellcheck disable=SC2086 # word-split the probe on purpose
           R4=$(PATH="$SHIM_DIR:$PATH" gh $probe 2>&1 1>/dev/null || true)
           [[ "$R4" == *"refused:"* ]] || { echo "::error::gh shim failed to refuse a foreign host: gh $probe (got: $R4)"; exit 1; }
+        done
+        for env in "GH_HOST=example.com" "GH_REPO=example.com/o/r"; do
+          R5=$(env "$env" PATH="$SHIM_DIR:$PATH" gh pr view 1 2>&1 1>/dev/null || true)
+          [[ "$R5" == *"refused:"* ]] || { echo "::error::gh shim failed to refuse a foreign host from $env (got: $R5)"; exit 1; }
         done
         # ...and must not over-block the github.com URL pr-review is given.
         OK1=$(PATH="$SHIM_DIR:$PATH" gh pr view https://github.com/o/r/pull/1 2>&1 1>/dev/null || true)

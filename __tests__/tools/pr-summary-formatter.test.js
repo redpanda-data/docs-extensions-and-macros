@@ -678,3 +678,29 @@ describe('Multi-Version PR Summary', () => {
     });
   });
 });
+
+describe('Multi-Version PR Summary - changed default rendering', () => {
+  it('shows a declared null default as null and a missing one as no default', () => {
+    const changedDefaults = [
+      { component: 'inputs:postgres_cdc', field: 'unchanged_toast_value', oldDefault: null, newDefault: 'x' },
+      { component: 'inputs:y', field: 'b', oldDefault: 'a', newDefault: undefined }
+    ];
+    const summary = generateMultiVersionPRSummary({
+      metadata: { startVersion: '4.79.0', endVersion: '4.81.0', processedReleases: 1 },
+      totalSummary: { versions: ['4.81.0'], releaseCount: 1, newComponents: 0, newFields: 0, removedFields: 0, deprecatedFields: 0 },
+      releases: [{
+        fromVersion: '4.79.0',
+        toVersion: '4.81.0',
+        summary: { newComponents: 0, newFields: 0, removedFields: 0, deprecatedFields: 0, changedDefaults: changedDefaults.length },
+        details: { newComponents: [], newFields: [], removedFields: [], deprecatedFields: [], changedDefaults }
+      }]
+    });
+
+    expect(summary).toContain('`null` | `"x"`');
+    expect(summary).toContain('`"a"` | _no default_');
+    expect(summary).toContain('`null` → `"x"`');
+    expect(summary).toContain('`"a"` → _no default_');
+    // "none" would read as a value.
+    expect(summary).not.toMatch(/_none_|`none`/);
+  });
+});

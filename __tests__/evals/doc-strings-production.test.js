@@ -27,6 +27,20 @@ describe('doc-strings evals: production review extraction', () => {
     expect(rendered).toMatch(/PR_NUMBER: 7/)
   })
 
+  test('the committable-suggestions expression tolerates spacing and escaped apostrophes', () => {
+    const prompt = "A ${{ !inputs.committable_suggestions  &&  'it''s off' ||  '' }} B"
+    expect(production.renderPrompt(prompt, { repository: 'r/r', prNumber: 1, committableSuggestions: false })).toBe("A it's off B")
+    expect(production.renderPrompt(prompt, { repository: 'r/r', prNumber: 1 })).toBe('A  B')
+  })
+
+  test('committable suggestions render the way a caller input would', () => {
+    const on = production.renderPrompt(step.with.prompt, { repository: 'r/r', prNumber: 1 })
+    const off = production.renderPrompt(step.with.prompt, { repository: 'r/r', prNumber: 1, committableSuggestions: false })
+    expect(on).not.toMatch(/COMMITTABLE SUGGESTIONS ARE OFF/)
+    expect(off).toMatch(/COMMITTABLE SUGGESTIONS ARE OFF/)
+    expect(off).not.toMatch(/\$\{\{/)
+  })
+
   test('an expression the eval does not know is an error, not a blank', () => {
     expect(() => production.renderPrompt('x ${{ secrets.TOKEN }}', { repository: 'a', prNumber: 1 })).toThrow(/unfilled/)
   })
@@ -124,6 +138,41 @@ describe('doc-strings evals: the suggestion comment must target the declaration'
   test('zero or two suggestion comments fail', () => {
     expect(lib.checkSuggestionComment([], target).problems.join()).toMatch(/found 0/)
     expect(lib.checkSuggestionComment([good, good], target).problems.join()).toMatch(/found 2/)
+  })
+
+  test('with committable suggestions off, a ```text rewrite is checked like a suggestion', () => {
+    // The review posts ```text in the off mode; runReview hands the executors
+    // the same comments under the tag they parse.
+    const offComment = { ...good, body: good.body.replace('```suggestion', '```text') }
+    expect(lib.checkSuggestionComment([offComment], target).problems.join()).toMatch(/found 0/)
+    const checked = production.normalizeComments([offComment], false)
+    expect(lib.checkSuggestionComment(checked, target).problems).toEqual([])
+    expect(production.normalizeComments([offComment], true)).toEqual([offComment])
+  })
+
+  test('with committable suggestions off, only the last ```text fence is the rewrite', () => {
+    // A review may quote the current string in a ```text block before the
+    // rewrite; converting that quote too would fail "exactly one suggestion".
+    const rewrite = good.body.replace('```suggestion', '```text')
+    const quoted = { ...good, body: 'Current:\n```text\nold string\n```\n\n' + rewrite }
+    const [checked] = production.normalizeComments([quoted], false)
+    expect(lib.parseFences(checked.body, 'suggestion')).toHaveLength(1)
+    expect(lib.parseFences(checked.body, 'text')).toEqual(['old string'])
+    expect(lib.checkSuggestionComment([checked], target).problems).toEqual([])
+  })
+
+  test('a rewrite case hands the review the declaration its finding is on, not the first with that name', () => {
+    // connect-short-description-markup: storage_account has a Description at
+    // 17-18 in two declarations and the ShortDescription with the finding at 17-19.
+    const decls = [
+      { name: 'storage_account', file: 'common.go', line_start: 17, line_end: 18, fingerprint: 'a' },
+      { name: 'storage_account', file: 'common.go', line_start: 17, line_end: 18, fingerprint: 'b' },
+      { name: 'storage_account', file: 'common.go', line_start: 17, line_end: 19, fingerprint: 'c' }
+    ]
+    const finding = { name: 'storage_account', file: 'common.go', line_start: 17, line_end: 19 }
+    expect(lib.declarationForFinding(decls, finding).fingerprint).toBe('c')
+    expect(lib.declarationForFinding(decls, { ...finding, file: 'other.go' })).toBeUndefined()
+    expect(lib.declarationForFinding(undefined, finding)).toBeUndefined()
   })
 
   test('the mock inline-comment tool rejects a call with no line and logs only a full one', () => {
