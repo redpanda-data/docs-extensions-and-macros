@@ -2132,6 +2132,11 @@ automation
  * bullets — it is a CANDIDATE for the curation step that rewrites voice, adds
  * `Area::` labels, normalizes units, and phrases CVEs.
  *
+ * In phase 1, a backticked name that matches a property in the release
+ * series' redpanda-properties-<tag>.json becomes a `prop:<name>[link=true]` link. The
+ * file is found in modules/reference/attachments/ unless --properties-file
+ * names one. With no file, names stay monospace and a warning is logged.
+ *
  * @why
  * Release notes are the one reference surface whose source of truth is
  * engineer-authored prose rather than code, so the deterministic part
@@ -2164,6 +2169,7 @@ automation
   .option('--section-file <file>', 'Phase 2: a curated section (from the sm-release-notes skill) to insert (relative to repo root, must stay inside the repository)')
   .option('--date <date>', 'Authored release date as YYYY-MM-DD (required with --body; confirmed on the PR)')
   .option('--page <file>', 'Target release-notes page (relative to repo root, must stay inside the repository)', 'modules/reference/pages/releases/redpanda.adoc')
+  .option('--properties-file <file>', 'Phase 1: property JSON whose names become prop: links (relative to repo root, must stay inside the repository). Default: the newest redpanda-properties-<tag>.json in modules/reference/attachments/ for the tag\'s release series')
   .option('--section-only', 'Phase 1 only: print the candidate section and do not read or modify the page')
   .option('--dry-run', 'Print output to stdout instead of writing the page')
   .action(async (options) => {
@@ -2172,6 +2178,11 @@ automation
       buildReleaseSection,
       isGaTag,
     } = require('../tools/redpanda-release-notes/generate-release-notes.js')
+    const {
+      ATTACHMENTS_DIR,
+      findPropertiesFile,
+      loadPropertyNames,
+    } = require('../tools/redpanda-release-notes/property-names.js')
     try {
       const repoRoot = findRepoRoot()
 
@@ -2192,6 +2203,19 @@ automation
         return abs
       }
 
+      // Phase 1 links known property names. An explicit --properties-file must
+      // exist; a missing default only means names stay monospace.
+      const readPropertyNames = () => {
+        const file = options.propertiesFile
+          ? readInside(options.propertiesFile, '--properties-file')
+          : findPropertiesFile(path.join(repoRoot, ATTACHMENTS_DIR), options.tag)
+        if (!file) {
+          console.warn(`[release-notes] WARN: no property file for ${options.tag} in ${ATTACHMENTS_DIR}; property names stay monospace.`)
+          return undefined
+        }
+        return loadPropertyNames(file)
+      }
+
       // Phase-1 candidate preview: emit the candidate for the curation step. No
       // page is read or written — this is the LLM step's input, nothing else.
       if (options.sectionOnly) {
@@ -2203,7 +2227,9 @@ automation
           return
         }
         const body = fs.readFileSync(readInside(options.body, '--body'), 'utf8')
-        const section = buildReleaseSection({ body, version: options.tag, date: options.date })
+        const section = buildReleaseSection({
+          body, version: options.tag, date: options.date, propertyNames: readPropertyNames(),
+        })
         process.stdout.write(section)
         return
       }
@@ -2213,6 +2239,7 @@ automation
       const genArgs = { tag: options.tag, date: options.date, pageContent }
       if (hasBody) {
         genArgs.body = fs.readFileSync(readInside(options.body, '--body'), 'utf8')
+        genArgs.propertyNames = readPropertyNames()
       } else {
         genArgs.section = fs.readFileSync(readInside(options.sectionFile, '--section-file'), 'utf8')
       }

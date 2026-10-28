@@ -287,10 +287,11 @@ function clusterSectionByArea(sectionText) {
  * @param {string} options.body - The raw rpchangelog release body markdown.
  * @param {string} options.version - The release version (`v26.2.3` or `26.2.3`).
  * @param {string} options.date - The release date as `YYYY-MM-DD`.
+ * @param {Set<string>} [options.propertyNames] - Known property names to link as `prop:` macros.
  * @return {string} The rendered AsciiDoc section.
  */
-function buildReleaseSection({ body, version, date }) {
-  const { sections } = parseReleaseBody(body);
+function buildReleaseSection({ body, version, date, propertyNames }) {
+  const { sections } = parseReleaseBody(body, { propertyNames });
   return renderReleaseSection({ version, date, sections });
 }
 
@@ -343,9 +344,10 @@ function assertSectionMatchesTag(section, version) {
  * @param {string} options.tag - The release tag (`v26.2.3`).
  * @param {string} [options.date] - The authored release date as `YYYY-MM-DD` (phase 1 only).
  * @param {string} options.pageContent - The current target page content.
+ * @param {Set<string>} [options.propertyNames] - Known property names to link as `prop:` macros (phase 1 only).
  * @return {{status: 'ok'|'skipped', reason?: string, section?: string, content?: string}}
  */
-function generateReleaseNotes({ body, section, tag, date, pageContent }) {
+function generateReleaseNotes({ body, section, tag, date, pageContent, propertyNames }) {
   if (body == null && section == null) {
     throw new Error('Provide either body (phase 1) or section (phase 2).');
   }
@@ -374,7 +376,7 @@ function generateReleaseNotes({ body, section, tag, date, pageContent }) {
     // have to, and so a hand-written section is normalized the same way.
     finalSection = clusterSectionByArea(section);
   } else {
-    finalSection = buildReleaseSection({ body, version, date });
+    finalSection = buildReleaseSection({ body, version, date, propertyNames });
   }
   const content = insertReleaseSection(pageContent, finalSection);
   return { status: 'ok', section: finalSection, content };
