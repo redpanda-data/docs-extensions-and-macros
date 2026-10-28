@@ -1583,6 +1583,7 @@ automation
   .option('--print-summary', 'Print PR summary (for GitHub Actions)')
   .option('--summary-file <path>', 'Write PR summary to file (for GitHub Actions)')
   .option('--show-info', 'Include info-level validation messages')
+  .option('--target-branch <branch>', 'Docs branch the output is for. On beta, v/*, and v-WIP/* the rpk ai docs, which main owns, are left untouched. Defaults to GITHUB_BASE_REF, then the checked-out branch.')
   .action(async (options) => {
     try {
       const { handleRpkDocsGeneration } = require('../tools/rpk-docs/rpk-docs-handler.js')
@@ -1619,7 +1620,8 @@ automation
         dataDir: options.dataDir,
         preserveFrom: options.preserveFrom,
         printSummary: options.printSummary,
-        showInfo: options.showInfo
+        showInfo: options.showInfo,
+        targetBranch: options.targetBranch
       })
 
       if (result.success) {

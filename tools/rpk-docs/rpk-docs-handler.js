@@ -26,6 +26,48 @@ const KNOWN_PLUGINS = ['ai', 'check', 'connect', 'k8s', 'oxla']
 const REFRESHABLE_PLUGINS = ['ai', 'check', 'connect', 'k8s']
 
 /**
+ * Plugins whose docs only main owns. rpk ai renders to partials that a
+ * separate plugin-release pipeline keeps current on main, and adp-docs
+ * single-sources them from main. A full regeneration on a version branch
+ * (beta, v/*) would re-render them from whatever plugin version installed
+ * that day, so those runs leave the subtree untouched.
+ */
+const MAIN_ONLY_PLUGINS = ['ai']
+
+/**
+ * Resolve the docs branch a run's output is for: an explicit value, else
+ * the pull request base branch on GitHub Actions (GITHUB_BASE_REF), else
+ * the branch checked out in the repo. Null when none is known (for
+ * example, a detached HEAD).
+ * @param {string} repoRoot - Docs repo root
+ * @param {string} [explicit] - Branch passed by the caller
+ * @param {Object} [env] - Environment (defaults to process.env)
+ * @returns {string|null}
+ */
+function resolveTargetBranch(repoRoot, explicit, env = process.env) {
+  if (explicit) return explicit
+  if (env.GITHUB_BASE_REF) return env.GITHUB_BASE_REF
+  // symbolic-ref fails on a detached HEAD, which has no branch
+  const head = spawnSync('git', ['symbolic-ref', '--short', '-q', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' })
+  const branch = head.status === 0 ? head.stdout.trim() : ''
+  return branch || null
+}
+
+/**
+ * Main-only plugins to protect (leave untouched) for a run on this branch.
+ * Only version branches protect them: beta, v/*, and v-WIP/*. main, an
+ * unknown branch, and a run that refreshes the plugin itself (--plugin ai)
+ * render them as before.
+ * @param {string|null} branch - Target branch from resolveTargetBranch
+ * @param {string} [refreshedPlugin] - Plugin this run refreshes, if any
+ * @returns {string[]}
+ */
+function mainOnlyPluginsToProtect(branch, refreshedPlugin) {
+  if (!branch || !(branch === 'beta' || /^v(-WIP)?\//.test(branch))) return []
+  return MAIN_ONLY_PLUGINS.filter(pl => pl !== refreshedPlugin)
+}
+
+/**
  * Per-plugin install flags that pin a version (rpk <plugin> install <flag> <version>).
  * k8s uses the generic flag name; the others embed the plugin name.
  */
@@ -1928,7 +1970,8 @@ async function handleRpkDocsGeneration(options = {}) {
     dataDir: customDataDir,
     preserveFrom, // Path to existing docs to preserve cloud conditionals and includes from
     printSummary = false, // Print PR summary to console
-    showInfo = false // Include info-level validation messages
+    showInfo = false, // Include info-level validation messages
+    targetBranch // Docs branch the output is for (detected when omitted)
   } = options
 
   // Normalize ref/sourceRef
@@ -1956,6 +1999,12 @@ async function handleRpkDocsGeneration(options = {}) {
     ? derivePartialsDir(finalOutputDir)
     : path.join(repoRoot, 'modules', 'reference', 'partials')
   const finalCloudSecretDir = cloudSecretDir || derivedPartialsDir
+
+  // On version branches, main-only plugin docs (rpk ai) are left untouched
+  const branchProtectedPlugins = mainOnlyPluginsToProtect(resolveTargetBranch(repoRoot, targetBranch), plugin)
+  if (branchProtectedPlugins.length > 0) {
+    console.log(`Leaving ${branchProtectedPlugins.map(pl => `rpk ${pl}`).join(', ')} docs untouched: main owns them`)
+  }
 
   // nav.adoc lives at modules/ROOT/nav.adoc relative to the repo root
   const navFile = path.join(repoRoot, 'modules', 'ROOT', 'nav.adoc')
@@ -2167,7 +2216,7 @@ async function handleRpkDocsGeneration(options = {}) {
         draftMissing,
         preservationsDir: preserveFrom,
         navFile,
-        protectedPlugins: failedPlugins
+        protectedPlugins: [...failedPlugins, ...branchProtectedPlugins]
       })
 
       console.log(`\nGeneration complete!`)
@@ -2555,7 +2604,7 @@ async function handleRpkDocsGeneration(options = {}) {
       draftMissing,
       preservationsDir: preserveFrom,
       navFile,
-      protectedPlugins: failedPlugins
+      protectedPlugins: [...failedPlugins, ...branchProtectedPlugins]
     })
 
     console.log(`\nGeneration complete!`)
@@ -2932,6 +2981,9 @@ module.exports = {
   splicePluginNode,
   preserveLinuxOnlyCommands,
   REFRESHABLE_PLUGINS,
+  MAIN_ONLY_PLUGINS,
+  resolveTargetBranch,
+  mainOnlyPluginsToProtect,
   PLUGIN_INSTALL_VERSION_FLAGS,
   PLUGIN_MANIFEST_SLUGS,
   getRequiredGoVersion,

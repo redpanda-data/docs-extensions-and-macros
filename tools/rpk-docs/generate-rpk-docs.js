@@ -2707,6 +2707,7 @@ async function generateRpkDocs(options = {}) {
     // rpk k8s before its GA plugin publishes). Their pages and nav entries are
     // preserved instead of treated as stale, because their absence from the
     // command tree reflects the generation environment, not the product.
+    // Also main-only plugins (rpk ai) on a version-branch run.
     protectedPlugins = []
   } = options
 
@@ -3237,7 +3238,7 @@ async function generateRpkDocs(options = {}) {
   for (const dir of rpkSubdirs(cloudSecretDir)) scanDirs.add(dir)
   for (const dir of [...scanDirs]) {
     if (protectedDirNames.has(path.basename(dir))) {
-      console.log(`  Preserving ${path.basename(dir)}/ (plugin commands absent from this run's tree)`)
+      console.log(`  Preserving ${path.basename(dir)}/ (protected plugin, not regenerated this run)`)
       scanDirs.delete(dir)
     }
   }

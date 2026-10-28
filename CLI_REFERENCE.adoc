@@ -1669,6 +1669,9 @@ Write PR summary to file (for GitHub Actions)
 `--show-info`::
 Include info-level validation messages
 
+`--target-branch <branch>`::
+Docs branch the output is for. On beta, v/*, and v-WIP/* the rpk ai docs, which main owns, are left untouched. Defaults to GITHUB_BASE_REF, then the checked-out branch.
+
 `-h, --help`::
 display help for command
 
