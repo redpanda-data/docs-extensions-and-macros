@@ -1138,6 +1138,7 @@ display help for command
 * `migrate-rpcn-descriptions` - One-time migration of frozen connector summaries and description prose onto the regenerated description partial. Dry run unless --write is given.
 * `migrate-rpcn-metadata` - One-time migration of inline connector == Metadata blocks into regenerated partials. Dry run unless --write is given.
 * `migrate-property-refs` - One-time migration of `property_name` prose mentions to prop:property_name[] macros. Dry run unless --write is given.
+* `migrate-property-values` - Report hand-written property values in prose and in example command output, check them against the property data, and propose propval: macros. Dry run unless --write is given; --write applies exact same-sentence prose matches only, never example output.
 * `property-docs` - Generate JSON and consolidated AsciiDoc partials for Redpanda configuration properties. Defaults to branch "dev" if neither --tag nor --branch is specified.
 * `rpk-docs` - Generate rpk CLI documentation from source. Builds rpk and parses source for platform detection.
 * `rpk-env-partial` - Generate the -X -> RPK_* env var mapping partial from rpk itself.
@@ -1440,6 +1441,48 @@ npx doc-tools generate migrate-property-refs --properties modules/reference/atta
 
 # Apply it
 npx doc-tools generate migrate-property-refs --properties modules/reference/attachments/redpanda-properties-v26.2.1.json --write
+----
+
+=== generate migrate-property-values
+
+Report hand-written property values in prose ("defaults to 128 MiB", "the minimum is 1 minute") next to a property mention, check each against the property data for the repo's own version (selected exactly as the prop: macro selects it), and propose a propval: replacement. Mismatches are likely doc errors. Also reads example command output in listing blocks (rpk topic describe, rpk cluster config get and export, Admin API cluster_config, kafka-configs --describe, Key/Value/Source records) and reports a row that asserts the default, such as SOURCE DEFAULT_CONFIG, but shows another value as stale example output, listed apart from prose findings. Dry run by default, writing a JSON and a Markdown report; --write applies only exact matches stated in the same sentence as their property, never a mismatch, a table cell or example output. Skips prose inside code blocks and generated content.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools generate migrate-property-values [options]
+----
+
+*Options:*
+
+`--docs-dir <path>`::
+Docs repo root containing antora.yml and modules/ (default: ".")
+
+`--lender <path...>`::
+Other component checkouts whose property data the repo borrows (cloud-docs borrows the docs repo's)
+
+`--report-dir <path>`::
+Where to write property-values-report.json and property-values-report.md (default: ".")
+
+`--write`::
+Replace exact, same-sentence matches with propval: macros (mismatches are never rewritten)
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Report on a docs checkout
+npx doc-tools generate migrate-property-values --docs-dir . --report-dir ./propval-report
+
+# Report on cloud-docs, which borrows the self-managed docs' property data
+npx doc-tools generate migrate-property-values --docs-dir ../cloud-docs --lender ../docs
+
+# Apply the auto-safe exact matches
+npx doc-tools generate migrate-property-values --docs-dir . --write
 ----
 
 === generate property-docs

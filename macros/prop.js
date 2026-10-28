@@ -83,6 +83,24 @@
  *   property-ref-role     CSS class applied to the code element
  *                         (default: property-ref).
  *
+ * PROPERTY VALUES: propval:
+ *
+ * The same registration also provides propval:<name>[<field>], which renders
+ * one value from the property data as plain text, so prose such as "defaults
+ * to 128 MiB" comes from the data instead of being typed by hand:
+ *
+ *   propval:log_segment_ms[default]              -> 2 weeks
+ *   propval:log_segment_ms[default,format=raw]   -> 1209600000
+ *   propval:log_segment_ms[min]                  -> 1 minute
+ *   propval:cloud_storage_enabled[restart]       -> yes
+ *
+ * It uses exactly prop:'s dataset selection, validation modes, Cloud gating
+ * and missing-data refusal (loadProperties, isAvailable, warnSeriesMissing),
+ * and formats values with the reference generator's own helpers (see
+ * extension-utils/property-values.js). Whenever no verified value exists, it
+ * renders a visible placeholder such as <unknown default> and reports why,
+ * because unlike a property name, a value has no safe fallback.
+ *
  * Example use in a playbook:
  *
  *   asciidoc:
@@ -92,6 +110,7 @@
 
 const semver = require('semver')
 const { escapeHtml } = require('../extension-utils/html-utils')
+const propertyValues = require('../extension-utils/property-values')
 const logger = require('@antora/logger')('prop-macro')
 
 const $propertyRegistry = Symbol('$propertyRegistry')
@@ -968,6 +987,116 @@ function propInlineMacro (config) {
   }
 }
 
+const VALUE_ROLE = 'property-value'
+const UNKNOWN_VALUE_ROLE = 'property-value-unknown'
+
+/**
+ * Build the HTML emitted for one propval: instance. Exported for unit testing.
+ *
+ * @param {object} opts
+ * @param {string} opts.name - Property name.
+ * @param {string} opts.field - Canonical (or as-written, for a placeholder) field.
+ * @param {string} [opts.text] - The value, as plain text.
+ * @param {string} [opts.html] - Pre-escaped markup, used instead of text.
+ * @param {boolean} [opts.unknown] - Render the placeholder instead.
+ * @returns {string}
+ */
+function buildPropvalContent ({ name, field, text, html, unknown = false }) {
+  const attrs = `data-property="${escapeHtml(name)}" data-field="${escapeHtml(field)}"`
+  if (unknown) {
+    return `<span class="${VALUE_ROLE} ${UNKNOWN_VALUE_ROLE}" ${attrs}>${escapeHtml(`<unknown ${field}>`)}</span>`
+  }
+  return `<span class="${VALUE_ROLE}" ${attrs}>${html !== undefined ? html : escapeHtml(text)}</span>`
+}
+
+/**
+ * Resolve one propval: call to its value, or to the reason there is none.
+ * Shares every decision with prop: -- the dataset (loadProperties), the
+ * availability gate (isAvailable) -- so a value is shown exactly where prop:
+ * would mark the name, and nowhere else. Exported for unit testing and for
+ * the migrate-property-values report.
+ *
+ * @param {string} [opts.filePath] - Named in the message, when known.
+ * @returns {{ok: true, text: string, html?: string, registry: object, field: string} |
+ *           {ok: false, kind: string, message: string, registry?: object, field: string}}
+ */
+function resolvePropertyValue ({ registry, name, field: requested, format, component, filePath }) {
+  const field = propertyValues.normalizeField(requested)
+  const call = `propval:${name}[${requested}]${filePath ? ` in ${filePath}` : ''}`
+  if (!field) {
+    const supported = Object.keys(propertyValues.FIELDS).join(', ')
+    return { ok: false, kind: 'unsupported-field', field: requested, message: `${call}: '${requested}' is not a field propval: supports. Supported fields: ${supported}.` }
+  }
+  if (!registry) {
+    return { ok: false, kind: 'no-data', field, message: `${call}: this page has no property data to read '${field}' from (see the prop macro warning for this component version), so it renders <unknown ${field}> rather than a value from another release.` }
+  }
+  const entry = Object.prototype.hasOwnProperty.call(registry.properties, name) ? registry.properties[name] : undefined
+  if (!entry || typeof entry !== 'object') {
+    return { ok: false, kind: 'unknown-property', field, registry, message: `${call}: '${name}' is not in the property data this page validates against (${describeDataset(registry)}). Either the name is misspelled or the property does not exist in that release.` }
+  }
+  if (!isAvailable(registry, entry)) {
+    return { ok: false, kind: 'unavailable', field, registry, message: `${call}: '${name}' is not available in the ${component || 'this'} component: ${describeDataset(registry)} marks it cloud_supported: false, so no value is shown to readers who cannot set it.` }
+  }
+  if (registry.surface === SURFACE_CLOUD && propertyValues.FIELDS[field].cloudHidden) {
+    return { ok: false, kind: 'cloud-hidden', field, registry, message: `${call}: the property reference does not state '${field}' for Cloud (Cloud configures it, and the reference renders it only outside env-cloud), so this Cloud page renders <unknown ${field}>. Put the sentence in an ifndef::env-cloud[] block, or use a field the Cloud reference shows, such as cloud-access.` }
+  }
+  const value = propertyValues.fieldValue(entry, field, { format })
+  if (!value.ok && value.reason === 'imprecise') {
+    return { ok: false, kind: 'imprecise', field, registry, message: `${call}: the ${field} of '${name}' in ${describeDataset(registry)} is an integer larger than JavaScript represents exactly, so the build cannot render it without changing digits and renders <unknown ${field}>. State the value in prose by hand.` }
+  }
+  if (!value.ok) {
+    return { ok: false, kind: 'missing-field', field, registry, message: `${call}: '${name}' has no ${field} in ${describeDataset(registry)}, so it renders <unknown ${field}>.` }
+  }
+  return { ok: true, field, registry, text: value.text, html: value.html }
+}
+
+function propvalInlineMacro (config) {
+  return function () {
+    const self = this
+    self.named('propval')
+    self.positionalAttributes(['field'])
+    self.process(function (parent, target, attributes) {
+      const document = parent.getDocument()
+      const name = target.trim()
+      const mode = document.getAttribute('property-validate', 'warn')
+      const filePath = config && config.file && config.file.src && config.file.src.path
+      const component = (config && config.file && config.file.src && config.file.src.component) || ''
+      const version = (config && config.file && config.file.src && config.file.src.version) || ''
+      const requested = String(attributes.field || 'default').trim()
+      let format = String(attributes.format || propertyValues.FORMAT_HUMAN).trim().toLowerCase()
+      const where = filePath ? ` in ${filePath}` : ''
+      if (format !== propertyValues.FORMAT_HUMAN && format !== propertyValues.FORMAT_RAW) {
+        logger.warn(`propval:${name}[${requested}]${where}: format=${format} is not supported; use format=raw for the exact value. Rendering the human-readable value.`)
+        format = propertyValues.FORMAT_HUMAN
+      }
+
+      const contentCatalog = config && config.contentCatalog
+      const registry = contentCatalog ? loadProperties(config) : undefined
+      if (!registry && contentCatalog && mode !== 'off') {
+        // The same once-per-component-version diagnostic prop: emits.
+        if (!warnSeriesMissing(contentCatalog, component, version)) warnNoPropertyData(contentCatalog, component, version)
+      }
+      const result = resolvePropertyValue({ registry, name, field: requested, format, component, filePath })
+      if (result.ok) {
+        return self.createInline(parent, 'quoted', buildPropvalContent({ name, field: result.field, text: result.text, html: result.html }))
+      }
+      // Authoring errors fail the build in error mode, like an unknown prop:
+      // name. So do cloud-hidden and unavailable: they appear only in the
+      // Cloud build of single-sourced prose, where a warning alone would let
+      // the placeholder ship. Everything else is reported and rendered as the
+      // placeholder. A placeholder is reported even in off mode: off means
+      // "do not check names", but a value cannot fall back to anything, and a
+      // silent <unknown default> would reach readers unnoticed.
+      const { message } = result
+      if (mode === 'error' && ['unknown-property', 'missing-field', 'unsupported-field', 'cloud-hidden', 'unavailable'].includes(result.kind)) {
+        throw new Error(message)
+      }
+      logger.warn(message)
+      return self.createInline(parent, 'quoted', buildPropvalContent({ name, field: result.field, unknown: true }))
+    })
+  }
+}
+
 /**
  * helm-path=auto displays the property as its Helm values path on pages
  * rendered with env-kubernetes, so single-sourced content reads correctly for
@@ -986,9 +1115,11 @@ function register (registry, config = {}) {
   if (typeof registry.register === 'function') {
     registry.register(function () {
       this.inlineMacro(propInlineMacro(config))
+      this.inlineMacro(propvalInlineMacro(config))
     })
   } else if (typeof registry.inlineMacro === 'function') {
     registry.inlineMacro(propInlineMacro(config))
+    registry.inlineMacro(propvalInlineMacro(config))
   } else {
     logger.warn("no 'inlineMacro' method on alleged registry")
   }
@@ -1008,3 +1139,7 @@ module.exports.releaseSeries = releaseSeries
 module.exports.extractHeadingsWithTags = extractHeadingsWithTags
 module.exports.evaluateTagExpression = evaluateTagExpression
 module.exports.buildPageIndex = buildPageIndex
+module.exports.isAvailable = isAvailable
+module.exports.describeDataset = describeDataset
+module.exports.buildPropvalContent = buildPropvalContent
+module.exports.resolvePropertyValue = resolvePropertyValue
