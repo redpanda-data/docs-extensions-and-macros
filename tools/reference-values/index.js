@@ -1,0 +1,446 @@
+'use strict'
+
+/* doc-tools check-reference-values: check hand-written reference values and
+ * references in a docs checkout against the published data, for three kinds:
+ *
+ *   properties  migrate-property-values' scan, unchanged (propval:).
+ *   rpk         rpk commands and flags in shell blocks and prose, and flag
+ *               defaults stated in prose (rpkval:). See rpk.js.
+ *   connect     Connect components and fields in YAML, YAML comments that
+ *               state a default, and field defaults stated in prose
+ *               (connectval:). See connect.js.
+ *
+ * Data is selected exactly as the macros select it, from the repo and any
+ * --lender checkouts read into one synthetic content catalog, unless
+ * --data-file names it. One combined report; the exit code says whether any
+ * finding is at or above --fail-on (1), or the check could not run (2).
+ */
+
+const fs = require('fs')
+const path = require('path')
+const migrate = require('../migrate-property-values')
+const { PROPERTIES_KIND, PROPERTIES_JSON_RX } = require('../../macros/prop')
+const datasets = require('../../extension-utils/attachment-datasets')
+const rpkValues = require('../../extension-utils/rpk-values')
+const connectValues = require('../../extension-utils/connect-values')
+const { scanRpk } = require('./rpk')
+const { scanConnect } = require('./connect')
+const { makeRenderGuard } = require('./render-check')
+const shared = require('./shared')
+
+const KINDS = ['properties', 'rpk', 'connect']
+const LEVELS = ['none', 'mismatch', 'any']
+const ALL_KINDS = [PROPERTIES_KIND, rpkValues.RPK_KIND, connectValues.CONNECT_KIND]
+const HISTORICAL_CONNECT_RX = /(?:^|\/)migration\//
+
+/**
+ * A problem that stops the check from running: exit 2.
+ */
+class SetupError extends Error {}
+
+const kindOfFile = (file) => {
+  const base = path.basename(file)
+  if (PROPERTIES_JSON_RX.test(base)) return { name: 'properties', kind: PROPERTIES_KIND, tag: base.match(PROPERTIES_JSON_RX)[1] }
+  if (rpkValues.RPK_JSON_RX.test(base)) return { name: 'rpk', kind: rpkValues.RPK_KIND, tag: base.match(rpkValues.RPK_JSON_RX)[1] }
+  if (connectValues.CONNECT_JSON_RX.test(base)) return { name: 'connect', kind: connectValues.CONNECT_KIND, tag: base.match(connectValues.CONNECT_JSON_RX)[1] }
+  return undefined
+}
+
+function readExplicit (file, own) {
+  const found = kindOfFile(file)
+  if (!found) throw new SetupError(`--data-file ${file}: the name matches no dataset kind (redpanda-properties-v<tag>.json, rpk-v<version>.json, connect-<version>.json)`)
+  let data
+  try {
+    data = JSON.parse(fs.readFileSync(file, 'utf8'))
+  } catch (error) {
+    throw new SetupError(`--data-file ${file}: ${error.code === 'ENOENT' ? 'no such file' : `not valid JSON (${error.message})`}`)
+  }
+  const verdict = datasets.isPlainObject(data) ? found.kind.validate(data) : found.kind.notObjectReason
+  if (verdict !== true) throw new SetupError(`--data-file ${file}: ${verdict}`)
+  const cloud = found.kind.borrowWhen.some((name) => datasets.isAttributeSet(own.attributes[name]))
+  const registry = {
+    tag: found.tag,
+    data,
+    component: own.component,
+    version: own.version,
+    surface: cloud ? datasets.SURFACE_CLOUD : datasets.SURFACE_ALL,
+    kind: found.kind,
+    explicit: file,
+  }
+  if (found.kind.decorate) found.kind.decorate(registry)
+  return { name: found.name, registry, file }
+}
+
+/**
+ * A finding's kind of file: historical findings are reported, never fail and
+ * are never written.
+ */
+function isHistorical (kind, file) {
+  return migrate.HISTORICAL_RX.test(file) || (kind === 'connect' && HISTORICAL_CONNECT_RX.test(file))
+}
+
+/**
+ * Whether a finding fails the check at a level.
+ */
+function failsAt (kind, f, level) {
+  if (level === 'none') return false
+  if (f.applied) return false
+  if (isHistorical(kind, f.file)) return false
+  if (f.status === 'mismatch') return true
+  if (f.status === 'reference' && f.severity === 'error') return true
+  if (f.status === 'example-output' && f.verdict === 'stale' && kind !== 'properties') return true
+  if (level !== 'any') return false
+  if (['exact', 'equivalent', 'unset'].includes(f.status)) return true
+  if (f.status === 'reference' && f.severity === 'warning') return true
+  return false
+}
+
+/**
+ * Every failing finding of a result at a level, as {kind, finding}.
+ */
+function failingFindings (result, level) {
+  const out = []
+  for (const [kind, r] of Object.entries(result.kinds)) {
+    for (const f of r.findings || []) if (failsAt(kind, f, level)) out.push({ kind, finding: f })
+  }
+  return out
+}
+
+/**
+ * Drop the findings a `// value-check: ignore` comment suppresses.
+ *
+ * @returns {number} how many were dropped.
+ */
+function applyIgnores (result, docsDir) {
+  const cache = new Map()
+  const ignored = (file, line) => {
+    if (!cache.has(file)) {
+      const full = path.join(docsDir, file)
+      cache.set(file, fs.existsSync(full) ? shared.ignoredLines(fs.readFileSync(full, 'utf8')) : new Set())
+    }
+    return cache.get(file).has(line)
+  }
+  let count = 0
+  for (const r of Object.values(result.kinds)) {
+    if (!Array.isArray(r.findings)) continue
+    const kept = r.findings.filter((f) => !ignored(f.file, f.line))
+    count += r.findings.length - kept.length
+    if (kept.length !== r.findings.length) {
+      r.findings = kept
+      r.counts = recount(r)
+    }
+  }
+  return count
+}
+
+// Counts after findings were dropped, in each kind's own shape.
+function recount (r) {
+  if (r.counts && Object.prototype.hasOwnProperty.call(r.counts, 'referenceErrors')) {
+    const extra = {}
+    for (const key of ['examplesRestatingDefault', 'yamlRestatingDefault']) if (key in r.counts) extra[key] = r.counts[key]
+    return { ...require('./rpk').countFindings(r.findings), ...extra }
+  }
+  const counts = { exact: 0, equivalent: 0, mismatch: 0, unset: 0, unverifiable: 0, autoSafe: 0, 'example-output': 0, exampleStale: 0 }
+  for (const f of r.findings) {
+    counts[f.status]++
+    if (f.autoSafe) counts.autoSafe++
+    if (f.verdict === 'stale') counts.exampleStale++
+  }
+  return counts
+}
+
+/**
+ * Run every requested kind over one checkout.
+ *
+ * @param {object} opts
+ * @param {string} opts.docsDir
+ * @param {string[]} [opts.lenderDirs]
+ * @param {string[]} [opts.dataFiles]
+ * @param {string[]} [opts.kinds] - Default: all three.
+ * @param {boolean} [opts.kindsExplicit] - The caller named the kinds: missing
+ *   data for one is a setup error, not a skip.
+ * @param {string[]} [opts.files]
+ * @param {boolean} [opts.write]
+ * @param {string} [opts.failOn]
+ */
+function scanAll ({ docsDir, lenderDirs = [], dataFiles = [], kinds = KINDS, kindsExplicit = false, files, write = false, failOn = 'mismatch' }) {
+  if (!LEVELS.includes(failOn)) throw new SetupError(`--fail-on ${failOn}: use one of ${LEVELS.join(', ')}`)
+  for (const kind of kinds) if (!KINDS.includes(kind)) throw new SetupError(`--kinds: '${kind}' is not a kind; use ${KINDS.join(', ')}`)
+  if (!fs.existsSync(path.join(docsDir, 'antora.yml'))) throw new SetupError(`--docs-dir ${docsDir}: no antora.yml`)
+  for (const dir of lenderDirs) if (!fs.existsSync(path.join(dir, 'antora.yml'))) throw new SetupError(`--lender ${dir}: no antora.yml`)
+  let own
+  try {
+    own = migrate.readComponent(docsDir, ALL_KINDS)
+  } catch (error) {
+    throw new SetupError(`--docs-dir ${docsDir}: ${error.message}`)
+  }
+  const lenders = lenderDirs.map((dir) => migrate.readComponent(dir, ALL_KINDS))
+  const catalog = migrate.catalogFor([own, ...lenders])
+  const explicit = {}
+  for (const file of dataFiles) {
+    const read = readExplicit(file, own)
+    explicit[read.name] = read
+  }
+
+  // The catalog the render guard renders against: the scan's, plus the
+  // explicit files as attachments where the macros would look for them.
+  const renderCatalog = () => {
+    const extra = Object.values(explicit).map(({ registry, file }) => {
+      const kind = registry.kind
+      const cloud = registry.surface === datasets.SURFACE_CLOUD
+      const component = kind === connectValues.CONNECT_KIND ? 'connect' : cloud ? 'streaming' : own.component
+      const version = kind === connectValues.CONNECT_KIND ? '' : cloud ? (datasets.releaseSeries(registry.tag) || '') : own.version
+      const base = kind === connectValues.CONNECT_KIND ? `connect-${registry.tag}.json` : `${kind.filePrefix}${registry.tag}.json`
+      return { component, version, attributes: {}, files: [{ src: { component, version, module: kind.module, family: 'attachment', relative: base }, contents: fs.readFileSync(file) }] }
+    })
+    return migrate.catalogFor([own, ...lenders, ...extra])
+  }
+  const guard = write ? makeRenderGuard({ catalog: renderCatalog(), component: own.component, version: own.version }) : undefined
+
+  const result = {
+    schema: 1,
+    docsDir,
+    component: own.component,
+    version: own.version,
+    failOn,
+    kinds: {},
+    skipped: {},
+    ignored: 0,
+    failing: 0,
+  }
+  const skip = (kind, why) => {
+    if (kindsExplicit) throw new SetupError(`--kinds ${kind}: ${why}`)
+    result.skipped[kind] = why
+  }
+  const where = `${own.component}@${own.version || 'unversioned'}`
+
+  if (kinds.includes('properties')) {
+    const given = explicit.properties && explicit.properties.registry
+    const registry = given || datasets.loadDatasetFor(catalog, own.component, own.version, PROPERTIES_KIND)
+    if (!registry) skip('properties', `no property data for ${where}`)
+    else {
+      const r = migrate.scanRepo({ docsDir, lenderDirs, write, files, registry: given })
+      if (r.error) skip('properties', r.error)
+      else result.kinds.properties = { ...r, selection: given ? 'explicit' : registry.surface === datasets.SURFACE_CLOUD ? 'cloud' : 'page' }
+    }
+  }
+
+  if (kinds.includes('rpk')) {
+    const given = explicit.rpk && explicit.rpk.registry
+    const registry = given || rpkValues.loadRpkFor(catalog, own.component, own.version)
+    if (!registry) skip('rpk', `no rpk data for ${where}: no rpk-<version>.json attachment selects for it; pass --data-file docs-data/rpk-v<version>.json`)
+    else {
+      const r = scanRpk({ docsDir, registry, files, write, renderGuard: guard })
+      result.kinds.rpk = {
+        dataset: given ? `${path.basename(given.explicit)} (--data-file)` : datasets.describeDataset(registry),
+        selection: given ? 'explicit' : registry.surface === datasets.SURFACE_CLOUD ? 'cloud' : 'page',
+        surface: registry.surface,
+        rpkVersion: registry.data.rpk_version || registry.tag,
+        pluginVersions: registry.data.plugin_versions || {},
+        scraped: rpkValues.KNOWN_PLUGINS.filter((p) => rpkValues.isScraped(registry, [p])),
+        ...r,
+      }
+    }
+  }
+
+  if (kinds.includes('connect')) {
+    const given = explicit.connect && explicit.connect.registry
+    const registry = given || connectValues.loadConnect(catalog)
+    if (!registry) skip('connect', 'no connect-<version>.json in connect:components attachments; pass --lender with an rp-connect-docs checkout, or --data-file')
+    else {
+      const cloudSurface = datasets.isAttributeSet(own.attributes['env-cloud'])
+      const r = scanConnect({ docsDir, registry, files, write, cloudSurface, renderGuard: guard, component: own.component })
+      result.kinds.connect = {
+        dataset: given ? `${path.basename(given.explicit)} (--data-file)` : datasets.describeDataset(registry),
+        selection: given ? 'explicit' : 'fixed',
+        surface: cloudSurface ? datasets.SURFACE_CLOUD : datasets.SURFACE_ALL,
+        cloudSource: 'json',
+        ...r,
+      }
+    }
+  }
+
+  if (!Object.keys(result.kinds).length) throw new SetupError(`no kind has data for ${where}: ${Object.entries(result.skipped).map(([k, v]) => `${k}: ${v}`).join('; ')}`)
+  result.ignored = applyIgnores(result, docsDir)
+  for (const [kind, r] of Object.entries(result.kinds)) {
+    for (const f of r.findings) f.failing = failsAt(kind, f, failOn)
+  }
+  result.failing = failingFindings(result, failOn).length
+  return result
+}
+
+const { mdEscape } = migrate
+
+// One line describing a failing finding, for the console and annotations.
+function describe (kind, f) {
+  if (kind === 'properties') {
+    if (f.status === 'mismatch') return `${f.property} ${f.field}: written ${f.written}, data ${f.dataValue}`
+    return `${f.property} ${f.field}: ${f.status}${f.note ? ` (${f.note})` : ''}`
+  }
+  const what = f.target || (kind === 'rpk' ? `${f.command || 'rpk'}${f.flag ? ` --${f.flag}` : ''}` : `${f.componentType || ''}/${f.component || ''}${f.fieldPath ? ` ${f.fieldPath}` : ''}`)
+  if (f.status === 'reference') return `${what}: ${f.reason}${f.note ? `: ${f.note}` : ''}`
+  if (f.status === 'example-output') return `${what}: comment says ${f.written}, data ${f.dataValue}`
+  return `${what}: written ${f.written}, data ${f.dataValue}`
+}
+
+/**
+ * Render the combined report as Markdown.
+ */
+function renderMarkdown (result) {
+  const out = ['# Reference values report', '']
+  out.push('Statuses: **reference** is a command, flag, component or field that does not exist in the data (error) or is deprecated (warning). **exact** is what the macro renders; **auto-safe** is an exact match `--write` may apply. **equivalent** is the same value worded differently. **mismatch** differs from the data. **unset** states a value the data leaves empty. **unverifiable** could not be compared, with the reason. **example output** is a value in a block or YAML comment, never written: **stale** when it differs from the data.', '')
+  out.push(`Checked ${result.component}@${result.version || 'unversioned'} at --fail-on ${result.failOn}: ${result.failing} failing finding(s), ${result.ignored} ignored by \`// value-check: ignore\`.`, '')
+  out.push('| Kind | Dataset | Surface | Files | Findings | Failing | Reference errors | Reference warnings | Mismatch | Exact (auto-safe) | Equivalent | Unset | Unverifiable | Example output (stale) |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|')
+  for (const [kind, r] of Object.entries(result.kinds)) {
+    const c = r.counts || {}
+    out.push(`| ${kind} | ${mdEscape(r.dataset)} | ${r.surface} | ${r.files} | ${r.findings.length} | ${r.findings.filter((f) => f.failing).length} | ${c.referenceErrors || 0} | ${c.referenceWarnings || 0} | ${c.mismatch || 0} | ${c.exact || 0} (${c.autoSafe || 0}) | ${c.equivalent || 0} | ${c.unset || 0} | ${c.unverifiable || 0} | ${c['example-output'] || 0} (${c.exampleStale || 0}) |`)
+  }
+  for (const [kind, why] of Object.entries(result.skipped)) out.push(`| ${kind} | skipped: ${mdEscape(why)} | | | | | | | | | | | | |`)
+
+  const failing = failingFindings(result, result.failOn)
+  out.push('', `## Failing (${failing.length})`, '')
+  if (failing.length) {
+    out.push('| File:line | Kind | Status | Finding |', '|---|---|---|---|')
+    for (const { kind, finding: f } of failing) out.push(`| ${mdEscape(`${f.file}:${f.line}`)} | ${kind} | ${f.status}${f.reason ? ` (${f.reason})` : ''}${f.verdict ? ` ${f.verdict}` : ''} | ${mdEscape(describe(kind, f))} |`)
+  } else out.push('None.')
+
+  for (const [kind, r] of Object.entries(result.kinds)) {
+    out.push('', `## ${kind}`, '')
+    if (kind === 'properties') {
+      // The property section is migrate-property-values' own report body.
+      const body = migrate.renderMarkdown([{ ...r, label: `${r.component}@${r.version || 'unversioned'}` }], { title: 'x' })
+      out.push(body.split('\n').slice(2).join('\n').replace(/^## /gm, '### '))
+      continue
+    }
+    const refs = r.findings.filter((f) => f.status === 'reference')
+    const errors = refs.filter((f) => f.severity === 'error')
+    const warnings = refs.filter((f) => f.severity === 'warning')
+    out.push(`### Reference problems (${errors.length} errors, ${warnings.length} warnings)`, '')
+    if (refs.length) {
+      out.push('| File:line | Severity | Reason | Where | Note |', '|---|---|---|---|---|')
+      for (const f of [...errors, ...warnings]) {
+        const where = kind === 'rpk' ? `${f.command || ''}${f.token ? ` ${f.token}` : ''}` : `${f.componentType || ''}/${f.component || ''}${f.fieldPath ? ` ${f.fieldPath}` : ''}`
+        out.push(`| ${mdEscape(`${f.file}:${f.line}`)} | ${f.severity} | ${f.reason} | ${mdEscape(where)} | ${mdEscape(f.note)} |`)
+      }
+    } else out.push('None.')
+    const section = (title, list, cols) => {
+      out.push('', `### ${title} (${list.length})`, '')
+      if (!list.length) { out.push('None.'); return }
+      out.push(`| File:line | Target | Written | Data | ${cols.join(' | ')} |`, `|---|---|---|---|${cols.map(() => '---|').join('')}`)
+      for (const f of list) out.push(`| ${mdEscape(`${f.file}:${f.line}`)} | \`${mdEscape(f.target || '')}\` | ${mdEscape(f.written)} | ${mdEscape(f.dataValue)} | ${cols.map((c) => mdEscape(c === 'Auto-safe' ? (f.autoSafe ? 'yes' : 'no') : c === 'Tied to' ? f.association : f.note)).join(' | ')} |`)
+    }
+    section('Mismatches', r.findings.filter((f) => f.status === 'mismatch'), ['Tied to', 'Note'])
+    section('Not set in the data', r.findings.filter((f) => f.status === 'unset'), ['Note'])
+    const exact = r.findings.filter((f) => f.status === 'exact')
+    section(`Exact, ${exact.filter((f) => f.autoSafe).length} auto-safe`, exact, ['Auto-safe', 'Note'])
+    section('Equivalent, proposed and never applied', r.findings.filter((f) => f.status === 'equivalent'), ['Tied to'])
+    const unverifiable = r.findings.filter((f) => f.status === 'unverifiable')
+    out.push('', `### Unverifiable (${unverifiable.length})`, '')
+    const byReason = {}
+    for (const f of unverifiable) byReason[f.reason] = (byReason[f.reason] || 0) + 1
+    out.push(Object.keys(byReason).length ? Object.entries(byReason).sort((a, b) => b[1] - a[1]).map(([k, v]) => `* ${k}: ${v}`).join('\n') : 'None.')
+    const helpDefaults = unverifiable.filter((f) => f.reason === 'plugin-help-default')
+    if (helpDefaults.length) {
+      out.push('', 'Plugin flags whose --help default differs from the prose (listed for a human; the --help scrape is not reliable enough to fail on):', '')
+      for (const f of helpDefaults) out.push(`* ${mdEscape(`${f.file}:${f.line}`)} \`${mdEscape(f.target)}\`: written ${mdEscape(f.written)}, --help ${mdEscape(f.dataValue)}`)
+    }
+    const examples = r.findings.filter((f) => f.status === 'example-output')
+    out.push('', `### Example output (${examples.length}: ${examples.filter((f) => f.verdict === 'stale').length} stale, ${examples.filter((f) => f.verdict === 'matches').length} matching)`, '')
+    const stale = examples.filter((f) => f.verdict === 'stale')
+    if (stale.length) {
+      out.push('| File:line | Target | Shown | Default |', '|---|---|---|---|')
+      for (const f of stale) out.push(`| ${mdEscape(`${f.file}:${f.line}`)} | \`${mdEscape(f.target || '')}\` | ${mdEscape(f.written)} | ${mdEscape(f.dataValue)} |`)
+    } else out.push('None stale.')
+  }
+  return out.join('\n') + '\n'
+}
+
+/**
+ * GitHub workflow commands: ::error for each failing finding, ::warning for
+ * each reference warning that does not fail.
+ */
+function annotations (result) {
+  const lines = []
+  const clean = (text) => String(text).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A')
+  for (const [kind, r] of Object.entries(result.kinds)) {
+    for (const f of r.findings) {
+      if (f.failing) lines.push(`::error file=${f.file},line=${f.line}::${clean(`${kind} ${f.status}: ${describe(kind, f)}`)}`)
+      else if (f.status === 'reference' && f.severity === 'warning') lines.push(`::warning file=${f.file},line=${f.line}::${clean(`${kind} ${f.reason}: ${describe(kind, f)}`)}`)
+    }
+  }
+  return lines
+}
+
+/**
+ * The CLI action. Returns the exit code.
+ */
+function runCli (options, { log = console.log, error = console.error } = {}) {
+  const docsDir = path.resolve(options.docsDir || '.')
+  const kindsExplicit = options.kinds !== undefined
+  const kinds = kindsExplicit ? String(options.kinds).split(',').map((k) => k.trim()).filter(Boolean) : KINDS
+  if (options.annotations !== undefined && options.annotations !== 'github') {
+    error(`Error: --annotations ${options.annotations}: the only format is github`)
+    return 2
+  }
+  let result
+  try {
+    if (options.write) {
+      // The render guard converts lines through the real macros, which log
+      // every placeholder; those are expected while guarding.
+      require('@antora/logger').configure({ level: 'silent' })
+    }
+    result = scanAll({
+      docsDir,
+      lenderDirs: (options.lender || []).map((dir) => path.resolve(dir)),
+      dataFiles: (options.dataFile || []).map((file) => path.resolve(file)),
+      kinds,
+      kindsExplicit,
+      files: options.files,
+      write: Boolean(options.write),
+      failOn: options.failOn || 'mismatch',
+    })
+  } catch (e) {
+    if (e instanceof SetupError) {
+      error(`Error: ${e.message}`)
+      return 2
+    }
+    throw e
+  }
+  const reportDir = path.resolve(options.reportDir || '.')
+  fs.mkdirSync(reportDir, { recursive: true })
+  const jsonPath = path.join(reportDir, 'reference-values-report.json')
+  const mdPath = path.join(reportDir, 'reference-values-report.md')
+  fs.writeFileSync(jsonPath, JSON.stringify(result, null, 2) + '\n')
+  fs.writeFileSync(mdPath, renderMarkdown(result))
+  for (const [kind, r] of Object.entries(result.kinds)) {
+    const c = r.counts
+    const refs = kind === 'properties' ? '' : `${c.referenceErrors} reference error(s), ${c.referenceWarnings} warning(s), `
+    log(`${kind}: ${r.dataset} (${r.surface}), ${r.files} files: ${refs}${c.mismatch} mismatch, ${c.unset} unset, ${c.exact} exact (${c.autoSafe} auto-safe), ${c.equivalent} equivalent, ${c.unverifiable} unverifiable, ${c['example-output'] || 0} example output (${c.exampleStale || 0} stale).`)
+  }
+  for (const [kind, why] of Object.entries(result.skipped)) log(`${kind}: skipped (${why})`)
+  if (result.ignored) log(`${result.ignored} finding(s) ignored by // value-check: ignore.`)
+  for (const { kind, finding: f } of failingFindings(result, result.failOn)) {
+    log(`  ${f.status === 'reference' ? f.reason.toUpperCase() : f.status.toUpperCase()} ${f.file}:${f.line} ${kind} ${describe(kind, f)}`)
+  }
+  if (options.annotations === 'github') for (const line of annotations(result)) log(line)
+  if (options.write) {
+    const changed = Object.values(result.kinds).reduce((n, r) => n + (r.changedFiles || 0), 0)
+    log(`Replaced auto-safe exact matches in ${changed} file(s).`)
+  }
+  log(`Report: ${mdPath}`)
+  log(`check (${result.failOn}): ${result.failing} failing finding(s)`)
+  return result.failing > 0 ? 1 : 0
+}
+
+module.exports = {
+  scanAll,
+  renderMarkdown,
+  failingFindings,
+  applyIgnores,
+  annotations,
+  runCli,
+  failsAt,
+  SetupError,
+  KINDS,
+  LEVELS,
+}

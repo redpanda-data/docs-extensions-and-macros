@@ -1149,7 +1149,8 @@ automation
  * findings. Dry run by default, writing a JSON and a Markdown report; --write
  * applies only exact matches stated in the same sentence as their property,
  * never a mismatch, a table cell or example output. Skips prose inside code
- * blocks and generated content.
+ * blocks and generated content. `check-reference-values` runs these property
+ * checks together with rpk and Connect checks, and can fail CI.
  *
  * @example
  * # Report on a docs checkout
@@ -3416,6 +3417,75 @@ programCli
   .action(async (paths, options) => {
     const { runCli } = require('../tools/check-metadata')
     await runCli(paths, options)
+  })
+
+/**
+ * check-reference-values
+ *
+ * @description
+ * Check a docs checkout for reference values and references that the
+ * propval:, rpkval: and connectval: macros could render from the published
+ * data, and for references to things the data does not have. Three kinds run
+ * together, each selecting its dataset exactly as its macro does (from the
+ * repo and any --lender checkouts), unless --data-file names one:
+ * properties runs the migrate-property-values scan unchanged; rpk parses
+ * every rpk invocation in shell blocks and backticked prose (unknown-command,
+ * unknown-flag and deprecated-command, with "did you mean" suggestions) and
+ * compares flag defaults stated in prose and in Default table columns with
+ * the rpk data; connect walks every pipeline config in YAML blocks and
+ * examples files (unknown-component, unknown-field, deprecated components and
+ * fields), compares YAML comments that state a default ("# Optional
+ * (default: ...)") and callouts and sentences that state one with the Connect
+ * data. Statuses are propval's (exact, equivalent, mismatch, unset,
+ * unverifiable, example output) plus reference. Plugin flags scraped from
+ * --help never fail, and neither do findings in release notes, upgrade notes
+ * or Connect migration guides. A `// value-check: ignore` comment line
+ * suppresses findings on the next line or in the next block. Writes one JSON
+ * and one Markdown report. --write applies only exact matches in the same
+ * sentence (or a Connect callout) that name one target, never in a table,
+ * block or YAML, and only when the line renders the same visible text before
+ * and after through the real macros. Exit 0 when no finding is at or above
+ * --fail-on, 1 when one is, 2 when the check could not run.
+ *
+ * @why
+ * Hand-typed defaults, flags and field names drift from the product with
+ * every release, and nothing notices until a reader runs the command. The
+ * value macros fix that for new prose; this finds the prose that needs them,
+ * and the references that are already wrong, in a form CI can fail on.
+ *
+ * @example
+ * # docs: rpk from the generator snapshot until the attachment is published
+ * npx doc-tools check-reference-values --docs-dir . --data-file docs-data/rpk-v26.2.2.json --lender ../rp-connect-docs --report-dir ./reference-values
+ *
+ * # cloud-docs borrows property and rpk data from docs, Connect data from rp-connect-docs
+ * npx doc-tools check-reference-values --docs-dir ../cloud-docs --lender ../docs ../rp-connect-docs --data-file ../docs/docs-data/rpk-v26.2.2.json
+ *
+ * # Only the files a pull request changed, with GitHub annotations
+ * npx doc-tools check-reference-values --files $(git diff --name-only origin/main -- '*.adoc') --annotations github
+ *
+ * # Apply the auto-safe exact matches, then fail on anything left
+ * npx doc-tools check-reference-values --write --fail-on mismatch
+ *
+ * @requirements
+ * - An Antora component checkout (antora.yml and modules/)
+ * - The data: redpanda-properties-<tag>.json and rpk-<version>.json attachments
+ *   in a reference module, connect-<version>.json in rp-connect-docs, or --data-file
+ */
+programCli
+  .command('check-reference-values')
+  .description('Check prose, shell blocks and YAML against the property, rpk and Connect data: report hand-written values the value macros could render, and unknown or deprecated commands, flags, components and fields')
+  .option('--docs-dir <path>', 'Root of the repo being scanned (antora.yml and modules/)', '.')
+  .option('--lender <path...>', 'Other component checkouts read into the same catalog, so data is selected exactly as the macros select it (for example ../docs ../rp-connect-docs)')
+  .option('--kinds <list>', 'Comma-separated kinds to run: properties, rpk, connect (default: all; a named kind with no data is a setup error)')
+  .option('--data-file <path...>', 'Dataset files that bypass selection, recognized by name: redpanda-properties-v<tag>.json, rpk-v<version>.json (the docs-data snapshot works), connect-<version>.json')
+  .option('--files <path...>', 'Scan only these files, relative to --docs-dir')
+  .option('--report-dir <path>', 'Where to write reference-values-report.json and reference-values-report.md', '.')
+  .option('--write', 'Apply auto-safe exact replacements with the value macros')
+  .option('--fail-on <level>', 'none, mismatch (mismatches, reference errors, stale rpk and Connect examples) or any (also exact, equivalent, unset and reference warnings)', 'mismatch')
+  .option('--annotations <format>', 'Also print GitHub workflow annotations: github')
+  .action((options) => {
+    const { runCli } = require('../tools/reference-values')
+    process.exitCode = runCli(options)
   })
 
 /**

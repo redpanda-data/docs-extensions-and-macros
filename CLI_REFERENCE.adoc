@@ -45,6 +45,7 @@ display help for command
 * `lint-screenshots` - Lint image macros and image files in a docs repo against the screenshot standard (alt text, size, format, width)
 * `check-build-log` - Check an Antora JSON build log: fail on error or fatal records or too few pages, print a Markdown summary
 * `check-metadata` - Check page-categories and solution facet values in AsciiDoc page headers against the docs taxonomy
+* `check-reference-values` - Check prose, shell blocks and YAML against the property, rpk and Connect data: report hand-written values the value macros could render, and unknown or deprecated commands, flags, components and fields
 * `check-rendered-html` - Scan rendered Antora HTML for unconverted AsciiDoc (literal backticks, xref:, include::, attributes, tables, empty sections) and broken anchors and links
 * `connect-docs-diff` - Diff two generated Connect docs trees and map each changed partial or example to its published page
 * `preview-string` - Render one embedded doc string (property, rpk command/flag, metric, helm key, CRD field, connect field) as it will publish
@@ -974,6 +975,76 @@ npx doc-tools check-metadata --changed origin/main --suggest --suggest-empty-onl
 npx doc-tools check-metadata --candidates-only --terminology shared/modules/terms/partials,../docs-team-standards/resources/writing-style/terminology.md --format json modules
 ----
 
+== check-reference-values
+
+Check a docs checkout for reference values and references that the propval:, rpkval: and connectval: macros could render from the published data, and for references to things the data does not have. Three kinds run together, each selecting its dataset exactly as its macro does (from the repo and any --lender checkouts), unless --data-file names one: properties runs the migrate-property-values scan unchanged; rpk parses every rpk invocation in shell blocks and backticked prose (unknown-command, unknown-flag and deprecated-command, with "did you mean" suggestions) and compares flag defaults stated in prose and in Default table columns with the rpk data; connect walks every pipeline config in YAML blocks and examples files (unknown-component, unknown-field, deprecated components and fields), compares YAML comments that state a default ("# Optional (default: ...)") and callouts and sentences that state one with the Connect data. Statuses are propval's (exact, equivalent, mismatch, unset, unverifiable, example output) plus reference. Plugin flags scraped from --help never fail, and neither do findings in release notes, upgrade notes or Connect migration guides. A `// value-check: ignore` comment line suppresses findings on the next line or in the next block. Writes one JSON and one Markdown report. --write applies only exact matches in the same sentence (or a Connect callout) that name one target, never in a table, block or YAML, and only when the line renders the same visible text before and after through the real macros. Exit 0 when no finding is at or above --fail-on, 1 when one is, 2 when the check could not run.
+
+*Why use it:*
+
+Hand-typed defaults, flags and field names drift from the product with every release, and nothing notices until a reader runs the command. The value macros fix that for new prose; this finds the prose that needs them, and the references that are already wrong, in a form CI can fail on.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools check-reference-values [options]
+----
+
+*Options:*
+
+`--docs-dir <path>`::
+Root of the repo being scanned (antora.yml and modules/) (default: ".")
+
+`--lender <path...>`::
+Other component checkouts read into the same catalog, so data is selected exactly as the macros select it (for example ../docs ../rp-connect-docs)
+
+`--kinds <list>`::
+Comma-separated kinds to run: properties, rpk, connect (default: all; a named kind with no data is a setup error)
+
+`--data-file <path...>`::
+Dataset files that bypass selection, recognized by name: redpanda-properties-v<tag>.json, rpk-v<version>.json (the docs-data snapshot works), connect-<version>.json
+
+`--files <path...>`::
+Scan only these files, relative to --docs-dir
+
+`--report-dir <path>`::
+Where to write reference-values-report.json and reference-values-report.md (default: ".")
+
+`--write`::
+Apply auto-safe exact replacements with the value macros
+
+`--fail-on <level>`::
+none, mismatch (mismatches, reference errors, stale rpk and Connect examples) or any (also exact, equivalent, unset and reference warnings) (default: "mismatch")
+
+`--annotations <format>`::
+Also print GitHub workflow annotations: github
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# docs: rpk from the generator snapshot until the attachment is published
+npx doc-tools check-reference-values --docs-dir . --data-file docs-data/rpk-v26.2.2.json --lender ../rp-connect-docs --report-dir ./reference-values
+
+# cloud-docs borrows property and rpk data from docs, Connect data from rp-connect-docs
+npx doc-tools check-reference-values --docs-dir ../cloud-docs --lender ../docs ../rp-connect-docs --data-file ../docs/docs-data/rpk-v26.2.2.json
+
+# Only the files a pull request changed, with GitHub annotations
+npx doc-tools check-reference-values --files $(git diff --name-only origin/main -- '*.adoc') --annotations github
+
+# Apply the auto-safe exact matches, then fail on anything left
+npx doc-tools check-reference-values --write --fail-on mismatch
+----
+
+*Requirements:*
+
+- An Antora component checkout (antora.yml and modules/)
+- The data: redpanda-properties-<tag>.json and rpk-<version>.json attachments
+  in a reference module, connect-<version>.json in rp-connect-docs, or --data-file
+
 == check-rendered-html
 
 Scan the rendered HTML of one or more Antora component paths for AsciiDoc that did not convert: literal backticks outside code, literal `xref:` or `include::` text, leftover {page-*} or {env-*} attribute references, `|===` table markup, Asciidoctor's "Unresolved include directive" text, links with the `unresolved` class, and empty sections (a heading followed directly by a heading of the same or higher level). Also checks links: a fragment with no matching id on its target page (broken-anchor), and a relative or root-relative link under a link root that is not in the build (broken-link). External links are ignored; links outside every link root, or into a root the build does not contain, are counted as unchecked. Only the page body is scanned. Reports findings per page and exits 0 unless --strict. With --changed-pages, findings are split into those on the listed pages and the rest, and --strict exits 1 only when a listed page has findings, so defects already on the base never fail a PR.
@@ -1445,7 +1516,7 @@ npx doc-tools generate migrate-property-refs --properties modules/reference/atta
 
 === generate migrate-property-values
 
-Report hand-written property values in prose ("defaults to 128 MiB", "the minimum is 1 minute") next to a property mention, check each against the property data for the repo's own version (selected exactly as the prop: macro selects it), and propose a propval: replacement. Mismatches are likely doc errors. Also reads example command output in listing blocks (rpk topic describe, rpk cluster config get and export, Admin API cluster_config, kafka-configs --describe, Key/Value/Source records) and reports a row that asserts the default, such as SOURCE DEFAULT_CONFIG, but shows another value as stale example output, listed apart from prose findings. Dry run by default, writing a JSON and a Markdown report; --write applies only exact matches stated in the same sentence as their property, never a mismatch, a table cell or example output. Skips prose inside code blocks and generated content.
+Report hand-written property values in prose ("defaults to 128 MiB", "the minimum is 1 minute") next to a property mention, check each against the property data for the repo's own version (selected exactly as the prop: macro selects it), and propose a propval: replacement. Mismatches are likely doc errors. Also reads example command output in listing blocks (rpk topic describe, rpk cluster config get and export, Admin API cluster_config, kafka-configs --describe, Key/Value/Source records) and reports a row that asserts the default, such as SOURCE DEFAULT_CONFIG, but shows another value as stale example output, listed apart from prose findings. Dry run by default, writing a JSON and a Markdown report; --write applies only exact matches stated in the same sentence as their property, never a mismatch, a table cell or example output. Skips prose inside code blocks and generated content. `check-reference-values` runs these property checks together with rpk and Connect checks, and can fail CI.
 
 *Usage:*
 

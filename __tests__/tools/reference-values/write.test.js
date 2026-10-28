@@ -1,0 +1,138 @@
+'use strict'
+
+jest.mock('@antora/logger', () => {
+  const logger = { warn: () => {}, info: () => {}, error: () => {}, debug: () => {} }
+  const getLogger = () => logger
+  getLogger.configure = () => getLogger
+  return getLogger
+})
+
+// --write applies only auto-safe exact findings, and only when the line
+// renders the same visible text before and after through the real macros.
+
+const fs = require('fs')
+const os = require('os')
+const path = require('path')
+const { scanAll } = require('../../../tools/reference-values')
+const { makeRenderGuard, renderLine, visibleText } = require('../../../tools/reference-values/render-check')
+const migrate = require('../../../tools/migrate-property-values')
+const { RPK_KIND } = require('../../../extension-utils/rpk-values')
+const { CONNECT_KIND } = require('../../../extension-utils/connect-values')
+const { PROPERTIES_KIND } = require('../../../macros/prop')
+
+const FIXTURES = path.join(__dirname, '..', '..', 'fixtures')
+const temps = []
+const tmp = () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rv-write-'))
+  temps.push(dir)
+  return dir
+}
+afterAll(() => {
+  for (const dir of temps) fs.rmSync(dir, { recursive: true, force: true })
+})
+const put = (dir, file, content) => {
+  fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true })
+  fs.writeFileSync(path.join(dir, file), content)
+}
+
+const block = (...lines) => ['[,bash]', '----', ...lines, '----', ''].join('\n')
+
+// One repo publishing its rpk data as an attachment, and a connect lender.
+function setup () {
+  const docs = tmp()
+  put(docs, 'antora.yml', "name: streaming\nversion: '26.2'\n")
+  put(docs, 'modules/reference/attachments/rpk-v26.2.2.json', fs.readFileSync(path.join(FIXTURES, 'rpkval', 'rpk-v26.2.2-sample.json')))
+  const connect = tmp()
+  put(connect, 'antora.yml', 'name: connect\nversion: ~\n')
+  put(connect, 'modules/components/attachments/connect-4.114.0.json', fs.readFileSync(path.join(FIXTURES, 'connectval', 'connect-4.114.0-sample.json')))
+
+  const files = {
+    // Auto-safe: a core flag, same sentence, sole target.
+    'modules/develop/pages/safe.adoc': ['= Safe', '', '== Create', '', block('rpk topic create orders'), 'The `--partitions` flag defaults to -1.', ''].join('\n'),
+    // Withheld: another flag on the line.
+    'modules/develop/pages/two-flags.adoc': ['= Two', '', '== Create', '', block('rpk topic create orders'), 'The `--partitions` flag defaults to -1, and `--replicas` too.', ''].join('\n'),
+    // Withheld: a table cell, even with the statement in one sentence.
+    'modules/develop/pages/table.adoc': ['= Table', '', '== Create', '', block('rpk topic create orders'), '|===', '| Flag | Description', '', '| `--partitions`', '| The `--partitions` flag defaults to -1.', '|===', ''].join('\n'),
+    // Withheld: the statement is in the sentence after the flag.
+    'modules/develop/pages/previous.adoc': ['= Previous', '', '== Create', '', block('rpk topic create orders'), 'Set `--partitions` when you create the topic. The default is -1.', ''].join('\n'),
+    // Withheld: a scraped plugin flag.
+    'modules/develop/pages/plugin.adoc': ['= Plugin', '', '== List', '', block('rpk ai auditlog list'), 'The `--limit` flag defaults to 50.', ''].join('\n'),
+    // Withheld: an empty default.
+    'modules/develop/pages/empty.adoc': ['= Empty', '', '== Select', '', block('rpk cloud cluster select'), 'The `--profile` flag defaults to `""`.', ''].join('\n'),
+    // Withheld: release notes.
+    'modules/get-started/pages/release-notes/redpanda.adoc': ['= Notes', '', '== Create', '', block('rpk topic create orders'), 'The `--partitions` flag defaults to -1.', ''].join('\n'),
+    // Withheld: a partial, outside ifndef::env-cloud, with a selfHostedOnly target.
+    'modules/manage/partials/self-test.adoc': ['== Self test', '', block('rpk cluster self-test start'), 'The `--disk-duration-ms` flag defaults to 30000.', ''].join('\n'),
+    // Withheld: a tagged page, same target.
+    'modules/manage/pages/tagged.adoc': ['= Tagged', '', '// tag::self-test[]', '== Self test', '', block('rpk cluster self-test start'), 'The `--disk-duration-ms` flag defaults to 30000.', '// end::self-test[]', ''].join('\n'),
+    // Allowed: the same partial content inside ifndef::env-cloud.
+    'modules/manage/partials/self-test-guarded.adoc': ['== Self test', '', block('rpk cluster self-test start'), 'ifndef::env-cloud[]', 'The `--disk-duration-ms` flag defaults to 30000.', 'endif::[]', ''].join('\n'),
+    // Auto-safe: a Connect callout.
+    'modules/develop/pages/cdc.adoc': ['= CDC', '', '[,yaml]', '----', 'input:', '  postgres_cdc:', '    incremental_snapshot:', '      chunk_size: 1024 # <1>', '----', '<1> The number of rows to read in each chunk. The default is `1024`.', ''].join('\n'),
+  }
+  for (const [file, content] of Object.entries(files)) put(docs, file, content)
+  return { docs, connect, files }
+}
+
+const catalogFor = (docs, connect) => migrate.catalogFor([
+  migrate.readComponent(docs, [PROPERTIES_KIND, RPK_KIND, CONNECT_KIND]),
+  migrate.readComponent(connect, [PROPERTIES_KIND, RPK_KIND, CONNECT_KIND]),
+])
+
+describe('check-reference-values --write', () => {
+  test('changes only the auto-safe lines', () => {
+    const { docs, connect, files } = setup()
+    const result = scanAll({ docsDir: docs, lenderDirs: [connect], kinds: ['rpk', 'connect'], kindsExplicit: true, write: true })
+    const changed = Object.keys(files).filter((file) => fs.readFileSync(path.join(docs, file), 'utf8') !== files[file]).sort()
+    expect(changed).toEqual(['modules/develop/pages/cdc.adoc', 'modules/develop/pages/safe.adoc', 'modules/manage/partials/self-test-guarded.adoc'])
+    expect(fs.readFileSync(path.join(docs, 'modules/develop/pages/safe.adoc'), 'utf8')).toContain('The `--partitions` flag defaults to rpkval:partitions[command=rpk topic create].')
+    expect(fs.readFileSync(path.join(docs, 'modules/develop/pages/cdc.adoc'), 'utf8')).toContain('<1> The number of rows to read in each chunk. The default is `connectval:incremental_snapshot.chunk_size[component=inputs/postgres_cdc]`.')
+    const notes = Object.fromEntries(result.kinds.rpk.findings.filter((f) => f.status === 'exact').map((f) => [f.file, f.note]))
+    expect(notes['modules/develop/pages/two-flags.adoc']).toBe('another flag or command is named on the line: proposed only')
+    expect(notes['modules/develop/pages/table.adoc']).toBe('in a table: proposed only')
+    expect(notes['modules/develop/pages/previous.adoc']).toBe('tied to the flag by previous-sentence: proposed only')
+    expect(notes['modules/develop/pages/plugin.adoc']).toBe('a plugin flag scraped from --help: proposed only')
+    expect(notes['modules/develop/pages/empty.adoc']).toBe('an empty default: proposed only')
+    expect(notes['modules/get-started/pages/release-notes/redpanda.adoc']).toBe('release or upgrade notes: proposed only')
+    expect(notes['modules/manage/partials/self-test.adoc']).toBe('page may be single-sourced; wrap in ifndef::env-cloud[] first')
+    expect(notes['modules/manage/pages/tagged.adoc']).toBe('page may be single-sourced; wrap in ifndef::env-cloud[] first')
+    expect(result.kinds.rpk.findings.filter((f) => f.applied).map((f) => f.file).sort()).toEqual(['modules/develop/pages/safe.adoc', 'modules/manage/partials/self-test-guarded.adoc'])
+  })
+
+  test('every written file renders the same visible text before and after, through the real macros', () => {
+    const { docs, connect, files } = setup()
+    scanAll({ docsDir: docs, lenderDirs: [connect], kinds: ['rpk', 'connect'], kindsExplicit: true, write: true })
+    const catalog = catalogFor(docs, connect)
+    for (const [file, before] of Object.entries(files)) {
+      const after = fs.readFileSync(path.join(docs, file), 'utf8')
+      if (after === before) continue
+      const src = { component: 'streaming', version: '26.2', module: file.split('/')[1], path: file }
+      expect(visibleText(renderLine(after, { catalog, src }))).toBe(visibleText(renderLine(before, { catalog, src })))
+      expect(renderLine(after, { catalog, src })).toMatch(/class="(?:rpk|connect)-value"/)
+    }
+  })
+
+  test('the render guard reverts a replacement that changes visible text', () => {
+    const { docs, connect } = setup()
+    const guard = makeRenderGuard({ catalog: catalogFor(docs, connect), component: 'streaming', version: '26.2' })
+    expect(guard('modules/x/pages/y.adoc', 'It defaults to -1.', 'It defaults to rpkval:partitions[command=rpk topic create].')).toBe(true)
+    expect(guard('modules/x/pages/y.adoc', 'It defaults to 3.', 'It defaults to rpkval:partitions[command=rpk topic create].')).toBe(false)
+    // A placeholder changes the text too.
+    expect(guard('modules/x/pages/y.adoc', 'It defaults to -1.', 'It defaults to rpkval:partitions[command=rpk topic make].')).toBe(false)
+  })
+
+  test('a reverted replacement is reported as render-changed and leaves the file alone', () => {
+    // A data value the scan accepts but the build renders differently: the
+    // page's own version selects no data, so the macro renders a placeholder.
+    const { docs, connect } = setup()
+    fs.writeFileSync(path.join(docs, 'antora.yml'), "name: streaming\nversion: '26.3'\n")
+    const data = path.join(docs, 'rpk-v26.2.2.json')
+    fs.copyFileSync(path.join(FIXTURES, 'rpkval', 'rpk-v26.2.2-sample.json'), data)
+    fs.rmSync(path.join(docs, 'modules/reference/attachments'), { recursive: true })
+    const before = fs.readFileSync(path.join(docs, 'modules/develop/pages/safe.adoc'), 'utf8')
+    const result = scanAll({ docsDir: docs, lenderDirs: [connect], dataFiles: [data], kinds: ['rpk'], kindsExplicit: true, write: true })
+    expect(fs.readFileSync(path.join(docs, 'modules/develop/pages/safe.adoc'), 'utf8')).toBe(before)
+    const f = result.kinds.rpk.findings.find((x) => x.file === 'modules/develop/pages/safe.adoc')
+    expect(f).toMatchObject({ status: 'exact', applied: false, autoSafe: false, note: 'render-changed' })
+  })
+})
