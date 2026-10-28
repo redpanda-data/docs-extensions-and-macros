@@ -1,5 +1,19 @@
 # Changelog
 
+## [5.57.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.56.1...v5.57.0) (2026-10-28)
+
+
+### Features
+
+* **claude-skill:** make pr_number optional for headless callers ([#420](https://github.com/redpanda-data/docs-extensions-and-macros/issues/420)) ([2e090c9](https://github.com/redpanda-data/docs-extensions-and-macros/commit/2e090c94934f1a1d989f058531219c61f065c4b4))
+* **release-notes:** link known configuration properties as prop: macros ([#398](https://github.com/redpanda-data/docs-extensions-and-macros/issues/398)) ([9098d84](https://github.com/redpanda-data/docs-extensions-and-macros/commit/9098d84b598dc60b841983e55f6097f77249f091))
+* **release-notes:** list each area once per category, with entries as bullets ([#421](https://github.com/redpanda-data/docs-extensions-and-macros/issues/421)) ([2ef7f1f](https://github.com/redpanda-data/docs-extensions-and-macros/commit/2ef7f1ff00b7f6a1ae47d2e86d670a664d4a7c62))
+
+
+### Bug fixes
+
+* **docs-review:** pin claude-skill to [#303](https://github.com/redpanda-data/docs-extensions-and-macros/issues/303)'s merge SHA and post the status after a failed upsert ([#418](https://github.com/redpanda-data/docs-extensions-and-macros/issues/418)) ([0fac2b8](https://github.com/redpanda-data/docs-extensions-and-macros/commit/0fac2b82207dd97787654a990cd6baf95b2bfcbe))
+
 ## [5.56.1](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.56.0...v5.56.1) (2026-10-27)
 
 
