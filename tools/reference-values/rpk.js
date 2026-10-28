@@ -296,6 +296,9 @@ function resolveInvocationFlag (registry, parsed, f) {
   const command = ['rpk', ...names].join(' ')
   if (PASS_THROUGH_COMMANDS.includes(command) || nodes.some((n) => n.passThroughFlags === true)) return { status: 'pass-through' }
   if (rpkValues.isScraped(registry, names)) return { status: 'plugin' }
+  // The command's own usage line names it (rpk security user create [USER] -p [PASS]).
+  const token = f.short ? `-${f.name}` : `--${f.name}`
+  if (node !== tree && typeof node.usage === 'string' && node.usage.split(/[\s[\]=]+/).includes(token)) return { status: 'usage' }
   return { status: 'unknown' }
 }
 
@@ -387,6 +390,8 @@ function scanRpk ({ docsDir, registry, files: only, write = false, renderGuard, 
           reference(at, { status: 'unverifiable', reason: 'ancestor-flag', command, flag: f.name, token: flagText, note: `${flagText} is defined on ${cmd(resolved.defined)}, probably as a persistent flag` })
         } else if (resolved.status === 'pass-through') {
           reference(at, { status: 'unverifiable', reason: 'pass-through', command, flag: f.name, token: flagText, note: `${command} passes flags it does not know through to Redpanda` })
+        } else if (resolved.status === 'usage') {
+          reference(at, { status: 'unverifiable', reason: 'usage-flag', command, flag: f.name, token: flagText, note: `${flagText} is not a flag in the data, but the usage line of ${command} names it` })
         } else if (resolved.status === 'plugin') {
           reference(at, { status: 'unverifiable', reason: 'plugin-flag-not-in-data', command, flag: f.name, token: flagText, note: `${flagText} is not in the --help scrape of the ${parsed.names[0]} plugin` })
         } else if (example && resolved.flag && f.hasValue && !rpkValues.isScraped(registry, parsed.names, resolved.flag)) {

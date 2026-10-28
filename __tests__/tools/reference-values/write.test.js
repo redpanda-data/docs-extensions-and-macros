@@ -46,6 +46,7 @@ function setup () {
   put(connect, 'antora.yml', 'name: connect\nversion: ~\n')
   put(connect, 'modules/components/attachments/connect-4.114.0.json', fs.readFileSync(path.join(FIXTURES, 'connectval', 'connect-4.114.0-sample.json')))
 
+  const cdcYaml = ['[,yaml]', '----', 'input:', '  postgres_cdc:', '    incremental_snapshot:', '      chunk_size: 1024 # <1>', '----']
   const files = {
     // Auto-safe: a core flag, same sentence, sole target.
     'modules/develop/pages/safe.adoc': ['= Safe', '', '== Create', '', block('rpk topic create orders'), 'The `--partitions` flag defaults to -1.', ''].join('\n'),
@@ -69,6 +70,19 @@ function setup () {
     'modules/manage/partials/self-test-guarded.adoc': ['== Self test', '', block('rpk cluster self-test start'), 'ifndef::env-cloud[]', 'The `--disk-duration-ms` flag defaults to 30000.', 'endif::[]', ''].join('\n'),
     // Auto-safe: a Connect callout.
     'modules/develop/pages/cdc.adoc': ['= CDC', '', '[,yaml]', '----', 'input:', '  postgres_cdc:', '    incremental_snapshot:', '      chunk_size: 1024 # <1>', '----', '<1> The number of rows to read in each chunk. The default is `1024`.', ''].join('\n'),
+    // Withheld Connect lines, one per rule.
+    // Association: the statement is in the sentence after the field.
+    'modules/develop/pages/c-assoc.adoc': ['= A', '', ...cdcYaml, '<1> The number of rows to read in each chunk.', '', 'Tune `incremental_snapshot.chunk_size` for large tables. The default is `1024`.', ''].join('\n'),
+    // Sole target: another field on the line.
+    'modules/develop/pages/c-sole.adoc': ['= A', '', ...cdcYaml, '<1> The number of rows to read in each chunk, unlike `incremental_snapshot.enabled`. The default is `1024`.', ''].join('\n'),
+    // An empty default.
+    'modules/develop/pages/c-empty.adoc': ['= A', '', '[,yaml]', '----', 'input:', '  aws_dynamodb_cdc:', '    table_tag_filter: "" # <1>', '----', '<1> The tag filter. The default is `""`.', ''].join('\n'),
+    // A table cell.
+    'modules/develop/pages/c-table.adoc': ['= A', '', ...cdcYaml, '<1> The chunk.', '', '|===', '| Field | Description', '', '| `incremental_snapshot.chunk_size`', '| The `incremental_snapshot.chunk_size` field defaults to `1024`.', '|===', ''].join('\n'),
+    // Historical: migration notes.
+    'modules/develop/pages/migration/v4.adoc': ['= A', '', ...cdcYaml, '<1> The number of rows to read in each chunk. The default is `1024`.', ''].join('\n'),
+    // A partial, outside ifndef::env-cloud, about a component Cloud does not run.
+    'modules/develop/partials/stdin.adoc': ['== A', '', '[,yaml]', '----', 'input:', '  stdin:', '    max_buffer: 1000000 # <1>', '----', '<1> The buffer size. The default is `1000000`.', ''].join('\n'),
   }
   for (const [file, content] of Object.entries(files)) put(docs, file, content)
   return { docs, connect, files }
@@ -97,6 +111,26 @@ describe('check-reference-values --write', () => {
     expect(notes['modules/manage/partials/self-test.adoc']).toBe('page may be single-sourced; wrap in ifndef::env-cloud[] first')
     expect(notes['modules/manage/pages/tagged.adoc']).toBe('page may be single-sourced; wrap in ifndef::env-cloud[] first')
     expect(result.kinds.rpk.findings.filter((f) => f.applied).map((f) => f.file).sort()).toEqual(['modules/develop/pages/safe.adoc', 'modules/manage/partials/self-test-guarded.adoc'])
+  })
+
+  test('withheld Connect lines stay as written while the auto-safe callout is rewritten', () => {
+    const { docs, connect, files } = setup()
+    const result = scanAll({ docsDir: docs, lenderDirs: [connect], kinds: ['rpk', 'connect'], kindsExplicit: true, write: true })
+    const withheld = {
+      'modules/develop/pages/c-assoc.adoc': 'tied to the field by previous-sentence: proposed only',
+      'modules/develop/pages/c-sole.adoc': 'another field is named on the line: proposed only',
+      'modules/develop/pages/c-empty.adoc': 'an empty default: proposed only',
+      'modules/develop/pages/c-table.adoc': 'in a table: proposed only',
+      'modules/develop/pages/migration/v4.adoc': 'release, upgrade or migration notes: proposed only',
+      'modules/develop/partials/stdin.adoc': 'page may be single-sourced; wrap in ifndef::env-cloud[] first',
+    }
+    const exact = result.kinds.connect.findings.filter((f) => f.status === 'exact')
+    for (const [file, note] of Object.entries(withheld)) {
+      expect(fs.readFileSync(path.join(docs, file), 'utf8')).toBe(files[file])
+      expect(exact.filter((f) => f.file === file).map((f) => [f.autoSafe, f.note])).toEqual([[false, note]])
+    }
+    expect(fs.readFileSync(path.join(docs, 'modules/develop/pages/cdc.adoc'), 'utf8')).toContain('connectval:incremental_snapshot.chunk_size[component=inputs/postgres_cdc]')
+    expect(result.kinds.connect.findings.filter((f) => f.applied).map((f) => f.file)).toEqual(['modules/develop/pages/cdc.adoc'])
   })
 
   test('every written file renders the same visible text before and after, through the real macros', () => {

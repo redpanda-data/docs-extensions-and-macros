@@ -44,6 +44,15 @@ describe('rpk reference findings on real lines', () => {
     expect(f).toMatchObject({ status: 'reference', reason: 'unknown-flag', severity: 'error', command: 'rpk transform deploy', flag: 'from-timestamp', failing: true })
   })
 
+  test('docs create-user.adoc:13: -p is named by the usage line of rpk security user create, so it is unverifiable, not unknown-flag', () => {
+    // The node as rpk v26.2.2 emits it: --password has no shorthand, but the usage line names -p.
+    const data = JSON.parse(fs.readFileSync(FIXTURE, 'utf8'))
+    const security = data.tree.commands.find((c) => c.name === 'security')
+    security.commands.push({ name: 'user', commands: [{ name: 'create', usage: 'rpk security user create [USER] -p [PASS] [flags]', flags: [{ name: 'mechanism', type: 'string', default: 'scram-sha-256' }, { name: 'password', type: 'string', default: '' }] }] })
+    const list = findings({ 'modules/deploy/partials/create-user.adoc': page(block('rpk security user create myuser -p changethispassword --mechanism SCRAM-SHA-256 -x 1')) }, { data })
+    expect(list.map((f) => [f.status, f.reason, f.flag])).toEqual([['unverifiable', 'usage-flag', 'p'], ['reference', 'unknown-flag', 'x']])
+  })
+
   test('docs manage-throughput.adoc:565: rpk cluster quotas delete is unknown-command', () => {
     const [f] = findings({ 'modules/manage/pages/manage-throughput.adoc': page(block('rpk cluster quotas delete --name user=alice')) })
     expect(f).toMatchObject({ status: 'reference', reason: 'unknown-command', severity: 'error', command: 'rpk cluster quotas delete' })
