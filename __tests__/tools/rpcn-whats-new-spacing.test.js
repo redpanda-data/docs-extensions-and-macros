@@ -169,3 +169,43 @@ describe('updateWhatsNew - entry spacing', () => {
     expect(blankRunsBeforeEntries(updated)).toEqual([2, 2])
   })
 })
+
+describe('updateWhatsNew - a release with nothing to list', () => {
+  let repo
+  let cwd
+
+  beforeEach(() => {
+    cwd = process.cwd()
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'rpcn-whats-new-empty-'))
+    fs.writeFileSync(path.join(repo, 'package.json'), '{"name":"fixture"}')
+    fs.mkdirSync(path.join(repo, 'docs-data'), { recursive: true })
+    fs.mkdirSync(path.join(repo, path.dirname(WHATS_NEW_REL)), { recursive: true })
+    fs.writeFileSync(path.join(repo, WHATS_NEW_REL), `${HEADER}\n\n${existingEntry('4.113.0')}`)
+    process.chdir(repo)
+  })
+
+  afterEach(() => {
+    process.chdir(cwd)
+    fs.rmSync(repo, { recursive: true, force: true })
+  })
+
+  function run (diff) {
+    fs.writeFileSync(path.join(repo, 'docs-data', 'connect-diff-4.113.0_to_4.113.1.json'), JSON.stringify(diff))
+    updateWhatsNew({ dataDir: path.join(repo, 'docs-data'), oldVersion: '4.113.0', newVersion: '4.113.1', binaryAnalysis: {} })
+    const content = fs.readFileSync(path.join(repo, WHATS_NEW_REL), 'utf8')
+    return content.slice(content.indexOf('== Version 4.113.1'), content.indexOf('== Version 4.113.0'))
+  }
+
+  it('tells the writer when a release has only newly stated defaults', () => {
+    const diff = diffJson('4.113.0', '4.113.1')
+    diff.details.newFields = []
+    diff.summary.newFields = 0
+    diff.details.documentedDefaults = [{ component: 'inputs:kafka_franz', field: 'compression', newDefault: 'snappy' }]
+    expect(run(diff)).toMatch(/^\/\/ TODO: The diff found nothing to list for this release/m)
+  })
+
+  it('adds no TODO when the release has something to list', () => {
+    expect(run(diffJson('4.113.0', '4.113.1'))).not.toMatch(/TODO: The diff found nothing/)
+  })
+})
+
