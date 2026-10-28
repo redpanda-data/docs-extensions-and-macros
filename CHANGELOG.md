@@ -1,5 +1,23 @@
 # Changelog
 
+## [5.58.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.57.0...v5.58.0) (2026-10-28)
+
+
+### Features
+
+* **doc-strings-review:** let a caller turn committable suggestions off ([#388](https://github.com/redpanda-data/docs-extensions-and-macros/issues/388)) ([23d31bb](https://github.com/redpanda-data/docs-extensions-and-macros/commit/23d31bb782ad7a23fd903e34e78dcfdf242b5e58))
+* **prop:** add propval macro and migrate-property-values report ([#434](https://github.com/redpanda-data/docs-extensions-and-macros/issues/434)) ([47cb0c9](https://github.com/redpanda-data/docs-extensions-and-macros/commit/47cb0c97fc05003e2aa1582b26350b2422bf7bf8))
+
+
+### Bug fixes
+
+* **rpcn-docs:** don't report a newly stated default as a default change ([#395](https://github.com/redpanda-data/docs-extensions-and-macros/issues/395)) ([d344d84](https://github.com/redpanda-data/docs-extensions-and-macros/commit/d344d8424c44722bd44c331da4065fd496dad956))
+
+
+### Reusable workflows and CI
+
+* **property-corpus-drift:** open a refresh PR instead of filing an issue ([#443](https://github.com/redpanda-data/docs-extensions-and-macros/issues/443)) ([7de15b4](https://github.com/redpanda-data/docs-extensions-and-macros/commit/7de15b4c68888661838e4625e06a0c6bb5176c76))
+
 ## [5.57.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.56.1...v5.57.0) (2026-10-28)
 
 
