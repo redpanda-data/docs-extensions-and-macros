@@ -789,6 +789,35 @@ function decodeHtmlEntities(text) {
 }
 
 /**
+ * Whether lines[i] is a wrapped continuation of a list item: indented to
+ * the item's text column, with only same-indent lines between it and the
+ * item's bullet. Help text wraps bullets this way
+ *
+ *   * Without a scope flag, it fails over the whole Shadow Link. Besides
+ *     command again resumes from that phase.
+ *
+ * so a continuation line can start with a word ("rpk", "command") that
+ * would otherwise read as an indented command example.
+ * @param {string[]} lines - All lines
+ * @param {number} i - Index of the line to test
+ * @returns {boolean}
+ */
+function isListItemContinuation(lines, i) {
+  const indent = lines[i].search(/\S/)
+  if (indent < 1) return false
+  // A lead-in ending in a colon introduces an example, even inside a list item
+  if (i > 0 && /:\s*$/.test(lines[i - 1])) return false
+  for (let k = i - 1; k >= 0; k--) {
+    const prev = lines[k]
+    if (prev.trim() === '') return false
+    const bullet = prev.match(/^\s*(?:[-*]|\d+[.)])\s+/)
+    if (bullet) return bullet[0].length === indent
+    if (prev.search(/\S/) !== indent) return false
+  }
+  return false
+}
+
+/**
  * Convert indented code examples and YAML/config blocks to protected placeholders
  * Detects patterns like:
  *   --flag value --other "arg"    (command examples)
@@ -885,7 +914,7 @@ function convertIndentedCodeBlocksToAsciiDoc(text, codeBlockStore = []) {
     // e.g. "  --job-name test --labels ..."
     // e.g. "  rpk cluster info"
     // e.g. "  $ echo 'command'"
-    if (/^[ ]{2,}(--|rpk\s|\$\s)/.test(line)) {
+    if (/^[ ]{2,}(--|rpk\s|\$\s)/.test(line) && !isListItemContinuation(lines, i)) {
       // Collect all consecutive indented lines that look like command continuation
       // Strip trailing backslashes as we'll add them during join
       // Also strip leading "$ " shell prompt if present
@@ -1378,6 +1407,25 @@ function applyTextTransformationsToExamples(text, customTransformations) {
   ).join('\n')
 }
 
+// Indented lines that read as a command to run (STEP 1c of formatDescription)
+const INDENTED_COMMAND_RE = /^[ \t]+((?:rpk|source|command|echo|export|brew|curl|wget|cat|mkdir|chmod|sudo)\s+.+?)$/
+
+/**
+ * Wrap indented single-line commands in backticks, except lines that
+ * continue a list item (see STEP 1c in formatDescription).
+ * @param {string} text - Description text
+ * @returns {string} Text with indented commands backticked
+ */
+function convertStandaloneIndentedCommands(text) {
+  const lines = text.split('\n')
+  return lines.map((line, i) => {
+    const match = line.match(INDENTED_COMMAND_RE)
+    if (!match || match[1].startsWith('__EARLY_CODE_BLOCK_')) return line
+    if (isListItemContinuation(lines, i)) return line
+    return `\`${match[1]}\``
+  }).join('\n')
+}
+
 /**
  * Format description by adding backticks around flags and code
  * @param {string} desc - Description text
@@ -1431,19 +1479,16 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   // Convert to:
   // `rpk cluster partitions balancer-status`
   // `rpk cluster license set --path /home/file.license`
-  preProcessed = preProcessed.replace(/^[ \t]+(rpk\s+.+?)$/gm, (match, command) => {
-    // Skip if this line is a placeholder (already converted to code block)
-    if (command.startsWith('__EARLY_CODE_BLOCK_')) return match
-    return `\`${command}\``
-  })
-
-  // Also convert indented non-rpk shell commands (starting with common commands)
-  // These are shell snippets that should be code, not prose
-  preProcessed = preProcessed.replace(/^[ \t]+((?:source|command|echo|export|brew|curl|wget|cat|mkdir|chmod|sudo)\s+.+?)$/gm, (match, command) => {
-    // Skip if this line is a placeholder (already converted to code block)
-    if (command.startsWith('__EARLY_CODE_BLOCK_')) return match
-    return `\`${command}\``
-  })
+  //
+  // Also converts indented non-rpk shell commands (starting with common
+  // commands): these are shell snippets that should be code, not prose.
+  //
+  // An indented line that continues a list item is prose, even when its
+  // first word is "rpk" or "command". Converting it turned the list
+  // continuation "  command again resumes from that phase. 'rpk shadow
+  // status' reports the link" into one code span (rpk shadow failover,
+  // v26.3.1-rc2).
+  preProcessed = convertStandaloneIndentedCommands(preProcessed)
 
   // === STEP 2: Protect code blocks, xrefs, and inline code ===
   // Protect code blocks FIRST (before any transformations)
@@ -1614,6 +1659,10 @@ function formatDescription(desc, customTransformations = null, options = {}) {
     // Also handles '--flag/-f', '--flag help', and similar patterns
     .replace(/'(--[a-z][-a-z0-9]*(?:\/-[a-z])?(?:\s+\w+)?)'/gi, '$1')
     .replace(/'(-[a-z])'/gi, '$1')
+    // Single-quoted constants are code: state and enum names such as
+    // 'FAILED_OVER' or 'ACTIVE' (rpk shadow failover). Uppercase only, so
+    // quoted prose words keep their quotes.
+    .replace(/(?<![\w'`])'([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*)'(?![\w'`])/g, (match, name) => name.length > 1 ? `\`${name}\`` : match)
     // Drop a dangling example lead-in with nothing after it (upstream help
     // strings sometimes end mid-example, which would render as "for example,.")
     .replace(/[,;]?\s*\be\.g\.[\s,]*$/i, '')

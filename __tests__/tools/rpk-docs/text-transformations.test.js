@@ -253,3 +253,54 @@ describe('applyTextTransformationsToExamples', () => {
     expect(out).toContain('  rpk ai agent a2a send hello')
   })
 })
+
+describe('indented lines inside list items (rpk shadow failover)', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  // Upstream help text from rpk shadow failover (v26.3.1-rc2)
+  const src = [
+    '* Without a scope flag, it fails over the whole Shadow Link. Besides failing',
+    "  over its topics, the link stops after it reaches the 'FAILED_OVER' state. A",
+    "  phase that misses it leaves the link in the 'FAILOVER_FAULTED' state, and running the",
+    "  command again resumes from that phase. 'rpk shadow status' reports the link",
+    '  state.',
+    '',
+    "Use --wait to block until the failover reaches 'FAILED_OVER'."
+  ].join('\n')
+  const quotedRpk = { replacements: [{ pattern: "'(rpk\\s+[^']+)'", replacement: '`$1`', flags: 'g' }] }
+
+  test('a continuation line that starts with a shell word stays prose', () => {
+    const out = formatDescription(src, quotedRpk)
+    expect(out).not.toContain('`command again')
+    expect(out).toContain('  command again resumes from that phase. `rpk shadow status` reports the link')
+  })
+
+  test('single-quoted constants become code', () => {
+    const out = formatDescription(src, null)
+    expect(out).toContain('the `FAILED_OVER` state')
+    expect(out).toContain('the `FAILOVER_FAULTED` state')
+    expect(out).toContain('reaches `FAILED_OVER`.')
+    expect(out).not.toContain("'FAILED_OVER'")
+  })
+
+  test('quoted lowercase prose and single capitals keep their quotes', () => {
+    const out = formatDescription("Answer 'yes' or 'Y' to the prompt.", null)
+    expect(out).toBe("Answer 'yes' or 'Y' to the prompt.")
+  })
+
+  test('a continuation line that starts with rpk stays prose, not a code block', () => {
+    const out = formatDescription('* With --all, it fails over every topic. Afterwards\n  rpk shadow status reports the link state.', null)
+    expect(out).not.toContain('----')
+    expect(out).toContain('  `rpk` shadow status reports the link state.')
+  })
+
+  test('indented commands outside list items are still code', () => {
+    expect(formatDescription('Prose line\n\n  echo "hello world"', null)).toBe('Prose line\n\n`echo "hello world"`')
+    expect(formatDescription('Run:\n  rpk topic list', null)).toContain('[,bash]\n----\nrpk topic list\n----')
+  })
+
+  test('an example introduced by a colon inside a list item is still code', () => {
+    const out = formatDescription('* To list topics, run:\n  rpk topic list', null)
+    expect(out).toContain('[,bash]\n----\nrpk topic list\n----')
+  })
+})
