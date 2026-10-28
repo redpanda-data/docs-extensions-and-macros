@@ -1697,13 +1697,19 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   // below only ever matches "rpk <word>", so without this pass it wraps
   // `rpk` alone and splits the command in half. Matching against the real
   // tree means prose that merely resembles a command is never wrapped.
+  // A path may wrap onto the next line of help text ("with rpk shadow\n
+  // config generate"); the wrapped path joins into one span on one line,
+  // or only `rpk` would be wrapped.
   if (knownCommandPaths.size > 0) {
-    result = result.replace(/(?<![`\w])rpk((?: [a-z][-a-z0-9]*)+)/g, (match, rest) => {
-      const tokens = rest.trim().split(' ')
-      for (let n = tokens.length; n >= 2; n--) {
-        const path = `rpk ${tokens.slice(0, n).join(' ')}`
+    result = result.replace(/(?<![`\w])rpk((?:(?: |\n[ \t]*)[a-z][-a-z0-9]*)+)/g, (match) => {
+      // [rpk, sep, token, sep, token, ...]
+      const parts = match.split(/( |\n[ \t]*)/)
+      const tokens = parts.filter((_, idx) => idx % 2 === 0)
+      for (let n = tokens.length - 1; n >= 2; n--) {
+        const path = tokens.slice(0, n + 1).join(' ')
         if (knownCommandPaths.has(path)) {
-          return `\`${path}\`` + match.slice(path.length)
+          const consumed = parts.slice(0, 2 * n + 1).join('')
+          return `\`${path}\`` + match.slice(consumed.length)
         }
       }
       return match

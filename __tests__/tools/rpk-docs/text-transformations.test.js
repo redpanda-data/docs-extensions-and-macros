@@ -304,3 +304,31 @@ describe('indented lines inside list items (rpk shadow failover)', () => {
     expect(out).toContain('[,bash]\n----\nrpk topic list\n----')
   })
 })
+
+describe('known command paths wrapped across lines (rpk shadow create)', () => {
+  const { formatDescription, registerKnownCommandPaths } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  beforeEach(() => registerKnownCommandPaths(['rpk', 'rpk shadow', 'rpk shadow config', 'rpk shadow config generate', 'rpk cloud', 'rpk cloud login']))
+  afterEach(() => registerKnownCommandPaths([]))
+
+  test('a path split by a line wrap becomes one span', () => {
+    const out = formatDescription('Before you create a Shadow Link, generate a configuration file with rpk shadow\nconfig generate and update it with your source cluster details.', null)
+    expect(out).toContain('with `rpk shadow config generate` and update it')
+    expect(out).not.toContain('`rpk` shadow')
+  })
+
+  test('a wrap inside an indented list item joins too', () => {
+    const out = formatDescription('* Generate one with rpk\n  shadow config generate first.', null)
+    expect(out).toContain('`rpk shadow config generate` first.')
+  })
+
+  test('never crosses a blank line', () => {
+    const out = formatDescription('Run rpk shadow\n\nconfig generate is a phrase here.', null)
+    expect(out).not.toContain('`rpk shadow config generate`')
+  })
+
+  test('a line ending in a full path keeps the next line separate', () => {
+    const out = formatDescription('See rpk cloud login\nfor details.', null)
+    expect(out).toBe('See `rpk cloud login`\nfor details.')
+  })
+})
