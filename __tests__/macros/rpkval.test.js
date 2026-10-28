@@ -93,6 +93,10 @@ describe('rpkval macro', () => {
       expect(valueOf(convert(input, { catalog: streaming() }))).toBe(expected)
     })
 
+    test('a field written after command= is still the field', () => {
+      expect(valueOf(convert('rpkval:partitions[command=rpk topic create,shorthand]', { catalog: streaming() }))).toBe('-p')
+    })
+
     test('a deprecated flag reads yes', () => {
       const data = clone(SAMPLE)
       data.tree.commands.find((c) => c.name === 'topic').commands.find((c) => c.name === 'create').flags.find((f) => f.name === 'dry').deprecated = true

@@ -71,6 +71,10 @@ describe('connectval macro', () => {
   afterEach(() => jest.restoreAllMocks())
 
   describe('fields', () => {
+    test('a field written after component= is still the field', () => {
+      expect(valueOf(convert('connectval:client_id[component=inputs/redpanda,type]', { catalog: connect() }))).toBe('string')
+    })
+
     test('renders a span naming the component and field', () => {
       const html = convert('connectval:incremental_snapshot.chunk_size[component=inputs/postgres_cdc]', { catalog: connect() })
       expect(html).toContain('<span class="connect-value" data-connect-component="inputs/postgres_cdc" data-connect-field="incremental_snapshot.chunk_size" data-field="default">1024</span>')

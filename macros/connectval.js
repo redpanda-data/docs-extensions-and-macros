@@ -52,7 +52,10 @@ function connectvalInlineMacro (config) {
       const mode = String(document.getAttribute('connect-validate', 'warn')).trim().toLowerCase()
       const src = (config && config.file && config.file.src) || {}
       const filePath = src.path
-      const requested = String(attributes.field || 'default').trim()
+      // Asciidoctor fills field from the first slot only, so a field written
+      // after command= or component= arrives as a later positional.
+      const positional = (attributes.$positional || []).find((value) => value != null)
+      const requested = String(attributes.field || positional || 'default').trim()
       const component = attributes.component
       const path = String(target).trim()
       let format = String(attributes.format || connectValues.FORMAT_HUMAN).trim().toLowerCase()

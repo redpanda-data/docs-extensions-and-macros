@@ -45,7 +45,10 @@ function rpkvalInlineMacro (config) {
       const filePath = src.path
       const component = src.component || ''
       const version = src.version || ''
-      const requested = String(attributes.field || 'default').trim()
+      // Asciidoctor fills field from the first slot only, so a field written
+      // after command= or component= arrives as a later positional.
+      const positional = (attributes.$positional || []).find((value) => value != null)
+      const requested = String(attributes.field || positional || 'default').trim()
       const command = attributes.command
       let format = String(attributes.format || rpkValues.FORMAT_HUMAN).trim().toLowerCase()
       const where = filePath ? ` in ${filePath}` : ''
