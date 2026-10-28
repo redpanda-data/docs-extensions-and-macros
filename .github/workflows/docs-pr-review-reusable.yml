@@ -33,11 +33,11 @@
 # host publishes git tags (`git ls-remote --tags` is empty), so @v1 is an
 # unresolvable ref: pin a commit SHA per caller.
 #
-# TWO-STEP PIN after this PR merges: the claude-skill `uses:` refs below
-# say @main because an action cannot reference its own not-yet-existing
-# SHA. Step 1: merge this PR (SHA-1). Step 2: a one-line follow-up commit
-# replaces @main with SHA-1 in every claude-skill ref (SHA-2). Callers
-# then pin @SHA-2 — from that point nothing in the pipeline floats.
+# TWO-STEP PIN: an action cannot reference its own not-yet-existing SHA,
+# so #303 merged with the claude-skill `uses:` refs at @main (step 1,
+# SHA-1 = 681c7a5). Step 2 replaced @main with SHA-1 in every claude-skill
+# ref. Callers pin the step-2 merge SHA, and from there nothing in the
+# pipeline floats. A change to the action needs the same two steps again.
 #
 # Design doc + decision record: https://claude.ai/code/artifact/36e1362f-11d3-4532-8fe1-a5191c8def9f
 #
@@ -171,7 +171,12 @@ on:
           earlier version, including the 5.38.0 this used to name, exits 1
           with "unknown command" and writes no result file, which the guard in
           screenshot_gate turns into a loud error rather than a silent pass.
-          Do not lower this below 5.45.0.
+          Do not lower this below 5.45.0. The same version runs
+          `doc-tools check-metadata` in metadata_check; a version without
+          that subcommand skips it (a notice in the job log, nothing in the
+          comment), and so does a run that finds no published taxonomy.yml,
+          so it applies from the first release that ships it and from when
+          the taxonomy is published.
         type: string
         default: '5.45.0'
       docs_app_id:
@@ -583,11 +588,106 @@ jobs:
           echo "ticket=$TICKET" >> "$GITHUB_OUTPUT"
 
   # ──────────────────────────────────────────────────────────────────────
+  # §4 — doc-tools check-metadata over the .adoc changes.
+  # Deterministic, no model: the same taxonomy check the docs repos'
+  # check-metadata workflow and the Antora build run. Its own job because
+  # it checks out the PR head and runs npm next to it, and must not hold
+  # id-token: write while it does: npm reads a project .npmrc from the
+  # nearest directory with a package.json, so an edited .npmrc could pick
+  # the registry npx installs doc-tools from, and whatever that served
+  # could mint an OIDC token, assume the repo's AWS role and read the
+  # long-lived ADP client secret (see json_validation_local). Nothing here
+  # needs a credential. As defense in depth, npx also runs from
+  # RUNNER_TEMP with --root pointing at the checkout, so the PR's npm
+  # config is never in npm's lookup path, and without GH_TOKEN.
+  # adoc_review adds the result to its verdict and findings; the review
+  # prompt does not read it.
+  # ──────────────────────────────────────────────────────────────────────
+  metadata_check:
+    needs: [gate, classify]
+    if: needs.classify.outputs.has_adoc == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    timeout-minutes: 15
+    steps:
+      # Full history with blobs fetched on demand: --changed diffs against
+      # the merge base with the PR's base branch.
+      - name: Check out the PR head for check-metadata
+        uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ inputs.pr_number }}/head
+          path: .metadata-check
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Deterministic checks (doc-tools check-metadata)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr_number }}
+          R: ${{ github.repository }}
+          DOC_TOOLS_VERSION: ${{ inputs.doc_tools_version }}
+          SRC: ${{ github.workspace }}/.metadata-check
+        run: |
+          set -uo pipefail
+          OUT_DIR="$RUNNER_TEMP/metadata-check"; mkdir -p "$OUT_DIR"
+          RESULT="$OUT_DIR/check-metadata.json"
+          # state: ran (a result to report) | missing (this doc-tools has no
+          # check-metadata, or there is no published taxonomy.yml yet:
+          # skipped, nothing reported) | failed (it could not run: reported
+          # as a check that did not run, never as a pass).
+          fail() { echo failed > "$OUT_DIR/state"; printf '%s\n' "$1" > "$OUT_DIR/reason"; echo "::warning::check-metadata: $1"; exit 0; }
+          BASE=$(gh api "repos/$R/pulls/$PR" --jq '.base.ref' 2> /dev/null) || BASE=""
+          [[ -n "$BASE" ]] || fail "could not read the pull request's base branch"
+          rc=0
+          # From RUNNER_TEMP, never the checkout: npm takes its project config
+          # from the nearest directory with a package.json, and the PR head
+          # has one. --root points the tool at the checkout instead.
+          ( cd "$RUNNER_TEMP" && env -u GH_TOKEN npx --yes --package "@redpanda-data/docs-extensions-and-macros@${DOC_TOOLS_VERSION}" \
+              doc-tools check-metadata --root "$SRC" --changed "origin/$BASE" --suggest --format json --output "$RESULT" ) > /dev/null 2> "$OUT_DIR/stderr.txt" || rc=$?
+          # Exit 1 is "errors found" only with a result file: an unknown
+          # subcommand (a doc_tools_version from before check-metadata) also
+          # exits 1, and writes none.
+          if [[ ( $rc -eq 0 || $rc -eq 1 ) && -s "$RESULT" ]] && jq -e '(.findings | type) == "array"' "$RESULT" > /dev/null 2>&1; then
+            echo ran > "$OUT_DIR/state"
+            jq -r '"check-metadata: \(.pages) page(s) with taxonomy metadata, \(.summary.errors) error(s), \(.summary.warnings) warning(s)"' "$RESULT"
+          elif grep -q "unknown command 'check-metadata'" "$OUT_DIR/stderr.txt"; then
+            echo missing > "$OUT_DIR/state"
+            echo "::notice::doc-tools ${DOC_TOOLS_VERSION} has no check-metadata subcommand; page metadata is not checked until doc_tools_version names a release that ships it"
+          elif [[ $rc -eq 2 ]] && grep -q "^check-metadata: no taxonomy.yml found" "$OUT_DIR/stderr.txt"; then
+            # Not found anywhere (the repo, $REDPANDA_DOCS_PATH, or a 404 from
+            # docs.redpanda.com). Any other taxonomy problem, an invalid file
+            # or a failed fetch, is a check that could not run.
+            echo missing > "$OUT_DIR/state"
+            echo "::notice::check-metadata found no taxonomy.yml; page metadata is not checked until the taxonomy is published at docs.redpanda.com"
+          else
+            fail "doc-tools check-metadata could not run (exit $rc): $(tr '\n' ' ' < "$OUT_DIR/stderr.txt" | head -c 300)"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: metadata-check
+          path: ${{ runner.temp }}/metadata-check/
+          if-no-files-found: ignore
+
+  # ──────────────────────────────────────────────────────────────────────
   # §4 — /docs-team-standards:pr-review over the .adoc changes.
   # ──────────────────────────────────────────────────────────────────────
   adoc_review:
-    needs: [gate, classify]
-    if: needs.classify.outputs.has_adoc == 'true'
+    needs: [gate, classify, metadata_check]
+    # !cancelled(), not the implicit success(): a failed metadata_check must
+    # not skip the review. The step that adds its result reports it as a
+    # check that did not run.
+    if: >-
+      !cancelled() && needs.classify.result == 'success' &&
+      needs.classify.outputs.has_adoc == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -595,7 +695,7 @@ jobs:
       id-token: write   # OIDC role for the ADP gateway credential
     timeout-minutes: 45
     steps:
-      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
+      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@681c7a5774f3dd72733ca1f6f4bbdb8633f548a5 # TWO-STEP PIN step 2: #303's merge SHA
         id: claude
         with:
           repo: ${{ github.repository }}
@@ -634,6 +734,90 @@ jobs:
             {"verdict":"pass"|"fail","blocking":["..."],"suggestions":["..."]}
             where "fail" means at least one genuinely blocking violation of
             team standards.
+      # metadata_check's result. Under RUNNER_TEMP, not the workspace: the
+      # claude-skill action's own checkout runs `git clean` there.
+      # continue-on-error: a missing result is handled in the next step.
+      - uses: actions/download-artifact@v4
+        if: always()
+        continue-on-error: true
+        with:
+          name: metadata-check
+          path: ${{ runner.temp }}/metadata-check
+      # check-metadata into this branch: errors are blocking, warnings are
+      # suggestions, and so are the --suggest taxonomy values (the top 10 by
+      # score, all of them in findings.md), which never fail the branch. A
+      # check that could not run is `not_run`, as is a
+      # metadata_check job that left no result. Every finding is also listed
+      # in findings.md, which the comment shows. A review that wrote no
+      # verdict stays unavailable: the deterministic result alone is not the
+      # review. Messages carry page attribute values, so their markdown is
+      # escaped.
+      - name: Add the check-metadata findings to the review
+        if: always()
+        env:
+          METADATA_CHECK_RESULT: ${{ needs.metadata_check.result }}
+        run: |
+          set -uo pipefail
+          DIR="$RUNNER_TEMP/metadata-check"
+          STATE=$(cat "$DIR/state" 2> /dev/null || echo none)
+          REASON=""
+          if [[ "$STATE" == none && "${METADATA_CHECK_RESULT:-}" != skipped ]]; then
+            STATE=failed
+            REASON="the metadata_check job left no result (${METADATA_CHECK_RESULT:-unknown})"
+          fi
+          [[ "$STATE" == ran || "$STATE" == failed ]] || { echo "check-metadata: $STATE, nothing to add"; exit 0; }
+          mkdir -p review-output
+          V=review-output/verdict.json
+          F=review-output/findings.md
+          HAVE_VERDICT=false
+          [[ -f "$V" ]] && jq -e 'type == "object"' "$V" > /dev/null 2>&1 && HAVE_VERDICT=true
+          if [[ "$STATE" == failed ]]; then
+            [[ -n "$REASON" ]] || REASON=$(cat "$DIR/reason" 2> /dev/null || echo "no reason recorded")
+            if [[ "$HAVE_VERDICT" == true ]]; then
+              jq --arg r "Page metadata (doc-tools check-metadata): $REASON" \
+                '.not_run = (((.not_run // []) | if type == "array" then . else [.] end) + [$r])' "$V" > "$V.tmp" && mv "$V.tmp" "$V"
+            fi
+            exit 0
+          fi
+          cp "$DIR/check-metadata.json" review-output/check-metadata.json
+          if [[ "$(jq '.findings | length' "$DIR/check-metadata.json")" -gt 0 ]]; then
+            {
+              echo
+              echo "### Page metadata (doc-tools check-metadata)"
+              echo
+              jq -r 'def md: gsub("(?<c>[`\\[\\]<>\\\\])"; "\\\(.c)");
+                .findings[] | "- \(.severity): `\(.file):\(.line)` \(.message | md)"' "$DIR/check-metadata.json"
+            } >> "$F"
+          fi
+          # Suggestions (--suggest): taxonomy values a changed page's text
+          # names at or above the default minimum score that its header does
+          # not carry. Never blocking; a doc-tools without them adds none.
+          if [[ "$(jq '(.suggest.suggestions // []) | length' "$DIR/check-metadata.json")" -gt 0 ]]; then
+            {
+              echo
+              echo "### Suggested taxonomy values (doc-tools check-metadata --suggest)"
+              echo
+              jq -r 'def md: gsub("(?<c>[`\\[\\]<>\\\\])"; "\\\(.c)");
+                .suggest.suggestions | sort_by(.file, -.score)[]
+                | "- `\(.file):\(.line // 1)`\(if .uncategorized then " (no page-categories yet)" else "" end): \(.label | md) (`\(.conceptId)`) in `:\(.attribute):`, score \(.score): \(.reason | md)"' "$DIR/check-metadata.json"
+            } >> "$F"
+          fi
+          if [[ "$HAVE_VERDICT" == true ]]; then
+            jq --slurpfile m "$DIR/check-metadata.json" '
+              def md: gsub("(?<c>[`\\[\\]<>\\\\])"; "\\\(.c)");
+              def line: "page metadata: `\(.file):\(.line)` \(.message | md)";
+              def list(k): ((.[k] // []) | if type == "array" then . else [.] end);
+              ($m[0].findings | map(select(.severity == "error") | line)) as $errors
+              | ($m[0].findings | map(select(.severity != "error") | line)) as $warnings
+              | .blocking = (list("blocking") + $errors)
+              | ((($m[0].suggest.suggestions // []) | sort_by(-.score)) as $s
+                  | ($s[:10] | map("page metadata suggestion: `\(.file):\(.line // 1)` consider \(.label | md) (`\(.conceptId)`) in `:\(.attribute):`, score \(.score): \(.reason | md)"))
+                    + (if ($s | length) > 10 then ["page metadata: \(($s | length) - 10) more suggestion(s) in check-metadata.json"] else [] end)) as $suggested
+              | .suggestions = (list("suggestions") + $warnings + $suggested)
+              | if ($errors | length) > 0 then .verdict = "fail" else . end
+              ' "$V" > "$V.tmp" && mv "$V.tmp" "$V"
+          fi
+          jq -r '"check-metadata: added \(.summary.errors) error(s), \(.summary.warnings) warning(s), and \((.suggest.suggestions // []) | length) suggestion(s) to the review"' "$DIR/check-metadata.json"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -730,7 +914,7 @@ jobs:
 
       - name: Overrides review (content repos, decision 4)
         if: github.repository != 'redpanda-data/docs-team-standards' && needs.classify.outputs.overrides_json == 'true'
-        uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
+        uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@681c7a5774f3dd72733ca1f6f4bbdb8633f548a5 # TWO-STEP PIN step 2: #303's merge SHA
         with:
           repo: ${{ github.repository }}
           pr_number: ${{ inputs.pr_number }}
@@ -816,7 +1000,7 @@ jobs:
       id-token: write   # OIDC role for the ADP gateway credential
     timeout-minutes: 45
     steps:
-      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
+      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@681c7a5774f3dd72733ca1f6f4bbdb8633f548a5 # TWO-STEP PIN step 2: #303's merge SHA
         with:
           repo: ${{ github.repository }}
           pr_number: ${{ inputs.pr_number }}
@@ -952,7 +1136,7 @@ jobs:
 
       - name: Claude vision pass
         if: needs.classify.outputs.has_images == 'true'
-        uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
+        uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@681c7a5774f3dd72733ca1f6f4bbdb8633f548a5 # TWO-STEP PIN step 2: #303's merge SHA
         with:
           repo: ${{ github.repository }}
           pr_number: ${{ inputs.pr_number }}
@@ -1073,7 +1257,7 @@ jobs:
       # No --add-dir needed for the prompt to read it: a bare `Read` in the
       # action's allowlist is not scoped to the workspace in -p mode
       # (verified on CLI 2.1.258, reading a file outside the cwd).
-      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
+      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@681c7a5774f3dd72733ca1f6f4bbdb8633f548a5 # TWO-STEP PIN step 2: #303's merge SHA
         with:
           repo: ${{ github.repository }}
           pr_number: ${{ inputs.pr_number }}
@@ -1239,7 +1423,13 @@ jobs:
             } > comment.md
           fi
 
+      # continue-on-error for the same reason the aggregator is guarded: a
+      # failed upsert (a transient 5xx or a secondary rate limit) would skip
+      # the status step below and leave the gate's pending claim in place
+      # until the 90-minute stale window expires. The status step still
+      # posts the verdict; the run shows the upsert's failure.
       - name: Upsert the review comment
+        continue-on-error: true
         uses: actions/github-script@v7
         env:
           PR: ${{ inputs.pr_number }}

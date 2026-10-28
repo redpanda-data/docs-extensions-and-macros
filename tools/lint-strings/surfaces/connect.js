@@ -19,6 +19,11 @@ const { CONDITIONAL_RULE } = require('../rules/verbatim-asciidoc')
  *   the option descriptions of annotated enum fields.
  * - Bloblang plugins (bloblang.PluginSpec): Description, Example summaries,
  *   and parameter descriptions.
+ * - benthos's internal field API (internal/docs): the description argument
+ *   of docs.FieldString, docs.FieldObject, docs.FieldBool and the other
+ *   docs.Field constructors, which document the shared config blocks
+ *   (http_server, tls, logger, batching, ...) that benthos builds outside
+ *   the public service API.
  * - `rpk connect` help (urfave/cli): command Usage, UsageText, ArgsUsage and
  *   Description, and flag Usage.
  *
@@ -88,6 +93,17 @@ const BARE_FIELD_CTORS = new Set([
 
 const SERVICE_PKG = 'github.com/redpanda-data/benthos/v4/public/service'
 const BLOBLANG_PKG = 'github.com/redpanda-data/benthos/v4/public/bloblang'
+const DOCS_PKG = 'github.com/redpanda-data/benthos/v4/internal/docs'
+
+// internal/docs constructors with the signature
+// (name, description string, examples ...any). docs.FieldComponent takes
+// no description and is left out.
+const DOCS_FIELD_CTORS = [
+  'FieldAnything', 'FieldObject', 'FieldString', 'FieldInterpolatedString', 'FieldBloblang',
+  'FieldInt', 'FieldFloat', 'FieldBool', 'FieldURL',
+  'FieldInput', 'FieldProcessor', 'FieldOutput', 'FieldBuffer', 'FieldCache',
+  'FieldRateLimit', 'FieldMetrics', 'FieldTracer', 'FieldScanner'
+]
 const CLI_PKG = /^github\.com\/urfave\/cli(?:\/v\d+)?$/
 
 // Repos whose urfave/cli commands are `rpk connect` help.
@@ -332,6 +348,7 @@ class ConnectScanner {
       file._aliases = {
         service: aliasesFor(file, SERVICE_PKG),
         bloblang: aliasesFor(file, BLOBLANG_PKG),
+        docs: aliasesFor(file, DOCS_PKG),
         cli: aliasesFor(file, CLI_PKG)
       }
     }
@@ -805,6 +822,7 @@ class ConnectScanner {
     const skipped = []
     const { service, bloblang, cli } = this.aliases(file)
     if (service.size > 0 || bloblang.size > 0) this.scanSpecs(file, rel, declarations, skipped)
+    this.scanDocsFields(file, rel, declarations)
     if (cli.size > 0 && this.cli) this.scanCli(file, rel, declarations)
     return { declarations, skipped }
   }
@@ -1054,6 +1072,53 @@ class ConnectScanner {
     }
     this.scanFieldCtors(file, rel, declarations, describedVars)
     this.scanJsFunctions(file, rel, declarations)
+  }
+
+  /**
+   * benthos's internal field API: `docs.FieldString(name, description)`
+   * and the other internal/docs constructors. The description is the second
+   * argument, not a `.Description()` call, so scanSpecs never sees it.
+   * Inside internal/docs itself the constructors are unqualified. An empty
+   * description is skipped: internal/docs uses `FieldString("type", "")`
+   * for structural fields that no page documents.
+   */
+  scanDocsFields (file, rel, declarations) {
+    const { docs } = this.aliases(file)
+    const mod = this.index.gomod.module
+    const inPackage = Boolean(mod) && `${mod}/${this.index.rel(file.dir).split(path.sep).join('/')}` === DOCS_PKG
+    if (docs.size === 0 && !inPackage) return
+    const qual = docs.size > 0 ? `(?:${[...docs].map(escapeRe).join('|')})\\s*\\.\\s*` : ''
+    const prefix = inPackage ? (qual ? `(?:${qual})?` : '') : qual
+    const pattern = new RegExp(`(^|[^\\w.])${prefix}(${DOCS_FIELD_CTORS.join('|')})\\s*\\(`, 'g')
+    const masked = file.masked
+    // String contents blanked, so example YAML or prose that mentions a
+    // constructor never reads as a call.
+    const text = stripStrings(masked)
+    let m
+    while ((m = pattern.exec(text)) !== null) {
+      const start = m.index + m[1].length
+      if (/\bfunc\s*$/.test(text.slice(Math.max(0, start - 10), start))) continue
+      const open = m.index + m[0].length - 1
+      const close = file.pairs.get(open)
+      if (close === undefined) continue
+      const args = splitTopLevelArgs(masked.slice(open + 1, close))
+      if (args.length < 2) continue
+      const argStart = (i) => open + 1 + args.slice(0, i).reduce((n, a) => n + a.length + 1, 0)
+      const result = this.evalAt(file, args[1], argStart(1))
+      if (isResolved(result) && renderResult(result).trim() === '') continue
+      const nameResult = this.evalAt(file, args[0], argStart(0))
+      this.pushDecl(declarations, file, rel, {
+        kind: 'field',
+        name: isResolved(nameResult) ? renderResult(nameResult) : null,
+        nameResult,
+        nameExpr: { text: args[0], offset: argStart(0) },
+        result,
+        valueExpr: { text: args[1], offset: argStart(1) },
+        start,
+        end: close,
+        extra: { ctor: `docs.${m[2]}`, ...this.componentMeta(file, start) }
+      })
+    }
   }
 
   /**

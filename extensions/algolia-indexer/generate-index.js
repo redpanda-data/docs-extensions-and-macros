@@ -3,6 +3,7 @@
 const { parse } = require('node-html-parser')
 const { decode } = require('html-entities')
 const path = require('path')
+const { pageFacets, authoredCategories } = require('../../extension-utils/taxonomy')
 
 // Create encoder once at module scope for efficiency
 const textEncoder = new TextEncoder()
@@ -20,10 +21,12 @@ const textEncoder = new TextEncoder()
  * @param {Boolean} config.indexLatestOnly - If true, only index the latest version of any given page.
  * @param {Array} config.excludes - CSS selectors for elements to exclude from indexing.
  * @param {Object} config.logger - Logger to use
+ * @param {Object} [config.taxonomy] - The site taxonomy (extension-utils/taxonomy.js). When
+ *   set, Product Docs records also carry topics, useCases, technologies, and deployment.
  * @typedef {Object} SearchIndexData
  * @returns {SearchIndexData} A data object that contains the Algolia index
  */
-function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, excludes = [], logger } = {}) {
+function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, excludes = [], logger, taxonomy } = {}) {
   // Use provided logger or create a no-op logger for tests
   if (!logger) {
     logger = process.env.NODE_ENV === 'test'
@@ -288,6 +291,10 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       ? page.asciidoc.attributes['page-categories'].split(',').map(category => category.trim())
       : []
 
+    const facets = taxonomy && component.name !== 'labs'
+      ? pageFacets(taxonomy, { categories: authoredCategories(page.asciidoc?.attributes), deployment, component: component.name })
+      : null
+
     const commercialNames = page.asciidoc?.attributes['page-commercial-names']
       ? page.asciidoc.attributes['page-commercial-names'].split(',').map(name => name.trim())
       : []
@@ -332,6 +339,11 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
         indexItem.breadcrumbs = breadcrumbs
         indexItem.type = 'Doc'
         indexItem._tags = Array.isArray(tag) ? tag : [tag]
+        // Taxonomy facets, next to `categories` rather than instead of it:
+        // labs-home filters on `categories`, so it stays the legacy list until
+        // every consumer has moved. Arrays of prefLabels for display and
+        // faceting, plus the concept IDs, which do not change when a label does.
+        if (taxonomy) Object.assign(indexItem, facets)
       } else {
         indexItem.deployment = deployment
         indexItem.type = 'Lab'
