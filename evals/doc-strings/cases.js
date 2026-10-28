@@ -84,6 +84,40 @@ const CASES = [
     expectRules: ['starts-lowercase', 'rpk-terminal-period']
   },
   {
+    id: 'connect-xref-module',
+    kind: 'rewrite',
+    description: 'Connect field description with a module-less xref, which breaks on the Cloud page; the link must stay and gain a module',
+    layout: 'connect-input',
+    edits: [{
+      find: 'f = f.Description("Only things whose name starts with this prefix are read.")',
+      replace: 'f = f.Description("Only things whose name starts with this prefix are read. To filter on other attributes, use a xref:bloblang/about.adoc[Bloblang] mapping.")'
+    }],
+    target: 'prefix',
+    targetKind: 'field',
+    language: 'go',
+    columnLimit: null,
+    singleLine: true,
+    expectRules: ['connect-xref-module'],
+    // Deleting the link, or qualifying it with a module the page is not in,
+    // also re-lints clean, so the link must survive with the page's real
+    // module (modules/guides/pages/bloblang/about.adoc in rp-connect-docs).
+    stringMustMatch: 'xref:(?:connect:)?guides:bloblang/about\\.adoc\\['
+  },
+  {
+    id: 'connect-short-description-markup',
+    kind: 'rewrite',
+    description: 'Connect ShortDescription with inline markup, which form-based editors show literally; the rewrite must be plain text in the shared helper',
+    layout: 'connect-common',
+    target: 'storage_account',
+    targetKind: 'field-short',
+    targetRule: 'connect-short-description-markup',
+    language: 'go',
+    columnLimit: null,
+    expectRules: ['connect-short-description-markup'],
+    stringMustMatch: '[Ss]torage account',
+    stringMustNotMatch: '[`*]|xref:|https?://'
+  },
+  {
     id: 'upstream-clean',
     kind: 'upstream',
     description: 'UPSTREAMABLE override ported into the C++ source; audit must reclassify it REDUNDANT afterwards',
@@ -196,6 +230,20 @@ const CASES = [
             '      "compressed, the limit applies to the compressed batch size. Default "\n' +
             '      "is 1048576 bytes.",',
       replace: '      "batch max bytes",'
+    }]
+  },
+  {
+    id: 'negative-connect-diff',
+    kind: 'negative-review',
+    description: 'Diff with a conforming connect field rewording; the model must post no comment and write no doc-impact file',
+    layout: 'connect-input',
+    diffEdits: [{
+      find: 'f = f.Description("Only things whose name starts with this prefix are read.")',
+      replace: 'f = f.Description("Only things whose names begin with this prefix are read.")'
+    }],
+    sabotageEdits: [{
+      find: 'f = f.Description("Only things whose name starts with this prefix are read.")',
+      replace: 'f = f.Description("Only things whose name starts with this prefix are read. To filter on other attributes, use a xref:bloblang/about.adoc[Bloblang] mapping.")'
     }]
   },
   {

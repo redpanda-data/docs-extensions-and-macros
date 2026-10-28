@@ -23,9 +23,14 @@ const EVAL_FIXTURES = path.join(__dirname, 'fixtures')
 const propertiesSurface = require(path.join(REPO_ROOT, 'tools/lint-strings/surfaces/properties'))
 const metricsSurface = require(path.join(REPO_ROOT, 'tools/lint-strings/surfaces/metrics'))
 const rpkSurface = require(path.join(REPO_ROOT, 'tools/lint-strings/surfaces/rpk'))
+const connectSurface = require(path.join(REPO_ROOT, 'tools/lint-strings/surfaces/connect'))
 const { deepEqual, normalizeText, detectDocsMarkup } = require(path.join(REPO_ROOT, 'tools/overrides-audit/classify.js'))
 
-const SURFACE_MODULES = { properties: propertiesSurface, metrics: metricsSurface, rpk: rpkSurface }
+const SURFACE_MODULES = { properties: propertiesSurface, metrics: metricsSurface, rpk: rpkSurface, connect: connectSurface }
+
+// The connect surface resolves strings across files (helper constructors,
+// constants, info.csv), so its layouts copy the whole fixture repo.
+const CONNECT_TREE = path.join(LINT_FIXTURES, 'connect', 'repo')
 
 /** Repo-relative target file per surface, shaped like the real repos. */
 const SURFACE_LAYOUT = {
@@ -49,6 +54,8 @@ const SURFACE_LAYOUT = {
     files: [{ from: path.join(LINT_FIXTURES, 'rpk', 'lint_cmd.go'), to: 'src/go/rpk/pkg/cli/cluster/lint_cmd.go' }],
     target: 'src/go/rpk/pkg/cli/cluster/lint_cmd.go'
   },
+  'connect-input': { tree: CONNECT_TREE, target: 'internal/impl/azure/input_thing.go', surface: 'connect' },
+  'connect-common': { tree: CONNECT_TREE, target: 'internal/impl/azure/common.go', surface: 'connect' },
   // rpk topic delete's help text before the change in streaming-enterprise
   // PR 461; the case commits the after side (delete.head.go) on top.
   'rpk-pr461': {
@@ -56,6 +63,16 @@ const SURFACE_LAYOUT = {
     target: 'src/go/rpk/pkg/cli/topic/delete.go',
     surface: 'rpk'
   }
+}
+
+/** Copy a fixture tree; a `go.mod.txt` becomes `go.mod` (kept renamed so the
+ * fixture is not a nested Go module in this repo). */
+function copyTree (from, to) {
+  fs.cpSync(from, to, { recursive: true })
+  // The fixture keeps its go.mod as go.mod.txt so Go tooling in this repo
+  // ignores it.
+  const mod = path.join(to, 'go.mod.txt')
+  if (fs.existsSync(mod)) fs.renameSync(mod, path.join(to, 'go.mod'))
 }
 
 // ---------------------------------------------------------------------------
@@ -75,7 +92,8 @@ function materializeRepo (layoutName, edits = []) {
   const layout = SURFACE_LAYOUT[layoutName]
   if (!layout) throw new Error(`Unknown layout: ${layoutName}`)
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `doc-strings-eval-${layoutName}-`))
-  for (const file of layout.files) {
+  if (layout.tree) copyTree(layout.tree, dir)
+  for (const file of layout.files || []) {
     const dest = path.join(dir, file.to)
     fs.mkdirSync(path.dirname(dest), { recursive: true })
     fs.copyFileSync(file.from, dest)
@@ -165,6 +183,10 @@ function claudeAvailable () {
   return !result.error && result.status === 0
 }
 
+// The template cases' model, named exactly: a CLI alias such as `sonnet`
+// resolves to the newest model the CLI knows, so results drift.
+const TEMPLATE_MODEL = 'claude-sonnet-5'
+
 /**
  * Run the claude CLI headless with the prompt on stdin. The model gets no
  * tools: every case is self-contained in the prompt, and the harness - not
@@ -172,7 +194,7 @@ function claudeAvailable () {
  *
  * @returns {{ output, stderr, status, timedOut, ms }}
  */
-function runClaude (prompt, { cwd, model = 'sonnet', timeoutMs = 300000 } = {}) {
+function runClaude (prompt, { cwd, model = TEMPLATE_MODEL, timeoutMs = 300000 } = {}) {
   const started = Date.now()
   const result = spawnSync('claude', [
     '-p',
@@ -346,10 +368,12 @@ function overlongLines (text, limit) {
 }
 
 /** Findings for one declaration name, as a flat list of {id, severity}. */
-function findingsFor (lintResult, name) {
+// Connect reuses one name across kinds (a component's summary, description
+// and example share it) and files, so `file` narrows the match when given.
+function findingsFor (lintResult, name, file) {
   const rules = []
   for (const finding of lintResult.findings) {
-    if (finding.name === name) rules.push(...finding.rules.map((r) => ({ id: r.id, severity: r.severity })))
+    if (finding.name === name && (!file || finding.file === file)) rules.push(...finding.rules.map((r) => ({ id: r.id, severity: r.severity })))
   }
   return rules
 }
@@ -360,13 +384,24 @@ function findingsFor (lintResult, name) {
  * span-length changes. Used to prove untouched declarations kept exactly
  * their findings.
  */
-function findingFingerprint (lintResult, excludeName) {
+function findingFingerprint (lintResult, excludeName, excludeFile) {
   const groups = []
   for (const finding of lintResult.findings) {
-    if (finding.name === excludeName) continue
+    if (finding.name === excludeName && (!excludeFile || finding.file === excludeFile)) continue
     groups.push(`${finding.surface}:${finding.name}:${finding.rules.map((r) => r.id).sort().join(',')}`)
   }
   return groups.sort()
+}
+
+/**
+ * The declaration a finding belongs to. A name alone is ambiguous: connect
+ * reuses a field name across declarations in one file, and a field's
+ * Description and ShortDescription are separate declarations with the same
+ * name. Match on the finding's file and line span instead.
+ */
+function declarationForFinding (declarations, finding) {
+  return (declarations || []).find((d) => d.name === finding.name && d.file === finding.file &&
+    d.line_start === finding.line_start && d.line_end === finding.line_end)
 }
 
 const LINE_FIELDS = ['line_start', 'line_end']
@@ -484,6 +519,7 @@ function checkSuggestionComment (comments, target) {
 }
 
 module.exports = {
+  TEMPLATE_MODEL,
   checkSuggestionComment,
   dispatchAccepts,
   linesKept,
@@ -510,6 +546,7 @@ module.exports = {
   overlongLines,
   findingsFor,
   findingFingerprint,
+  declarationForFinding,
   comparePropertyExtraction,
   compareDeclExtraction,
   normalizeText,
