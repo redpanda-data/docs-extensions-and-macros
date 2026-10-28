@@ -166,6 +166,12 @@ describe('Connect YAML on real lines', () => {
     expect(result.failing).toBe(0)
   })
 
+  test('docs reference/pages/releases/ is historical', () => {
+    const result = scan({ 'modules/reference/pages/releases/redpanda.adoc': page(yaml('input:', '  redpanda:', '    clinet_id: x')) }, { failOn: 'any' })
+    expect(result.kinds.connect.findings.map((f) => f.reason)).toEqual(['unknown-field'])
+    expect(result.failing).toBe(0)
+  })
+
   test('a Cloud scan hides ifndef::env-cloud content', () => {
     const result = scan({ 'modules/x/pages/y.adoc': page('ifndef::env-cloud[]\n' + yaml('input:', '  redpanda:', '    clinet_id: x') + 'endif::[]') }, CLOUD)
     expect(result.kinds.connect.findings).toEqual([])
@@ -176,6 +182,31 @@ describe('Connect YAML on real lines', () => {
     expect(f).toMatchObject({ status: 'unverifiable', reason: 'not-in-connect-data', failing: false })
     const [g] = findings({ 'modules/x/pages/y.adoc': page(yaml('input:', '  gateway: {}')) })
     expect(g).toMatchObject({ status: 'reference', reason: 'unknown-component' })
+  })
+
+  test('rp-connect-docs templating.adoc:57 and plugins/pages/about.adoc:125: a component a template or plugin on the page defines is unverifiable', () => {
+    const result = scan({
+      'modules/configuration/pages/templating.adoc': page(
+        yaml('name: aws_sqs_list', 'type: input', '', 'mapping: |', '  root.broker.inputs = []') +
+        yaml('input:', '  aws_sqs_list:', '    urls: []')),
+      'modules/plugins/pages/about.adoc': page(
+        yaml('name: fizzbuzz', 'type: processor', 'fields: []') +
+        yaml('input:', '  generate:', '    mapping: root = 1', 'pipeline:', '  processors:', '  - fizzbuzz: {}')),
+    })
+    expect(result.kinds.connect.findings.map((f) => [f.file, f.status, f.reason, f.component])).toEqual([
+      ['modules/configuration/pages/templating.adoc', 'unverifiable', 'page-defined-component', 'aws_sqs_list'],
+      ['modules/plugins/pages/about.adoc', 'unverifiable', 'page-defined-component', 'fizzbuzz'],
+    ])
+    expect(result.failing).toBe(0)
+    // The definition counts on its own page only.
+    const [f] = findings({ 'modules/x/pages/y.adoc': page(yaml('input:', '  aws_sqs_list: {}')) })
+    expect(f).toMatchObject({ status: 'reference', reason: 'unknown-component' })
+  })
+
+  test('rp-connect-docs helm-chart.adoc:408: Helm values on a Connect page are not walked, root fields alone still are', () => {
+    expect(findings({ 'modules/get-started/pages/quickstarts/helm-chart.adoc': page(yaml('metrics:', '  prometheus: {}', '', 'tracing:', '  openTelemetry:', '    http: []', '', 'logger:', '  level: INFO')) })).toEqual([])
+    const [f] = findings({ 'modules/x/pages/y.adoc': page(yaml('http:', '  adress: 0.0.0.0:4195', 'logger: {}')) })
+    expect(f).toMatchObject({ status: 'reference', reason: 'unknown-field', fieldPath: 'http.adress' })
   })
 
   test('the explicit type: form names the component', () => {

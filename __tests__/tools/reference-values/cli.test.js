@@ -167,4 +167,13 @@ describe('doc-tools check-reference-values', () => {
     expect(r.report.kinds.rpk.findings.map((f) => [f.status, f.failing])).toEqual([['reference', false], ['unverifiable', false]])
     expect(r.code).toBe(0)
   })
+
+  test('docs patch release notes (reference/pages/releases/) are historical, and --write leaves them alone', () => {
+    const notes = ['= Notes', '', block('rpk cluster quotas delete --name user=alice'), '== Create', '', block('rpk topic create orders'), 'The `--partitions` flag defaults to -1.', ''].join('\n')
+    const dir = repo({ 'modules/reference/pages/releases/redpanda.adoc': notes })
+    const r = run(dir, ['--data-file', rpkData(dir), '--fail-on', 'any', '--write'])
+    expect(r.report.kinds.rpk.findings.map((f) => [f.status, f.failing])).toEqual([['reference', false], ['exact', false]])
+    expect(r.code).toBe(0)
+    expect(fs.readFileSync(path.join(dir, 'modules/reference/pages/releases/redpanda.adoc'), 'utf8')).toBe(notes)
+  })
 })

@@ -136,3 +136,57 @@ describe('check-reference-values --write', () => {
     expect(f).toMatchObject({ status: 'exact', applied: false, autoSafe: false, note: 'render-changed' })
   })
 })
+
+describe('--write and // value-check: ignore', () => {
+  const IGNORE = '// value-check: ignore'
+
+  test('rpk and Connect lines the comment covers are left as written', () => {
+    const { docs, connect } = setup()
+    const rpkPage = ['= Safe', '', '== Create', '', block('rpk topic create orders'), IGNORE, 'The `--partitions` flag defaults to -1.', ''].join('\n')
+    const cdcPage = ['= CDC', '', '[,yaml]', '----', 'input:', '  postgres_cdc:', '    incremental_snapshot:', '      chunk_size: 1024 # <1>', '----', IGNORE, '<1> The number of rows to read in each chunk. The default is `1024`.', ''].join('\n')
+    put(docs, 'modules/develop/pages/safe.adoc', rpkPage)
+    put(docs, 'modules/develop/pages/cdc.adoc', cdcPage)
+    const result = scanAll({ docsDir: docs, lenderDirs: [connect], kinds: ['rpk', 'connect'], kindsExplicit: true, write: true, files: ['modules/develop/pages/safe.adoc', 'modules/develop/pages/cdc.adoc'] })
+    expect(fs.readFileSync(path.join(docs, 'modules/develop/pages/safe.adoc'), 'utf8')).toBe(rpkPage)
+    expect(fs.readFileSync(path.join(docs, 'modules/develop/pages/cdc.adoc'), 'utf8')).toBe(cdcPage)
+    expect(result.ignored).toBe(2)
+    expect(result.kinds.rpk.changedFiles + result.kinds.connect.changedFiles).toBe(0)
+  })
+
+  describe('properties', () => {
+    const page = (ignore) => ['= A', '', ...(ignore ? [IGNORE] : []), 'Set prop:log_segment_ms[], which defaults to 2 weeks.', '', 'Also, prop:log_segment_ms[] defaults to 2 weeks.', ''].join('\n')
+    const repoWith = (content) => {
+      const docs = tmp()
+      put(docs, 'antora.yml', "name: streaming\nversion: '26.2'\n")
+      put(docs, 'modules/reference/attachments/redpanda-properties-v26.2.4.json', fs.readFileSync(path.join(FIXTURES, 'propval', 'redpanda-properties-v26.2.4-sample.json')))
+      put(docs, 'modules/manage/pages/a.adoc', content)
+      return docs
+    }
+
+    test('a line the comment covers is put back, and the rest of the page is written', () => {
+      const docs = repoWith(page(true))
+      const result = scanAll({ docsDir: docs, kinds: ['properties'], kindsExplicit: true, write: true })
+      const lines = fs.readFileSync(path.join(docs, 'modules/manage/pages/a.adoc'), 'utf8').split('\n')
+      expect(lines[3]).toBe('Set prop:log_segment_ms[], which defaults to 2 weeks.')
+      expect(lines[5]).toContain('defaults to propval:log_segment_ms[default].')
+      expect(result.ignored).toBe(1)
+      expect(result.kinds.properties.changedFiles).toBe(1)
+    })
+
+    test('a page whose only replacement is ignored counts as unchanged', () => {
+      const content = ['= A', '', IGNORE, 'Set prop:log_segment_ms[], which defaults to 2 weeks.', ''].join('\n')
+      const docs = repoWith(content)
+      const result = scanAll({ docsDir: docs, kinds: ['properties'], kindsExplicit: true, write: true })
+      expect(fs.readFileSync(path.join(docs, 'modules/manage/pages/a.adoc'), 'utf8')).toBe(content)
+      expect(result.kinds.properties.changedFiles).toBe(0)
+    })
+
+    test('findings --write applied are marked applied and never fail', () => {
+      const docs = repoWith(page(false))
+      expect(scanAll({ docsDir: docs, kinds: ['properties'], kindsExplicit: true, failOn: 'any' }).failing).toBe(2)
+      const result = scanAll({ docsDir: docs, kinds: ['properties'], kindsExplicit: true, write: true, failOn: 'any' })
+      expect(result.kinds.properties.findings.map((f) => [f.autoSafe, f.applied, f.failing])).toEqual([[true, true, false], [true, true, false]])
+      expect(result.failing).toBe(0)
+    })
+  })
+})

@@ -331,9 +331,12 @@ function scanRpk ({ docsDir, registry, files: only, write = false, renderGuard, 
     if (shared.isGenerated(original)) { skippedGenerated++; continue }
     if (shared.isStubPage(original)) { skippedStubs++; continue }
     files++
-    const historical = HISTORICAL_RX.test(relative)
+    const historical = HISTORICAL_RX.test(relative) || shared.RELEASES_RX.test(relative)
     const tagged = /^\s*\/\/\s*tag::[^[\s]+\[\]\s*$/m.test(original) || /(?:^|\/)partials\//.test(relative)
     const lines = original.split('\n')
+    // Lines a // value-check: ignore comment covers are reported (and then
+    // dropped by the orchestrator) but never rewritten.
+    const ignored = shared.ignoredLines(original)
     const fileFindings = []
     const seen = new Set()
     const sightings = commandSightings(lines, registry)
@@ -442,7 +445,7 @@ function scanRpk ({ docsDir, registry, files: only, write = false, renderGuard, 
         if (finding) lineFindings.push(finding)
       }
       for (const f of [...lineFindings].sort((a, b) => b.start - a.start)) {
-        if (write && f.autoSafe) {
+        if (write && f.autoSafe && !ignored.has(index + 1)) {
           const candidate = rewritten.slice(0, f.start) + f.proposed + rewritten.slice(f.end)
           if (renderGuard && !renderGuard(relative, rewritten, candidate)) {
             f.autoSafe = false

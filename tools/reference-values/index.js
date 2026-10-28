@@ -19,6 +19,7 @@
 const fs = require('fs')
 const path = require('path')
 const migrate = require('../migrate-property-values')
+const { DEFAULT_EXCLUDE } = require('../migrate-property-refs')
 const { PROPERTIES_KIND, PROPERTIES_JSON_RX } = require('../../macros/prop')
 const datasets = require('../../extension-utils/attachment-datasets')
 const rpkValues = require('../../extension-utils/rpk-values')
@@ -76,7 +77,7 @@ function readExplicit (file, own) {
  * are never written.
  */
 function isHistorical (kind, file) {
-  return migrate.HISTORICAL_RX.test(file) || (kind === 'connect' && HISTORICAL_CONNECT_RX.test(file))
+  return migrate.HISTORICAL_RX.test(file) || (kind !== 'properties' && shared.RELEASES_RX.test(file)) || (kind === 'connect' && HISTORICAL_CONNECT_RX.test(file))
 }
 
 /**
@@ -131,6 +132,36 @@ function applyIgnores (result, docsDir) {
     }
   }
   return count
+}
+
+/**
+ * Remember every page that has a `// value-check: ignore` comment. The
+ * returned function restores the lines the comments cover, in pages written
+ * since, and returns how many pages are back to unchanged.
+ */
+function keepIgnoredLines (docsDir, files) {
+  const before = []
+  for (const relative of shared.walkFiles(docsDir, { exclude: DEFAULT_EXCLUDE, only: files })) {
+    const full = path.join(docsDir, relative)
+    const content = fs.readFileSync(full, 'utf8')
+    const lines = shared.ignoredLines(content)
+    if (lines.size) before.push({ full, content, lines })
+  }
+  return () => {
+    let unchanged = 0
+    for (const { full, content, lines } of before) {
+      const now = fs.readFileSync(full, 'utf8')
+      if (now === content) continue
+      const was = content.split('\n')
+      const out = now.split('\n')
+      // Replacements stay within a line; anything else restores the page.
+      const restored = out.length === was.length ? out.map((line, i) => (lines.has(i + 1) ? was[i] : line)).join('\n') : content
+      if (restored === now) continue
+      fs.writeFileSync(full, restored)
+      if (restored === content) unchanged++
+    }
+    return unchanged
+  }
 }
 
 // Counts after findings were dropped, in each kind's own shape.
@@ -219,9 +250,17 @@ function scanAll ({ docsDir, lenderDirs = [], dataFiles = [], kinds = KINDS, kin
     const registry = given || datasets.loadDatasetFor(catalog, own.component, own.version, PROPERTIES_KIND)
     if (!registry) skip('properties', `no property data for ${where}`)
     else {
+      // The property engine writes without knowing about // value-check:
+      // ignore, so put back the lines it covers afterwards.
+      const kept = write ? keepIgnoredLines(docsDir, files) : undefined
       const r = migrate.scanRepo({ docsDir, lenderDirs, write, files, registry: given })
       if (r.error) skip('properties', r.error)
-      else result.kinds.properties = { ...r, selection: given ? 'explicit' : registry.surface === datasets.SURFACE_CLOUD ? 'cloud' : 'page' }
+      else {
+        if (kept) r.changedFiles -= kept()
+        // Every auto-safe property finding is replaced when writing.
+        if (write) for (const f of r.findings) if (f.autoSafe) f.applied = true
+        result.kinds.properties = { ...r, selection: given ? 'explicit' : registry.surface === datasets.SURFACE_CLOUD ? 'cloud' : 'page' }
+      }
     }
   }
 

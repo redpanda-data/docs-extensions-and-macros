@@ -206,6 +206,11 @@ function ignoredLines (content) {
 
 const readText = (file) => fs.readFileSync(file, 'utf8')
 
+// Per-release pages HISTORICAL_RX does not match (docs
+// modules/reference/pages/releases/). Historical for rpk and Connect only, so
+// property findings stay as migrate-property-values reports them.
+const RELEASES_RX = /(?:^|\/)releases\//
+
 module.exports = {
   norm,
   walkFiles,
@@ -218,5 +223,6 @@ module.exports = {
   parseAfterFiller,
   ignoredLines,
   readText,
+  RELEASES_RX,
   FILLER_RX,
 }

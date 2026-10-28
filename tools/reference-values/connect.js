@@ -136,19 +136,33 @@ function fieldPaths (children, prefix = '', out = []) {
  * @param {(f: object) => void} opts.report - A reference or example finding.
  * @param {(line: number, info: object) => void} opts.noteLine - Field info per
  *   line, for callouts.
+ * @param {Set<string>} [opts.definedComponents] - Collects the <type>/<name>
+ *   of each template or plugin definition, and is read for unknown names.
  */
-function walkYamlDocument (doc, lineCounter, lines, { data, index, cloudSurface, report, noteLine, usedComponents, connectContext = false }) {
+function walkYamlDocument (doc, lineCounter, lines, { data, index, cloudSurface, report, noteLine, usedComponents, connectContext = false, definedComponents }) {
   const root = doc.contents
   if (!root || !YAML.isMap(root)) return
   const rootFields = Array.isArray(data.config) ? data.config : []
   const keyName = (pair) => (pair && pair.key && YAML.isScalar(pair.key) ? String(pair.key.value) : undefined)
   const lineOf = (node) => (node && node.range ? lineCounter.linePos(node.range[0]).line - 1 : undefined)
+  // A template or plugin definition (name: and type: at the root) declares a
+  // component the Connect data cannot have.
+  const scalarAt = (key) => {
+    const pair = root.items.find((p) => keyName(p) === key)
+    return pair && YAML.isScalar(pair.value) ? String(pair.value.value) : undefined
+  }
+  if (definedComponents && scalarAt('name') && scalarAt('type')) definedComponents.add(`${normalizeType(scalarAt('type'))}/${scalarAt('name')}`)
   const rootKeys = root.items.map(keyName)
   const known = rootKeys.filter((k) => rootFields.some((f) => f.name === k))
   // A fragment: no root config key, or mostly keys that are not root config
   // fields (a template definition, a component on its own).
   if (!known.length || known.length * 2 < rootKeys.length) return
-  if (!rootKeys.some((k) => PIPELINE_KEYS.has(k)) && !connectContext) return
+  const pipeline = rootKeys.some((k) => PIPELINE_KEYS.has(k))
+  if (!pipeline && !connectContext) return
+  // Walked only because the page is about Connect: root fields on their own
+  // (logger:, metrics:) are checked, but a document with any other root key
+  // may be Helm values or another tool's config.
+  if (!pipeline && known.length !== rootKeys.length) return
 
   const commentDefault = (line, field, info) => {
     if (line === undefined) return
@@ -227,7 +241,9 @@ function walkYamlDocument (doc, lineCounter, lines, { data, index, cloudSurface,
     const entry = typeKey && (data[typeKey] || []).find((c) => c && c.name === name)
     const label = `${typeKey ? typeKey.replace(/-/g, '_') : type}/${name}`
     if (!entry) {
-      if (cloudSurface) {
+      if (definedComponents && definedComponents.has(`${type}/${name}`)) {
+        report({ line, status: 'unverifiable', reason: 'page-defined-component', componentType: type, component: name, note: `${type} '${name}' is defined by a template or plugin on this page` })
+      } else if (cloudSurface) {
         report({ line, status: 'unverifiable', reason: 'not-in-connect-data', componentType: type, component: name, note: `${type} '${name}' is not in the OSS Connect data; Cloud-only components are not in it` })
       } else {
         const suggestions = require('../../extension-utils/attachment-datasets').suggest(name, (data[typeKey] || []).map((c) => c && c.name).filter(Boolean))
@@ -344,6 +360,7 @@ function scanYaml (entries, ctx) {
       cloudSurface: ctx.cloudSurface,
       usedComponents: ctx.usedComponents,
       connectContext: ctx.connectContext,
+      definedComponents: ctx.definedComponents,
       noteLine: (line, info) => { lineInfo[line] = info },
       report: (f) => {
         const at = entries[f.line] || entries[0]
@@ -390,7 +407,7 @@ function scanConnect ({ docsDir, registry, files: only, write = false, cloudSurf
     seen.add(key)
     findings.push(f)
   }
-  const isHistorical = (relative) => HISTORICAL_RX.test(relative) || HISTORICAL_CONNECT_RX.test(relative)
+  const isHistorical = (relative) => HISTORICAL_RX.test(relative) || shared.RELEASES_RX.test(relative) || HISTORICAL_CONNECT_RX.test(relative)
 
   // Examples files, walked on their own.
   for (const relative of shared.walkFiles(docsDir, { exclude: EXAMPLE_EXCLUDE, extensions: ['.yaml', '.yml'], only, include: (r) => /^modules\/[^/]+\/examples\//.test(r) })) {
@@ -408,6 +425,8 @@ function scanConnect ({ docsDir, registry, files: only, write = false, cloudSurf
     const historical = isHistorical(relative)
     const tagged = /^\s*\/\/\s*tag::[^[\s]+\[\]\s*$/m.test(original) || /(?:^|\/)partials\//.test(relative)
     const usedComponents = new Set()
+    // Lines a // value-check: ignore comment covers are never rewritten.
+    const ignored = shared.ignoredLines(original)
     // Prose that names a Connect field with no component to check it against
     // is reported only on pages about Connect: elsewhere `offset` or
     // `target` is something else (a SQL argument, a Kafka Connect setting).
@@ -415,7 +434,7 @@ function scanConnect ({ docsDir, registry, files: only, write = false, cloudSurf
     // First pass: the components the page's YAML uses, for prose context.
     let callouts = {}
     const pageFindings = []
-    const ctx = { data, index: cindex, cloudSurface, counts, usedComponents, report: (f) => pageFindings.push(f), connectContext: ownComponent === 'connect' || /(?:^|\/)(?:connect|rpcn|redpanda-connect)[^/]*\//.test(relative) }
+    const ctx = { data, index: cindex, cloudSurface, counts, usedComponents, definedComponents: new Set(), report: (f) => pageFindings.push(f), connectContext: ownComponent === 'connect' || /(?:^|\/)(?:connect|rpcn|redpanda-connect)[^/]*\//.test(relative) }
     const blocks = []
     walkAdoc(original, { onBlock: (b) => blocks.push(b) }, { cloudSurface })
     for (const b of blocks) {
@@ -439,7 +458,7 @@ function scanConnect ({ docsDir, registry, files: only, write = false, cloudSurf
         if (f && (f.reason !== 'no-component-context' || connectPage || usedComponents.size)) lineFindings.push(f)
       }
       for (const f of [...lineFindings].sort((a, b) => b.start - a.start)) {
-        if (write && f.autoSafe) {
+        if (write && f.autoSafe && !ignored.has(index + 1)) {
           const candidate = rewritten.slice(0, f.start) + f.proposed + rewritten.slice(f.end)
           if (renderGuard && !renderGuard(relative, rewritten, candidate)) {
             f.autoSafe = false
