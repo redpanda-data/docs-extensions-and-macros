@@ -252,4 +252,5 @@ module.exports = {
   humanizeDuration,
   humanizeBytes,
   humanizeNumber,
+  isImprecise,
 }

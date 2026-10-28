@@ -1,0 +1,58 @@
+= Reference values test
+:description: Exercises the rpkval and connectval macros: fields, formats, command and component resolution, and each placeholder case.
+
+Each line below states what it must render, and what the build log must say
+for it. The rpk values come from this component's `rpk-v26.2.2.json` fixture
+(trimmed real data from the docs repo's rpk snapshot). The Connect values come
+from `connect-4.114.0.json` in the `connect` component, which the showcase
+build supplies from `preview/connect-data-lender`.
+
+== rpk flags
+
+* Must read -1: rpkval:partitions[command=rpk topic create]
+* Must read -p: rpkval:partitions[shorthand,command=rpk topic create]
+* Must read 30000: rpkval:disk-duration-ms[command=rpk cluster self-test start]
+* Must read 24h, with `data-source="help"` in the HTML because the flag comes
+  from the `ai` plugin's `--help`: rpkval:since[command=rpk ai auditlog list]
+* Must read stringArray, a global flag with no command:
+  rpkval:config-opt[type]
+* Must read no, and false:
+  rpkval:partitions[required,command=rpk topic create], and
+  rpkval:partitions[required,command=rpk topic create,format=raw]
+* Must read -1, the `rpk cluster partitions move-cancel` value reached
+  through its alias: rpkval:node[command=rpk cluster partitions alter-cancel]
+* Must read 1m0s in inline code, as Go prints the duration:
+  `rpkval:timeout[command=rpk debug bundle]`
+
+== rpk placeholders
+
+* Must show `<unknown default>` and log description-default (the description
+  states the default the flag itself does not hold):
+  rpkval:output[command=rpk debug bundle]
+* Must show a placeholder and log unknown-flag:
+  rpkval:from-timestamp[command=rpk transform deploy]
+* Must show a placeholder and log deprecated-command, with the replacement:
+  rpkval:x[command=rpk redpanda admin brokers]
+* Must show a placeholder and log unknown-flag naming `rpk registry`, where
+  the flag is defined: rpkval:schema-context[command=rpk registry mode set]
+
+== Connect fields
+
+* Must read redpanda-connect: connectval:client_id[component=inputs/redpanda]
+* Must read 1024 in code:
+  `connectval:incremental_snapshot.chunk_size[component=inputs/postgres_cdc]`
+* Must list merge-on-read, copy-on-write, each in code:
+  connectval:merge_strategy[options,component=outputs/iceberg]
+* Must read -1: connectval:pipeline.threads[component=config]
+* Must read yes, and log deprecated-field:
+  connectval:regexp_topics[deprecated,component=inputs/redpanda]
+* Must read array<string>: connectval:topics[type,component=inputs/redpanda]
+
+== Connect placeholders
+
+* Must show a placeholder and log complex-default:
+  connectval:partition_assignment_strategy[component=inputs/redpanda]
+* Must show a placeholder and log unknown-field, suggesting client_id:
+  connectval:clinet_id[component=inputs/redpanda]
+* Must show a placeholder and log unknown-type:
+  connectval:x[component=widgets/local]

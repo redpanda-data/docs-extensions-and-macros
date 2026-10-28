@@ -44,7 +44,8 @@ content:
     branches: HEAD
     start_paths: [preview/extensions-and-macros, preview/shared,
                  preview/streaming-ga-lender, preview/macro-fixtures-ga,
-                 preview/macro-fixtures-beta, preview/macro-fixtures-cloud]
+                 preview/macro-fixtures-beta, preview/macro-fixtures-cloud,
+                 preview/connect-data-lender]
 ui:
   bundle:
     url: https://github.com/redpanda-data/docs-ui/releases/latest/download/ui-bundle.zip
@@ -55,6 +56,8 @@ asciidoc:
     # default) is what a writer should build with while learning the macros:
     # everything still renders, and every problem still gets reported.
     property-validate: warn
+    rpk-validate: warn
+    connect-validate: warn
     enterprise-validate: warn
     # The real licensing page lives on a real page in the streaming component.
     # preview/streaming-ga-lender registers that component name (Cloud's GA

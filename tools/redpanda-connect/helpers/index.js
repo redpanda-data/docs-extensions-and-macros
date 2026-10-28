@@ -10,6 +10,8 @@ module.exports = {
   isObject:        require('./isObject.js'),
   renderYamlList:  require('./renderYamlList.js'),
   renderConnectFields:    require('./renderConnectFields.js'),
+  formatConnectDefault:   require('./formatConnectDefault.js').formatConnectDefault,
+  connectDisplayType:     require('./formatConnectDefault.js').connectDisplayType,
   renderConnectExamples:  require('./renderConnectExamples.js'),
   renderConnectMetadata:  require('./renderConnectMetadata.js'),
   renderConnectDescription: require('./renderConnectDescription.js'),

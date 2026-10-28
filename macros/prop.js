@@ -108,10 +108,20 @@
  *     - '@redpanda-data/docs-extensions-and-macros/macros/prop'
  */
 
-const semver = require('semver')
 const { escapeHtml } = require('../extension-utils/html-utils')
 const propertyValues = require('../extension-utils/property-values')
+const datasets = require('../extension-utils/attachment-datasets')
+const { rpkvalInlineMacro } = require('./rpkval')
+const { connectvalInlineMacro } = require('./connectval')
 const logger = require('@antora/logger')('prop-macro')
+
+const {
+  SURFACE_CLOUD,
+  compareTags,
+  isPrerelease,
+  releaseSeries,
+  isAttributeSet,
+} = datasets
 
 const $propertyRegistry = Symbol('$propertyRegistry')
 // Release series a component version has no property data for, recorded at
@@ -119,10 +129,48 @@ const $propertyRegistry = Symbol('$propertyRegistry')
 const $propertySeriesGap = Symbol('$propertySeriesGap')
 
 const DEFAULT_ROLE = 'property-ref'
-// Which slice of a dataset a component may reference.
-const SURFACE_ALL = 'all'
-const SURFACE_CLOUD = 'cloud'
 const PROPERTIES_JSON_RX = /^redpanda-properties-(v\d+\.\d+\.\d+(?:-[\w.]+)?)\.json$/
+
+// The properties dataset as the shared loader sees it. The cache and gap
+// Symbols are the ones prop: has always used, so the property-page-index
+// extension sees the same cache layout, and every message is the wording
+// prop: has always printed.
+const PROPERTIES_KIND = {
+  name: 'properties',
+  module: 'reference',
+  rx: PROPERTIES_JSON_RX,
+  filePrefix: 'redpanda-properties-',
+  label: 'property data',
+  regenerate: "'npx doc-tools generate property-docs'",
+  borrowWhen: ['env-cloud'],
+  lenders: ['streaming', 'ROOT'],
+  cacheSymbol: $propertyRegistry,
+  gapSymbol: $propertySeriesGap,
+  keyPrefix: '',
+  invalidKey: 'noprops',
+  // Must be a plain object of name -> entry. A string, number, or array parses
+  // fine and would then make every prop: target look like a typo.
+  validate: (data) => {
+    const properties = data.properties
+    return properties && typeof properties === 'object' && !Array.isArray(properties)
+      ? true
+      : "has no usable 'properties' object"
+  },
+  notObjectReason: "has no usable 'properties' object",
+  decorate: (registry) => { registry.properties = registry.data.properties },
+  logger,
+  text: {
+    log: 'prop macro',
+    macro: 'prop:',
+    attachment: 'property attachment',
+    releaseNoun: 'properties',
+    effect: (where) => `prop: targets${where} are therefore not validated and their tooltips carry no data`,
+    generateSeries: (series) => `'npx doc-tools generate property-docs --tag v${series}.<patch>'`,
+    noData: (component, version) =>
+      `prop macro: no redpanda-properties-<tag>.json attachment found in any component's reference module for ${component || 'unknown component'}@${version || 'unversioned'}; ` +
+      'prop: targets are not validated and their tooltips carry no data. Publish the property JSON as a reference-module attachment in this component or in streaming.',
+  },
+}
 
 const $propertyPageIndex = Symbol('$propertyPageIndex')
 // Two or more '=': a level-0 heading is the page title, which generates no
@@ -413,123 +461,11 @@ function helmValuesPath (name, scope) {
   return `config.cluster.${name}`
 }
 
-// Warnings are deduplicated per build. Antora's watch mode (gulp/npm start)
-// reuses one process across many builds, so a module-level guard would report
-// each problem only on a session's first build and stay silent afterwards --
-// exactly when a writer is iterating and most wants to see it. The content
-// catalog is rebuilt per build, so keying off it scopes the guard correctly.
-const $warned = Symbol('$warned')
-
+// Deduplicated per build on the content catalog (see warnOnce in
+// extension-utils/attachment-datasets.js), through prop:'s own logger.
 function warnOnce (contentCatalog, key, message) {
-  const seen = contentCatalog[$warned] || (contentCatalog[$warned] = new Set())
-  if (seen.has(key)) return false
-  seen.add(key)
-  logger.warn(message)
-  return true
+  return datasets.warnOnce(contentCatalog, key, message, logger)
 }
-
-/**
- * Compare two property tags by release precedence, newest last.
- *
- * Prereleases matter here: a release cycle publishes v26.3.1-rc1, then rc2,
- * then the GA v26.3.1, and the beta branch has to land on the newest of them
- * deterministically. A numeric-only comparison rates all three equal, leaving
- * the winner to catalog iteration order -- so rc1 could beat rc2, or an RC
- * could beat its own GA.
- *
- * Redpanda tags spell prereleases as one identifier (-rc2, not -rc.2), which
- * the semver spec compares as a string: 'rc10' would sort below 'rc2'. Split
- * the trailing digits into their own identifier first so they compare
- * numerically.
- */
-function compareTags (a, b) {
-  const normalize = (tag) => String(tag).replace(/^v/, '').replace(/-([a-z]+)(\d+)/gi, '-$1.$2')
-  const left = semver.valid(normalize(a))
-  const right = semver.valid(normalize(b))
-  if (left && right) return semver.compare(left, right)
-  // Not semver (a hand-named file, say): fall back to numeric release order.
-  const parse = (tag) => String(tag).replace(/^v/, '').split('-')[0].split('.').map(Number)
-  const [a1, a2, a3] = parse(a)
-  const [b1, b2, b3] = parse(b)
-  return (a1 - b1) || (a2 - b2) || (a3 - b3) || 0
-}
-
-/**
- * Whether a tag names a prerelease (an RC or beta build).
- */
-function isPrerelease (tag) {
-  const normalized = String(tag).replace(/^v/, '')
-  const valid = semver.valid(normalized)
-  return valid ? Boolean(semver.prerelease(valid)) : /-/.test(normalized)
-}
-
-/**
- * The release series ('26.2') of a component version ('26.2', '25.3.1') or a
- * properties tag ('v26.2.1', 'v26.3.1-rc1'). Undefined when the value names no
- * numeric series.
- */
-function releaseSeries (value) {
-  const match = String(value == null ? '' : value).replace(/^v/, '').match(/^(\d+)\.(\d+)/)
-  return match ? `${match[1]}.${match[2]}` : undefined
-}
-
-/**
- * Whether an Antora attribute counts as declared.
- *
- * Antora keeps a component version's antora.yml attributes verbatim, and
- * setting one to false is how a maintainer turns it off: the key stays present.
- * A bare `!== undefined` test therefore reads `env-cloud: false` as "this is
- * Cloud", the opposite of what was written. Sibling readers of this attribute
- * in this repo use truthiness, so match them, while still honouring AsciiDoc's
- * set-but-empty convention.
- */
-function isAttributeSet (value) {
-  if (value === undefined || value === null || value === false) return false
-  return String(value).toLowerCase() !== 'false'
-}
-
-/**
- * The asciidoc attributes declared for one component version, which is where
- * env-cloud lives. Read from the catalog rather than the converting document
- * so the property-page-index extension resolves surfaces identically.
- */
-function componentAttributes (contentCatalog, component, version) {
-  if (typeof contentCatalog.getComponent !== 'function') return {}
-  const found = contentCatalog.getComponent(component)
-  if (!found) return {}
-  const versions = found.versions || []
-  const match = versions.find((entry) => entry.version === version) || found.latest || versions[0]
-  return (match && match.asciidoc && match.asciidoc.attributes) || {}
-}
-
-/**
- * Every properties JSON in the build, as {tag, file, component, version}.
- */
-function propertyDatasets (contentCatalog) {
-  const found = []
-  for (const attachment of contentCatalog.findBy({ family: 'attachment' }) || []) {
-    if (attachment.src.module !== 'reference') continue
-    const match = attachment.src.relative.split('/').pop().match(PROPERTIES_JSON_RX)
-    if (!match) continue
-    found.push({ tag: match[1], file: attachment, component: attachment.src.component, version: attachment.src.version })
-  }
-  return found
-}
-
-/**
- * The newest dataset in a list, with ties broken on a stable identity rather
- * than on catalog iteration order: two attachments can carry the same tag, and
- * picking whichever the catalog happened to yield first made the chosen
- * property data differ between builds of identical content.
- */
-const newestDataset = (list) =>
-  list.reduce((best, entry) => {
-    if (!best) return entry
-    const byTag = compareTags(entry.tag, best.tag)
-    if (byTag > 0) return entry
-    if (byTag < 0) return best
-    return stableKey(entry) < stableKey(best) ? entry : best
-  }, null)
 
 /**
  * Load and cache the property data for one page's component and version, plus
@@ -567,156 +503,7 @@ function loadProperties (config) {
  * property-page-index extension can warm the caches before conversion.
  */
 function loadPropertiesFor (contentCatalog, pageComponent, pageVersion) {
-  const cacheKey = `${pageComponent}@${pageVersion}`
-  const cache = contentCatalog[$propertyRegistry] || (contentCatalog[$propertyRegistry] = {})
-  if (cache[cacheKey] !== undefined) return cache[cacheKey] || undefined
-
-  const datasets = propertyDatasets(contentCatalog)
-  const own = datasets.filter((d) => d.component === pageComponent)
-  let pick
-  let surface
-  // The candidates the corrupt-file fallback may fall back TO. It has to be the
-  // same filtered set `pick` was chosen from, not everything the component
-  // publishes: falling back across release series would validate a 25.3 page
-  // against 25.2 data, which is exactly the borrowing this function refuses to
-  // do on the primary path.
-  let pool
-
-  // Cloud is decided first, and deliberately outranks the component's own
-  // attachments. The property extractor writes
-  // modules/reference/attachments/redpanda-properties-<tag>.json into whatever
-  // repo it runs in, so running it inside cloud-docs would otherwise flip that
-  // component to the unfiltered surface and switch off cloud_supported gating
-  // site-wide, with no warning anywhere.
-  if (isAttributeSet(componentAttributes(contentCatalog, pageComponent, pageVersion)['env-cloud'])) {
-    surface = SURFACE_CLOUD
-    // GA only: Cloud runs released Redpanda, so an RC published on the beta
-    // branch must not become the dataset Cloud pages validate against.
-    // Only streaming/ROOT count as lenders -- another component's product
-    // version is not a Redpanda release candidate.
-    const lenders = datasets.filter((d) => d.component === 'streaming' || d.component === 'ROOT')
-    const released = lenders.filter((d) => !isPrerelease(d.tag))
-    pool = released
-    pick =
-      newestDataset(released.filter((d) => d.component === 'streaming')) ||
-      newestDataset(released.filter((d) => d.component === 'ROOT'))
-    if (!pick && lenders.length) {
-      // Self-managed data exists but all of it is a prerelease. Say that
-      // specifically rather than claiming no property data was found.
-      const gaps = contentCatalog[$propertySeriesGap] || (contentCatalog[$propertySeriesGap] = {})
-      gaps[cacheKey] = {
-        kind: 'cloud-prerelease-only',
-        component: pageComponent,
-        version: pageVersion,
-        have: [...new Set(lenders.map((d) => d.tag))].sort(compareTags),
-      }
-      cache[cacheKey] = null
-      return undefined
-    }
-  } else if (own.length) {
-    surface = SURFACE_ALL
-    const series = releaseSeries(pageVersion)
-    if (series) {
-      const inSeries = own.filter((d) => releaseSeries(d.tag) === series)
-      pool = inSeries
-      pick = newestDataset(inSeries.filter((d) => d.version === pageVersion)) || newestDataset(inSeries)
-      if (!pick) {
-        // Record the gap rather than reporting it here: this also runs from the
-        // property-page-index extension, once per component version in the
-        // build, so warning now would report versions no page of which uses the
-        // macro. The macro reports it on first actual use.
-        const gaps = contentCatalog[$propertySeriesGap] || (contentCatalog[$propertySeriesGap] = {})
-        gaps[cacheKey] = {
-          kind: 'series',
-          component: pageComponent,
-          version: pageVersion,
-          series,
-          have: [...new Set(own.map((d) => d.tag))].sort(compareTags),
-        }
-        cache[cacheKey] = null
-        return undefined
-      }
-    } else {
-      pool = own
-      pick = newestDataset(own.filter((d) => d.version === pageVersion)) || newestDataset(own)
-    }
-  }
-
-  // A corrupt or half-written attachment must not take the whole build down,
-  // and must not mask a good file: try candidates newest-first and use the
-  // first one that actually carries properties, reporting each one skipped.
-  let registry = null
-  const candidates = orderedCandidates(pick, pool)
-  for (const candidate of candidates) {
-    const properties = readProperties(candidate, contentCatalog)
-    if (!properties) continue
-    registry = { tag: candidate.tag, properties, component: candidate.component, version: candidate.version, surface }
-    break
-  }
-  if (!registry && candidates.length) {
-    // Every candidate was unusable. Record that, because the caller's fallback
-    // diagnostic says no attachment exists anywhere -- which contradicts the
-    // per-file warning readProperties just emitted and sends the writer looking
-    // for a file that is sitting right there.
-    const gaps = contentCatalog[$propertySeriesGap] || (contentCatalog[$propertySeriesGap] = {})
-    gaps[cacheKey] = {
-      kind: 'unusable',
-      component: pageComponent,
-      version: pageVersion,
-      have: [...new Set(candidates.map((d) => d.tag))].sort(compareTags),
-    }
-  }
-  // Cache null too, so a missing dataset is only searched for once per build.
-  cache[cacheKey] = registry
-  return registry || undefined
-}
-
-/**
- * The chosen dataset first, then the remaining candidates from the same pool in
- * descending release order, so an unusable file falls through to the next best
- * rather than voiding the component's data entirely.
- */
-function orderedCandidates (pick, pool) {
-  if (!pick) return []
-  const rest = (pool || [])
-    .filter((d) => d !== pick)
-    .sort((a, b) => compareTags(b.tag, a.tag) || stableKey(a).localeCompare(stableKey(b)))
-  return [pick, ...rest]
-}
-
-/**
- * Parse one properties attachment, or report why it is unusable and return
- * undefined. A JSON syntax error used to escape as an unhandled exception that
- * named no file, so a single bad attachment failed the build with no way to tell
- * which of them was at fault.
- */
-function readProperties (candidate, contentCatalog) {
-  const where = `${candidate.component}@${candidate.version || 'unversioned'}`
-  let data
-  try {
-    data = JSON.parse(candidate.file.contents.toString())
-  } catch (error) {
-    warnOnce(contentCatalog, `badjson:${where}:${candidate.tag}`,
-      `prop macro: redpanda-properties-${candidate.tag}.json in ${where} is not valid JSON (${error.message}), so it is ignored. Regenerate it with 'npx doc-tools generate property-docs'.`)
-    return undefined
-  }
-  const properties = data && data.properties
-  // Must be a plain object of name -> entry. A string, number, or array parses
-  // fine and would then make every prop: target look like a typo.
-  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) {
-    warnOnce(contentCatalog, `noprops:${where}:${candidate.tag}`,
-      `prop macro: redpanda-properties-${candidate.tag}.json in ${where} has no usable 'properties' object, so it is ignored. Regenerate it with 'npx doc-tools generate property-docs'.`)
-    return undefined
-  }
-  return properties
-}
-
-/**
- * A stable identity for an attachment, so two files carrying the same tag are
- * resolved the same way on every build instead of by catalog iteration order.
- */
-function stableKey (candidate) {
-  return `${candidate.component}\u0000${candidate.version}\u0000${candidate.file.src.relative}`
+  return datasets.loadDatasetFor(contentCatalog, pageComponent, pageVersion, PROPERTIES_KIND)
 }
 
 /**
@@ -744,32 +531,12 @@ function isAvailable (registry, entry) {
 
 function warnSeriesMissing (contentCatalog, pageComponent, pageVersion) {
   const gaps = contentCatalog[$propertySeriesGap]
-  const gap = gaps && gaps[`${pageComponent}@${pageVersion}`]
-  if (!gap) return false
-  const have = gap.have.join(', ')
-  if (gap.kind === 'unusable') {
-    warnOnce(contentCatalog, `unusable:${gap.component}@${gap.version}`,
-      `prop macro: every property attachment for ${gap.component}@${gap.version} is unusable (${have}); see the per-file warning above for why. ` +
-      'prop: targets are therefore not validated and their tooltips carry no data. Regenerate the file with \'npx doc-tools generate property-docs\' rather than treating this as missing data.')
-    return true
-  }
-  if (gap.kind === 'cloud-prerelease-only') {
-    warnOnce(contentCatalog, `cloudpre:${gap.component}@${gap.version}`,
-      `prop macro: ${gap.component} found only prerelease property data (${have}). Cloud runs released Redpanda, so it uses GA property data and will not validate against a release candidate. ` +
-      'prop: targets on Cloud pages are therefore not validated and their tooltips carry no data. Include a GA self-managed branch in the build, or leave prop: out of Cloud content until the release ships.')
-    return true
-  }
-  warnOnce(contentCatalog, `series:${gap.component}@${gap.version}`,
-    `prop macro: ${gap.component}@${gap.version} publishes no redpanda-properties-v${gap.series}.*.json attachment in its reference module (found for other series: ${have}). ` +
-    `prop: targets on ${gap.version} pages are therefore not validated and their tooltips carry no data, rather than being checked against another release's properties. ` +
-    `Generate it with 'npx doc-tools generate property-docs --tag v${gap.series}.<patch>' on that branch, or leave prop: out of ${gap.version} content.`)
-  return true
+  if (!(gaps && gaps[`${pageComponent}@${pageVersion}`])) return false
+  return datasets.warnDatasetMissing(contentCatalog, pageComponent, pageVersion, PROPERTIES_KIND)
 }
 
 function warnNoPropertyData (contentCatalog, component, version) {
-  warnOnce(contentCatalog, `nodata:${component}@${version}`,
-    `prop macro: no redpanda-properties-<tag>.json attachment found in any component's reference module for ${component || 'unknown component'}@${version || 'unversioned'}; ` +
-    'prop: targets are not validated and their tooltips carry no data. Publish the property JSON as a reference-module attachment in this component or in streaming.')
+  warnOnce(contentCatalog, `nodata:${component}@${version}`, PROPERTIES_KIND.text.noData(component, version))
 }
 
 /**
@@ -803,10 +570,7 @@ function reportUnknownProperty ({ name, mode, registry, filePath }) {
  * the same name can be valid in one series and absent from another.
  */
 function describeDataset (registry) {
-  const from = registry.component
-    ? `${registry.component}@${registry.version || 'unversioned'}`
-    : 'unknown component'
-  return `redpanda-properties-${registry.tag}.json from ${from}`
+  return datasets.describeDataset({ kind: PROPERTIES_KIND, ...registry })
 }
 
 /**
@@ -1116,10 +880,14 @@ function register (registry, config = {}) {
     registry.register(function () {
       this.inlineMacro(propInlineMacro(config))
       this.inlineMacro(propvalInlineMacro(config))
+      this.inlineMacro(rpkvalInlineMacro(config))
+      this.inlineMacro(connectvalInlineMacro(config))
     })
   } else if (typeof registry.inlineMacro === 'function') {
     registry.inlineMacro(propInlineMacro(config))
     registry.inlineMacro(propvalInlineMacro(config))
+    registry.inlineMacro(rpkvalInlineMacro(config))
+    registry.inlineMacro(connectvalInlineMacro(config))
   } else {
     logger.warn("no 'inlineMacro' method on alleged registry")
   }
@@ -1143,3 +911,5 @@ module.exports.isAvailable = isAvailable
 module.exports.describeDataset = describeDataset
 module.exports.buildPropvalContent = buildPropvalContent
 module.exports.resolvePropertyValue = resolvePropertyValue
+module.exports.PROPERTIES_KIND = PROPERTIES_KIND
+module.exports.PROPERTIES_JSON_RX = PROPERTIES_JSON_RX
