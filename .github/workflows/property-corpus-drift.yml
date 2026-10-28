@@ -1,5 +1,5 @@
 ---
-# Reports when the property test corpus falls behind redpanda-data/docs.
+# Refreshes the property test corpus when it falls behind redpanda-data/docs.
 #
 # __tests__/docs-data/property-overrides.json and property-snapshot.json mirror
 # that repo. property-corpus-rendering.test.js renders the real overrides file
@@ -11,10 +11,11 @@
 # would ever see it. That is how the mirror previously fell three months and
 # 114 entries behind.
 #
-# Reports rather than blocks. A stale mirror means the corpus test covers older
-# data, which is a coverage gap and not a broken build, so failing unrelated
-# PRs here over a merge in another repo would be the wrong trade. The script
-# opens one issue and comments on it thereafter.
+# Refreshes rather than blocks. A stale mirror means the corpus test covers
+# older data, which is a coverage gap and not a broken build, so failing
+# unrelated PRs here over a merge in another repo would be the wrong trade. The
+# script runs the README refresh recipe and opens one pull request from
+# bot/refresh-property-corpus, then updates it on later runs.
 #
 # The bash lives in .github/scripts/property-corpus-drift.sh, which the last
 # step runs from the checkout; __tests__/workflows/property-corpus-drift.test.js
@@ -83,7 +84,12 @@ jobs:
             ,sdlc/prod/github/actions_bot_token
           parse-json-secrets: true
 
+      # The script pushes the refresh with the bot token, scoped to each git
+      # command. A persisted github.token header would be sent alongside it,
+      # and a push made with github.token would not trigger the PR's own CI.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -91,26 +97,29 @@ jobs:
 
       # redpanda-data/docs is private, so the default Actions token cannot read
       # it and an unauthenticated raw.githubusercontent fetch 404s. The bot
-      # token above is what makes both the fetch and the issue report possible.
+      # token above is what makes the fetch, the push, and the PR possible.
       - name: Check corpus against the docs repo
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ env.ACTIONS_BOT_TOKEN }}
           # A PR that updates the corpus is ahead of docs main on purpose, so a
-          # PR run reports in the log and files nothing. Left to itself it filed
+          # PR run reports in the log and opens nothing. Left to itself it filed
           # an issue against its own branch's work.
-          FILE_ISSUE: ${{ github.event_name != 'pull_request' }}
+          OPEN_PR: ${{ github.event_name != 'pull_request' }}
         run: |
           set -euo pipefail
           # Exit 1 means drift was found and reported, which is not a build
-          # failure here; exit 2 means the check could not run at all, which is.
+          # failure here; exit 3 means drift was found but the open refresh PR
+          # is someone else's to finish; exit 2 means the check could not run
+          # at all, which is a failure.
           # Distinguished explicitly so a token or network problem cannot pass
           # as "no drift".
           rc=0
           bash .github/scripts/property-corpus-drift.sh || rc=$?
           case "$rc" in
             0) echo "Corpus is current." ;;
-            1) echo "::notice::Corpus drift reported in an issue." ;;
+            1) echo "::notice::Corpus drift reported in a refresh pull request." ;;
+            3) echo "::notice::Corpus drift found, but the open refresh pull request has someone else's commit, so it was left alone." ;;
             *) echo "::error::The corpus drift check could not run."; exit 1 ;;
           esac
 

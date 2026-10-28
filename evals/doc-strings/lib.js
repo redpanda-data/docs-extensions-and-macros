@@ -23,9 +23,14 @@ const EVAL_FIXTURES = path.join(__dirname, 'fixtures')
 const propertiesSurface = require(path.join(REPO_ROOT, 'tools/lint-strings/surfaces/properties'))
 const metricsSurface = require(path.join(REPO_ROOT, 'tools/lint-strings/surfaces/metrics'))
 const rpkSurface = require(path.join(REPO_ROOT, 'tools/lint-strings/surfaces/rpk'))
+const connectSurface = require(path.join(REPO_ROOT, 'tools/lint-strings/surfaces/connect'))
 const { deepEqual, normalizeText, detectDocsMarkup } = require(path.join(REPO_ROOT, 'tools/overrides-audit/classify.js'))
 
-const SURFACE_MODULES = { properties: propertiesSurface, metrics: metricsSurface, rpk: rpkSurface }
+const SURFACE_MODULES = { properties: propertiesSurface, metrics: metricsSurface, rpk: rpkSurface, connect: connectSurface }
+
+// The connect surface resolves strings across files (helper constructors,
+// constants, info.csv), so its layouts copy the whole fixture repo.
+const CONNECT_TREE = path.join(LINT_FIXTURES, 'connect', 'repo')
 
 /** Repo-relative target file per surface, shaped like the real repos. */
 const SURFACE_LAYOUT = {
@@ -48,7 +53,26 @@ const SURFACE_LAYOUT = {
   rpk: {
     files: [{ from: path.join(LINT_FIXTURES, 'rpk', 'lint_cmd.go'), to: 'src/go/rpk/pkg/cli/cluster/lint_cmd.go' }],
     target: 'src/go/rpk/pkg/cli/cluster/lint_cmd.go'
+  },
+  'connect-input': { tree: CONNECT_TREE, target: 'internal/impl/azure/input_thing.go', surface: 'connect' },
+  'connect-common': { tree: CONNECT_TREE, target: 'internal/impl/azure/common.go', surface: 'connect' },
+  // rpk topic delete's help text before the change in streaming-enterprise
+  // PR 461; the case commits the after side (delete.head.go) on top.
+  'rpk-pr461': {
+    files: [{ from: path.join(EVAL_FIXTURES, 'rpk-pr461', 'delete.base.go'), to: 'src/go/rpk/pkg/cli/topic/delete.go' }],
+    target: 'src/go/rpk/pkg/cli/topic/delete.go',
+    surface: 'rpk'
   }
+}
+
+/** Copy a fixture tree; a `go.mod.txt` becomes `go.mod` (kept renamed so the
+ * fixture is not a nested Go module in this repo). */
+function copyTree (from, to) {
+  fs.cpSync(from, to, { recursive: true })
+  // The fixture keeps its go.mod as go.mod.txt so Go tooling in this repo
+  // ignores it.
+  const mod = path.join(to, 'go.mod.txt')
+  if (fs.existsSync(mod)) fs.renameSync(mod, path.join(to, 'go.mod'))
 }
 
 // ---------------------------------------------------------------------------
@@ -68,7 +92,8 @@ function materializeRepo (layoutName, edits = []) {
   const layout = SURFACE_LAYOUT[layoutName]
   if (!layout) throw new Error(`Unknown layout: ${layoutName}`)
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `doc-strings-eval-${layoutName}-`))
-  for (const file of layout.files) {
+  if (layout.tree) copyTree(layout.tree, dir)
+  for (const file of layout.files || []) {
     const dest = path.join(dir, file.to)
     fs.mkdirSync(path.dirname(dest), { recursive: true })
     fs.copyFileSync(file.from, dest)
@@ -97,7 +122,7 @@ function gitInit (dir) {
   run('git', ['config', 'user.email', 'eval@localhost'], dir)
   run('git', ['config', 'user.name', 'doc-strings-eval'], dir)
   run('git', ['add', '-A'], dir)
-  run('git', ['commit', '-q', '-m', 'base'], dir)
+  run('git', ['commit', '-q', '--allow-empty', '-m', 'base'], dir)
   return run('git', ['rev-parse', 'HEAD'], dir).stdout.trim()
 }
 
@@ -158,6 +183,10 @@ function claudeAvailable () {
   return !result.error && result.status === 0
 }
 
+// The template cases' model, named exactly: a CLI alias such as `sonnet`
+// resolves to the newest model the CLI knows, so results drift.
+const TEMPLATE_MODEL = 'claude-sonnet-5'
+
 /**
  * Run the claude CLI headless with the prompt on stdin. The model gets no
  * tools: every case is self-contained in the prompt, and the harness - not
@@ -165,7 +194,7 @@ function claudeAvailable () {
  *
  * @returns {{ output, stderr, status, timedOut, ms }}
  */
-function runClaude (prompt, { cwd, model = 'sonnet', timeoutMs = 300000 } = {}) {
+function runClaude (prompt, { cwd, model = TEMPLATE_MODEL, timeoutMs = 300000 } = {}) {
   const started = Date.now()
   const result = spawnSync('claude', [
     '-p',
@@ -199,6 +228,61 @@ function parseFences (output, tag) {
   let match
   while ((match = pattern.exec(output)) !== null) blocks.push(match[1])
   return blocks
+}
+
+/**
+ * The unchanged lines a suggestion on a declaration dropped, reworded or
+ * moved: for every recorded comment whose range overlaps the declaration's
+ * span, each ```suggestion block must contain `keep`, the declaration's
+ * unchanged lines including blank ones, in order, as whole lines (trailing
+ * whitespace aside). New lines may sit between them, since that is where the
+ * changed lines go, but an unchanged line that is reworded, missing, out of
+ * order or a collapsed blank line fails. Comments without a suggestion block
+ * change nothing and are not judged. Paths compare without a leading `./`,
+ * as checkSuggestionComment does.
+ *
+ * @param {Array<{path, body, line, startLine}>} comments - recorded inline comments
+ * @param {{file: string, line_start: number, line_end: number}} decl
+ * @param {string[]} keep - exact text of the unchanged lines, in file order
+ * @returns {{pass: boolean, judged: number, dropped: string[]}}
+ */
+function linesKept (comments, decl, keep) {
+  const norm = (p) => String(p || '').replace(/^\.\//, '')
+  const rtrim = (l) => l.replace(/\s+$/, '')
+  let judged = 0
+  const dropped = new Set()
+  for (const comment of comments) {
+    if (norm(comment.path) !== norm(decl.file)) continue
+    const end = Number(comment.line)
+    const start = Number(comment.startLine || comment.line)
+    if (!(start <= decl.line_end && end >= decl.line_start)) continue
+    for (const body of parseFences(comment.body || '', 'suggestion')) {
+      judged++
+      const lines = body.split('\n').map(rtrim)
+      let at = 0
+      for (const want of keep) {
+        const i = lines.indexOf(rtrim(want), at)
+        if (i === -1) dropped.add(want)
+        else at = i + 1
+      }
+    }
+  }
+  return { pass: dropped.size === 0, judged, dropped: [...dropped] }
+}
+
+/**
+ * Line numbers changed between `base` and HEAD in one file (post-image),
+ * from git's own zero-context diff.
+ */
+function changedLines (repoDir, base, fileRel) {
+  const out = run('git', ['diff', '-U0', base, 'HEAD', '--', fileRel], repoDir).stdout
+  const lines = new Set()
+  for (const m of out.matchAll(/^@@ -\S+ \+(\d+)(?:,(\d+))? @@/gm)) {
+    const start = Number(m[1])
+    const count = m[2] === undefined ? 1 : Number(m[2])
+    for (let n = start; n < start + count; n++) lines.add(n)
+  }
+  return lines
 }
 
 /** All fenced ```json blocks, parsed; unparseable blocks are kept as errors. */
@@ -284,10 +368,12 @@ function overlongLines (text, limit) {
 }
 
 /** Findings for one declaration name, as a flat list of {id, severity}. */
-function findingsFor (lintResult, name) {
+// Connect reuses one name across kinds (a component's summary, description
+// and example share it) and files, so `file` narrows the match when given.
+function findingsFor (lintResult, name, file) {
   const rules = []
   for (const finding of lintResult.findings) {
-    if (finding.name === name) rules.push(...finding.rules.map((r) => ({ id: r.id, severity: r.severity })))
+    if (finding.name === name && (!file || finding.file === file)) rules.push(...finding.rules.map((r) => ({ id: r.id, severity: r.severity })))
   }
   return rules
 }
@@ -298,13 +384,24 @@ function findingsFor (lintResult, name) {
  * span-length changes. Used to prove untouched declarations kept exactly
  * their findings.
  */
-function findingFingerprint (lintResult, excludeName) {
+function findingFingerprint (lintResult, excludeName, excludeFile) {
   const groups = []
   for (const finding of lintResult.findings) {
-    if (finding.name === excludeName) continue
+    if (finding.name === excludeName && (!excludeFile || finding.file === excludeFile)) continue
     groups.push(`${finding.surface}:${finding.name}:${finding.rules.map((r) => r.id).sort().join(',')}`)
   }
   return groups.sort()
+}
+
+/**
+ * The declaration a finding belongs to. A name alone is ambiguous: connect
+ * reuses a field name across declarations in one file, and a field's
+ * Description and ShortDescription are separate declarations with the same
+ * name. Match on the finding's file and line span instead.
+ */
+function declarationForFinding (declarations, finding) {
+  return (declarations || []).find((d) => d.name === finding.name && d.file === finding.file &&
+    d.line_start === finding.line_start && d.line_end === finding.line_end)
 }
 
 const LINE_FIELDS = ['line_start', 'line_end']
@@ -367,7 +464,66 @@ function compareDeclExtraction (before, after, targetKey) {
   return problems
 }
 
+/**
+ * Whether the doc-strings-review workflow's dispatch step would send this
+ * doc-impact.json. Runs the step's own jq predicate, read from the workflow
+ * file, so the eval and the gate cannot disagree about the shape.
+ *
+ * @returns {{ pass: boolean, detail: string }}
+ */
+function dispatchAccepts (docImpactText) {
+  const YAML = require('yaml')
+  const wf = YAML.parse(fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'doc-strings-review.yml'), 'utf8'))
+  const step = wf.jobs['doc-strings-review'].steps.find((s) => s.name === 'Dispatch doc-impact')
+  let filter
+  try {
+    filter = step && require('./doc-impact/lib').extractDispatchFilter(step.run)
+  } catch (_) {}
+  if (!filter) throw new Error('the dispatch step\'s doc-impact.json predicate was not found in doc-strings-review.yml')
+  const r = spawnSync('jq', ['-e', filter], { input: docImpactText, encoding: 'utf8' })
+  if (r.error) throw r.error
+  return { pass: r.status === 0, detail: r.status === 0 ? 'accepted' : `rejected (jq exit ${r.status}${r.stderr ? ': ' + r.stderr.trim().slice(0, 160) : ''})` }
+}
+
+/**
+ * Check the inline comment that carries a suggestion against the declaration
+ * it should replace. Production posts the comment on the lines it names and
+ * GitHub applies the suggestion to exactly those lines, so a correct
+ * replacement on the wrong file or range is a wrong review. The footer is how
+ * a later push recovers which declarations were reviewed.
+ *
+ * @param {Array<{path:string, line?:number, startLine?:number, body:string}>} comments
+ * @param {{file:string, lineStart:number, lineEnd:number, fingerprint?:string}} target
+ * @returns {{problems:string[], comment:object|null, start:number, end:number}}
+ */
+function checkSuggestionComment (comments, target) {
+  const withSuggestion = (comments || []).filter((c) => parseFences(c.body || '', 'suggestion').length > 0)
+  if (withSuggestion.length !== 1) {
+    return { problems: [`expected one comment with a suggestion, found ${withSuggestion.length}`], comment: null, start: 0, end: 0 }
+  }
+  const c = withSuggestion[0]
+  const problems = []
+  const norm = (p) => String(p || '').replace(/^\.\//, '')
+  if (norm(c.path) !== norm(target.file)) problems.push(`posted on ${c.path}, expected ${target.file}`)
+  if (!Number.isInteger(c.line)) problems.push('comment has no line')
+  const end = Number.isInteger(c.line) ? c.line : 0
+  const start = Number.isInteger(c.startLine) ? c.startLine : end
+  if (end && (start !== target.lineStart || end !== target.lineEnd)) {
+    problems.push(`posted on lines ${start}-${end}, expected ${target.lineStart}-${target.lineEnd}`)
+  }
+  if (target.fingerprint) {
+    const footer = `<sub>doc-strings-review:fp=${target.fingerprint}</sub>`
+    if (!String(c.body).includes(footer)) problems.push(`body lacks the footer ${footer}`)
+  }
+  return { problems, comment: c, start, end }
+}
+
 module.exports = {
+  TEMPLATE_MODEL,
+  checkSuggestionComment,
+  dispatchAccepts,
+  linesKept,
+  changedLines,
   REPO_ROOT,
   SURFACE_LAYOUT,
   DOC_TOOLS,
@@ -390,6 +546,7 @@ module.exports = {
   overlongLines,
   findingsFor,
   findingFingerprint,
+  declarationForFinding,
   comparePropertyExtraction,
   compareDeclExtraction,
   normalizeText,

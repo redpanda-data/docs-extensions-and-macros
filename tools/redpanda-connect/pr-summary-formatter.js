@@ -4,6 +4,16 @@
  */
 
 /**
+ * Format a field default for the Markdown PR summary. A field with no default
+ * is `undefined`; a declared null default (Default(nil)) is a value.
+ * @param {*} value - The default, or undefined when the field has none
+ * @returns {string} Inline code, or `_no default_`
+ */
+function formatDefault(value) {
+  return value === undefined ? '_no default_' : `\`${JSON.stringify(value)}\``;
+}
+
+/**
  * Render Bloblang changes section for PR summary
  * @param {object} data - Bloblang change data
  * @param {array} data.newMethods - Array of new methods (with .name and optional .version)
@@ -238,6 +248,9 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
   if (total.changedDefaults > 0) {
     lines.push(`- **${total.changedDefaults}** changed default values`);
   }
+  if (total.documentedDefaults > 0) {
+    lines.push(`- **${total.documentedDefaults}** newly stated default values`);
+  }
   if (total.newBloblangMethods > 0) {
     lines.push(`- **${total.newBloblangMethods}** new Bloblang methods`);
   }
@@ -375,9 +388,22 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
       lines.push('| Component | Field | Old Default | New Default |');
       lines.push('|-----------|-------|-------------|-------------|');
       changedDefaults.forEach(change => {
-        const oldVal = change.oldDefault !== undefined ? `\`${JSON.stringify(change.oldDefault)}\`` : '_none_';
-        const newVal = change.newDefault !== undefined ? `\`${JSON.stringify(change.newDefault)}\`` : '_none_';
+        const oldVal = formatDefault(change.oldDefault);
+        const newVal = formatDefault(change.newDefault);
         lines.push(`| \`${change.component}\` | \`${change.field}\` | ${oldVal} | ${newVal} |`);
+      });
+      lines.push('');
+    }
+
+    // Fields that gained a stated default
+    const documentedDefaults = details.documentedDefaults || [];
+    if (documentedDefaults.length > 0) {
+      lines.push(`**Newly Stated Defaults (${documentedDefaults.length}):**`);
+      lines.push('');
+      lines.push("_These fields now state a default. They usually behaved this way already, so they are not listed as changes in What's new. Check that none of them changed behavior._");
+      lines.push('');
+      documentedDefaults.forEach(change => {
+        lines.push(`- \`${change.component}.${change.field}\`: ${formatDefault(change.newDefault)}`);
       });
       lines.push('');
     }
@@ -558,9 +584,9 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
     lines.push('**Review Changed Defaults for Breaking Changes:**');
     lines.push('');
     allChangedDefaults.forEach(change => {
-      const oldVal = change.oldDefault !== undefined ? JSON.stringify(change.oldDefault) : 'none';
-      const newVal = change.newDefault !== undefined ? JSON.stringify(change.newDefault) : 'none';
-      lines.push(`- [ ] \`${change.component}.${change.field}\`: \`${oldVal}\` → \`${newVal}\` — changed in **${change.version}**`);
+      const oldVal = formatDefault(change.oldDefault);
+      const newVal = formatDefault(change.newDefault);
+      lines.push(`- [ ] \`${change.component}.${change.field}\`: ${oldVal} → ${newVal} — changed in **${change.version}**`);
     });
     lines.push('');
   }
@@ -715,6 +741,10 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
 
   if (stats.changedDefaults > 0) {
     lines.push(`- **${stats.changedDefaults}** default value change${stats.changedDefaults !== 1 ? 's' : ''}`);
+  }
+
+  if (stats.documentedDefaults > 0) {
+    lines.push(`- **${stats.documentedDefaults}** newly stated default value${stats.documentedDefaults !== 1 ? 's' : ''} (no behavior change expected)`);
   }
 
   lines.push('');
@@ -1233,12 +1263,23 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
       const [type, name] = component.split(':');
       lines.push(`**${type}/${name}:**`);
       changes.forEach(c => {
-        const oldStr = JSON.stringify(c.oldDefault);
-        const newStr = JSON.stringify(c.newDefault);
-        lines.push(`- \`${c.field}\`: ${oldStr} → ${newStr}`);
+        lines.push(`- \`${c.field}\`: ${formatDefault(c.oldDefault)} → ${formatDefault(c.newDefault)}`);
       });
       lines.push('');
     });
+  }
+
+  // Newly stated defaults
+  const documentedDefaults = diffData.details.documentedDefaults || [];
+  if (documentedDefaults.length > 0) {
+    lines.push('#### Newly Stated Defaults');
+    lines.push('');
+    lines.push("_These fields now state a default. They usually behaved this way already, so they are not listed as changes in What's new. Check that none of them changed behavior._");
+    lines.push('');
+    documentedDefaults.forEach(c => {
+      lines.push(`- \`${c.component}.${c.field}\`: ${formatDefault(c.newDefault)}`);
+    });
+    lines.push('');
   }
 
   // New Bloblang Methods

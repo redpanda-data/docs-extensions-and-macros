@@ -58,7 +58,9 @@ IMPORTANT: Macros must be registered under the `asciidoc.extensions` key in your
 === Inline macros
 
 * **glossterm** - Reference glossary terms with tooltips
-* **config_ref** - Link to configuration properties
+* **prop** - Reference a configuration property, with a validated tooltip and optional link
+* **propval** - Render a property's default, minimum, unit, or other value from the property data
+* **config_ref** - Link to configuration properties (deprecated; use prop)
 * **helm_ref** - Link to Helm chart values
 * **badge** - Display status badges
 

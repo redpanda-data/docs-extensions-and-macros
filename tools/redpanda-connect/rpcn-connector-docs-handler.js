@@ -657,7 +657,8 @@ function buildChangedDefaultsTable (changedDefaults, capFn) {
   const byFieldAndDefaults = {}
   for (const change of changedDefaults) {
     const [type, compName] = change.component.split(':')
-    const compositeKey = `${change.field}|${String(change.oldDefault)}|${String(change.newDefault)}`
+    // JSON keeps null apart from "null" and one object default apart from another.
+    const compositeKey = JSON.stringify([change.field, change.oldDefault, change.newDefault])
     if (!byFieldAndDefaults[compositeKey]) {
       byFieldAndDefaults[compositeKey] = {
         field: change.field,
@@ -675,23 +676,31 @@ function buildChangedDefaultsTable (changedDefaults, capFn) {
   section += '|Field |Old default |New default |Description |Affected components\n\n'
 
   for (const [, info] of Object.entries(byFieldAndDefaults)) {
-    // Values render as literal inline code, so interpolations like
-    // ${!uuid_v4()} and characters like * or _ show as typed.
     // Values render as literal inline code through pass:c, which, unlike
     // `+...+`, also keeps values with ++ or with spaces at either end. Strings
     // that are empty, start or end with whitespace, or contain a newline show
     // as JSON, so " " and "\n" read as the values they are.
-    const formatDefault = (val) => {
-      if (val === undefined || val === null) return 'none'
+    const formatDefault = (val, asJson = false) => {
+      // 'none' would read as a value, and is one for some fields (compression).
+      if (val === undefined) return '_no default_'
       let text
-      if (typeof val === 'string') text = (val === '' || /^\s|\s$|\n/.test(val)) ? JSON.stringify(val) : val
+      if (asJson) text = JSON.stringify(val)
+      // A null default is declared (Default(nil)), so it renders as a value.
+      else if (val === null) text = 'null'
+      else if (typeof val === 'string') text = (val === '' || /^\s|\s$|\n/.test(val)) ? JSON.stringify(val) : val
       else if (typeof val === 'number' || typeof val === 'boolean') text = String(val)
       else text = JSON.stringify(val)
       return `\`pass:c[${text.replace(/\]/g, '\\]').replace(/\|/g, '\\|')}]\``
     }
 
-    const oldVal = formatDefault(info.oldDefault)
-    const newVal = formatDefault(info.newDefault)
+    let oldVal = formatDefault(info.oldDefault)
+    let newVal = formatDefault(info.newDefault)
+    // A type change such as "5" to 5 or "null" to null would read as no
+    // change, so show both sides as JSON.
+    if (oldVal === newVal) {
+      oldVal = formatDefault(info.oldDefault, true)
+      newVal = formatDefault(info.newDefault, true)
+    }
     // A | in the description would end the cell and shift the row.
     const desc = info.description ? capFn(info.description).replace(/\|/g, '\\|') : '// TODO: Add description'
 

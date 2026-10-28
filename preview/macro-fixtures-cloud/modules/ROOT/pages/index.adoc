@@ -30,3 +30,17 @@ xref:preview:ROOT:macros-showcase.adoc[macro showcase^]).
 The block macro renders a warning instead of a table:
 
 enterprise_features::redpanda[]
+
+[[property-values-on-cloud]]
+== Property values on Cloud
+
+`propval:` reads the same GA data, with the same gate.
+
+* propval:iceberg_enabled[type] must read "boolean".
+* propval:iceberg_enabled[default] must read "<unknown default>": the Cloud
+  property reference states no defaults (it shows "Available in the Redpanda
+  Cloud Console"), so a Cloud page cannot state one either.
+* propval:log_segment_size[min] must read "<unknown min>": the property is not
+  available in Cloud.
+* propval:fips_mode[scope] must read "broker": broker properties are not
+  gated.

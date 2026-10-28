@@ -1175,10 +1175,11 @@ describe('prop macro', () => {
   })
 
   describe('registration', () => {
-    test('registers an inline macro on a plain registry', () => {
+    test('registers prop and propval on a plain registry', () => {
       const inlineMacro = jest.fn()
       register({ inlineMacro })
-      expect(inlineMacro).toHaveBeenCalledTimes(1)
+      // One registration each: prop: and propval:.
+      expect(inlineMacro).toHaveBeenCalledTimes(2)
     })
   })
 })

@@ -1531,6 +1531,23 @@ const MARKUP_PATTERNS = [
 // link needs an explicit module to resolve in both places.
 const XREF_MODULES = new Set(['components', 'configuration', 'cookbooks', 'get-started', 'guides', 'install', 'reference'])
 
+// Component reference pages live in the components module, one directory
+// per registration kind (inputs/, outputs/, ...). Derived from the kinds
+// above so a new component kind needs no second list.
+const COMPONENT_PAGE_DIRS = new Set(Object.values(REGISTRATION_TYPES)
+  .filter((t) => !t.startsWith('bloblang-'))
+  .map((t) => `${t}s`))
+
+/** The fix a module-less xref needs. Component pages and Bloblang pages have
+ * a module the lint can know (the review prompt says the same); any other
+ * page's module is in its docs URL. */
+function xrefModuleHint (target) {
+  const dir = target.split('/')[0]
+  if (COMPONENT_PAGE_DIRS.has(dir)) return `Name the module: xref:components:${target}[...].`
+  if (dir === 'bloblang') return `Name the module: xref:guides:${target}[...].`
+  return 'Name the module the page lives in. It is the path segment after /connect/ in the page\'s docs URL, so https://docs.redpanda.com/connect/configuration/interpolation/ is xref:configuration:interpolation.adoc[...].'
+}
+
 const AVAILABILITY_PROSE = /\b(?:not (?:available|supported) (?:in|on) (?:Redpanda )?Cloud|only available (?:in|on|for) (?:self-managed|Redpanda Cloud|Cloud)|self-managed only|requires? (?:a )?cgo|CGO_ENABLED|x_benthos_extra)\b/i
 
 /** Surface-specific convention rules. */
@@ -1575,7 +1592,7 @@ const RULES = [
         if (parts.length === 2 && XREF_MODULES.has(parts[0])) continue
         issues.push({
           message: parts.length === 1
-            ? `"xref:${m[1]}[" has no module. It resolves on the self-managed page, but Cloud includes the same partial into its own module, where the link breaks. Name the module, for example xref:components:${m[1]}[...].`
+            ? `"xref:${m[1]}[" has no module. It resolves on the self-managed page, but Cloud includes the same partial into its own module, where the link breaks. ${xrefModuleHint(m[1])}`
             : `"xref:${m[1]}[" names the ${parts[0]} module, which the Redpanda Connect docs do not have, so the link breaks on the rendered page. Use one of ${[...XREF_MODULES].join(', ')}, a component:module:page xref, or a full https:// link.`
         })
       }

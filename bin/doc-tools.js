@@ -1137,6 +1137,73 @@ automation
   })
 
 /**
+ * @description Report hand-written property values in prose ("defaults to
+ * 128 MiB", "the minimum is 1 minute") next to a property mention, check each
+ * against the property data for the repo's own version (selected exactly as
+ * the prop: macro selects it), and propose a propval: replacement. Mismatches
+ * are likely doc errors. Also reads example command output in listing
+ * blocks (rpk topic describe, rpk cluster config get and export, Admin API
+ * cluster_config, kafka-configs --describe, Key/Value/Source records) and
+ * reports a row that asserts the default, such as SOURCE DEFAULT_CONFIG, but
+ * shows another value as stale example output, listed apart from prose
+ * findings. Dry run by default, writing a JSON and a Markdown report; --write
+ * applies only exact matches stated in the same sentence as their property,
+ * never a mismatch, a table cell or example output. Skips prose inside code
+ * blocks and generated content.
+ *
+ * @example
+ * # Report on a docs checkout
+ * npx doc-tools generate migrate-property-values --docs-dir . --report-dir ./propval-report
+ *
+ * # Report on cloud-docs, which borrows the self-managed docs' property data
+ * npx doc-tools generate migrate-property-values --docs-dir ../cloud-docs --lender ../docs
+ *
+ * # Apply the auto-safe exact matches
+ * npx doc-tools generate migrate-property-values --docs-dir . --write
+ */
+automation
+  .command('migrate-property-values')
+  .description('Report hand-written property values in prose and in example command output, check them against the property data, and propose propval: macros. Dry run unless --write is given; --write applies exact same-sentence prose matches only, never example output.')
+  .option('--docs-dir <path>', 'Docs repo root containing antora.yml and modules/', '.')
+  .option('--lender <path...>', 'Other component checkouts whose property data the repo borrows (cloud-docs borrows the docs repo\'s)')
+  .option('--report-dir <path>', 'Where to write property-values-report.json and property-values-report.md', '.')
+  .option('--write', 'Replace exact, same-sentence matches with propval: macros (mismatches are never rewritten)')
+  .action((options) => {
+    const { scanRepo, renderMarkdown } = require('../tools/migrate-property-values.js')
+    const result = scanRepo({
+      docsDir: path.resolve(options.docsDir),
+      lenderDirs: (options.lender || []).map((dir) => path.resolve(dir)),
+      write: Boolean(options.write),
+    })
+    if (result.error) {
+      console.error(`Error: ${result.error}`)
+      process.exit(1)
+    }
+    result.label = `${result.component}@${result.version || 'unversioned'}`
+    const reportDir = path.resolve(options.reportDir)
+    fs.mkdirSync(reportDir, { recursive: true })
+    fs.writeFileSync(path.join(reportDir, 'property-values-report.json'), JSON.stringify(result, null, 2) + '\n')
+    fs.writeFileSync(path.join(reportDir, 'property-values-report.md'), renderMarkdown([result]))
+    const { counts } = result
+    console.log(`Checked against ${result.dataset} (${result.surface}).`)
+    console.log(`${result.findings.length} value statement(s) in ${result.files} files: ${counts.mismatch} mismatch, ${counts.unset} unset, ${counts.exact} exact (${counts.autoSafe} auto-safe), ${counts.equivalent} equivalent, ${counts.unverifiable} unverifiable.`)
+    for (const f of result.findings.filter((x) => x.status === 'mismatch')) {
+      console.log(`  MISMATCH ${f.file}:${f.line} ${f.property} ${f.field}: written ${f.written}, data ${f.dataValue}`)
+    }
+    for (const f of result.findings.filter((x) => x.status === 'unset')) {
+      console.log(`  UNSET ${f.file}:${f.line} ${f.property} ${f.field}: ${f.note}`)
+    }
+    const examples = result.findings.filter((x) => x.status === 'example-output')
+    console.log(`${examples.length} value(s) in example output: ${counts.exampleStale} stale, ${examples.filter((x) => x.verdict === 'matches').length} matching, ${examples.filter((x) => x.verdict === 'unverifiable').length} unverifiable (never written).`)
+    for (const f of examples.filter((x) => x.verdict === 'stale')) {
+      console.log(`  EXAMPLE ${f.file}:${f.line} ${f.property}${f.clusterProperty ? ` (${f.clusterProperty})` : ''}: shown ${f.written}${f.source ? ` ${f.source}` : ''}, default ${f.dataRaw || f.dataValue}`)
+    }
+    if (options.write) console.log(`Replaced auto-safe exact matches in ${result.changedFiles} file(s).`)
+    else if (counts.autoSafe) console.log('Re-run with --write to replace the auto-safe exact matches.')
+    console.log(`Report: ${path.join(reportDir, 'property-values-report.md')}`)
+  })
+
+/**
  * generate property-docs
  *
  * @description
@@ -2132,6 +2199,11 @@ automation
  * bullets — it is a CANDIDATE for the curation step that rewrites voice, adds
  * `Area::` labels, normalizes units, and phrases CVEs.
  *
+ * In phase 1, a backticked name that matches a property in the release
+ * series' redpanda-properties-<tag>.json becomes a `prop:<name>[link=true]` link. The
+ * file is found in modules/reference/attachments/ unless --properties-file
+ * names one. With no file, names stay monospace and a warning is logged.
+ *
  * @why
  * Release notes are the one reference surface whose source of truth is
  * engineer-authored prose rather than code, so the deterministic part
@@ -2164,6 +2236,7 @@ automation
   .option('--section-file <file>', 'Phase 2: a curated section (from the sm-release-notes skill) to insert (relative to repo root, must stay inside the repository)')
   .option('--date <date>', 'Authored release date as YYYY-MM-DD (required with --body; confirmed on the PR)')
   .option('--page <file>', 'Target release-notes page (relative to repo root, must stay inside the repository)', 'modules/reference/pages/releases/redpanda.adoc')
+  .option('--properties-file <file>', 'Phase 1: property JSON whose names become prop: links (relative to repo root, must stay inside the repository). Default: the newest redpanda-properties-<tag>.json in modules/reference/attachments/ for the tag\'s release series')
   .option('--section-only', 'Phase 1 only: print the candidate section and do not read or modify the page')
   .option('--dry-run', 'Print output to stdout instead of writing the page')
   .action(async (options) => {
@@ -2172,6 +2245,11 @@ automation
       buildReleaseSection,
       isGaTag,
     } = require('../tools/redpanda-release-notes/generate-release-notes.js')
+    const {
+      ATTACHMENTS_DIR,
+      findPropertiesFile,
+      loadPropertyNames,
+    } = require('../tools/redpanda-release-notes/property-names.js')
     try {
       const repoRoot = findRepoRoot()
 
@@ -2192,6 +2270,19 @@ automation
         return abs
       }
 
+      // Phase 1 links known property names. An explicit --properties-file must
+      // exist; a missing default only means names stay monospace.
+      const readPropertyNames = () => {
+        const file = options.propertiesFile
+          ? readInside(options.propertiesFile, '--properties-file')
+          : findPropertiesFile(path.join(repoRoot, ATTACHMENTS_DIR), options.tag)
+        if (!file) {
+          console.warn(`[release-notes] WARN: no property file for ${options.tag} in ${ATTACHMENTS_DIR}; property names stay monospace.`)
+          return undefined
+        }
+        return loadPropertyNames(file)
+      }
+
       // Phase-1 candidate preview: emit the candidate for the curation step. No
       // page is read or written — this is the LLM step's input, nothing else.
       if (options.sectionOnly) {
@@ -2203,7 +2294,9 @@ automation
           return
         }
         const body = fs.readFileSync(readInside(options.body, '--body'), 'utf8')
-        const section = buildReleaseSection({ body, version: options.tag, date: options.date })
+        const section = buildReleaseSection({
+          body, version: options.tag, date: options.date, propertyNames: readPropertyNames(),
+        })
         process.stdout.write(section)
         return
       }
@@ -2213,6 +2306,7 @@ automation
       const genArgs = { tag: options.tag, date: options.date, pageContent }
       if (hasBody) {
         genArgs.body = fs.readFileSync(readInside(options.body, '--body'), 'utf8')
+        genArgs.propertyNames = readPropertyNames()
       } else {
         genArgs.section = fs.readFileSync(readInside(options.sectionFile, '--section-file'), 'utf8')
       }
@@ -3055,9 +3149,10 @@ programCli
   .requiredOption('--repo <path>', 'Path to a Redpanda core checkout. Nothing is cloned.')
   .requiredOption('--diff <base>', 'Base ref: changes in <base>...HEAD are inspected')
   .option('--format <format>', 'Output format: json or human', 'json')
+  .option('--exclude <file>', 'File of already-dispatched findings, one "name change_kind" per line, to leave out of the report')
   .action((options) => {
     const { spawnSync } = require('child_process')
-    const { detectGatingChanges, buildDocImpact, enterprisePropertyNames, ENUM_HEADER, CONFIG_HEADER, CONFIG_SOURCE } = require('../tools/enterprise-features/detect-gating-changes')
+    const { detectGatingChanges, buildDocImpact, withoutSent, enterprisePropertyNames, ENUM_HEADER, CONFIG_HEADER, CONFIG_SOURCE } = require('../tools/enterprise-features/detect-gating-changes')
     const empty = { findings: [] }
     const result = spawnSync('git', ['diff', '--no-color', '--no-ext-diff', `${options.diff}...HEAD`, '--', ENUM_HEADER, CONFIG_HEADER, CONFIG_SOURCE], {
       cwd: options.repo, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024
@@ -3072,7 +3167,14 @@ programCli
     const header = spawnSync('git', ['show', `HEAD:${CONFIG_HEADER}`], { cwd: options.repo, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
     if (header.status !== 0) console.error(`git show HEAD:${CONFIG_HEADER} failed in ${options.repo}; configuration.cc changes are not checked: ${(header.stderr || '').trim()}`)
     const enterpriseNames = header.status === 0 ? enterprisePropertyNames(header.stdout) : []
-    const findings = detectGatingChanges(result.stdout, { enterpriseNames })
+    let findings = detectGatingChanges(result.stdout, { enterpriseNames })
+    if (options.exclude) {
+      try {
+        findings = withoutSent(findings, fs.readFileSync(options.exclude, 'utf8'))
+      } catch (err) {
+        console.error(`Could not read ${options.exclude}; nothing excluded: ${err.message}`)
+      }
+    }
     const report = buildDocImpact(findings) || empty
     if (options.format === 'human') {
       if (findings.length === 0) { console.log('No enterprise gating changes.'); return }
