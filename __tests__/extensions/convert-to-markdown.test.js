@@ -77,6 +77,11 @@ describe('export structure', () => {
     expect(md).toContain('description: Get one trigger. <name> is the resource name.')
   })
 
+  test('decodes front matter entities once and keeps astral characters whole', () => {
+    const md = convert('<h1>x</h1>', { asciidoc: { doctitle: '&amp;lt;literal&amp;gt; &#128512;', attributes: {} } })
+    expect(md).toContain('title: "&lt;literal&gt; 😀"')
+  })
+
   test('gives field-only pages the body alone', () => {
     const md = convert('<h2 id="f"><a class="anchor" href="#f"></a>Fields</h2><p>Body</p>', { isFieldOnlyPage: true })
     expect(md).toBe('## Fields\n\nBody')
@@ -92,6 +97,11 @@ describe('export structure', () => {
       '<div class="feedback-section">Was this helpful?</div>'
     )
     expect(bodyOf(md)).toBe('Body')
+  })
+
+  test('keeps a content block whose id or class contains a chrome fragment', () => {
+    const md = convert('<h1>T</h1><table id="footer-opts"><thead><tr><th>A</th></tr></thead><tbody><tr><td>b</td></tr></tbody></table>')
+    expect(bodyOf(md)).toBe('| A |\n| --- |\n| b |')
   })
 })
 
@@ -178,6 +188,33 @@ describe('tables', () => {
     expect(bodyOf(md)).toBe('| N | Inner |\n| --- | --- |\n| 1 | x / y |')
   })
 
+  test('escapes a pipe in a nested table once, so the outer row keeps its cells', () => {
+    const md = convert('<h1>T</h1><table><thead><tr><th>A</th><th>B</th></tr></thead><tbody><tr><td><p>X</p><table><tr><td>a|b</td></tr></table></td><td>x</td></tr></tbody></table>')
+    const row = bodyOf(md).split('\n')[2]
+    expect(row).not.toContain('\\\\|')
+    expect(row.split(/(?<!\\)\|/).length - 2).toBe(2)
+  })
+
+  test('turns a code block in a list in a cell into code spans', () => {
+    const md = convert('<h1>T</h1><table><thead><tr><th>A</th><th>B</th></tr></thead><tbody><tr><td><div class="ulist"><ul><li><p>Run:</p><div class="listingblock"><div class="content"><pre class="highlight"><code class="language-bash" data-lang="bash">rpk topic create a | tee x</code></pre></div></div></li></ul></div></td><td>x</td></tr></tbody></table>')
+    expect(bodyOf(md).split('\n')[2]).toBe('| - Run:<br>`rpk topic create a \\| tee x` | x |')
+  })
+
+  test('keeps the indentation of code lines in a cell', () => {
+    const md = convert('<h1>T</h1><table><thead><tr><th>A</th></tr></thead><tbody><tr><td><div class="listingblock"><div class="content"><pre class="highlight"><code class="language-yaml" data-lang="yaml">a:\n  b: 1</code></pre></div></div></td></tr></tbody></table>')
+    expect(bodyOf(md).split('\n')[2]).toBe('| `a:`<br>`  b: 1` |')
+  })
+
+  test('does not promote a later row of th cells above the rows before it', () => {
+    const md = convert('<h1>T</h1><table><tbody><tr><td>a</td><td>b</td></tr><tr><th>H1</th><th>H2</th></tr></tbody></table>')
+    expect(bodyOf(md)).toBe('|  |  |\n| --- | --- |\n| a | b |\n| H1 | H2 |')
+  })
+
+  test('gives an admonition its own title, not that of a block nested in it', () => {
+    const md = convert('<h1>T</h1><div class="admonitionblock note"><table><tr><td class="icon"><i class="fa icon-note" title="Note"></i></td><td class="content"><div class="paragraph"><p>Body</p></div><div class="listingblock"><div class="title">Example config</div><div class="content"><pre>a: 1</pre></div></div></td></tr></table></div>')
+    expect(bodyOf(md).split('\n')[0]).toBe('> 📝 **NOTE**')
+  })
+
   test('still renders admonitions as blockquotes', () => {
     const md = convert(
       '<h1>T</h1><div class="admonitionblock note"><table><tr><td class="icon"><i class="fa icon-note" title="Note"></i></td>' +
@@ -203,6 +240,11 @@ describe('escaping', () => {
     expect(bodyOf(md)).toBe('\\- not a list')
   })
 
+  test('escapes line starts after a hard break', () => {
+    const md = convert('<h1>T</h1><p>Line one<br>- not a list<br>1. nope<br># nohead</p>')
+    expect(bodyOf(md)).toBe('Line one  \n\\- not a list  \n1\\. nope  \n\\# nohead')
+  })
+
   test('escapes a delimiter that opens the text as a list marker or thematic break', () => {
     expect(escapeText('* Indicates a required field')).toBe('\\* Indicates a required field')
     expect(escapeText('***')).toBe('\\*\\*\\*')
@@ -224,6 +266,10 @@ describe('escaping', () => {
     expect(escapeText('_emphasis_ here')).toBe('\\_emphasis_ here')
     expect(escapeText('say *loud* words')).toBe('say \\*loud* words')
     expect(escapeText('a *b')).toBe('a \\*b')
+  })
+
+  test('treats a delimiter after a literal backslash as unescaped', () => {
+    expect(escapeText('regex \\*foo* and a\\_b_ c')).toBe('regex \\\\\\*foo* and a\\\\\\_b_ c')
   })
 
   test('leaves an asterisk that cannot open emphasis alone', () => {

@@ -1,5 +1,6 @@
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
 const os = require('os')
+const { decode } = require('html-entities')
 const yaml = require('js-yaml')
 const { toMarkdownUrl } = require('../extension-utils/url-utils')
 const { formatLlmsDirective, transformOutsideFences } = require('../extension-utils/llms-utils')
@@ -109,14 +110,7 @@ function collectGeneratedProvenance (page, contentCatalog) {
  */
 function decodeHtmlEntities (str) {
   if (!str || typeof str !== 'string') return str
-  return str
-    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(dec))
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
-    .replace(/&quot;/g, '"')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&apos;/g, "'")
+  return decode(str)
 }
 
 /**
@@ -488,8 +482,11 @@ function escapeEmphasisDelimiters (text) {
   return text.replace(/([*_])\1*/g, (run, ch, offset) => {
     const prev = offset > 0 ? text[offset - 1] : undefined
     const next = text[offset + run.length]
-    // Already escaped by the base list.
-    if (prev === '\\') return run
+    // Already escaped by the base list: an odd number of backslashes before the
+    // run. An even number is literal backslashes, escaped in pairs.
+    let slashes = 0
+    while (offset - slashes - 1 >= 0 && text[offset - slashes - 1] === '\\') slashes++
+    if (slashes % 2 === 1) return run
     // Intraword underscore. Both neighbours must be known: at a node boundary
     // the next character may be a delimiter Turndown emits for <em>.
     if (ch === '_' && prev !== undefined && next !== undefined && isAlphanumeric(prev) && isAlphanumeric(next)) return run
@@ -543,6 +540,7 @@ function rendersNothing (node) {
   if (node.nodeType === 8) return true
   if (node.nodeType === 3) return !(node.nodeValue || '').trim()
   if (node.nodeType !== 1) return false
+  if (node.nodeName === 'BR' || node.nodeName === 'IMG') return false
   if ((node.textContent || '').trim()) return false
   return !node.querySelector('img, br')
 }
@@ -629,8 +627,13 @@ function fencedCodeBlock (code, language = '') {
  * @returns {string} One line, safe inside `| … |`.
  */
 function flattenCell (markdown) {
-  const withInlineCode = markdown.replace(/(`{3,})[^\n]*\n([\s\S]*?)\n\1/g, (_, __, code) =>
-    code.split('\n').filter((line) => line.trim()).map((line) => inlineCode(line.trim())).join('\n')
+  // A fence in a list item is indented; the closing fence has the same indent.
+  // Code lines keep their own indentation beyond it (YAML nesting).
+  const withInlineCode = markdown.replace(/^([ \t]*)(`{3,})[^\n]*\n([\s\S]*?)\n\1\2/gm, (_, indent, __, code) =>
+    indent + code.split('\n')
+      .filter((line) => line.trim())
+      .map((line) => inlineCode((line.startsWith(indent) ? line.slice(indent.length) : line).trimEnd()))
+      .join('\n' + indent)
   )
   return withInlineCode
     .split('\n')
@@ -644,7 +647,8 @@ function flattenCell (markdown) {
     )
     .filter(Boolean)
     .join('<br>')
-    .replace(/\|/g, '\\|')
+    // A nested table's cells are already escaped; escape only bare pipes.
+    .replace(/(?<!\\)((?:\\\\)*)\|/g, '$1\\|')
 }
 
 /**
@@ -764,10 +768,21 @@ function createTurndownBase () {
   return td
 }
 
+/** A tracking pixel or hidden image, which the export drops. */
+function isTrackingImage (node) {
+  const classAttr = (node.getAttribute('class') || '').toLowerCase()
+  const idAttr = (node.getAttribute('id') || '').toLowerCase()
+  return classAttr.includes('tracking') ||
+    idAttr.includes('scarf') ||
+    node.getAttribute('role') === 'presentation' ||
+    node.style?.display === 'none'
+}
+
 /**
- * Drop site chrome and tracking pixels. Registered last so it outranks the
- * content rules: Turndown consults the most recently added rule first, and the
- * image rule must not get to render a tracking pixel.
+ * Drop site chrome. Registered first so the content rules outrank it:
+ * Turndown consults the most recently added rule first, and a table or block
+ * whose class or id happens to contain a chrome fragment (`footer-opts`) is
+ * content. The image rule drops tracking pixels itself.
  */
 function addRemoveUnwantedRule (td) {
   td.addRule('remove-unwanted', {
@@ -781,15 +796,7 @@ function addRemoveUnwantedRule (td) {
       if (['script', 'style', 'footer', 'nav'].includes(tag)) return true
 
       // Tracking or hidden images
-      if (
-        tag === 'img' &&
-        (classAttr.includes('tracking') ||
-          idAttr.includes('scarf') ||
-          node.getAttribute('role') === 'presentation' ||
-          node.style?.display === 'none')
-      ) {
-        return true
-      }
+      if (tag === 'img' && isTrackingImage(node)) return true
 
       return UNWANTED_FRAGMENTS.some((x) => classAttr.includes(x) || idAttr.includes(x))
     },
@@ -916,7 +923,8 @@ function createTurndownForPage ({ pageUrl, logger }) {
         const type = match ? match[1].toUpperCase() : 'NOTE'
 
         const titleEl =
-          node.querySelector('.title') || contentCell.querySelector('.title') || iconEl?.getAttribute('title')
+          // Only the admonition's own title, not one of a block nested in it.
+          Array.from(contentCell.children).find((c) => c.classList.contains('title')) || iconEl?.getAttribute('title')
         const customTitle = typeof titleEl === 'string' ? titleEl.trim() : titleEl?.textContent?.trim() || ''
 
         const emojiMap = {
@@ -976,13 +984,15 @@ function createTurndownForPage ({ pageUrl, logger }) {
 
         // Asciidoctor emits <thead> only for tables declared with a header
         // row. Without one, every row is data and the header row stays empty
-        // rather than promoting the first data row.
+        // rather than promoting the first data row. A first row of <th> cells
+        // is a header; a later one is not moved above the rows before it.
+        const allTh = (row) => {
+          const cells = row ? Array.from(row.childNodes).filter((c) => c.nodeType === 1) : []
+          return cells.length > 0 && cells.every((c) => c.nodeName === 'TH')
+        }
         const headerRow =
           rows.find((row) => row.parentNode && row.parentNode.nodeName === 'THEAD') ||
-          rows.find((row) => {
-            const cells = Array.from(row.childNodes).filter((c) => c.nodeType === 1)
-            return cells.length && cells.every((c) => c.nodeName === 'TH')
-          })
+          (allTh(rows[0]) ? rows[0] : undefined)
         const bodyRows = rows.filter((row) => row !== headerRow).map(cellsOf)
         const headerCells = headerRow ? cellsOf(headerRow) : []
         const columnCount = Math.max(headerCells.length, ...bodyRows.map((r) => r.length))
@@ -1068,6 +1078,7 @@ function createTurndownForPage ({ pageUrl, logger }) {
     turndownInstance.addRule('images', {
       filter: 'img',
       replacement: (_, node) => {
+        if (isTrackingImage(node)) return ''
         const src = resolveTarget(node.getAttribute('src'), pageUrl)
         if (!src) return ''
         const alt = cleanAttribute(node.getAttribute('alt'))
@@ -1092,10 +1103,10 @@ function createTurndownForPage ({ pageUrl, logger }) {
     })
   }
 
-  addCustomRules(outerTurndown, false)
-  addCustomRules(nestedTurndown, true)
   addRemoveUnwantedRule(outerTurndown)
   addRemoveUnwantedRule(nestedTurndown)
+  addCustomRules(outerTurndown, false)
+  addCustomRules(nestedTurndown, true)
   return outerTurndown
 }
 
