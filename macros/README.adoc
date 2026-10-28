@@ -60,6 +60,8 @@ IMPORTANT: Macros must be registered under the `asciidoc.extensions` key in your
 * **glossterm** - Reference glossary terms with tooltips
 * **prop** - Reference a configuration property, with a validated tooltip and optional link
 * **propval** - Render a property's default, minimum, unit, or other value from the property data
+* **rpkval** - Render an `rpk` flag's default, type, shorthand, or other value from the rpk data
+* **connectval** - Render a Redpanda Connect field's default, type, options, or other value from the Connect data
 * **config_ref** - Link to configuration properties (deprecated; use prop)
 * **helm_ref** - Link to Helm chart values
 * **badge** - Display status badges

@@ -223,7 +223,7 @@ Registered together with the `enterprise` inline macro.
 
 This inline macro references a Redpanda configuration property in prose. The property renders as a marked `<code>` element (`property-ref` class plus a `data-property-name` attribute) that the docs UI decorates with a hover-documentation tooltip. Marking is opt-in: only properties referenced through this macro get tooltips, so ambiguous words such as `admin` or `rack` in unrelated contexts (Helm values, feature settings) are never decorated by mistake.
 
-The macro checks that a property is actually available to the audience reading the page, and links it only where a page documents it. It validates against the published property data: a `redpanda-properties-<tag>.json` attachment in the `reference` module, the same data the tooltips fetch at runtime. See <<prop-availability>> for which properties each doc set may reference and <<prop-version-selection>> for which file a given page uses. To migrate existing plain-backtick property mentions, use `doc-tools generate migrate-property-refs`. To render a property's value (its default, minimum, unit, and so on) rather than its name, use <<propval>>.
+The macro checks that a property is actually available to the audience reading the page, and links it only where a page documents it. It validates against the published property data: a `redpanda-properties-<tag>.json` attachment in the `reference` module, the same data the tooltips fetch at runtime. See <<prop-availability>> for which properties each doc set may reference and <<prop-version-selection>> for which file a given page uses. To migrate existing plain-backtick property mentions, use `doc-tools generate migrate-property-refs`. To render a property's value (its default, minimum, unit, and so on) rather than its name, use <<propval>>. For `rpk` flag and Connect field values, see <<rpkval>> and <<connectval>>.
 
 === Usage
 
@@ -345,7 +345,7 @@ The exact default is `propval:log_segment_ms[default,format=raw]`.
 
 Rendered against `redpanda-properties-v26.2.4.json`, those lines read: "defaults to 2 weeks", "The minimum is 1 minute", "requires a restart: yes", and "The exact default is `1209600000`".
 
-`propval:` is registered by the `prop` macro's extension, so a playbook that registers `macros/prop` has both. It shares every data decision with `prop:` rather than copying them: the same dataset for the page's version (<<prop-version-selection>>), the same `property-validate` modes, the same Cloud availability gate (<<prop-availability>>), and the same refusal to use a neighbouring release's data when a version has none.
+`propval:` is registered by the `prop` macro's extension, so a playbook that registers `macros/prop` has both, along with <<rpkval>> and <<connectval>>. It shares every data decision with `prop:` rather than copying them: the same dataset for the page's version (<<prop-version-selection>>), the same `property-validate` modes, the same Cloud availability gate (<<prop-availability>>), and the same refusal to use a neighbouring release's data when a version has none.
 
 === Usage
 
@@ -442,6 +442,8 @@ With `property-validate` set to `error`, an unknown property, an unsupported fie
 
 === Migrating hand-written values
 
+To run these checks together with the rpk and Connect checks, and fail CI on them, use <<check-reference-values>>.
+
 `doc-tools generate migrate-property-values` finds hand-written values next to a property mention ("defaults to X", "the default is X", "default: X", "minimum X", "is X by default") and checks each against the data for the repo's own version, selected exactly as `prop:` selects it. It writes a JSON and a Markdown report. Each finding is one of:
 
 exact:: The written text is what `propval:` renders. Auto-safe when the statement is in the same sentence as its property, no other property is named in that paragraph line or its list entry, the data value is not null, and the file is not release or upgrade notes. On a self-managed page, a `default` (or another field the Cloud reference hides), or any field of a property Cloud does not support, is auto-safe only inside `ifndef::env-cloud[]` or in a page (not a partial) with no `tag::` regions. Otherwise the page may be single-sourced into cloud-docs, where `propval:` renders a placeholder, so the finding is proposed only: wrap the sentence in `ifndef::env-cloud[]` first.
@@ -487,6 +489,252 @@ asciidoc:
   extensions:
     - '@redpanda-data/docs-extensions-and-macros/macros/prop'
 ----
+
+== rpkval
+
+This inline macro renders one value of an `rpk` flag from the published rpk data, so a sentence such as "the default is -1" comes from the same data as the generated `rpk` reference instead of being typed by hand.
+
+[,asciidoc]
+----
+The default is rpkval:partitions[command=rpk topic create].
+Use `rpkval:partitions[shorthand,command=rpk topic create]` for short.
+The window defaults to rpkval:since[command=rpk ai auditlog list].
+Every command accepts rpkval:config-opt[shorthand] (rpkval:config-opt[type]).
+----
+
+Rendered against `rpk-v26.2.2.json`, those lines read: "The default is -1", "Use `-p` for short", "defaults to 24h", and "accepts -X (stringArray)". For property values, use <<propval>>; for Connect fields, <<connectval>>.
+
+=== Usage
+
+[,asciidoc]
+----
+rpkval:<flag>[<field>,command=<rpk command path>,format=human|raw]
+----
+
+The target is the flag's long name, with or without its leading dashes (`partitions` or `--partitions`). Dots are allowed (`openai-config.base-url`). A one-letter target is an error (`shorthand-target`): name the long flag and use the `shorthand` field.
+
+command::
+The command path exactly as you type it, with spaces: `command=rpk topic create`. The leading `rpk` and quotes are optional, and whitespace is collapsed. Each word matches a command name, then an alias, so `command=rpk cluster status` resolves to `rpk cluster info`. Write the path only: `command=rpk topic create my-topic` is an `unknown-command` error that says `command=` takes the command path only. Leave `command` out, or write `command=rpk`, for a global flag such as `--config-opt`.
+
+The flag is looked up on that command, then in the global flags. It is never taken from a parent command: the data does not say which flags are persistent, so a parent's local flag would be a guess. A flag defined on a parent (`--schema-context` on `rpk registry`) is an `unknown-flag` error whose message names the command to write instead.
+
+[cols="1,2,2"]
+|===
+| Field | Source in the rpk data | Example (v26.2.2)
+
+| `default`
+| The flag's `default`, as `rpk <command> --help` prints it inside `(default ...)`, without the quotes help puts around strings
+| `rpk topic create --partitions`: `-1`; `rpk debug bundle --timeout`: `1m0s`; `rpk topic create --topic-config`: `[]`
+
+| `type`
+| `type`, as the reference's Type column prints it
+| `int32`, `stringArray`, `duration`
+
+| `shorthand` (alias `short`)
+| `shorthand`, with its dash
+| `-p`
+
+| `required`
+| `required`
+| `yes` or `no`
+
+| `deprecated`
+| `deprecated`. An absent key means not deprecated, the rule the reference uses to print `[Deprecated]`
+| `yes` or `no`
+|===
+
+format::
+`human` (default) or `raw`. It changes only `required` and `deprecated`, to `true` or `false`. Any other value warns and renders the human form.
+
+The output is a `<span class="rpk-value">` with `data-rpk-command`, `data-rpk-flag` and `data-field` attributes. A flag scraped from a plugin's `--help` also carries `data-source="help"`. The macro works inside backticks.
+
+=== Formatting
+
+`rpkval:` renders what pflag stores as the flag's default, which is what `--help` prints. It never humanizes: durations stay as Go writes them (`10s`, `1m0s`), and slices render as pflag prints them (`[]`, `[a,b]`). An empty string renders `""`, and booleans and numbers render as stored. It never parses a default out of a description.
+
+=== Which rpk data a page reads
+
+The data is an `rpk-<version>.json` attachment in a `reference` module. The docs rpk workflows publish the newest snapshot of `docs-data/rpk-v<version>.json` there. Selection follows `prop:` exactly (<<prop-version-selection>>):
+
+[cols="1,2,2"]
+|===
+| Page | Dataset | When there is none
+
+| `streaming` on main (26.2)
+| Its own `rpk-v26.2.x.json`: the page's version first, then the newest in the 26.2 series
+| A placeholder and the series warning
+
+| `streaming` beta (26.3, a prerelease)
+| Its own 26.3 files only. It never borrows 26.2 data
+| A placeholder and the series warning
+
+| `streaming` older versions
+| Their own file
+| A placeholder until one is published
+
+| cloud-docs (`env-cloud`) and adp-docs (`env-adp`)
+| The newest GA `streaming` file, then `ROOT`. The surface is Cloud
+| A placeholder, and a prerelease-only or no-data warning
+
+| Any other component
+| None, never inferred
+| A placeholder and the no-data warning
+|===
+
+`env-adp` borrows rpk data only: `prop:` and `propval:` still borrow on `env-cloud` alone.
+
+=== Cloud
+
+On a page whose surface is Cloud:
+
+* A command or flag marked `selfHostedOnly` anywhere on its path is `unavailable`, because it is self-managed only.
+* The `default` of a command whose reference description is scoped to self-managed (`descriptionScope: self-hosted`, such as `rpk shadow delete`) is `cloud-hidden`, because the behavior may differ in Cloud. Its other fields still render.
+* `platforms` and `linux_only_commands` are not gated: they describe the operating system, not the deployment.
+
+On a self-managed page, a flag marked `cloudOnly` is `unavailable`, mirroring the `ifdef::env-cloud[]` the reference puts around it.
+
+=== Failures and validation modes
+
+Whenever no verified value exists, `rpkval:` renders `<unknown FIELD>` (class `rpk-value rpk-value-unknown`) and logs why, naming the macro call, the field, the dataset, and the file. It never renders a guessed value.
+
+rpk-validate::
+`warn` (default) logs each problem. `error` fails the build on `unknown-command`, `unknown-flag`, `shorthand-target`, `deprecated-command`, `missing-field`, `unsupported-field`, `cloud-hidden` and `unavailable`. `off` silences warnings for values that render; a placeholder is still reported, because a value has no safe fallback.
+
+These data gaps render a placeholder and warn, and never fail the build: `no-data`, `imprecise`, `description-default` (an empty default whose description states the real one, such as `rpk debug bundle --output`), `complex-default`, and `plugin-unknown`.
+
+`deprecated-command` covers a command that is a key of `deprecated_commands`, or whose ancestor is, and its message carries the replacement. It is checked before `unknown-command`, because deprecated commands are not in the tree.
+
+=== Plugin flags until DOC-2689
+
+`rpk ai`, `rpk check`, `rpk connect`, `rpk k8s` and `rpk oxla` are plugins, and until they publish their own command trees (DOC-2689), the generator scrapes their flags from `--help`. A scraped flag's default is the string help printed, with its quotes, and a flag with no default means help said nothing, not that there is none. So for a scraped flag, `rpkval:` strips one pair of quotes from the default, adds `data-source="help"`, and renders `plugin-unknown` (warn only) when the default or `required` is absent.
+
+A flag is scraped when its command is under one of those plugins, the snapshot's `plugin_flag_sources` does not record that plugin as `tree`, and the flag carries no `from_plugin: true` marker. Both markers are what the generator writes once the plugin trees land, so no change here is needed when they do.
+
+=== Checking prose with check-reference-values
+
+`doc-tools check-reference-values` finds hand-written flag defaults that `rpkval:` could render, and `rpk` commands and flags the data does not have. See <<check-reference-values>>.
+
+=== Registration
+
+Registered by the `prop` macro's extension, so a playbook that registers `macros/prop` has `prop:`, `propval:`, `rpkval:` and `connectval:`:
+
+[,yaml]
+----
+asciidoc:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/macros/prop'
+----
+
+== connectval
+
+This inline macro renders one value of a Redpanda Connect config field from the published Connect data, formatted exactly as the generated component reference prints it.
+
+[,asciidoc]
+----
+The chunk size defaults to `connectval:incremental_snapshot.chunk_size[component=inputs/postgres_cdc]`.
+Valid strategies: connectval:merge_strategy[options,component=outputs/iceberg].
+The default for `pipeline.threads` is connectval:pipeline.threads[component=config].
+----
+
+Rendered against `connect-4.114.0.json`, those lines read: "defaults to `1024`", "Valid strategies: `merge-on-read`, `copy-on-write`", and "The default for `pipeline.threads` is -1".
+
+=== Usage
+
+[,asciidoc]
+----
+connectval:<field.path>[<field>,component=<type>/<name>|config,format=human|raw]
+----
+
+The target is a dot-separated field path through the component's config, such as `tls.enabled` or `incremental_snapshot.chunk_size`. Address an array of objects without an index (`sasl.mechanism`): the data stores one element's fields, and Asciidoctor ends a macro target at `[`, so `sasl[].mechanism` cannot work.
+
+component::
+Required. `<type>/<name>`, written as rp-connect-docs paths and xrefs write it: `inputs/kafka_franz`, `rate_limits/local`. The type may be plural, singular, or hyphenated (`rate-limits`, `rate_limit`). `component=config` addresses the root fields of a pipeline config (`pipeline.threads`, `http.enabled`). The type is always explicit, so `kafka`, `http_client` and `file` are never ambiguous.
+
+[cols="1,2,2"]
+|===
+| Field | Source in the Connect data | Example (4.114.0)
+
+| `default`
+| `default`, as the reference's `*Default*:` line prints it inline
+| `redpanda` input `client_id`: `redpanda-connect`; `postgres_cdc` input `incremental_snapshot.chunk_size`: `1024`
+
+| `type`
+| The reference's `*Type*:` text
+| `string`, `array<string>`, `object`, `array<array<string>>`
+
+| `options` (aliases `values`, `annotated_options`)
+| `options`, else the first value of each `annotated_options` pair, each as inline code
+| `merge-on-read`, `copy-on-write`
+
+| `deprecated` (alias `is_deprecated`)
+| `is_deprecated`
+| `yes` or `no`
+
+| `introduced` (alias `version`)
+| `version`. Hidden on Cloud, where the reference shows no "Requires version"
+| `4.21.0`
+|===
+
+format::
+`human` (default) or `raw`. It changes only `deprecated` (`true` or `false`) and `options` (a JSON array).
+
+Don't wrap `options` in backticks: it already renders each value as inline code. The output is a `<span class="connect-value">` with `data-connect-component`, `data-connect-field` and `data-field` attributes.
+
+=== Formatting
+
+Connect renders what the reference prints, through `formatConnectDefault` and `connectDisplayType` in `tools/redpanda-connect/helpers/formatConnectDefault.js`, which `renderConnectFields` also calls. `[]` and `{}` render as written, a string that is already quoted renders as stored, an empty string renders `""`, and numbers and booleans render as stored. A default the reference prints as a YAML block (any other object or list) is `complex-default`: link the reference instead. An empty default whose description names the real one (`gcp_spanner_cdc` `metadata_table`) is `description-default`.
+
+A deprecated field still renders, and the macro warns `deprecated-field`, because the Connect reference does not list deprecated fields.
+
+=== Which Connect data a page reads
+
+Connect versions are Connect's own (4.x), so the page's component and version never select the data. Every page reads the newest `connect-<version>.json` in the `components` module of the component named `connect` (rp-connect-docs). When more than one exists, the newest wins and the macro warns once. With no `connect` component in the build, every value is a placeholder and the warning says to add the rp-connect-docs content source to the playbook.
+
+=== Cloud
+
+The surface is Cloud when the page's own component version sets `env-cloud`, so a cloud-docs page that includes rp-connect-docs text is gated. On a Cloud page:
+
+* A component that is not available in Cloud is `unavailable`. Availability comes from the translated `csvData` rows that `generate-rp-connect-info` sets on the `connect` component (GPU-only components count as available), else from the component's `cloudSupported` in the JSON. The message names the source. When neither says, the value renders and the macro warns `cloud-unknown` once.
+* `introduced` is `cloud-hidden`.
+* `component=config` is never gated.
+
+=== Failures and validation modes
+
+A missing value renders `<unknown FIELD>` (class `connect-value connect-value-unknown`) and logs why.
+
+connect-validate::
+`warn` (default) logs each problem. `error` fails the build on `unknown-type`, `unknown-component`, `unknown-field`, `missing-field`, `unsupported-field`, `cloud-hidden` and `unavailable`. `off` silences warnings for values that render; a placeholder is still reported.
+
+These never fail the build: `no-data`, `imprecise`, `description-default`, `complex-default`, `deprecated-field` and `cloud-unknown`.
+
+=== Checking prose with check-reference-values
+
+`doc-tools check-reference-values` finds hand-written field defaults that `connectval:` could render, YAML comments that state a stale default, and components and fields the data does not have. See <<check-reference-values>>.
+
+=== Registration
+
+Registered by the `prop` macro's extension (see <<rpkval>>).
+
+[[check-reference-values]]
+== Checking prose: check-reference-values
+
+`npx doc-tools check-reference-values` runs three checks over a docs checkout and writes one JSON and one Markdown report. Each kind selects its data exactly as its macro does, from the repo and any `--lender` checkouts, unless `--data-file` names it.
+
+properties:: The `generate migrate-property-values` scan, unchanged. See <<propval>>.
+rpk:: Every `rpk` invocation in a shell listing block and every backticked `rpk ...` span in prose is parsed as `rpk` parses it. An unknown subcommand is `unknown-command`, with a suggestion (`movement-cancel` suggests `move-cancel`); a flag no command on the path defines is `unknown-flag`; a deprecated command is a warning that carries its replacement. A flag default stated in prose ("`--limit` defaults to 50") or in a Default table column is compared with what `rpkval:` renders for the nearest command on the page that defines the flag.
+connect:: Every pipeline config in a YAML listing block or an examples file is walked from its root keys. An unknown component is `unknown-component`, an unknown field is `unknown-field`, and deprecated components and fields are warnings. A YAML comment that states a default ("# Optional (default: "benthos")") is example output that `matches` or is `stale`. A callout ("<3> ... The default is `1024`.") or a sentence that states a field's default is compared with what `connectval:` renders.
+
+Statuses are propval's, plus `reference` for a thing the data does not have. `--fail-on mismatch` (the default) fails on mismatches, reference errors, and stale rpk and Connect examples; `any` also fails on exact, equivalent and unset values and on reference warnings, which catches every hand-written value a macro could render. Plugin flags scraped from `--help` never fail, and neither do findings in release notes, upgrade notes or Connect migration guides. A `// value-check: ignore` comment line suppresses the findings on the next line, or in the block it sits directly above. Exit 0 means nothing failed, 1 that something did, and 2 that the check could not run.
+
+`--write` applies only exact matches in the same sentence (or a Connect callout) that name one target, never in a table, block or YAML, never a scraped plugin flag or an empty default, and never in a file that may be single-sourced into Cloud where the macro would render a placeholder. Each replacement is kept only when the line renders the same visible text before and after, through the real macros.
+
+[,bash]
+----
+npx doc-tools check-reference-values --docs-dir . --data-file docs-data/rpk-v26.2.2.json --lender ../rp-connect-docs
+npx doc-tools check-reference-values --docs-dir ../cloud-docs --lender ../docs ../rp-connect-docs --data-file ../docs/docs-data/rpk-v26.2.2.json
+----
+
+See `CLI_REFERENCE.adoc` for every option.
 
 == glossterm
 

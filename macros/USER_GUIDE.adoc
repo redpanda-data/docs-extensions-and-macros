@@ -91,6 +91,45 @@ To find hand-written values in a repo and check them against the data:
 npx doc-tools generate migrate-property-values --docs-dir . --report-dir ./propval-report
 ----
 
+=== rpkval and connectval - rpk flag and Connect field values
+
+Render an `rpk` flag's value, or a Redpanda Connect field's value, from the published data instead of typing it. Use `rpkval:` when prose states a flag's default, type, or shorthand, and `connectval:` when it states a Connect field's default, type, or accepted options.
+
+[,asciidoc]
+----
+The default is rpkval:partitions[command=rpk topic create].
+Use `rpkval:partitions[shorthand,command=rpk topic create]` for short.
+The `--since` window defaults to rpkval:since[command=rpk ai auditlog list].
+----
+
+With rpk 26.2.2 data, that renders "The default is -1", "Use `-p` for short", and "defaults to 24h".
+
+[,asciidoc]
+----
+The chunk size defaults to `connectval:incremental_snapshot.chunk_size[component=inputs/postgres_cdc]`.
+Valid strategies: connectval:merge_strategy[options,component=outputs/iceberg].
+The default for `pipeline.threads` is connectval:pipeline.threads[component=config].
+----
+
+With Connect 4.114.0 data, that renders "defaults to `1024`", "Valid strategies: `merge-on-read`, `copy-on-write`", and "is -1".
+
+*Syntax:* `rpkval:flag[field,command=rpk command]` and `connectval:field.path[field,component=type/name]`
+
+* Write `command=` as you would type the command, without arguments: `command=rpk topic create`, not `command=rpk topic create my-topic`. Leave it out for a global flag.
+* Name the long flag as the target (`partitions`), not the shorthand.
+* Write `component=` as the component's page path: `inputs/postgres_cdc`, or `config` for root fields such as `pipeline.threads`.
+* Address array fields without `[]`: `sasl.mechanism`, not `sasl[].mechanism`.
+* Don't wrap `options` in backticks: each value already renders as inline code.
+
+Both come with `@redpanda-data/docs-extensions-and-macros/macros/prop`. If a value can't be verified, the page shows `<unknown default>` and the build log says why. See link:REFERENCE.adoc#rpkval[the macros reference].
+
+To find hand-written values that need these macros, and commands, flags, components and fields that don't exist:
+
+[,bash]
+----
+npx doc-tools check-reference-values --docs-dir . --data-file docs-data/rpk-v26.2.2.json --lender ../rp-connect-docs
+----
+
 === helm_ref - Helm value references
 
 Link to Helm chart values:
