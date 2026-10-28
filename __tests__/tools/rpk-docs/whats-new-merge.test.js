@@ -287,3 +287,58 @@ describe('filterDiffForWhatsNew (rpk ai exclusion)', () => {
     expect(out.details.newFlags.map(f => f.commandPath)).toEqual(['rpk topic produce'])
   })
 })
+
+describe('dropExcludedFromDiff (exclude: true and excludeFlags)', () => {
+  const { dropExcludedFromDiff } = require('../../../tools/rpk-docs/rpk-docs-handler.js')
+  const { generateRpkDiff } = require('../../../tools/rpk-docs/report-delta.js')
+
+  const tree = (children) => ({ name: 'rpk', path: 'rpk', commands: children })
+  const oxla = { name: 'oxla', path: 'rpk oxla', description: 'Redpanda Oxla - Coming Soon', commands: [] }
+  const topic = (flags) => ({ name: 'topic', path: 'rpk topic', description: 'Topics', flags, commands: [] })
+  const flag = (name) => ({ name, type: 'bool', description: name })
+
+  const overrides = {
+    commands: {
+      'rpk oxla': { exclude: true },
+      'rpk topic': { excludeFlags: ['internal'] }
+    }
+  }
+
+  test('an excluded command that leaves the tree is not reported as removed', () => {
+    const diff = generateRpkDiff(
+      tree([oxla, topic([flag('verbose')])]),
+      tree([topic([flag('verbose')])]),
+      { oldVersion: 'v1', newVersion: 'v2' }
+    )
+    expect(diff.details.removedCommands.map(c => c.path)).toEqual(['rpk oxla'])
+
+    const out = dropExcludedFromDiff(diff, overrides)
+    expect(out.details.removedCommands).toEqual([])
+    expect(out.summary.removedCommands).toBe(0)
+  })
+
+  test('an excluded command that enters the tree is not reported as new', () => {
+    const diff = generateRpkDiff(tree([topic([])]), tree([oxla, topic([])]), {})
+    const out = dropExcludedFromDiff(diff, overrides)
+    expect(out.details.newCommands).toEqual([])
+    expect(out.summary.newCommands).toBe(0)
+  })
+
+  test('excludeFlags entries are not reported as new or removed flags', () => {
+    const diff = generateRpkDiff(
+      tree([topic([flag('verbose'), flag('gone')])]),
+      tree([topic([flag('verbose'), flag('internal')])]),
+      {}
+    )
+    const out = dropExcludedFromDiff(diff, overrides)
+    expect(out.details.newFlags).toEqual([])
+    expect(out.details.removedFlags.map(f => f.flagName)).toEqual(['gone'])
+    expect(out.summary.newFlags).toBe(0)
+    expect(out.summary.removedFlags).toBe(1)
+  })
+
+  test('without overrides the diff passes through unchanged', () => {
+    const diff = generateRpkDiff(tree([oxla]), tree([]), {})
+    expect(dropExcludedFromDiff(diff, null)).toBe(diff)
+  })
+})

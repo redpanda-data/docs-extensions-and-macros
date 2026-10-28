@@ -1163,6 +1163,43 @@ function filterDiffForWhatsNew(diffData, excluded = WHATS_NEW_EXCLUDED_SUBTREES,
   return { ...diffData, details: filteredDetails }
 }
 
+/**
+ * Return a copy of diffData without entries for commands and flags the
+ * overrides exclude from the docs (`exclude: true`, `excludeFlags`). Those
+ * have no pages, so reporting them as new or removed is noise: when the
+ * excluded `rpk oxla` stub dropped out of the tree, the What's new block
+ * and PR summary listed it as a removed command. Summary counts are
+ * recomputed from the filtered details.
+ * @param {Object} diffData - Diff from generateRpkDiff
+ * @param {Object|null} overridesData - rpk overrides
+ * @returns {Object} Filtered copy (the input when there are no overrides)
+ */
+function dropExcludedFromDiff(diffData, overridesData) {
+  if (!diffData || !overridesData?.commands) return diffData
+  const resolved = resolveReferences(overridesData, overridesData)
+  const excludedCommand = (cmdPath) => typeof cmdPath === 'string' && shouldExcludeCommand(resolved, cmdPath)
+  const excludedFlag = (cmdPath, flagName) => {
+    const flags = resolved.commands[cmdPath]?.excludeFlags
+    return Array.isArray(flags) && flags.includes(flagName)
+  }
+  const details = diffData.details || {}
+  const filteredDetails = { ...details }
+  for (const key of ['newCommands', 'newlyDeprecatedCommands', 'removedCommands', 'descriptionChanges']) {
+    if (Array.isArray(details[key])) filteredDetails[key] = details[key].filter(e => !excludedCommand(e.path))
+  }
+  for (const key of ['newFlags', 'removedFlags', 'changedDefaults', 'changedFlagTypes', 'changedFlagRequirements', 'changedFlagDescriptions', 'flagDataBackfilled']) {
+    if (Array.isArray(details[key])) {
+      filteredDetails[key] = details[key].filter(e =>
+        !excludedCommand(e.commandPath) && !(e.flagName && excludedFlag(e.commandPath, e.flagName)))
+    }
+  }
+  const summary = { ...(diffData.summary || {}) }
+  for (const key of Object.keys(summary)) {
+    if (Array.isArray(filteredDetails[key])) summary[key] = filteredDetails[key].length
+  }
+  return { ...diffData, summary, details: filteredDetails }
+}
+
 function updateWhatsNewFile(diffData, whatsNewPath, version, options = {}) {
   // Each block opens with a "=== <version>" heading so accumulated blocks
   // (successive RCs, multiple plugin releases) never collide on section ids
@@ -2151,12 +2188,12 @@ async function handleRpkDocsGeneration(options = {}) {
         if (oldData) {
           // Use raw_tree for diffing (falls back to tree for backward compatibility)
           const oldTree = oldData.raw_tree || oldData.tree
-          diffData = generateRpkDiff(oldTree, tree, {
+          diffData = dropExcludedFromDiff(generateRpkDiff(oldTree, tree, {
             oldVersion: diffVersion,
             newVersion: rpkVersion,
             oldDeprecatedCommands: oldData.deprecated_commands || {},
             newDeprecatedCommands: jsonData.deprecated_commands || {}
-          })
+          }), overridesData)
 
           // Save diff
           const diffFileName = `rpk-diff-${diffVersion}_to_${rpkVersion}.json`
@@ -2463,12 +2500,12 @@ async function handleRpkDocsGeneration(options = {}) {
       if (oldData) {
         // Use raw_tree for diffing (falls back to tree for backward compatibility)
         const oldTree = oldData.raw_tree || oldData.tree
-        diffData = generateRpkDiff(oldTree, tree, {
+        diffData = dropExcludedFromDiff(generateRpkDiff(oldTree, tree, {
           oldVersion: diffVersion,
           newVersion: rpkVersion,
           oldDeprecatedCommands: oldData.deprecated_commands || {},
           newDeprecatedCommands: deprecatedCommands
-        })
+        }), overridesData)
 
         // Save diff
         const diffFileName = `rpk-diff-${diffVersion}_to_${rpkVersion}.json`
@@ -2912,6 +2949,7 @@ module.exports = {
   // Exported for tests to seed manifest data without network access
   pluginManifestVersionsCache,
   filterDiffForWhatsNew,
+  dropExcludedFromDiff,
   computeDescriptionCoverage,
   updateWhatsNewFile,
   KNOWN_PLUGINS,
