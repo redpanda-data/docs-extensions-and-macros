@@ -1126,14 +1126,20 @@ function makeLinkablePredicate(overridesData) {
   }
 }
 
-// Command subtrees whose changes never belong in the Self-Managed What's
-// new. rpk ai's documentation home is adp-docs, and the ADP release notes
-// already cover its CLI changes per release. The plugin-release receiver
-// workflow excludes ai from --update-whats-new for exactly this reason; the
-// full-regeneration path must agree, or a full run floods the Self-Managed
-// release notes with rpk ai entries (a rename release alone produces 21 new
-// plus 21 removed bullets).
+// Plugin subtrees that never get a What's new block, even from their own
+// plugin-release run. rpk ai's documentation home is adp-docs, and the ADP
+// release notes already cover its CLI changes per release.
 const WHATS_NEW_EXCLUDED_SUBTREES = ['rpk ai']
+
+// Command subtrees a full rpk regeneration leaves out of its What's new
+// block: every plugin that releases on its own cadence. Each one's changes
+// are published by its plugin-release run under the plugin's own version
+// (or, for rpk ai, by adp-docs), so a full run that also listed them would
+// attribute them to the Redpanda release and duplicate them. Without this,
+// a full run floods the Self-Managed release notes with plugin entries (an
+// rpk ai rename release alone produces 21 new plus 21 removed bullets, and
+// v26.3.1-rc2 listed rpk connect 4.115.1 flags as Redpanda changes).
+const FULL_REGEN_WHATS_NEW_EXCLUDED_SUBTREES = REFRESHABLE_PLUGINS.map(pl => `rpk ${pl}`)
 
 /**
  * Return a copy of diffData without entries under the excluded subtrees.
@@ -1147,7 +1153,7 @@ const WHATS_NEW_EXCLUDED_SUBTREES = ['rpk ai']
  * @param {Object} [overridesData] - rpk overrides; asPartial subtrees are dropped
  * @returns {Object} Filtered copy
  */
-function filterDiffForWhatsNew(diffData, excluded = WHATS_NEW_EXCLUDED_SUBTREES, overridesData = null) {
+function filterDiffForWhatsNew(diffData, excluded = FULL_REGEN_WHATS_NEW_EXCLUDED_SUBTREES, overridesData = null) {
   const resolved = overridesData ? resolveReferences(overridesData, overridesData) : null
   const outside = (cmdPath) => !excluded.some(prefix =>
     cmdPath === prefix || (typeof cmdPath === 'string' && cmdPath.startsWith(prefix + ' '))) &&
@@ -2206,7 +2212,7 @@ async function handleRpkDocsGeneration(options = {}) {
 
           // Update what's-new file if requested
           if (whatsNewPath) {
-            updateWhatsNewFile(filterDiffForWhatsNew(diffData, WHATS_NEW_EXCLUDED_SUBTREES, overridesData), whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
+            updateWhatsNewFile(filterDiffForWhatsNew(diffData, FULL_REGEN_WHATS_NEW_EXCLUDED_SUBTREES, overridesData), whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
           }
         } else {
           console.warn(`Warning: Could not load previous version ${diffVersion} for diff`)
@@ -2528,7 +2534,7 @@ async function handleRpkDocsGeneration(options = {}) {
 
         // Update what's-new file if requested
         if (whatsNewPath) {
-          updateWhatsNewFile(filterDiffForWhatsNew(diffData, WHATS_NEW_EXCLUDED_SUBTREES, overridesData), whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
+          updateWhatsNewFile(filterDiffForWhatsNew(diffData, FULL_REGEN_WHATS_NEW_EXCLUDED_SUBTREES, overridesData), whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
         }
       } else {
         console.warn(`Warning: Could not load previous version ${diffVersion} for diff`)
@@ -2949,6 +2955,8 @@ module.exports = {
   // Exported for tests to seed manifest data without network access
   pluginManifestVersionsCache,
   filterDiffForWhatsNew,
+  FULL_REGEN_WHATS_NEW_EXCLUDED_SUBTREES,
+  WHATS_NEW_EXCLUDED_SUBTREES,
   dropExcludedFromDiff,
   computeDescriptionCoverage,
   updateWhatsNewFile,
