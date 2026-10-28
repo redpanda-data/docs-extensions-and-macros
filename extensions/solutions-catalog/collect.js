@@ -33,8 +33,12 @@ const LAYOUTS = Object.freeze({
 const ENUMS = Object.freeze({
   status: ['draft', 'published', 'deprecated'],
   download: ['authenticated', 'public', 'none'],
-  platforms: ['self-managed', 'cloud', 'kubernetes'],
 })
+
+// The page-solution-platforms values a build without the docs taxonomy
+// accepts. With taxonomy.yml, the deployment scheme decides instead (see
+// verificationPlatforms and validate.js), and this list is not used.
+const FALLBACK_PLATFORMS = Object.freeze(['self-managed', 'cloud', 'kubernetes'])
 
 // A solution that sets no page-solution-platforms runs on these. Kubernetes is
 // never assumed: it needs the solution's own manifests and k8s-up target.
@@ -93,13 +97,31 @@ const PLATFORM_RUN_FIELDS = Object.freeze([
 ])
 
 /**
+ * The platforms a verification manifest can carry a separate run for, as the
+ * prefix of its <platform>_verify_script, <platform>_run_at and
+ * <platform>_environment keys. The base run (unprefixed keys) is the one
+ * page-solution-platforms calls self-managed, so it is never a prefix.
+ *
+ * @param {import('../../extension-utils/taxonomy').Taxonomy} [taxonomy] - with
+ *   it, every deployment concept ID except the one self-managed resolves to;
+ *   without it, FALLBACK_PLATFORMS minus self-managed
+ * @returns {Array<string>}
+ */
+function verificationPlatforms (taxonomy) {
+  if (!taxonomy) return FALLBACK_PLATFORMS.filter((p) => p !== 'self-managed')
+  const base = taxonomy.resolve('self-managed', { schemes: ['deployment'], prefer: 'id' })
+  const baseIds = base ? base.ids : []
+  return taxonomy.conceptIds('deployment').filter((id) => !baseIds.includes(id))
+}
+
+/**
  * Read a solution's verification manifest.
  *
  * Returns `{ verified, error }`: a record object when the file parses and
  * carries at least one known field, otherwise `verified: null` and a reason for
  * validate.js to warn with. A missing file is neither: no data, no complaint.
  */
-function parseVerification (file) {
+function parseVerification (file, { platforms = verificationPlatforms() } = {}) {
   if (!file) return { verified: null, error: null }
   let data
   try {
@@ -117,7 +139,7 @@ function parseVerification (file) {
     verified[to] = value
   }
   const runs = {}
-  for (const platform of ENUMS.platforms.filter((p) => p !== 'self-managed')) {
+  for (const platform of platforms) {
     const run = {}
     for (const [from, to] of PLATFORM_RUN_FIELDS) {
       const value = data[`${platform}_${from}`]
@@ -379,7 +401,7 @@ function stepIdOf (page) {
  *   facetsFile: Object|undefined
  * }} null when the component is not part of the build
  */
-function collectSolutions (contentCatalog, { component = COMPONENT } = {}) {
+function collectSolutions (contentCatalog, { component = COMPONENT, taxonomy } = {}) {
   const comp = contentCatalog.getComponent(component)
   if (!comp) return null
 
@@ -407,11 +429,13 @@ function collectSolutions (contentCatalog, { component = COMPONENT } = {}) {
   const facetsFile = partials.find((f) => f.src.module === 'ROOT' && f.src.relative === 'solution-facets.yml')
 
   const solutions = []
+  const runPlatforms = verificationPlatforms(taxonomy) // once per build, not per module
   for (const [mod, modulePages] of byModule) {
     if (NON_SOLUTION_MODULES.includes(mod)) continue
     solutions.push(buildRecord(mod, modulePages, attachments.filter((a) => a.src.module === mod), {
       version,
       moduleExamples: examples.filter((e) => e.src.module === mod),
+      verificationPlatforms: runPlatforms,
     }))
   }
   solutions.sort((a, b) => a.id.localeCompare(b.id))
@@ -419,7 +443,7 @@ function collectSolutions (contentCatalog, { component = COMPONENT } = {}) {
   return { component: comp, version, landing, solutions, rootPages, relationshipsFile, facetsFile }
 }
 
-function buildRecord (mod, modulePages, moduleAttachments, { version, moduleExamples = [] }) {
+function buildRecord (mod, modulePages, moduleAttachments, { version, moduleExamples = [], verificationPlatforms: platformsForRuns }) {
   const overview = modulePages.find((p) => p.src.relative === 'index.adoc')
   const stepPages = modulePages
     .filter((p) => p !== overview)
@@ -429,7 +453,8 @@ function buildRecord (mod, modulePages, moduleAttachments, { version, moduleExam
   const attrs = (overview && overview.asciidoc && overview.asciidoc.attributes) || {}
   const solutionVersion = attrs['page-solution-version'] ? String(attrs['page-solution-version']).trim() : ''
   const { verified, error: verifiedError } = parseVerification(
-    moduleAttachments.find((a) => a.src.relative === VERIFICATION_FILE)
+    moduleAttachments.find((a) => a.src.relative === VERIFICATION_FILE),
+    platformsForRuns ? { platforms: platformsForRuns } : undefined
   )
   const platforms = parseList(attrs['page-solution-platforms'])
 
@@ -577,6 +602,7 @@ module.exports = {
   NON_SOLUTION_MODULES,
   LAYOUTS,
   ENUMS,
+  FALLBACK_PLATFORMS,
   DEFAULT_PLATFORMS,
   SLUG_RX,
   VERSION_RX,
@@ -584,6 +610,7 @@ module.exports = {
   ALLOWED_ATTACHMENTS,
   VERIFICATION_FIELDS,
   parseVerification,
+  verificationPlatforms,
   collectSnippetFiles,
   isFullIncludeAttrlist,
   fullExampleIncludes,

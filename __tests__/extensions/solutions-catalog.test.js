@@ -222,6 +222,26 @@ function createContext (config = {}) {
 }
 
 /**
+ * Register through Antora's real GeneratorContext, from a playbook entry, the
+ * way a build does. Antora picks how to call register from its .length, so
+ * this is what catches a signature that never receives the settings.
+ */
+async function createAntoraContext (config = {}) {
+  const GeneratorContext = require(path.join(path.dirname(require.resolve('@antora/site-generator')), 'generator-context.js'))
+  const ctx = new GeneratorContext(module)
+  const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }
+  ctx.getLogger = () => logger
+  const entry = { require: path.join(__dirname, '..', '..', 'extensions', 'solutions-catalog', 'index.js'), ...config }
+  await GeneratorContext.start(ctx, { dir: path.join(__dirname, '..', '..'), antora: { extensions: [entry] } })
+  const handlers = {}
+  for (const event of ['contentClassified', 'documentsConverted', 'navigationBuilt', 'beforePublish']) {
+    const [listener] = ctx.rawListeners(event)
+    if (listener) handlers[event] = (vars) => listener.call(ctx, vars)
+  }
+  return { ctx, handlers, logger }
+}
+
+/**
  * Register and run the three hooks over the given content. Returns everything a
  * test may want to inspect. Throws whatever the extension throws.
  */
@@ -241,6 +261,11 @@ async function run ({
   // contentClassified and its converted HTML from documentsConverted on, as
   // in a real build.
   sources = {},
+  // A parsed docs taxonomy for siteCatalog.taxonomy; null is a build without
+  // taxonomy.yml.
+  taxonomy = null,
+  // Register through Antora's GeneratorContext instead of calling register.
+  viaAntora = false,
 } = {}) {
   const pages = [...(landing ? [landing] : []), ...solutions.flatMap((s) => s.pages), ...docs]
   const attachments = [...solutions.flatMap((s) => s.attachments), ...solutions.flatMap((s) => s.examples || [])]
@@ -249,13 +274,13 @@ async function run ({
     ...(facetsText === null ? [] : [makePartial({ relative: 'solution-facets.yml', text: facetsText })]),
   ]
   const catalog = makeCatalog({ pages, attachments, partials, components })
-  const siteCatalog = { attributeFile: { 'page-valid-categories': VALID_CATEGORIES }, unpublishedPages: [], addFile: jest.fn() }
+  const siteCatalog = { attributeFile: { 'page-valid-categories': VALID_CATEGORIES }, unpublishedPages: [], addFile: jest.fn(), taxonomy }
   const playbook = { site: { url: 'https://docs.redpanda.com' } }
 
   const savedEnv = { ...process.env }
   Object.assign(process.env, env)
   try {
-    const { handlers, logger } = createContext(config)
+    const { handlers, logger } = viaAntora ? await createAntoraContext(config) : createContext(config)
     const html = new Map()
     for (const page of pages) {
       const source = sources[`${page.src.module}/${page.src.relative}`]
@@ -466,6 +491,20 @@ describe('solutions-catalog: happy path', () => {
   test('warns about the pending relationship instead of using it', () => {
     const info = result.logger.info.mock.calls.map((c) => c[0]).join('\n')
     expect(info).toMatch(/1 pending relationship/)
+  })
+})
+
+describe('solutions-catalog: playbook settings through Antora', () => {
+  // Antora calls a register function with .length 0 with no arguments, so a
+  // signature like `({ config = {} } = {})` silently dropped every setting.
+  test('min_score and max_related from the playbook entry reach the graph', async () => {
+    const result = await run({ viaAntora: true, config: { min_score: 0.9, max_related: 1, network_checks: false } })
+    expect(addedFile(result.siteCatalog, 'assets/data/solutions-graph.json').settings).toEqual({ maxRelated: 1, minScore: 0.9 })
+  })
+
+  test('without settings, the defaults apply', async () => {
+    const result = await run({ viaAntora: true })
+    expect(addedFile(result.siteCatalog, 'assets/data/solutions-graph.json').settings).toEqual({ maxRelated: 3, minScore: 0.6 })
   })
 })
 
@@ -2466,7 +2505,8 @@ describe('solutions-catalog: build-along files', () => {
 
 describe('solutions-catalog: the kubernetes platform', () => {
   test('kubernetes is an allowed platform, but a solution that sets none is never assumed to run there', () => {
-    expect(collect.ENUMS.platforms).toEqual(['self-managed', 'cloud', 'kubernetes'])
+    expect(collect.ENUMS.platforms).toBeUndefined()
+    expect(collect.FALLBACK_PLATFORMS).toEqual(['self-managed', 'cloud', 'kubernetes'])
     expect(collect.DEFAULT_PLATFORMS).toEqual(['self-managed', 'cloud'])
   })
 })
@@ -2492,5 +2532,96 @@ describe('solutions-catalog: draft_downloads (preview only)', () => {
     const noDrafts = await run({ solutions: [makeSolution('leaderboard'), sandbox()], config: { draft_downloads: true } })
     expect(recordOf(noDrafts, 'sandbox')).toBeUndefined()
     expect(warningsOf(noDrafts)).not.toMatch(/draft_downloads is on/)
+  })
+})
+
+describe('solutions-catalog: with the docs taxonomy', () => {
+  const { parseTaxonomy } = require('../../extension-utils/taxonomy')
+  const taxonomy = parseTaxonomy(fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'taxonomy', 'taxonomy.yml')))
+  const facetAttrs = { 'page-solution-use-cases': 'Stream processing', 'page-solution-technologies': 'Postgres, Redpanda Connect', 'page-categories': 'Clients' }
+  const solution = (attrs) => makeSolution('leaderboard', { attrs: { ...facetAttrs, ...attrs } })
+
+  test('an unknown use case is fatal, with the taxonomy as the vocabulary', async () => {
+    await expect(run({ taxonomy, solutions: [solution({ 'page-solution-use-cases': 'Data mesh' })] }))
+      .rejects.toThrow(/page-solution-use-cases value 'Data mesh' is not in the taxonomy/)
+  })
+
+  test('an unknown platform is fatal; self-managed is the docker concept', async () => {
+    await expect(run({ taxonomy, solutions: [solution({ 'page-solution-platforms': 'mainframe' })] })).rejects.toThrow(/page-solution-platforms value 'mainframe'/)
+    const result = await run({ taxonomy, solutions: [solution()] })
+    const catalog = addedFile(result.siteCatalog, 'solutions.json')
+    expect(catalog.solutions[0].platforms).toEqual(['self-managed', 'cloud'])
+    expect(catalog.solutions[0].concepts.platforms.map((p) => p.id)).toEqual(['docker', 'cloud'])
+    expect(catalog.taxonomy.technologies.find((t) => t.id === 'redpanda-connect').component).toBe('connect')
+  })
+
+  test('a deprecated category warns and still builds', async () => {
+    const result = await run({ taxonomy, solutions: [solution({ 'page-categories': 'Clients, Iceberg' })] })
+    expect(warningsOf(result)).toContain("leaderboard: page-categories value 'Iceberg' is deprecated; use 'Iceberg Topics' instead")
+  })
+
+  test('a use case the doc carries as a category now counts toward the edge', async () => {
+    // Clients is a legacy category the fixture taxonomy lacks: it counts as a
+    // topic, as the pseudo-concept category:Clients. The use case is strong.
+    const docs = [makeDoc({ relative: 'unlisted.adoc', attrs: { 'page-categories': 'Stream Processing, Clients' } })]
+    const solutions = [noRelatedDocs(solution())]
+    const before = addedFile((await run({ docs, solutions })).siteCatalog, 'solutions-graph.json')
+    const after = addedFile((await run({ docs, solutions: [noRelatedDocs(solution())], taxonomy })).siteCatalog, 'solutions-graph.json')
+    expect(before.edges[0]).toMatchObject({ score: 0.4, shown: false })
+    expect(after.edges[0]).toMatchObject({ score: 0.5, shown: false, shared: { leaves: ['stream-processing', 'category:Clients'], broader: [], strong: ['stream-processing'] } })
+  })
+
+  test('a solution that writes Cloud gets the Cloud-reach warning, as one that writes cloud does', async () => {
+    const cloudComponent = () => {
+      const v = { version: '', asciidoc: { attributes: { 'env-cloud': true } } }
+      return { name: 'cloud', title: 'Cloud', latest: v, versions: [v] }
+    }
+    const warns = async (platforms) => warningsOf(await run({ taxonomy, components: makeComponents([cloudComponent()]), solutions: [solution({ 'page-solution-platforms': platforms })] }))
+    expect(await warns('self-managed, Cloud')).toMatch(/leaderboard: page-solution-platforms includes cloud but no page-solution-related-docs entry is a Cloud page/)
+    expect(await warns('self-managed, Redpanda Cloud')).toMatch(/Cloud readers get no explicit recommendation/)
+    // Control: a solution with no Cloud platform is not warned.
+    expect(await warns('self-managed')).not.toMatch(/Cloud readers get no explicit recommendation/)
+  })
+
+  test('coverage counts what a page authored, not the parents validate-attributes added', async () => {
+    // As validate-attributes leaves a page: page-categories rewritten with the
+    // legacy parent, the authored list kept beside it.
+    const docs = [makeDoc({ relative: 'unlisted.adoc', attrs: { 'page-categories': 'Stream Processing, Clients, Development', 'page-categories-authored': 'Stream Processing, Clients' } })]
+    const coverageOf = async (opts) => addedFile((await run({ docs, solutions: [noRelatedDocs(solution({ 'page-categories': 'Clients, Development' }))], ...opts })).siteCatalog, 'solutions-graph.json').coverage.solutions.leaderboard.categories
+    expect((await coverageOf({ taxonomy })).Development.pages).toBe(0)
+    expect((await coverageOf({ taxonomy })).Clients.pages).toBe(1)
+    // Control: without the taxonomy, coverage reads page-categories as before.
+    expect((await coverageOf({})).Development.pages).toBe(1)
+  })
+
+  test('verification runs are keyed by deployment concept IDs, except the base run', () => {
+    expect(collect.verificationPlatforms()).toEqual(['cloud', 'kubernetes'])
+    expect(collect.verificationPlatforms(taxonomy)).toEqual(['cloud', 'redpanda-self-managed', 'kubernetes', 'linux'])
+    const file = { contents: Buffer.from(JSON.stringify({ ...MANIFEST, linux_verify_script: 'PASS (9/9)', kubernetes_run_at: '2026-10-13T18:00:00Z' })) }
+    expect(collect.parseVerification(file).verified.runs).toEqual({ kubernetes: { runAt: '2026-10-13T18:00:00Z' } })
+    expect(collect.parseVerification(file, { platforms: collect.verificationPlatforms(taxonomy) }).verified.runs).toEqual({
+      kubernetes: { runAt: '2026-10-13T18:00:00Z' },
+      linux: { verifyScript: 'PASS (9/9)' },
+    })
+  })
+
+  test('a linux run reaches the record only with the taxonomy', async () => {
+    const verification = JSON.stringify({ ...MANIFEST, linux_verify_script: 'PASS (9/9)' })
+    const runsOf = async (opts) => addedFile((await run({ ...opts, solutions: [makeSolution('leaderboard', { attrs: facetAttrs, verification })] })).siteCatalog, 'solutions.json').solutions[0].verified.runs
+    expect(await runsOf({})).toBeUndefined()
+    expect(await runsOf({ taxonomy })).toEqual({ linux: { verifyScript: 'PASS (9/9)' } })
+  })
+
+  test('manifest platforms resolve through the deployment scheme', async () => {
+    const withPlatforms = (platforms) => makeSolution('leaderboard', {
+      attrs: { ...facetAttrs, 'page-solution-platforms': 'self-managed' },
+      verification: JSON.stringify({ ...MANIFEST, platforms }),
+    })
+    // docker is what self-managed means, so the run covers the page's claim.
+    expect(warningsOf(await run({ taxonomy, solutions: [withPlatforms(['docker'])] }))).not.toMatch(/verification\.json platforms|verified only/)
+    expect(warningsOf(await run({ taxonomy, solutions: [withPlatforms(['mainframe'])] }))).toMatch(/verification\.json platforms contains unknown values: mainframe/)
+    expect(warningsOf(await run({ taxonomy, solutions: [withPlatforms(['cloud'])] }))).toMatch(/page-solution-platforms includes self-managed but verification\.json verified only cloud/)
+    // Without the taxonomy, docker is not a known value.
+    expect(warningsOf(await run({ solutions: [withPlatforms(['docker'])] }))).toMatch(/verification\.json platforms contains unknown values: docker/)
   })
 })

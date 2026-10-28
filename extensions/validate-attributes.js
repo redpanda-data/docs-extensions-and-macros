@@ -28,7 +28,12 @@ module.exports.register = function ({ config }) {
     const pages = contentCatalog.findBy({ family: 'page' });
     pages.forEach((page) => {
       let pageCategories = page.asciidoc.attributes['page-categories'];
-      if (!pageCategories) return;
+      if (!pageCategories) {
+        // The taxonomy rules still check :page-topic-type:, as
+        // `doc-tools check-metadata` does on the same page.
+        if (taxonomy) checkTaxonomy([], { taxonomy, categoryMap, page, report });
+        return;
+      }
       let pageCategoryList = pageCategories.split(',').map(c => c.trim());
       const pageInfo = page.asciidoc.attributes['page-relative-src-path'];
       if (taxonomy) pageCategoryList = checkTaxonomy(pageCategoryList, { taxonomy, categoryMap, page, report });
