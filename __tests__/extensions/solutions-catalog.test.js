@@ -1631,13 +1631,16 @@ describe('solutions-catalog: agent companion', () => {
   }
 
   const companionCall = (siteCatalog) => siteCatalog.addFile.mock.calls.map(([f]) => f).find((f) => f.out.path.endsWith('agent-companion.md'))
+  const partCalls = (siteCatalog) => siteCatalog.addFile.mock.calls.map(([f]) => f).filter((f) => /agent-companion-part-\d+\.md$/.test(f.out.path))
+  // The core file and its parts, in order: the whole companion an agent downloads.
+  const companionText = (siteCatalog) => [companionCall(siteCatalog), ...partCalls(siteCatalog)].map((f) => f.contents.toString('utf8')).join('\n')
 
   test('publishes solutions/<slug>/agent-companion.md from the pages and verify.sh, and links it from the record', async () => {
     const { solution, convert } = withSources(makeSolution('leaderboard'), 'leaderboard')
     const { siteCatalog, pages } = await run({ solutions: [solution], afterContentClassified: convert })
     const file = companionCall(siteCatalog)
     expect(file.out.path).toBe('solutions/leaderboard/agent-companion.md')
-    const md = file.contents.toString('utf8')
+    const md = companionText(siteCatalog)
     expect(md).toMatch(/^# Agent companion: Solution leaderboard\n/)
     expect(md).toContain('## Rules\n\nEvery rule must hold in the target system.\n\n1. Publish absolute state, never deltas. (from [Build the leaderboard](https://docs.redpanda.com/solutions/leaderboard/build-leaderboard/))')
     expect(md).toContain('- [ ] Rule 1: Find consumers that aggregate.')
@@ -1648,6 +1651,19 @@ describe('solutions-catalog: agent companion', () => {
     const overview = pages.find((p) => p.src.module === 'leaderboard' && p.src.relative === 'index.adoc')
     expect(json(overview, 'page-solution').agentCompanion).toBe('/solutions/leaderboard/agent-companion.md')
     expect(addedFile(siteCatalog, 'solutions.json').solutions[0].agentCompanion).toBe('/solutions/leaderboard/agent-companion.md')
+  })
+
+  test('publishes each part beside the core file, at the URL the core file lists', async () => {
+    const { solution, convert } = withSources(makeSolution('leaderboard'), 'leaderboard')
+    const { siteCatalog } = await run({ solutions: [solution], afterContentClassified: convert })
+    const parts = partCalls(siteCatalog)
+    expect(parts.map((f) => f.out.path)).toEqual(['solutions/leaderboard/agent-companion-part-1.md'])
+    const part = parts[0].contents.toString('utf8')
+    expect(part).toMatch(/^# Agent companion part 1 of 1: Solution leaderboard\n/)
+    expect(part).toContain('## Design contract')
+    const core = companionCall(siteCatalog).contents.toString('utf8')
+    expect(core).not.toContain('## Design contract')
+    expect(core).toContain('`curl -sf https://docs.redpanda.com/solutions/leaderboard/agent-companion-part-1.md`')
   })
 
   test('a draft that is not built gets no companion', async () => {
@@ -1707,7 +1723,7 @@ describe('solutions-catalog: agent companion', () => {
       afterContentClassified: prepared.convert,
       docs: [makeDoc({ title: 'Consumer <code>offsets</code> &amp; groups' })],
     })
-    const md = companionCall(siteCatalog).contents.toString('utf8')
+    const md = companionText(siteCatalog)
     expect(md).toContain('[Consumer offsets & groups](https://docs.redpanda.com/streaming/current/develop/consumer-offsets/)')
     expect(md).not.toContain('[consumer offsets]')
   })
@@ -1723,7 +1739,7 @@ describe('solutions-catalog: agent companion', () => {
       text: '// tag::summary[]\nKeep publishing absolute totals.\n// end::summary[]\n// tag::detail[]\nDetail.\n// end::detail[]\n',
     }))
     const { siteCatalog, logger } = await run({ solutions: [prepared.solution], afterContentClassified: prepared.convert })
-    const md = companionCall(siteCatalog).contents.toString('utf8')
+    const md = companionText(siteCatalog)
     expect(md).toContain('**In production:** Keep publishing absolute totals.')
     expect(md).not.toContain('Detail.')
     expect(logger.warn.mock.calls.map((c) => c[0]).join('\n')).toContain(
@@ -1731,9 +1747,22 @@ describe('solutions-catalog: agent companion', () => {
     )
   })
 
+  test('a subsection too big for one part is published whole, with a build warning', async () => {
+    const saved = SOURCES['build-leaderboard']
+    SOURCES['build-leaderboard'] = saved + ' ' + 'A long reason. '.repeat(2000)
+    let prepared
+    try { prepared = withSources(makeSolution('leaderboard'), 'leaderboard') } finally { SOURCES['build-leaderboard'] = saved }
+    const { siteCatalog, logger } = await run({ solutions: [prepared.solution], afterContentClassified: prepared.convert })
+    expect(logger.warn.mock.calls.map((c) => c[0]).join('\n')).toMatch(
+      /solutions-catalog: leaderboard: agent companion part 1: subsection "1\. Build the leaderboard" of Design contract is \d+ characters, over the 24000-character part budget/
+    )
+    expect(partCalls(siteCatalog)[0].contents.toString('utf8')).toContain('A long reason. '.repeat(2000).trim())
+  })
+
   test('pages that are no longer AsciiDoc at contentClassified yield no companion and no link', async () => {
     const { siteCatalog, pages } = await run()
     expect(companionCall(siteCatalog)).toBeUndefined()
+    expect(partCalls(siteCatalog)).toEqual([])
     const overview = pages.find((p) => p.src.module === 'leaderboard' && p.src.relative === 'index.adoc')
     expect(json(overview, 'page-solution')).not.toHaveProperty('agentCompanion')
   })

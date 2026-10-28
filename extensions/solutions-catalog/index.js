@@ -28,7 +28,8 @@
  *                        `solutions-catalog` (set here, not at beforePublish,
  *                        because pages are composed before beforePublish fires)
  *   beforePublish        assets/data/solutions.json, assets/data/solutions-graph.json,
- *                        solutions/<slug>/agent-companion.md per built solution
+ *                        solutions/<slug>/agent-companion.md per built solution,
+ *                        with its agent-companion-part-<n>.md files
  *                        (agent_companion), optional GitHub release check (network_checks)
  *
  * When the build has no `solutions` component every hook is a no-op, so the
@@ -281,6 +282,7 @@ function buildCompanion (record, sources, logger, { titleOf, errors } = {}) {
     return null
   }
   if (result.leaks.length) logger.warn(`solutions-catalog: ${record.id}: AsciiDoc left in the agent companion (${result.leaks.join(', ')})`)
+  for (const warning of result.warnings || []) logger.warn(`solutions-catalog: ${warning}`)
   if (!result.rules.some((r) => r.rule)) {
     const message = `${record.id}: no step sets page-solution-rule, so the agent companion has no Rules, Design contract rules, or Acceptance for an agent to apply`
     if (record.status === 'published' && errors) errors.push(message)
@@ -288,7 +290,9 @@ function buildCompanion (record, sources, logger, { titleOf, errors } = {}) {
   }
   const dir = overview.out.path.replace(/[^/]*$/, '')
   const base = (record.url || `/${dir}`).replace(/[^/]*$/, '')
-  return { id: record.id, path: `${dir}${companion.FILE_NAME}`, url: `${base}${companion.FILE_NAME}`, markdown: result.markdown }
+  // The part files are published beside the core file, at the URLs its How to use this lists.
+  const parts = (result.parts || []).map((p) => ({ path: `${dir}${p.fileName}`, url: `${base}${p.fileName}`, markdown: p.markdown }))
+  return { id: record.id, path: `${dir}${companion.FILE_NAME}`, url: `${base}${companion.FILE_NAME}`, markdown: result.markdown, parts }
 }
 
 /**
@@ -605,8 +609,10 @@ module.exports.register = function ({ config = {} } = {}) {
     siteCatalog.addFile({ contents: outputs.toJsonBuffer(state.catalog), out: { path: `${ASSET_DIR}/${CATALOG_FILENAME}` } })
     siteCatalog.addFile({ contents: outputs.toJsonBuffer(state.graph), out: { path: `${ASSET_DIR}/${GRAPH_FILENAME}` } })
     logger.info(`solutions-catalog: published ${ASSET_DIR}/${CATALOG_FILENAME} and ${ASSET_DIR}/${GRAPH_FILENAME}`)
-    for (const { path, markdown } of state.companions) {
-      siteCatalog.addFile({ contents: Buffer.from(markdown, 'utf8'), out: { path } })
+    for (const { path, markdown, parts = [] } of state.companions) {
+      for (const file of [{ path, markdown }, ...parts]) {
+        siteCatalog.addFile({ contents: Buffer.from(file.markdown, 'utf8'), out: { path: file.path } })
+      }
     }
     if (state.companions.length) logger.info(`solutions-catalog: published ${state.companions.length} agent companion${state.companions.length === 1 ? '' : 's'}`)
 
