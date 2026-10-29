@@ -278,6 +278,11 @@ describe('rpkcmd: and the bracket form of rpkval: in the value scan', () => {
     expect(result.kinds.rpk.findings).toEqual([])
   })
 
+  test('the block form rpkval::[...] is a macro, and a command-level rpkval:[...] names the command', () => {
+    const { result } = scan('streaming', { 'modules/x/pages/x.adoc': page('rpkval::[rpk topic create,description]', '', 'The usage is rpkval:[rpk topic create,usage]. The `--partitions` flag defaults to 3.') })
+    expect(result.kinds.rpk.findings).toEqual([expect.objectContaining({ status: 'mismatch', command: 'rpk topic create', flag: 'partitions', written: '3', commandFrom: 'same-line', line: 5 })])
+  })
+
   test('rpkcmd:[...] with a flag is a flag mention with its command', () => {
     const { result } = scan('streaming', { 'modules/x/pages/x.adoc': page('The rpkcmd:[rpk topic create --partitions] flag defaults to 3.') })
     expect(result.kinds.rpk.findings).toEqual([expect.objectContaining({ status: 'mismatch', command: 'rpk topic create', flag: 'partitions', written: '3', dataValue: '-1', commandFrom: 'macro' })])

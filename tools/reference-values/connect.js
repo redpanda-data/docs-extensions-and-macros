@@ -524,7 +524,7 @@ function scanConnect ({ docsDir, registry, files: only, write = false, cloudSurf
 }
 
 // Field mentions on a prose line: backticked names or dotted paths, and
-// connectval: macros.
+// connectval: macros in either form.
 function fieldMentions (line) {
   const mentions = []
   for (const span of shared.backtickSpans(line)) {
@@ -533,6 +533,12 @@ function fieldMentions (line) {
   for (const m of line.matchAll(/connectval:([\w.]+)\[([^\]]*)\]/g)) {
     const component = (m[2].match(/(?:^|,)\s*component=([^,\]]*)/) || [])[1]
     mentions.push({ path: m[1], start: m.index, end: m.index + m[0].length, component: component && component.trim(), macro: true })
+  }
+  // The bracket form names the component and the path together:
+  // connectval:[inputs/redpanda.client_id,default].
+  for (const m of line.matchAll(/connectval::?\[([^\],]*)[^\]]*\]/g)) {
+    const { component, path } = connectValues.parseFieldTarget(m[1])
+    if (path) mentions.push({ path, start: m.index, end: m.index + m[0].length, component, macro: true })
   }
   return mentions.sort((a, b) => a.start - b.start)
 }
@@ -546,10 +552,12 @@ function lineClaims (line, { calloutField, offset = 0 }) {
     if (claimed.has(valueStart)) return
     const { parsed, skip } = shared.parseAfterFiller(line.slice(valueStart))
     if (!parsed) return
+    // A value macro is the macro already, not a hand-written value.
+    if (shared.MACRO_VALUE_RX.test(line.slice(valueStart + skip))) return
     claimed.add(valueStart)
     const ownSentence = text(sentenceAt(valueStart), sentenceAt(valueStart))
     const context = owner.mention ? text(sentenceAt(owner.mention.start), sentenceAt(valueStart)) : ownSentence
-    const qualifier = context.replace(/\bconnectval:[^[\s]+\[[^\]]*\]/g, 'connectval:x[]').match(QUALIFIER_RX) || ownSentence.match(/^\s*(?:If|When|Unless|Suppose)\b/)
+    const qualifier = context.replace(/\bconnectval::?[^[\s]*\[[^\]]*\]/g, 'connectval:x[]').match(QUALIFIER_RX) || ownSentence.match(/^\s*(?:If|When|Unless|Suppose)\b/)
     claims.push({ ...owner, phrase, parsed, start: valueStart + skip, end: valueStart + skip + parsed.length, sentence: context, soleTarget: mentions.filter((m) => !owner.mention || m.path !== owner.mention.path).length === 0, ...(qualifier ? { qualifier: qualifier[0].trim() } : {}) })
   }
   const ownerOf = (at) => {

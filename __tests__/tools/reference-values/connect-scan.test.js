@@ -299,6 +299,21 @@ describe('Connect prose', () => {
     expect(findings({ 'modules/sql/pages/lag.adoc': page('* `default`: Optional. Value to return if the `offset` is out of range. Defaults to `NULL`.') }, { name: 'cloud-data-platform', attributes: { 'env-cloud': true } })).toEqual([])
   })
 
+  test('a value written as connectval: is the macro, not a hand-written value, in every form', () => {
+    for (const value of ['connectval:[inputs/redpanda.client_id]', '`connectval:[inputs/redpanda.client_id]`', 'connectval:client_id[default,component=inputs/redpanda]']) {
+      expect([value, findings({ 'modules/components/pages/inputs/redpanda.adoc': page(`The \`client_id\` field defaults to ${value}.`) })]).toEqual([value, []])
+    }
+  })
+
+  test('the bracket form of connectval: is a field mention with its component', () => {
+    const [f] = findings({ 'modules/guides/pages/x.adoc': page('The connectval:[inputs/redpanda.client_id,type] field defaults to `benthos`.') })
+    expect(f).toMatchObject({ status: 'mismatch', component: 'redpanda', fieldPath: 'client_id', dataValue: 'redpanda-connect' })
+  })
+
+  test('a block-form line is not prose', () => {
+    expect(findings({ 'modules/components/pages/inputs/redpanda.adoc': page('connectval::[inputs/redpanda.client_id,description]') })).toEqual([])
+  })
+
   test('a Cloud scan marks a claim about a component Cloud does not run cloud-unavailable', () => {
     const [f] = findings({ 'modules/x/pages/y.adoc': page('The xref:components:inputs/stdin.adoc[`stdin`] input field `max_buffer` defaults to 1000000.') }, CLOUD)
     expect(f).toMatchObject({ status: 'unverifiable', reason: 'cloud-unavailable' })

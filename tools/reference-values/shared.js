@@ -211,6 +211,10 @@ const readText = (file) => fs.readFileSync(file, 'utf8')
 // property findings stay as migrate-property-values reports them.
 const RELEASES_RX = /(?:^|\/)releases\//
 
+// A value that is a macro call, inline or block form, with or without
+// backticks around it: the macro already, not a hand-written value.
+const MACRO_VALUE_RX = /^`?\+?(?:rpkval|rpkcmd|propval|prop|connectval):/
+
 module.exports = {
   norm,
   walkFiles,
@@ -225,4 +229,5 @@ module.exports = {
   readText,
   RELEASES_RX,
   FILLER_RX,
+  MACRO_VALUE_RX,
 }

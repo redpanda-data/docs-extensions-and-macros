@@ -239,7 +239,7 @@ const SENTENCE_RX = /[.!?](?=\s+(?:[A-Z*`(]|prop:|xref:))/g
 const QUALIFIER_RX = /\b(?:earlier|prior|previous|older)\s+(?:versions?|releases?)\b|\b(?:before|until|prior to)\s+(?:Redpanda\s+)?v?\d+\.\d+|\bin\s+(?:Redpanda\s+)?v?\d+\.\d+\b|\bRedpanda Cloud\b|\bBYOC\b|\bDedicated\b|\bServerless\b|\bHelm\b|\bchart\b|\bclients?\b|\blibrar(?:y|ies)\b|\bdev-container\b|\bdev mode\b|\bKubernetes\b|\boperator\b/i
 // Macro attribute lists (prop:x[link=true,helm-path=auto]) are not prose, so
 // they never qualify a sentence.
-const stripMacroAttributes = (text) => text.replace(/\b(prop|propval):([A-Za-z][A-Za-z0-9_.]*)\[[^\]]*\]/g, '$1:$2[]')
+const stripMacroAttributes = (text) => text.replace(/\b(prop|propval)::?([A-Za-z][A-Za-z0-9_.]*)\[[^\]]*\]/g, '$1:$2[]')
 
 /**
  * Every property mention on a line: prop: calls, property xrefs, and

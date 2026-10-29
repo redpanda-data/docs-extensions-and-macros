@@ -59,8 +59,7 @@ const DEFAULT_PHRASES = PHRASES.filter((p) => p.field === 'default')
 const TRAILING_DEFAULT_RX = /(?:^|\s)((?:at\s+most\s+|up\s+to\s+|at\s+least\s+)?(?:`[^`]+`|-?\d[\d,]*(?:\.\d+)?(?:\s*[A-Za-z%]+)?|true|false|enabled|disabled|on|off))(?:\s+[a-z]+)?\s+by\s+default\b/gi
 // "the default `--x` of 5", "the default `--x` is 5".
 const DEFAULT_OF_RX = /\bdefault\s+(`--[a-z][\w.-]*`)\s+(?:of|is)\s+/gi
-// A value that is a macro call, with or without backticks around it.
-const MACRO_VALUE_RX = /^`?\+?(?:rpkval|rpkcmd|propval|prop|connectval):/
+const { MACRO_VALUE_RX } = shared
 
 /**
  * The language of a block from its style line ([source,bash], [,yaml],
@@ -816,11 +815,11 @@ function flagMentions (line) {
   return mentions.sort((a, b) => a.start - b.start)
 }
 
-// The command line of each rpkcmd:[...] and bracket-form rpkval:[...] on a
-// line, parsed as the macros parse it.
+// The command line of each rpkcmd:[...] and bracket-form rpkval:[...] or
+// rpkval::[...] on a line, parsed as the macros parse it.
 function macroCommandLines (line) {
   const out = []
-  for (const m of line.matchAll(/\b(rpkcmd|rpkval):\[([^\]]*)\]/g)) {
+  for (const m of line.matchAll(/\b(rpkcmd|rpkval)::?\[([^\]]*)\]/g)) {
     out.push({ macro: m[1], start: m.index, end: m.index + m[0].length, parsed: rpkValues.parseCommandLine(m[2].split(',')[0]) })
   }
   return out
@@ -878,7 +877,7 @@ function proseClaims (index, line, ctx) {
     const sentence = sentenceBounds(line)
     const context = sentence.text(Math.min(sentenceAt(owner.mention.start), sentenceAt(valueStart)), Math.max(sentenceAt(owner.mention.start), sentenceAt(valueStart)))
     const ownSentence = sentence.text(sentenceAt(valueStart), sentenceAt(valueStart))
-    const stripped = context.replace(/\brpkval:[^[\s]+\[[^\]]*\]/g, 'rpkval:x[]')
+    const stripped = context.replace(/\brpkval::?[^[\s]*\[[^\]]*\]/g, 'rpkval:x[]')
     const qualifier = stripped.match(QUALIFIER_RX) || ownSentence.match(/^\s*(?:If|When|Unless|Suppose)\b/) || (ctx.qualifier ? [ctx.qualifier] : null)
     claims.push({
       mention: owner.mention,
