@@ -409,6 +409,29 @@ describe('generate-rp-connect-info extractDescription', () => {
     expect(ext.cleanDescription(long)).toBe('Supports Kafka 2.8 and later, including clusters that run with tiered storage, transactions, and idempotent producers enabled.')
   })
 
+  test('does not end the first sentence at an abbreviation when truncating', () => {
+    const long = 'Writes to object stores, e.g. Amazon S3 or Google Cloud Storage, with batching, compression, and configurable path templates for every message. More text follows.'
+    expect(long.length).toBeGreaterThan(150)
+    expect(ext.cleanDescription(long)).toBe('Writes to object stores, e.g. Amazon S3 or Google Cloud Storage, with batching, compression, and configurable path templates for every message.')
+  })
+
+  // contentClassified runs before Antora parses pages, so asciidoc.attributes
+  // is unset there; the page header in the source still defines attributes.
+  test('resolves attribute references from the page header when the page is not parsed yet', () => {
+    const src = page([
+      '= Kafka',
+      ':max-batch: 100msgs',
+      '',
+      'component_type_dropdown::[]',
+      '',
+      'Consumes data from Apache Kafka with {max-batch} batching.',
+      ''
+    ].join('\n'))
+    expect(src.asciidoc).toBeUndefined()
+    expect(extractDescription(src)).toBe('Consumes data from Apache Kafka with 100msgs batching.')
+    expect(extractDescription(page('= Kafka\n:max-batch: 100msgs\n:description: Batches {max-batch} at a time.\n'))).toBe('Batches 100msgs at a time.')
+  })
+
   test('converts <<anchor,text>>, link: macros, and escaped braces to plain text', () => {
     expect(ext.cleanDescription('Parses common log <<formats,formats>> into structured data.')).toBe('Parses common log formats into structured data.')
     expect(ext.cleanDescription('Sends to link:https://kafka.apache.org[Kafka^] brokers.')).toBe('Sends to Kafka brokers.')

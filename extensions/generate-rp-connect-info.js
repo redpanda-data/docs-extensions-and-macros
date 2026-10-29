@@ -672,8 +672,9 @@ function cleanDescription (text, attributes = {}) {
     .trim()
 
   if (description.length > DESCRIPTION_MAX_LENGTH) {
-    // A sentence ends at punctuation followed by whitespace, so "Kafka 2.8" stays whole
-    const firstSentence = description.split(/(?<=[.!?])\s+/)[0].trim()
+    // A sentence ends at punctuation followed by whitespace, so "Kafka 2.8"
+    // stays whole, and not after an abbreviation such as "e.g."
+    const firstSentence = description.split(/(?<=[.!?])(?<!\b(?:e\.g|i\.e|vs|cf)\.)\s+/i)[0].trim()
     if (firstSentence && firstSentence.length <= DESCRIPTION_MAX_LENGTH) {
       description = firstSentence
     } else {
@@ -698,8 +699,13 @@ function cleanDescription (text, attributes = {}) {
 function extractDescription (pageSrc) {
   if (!pageSrc) return ''
 
-  // Try to get from asciidoc attributes first
-  let description = pageSrc.asciidoc?.attributes?.description || ''
+  // This runs during contentClassified, before Antora parses the page, so
+  // asciidoc.attributes is usually unset: read the header attributes from the
+  // source instead, as the page-commercial-names fallback does. Component and
+  // built-in attributes are not resolved this way.
+  const attributes = pageSrc.asciidoc?.attributes ||
+    parseHeaderAttributes(pageSrc.contents ? pageSrc.contents.toString('utf8') : '')
+  let description = attributes.description || ''
 
   // Fallback: extract first paragraph from page body
   if (!description && pageSrc.contents) {
@@ -788,7 +794,29 @@ function extractDescription (pageSrc) {
     }
   }
 
-  return cleanDescription(description, pageSrc.asciidoc?.attributes || {})
+  return cleanDescription(description, attributes)
+}
+
+/**
+ * The single-line attribute entries (:name: value) of an AsciiDoc document
+ * header, which ends at the first blank line after it starts.
+ *
+ * @param {string} contents - the page source
+ * @returns {Object.<string,string>}
+ */
+function parseHeaderAttributes (contents) {
+  const attributes = {}
+  let started = false
+  for (const line of contents.split(/\r?\n/)) {
+    if (line.trim() === '') {
+      if (started) break
+      continue
+    }
+    started = true
+    const match = line.match(/^:([\w][\w-]*):[ \t]*(.*)$/)
+    if (match) attributes[match[1]] = match[2].trim()
+  }
+  return attributes
 }
 
 module.exports.extractDescription = extractDescription
