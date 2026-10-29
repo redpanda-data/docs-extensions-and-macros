@@ -79,8 +79,15 @@ With Redpanda 26.2 data, that renders "defaults to 2 weeks" and "The minimum is 
 *Syntax:* `prop:name[]` and `propval:name[field,format=raw]`
 
 * `name` - Property name (required)
-* `field` - `default` (when omitted), `type`, `unit`, `min`, `max`, `restart`, `nullable`, `values`, `scope`, `introduced`, `visibility`, `restored`, `aliases`, or `cloud-access`
+* `field` - `default` (when omitted), `type`, `unit`, `min`, `max`, `restart`, `nullable`, `values`, `scope`, `introduced`, `visibility`, `restored`, `aliases`, `cloud-access`, `description`, `examples`, `see-also`, `deprecated`, `enterprise`, `secret`, or `category`
 * `format=raw` - The exact value (`1209600000`) instead of the human-readable one (`2 weeks`)
+
+A description or example longer than one paragraph needs the block form, with two colons, on a line of its own:
+
+[,asciidoc]
+----
+propval::cleanup.policy[description]
+----
 
 Register `@redpanda-data/docs-extensions-and-macros/macros/prop`, which provides both macros. If a value can't be verified for the page's version, the page shows `<unknown default>` and the build log says why. See link:REFERENCE.adoc#propval[the macros reference] for every field and failure case.
 
@@ -93,7 +100,7 @@ npx doc-tools generate migrate-property-values --docs-dir . --report-dir ./propv
 
 === rpkval and connectval - rpk flag and Connect field values
 
-Render an `rpk` flag's value, or a Redpanda Connect field's value, from the published data instead of typing it. Use `rpkval:` when prose states a flag's default, type, or shorthand, and `connectval:` when it states a Connect field's default, type, or accepted options.
+Render an `rpk` flag's or command's value, or a Redpanda Connect field's or component's value, from the published data instead of typing it. Use `rpkval:` when prose states a flag's default, type, or shorthand, or a command's usage or aliases, and `connectval:` when it states a Connect field's default, type, or accepted values, or a component's status.
 
 [,asciidoc]
 ----
@@ -106,23 +113,27 @@ With rpk 26.2.2 data, that renders "The default is -1", "Use `-p` for short", an
 
 [,asciidoc]
 ----
-The chunk size defaults to `connectval:incremental_snapshot.chunk_size[default,component=inputs/postgres_cdc]`.
-Valid strategies: connectval:merge_strategy[options,component=outputs/iceberg].
-The default for `pipeline.threads` is connectval:pipeline.threads[default,component=config].
+The chunk size defaults to `connectval:[inputs/postgres_cdc.incremental_snapshot.chunk_size]`.
+Valid strategies: connectval:[outputs/iceberg.merge_strategy,values].
+The default for `pipeline.threads` is connectval:[config.pipeline.threads,default].
 ----
 
 With Connect 4.114.0 data, that renders "defaults to `1024`", "Valid strategies: `merge-on-read`, `copy-on-write`", and "is -1".
 
-*Syntax:* `rpkval:[rpk command --flag,field]` and `connectval:field.path[field,component=type/name]`
+*Syntax:* `rpkval:[rpk command --flag,field]`, `rpkval:[rpk command,field]`, `connectval:[type/name.field.path,field]` and `connectval:[type/name,field]`
 
 * Write the command as you would type it, then the long flag, without arguments or values: `rpkval:[rpk topic create --partitions]`, not `rpkval:[rpk topic create my-topic --partitions]`. For a global flag, write `rpk` and the flag: `rpkval:[rpk --config-opt,type]`.
 * Name the long flag (`--partitions`), not the shorthand, and ask for the `shorthand` field to show `-p`.
+* Leave the flag out to read a field of the command itself: `rpkval:[rpk topic create,usage]`, `rpkval:[rpk cluster info,aliases]`.
 * The older form, `rpkval:partitions[command=rpk topic create]`, still works and renders the same.
-* Write `component=` as the component's page path: `inputs/postgres_cdc`, or `config` for root fields such as `pipeline.threads`.
+* Start a Connect call with the component's page path and the field path: `inputs/postgres_cdc.incremental_snapshot.chunk_size`, or `config.pipeline.threads` for root fields. A component alone reads its own fields, such as `connectval:[inputs/kafka_franz,status]`.
+* The older form, `connectval:client_id[component=inputs/redpanda]`, still works and renders the same.
 * Address array fields without `[]`: `sasl.mechanism`, not `sasl[].mechanism`.
-* Don't wrap `options` in backticks: each value already renders as inline code.
+* Don't wrap `values` in backticks: each value already renders as inline code.
+* The field names are the same in every value macro, so `introduced`, `values`, `description` and `required` (or its opposite, `optional`) work wherever the data has them. A field a macro doesn't support logs a warning that lists the ones it does.
+* A description longer than one paragraph needs the block form, on a line of its own: `rpkval::[rpk topic create,description]`, `connectval::[inputs/kafka_franz.consumer_group,description]`. rpk help text renders exactly as written; Connect text renders as AsciiDoc, with its links rewritten for the page it appears on.
 
-Both come with `@redpanda-data/docs-extensions-and-macros/macros/prop`. If a value can't be verified, the page shows `<unknown default>` and the build log says why. See link:REFERENCE.adoc#rpkval[the macros reference].
+Both come with `@redpanda-data/docs-extensions-and-macros/macros/prop`. If a value can't be verified, the page shows `<unknown default>` and the build log says why. See link:REFERENCE.adoc#rpkval[the macros reference], and link:REFERENCE.adoc#value-fields[the table of every field].
 
 To find hand-written values that need these macros, and commands, flags, components and fields that don't exist:
 

@@ -59,9 +59,9 @@ IMPORTANT: Macros must be registered under the `asciidoc.extensions` key in your
 
 * **glossterm** - Reference glossary terms with tooltips
 * **prop** - Reference a configuration property, with a validated tooltip and optional link
-* **propval** - Render a property's default, minimum, unit, or other value from the property data
-* **rpkval** - Render an `rpk` flag's default, type, shorthand, or other value from the rpk data
-* **connectval** - Render a Redpanda Connect field's default, type, options, or other value from the Connect data
+* **propval** - Render a property's default, minimum, unit, description, or other value from the property data
+* **rpkval** - Render an `rpk` flag's or command's default, type, usage, description, or other value from the rpk data
+* **connectval** - Render a Redpanda Connect field's or component's default, type, values, description, or other value from the Connect data
 * **rpkcmd** - Render an `rpk` command as code, linked to its reference page in the component that renders the page
 * **config_ref** - Link to configuration properties (deprecated; use prop)
 * **helm_ref** - Link to Helm chart values

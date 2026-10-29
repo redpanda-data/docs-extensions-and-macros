@@ -1,5 +1,5 @@
 = Reference values test
-:description: Exercises the rpkval, connectval and rpkcmd macros: fields, formats, command and component resolution, links, and each placeholder case.
+:description: Exercises the rpkval, connectval and rpkcmd macros, and the fields and block forms they share with propval: fields, formats, command and component resolution, links, text values, and each placeholder case.
 
 Each line below states what it must render, and what the build log must say
 for it. The rpk values come from this component's `rpk-v26.2.2.json` fixture
@@ -26,6 +26,31 @@ build supplies from `preview/connect-data-lender`.
 * Must read -1 again, in the first form of the macro, which is still accepted:
   rpkval:partitions[command=rpk topic create]
 
+== rpk command fields and help text
+
+* Must read `+rpk topic create [TOPICS...] [flags]+`: rpkval:[rpk topic create,usage]
+* Must read "status, metadata", the aliases of `rpk cluster info`:
+  rpkval:[rpk cluster info,aliases]
+* Must read yes, because `--partitions` is not required:
+  rpkval:[rpk topic create --partitions,optional]
+* Must read the flag's help text, with its backticks shown as written:
+  rpkval:[rpk topic create --partitions,description]
+* Must show `<unknown description>` and log needs-block, naming
+  `+rpkval::[rpk topic create,description]+`:
+  rpkval:[rpk topic create,description]
+* Must show `<unknown deprecated>` and log dropped-field:
+  rpkval:[rpk topic create --partitions,deprecated]
+
+The block form below must render the two paragraphs of the `rpk topic create`
+description, with its backticks shown as written:
+
+rpkval::[rpk topic create,description]
+
+The block form below must render each example of `rpk security acl list` as a
+paragraph followed by a literal block:
+
+rpkval::[rpk security acl list,examples]
+
 == rpk placeholders
 
 * Must show `<unknown default>` and log description-default (the description
@@ -51,6 +76,47 @@ build supplies from `preview/connect-data-lender`.
 * Must read yes, and log deprecated-field:
   connectval:regexp_topics[deprecated,component=inputs/redpanda]
 * Must read array<string>: connectval:topics[type,component=inputs/redpanda]
+
+== Connect bracket form, component fields and text
+
+* Must read redpanda-connect, as the first form above does:
+  connectval:[inputs/redpanda.client_id]
+* Must read -1: connectval:[config.pipeline.threads]
+* Must list merge-on-read, copy-on-write, each in code, through the `options`
+  alias of `values`: connectval:[outputs/iceberg.merge_strategy,options]
+* Must read deprecated: connectval:[inputs/kafka_franz,status]
+* Must read yes: connectval:[inputs/generate.mapping,required]
+* Must read the one-paragraph summary of the `consumer_group` field:
+  connectval:[inputs/kafka_franz.consumer_group,summary]
+* Must read the `generate` summary. Its `Bloblang` link is rewritten to
+  `connect:guides:bloblang/about.adoc`, because this page is in another
+  component, and this build has Connect data but no Connect pages, so it must
+  render as text and log that the build has no page for it:
+  connectval:[inputs/generate,summary]
+* Must show `<unknown description>` and log needs-block:
+  connectval:[inputs/kafka_franz.consumer_group,description]
+
+The block form below must render the `consumer_group` description: a
+paragraph, a two-item list and a paragraph.
+
+connectval::[inputs/kafka_franz.consumer_group,description]
+
+The block form below must render the `unchanged_toast_value` description.
+Its `signal_table_name` reference is an anchor on the `postgres_cdc` page,
+not on this page, so it is rewritten to that page in the `connect`
+component; with no Connect pages in this build, it must render as text and
+log why:
+
+connectval::[inputs/postgres_cdc.unchanged_toast_value,description]
+
+== Property text values
+
+* Must read "Default log segment size in bytes for topics that do not set
+  `segment.bytes`.", with `segment.bytes` in code:
+  propval:log_segment_size[description]
+* Must read `2147483648` in code, the example:
+  propval:log_segment_size[examples]
+* Must read yes: propval:cloud_storage_enabled[enterprise]
 
 == Connect placeholders
 
