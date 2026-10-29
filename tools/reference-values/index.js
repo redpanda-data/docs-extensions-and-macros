@@ -73,6 +73,44 @@ function readExplicit (file, own) {
 }
 
 /**
+ * The rpk reference pages of a checkout, as page entries in the synthetic
+ * catalog, so rpk links resolve against the pages the build would have, and
+ * the page-aliases they declare, which Antora resolves an xref through.
+ *
+ * @returns {{pages: object[], aliases: {component: string, version: string, relative: string, target: string}[]}}
+ */
+function rpkPages (dir, comp) {
+  const root = path.join(dir, 'modules', 'reference', 'pages')
+  const pages = []
+  const aliases = []
+  for (const file of shared.walkFiles(dir, { root: path.join('modules', 'reference', 'pages', 'rpk') })) {
+    const relative = path.relative(root, path.join(dir, file)).split(path.sep).join('/')
+    pages.push({ src: { component: comp.component, version: comp.version, module: 'reference', family: 'page', relative } })
+    const header = fs.readFileSync(path.join(dir, file), 'utf8').split('\n', 30).find((line) => /^:page-aliases:/.test(line))
+    if (!header) continue
+    for (const alias of header.replace(/^:page-aliases:/, '').split(',').map((a) => a.trim()).filter(Boolean)) {
+      // reference:rpk/rpk-acl.adoc, or rpk/rpk-acl.adoc within the module.
+      const parts = alias.split(':')
+      if (parts.length > 2 || (parts.length === 2 && parts[0] !== 'reference')) continue
+      aliases.push({ component: comp.component, version: comp.version, relative: parts[parts.length - 1], target: relative })
+    }
+  }
+  return { pages, aliases }
+}
+
+/**
+ * The nav files antora.yml lists: generated from the command tree, not prose.
+ */
+function navFiles (dir) {
+  try {
+    const descriptor = require('js-yaml').load(fs.readFileSync(path.join(dir, 'antora.yml'), 'utf8')) || {}
+    return new Set((descriptor.nav || []).map((file) => path.normalize(String(file))))
+  } catch (error) {
+    return new Set()
+  }
+}
+
+/**
  * A finding's kind of file: historical findings are reported, never fail and
  * are never written.
  */
@@ -169,7 +207,8 @@ function recount (r) {
   if (r.counts && Object.prototype.hasOwnProperty.call(r.counts, 'referenceErrors')) {
     const extra = {}
     for (const key of ['examplesRestatingDefault', 'yamlRestatingDefault']) if (key in r.counts) extra[key] = r.counts[key]
-    return { ...require('./rpk').countFindings(r.findings), ...extra }
+    const links = 'linksBroken' in r.counts ? require('./rpk').linkCounts(r.findings) : {}
+    return { ...require('./rpk').countFindings(r.findings), ...extra, ...links }
   }
   const counts = { exact: 0, equivalent: 0, mismatch: 0, unset: 0, unverifiable: 0, autoSafe: 0, 'example-output': 0, exampleStale: 0 }
   for (const f of r.findings) {
@@ -206,6 +245,12 @@ function scanAll ({ docsDir, lenderDirs = [], dataFiles = [], kinds = KINDS, kin
     throw new SetupError(`--docs-dir ${docsDir}: ${error.message}`)
   }
   const lenders = lenderDirs.map((dir) => migrate.readComponent(dir, ALL_KINDS))
+  const pageAliases = new Map()
+  ;[[docsDir, own], ...lenderDirs.map((dir, i) => [dir, lenders[i]])].forEach(([dir, comp]) => {
+    const { pages, aliases } = rpkPages(dir, comp)
+    comp.files.push(...pages)
+    for (const a of aliases) pageAliases.set(`${a.component}@${a.version}:${a.relative}`, a.target)
+  })
   const catalog = migrate.catalogFor([own, ...lenders])
   const explicit = {}
   for (const file of dataFiles) {
@@ -269,7 +314,16 @@ function scanAll ({ docsDir, lenderDirs = [], dataFiles = [], kinds = KINDS, kin
     const registry = given || rpkValues.loadRpkFor(catalog, own.component, own.version)
     if (!registry) skip('rpk', `no rpk data for ${where}: no rpk-<version>.json attachment selects for it; pass --data-file docs-data/rpk-v<version>.json`)
     else {
-      const r = scanRpk({ docsDir, registry, files, write, renderGuard: guard })
+      const cloudLenders = lenders.filter((l) => datasets.isAttributeSet(l.attributes['env-cloud']))
+      const links = {
+        catalog,
+        component: own.component,
+        version: own.version,
+        skip: navFiles(docsDir),
+        aliases: pageAliases,
+        cloud: cloudLenders.length === 1 ? { component: cloudLenders[0].component, version: cloudLenders[0].version } : undefined,
+      }
+      const r = scanRpk({ docsDir, registry, files, write, renderGuard: guard, links })
       result.kinds.rpk = {
         dataset: given ? `${path.basename(given.explicit)} (--data-file)` : datasets.describeDataset(registry),
         selection: given ? 'explicit' : registry.surface === datasets.SURFACE_CLOUD ? 'cloud' : 'page',
@@ -327,7 +381,7 @@ function describe (kind, f) {
  */
 function renderMarkdown (result) {
   const out = ['# Reference values report', '']
-  out.push('Statuses: **reference** is a command, flag, component or field that does not exist in the data (error) or is deprecated (warning). **exact** is what the macro renders; **auto-safe** is an exact match `--write` may apply. **equivalent** is the same value worded differently. **mismatch** differs from the data. **unset** states a value the data leaves empty. **unverifiable** could not be compared, with the reason. **example output** is a value in a block or YAML comment, never written: **stale** when it differs from the data.', '')
+  out.push('Statuses: **reference** is a command, flag, component or field that does not exist in the data (error) or is deprecated (warning), or an xref to an rpk reference page that does not exist (broken-link, error) or whose label names another command (link-label-mismatch, warning). **exact** is what the macro renders, or an xref rpkcmd:[...] would render the same; **auto-safe** is an exact match `--write` may apply. **equivalent** is the same value worded differently. **mismatch** differs from the data. **unset** states a value the data leaves empty. **unverifiable** could not be compared, with the reason. **example output** is a value in a block or YAML comment, never written: **stale** when it differs from the data.', '')
   out.push(`Checked ${result.component}@${result.version || 'unversioned'} at --fail-on ${result.failOn}: ${result.failing} failing finding(s), ${result.ignored} ignored by \`// value-check: ignore\`.`, '')
   out.push('| Kind | Dataset | Surface | Files | Findings | Failing | Reference errors | Reference warnings | Mismatch | Exact (auto-safe) | Equivalent | Unset | Unverifiable | Example output (stale) |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|')
   for (const [kind, r] of Object.entries(result.kinds)) {
@@ -350,6 +404,10 @@ function renderMarkdown (result) {
       const body = migrate.renderMarkdown([{ ...r, label: `${r.component}@${r.version || 'unversioned'}` }], { title: 'x' })
       out.push(body.split('\n').slice(2).join('\n').replace(/^## /gm, '### '))
       continue
+    }
+    if (r.counts && 'linksBroken' in r.counts) {
+      const c = r.counts
+      out.push(`Links to rpk reference pages: ${c.linksBroken} broken, ${c.linksMislabeled} with a label naming another command, ${c.linksReplaceable} replaceable with rpkcmd:[...] (listed under Exact), ${c.linksNotLoaded} to a component this scan did not read.`, '')
     }
     const refs = r.findings.filter((f) => f.status === 'reference')
     const errors = refs.filter((f) => f.severity === 'error')
@@ -455,6 +513,7 @@ function runCli (options, { log = console.log, error = console.error } = {}) {
     const c = r.counts
     const refs = kind === 'properties' ? '' : `${c.referenceErrors} reference error(s), ${c.referenceWarnings} warning(s), `
     log(`${kind}: ${r.dataset} (${r.surface}), ${r.files} files: ${refs}${c.mismatch} mismatch, ${c.unset} unset, ${c.exact} exact (${c.autoSafe} auto-safe), ${c.equivalent} equivalent, ${c.unverifiable} unverifiable, ${c['example-output'] || 0} example output (${c.exampleStale || 0} stale).`)
+    if ('linksBroken' in c) log(`${kind} links: ${c.linksBroken} broken, ${c.linksMislabeled} mislabeled, ${c.linksReplaceable} replaceable with rpkcmd:[...], ${c.linksNotLoaded} not checked (component not loaded).`)
   }
   for (const [kind, why] of Object.entries(result.skipped)) log(`${kind}: skipped (${why})`)
   if (result.ignored) log(`${result.ignored} finding(s) ignored by // value-check: ignore.`)

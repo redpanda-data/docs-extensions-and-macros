@@ -32,6 +32,7 @@ const {
 } = require('../migrate-property-values')
 const { DEFAULT_EXCLUDE } = require('../migrate-property-refs')
 const rpkValues = require('../../extension-utils/rpk-values')
+const rpkLinks = require('../../extension-utils/rpk-links')
 const shared = require('./shared')
 
 // rpk redpanda start forwards flags it does not know to Seastar, so they are
@@ -58,6 +59,8 @@ const DEFAULT_PHRASES = PHRASES.filter((p) => p.field === 'default')
 const TRAILING_DEFAULT_RX = /(?:^|\s)((?:at\s+most\s+|up\s+to\s+|at\s+least\s+)?(?:`[^`]+`|-?\d[\d,]*(?:\.\d+)?(?:\s*[A-Za-z%]+)?|true|false|enabled|disabled|on|off))(?:\s+[a-z]+)?\s+by\s+default\b/gi
 // "the default `--x` of 5", "the default `--x` is 5".
 const DEFAULT_OF_RX = /\bdefault\s+(`--[a-z][\w.-]*`)\s+(?:of|is)\s+/gi
+// A value that is a macro call, with or without backticks around it.
+const MACRO_VALUE_RX = /^`?\+?(?:rpkval|rpkcmd|propval|prop|connectval):/
 
 /**
  * The language of a block from its style line ([source,bash], [,yaml],
@@ -314,8 +317,13 @@ const cmd = (names) => ['rpk', ...names].join(' ')
  * @param {boolean} [opts.write]
  * @param {(file: string, original: string, replaced: string) => boolean} [opts.renderGuard]
  * @param {object} [opts.single] - {tagged, partial} for the single-sourcing guard.
+ * @param {object} [opts.links] - {catalog, component, version, skip, cloud}:
+ *   check hand-written xrefs to rpk reference pages against the pages in
+ *   catalog, as the scanned component renders them, except in the files in
+ *   skip. cloud ({component, version}) is the one Cloud lender, which renders
+ *   a self-managed file's ifdef::env-cloud[] content.
  */
-function scanRpk ({ docsDir, registry, files: only, write = false, renderGuard, readFile = shared.readText, writeFile }) {
+function scanRpk ({ docsDir, registry, files: only, write = false, renderGuard, readFile = shared.readText, writeFile, links }) {
   const fsPath = require('path')
   const tree = registry.data.tree
   const cloudSurface = registry.surface === 'cloud'
@@ -444,7 +452,14 @@ function scanRpk ({ docsDir, registry, files: only, write = false, renderGuard, 
       if (ctx.hidden) return line
       const claims = table ? tableClaims(index, line, ctx, registry) : proseClaims(index, line, ctx)
       let rewritten = line
-      const lineFindings = []
+      // A self-managed file's ifdef::env-cloud[] content renders only where
+      // Cloud includes the file, so its links are checked as the Cloud
+      // lender renders them, and not at all without one.
+      const cloudOnly = !cloudSurface && ctx.qualifier === 'ifdef::env-cloud'
+      const linkScope = links && cloudOnly ? (links.cloud ? { ...links, ...links.cloud } : undefined) : links
+      const lineFindings = linkScope && !(links.skip && links.skip.has(relative))
+        ? linkFindings(line, { index, relative, registry, links: linkScope, historical })
+        : []
       for (const claim of claims) {
         const finding = classifyClaim(claim, { index, line, ctx, sightings, registry, allFlags, historical, tagged, cloudSurface, relative, table, sectionStart: sectionStartOf(index) })
         if (finding) lineFindings.push(finding)
@@ -495,9 +510,177 @@ function scanRpk ({ docsDir, registry, files: only, write = false, renderGuard, 
     skippedGenerated,
     skippedStubs,
     findings,
-    counts: { ...tally, examplesRestatingDefault: counts.examplesRestatingDefault },
+    counts: { ...tally, examplesRestatingDefault: counts.examplesRestatingDefault, ...(links ? linkCounts(findings) : {}) },
     changedFiles,
   }
+}
+
+/**
+ * Counts of the rpk link findings, by what they are.
+ */
+function linkCounts (findings) {
+  const links = findings.filter((f) => f.check === 'link')
+  return {
+    linksBroken: links.filter((f) => f.reason === 'broken-link').length,
+    linksMislabeled: links.filter((f) => f.reason === 'link-label-mismatch').length,
+    linksReplaceable: links.filter((f) => f.status === 'exact').length,
+    linksNotLoaded: links.filter((f) => f.reason === 'link-target-not-loaded').length,
+  }
+}
+
+// An xref and its label; the target stops at the bracket.
+const XREF_RX = /xref:([^\s[\]]+)\[((?:\\\]|[^\]])*)\]/g
+
+/**
+ * The page an xref target names, by Antora's resource ID rules:
+ * [version@][component:][module:]relative#fragment. No module means the
+ * file's own; no component means the scanned component and version; a
+ * component without a version means its latest. Undefined for a target with
+ * an attribute reference or a relative path.
+ *
+ * @returns {{component: string, version: string|undefined, module: string, relative: string, fragment: string, named: boolean, pinned: boolean} | undefined}
+ */
+function xrefPage (spec, { component, version, module, catalog }) {
+  const hash = spec.indexOf('#')
+  const id = hash === -1 ? spec : spec.slice(0, hash)
+  const fragment = hash === -1 ? '' : spec.slice(hash + 1)
+  if (/[{}]/.test(id) || id.startsWith('.')) return undefined
+  let rest = id
+  let pinned
+  const at = rest.indexOf('@')
+  if (at !== -1) {
+    pinned = rest.slice(0, at)
+    rest = rest.slice(at + 1)
+  }
+  const parts = rest.split(':')
+  if (parts.length > 3) return undefined
+  const relative = parts.pop()
+  const mod = parts.length ? parts.pop() : module
+  const named = parts.length ? parts.pop() : undefined
+  const comp = named || component
+  const ver = pinned !== undefined ? pinned : named ? rpkLinks.latestVersion(catalog, named) : version
+  return { component: comp, version: ver, module: mod, relative, fragment, named: Boolean(named), pinned: pinned !== undefined }
+}
+
+/**
+ * The command an xref label names: its leading backticked rpk span, or the
+ * whole label when it is plain text starting with rpk. exact when the label
+ * is nothing but that span, naming a command and at most one known flag, as
+ * rpkcmd:[...] would render it.
+ *
+ * @returns {{names: string[], typed: string, flag?: object, exact: boolean} | undefined}
+ */
+function labelCommand (tree, label) {
+  const t = label.trim()
+  const span = t.match(/^`(rpk(?:\s[^`]*)?)`/)
+  const text = span ? span[1] : (/^rpk(?:\s|$)/.test(t) && !t.includes('`') ? t : undefined)
+  if (text === undefined) return undefined
+  const words = text.trim().split(/\s+/).slice(1)
+  let node = tree
+  const names = []
+  const nodes = []
+  let i = 0
+  for (; i < words.length; i++) {
+    const child = rpkValues.childOf(node, words[i])
+    if (!child) break
+    node = child
+    names.push(child.name)
+    nodes.push(child)
+  }
+  const rest = words.slice(i)
+  // A word where a subcommand belongs: the span check reports it.
+  if (rest.length && !isFlagToken(rest[0]) && Array.isArray(node.commands) && node.commands.length && !rpkValues.acceptsPositional(node, names)) return undefined
+  const typed = ['rpk', ...words].join(' ')
+  let flag
+  if (rest.length === 1 && isFlagToken(rest[0])) {
+    const found = rpkValues.findFlag(names.length ? node : tree, rest[0].replace(/^-+/, ''), tree)
+    flag = found && found.flag
+  }
+  const exact = Boolean(span) && span[0] === t && (rest.length === 0 || Boolean(flag))
+  return { names, typed, flag, exact }
+}
+
+/**
+ * Findings for the hand-written xrefs to rpk reference pages on one prose
+ * line, as the scanned component renders them:
+ *
+ *   broken-link (reference error): the target page does not exist there.
+ *   link-label-mismatch (reference warning): the label names another
+ *   command than the page documents.
+ *   exact: the label is the command in backticks and the target is the page
+ *   rpkcmd:[...] would link, so --write may replace the xref with the macro.
+ *   link-target-not-loaded (unverifiable): the target is in a component or
+ *   version this scan has not read; pass it with --lender.
+ */
+function linkFindings (line, { index, relative, registry, links, historical }) {
+  const tree = registry.data.tree
+  const { catalog, component, version } = links
+  const pages = rpkLinks.rpkPageIndex(catalog)
+  const module = (relative.match(/^modules\/([^/]+)\//) || [])[1] || 'ROOT'
+  const spans = shared.backtickSpans(line)
+  const out = []
+  for (const m of line.matchAll(XREF_RX)) {
+    // An xref shown as code is not a link.
+    if (spans.some((sp) => sp.start < m.index && m.index < sp.end)) continue
+    const page = xrefPage(m[1], { component, version, module, catalog })
+    if (!page || page.module !== rpkLinks.PAGE_MODULE || !page.relative.startsWith('rpk/') || !page.relative.endsWith('.adoc')) continue
+    const base = { file: relative, line: index + 1, text: line.trim(), kind: 'rpk', check: 'link', target: `xref:${m[1]}`, token: m[1], written: m[0], association: 'link', autoSafe: false, start: m.index, end: m.index + m[0].length }
+    const where = `${page.component}@${page.version || 'unversioned'}`
+    const known = page.version !== undefined && (() => {
+      const found = typeof catalog.getComponent === 'function' && catalog.getComponent(page.component)
+      return Boolean(found) && (found.versions || []).some((v) => (v.version == null ? '' : String(v.version)) === page.version)
+    })()
+    if (!known) {
+      out.push({ ...base, status: 'unverifiable', reason: 'link-target-not-loaded', note: `${page.named ? page.component : where} is not in this scan; pass its checkout with --lender to check the link` })
+      continue
+    }
+    // Antora resolves an xref to a page alias as a link to the page.
+    const aliased = !rpkLinks.hasPage(pages, page.component, page.version, page.relative) && links.aliases
+      ? links.aliases.get(`${page.component}@${page.version}:${page.relative}`)
+      : undefined
+    if (aliased) {
+      base.alias = page.relative
+      page.relative = aliased
+    }
+    const commandPage = rpkLinks.commandOfPage(tree, page.relative)
+    const command = commandPage ? cmd(commandPage.names) : undefined
+    if (!rpkLinks.hasPage(pages, page.component, page.version, page.relative)) {
+      let note = `${where} has no page reference:${page.relative}`
+      if (commandPage) {
+        const pick = rpkLinks.pickCommandPage(catalog, { component, version, relative: page.relative })
+        if (pick.ok) note += `; rpkcmd:[${command}] links ${pick.id}`
+        else if (pick.reason === 'cloud-no-page') note += `; ${component} is Cloud and has no page for ${command}, so rpkcmd:[${command}] renders it as plain code`
+        else note += `; no component in this scan has a page for ${command}`
+      } else {
+        note += `, and the path names no command in rpk ${registry.data.rpk_version || registry.tag}`
+      }
+      out.push({ ...base, status: 'reference', reason: 'broken-link', severity: 'error', command, note })
+      continue
+    }
+    // index.adoc, rpk-x-options.adoc: a page, not a command.
+    if (!commandPage) continue
+    const label = labelCommand(tree, m[2])
+    const sameCommand = label && label.names.join(' ') === commandPage.names.join(' ')
+    // A label of just rpk names the tool ("the `rpk` CLI"), not a command.
+    if (label && !sameCommand && label.typed !== 'rpk') {
+      out.push({ ...base, status: 'reference', reason: 'link-label-mismatch', severity: 'warning', command, note: `the label names ${cmd(label.names)}, but the link goes to the page for ${command}${base.alias ? ` (through the page alias reference:${base.alias})` : ''}` })
+      continue
+    }
+    // A fragment or a pinned version is a choice rpkcmd: cannot express.
+    if (!sameCommand || !label.exact || page.fragment || page.pinned) continue
+    const pick = rpkLinks.pickCommandPage(catalog, { component, version, relative: page.relative })
+    if (!pick.ok || pick.id !== rpkLinks.resourceId(page)) continue
+    const proposed = `rpkcmd:[${label.typed}]`
+    const finding = { ...base, status: 'exact', command, target: proposed, dataValue: pick.id, proposed }
+    if (label.flag) finding.flag = label.flag.name
+    if (historical) finding.note = 'release or upgrade notes: proposed only'
+    else {
+      finding.autoSafe = true
+      if (base.alias) finding.note = `links through the page alias reference:${base.alias}`
+    }
+    out.push(finding)
+  }
+  return out
 }
 
 /**
@@ -551,6 +734,10 @@ function commandSightings (lines, registry) {
       const r = resolve(words)
       if (r) out.push({ line: i, col: span.start, ...r, from: 'span' })
     }
+    for (const m of macroCommandLines(line)) {
+      const r = resolve(m.parsed.tokens)
+      if (r) out.push({ line: i, col: m.start, ...r, from: 'macro' })
+    }
     for (const m of line.matchAll(/xref:(?:[\w-]+:)?reference:rpk\/[\w-]+\/(rpk-[\w-]+)\.adoc/g)) {
       const r = resolveDashed(tree, m[1].slice(4))
       if (r) out.push({ line: i, col: m.index, ...r, from: 'xref' })
@@ -603,7 +790,21 @@ function flagMentions (line) {
     const command = (m[2].match(/(?:^|,)\s*command=("[^"]*"|[^,\]]*)/) || [])[1]
     mentions.push({ name: m[1].replace(/^-+/, ''), start: m.index, end: m.index + m[0].length, macro: true, commandWords: command !== undefined ? rpkValues.commandTokens(command) : [] })
   }
+  for (const m of macroCommandLines(line)) {
+    if (!m.parsed.flag || m.parsed.extra.length) continue
+    mentions.push({ name: m.parsed.flag.replace(/^-+/, ''), start: m.start, end: m.end, macro: true, commandWords: m.parsed.tokens })
+  }
   return mentions.sort((a, b) => a.start - b.start)
+}
+
+// The command line of each rpkcmd:[...] and bracket-form rpkval:[...] on a
+// line, parsed as the macros parse it.
+function macroCommandLines (line) {
+  const out = []
+  for (const m of line.matchAll(/\b(rpkcmd|rpkval):\[([^\]]*)\]/g)) {
+    out.push({ macro: m[1], start: m.index, end: m.index + m[0].length, parsed: rpkValues.parseCommandLine(m[2].split(',')[0]) })
+  }
+  return out
 }
 
 /**
@@ -650,6 +851,8 @@ function proseClaims (index, line, ctx) {
     if (!owner || claimed.has(valueStart)) return
     const { parsed, skip } = shared.parseAfterFiller(line.slice(valueStart))
     if (!parsed) return
+    // A value macro is the macro already, not a hand-written value.
+    if (MACRO_VALUE_RX.test(line.slice(valueStart + skip))) return
     // "defaults to `--other-flag`" is a reference, not a value.
     if (/^--/.test(parsed.string || '')) return
     claimed.add(valueStart)
@@ -889,6 +1092,10 @@ module.exports = {
   flagMentions,
   proseClaims,
   countFindings,
+  linkCounts,
+  xrefPage,
+  labelCommand,
+  linkFindings,
   PASS_THROUGH_COMMANDS,
   RPK_EXCLUDE,
 }

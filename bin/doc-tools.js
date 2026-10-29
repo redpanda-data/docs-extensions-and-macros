@@ -3424,15 +3424,19 @@ programCli
  *
  * @description
  * Check a docs checkout for reference values and references that the
- * propval:, rpkval: and connectval: macros could render from the published
- * data, and for references to things the data does not have. Three kinds run
+ * propval:, rpkval:, connectval: and rpkcmd: macros could render from the
+ * published data, and for references to things the data does not have. Three kinds run
  * together, each selecting its dataset exactly as its macro does (from the
  * repo and any --lender checkouts), unless --data-file names one:
  * properties runs the migrate-property-values scan unchanged; rpk parses
  * every rpk invocation in shell blocks and backticked prose (unknown-command,
  * unknown-flag and deprecated-command, with "did you mean" suggestions) and
  * compares flag defaults stated in prose and in Default table columns with
- * the rpk data; connect walks every pipeline config in YAML blocks and
+ * the rpk data, and checks each hand-written xref to an rpk reference page as
+ * the scanned component renders it (broken-link when the page does not
+ * exist there, link-label-mismatch when the label names another command, and
+ * exact when the label is the command in backticks and rpkcmd: would link the
+ * same page); connect walks every pipeline config in YAML blocks and
  * examples files (unknown-component, unknown-field, deprecated components and
  * fields), compares YAML comments that state a default ("# Optional
  * (default: ...)") and callouts and sentences that state one with the Connect
@@ -3444,7 +3448,9 @@ programCli
  * and one Markdown report. --write applies only exact matches in the same
  * sentence (or a Connect callout) that name one target, never in a table,
  * block or YAML, and only when the line renders the same visible text before
- * and after through the real macros. Exit 0 when no finding is at or above
+ * and after through the real macros; an exact rpk xref, in prose or a table
+ * cell, becomes rpkcmd:[...].
+ * Exit 0 when no finding is at or above
  * --fail-on, 1 when one is, 2 when the check could not run.
  *
  * @why
