@@ -49,6 +49,13 @@ describe('field anchors', () => {
     expect(anchorOf('outputs/amqp_1.metadata')).toBe('metadata-2')
   })
 
+  test('processors/nats_request_reply metadata is metadata-2: the description partial includes the metadata partial', () => {
+    expect(anchorOf('processors/nats_request_reply.metadata', { catalog: catalogOf() })).toBe('metadata-2')
+    const ids = links.componentAnchors({ entry: resolve('processors/nats_request_reply').entry, pageText: PAGES.sources['processors/nats_request_reply'], catalog: catalogOf() })
+    expect(ids.has('metadata')).toBe(true)
+    expect(ids.has('metadata-2')).toBe(true)
+  })
+
   test('inputs/jira fields is fields-2: the fields partial opens with == Fields', () => {
     expect(anchorOf('inputs/jira.fields', { catalog: catalogOf() })).toBe('fields-2')
     expect(anchorOf('inputs/jira.fields')).toBe('fields-2')
@@ -135,6 +142,15 @@ describe('pages', () => {
     expect(pick('cloud-data-platform', true)).toMatchObject({ ok: true, own: true, id: 'cloud-data-platform:develop:connect/components/inputs/kafka_franz.adoc' })
     expect(links.pickConnectPage(catalog, { component: 'cloud-data-platform', version: '', module: 'components', relative: 'outputs/amqp_1.adoc', cloud: true })).toEqual({ ok: false, reason: 'cloud-no-page' })
     expect(links.pickConnectPage(catalogOf({ components: [] }), { component: 'streaming', version: '26.2', module: 'components', relative: 'inputs/kafka_franz.adoc' })).toEqual({ ok: false, reason: 'no-page' })
+  })
+
+  test('from Cloud, a component whose stub was removed has no page: its path aliases the type\'s about page', () => {
+    // cloud-docs d9be410 modules/develop/pages/connect/components/processors/about.adoc:2
+    const catalog = catalogOf()
+    expect(links.findPage(catalog, 'components:processors/protobuf.adoc', { component: 'cloud-data-platform', version: '', module: 'components' }).src.relative).toBe('connect/components/processors/about.adoc')
+    expect(links.pickConnectPage(catalog, { component: 'cloud-data-platform', version: '', module: 'components', relative: 'processors/protobuf.adoc', cloud: true })).toEqual({ ok: false, reason: 'cloud-no-page' })
+    expect(links.pickConnectPage(catalog, { component: 'cloud-data-platform', version: '', module: 'components', relative: 'processors/nats_request_reply.adoc', cloud: true })).toMatchObject({ ok: true, own: true })
+    expect(links.pickConnectPage(catalog, { component: 'connect', version: '', module: 'components', relative: 'inputs/pg_stream.adoc' })).toMatchObject({ ok: true, own: true, id: 'connect:components:inputs/postgres_cdc.adoc' })
   })
 
   test('findPage resolves a page alias to its page', () => {

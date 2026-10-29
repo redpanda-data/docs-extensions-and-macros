@@ -50,6 +50,7 @@ test('a component and its fields link the connect pages, with the anchors the re
     'connect:[outputs/amqp_1.metadata]',
     'connect:[inputs/jira.fields]',
     'connect:[inputs/pg_stream]',
+    'connect:[processors/nats_request_reply.metadata]',
   ].join('\n'))
   expect(hrefs(html)).toEqual([
     '../../../connect/components/inputs/kafka_franz/',
@@ -58,7 +59,17 @@ test('a component and its fields link the connect pages, with the anchors the re
     '../../../connect/components/outputs/amqp_1/#metadata-2',
     '../../../connect/components/inputs/jira/#fields-2',
     '../../../connect/components/inputs/postgres_cdc/',
+    '../../../connect/components/processors/nats_request_reply/#metadata-2',
   ])
+})
+
+test('from Cloud, a component whose removed stub now aliases the about page renders unlinked', () => {
+  // cloud-docs d9be410 modules/develop/pages/connect/components/processors/about.adoc:2
+  // declares components:processors/protobuf.adoc as an alias.
+  const html = render('connect:[processors/protobuf] connect:[processors/protobuf.operator]', 'cloud-data-platform')
+  expect(hrefs(html)).toEqual([])
+  expect(html).toContain('<code>protobuf</code> processor')
+  expect(html).not.toContain('processors/about/')
 })
 
 test('from Cloud, the links go to the Cloud stubs through their page aliases', () => {

@@ -130,6 +130,20 @@ describe('plainSegments', () => {
       { kind: 'paragraph', lines: ['Done.'] },
     ])
   })
+
+  test('a ---- listing is a literal block, without its delimiters and [,bash] line', () => {
+    // docs 83f6be4d docs-data/rpk-v26.2.2.json, rpk connect echo
+    const text = "Parse a config file and echo back a normalized version.\n\nExamples:\n\n[,bash]\n----\nrpk connect echo ./config.yaml | less\nrpk connect echo --set 'input.generate.mapping=root.id = uuid_v4()'\n----"
+    expect(plainSegments(text)).toEqual([
+      { kind: 'paragraph', lines: ['Parse a config file and echo back a normalized version.'] },
+      { kind: 'paragraph', lines: ['Examples:'] },
+      { kind: 'literal', lines: ['rpk connect echo ./config.yaml | less', "rpk connect echo --set 'input.generate.mapping=root.id = uuid_v4()'"] },
+    ])
+  })
+
+  test('a ---- line with no closing one is text', () => {
+    expect(plainSegments('Before\n----\nafter')).toEqual([{ kind: 'paragraph', lines: ['Before', '----', 'after'] }])
+  })
 })
 
 describe('discreteHeadings', () => {

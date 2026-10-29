@@ -1399,7 +1399,7 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | Markdown, converted to AsciiDoc first: paragraphs, emphasis, code spans, links, lists, fenced code, headings, block quotes and pipe tables
 
 | rpk help text
-| Literally, as cobra prints it: paragraphs, with each indented run as a literal block. Backticks and asterisks render as written
+| Literally, as cobra prints it: paragraphs, with each indented run, and each listing between `----` lines, as a literal block. Backticks and asterisks render as written
 |===
 
 The inline form renders a text value only when it is one paragraph. Anything longer (a blank line, a list, a listing, a heading, a conditional) renders `<unknown FIELD>` with a `needs-block` warning that names the block form: the same macro with two colons, on a line of its own, such as `propval::cleanup.policy[description]`, `rpkval::[rpk topic create,description]` or `connectval::[inputs/kafka_franz.consumer_group,description]`. The block form parses the text into the page. A heading in the text renders as a discrete heading, because a section cannot open inside a block. Written inside a sentence, the block form is a `block-form-inline` error.
@@ -1409,6 +1409,8 @@ A Connect string was written for its component's page in `connect:components`, s
 * `<<signal_table_name,...>>`, an anchor on the component's page, links that page's anchor.
 * An xref with no component, such as `xref:components:inputs/broker.adoc[]` or `xref:guides:bloblang/about.adoc[]`, keeps pointing at the connect component. On another page in `connect`, a bare page gets its `components` module. On a Cloud page, the link stays relative to the Cloud component, where the Cloud stubs alias the connect paths (`components:inputs/broker.adoc`). On any other page it is qualified with `connect:`.
 * A target the rendering page's build has no page for renders as its label, unlinked, with a warning. A Cloud reader is never linked to the self-managed docs.
+
+A Bloblang string was written for the functions or methods page in `connect:guides`, so `bloblval:` rewrites its links the same way, with that page in place of the component's page and `guides` in place of `components`: `<<round,...>>` in a method description links `guides:bloblang/methods.adoc#round`.
 
 Property descriptions and examples link with module-qualified xrefs that resolve wherever the property reference itself renders, so they are not rewritten.
 

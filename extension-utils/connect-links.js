@@ -17,6 +17,10 @@
  *   2. the connect component's latest version, except from a Cloud
  *      (env-cloud) page: Cloud readers are never sent to self-managed docs.
  *
+ * A page found through an alias counts only when it is the page for that
+ * path (isPageOf): when Cloud removes a stub, its paths become aliases of the
+ * type's about page, which is not the component's page.
+ *
  * Anchors are the ids Asciidoctor generates on the published pages (idprefix
  * empty, idseparator -). A field heading such as === `batching.byte_size`
  * becomes batching-byte_size. When a section earlier on the page already has
@@ -197,6 +201,23 @@ function resourceId (page) {
 const isCloud = (catalog, component, version) =>
   Boolean(catalog) && datasets.isAttributeSet(datasets.componentAttributes(catalog, component || '', version || '')['env-cloud'])
 
+// The file name of a page path: inputs/kafka_franz.adoc -> kafka_franz.adoc.
+const baseName = (relative) => String(relative).split('/').pop()
+
+/**
+ * Whether a page, found by a connect path (components:inputs/x.adoc) in some
+ * component, is the page for that path: the connect page itself, or a page
+ * with the same file name as the path or as the connect page it resolves to
+ * (a Cloud stub, or the page of a renamed component). A Cloud about page
+ * that a removed stub's paths alias is not.
+ */
+function isPageOf (catalog, page, { module, relative }) {
+  const connectPage = findPage(catalog, `${CONNECT}:${module}:${relative}`)
+  if (page === connectPage) return true
+  const name = baseName(page.src.relative)
+  return name === baseName(relative) || (Boolean(connectPage) && name === baseName(connectPage.src.relative))
+}
+
 /**
  * The page a link from one component version goes to, in the order the file
  * comment gives.
@@ -205,7 +226,7 @@ const isCloud = (catalog, component, version) =>
  */
 function pickConnectPage (catalog, { component, version, module, relative, cloud }) {
   const ownPage = findPage(catalog, `${module}:${relative}`, { component, version, module })
-  if (ownPage) return { ok: true, page: ownPage, id: resourceId(ownPage), own: true }
+  if (ownPage && isPageOf(catalog, ownPage, { module, relative })) return { ok: true, page: ownPage, id: resourceId(ownPage), own: true }
   if (cloud) return { ok: false, reason: 'cloud-no-page' }
   const page = component === CONNECT ? undefined : findPage(catalog, `${CONNECT}:${module}:${relative}`)
   return page ? { ok: true, page, id: resourceId(page), own: false } : { ok: false, reason: 'no-page' }
@@ -303,6 +324,8 @@ function componentPageIds ({ entry = {}, pageText, readPartial = () => undefined
     ? [{ id: 'examples' }, ...entry.examples.map((e) => ({ id: sectionId(e.title || '') })).filter((x) => x.id)]
     : [])
   if (pageText === undefined || isHtml(pageText)) return { before: description().map((x) => x.id), after: examples().map((x) => x.id) }
+  // A partial's own includes count too: a description partial includes the
+  // metadata partial, which holds the == Metadata section.
   const onInclude = (target, attrs) => {
     const m = target.match(/^(?:(?:connect:)?components:)?partial\$(.+)$/)
     if (!m) return []
@@ -310,7 +333,7 @@ function componentPageIds ({ entry = {}, pageText, readPartial = () => undefined
     // The fields partial: its ids are the fields' own.
     if (/^fields\//.test(relative)) return [{ fields: true }]
     const text = readPartial(relative)
-    if (text !== undefined) return sourceIds(taggedRegion(text, attrs))
+    if (text !== undefined) return sourceIds(taggedRegion(text, attrs), { onInclude })
     const tag = (String(attrs).match(/tags?=([\w-]+)/) || [])[1]
     if (/^descriptions\//.test(relative)) return tag === 'meta' ? [] : description()
     if (/^metadata\//.test(relative)) return description().filter((x) => x.id === 'metadata').slice(0, 1)
@@ -451,6 +474,7 @@ module.exports = {
   findPage,
   resourceId,
   isCloud,
+  isPageOf,
   pickConnectPage,
   connectPartial,
   typeDir,

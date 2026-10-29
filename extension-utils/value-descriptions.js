@@ -18,7 +18,8 @@
  * render as discrete headings, because a section cannot open inside a block.
  *
  * Plain text is never parsed as markup: it renders as paragraphs, with each
- * indented run (cobra's examples) as a literal block.
+ * indented run (cobra's examples) and each ---- delimited listing (some rpk
+ * descriptions carry one) as a literal block.
  */
 
 const { escapeHtml } = require('./html-utils')
@@ -102,7 +103,8 @@ function parseInto (processor, block, text, format) {
 /**
  * Plain text as paragraphs and literal blocks: blank lines separate
  * paragraphs, and an indented run, with the blank lines inside it, is one
- * literal block, dedented.
+ * literal block, dedented. A listing between ---- lines is a literal block
+ * too, without the delimiters and the [,bash] line before them.
  */
 function plainSegments (text) {
   const lines = String(text == null ? '' : text).replace(/\s+$/, '').replace(/^\s*\n/, '').split('\n')
@@ -110,6 +112,17 @@ function plainSegments (text) {
   let current
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
+    const end = /^-{4,}\s*$/.test(line) && (!current || current.kind !== 'literal') ? lines.findIndex((l, j) => j > i && l.trim() === line.trim()) : -1
+    if (end !== -1) {
+      if (current && /^\[[^\]]*\]\s*$/.test(current.lines[current.lines.length - 1])) {
+        current.lines.pop()
+        if (!current.lines.length) segments.pop()
+      }
+      segments.push({ kind: 'literal', lines: lines.slice(i + 1, end) })
+      current = undefined
+      i = end
+      continue
+    }
     if (!line.trim()) {
       const next = lines.slice(i + 1).find((l) => l.trim())
       if (current && current.kind === 'literal' && next && /^\s/.test(next)) current.lines.push('')

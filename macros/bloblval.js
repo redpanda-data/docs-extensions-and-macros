@@ -84,6 +84,15 @@ function bloblvalCall (config, parent, target, attributes, { block = false } = {
   }
   const result = bloblang.resolveBloblValue({ registry, call: written, field: requested, format, cloud, category, categoryOrder, filePath: src.path, macro })
   if (mode !== 'off') for (const warning of result.warnings || []) logger.warn(warning.message)
+  // The strings are written for the functions or methods page: off it,
+  // their links are rewritten as connectval: rewrites a component's.
+  if (result.ok && result.rich && result.rich.format === 'asciidoc') {
+    const moved = connectValues.relocateConnectRefs(result.rich.text, { home: connectLinks.BLOBLANG_PAGES[result.kind], homeModule: connectLinks.GUIDES_MODULE, src, cloud, contentCatalog })
+    if (moved.unlinked.length && mode !== 'off') {
+      logger.warn(`${result.call}: the ${result.field} links ${moved.unlinked.join(', ')}, which ${cloud ? 'this Cloud page' : 'this build'} has no page for, so ${moved.unlinked.length === 1 ? 'that link renders' : 'those links render'} as text.`)
+    }
+    return { ...base, result: { ...result, rich: { ...result.rich, text: moved.text } } }
+  }
   return { ...base, result }
 }
 

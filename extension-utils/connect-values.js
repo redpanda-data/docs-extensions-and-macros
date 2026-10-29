@@ -513,17 +513,21 @@ function resolveConnectValue ({ registry, component, path: target, field: reques
  * rendering page renders as its label, unlinked, and is returned in
  * unlinked: a Cloud reader is never sent to the self-managed docs.
  *
+ * The Bloblang strings are written the same way for the functions or methods
+ * page, so they pass that page as home and guides as homeModule.
+ *
  * @param {string} text - AsciiDoc.
  * @param {object} opts
  * @param {string} [opts.home] - The component's page, inputs/kafka_franz.adoc.
+ * @param {string} [opts.homeModule] - The module of home and of a bare page.
  * @param {object} [opts.src] - The rendering page's src (component, version, module, relative).
  * @param {boolean} [opts.cloud]
  * @param {object} [opts.contentCatalog]
  * @returns {{text: string, unlinked: string[]}}
  */
-function relocateConnectRefs (text, { home, src = {}, cloud = false, contentCatalog } = {}) {
+function relocateConnectRefs (text, { home, homeModule = 'components', src = {}, cloud = false, contentCatalog } = {}) {
   const onConnect = src.component === CONNECT_COMPONENT
-  const onHome = onConnect && src.module === 'components' && Boolean(home) && src.relative === home
+  const onHome = onConnect && src.module === homeModule && Boolean(home) && src.relative === home
   const canResolve = Boolean(contentCatalog) && typeof contentCatalog.resolvePage === 'function'
   const context = { component: src.component, version: src.version, module: src.module }
   const unlinked = []
@@ -540,14 +544,14 @@ function relocateConnectRefs (text, { home, src = {}, cloud = false, contentCata
     return line
       .replace(/<<([^,>\s]+)(?:,\s*([^>]*?))?>>/g, (match, id, label) => {
         if (onHome || !home) return match
-        return link(`components:${home}`, id, label != null && label !== '' ? label : `\`${id}\``)
+        return link(`${homeModule}:${home}`, id, label != null && label !== '' ? label : `\`${id}\``)
       })
       .replace(/xref:([^[\s]+)\[([^\]]*)\]/g, (match, target, label) => {
         const [resource, fragment] = target.split('#')
         // A version or a component already says where it points.
         if (resource.includes('@') || resource.split(':').length > 2) return match
-        if (onConnect && (resource.includes(':') || src.module === 'components')) return match
-        return link(resource.includes(':') ? resource : `components:${resource}`, fragment, label)
+        if (onConnect && (resource.includes(':') || src.module === homeModule)) return match
+        return link(resource.includes(':') ? resource : `${homeModule}:${resource}`, fragment, label)
       })
   })
   return { text: lines.join('\n'), unlinked }

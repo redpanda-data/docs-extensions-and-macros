@@ -22,6 +22,7 @@ const datasets = require('./attachment-datasets')
 const { defineFields } = require('./value-fields')
 const { FORMAT_ASCIIDOC, FORMAT_MARKDOWN, markdownToAsciidoc } = require('./value-descriptions')
 const connectValues = require('./connect-values')
+const bloblangExample = require('../tools/redpanda-connect/helpers/bloblangExample')
 
 const FUNCTION = 'function'
 const METHOD = 'method'
@@ -185,16 +186,15 @@ function richString (text, format) {
 }
 
 /**
- * The examples as the reference prints them: each summary, then the mapping
- * and its inputs and outputs in a bloblang listing.
+ * The examples as the reference prints them, with the formatter the
+ * reference generator uses: each summary as a lead-in ending in a colon (its
+ * Markdown headings as headings), then the mapping and its inputs and
+ * outputs in a bloblang listing.
  */
 function examplesText (examples, format) {
   return examples.map((e) => {
     const summary = String(e.summary || '').trim()
-    const lead = summary ? `${format === FORMAT_MARKDOWN ? markdownToAsciidoc(summary) : summary}`.replace(/\.$/, ':') : ''
-    const results = (Array.isArray(e.results) ? e.results : []).map((r) => `# In:  ${r[0]}\n# Out: ${r[1]}`)
-    const body = [String(e.mapping || '').replace(/\s+$/, ''), ...results].join('\n\n')
-    return [...(lead ? [lead, ''] : []), '[,bloblang]', '----', body, '----'].join('\n')
+    return bloblangExample({ ...e, summary: format === FORMAT_MARKDOWN && summary ? markdownToAsciidoc(summary) : summary }).replace(/\n$/, '')
   }).join('\n\n')
 }
 

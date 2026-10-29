@@ -65,13 +65,13 @@ function catalogOf ({ components = ['connect', 'cloud-data-platform'], data = tr
 /**
  * Convert with the prop extension's macros, rendering in one component.
  */
-function convert (input, { catalog = catalogOf(), component = 'connect', version = VERSIONS[component] || '', attributes = {} } = {}) {
+function convert (input, { catalog = catalogOf(), component = 'connect', version = VERSIONS[component] || '', module = 'guides', relative = 'example.adoc', attributes = {} } = {}) {
   const { register } = require('../../macros/prop')
   const Asciidoctor = require('@asciidoctor/core')()
   const registry = Asciidoctor.Extensions.create()
   register(registry, catalog && {
     contentCatalog: catalog,
-    file: { src: { path: 'modules/guides/pages/example.adoc', component, version, module: 'guides' } },
+    file: { src: { path: `modules/${module}/pages/${relative}`, component, version, module, relative } },
   })
   return Asciidoctor.convert(input, { extension_registry: registry, attributes })
 }

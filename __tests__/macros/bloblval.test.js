@@ -98,6 +98,22 @@ describe('bloblval macro', () => {
       expect(html).toContain('<pre class="highlight"><code class="language-bloblang" data-lang="bloblang">root.id = counter()\n\n# In:  {}\n# Out: {"id":1}')
     })
 
+    test('a summary with no closing period still leads in with a colon, as bloblang-functions/fake.adoc prints it', () => {
+      expect(convert('bloblval::[fake(),examples]')).toContain('<p>Generate fake user profile data for testing:</p>')
+    })
+
+    test('a mapping that starts with a newline opens its listing on the mapping, as bloblang-methods/abs.adoc prints it', () => {
+      const abs = DATA['bloblang-methods'].find((e) => e.name === 'abs')
+      expect(abs.examples[0].mapping.startsWith('\n')).toBe(true)
+      expect(bloblang.entryValue('method', abs, 'examples').text).toContain('[,bloblang]\n----\nroot.outs = this.ins.map_each(ele -> ele.abs())\n\n# In:  {"ins":[9,-18,1.23,-4.56]}')
+    })
+
+    test('a Markdown heading in a summary is a heading, as bloblang-methods/explode.adoc prints it', () => {
+      const html = convert('bloblval::[.explode(),examples]')
+      expect(html).toMatch(/<h3 id="[^"]*" class="discrete">On arrays<\/h3>/)
+      expect(html).not.toContain('#####')
+    })
+
     test('a method\'s examples are its category copy\'s', () => {
       const html = convert('bloblval::[.contains(),examples,category=String Manipulation]')
       expect(html).toContain('# In:  {"thing":"this foo that"}')
@@ -108,6 +124,23 @@ describe('bloblval macro', () => {
       const warn = warnings()
       expect(valueOf('Its examples: bloblval::[counter(),examples].')).toBe('<unknown examples>')
       expect(warn.mock.calls[0][0]).toContain('bloblval:: is the block form, which renders only on a line of its own')
+    })
+
+    test('off the methods page, a description\'s <<round>> links the methods page anchor', () => {
+      // bloblang-methods int64: "... use <<round, `.round()`>> first."
+      const streaming = convert('bloblval::[.int64(),description]', { component: 'streaming', module: 'manage' })
+      expect(streaming).toContain('href="connect:guides:bloblang/methods.html#round"')
+      expect(streaming).not.toContain('href="#round"')
+      expect(convert('bloblval::[.int64(),description]', { relative: 'bloblang/functions.adoc' })).toContain('href="guides:bloblang/methods.html#round"')
+    })
+
+    test('on the methods page, <<round>> is left as written', () => {
+      expect(convert('bloblval::[.int64(),description]', { relative: 'bloblang/methods.adoc' })).toContain('href="#round"')
+    })
+
+    test('a connect-relative xref is qualified with connect: on another component\'s page', () => {
+      const html = convert('bloblval:[.get(),description]', { component: 'streaming', module: 'manage' })
+      expect(html).toContain('href="connect:configuration:field_paths.html"')
     })
 
     test('a short value in the block form is a paragraph', () => {
