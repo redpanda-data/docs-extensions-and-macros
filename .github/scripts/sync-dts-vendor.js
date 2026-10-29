@@ -39,11 +39,17 @@ const README = 'README.adoc'
 // `required: false` means the source directory may be absent, in which case
 // the copy has none of that group. A directory that exists must still contain
 // the group's required files, so a half-moved style fails instead of shipping.
+//
+// `pathspecs` are the git pathspecs for the same files `include` picks. The
+// manifest's source commit is the last commit that touched them, so keep the
+// two in step: a change to a file that is not copied (a fixture, a README)
+// must not change the manifest.
 const GROUPS = [
   {
     from: 'resources/templates',
     to: 'templates',
     required: true,
+    pathspecs: [':(glob)resources/templates/*-template.adoc'],
     include: (rel) => /^[^/]+-template\.adoc$/.test(rel),
     mustHave: [],
   },
@@ -51,6 +57,7 @@ const GROUPS = [
     from: 'vale',
     to: 'vale',
     required: false,
+    pathspecs: ['vale/.vale.ini', ':(glob)vale/styles/**'],
     include: (rel) => rel === '.vale.ini' || rel.startsWith('styles/'),
     mustHave: ['.vale.ini'],
   },
@@ -126,10 +133,12 @@ function collect (sourceRoot) {
   return entries.sort((a, b) => (a.dest < b.dest ? -1 : 1))
 }
 
-// The last commit that touched the copied paths, not the checkout's HEAD, so
+// The last commit that touched the copied files, not the checkout's HEAD, so
 // an unrelated DTS commit leaves the manifest unchanged and opens no PR.
 function sourceCommit (sourceRoot) {
-  const paths = GROUPS.map((g) => g.from).filter((p) => fs.existsSync(path.join(sourceRoot, p)))
+  const paths = GROUPS
+    .filter((g) => fs.existsSync(path.join(sourceRoot, g.from)))
+    .flatMap((g) => g.pathspecs)
   let out
   try {
     out = execFileSync('git', ['-C', sourceRoot, 'log', '-1', '--format=%H', '--', ...paths], {

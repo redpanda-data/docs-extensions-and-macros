@@ -186,6 +186,18 @@ describe('sync from a docs-team-standards checkout', () => {
     expect(run(['--source', src, '--dest', dest, '--check']).status).toBe(0)
   })
 
+  test('a commit to an uncopied file inside a copied directory changes nothing', () => {
+    const src = makeSource()
+    const dest = path.join(tmp, 'out')
+    run(['--source', src, '--dest', dest])
+    write(src, 'vale/fixtures/EmDash.adoc', 'changed fixture\n')
+    write(src, 'resources/templates/README.md', 'changed notes\n')
+    git(src, 'commit', '-q', '-am', 'fixtures and notes')
+    const r = run(['--source', src, '--dest', dest, '--check'])
+    expect(r.out).not.toContain('manifest.json')
+    expect(r.status).toBe(0)
+  })
+
   test('a removed source file is removed from the copy', () => {
     const src = makeSource()
     const dest = path.join(tmp, 'out')
