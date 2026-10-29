@@ -1,7 +1,7 @@
 'use strict'
 
-/* The field vocabulary every value macro shares: propval:, rpkval: and
- * connectval:. A field means the same thing in every macro, so a writer who
+/* The field vocabulary every value macro shares: propval:, rpkval:,
+ * connectval: and bloblval:. A field means the same thing in every macro, so a writer who
  * knows `introduced` or `values` in one knows it in all of them, and the
  * aliases (the JSON key names, and the older spellings) are accepted
  * everywhere the field exists.

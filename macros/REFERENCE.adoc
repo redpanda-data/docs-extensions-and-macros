@@ -561,7 +561,7 @@ The field comes next, `default` when it is omitted. `format=` may follow it.
 
 The flag is looked up on that command, then in the global flags. It is never taken from a parent command: the data does not say which flags are persistent, so a parent's local flag would be a guess. A flag defined on a parent (`--schema-context` on `rpk registry`) is an `unknown-flag` error whose message names the command to write instead.
 
-The first form of the macro is still accepted, and renders the same: the flag as the target and the command in `command=`, as in `rpkval:partitions[command=rpk topic create]` or `rpkval:partitions[shorthand,command=rpk topic create]`. Leave `command=` out for a global flag (`rpkval:config-opt[type]`). `check-reference-values --write` writes this form.
+The first form of the macro is still accepted, and renders the same: the flag as the target and the command in `command=`, as in `rpkval:partitions[command=rpk topic create]` or `rpkval:partitions[shorthand,command=rpk topic create]`. Leave `command=` out for a global flag (`rpkval:config-opt[type]`). `check-reference-values --write` writes the bracket form, with the field it checked: `rpkval:[rpk topic create --partitions,default]`, or `rpkval:[rpk --verbose,default]` for a global flag.
 
 With no flag, the brackets name a command, and the field is one of the command's own: `rpkval:[rpk topic create,usage]` renders `rpk topic create [TOPICS...] [flags]`. A flag field with no flag (`rpkval:[rpk topic create]` asks for `default`) is an `unknown-flag` error, and a command field with a flag is an `unsupported-field` error; both messages say which to write.
 
@@ -817,7 +817,7 @@ The type is written as rp-connect-docs paths and xrefs write it, `inputs/kafka_f
 
 The field comes next, `default` when it is omitted. Every value macro shares one set of field names (<<value-fields>>).
 
-The first form of the macro is still accepted, and renders the same: the field path as the target and the component in `component=`, as in `connectval:client_id[default,component=inputs/redpanda]` or `connectval:pipeline.threads[component=config]`. `check-reference-values --write` writes this form.
+The first form of the macro is still accepted, and renders the same: the field path as the target and the component in `component=`, as in `connectval:client_id[default,component=inputs/redpanda]` or `connectval:pipeline.threads[component=config]`. `check-reference-values --write` writes the bracket form, with the field it checked: `connectval:[inputs/aws_dynamodb_cdc.checkpoint_table,default]`, or `connectval:[config.pipeline.threads,default]` for a root field.
 
 [[connectval-fields]]
 [cols="1,1,2,2"]

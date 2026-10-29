@@ -292,7 +292,7 @@ describe('docs, scanned as streaming', () => {
 describe('the value checks read the new macros', () => {
   test('connect:[...] names the component a stated default belongs to', () => {
     const { result } = scan('connect', { 'modules/guides/pages/x.adoc': page('The connect:[inputs/kafka_franz.client_id] field defaults to `redpanda-connect`.') })
-    expect(result.kinds.connect.findings.filter((f) => f.file === 'modules/guides/pages/x.adoc')).toEqual([expect.objectContaining({ status: 'exact', field: 'default', fieldPath: 'client_id', component: 'kafka_franz', target: 'connectval:client_id[component=inputs/kafka_franz]' })])
+    expect(result.kinds.connect.findings.filter((f) => f.file === 'modules/guides/pages/x.adoc')).toEqual([expect.objectContaining({ status: 'exact', field: 'default', fieldPath: 'client_id', component: 'kafka_franz', target: 'connectval:[inputs/kafka_franz.client_id,default]' })])
   })
 
   test('a bloblval: value is a macro, not a hand-written value', () => {

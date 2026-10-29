@@ -60,7 +60,11 @@ describe('doc-tools check-reference-values', () => {
     const dir = repo({ 'modules/x/pages/m.adoc': MISMATCH })
     const r = run(dir, ['--data-file', rpkData(dir)])
     expect(r.code).toBe(1)
-    expect(r.stdout).toContain('MISMATCH modules/x/pages/m.adoc:10 rpk rpkval:partitions[command=rpk topic create]: written 3, data -1')
+    expect(r.stdout).toContain('MISMATCH modules/x/pages/m.adoc:10 rpk rpkval:[rpk topic create --partitions,default]: written 3, data -1')
+    // The report and the annotation name the same bracket form --write writes.
+    expect(fs.readFileSync(path.join(dir, 'report', 'reference-values-report.md'), 'utf8')).toContain('| `rpkval:[rpk topic create --partitions,default]` | 3 | -1 |')
+    const annotated = run(dir, ['--data-file', rpkData(dir), '--annotations', 'github'])
+    expect(annotated.stdout).toContain('::error file=modules/x/pages/m.adoc,line=10::rpk mismatch: rpkval:[rpk topic create --partitions,default]: written 3, data -1')
   })
 
   test('exit 1 on a reference error', () => {
@@ -155,7 +159,7 @@ describe('doc-tools check-reference-values', () => {
     const written = run(dir, ['--fail-on', 'any', '--write'])
     expect(written.code).toBe(0)
     expect(written.report.kinds.rpk.findings[0]).toMatchObject({ applied: true, failing: false })
-    expect(fs.readFileSync(path.join(dir, 'modules/x/pages/e.adoc'), 'utf8')).toContain('rpkval:partitions[command=rpk topic create]')
+    expect(fs.readFileSync(path.join(dir, 'modules/x/pages/e.adoc'), 'utf8')).toContain('rpkval:[rpk topic create --partitions,default]')
   })
 
   test('historical and unverifiable findings never fail', () => {

@@ -1034,7 +1034,9 @@ function classifyClaim (claim, { index, line, sightings, registry, allFlags, his
   base.commandFrom = owner.from
   const globalOnly = !owner.names.length
   const result = rpkValues.resolveRpkValue({ registry, command: globalOnly ? undefined : command, flag: name, field: 'default' })
-  base.target = `rpkval:${name}[${globalOnly ? '' : `command=${command}`}]`
+  // The bracket form, with the field it compared, so the written call
+  // renders the value the finding resolved.
+  base.target = `rpkval:[${globalOnly ? 'rpk' : command} --${name},default]`
   const flagEntry = (owner.node && rpkValues.flagOn(owner.node, name)) || rpkValues.flagOn({ flags: registry.data.tree.global_flags || [] }, name)
   const scraped = !globalOnly && flagEntry && rpkValues.isScraped(registry, owner.names, flagEntry)
   base.source = scraped ? 'help' : 'core'

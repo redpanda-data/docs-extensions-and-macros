@@ -205,7 +205,7 @@ describe('rpk flag defaults in prose and tables', () => {
     const [f] = findings({ 'modules/develop/pages/t.adoc': page('The `rpk topic create` flag `--partitions` defaults to -1.') })
     expect(f).toMatchObject({ status: 'exact', autoSafe: false })
     const [g] = findings({ 'modules/develop/pages/t.adoc': page('== Create\n\n[,bash]\n----\nrpk topic create orders\n----\n\nThe `--partitions` flag defaults to -1.') })
-    expect(g).toMatchObject({ status: 'exact', autoSafe: true, proposed: 'rpkval:partitions[command=rpk topic create]', command: 'rpk topic create', commandFrom: 'section' })
+    expect(g).toMatchObject({ status: 'exact', autoSafe: true, proposed: 'rpkval:[rpk topic create --partitions,default]', command: 'rpk topic create', commandFrom: 'section' })
   })
 
   test('a mutated fixture default turns a matching claim into mismatch for a core flag and plugin-help-default for a plugin flag', () => {

@@ -380,8 +380,10 @@ function scanYaml (entries, ctx) {
 
 function targetOf (f) {
   if (!f.fieldPath) return undefined
+  // The bracket form, with the field it compared: connectval:[inputs/x.path,default],
+  // or connectval:[config.path,default] for a root field.
   const component = f.componentKey === 'config' ? 'config' : f.componentKey ? `${f.componentKey.replace(/-/g, '_')}/${f.component}` : undefined
-  return component ? `connectval:${f.fieldPath}[component=${component}]` : undefined
+  return component ? `connectval:[${component}.${f.fieldPath},default]` : undefined
 }
 
 /**

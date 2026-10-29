@@ -50,6 +50,8 @@ function setup () {
   const files = {
     // Auto-safe: a core flag, same sentence, sole target.
     'modules/develop/pages/safe.adoc': ['= Safe', '', '== Create', '', block('rpk topic create orders'), 'The `--partitions` flag defaults to -1.', ''].join('\n'),
+    // Auto-safe: a global flag, with no command on the page.
+    'modules/develop/pages/global.adoc': ['= Global', '', 'The `--verbose` flag defaults to `false`.', ''].join('\n'),
     // Withheld: another flag on the line.
     'modules/develop/pages/two-flags.adoc': ['= Two', '', '== Create', '', block('rpk topic create orders'), 'The `--partitions` flag defaults to -1, and `--replicas` too.', ''].join('\n'),
     // Withheld: a table cell, even with the statement in one sentence.
@@ -70,6 +72,8 @@ function setup () {
     'modules/manage/partials/self-test-guarded.adoc': ['== Self test', '', block('rpk cluster self-test start'), 'ifndef::env-cloud[]', 'The `--disk-duration-ms` flag defaults to 30000.', 'endif::[]', ''].join('\n'),
     // Auto-safe: a Connect callout.
     'modules/develop/pages/cdc.adoc': ['= CDC', '', '[,yaml]', '----', 'input:', '  postgres_cdc:', '    incremental_snapshot:', '      chunk_size: 1024 # <1>', '----', '<1> The number of rows to read in each chunk. The default is `1024`.', ''].join('\n'),
+    // Auto-safe: a root config field in prose.
+    'modules/develop/pages/config.adoc': ['= Config', '', 'The `pipeline.threads` field defaults to `-1`.', ''].join('\n'),
     // Withheld Connect lines, one per rule.
     // Association: the statement is in the sentence after the field.
     'modules/develop/pages/c-assoc.adoc': ['= A', '', ...cdcYaml, '<1> The number of rows to read in each chunk.', '', 'Tune `incremental_snapshot.chunk_size` for large tables. The default is `1024`.', ''].join('\n'),
@@ -98,9 +102,11 @@ describe('check-reference-values --write', () => {
     const { docs, connect, files } = setup()
     const result = scanAll({ docsDir: docs, lenderDirs: [connect], kinds: ['rpk', 'connect'], kindsExplicit: true, write: true })
     const changed = Object.keys(files).filter((file) => fs.readFileSync(path.join(docs, file), 'utf8') !== files[file]).sort()
-    expect(changed).toEqual(['modules/develop/pages/cdc.adoc', 'modules/develop/pages/safe.adoc', 'modules/manage/partials/self-test-guarded.adoc'])
-    expect(fs.readFileSync(path.join(docs, 'modules/develop/pages/safe.adoc'), 'utf8')).toContain('The `--partitions` flag defaults to rpkval:partitions[command=rpk topic create].')
-    expect(fs.readFileSync(path.join(docs, 'modules/develop/pages/cdc.adoc'), 'utf8')).toContain('<1> The number of rows to read in each chunk. The default is `connectval:incremental_snapshot.chunk_size[component=inputs/postgres_cdc]`.')
+    expect(changed).toEqual(['modules/develop/pages/cdc.adoc', 'modules/develop/pages/config.adoc', 'modules/develop/pages/global.adoc', 'modules/develop/pages/safe.adoc', 'modules/manage/partials/self-test-guarded.adoc'])
+    expect(fs.readFileSync(path.join(docs, 'modules/develop/pages/safe.adoc'), 'utf8')).toContain('The `--partitions` flag defaults to rpkval:[rpk topic create --partitions,default].')
+    expect(fs.readFileSync(path.join(docs, 'modules/develop/pages/cdc.adoc'), 'utf8')).toContain('<1> The number of rows to read in each chunk. The default is `connectval:[inputs/postgres_cdc.incremental_snapshot.chunk_size,default]`.')
+    expect(fs.readFileSync(path.join(docs, 'modules/develop/pages/global.adoc'), 'utf8')).toContain('The `--verbose` flag defaults to `rpkval:[rpk --verbose,default]`.')
+    expect(fs.readFileSync(path.join(docs, 'modules/develop/pages/config.adoc'), 'utf8')).toContain('The `pipeline.threads` field defaults to `connectval:[config.pipeline.threads,default]`.')
     const notes = Object.fromEntries(result.kinds.rpk.findings.filter((f) => f.status === 'exact').map((f) => [f.file, f.note]))
     expect(notes['modules/develop/pages/two-flags.adoc']).toBe('another flag or command is named on the line: proposed only')
     expect(notes['modules/develop/pages/table.adoc']).toBe('in a table: proposed only')
@@ -110,7 +116,7 @@ describe('check-reference-values --write', () => {
     expect(notes['modules/get-started/pages/release-notes/redpanda.adoc']).toBe('release or upgrade notes: proposed only')
     expect(notes['modules/manage/partials/self-test.adoc']).toBe('page may be single-sourced; wrap in ifndef::env-cloud[] first')
     expect(notes['modules/manage/pages/tagged.adoc']).toBe('page may be single-sourced; wrap in ifndef::env-cloud[] first')
-    expect(result.kinds.rpk.findings.filter((f) => f.applied).map((f) => f.file).sort()).toEqual(['modules/develop/pages/safe.adoc', 'modules/manage/partials/self-test-guarded.adoc'])
+    expect(result.kinds.rpk.findings.filter((f) => f.applied).map((f) => f.file).sort()).toEqual(['modules/develop/pages/global.adoc', 'modules/develop/pages/safe.adoc', 'modules/manage/partials/self-test-guarded.adoc'])
   })
 
   test('withheld Connect lines stay as written while the auto-safe callout is rewritten', () => {
@@ -129,8 +135,8 @@ describe('check-reference-values --write', () => {
       expect(fs.readFileSync(path.join(docs, file), 'utf8')).toBe(files[file])
       expect(exact.filter((f) => f.file === file).map((f) => [f.autoSafe, f.note])).toEqual([[false, note]])
     }
-    expect(fs.readFileSync(path.join(docs, 'modules/develop/pages/cdc.adoc'), 'utf8')).toContain('connectval:incremental_snapshot.chunk_size[component=inputs/postgres_cdc]')
-    expect(result.kinds.connect.findings.filter((f) => f.applied).map((f) => f.file)).toEqual(['modules/develop/pages/cdc.adoc'])
+    expect(fs.readFileSync(path.join(docs, 'modules/develop/pages/cdc.adoc'), 'utf8')).toContain('connectval:[inputs/postgres_cdc.incremental_snapshot.chunk_size,default]')
+    expect(result.kinds.connect.findings.filter((f) => f.applied).map((f) => f.file).sort()).toEqual(['modules/develop/pages/cdc.adoc', 'modules/develop/pages/config.adoc'])
   })
 
   test('every written file renders the same visible text before and after, through the real macros', () => {
@@ -146,13 +152,36 @@ describe('check-reference-values --write', () => {
     }
   })
 
+  test('every proposal is the bracket form, and renders what the older target form rendered', () => {
+    const { docs, connect } = setup()
+    const result = scanAll({ docsDir: docs, lenderDirs: [connect], kinds: ['rpk', 'connect'], kindsExplicit: true })
+    const catalog = catalogFor(docs, connect)
+    const src = { component: 'streaming', version: '26.2', module: 'develop', path: 'modules/develop/pages/x.adoc' }
+    const proposals = [...result.kinds.rpk.findings, ...result.kinds.connect.findings].filter((f) => f.proposed && /^`?(?:rpkval|connectval):/.test(f.proposed))
+    expect(proposals.length).toBeGreaterThan(10)
+    const seen = new Set()
+    for (const f of proposals) {
+      const written = f.proposed.replace(/^`|`$/g, '')
+      // The form --write wrote before, from the same finding.
+      const older = f.kind === 'rpk'
+        ? `rpkval:${f.flag}[${f.command === 'rpk' ? '' : `command=${f.command}`}]`
+        : `connectval:${f.fieldPath}[component=${written.match(/^connectval:\[([^.]+)\./)[1]}]`
+      expect(written).toMatch(f.kind === 'rpk' ? /^rpkval:\[rpk [^,\]]*--[\w-]+,default\]$/ : /^connectval:\[(?:config|[a-z_]+\/\w+)\.[\w.]+,default\]$/)
+      const now = visibleText(renderLine(`It is ${written}.`, { catalog, src }))
+      expect(now).toBe(visibleText(renderLine(`It is ${older}.`, { catalog, src })))
+      expect(now).toBe(`It is ${f.dataValue}.`)
+      seen.add(f.kind === 'rpk' ? (f.command === 'rpk' ? 'global' : 'rpk') : written.startsWith('connectval:[config.') ? 'config' : 'component')
+    }
+    expect([...seen].sort()).toEqual(['component', 'config', 'global', 'rpk'])
+  })
+
   test('the render guard reverts a replacement that changes visible text', () => {
     const { docs, connect } = setup()
     const guard = makeRenderGuard({ catalog: catalogFor(docs, connect), component: 'streaming', version: '26.2' })
-    expect(guard('modules/x/pages/y.adoc', 'It defaults to -1.', 'It defaults to rpkval:partitions[command=rpk topic create].')).toBe(true)
-    expect(guard('modules/x/pages/y.adoc', 'It defaults to 3.', 'It defaults to rpkval:partitions[command=rpk topic create].')).toBe(false)
+    expect(guard('modules/x/pages/y.adoc', 'It defaults to -1.', 'It defaults to rpkval:[rpk topic create --partitions,default].')).toBe(true)
+    expect(guard('modules/x/pages/y.adoc', 'It defaults to 3.', 'It defaults to rpkval:[rpk topic create --partitions,default].')).toBe(false)
     // A placeholder changes the text too.
-    expect(guard('modules/x/pages/y.adoc', 'It defaults to -1.', 'It defaults to rpkval:partitions[command=rpk topic make].')).toBe(false)
+    expect(guard('modules/x/pages/y.adoc', 'It defaults to -1.', 'It defaults to rpkval:[rpk topic make --partitions,default].')).toBe(false)
   })
 
   test('a reverted replacement is reported as render-changed and leaves the file alone', () => {

@@ -69,7 +69,7 @@ describe('Connect YAML on real lines', () => {
   const at = (line, reason) => list().find((f) => f.line === line && (f.reason === reason || f.verdict === reason))
 
   test('connect-quickstart.adoc:208: the client_id comment default is stale', () => {
-    expect(at(9, 'stale')).toMatchObject({ status: 'example-output', verdict: 'stale', fieldPath: 'client_id', written: 'benthos', dataValue: 'redpanda-connect', failing: true, target: 'connectval:client_id[component=inputs/redpanda]' })
+    expect(at(9, 'stale')).toMatchObject({ status: 'example-output', verdict: 'stale', fieldPath: 'client_id', written: 'benthos', dataValue: 'redpanda-connect', failing: true, target: 'connectval:[inputs/redpanda.client_id,default]' })
   })
 
   test('connect-quickstart.adoc:216: the metadata_max_age comment default is stale', () => {
@@ -261,7 +261,7 @@ describe('Connect prose', () => {
   test('rp-connect-docs postgres_cdc.adoc:211: the callout default is exact and auto-safe', () => {
     const list = findings({ 'modules/cookbooks/pages/postgres_cdc.adoc': POSTGRES_PAGE, 'modules/cookbooks/examples/postgres_cdc/incremental-snapshot.yaml': INCREMENTAL })
     const f = list.find((x) => x.association === 'callout')
-    expect(f).toMatchObject({ file: 'modules/cookbooks/pages/postgres_cdc.adoc', line: 13, status: 'exact', autoSafe: true, fieldPath: 'incremental_snapshot.chunk_size', proposed: '`connectval:incremental_snapshot.chunk_size[component=inputs/postgres_cdc]`' })
+    expect(f).toMatchObject({ file: 'modules/cookbooks/pages/postgres_cdc.adoc', line: 13, status: 'exact', autoSafe: true, fieldPath: 'incremental_snapshot.chunk_size', proposed: '`connectval:[inputs/postgres_cdc.incremental_snapshot.chunk_size,default]`' })
   })
 
   test('rp-connect-docs mysql_cdc.adoc:204: the callout default is exact', () => {
