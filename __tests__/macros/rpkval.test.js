@@ -146,7 +146,7 @@ describe('rpkval macro', () => {
 
   describe('shared fields and help text', () => {
     test.each([
-      ['a flag description, one paragraph', 'rpkval:[rpk topic create --partitions,description]', "Number of partitions for the topic. The default of `-1` uses the cluster's `default_topic_partitions` property. More partitions enable higher parallelism but increase resource usage."],
+      ['a flag description, one paragraph', 'rpkval:[rpk topic create --partitions,description]', 'Number of partitions for the topic. The default of -1 uses the cluster&#8217;s default_topic_partitions property. More partitions enable higher parallelism but increase resource usage.'],
       ['a flag introduced version', 'rpkval:[rpk ai llm-provider create --tags,introduced]', '0.2.33'],
       ['introduced through its alias since', 'rpkval:[rpk ai llm-provider create --tags,since]', '0.2.33'],
       ['optional, the inverse of required', 'rpkval:[rpk topic create --partitions,optional]', 'yes'],
@@ -168,10 +168,38 @@ describe('rpkval macro', () => {
       expect(convert('rpkval:[rpk topic create --partitions,optional]', { catalog: streaming() })).toContain('data-rpk-flag="partitions" data-field="optional">yes<')
     })
 
-    test('help text renders literally inline: backticks are not markup', () => {
+    test('a description renders as AsciiDoc inline: backticks are code', () => {
       const html = convert('rpkval:[rpk topic create --partitions,description]', { catalog: streaming() })
-      expect(html).toContain('The default of `-1` uses')
-      expect(html).not.toContain('<code>-1</code>')
+      expect(html).toContain('The default of <code>-1</code> uses')
+      expect(html).not.toContain('`-1`')
+    })
+
+    test('the block form renders an xref in a description as a link', () => {
+      const html = convert('rpkval::[rpk cloud mcp stdio,description]', { catalog: streaming() })
+      expect(html).toContain('<div class="openblock rpk-value rpk-value-description">')
+      expect(html).toMatch(/<a href="[^"]*rpk-cloud-mcp-install\.html"[^>]*><code>rpk cloud mcp install<\/code><\/a>/)
+      expect(html).not.toContain('xref:')
+    })
+
+    test('the block form renders a ---- listing in a description as a listing block', () => {
+      const html = convert('rpkval::[rpk cluster quotas import,description]', { catalog: streaming() })
+      expect(html).toMatch(/<div class="listingblock">\n<div class="content">\n<pre[^>]*>(?:<code[^>]*>)?\{\n {2}quotas: \[\]\{/)
+      expect(html).not.toContain('<p>----')
+      expect(html).toContain('Use the <code>--no-confirm</code> flag')
+    })
+
+    test('a {placeholder} in a description keeps its braces and is not a missing attribute', () => {
+      // drop-line drops any line with a missing attribute, so a placeholder
+      // read as an attribute would lose its sentence.
+      const html = convert('rpkval::[rpk ai trigger,description]', { catalog: streaming(), attributes: { 'attribute-missing': 'drop-line', vbar: '|' } })
+      expect(html).toContain('<code>agents/{agent}/triggers/{trigger}</code>')
+      expect(html).not.toContain('\\{')
+    })
+
+    test('examples still render literally: backticks are not markup', () => {
+      const html = convert('rpkval::[rpk security acl list,examples]', { catalog: streaming() })
+      expect(html).toContain('<pre>rpk security acl list --topic foo</pre>')
+      expect(html).not.toContain('<div class="listingblock">')
     })
 
     test('a command description is more than one paragraph: a warning names the block form', () => {
@@ -180,11 +208,11 @@ describe('rpkval macro', () => {
       expect(warn.mock.calls[0][0]).toContain('Use the block form on a line of its own: rpkval::[rpk topic create,description].')
     })
 
-    test('the block form renders the description as escaped paragraphs', () => {
+    test('the block form renders the description as AsciiDoc paragraphs', () => {
       const html = convert('rpkval::[rpk topic create,description]', { catalog: streaming() })
       expect(html).toContain('<div class="openblock rpk-value rpk-value-description">')
       expect(html).toContain('<p>Create one or more Kafka topics with configurable partitions, replication factor, and topic-level settings.</p>')
-      expect(html).toContain('For example, `rpk topic create -c cleanup.policy=compact -r 3 -p 20 foo bar` creates two topics')
+      expect(html).toContain('For example, <code>rpk topic create -c cleanup.policy=compact -r 3 -p 20 foo bar</code> creates two topics')
     })
 
     test('the block form renders examples as prose and literal blocks', () => {

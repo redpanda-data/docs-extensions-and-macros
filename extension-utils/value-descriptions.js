@@ -4,10 +4,10 @@
  *
  * A text value comes in one of three source formats:
  *
- *   asciidoc  Property descriptions and examples, and Connect strings while
- *             the Connect data says docs_format: asciidoc.
+ *   asciidoc  Property descriptions and examples, rpk descriptions, and
+ *             Connect strings while the data says docs_format: asciidoc.
  *   markdown  Connect strings once the data says docs_format: markdown.
- *   plain     rpk help text, which cobra prints as written.
+ *   plain     rpk examples, which cobra prints as written.
  *
  * The inline form (propval:x[description]) renders a value only when it is a
  * single paragraph, through AsciiDoc's inline substitutions, so `code`,

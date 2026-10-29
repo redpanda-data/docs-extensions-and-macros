@@ -34,7 +34,8 @@ component and Bloblang pages for the links to land on.
   rpkval:[rpk cluster info,aliases]
 * Must read yes, because `--partitions` is not required:
   rpkval:[rpk topic create --partitions,optional]
-* Must read the flag's help text, with its backticks shown as written:
+* Must read the flag's help text, with `-1` and `default_topic_partitions`
+  as inline code:
   rpkval:[rpk topic create --partitions,description]
 * Must show `<unknown description>` and log needs-block, naming
   `+rpkval::[rpk topic create,description]+`:
@@ -43,9 +44,24 @@ component and Bloblang pages for the links to land on.
   rpkval:[rpk topic create --partitions,deprecated]
 
 The block form below must render the two paragraphs of the `rpk topic create`
-description, with its backticks shown as written:
+description, with its backticks as inline code:
 
 rpkval::[rpk topic create,description]
+
+The block form below must render the `rpk cloud mcp stdio` description with
+a link to `rpk cloud mcp install`:
+
+rpkval::[rpk cloud mcp stdio,description]
+
+The block form below must render the `rpk cluster quotas import` description
+with the import schema as a listing block:
+
+rpkval::[rpk cluster quotas import,description]
+
+The block form below must render the `rpk ai trigger` description with
+`+agents/{agent}/triggers/{trigger}+` as inline code, braces included:
+
+rpkval::[rpk ai trigger,description]
 
 The block form below must render each example of `rpk security acl list` as a
 paragraph followed by a literal block:

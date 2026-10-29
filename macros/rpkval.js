@@ -18,7 +18,8 @@
  *
  * Help text longer than one paragraph, such as a command's description or
  * examples, renders only in the block form, rpkval::[rpk topic create,description]
- * on a line of its own, and always literally: help text is not AsciiDoc.
+ * on a line of its own. Descriptions render as AsciiDoc, as the rpk reference
+ * renders them; examples render literally, because they are command lines.
  *
  * The first form is still accepted: the flag as the target and the command
  * in command=, as in rpkval:partitions[command=rpk topic create] or
@@ -37,6 +38,7 @@
 const rpkValues = require('../extension-utils/rpk-values')
 const datasets = require('../extension-utils/attachment-datasets')
 const valueDescriptions = require('../extension-utils/value-descriptions')
+const { annotateVerbatimLines } = require('../tools/redpanda-connect/metadata-utils')
 const logger = require('@antora/logger')('rpkval-macro')
 
 // Kinds that fail the build in error mode: authoring errors, plus the Cloud
@@ -106,8 +108,24 @@ function rpkvalCall (config, parent, target, attributes, { block = false } = {})
     : undefined
   // With no flag, the bracket form reads a field of the command itself.
   const level = bracket && !parsed.flag ? 'command' : 'flag'
-  const result = shape || rpkValues.resolveRpkValue({ registry, command, flag: flagTarget, field: requested, format, filePath, macro, level })
+  let result = shape || rpkValues.resolveRpkValue({ registry, command, flag: flagTarget, field: requested, format, filePath, macro, level })
+  if (result.ok && result.rich && result.rich.format === valueDescriptions.FORMAT_ASCIIDOC) {
+    result = { ...result, rich: { ...result.rich, text: escapeUndefinedAttributes(result.rich.text, document) } }
+  }
   return { mode, flagName, requested, commandText: result.ok ? result.command : commandText(), result, macro: macro || `rpkval:${target}[${requested}]`, where }
+}
+
+/**
+ * Help text uses {name} for placeholders (agents/{agent}/triggers/{trigger}),
+ * which AsciiDoc reads as attribute references. One the page does not define
+ * is escaped, so it renders with its braces, as the rpk reference renders it;
+ * a defined one, such as {vbar}, still resolves. Listings and indented
+ * (literal) lines are left alone, because they take no substitutions.
+ */
+function escapeUndefinedAttributes (text, document) {
+  return annotateVerbatimLines(text).map(({ line, verbatim }) => (verbatim || /^\s/.test(line)
+    ? line
+    : line.replace(/(?<!\\)\{([\w][\w-]*)\}/g, (match, name) => (document.hasAttribute(name) ? match : `\\${match}`)))).join('\n')
 }
 
 function report (mode, result) {
@@ -145,8 +163,9 @@ function rpkvalInlineMacro (config) {
 
 /**
  * rpkval::[<command> [--<flag>],<field>], the block form, for help text
- * longer than one paragraph: a command's description or examples. Help text
- * renders literally, as paragraphs and literal blocks, never parsed as markup.
+ * longer than one paragraph: a command's description or examples. A
+ * description is parsed as AsciiDoc; examples render literally, as paragraphs
+ * and literal blocks.
  */
 function rpkvalBlockMacro (config) {
   return function () {

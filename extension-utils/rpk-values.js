@@ -28,7 +28,7 @@ const { escapeHtml } = require('./html-utils')
 const datasets = require('./attachment-datasets')
 const { isImprecise } = require('./property-values')
 const { defineFields } = require('./value-fields')
-const { FORMAT_PLAIN } = require('./value-descriptions')
+const { FORMAT_ASCIIDOC, FORMAT_PLAIN } = require('./value-descriptions')
 const logger = require('@antora/logger')('rpkval-macro')
 
 const FORMAT_HUMAN = 'human'
@@ -38,7 +38,9 @@ const FORMAT_RAW = 'raw'
 // (rpkval:[rpk topic create --partitions,type]), a command
 // (rpkval:[rpk topic create,usage]), or both. None is hidden on Cloud by
 // itself; see resolveRpkValue for the descriptionScope rules. The `rich`
-// fields are help text, which renders literally (value-descriptions.js).
+// fields are help text: descriptions render as AsciiDoc, as the rpk
+// reference renders them, and examples render literally
+// (value-descriptions.js).
 const FIELD_SET = defineFields('rpkval:', {
   default: { levels: ['flag'] },
   type: { levels: ['flag'] },
@@ -180,10 +182,13 @@ const yesNo = (value, format) => ({ ok: true, text: format === FORMAT_RAW ? Stri
 
 const missingValue = () => ({ ok: false, reason: 'missing' })
 // Help text as written: leading blank lines and trailing space go, and
-// indentation stays, because an indented run is an example.
-const helpText = (text) => {
+// indentation stays, because an indented run is an example. A description
+// is AsciiDoc (the docs data carries rpk-overrides.json text, and the rpk
+// reference renders it as AsciiDoc); examples are command lines, so they
+// render literally.
+const helpText = (text, format = FORMAT_PLAIN) => {
   const value = text.replace(/^\s*\n/, '').replace(/\s+$/, '')
-  return { ok: true, text: value, rich: { kind: 'text', text: value, format: FORMAT_PLAIN } }
+  return { ok: true, text: value, rich: { kind: 'text', text: value, format } }
 }
 const listValue = (list, format) => (Array.isArray(list) && list.length
   ? { ok: true, text: format === FORMAT_RAW ? JSON.stringify(list) : list.map(String).join(', ') }
@@ -208,7 +213,7 @@ function fieldValue (flag, field, { format = FORMAT_HUMAN, scraped = false } = {
       if (typeof flag.required === 'boolean') return yesNo(flag.required, format)
       return { ok: false, reason: scraped ? 'plugin-unknown' : 'missing' }
     case 'description':
-      return typeof flag.description === 'string' && flag.description.trim() ? helpText(flag.description) : missingValue()
+      return typeof flag.description === 'string' && flag.description.trim() ? helpText(flag.description, FORMAT_ASCIIDOC) : missingValue()
     case 'introduced':
       return typeof flag.introducedInVersion === 'string' && flag.introducedInVersion ? { ok: true, text: flag.introducedInVersion } : missingValue()
     default:
@@ -224,7 +229,7 @@ function fieldValue (flag, field, { format = FORMAT_HUMAN, scraped = false } = {
 function commandFieldValue (node, field, { format = FORMAT_HUMAN } = {}) {
   switch (normalizeField(field)) {
     case 'description':
-      return typeof node.description === 'string' && node.description.trim() ? helpText(node.description) : missingValue()
+      return typeof node.description === 'string' && node.description.trim() ? helpText(node.description, FORMAT_ASCIIDOC) : missingValue()
     case 'examples':
       return typeof node.examples === 'string' && node.examples.trim() ? helpText(node.examples) : missingValue()
     case 'usage':

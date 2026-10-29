@@ -592,7 +592,7 @@ With no flag, the brackets name a command, and the field is one of the command's
 
 | `description`
 | flag, command
-| `description`, the help text, rendered literally (<<value-text>>). A command's description is usually more than one paragraph, so it needs `rpkval::`
+| `description`, the help text, rendered as AsciiDoc (<<value-text>>). A command's description is usually more than one paragraph, so it needs `rpkval::`
 | `rpk topic create --partitions`: "Number of partitions for the topic. ..."
 
 | `introduced` (aliases `since`, `version`, `introducedInVersion`)
@@ -641,7 +641,7 @@ rpkval::[rpk topic create,description]
 rpkval::[rpk security acl list,examples]
 ----
 
-It renders an open block with the roles `rpk-value` and `rpk-value-<field>`. The help text is never parsed as AsciiDoc, so backticks and asterisks in it render as written (<<value-text>>).
+It renders an open block with the roles `rpk-value` and `rpk-value-<field>`. A description is parsed as AsciiDoc, as the rpk reference renders it: code, links, and `----` listings render as they do there. Examples render literally (<<value-text>>).
 
 === Formatting
 
@@ -1398,8 +1398,11 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | Connect strings once the data says `docs_format: markdown`
 | Markdown, converted to AsciiDoc first: paragraphs, emphasis, code spans, links, lists, fenced code, headings, block quotes and pipe tables
 
-| rpk help text
-| Literally, as cobra prints it: paragraphs, with each indented run, and each listing between `----` lines, as a literal block. Backticks and asterisks render as written
+| rpk descriptions
+| AsciiDoc, as the rpk reference renders them: the data carries the `docs-data/rpk-overrides.json` text. A `{name}` placeholder the page does not define as an attribute, such as `+agents/{agent}/triggers/{trigger}+`, keeps its braces
+
+| rpk examples
+| Literally, as cobra prints them: paragraphs, with each indented run, and each listing between `----` lines, as a literal block. Backticks and asterisks render as written
 |===
 
 The inline form renders a text value only when it is one paragraph. Anything longer (a blank line, a list, a listing, a heading, a conditional) renders `<unknown FIELD>` with a `needs-block` warning that names the block form: the same macro with two colons, on a line of its own, such as `propval::cleanup.policy[description]`, `rpkval::[rpk topic create,description]` or `connectval::[inputs/kafka_franz.consumer_group,description]`. The block form parses the text into the page. A heading in the text renders as a discrete heading, because a section cannot open inside a block. Written inside a sentence, the block form is a `block-form-inline` error.
