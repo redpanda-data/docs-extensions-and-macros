@@ -582,7 +582,8 @@ tools/redpanda-connect/
 ├── generate-rpcn-connector-docs.js  # Main connector doc generator
 ├── parse-csv-connectors.js          # CSV catalog parser
 ├── report-delta.js                   # Version comparison
-├── connector-binary-analyzer.js     # Cloud/CGO binary analysis
+├── release-attachment.js            # Cloud/cgo data from the release docs asset
+├── connector-binary-analyzer.js     # Cloud/CGO binary analysis (older releases)
 ├── pr-summary-formatter.js          # PR-friendly summary generation
 ├── helpers/
 │   ├── renderConnectFields.js       # Renders field documentation
@@ -684,7 +685,9 @@ _This helps improve discoverability and ensures proper categorization._
 
 === Cloud binary analysis
 
-The `connector-binary-analyzer.js` module detects connector availability across different binaries:
+Releases whose `redpanda-connect-docs.tar.gz` asset has `modules/components/attachments/connect-<version>.json` need no binaries: `release-attachment.js` reads the connector data and the `cloudSupported`, `requiresCgo`, and `cloudOnly` flags from that file, and the generator does not write its own copy to `modules/components/attachments/`, because the docs site serves the asset's copy. Passing `--cloud-version` or `--cgo-version` still compares binaries.
+
+For releases without that file (v4.115.x and older), the `connector-binary-analyzer.js` module detects connector availability across different binaries:
 
 [,javascript]
 ----

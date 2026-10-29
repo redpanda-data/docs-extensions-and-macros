@@ -1,0 +1,880 @@
+{
+  "bloblang-functions": [
+    {
+      "status": "stable",
+      "category": "Environment",
+      "name": "now",
+      "description": "Returns the current timestamp as an RFC 3339 formatted string with nanosecond precision. Use this to add processing timestamps to messages or measure time between events. Chain with `ts_format` to customize the format or timezone.",
+      "params": {},
+      "examples": [
+        {
+          "mapping": "root.received_at = now()",
+          "summary": "",
+          "results": [],
+          "skip_testing": false
+        },
+        {
+          "mapping": "root.received_at = now().ts_format(\"Mon Jan 2 15:04:05 -0700 MST 2006\", \"UTC\")",
+          "summary": "Format the timestamp in a custom format and timezone.",
+          "results": [],
+          "skip_testing": false
+        }
+      ],
+      "impure": false
+    }
+  ],
+  "bloblang-methods": [
+    {
+      "status": "stable",
+      "name": "uppercase",
+      "description": "Converts all letters in a string to uppercase",
+      "params": {},
+      "examples": [
+        {
+          "mapping": "root.foo = this.foo.uppercase()",
+          "summary": "",
+          "results": [
+            [
+              "{\"foo\":\"hello world\"}",
+              "{\"foo\":\"HELLO WORLD\"}"
+            ]
+          ],
+          "skip_testing": false
+        },
+        {
+          "mapping": "root.code = this.product_code.uppercase()",
+          "summary": "",
+          "results": [
+            [
+              "{\"product_code\":\"abc-123\"}",
+              "{\"code\":\"ABC-123\"}"
+            ]
+          ],
+          "skip_testing": false
+        }
+      ],
+      "categories": [
+        {
+          "Category": "String Manipulation",
+          "Description": "Converts all letters in a string to uppercase. Use for case-insensitive comparisons or formatting output.",
+          "Examples": [
+            {
+              "mapping": "root.foo = this.foo.uppercase()",
+              "summary": "",
+              "results": [
+                [
+                  "{\"foo\":\"hello world\"}",
+                  "{\"foo\":\"HELLO WORLD\"}"
+                ]
+              ],
+              "skip_testing": false
+            },
+            {
+              "mapping": "root.code = this.product_code.uppercase()",
+              "summary": "",
+              "results": [
+                [
+                  "{\"product_code\":\"abc-123\"}",
+                  "{\"code\":\"ABC-123\"}"
+                ]
+              ],
+              "skip_testing": false
+            }
+          ]
+        }
+      ],
+      "impure": false
+    }
+  ],
+  "caches": [
+    {
+      "categories": null,
+      "cloudSupported": false,
+      "config": {
+        "children": [
+          {
+            "description": "The directory within which to store items.",
+            "kind": "scalar",
+            "name": "directory",
+            "type": "string"
+          }
+        ],
+        "kind": "scalar",
+        "name": "",
+        "type": "object"
+      },
+      "description": "This type currently offers no form of item expiry or garbage collection, and is intended to be used for development and debugging purposes only.",
+      "name": "file",
+      "plugin": true,
+      "requiresCgo": false,
+      "status": "stable",
+      "summary": "Stores each item in a directory as a file, where an item ID is the path relative to the configured directory.",
+      "type": "cache"
+    },
+    {
+      "categories": null,
+      "cloudSupported": true,
+      "config": {
+        "children": [
+          {
+            "default": "5m",
+            "description": "The default TTL of each item. After this period an item will be eligible for removal during the next compaction.",
+            "kind": "scalar",
+            "name": "default_ttl",
+            "type": "string"
+          },
+          {
+            "default": "60s",
+            "description": "The period of time to wait before each compaction, at which point expired items are removed. This field can be set to an empty string in order to disable compactions/expiry entirely.",
+            "kind": "scalar",
+            "name": "compaction_interval",
+            "type": "string"
+          },
+          {
+            "default": {},
+            "description": "A table of key/value pairs that should be present in the cache on initialization. This can be used to create static lookup tables.",
+            "examples": [
+              {
+                "Nickelback": "1995",
+                "Spice Girls": "1994",
+                "The Human League": "1977"
+              }
+            ],
+            "kind": "map",
+            "name": "init_values",
+            "type": "string"
+          },
+          {
+            "default": 1,
+            "description": "A number of logical shards to spread keys across, increasing the shards can have a performance benefit when processing a large number of keys.",
+            "is_advanced": true,
+            "kind": "scalar",
+            "name": "shards",
+            "type": "int"
+          }
+        ],
+        "kind": "scalar",
+        "name": "",
+        "type": "object"
+      },
+      "description": "The compaction interval determines how often the cache is cleared of expired items, and this process is only triggered on writes to the cache. Access to the cache is blocked during this process.\n\nItem expiry can be disabled entirely by setting the `compaction_interval` to an empty string.\n\nThe field `init_values` can be used to prepopulate the memory cache with any number of key/value pairs which are exempt from TTLs:\n\n```yaml\ncache_resources:\n  - label: foocache\n    memory:\n      default_ttl: 60s\n      init_values:\n        foo: bar\n```\n\nThese values can be overridden during execution, at which point the configured TTL is respected as usual.",
+      "name": "memory",
+      "plugin": true,
+      "requiresCgo": false,
+      "status": "stable",
+      "summary": "Stores key/value pairs in a map held in memory. This cache is therefore reset every time the service restarts. Each item in the cache has a TTL set from the moment it was last edited, after which it will be removed during the next compaction.",
+      "type": "cache"
+    }
+  ],
+  "config": [
+    {
+      "children": [
+        {
+          "default": true,
+          "description": "Whether to enable to HTTP server.",
+          "kind": "scalar",
+          "name": "enabled",
+          "type": "bool"
+        },
+        {
+          "default": "0.0.0.0:4195",
+          "description": "The address to bind to.",
+          "kind": "scalar",
+          "name": "address",
+          "type": "string"
+        },
+        {
+          "default": "/benthos",
+          "description": "Specifies a general prefix for all endpoints, this can help isolate the service endpoints when using a reverse proxy with other shared services. All endpoints will still be registered at the root as well as behind the prefix, e.g. with a root_path set to `/foo` the endpoint `/version` will be accessible from both `/version` and `/foo/version`.",
+          "kind": "scalar",
+          "name": "root_path",
+          "type": "string"
+        },
+        {
+          "default": false,
+          "description": "Whether to register a few extra endpoints that can be useful for debugging performance or behavioral problems.",
+          "kind": "scalar",
+          "name": "debug_endpoints",
+          "type": "bool"
+        },
+        {
+          "default": "",
+          "description": "An optional certificate file for enabling TLS.",
+          "is_advanced": true,
+          "kind": "scalar",
+          "name": "cert_file",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "An optional key file for enabling TLS.",
+          "is_advanced": true,
+          "kind": "scalar",
+          "name": "key_file",
+          "type": "string"
+        },
+        {
+          "children": [
+            {
+              "default": false,
+              "description": "Whether to allow CORS requests.",
+              "is_advanced": true,
+              "kind": "scalar",
+              "name": "enabled",
+              "type": "bool"
+            },
+            {
+              "default": [],
+              "description": "An explicit list of origins that are allowed for CORS requests.",
+              "is_advanced": true,
+              "kind": "array",
+              "name": "allowed_origins",
+              "type": "string"
+            }
+          ],
+          "description": "Adds Cross-Origin Resource Sharing headers.",
+          "is_advanced": true,
+          "kind": "scalar",
+          "name": "cors",
+          "type": "object",
+          "version": "3.63.0"
+        },
+        {
+          "children": [
+            {
+              "default": false,
+              "description": "Enable basic authentication",
+              "is_advanced": true,
+              "kind": "scalar",
+              "name": "enabled",
+              "type": "bool"
+            },
+            {
+              "default": "restricted",
+              "description": "Custom realm name",
+              "is_advanced": true,
+              "kind": "scalar",
+              "name": "realm",
+              "type": "string"
+            },
+            {
+              "default": "",
+              "description": "Username required to authenticate.",
+              "is_advanced": true,
+              "kind": "scalar",
+              "name": "username",
+              "type": "string"
+            },
+            {
+              "default": "",
+              "description": "Hashed password required to authenticate. (base64 encoded)",
+              "is_advanced": true,
+              "kind": "scalar",
+              "name": "password_hash",
+              "type": "string"
+            },
+            {
+              "default": "sha256",
+              "description": "Encryption algorithm used to generate `password_hash`.",
+              "examples": [
+                "md5",
+                "sha256",
+                "bcrypt",
+                "scrypt"
+              ],
+              "is_advanced": true,
+              "kind": "scalar",
+              "name": "algorithm",
+              "type": "string"
+            },
+            {
+              "default": "",
+              "description": "Salt for scrypt algorithm. (base64 encoded)",
+              "is_advanced": true,
+              "kind": "scalar",
+              "name": "salt",
+              "type": "string"
+            }
+          ],
+          "description": "Allows you to enforce and customise basic authentication for requests to the HTTP server.",
+          "is_advanced": true,
+          "kind": "scalar",
+          "name": "basic_auth",
+          "type": "object"
+        }
+      ],
+      "cloudSupported": true,
+      "description": "Configures the service-wide HTTP server.",
+      "kind": "scalar",
+      "name": "http",
+      "requiresCgo": false,
+      "type": "object"
+    },
+    {
+      "cloudSupported": true,
+      "default": "0s",
+      "description": "A period of time to wait for metrics and traces to be pulled or pushed from the process.",
+      "kind": "scalar",
+      "name": "shutdown_delay",
+      "requiresCgo": false,
+      "type": "string"
+    }
+  ],
+  "date": "2026-10-20T00:00:00Z",
+  "docs_format": "asciidoc",
+  "inputs": [
+    {
+      "categories": [
+        "Services"
+      ],
+      "cloudSupported": false,
+      "config": {
+        "children": [
+          {
+            "description": "An address to connect to.",
+            "examples": [
+              "127.0.0.1:11300"
+            ],
+            "kind": "scalar",
+            "name": "address",
+            "type": "string"
+          }
+        ],
+        "kind": "scalar",
+        "name": "",
+        "type": "object"
+      },
+      "name": "beanstalkd",
+      "plugin": true,
+      "requiresCgo": false,
+      "status": "stable",
+      "summary": "Reads messages from a Beanstalkd queue.",
+      "type": "input",
+      "version": "4.7.0"
+    },
+    {
+      "categories": [
+        "Utility"
+      ],
+      "cloudSupported": true,
+      "config": {
+        "children": [
+          {
+            "bloblang": true,
+            "description": "A xref:guides:bloblang/about.adoc[Bloblang] mapping to use for generating messages.",
+            "examples": [
+              "root = \"hello world\"",
+              "root = {\"test\":\"message\",\"id\":uuid_v4()}"
+            ],
+            "kind": "scalar",
+            "name": "mapping",
+            "type": "string"
+          },
+          {
+            "default": "1s",
+            "description": "The time interval at which messages should be generated, expressed either as a duration string or as a cron expression. If set to an empty string messages will be generated as fast as downstream services can process them. Cron expressions can specify a timezone by prefixing the expression with `TZ=<location name>`, where the location name corresponds to a file within the IANA Time Zone database.",
+            "examples": [
+              "5s",
+              "1m",
+              "1h",
+              "@every 1s",
+              "0,30 */2 * * * *",
+              "TZ=Europe/London 30 3-6,20-23 * * *"
+            ],
+            "kind": "scalar",
+            "name": "interval",
+            "type": "string"
+          },
+          {
+            "default": 0,
+            "description": "An optional number of messages to generate, if set above 0 the specified number of messages is generated and then the input will shut down.",
+            "kind": "scalar",
+            "name": "count",
+            "type": "int"
+          },
+          {
+            "default": 1,
+            "description": "The number of generated messages that should be accumulated into each batch flushed at the specified interval.",
+            "kind": "scalar",
+            "name": "batch_size",
+            "type": "int",
+            "version": "4.5.0"
+          },
+          {
+            "default": true,
+            "description": "Whether to automatically replay rejected messages (negative acknowledgements, or nacks) at the output level. If the cause of rejections persists, leaving this option enabled can result in back pressure.\n\nSet `auto_replay_nacks` to `false` to delete rejected messages. Disabling auto replays can greatly improve memory efficiency of high throughput streams, as the original shape of the data is discarded immediately upon consumption and mutation.",
+            "kind": "scalar",
+            "name": "auto_replay_nacks",
+            "type": "bool",
+            "version": "4.27.0"
+          }
+        ],
+        "kind": "scalar",
+        "name": "",
+        "type": "object"
+      },
+      "examples": [
+        {
+          "config": "\ninput:\n  generate:\n    interval: '@every 5m'\n    mapping: 'root = {}'\n  processors:\n    - sql_select:\n        driver: postgres\n        dsn: postgres://foouser:foopass@localhost:5432/testdb?sslmode=disable\n        table: foo\n        columns: [ \"*\" ]\n",
+          "summary": "A common use case for the generate input is to trigger processors on a schedule so that the processors themselves can behave similarly to an input. The following configuration reads rows from a PostgreSQL table every 5 minutes.",
+          "title": "Cron Scheduled Processing"
+        },
+        {
+          "config": "\ninput:\n  generate:\n    count: 100\n    interval: \"\"\n    mapping: |\n      root = if random_int() % 2 == 0 {\n        {\n          \"type\": \"foo\",\n          \"foo\": \"is yummy\"\n        }\n      } else {\n        {\n          \"type\": \"bar\",\n          \"bar\": \"is gross\"\n        }\n      }\n",
+          "summary": "The generate input can be used as a convenient way to generate test data. The following example generates 100 rows of structured data by setting an explicit count. The interval field is set to empty, which means data is generated as fast as the downstream components can consume it.",
+          "title": "Generate 100 Rows"
+        }
+      ],
+      "name": "generate",
+      "plugin": true,
+      "requiresCgo": false,
+      "status": "stable",
+      "summary": "Generates messages at a given interval using a xref:guides:bloblang/about.adoc[Bloblang] mapping executed without a context. This allows you to generate messages for testing your pipeline configs.",
+      "type": "input",
+      "version": "3.40.0"
+    },
+    {
+      "categories": [
+        "Network"
+      ],
+      "cloudSupported": false,
+      "config": {
+        "children": [
+          {
+            "description": "A list of ZeroMQ endpoints to connect to, or to bind when `bind` is `true`, using a transport such as `tcp://`, `ipc://`, or `inproc://`. If an item in the list contains commas, it is split into multiple endpoints.",
+            "examples": [
+              [
+                "tcp://localhost:5555"
+              ]
+            ],
+            "kind": "array",
+            "name": "urls",
+            "type": "string"
+          },
+          {
+            "default": false,
+            "description": "Whether to bind to the URLs and wait for peers to connect, instead of connecting to them.",
+            "kind": "scalar",
+            "name": "bind",
+            "type": "bool"
+          },
+          {
+            "description": "The socket type to connect as.",
+            "kind": "scalar",
+            "linter": "\nlet options = {\n  \"pull\": true,\n  \"sub\": true,\n}\n\nroot = if !$options.exists(this.string().lowercase()) {\n  {\"type\": 2, \"what\": \"value %v is not a valid option for this field\".format(this.string())}\n}\n",
+            "name": "socket_type",
+            "options": [
+              "PULL",
+              "SUB"
+            ],
+            "type": "string"
+          },
+          {
+            "default": [],
+            "description": "The topics that the socket subscribes to when `socket_type` is `SUB`. ZeroMQ delivers a message only when its first frame begins with one of these prefixes, so specifying a single sub_filter of `''` subscribes to everything. At least one filter is required with a SUB socket.",
+            "kind": "array",
+            "name": "sub_filters",
+            "short_description": "Subscription topic filters for a SUB socket. A single empty filter subscribes to everything.",
+            "type": "string"
+          },
+          {
+            "default": 0,
+            "description": "The message high water mark to use.",
+            "is_advanced": true,
+            "kind": "scalar",
+            "name": "high_water_mark",
+            "type": "int"
+          },
+          {
+            "default": "5s",
+            "description": "The poll timeout to use.",
+            "is_advanced": true,
+            "kind": "scalar",
+            "name": "poll_timeout",
+            "type": "string"
+          }
+        ],
+        "kind": "scalar",
+        "name": "",
+        "type": "object"
+      },
+      "description": "\nThis component links to the ZeroMQ C library (`libzmq`), so only cgo builds of Redpanda Connect include it. The standard release binaries, `rpk connect`, and the Docker images don't include it.\n\nTo get a build that includes this component, either download the `redpanda-connect-cgo_<version>_linux_amd64.tar.gz` archive from the https://github.com/redpanda-data/connect/releases[Redpanda Connect releases^], or build from source with cgo enabled and the `x_benthos_extra` build tag:\n\n```bash\n# Install the libzmq headers first, for example on Debian or Ubuntu\nsudo apt-get install libzmq3-dev\n\nCGO_ENABLED=1 go build -tags x_benthos_extra,timetzdata ./cmd/redpanda-connect\n```\n\nBoth builds link `libzmq` dynamically, so the machine that runs Redpanda Connect also needs the ZeroMQ shared library installed.",
+      "name": "zmq4",
+      "plugin": true,
+      "requiresCgo": true,
+      "status": "stable",
+      "summary": "Consumes messages from a ZeroMQ socket.",
+      "type": "input"
+    }
+  ],
+  "outputs": [
+    {
+      "categories": [
+        "Services"
+      ],
+      "cloudSupported": false,
+      "config": {
+        "children": [
+          {
+            "description": "An address to connect to.",
+            "examples": [
+              "127.0.0.1:11300"
+            ],
+            "kind": "scalar",
+            "name": "address",
+            "type": "string"
+          },
+          {
+            "default": 64,
+            "description": "The maximum number of messages to have in flight at a given time. For outputs that send messages in batches, this limit applies to message batches. Increase this value to improve throughput.",
+            "kind": "scalar",
+            "name": "max_in_flight",
+            "type": "int"
+          }
+        ],
+        "kind": "scalar",
+        "name": "",
+        "type": "object"
+      },
+      "name": "beanstalkd",
+      "plugin": true,
+      "requiresCgo": false,
+      "status": "stable",
+      "summary": "Write messages to a Beanstalkd queue.",
+      "type": "output",
+      "version": "4.7.0"
+    },
+    {
+      "categories": [
+        "Utility"
+      ],
+      "cloudSupported": true,
+      "config": {
+        "default": {},
+        "kind": "scalar",
+        "name": "",
+        "type": "object"
+      },
+      "description": "The `drop` output acknowledges each message as soon as it receives it and then discards it, without errors or side effects. Because it adds almost no overhead, it's useful for measuring input and processing throughput without an output bottleneck, for temporarily disabling output while you develop a pipeline, for discarding unwanted messages in a xref:components:outputs/switch.adoc[`switch`] output, and as the final fallback in a xref:components:outputs/fallback.adoc[`fallback`] output.",
+      "name": "drop",
+      "plugin": true,
+      "requiresCgo": false,
+      "status": "stable",
+      "summary": "Drops all messages.",
+      "type": "output"
+    },
+    {
+      "categories": [
+        "Network"
+      ],
+      "cloudSupported": false,
+      "config": {
+        "children": [
+          {
+            "description": "A list of ZeroMQ endpoints to connect to, or to bind when `bind` is `true`, using a transport such as `tcp://`, `ipc://`, or `inproc://`. If an item in the list contains commas, it is split into multiple endpoints.",
+            "examples": [
+              [
+                "tcp://localhost:5556"
+              ]
+            ],
+            "kind": "array",
+            "name": "urls",
+            "type": "string"
+          },
+          {
+            "default": true,
+            "description": "Whether to bind to the URLs and wait for peers to connect, instead of connecting to them.",
+            "kind": "scalar",
+            "name": "bind",
+            "type": "bool"
+          },
+          {
+            "description": "The socket type to connect as.",
+            "kind": "scalar",
+            "linter": "\nlet options = {\n  \"push\": true,\n  \"pub\": true,\n}\n\nroot = if !$options.exists(this.string().lowercase()) {\n  {\"type\": 2, \"what\": \"value %v is not a valid option for this field\".format(this.string())}\n}\n",
+            "name": "socket_type",
+            "options": [
+              "PUSH",
+              "PUB"
+            ],
+            "type": "string"
+          },
+          {
+            "default": 0,
+            "description": "The message high water mark to use.",
+            "is_advanced": true,
+            "kind": "scalar",
+            "name": "high_water_mark",
+            "type": "int"
+          },
+          {
+            "default": "5s",
+            "description": "The poll timeout to use.",
+            "is_advanced": true,
+            "kind": "scalar",
+            "name": "poll_timeout",
+            "type": "string"
+          }
+        ],
+        "kind": "scalar",
+        "name": "",
+        "type": "object"
+      },
+      "description": "\nThis component links to the ZeroMQ C library (`libzmq`), so only cgo builds of Redpanda Connect include it. The standard release binaries, `rpk connect`, and the Docker images don't include it.\n\nTo get a build that includes this component, either download the `redpanda-connect-cgo_<version>_linux_amd64.tar.gz` archive from the https://github.com/redpanda-data/connect/releases[Redpanda Connect releases^], or build from source with cgo enabled and the `x_benthos_extra` build tag:\n\n```bash\n# Install the libzmq headers first, for example on Debian or Ubuntu\nsudo apt-get install libzmq3-dev\n\nCGO_ENABLED=1 go build -tags x_benthos_extra,timetzdata ./cmd/redpanda-connect\n```\n\nBoth builds link `libzmq` dynamically, so the machine that runs Redpanda Connect also needs the ZeroMQ shared library installed.",
+      "name": "zmq4",
+      "plugin": true,
+      "requiresCgo": true,
+      "status": "stable",
+      "summary": "Writes messages to a ZeroMQ socket.",
+      "type": "output"
+    }
+  ],
+  "processors": [
+    {
+      "categories": [
+        "AI"
+      ],
+      "cloudOnly": true,
+      "cloudSupported": true,
+      "config": {
+        "children": [
+          {
+            "description": "URL for the A2A agent card. Can be either a base URL (for example, `https://example.com`) or a full path to the agent card (for example, `https://example.com/.well-known/agent.json`). If no path is provided, defaults to `/.well-known/agent.json`. Authentication uses OAuth2 from environment variables.",
+            "kind": "scalar",
+            "name": "agent_card_url",
+            "scrubber": "\nlet pass = this.parse_url().user.password.or(\"\")\nroot = if $pass != \"\" && !$pass.trim().re_match(\"\"\"^\\${[0-9A-Za-z_.]+(:((\\${[^}]+})|[^}])*)?}$\"\"\") {\n  \"!!!SECRET_SCRUBBED!!!\"\n}\n",
+            "type": "string"
+          },
+          {
+            "description": "The user prompt to send to the agent. By default, the processor submits the entire payload as a string.",
+            "interpolated": true,
+            "is_optional": true,
+            "kind": "scalar",
+            "name": "prompt",
+            "type": "string"
+          },
+          {
+            "default": true,
+            "description": "If true, returns only the text from the final agent message (concatenated from all text parts). If false, returns the complete Message or Task object as structured data with full history, artifacts, and metadata.\n\nExample with final_message_only: true (default):\n```\nHere is the answer to your question...\n```\n\nExample with final_message_only: false:\n```json\n{\n  \"id\": \"task-123\",\n  \"contextId\": \"ctx-456\",\n  \"status\": {\n    \"state\": \"completed\"\n  },\n  \"history\": [\n    {\"role\": \"user\", \"parts\": [{\"text\": \"Your question\"}]},\n    {\"role\": \"agent\", \"parts\": [{\"text\": \"Here is the answer to your question...\"}]}\n  ],\n  \"artifacts\": []\n}\n```\n",
+            "is_advanced": true,
+            "kind": "scalar",
+            "name": "final_message_only",
+            "type": "bool"
+          }
+        ],
+        "kind": "scalar",
+        "name": "",
+        "type": "object"
+      },
+      "description": "\nThis processor enables Redpanda Connect pipelines to communicate with A2A protocol agents. Currently only JSON-RPC transport is supported.\n\nThe processor sends a message to the agent and polls for task completion. The agent's response\nis returned as the processor output.\n\nFor more information about the A2A protocol, see https://a2a-protocol.org/latest/specification",
+      "name": "a2a_message",
+      "plugin": true,
+      "requiresCgo": false,
+      "status": "stable",
+      "summary": "Sends messages to an A2A (Agent-to-Agent) protocol agent and returns the response.",
+      "type": "processor",
+      "version": "4.68.0"
+    },
+    {
+      "categories": [
+        "Integration"
+      ],
+      "cloudSupported": false,
+      "config": {
+        "children": [
+          {
+            "description": "The name of the command to execute.",
+            "examples": [
+              "bash",
+              "go",
+              "${! @command }"
+            ],
+            "interpolated": true,
+            "kind": "scalar",
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "bloblang": true,
+            "description": "An optional xref:guides:bloblang/about.adoc[Bloblang mapping] that, when specified, should resolve into an array of arguments to pass to the command. Command arguments are expressed this way in order to support dynamic behavior.",
+            "examples": [
+              "[ \"-c\", this.script_path ]"
+            ],
+            "is_optional": true,
+            "kind": "scalar",
+            "name": "args_mapping",
+            "type": "string"
+          }
+        ],
+        "kind": "scalar",
+        "name": "",
+        "type": "object"
+      },
+      "description": "\nThe specified command is executed for each message processed, with the raw bytes of the message being fed into the stdin of the command process, and the resulting message having its contents replaced with the stdout of it.\n\n== Metadata\n\nThis processor adds the following metadata fields to each message:\n\n```text\n- command_stderr - Contains the stderr output of a successful command, if any.\n- exit_code - The exit code returned by the command.\n```\n\nYou can access these metadata fields using\nxref:configuration:interpolation.adoc#bloblang-queries[function interpolation].\n\n== Performance\n\nSince this processor executes a new process for each message performance will likely be an issue for high throughput streams. If this is the case then consider using the xref:components:processors/subprocess.adoc[`subprocess` processor] instead as it keeps the underlying process alive long term and uses codecs to insert and extract inputs and outputs to it via stdin/stdout.\n\n== Error handling\n\nIf a non-zero error code is returned by the command then an error containing the entirety of stderr (or a generic message if nothing is written) is set on the message. These failed messages will continue through the pipeline unchanged, but can be dropped or placed in a dead letter queue according to your config, you can read about xref:configuration:error_handling.adoc[these patterns].\n",
+      "examples": [
+        {
+          "config": "\ninput:\n  generate:\n    interval: '0,30 */2 * * * *'\n    mapping: 'root = \"\"' # Empty string as we do not need to pipe anything to stdin\n  processors:\n    - command:\n        name: df\n        args_mapping: '[ \"-h\" ]'\n",
+          "summary": "This example uses a xref:components:inputs/generate.adoc[`generate` input] to trigger a command on a cron schedule:",
+          "title": "Cron Scheduled Command"
+        },
+        {
+          "config": "\npipeline:\n  processors:\n    - command:\n        name: ${! this.command }\n        args_mapping: 'this.args'\n",
+          "summary": "This example config takes structured messages of the form `{\"command\":\"echo\",\"args\":[\"foo\"]}` and uses their contents to execute the contained command and arguments dynamically, replacing its contents with the command result printed to stdout:",
+          "title": "Dynamic Command Execution"
+        }
+      ],
+      "name": "command",
+      "plugin": true,
+      "requiresCgo": false,
+      "status": "stable",
+      "summary": "Executes a command for each message.",
+      "type": "processor",
+      "version": "4.21.0"
+    },
+    {
+      "categories": null,
+      "cloudSupported": false,
+      "config": {
+        "children": [
+          {
+            "description": "The path to the shared library (.so, .dylib or .dll) file to load dynamically.",
+            "examples": [
+              "libbar.6.so",
+              "libfoo.dylib"
+            ],
+            "kind": "scalar",
+            "name": "library_path",
+            "type": "string"
+          },
+          {
+            "description": "The name of the function to load from the shared library.",
+            "examples": [
+              "MyExternCFunction"
+            ],
+            "kind": "scalar",
+            "name": "function_name",
+            "type": "string"
+          },
+          {
+            "bloblang": true,
+            "description": "The bloblang expression that returns an array of arguments to pass into the foreign function.",
+            "examples": [
+              "root = [42, now().ts_unix_nano(), content()]"
+            ],
+            "kind": "scalar",
+            "name": "args_mapping",
+            "type": "string"
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "annotated_options": [
+                      [
+                        "int32",
+                        "A 32 bit signed integer is returned"
+                      ],
+                      [
+                        "int64",
+                        "A 64 bit signed integer is returned"
+                      ],
+                      [
+                        "void",
+                        "The function returns nothing"
+                      ]
+                    ],
+                    "description": "The data type of function's return value",
+                    "kind": "scalar",
+                    "linter": "\nlet options = {\n  \"int32\": true,\n  \"int64\": true,\n  \"void\": true,\n}\n\nroot = if !$options.exists(this.string().lowercase()) {\n  {\"type\": 2, \"what\": \"value %v is not a valid option for this field\".format(this.string())}\n}\n",
+                    "name": "type",
+                    "type": "string"
+                  }
+                ],
+                "description": "The configuration for the function's result.",
+                "kind": "scalar",
+                "name": "return",
+                "type": "object"
+              },
+              {
+                "children": [
+                  {
+                    "annotated_options": [
+                      [
+                        "byte*",
+                        "A pointer to a byte array is provided as an argument. Note this byte array cannot be referenced once the function returns. `args_mapping` must return a byte array or string type for this argument, and the parameter in C for this should be `void*`."
+                      ],
+                      [
+                        "int32",
+                        "A 32 bit signed integer is provided as an argument"
+                      ],
+                      [
+                        "int64",
+                        "A 64 bit signed integer is provided as an argument"
+                      ]
+                    ],
+                    "description": "The data type of the parameter.",
+                    "kind": "scalar",
+                    "linter": "\nlet options = {\n  \"byte*\": true,\n  \"int32\": true,\n  \"int64\": true,\n}\n\nroot = if !$options.exists(this.string().lowercase()) {\n  {\"type\": 2, \"what\": \"value %v is not a valid option for this field\".format(this.string())}\n}\n",
+                    "name": "type",
+                    "type": "string"
+                  },
+                  {
+                    "default": false,
+                    "description": "If the parameter provided is an 'out' parameter, meaning if the function mutates the value, and the resulting value should be returned. This is only valid for pointer types.",
+                    "kind": "scalar",
+                    "name": "out",
+                    "type": "bool"
+                  }
+                ],
+                "description": "The parameters of the function.",
+                "kind": "array",
+                "name": "parameters",
+                "type": "object"
+              }
+            ],
+            "description": "The signature of the function.",
+            "kind": "scalar",
+            "name": "signature",
+            "type": "object"
+          }
+        ],
+        "kind": "scalar",
+        "name": "",
+        "type": "object"
+      },
+      "description": "The `ffi` processor allows you to dynamically load shared libraries (.so, .dylib, or .dll files) and invoke their functions as a processing step. This enables integration with external C/C++ libraries without requiring custom Go code or rebuilding Redpanda Connect.\n\nThe processor uses `dlopen` (or platform equivalent) to load the specified library at runtime, looks up the function by name, and invokes it with arguments provided through Bloblang mapping. Function signatures are defined using the `signature` field, specifying parameter and return types.\n\nResults are returned as an array, where the first element is the return value (if not void), followed by any output parameters in their declaration order.",
+      "examples": [
+        {
+          "config": "\npipeline:\n  processors:\n    - ffi:\n        library_path: libc.so.6\n        function_name: memcmp\n        args_mapping: 'root = [\"foo\", \"bar\", 3]'\n        signature:\n          return:\n            type: int32\n          parameters:\n            - type: byte*\n            - type: byte*\n            - type: int64\n",
+          "summary": "This is an example of loading libc.so.6 and calling a function on Linux.",
+          "title": "Call a libc function"
+        }
+      ],
+      "name": "ffi",
+      "plugin": true,
+      "requiresCgo": true,
+      "status": "stable",
+      "summary": "Invokes functions from shared libraries using a Foreign Function Interface (FFI).",
+      "type": "processor",
+      "version": "4.69.0"
+    },
+    {
+      "categories": null,
+      "cloudSupported": true,
+      "config": {
+        "default": {},
+        "kind": "scalar",
+        "name": "",
+        "type": "object"
+      },
+      "name": "noop",
+      "plugin": true,
+      "requiresCgo": false,
+      "status": "stable",
+      "summary": "Noop is a processor that does nothing, the message passes through unchanged. Why? Sometimes doing nothing is the braver option.",
+      "type": "processor"
+    }
+  ],
+  "version": "4.115.1"
+}
