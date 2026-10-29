@@ -11,7 +11,14 @@
  * rp-connect-docs page). An xref with no component resolves in the rendering
  * page's component, so the same xref can work in one and break in another.
  * A line in ifndef::env-cloud[] is judged off Cloud only, and one in
- * ifdef::env-cloud[] on Cloud only.
+ * ifdef::env-cloud[] on Cloud only. An include with tag= or tags= renders
+ * only the lines in those tag regions, and an include line in an env-cloud
+ * conditional only on the surfaces the conditional keeps.
+ *
+ * A scan of connect with no Cloud lender cannot say whether Cloud renders a
+ * line of a partial or of a page's single-source tag region. Its links are
+ * link-target-not-loaded, never exact, until the scan has the cloud-docs
+ * checkout.
  *
  *   broken-link (reference error): the page does not exist on a surface, or
  *   the anchor is not on the page there (a deprecated field, an impure
@@ -24,7 +31,8 @@
  *   the page and anchor the macro links, so --write may replace the xref
  *   with connect:[...] or blobl:[...].
  *   link-target-not-loaded (unverifiable): no surface in this scan renders
- *   the line, or the target is in a component the scan did not read.
+ *   the line, Cloud may render it and the scan has no Cloud checkout, or the
+ *   target is in a component the scan did not read.
  */
 
 const fs = require('fs')
@@ -35,6 +43,7 @@ const bloblang = require('../../extension-utils/bloblang-values')
 const { normalizeType } = require('../../extensions/util/connect-catalog')
 const shared = require('./shared')
 const { xrefPage } = require('./rpk')
+const { CONDITIONAL_RX, conditionOf } = require('../migrate-property-values')
 
 const XREF_RX = /xref:([^\s[\]]+)\[((?:\\\]|[^\]])*)\]/g
 
@@ -119,17 +128,75 @@ function includeTarget (target, { fromFile, component }) {
 }
 
 /**
- * The surfaces that render each file of the scanned checkout.
+ * The include lines of a file: target, attributes, line index, and the
+ * surfaces an env-cloud conditional around the line keeps (cloud, off or
+ * either).
+ */
+function includeLines (text) {
+  const out = []
+  const conditions = []
+  String(text).split('\n').forEach((line, index) => {
+    const trimmed = line.trim()
+    const directive = trimmed.match(CONDITIONAL_RX)
+    if (/^endif::[^[\s]*\[\]$/.test(trimmed)) {
+      conditions.pop()
+    } else if (/^ifeval::\[.*\]$/.test(trimmed)) {
+      conditions.push({ type: 'ifeval', attrs: '' })
+    } else if (directive) {
+      // The single-line form, ifdef::x[text], opens nothing.
+      if (!directive[3]) conditions.push({ type: directive[1], attrs: directive[2] })
+    } else {
+      const m = line.match(/^include::([^[\s]+)\[([^\]]*)\]\s*$/)
+      if (!m) return
+      const state = conditionOf(conditions, false)
+      out.push({ target: m[1], attrs: m[2], index, only: state.cloudExcluded ? 'off' : state.qualifier ? 'cloud' : undefined })
+    }
+  })
+  return out
+}
+
+/**
+ * The line indexes of a file inside the tag regions an include selects, or
+ * undefined for every line: no tag=, or a filter with ! or * the scan does
+ * not follow.
+ */
+function taggedLines (text, attrs) {
+  const m = String(attrs || '').match(/(?:^|,)\s*tags?=["']?([^,"']+)/)
+  if (!m) return undefined
+  const tags = m[1].split(';').map((t) => t.trim()).filter(Boolean)
+  if (!tags.length || tags.some((t) => /^[!*]/.test(t))) return undefined
+  const lines = new Set()
+  const open = new Set()
+  String(text).split('\n').forEach((line, index) => {
+    const tag = line.match(/\b(tag|end)::([^[\s]+)\[\]/)
+    if (tag && tags.includes(tag[2])) {
+      if (tag[1] === 'tag') open.add(tag[2])
+      else open.delete(tag[2])
+      return
+    }
+    if (open.size) lines.add(index)
+  })
+  return lines
+}
+
+/**
+ * The surfaces that render each line of the scanned checkout's files.
  *
  * @param {object} opts
  * @param {string} opts.docsDir
  * @param {object} opts.own - {component, version, attributes}.
  * @param {{dir: string, comp: object}[]} opts.lenders
- * @returns {(relative: string) => {component: string, version: string, cloud: boolean}[]}
+ * @returns {(relative: string, index?: number) => {component: string, version: string, cloud: boolean, unknown?: boolean}[]}
+ *   the surfaces of a line, or with no index of any line of the file. An
+ *   unknown surface is a Cloud the scan has no checkout for.
  */
 function renderingSurfaces ({ docsDir, own, lenders = [] }) {
   const surface = (comp) => ({ component: comp.component, version: comp.version, cloud: Boolean(comp.attributes && comp.attributes['env-cloud']) })
   const ownSurface = surface(own)
+  const unknownCloud = own.component === connectLinks.CONNECT && !ownSurface.cloud && !lenders.some(({ comp }) => surface(comp).cloud)
+    ? { component: undefined, version: undefined, cloud: true, unknown: true }
+    : undefined
+  const texts = new Map()
   const includers = new Map()
   const seeds = new Map()
   const add = (map, key, value) => {
@@ -144,10 +211,11 @@ function renderingSurfaces ({ docsDir, own, lenders = [] }) {
     } catch (error) {
       continue
     }
+    texts.set(posix, text)
     if (!text.includes('include::')) continue
-    for (const m of text.matchAll(INCLUDE_RX)) {
-      const target = includeTarget(m[1], { fromFile: posix, component: own.component })
-      if (target) add(includers, target, posix)
+    for (const edge of includeLines(text)) {
+      const target = includeTarget(edge.target, { fromFile: posix, component: own.component })
+      if (target) add(includers, target, { from: posix, ...edge })
     }
   }
   for (const { dir, comp } of lenders) {
@@ -160,28 +228,49 @@ function renderingSurfaces ({ docsDir, own, lenders = [] }) {
         continue
       }
       if (!text.includes(needle)) continue
-      for (const m of text.matchAll(INCLUDE_RX)) {
-        if (!m[1].includes(needle)) continue
-        const target = includeTarget(m[1], { fromFile: relative.split(path.sep).join('/'), component: own.component })
-        if (target) add(seeds, target, surface(comp))
+      for (const edge of includeLines(text)) {
+        if (!edge.target.includes(needle)) continue
+        const target = includeTarget(edge.target, { fromFile: relative.split(path.sep).join('/'), component: own.component })
+        if (target) add(seeds, target, { surface: surface(comp), ...edge })
       }
     }
   }
+  const keeps = (only, s) => !only || (only === 'cloud') === s.cloud
+  const linesOf = (file, attrs) => taggedLines(texts.get(file) || '', attrs)
   const memo = new Map()
+  // Each surface of a file, with the lines it renders (undefined for all).
   const of = (file, stack = new Set()) => {
     if (memo.has(file)) return memo.get(file)
-    if (stack.has(file)) return []
+    if (stack.has(file)) return new Map()
     stack.add(file)
     const found = new Map()
-    if (/^modules\/[^/]+\/pages\//.test(file)) found.set(`${ownSurface.component}@${ownSurface.version}`, ownSurface)
-    for (const s of seeds.get(file) || []) found.set(`${s.component}@${s.version}`, s)
-    for (const from of includers.get(file) || []) for (const s of of(from, stack)) found.set(`${s.component}@${s.version}`, s)
+    const reach = (s, lines) => {
+      const key = `${s.component}@${s.version}`
+      const had = found.get(key)
+      if (!had) found.set(key, { s, lines })
+      else if (had.lines) had.lines = lines ? new Set([...had.lines, ...lines]) : undefined
+    }
+    if (/^modules\/[^/]+\/pages\//.test(file)) reach(ownSurface)
+    for (const seed of seeds.get(file) || []) if (keeps(seed.only, seed.surface)) reach(seed.surface, linesOf(file, seed.attrs))
+    for (const edge of includers.get(file) || []) {
+      for (const { s, lines } of of(edge.from, stack).values()) {
+        if ((lines && !lines.has(edge.index)) || !keeps(edge.only, s)) continue
+        reach(s, linesOf(file, edge.attrs))
+      }
+    }
+    if (unknownCloud) {
+      // Cloud may include any partial, and a page's single-source region.
+      const text = texts.get(file) || ''
+      if (/^modules\/[^/]+\/partials\//.test(file)) reach(unknownCloud)
+      else if (/tag::single-source\[\]/.test(text)) reach(unknownCloud, taggedLines(text, 'tag=single-source'))
+    }
     stack.delete(file)
-    const out = [...found.values()]
-    memo.set(file, out)
-    return out
+    memo.set(file, found)
+    return found
   }
-  return (relative) => of(String(relative).split(path.sep).join('/'))
+  return (relative, index) => [...of(String(relative).split(path.sep).join('/')).values()]
+    .filter(({ lines }) => index === undefined || !lines || lines.has(index))
+    .map(({ s }) => s)
 }
 
 // ---------------------------------------------------------------------------
@@ -234,9 +323,13 @@ function linkFindings (line, { index, relative, registry, links, ctx = {}, histo
   const types = {}
   for (const key of Object.values(connectValues.componentTypes(data))) types[connectLinks.typeDir(key)] = key
   const spans = shared.backtickSpans(line)
-  let surfaces = links.surfacesOf(relative)
+  let surfaces = links.surfacesOf(relative, index)
   if (ctx.cloudExcluded) surfaces = surfaces.filter((s) => !s.cloud)
   if (ctx.qualifier === 'ifdef::env-cloud') surfaces = surfaces.filter((s) => s.cloud)
+  // A Cloud the scan has no checkout for may render the line.
+  const cloudUnknown = surfaces.some((s) => s.unknown)
+  const cloudNote = `Cloud may render this line (${/(?:^|\/)partials\//.test(relative) ? 'a partial' : 'the page\'s single-source tag region'}), and this scan has no Cloud checkout; pass the cloud-docs checkout with --lender to check it`
+  surfaces = surfaces.filter((s) => !s.unknown)
   const out = []
   for (const m of line.matchAll(XREF_RX)) {
     if (spans.some((sp) => sp.start < m.index && m.index < sp.end)) continue
@@ -262,7 +355,7 @@ function linkFindings (line, { index, relative, registry, links, ctx = {}, histo
       // this check would judge.
       const page = xrefPage(m[1], { component: links.component, version: links.version, module, catalog })
       if (page && connectTarget(page, { types }) && (connectContent || connectTarget(page, { types }).kind === 'component')) {
-        out.push({ ...base, status: 'unverifiable', reason: 'link-target-not-loaded', note: 'no page in this scan renders this line; pass the checkout that includes the file with --lender to check it' })
+        out.push({ ...base, status: 'unverifiable', reason: 'link-target-not-loaded', note: cloudUnknown ? cloudNote : 'no page in this scan renders this line; pass the checkout that includes the file with --lender to check it' })
       }
       continue
     }
@@ -288,6 +381,12 @@ function linkFindings (line, { index, relative, registry, links, ctx = {}, histo
       const fragment = v.page.fragment
       if (target.kind === 'component') {
         if (!entry) continue
+        // A path that aliases another page there (a Cloud about page that
+        // took over a removed stub's paths) is not the component's page.
+        if (!connectLinks.isPageOf(catalog, v.resolved, { module: connectLinks.COMPONENTS_MODULE, relative: target.relative })) {
+          problems.push(`${where} has no ${normalizeType(target.key)} page for '${target.name}': ${v.page.component}:${v.page.module}:${v.page.relative} is a page alias of ${connectLinks.resourceId(v.resolved)}`)
+          continue
+        }
         const anchors = componentAnchorsOf(catalog, target, entry, data)
         if (fragment && !anchors.ids.has(fragment)) problems.push(`the ${normalizeType(target.key)} page has no anchor #${fragment}${fieldHint(anchors, fragment)}`)
         const pick = connectLinks.pickConnectPage(catalog, { component: v.s.component, version: v.s.version, module: connectLinks.COMPONENTS_MODULE, relative: target.relative, cloud: v.s.cloud })
@@ -314,6 +413,10 @@ function linkFindings (line, { index, relative, registry, links, ctx = {}, histo
     const mislabel = target.kind === 'component' ? componentLabelProblem(label, target, entry, picks, catalog, data) : bloblangLabelProblem(label, target, picks)
     if (mislabel) {
       out.push({ ...base, status: 'reference', reason: 'link-label-mismatch', severity: 'warning', component: target.name, componentType: target.key && normalizeType(target.key), note: mislabel })
+      continue
+    }
+    if (cloudUnknown) {
+      out.push({ ...base, status: 'unverifiable', reason: 'link-target-not-loaded', note: cloudNote })
       continue
     }
     const proposed = target.kind === 'component' ? componentProposal(label, target, entry, picks, catalog, data) : bloblangProposal(label, target, picks, catalog, data)

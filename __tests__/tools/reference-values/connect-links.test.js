@@ -190,6 +190,47 @@ describe('rp-connect-docs, scanned as connect', () => {
       expect(at(links, 7)).toEqual([expect.objectContaining({ status: 'exact', proposed: 'connect:[outputs/amqp_1]' })])
     })
 
+    describe('a single-sourced page', () => {
+      // modules/guides/pages/bloblang/walkthrough.adoc:2, :146 and :904, which
+      // cloud-docs modules/develop/pages/connect/guides/bloblang/walkthrough.adoc:4
+      // includes with tag=single-source.
+      const LINE = "Woah, I think that's the plot to Inception, let's move onto functions. Functions are just boring methods that don't have a target, and there are xref:guides:bloblang/functions.adoc[plenty of them as well]. Functions are often used to extract information unrelated to the input document, such as xref:guides:bloblang/functions.adoc#env[environment variables], or to generate data such as xref:guides:bloblang/functions.adoc#now[timestamps] or xref:guides:bloblang/functions.adoc#uuid_v4[UUIDs]."
+      const WALKTHROUGH = 'modules/guides/pages/bloblang/walkthrough.adoc'
+      const STUB = { 'modules/develop/pages/connect/guides/bloblang/walkthrough.adoc': '= Bloblang Walkthrough\n:page-aliases: guides:bloblang/walkthrough.adoc\n:description: A step by step introduction to Bloblang\ninclude::connect:guides:bloblang/walkthrough.adoc[tag=single-source]\n' }
+      const withCloud = (files, cloud = STUB) => scan('connect', files, { lenders: ['streaming', 'cloud-data-platform'], lenderFiles: { 'cloud-data-platform': cloud } }).links
+
+      test('with no Cloud checkout, its links are not loaded, never exact', () => {
+        const { links } = scan('connect', { [WALKTHROUGH]: page('// tag::single-source[]', LINE, '', 'Use the xref:guides:bloblang/functions.adoc#counter[`counter()`] function.', '// end::single-source[]', '', 'Use the xref:guides:bloblang/functions.adoc#counter[`counter()`] function.') })
+        expect(at(links, 4)).toHaveLength(4)
+        expect(at(links, 4).every((f) => f.reason === 'link-target-not-loaded' && !f.autoSafe)).toBe(true)
+        expect(at(links, 4)[0].note).toContain('pass the cloud-docs checkout with --lender')
+        expect(at(links, 6)).toEqual([expect.objectContaining({ reason: 'link-target-not-loaded' })])
+        expect(at(links, 9)).toEqual([expect.objectContaining({ status: 'exact', autoSafe: true })])
+      })
+
+      test('a partial is not loaded either, but a line in ifndef::env-cloud[] is judged', () => {
+        const { links } = scan('connect', { 'modules/guides/partials/x.adoc': ['Use the xref:guides:bloblang/functions.adoc#counter[`counter()`] function.', 'ifndef::env-cloud[]', 'Use the xref:guides:bloblang/functions.adoc#counter[`counter()`] function.', 'endif::[]', ''].join('\n'), 'modules/guides/pages/x.adoc': page('include::guides:partial$x.adoc[]') })
+        expect(at(links, 1)).toEqual([expect.objectContaining({ reason: 'link-target-not-loaded' })])
+        expect(at(links, 3)).toEqual([expect.objectContaining({ status: 'exact' })])
+      })
+
+      test('with the Cloud checkout, the env() anchor is broken on Cloud', () => {
+        const links = withCloud({ [WALKTHROUGH]: page('// tag::single-source[]', LINE, '// end::single-source[]') })
+        expect(at(links, 4)).toEqual([expect.objectContaining({ reason: 'broken-link', note: expect.stringContaining('env() is impure, and the Cloud page leaves it out') })])
+      })
+
+      test('only the tag region renders on Cloud: a line after end::single-source[] is judged off Cloud only', () => {
+        const links = withCloud({ [WALKTHROUGH]: page('// tag::single-source[]', 'In tag.', '// end::single-source[]', 'Read xref:guides:bloblang/functions.adoc#env[`env()`].') })
+        expect(at(links, 6)).toEqual([expect.objectContaining({ status: 'exact', proposed: 'blobl:[env()]' })])
+      })
+
+      test('an include in ifndef::env-cloud[] does not render on Cloud', () => {
+        const cloud = { 'modules/develop/pages/connect/guides/bloblang/walkthrough.adoc': '= Bloblang Walkthrough\n\nifndef::env-cloud[]\ninclude::connect:guides:bloblang/walkthrough.adoc[tag=single-source]\nendif::[]\n' }
+        const links = withCloud({ [WALKTHROUGH]: page('// tag::single-source[]', 'Read xref:guides:bloblang/functions.adoc#env[`env()`].', '// end::single-source[]') }, cloud)
+        expect(at(links, 4)).toEqual([expect.objectContaining({ status: 'exact' })])
+      })
+    })
+
     test('an xref that sends Cloud readers to the connect page is not exact: on Cloud, connect: links the stub', () => {
       const own = { 'modules/guides/pages/shared.adoc': page('Read with the xref:connect:components:inputs/kafka_franz.adoc[`kafka_franz` input].') }
       const cloud = { 'modules/develop/pages/connect/guides/shared.adoc': '= Shared\n\ninclude::connect:guides:shared.adoc[]\n' }
@@ -216,6 +257,16 @@ describe('cloud-docs, scanned as Cloud', () => {
     const { links } = scan('cloud-data-platform', { 'modules/develop/pages/connect/x.adoc': page('Read xref:guides:bloblang/functions.adoc#env[environment variables].') })
     expect(links).toEqual([expect.objectContaining({ reason: 'broken-link' })])
     expect(links[0].note).toContain('env() is impure, and the Cloud page leaves it out')
+  })
+
+  test('a component whose stub Cloud removed is broken, though its path aliases the about page (changed from a real line)', () => {
+    // cloud-docs d9be410 modules/develop/pages/connect/components/processors/about.adoc:2
+    // declares components:processors/protobuf.adoc as an alias.
+    const { links } = scan('cloud-data-platform', { 'modules/develop/pages/connect/x.adoc': page('Decode with the xref:components:processors/protobuf.adoc#operator[`operator`] field, or the xref:components:processors/protobuf.adoc[`protobuf` processor].') })
+    expect(links).toEqual([
+      expect.objectContaining({ reason: 'broken-link', note: "cloud-data-platform@unversioned has no processor page for 'protobuf': cloud-data-platform:components:processors/protobuf.adoc is a page alias of cloud-data-platform:develop:connect/components/processors/about.adoc" }),
+      expect.objectContaining({ reason: 'broken-link' }),
+    ])
   })
 
   test('the SQL reference is never read for Bloblang links', () => {
