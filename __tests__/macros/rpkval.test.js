@@ -104,6 +104,47 @@ describe('rpkval macro', () => {
     })
   })
 
+  describe('bracket form: the command line, then the field', () => {
+    test.each([
+      ['rpkval:[rpk topic create --partitions]', 'rpkval:partitions[command=rpk topic create]', '-1'],
+      ['rpkval:[rpk topic create --partitions,default]', 'rpkval:partitions[default,command=rpk topic create]', '-1'],
+      ['rpkval:[topic create --partitions,shorthand]', 'rpkval:partitions[shorthand,command=rpk topic create]', '-p'],
+      ['rpkval:[rpk topic create --partitions,required,format=raw]', 'rpkval:partitions[required,command=rpk topic create,format=raw]', 'false'],
+      ['rpkval:[rpk cluster partitions alter-cancel --node]', 'rpkval:node[command=rpk cluster partitions alter-cancel]', '-1'],
+      ['rpkval:[rpk --config-opt,type]', 'rpkval:config-opt[type]', 'stringArray'],
+      ['rpkval:[--config-opt,type]', 'rpkval:config-opt[type]', 'stringArray'],
+      ['rpkval:[rpk ai auditlog list --since]', 'rpkval:since[command=rpk ai auditlog list]', '24h'],
+    ])('%s renders what %s renders', (bracket, named, expected) => {
+      const a = convert(`The value is ${bracket}.`, { catalog: streaming() })
+      const b = convert(`The value is ${named}.`, { catalog: streaming() })
+      expect(valueOf(a)).toBe(expected)
+      expect(a).toBe(b)
+    })
+
+    test('two bracket calls on one line, in backticks', () => {
+      const html = convert('`rpkval:[rpk topic create --partitions]` and `rpkval:[rpk topic create --replicas]`', { catalog: streaming() })
+      expect(spans(html)).toEqual(['-1', '-1'])
+    })
+
+    test.each([
+      ['rpkval:[rpk topic create]', 'unknown-flag', 'rpkval:[rpk topic create] in modules/manage/pages/example.adoc: names no flag; write the command, then the flag, as in rpkval:[rpk topic create --partitions].'],
+      ['rpkval:[rpk topic create --partitions 3]', 'unknown-flag', "rpkval:[rpk topic create --partitions 3] in modules/manage/pages/example.adoc: '3' follows --partitions; write the command and one flag, without a value or arguments"],
+      ['rpkval:[rpk topic create -p]', 'shorthand-target', 'Write rpkval:[rpk topic create --partitions] instead.'],
+      ['rpkval:[rpk registry mode set --schema-context]', 'unknown-flag', 'write rpkval:[rpk registry --schema-context].'],
+      ['rpkval:[rpk --partitions]', 'unknown-flag', 'write the command that defines it before the flag'],
+      ['rpkval:[rpk topic create my-topic --partitions]', 'unknown-command', 'Write the command path and one flag, without arguments.'],
+      ['rpkval:[rpk redpanda admin brokers --x]', 'deprecated-command', "rpkval:[rpk redpanda admin brokers --x] in modules/manage/pages/example.adoc: 'rpk redpanda admin brokers' is deprecated"],
+      ['rpkval:[rpk topic create --partitions,colour]', 'unsupported-field', "rpkval:[rpk topic create --partitions,colour] in modules/manage/pages/example.adoc: 'colour' is not a field rpkval: supports."],
+    ])('%s is a placeholder (%s) whose message names the bracket call', (input, kind, message) => {
+      const warn = warnings()
+      const html = convert(input, { catalog: streaming() })
+      expect(html).toContain('rpk-value-unknown')
+      expect(warn.mock.calls.map((c) => c[0]).join('\n')).toContain(message)
+      expect(THROW_KINDS).toContain(kind)
+      expect(() => convert(input, { catalog: streaming(), attributes: { 'rpk-validate': 'error' } })).toThrow(message)
+    })
+  })
+
   describe('command resolution', () => {
     test.each([
       ['a global flag with no command', 'rpkval:config-opt[type]', 'stringArray', 'rpk'],

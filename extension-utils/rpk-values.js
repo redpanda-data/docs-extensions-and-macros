@@ -205,6 +205,22 @@ function commandTokens (command) {
   return tokens
 }
 
+/**
+ * Split a command line as a writer types it in rpkval:[...] or rpkcmd:[...]
+ * into the command names, then at most one flag: `rpk topic create
+ * --partitions`. The leading rpk is optional. Words after the first flag,
+ * which would be a value, an argument or a second flag, come back in extra.
+ *
+ * @returns {{tokens: string[], flag?: string, extra: string[]}}
+ *   flag is as typed, dashes included.
+ */
+function parseCommandLine (text) {
+  const words = commandTokens(text)
+  const at = words.findIndex((w) => w.startsWith('-'))
+  if (at === -1) return { tokens: words, extra: [] }
+  return { tokens: words.slice(0, at), flag: words[at], extra: words.slice(at + 1) }
+}
+
 // A child of a node by name, then by alias.
 function childOf (node, token) {
   const children = (node && Array.isArray(node.commands)) ? node.commands : []
@@ -354,14 +370,16 @@ const cmdText = (names) => ['rpk', ...names].join(' ')
  * @param {string} [opts.field]
  * @param {string} [opts.format]
  * @param {string} [opts.filePath]
+ * @param {string} [opts.macro] - The call as written, for messages, when it
+ *   is the bracket form rpkval:[rpk topic create --partitions].
  * @returns {{ok: true, text: string, field: string, registry: object, source: 'core'|'help', command: string, flag: object} |
  *   {ok: false, kind: string, message: string, field: string, registry?: object, suggestions?: string[]}}
  */
-function resolveRpkValue ({ registry, command, flag: target, field: requested = 'default', format = FORMAT_HUMAN, filePath }) {
+function resolveRpkValue ({ registry, command, flag: target, field: requested = 'default', format = FORMAT_HUMAN, filePath, macro }) {
   const fieldName = normalizeField(requested)
   const rawTarget = String(target == null ? '' : target).trim()
   const commandAttr = command !== undefined && command !== null && String(command).trim() !== '' ? `,command=${String(command).trim()}` : ''
-  const call = `rpkval:${rawTarget}[${requested}${commandAttr}]${filePath ? ` in ${filePath}` : ''}`
+  const call = `${macro || `rpkval:${rawTarget}[${requested}${commandAttr}]`}${filePath ? ` in ${filePath}` : ''}`
   const field = fieldName || requested
   if (!fieldName) {
     return { ok: false, kind: 'unsupported-field', field, message: `${call}: '${requested}' is not a field rpkval: supports. Supported fields: ${Object.keys(FIELDS).join(', ')}.` }
@@ -383,7 +401,7 @@ function resolveRpkValue ({ registry, command, flag: target, field: requested = 
   if (!resolved.ok) {
     const typed = cmdText([...resolved.parentNames, ...tokens.slice(resolved.at)])
     const hint = resolved.argument
-      ? ' command= takes the command path only, without arguments or flags.'
+      ? (macro ? ' Write the command path and one flag, without arguments.' : ' command= takes the command path only, without arguments or flags.')
       : resolved.suggestions.length ? ` Did you mean: ${resolved.suggestions.join(', ')}?` : ''
     return { ok: false, kind: 'unknown-command', field, registry, suggestions: resolved.suggestions, message: `${call}: '${typed}' is not a command in ${dataset}: ${cmdText(resolved.parentNames)} has no subcommand '${resolved.token}'.${hint}` }
   }
@@ -392,7 +410,7 @@ function resolveRpkValue ({ registry, command, flag: target, field: requested = 
 
   if (name.length === 1) {
     const found = names.length ? findFlag(node, name, tree) : findFlag(tree, name, tree)
-    const long = found ? ` Write rpkval:${found.flag.name}[...] instead.` : ''
+    const long = found ? (macro ? ` Write rpkval:[${where} --${found.flag.name}] instead.` : ` Write rpkval:${found.flag.name}[...] instead.`) : ''
     return { ok: false, kind: 'shorthand-target', field, registry, message: `${call}: '${rawTarget}' is a shorthand; rpkval: targets name the long flag.${long}` }
   }
 
@@ -414,7 +432,7 @@ function resolveRpkValue ({ registry, command, flag: target, field: requested = 
     found = findFlag(tree, name, tree)
     if (!found) {
       const elsewhere = allFlagNames(registry).has(name)
-      const hint = elsewhere ? ' It is not a global flag; add command= with the command that defines it.' : ''
+      const hint = elsewhere ? (macro ? ' It is not a global flag; write the command that defines it before the flag.' : ' It is not a global flag; add command= with the command that defines it.') : ''
       return { ok: false, kind: 'unknown-flag', field, registry, suggestions: [], message: `${call}: '--${name}' is not a global flag in ${dataset}.${hint}` }
     }
   } else {
@@ -422,7 +440,7 @@ function resolveRpkValue ({ registry, command, flag: target, field: requested = 
     if (!found) {
       const ancestor = ancestorFlag(nodes, names, name)
       if (ancestor) {
-        return { ok: false, kind: 'unknown-flag', field, registry, message: `${call}: '--${name}' is not a flag of ${where} in ${dataset}; --${name} is defined on ${cmdText(ancestor.names)}; write command=${cmdText(ancestor.names)}.` }
+        return { ok: false, kind: 'unknown-flag', field, registry, message: `${call}: '--${name}' is not a flag of ${where} in ${dataset}; --${name} is defined on ${cmdText(ancestor.names)}; write ${macro ? `rpkval:[${cmdText(ancestor.names)} --${name}]` : `command=${cmdText(ancestor.names)}`}.` }
       }
       const suggestions = datasets.suggest(name, [...(node.flags || []), ...(tree.global_flags || [])].map((f) => f.name))
       const hint = suggestions.length ? ` Did you mean: ${suggestions.map((s) => `--${s}`).join(', ')}?` : ''
@@ -486,6 +504,7 @@ module.exports = {
   formatFlagDefault,
   fieldValue,
   commandTokens,
+  parseCommandLine,
   childOf,
   deprecatedEntry,
   acceptsPositional,
