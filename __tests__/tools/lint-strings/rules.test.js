@@ -136,6 +136,8 @@ describe('common rules', () => {
     expect(rule.check(decl({ string: `${words(29)} \`rpk ai mcp-server create --name my-server --gate iap\`.` }))).toHaveLength(0)
     expect(rule.check(decl({ string: `${words(29)} https://docs.redpanda.com/a/very/long/path?with=query.` }))).toHaveLength(0)
     expect(rule.check(decl({ string: `${words(31)}.` }))).toHaveLength(1)
+    // A URL keeps the punctuation after it, so its sentence still ends there.
+    expect(rule.check(decl({ string: `${words(20)} (anything starting with http:// or https://). ${words(20)}.` }))).toHaveLength(0)
     // Indented lines become code blocks in rpk docs.
     expect(rule.check(decl({ string: `Run this command.\n\n  ${words(40)}` }))).toHaveLength(0)
     // Each list item is its own segment.

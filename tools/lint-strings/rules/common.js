@@ -187,7 +187,9 @@ function findLongSentences (text, max = MAX_SENTENCE_WORDS) {
     for (const segment of segments) {
       const prose = segment
         .replace(/`[^`]*`/g, 'CODE')
-        .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, 'URL')
+        // Keep the punctuation after a URL, so "https://)." still ends a
+        // sentence.
+        .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S*?([).,;:!?]*)(?=\s|$)/gi, 'URL$1')
       for (const sentence of prose.split(/(?<=[.!?])\s+/)) {
         const words = sentence.split(/\s+/).filter((w) => /[A-Za-z0-9]/.test(w)).length
         if (words > max) long.push({ sentence: sentence.trim(), words })
