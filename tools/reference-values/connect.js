@@ -35,7 +35,8 @@ const connectValues = require('../../extension-utils/connect-values')
 const { normalizeType, typeFromRelative } = require('../../extensions/util/connect-catalog')
 const { formatConnectDefault } = require('../redpanda-connect/helpers/formatConnectDefault')
 const shared = require('./shared')
-const { countFindings, blockLanguage } = require('./rpk')
+const { countFindings, blockLanguage, linkCounts } = require('./rpk')
+const { linkFindings } = require('./connect-links')
 
 // The keys Connect's runtime accepts beside the component name in a component
 // map: a label on any component, and processors on inputs and outputs.
@@ -51,6 +52,7 @@ const CONNECT_EXCLUDE = DEFAULT_EXCLUDE.concat([
 // walk of examples directories uses this list instead.
 const EXAMPLE_EXCLUDE = DEFAULT_EXCLUDE.filter((fragment) => fragment !== '/examples/')
 const HISTORICAL_CONNECT_RX = /(?:^|\/)migration\//
+const SQL_REFERENCE_RX = /^modules\/reference\/pages\/sql\//
 
 const YAML_LANGUAGES = new Set(['yaml', 'yml'])
 // Root keys only a Connect pipeline config has. A document with none of
@@ -385,7 +387,7 @@ function targetOf (f) {
 /**
  * The Connect engine. Scans one checkout against one Connect registry.
  */
-function scanConnect ({ docsDir, registry, files: only, write = false, cloudSurface = false, renderGuard, component: ownComponent }) {
+function scanConnect ({ docsDir, registry, files: only, write = false, cloudSurface = false, renderGuard, component: ownComponent, links }) {
   const data = registry.data
   const cindex = { ...componentIndex(data), counts: undefined }
   const counts = { yamlRestatingDefault: 0, yamlUnparsed: 0 }
@@ -402,7 +404,7 @@ function scanConnect ({ docsDir, registry, files: only, write = false, cloudSurf
     }
   }
   const report = (f) => {
-    const key = `${f.file}:${f.line}:${f.status}:${f.reason}:${f.fieldPath || f.component || ''}`
+    const key = `${f.file}:${f.line}:${f.status}:${f.reason}:${f.fieldPath || f.component || ''}${f.check === 'link' ? `:${f.written}` : ''}`
     if (seen.has(key)) return
     seen.add(key)
     findings.push(f)
@@ -442,6 +444,14 @@ function scanConnect ({ docsDir, registry, files: only, write = false, cloudSurf
       scanYaml(expandBlock(b, { docsDir, relative, component: ownComponent }), { ...ctx, counts: { yamlRestatingDefault: 0, yamlUnparsed: 0 }, index: { ...cindex, counts: { yamlRestatingDefault: 0 } }, report: () => {} })
     }
 
+    // Hand-written xrefs to Connect component and Bloblang pages, unless the
+    // file is a nav file. Bloblang findings come only from xrefs to the
+    // Bloblang pages; the SQL reference, whose backticked SQL functions share
+    // Bloblang names, is never read for them.
+    const linkLine = (index, line, ctxLine) => (links && !(links.skip && links.skip.has(relative))
+      ? linkFindings(line, { index, relative, registry, links, ctx: ctxLine, historical, connectContent: !SQL_REFERENCE_RX.test(relative) })
+      : [])
+
     const proseLine = (index, line, ctxLine) => {
       const callout = line.match(CALLOUT_ITEM_RX)
       const claims = []
@@ -451,12 +461,18 @@ function scanConnect ({ docsDir, registry, files: only, write = false, cloudSurf
         if (line.trim() && !callout) callouts = {}
         claims.push(...lineClaims(line, {}))
       }
-      let rewritten = line
-      const lineFindings = []
+      const lineFindings = linkLine(index, line, ctxLine)
       for (const claim of claims) {
         const f = classifyClaim(claim, { index, line, relative, data, componentIndex: cindex, usedComponents, historical, tagged, cloudSurface, ctxLine, fieldNames })
         if (f && (f.reason !== 'no-component-context' || connectPage || usedComponents.size)) lineFindings.push(f)
       }
+      return applyLine(index, line, lineFindings)
+    }
+
+    // Apply a line's auto-safe findings, right to left, each kept only when
+    // the line still renders the same.
+    const applyLine = (index, line, lineFindings) => {
+      let rewritten = line
       for (const f of [...lineFindings].sort((a, b) => b.start - a.start)) {
         if (write && f.autoSafe && !ignored.has(index + 1)) {
           const candidate = rewritten.slice(0, f.start) + f.proposed + rewritten.slice(f.end)
@@ -492,15 +508,12 @@ function scanConnect ({ docsDir, registry, files: only, write = false, cloudSurf
         return proseLine(index, line, ctxLine)
       },
       onTableLine: (index, line, ctxLine) => {
+        const lineFindings = linkLine(index, line, ctxLine)
         for (const claim of lineClaims(line, {})) {
           const f = classifyClaim(claim, { index, line, relative, data, componentIndex: cindex, usedComponents, historical, tagged, cloudSurface, ctxLine, fieldNames, table: true })
-          if (f && (f.reason !== 'no-component-context' || connectPage || usedComponents.size)) {
-            delete f.start
-            delete f.end
-            pageFindings.push(f)
-          }
+          if (f && (f.reason !== 'no-component-context' || connectPage || usedComponents.size)) lineFindings.push(f)
         }
-        return line
+        return applyLine(index, line, lineFindings)
       },
     }, { cloudSurface })
     for (const f of pageFindings) report(f)
@@ -518,7 +531,7 @@ function scanConnect ({ docsDir, registry, files: only, write = false, cloudSurf
     skippedGenerated,
     yamlUnparsed: counts.yamlUnparsed,
     findings,
-    counts: { ...countFindings(findings), yamlRestatingDefault: counts.yamlRestatingDefault },
+    counts: { ...countFindings(findings), yamlRestatingDefault: counts.yamlRestatingDefault, ...(links ? linkCounts(findings) : {}) },
     changedFiles,
   }
 }
@@ -535,8 +548,9 @@ function fieldMentions (line) {
     mentions.push({ path: m[1], start: m.index, end: m.index + m[0].length, component: component && component.trim(), macro: true })
   }
   // The bracket form names the component and the path together:
-  // connectval:[inputs/redpanda.client_id,default].
-  for (const m of line.matchAll(/connectval::?\[([^\],]*)[^\]]*\]/g)) {
+  // connectval:[inputs/redpanda.client_id,default], and so does a link to
+  // the field, connect:[inputs/redpanda.client_id].
+  for (const m of line.matchAll(/(?<![\w:])(?:connectval::?|connect:)\[([^\],]*)[^\]]*\]/g)) {
     const { component, path } = connectValues.parseFieldTarget(m[1])
     if (path) mentions.push({ path, start: m.index, end: m.index + m[0].length, component, macro: true })
   }
@@ -619,7 +633,12 @@ function resolveClaimField (claim, { data, componentIndex: index, usedComponents
   // in exactly one type, in the same sentence.
   const sentence = claim.sentence || ''
   const named = []
-  for (const m of sentence.matchAll(/xref:(?:[\w-]+:)?components:([a-z_]+)\/([\w-]+)\.adoc/g)) {
+  for (const m of sentence.matchAll(/xref:(?:[\w-]+:)?components:([a-z_]+)\/([\w-]+)\.adoc|(?<![\w:])connect:\[([a-z_-]+)\/([\w-]+)/g)) {
+    if (m[3]) {
+      const key = index.types[normalizeType(m[3])]
+      if (key) named.push({ key, name: m[4] })
+      continue
+    }
     const key = index.types[normalizeType(m[1])]
     if (key) named.push({ key, name: m[2] })
   }

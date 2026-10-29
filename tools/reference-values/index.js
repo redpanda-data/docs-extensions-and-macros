@@ -26,6 +26,7 @@ const rpkValues = require('../../extension-utils/rpk-values')
 const connectValues = require('../../extension-utils/connect-values')
 const { scanRpk } = require('./rpk')
 const { scanConnect } = require('./connect')
+const connectLinks = require('./connect-links')
 const { makeRenderGuard } = require('./render-check')
 const shared = require('./shared')
 
@@ -251,7 +252,18 @@ function scanAll ({ docsDir, lenderDirs = [], dataFiles = [], kinds = KINDS, kin
     comp.files.push(...pages)
     for (const a of aliases) pageAliases.set(`${a.component}@${a.version}:${a.relative}`, a.target)
   })
-  const catalog = migrate.catalogFor([own, ...lenders])
+  // Every other page and page alias, so Connect links resolve as Antora
+  // resolves them.
+  const comps = [own, ...lenders]
+  const latest = (name) => {
+    const found = comps.find((c) => c.component === name)
+    return found ? found.version : undefined
+  }
+  ;[[docsDir, own], ...lenderDirs.map((dir, i) => [dir, lenders[i]])].forEach(([dir, comp]) => {
+    const seen = new Set(comp.files.filter((f) => f.src.family === 'page').map((f) => `${f.src.version}@${f.src.component}:${f.src.module}:${f.src.relative}`))
+    comp.files.push(...connectLinks.pageEntries(dir, comp, { latest, seen }))
+  })
+  const catalog = migrate.catalogFor(comps)
   const explicit = {}
   for (const file of dataFiles) {
     const read = readExplicit(file, own)
@@ -342,7 +354,17 @@ function scanAll ({ docsDir, lenderDirs = [], dataFiles = [], kinds = KINDS, kin
     if (!registry) skip('connect', 'no connect-<version>.json in connect:components attachments; pass --lender with an rp-connect-docs checkout, or --data-file')
     else {
       const cloudSurface = datasets.isAttributeSet(own.attributes['env-cloud'])
-      const r = scanConnect({ docsDir, registry, files, write, cloudSurface, renderGuard: guard, component: own.component })
+      const links = {
+        catalog,
+        component: own.component,
+        version: own.version,
+        skip: navFiles(docsDir),
+        surfacesOf: connectLinks.renderingSurfaces({ docsDir, own, lenders: lenderDirs.map((dir, i) => ({ dir, comp: lenders[i] })) }),
+        // --data-file checks the links, but connect: and blobl: link only
+        // with the build's own Connect data.
+        buildHasData: Boolean(connectValues.loadConnect(catalog)),
+      }
+      const r = scanConnect({ docsDir, registry, files, write, cloudSurface, renderGuard: guard, component: own.component, links })
       result.kinds.connect = {
         dataset: given ? `${path.basename(given.explicit)} (--data-file)` : datasets.describeDataset(registry),
         selection: given ? 'explicit' : 'fixed',
@@ -381,7 +403,7 @@ function describe (kind, f) {
  */
 function renderMarkdown (result) {
   const out = ['# Reference values report', '']
-  out.push('Statuses: **reference** is a command, flag, component or field that does not exist in the data (error) or is deprecated (warning), or an xref to an rpk reference page that does not exist (broken-link, error) or whose label names another command (link-label-mismatch, warning). **exact** is what the macro renders, or an xref rpkcmd:[...] would render the same; **auto-safe** is an exact match `--write` may apply. **equivalent** is the same value worded differently. **mismatch** differs from the data. **unset** states a value the data leaves empty. **unverifiable** could not be compared, with the reason. **example output** is a value in a block or YAML comment, never written: **stale** when it differs from the data.', '')
+  out.push('Statuses: **reference** is a command, flag, component or field that does not exist in the data (error) or is deprecated (warning), or an xref to an rpk, Connect component or Bloblang page or anchor that does not exist (broken-link, error) or whose label names something else (link-label-mismatch, warning). **exact** is what the macro renders, or an xref rpkcmd:[...], connect:[...] or blobl:[...] would render the same; **auto-safe** is an exact match `--write` may apply. **equivalent** is the same value worded differently. **mismatch** differs from the data. **unset** states a value the data leaves empty. **unverifiable** could not be compared, with the reason. **example output** is a value in a block or YAML comment, never written: **stale** when it differs from the data.', '')
   out.push(`Checked ${result.component}@${result.version || 'unversioned'} at --fail-on ${result.failOn}: ${result.failing} failing finding(s), ${result.ignored} ignored by \`// value-check: ignore\`.`, '')
   out.push('| Kind | Dataset | Surface | Files | Findings | Failing | Reference errors | Reference warnings | Mismatch | Exact (auto-safe) | Equivalent | Unset | Unverifiable | Example output (stale) |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|')
   for (const [kind, r] of Object.entries(result.kinds)) {
@@ -407,7 +429,9 @@ function renderMarkdown (result) {
     }
     if (r.counts && 'linksBroken' in r.counts) {
       const c = r.counts
-      out.push(`Links to rpk reference pages: ${c.linksBroken} broken, ${c.linksMislabeled} with a label naming another command, ${c.linksReplaceable} replaceable with rpkcmd:[...] (listed under Exact), ${c.linksNotLoaded} to a component this scan did not read.`, '')
+      out.push(kind === 'connect'
+        ? `Links to Connect component and Bloblang pages: ${c.linksBroken} broken, ${c.linksMislabeled} with a label naming another component, field, function or method, ${c.linksReplaceable} replaceable with connect:[...] or blobl:[...] (listed under Exact), ${c.linksNotLoaded} not checked (not rendered by, or not in, this scan).`
+        : `Links to rpk reference pages: ${c.linksBroken} broken, ${c.linksMislabeled} with a label naming another command, ${c.linksReplaceable} replaceable with rpkcmd:[...] (listed under Exact), ${c.linksNotLoaded} to a component this scan did not read.`, '')
     }
     const refs = r.findings.filter((f) => f.status === 'reference')
     const errors = refs.filter((f) => f.severity === 'error')
@@ -513,7 +537,7 @@ function runCli (options, { log = console.log, error = console.error } = {}) {
     const c = r.counts
     const refs = kind === 'properties' ? '' : `${c.referenceErrors} reference error(s), ${c.referenceWarnings} warning(s), `
     log(`${kind}: ${r.dataset} (${r.surface}), ${r.files} files: ${refs}${c.mismatch} mismatch, ${c.unset} unset, ${c.exact} exact (${c.autoSafe} auto-safe), ${c.equivalent} equivalent, ${c.unverifiable} unverifiable, ${c['example-output'] || 0} example output (${c.exampleStale || 0} stale).`)
-    if ('linksBroken' in c) log(`${kind} links: ${c.linksBroken} broken, ${c.linksMislabeled} mislabeled, ${c.linksReplaceable} replaceable with rpkcmd:[...], ${c.linksNotLoaded} not checked (component not loaded).`)
+    if ('linksBroken' in c) log(`${kind} links: ${c.linksBroken} broken, ${c.linksMislabeled} mislabeled, ${c.linksReplaceable} replaceable with ${kind === 'connect' ? 'connect:[...] or blobl:[...]' : 'rpkcmd:[...]'}, ${c.linksNotLoaded} not checked (${kind === 'connect' ? 'not rendered by, or not in, this scan' : 'component not loaded'}).`)
   }
   for (const [kind, why] of Object.entries(result.skipped)) log(`${kind}: skipped (${why})`)
   if (result.ignored) log(`${result.ignored} finding(s) ignored by // value-check: ignore.`)

@@ -29,7 +29,9 @@ const scan = (files, opts = {}) => {
   const { dir, dataFile } = repo(files, opts)
   return scanAll({ docsDir: dir, dataFiles: [dataFile], kinds: ['connect'], kindsExplicit: true, failOn: opts.failOn || 'mismatch' })
 }
-const findings = (files, opts) => scan(files, opts).kinds.connect.findings
+// Link findings are tested in connect-links.test.js: these checkouts have no
+// Connect pages, so every component xref in them is broken.
+const findings = (files, opts) => scan(files, opts).kinds.connect.findings.filter((f) => f.check !== 'link')
 const yaml = (...lines) => ['[source,yaml]', '----', ...lines, '----', ''].join('\n')
 const page = (body) => `= Page\n\n${body}\n`
 const CLOUD = { name: 'cloud-data-platform', attributes: { 'env-cloud': true } }

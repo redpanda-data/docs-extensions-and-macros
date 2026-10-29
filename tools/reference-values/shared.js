@@ -213,7 +213,7 @@ const RELEASES_RX = /(?:^|\/)releases\//
 
 // A value that is a macro call, inline or block form, with or without
 // backticks around it: the macro already, not a hand-written value.
-const MACRO_VALUE_RX = /^`?\+?(?:rpkval|rpkcmd|propval|prop|connectval):/
+const MACRO_VALUE_RX = /^`?\+?(?:rpkval|rpkcmd|propval|prop|connectval|bloblval|connect|blobl):/
 
 module.exports = {
   norm,
