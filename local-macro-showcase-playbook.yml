@@ -62,8 +62,8 @@ asciidoc:
     # The real licensing page lives on a real page in the streaming component.
     # preview/streaming-ga-lender registers that component name (Cloud's GA
     # data lookup only trusts one literally called streaming or ROOT), but it
-    # is data-only and carries no pages, so the real licensing page still
-    # doesn't exist here. Point at a resolvable stand-in instead, so a feature
+    # carries only data and a few stand-in rpk pages, so the real licensing
+    # page still doesn't exist here. Point at a resolvable stand-in instead, so a feature
     # mention with no xref of its own still links somewhere. A page that
     # already sets its own enterprise-licensing-page (test.adoc,
     # enterprise-kubernetes-test.adoc) keeps pointing at the real target and

@@ -223,7 +223,7 @@ Registered together with the `enterprise` inline macro.
 
 This inline macro references a Redpanda configuration property in prose. The property renders as a marked `<code>` element (`property-ref` class plus a `data-property-name` attribute) that the docs UI decorates with a hover-documentation tooltip. Marking is opt-in: only properties referenced through this macro get tooltips, so ambiguous words such as `admin` or `rack` in unrelated contexts (Helm values, feature settings) are never decorated by mistake.
 
-The macro checks that a property is actually available to the audience reading the page, and links it only where a page documents it. It validates against the published property data: a `redpanda-properties-<tag>.json` attachment in the `reference` module, the same data the tooltips fetch at runtime. See <<prop-availability>> for which properties each doc set may reference and <<prop-version-selection>> for which file a given page uses. To migrate existing plain-backtick property mentions, use `doc-tools generate migrate-property-refs`. To render a property's value (its default, minimum, unit, and so on) rather than its name, use <<propval>>. For `rpk` flag and Connect field values, see <<rpkval>> and <<connectval>>.
+The macro checks that a property is actually available to the audience reading the page, and links it only where a page documents it. It validates against the published property data: a `redpanda-properties-<tag>.json` attachment in the `reference` module, the same data the tooltips fetch at runtime. See <<prop-availability>> for which properties each doc set may reference and <<prop-version-selection>> for which file a given page uses. To migrate existing plain-backtick property mentions, use `doc-tools generate migrate-property-refs`. To render a property's value (its default, minimum, unit, and so on) rather than its name, use <<propval>>. For `rpk` flag and Connect field values, see <<rpkval>> and <<connectval>>; for a linked `rpk` command, see <<rpkcmd>>.
 
 === Usage
 
@@ -345,7 +345,7 @@ The exact default is `propval:log_segment_ms[default,format=raw]`.
 
 Rendered against `redpanda-properties-v26.2.4.json`, those lines read: "defaults to 2 weeks", "The minimum is 1 minute", "requires a restart: yes", and "The exact default is `1209600000`".
 
-`propval:` is registered by the `prop` macro's extension, so a playbook that registers `macros/prop` has both, along with <<rpkval>> and <<connectval>>. It shares every data decision with `prop:` rather than copying them: the same dataset for the page's version (<<prop-version-selection>>), the same `property-validate` modes, the same Cloud availability gate (<<prop-availability>>), and the same refusal to use a neighbouring release's data when a version has none.
+`propval:` is registered by the `prop` macro's extension, so a playbook that registers `macros/prop` has both, along with <<rpkval>>, <<connectval>> and <<rpkcmd>>. It shares every data decision with `prop:` rather than copying them: the same dataset for the page's version (<<prop-version-selection>>), the same `property-validate` modes, the same Cloud availability gate (<<prop-availability>>), and the same refusal to use a neighbouring release's data when a version has none.
 
 === Usage
 
@@ -496,27 +496,34 @@ This inline macro renders one value of an `rpk` flag from the published rpk data
 
 [,asciidoc]
 ----
-The default is rpkval:partitions[command=rpk topic create].
-Use `rpkval:partitions[shorthand,command=rpk topic create]` for short.
-The window defaults to rpkval:since[command=rpk ai auditlog list].
-Every command accepts rpkval:config-opt[shorthand] (rpkval:config-opt[type]).
+The default is rpkval:[rpk topic create --partitions].
+Use `rpkval:[rpk topic create --partitions,shorthand]` for short.
+The window defaults to rpkval:[rpk ai auditlog list --since].
+Every command accepts rpkval:[rpk --config-opt,shorthand] (rpkval:[rpk --config-opt,type]).
 ----
 
-Rendered against `rpk-v26.2.2.json`, those lines read: "The default is -1", "Use `-p` for short", "defaults to 24h", and "accepts -X (stringArray)". For property values, use <<propval>>; for Connect fields, <<connectval>>.
+Rendered against `rpk-v26.2.2.json`, those lines read: "The default is -1", "Use `-p` for short", "defaults to 24h", and "accepts -X (stringArray)". For property values, use <<propval>>; for Connect fields, <<connectval>>; to name and link the command itself, <<rpkcmd>>.
 
 === Usage
 
 [,asciidoc]
 ----
-rpkval:<flag>[<field>,command=<rpk command path>,format=human|raw]
+rpkval:[<rpk command> --<flag>,<field>,format=human|raw]
 ----
 
-The target is the flag's long name, with or without its leading dashes (`partitions` or `--partitions`). Dots are allowed (`openai-config.base-url`). A one-letter target is an error (`shorthand-target`): name the long flag and use the `shorthand` field.
+The brackets start with the command line as you type it: the command path, then the flag's long name with its dashes. The leading `rpk` is optional, and whitespace is collapsed. Each word of the path matches a command name, then an alias, so `rpkval:[rpk cluster status --format]` reads the `--format` flag of `rpk cluster info`. Dots in a flag name are allowed (`--openai-config.base-url`). For a global flag such as `--config-opt`, write `rpk` and the flag: `rpkval:[rpk --config-opt,type]`.
 
-command::
-The command path exactly as you type it, with spaces: `command=rpk topic create`. The leading `rpk` and quotes are optional, and whitespace is collapsed. Each word matches a command name, then an alias, so `command=rpk cluster status` resolves to `rpk cluster info`. Write the path only: `command=rpk topic create my-topic` is an `unknown-command` error that says `command=` takes the command path only. Leave `command` out, or write `command=rpk`, for a global flag such as `--config-opt`.
+Write the command path and one flag only:
+
+* An argument (`rpkval:[rpk topic create my-topic --partitions]`) is an `unknown-command` error that says to write the path without arguments.
+* No flag, a value after the flag (`--partitions 3`), or a second flag is an `unknown-flag` error.
+* A shorthand (`-p`) is a `shorthand-target` error whose message names the long flag: name the long flag and use the `shorthand` field.
+
+The field comes next, `default` when it is omitted. `format=` may follow it.
 
 The flag is looked up on that command, then in the global flags. It is never taken from a parent command: the data does not say which flags are persistent, so a parent's local flag would be a guess. A flag defined on a parent (`--schema-context` on `rpk registry`) is an `unknown-flag` error whose message names the command to write instead.
+
+The first form of the macro is still accepted, and renders the same: the flag as the target and the command in `command=`, as in `rpkval:partitions[command=rpk topic create]` or `rpkval:partitions[shorthand,command=rpk topic create]`. Leave `command=` out for a global flag (`rpkval:config-opt[type]`). `check-reference-values --write` writes this form.
 
 [cols="1,2,2"]
 |===
@@ -612,11 +619,11 @@ A flag is scraped when its command is under one of those plugins, the snapshot's
 
 === Checking prose with check-reference-values
 
-`doc-tools check-reference-values` finds hand-written flag defaults that `rpkval:` could render, and `rpk` commands and flags the data does not have. See <<check-reference-values>>.
+`doc-tools check-reference-values` finds hand-written flag defaults that `rpkval:` could render, and `rpk` commands and flags the data does not have. It reads both forms of `rpkval:`, and `rpkcmd:`, as macros, never as hand-written values. See <<check-reference-values>>.
 
 === Registration
 
-Registered by the `prop` macro's extension, so a playbook that registers `macros/prop` has `prop:`, `propval:`, `rpkval:` and `connectval:`:
+Registered by the `prop` macro's extension, so a playbook that registers `macros/prop` has `prop:`, `propval:`, `rpkval:`, `connectval:` and `rpkcmd:`:
 
 [,yaml]
 ----
@@ -625,15 +632,82 @@ asciidoc:
     - '@redpanda-data/docs-extensions-and-macros/macros/prop'
 ----
 
+[[rpkcmd]]
+== rpkcmd
+
+This inline macro renders an `rpk` command as inline code, written as you type it, and links it to the command's generated reference page. The command is checked against the same rpk data as <<rpkval>>, and the page is found in the build, so the link follows the component that renders the page.
+
+[,asciidoc]
+----
+Create the topic with rpkcmd:[rpk topic create].
+Set the partition count with rpkcmd:[rpk topic create --partitions].
+Check the brokers with rpkcmd:[cluster status].
+Then rpkcmd:[rpk topic create,text=create a topic] for each tenant.
+----
+
+Rendered in `streaming` 26.2, the first three lines show `rpk topic create`, `rpk topic create --partitions` and `rpk cluster status` as code, linked to the `rpk topic create` page (twice) and the `rpk cluster info` page, because `status` is an alias of `info`. The last line links the words "create a topic".
+
+=== Usage
+
+[,asciidoc]
+----
+rpkcmd:[<rpk command> [--<flag>],text=<link text>]
+----
+
+The brackets hold the command exactly as you type it, aliases included, then at most one flag, long (`--partitions`) or shorthand (`-p`). The leading `rpk` is optional; the output always starts with `rpk`. For a global flag, write `rpk` and the flag: `rpkcmd:[rpk --profile]` links the `rpk` page.
+
+Write the command path and at most one flag. An argument (`rpkcmd:[rpk topic create my-topic]`) is `unknown-command`, and a value after the flag (`--partitions 3`) or a second flag is `unknown-flag`. The command and flag resolve exactly as in `rpkval:`: names then aliases, deprecated commands before unknown ones, the command's own flags then the global flags, and never a parent's flag (`rpkcmd:[rpk registry mode set --schema-context]` is `unknown-flag`, and the message says to write `rpkcmd:[rpk registry --schema-context]`).
+
+text::
+Optional. The link text, instead of the command as code.
+
+The output is the generated page's link around `<code class="rpk-command">`, with `data-rpk-command` (the canonical command, `rpk cluster info` for `rpk cluster status`) and, with a flag, `data-rpk-flag` (the long name). Don't wrap the macro in backticks: it already renders code, and backticks nest a second code element around the link.
+
+The generated `rpk` pages have no anchor per flag (the Flags section is a table with no IDs), so a flag links its command's page.
+
+[[rpkcmd-page]]
+=== Which page it links
+
+The page path comes from the command, as the `rpk` docs generator writes it: `rpk` is `rpk/rpk.adoc`, a top-level command with subcommands and every command below it are in `rpk/rpk-<top>/rpk-<path>.adoc` (`rpk/rpk-cluster/rpk-cluster-partitions-move-cancel.adoc`), and a top-level command without subcommands is `rpk/rpk-<name>.adoc` (`rpk/rpk-version.adoc`), all in the `reference` module. The macro then looks for that page in the content catalog, in this order:
+
+. The rendering page's own component and version.
+. The `streaming` component: the rendering page's version when the page is in `streaming`, else the latest version. A `streaming` page never links another `streaming` version.
+. Any other component that has the page, the one with the most `rpk` reference pages first. A `streaming` page that names `rpk cloud login` links cloud-docs, which publishes the `rpk cloud` pages.
+
+The rendering page is the one Antora converts, so a cloud-docs stub that includes a `streaming` page links cloud-docs pages, and an rp-connect-docs page links `streaming`. No repo or component is listed in the macro: a page that exists in the build is linked, and one that doesn't is not.
+
+The command is checked against the rpk data the page reads for `rpkval:` (<<rpkval>>). A component that is not a Redpanda release and borrows no rpk data, such as rp-connect-docs, checks against the data of the latest `streaming` version. A `streaming` version with no rpk data of its own never borrows another release's: its commands render as plain code with the series warning.
+
+=== Cloud
+
+A Cloud page (`env-cloud` on its component version) links only its own component's pages. When Cloud has no page for the command, the macro renders plain code and warns, and never links Cloud readers to self-managed docs. Put such a sentence in an `ifndef::env-cloud[]` block, or link it differently in Cloud.
+
+=== Failures and validation modes
+
+Whenever the command can't be linked, `rpkcmd:` renders the command as plain code (`<code>`), or the `text=` value as plain text, with no link and no `rpk-command` class, and logs why, naming the macro call, the dataset and the file.
+
+rpk-validate::
+The same attribute as `rpkval:`. `warn` (default) logs each problem. `error` fails the build on `unknown-command`, `unknown-flag` and `deprecated-command`. `off` silences every `rpkcmd:` warning, because plain code still reads correctly.
+
+These never fail the build: `no-data` (no rpk data for the page) and `no-page` (no component in the build has the page, or a Cloud page has none of its own).
+
+=== Checking links with check-reference-values
+
+`doc-tools check-reference-values` checks hand-written xrefs to `rpk` reference pages, reports the broken and mislabeled ones, and with `--write` replaces each exact one with `rpkcmd:[...]`. See <<check-reference-values>>.
+
+=== Registration
+
+Registered by the `prop` macro's extension (see <<rpkval>>).
+
 == connectval
 
 This inline macro renders one value of a Redpanda Connect config field from the published Connect data, formatted exactly as the generated component reference prints it.
 
 [,asciidoc]
 ----
-The chunk size defaults to `connectval:incremental_snapshot.chunk_size[component=inputs/postgres_cdc]`.
+The chunk size defaults to `connectval:incremental_snapshot.chunk_size[default,component=inputs/postgres_cdc]`.
 Valid strategies: connectval:merge_strategy[options,component=outputs/iceberg].
-The default for `pipeline.threads` is connectval:pipeline.threads[component=config].
+The default for `pipeline.threads` is connectval:pipeline.threads[default,component=config].
 ----
 
 Rendered against `connect-4.114.0.json`, those lines read: "defaults to `1024`", "Valid strategies: `merge-on-read`, `copy-on-write`", and "The default for `pipeline.threads` is -1".
@@ -646,6 +720,8 @@ connectval:<field.path>[<field>,component=<type>/<name>|config,format=human|raw]
 ----
 
 The target is a dot-separated field path through the component's config, such as `tls.enabled` or `incremental_snapshot.chunk_size`. Address an array of objects without an index (`sasl.mechanism`): the data stores one element's fields, and Asciidoctor ends a macro target at `[`, so `sasl[].mechanism` cannot work.
+
+The first attribute is the field. It may be omitted, in which case it is `default`, but writing it (`connectval:client_id[default,component=inputs/redpanda]`) keeps the call readable next to the other fields.
 
 component::
 Required. `<type>/<name>`, written as rp-connect-docs paths and xrefs write it: `inputs/kafka_franz`, `rate_limits/local`. The type may be plural, singular, or hyphenated (`rate-limits`, `rate_limit`). `component=config` addresses the root fields of a pipeline config (`pipeline.threads`, `http.enabled`). The type is always explicit, so `kafka`, `http_client` and `file` are never ambiguous.
@@ -721,12 +797,20 @@ Registered by the `prop` macro's extension (see <<rpkval>>).
 `npx doc-tools check-reference-values` runs three checks over a docs checkout and writes one JSON and one Markdown report. Each kind selects its data exactly as its macro does, from the repo and any `--lender` checkouts, unless `--data-file` names it.
 
 properties:: The `generate migrate-property-values` scan, unchanged. See <<propval>>.
-rpk:: Every `rpk` invocation in a shell listing block and every backticked `rpk ...` span in prose is parsed as `rpk` parses it. An unknown subcommand is `unknown-command`, with a suggestion (`movement-cancel` suggests `move-cancel`); a flag no command on the path defines is `unknown-flag`; a deprecated command is a warning that carries its replacement. A flag default stated in prose ("`--limit` defaults to 50") or in a Default table column is compared with what `rpkval:` renders for the nearest command on the page that defines the flag.
+rpk:: Every `rpk` invocation in a shell listing block and every backticked `rpk ...` span in prose is parsed as `rpk` parses it. An unknown subcommand is `unknown-command`, with a suggestion (`movement-cancel` suggests `move-cancel`); a flag no command on the path defines is `unknown-flag`; a deprecated command is a warning that carries its replacement. A flag default stated in prose ("`--limit` defaults to 50") or in a Default table column is compared with what `rpkval:` renders for the nearest command on the page that defines the flag. `rpkcmd:[...]` and both forms of `rpkval:` count as macros, never as hand-written values: a flag in `rpkcmd:[rpk topic create --partitions]` is a mention of that command's flag, and `rpkcmd:[rpk topic create]` names the command later flag mentions belong to.
+rpk links:: Every hand-written xref to a page under `reference:rpk/` in prose and tables is resolved as the scanned component renders it, by Antora's rules (a target with no component is the page's own component and version, a component with no version is its latest) and through the `page-aliases` the `rpk` pages declare. The scan reads the `rpk` pages of the repo and every `--lender`:
++
+* `broken-link` (reference error): the page does not exist there. The note says what `rpkcmd:` would link instead, or that Cloud has no page for the command.
+* `link-label-mismatch` (reference warning): the label's leading `rpk ...` names another command than the page documents (the label `rpk profile` on a link to the `rpk profile create` page). A label of just `rpk` names the tool and is not checked.
+* `exact`: the label is the command in backticks, with at most one known flag, the target is the page `rpkcmd:` would link (<<rpkcmd-page>>), and the xref has no fragment and no pinned version. `--write` replaces it with `rpkcmd:[...]`, in prose or a table cell.
+* `link-target-not-loaded` (unverifiable): the target is in a component or version the scan did not read. Pass that checkout with `--lender`.
++
+On a self-managed scan, a line inside `ifdef::env-cloud[]` renders only where Cloud includes the file, so its links are checked as the one `--lender` that sets `env-cloud` renders them, and not checked without one. Nav files listed in `antora.yml`, the generated `rpk` pages and partials, stub pages, and xrefs shown as code are not checked. The report counts the links in `linksBroken`, `linksMislabeled`, `linksReplaceable` and `linksNotLoaded`.
 connect:: Every pipeline config in a YAML listing block or an examples file is walked from its root keys. An unknown component is `unknown-component`, an unknown field is `unknown-field`, and deprecated components and fields are warnings. A YAML comment that states a default ("# Optional (default: "benthos")") is example output that `matches` or is `stale`. A callout ("<3> ... The default is `1024`.") or a sentence that states a field's default is compared with what `connectval:` renders.
 
 Statuses are propval's, plus `reference` for a thing the data does not have. `--fail-on mismatch` (the default) fails on mismatches, reference errors, and stale rpk and Connect examples; `any` also fails on exact, equivalent and unset values and on reference warnings, which catches every hand-written value a macro could render. Plugin flags scraped from `--help` never fail, and neither do findings in release notes, upgrade notes or Connect migration guides. A `// value-check: ignore` comment line suppresses the findings on the next line, or in the block it sits directly above. Exit 0 means nothing failed, 1 that something did, and 2 that the check could not run.
 
-`--write` applies only exact matches in the same sentence (or a Connect callout) that name one target, never in a table, block or YAML, never a scraped plugin flag or an empty default, and never in a file that may be single-sourced into Cloud where the macro would render a placeholder. Each replacement is kept only when the line renders the same visible text before and after, through the real macros.
+`--write` applies only exact matches in the same sentence (or a Connect callout) that name one target, never in a table, block or YAML, never a scraped plugin flag or an empty default, and never in a file that may be single-sourced into Cloud where the macro would render a placeholder. An exact `rpk` xref is replaced in prose or a table cell: `rpkcmd:` links the same page from the page's own component, and on Cloud renders plain code where the xref would be broken. Each replacement is kept only when the line renders the same visible text before and after, through the real macros.
 
 [,bash]
 ----

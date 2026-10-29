@@ -53,15 +53,28 @@ enterprise_features::redpanda[]
 Build with `local-macro-showcase-playbook.yml` to see these values: the full
 test playbook pulls the real docs repo, which publishes no rpk attachment yet.
 
-* rpkval:verbose[command=rpk cluster brokers] must read "<unknown default>"
+* rpkval:[rpk cluster brokers --verbose] must read "<unknown default>"
   and log unavailable: `rpk cluster brokers` is self-managed only.
-* rpkval:force[command=rpk shadow delete] must read "<unknown default>" and
+* rpkval:[rpk shadow delete --force] must read "<unknown default>" and
   log cloud-hidden, because the reference scopes that command's description
-  to self-managed; rpkval:force[type,command=rpk shadow delete] must read
+  to self-managed; rpkval:[rpk shadow delete --force,type] must read
   "bool".
-* connectval:max_buffer[component=inputs/stdin] must read "<unknown default>",
+* connectval:max_buffer[default,component=inputs/stdin] must read "<unknown default>",
   and the log must name `connect-4.114.0.json cloudSupported` as the source:
   the `stdin` input is not available in Cloud.
 * connectval:client_id[introduced,component=inputs/redpanda] must read
   "<unknown introduced>": the Connect reference shows "Requires version" only
   outside Cloud.
+
+[[rpk-commands-on-cloud]]
+== rpk command links on Cloud
+
+`rpkcmd:` links only this component's own `rpk` pages. This component has a
+stub page for `rpk topic create` that includes the `streaming-ga-lender` page,
+as the cloud-docs stubs do, and no page for `rpk cluster info`.
+
+* rpkcmd:[rpk topic create] must link this component's stub page, not the
+  `streaming` page.
+* rpkcmd:[rpk cluster info] must render as plain code with no link, and the
+  log must say this component has no page for it and that a Cloud page links
+  only Cloud pages.

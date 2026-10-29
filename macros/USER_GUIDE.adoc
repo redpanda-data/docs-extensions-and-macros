@@ -97,26 +97,27 @@ Render an `rpk` flag's value, or a Redpanda Connect field's value, from the publ
 
 [,asciidoc]
 ----
-The default is rpkval:partitions[command=rpk topic create].
-Use `rpkval:partitions[shorthand,command=rpk topic create]` for short.
-The `--since` window defaults to rpkval:since[command=rpk ai auditlog list].
+The default is rpkval:[rpk topic create --partitions].
+Use `rpkval:[rpk topic create --partitions,shorthand]` for short.
+The `--since` window defaults to rpkval:[rpk ai auditlog list --since].
 ----
 
 With rpk 26.2.2 data, that renders "The default is -1", "Use `-p` for short", and "defaults to 24h".
 
 [,asciidoc]
 ----
-The chunk size defaults to `connectval:incremental_snapshot.chunk_size[component=inputs/postgres_cdc]`.
+The chunk size defaults to `connectval:incremental_snapshot.chunk_size[default,component=inputs/postgres_cdc]`.
 Valid strategies: connectval:merge_strategy[options,component=outputs/iceberg].
-The default for `pipeline.threads` is connectval:pipeline.threads[component=config].
+The default for `pipeline.threads` is connectval:pipeline.threads[default,component=config].
 ----
 
 With Connect 4.114.0 data, that renders "defaults to `1024`", "Valid strategies: `merge-on-read`, `copy-on-write`", and "is -1".
 
-*Syntax:* `rpkval:flag[field,command=rpk command]` and `connectval:field.path[field,component=type/name]`
+*Syntax:* `rpkval:[rpk command --flag,field]` and `connectval:field.path[field,component=type/name]`
 
-* Write `command=` as you would type the command, without arguments: `command=rpk topic create`, not `command=rpk topic create my-topic`. Leave it out for a global flag.
-* Name the long flag as the target (`partitions`), not the shorthand.
+* Write the command as you would type it, then the long flag, without arguments or values: `rpkval:[rpk topic create --partitions]`, not `rpkval:[rpk topic create my-topic --partitions]`. For a global flag, write `rpk` and the flag: `rpkval:[rpk --config-opt,type]`.
+* Name the long flag (`--partitions`), not the shorthand, and ask for the `shorthand` field to show `-p`.
+* The older form, `rpkval:partitions[command=rpk topic create]`, still works and renders the same.
 * Write `component=` as the component's page path: `inputs/postgres_cdc`, or `config` for root fields such as `pipeline.threads`.
 * Address array fields without `[]`: `sasl.mechanism`, not `sasl[].mechanism`.
 * Don't wrap `options` in backticks: each value already renders as inline code.
@@ -129,6 +130,30 @@ To find hand-written values that need these macros, and commands, flags, compone
 ----
 npx doc-tools check-reference-values --docs-dir . --data-file docs-data/rpk-v26.2.2.json --lender ../rp-connect-docs
 ----
+
+=== rpkcmd - Linked rpk commands
+
+Name an `rpk` command as inline code, linked to its reference page, without writing the page path:
+
+[,asciidoc]
+----
+Create the topic with rpkcmd:[rpk topic create].
+Set the partition count with rpkcmd:[rpk topic create --partitions].
+Then rpkcmd:[rpk topic create,text=create a topic] for each tenant.
+----
+
+That renders `rpk topic create` and `rpk topic create --partitions` as code, each linked to the `rpk topic create` page, and links the words "create a topic" to the same page.
+
+*Syntax:* `rpkcmd:[rpk command --flag,text=link text]`
+
+* Write the command as you would type it, aliases included, with at most one flag and no arguments or values. The leading `rpk` is optional.
+* A flag links its command's page: the generated pages have no anchor per flag.
+* Don't wrap the macro in backticks: it already renders code.
+* The link follows the page's own component: a cloud-docs page links the Cloud page, and an Agentic Data Plane page links its own `rpk ai` pages. When Cloud has no page for a command, the macro renders plain code and warns instead of linking self-managed docs.
+
+If the command doesn't exist in the rpk data, is deprecated, or has no page in the build, the page shows plain code with no link and the build log says why. `rpkcmd:` comes with `@redpanda-data/docs-extensions-and-macros/macros/prop`, and uses the same `rpk-validate` attribute as `rpkval:`. See link:REFERENCE.adoc#rpkcmd[the macros reference].
+
+`check-reference-values` also checks hand-written xrefs to `rpk` pages: it reports links to pages that don't exist for the component and labels that name another command, and `--write` replaces each xref whose label is the command in backticks with `rpkcmd:[...]`.
 
 === helm_ref - Helm value references
 
