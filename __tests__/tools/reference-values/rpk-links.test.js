@@ -103,6 +103,20 @@ describe('broken links', () => {
     expect(links[0].note).toContain('cloud-data-platform is Cloud and has no page for rpk cluster partitions move-cancel, so rpkcmd:[rpk cluster partitions move-cancel] renders it as plain code')
   })
 
+  test('docs iceberg/specify-iceberg-schema.adoc:58: a target with no .adoc extension is an anchor on the page, so it is broken', () => {
+    const line = 'NOTE: The `value_schema_latest` mode is not compatible with the xref:reference:rpk/rpk-topic/rpk-topic-produce[`rpk topic produce`] command which embeds the wire format header.'
+    const { links } = scan('streaming', { 'modules/manage/pages/iceberg/specify-iceberg-schema.adoc': page(line) })
+    expect(links).toEqual([expect.objectContaining({ status: 'reference', reason: 'broken-link', severity: 'error', line: 3, failing: true, note: 'the target has no .adoc extension, so Asciidoctor links an anchor on this page instead of reference:rpk/rpk-topic/rpk-topic-produce.adoc' })])
+  })
+
+  test('a target with no .adoc extension names what rpkcmd: would link; with a fragment, or with .adoc, it is a page link', () => {
+    const { links } = scan('streaming', { 'modules/x/pages/x.adoc': page('Run xref:reference:rpk/rpk-topic/rpk-topic-create[`rpk topic create`], xref:reference:rpk/rpk-topic/rpk-topic-create#examples[`rpk topic create`] or xref:reference:rpk/rpk-topic/rpk-topic-create.adoc[`rpk topic create`].') })
+    expect(links.map((f) => [f.reason || f.status, f.command, f.note])).toEqual([
+      ['broken-link', 'rpk topic create', 'the target has no .adoc extension, so Asciidoctor links an anchor on this page instead of reference:rpk/rpk-topic/rpk-topic-create.adoc; rpkcmd:[rpk topic create] links 26.2@streaming:reference:rpk/rpk-topic/rpk-topic-create.adoc'],
+      ['exact', 'rpk topic create', undefined],
+    ])
+  })
+
   test('a path that names no command and no page is broken', () => {
     const { links } = scan('streaming', { 'modules/manage/pages/x.adoc': page('See xref:reference:rpk/rpk-acl/rpk-acl-frobnicate.adoc[`rpk security acl frobnicate`].') })
     expect(links[0]).toMatchObject({ reason: 'broken-link' })

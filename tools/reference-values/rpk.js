@@ -604,7 +604,8 @@ function labelCommand (tree, label) {
  * Findings for the hand-written xrefs to rpk reference pages on one prose
  * line, as the scanned component renders them:
  *
- *   broken-link (reference error): the target page does not exist there.
+ *   broken-link (reference error): the target page does not exist there,
+ *   or the target has no .adoc extension.
  *   link-label-mismatch (reference warning): the label names another
  *   command than the page documents.
  *   exact: the label is the command in backticks and the target is the page
@@ -624,8 +625,22 @@ function linkFindings (line, { index, relative, registry, links, historical }) {
     // An xref shown as code is not a link.
     if (spans.some((sp) => sp.start < m.index && m.index < sp.end)) continue
     const page = xrefPage(m[1], { component, version, module, catalog })
-    if (!page || page.module !== rpkLinks.PAGE_MODULE || !page.relative.startsWith('rpk/') || !page.relative.endsWith('.adoc')) continue
+    if (!page || page.module !== rpkLinks.PAGE_MODULE || !page.relative.startsWith('rpk/')) continue
+    // With no extension and no fragment, Asciidoctor reads the target as an
+    // anchor on this page, so the link goes nowhere.
+    const bare = !m[1].includes('#') && !/\.[\w]+$/.test(page.relative)
+    if (!bare && !page.relative.endsWith('.adoc')) continue
     const base = { file: relative, line: index + 1, text: line.trim(), kind: 'rpk', check: 'link', target: `xref:${m[1]}`, token: m[1], written: m[0], association: 'link', autoSafe: false, start: m.index, end: m.index + m[0].length }
+    if (bare) {
+      const fixed = `${page.relative}.adoc`
+      const commandPage = rpkLinks.commandOfPage(tree, fixed)
+      const command = commandPage ? cmd(commandPage.names) : undefined
+      let note = `the target has no .adoc extension, so Asciidoctor links an anchor on this page instead of reference:${fixed}`
+      const pick = commandPage && rpkLinks.pickCommandPage(catalog, { component, version, relative: fixed })
+      if (pick && pick.ok) note += `; rpkcmd:[${command}] links ${pick.id}`
+      out.push({ ...base, status: 'reference', reason: 'broken-link', severity: 'error', command, note })
+      continue
+    }
     const where = `${page.component}@${page.version || 'unversioned'}`
     const known = page.version !== undefined && (() => {
       const found = typeof catalog.getComponent === 'function' && catalog.getComponent(page.component)
