@@ -86,7 +86,8 @@ function clearAttachmentCache () {
   cache.clear()
 }
 
-const arrayKeys = (data) => Object.keys(data).filter((k) => Array.isArray(data[k]))
+// `undocumented` is a list of components, not a component group.
+const arrayKeys = (data) => Object.keys(data).filter((k) => k !== 'undocumented' && Array.isArray(data[k]))
 const isExtra = (c) => c && (c.requiresCgo === true || c.cloudOnly === true)
 
 /**
@@ -97,6 +98,7 @@ const isExtra = (c) => c && (c.requiresCgo === true || c.cloudOnly === true)
  */
 function ossIndexFromAttachment (data) {
   const index = JSON.parse(JSON.stringify(data))
+  delete index.undocumented
   for (const key of arrayKeys(index)) {
     index[key] = index[key].filter((c) => !isExtra(c))
     for (const c of index[key]) {
@@ -163,7 +165,43 @@ function binaryAnalysisFromAttachment (data) {
   }
 }
 
+/**
+ * The components a Connect release build registers that docs_gen does not
+ * document, so they have no docs page. redpanda-data/connect#4947 writes them
+ * to the attachment's top-level `undocumented` list as
+ * `{ type, name, builds }`. Assets from before that field have no list, which
+ * reads as empty. Malformed entries are skipped with one warning; this never
+ * throws, because a gap in the docs should not stop generation.
+ *
+ * @param {Object|null} data - The attachment
+ * @param {Object} [options]
+ * @param {Object} [options.logger] - console stand-in (tests)
+ * @returns {Array<{type: string, name: string, builds: string[]}>}
+ */
+function undocumentedFromAttachment (data, { logger = console } = {}) {
+  const list = data && data.undocumented
+  if (list === undefined || list === null) return []
+  if (!Array.isArray(list)) {
+    logger.warn(`⚠️  Ignoring the attachment's undocumented field: expected a list, got ${typeof list}`)
+    return []
+  }
+  const isText = (v) => typeof v === 'string' && v.length > 0
+  const valid = list.filter((e) => e && isText(e.type) && isText(e.name) &&
+    Array.isArray(e.builds) && e.builds.length > 0 && e.builds.every(isText))
+  if (valid.length < list.length) {
+    logger.warn(`⚠️  Skipped ${list.length - valid.length} malformed entr${list.length - valid.length === 1 ? 'y' : 'ies'} in the attachment's undocumented list`)
+  }
+  return valid.map((e) => ({ type: e.type, name: e.name, builds: [...e.builds] }))
+}
+
+function undocumentedWarning ({ type, name, builds }) {
+  const plural = builds.length === 1 ? 'build' : 'builds'
+  return `⚠️  ${type}/${name} ships in the ${builds.join(', ')} ${plural} but Connect's docs_gen doesn't document it, so it has no docs page. Add its package to cmd/tools/docs_gen/allcomponents in redpanda-data/connect.`
+}
+
 module.exports = {
+  undocumentedFromAttachment,
+  undocumentedWarning,
   attachmentPath,
   attachmentFromFiles,
   validateAttachment,

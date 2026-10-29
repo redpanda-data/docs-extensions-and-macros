@@ -825,6 +825,21 @@ async function findReleaseAttachment (version, options = {}) {
 }
 
 /**
+ * Warn once per component the release ships that Connect's docs_gen does not
+ * document (the attachment's `undocumented` list) and return the list for the
+ * PR summary. Advisory only: never throws or changes the exit code.
+ *
+ * @param {Object|null} attachment - Result of findReleaseAttachment()
+ * @returns {Array<{type: string, name: string, builds: string[]}>}
+ */
+function reportUndocumentedComponents (attachment) {
+  if (!attachment) return []
+  const entries = releaseAttachment.undocumentedFromAttachment(attachment)
+  for (const entry of entries) console.warn(releaseAttachment.undocumentedWarning(entry))
+  return entries
+}
+
+/**
  * Cloud and cgo platform data for a version: from the release's attachment
  * when there is one, otherwise from downloading and comparing the standard,
  * Cloud, and cgo binaries.
@@ -2256,7 +2271,8 @@ async function handleRpcnConnectorDocs (options) {
 
   // Generate PR summary
   try {
-    const { printPRSummary, renderLostSectionWarnings, renderStyleRegressionWarnings, renderDescriptionReports } = require('./pr-summary-formatter.js')
+    const { printPRSummary, renderLostSectionWarnings, renderStyleRegressionWarnings, renderDescriptionReports, renderUndocumentedComponents } = require('./pr-summary-formatter.js')
+    const undocumentedComponents = reportUndocumentedComponents(attachment)
     // Use master diff if available, otherwise use single diff. Content-loss
     // warnings and structure reports ride the diff object so they land in the
     // PR summary body instead of dying in the collapsed workflow log.
@@ -2265,8 +2281,9 @@ async function handleRpcnConnectorDocs (options) {
       if (lostSectionWarnings.length) summaryDiff.lostSectionWarnings = lostSectionWarnings
       if (styleRegressionWarnings.length) summaryDiff.styleRegressionWarnings = styleRegressionWarnings
       if (descriptionReports.length) summaryDiff.descriptionReports = descriptionReports
+      if (undocumentedComponents.length) summaryDiff.undocumentedComponents = undocumentedComponents
       printPRSummary(summaryDiff, binaryAnalysis, draftFiles, masterDiff ? true : false)
-    } else if (lostSectionWarnings.length || styleRegressionWarnings.length || descriptionReports.length) {
+    } else if (lostSectionWarnings.length || styleRegressionWarnings.length || descriptionReports.length || undocumentedComponents.length) {
       // No diff to summarize (no prior version, or versions match), but this
       // run still produced content-loss warnings or description-structure
       // reports that a reviewer needs to see -- print them on their own
@@ -2274,7 +2291,8 @@ async function handleRpcnConnectorDocs (options) {
       const lines = [
         ...renderLostSectionWarnings(lostSectionWarnings),
         ...renderStyleRegressionWarnings(styleRegressionWarnings),
-        ...renderDescriptionReports(descriptionReports)
+        ...renderDescriptionReports(descriptionReports),
+        ...renderUndocumentedComponents(undocumentedComponents)
       ]
       console.log('\n' + lines.join('\n') + '\n')
     }
@@ -2353,6 +2371,7 @@ module.exports = {
   loadConnectorDataForVersion,
   snapshotReuseBlocker,
   findReleaseAttachment,
+  reportUndocumentedComponents,
   resolvePlatformAnalysis,
   publishConnectorAttachment,
   fieldAnchor,

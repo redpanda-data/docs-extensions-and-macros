@@ -149,6 +149,27 @@ function renderDescriptionReports(reports) {
 }
 
 /**
+ * Render the components the release ships that Connect's docs_gen does not
+ * document (the attachment's `undocumented` list), so a writer sees on the PR
+ * that they have no docs page.
+ * @param {Array<{type: string, name: string, builds: string[]}>} entries
+ * @returns {string[]} lines (empty when there is nothing to report)
+ */
+function renderUndocumentedComponents(entries) {
+  if (!Array.isArray(entries) || entries.length === 0) return [];
+  const lines = [];
+  lines.push('### Undocumented components');
+  lines.push('');
+  lines.push('These ship in a Connect release build but Connect\'s docs_gen doesn\'t document them, so they have no docs page. Add each package to `cmd/tools/docs_gen/allcomponents` in redpanda-data/connect.');
+  lines.push('');
+  for (const e of entries) {
+    lines.push(`- \`${e.type}/${e.name}\` (builds: ${e.builds.join(', ')})`);
+  }
+  lines.push('');
+  return lines;
+}
+
+/**
  * Generate PR summary for multiple releases
  * @param {object} masterDiff - Master diff with releases array
  * @param {object} binaryAnalysis - Cloud support data (from latest release)
@@ -211,6 +232,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
   lines.push(...renderLostSectionWarnings(masterDiff?.lostSectionWarnings));
   lines.push(...renderStyleRegressionWarnings(masterDiff?.styleRegressionWarnings));
   lines.push(...renderDescriptionReports(masterDiff?.descriptionReports));
+  lines.push(...renderUndocumentedComponents(masterDiff?.undocumentedComponents));
   lines.push('## Redpanda Connect Documentation Update');
   lines.push('');
   lines.push(`**Multi-Release Update:** ${startVersion} → ${endVersion}`);
@@ -637,6 +659,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   lines.push(...renderLostSectionWarnings(diffData.lostSectionWarnings));
   lines.push(...renderStyleRegressionWarnings(diffData.styleRegressionWarnings));
   lines.push(...renderDescriptionReports(diffData.descriptionReports));
+  lines.push(...renderUndocumentedComponents(diffData.undocumentedComponents));
 
   // Detect if this is a master diff
   if (!isMultiVersion && diffData.releases && diffData.totalSummary) {
@@ -1454,5 +1477,6 @@ module.exports = {
   renderDescriptionReports,
   renderLostSectionWarnings,
   renderStyleRegressionWarnings,
+  renderUndocumentedComponents,
   truncateToSentence
 };

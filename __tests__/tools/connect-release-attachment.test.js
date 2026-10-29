@@ -6,10 +6,11 @@
  * for falling back to the binary analysis when the asset has no such file.
  *
  * The fixture is a trimmed copy of real docs_gen output: redpanda-connect#4947
- * at 6210ac06, run as
+ * at 936f1050, run as
  *   CGO_ENABLED=1 go run -tags x_benthos_extra ./cmd/tools/docs_gen -version 4.115.1 -date 2026-10-20T00:00:00Z
  * keeping a Cloud, a self-hosted-only, a cgo-only, and the cloud-only
- * component, two config objects, and one Bloblang function and method.
+ * component, two config objects, and one Bloblang function and method. Its
+ * `undocumented` list is empty, as it is for that release.
  */
 
 jest.mock('../../cli-utils/octokit-client', () => ({}));
@@ -34,11 +35,13 @@ const releaseAttachment = require('../../tools/redpanda-connect/release-attachme
 const {
   augmentConnectorData,
   findReleaseAttachment,
+  reportUndocumentedComponents,
   resolvePlatformAnalysis,
   loadConnectorDataForVersion,
   publishConnectorAttachment,
 } = require('../../tools/redpanda-connect/rpcn-connector-docs-handler');
 const { generateConnectorDiffJson } = require('../../tools/redpanda-connect/report-delta');
+const { generatePRSummary } = require('../../tools/redpanda-connect/pr-summary-formatter');
 
 const FIXTURE = path.join(__dirname, '..', 'fixtures', 'connect-release-attachment', 'connect-4.115.1.json');
 const VERSION = '4.115.1';
@@ -246,5 +249,57 @@ describe('diff against an older binary analysis', () => {
     };
     const diff = generateConnectorDiffJson(attachment, attachment, { oldVersion: '4.115.0', newVersion: VERSION, binaryAnalysis: ba, oldBinaryAnalysis: oldBa });
     expect(diff.binaryAnalysis.changes.cloud.removed).toEqual([{ type: 'inputs', name: 'gone', status: 'stable' }]);
+  });
+});
+
+describe('undocumented components', () => {
+  const ENTRY = { type: 'processors', name: 'x', builds: ['cloud', 'ai'] };
+  const withUndocumented = (list) => ({ ...readFixture(), undocumented: list });
+  const withoutField = () => {
+    const data = readFixture();
+    delete data.undocumented;
+    return data;
+  };
+  const summaryFor = (undocumentedComponents) => {
+    const attachment = readFixture();
+    const diff = generateConnectorDiffJson(attachment, attachment, { oldVersion: '4.115.0', newVersion: VERSION });
+    return generatePRSummary({ ...diff, undocumentedComponents });
+  };
+
+  test('a listed component is warned about and appears in the PR summary', () => {
+    const entries = reportUndocumentedComponents(withUndocumented([ENTRY]));
+    expect(entries).toEqual([ENTRY]);
+    expect(console.warn).toHaveBeenCalledTimes(1);
+    expect(console.warn.mock.calls[0][0]).toMatch(
+      /processors\/x ships in the cloud, ai builds but Connect's docs_gen doesn't document it, so it has no docs page\. Add its package to cmd\/tools\/docs_gen\/allcomponents/
+    );
+    const summary = summaryFor(entries);
+    expect(summary).toContain('### Undocumented components');
+    expect(summary).toContain('- `processors/x` (builds: cloud, ai)');
+  });
+
+  test('an empty list (the 936f1050 output) or an older asset without the field warns about nothing', () => {
+    expect(readFixture().undocumented).toEqual([]);
+    for (const data of [readFixture(), withoutField()]) {
+      expect(reportUndocumentedComponents(data)).toEqual([]);
+      expect(summaryFor(reportUndocumentedComponents(data))).not.toContain('Undocumented components');
+    }
+    expect(reportUndocumentedComponents(null)).toEqual([]);
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  test('malformed entries are skipped with one warning instead of throwing', () => {
+    const entries = reportUndocumentedComponents(withUndocumented([ENTRY, { type: 'inputs' }, 'bogus', { ...ENTRY, builds: [] }]));
+    expect(entries).toEqual([ENTRY]);
+    const messages = console.warn.mock.calls.map((c) => c[0]);
+    expect(messages.filter((m) => /malformed/.test(m))).toEqual([expect.stringContaining('Skipped 3 malformed entries')]);
+    expect(messages.filter((m) => /docs_gen/.test(m))).toHaveLength(1);
+    expect(() => reportUndocumentedComponents(withUndocumented({ not: 'a list' }))).not.toThrow();
+  });
+
+  test('the list is not a component group in the OSS snapshot or the platform data', () => {
+    const attachment = withUndocumented([ENTRY]);
+    expect(releaseAttachment.ossIndexFromAttachment(attachment)).not.toHaveProperty('undocumented');
+    expect(releaseAttachment.binaryAnalysisFromAttachment(attachment).coveredTypes).not.toContain('undocumented');
   });
 });
