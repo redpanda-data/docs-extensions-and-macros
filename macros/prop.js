@@ -121,6 +121,9 @@ const datasets = require('../extension-utils/attachment-datasets')
 const { rpkvalInlineMacro, rpkvalBlockMacro } = require('./rpkval')
 const { connectvalInlineMacro, connectvalBlockMacro } = require('./connectval')
 const { rpkcmdInlineMacro } = require('./rpkcmd')
+const { connectInlineMacro } = require('./connect')
+const { bloblInlineMacro } = require('./blobl')
+const { bloblvalInlineMacro, bloblvalBlockMacro } = require('./bloblval')
 const logger = require('@antora/logger')('prop-macro')
 
 const {
@@ -935,9 +938,13 @@ function register (registry, config = {}) {
       this.inlineMacro(rpkvalInlineMacro(config))
       this.inlineMacro(connectvalInlineMacro(config))
       this.inlineMacro(rpkcmdInlineMacro(config))
+      this.inlineMacro(connectInlineMacro(config))
+      this.inlineMacro(bloblInlineMacro(config))
+      this.inlineMacro(bloblvalInlineMacro(config))
       this.blockMacro(propvalBlockMacro(config))
       this.blockMacro(rpkvalBlockMacro(config))
       this.blockMacro(connectvalBlockMacro(config))
+      this.blockMacro(bloblvalBlockMacro(config))
     })
   } else if (typeof registry.inlineMacro === 'function') {
     registry.inlineMacro(propInlineMacro(config))
@@ -945,10 +952,14 @@ function register (registry, config = {}) {
     registry.inlineMacro(rpkvalInlineMacro(config))
     registry.inlineMacro(connectvalInlineMacro(config))
     registry.inlineMacro(rpkcmdInlineMacro(config))
+    registry.inlineMacro(connectInlineMacro(config))
+    registry.inlineMacro(bloblInlineMacro(config))
+    registry.inlineMacro(bloblvalInlineMacro(config))
     if (typeof registry.blockMacro === 'function') {
       registry.blockMacro(propvalBlockMacro(config))
       registry.blockMacro(rpkvalBlockMacro(config))
       registry.blockMacro(connectvalBlockMacro(config))
+      registry.blockMacro(bloblvalBlockMacro(config))
     }
   } else {
     logger.warn("no 'inlineMacro' method on alleged registry")
