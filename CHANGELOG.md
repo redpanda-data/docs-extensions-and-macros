@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.59.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.58.0...v5.59.0) (2026-10-29)
+
+
+### Features
+
+* **lint-strings:** route rpk ai to the rpk surface and warn on long sentences ([#461](https://github.com/redpanda-data/docs-extensions-and-macros/issues/461)) ([2583d4c](https://github.com/redpanda-data/docs-extensions-and-macros/commit/2583d4cf69205ea3d0bc8be973772fef7fcfb1d1))
+
 ## [5.58.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.57.0...v5.58.0) (2026-10-28)
 
 
