@@ -796,32 +796,82 @@ function snapshotReuseBlocker (data, version) {
 
 /**
  * The release's connect-<version>.json from its docs asset, or null when the
- * binaries have to be compared instead: the release predates the file
- * (v4.115.x and older), the asset can't be read, or an explicit
- * --cloud-version or --cgo-version asks for specific binaries.
+ * binaries have to be compared instead, plus why. `source.reason` is one of:
+ * - `release-asset`: the asset has the file
+ * - `asset-missing-file`: the asset was read but has no such file (v4.115.x
+ *   and older releases, or a release whose docs step didn't write it)
+ * - `asset-unreadable`: the asset couldn't be read (`source.error` says why)
+ * - `override`: --cloud-version or --cgo-version asks for Cloud or cgo
+ *   availability from another Connect version's binaries (`source.cloudVersion`
+ *   and `source.cgoVersion` carry them). Only a person running doc-tools or
+ *   the MCP tool sets these; CI never does.
+ *
+ * @param {string} version - Connect version
+ * @param {Object} [options] - Handler options
+ * @returns {Promise<{attachment: Object|null, source: {reason: string, version: string, file: string, error?: string, cloudVersion?: string|null, cgoVersion?: string|null}}>}
+ */
+async function findReleaseAttachmentWithSource (version, options = {}) {
+  const file = releaseAttachment.attachmentPath(version)
+  const source = (reason, extra = {}) => ({ reason, version, file, ...extra })
+  if (options.cloudVersion || options.cgoVersion) {
+    const requested = { cloudVersion: options.cloudVersion || null, cgoVersion: options.cgoVersion || null }
+    console.log(`ℹ️  ${require('./pr-summary-formatter.js').overrideRequestText({ version, ...requested })}, so ${version} is analyzed from the binaries rather than ${file}`)
+    return { attachment: null, source: source('override', requested) }
+  }
+  try {
+    const data = await releaseAttachment.loadReleaseAttachment(version)
+    if (data) {
+      console.log(`✓ Using ${file} from the v${version} docs asset: no binary downloads needed`)
+      return { attachment: data, source: source('release-asset') }
+    }
+    console.log(`ℹ️  The v${version} docs asset has no ${file}, so the binaries are compared instead`)
+    return { attachment: null, source: source('asset-missing-file') }
+  } catch (err) {
+    console.warn(`Warning: Could not read ${file} from the v${version} docs asset (${err.message}), so the binaries are compared instead`)
+    return { attachment: null, source: source('asset-unreadable', { error: err.message }) }
+  }
+}
+
+/**
+ * The release's connect-<version>.json from its docs asset, or null.
+ * See findReleaseAttachmentWithSource().
  *
  * @param {string} version - Connect version
  * @param {Object} [options] - Handler options
  * @returns {Promise<Object|null>}
  */
 async function findReleaseAttachment (version, options = {}) {
-  const file = releaseAttachment.attachmentPath(version)
-  if (options.cloudVersion || options.cgoVersion) {
-    console.log(`ℹ️  --cloud-version or --cgo-version is set, so ${version} is analyzed from the binaries rather than ${file}`)
+  return (await findReleaseAttachmentWithSource(version, options)).attachment
+}
+
+/**
+ * Detect a fallback to the binaries that shouldn't have happened: the
+ * release's docs asset has no readable attachment but the previous release's
+ * (the version the diff compares against) does, so the release's docs step
+ * likely stopped writing it. Advisory only: never throws or changes the exit
+ * code, and returns null (logging why) whenever it can't tell.
+ *
+ * @param {Object|null} source - `source` from findReleaseAttachmentWithSource()
+ * @param {string|null} previousVersion - Version the diff compares against
+ * @returns {Promise<{version: string, previousVersion: string}|null>}
+ */
+async function checkUnexpectedFallback (source, previousVersion) {
+  if (!source || !['asset-missing-file', 'asset-unreadable'].includes(source.reason)) return null
+  if (!previousVersion || previousVersion === source.version) {
+    console.log(`ℹ️  Not checking the previous release's docs asset: no previous version to compare v${source.version} against`)
     return null
   }
+  let previous
   try {
-    const data = await releaseAttachment.loadReleaseAttachment(version)
-    if (data) {
-      console.log(`✓ Using ${file} from the v${version} docs asset: no binary downloads needed`)
-    } else {
-      console.log(`ℹ️  The v${version} docs asset has no ${file}, so the binaries are compared instead`)
-    }
-    return data
+    previous = await releaseAttachment.loadReleaseAttachment(previousVersion)
   } catch (err) {
-    console.warn(`Warning: Could not read ${file} from the v${version} docs asset (${err.message}), so the binaries are compared instead`)
+    console.log(`ℹ️  Not checking for an unexpected fallback: could not read the v${previousVersion} docs asset (${err.message})`)
     return null
   }
+  if (!previous) return null
+  const warning = { version: source.version, previousVersion }
+  console.warn(`Warning: ${require('./pr-summary-formatter.js').unexpectedFallbackMessage(warning)}`)
+  return warning
 }
 
 /**
@@ -1029,8 +1079,10 @@ async function handleRpcnConnectorDocs (options) {
   let draftFiles = []
   let needsAugmentation = false
   let csvMetadata = []
-  // The release's connect-<version>.json from its docs asset, when it has one.
+  // The release's connect-<version>.json from its docs asset, when it has one,
+  // and where the platform data came from (for the PR summary).
   let attachment = null
+  let platformSource = null
 
   if (options.fetchConnectors) {
     try {
@@ -1047,7 +1099,7 @@ async function handleRpcnConnectorDocs (options) {
         // snapshot when it is raw, unaugmented output for this same version,
         // and leaves the caller's own Connect install alone either way.
         console.log(`Fetching connector data for Connect ${newVersion}...`)
-        attachment = await findReleaseAttachment(newVersion, options)
+        ;({ attachment, source: platformSource } = await findReleaseAttachmentWithSource(newVersion, options))
         await loadConnectorDataForVersion(newVersion, dataDir, { attachment })
         dataFile = path.join(dataDir, `connect-${newVersion}.json`)
         needsAugmentation = true
@@ -1061,7 +1113,7 @@ async function handleRpcnConnectorDocs (options) {
         const tmpFile = path.join(dataDir, `connect-${newVersion}.tmp.json`)
         const finalFile = path.join(dataDir, `connect-${newVersion}.json`)
 
-        attachment = await findReleaseAttachment(newVersion, options)
+        ;({ attachment, source: platformSource } = await findReleaseAttachmentWithSource(newVersion, options))
         if (attachment) {
           await loadConnectorDataForVersion(newVersion, dataDir, { attachment })
         } else {
@@ -1182,7 +1234,7 @@ async function handleRpcnConnectorDocs (options) {
     const sortedVersions = semver.rsort(candidates)
     newVersion = sortedVersions[0]
     dataFile = path.join(dataDir, `connect-${newVersion}.json`)
-    attachment = await findReleaseAttachment(newVersion, options)
+    ;({ attachment, source: platformSource } = await findReleaseAttachmentWithSource(newVersion, options))
   }
 
   // ========================================================================
@@ -1255,7 +1307,7 @@ async function handleRpcnConnectorDocs (options) {
               // Load data for both versions - FORCE FRESH to avoid stale/incomplete data
               // This ensures we have accurate connector lists for both versions
               const oldAttachment = await findReleaseAttachment(fromVer, options)
-              const newAttachment = await findReleaseAttachment(toVer, options)
+              const { attachment: newAttachment, source: newSource } = await findReleaseAttachmentWithSource(toVer, options)
 
               console.log(`Loading connector data for ${fromVer} (fresh fetch)...`)
               const oldData = await loadConnectorDataForVersion(fromVer, dataDir, { forceFresh: true, attachment: oldAttachment })
@@ -1382,6 +1434,7 @@ async function handleRpcnConnectorDocs (options) {
                 fromVersion: fromVer,
                 toVersion: toVer,
                 diffPath,
+                platformSource: newSource,
                 success: true
               })
 
@@ -2282,6 +2335,12 @@ async function handleRpcnConnectorDocs (options) {
       if (styleRegressionWarnings.length) summaryDiff.styleRegressionWarnings = styleRegressionWarnings
       if (descriptionReports.length) summaryDiff.descriptionReports = descriptionReports
       if (undocumentedComponents.length) summaryDiff.undocumentedComponents = undocumentedComponents
+      summaryDiff.platformSource = platformSource
+      summaryDiff.releasePlatformSources = intermediateProcessingResults
+        .filter(r => r.success && r.platformSource)
+        .map(r => r.platformSource)
+      const fallbackWarning = await checkUnexpectedFallback(platformSource, oldVersion)
+      if (fallbackWarning) summaryDiff.platformFallbackWarning = fallbackWarning
       printPRSummary(summaryDiff, binaryAnalysis, draftFiles, masterDiff ? true : false)
     } else if (lostSectionWarnings.length || styleRegressionWarnings.length || descriptionReports.length || undocumentedComponents.length) {
       // No diff to summarize (no prior version, or versions match), but this
@@ -2371,6 +2430,8 @@ module.exports = {
   loadConnectorDataForVersion,
   snapshotReuseBlocker,
   findReleaseAttachment,
+  findReleaseAttachmentWithSource,
+  checkUnexpectedFallback,
   reportUndocumentedComponents,
   resolvePlatformAnalysis,
   publishConnectorAttachment,

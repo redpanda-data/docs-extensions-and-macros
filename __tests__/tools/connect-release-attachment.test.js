@@ -35,13 +35,15 @@ const releaseAttachment = require('../../tools/redpanda-connect/release-attachme
 const {
   augmentConnectorData,
   findReleaseAttachment,
+  findReleaseAttachmentWithSource,
+  checkUnexpectedFallback,
   reportUndocumentedComponents,
   resolvePlatformAnalysis,
   loadConnectorDataForVersion,
   publishConnectorAttachment,
 } = require('../../tools/redpanda-connect/rpcn-connector-docs-handler');
 const { generateConnectorDiffJson } = require('../../tools/redpanda-connect/report-delta');
-const { generatePRSummary } = require('../../tools/redpanda-connect/pr-summary-formatter');
+const { generatePRSummary, generateMultiVersionPRSummary } = require('../../tools/redpanda-connect/pr-summary-formatter');
 
 const FIXTURE = path.join(__dirname, '..', 'fixtures', 'connect-release-attachment', 'connect-4.115.1.json');
 const VERSION = '4.115.1';
@@ -301,5 +303,103 @@ describe('undocumented components', () => {
     const attachment = withUndocumented([ENTRY]);
     expect(releaseAttachment.ossIndexFromAttachment(attachment)).not.toHaveProperty('undocumented');
     expect(releaseAttachment.binaryAnalysisFromAttachment(attachment).coveredTypes).not.toContain('undocumented');
+  });
+});
+
+describe('platform data source in the PR summary', () => {
+  const PREV = '4.115.0';
+  const FILE = releaseAttachment.attachmentPath(VERSION);
+  // Stand-in asset loader: version -> attachment, null (no file), or Error.
+  const assets = (byVersion) => jest.spyOn(releaseAttachment, 'loadReleaseAttachment')
+    .mockImplementation(async (v) => {
+      const value = byVersion[v];
+      if (value instanceof Error) throw value;
+      return value === undefined ? null : value;
+    });
+  const singleSummary = (extra) => {
+    const attachment = readFixture();
+    const diff = generateConnectorDiffJson(attachment, attachment, { oldVersion: PREV, newVersion: VERSION });
+    return generatePRSummary({ ...diff, ...extra });
+  };
+  const multiSummary = (extra) => generateMultiVersionPRSummary({
+    metadata: { startVersion: '4.114.0', endVersion: VERSION, processedReleases: 2 },
+    totalSummary: {},
+    ...extra,
+  });
+  const run = async (byVersion, options = {}) => {
+    assets(byVersion);
+    const { source } = await findReleaseAttachmentWithSource(VERSION, options);
+    const platformFallbackWarning = await checkUnexpectedFallback(source, PREV);
+    return { source, platformFallbackWarning };
+  };
+
+  test('each reason renders its own source line', async () => {
+    const cases = [
+      [{ [VERSION]: readFixture() }, {}, 'release-asset', '**Platform data:** release asset'],
+      [{}, {}, 'asset-missing-file', `**Platform data:** binaries (the v${VERSION} docs asset has no ${FILE})`],
+      [{ [VERSION]: new Error('HTTP 502') }, {}, 'asset-unreadable', `**Platform data:** binaries (couldn't read the v${VERSION} docs asset: HTTP 502)`],
+      [{ [VERSION]: readFixture() }, { cloudVersion: '4.114.0', cgoVersion: '4.114.0' }, 'override', `**Platform data:** binaries (Cloud v4.114.0 and cgo v4.114.0 were requested, so the v${VERSION} docs asset's flags don't apply)`],
+      [{ [VERSION]: readFixture() }, { cgoVersion: '4.113.0' }, 'override', `**Platform data:** binaries (cgo v4.113.0 was requested, so the v${VERSION} docs asset's flags don't apply)`],
+    ];
+    for (const [byVersion, options, reason, line] of cases) {
+      jest.restoreAllMocks();
+      const { source } = await run(byVersion, options);
+      expect(source.reason).toBe(reason);
+      expect(singleSummary({ platformSource: source })).toContain(line);
+      expect(multiSummary({ platformSource: source })).toContain(line);
+    }
+  });
+
+  test('a multi-release summary lists only the releases whose source differs', () => {
+    const at = (version, reason) => ({ reason, version, file: releaseAttachment.attachmentPath(version) });
+    const summary = multiSummary({
+      platformSource: at(VERSION, 'release-asset'),
+      releasePlatformSources: [at('4.114.1', 'asset-missing-file'), at(PREV, 'release-asset')],
+    });
+    expect(summary).toContain('**Platform data:** release asset');
+    expect(summary).toContain('**Platform data (4.114.1):** binaries (the v4.114.1 docs asset has no modules/components/attachments/connect-4.114.1.json)');
+    expect(summary).not.toContain(`**Platform data (${PREV})`);
+  });
+
+  test.each([
+    ['missing from', null],
+    ['unreadable in', new Error('HTTP 502')],
+  ])('warns when the previous release has the file and it is %s the current one', async (_label, current) => {
+    const { platformFallbackWarning } = await run({ [PREV]: readFixture(), [VERSION]: current });
+    expect(platformFallbackWarning).toEqual({ version: VERSION, previousVersion: PREV });
+    const message = `v${PREV} shipped connect-${PREV}.json but v${VERSION} doesn't, so this run compared binaries instead. Check redpanda-data/connect's release docs step (docs_gen -version).`;
+    expect(console.warn).toHaveBeenCalledWith(`Warning: ${message}`);
+    for (const summary of [singleSummary({ platformFallbackWarning }), multiSummary({ platformFallbackWarning })]) {
+      expect(summary).toContain(`> [!WARNING]\n> ${message}`);
+      expect(summary.indexOf('[!WARNING]')).toBeLessThan(summary.indexOf('## Redpanda Connect Documentation Update'));
+    }
+  });
+
+  test('no warning when neither release has the file (older releases)', async () => {
+    const { platformFallbackWarning } = await run({});
+    expect(platformFallbackWarning).toBeNull();
+    expect(singleSummary({ platformFallbackWarning })).not.toContain('[!WARNING]');
+  });
+
+  test('no warning when the current release has the file', async () => {
+    const { platformFallbackWarning } = await run({ [PREV]: readFixture(), [VERSION]: readFixture() });
+    expect(platformFallbackWarning).toBeNull();
+  });
+
+  test('no warning for an override, and the previous asset is never downloaded', async () => {
+    const { platformFallbackWarning } = await run({ [PREV]: readFixture(), [VERSION]: readFixture() }, { cgoVersion: '4.114.0' });
+    expect(platformFallbackWarning).toBeNull();
+    expect(releaseAttachment.loadReleaseAttachment).not.toHaveBeenCalled();
+  });
+
+  test('no warning, and no throw, when the previous version is unknown or its asset is unreadable', async () => {
+    const load = assets({ [PREV]: new Error('HTTP 503') });
+    const source = { reason: 'asset-missing-file', version: VERSION, file: FILE };
+    await expect(checkUnexpectedFallback(source, null)).resolves.toBeNull();
+    await expect(checkUnexpectedFallback(source, VERSION)).resolves.toBeNull();
+    expect(load).not.toHaveBeenCalled();
+    await expect(checkUnexpectedFallback(source, PREV)).resolves.toBeNull();
+    expect(logSpy.mock.calls.map((c) => c[0]).join('\n')).toMatch(/could not read the v4\.115\.0 docs asset \(HTTP 503\)/);
+    expect(console.warn).not.toHaveBeenCalled();
   });
 });
