@@ -35,8 +35,9 @@ const put = (dir, file, content) => {
 }
 
 // One checkout of a component: its real rpk page paths, with the
-// page-aliases they declare, and the given prose files.
-function checkout (name, files = {}, { nav } = {}) {
+// page-aliases they declare, and the given prose files. streaming also
+// publishes the rpk data attachment rpkcmd: links with, unless data is false.
+function checkout (name, files = {}, { nav, data = name === 'streaming' } = {}) {
   const c = PAGES.components.find((x) => x.name === name)
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-links-'))
   temps.push(dir)
@@ -46,6 +47,7 @@ function checkout (name, files = {}, { nav } = {}) {
     const aliases = c.aliases[relative]
     put(dir, `modules/reference/pages/${relative}`, `= ${relative}\n${aliases ? `:page-aliases: ${aliases.join(', ')}\n` : ''}\nGenerated.\n`)
   }
+  if (data) put(dir, 'modules/reference/attachments/rpk-v26.2.2.json', fs.readFileSync(RPK))
   for (const [file, content] of Object.entries(files)) put(dir, file, content)
   return dir
 }
@@ -53,9 +55,9 @@ function checkout (name, files = {}, { nav } = {}) {
 const page = (...lines) => ['= Page', '', ...lines, ''].join('\n')
 
 // Scan one component, with the other two as lenders unless told otherwise.
-function scan (name, files, { lenders = ['streaming', 'cloud-data-platform', 'agentic-data-plane'].filter((n) => n !== name), nav, write = false, failOn = 'mismatch' } = {}) {
-  const docsDir = checkout(name, files, { nav })
-  const lenderDirs = lenders.map((n) => checkout(n))
+function scan (name, files, { lenders = ['streaming', 'cloud-data-platform', 'agentic-data-plane'].filter((n) => n !== name), nav, write = false, failOn = 'mismatch', data } = {}) {
+  const docsDir = checkout(name, files, { nav, data })
+  const lenderDirs = lenders.map((n) => checkout(n, {}, { data }))
   const result = scanAll({ docsDir, lenderDirs, dataFiles: [RPK], kinds: ['rpk'], kindsExplicit: true, write, failOn })
   return { result, docsDir, links: result.kinds.rpk.findings.filter((f) => f.check === 'link') }
 }
@@ -177,6 +179,15 @@ describe('replaceable links', () => {
   test('a streaming link to the Cloud rpk cloud login page is replaceable: Cloud has more rpk-cloud pages than ADP, though ADP has more rpk pages', () => {
     const { links } = scan('streaming', { 'modules/x/pages/x.adoc': page('Log in with xref:cloud-data-platform:reference:rpk/rpk-cloud/rpk-cloud-login.adoc[`rpk cloud login`].') })
     expect(links[0]).toMatchObject({ status: 'exact', autoSafe: true, proposed: 'rpkcmd:[rpk cloud login]', dataValue: 'cloud-data-platform:reference:rpk/rpk-cloud/rpk-cloud-login.adoc' })
+  })
+
+  test('with --data-file but no rpk data attachment in the build, an exact link is proposed only, since rpkcmd: would render it unlinked', () => {
+    const line = 'Run xref:reference:rpk/rpk-topic/rpk-topic-create.adoc[`rpk topic create`].'
+    const { links, docsDir } = scan('streaming', { 'modules/x/pages/x.adoc': page(line) }, { write: true, data: false })
+    expect(links.map((f) => [f.status, f.autoSafe, f.applied, f.proposed, f.note])).toEqual([
+      ['exact', false, undefined, 'rpkcmd:[rpk topic create]', 'no rpk data attachment in this build; rpkcmd: would render without a link'],
+    ])
+    expect(fs.readFileSync(path.join(docsDir, 'modules/x/pages/x.adoc'), 'utf8')).toContain(line)
   })
 
   test('a label with a flag is replaceable, and the replacement keeps the flag', () => {

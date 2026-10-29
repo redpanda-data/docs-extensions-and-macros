@@ -608,7 +608,8 @@ function labelCommand (tree, label) {
  *   link-label-mismatch (reference warning): the label names another
  *   command than the page documents.
  *   exact: the label is the command in backticks and the target is the page
- *   rpkcmd:[...] would link, so --write may replace the xref with the macro.
+ *   rpkcmd:[...] would link, so --write may replace the xref with the macro,
+ *   unless the build has no rpk data attachment for rpkcmd: to link with.
  *   link-target-not-loaded (unverifiable): the target is in a component or
  *   version this scan has not read; pass it with --lender.
  */
@@ -674,6 +675,9 @@ function linkFindings (line, { index, relative, registry, links, historical }) {
     const finding = { ...base, status: 'exact', command, target: proposed, dataValue: pick.id, proposed }
     if (label.flag) finding.flag = label.flag.name
     if (historical) finding.note = 'release or upgrade notes: proposed only'
+    // --data-file checks the page, but rpkcmd: links only with the build's
+    // own rpk data.
+    else if (!rpkLinks.loadRpkForLinks(catalog, component, version)) finding.note = 'no rpk data attachment in this build; rpkcmd: would render without a link'
     else {
       finding.autoSafe = true
       if (base.alias) finding.note = `links through the page alias reference:${base.alias}`

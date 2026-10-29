@@ -153,7 +153,7 @@ That renders `rpk topic create` and `rpk topic create --partitions` as code, eac
 
 If the command doesn't exist in the rpk data, is deprecated, or has no page in the build, the page shows plain code with no link and the build log says why. `rpkcmd:` comes with `@redpanda-data/docs-extensions-and-macros/macros/prop`, and uses the same `rpk-validate` attribute as `rpkval:`. See link:REFERENCE.adoc#rpkcmd[the macros reference].
 
-`check-reference-values` also checks hand-written xrefs to `rpk` pages: it reports links to pages that don't exist for the component and labels that name another command, and `--write` replaces each xref whose label is the command in backticks with `rpkcmd:[...]`.
+`check-reference-values` also checks hand-written xrefs to `rpk` pages: it reports links to pages that don't exist for the component and labels that name another command, and `--write` replaces each xref whose label is the command in backticks with `rpkcmd:[...]`, once the build publishes the `rpk-<version>.json` attachment that `rpkcmd:` links with.
 
 === helm_ref - Helm value references
 
