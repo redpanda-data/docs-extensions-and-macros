@@ -115,6 +115,18 @@ See xref:connect:components:outputs/redis.adoc[] and xref:connect:components:out
     expect(pageCandidates(parts, buildMatcher(small, { allLabels: true }))).toEqual([])
   })
 
+  test('a label for the product name alone does not drop what follows it', () => {
+    const small = parseTaxonomy('schema-version: 1\nschemes:\n  - id: technology\n    concepts:\n      - { id: redpanda, prefLabel: Redpanda }\n')
+    const parts = pageParts('= X\n\nWe deploy with Redpanda Terraform, and Redpanda Terraform again.\n', parseHeader, {})
+    expect(terms(pageCandidates(parts, buildMatcher(small, { allLabels: true })))).toContain('Terraform')
+  })
+
+  test('a line that names Enterprise Edition is not a sales line for its other terms', () => {
+    const got = terms(candidates('= X\n\nShadow Indexing is available in Enterprise Edition.\nTo use Shadow Indexing, you need Enterprise Edition.\n'))
+    expect(got).toContain('Shadow Indexing')
+    expect(got).not.toContain('Enterprise Edition')
+  })
+
   test('keeps what follows the product name, and a system named in a Connect xref', () => {
     expect(by(found, 'Terraform')).toEqual(expect.objectContaining({ count: 2 }))
     expect(by(found, 'redis')).toEqual(expect.objectContaining({ facet: 'technology', cue: 'connector-name' }))

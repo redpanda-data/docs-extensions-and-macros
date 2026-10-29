@@ -119,11 +119,15 @@ initcontainer sidecar volume volumemount affinity toleration taint kubelet
 const PRODUCT_WORDS = new Set(['redpanda'])
 
 // A line that sells rather than documents: sales contact, pricing, buying.
-// A term every one of whose mentions is on such a line (Enterprise Edition) is
+// A term every one of whose mentions is on such a line (Redpanda Sales) is
 // boilerplate. Words that technical lines use too (subscription, trial,
-// upgrade to, license) are left out, so "Pub/Sub subscription" and
-// "Azure subscription" lines still count.
-const SALES_LINE_RE = /\b(?:contact (?:redpanda )?sales|account team|pricing|request a (?:trial|license)|purchase|enterprise edition)\b/i
+// upgrade to, license, Enterprise Edition) are left out, so "Pub/Sub
+// subscription" and "available in Enterprise Edition" lines still count.
+const SALES_LINE_RE = /\b(?:contact (?:redpanda )?sales|account team|pricing|request a (?:trial|license)|purchase)\b/i
+
+// Licensing names that are boilerplate wherever they appear. Dropped as terms
+// without making the rest of their line a sales line.
+const SALES_TERMS = new Set(['enterprise edition'])
 
 /** Why a term, as its words, is not a candidate, or null. */
 function excluded (ws) {
@@ -243,7 +247,9 @@ function pageCandidates (parts, matcher, { terminology = new Set(), minCount = 2
     let words = raw.split(/\s+/)
     if (PRODUCT_WORDS.has(words[0].toLowerCase())) {
       // Redpanda Console is a label: the whole term is covered, not "Console".
-      if (matchText(matcher, raw).length) return
+      // Only a match of the whole term: a "Redpanda" label alone must not
+      // drop "Redpanda Terraform", which counts as Terraform.
+      if (matchText(matcher, raw).some((h) => keyOf(h.term) === keyOf(raw))) return
       while (words.length && PRODUCT_WORDS.has(words[0].toLowerCase())) words = words.slice(1)
     }
     if (!words.length) return
@@ -251,6 +257,7 @@ function pageCandidates (parts, matcher, { terminology = new Set(), minCount = 2
     if (excluded(identifier ? words[0].split(/[_-]/) : words)) return
     const term = words.join(' ')
     const key = keyOf(term)
+    if (SALES_TERMS.has(key)) return
     if (!found.has(key)) found.set(key, { spellings: new Map(), count: 0, sales: 0, lines: [], cues: new Map() })
     const f = found.get(key)
     f.spellings.set(term, (f.spellings.get(term) || 0) + 1)
