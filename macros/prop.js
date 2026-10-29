@@ -113,6 +113,7 @@ const propertyValues = require('../extension-utils/property-values')
 const datasets = require('../extension-utils/attachment-datasets')
 const { rpkvalInlineMacro } = require('./rpkval')
 const { connectvalInlineMacro } = require('./connectval')
+const { rpkcmdInlineMacro } = require('./rpkcmd')
 const logger = require('@antora/logger')('prop-macro')
 
 const {
@@ -882,12 +883,14 @@ function register (registry, config = {}) {
       this.inlineMacro(propvalInlineMacro(config))
       this.inlineMacro(rpkvalInlineMacro(config))
       this.inlineMacro(connectvalInlineMacro(config))
+      this.inlineMacro(rpkcmdInlineMacro(config))
     })
   } else if (typeof registry.inlineMacro === 'function') {
     registry.inlineMacro(propInlineMacro(config))
     registry.inlineMacro(propvalInlineMacro(config))
     registry.inlineMacro(rpkvalInlineMacro(config))
     registry.inlineMacro(connectvalInlineMacro(config))
+    registry.inlineMacro(rpkcmdInlineMacro(config))
   } else {
     logger.warn("no 'inlineMacro' method on alleged registry")
   }

@@ -1,0 +1,245 @@
+'use strict'
+
+/* Links from an rpk command to its generated reference page, shared by the
+ * rpkcmd: inline macro (macros/rpkcmd.js) and check-reference-values, so a
+ * hand-written xref is judged by the page the macro would link.
+ *
+ * The page path is the rpk docs generator's (getOutputPath in
+ * tools/rpk-docs/generate-rpk-docs.js): rpk itself is rpk/rpk.adoc, a
+ * top-level command with subcommands and every command below it are in
+ * rpk/rpk-<top>/rpk-<path-dashed>.adoc, and a top-level command without
+ * subcommands is rpk/rpk-<name>.adoc. The generated pages have no flag
+ * anchors, so a flag links its command's page.
+ *
+ * The page is found in the content catalog, never in a list of repos, in
+ * this order:
+ *
+ *   1. the rendering page's own component and version;
+ *   2. the streaming component: the page's own version when rendering there,
+ *      otherwise its latest (GA) version;
+ *   3. any other component that has the page, the one with the most rpk
+ *      reference pages first (cloud-docs before adp-docs for rpk cloud).
+ *
+ * The rendering page is the one Antora converts, so a cloud-docs stub that
+ * includes a streaming page, or a page that includes rp-connect-docs text,
+ * resolves from its own component. A Cloud (env-cloud) page stops after step
+ * 1: Cloud readers are never sent to self-managed docs.
+ */
+
+const datasets = require('./attachment-datasets')
+const rpkValues = require('./rpk-values')
+
+const $rpkPages = Symbol('$rpkPages')
+const PAGE_MODULE = 'reference'
+const PAGE_DIR = 'rpk/'
+
+/**
+ * The reference page path of a canonical command path, below the module.
+ *
+ * @param {object} tree - registry.data.tree.
+ * @param {string[]} names - Canonical command names below rpk.
+ */
+function commandPagePath (tree, names) {
+  if (!names.length) return `${PAGE_DIR}rpk.adoc`
+  const file = `rpk-${names.join('-')}.adoc`
+  const top = rpkValues.childOf(tree, names[0])
+  const grouped = top && Array.isArray(top.commands) && top.commands.length > 0
+  return grouped ? `${PAGE_DIR}rpk-${top.name}/${file}` : `${PAGE_DIR}${file}`
+}
+
+/**
+ * The command a reference page path documents, or undefined for a page that
+ * is not a command page (index.adoc, rpk-x-options.adoc) or names no command
+ * in the tree. Command names may hold dashes, so each step takes the longest
+ * child name that matches.
+ *
+ * @returns {{names: string[], node: object, nodes: object[]} | undefined}
+ */
+function commandOfPage (tree, relative) {
+  const m = String(relative).match(/^rpk\/(?:rpk-[\w-]+\/)?(rpk(?:-[\w-]+)?)\.adoc$/)
+  if (!m) return undefined
+  if (m[1] === 'rpk') return relative === `${PAGE_DIR}rpk.adoc` ? { names: [], node: tree, nodes: [] } : undefined
+  let node = tree
+  const nodes = []
+  const names = []
+  let rest = m[1].slice(4)
+  while (rest) {
+    const child = (node.commands || [])
+      .filter((c) => c && (rest === c.name || rest.startsWith(`${c.name}-`)))
+      .sort((a, b) => b.name.length - a.name.length)[0]
+    if (!child) return undefined
+    node = child
+    nodes.push(child)
+    names.push(child.name)
+    rest = rest.slice(child.name.length).replace(/^-/, '')
+  }
+  // The path must be where the generator puts that command.
+  return commandPagePath(tree, names) === relative ? { names, node, nodes } : undefined
+}
+
+/**
+ * Every rpk reference page in the build, by component and version, read once
+ * per catalog. Antora rebuilds the catalog per build, so watch mode sees new
+ * pages.
+ *
+ * @returns {Map<string, Map<string, Set<string>>>}
+ */
+function rpkPageIndex (contentCatalog) {
+  if (contentCatalog[$rpkPages]) return contentCatalog[$rpkPages]
+  const index = new Map()
+  for (const page of contentCatalog.findBy({ family: 'page' }) || []) {
+    const src = page.src || {}
+    if (src.module !== PAGE_MODULE || !String(src.relative || '').startsWith(PAGE_DIR)) continue
+    const component = String(src.component || '')
+    const version = src.version == null ? '' : String(src.version)
+    if (!index.has(component)) index.set(component, new Map())
+    const versions = index.get(component)
+    if (!versions.has(version)) versions.set(version, new Set())
+    versions.get(version).add(src.relative)
+  }
+  contentCatalog[$rpkPages] = index
+  return index
+}
+
+function hasPage (index, component, version, relative) {
+  const versions = index.get(component)
+  const pages = versions && versions.get(version)
+  return Boolean(pages && pages.has(relative))
+}
+
+/**
+ * A component's latest version: Antora's latest, which skips prereleases.
+ */
+function latestVersion (contentCatalog, component) {
+  const found = typeof contentCatalog.getComponent === 'function' ? contentCatalog.getComponent(component) : undefined
+  if (!found) return undefined
+  const latest = found.latest || (found.versions || [])[0]
+  return latest ? (latest.version == null ? '' : String(latest.version)) : undefined
+}
+
+/**
+ * The Antora resource ID of a picked page.
+ */
+function resourceId ({ component, version, relative }) {
+  return `${version ? `${version}@` : ''}${component}:${PAGE_MODULE}:${relative}`
+}
+
+/**
+ * The page a command links to from a page rendering in one component
+ * version, in the order the file comment gives.
+ *
+ * @returns {{ok: true, component: string, version: string, relative: string, id: string} |
+ *   {ok: false, reason: 'cloud-no-page'|'no-page', relative: string}}
+ */
+function pickCommandPage (contentCatalog, { component, version, relative }) {
+  const index = rpkPageIndex(contentCatalog)
+  const found = (c, v) => ({ ok: true, component: c, version: v, relative, id: resourceId({ component: c, version: v, relative }) })
+  if (hasPage(index, component, version, relative)) return found(component, version)
+  const cloud = datasets.isAttributeSet(datasets.componentAttributes(contentCatalog, component, version)['env-cloud'])
+  if (cloud) return { ok: false, reason: 'cloud-no-page', relative }
+  const lenders = rpkValues.RPK_KIND.lenders
+  for (const lender of lenders) {
+    const v = lender === component ? version : latestVersion(contentCatalog, lender)
+    if (v !== undefined && hasPage(index, lender, v, relative)) return found(lender, v)
+  }
+  const others = [...index.keys()]
+    .filter((c) => c !== component && !lenders.includes(c))
+    .map((c) => ({ c, pages: [...index.get(c).values()].reduce((n, set) => n + set.size, 0) }))
+    .sort((a, b) => b.pages - a.pages || a.c.localeCompare(b.c))
+  for (const { c } of others) {
+    const v = latestVersion(contentCatalog, c)
+    if (v !== undefined && hasPage(index, c, v, relative)) return found(c, v)
+  }
+  return { ok: false, reason: 'no-page', relative }
+}
+
+/**
+ * The rpk data a link resolves commands against: the page's own (as rpkval:
+ * picks it), or, for a component that is no Redpanda release and borrows
+ * nothing (rp-connect-docs), the latest streaming version's. A versioned
+ * self-managed page, and a Cloud or Agentic Data Plane page, never borrow
+ * another release's data here either.
+ */
+function loadRpkForLinks (contentCatalog, component, version) {
+  const own = rpkValues.loadRpkFor(contentCatalog, component, version)
+  if (own) return own
+  const kind = rpkValues.RPK_KIND
+  if (kind.lenders.includes(component)) return undefined
+  const attributes = datasets.componentAttributes(contentCatalog, component, version)
+  if (kind.borrowWhen.some((name) => datasets.isAttributeSet(attributes[name]))) return undefined
+  for (const lender of kind.lenders) {
+    const v = latestVersion(contentCatalog, lender)
+    if (v === undefined) continue
+    const registry = rpkValues.loadRpkFor(contentCatalog, lender, v)
+    if (registry) return registry
+  }
+  return undefined
+}
+
+const cmdText = (names) => ['rpk', ...names].join(' ')
+
+/**
+ * Resolve the command line in one rpkcmd:[...] to its command and flag, the
+ * way rpkval: resolves them: names then aliases, deprecated commands before
+ * unknown ones, the command's own flags then the global flags, and no
+ * ancestor flags.
+ *
+ * @param {object} opts
+ * @param {object} [opts.registry]
+ * @param {string} opts.text - The command line as written.
+ * @param {string} [opts.call] - How messages name the call.
+ * @returns {{ok: true, names: string[], node: object, nodes: object[], flag?: object, typed: string} |
+ *   {ok: false, kind: string, message: string, typed: string, registry?: object}}
+ */
+function resolveRpkCommand ({ registry, text, call }) {
+  const parsed = rpkValues.parseCommandLine(text)
+  const typed = [cmdText(parsed.tokens), ...(parsed.flag ? [parsed.flag] : [])].join(' ')
+  const label = call || `rpkcmd:[${String(text == null ? '' : text).trim()}]`
+  if (!registry) {
+    return { ok: false, kind: 'no-data', typed, message: `${label}: this page has no rpk data to check '${typed}' against (see the rpkval macro warning for this component version), so it renders as plain code with no link.` }
+  }
+  const dataset = datasets.describeDataset(registry)
+  const tree = registry.data.tree
+  if (parsed.extra.length) {
+    return { ok: false, kind: 'unknown-flag', typed, registry, message: `${label}: '${parsed.extra.join(' ')}' follows ${parsed.flag}; write the command and at most one flag, without a value or arguments.` }
+  }
+  const resolved = rpkValues.resolveCommand(tree, parsed.tokens, registry.data.deprecated_commands)
+  if (!resolved.ok && resolved.kind === 'deprecated-command') {
+    const why = resolved.entry.replacement || resolved.entry.deprecatedMessage
+    return { ok: false, kind: 'deprecated-command', typed, registry, message: `${label}: '${cmdText(resolved.typed)}' is deprecated (${resolved.entry.key} in ${dataset}) and has no reference page, so it renders as plain code with no link.${why ? ` ${why}` : ''}` }
+  }
+  if (!resolved.ok) {
+    const shown = cmdText([...resolved.parentNames, ...parsed.tokens.slice(resolved.at)])
+    const hint = resolved.argument
+      ? ' Write the command path, without arguments.'
+      : resolved.suggestions.length ? ` Did you mean: ${resolved.suggestions.join(', ')}?` : ''
+    return { ok: false, kind: 'unknown-command', typed, registry, message: `${label}: '${shown}' is not a command in ${dataset}: ${cmdText(resolved.parentNames)} has no subcommand '${resolved.token}'.${hint}` }
+  }
+  const { node, nodes, names } = resolved
+  const out = { ok: true, names, node, nodes, typed }
+  if (!parsed.flag) return out
+  const name = parsed.flag.replace(/^-+/, '')
+  const where = cmdText(names)
+  const found = names.length ? rpkValues.findFlag(node, name, tree) : rpkValues.findFlag(tree, name, tree)
+  if (found) return { ...out, flag: found.flag }
+  const ancestor = rpkValues.ancestorFlag(nodes, names, name)
+  if (ancestor) {
+    return { ok: false, kind: 'unknown-flag', typed, registry, message: `${label}: '${parsed.flag}' is not a flag of ${where} in ${dataset}; it is defined on ${cmdText(ancestor.names)}; write rpkcmd:[${cmdText(ancestor.names)} ${parsed.flag}].` }
+  }
+  const suggestions = name.length > 1 ? datasets.suggest(name, [...(names.length ? node.flags || [] : []), ...(tree.global_flags || [])].map((f) => f.name)) : []
+  const hint = suggestions.length ? ` Did you mean: ${suggestions.map((s) => `--${s}`).join(', ')}?` : ''
+  return { ok: false, kind: 'unknown-flag', typed, registry, message: `${label}: '${parsed.flag}' is not a flag of ${where} in ${dataset}.${hint}` }
+}
+
+module.exports = {
+  PAGE_MODULE,
+  commandPagePath,
+  commandOfPage,
+  rpkPageIndex,
+  hasPage,
+  latestVersion,
+  resourceId,
+  pickCommandPage,
+  loadRpkForLinks,
+  resolveRpkCommand,
+}

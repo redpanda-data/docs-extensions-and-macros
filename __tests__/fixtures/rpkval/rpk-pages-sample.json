@@ -1,0 +1,233 @@
+{
+ "_source": {
+  "note": "rpk reference page paths from the content repos, trimmed to the commands in rpk-v26.2.2-sample.json plus the section pages; aliases are the page-aliases those pages declare",
+  "commits": {
+   "docs": "19384b39",
+   "cloud-docs": "089d5cf",
+   "adp-docs": "f7d7daf"
+  }
+ },
+ "components": [
+  {
+   "repo": "docs",
+   "name": "streaming",
+   "version": "26.2",
+   "pages": [
+    "rpk/index.adoc",
+    "rpk/rpk-cluster/rpk-cluster-brokers-decommission-status.adoc",
+    "rpk/rpk-cluster/rpk-cluster-brokers-decommission.adoc",
+    "rpk/rpk-cluster/rpk-cluster-brokers-recommission.adoc",
+    "rpk/rpk-cluster/rpk-cluster-brokers.adoc",
+    "rpk/rpk-cluster/rpk-cluster-config-status.adoc",
+    "rpk/rpk-cluster/rpk-cluster-config.adoc",
+    "rpk/rpk-cluster/rpk-cluster-info.adoc",
+    "rpk/rpk-cluster/rpk-cluster-partitions-move-cancel.adoc",
+    "rpk/rpk-cluster/rpk-cluster-partitions.adoc",
+    "rpk/rpk-cluster/rpk-cluster-quotas-alter.adoc",
+    "rpk/rpk-cluster/rpk-cluster-quotas-describe.adoc",
+    "rpk/rpk-cluster/rpk-cluster-quotas-import.adoc",
+    "rpk/rpk-cluster/rpk-cluster-quotas.adoc",
+    "rpk/rpk-cluster/rpk-cluster-self-test-start.adoc",
+    "rpk/rpk-cluster/rpk-cluster-self-test.adoc",
+    "rpk/rpk-cluster/rpk-cluster.adoc",
+    "rpk/rpk-connect/rpk-connect-run.adoc",
+    "rpk/rpk-connect/rpk-connect.adoc",
+    "rpk/rpk-debug/rpk-debug-bundle.adoc",
+    "rpk/rpk-debug/rpk-debug.adoc",
+    "rpk/rpk-generate/rpk-generate-grafana-dashboard.adoc",
+    "rpk/rpk-generate/rpk-generate.adoc",
+    "rpk/rpk-k8s/rpk-k8s-multicluster-bundle.adoc",
+    "rpk/rpk-k8s/rpk-k8s-multicluster.adoc",
+    "rpk/rpk-k8s/rpk-k8s.adoc",
+    "rpk/rpk-redpanda/rpk-redpanda-start.adoc",
+    "rpk/rpk-redpanda/rpk-redpanda.adoc",
+    "rpk/rpk-registry/rpk-registry-mode-set.adoc",
+    "rpk/rpk-registry/rpk-registry-mode.adoc",
+    "rpk/rpk-registry/rpk-registry.adoc",
+    "rpk/rpk-security/rpk-security-acl-list.adoc",
+    "rpk/rpk-security/rpk-security-acl.adoc",
+    "rpk/rpk-security/rpk-security.adoc",
+    "rpk/rpk-shadow/rpk-shadow-delete.adoc",
+    "rpk/rpk-shadow/rpk-shadow.adoc",
+    "rpk/rpk-topic/rpk-topic-consume.adoc",
+    "rpk/rpk-topic/rpk-topic-create.adoc",
+    "rpk/rpk-topic/rpk-topic.adoc",
+    "rpk/rpk-transform/rpk-transform-deploy.adoc",
+    "rpk/rpk-transform/rpk-transform-init.adoc",
+    "rpk/rpk-transform/rpk-transform.adoc",
+    "rpk/rpk-version.adoc",
+    "rpk/rpk-x-options.adoc",
+    "rpk/rpk.adoc"
+   ],
+   "aliases": {
+    "rpk/index.adoc": [
+     "reference:rpk/index/index.adoc"
+    ],
+    "rpk/rpk-cluster/rpk-cluster-brokers-decommission-status.adoc": [
+     "reference:rpk/rpk-redpanda/rpk-redpanda-admin-brokers-decommission-status.adoc"
+    ],
+    "rpk/rpk-cluster/rpk-cluster-brokers-decommission.adoc": [
+     "reference:rpk/rpk-redpanda/rpk-redpanda-admin-brokers-decommission.adoc"
+    ],
+    "rpk/rpk-cluster/rpk-cluster-brokers-recommission.adoc": [
+     "reference:rpk/rpk-redpanda/rpk-redpanda-admin-brokers-recommission.adoc"
+    ],
+    "rpk/rpk-cluster/rpk-cluster-brokers.adoc": [
+     "reference:rpk/rpk-redpanda/rpk-redpanda-admin-brokers.adoc"
+    ],
+    "rpk/rpk-cluster/rpk-cluster-config.adoc": [
+     "reference:rpk/rpk-redpanda/rpk-redpanda-admin-config.adoc"
+    ],
+    "rpk/rpk-cluster/rpk-cluster-info.adoc": [
+     "reference:rpk/rpk-cluster/rpk-cluster-metadata.adoc",
+     "reference:rpk/rpk-redpanda/rpk-redpanda-admin-brokers-list.adoc"
+    ],
+    "rpk/rpk-cluster/rpk-cluster-partitions-move-cancel.adoc": [
+     "reference:rpk/rpk-cluster/rpk-cluster-partitions-movement-cancel.adoc"
+    ],
+    "rpk/rpk-cluster/rpk-cluster-partitions.adoc": [
+     "reference:rpk/rpk-redpanda/rpk-redpanda-admin-partitions.adoc"
+    ],
+    "rpk/rpk-cluster/rpk-cluster.adoc": [
+     "reference:rpk/rpk-redpanda/rpk-redpanda-admin.adoc"
+    ],
+    "rpk/rpk-debug/rpk-debug.adoc": [
+     "reference:rpk/rpk-debug.adoc"
+    ],
+    "rpk/rpk-generate/rpk-generate.adoc": [
+     "reference:rpk/rpk-generate.adoc"
+    ],
+    "rpk/rpk-security/rpk-security-acl-list.adoc": [
+     "reference:rpk/rpk-acl/rpk-acl-list.adoc"
+    ],
+    "rpk/rpk-security/rpk-security-acl.adoc": [
+     "reference:rpk/rpk-acl.adoc",
+     "reference:rpk/rpk-acl/rpk-acl.adoc"
+    ],
+    "rpk/rpk-topic/rpk-topic.adoc": [
+     "reference:rpk/rpk-topic.adoc"
+    ],
+    "rpk/rpk-transform/rpk-transform-deploy.adoc": [
+     "labs:data-transform/rpk-transform-deploy.adoc"
+    ],
+    "rpk/rpk-transform/rpk-transform-init.adoc": [
+     "labs:data-transform/rpk-transform-init.adoc"
+    ],
+    "rpk/rpk-transform/rpk-transform.adoc": [
+     "labs:data-transform/rpk-transform.adoc"
+    ]
+   }
+  },
+  {
+   "repo": "cloud-docs",
+   "name": "cloud-data-platform",
+   "version": "",
+   "pages": [
+    "rpk/index.adoc",
+    "rpk/rpk-cloud/rpk-cloud-byoc-install.adoc",
+    "rpk/rpk-cloud/rpk-cloud-byoc-uninstall.adoc",
+    "rpk/rpk-cloud/rpk-cloud-byoc.adoc",
+    "rpk/rpk-cloud/rpk-cloud-cluster-select.adoc",
+    "rpk/rpk-cloud/rpk-cloud-cluster.adoc",
+    "rpk/rpk-cloud/rpk-cloud-login.adoc",
+    "rpk/rpk-cloud/rpk-cloud-mcp-install.adoc",
+    "rpk/rpk-cloud/rpk-cloud-mcp.adoc",
+    "rpk/rpk-cloud/rpk-cloud.adoc",
+    "rpk/rpk-cluster/rpk-cluster-config-status.adoc",
+    "rpk/rpk-cluster/rpk-cluster-config.adoc",
+    "rpk/rpk-cluster/rpk-cluster-info.adoc",
+    "rpk/rpk-cluster/rpk-cluster-quotas-alter.adoc",
+    "rpk/rpk-cluster/rpk-cluster-quotas-describe.adoc",
+    "rpk/rpk-cluster/rpk-cluster-quotas-import.adoc",
+    "rpk/rpk-cluster/rpk-cluster-quotas.adoc",
+    "rpk/rpk-cluster/rpk-cluster.adoc",
+    "rpk/rpk-generate/rpk-generate-grafana-dashboard.adoc",
+    "rpk/rpk-generate/rpk-generate.adoc",
+    "rpk/rpk-registry/rpk-registry-mode-set.adoc",
+    "rpk/rpk-registry/rpk-registry-mode.adoc",
+    "rpk/rpk-registry/rpk-registry.adoc",
+    "rpk/rpk-security/rpk-security-acl-list.adoc",
+    "rpk/rpk-security/rpk-security-acl.adoc",
+    "rpk/rpk-security/rpk-security.adoc",
+    "rpk/rpk-shadow/rpk-shadow-delete.adoc",
+    "rpk/rpk-shadow/rpk-shadow.adoc",
+    "rpk/rpk-topic/rpk-topic-consume.adoc",
+    "rpk/rpk-topic/rpk-topic-create.adoc",
+    "rpk/rpk-topic/rpk-topic.adoc",
+    "rpk/rpk-transform/rpk-transform-deploy.adoc",
+    "rpk/rpk-transform/rpk-transform-init.adoc",
+    "rpk/rpk-transform/rpk-transform.adoc",
+    "rpk/rpk-version.adoc",
+    "rpk/rpk-x-options.adoc"
+   ],
+   "aliases": {
+    "rpk/index.adoc": [
+     "reference:rpk/index/index.adoc"
+    ],
+    "rpk/rpk-cloud/rpk-cloud.adoc": [
+     "reference:rpk/rpk-cloud.adoc"
+    ],
+    "rpk/rpk-cluster/rpk-cluster-info.adoc": [
+     "reference:rpk/rpk-cluster/rpk-cluster-metadata.adoc"
+    ],
+    "rpk/rpk-security/rpk-security-acl-list.adoc": [
+     "reference:rpk/rpk-acl/rpk-acl-list.adoc"
+    ],
+    "rpk/rpk-security/rpk-security-acl.adoc": [
+     "reference:rpk/rpk-acl.adoc",
+     "reference:rpk/rpk-acl/rpk-acl.adoc"
+    ],
+    "rpk/rpk-topic/rpk-topic.adoc": [
+     "reference:rpk/rpk-topic.adoc"
+    ],
+    "rpk/rpk-transform/rpk-transform-deploy.adoc": [
+     "labs:data-transform/rpk-transform-deploy.adoc"
+    ],
+    "rpk/rpk-transform/rpk-transform-init.adoc": [
+     "labs:data-transform/rpk-transform-init.adoc"
+    ],
+    "rpk/rpk-transform/rpk-transform.adoc": [
+     "labs:data-transform/rpk-transform.adoc"
+    ]
+   }
+  },
+  {
+   "repo": "adp-docs",
+   "name": "agentic-data-plane",
+   "version": "",
+   "pages": [
+    "rpk/index.adoc",
+    "rpk/rpk-ai/rpk-ai-agent-credential-create.adoc",
+    "rpk/rpk-ai/rpk-ai-agent-credential.adoc",
+    "rpk/rpk-ai/rpk-ai-agent.adoc",
+    "rpk/rpk-ai/rpk-ai-auditlog-list.adoc",
+    "rpk/rpk-ai/rpk-ai-auditlog.adoc",
+    "rpk/rpk-ai/rpk-ai-docs-search.adoc",
+    "rpk/rpk-ai/rpk-ai-docs.adoc",
+    "rpk/rpk-ai/rpk-ai-llm-provider-create.adoc",
+    "rpk/rpk-ai/rpk-ai-llm-provider.adoc",
+    "rpk/rpk-ai/rpk-ai-mcp-server-ping.adoc",
+    "rpk/rpk-ai/rpk-ai-mcp-server.adoc",
+    "rpk/rpk-ai/rpk-ai-trigger-create.adoc",
+    "rpk/rpk-ai/rpk-ai-trigger.adoc",
+    "rpk/rpk-ai/rpk-ai.adoc",
+    "rpk/rpk-cloud/rpk-cloud-login.adoc",
+    "rpk/rpk-x-options.adoc"
+   ],
+   "aliases": {
+    "rpk/rpk-ai/rpk-ai-llm-provider-create.adoc": [
+     "reference:rpk/rpk-ai/rpk-ai-llm-create.adoc"
+    ],
+    "rpk/rpk-ai/rpk-ai-llm-provider.adoc": [
+     "reference:rpk/rpk-ai/rpk-ai-llm.adoc"
+    ],
+    "rpk/rpk-ai/rpk-ai-mcp-server.adoc": [
+     "reference:rpk/rpk-ai/rpk-ai-mcp.adoc"
+    ],
+    "rpk/rpk-ai/rpk-ai.adoc": [
+     "reference:rpk/rpk-ai/index.adoc"
+    ]
+   }
+  }
+ ]
+}
