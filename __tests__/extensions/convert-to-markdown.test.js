@@ -386,6 +386,16 @@ describe('flattenCell', () => {
   test('drops line-start escapes, which mean nothing inside a cell', () => {
     expect(flattenCell('Use these instead:\n\n\\- `rpk a`\n\n\\- `rpk b`\n\n1\\. step')).toBe('Use these instead:<br>- `rpk a`<br>- `rpk b`<br>1. step')
   })
+
+  test('keeps the leading indentation of code lines, which carries YAML nesting', () => {
+    const yaml = 'Example:\n\n```yaml\nredpanda:\n  tls:\n    enabled: true\n```\n'
+    expect(flattenCell(yaml)).toBe('Example:<br>`redpanda:`<br>`  tls:`<br>`    enabled: true`')
+  })
+
+  test('strips only the list-item indent from code in a list item, not the YAML nesting', () => {
+    const yaml = '-   Example:\n\n    ```yaml\n    a:\n      b: 1\n    ```\n'
+    expect(flattenCell(yaml)).toBe('- Example:<br>`a:`<br>`  b: 1`')
+  })
 })
 
 // The enterprise signal is CSS-only in HTML: the badge comes from the span's
