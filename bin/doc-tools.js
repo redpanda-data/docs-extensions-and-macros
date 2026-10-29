@@ -3424,8 +3424,8 @@ programCli
  *
  * @description
  * Check a docs checkout for reference values and references that the
- * propval:, rpkval:, connectval: and rpkcmd: macros could render from the
- * published data, and for references to things the data does not have. Three kinds run
+ * propval:, rpkval:, connectval:, bloblval:, rpkcmd:, connect: and blobl:
+ * macros could render from the published data, and for references to things the data does not have. Three kinds run
  * together, each selecting its dataset exactly as its macro does (from the
  * repo and any --lender checkouts), unless --data-file names one:
  * properties runs the migrate-property-values scan unchanged; rpk parses
@@ -3440,7 +3440,10 @@ programCli
  * examples files (unknown-component, unknown-field, deprecated components and
  * fields), compares YAML comments that state a default ("# Optional
  * (default: ...)") and callouts and sentences that state one with the Connect
- * data. Statuses are propval's (exact, equivalent, mismatch, unset,
+ * data, and checks each hand-written xref to a Connect component page, field
+ * anchor or Bloblang page on every component that renders the file
+ * (broken-link, link-label-mismatch, and exact when the label is just the
+ * name and connect: or blobl: would link the same page and anchor). Statuses are propval's (exact, equivalent, mismatch, unset,
  * unverifiable, example output) plus reference. Plugin flags scraped from
  * --help never fail, and neither do findings in release notes, upgrade notes
  * or Connect migration guides. A `// value-check: ignore` comment line
@@ -3449,7 +3452,8 @@ programCli
  * sentence (or a Connect callout) that name one target, never in a table,
  * block or YAML, and only when the line renders the same visible text before
  * and after through the real macros; an exact rpk xref, in prose or a table
- * cell, becomes rpkcmd:[...].
+ * cell, becomes rpkcmd:[...], and an exact Connect xref connect:[...] or
+ * blobl:[...].
  * Exit 0 when no finding is at or above
  * --fail-on, 1 when one is, 2 when the check could not run.
  *

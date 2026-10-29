@@ -70,6 +70,11 @@ asciidoc:
     # stays unresolved here on purpose: build with local-macro-test-playbook.yml
     # to see those resolve for real.
     enterprise-licensing-page: shared:ROOT:licensing-placeholder.adoc
+    # docs.redpanda.com generates section ids with no prefix and - as the
+    # separator (#batching-byte_size, #contains-2), and connect: and blobl:
+    # link those ids. Generate the same ids here, so their links land.
+    idprefix: ''
+    idseparator: '-'
   extensions:
   - '@asciidoctor/tabs'
   - './macros/glossary'

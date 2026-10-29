@@ -1,11 +1,12 @@
 = Reference values test
-:description: Exercises the rpkval, connectval and rpkcmd macros, and the fields and block forms they share with propval: fields, formats, command and component resolution, links, text values, and each placeholder case.
+:description: Exercises the rpkval, connectval, bloblval, rpkcmd, connect and blobl macros, and the fields and block forms they share with propval: fields, formats, command and component resolution, links, text values, and each placeholder case.
 
 Each line below states what it must render, and what the build log must say
 for it. The rpk values come from this component's `rpk-v26.2.2.json` fixture
 (trimmed real data from the docs repo's rpk snapshot). The Connect values come
 from `connect-4.114.0.json` in the `connect` component, which the showcase
-build supplies from `preview/connect-data-lender`.
+build supplies from `preview/connect-data-lender`, with a few stand-in
+component and Bloblang pages for the links to land on.
 
 == rpk flags
 
@@ -90,8 +91,8 @@ rpkval::[rpk security acl list,examples]
   connectval:[inputs/kafka_franz.consumer_group,summary]
 * Must read the `generate` summary. Its `Bloblang` link is rewritten to
   `connect:guides:bloblang/about.adoc`, because this page is in another
-  component, and this build has Connect data but no Connect pages, so it must
-  render as text and log that the build has no page for it:
+  component, and this build's stand-in Connect pages do not include that one,
+  so it must render as text and log that the build has no page for it:
   connectval:[inputs/generate,summary]
 * Must show `<unknown description>` and log needs-block:
   connectval:[inputs/kafka_franz.consumer_group,description]
@@ -104,8 +105,8 @@ connectval::[inputs/kafka_franz.consumer_group,description]
 The block form below must render the `unchanged_toast_value` description.
 Its `signal_table_name` reference is an anchor on the `postgres_cdc` page,
 not on this page, so it is rewritten to that page in the `connect`
-component; with no Connect pages in this build, it must render as text and
-log why:
+component; with no stand-in `postgres_cdc` page in this build, it must render
+as text and log why:
 
 connectval::[inputs/postgres_cdc.unchanged_toast_value,description]
 
@@ -154,3 +155,50 @@ Each must render as plain code with no link, and log why.
 * deprecated-command, with the replacement: rpkcmd:[rpk redpanda admin brokers]
 * no-page, because no component in this build has a page for it:
   rpkcmd:[rpk debug bundle]
+
+== Connect component links
+
+`connect:` checks the component and field against the same Connect data and
+links the page in the build: this component has no Connect pages, so it links
+the stand-in pages of `connect-data-lender`.
+
+* Must render "`kafka_franz` input", the name in code, linked to the
+  `kafka_franz` page: connect:[inputs/kafka_franz]
+* Must render `consumer_group` in code, linked to `#consumer_group` on the
+  same page: connect:[inputs/kafka_franz.consumer_group]
+* Must render `sasl.mechanism` in code, linked to `#sasl-mechanism`:
+  connect:[inputs/kafka_franz.sasl.mechanism]
+* Must link the words "the generator": connect:[inputs/generate,text=the generator]
+* Must render "`redpanda` input" as plain code with no link, and log that no
+  component in this build has its page: connect:[inputs/redpanda]
+* Must render plain code and log unknown-component, suggesting kafka_franz:
+  connect:[inputs/kafka_frans]
+
+== Bloblang links and values
+
+* Must render `now()` in code, linked to `#now` on the functions page:
+  blobl:[now()]
+* Must render `.uppercase()` in code, linked to `#uppercase` on the methods
+  page: blobl:[.uppercase()]
+* Must link `#contains`, the copy under Object & Array Manipulation, which is
+  first on the page: blobl:[.contains()]
+* Must link `#contains-2`, the String Manipulation copy:
+  blobl:[.contains(),category=String Manipulation]
+* Must render `counter(min)` in code, linked to `#counter`:
+  blobl:[counter(min)]
+* Must render plain code and log hidden, because the reference does not
+  document it: blobl:[var()]
+* Must read 1: bloblval:[counter(min),default]
+* Must read string: bloblval:[.replace_all(old),type]
+* Must read experimental: bloblval:[counter(),status]
+* Must read "Checks whether a string contains a substring and returns a
+  boolean result.": bloblval:[.contains(),description,category=String Manipulation]
+* Must show `<unknown default>` and log imprecise, because the data's
+  maximum lost precision in a float round-trip: bloblval:[counter(max),default]
+* Must show `<unknown default>` and log complex-default, because the data's
+  seed is a Go struct: bloblval:[random_int(seed),default]
+
+The block form below must render the `counter()` examples, each summary
+followed by a Bloblang listing, as the Bloblang reference prints them.
+
+bloblval::[counter(),examples]

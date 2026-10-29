@@ -78,3 +78,22 @@ as the cloud-docs stubs do, and no page for `rpk cluster info`.
 * rpkcmd:[rpk cluster info] must render as plain code with no link, and the
   log must say this component has no page for it and that a Cloud page links
   only Cloud pages.
+
+[[connect-links-on-cloud]]
+== Connect links on Cloud
+
+`connect:` and `blobl:` link only this component's own pages. This component
+has a stub page for the `kafka_franz` input that declares
+`components:inputs/kafka_franz.adoc` as a page alias, as the cloud-docs stubs
+do, and no stub for the `generate` input or the Bloblang pages.
+
+* connect:[inputs/kafka_franz] must link this component's stub page, not the
+  `connect` page.
+* connect:[inputs/generate] must render as plain code with no link, and the
+  log must say this component has no page for it and that a Cloud page links
+  only Cloud pages.
+* blobl:[env()] must render as plain code with no link: `env()` is impure,
+  and the Cloud Bloblang reference leaves impure functions out.
+* bloblval:[env(name),type] must read "<unknown type>" and log unavailable,
+  for the same reason.
+

@@ -166,6 +166,51 @@ If the command doesn't exist in the rpk data, is deprecated, or has no page in t
 
 `check-reference-values` also checks hand-written xrefs to `rpk` pages: it reports links to pages that don't exist for the component (including targets missing the `.adoc` extension) and labels that name another command, and `--write` replaces each xref whose label is the command in backticks with `rpkcmd:[...]`, once the build publishes the `rpk-<version>.json` attachment that `rpkcmd:` links with.
 
+=== connect and blobl - Linked Connect components and Bloblang calls
+
+Name a Redpanda Connect component, one of its fields, or a Bloblang function or method as inline code, linked to its reference entry, without writing the page path or the anchor:
+
+[,asciidoc]
+----
+Read from Kafka with the connect:[inputs/kafka_franz].
+Set connect:[inputs/kafka_franz.consumer_group] to share the load.
+Stamp each message with blobl:[now()] and upper-case it with blobl:[.uppercase()].
+----
+
+That renders "`kafka_franz` input" and `consumer_group` as code, linked to the `kafka_franz` input page and to the field's anchor on it, and `now()` and `.uppercase()` linked to their entries on the Bloblang functions and methods pages.
+
+*Syntax:* `connect:[type/name]`, `connect:[type/name.field.path]`, `blobl:[function()]`, `blobl:[.method()]`, each with an optional link text after a comma
+
+* Always write the type: 71 names, such as `kafka`, exist in more than one type.
+* A function has parentheses, a method a leading dot. A name inside the parentheses, `blobl:[counter(min)]`, is shown as written and links its function: parameters have no anchors.
+* `contains`, `length` and `slice` are in two method categories, with one entry each. Add `category=String Manipulation` to link the other one.
+* To keep your own words, add them after a comma: `+connect:[inputs/generate,`generate`]+`, `+blobl:[.fold(),`fold` method]+`.
+* Don't wrap the macro in backticks: it already renders code.
+* The link follows the page's own component: a cloud-docs page links the Cloud page. When Cloud has no page, such as for a component that isn't available in Cloud or an impure function like `env()`, the macro renders plain code and warns instead of linking self-managed docs.
+
+If the component, field, function or method doesn't exist in the Connect data, or has no page in the build, the page shows plain code with no link and the build log says why. Both come with `@redpanda-data/docs-extensions-and-macros/macros/prop`, and use the `connect-validate` attribute. See link:REFERENCE.adoc#connect[the macros reference].
+
+`check-reference-values` also checks hand-written xrefs to Connect component and Bloblang pages, on every component that renders the file: it reports links to pages and anchors that don't exist there and labels that name another component, field, function or method, and `--write` replaces each xref whose label is just the name with `connect:[...]` or `blobl:[...]`.
+
+=== bloblval - Bloblang values
+
+Render a Bloblang function's, method's or parameter's value from the Connect data instead of typing it:
+
+[,asciidoc]
+----
+`counter()` starts at bloblval:[counter(min),default] unless you set `min`.
+The `old` argument of `.replace_all()` is a bloblval:[.replace_all(old),type].
+bloblval::[counter(),examples]
+----
+
+With Connect 4.115.1 data, that renders "starts at 1", "is a string", and the function's examples as the Bloblang reference prints them.
+
+*Syntax:* `bloblval:[function(parameter),field]`, `bloblval:[.method(),field]`, and the block form `bloblval::[call,field]` on a line of its own
+
+* Write the call as for `blobl:`. A parameter has `default`, `type`, `description` and `required` (or `optional`); a function or method has `description`, `examples`, `status`, `deprecated`, `category`, `introduced` and `impure`.
+* A method in two categories has a description and examples per category: add `category=` to pick one.
+* Two parameters have defaults the data gets wrong, `random_int(seed)` and the maximum of `counter()` and `random_int()`. They render `<unknown default>` with a warning: state those values by hand.
+
 === helm_ref - Helm value references
 
 Link to Helm chart values:

@@ -945,93 +945,314 @@ These never fail the build: `no-data`, `imprecise`, `description-default`, `comp
 
 Registered by the `prop` macro's extension (see <<rpkval>>).
 
+[[connect]]
+== connect
+
+This inline macro renders a Redpanda Connect component, or one of its fields, as inline code, linked to its generated reference page, and a field to its anchor on that page. The component and field are checked against the Connect data `connectval:` reads, and the page is found in the build, so the link follows the component that renders the page.
+
+[,asciidoc]
+----
+Read from Kafka with the connect:[inputs/kafka_franz].
+Set connect:[inputs/kafka_franz.consumer_group] to share the load.
+The connect:[outputs/amqp_1.metadata] field filters the headers.
+Use connect:[inputs/generate,`generate`] for test data.
+----
+
+Rendered in `connect`, the first line shows "`kafka_franz` input", linked to `components:inputs/kafka_franz.adoc`, the second `consumer_group`, linked to `#consumer_group` on the same page, and the third `metadata`, linked to `#metadata-2` on the `amqp_1` output page. The last line links its own text.
+
+=== Usage
+
+[,asciidoc]
+----
+connect:[<type>/<name>]
+connect:[<type>/<name>.<field.path>]
+connect:[<type>/<name>[.<field.path>],<link text>]
+----
+
+The brackets start with the component as `connectval:` takes it (<<connectval>>): the type is always written, as rp-connect-docs paths write it (`inputs`, `rate_limits`) or singular or hyphenated, because 71 names exist in more than one type. A field path follows the name, without `[]`. Root config fields (`config.`) have no reference page to link.
+
+The default text is the component name as code and its type (`+`kafka_franz` input+`, `+`local` rate limit+`), or the field path as code. The second attribute, or `text=`, replaces it, and is rendered as written: `+connect:[inputs/generate,`generate`]+`.
+
+The output is the page's link around `<code class="connect-component">`, with `data-connect-component` (`inputs/kafka_franz`) and, for a field, `data-connect-field`. Don't wrap the macro in backticks.
+
+Only this short form exists. Asciidoctor matches an inline macro name anywhere in a word, so a `connect:<target>[]` form would match inside `xref:connect:components:inputs/kafka.adoc[]`.
+
+[[connect-page]]
+=== Which page and anchor it links
+
+The page is `components:<type>/<name>.adoc`, found in the content catalog, page aliases included, in this order:
+
+. The rendering page's own component and version. The `connect` component finds its own pages here, and Cloud finds its stubs, which declare the connect paths (`components:inputs/kafka_franz.adoc`) as page aliases. A name the reference keeps as a page alias, such as `inputs/pg_stream` on the `postgres_cdc` page, links that page.
+. The `connect` component's latest version, except from a Cloud page.
+
+A field links the id Asciidoctor generates for its heading on the published page (`+=== `batching.byte_size`+` is `batching-byte_size`). The ids are the ones docs.redpanda.com generates, with no prefix and `-` as the separator; a build that keeps Asciidoctor's own defaults (`_batching_byte_size`) needs `idprefix: ''` and `idseparator: '-'`, as `local-macro-showcase-playbook.yml` sets them. When a section earlier on the page already has that id, the field gets the next free one, as Asciidoctor numbers them: the `amqp_1` output's description has a Metadata section, so its `metadata` field is `metadata-2`, and the `jira` input's `fields` field is `fields-2`, after the page's Fields heading. The earlier sections come from the connect page's own source and the partials it includes, read from the build when it has them and from the Connect data when it does not. A field the reference does not list (a deprecated one, or one below it) links the page with no anchor, with a warning.
+
+=== Cloud
+
+A Cloud page (`env-cloud` on its component version) links only its own component's pages. When Cloud has no page for the component, the macro renders plain code and warns, and never links Cloud readers to self-managed docs. Put such a sentence in an `ifndef::env-cloud[]` block.
+
+=== Failures and validation modes
+
+Whenever the component can't be linked, `connect:` renders plain code with no link and no `connect-component` class, and logs why, naming the call, the dataset and the file.
+
+connect-validate::
+The same attribute as `connectval:`. `warn` (default) logs each problem. `error` fails the build on `unknown-type`, `unknown-component` and `unknown-field`. `off` silences every `connect:` warning.
+
+These never fail the build: `no-data` (no Connect data) and `no-page` (no page in the build, or a Cloud page has none of its own).
+
+=== Registration
+
+Registered by the `prop` macro's extension (see <<rpkval>>).
+
+[[blobl]]
+== blobl
+
+This inline macro renders a Bloblang function or method call as inline code, exactly as written, linked to its entry in the Bloblang reference.
+
+[,asciidoc]
+----
+Stamp each message with blobl:[now()].
+Upper-case the field with blobl:[.uppercase()].
+blobl:[counter(min)] sets the first value.
+Check for a substring with blobl:[.contains(),category=String Manipulation].
+----
+
+Rendered in `connect`, those link `guides:bloblang/functions.adoc#now`, `guides:bloblang/methods.adoc#uppercase`, `guides:bloblang/functions.adoc#counter` and `guides:bloblang/methods.adoc#contains-2`.
+
+=== Usage
+
+[,asciidoc]
+----
+blobl:[<function>()]
+blobl:[.<method>()]
+blobl:[<function>(<parameter>)]
+blobl:[<call>,<link text>,category=<category>]
+----
+
+A leading dot makes a method, and parentheses without one a function. A bare name (`blobl:[now]`) works when only one kind has it; `bytes` is both, so it needs the parentheses or the dot. A name inside the parentheses is a parameter, which has no anchor of its own (each parameter table sits under a numbered `parameters-N` heading), so it links its function or method.
+
+The methods page lists each method under its category heading. `contains`, `length` and `slice` are in two categories, each with its own description, and the second copy on the page has a numbered id (`contains-2`). `category=` picks one, by its name in any case or spacing (`String Manipulation`, `string_manipulation`); without it, the first copy on the page. The order of the categories is the order of the published `bloblang/methods.adoc` partial when the build has it, otherwise General first, Deprecated last and the rest alphabetical, which is that partial's order.
+
+The second attribute, or `text=`, replaces the text, as in `connect:`. The output is the page's link around `<code class="bloblang-call">`, with `data-bloblang-function` or `data-bloblang-method`.
+
+=== Which page it links
+
+The functions page is `guides:bloblang/functions.adoc` and the methods page `guides:bloblang/methods.adoc`, found as `connect:` finds a component page (<<connect-page>>): Cloud's stubs alias those paths.
+
+=== Cloud
+
+The Cloud functions page leaves out the impure functions (`count`, `env`, `file`, `file_rel` and `hostname`). The data has no Cloud flag for functions, so `impure` is the gate: on a Cloud page, `blobl:` renders an impure function as plain code and warns. Methods are the same on both.
+
+=== Failures and validation modes
+
+connect-validate::
+`error` fails the build on `unknown-function`, `unknown-method`, `unknown-parameter`, `ambiguous-name`, `hidden` (`nothing()` and `var()`, which the reference does not document) and `unknown-category`. `no-data`, `no-page` and an impure function on Cloud never fail the build.
+
+=== Registration
+
+Registered by the `prop` macro's extension (see <<rpkval>>).
+
+[[bloblval]]
+== bloblval
+
+This inline macro renders one value of a Bloblang function, method or parameter from the Bloblang lists of the Connect data `connectval:` reads, as the Bloblang reference prints it.
+
+[,asciidoc]
+----
+`counter()` starts at bloblval:[counter(min),default].
+The `old` argument is a bloblval:[.replace_all(old),type].
+`counter()` is bloblval:[counter(),status].
+bloblval::[counter(),examples]
+----
+
+Rendered against `connect-4.115.1.json`, those read "starts at 1", "is a string", "is experimental", and the function's examples as a Bloblang listing.
+
+=== Usage
+
+[,asciidoc]
+----
+bloblval:[<call>,<field>,category=<category>,format=human|raw]
+bloblval::[<call>,<field>]
+----
+
+The call is written as for `blobl:` (<<blobl>>); a parameter's name in the parentheses reads a field of that parameter. The field comes next, `default` when it is omitted, named as every value macro names it (<<value-fields>>). For a method in two categories, the description and examples are the category copy's: `category=` picks one, and the default is the first copy on the page.
+
+[[bloblval-fields]]
+[cols="1,1,2,2"]
+|===
+| Field | Of | Source in the Connect data | Example (4.115.1)
+
+| `default`
+| parameter
+| `default`, as JSON, as the reference prints it
+| `counter(min)`: `1`; `.format_timestamp(format)`: `"2006-01-02T15:04:05.999999999Z07:00"`
+
+| `type`
+| parameter
+| `type`
+| `string`, `query expression`
+
+| `description`
+| function, method, parameter
+| `description`, or for a method the category copy's `Description`, as AsciiDoc (or Markdown, by `docs_format`)
+| `.uppercase()`: "Converts all letters in a string to uppercase. ..."
+
+| `required` (inverse alias `optional`)
+| parameter
+| Neither `is_optional` nor a `default`, the parameters the reference does not mark `(optional)`
+| `.contains(value)`: `yes`; `counter(min)`: `no`
+
+| `examples` (alias `example`)
+| function, method
+| `examples`, or the category copy's `Examples`: each summary, then a `bloblang` listing of the mapping and its inputs and outputs. Block form only
+| `counter()`
+
+| `introduced` (aliases `since`, `version`)
+| function, method
+| `version`. Hidden on Cloud, where the reference shows no "Introduced in version"
+| `counter()`: `4.22.0`
+
+| `deprecated` (alias `is_deprecated`)
+| function, method
+| `status` of `deprecated`
+| `yes` or `no`
+
+| `status`
+| function, method
+| `status`
+| `stable`, `beta`, `experimental`, `deprecated`
+
+| `category` (alias `categories`)
+| function, method
+| A function's `category`, or a method's categories, comma-separated
+| `now()`: `Environment`; `.contains()`: `Object & Array Manipulation, String Manipulation`
+
+| `impure` (alias `is_impure`)
+| function, method
+| `impure`: the function reads its environment, and the Cloud reference leaves it out
+| `env()`: `yes`
+|===
+
+format::
+`human` (default) or `raw`, which changes the yes-or-no fields to `true` or `false` and `category` to a JSON array.
+
+The output is a `<span class="bloblang-value">` with `data-bloblang` (the call as written) and `data-field`. The block form renders an open block with the roles `bloblang-value` and `bloblang-value-<field>`, as `connectval::` does (<<value-text>>).
+
+A default the data gets wrong is not shown. `random_int(seed)` is `{"Value":0}`, a Go struct, and the maximum of `counter()` and `random_int()` lost precision in a float round-trip (`9223372036854776000`, where the reference prints `9223372036854775807` and `9223372036854775806`). An object default is `complex-default`, and an integer JavaScript cannot hold exactly is `imprecise`: both render `<unknown default>` with a warning and never fail the build. State those values by hand until Connect fixes the data.
+
+=== Cloud
+
+On a Cloud page an impure function is `unavailable`, because the Cloud reference leaves it out, and `introduced` is `cloud-hidden`.
+
+=== Failures and validation modes
+
+connect-validate::
+`error` fails the build on `unknown-function`, `unknown-method`, `unknown-parameter`, `ambiguous-name`, `hidden`, `unknown-category`, `missing-field`, `unsupported-field`, `cloud-hidden`, `unavailable`, `needs-block` and `block-form-inline`. `no-data`, `imprecise` and `complex-default` never do.
+
+=== Registration
+
+Registered by the `prop` macro's extension (see <<rpkval>>).
+
 [[value-fields]]
 == Fields of the value macros
 
-`propval:`, `rpkval:` and `connectval:` share one set of field names: a field means the same thing in every macro that has it, and its aliases (the JSON key names, and older spellings) work everywhere the field exists. The first rows are the shared fields; the rest belong to one source. A cell names where a macro has the field: `yes`, or a flag or command for `rpkval:`, a config field or component for `connectval:`. An inverted alias gives the opposite value: `optional` is `yes` where `required` is `no`.
+`propval:`, `rpkval:`, `connectval:` and `bloblval:` share one set of field names: a field means the same thing in every macro that has it, and its aliases (the JSON key names, and older spellings) work everywhere the field exists. The first rows are the shared fields; the rest belong to one source. A cell names where a macro has the field: `yes`, or a flag or command for `rpkval:`, a config field or component for `connectval:`, a function, method or parameter for `bloblval:`. An inverted alias gives the opposite value: `optional` is `yes` where `required` is `no`.
 
 A field name a macro does not support is a warning (an error in `error` mode) that lists the fields it does. A test in this repository fails when this table and the macros disagree.
 
 [[value-fields-table]]
-[cols="2,3,1,2,2"]
+[cols="2,3,1,2,2,2"]
 |===
-| Field | Aliases | propval | rpkval | connectval
+| Field | Aliases | propval | rpkval | connectval | bloblval
 
 | `default`
 |
 | yes
 | flag
 | field
+| parameter
 
 | `type`
 |
 | yes
 | flag
 | field
+| parameter
 
 | `description`
 | `desc`
 | yes
 | flag, command
 | field, component
+| function, method, parameter
 
 | `summary`
 | `short_description`
 |
 |
 | field, component
+|
 
 | `values`
 | `accepted-values`, `annotated_options`, `enum`, `options`
 | yes
 |
 | field
+|
 
 | `introduced`
 | `introducedInVersion`, `since`, `version`
 | yes
 | flag, command
 | field, component
+| function, method
 
 | `deprecated`
 | `is_deprecated`
 | yes
 |
 | field, component
+| function, method
 
 | `status`
 |
 |
 |
 | component
+| function, method
 
 | `required`
 | `optional` (inverted)
 |
 | flag
 | field
+| parameter
 
 | `examples`
 | `example`
 | yes
 | command
 | field
+| function, method
 
 | `advanced`
 | `is_advanced`
 |
 |
 | field
+|
 
 | `secret`
 | `is_secret`
 | yes
 |
 | field
+|
 
 | `enterprise`
 | `is_enterprise`
 | yes
+|
 |
 |
 
@@ -1040,16 +1261,19 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | yes
 |
 | component
+| function, method
 
 | `aliases`
 |
 | yes
 | command
 |
+|
 
 | `see-also`
 | `seeAlso`, `see_also`
 | yes
+|
 |
 |
 
@@ -1058,10 +1282,12 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | yes
 |
 |
+|
 
 | `unit`
 | `units`
 | yes
+|
 |
 |
 
@@ -1070,10 +1296,12 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | yes
 |
 |
+|
 
 | `max`
 | `maximum`
 | yes
+|
 |
 |
 
@@ -1082,10 +1310,12 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | yes
 |
 |
+|
 
 | `nullable`
 |
 | yes
+|
 |
 |
 
@@ -1094,10 +1324,12 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | yes
 |
 |
+|
 
 | `visibility`
 |
 | yes
+|
 |
 |
 
@@ -1106,11 +1338,13 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | yes
 |
 |
+|
 
 | `shorthand`
 | `short`
 |
 | flag
+|
 |
 
 | `usage`
@@ -1118,11 +1352,13 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 | command
 |
+|
 
 | `platforms`
 |
 |
 | command
+|
 |
 
 | `self-hosted-only`
@@ -1130,12 +1366,21 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 | command
 |
+|
 
 | `interpolated`
 | `is_interpolated`
 |
 |
 | field
+|
+
+| `impure`
+| `is_impure`
+|
+|
+|
+| function, method
 |===
 
 [[value-text]]
@@ -1182,11 +1427,19 @@ rpk links:: Every hand-written xref to a page under `reference:rpk/` in prose an
 * `link-target-not-loaded` (unverifiable): the target is in a component or version the scan did not read. Pass that checkout with `--lender`.
 +
 On a self-managed scan, a line inside `ifdef::env-cloud[]` renders only where Cloud includes the file, so its links are checked as the one `--lender` that sets `env-cloud` renders them, and not checked without one. Nav files listed in `antora.yml`, the generated `rpk` pages and partials, stub pages, and xrefs shown as code are not checked. The report counts the links in `linksBroken`, `linksMislabeled`, `linksReplaceable` and `linksNotLoaded`.
-connect:: Every pipeline config in a YAML listing block or an examples file is walked from its root keys. An unknown component is `unknown-component`, an unknown field is `unknown-field`, and deprecated components and fields are warnings. A YAML comment that states a default ("# Optional (default: "benthos")") is example output that `matches` or is `stale`. A callout ("<3> ... The default is `1024`.") or a sentence that states a field's default is compared with what `connectval:` renders.
+connect links:: Every hand-written xref to a Connect component page (`components:<type>/<name>.adoc`), a field anchor on one, or the Bloblang functions or methods page is judged on every component that renders the file: the scanned component for a page, or for a partial one of its pages includes, and each `--lender` that includes the file, such as a cloud-docs stub that includes an rp-connect-docs page. An xref with no component resolves in the rendering component, page aliases included, so the same xref can work in `connect` and break in Cloud. A line in `ifndef::env-cloud[]` is judged off Cloud only, and one in `ifdef::env-cloud[]` on Cloud only. The anchors are the ones `connect:` and `blobl:` compute (<<connect-page>>, <<blobl>>), plus the page's own section ids.
++
+* `broken-link` (reference error): the page does not exist on a rendering component, or the anchor is not on the page there: a field the reference does not list, an impure function on Cloud, a hidden function, or a numbered `parameters-N` heading. A field anchor that is off by its number names the right one.
+* `link-label-mismatch` (reference warning): the label's backticked name is another component, field, function or method than the target, or calls it another type (`+`redis` cache+` on the `redis` rate limit page). A name the target page declares as a page alias (`pg_stream` on `postgres_cdc`) is the same component.
+* `exact`: the label is just the name (`+`kafka_franz`+`, `+`kafka_franz` input+`, `+`write_mode`+`, `+`now()`+`, `+`fold` method+`, `+method `catch`+`), and on every rendering component the target is the page and anchor the macro links. `--write` replaces it with `connect:[...]` or `blobl:[...]`, keeping the label as the link text when the macro's own would differ, and adding `category=` for a second method copy. Without a `connect-<version>.json` attachment in the build, the finding is proposed only.
+* `link-target-not-loaded` (unverifiable): no page in the scan renders the line (a partial only a component outside the scan includes), or the target component is not in the scan. Pass that checkout with `--lender`.
++
+Nav files, generated pages, stub pages and xrefs shown as code are not checked, and the SQL reference (`modules/reference/pages/sql/`), whose backticked SQL functions share Bloblang names, is never read for Bloblang links. The report counts the links in `linksBroken`, `linksMislabeled`, `linksReplaceable` and `linksNotLoaded`.
+connect:: Every pipeline config in a YAML listing block or an examples file is walked from its root keys. An unknown component is `unknown-component`, an unknown field is `unknown-field`, and deprecated components and fields are warnings. A YAML comment that states a default ("# Optional (default: "benthos")") is example output that `matches` or is `stale`. A callout ("<3> ... The default is `1024`.") or a sentence that states a field's default is compared with what `connectval:` renders. A `connect:[...]` link names the component and field a stated default belongs to, and `bloblval:` and `connect:` values are macros, never hand-written values.
 
 Statuses are propval's, plus `reference` for a thing the data does not have. `--fail-on mismatch` (the default) fails on mismatches, reference errors, and stale rpk and Connect examples; `any` also fails on exact, equivalent and unset values and on reference warnings, which catches every hand-written value a macro could render. Plugin flags scraped from `--help` never fail, and neither do findings in release notes, upgrade notes or Connect migration guides. A `// value-check: ignore` comment line suppresses the findings on the next line, or in the block it sits directly above. Exit 0 means nothing failed, 1 that something did, and 2 that the check could not run.
 
-`--write` applies only exact matches in the same sentence (or a Connect callout) that name one target, never in a table, block or YAML, never a scraped plugin flag or an empty default, and never in a file that may be single-sourced into Cloud where the macro would render a placeholder. An exact `rpk` xref is replaced in prose or a table cell: `rpkcmd:` links the same page from the page's own component, and on Cloud renders plain code where the xref would be broken. Each replacement is kept only when the line renders the same visible text before and after, through the real macros.
+`--write` applies only exact matches in the same sentence (or a Connect callout) that name one target, never in a table, block or YAML, never a scraped plugin flag or an empty default, and never in a file that may be single-sourced into Cloud where the macro would render a placeholder. An exact `rpk` or Connect xref is replaced in prose or a table cell: `rpkcmd:`, `connect:` and `blobl:` link the same page from the page's own component, and on Cloud render plain code where the xref would be broken. Each replacement is kept only when the line renders the same visible text before and after, through the real macros.
 
 [,bash]
 ----

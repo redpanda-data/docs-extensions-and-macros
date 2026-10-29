@@ -63,6 +63,9 @@ IMPORTANT: Macros must be registered under the `asciidoc.extensions` key in your
 * **rpkval** - Render an `rpk` flag's or command's default, type, usage, description, or other value from the rpk data
 * **connectval** - Render a Redpanda Connect field's or component's default, type, values, description, or other value from the Connect data
 * **rpkcmd** - Render an `rpk` command as code, linked to its reference page in the component that renders the page
+* **connect** - Render a Redpanda Connect component or field as code, linked to its reference page and field anchor in the component that renders the page
+* **blobl** - Render a Bloblang function or method call as code, linked to its entry in the Bloblang reference
+* **bloblval** - Render a Bloblang function's, method's or parameter's default, type, description, examples, or other value from the Connect data
 * **config_ref** - Link to configuration properties (deprecated; use prop)
 * **helm_ref** - Link to Helm chart values
 * **badge** - Display status badges

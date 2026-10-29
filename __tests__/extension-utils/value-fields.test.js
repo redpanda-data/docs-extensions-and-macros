@@ -6,6 +6,7 @@ const { SHARED_FIELDS, defineFields, aliasesByField } = require('../../extension
 const propertyValues = require('../../extension-utils/property-values')
 const rpkValues = require('../../extension-utils/rpk-values')
 const connectValues = require('../../extension-utils/connect-values')
+const bloblangValues = require('../../extension-utils/bloblang-values')
 
 // Every value macro and its field set, in the column order of the
 // REFERENCE.adoc table. A new value macro adds itself here.
@@ -13,6 +14,7 @@ const MACROS = [
   ['propval', propertyValues.FIELD_SET],
   ['rpkval', rpkValues.FIELD_SET],
   ['connectval', connectValues.FIELD_SET],
+  ['bloblval', bloblangValues.FIELD_SET],
 ]
 
 const REFERENCE = fs.readFileSync(path.join(__dirname, '..', '..', 'macros', 'REFERENCE.adoc'), 'utf8')
