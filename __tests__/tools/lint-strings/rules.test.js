@@ -108,6 +108,42 @@ describe('common rules', () => {
     expect(rule.check(decl({ string: 'Set `i.e.identifier` to the resolved name.' }))).toHaveLength(0)
   })
 
+  test('long-sentence flags sentences over the ceiling across line wraps', () => {
+    const rule = ruleByName(COMMON_RULES, 'long-sentence')
+    expect(rule.severity).toBe('warning')
+    // The rpk ai Long text that prompted the rule, wrapped as in source.
+    const wrapped = [
+      'On AWS the trust can be one MCP server\'s: name the server (one that exists, or',
+      'the name you will create it with) and it prints the Workload Identity Federation',
+      'setup and the binding that lets that server, and no other on the gateway, mint',
+      'as the account. On Google Cloud the gateway has one identity, so the binding',
+      'trusts every MCP server on it.'
+    ].join('\n')
+    const issues = rule.check(decl({ string: wrapped }))
+    expect(issues).toHaveLength(1)
+    expect(issues[0].message).toMatch(/^Sentence has 48 words/)
+    // Split into short sentences, the same facts pass.
+    expect(rule.check(decl({
+      string: 'On AWS, you can trust a single MCP server. Pass the server\'s name, even if you haven\'t created it yet.\n' +
+        'The command prints the Workload Identity Federation setup and the binding.'
+    }))).toHaveLength(0)
+    expect(rule.check(decl({ string: null }))).toHaveLength(0)
+  })
+
+  test('long-sentence counts code spans and URLs as one word and skips code blocks and list items', () => {
+    const rule = ruleByName(COMMON_RULES, 'long-sentence')
+    const words = (n) => Array.from({ length: n }, () => 'word').join(' ')
+    expect(rule.check(decl({ string: `${words(29)} \`rpk ai mcp-server create --name my-server --gate iap\`.` }))).toHaveLength(0)
+    expect(rule.check(decl({ string: `${words(29)} https://docs.redpanda.com/a/very/long/path?with=query.` }))).toHaveLength(0)
+    expect(rule.check(decl({ string: `${words(31)}.` }))).toHaveLength(1)
+    // Indented lines become code blocks in rpk docs.
+    expect(rule.check(decl({ string: `Run this command.\n\n  ${words(40)}` }))).toHaveLength(0)
+    // Each list item is its own segment.
+    expect(rule.check(decl({ string: `Choose one:\n- ${words(20)}\n- ${words(20)}` }))).toHaveLength(0)
+    // An unindented shell transcript, as in rpk cluster brokers decommission-status.
+    expect(rule.check(decl({ string: `Reports progress as follows.\n\n$ rpk cluster brokers decommission-status 4\nDECOMMISSION PROGRESS\n${words(40)}` }))).toHaveLength(0)
+  })
+
   test('unbalanced-backticks flags odd counts', () => {
     const rule = ruleByName(COMMON_RULES, 'unbalanced-backticks')
     expect(rule.check(decl({ string: 'Accepted values: `config_file`, `sts, `other`.' }))).toHaveLength(1)
