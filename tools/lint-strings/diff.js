@@ -29,6 +29,10 @@ const SURFACE_ROUTES = [
   // excluded the same way the whole-repo scan excludes them.
   { surface: 'metrics', pattern: /^src\/v\/(?!(?:.*\/)?tests?\/).*\.(?:cc|h)$/ },
   { surface: 'rpk', pattern: /^src\/go\/rpk\/pkg\/cli\// },
+  // The rpk ai plugin, in cloudv2. Its cobra commands live anywhere under
+  // apps/rpai, so route every non-test Go file there and let the scanner,
+  // which skips any file with no cobra.Command or Flags() call, decide.
+  { surface: 'rpk', pattern: /^apps\/rpai\/(?!(?:.*\/)?testdata\/).*(?<!_test)\.go$/ },
   // Both chart layouts ship: charts/<name>/chart/values.yaml (redpanda,
   // console) and charts/<name>/values.yaml (connectors).
   { surface: 'helm', pattern: /^charts\/[^/]+\/(chart\/)?values\.yaml$/ },

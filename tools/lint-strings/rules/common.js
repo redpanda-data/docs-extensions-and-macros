@@ -149,6 +149,64 @@ function excerpt (text, needle, width = 60) {
   return `${start > 0 ? '...' : ''}${slice}${start + width < text.length ? '...' : ''}`
 }
 
+/**
+ * Word count above which a sentence is a finding. The writing standard asks
+ * for about 25 words, and the model review judges the borderline cases; this
+ * ceiling is set higher so the deterministic rule fires only on sentences no
+ * reader would call short.
+ */
+const MAX_SENTENCE_WORDS = 30
+
+/**
+ * Sentences in a description longer than `max` words, as { sentence, words }.
+ *
+ * Paragraphs split on blank lines, and source line wraps inside a paragraph
+ * are joined, because rpk `Long` text and clang-format-wrapped literals break
+ * lines mid-sentence. Indented lines and list items are not prose sentences
+ * (rpk-docs turns indented lines into code blocks), so each list item counts
+ * on its own and indented lines are skipped. A paragraph that opens with a
+ * `$ ` prompt is a shell transcript (some rpk `Long` text shows command
+ * output unindented), so it is skipped too, and so are AsciiDoc listing,
+ * literal, and table blocks (`----`, `....`, `|===`) and block attribute
+ * lines (`[source,yaml]`, `[%header]`, `[#anchor]`), which connector
+ * descriptions carry unindented. A backticked span or a URL counts as one
+ * word, however many tokens it holds.
+ */
+function findLongSentences (text, max = MAX_SENTENCE_WORDS) {
+  const long = []
+  const prose = String(text || '')
+    .replace(/^(-{4,}|\.{4,}|\|={3,})[ \t]*$[\s\S]*?^\1[ \t]*$/gm, '')
+    .replace(/^\[[^\]\n]*\][ \t]*$/gm, '')
+  for (const paragraph of prose.split(/\n\s*\n/)) {
+    if (/^\s*\$ /.test(paragraph)) continue
+    const segments = []
+    let current = []
+    for (const line of paragraph.split('\n')) {
+      if (/^(?:\t| {2,})/.test(line)) continue
+      if (/^\s*(?:[-*]|\d+\.)\s/.test(line) && current.length) {
+        segments.push(current.join(' '))
+        current = []
+      }
+      current.push(line.trim())
+    }
+    if (current.length) segments.push(current.join(' '))
+    for (const segment of segments) {
+      const masked = segment
+        .replace(/`[^`]*`/g, 'CODE')
+        // Keep the punctuation after a URL, so "https://)." still ends a
+        // sentence.
+        .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S*?([).,;:!?]*)(?=\s|$)/gi, 'URL$1')
+      // A closing quote or bracket may follow the full stop: `."` and `.)`
+      // still end the sentence.
+      for (const sentence of masked.split(/(?<=[.!?]["'”’)\]]*)\s+/)) {
+        const words = sentence.split(/\s+/).filter((w) => /[A-Za-z0-9]/.test(w)).length
+        if (words > max) long.push({ sentence: sentence.trim(), words })
+      }
+    }
+  }
+  return long
+}
+
 const COMMON_RULES = [
   {
     name: 'empty-description',
@@ -269,6 +327,18 @@ const COMMON_RULES = [
     }
   },
   {
+    name: 'long-sentence',
+    description: `Sentence longer than ${MAX_SENTENCE_WORDS} words`,
+    severity: 'warning',
+    check: (decl) => {
+      // The standard asks for one idea per sentence. A sentence this long
+      // usually chains clauses a reader has to parse twice.
+      return findLongSentences(decl.string).map(({ sentence, words }) => ({
+        message: `Sentence has ${words} words. Split it into shorter sentences with one idea each: "${sentence.slice(0, 80)}${sentence.length > 80 ? '...' : ''}"`
+      }))
+    }
+  },
+  {
     name: 'unbalanced-backticks',
     description: 'Odd number of backticks ships broken markup',
     severity: 'error',
@@ -301,4 +371,4 @@ const COMMON_RULES = [
   }
 ]
 
-module.exports = { COMMON_RULES, JARGON_TERMS, isNameEcho, tokenize, findBareCodeTokens, maskNonProse }
+module.exports = { COMMON_RULES, JARGON_TERMS, MAX_SENTENCE_WORDS, isNameEcho, tokenize, findBareCodeTokens, findLongSentences, maskNonProse }
