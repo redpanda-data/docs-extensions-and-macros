@@ -174,6 +174,11 @@ describe('replaceable links', () => {
     expect(links[0].note).toContain('rpkcmd:[rpk topic create] links 26.2@streaming:reference:rpk/rpk-topic/rpk-topic-create.adoc')
   })
 
+  test('a streaming link to the Cloud rpk cloud login page is replaceable: Cloud has more rpk-cloud pages than ADP, though ADP has more rpk pages', () => {
+    const { links } = scan('streaming', { 'modules/x/pages/x.adoc': page('Log in with xref:cloud-data-platform:reference:rpk/rpk-cloud/rpk-cloud-login.adoc[`rpk cloud login`].') })
+    expect(links[0]).toMatchObject({ status: 'exact', autoSafe: true, proposed: 'rpkcmd:[rpk cloud login]', dataValue: 'cloud-data-platform:reference:rpk/rpk-cloud/rpk-cloud-login.adoc' })
+  })
+
   test('a label with a flag is replaceable, and the replacement keeps the flag', () => {
     const { links } = scan('streaming', { 'modules/x/pages/x.adoc': page('Pass xref:reference:rpk/rpk-topic/rpk-topic-create.adoc[`rpk topic create -p`].') })
     expect(links[0]).toMatchObject({ status: 'exact', autoSafe: true, proposed: 'rpkcmd:[rpk topic create -p]', flag: 'partitions' })

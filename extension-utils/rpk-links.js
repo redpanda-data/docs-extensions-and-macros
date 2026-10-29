@@ -17,8 +17,10 @@
  *   1. the rendering page's own component and version;
  *   2. the streaming component: the page's own version when rendering there,
  *      otherwise its latest (GA) version;
- *   3. any other component that has the page, the one with the most rpk
- *      reference pages first (cloud-docs before adp-docs for rpk cloud).
+ *   3. any other component that has the page, the one with the most pages
+ *      in the page's own directory first (rpk/rpk-cloud/ for rpk cloud
+ *      login, where cloud-docs has many and adp-docs one), then the one with
+ *      the most rpk reference pages.
  *
  * The rendering page is the one Antora converts, so a cloud-docs stub that
  * includes a streaming page, or a page that includes rp-connect-docs text,
@@ -142,10 +144,15 @@ function pickCommandPage (contentCatalog, { component, version, relative }) {
     const v = lender === component ? version : latestVersion(contentCatalog, lender)
     if (v !== undefined && hasPage(index, lender, v, relative)) return found(lender, v)
   }
+  const dir = relative.slice(0, relative.lastIndexOf('/') + 1)
+  const inDir = (p) => p.startsWith(dir) && !p.slice(dir.length).includes('/')
   const others = [...index.keys()]
     .filter((c) => c !== component && !lenders.includes(c))
-    .map((c) => ({ c, pages: [...index.get(c).values()].reduce((n, set) => n + set.size, 0) }))
-    .sort((a, b) => b.pages - a.pages || a.c.localeCompare(b.c))
+    .map((c) => {
+      const sets = [...index.get(c).values()]
+      return { c, group: sets.reduce((n, set) => n + [...set].filter(inDir).length, 0), pages: sets.reduce((n, set) => n + set.size, 0) }
+    })
+    .sort((a, b) => b.group - a.group || b.pages - a.pages || a.c.localeCompare(b.c))
   for (const { c } of others) {
     const v = latestVersion(contentCatalog, c)
     if (v !== undefined && hasPage(index, c, v, relative)) return found(c, v)

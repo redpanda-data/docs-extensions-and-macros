@@ -134,8 +134,10 @@ describe('rpkcmd macro', () => {
       expect(linkOf(convert('rpkcmd:[rpk topic create,text=create a topic]'))).toEqual({ target: '26.2@streaming:reference:rpk/rpk-topic/rpk-topic-create.adoc', inner: 'create a topic' })
     })
 
-    test('a command streaming has no page for links the component with the most rpk pages that has it', () => {
+    test('a command streaming has no page for links the component with the most pages in its directory that has it', () => {
       // cloud-data-platform and agentic-data-plane both have rpk cloud login.
+      // agentic-data-plane has more rpk pages, cloud-data-platform more
+      // rpk-cloud pages, as in the real repos.
       expect(linkOf(convert('rpkcmd:[rpk cloud login]')).target).toBe('cloud-data-platform:reference:rpk/rpk-cloud/rpk-cloud-login.adoc')
       expect(linkOf(convert('rpkcmd:[rpk ai auditlog list]')).target).toBe('agentic-data-plane:reference:rpk/rpk-ai/rpk-ai-auditlog-list.adoc')
     })

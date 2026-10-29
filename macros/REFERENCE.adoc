@@ -672,7 +672,7 @@ The page path comes from the command, as the `rpk` docs generator writes it: `rp
 
 . The rendering page's own component and version.
 . The `streaming` component: the rendering page's version when the page is in `streaming`, else the latest version. A `streaming` page never links another `streaming` version.
-. Any other component that has the page, the one with the most `rpk` reference pages first. A `streaming` page that names `rpk cloud login` links cloud-docs, which publishes the `rpk cloud` pages.
+. Any other component that has the page, the one with the most pages in that page's directory first, then the one with the most `rpk` reference pages. A `streaming` page that names `rpk cloud login` links cloud-docs, which publishes most of the `rpk-cloud/` pages, not adp-docs, which has more `rpk` pages but only that one `rpk cloud` page.
 
 The rendering page is the one Antora converts, so a cloud-docs stub that includes a `streaming` page links cloud-docs pages, and an rp-connect-docs page links `streaming`. No repo or component is listed in the macro: a page that exists in the build is linked, and one that doesn't is not.
 
