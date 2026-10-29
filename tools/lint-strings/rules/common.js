@@ -166,12 +166,18 @@ const MAX_SENTENCE_WORDS = 30
  * (rpk-docs turns indented lines into code blocks), so each list item counts
  * on its own and indented lines are skipped. A paragraph that opens with a
  * `$ ` prompt is a shell transcript (some rpk `Long` text shows command
- * output unindented), so it is skipped too. A backticked span or a URL
- * counts as one word, however many tokens it holds.
+ * output unindented), so it is skipped too, and so are AsciiDoc listing,
+ * literal, and table blocks (`----`, `....`, `|===`) and block attribute
+ * lines (`[source,yaml]`, `[%header]`, `[#anchor]`), which connector
+ * descriptions carry unindented. A backticked span or a URL counts as one
+ * word, however many tokens it holds.
  */
 function findLongSentences (text, max = MAX_SENTENCE_WORDS) {
   const long = []
-  for (const paragraph of String(text || '').split(/\n\s*\n/)) {
+  const prose = String(text || '')
+    .replace(/^(-{4,}|\.{4,}|\|={3,})[ \t]*$[\s\S]*?^\1[ \t]*$/gm, '')
+    .replace(/^\[[^\]\n]*\][ \t]*$/gm, '')
+  for (const paragraph of prose.split(/\n\s*\n/)) {
     if (/^\s*\$ /.test(paragraph)) continue
     const segments = []
     let current = []
@@ -185,12 +191,14 @@ function findLongSentences (text, max = MAX_SENTENCE_WORDS) {
     }
     if (current.length) segments.push(current.join(' '))
     for (const segment of segments) {
-      const prose = segment
+      const masked = segment
         .replace(/`[^`]*`/g, 'CODE')
         // Keep the punctuation after a URL, so "https://)." still ends a
         // sentence.
         .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S*?([).,;:!?]*)(?=\s|$)/gi, 'URL$1')
-      for (const sentence of prose.split(/(?<=[.!?])\s+/)) {
+      // A closing quote or bracket may follow the full stop: `."` and `.)`
+      // still end the sentence.
+      for (const sentence of masked.split(/(?<=[.!?]["'”’)\]]*)\s+/)) {
         const words = sentence.split(/\s+/).filter((w) => /[A-Za-z0-9]/.test(w)).length
         if (words > max) long.push({ sentence: sentence.trim(), words })
       }

@@ -142,8 +142,36 @@ describe('common rules', () => {
     expect(rule.check(decl({ string: `Run this command.\n\n  ${words(40)}` }))).toHaveLength(0)
     // Each list item is its own segment.
     expect(rule.check(decl({ string: `Choose one:\n- ${words(20)}\n- ${words(20)}` }))).toHaveLength(0)
+    // ...but one long list item is still a finding.
+    expect(rule.check(decl({ string: `Choose one:\n- ${words(35)}\n- ${words(5)}` }))).toHaveLength(1)
     // An unindented shell transcript, as in rpk cluster brokers decommission-status.
     expect(rule.check(decl({ string: `Reports progress as follows.\n\n$ rpk cluster brokers decommission-status 4\nDECOMMISSION PROGRESS\n${words(40)}` }))).toHaveLength(0)
+  })
+
+  test('long-sentence ends a sentence at a closing quote or bracket after the full stop', () => {
+    const rule = ruleByName(COMMON_RULES, 'long-sentence')
+    const words = (n) => Array.from({ length: n }, () => 'word').join(' ')
+    expect(rule.check(decl({ string: `"${words(20)}." "${words(20)}."` }))).toHaveLength(0)
+    expect(rule.check(decl({ string: `(${words(20)}.) ${words(20)}.` }))).toHaveLength(0)
+    expect(rule.check(decl({ string: `“${words(20)}.” ${words(20)}.` }))).toHaveLength(0)
+    expect(rule.check(decl({ string: `"${words(35)}." ${words(5)}.` }))).toHaveLength(1)
+  })
+
+  test('long-sentence skips AsciiDoc tables and block attribute lines', () => {
+    const rule = ruleByName(COMMON_RULES, 'long-sentence')
+    const words = (n) => Array.from({ length: n }, () => 'word').join(' ')
+    // As in the snowflake_streaming connector description.
+    expect(rule.check(decl({ string: `Columns map as follows.\n\n[#supported-formats]\n.Supported formats\n[%header,format=dsv]\n|===\nColumn type:Allowed format\n${words(40)}:string\n|===` }))).toHaveLength(0)
+  })
+
+  test('long-sentence skips AsciiDoc listing and literal blocks', () => {
+    const rule = ruleByName(COMMON_RULES, 'long-sentence')
+    const words = (n) => Array.from({ length: n }, () => 'word').join(' ')
+    // As in the google_drive_* connector descriptions.
+    expect(rule.check(decl({ string: `Log in first.\n\n[source,bash]\n----\n# ${words(40)}\ngcloud auth login\n----\n\nThen run the pipeline.` }))).toHaveLength(0)
+    expect(rule.check(decl({ string: `Output looks like this.\n\n....\n${words(40)}\n....` }))).toHaveLength(0)
+    // Prose after the block is still checked.
+    expect(rule.check(decl({ string: `[source,yaml]\n----\nkey: value\n----\n\n${words(35)}.` }))).toHaveLength(1)
   })
 
   test('unbalanced-backticks flags odd counts', () => {
