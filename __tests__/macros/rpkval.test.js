@@ -82,8 +82,6 @@ describe('rpkval macro', () => {
       ['rpkval:partitions[type,command=rpk topic create]', 'int32'],
       ['rpkval:partitions[required,command=rpk topic create]', 'no'],
       ['rpkval:partitions[required,command=rpk topic create,format=raw]', 'false'],
-      ['rpkval:partitions[deprecated,command=rpk topic create]', 'no'],
-      ['rpkval:partitions[deprecated,command=rpk topic create,format=raw]', 'false'],
       ['rpkval:disk-duration-ms[command=rpk cluster self-test start]', '30000'],
       ['rpkval:topic-config[command=rpk topic create]', '[]'],
       ['rpkval:dry[command=rpk topic create]', 'false'],
@@ -97,10 +95,11 @@ describe('rpkval macro', () => {
       expect(valueOf(convert('rpkval:partitions[command=rpk topic create,shorthand]', { catalog: streaming() }))).toBe('-p')
     })
 
-    test('a deprecated flag reads yes', () => {
-      const data = clone(SAMPLE)
-      data.tree.commands.find((c) => c.name === 'topic').commands.find((c) => c.name === 'create').flags.find((f) => f.name === 'dry').deprecated = true
-      expect(valueOf(convert('rpkval:dry[deprecated,command=rpk topic create]', { catalog: streaming(data) }))).toBe('yes')
+    test('deprecated is dropped for flags: a placeholder and a warning that says why, never an error', () => {
+      const warn = warnings()
+      expect(valueOf(convert('rpkval:[rpk topic create --partitions,deprecated]', { catalog: streaming() }))).toBe('<unknown deprecated>')
+      expect(warn.mock.calls[0][0]).toBe('rpkval:[rpk topic create --partitions,deprecated] in modules/manage/pages/example.adoc: the rpk data records no deprecation for flags (deprecated_commands covers commands only), so rpkval: cannot say whether a flag is deprecated, so it renders <unknown deprecated>. Drop the field from the sentence; the reference lists only flags that are in the data.')
+      expect(() => convert('rpkval:partitions[deprecated,command=rpk topic create]', { catalog: streaming(), attributes: { 'rpk-validate': 'error' } })).not.toThrow()
     })
   })
 
@@ -142,6 +141,78 @@ describe('rpkval macro', () => {
       expect(warn.mock.calls.map((c) => c[0]).join('\n')).toContain(message)
       expect(THROW_KINDS).toContain(kind)
       expect(() => convert(input, { catalog: streaming(), attributes: { 'rpk-validate': 'error' } })).toThrow(message)
+    })
+  })
+
+  describe('shared fields and help text', () => {
+    test.each([
+      ['a flag description, one paragraph', 'rpkval:[rpk topic create --partitions,description]', "Number of partitions for the topic. The default of `-1` uses the cluster's `default_topic_partitions` property. More partitions enable higher parallelism but increase resource usage."],
+      ['a flag introduced version', 'rpkval:[rpk ai llm-provider create --tags,introduced]', '0.2.33'],
+      ['introduced through its alias since', 'rpkval:[rpk ai llm-provider create --tags,since]', '0.2.33'],
+      ['optional, the inverse of required', 'rpkval:[rpk topic create --partitions,optional]', 'yes'],
+      ['optional raw', 'rpkval:[rpk topic create --partitions,optional,format=raw]', 'true'],
+      ['a command usage', 'rpkval:[rpk topic create,usage]', 'rpk topic create [TOPICS...] [flags]'],
+      ['command aliases', 'rpkval:[rpk cluster info,aliases]', 'status, metadata'],
+      ['command aliases raw', 'rpkval:[rpk cluster info,aliases,format=raw]', '["status","metadata"]'],
+      ['command platforms', 'rpkval:[rpk topic create,platforms]', 'linux, darwin'],
+      ['a command introduced version', 'rpkval:[rpk ai llm-provider create,introduced]', '0.2.28'],
+      ['self-hosted-only', 'rpkval:[rpk cluster brokers,self-hosted-only]', 'yes'],
+      ['self-hosted-only through its JSON key', 'rpkval:[rpk topic create,selfHostedOnly]', 'no'],
+      ['a command reached through an alias', 'rpkval:[rpk cluster status,aliases]', 'status, metadata'],
+    ])('%s', (_name, input, expected) => {
+      expect(valueOf(convert(input, { catalog: streaming() }))).toBe(expected)
+    })
+
+    test('a command field carries no data-rpk-flag, and optional names itself in data-field', () => {
+      expect(convert('rpkval:[rpk topic create,usage]', { catalog: streaming() })).toContain('<span class="rpk-value" data-rpk-command="rpk topic create" data-field="usage">')
+      expect(convert('rpkval:[rpk topic create --partitions,optional]', { catalog: streaming() })).toContain('data-rpk-flag="partitions" data-field="optional">yes<')
+    })
+
+    test('help text renders literally inline: backticks are not markup', () => {
+      const html = convert('rpkval:[rpk topic create --partitions,description]', { catalog: streaming() })
+      expect(html).toContain('The default of `-1` uses')
+      expect(html).not.toContain('<code>-1</code>')
+    })
+
+    test('a command description is more than one paragraph: a warning names the block form', () => {
+      const warn = warnings()
+      expect(valueOf(convert('rpkval:[rpk topic create,description]', { catalog: streaming() }))).toBe('<unknown description>')
+      expect(warn.mock.calls[0][0]).toContain('Use the block form on a line of its own: rpkval::[rpk topic create,description].')
+    })
+
+    test('the block form renders the description as escaped paragraphs', () => {
+      const html = convert('rpkval::[rpk topic create,description]', { catalog: streaming() })
+      expect(html).toContain('<div class="openblock rpk-value rpk-value-description">')
+      expect(html).toContain('<p>Create one or more Kafka topics with configurable partitions, replication factor, and topic-level settings.</p>')
+      expect(html).toContain('For example, `rpk topic create -c cleanup.policy=compact -r 3 -p 20 foo bar` creates two topics')
+    })
+
+    test('the block form renders examples as prose and literal blocks', () => {
+      const html = convert('rpkval::[rpk security acl list,examples]', { catalog: streaming() })
+      expect(html).toContain('<p>List all ACLs:</p>')
+      expect(html).toContain('<pre>rpk security acl list --topic foo</pre>')
+      expect(html).toContain('<p>List all ACLs for topic &quot;foo&quot;:</p>')
+    })
+
+    test('a command field with a flag, and a flag field with no flag, say which to write', () => {
+      const warn = warnings()
+      convert('rpkval:[rpk topic create --partitions,usage]', { catalog: streaming() })
+      convert('rpkval:[rpk topic create,type]', { catalog: streaming() })
+      expect(warn.mock.calls[0][0]).toContain('usage is a field of a command, not of a flag; write the command without the flag, as in rpkval:[rpk topic create,usage].')
+      expect(warn.mock.calls[1][0]).toContain('names no flag; write the command, then the flag, as in rpkval:[rpk topic create --partitions]. type is a field of a flag.')
+    })
+
+    test('on Cloud, a description scoped to self-managed is cloud-hidden', () => {
+      const warn = warnings()
+      expect(valueOf(onCloud('rpkval:[rpk cluster config status,description]'))).toBe('<unknown description>')
+      expect(warn.mock.calls[0][0]).toContain('descriptionScope: self-hosted')
+      expect(onCloud('rpkval::[rpk topic create,description]')).toContain('<p>Create one or more Kafka topics')
+    })
+
+    test('a command missing the field is missing-field', () => {
+      const warn = warnings()
+      expect(valueOf(convert('rpkval:[rpk topic create,examples]', { catalog: streaming() }))).toBe('<unknown examples>')
+      expect(warn.mock.calls[0][0]).toContain('rpk topic create has no examples in rpk-v26.2.2.json')
     })
   })
 
@@ -344,6 +415,8 @@ describe('rpkval macro', () => {
       return data
     }
     const throwing = {
+      'needs-block': ['rpkval:[rpk topic create,description]', { macroOnly: true }],
+      'block-form-inline': ['See rpkval::[rpk topic create,description] here.', { macroOnly: true }],
       'unknown-command': ['rpkval:partitions[command=rpk topic make]'],
       'unknown-flag': ['rpkval:nope[command=rpk topic create]'],
       'shorthand-target': ['rpkval:p[command=rpk topic create]'],
@@ -362,6 +435,7 @@ describe('rpkval macro', () => {
         ? onCloud(input, { attributes })
         : convert(input, { catalog: streaming(opts.data), attributes })
       expect(run).toThrow()
+      if (opts.macroOnly) return
       const registry = opts.cloud
         ? rpkValues.loadRpkFor(cloud(), 'cloud-data-platform', '')
         : rpkValues.loadRpkFor(streaming(opts.data), 'streaming', '26.2')

@@ -234,6 +234,8 @@ describe('connectval macro', () => {
     })
 
     const throwing = {
+      'needs-block': ['connectval:[inputs/kafka_franz.consumer_group,description]'],
+      'block-form-inline': ['See connectval::[inputs/kafka_franz.consumer_group,description] here.'],
       'unknown-type': ['connectval:x[component=widgets/local]'],
       'unknown-component': ['connectval:x[component=inputs/nope]'],
       'unknown-field': ['connectval:nope[component=inputs/redpanda]'],
@@ -275,6 +277,136 @@ describe('connectval macro', () => {
     test('two macros on one line and inside backticks', () => {
       const html = convert('`connectval:tls.enabled[component=inputs/redpanda]` and connectval:pipeline.threads[component=config]', { catalog: connect() })
       expect(spans(html)).toEqual(['false', '-1'])
+    })
+  })
+
+  describe('the bracket form and the shared fields', () => {
+    // A page in another component, an rp-connect-docs page elsewhere in
+    // connect, and the component's own page.
+    const render = (input, src = {}, catalog = connect()) => {
+      const Asciidoctor = require('@asciidoctor/core')()
+      const registry = Asciidoctor.Extensions.create()
+      register(registry, { contentCatalog: catalog, file: { src: { path: 'modules/x/pages/example.adoc', component: 'ROOT', version: '', module: 'x', relative: 'example.adoc', ...src } } })
+      return Asciidoctor.convert(input, { extension_registry: registry })
+    }
+
+    test.each([
+      ['connectval:[inputs/redpanda.client_id]', 'connectval:client_id[component=inputs/redpanda]'],
+      ['connectval:[inputs/postgres_cdc.incremental_snapshot.chunk_size,default]', 'connectval:incremental_snapshot.chunk_size[default,component=inputs/postgres_cdc]'],
+      ['connectval:[outputs/iceberg.merge_strategy,values]', 'connectval:merge_strategy[values,component=outputs/iceberg]'],
+      ['connectval:[config.pipeline.threads]', 'connectval:pipeline.threads[component=config]'],
+      ['connectval:[rate_limit/local.count]', 'connectval:count[component=rate_limit/local]'],
+      ['connectval:[inputs/redpanda.sasl.mechanism,options,format=raw]', 'connectval:sasl.mechanism[options,component=inputs/redpanda,format=raw]'],
+    ])('%s renders what %s renders', (bracket, named) => {
+      const a = convert(bracket, { catalog: connect() })
+      expect(a).toBe(convert(named, { catalog: connect() }))
+      expect(a).not.toContain('connect-value-unknown')
+    })
+
+    test('options is an alias: data-field is the canonical values', () => {
+      expect(convert('connectval:merge_strategy[options,component=outputs/iceberg]', { catalog: connect() })).toContain('data-field="values"><code>merge-on-read</code>')
+    })
+
+    test.each([
+      ['a component status', 'connectval:[inputs/kafka_franz,status]', 'deprecated'],
+      ['a deprecated component', 'connectval:[inputs/kafka_franz,deprecated]', 'yes'],
+      ['component categories', 'connectval:[inputs/generate,categories]', 'Utility'],
+      ['a component introduced version', 'connectval:[inputs/generate,introduced]', '3.40.0'],
+      ['a field summary', 'connectval:[inputs/kafka_franz.consumer_group,summary]', 'An optional consumer group to consume as. Partitions and offsets are managed automatically across the group.'],
+      ['required: not optional, no default, a scalar', 'connectval:[inputs/generate.mapping,required]', 'yes'],
+      ['required: a list is never required', 'connectval:[inputs/redpanda.seed_brokers,required]', 'no'],
+      ['optional, the inverse of required', 'connectval:[inputs/generate.mapping,optional]', 'no'],
+      ['secret', 'connectval:[inputs/kafka_franz.sasl.password,secret]', 'yes'],
+      ['secret through is_secret', 'connectval:[inputs/kafka_franz.consumer_group,is_secret]', 'no'],
+      ['advanced', 'connectval:[inputs/kafka_franz.consumer_group,advanced]', 'no'],
+      ['interpolated', 'connectval:[inputs/kafka_franz.consumer_group,interpolated,format=raw]', 'false'],
+      ['scalar examples, each as code', 'connectval:[inputs/generate.interval,examples]', '5s, 1m, 1h, @every 1s, 0,30 */2 * * * *, TZ=Europe/London 30 3-6,20-23 * * *'],
+    ])('%s', (_name, input, expected) => {
+      expect(valueOf(convert(input, { catalog: connect() }))).toBe(expected)
+    })
+
+    test('a component field carries no data-connect-field', () => {
+      expect(convert('connectval:[inputs/kafka_franz,status]', { catalog: connect() })).toContain('<span class="connect-value" data-connect-component="inputs/kafka_franz" data-field="status">deprecated</span>')
+    })
+
+    test('a field of the wrong level says which to write', () => {
+      const warn = warnings()
+      convert('connectval:[inputs/kafka_franz,default]', { catalog: connect() })
+      convert('connectval:[inputs/kafka_franz.consumer_group,status]', { catalog: connect() })
+      expect(warn.mock.calls[0][0]).toContain('default is a field of a config field, not of a component. Name a field after the component, as in connectval:[inputs/kafka_franz.consumer_group,default].')
+      expect(warn.mock.calls[1][0]).toContain('status is a field of a component, not of a config field. Name the component alone, as in connectval:[inputs/kafka_franz,status].')
+    })
+
+    test('a one-paragraph description renders inline with its markup and links', () => {
+      const html = convert('connectval:[inputs/generate,summary]', { catalog: connect() })
+      expect(html).toContain('Generates messages at a given interval using a <a href="guides:bloblang/about.html">Bloblang</a> mapping')
+    })
+
+    test('a description longer than one paragraph names the block form', () => {
+      const warn = warnings()
+      expect(valueOf(convert('connectval:[inputs/kafka_franz.consumer_group,description]', { catalog: connect() }))).toBe('<unknown description>')
+      expect(warn.mock.calls.map((c) => c[0]).join('\n')).toContain('Use the block form on a line of its own: connectval::[inputs/kafka_franz.consumer_group,description].')
+    })
+
+    test('the block form parses the description, list included', () => {
+      const html = convert('connectval::[inputs/kafka_franz.consumer_group,description]', { catalog: connect() })
+      expect(html).toContain('<div class="openblock connect-value connect-value-description">')
+      expect(html).toContain('<li>\n<p>Partition offsets are automatically committed and resumed under this name.</p>')
+    })
+
+    test('the block form of examples is a YAML listing', () => {
+      const html = convert('connectval::[inputs/kafka_franz.topics,examples]', { catalog: connect() })
+      expect(html).toContain('<code class="language-yaml" data-lang="yaml">topics:\n  - foo\n  - bar\n\n# ---\n\ntopics:\n  - things.*')
+    })
+
+    test('object examples have no inline form', () => {
+      warnings()
+      expect(valueOf(convert('connectval:[inputs/redpanda.tls.client_certs,examples]', { catalog: connect() }))).toBe('<unknown examples>')
+    })
+
+    describe('links in a string reused off its page', () => {
+      const toast = 'connectval::[inputs/postgres_cdc.unchanged_toast_value,description]'
+      test('on another component\'s page, a same-page ref links the component page with connect:', () => {
+        expect(render(toast)).toContain('<a href="connect:components:inputs/postgres_cdc.html#signal_table_name"><code>signal_table_name</code></a>')
+      })
+      test('elsewhere in connect, the ref stays in the component', () => {
+        expect(render(toast, { component: 'connect', module: 'guides' })).toContain('<a href="components:inputs/postgres_cdc.html#signal_table_name">')
+      })
+      test('on the component\'s own page, nothing changes', () => {
+        expect(render(toast, { component: 'connect', module: 'components', relative: 'inputs/postgres_cdc.adoc' })).toContain('<a href="#signal_table_name"><code>signal_table_name</code></a>')
+      })
+      test('a connect-relative xref is qualified with connect: on another component\'s page', () => {
+        expect(render('connectval:[inputs/generate,summary]')).toContain('<a href="connect:guides:bloblang/about.html">Bloblang</a>')
+        expect(render('connectval:[inputs/generate,summary]', { component: 'connect', module: 'components' })).toContain('<a href="guides:bloblang/about.html">Bloblang</a>')
+      })
+      test('on Cloud, a link stays relative where Cloud has the page, and renders as text where it does not', () => {
+        const warn = warnings()
+        const catalog = cloudCatalog()
+        catalog.resolvePage = (spec) => (spec.startsWith('components:') ? { src: {} } : undefined)
+        const summary = render('connectval:[inputs/generate,summary]', { component: 'cloud-data-platform' }, catalog)
+        expect(summary).toContain('using a Bloblang mapping')
+        expect(summary).not.toContain('<a href')
+        expect(warn.mock.calls.map((c) => c[0]).join('\n')).toContain('the summary links connect:guides:bloblang/about.adoc, which this Cloud page has no page for, so that link renders as text.')
+        expect(render(toast, { component: 'cloud-data-platform' }, catalog)).toContain('<a href="components:inputs/postgres_cdc.html#signal_table_name">')
+      })
+    })
+
+    test('docs_format: markdown strings are converted from Markdown', () => {
+      const data = clone(SAMPLE)
+      data.docs_format = 'markdown'
+      const consumer = data.inputs.find((c) => c.name === 'kafka_franz').config.children.find((f) => f.name === 'consumer_group')
+      consumer.description = 'An optional consumer group. When you specify this value:\n\n- The partitions of any topics specified in the `topics` field are distributed.\n- Offsets are committed under **this** name.\n\nSee the [franz-go docs](https://github.com/twmb/franz-go).'
+      consumer.short_description = 'An optional consumer group, *managed* by `franz-go`.'
+      expect(convert('connectval:[inputs/kafka_franz.consumer_group,summary]', { catalog: connect(data) })).toContain('An optional consumer group, <em>managed</em> by <code>franz-go</code>.')
+      const html = convert('connectval::[inputs/kafka_franz.consumer_group,description]', { catalog: connect(data) })
+      expect(html).toContain('<li>\n<p>Offsets are committed under <strong>this</strong> name.</p>')
+      expect(html).toContain('<a href="https://github.com/twmb/franz-go">franz-go docs</a>')
+    })
+
+    test('connectval:: in a sentence is block-form-inline', () => {
+      const warn = warnings()
+      expect(valueOf(convert('See connectval::[inputs/kafka_franz.consumer_group,description] here.', { catalog: connect() }))).toBe('<unknown description>')
+      expect(warn.mock.calls.map((c) => c[0]).join('\n')).toContain('connectval:: is the block form, which renders only on a line of its own.')
     })
   })
 

@@ -1177,9 +1177,12 @@ describe('prop macro', () => {
   describe('registration', () => {
     test('registers prop and propval on a plain registry', () => {
       const inlineMacro = jest.fn()
-      register({ inlineMacro })
-      // One registration each: prop:, propval:, rpkval:, connectval: and rpkcmd:.
+      const blockMacro = jest.fn()
+      register({ inlineMacro, blockMacro })
+      // One registration each: prop:, propval:, rpkval:, connectval: and
+      // rpkcmd:, and the block forms propval::, rpkval:: and connectval::.
       expect(inlineMacro).toHaveBeenCalledTimes(5)
+      expect(blockMacro).toHaveBeenCalledTimes(3)
     })
   })
 })

@@ -27,24 +27,40 @@
 const { escapeHtml } = require('./html-utils')
 const datasets = require('./attachment-datasets')
 const { isImprecise } = require('./property-values')
+const { defineFields } = require('./value-fields')
+const { FORMAT_PLAIN } = require('./value-descriptions')
 const logger = require('@antora/logger')('rpkval-macro')
 
 const FORMAT_HUMAN = 'human'
 const FORMAT_RAW = 'raw'
 
-// Every field rpkval: supports. None is hidden on Cloud by itself; see
-// resolveRpkValue for the descriptionScope rule on default.
-const FIELDS = {
-  default: { cloudHidden: false },
-  type: { cloudHidden: false },
-  shorthand: { cloudHidden: false },
-  required: { cloudHidden: false },
-  deprecated: { cloudHidden: false },
-}
-
-const FIELD_ALIASES = {
+// Every field rpkval: supports, and whether it belongs to a flag
+// (rpkval:[rpk topic create --partitions,type]), a command
+// (rpkval:[rpk topic create,usage]), or both. None is hidden on Cloud by
+// itself; see resolveRpkValue for the descriptionScope rules. The `rich`
+// fields are help text, which renders literally (value-descriptions.js).
+const FIELD_SET = defineFields('rpkval:', {
+  default: { levels: ['flag'] },
+  type: { levels: ['flag'] },
+  shorthand: { levels: ['flag'] },
+  required: { levels: ['flag'] },
+  description: { levels: ['flag', 'command'], rich: true },
+  introduced: { levels: ['flag', 'command'] },
+  usage: { levels: ['command'] },
+  examples: { levels: ['command'], rich: true },
+  aliases: { levels: ['command'] },
+  platforms: { levels: ['command'] },
+  'self-hosted-only': { levels: ['command'] },
+}, {
   short: 'shorthand',
-}
+  introducedInVersion: 'introduced',
+  selfHostedOnly: 'self-hosted-only',
+}, {
+  // Documented before the data was checked: no flag in the rpk data carries
+  // a deprecation, so the field could only ever say no.
+  deprecated: 'the rpk data records no deprecation for flags (deprecated_commands covers commands only), so rpkval: cannot say whether a flag is deprecated',
+})
+const { FIELDS, FIELD_ALIASES } = FIELD_SET
 
 // The rpk command groups that are separately installed plugins. Their flags
 // come from --help until the plugin publishes its own tree.
@@ -104,12 +120,7 @@ const own = (object, key) => Boolean(object) && Object.prototype.hasOwnProperty.
 /**
  * Canonical field name, or undefined for a field rpkval: does not support.
  */
-function normalizeField (field) {
-  const key = String(field == null ? '' : field).trim().toLowerCase()
-  if (own(FIELDS, key)) return key
-  if (own(FIELD_ALIASES, key)) return FIELD_ALIASES[key]
-  return undefined
-}
+const normalizeField = FIELD_SET.normalizeField
 
 /**
  * Whether a flag's metadata was scraped from a plugin's --help rather than
@@ -167,10 +178,21 @@ function formatFlagDefault (flag, { scraped = false } = {}) {
 
 const yesNo = (value, format) => ({ ok: true, text: format === FORMAT_RAW ? String(value) : (value ? 'yes' : 'no') })
 
+const missingValue = () => ({ ok: false, reason: 'missing' })
+// Help text as written: leading blank lines and trailing space go, and
+// indentation stays, because an indented run is an example.
+const helpText = (text) => {
+  const value = text.replace(/^\s*\n/, '').replace(/\s+$/, '')
+  return { ok: true, text: value, rich: { kind: 'text', text: value, format: FORMAT_PLAIN } }
+}
+const listValue = (list, format) => (Array.isArray(list) && list.length
+  ? { ok: true, text: format === FORMAT_RAW ? JSON.stringify(list) : list.map(String).join(', ') }
+  : missingValue())
+
 /**
  * The value of one field of one flag.
  *
- * @returns {{ok: true, text: string} | {ok: false, reason: string}}
+ * @returns {{ok: true, text: string, rich?: object} | {ok: false, reason: string}}
  */
 function fieldValue (flag, field, { format = FORMAT_HUMAN, scraped = false } = {}) {
   const name = normalizeField(field)
@@ -179,16 +201,44 @@ function fieldValue (flag, field, { format = FORMAT_HUMAN, scraped = false } = {
     case 'default':
       return formatFlagDefault(flag, { scraped })
     case 'type':
-      return typeof flag.type === 'string' && flag.type ? { ok: true, text: flag.type } : { ok: false, reason: 'missing' }
+      return typeof flag.type === 'string' && flag.type ? { ok: true, text: flag.type } : missingValue()
     case 'shorthand':
-      return typeof flag.shorthand === 'string' && flag.shorthand ? { ok: true, text: `-${flag.shorthand}` } : { ok: false, reason: 'missing' }
+      return typeof flag.shorthand === 'string' && flag.shorthand ? { ok: true, text: `-${flag.shorthand}` } : missingValue()
     case 'required':
       if (typeof flag.required === 'boolean') return yesNo(flag.required, format)
       return { ok: false, reason: scraped ? 'plugin-unknown' : 'missing' }
-    case 'deprecated':
-      // An absent key means not deprecated: the reference prints
-      // [Deprecated] only when the key is true.
-      return yesNo(flag.deprecated === true, format)
+    case 'description':
+      return typeof flag.description === 'string' && flag.description.trim() ? helpText(flag.description) : missingValue()
+    case 'introduced':
+      return typeof flag.introducedInVersion === 'string' && flag.introducedInVersion ? { ok: true, text: flag.introducedInVersion } : missingValue()
+    default:
+      return { ok: false, reason: 'unsupported' }
+  }
+}
+
+/**
+ * The value of one field of one command.
+ *
+ * @returns {{ok: true, text: string, rich?: object} | {ok: false, reason: string}}
+ */
+function commandFieldValue (node, field, { format = FORMAT_HUMAN } = {}) {
+  switch (normalizeField(field)) {
+    case 'description':
+      return typeof node.description === 'string' && node.description.trim() ? helpText(node.description) : missingValue()
+    case 'examples':
+      return typeof node.examples === 'string' && node.examples.trim() ? helpText(node.examples) : missingValue()
+    case 'usage':
+      return typeof node.usage === 'string' && node.usage.trim() ? { ok: true, text: node.usage.trim() } : missingValue()
+    case 'aliases':
+      return listValue(node.aliases, format)
+    case 'platforms':
+      return listValue(node.platforms, format)
+    case 'introduced':
+      return typeof node.introducedInVersion === 'string' && node.introducedInVersion ? { ok: true, text: node.introducedInVersion } : missingValue()
+    case 'self-hosted-only':
+      // An absent key means not self-managed only, the rule the reference
+      // uses for its ifndef::env-cloud[] wrapping.
+      return yesNo(node.selfHostedOnly === true, format)
     default:
       return { ok: false, reason: 'unsupported' }
   }
@@ -372,17 +422,28 @@ const cmdText = (names) => ['rpk', ...names].join(' ')
  * @param {string} [opts.filePath]
  * @param {string} [opts.macro] - The call as written, for messages, when it
  *   is the bracket form rpkval:[rpk topic create --partitions].
- * @returns {{ok: true, text: string, field: string, registry: object, source: 'core'|'help', command: string, flag: object} |
+ * @param {'flag'|'command'} [opts.level] - command for a bracket form with no
+ *   flag, which reads a field of the command itself.
+ * @returns {{ok: true, text: string, rich?: object, field: string, invert: boolean, registry: object, source: 'core'|'help', command: string, flag?: object} |
  *   {ok: false, kind: string, message: string, field: string, registry?: object, suggestions?: string[]}}
  */
-function resolveRpkValue ({ registry, command, flag: target, field: requested = 'default', format = FORMAT_HUMAN, filePath, macro }) {
-  const fieldName = normalizeField(requested)
+function resolveRpkValue ({ registry, command, flag: target, field: requested = 'default', format = FORMAT_HUMAN, filePath, macro, level = 'flag' }) {
+  const resolvedField = FIELD_SET.resolveField(requested)
+  const fieldName = resolvedField && resolvedField.name
+  const invert = Boolean(resolvedField && resolvedField.invert)
+  const dropped = !fieldName && FIELD_SET.droppedReason(requested)
   const rawTarget = String(target == null ? '' : target).trim()
   const commandAttr = command !== undefined && command !== null && String(command).trim() !== '' ? `,command=${String(command).trim()}` : ''
   const call = `${macro || `rpkval:${rawTarget}[${requested}${commandAttr}]`}${filePath ? ` in ${filePath}` : ''}`
-  const field = fieldName || requested
-  if (!fieldName) {
-    return { ok: false, kind: 'unsupported-field', field, message: `${call}: '${requested}' is not a field rpkval: supports. Supported fields: ${Object.keys(FIELDS).join(', ')}.` }
+  const field = fieldName || (dropped ? String(requested).trim().toLowerCase() : requested)
+  if (!fieldName && !dropped) {
+    return { ok: false, kind: 'unsupported-field', field, message: FIELD_SET.unsupportedMessage(call, requested) }
+  }
+  if (fieldName && !FIELDS[fieldName].levels.includes(level)) {
+    if (level === 'command') {
+      return { ok: false, kind: 'unknown-flag', field, message: `${call}: names no flag; write the command, then the flag, as in rpkval:[rpk topic create --partitions].${fieldName === 'default' ? '' : ` ${fieldName} is a field of a flag.`}` }
+    }
+    return { ok: false, kind: 'unsupported-field', field, message: `${call}: ${fieldName} is a field of a command, not of a flag; write the command without the flag, as in rpkval:[rpk topic create,${fieldName}].` }
   }
   if (!registry) {
     return { ok: false, kind: 'no-data', field, message: `${call}: this page has no rpk data to read '${field}' from (see the rpkval macro warning for this component version), so it renders <unknown ${field}> rather than a value from another release.` }
@@ -427,6 +488,10 @@ function resolveRpkValue ({ registry, command, flag: target, field: requested = 
     }
   }
 
+  if (level === 'command') {
+    return resolveCommandValue({ registry, resolved, field, fieldName, dropped, format, call, dataset })
+  }
+
   let found
   if (!names.length) {
     found = findFlag(tree, name, tree)
@@ -457,6 +522,9 @@ function resolveRpkValue ({ registry, command, flag: target, field: requested = 
   if (cloud && fieldName === 'default' && node.descriptionScope === 'self-hosted') {
     return { ok: false, kind: 'cloud-hidden', field, registry, message: `${call}: the reference scopes the description of ${where} to self-managed (descriptionScope: self-hosted in ${dataset}), so its default may differ in Cloud and this Cloud page renders <unknown ${field}>. Put the sentence in an ifndef::env-cloud[] block.` }
   }
+  if (dropped) {
+    return { ok: false, kind: 'dropped-field', field, registry, message: `${call}: ${dropped}, so it renders <unknown ${field}>. Drop the field from the sentence; the reference lists only flags that are in the data.` }
+  }
   const scraped = !found.global && isScraped(registry, names, flag)
   const value = fieldValue(flag, fieldName, { format, scraped })
   const label = `--${flag.name} of ${where}`
@@ -473,7 +541,37 @@ function resolveRpkValue ({ registry, command, flag: target, field: requested = 
     const kind = value.reason === 'missing' ? 'missing-field' : value.reason === 'complex' ? 'complex-default' : value.reason
     return { ok: false, kind, field, registry, message: `${call}: ${messages[value.reason] || messages.missing}` }
   }
-  return { ok: true, field: fieldName, registry, text: value.text, source: scraped ? 'help' : 'core', command: where, flag }
+  return { ok: true, field: fieldName, invert, registry, text: invert ? inverted(value.text) : value.text, rich: value.rich, source: scraped ? 'help' : 'core', command: where, flag }
+}
+
+// The opposite of a yes-or-no value, for an inverse alias (optional).
+const inverted = (text) => ({ yes: 'no', no: 'yes', true: 'false', false: 'true' })[text] || text
+
+/**
+ * The command-level half of resolveRpkValue: a field of the command itself,
+ * rpkval:[rpk topic create,usage]. Cloud gating has already run for the
+ * command path.
+ */
+function resolveCommandValue ({ registry, resolved, field, fieldName, dropped, format, call, dataset }) {
+  const { node, names } = resolved
+  const where = names.length ? cmdText(names) : 'rpk'
+  if (dropped) {
+    return { ok: false, kind: 'dropped-field', field, registry, message: `${call}: ${dropped}, so it renders <unknown ${field}>.` }
+  }
+  const cloud = registry.surface === datasets.SURFACE_CLOUD
+  // The reference wraps a scoped description in ifndef::env-cloud[] or
+  // ifdef::env-cloud[], so only that surface may state it.
+  if (fieldName === 'description' && cloud && node.descriptionScope === 'self-hosted') {
+    return { ok: false, kind: 'cloud-hidden', field, registry, message: `${call}: the reference shows the description of ${where} only to self-managed readers (descriptionScope: self-hosted in ${dataset}), so this Cloud page renders <unknown ${field}>. Put the block in an ifndef::env-cloud[] block.` }
+  }
+  if (fieldName === 'description' && !cloud && node.descriptionScope === 'cloud') {
+    return { ok: false, kind: 'unavailable', field, registry, message: `${call}: the reference shows the description of ${where} only to Cloud readers (descriptionScope: cloud in ${dataset}), so this self-managed page renders <unknown ${field}>.` }
+  }
+  const value = commandFieldValue(node, fieldName, { format })
+  if (!value.ok) {
+    return { ok: false, kind: 'missing-field', field, registry, message: `${call}: ${where} has no ${field} in ${dataset}, so it renders <unknown ${field}>.` }
+  }
+  return { ok: true, field: fieldName, invert: false, registry, text: value.text, rich: value.rich, source: 'core', command: where }
 }
 
 const VALUE_ROLE = 'rpk-value'
@@ -482,13 +580,15 @@ const UNKNOWN_VALUE_ROLE = 'rpk-value-unknown'
 /**
  * The HTML for one rpkval: instance.
  */
-function buildRpkvalContent ({ command, flag, field, text, source, unknown = false }) {
-  const attrs = `data-rpk-command="${escapeHtml(command)}" data-rpk-flag="${escapeHtml(flag)}" data-field="${escapeHtml(field)}"${source === 'help' ? ' data-source="help"' : ''}`
+function buildRpkvalContent ({ command, flag, field, text, html, source, unknown = false }) {
+  const flagAttr = flag ? ` data-rpk-flag="${escapeHtml(flag)}"` : ''
+  const attrs = `data-rpk-command="${escapeHtml(command)}"${flagAttr} data-field="${escapeHtml(field)}"${source === 'help' ? ' data-source="help"' : ''}`
   if (unknown) return `<span class="${VALUE_ROLE} ${UNKNOWN_VALUE_ROLE}" ${attrs}>${escapeHtml(`<unknown ${field}>`)}</span>`
-  return `<span class="${VALUE_ROLE}" ${attrs}>${escapeHtml(text)}</span>`
+  return `<span class="${VALUE_ROLE}" ${attrs}>${html !== undefined ? html : escapeHtml(text)}</span>`
 }
 
 module.exports = {
+  FIELD_SET,
   FIELDS,
   FIELD_ALIASES,
   FORMAT_HUMAN,
@@ -503,6 +603,7 @@ module.exports = {
   stripHelpQuotes,
   formatFlagDefault,
   fieldValue,
+  commandFieldValue,
   commandTokens,
   parseCommandLine,
   childOf,
@@ -515,5 +616,6 @@ module.exports = {
   allFlagNames,
   describeDataset,
   resolveRpkValue,
+  resolveCommandValue,
   buildRpkvalContent,
 }

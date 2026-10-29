@@ -349,8 +349,9 @@ Rendered against `redpanda-properties-v26.2.4.json`, those lines read: "defaults
 
 === Usage
 
-The target is the property name. The first positional attribute (or `field=`) names the field, and defaults to `default`.
+The target is the property name. The first positional attribute (or `field=`) names the field, and defaults to `default`. Every value macro shares one set of field names (<<value-fields>>), so `introduced`, `values` and `description` mean the same thing in `propval:`, `rpkval:` and `connectval:`.
 
+[[propval-fields]]
 [cols="1,2,2"]
 |===
 | Field | Source in the property JSON | Example (v26.2.4)
@@ -406,14 +407,51 @@ The target is the property name. The first positional attribute (or `field=`) na
 | `cloud-access`
 | `cloud_editable` and `cloud_readonly`, for cluster properties only
 | `editable`, `read-only`, or `not available`
+
+| `description`
+| `description`, as AsciiDoc. Inline only when it is one paragraph; otherwise use the block form, `propval::`
+| `log_segment_ms`: "Default lifetime of log segments. ..."
+
+| `examples` (alias `example`)
+| `example`, as AsciiDoc. Inline only when it is one paragraph, such as `` `true` ``; a YAML example needs `propval::`
+| `admin_api_require_auth`: `true`
+
+| `see-also` (aliases `see_also`, `seeAlso`)
+| `see_also`, the reference's Related topics row, with only the items for this surface (`cloud_only` and `self_managed_only`)
+| `log_segment_ms`: a link to `segment.ms`
+
+| `deprecated` (alias `is_deprecated`)
+| `is_deprecated`
+| `yes` or `no`
+
+| `enterprise` (alias `is_enterprise`)
+| `is_enterprise`. Hidden on Cloud, where the reference shows no license note
+| `yes` or `no`
+
+| `secret` (alias `is_secret`)
+| `is_secret`
+| `yes` or `no`
+
+| `category`
+| `category`, the include tag the reference pages filter on
+| `tiered-storage`, `schema-registry`
 |===
 
-The JSON key names and table labels also work as field names: `minimum`, `maximum`, `needs_restart`, `units`, `enum`, `config_scope`, `version`, `gets_restored`.
+The JSON key names and table labels also work as field names: `minimum`, `maximum`, `needs_restart`, `units`, `enum`, `config_scope`, `version`, `gets_restored`. So do the aliases every value macro shares, such as `since` for `introduced` and `options` for `values`. A field name `propval:` does not support is a warning (an error with `property-validate: error`) that lists the fields it does.
 
 format::
 `human` (default) or `raw`. `raw` gives the exact value: the code value in the reference table for `default`, the plain number for `min` and `max`, `true` or `false` for the yes-or-no fields, and a JSON array for `values` and `aliases`.
 
 The output is a `<span>` with the stable class `property-value` and `data-property` and `data-field` attributes. It is plain text with no tooltip; mark the name with `prop:` for that. The macro works inside backticks, so `` `propval:x[default,format=raw]` `` renders as inline code. Don't put `values` inside backticks: it already renders each value as inline code, and backticks would nest one code element inside another.
+
+A description, an example or a Related topics list that is longer than one paragraph has no inline form. Write the block form on a line of its own, which parses the text into the page (<<value-text>>):
+
+[,asciidoc]
+----
+propval::cleanup.policy[description]
+----
+
+It renders an open block with the roles `property-value` and `property-value-<field>`. Any other field in the block form renders as a paragraph of its own.
 
 === Formatting
 
@@ -525,35 +563,85 @@ The flag is looked up on that command, then in the global flags. It is never tak
 
 The first form of the macro is still accepted, and renders the same: the flag as the target and the command in `command=`, as in `rpkval:partitions[command=rpk topic create]` or `rpkval:partitions[shorthand,command=rpk topic create]`. Leave `command=` out for a global flag (`rpkval:config-opt[type]`). `check-reference-values --write` writes this form.
 
-[cols="1,2,2"]
+With no flag, the brackets name a command, and the field is one of the command's own: `rpkval:[rpk topic create,usage]` renders `rpk topic create [TOPICS...] [flags]`. A flag field with no flag (`rpkval:[rpk topic create]` asks for `default`) is an `unknown-flag` error, and a command field with a flag is an `unsupported-field` error; both messages say which to write.
+
+[[rpkval-fields]]
+[cols="1,1,2,2"]
 |===
-| Field | Source in the rpk data | Example (v26.2.2)
+| Field | Of | Source in the rpk data | Example (v26.2.2)
 
 | `default`
+| flag
 | The flag's `default`, as `rpk <command> --help` prints it inside `(default ...)`, without the quotes help puts around strings
 | `rpk topic create --partitions`: `-1`; `rpk debug bundle --timeout`: `1m0s`; `rpk topic create --topic-config`: `[]`
 
 | `type`
+| flag
 | `type`, as the reference's Type column prints it
 | `int32`, `stringArray`, `duration`
 
 | `shorthand` (alias `short`)
+| flag
 | `shorthand`, with its dash
 | `-p`
 
-| `required`
-| `required`
+| `required` (inverse alias `optional`)
+| flag
+| `required`. `optional` gives the opposite
 | `yes` or `no`
 
-| `deprecated`
-| `deprecated`. An absent key means not deprecated, the rule the reference uses to print `[Deprecated]`
-| `yes` or `no`
+| `description`
+| flag, command
+| `description`, the help text, rendered literally (<<value-text>>). A command's description is usually more than one paragraph, so it needs `rpkval::`
+| `rpk topic create --partitions`: "Number of partitions for the topic. ..."
+
+| `introduced` (aliases `since`, `version`, `introducedInVersion`)
+| flag, command
+| `introducedInVersion`. For a plugin command, the plugin's version
+| `rpk ai docs search`: `0.2.92`
+
+| `usage`
+| command
+| `usage`
+| `rpk topic create [TOPICS...] [flags]`
+
+| `examples` (alias `example`)
+| command
+| `examples`, rendered literally: prose as paragraphs, indented commands as literal blocks. Needs `rpkval::`
+| `rpk security acl list`
+
+| `aliases`
+| command
+| `aliases`, comma-separated
+| `rpk cluster info`: `status, metadata`
+
+| `platforms`
+| command
+| `platforms`, comma-separated
+| `linux, darwin`
+
+| `self-hosted-only` (alias `selfHostedOnly`)
+| command
+| `selfHostedOnly`. An absent key means no
+| `rpk cluster brokers`: `yes`
 |===
 
-format::
-`human` (default) or `raw`. It changes only `required` and `deprecated`, to `true` or `false`. Any other value warns and renders the human form.
+The `deprecated` field is gone for flags: no flag in the rpk data carries a deprecation (`deprecated_commands` covers commands only), so it could only ever say `no`. `rpkval:[... --flag,deprecated]` still renders, as `<unknown deprecated>`, with a `dropped-field` warning that says why, and never fails the build.
 
-The output is a `<span class="rpk-value">` with `data-rpk-command`, `data-rpk-flag` and `data-field` attributes. A flag scraped from a plugin's `--help` also carries `data-source="help"`. The macro works inside backticks.
+format::
+`human` (default) or `raw`. It changes `required` and `self-hosted-only` to `true` or `false`, and `aliases` and `platforms` to a JSON array. Any other value warns and renders the human form.
+
+The output is a `<span class="rpk-value">` with `data-rpk-command`, `data-rpk-flag` (for a flag) and `data-field` attributes. `data-field` is the canonical field, or `optional` when that is what the call asked for. A flag scraped from a plugin's `--help` also carries `data-source="help"`. The macro works inside backticks.
+
+Help text longer than one paragraph has no inline form. Write the block form on a line of its own:
+
+[,asciidoc]
+----
+rpkval::[rpk topic create,description]
+rpkval::[rpk security acl list,examples]
+----
+
+It renders an open block with the roles `rpk-value` and `rpk-value-<field>`. The help text is never parsed as AsciiDoc, so backticks and asterisks in it render as written (<<value-text>>).
 
 === Formatting
 
@@ -596,6 +684,7 @@ On a page whose surface is Cloud:
 
 * A command or flag marked `selfHostedOnly` anywhere on its path is `unavailable`, because it is self-managed only.
 * The `default` of a command whose reference description is scoped to self-managed (`descriptionScope: self-hosted`, such as `rpk shadow delete`) is `cloud-hidden`, because the behavior may differ in Cloud. Its other fields still render.
+* The `description` of such a command is `cloud-hidden` too, because the reference shows it only outside `env-cloud`. On a self-managed page, the description of a command scoped to Cloud (`descriptionScope: cloud`) is `unavailable`.
 * `platforms` and `linux_only_commands` are not gated: they describe the operating system, not the deployment.
 
 On a self-managed page, a flag marked `cloudOnly` is `unavailable`, mirroring the `ifdef::env-cloud[]` the reference puts around it.
@@ -605,9 +694,9 @@ On a self-managed page, a flag marked `cloudOnly` is `unavailable`, mirroring th
 Whenever no verified value exists, `rpkval:` renders `<unknown FIELD>` (class `rpk-value rpk-value-unknown`) and logs why, naming the macro call, the field, the dataset, and the file. It never renders a guessed value.
 
 rpk-validate::
-`warn` (default) logs each problem. `error` fails the build on `unknown-command`, `unknown-flag`, `shorthand-target`, `deprecated-command`, `missing-field`, `unsupported-field`, `cloud-hidden` and `unavailable`. `off` silences warnings for values that render; a placeholder is still reported, because a value has no safe fallback.
+`warn` (default) logs each problem. `error` fails the build on `unknown-command`, `unknown-flag`, `shorthand-target`, `deprecated-command`, `missing-field`, `unsupported-field`, `cloud-hidden`, `unavailable`, `needs-block` (help text longer than one paragraph in the inline form) and `block-form-inline` (`rpkval::` inside a sentence). `off` silences warnings for values that render; a placeholder is still reported, because a value has no safe fallback.
 
-These data gaps render a placeholder and warn, and never fail the build: `no-data`, `imprecise`, `description-default` (an empty default whose description states the real one, such as `rpk debug bundle --output`), `complex-default`, and `plugin-unknown`.
+These render a placeholder and warn, and never fail the build: the data gaps `no-data`, `imprecise`, `description-default` (an empty default whose description states the real one, such as `rpk debug bundle --output`), `complex-default` and `plugin-unknown`, and `dropped-field` (`deprecated` on a flag).
 
 `deprecated-command` covers a command that is a key of `deprecated_commands`, or whose ancestor is, and its message carries the replacement. It is checked before `unknown-command`, because deprecated commands are not in the tree.
 
@@ -701,60 +790,124 @@ Registered by the `prop` macro's extension (see <<rpkval>>).
 
 == connectval
 
-This inline macro renders one value of a Redpanda Connect config field from the published Connect data, formatted exactly as the generated component reference prints it.
+This inline macro renders one value of a Redpanda Connect component or config field from the published Connect data, formatted exactly as the generated component reference prints it.
 
 [,asciidoc]
 ----
-The chunk size defaults to `connectval:incremental_snapshot.chunk_size[default,component=inputs/postgres_cdc]`.
-Valid strategies: connectval:merge_strategy[options,component=outputs/iceberg].
-The default for `pipeline.threads` is connectval:pipeline.threads[default,component=config].
+The chunk size defaults to `connectval:[inputs/postgres_cdc.incremental_snapshot.chunk_size]`.
+Valid strategies: connectval:[outputs/iceberg.merge_strategy,values].
+The default for `pipeline.threads` is connectval:[config.pipeline.threads,default].
+The `kafka_franz` input is connectval:[inputs/kafka_franz,status].
 ----
 
-Rendered against `connect-4.114.0.json`, those lines read: "defaults to `1024`", "Valid strategies: `merge-on-read`, `copy-on-write`", and "The default for `pipeline.threads` is -1".
+Rendered against `connect-4.114.0.json`, those lines read: "defaults to `1024`", "Valid strategies: `merge-on-read`, `copy-on-write`", "The default for `pipeline.threads` is -1", and "The `kafka_franz` input is deprecated".
 
 === Usage
 
 [,asciidoc]
 ----
-connectval:<field.path>[<field>,component=<type>/<name>|config,format=human|raw]
+connectval:[<type>/<name>.<field.path>,<field>,format=human|raw]
+connectval:[<type>/<name>,<field>]
+connectval:[config.<field.path>,<field>]
 ----
 
-The target is a dot-separated field path through the component's config, such as `tls.enabled` or `incremental_snapshot.chunk_size`. Address an array of objects without an index (`sasl.mechanism`): the data stores one element's fields, and Asciidoctor ends a macro target at `[`, so `sasl[].mechanism` cannot work.
+The brackets start with the component and the field path together: `inputs/kafka_franz.consumer_group`, `outputs/iceberg.commit.cleanup_on_failure`. Component names have no dots, so the first dot after the type ends the name. Address an array of objects without an index (`sasl.mechanism`): the data stores one element's fields. `config.` addresses the root fields of a pipeline config (`config.pipeline.threads`, `config.http.enabled`). A component with no field path reads a field of the component itself, such as its `status`.
 
-The first attribute is the field. It may be omitted, in which case it is `default`, but writing it (`connectval:client_id[default,component=inputs/redpanda]`) keeps the call readable next to the other fields.
+The type is written as rp-connect-docs paths and xrefs write it, `inputs/kafka_franz`, `rate_limits/local`, and may be plural, singular, or hyphenated (`rate-limits`, `rate_limit`). It is always explicit, so `kafka`, `http_client` and `file` are never ambiguous.
 
-component::
-Required. `<type>/<name>`, written as rp-connect-docs paths and xrefs write it: `inputs/kafka_franz`, `rate_limits/local`. The type may be plural, singular, or hyphenated (`rate-limits`, `rate_limit`). `component=config` addresses the root fields of a pipeline config (`pipeline.threads`, `http.enabled`). The type is always explicit, so `kafka`, `http_client` and `file` are never ambiguous.
+The field comes next, `default` when it is omitted. Every value macro shares one set of field names (<<value-fields>>).
 
-[cols="1,2,2"]
+The first form of the macro is still accepted, and renders the same: the field path as the target and the component in `component=`, as in `connectval:client_id[default,component=inputs/redpanda]` or `connectval:pipeline.threads[component=config]`. `check-reference-values --write` writes this form.
+
+[[connectval-fields]]
+[cols="1,1,2,2"]
 |===
-| Field | Source in the Connect data | Example (4.114.0)
+| Field | Of | Source in the Connect data | Example (4.114.0)
 
 | `default`
+| field
 | `default`, as the reference's `*Default*:` line prints it inline
 | `redpanda` input `client_id`: `redpanda-connect`; `postgres_cdc` input `incremental_snapshot.chunk_size`: `1024`
 
 | `type`
+| field
 | The reference's `*Type*:` text
 | `string`, `array<string>`, `object`, `array<array<string>>`
 
-| `options` (aliases `values`, `annotated_options`)
+| `values` (aliases `options`, `annotated_options`, `enum`, `accepted-values`)
+| field
 | `options`, else the first value of each `annotated_options` pair, each as inline code
 | `merge-on-read`, `copy-on-write`
 
+| `description`
+| field, component
+| `description`, as AsciiDoc (or Markdown, by `docs_format`). Inline only when it is one paragraph; otherwise use `connectval::`
+| `kafka_franz` input `consumer_group`: a paragraph, a list and a paragraph
+
+| `summary` (alias `short_description`)
+| field, component
+| A field's `short_description`, or a component's `summary`
+| `kafka_franz` input `consumer_group`: "An optional consumer group to consume as. ..."
+
+| `examples` (alias `example`)
+| field
+| `examples`. Inline, each value as inline code, when every example is a single value; the block form is a YAML listing, one example per document
+| `kafka_franz` input `topics`
+
 | `deprecated` (alias `is_deprecated`)
-| `is_deprecated`
+| field, component
+| A field's `is_deprecated`, or a component's `status` of `deprecated`
 | `yes` or `no`
 
-| `introduced` (alias `version`)
+| `introduced` (aliases `since`, `version`)
+| field, component
 | `version`. Hidden on Cloud, where the reference shows no "Requires version"
 | `4.21.0`
+
+| `required` (inverse alias `optional`)
+| field
+| Whether the config linter requires the field: not optional, not deprecated, no default, a scalar with no child fields, and not a component (benthos `internal/docs/format_yaml.go`)
+| `redpanda` input `seed_brokers`: `no` (it is a list); `generate` input `mapping`: `yes`
+
+| `advanced` (alias `is_advanced`)
+| field
+| `is_advanced`
+| `yes` or `no`
+
+| `secret` (alias `is_secret`)
+| field
+| `is_secret`
+| `yes` or `no`
+
+| `interpolated` (alias `is_interpolated`)
+| field
+| `interpolated`: the field takes interpolation functions
+| `yes` or `no`
+
+| `status`
+| component
+| `status`
+| `stable`, `beta`, `experimental`, `deprecated`
+
+| `category` (alias `categories`)
+| component
+| `categories`, comma-separated
+| `Services`, `AWS`
 |===
 
 format::
-`human` (default) or `raw`. It changes only `deprecated` (`true` or `false`) and `options` (a JSON array).
+`human` (default) or `raw`. It changes the yes-or-no fields to `true` or `false`, and `values` and `category` to a JSON array.
 
-Don't wrap `options` in backticks: it already renders each value as inline code. The output is a `<span class="connect-value">` with `data-connect-component`, `data-connect-field` and `data-field` attributes.
+Don't wrap `values` in backticks: it already renders each value as inline code. The output is a `<span class="connect-value">` with `data-connect-component`, `data-connect-field` (for a field) and `data-field` attributes. `data-field` is the canonical field (`values` for a call that asked for `options`), or `optional` when that is what the call asked for.
+
+A description or an example longer than one paragraph has no inline form. Write the block form on a line of its own, which parses the text into the page:
+
+[,asciidoc]
+----
+connectval::[inputs/kafka_franz.consumer_group,description]
+----
+
+It renders an open block with the roles `connect-value` and `connect-value-<field>`. The strings were written for the component's own page, so off that page their links are rewritten (<<value-text>>).
 
 === Formatting
 
@@ -771,15 +924,16 @@ Connect versions are Connect's own (4.x), so the page's component and version ne
 The surface is Cloud when the page's own component version sets `env-cloud`, so a cloud-docs page that includes rp-connect-docs text is gated. On a Cloud page:
 
 * A component that is not available in Cloud is `unavailable`. Availability comes from the translated `csvData` rows that `generate-rp-connect-info` sets on the `connect` component (GPU-only components count as available), else from the component's `cloudSupported` in the JSON. The message names the source. When neither says, the value renders and the macro warns `cloud-unknown` once.
-* `introduced` is `cloud-hidden`.
-* `component=config` is never gated.
+* `introduced` is `cloud-hidden`, for a field or a component.
+* The root config (`config.` or `component=config`) is never gated.
+* A link in a description to a page Cloud does not have renders as its label, unlinked, with a warning (<<value-text>>).
 
 === Failures and validation modes
 
 A missing value renders `<unknown FIELD>` (class `connect-value connect-value-unknown`) and logs why.
 
 connect-validate::
-`warn` (default) logs each problem. `error` fails the build on `unknown-type`, `unknown-component`, `unknown-field`, `missing-field`, `unsupported-field`, `cloud-hidden` and `unavailable`. `off` silences warnings for values that render; a placeholder is still reported.
+`warn` (default) logs each problem. `error` fails the build on `unknown-type`, `unknown-component`, `unknown-field`, `missing-field`, `unsupported-field`, `cloud-hidden`, `unavailable`, `needs-block` (a string longer than one paragraph in the inline form) and `block-form-inline` (`connectval::` inside a sentence). `off` silences warnings for values that render; a placeholder is still reported.
 
 These never fail the build: `no-data`, `imprecise`, `description-default`, `complex-default`, `deprecated-field` and `cloud-unknown`.
 
@@ -790,6 +944,228 @@ These never fail the build: `no-data`, `imprecise`, `description-default`, `comp
 === Registration
 
 Registered by the `prop` macro's extension (see <<rpkval>>).
+
+[[value-fields]]
+== Fields of the value macros
+
+`propval:`, `rpkval:` and `connectval:` share one set of field names: a field means the same thing in every macro that has it, and its aliases (the JSON key names, and older spellings) work everywhere the field exists. The first rows are the shared fields; the rest belong to one source. A cell names where a macro has the field: `yes`, or a flag or command for `rpkval:`, a config field or component for `connectval:`. An inverted alias gives the opposite value: `optional` is `yes` where `required` is `no`.
+
+A field name a macro does not support is a warning (an error in `error` mode) that lists the fields it does. A test in this repository fails when this table and the macros disagree.
+
+[[value-fields-table]]
+[cols="2,3,1,2,2"]
+|===
+| Field | Aliases | propval | rpkval | connectval
+
+| `default`
+|
+| yes
+| flag
+| field
+
+| `type`
+|
+| yes
+| flag
+| field
+
+| `description`
+| `desc`
+| yes
+| flag, command
+| field, component
+
+| `summary`
+| `short_description`
+|
+|
+| field, component
+
+| `values`
+| `accepted-values`, `annotated_options`, `enum`, `options`
+| yes
+|
+| field
+
+| `introduced`
+| `introducedInVersion`, `since`, `version`
+| yes
+| flag, command
+| field, component
+
+| `deprecated`
+| `is_deprecated`
+| yes
+|
+| field, component
+
+| `status`
+|
+|
+|
+| component
+
+| `required`
+| `optional` (inverted)
+|
+| flag
+| field
+
+| `examples`
+| `example`
+| yes
+| command
+| field
+
+| `advanced`
+| `is_advanced`
+|
+|
+| field
+
+| `secret`
+| `is_secret`
+| yes
+|
+| field
+
+| `enterprise`
+| `is_enterprise`
+| yes
+|
+|
+
+| `category`
+| `categories`
+| yes
+|
+| component
+
+| `aliases`
+|
+| yes
+| command
+|
+
+| `see-also`
+| `seeAlso`, `see_also`
+| yes
+|
+|
+
+| `cloud-access`
+| `cloud`
+| yes
+|
+|
+
+| `unit`
+| `units`
+| yes
+|
+|
+
+| `min`
+| `minimum`
+| yes
+|
+|
+
+| `max`
+| `maximum`
+| yes
+|
+|
+
+| `restart`
+| `needs_restart`, `requires-restart`
+| yes
+|
+|
+
+| `nullable`
+|
+| yes
+|
+|
+
+| `scope`
+| `config_scope`
+| yes
+|
+|
+
+| `visibility`
+|
+| yes
+|
+|
+
+| `restored`
+| `gets_restored`
+| yes
+|
+|
+
+| `shorthand`
+| `short`
+|
+| flag
+|
+
+| `usage`
+|
+|
+| command
+|
+
+| `platforms`
+|
+|
+| command
+|
+
+| `self-hosted-only`
+| `selfHostedOnly`
+|
+| command
+|
+
+| `interpolated`
+| `is_interpolated`
+|
+|
+| field
+|===
+
+[[value-text]]
+=== Descriptions and other text values
+
+`description`, `summary`, `examples` and `see-also` are text, rendered from its source format:
+
+[cols="1,2"]
+|===
+| Source | Rendered as
+
+| Property strings, and Connect strings while the data says `docs_format: asciidoc`
+| AsciiDoc: `code`, emphasis, links, lists, admonitions, listings, tables, and `ifdef::env-cloud[]` conditionals, which apply with the page's attributes
+
+| Connect strings once the data says `docs_format: markdown`
+| Markdown, converted to AsciiDoc first: paragraphs, emphasis, code spans, links, lists, fenced code, headings, block quotes and pipe tables
+
+| rpk help text
+| Literally, as cobra prints it: paragraphs, with each indented run as a literal block. Backticks and asterisks render as written
+|===
+
+The inline form renders a text value only when it is one paragraph. Anything longer (a blank line, a list, a listing, a heading, a conditional) renders `<unknown FIELD>` with a `needs-block` warning that names the block form: the same macro with two colons, on a line of its own, such as `propval::cleanup.policy[description]`, `rpkval::[rpk topic create,description]` or `connectval::[inputs/kafka_franz.consumer_group,description]`. The block form parses the text into the page. A heading in the text renders as a discrete heading, because a section cannot open inside a block. Written inside a sentence, the block form is a `block-form-inline` error.
+
+A Connect string was written for its component's page in `connect:components`, so a link in it is relative to that page. When the string renders anywhere else, its links are rewritten:
+
+* `<<signal_table_name,...>>`, an anchor on the component's page, links that page's anchor.
+* An xref with no component, such as `xref:components:inputs/broker.adoc[]` or `xref:guides:bloblang/about.adoc[]`, keeps pointing at the connect component. On another page in `connect`, a bare page gets its `components` module. On a Cloud page, the link stays relative to the Cloud component, where the Cloud stubs alias the connect paths (`components:inputs/broker.adoc`). On any other page it is qualified with `connect:`.
+* A target the rendering page's build has no page for renders as its label, unlinked, with a warning. A Cloud reader is never linked to the self-managed docs.
+
+Property descriptions and examples link with module-qualified xrefs that resolve wherever the property reference itself renders, so they are not rewritten.
 
 [[check-reference-values]]
 == Checking prose: check-reference-values

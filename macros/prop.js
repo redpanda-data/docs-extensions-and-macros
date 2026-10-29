@@ -101,6 +101,12 @@
  * renders a visible placeholder such as <unknown default> and reports why,
  * because unlike a property name, a value has no safe fallback.
  *
+ * Text values (description, examples, see-also) render inline only when they
+ * are one paragraph. Anything longer takes the block form, on a line of its
+ * own, which parses the AsciiDoc into the page:
+ *
+ *   propval::cleanup.policy[description]
+ *
  * Example use in a playbook:
  *
  *   asciidoc:
@@ -110,9 +116,10 @@
 
 const { escapeHtml } = require('../extension-utils/html-utils')
 const propertyValues = require('../extension-utils/property-values')
+const valueDescriptions = require('../extension-utils/value-descriptions')
 const datasets = require('../extension-utils/attachment-datasets')
-const { rpkvalInlineMacro } = require('./rpkval')
-const { connectvalInlineMacro } = require('./connectval')
+const { rpkvalInlineMacro, rpkvalBlockMacro } = require('./rpkval')
+const { connectvalInlineMacro, connectvalBlockMacro } = require('./connectval')
 const { rpkcmdInlineMacro } = require('./rpkcmd')
 const logger = require('@antora/logger')('prop-macro')
 
@@ -782,15 +789,15 @@ function buildPropvalContent ({ name, field, text, html, unknown = false }) {
  * the migrate-property-values report.
  *
  * @param {string} [opts.filePath] - Named in the message, when known.
- * @returns {{ok: true, text: string, html?: string, registry: object, field: string} |
+ * @param {boolean} [opts.block] - The call is the block form, propval::.
+ * @returns {{ok: true, text: string, html?: string, rich?: object, registry: object, field: string} |
  *           {ok: false, kind: string, message: string, registry?: object, field: string}}
  */
-function resolvePropertyValue ({ registry, name, field: requested, format, component, filePath }) {
+function resolvePropertyValue ({ registry, name, field: requested, format, component, filePath, block = false }) {
   const field = propertyValues.normalizeField(requested)
-  const call = `propval:${name}[${requested}]${filePath ? ` in ${filePath}` : ''}`
+  const call = `propval${block ? '::' : ':'}${name}[${requested}]${filePath ? ` in ${filePath}` : ''}`
   if (!field) {
-    const supported = Object.keys(propertyValues.FIELDS).join(', ')
-    return { ok: false, kind: 'unsupported-field', field: requested, message: `${call}: '${requested}' is not a field propval: supports. Supported fields: ${supported}.` }
+    return { ok: false, kind: 'unsupported-field', field: requested, message: propertyValues.FIELD_SET.unsupportedMessage(call, requested) }
   }
   if (!registry) {
     return { ok: false, kind: 'no-data', field, message: `${call}: this page has no property data to read '${field}' from (see the prop macro warning for this component version), so it renders <unknown ${field}> rather than a value from another release.` }
@@ -805,14 +812,62 @@ function resolvePropertyValue ({ registry, name, field: requested, format, compo
   if (registry.surface === SURFACE_CLOUD && propertyValues.FIELDS[field].cloudHidden) {
     return { ok: false, kind: 'cloud-hidden', field, registry, message: `${call}: the property reference does not state '${field}' for Cloud (Cloud configures it, and the reference renders it only outside env-cloud), so this Cloud page renders <unknown ${field}>. Put the sentence in an ifndef::env-cloud[] block, or use a field the Cloud reference shows, such as cloud-access.` }
   }
-  const value = propertyValues.fieldValue(entry, field, { format })
+  const value = propertyValues.fieldValue(entry, field, { format, cloud: registry.surface === SURFACE_CLOUD })
   if (!value.ok && value.reason === 'imprecise') {
     return { ok: false, kind: 'imprecise', field, registry, message: `${call}: the ${field} of '${name}' in ${describeDataset(registry)} is an integer larger than JavaScript represents exactly, so the build cannot render it without changing digits and renders <unknown ${field}>. State the value in prose by hand.` }
   }
   if (!value.ok) {
     return { ok: false, kind: 'missing-field', field, registry, message: `${call}: '${name}' has no ${field} in ${describeDataset(registry)}, so it renders <unknown ${field}>.` }
   }
-  return { ok: true, field, registry, text: value.text, html: value.html }
+  return { ok: true, field, registry, text: value.text, html: value.html, rich: value.rich, call }
+}
+
+// Kinds that fail the build in error mode, like an unknown prop: name. So do
+// cloud-hidden and unavailable: they appear only in the Cloud build of
+// single-sourced prose, where a warning alone would let the placeholder ship.
+// Everything else is reported and rendered as the placeholder.
+const PROPVAL_THROW_KINDS = ['unknown-property', 'missing-field', 'unsupported-field', 'cloud-hidden', 'unavailable', 'needs-block', 'block-form-inline']
+
+/**
+ * Resolve one propval: or propval:: call on a page: its dataset, format and
+ * value, which the inline and block forms share.
+ */
+function propvalCall (config, parent, target, attributes, { block = false } = {}) {
+  const document = parent.getDocument()
+  const name = String(target).trim()
+  const mode = document.getAttribute('property-validate', 'warn')
+  const filePath = config && config.file && config.file.src && config.file.src.path
+  const component = (config && config.file && config.file.src && config.file.src.component) || ''
+  const version = (config && config.file && config.file.src && config.file.src.version) || ''
+  const requested = String(attributes.field || 'default').trim()
+  let format = String(attributes.format || propertyValues.FORMAT_HUMAN).trim().toLowerCase()
+  const where = filePath ? ` in ${filePath}` : ''
+  if (format !== propertyValues.FORMAT_HUMAN && format !== propertyValues.FORMAT_RAW) {
+    logger.warn(`propval:${name}[${requested}]${where}: format=${format} is not supported; use format=raw for the exact value. Rendering the human-readable value.`)
+    format = propertyValues.FORMAT_HUMAN
+  }
+  // propval::x[] inside a sentence reaches the inline macro with the second
+  // colon at the start of the target.
+  if (!block && name.startsWith(':')) {
+    const field = propertyValues.normalizeField(requested) || requested
+    return { mode, name: name.slice(1), result: { ok: false, kind: 'block-form-inline', field, message: `propval:${name}[${requested}]${where}: propval:: is the block form, which renders only on a line of its own. In a sentence, write propval:${name.slice(1)}[${requested}].` } }
+  }
+
+  const contentCatalog = config && config.contentCatalog
+  const registry = contentCatalog ? loadProperties(config) : undefined
+  if (!registry && contentCatalog && mode !== 'off') {
+    // The same once-per-component-version diagnostic prop: emits.
+    if (!warnSeriesMissing(contentCatalog, component, version)) warnNoPropertyData(contentCatalog, component, version)
+  }
+  return { mode, name, result: resolvePropertyValue({ registry, name, field: requested, format, component, filePath, block }) }
+}
+
+// A placeholder is reported even in off mode: off means "do not check
+// names", but a value cannot fall back to anything, and a silent
+// <unknown default> would reach readers unnoticed.
+function reportPropval (mode, result) {
+  if (mode === 'error' && PROPVAL_THROW_KINDS.includes(result.kind)) throw new Error(result.message)
+  logger.warn(result.message)
 }
 
 function propvalInlineMacro (config) {
@@ -821,43 +876,39 @@ function propvalInlineMacro (config) {
     self.named('propval')
     self.positionalAttributes(['field'])
     self.process(function (parent, target, attributes) {
-      const document = parent.getDocument()
-      const name = target.trim()
-      const mode = document.getAttribute('property-validate', 'warn')
-      const filePath = config && config.file && config.file.src && config.file.src.path
-      const component = (config && config.file && config.file.src && config.file.src.component) || ''
-      const version = (config && config.file && config.file.src && config.file.src.version) || ''
-      const requested = String(attributes.field || 'default').trim()
-      let format = String(attributes.format || propertyValues.FORMAT_HUMAN).trim().toLowerCase()
-      const where = filePath ? ` in ${filePath}` : ''
-      if (format !== propertyValues.FORMAT_HUMAN && format !== propertyValues.FORMAT_RAW) {
-        logger.warn(`propval:${name}[${requested}]${where}: format=${format} is not supported; use format=raw for the exact value. Rendering the human-readable value.`)
-        format = propertyValues.FORMAT_HUMAN
+      const { mode, name, result } = propvalCall(config, parent, target, attributes)
+      if (result.ok && result.rich) {
+        // A text value renders inline only when it is one paragraph.
+        const html = valueDescriptions.richInlineHtml(parent, result.rich)
+        if (html !== undefined) return self.createInline(parent, 'quoted', buildPropvalContent({ name, field: result.field, html }))
+        reportPropval(mode, { kind: 'needs-block', message: `${result.call}: the ${result.field} value of '${name}' is more than one paragraph, which has no inline form, so it renders <unknown ${result.field}>. Use the block form on a line of its own: propval::${name}[${result.field}].` })
+        return self.createInline(parent, 'quoted', buildPropvalContent({ name, field: result.field, unknown: true }))
       }
-
-      const contentCatalog = config && config.contentCatalog
-      const registry = contentCatalog ? loadProperties(config) : undefined
-      if (!registry && contentCatalog && mode !== 'off') {
-        // The same once-per-component-version diagnostic prop: emits.
-        if (!warnSeriesMissing(contentCatalog, component, version)) warnNoPropertyData(contentCatalog, component, version)
-      }
-      const result = resolvePropertyValue({ registry, name, field: requested, format, component, filePath })
       if (result.ok) {
         return self.createInline(parent, 'quoted', buildPropvalContent({ name, field: result.field, text: result.text, html: result.html }))
       }
-      // Authoring errors fail the build in error mode, like an unknown prop:
-      // name. So do cloud-hidden and unavailable: they appear only in the
-      // Cloud build of single-sourced prose, where a warning alone would let
-      // the placeholder ship. Everything else is reported and rendered as the
-      // placeholder. A placeholder is reported even in off mode: off means
-      // "do not check names", but a value cannot fall back to anything, and a
-      // silent <unknown default> would reach readers unnoticed.
-      const { message } = result
-      if (mode === 'error' && ['unknown-property', 'missing-field', 'unsupported-field', 'cloud-hidden', 'unavailable'].includes(result.kind)) {
-        throw new Error(message)
-      }
-      logger.warn(message)
+      reportPropval(mode, result)
       return self.createInline(parent, 'quoted', buildPropvalContent({ name, field: result.field, unknown: true }))
+    })
+  }
+}
+
+/**
+ * propval::<name>[<field>], the block form, for a value longer than one
+ * paragraph such as a description. A text value is parsed into the page as
+ * AsciiDoc; any other value renders as a paragraph of its own.
+ */
+function propvalBlockMacro (config) {
+  return function () {
+    const self = this
+    self.named('propval')
+    self.positionalAttributes(['field'])
+    self.process(function (parent, target, attributes) {
+      const { mode, name, result } = propvalCall(config, parent, target, attributes, { block: true })
+      if (result.ok && result.rich) return valueDescriptions.richBlock(self, parent, result.rich, `${VALUE_ROLE} ${VALUE_ROLE}-${result.field}`)
+      if (result.ok) return valueDescriptions.htmlParagraph(self, parent, buildPropvalContent({ name, field: result.field, text: result.text, html: result.html }))
+      reportPropval(mode, result)
+      return valueDescriptions.htmlParagraph(self, parent, buildPropvalContent({ name, field: result.field, unknown: true }))
     })
   }
 }
@@ -884,6 +935,9 @@ function register (registry, config = {}) {
       this.inlineMacro(rpkvalInlineMacro(config))
       this.inlineMacro(connectvalInlineMacro(config))
       this.inlineMacro(rpkcmdInlineMacro(config))
+      this.blockMacro(propvalBlockMacro(config))
+      this.blockMacro(rpkvalBlockMacro(config))
+      this.blockMacro(connectvalBlockMacro(config))
     })
   } else if (typeof registry.inlineMacro === 'function') {
     registry.inlineMacro(propInlineMacro(config))
@@ -891,6 +945,11 @@ function register (registry, config = {}) {
     registry.inlineMacro(rpkvalInlineMacro(config))
     registry.inlineMacro(connectvalInlineMacro(config))
     registry.inlineMacro(rpkcmdInlineMacro(config))
+    if (typeof registry.blockMacro === 'function') {
+      registry.blockMacro(propvalBlockMacro(config))
+      registry.blockMacro(rpkvalBlockMacro(config))
+      registry.blockMacro(connectvalBlockMacro(config))
+    }
   } else {
     logger.warn("no 'inlineMacro' method on alleged registry")
   }

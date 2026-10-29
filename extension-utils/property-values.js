@@ -26,13 +26,17 @@
 const formatPropertyValue = require('../tools/property-extractor/helpers/formatPropertyValue')
 const formatUnits = require('../tools/property-extractor/helpers/formatUnits')
 const { escapeHtml } = require('./html-utils')
+const { defineFields } = require('./value-fields')
+const { normalizeSeeAlso } = require('../tools/property-extractor/helpers/seeAlsoView')
 
 const FORMAT_HUMAN = 'human'
 const FORMAT_RAW = 'raw'
 
 // Every field propval: supports. `cloudHidden` marks the fields the reference
 // pages wrap in ifndef::env-cloud[], so a Cloud page never states them either.
-const FIELDS = {
+// `rich` marks text values (AsciiDoc), which the inline form renders only
+// when they are a single paragraph; see extension-utils/value-descriptions.js.
+const FIELD_SET = defineFields('propval:', {
   default: { cloudHidden: true },
   type: {},
   unit: {},
@@ -47,35 +51,33 @@ const FIELDS = {
   restored: { cloudHidden: true },
   aliases: { cloudHidden: true },
   'cloud-access': {},
-}
-
-// The JSON key names and table labels are accepted as aliases, so a writer
-// who types what they see in the data or on the page gets the same field.
-const FIELD_ALIASES = {
+  description: { rich: true },
+  deprecated: {},
+  enterprise: { cloudHidden: true },
+  secret: {},
+  category: {},
+  examples: { rich: true },
+  'see-also': { rich: true },
+}, {
+  // The JSON key names and table labels are accepted as aliases, so a writer
+  // who types what they see in the data or on the page gets the same field.
+  // The shared aliases (enum, version, cloud, ...) come from value-fields.js.
   minimum: 'min',
   maximum: 'max',
   needs_restart: 'restart',
   'requires-restart': 'restart',
   units: 'unit',
-  enum: 'values',
-  'accepted-values': 'values',
   config_scope: 'scope',
-  version: 'introduced',
   gets_restored: 'restored',
-  cloud: 'cloud-access',
-}
+})
+const { FIELDS, FIELD_ALIASES } = FIELD_SET
 
 const DURATION_UNITS = { milliseconds: 1, seconds: 1000 }
 
 /**
  * Canonical field name, or undefined for a field propval: does not support.
  */
-function normalizeField (field) {
-  const key = String(field == null ? '' : field).trim().toLowerCase()
-  if (Object.prototype.hasOwnProperty.call(FIELDS, key)) return key
-  if (Object.prototype.hasOwnProperty.call(FIELD_ALIASES, key)) return FIELD_ALIASES[key]
-  return undefined
-}
+const normalizeField = FIELD_SET.normalizeField
 
 /**
  * The unit the reference table prints for a property, lowercased for prose:
@@ -152,6 +154,7 @@ const imprecise = () => ({ ok: false, reason: 'imprecise' })
 const plain = (text) => ({ ok: true, text: String(text) })
 const missing = () => ({ ok: false, reason: 'missing' })
 const yesNo = (value, format) => plain(format === FORMAT_RAW ? String(value) : (value ? 'yes' : 'no'))
+const richText = (text) => ({ ok: true, text: text.trim(), rich: { kind: 'text', text: text.trim(), format: 'asciidoc' } })
 
 /**
  * The value of one field of one property entry.
@@ -160,11 +163,15 @@ const yesNo = (value, format) => plain(format === FORMAT_RAW ? String(value) : (
  * @param {string} field - A field name or alias.
  * @param {object} [opts]
  * @param {'human'|'raw'} [opts.format] - human (default) or the exact value.
- * @returns {{ok: true, text: string, html?: string} |
+ * @param {boolean} [opts.cloud] - The page renders for Cloud, which decides
+ *   which see-also items apply.
+ * @returns {{ok: true, text: string, html?: string, rich?: object} |
  *           {ok: false, reason: 'unsupported'|'missing'|'imprecise'}}
- *   html, when present, is pre-escaped markup to use instead of text.
+ *   html, when present, is pre-escaped markup to use instead of text. rich,
+ *   when present, is AsciiDoc the macro renders in the page's context
+ *   ({kind: 'text', text} or {kind: 'list', items}, format asciidoc).
  */
-function fieldValue (entry, field, { format = FORMAT_HUMAN } = {}) {
+function fieldValue (entry, field, { format = FORMAT_HUMAN, cloud = false } = {}) {
   const name = normalizeField(field)
   if (!name) return { ok: false, reason: 'unsupported' }
   const has = (key) => Object.prototype.hasOwnProperty.call(entry, key) && entry[key] !== undefined
@@ -236,12 +243,32 @@ function fieldValue (entry, field, { format = FORMAT_HUMAN } = {}) {
       if (entry.cloud_supported === false) return plain(raw ? 'unsupported' : 'not available')
       return missing()
     }
+    case 'description':
+      return typeof entry.description === 'string' && entry.description.trim() ? richText(entry.description) : missing()
+    case 'examples':
+      return typeof entry.example === 'string' && entry.example.trim() ? richText(entry.example) : missing()
+    case 'deprecated':
+      return typeof entry.is_deprecated === 'boolean' ? yesNo(entry.is_deprecated, format) : missing()
+    case 'enterprise':
+      return typeof entry.is_enterprise === 'boolean' ? yesNo(entry.is_enterprise, format) : missing()
+    case 'secret':
+      return typeof entry.is_secret === 'boolean' ? yesNo(entry.is_secret, format) : missing()
+    case 'category':
+      return typeof entry.category === 'string' && entry.category ? plain(entry.category) : missing()
+    case 'see-also': {
+      // The Related topics row, with the items the reference shows on this
+      // surface only (cloud_only and self_managed_only, as seeAlsoView reads
+      // them).
+      const items = normalizeSeeAlso(entry).filter((item) => (cloud ? !item.selfManagedOnly : !item.cloudOnly)).map((item) => item.content)
+      return items.length ? { ok: true, text: items.join(', '), rich: { kind: 'list', items, format: 'asciidoc' } } : missing()
+    }
     default:
       return { ok: false, reason: 'unsupported' }
   }
 }
 
 module.exports = {
+  FIELD_SET,
   FIELDS,
   FIELD_ALIASES,
   FORMAT_HUMAN,
