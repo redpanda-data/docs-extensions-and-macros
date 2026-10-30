@@ -36,6 +36,7 @@
  */
 
 const rpkValues = require('../extension-utils/rpk-values')
+const rpkLinks = require('../extension-utils/rpk-links')
 const datasets = require('../extension-utils/attachment-datasets')
 const valueDescriptions = require('../extension-utils/value-descriptions')
 const { annotateVerbatimLines } = require('../tools/redpanda-connect/metadata-utils')
@@ -109,10 +110,19 @@ function rpkvalCall (config, parent, target, attributes, { block = false } = {})
   // With no flag, the bracket form reads a field of the command itself.
   const level = bracket && !parsed.flag ? 'command' : 'flag'
   let result = shape || rpkValues.resolveRpkValue({ registry, command, flag: flagTarget, field: requested, format, filePath, macro, level })
+  const call = macro || `rpkval:${target}[${requested}]`
   if (result.ok && result.rich && result.rich.format === valueDescriptions.FORMAT_ASCIIDOC) {
-    result = { ...result, rich: { ...result.rich, text: escapeUndefinedAttributes(result.rich.text, document) } }
+    // The description is written for its command's reference page, so its
+    // links are rewritten for the page it renders on.
+    const names = rpkValues.commandTokens(result.command)
+    const moved = rpkLinks.relocateRpkRefs(escapeUndefinedAttributes(result.rich.text, document), { registry: result.registry || registry, names, src, contentCatalog })
+    if (moved.unlinked.length && mode !== 'off') {
+      const cloud = datasets.isAttributeSet(datasets.componentAttributes(contentCatalog, component, version)['env-cloud'])
+      logger.warn(`${call}${where}: the ${result.field} links ${moved.unlinked.join(', ')}, which ${cloud ? 'this Cloud page' : 'this build'} has no page for, so ${moved.unlinked.length === 1 ? 'that link renders' : 'those links render'} as text.`)
+    }
+    result = { ...result, rich: { ...result.rich, text: moved.text } }
   }
-  return { mode, flagName, requested, commandText: result.ok ? result.command : commandText(), result, macro: macro || `rpkval:${target}[${requested}]`, where }
+  return { mode, flagName, requested, commandText: result.ok ? result.command : commandText(), result, macro: call, where }
 }
 
 /**

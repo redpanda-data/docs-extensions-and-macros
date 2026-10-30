@@ -30,6 +30,7 @@
 
 const datasets = require('./attachment-datasets')
 const rpkValues = require('./rpk-values')
+const { annotateVerbatimLines } = require('../tools/redpanda-connect/metadata-utils')
 
 const $rpkPages = Symbol('$rpkPages')
 const PAGE_MODULE = 'reference'
@@ -238,6 +239,112 @@ function resolveRpkCommand ({ registry, text, call }) {
   return { ok: false, kind: 'unknown-flag', typed, registry, message: `${label}: '${parsed.flag}' is not a flag of ${where} in ${dataset}.${hint}` }
 }
 
+/**
+ * Rewrite the links in an rpk description for the page it renders on. The
+ * descriptions are written for the command's own reference page in the
+ * component the rpk data came from (streaming): an xref with no component
+ * resolves there, xref:./x.adoc is a page beside the command's page, and
+ * <<id>> is an anchor on it. On any other page those links break, so:
+ *
+ *   a command page     links the page rpkcmd: would link (pickCommandPage),
+ *                      with its fragment: a Cloud stub on Cloud, the rpk ai
+ *                      pages on Agentic Data Plane, never a self-managed
+ *                      page on Cloud.
+ *   <<id>>             links the anchor on the command's page, picked the
+ *                      same way, unless the text renders on that page.
+ *   any other page     stays as written when the rendering page's component
+ *                      version has it, and is otherwise qualified with the
+ *                      data's component and version. A Cloud page never
+ *                      links outside its own component.
+ *   a qualified target (xref:connect:guides:bloblang/about.adoc) stays as
+ *                      written.
+ *
+ * A target the build has no page for renders as its label, unlinked, and is
+ * returned in unlinked.
+ *
+ * @param {string} text - AsciiDoc.
+ * @param {object} opts
+ * @param {object} opts.registry - The rpk data the text came from.
+ * @param {string[]} opts.names - The command the text describes, below rpk.
+ * @param {object} [opts.src] - The rendering page's src (component, version, module, relative).
+ * @param {object} [opts.contentCatalog]
+ * @returns {{text: string, unlinked: string[]}}
+ */
+function relocateRpkRefs (text, { registry, names = [], src = {}, contentCatalog } = {}) {
+  if (!contentCatalog || !registry) return { text, unlinked: [] }
+  const { findPage: find } = require('./connect-links')
+  // A resource ID with a version (26.2@streaming:manage:x.adoc) resolves in
+  // that version, as Antora resolves it.
+  const findPage = (catalog, spec, context = {}) => {
+    const at = spec.indexOf('@')
+    if (at === -1 || typeof catalog.resolvePage === 'function') return find(catalog, spec, context)
+    const parts = spec.slice(at + 1).split(':')
+    const relative = parts.pop()
+    const module = parts.pop() || context.module
+    return find(catalog, `${module}:${relative}`, { component: parts.pop() || context.component, version: spec.slice(0, at), module })
+  }
+  const tree = registry.data.tree
+  const component = String(src.component || '')
+  const version = src.version == null ? '' : String(src.version)
+  const home = commandPagePath(tree, names)
+  const onHome = src.module === PAGE_MODULE && src.relative === home
+  const cloud = datasets.isAttributeSet(datasets.componentAttributes(contentCatalog, component, version)['env-cloud'])
+  const from = { component: String(registry.component || ''), version: registry.version == null ? '' : String(registry.version) }
+  const unlinked = []
+  const title = (spec) => {
+    const page = findPage(contentCatalog, spec, from)
+    return page && page.asciidoc && page.asciidoc.doctitle
+  }
+  const unlink = (spec, label, fallback) => {
+    unlinked.push(spec)
+    return label || fallback
+  }
+  const commandLink = (relative, fragment, label) => {
+    const command = commandOfPage(tree, relative)
+    const shown = command ? `\`${cmdText(command.names)}\`` : `\`${relative.replace(/^.*\//, '').replace(/\.adoc$/, '')}\``
+    const page = pickCommandPage(contentCatalog, { component, version, relative })
+    if (!page.ok) return unlink(`${PAGE_MODULE}:${relative}`, label, shown)
+    return `xref:${page.id}${fragment ? `#${fragment}` : ''}[${label}]`
+  }
+  const lines = annotateVerbatimLines(text).map(({ line, verbatim }) => {
+    if (verbatim) return line
+    return line
+      .replace(/<<([^,>\s]+)(?:,\s*([^>]*?))?>>/g, (match, id, label) => {
+        if (onHome) return match
+        return commandLink(home, id, label != null && label !== '' ? label : `\`${id}\``)
+      })
+      .replace(/xref:([^[\s]+)\[([^\]]*)\]/g, (match, target, label) => {
+        const [resource, fragment] = target.split('#')
+        // A version or a component already says where it points, and an
+        // attribute reference is the page's to resolve.
+        if (resource.includes('@') || resource.split(':').length > 2 || /[{}]/.test(resource)) {
+          if (/[{}]/.test(resource) || findPage(contentCatalog, resource, { component, version })) return match
+          return unlink(resource, label, `\`${resource.replace(/^.*[/:]/, '').replace(/\.adoc$/, '')}\``)
+        }
+        let module = PAGE_MODULE
+        let relative = resource
+        if (resource.startsWith('./') || resource.startsWith('../')) {
+          relative = require('path').posix.normalize(`${home.slice(0, home.lastIndexOf('/') + 1)}${resource}`)
+        } else if (resource.includes(':')) {
+          [module, relative] = resource.split(':')
+        }
+        if (module === PAGE_MODULE && relative.startsWith(PAGE_DIR) && commandOfPage(tree, relative)) {
+          if (onHome && relative === home) return match
+          return commandLink(relative, fragment, label)
+        }
+        const spec = `${module}:${relative}`
+        const link = (id) => `xref:${id}${fragment ? `#${fragment}` : ''}[${label}]`
+        if (findPage(contentCatalog, spec, { component, version, module: src.module })) return link(spec)
+        const qualified = `${from.version ? `${from.version}@` : ''}${from.component}:${spec}`
+        if (cloud || from.component === component || !findPage(contentCatalog, qualified)) {
+          return unlink(spec, label, title(spec) || `\`${relative.replace(/^.*\//, '').replace(/\.adoc$/, '')}\``)
+        }
+        return link(qualified)
+      })
+  })
+  return { text: lines.join('\n'), unlinked }
+}
+
 module.exports = {
   PAGE_MODULE,
   commandPagePath,
@@ -249,4 +356,5 @@ module.exports = {
   pickCommandPage,
   loadRpkForLinks,
   resolveRpkCommand,
+  relocateRpkRefs,
 }

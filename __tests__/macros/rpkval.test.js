@@ -174,11 +174,14 @@ describe('rpkval macro', () => {
       expect(html).not.toContain('`-1`')
     })
 
-    test('the block form renders an xref in a description as a link', () => {
+    test('the block form renders an xref in a description as its label when the build has no page for it', () => {
+      // Links that resolve are in __tests__/extension-utils/rpk-relocate.test.js.
+      const warn = warnings()
       const html = convert('rpkval::[rpk cloud mcp stdio,description]', { catalog: streaming() })
       expect(html).toContain('<div class="openblock rpk-value rpk-value-description">')
-      expect(html).toMatch(/<a href="[^"]*rpk-cloud-mcp-install\.html"[^>]*><code>rpk cloud mcp install<\/code><\/a>/)
+      expect(html).toContain('Most users should use <code>rpk cloud mcp install</code> instead')
       expect(html).not.toContain('xref:')
+      expect(warn.mock.calls.map((c) => c[0]).join('\n')).toContain('the description links reference:rpk/rpk-cloud/rpk-cloud-mcp-install.adoc, which this build has no page for')
     })
 
     test('the block form renders a ---- listing in a description as a listing block', () => {
