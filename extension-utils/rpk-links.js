@@ -31,8 +31,12 @@
 const datasets = require('./attachment-datasets')
 const rpkValues = require('./rpk-values')
 const { annotateVerbatimLines } = require('../tools/redpanda-connect/metadata-utils')
+const urlToXref = require('../extensions/url-to-xref')
+const { scanContentUrls } = require('../extensions/util/scan-content-urls')
 
 const $rpkPages = Symbol('$rpkPages')
+const $docsUrls = Symbol('$rpkDocsUrls')
+const DOCS_HOSTNAMES = new Set(['docs.redpanda.com'])
 const PAGE_MODULE = 'reference'
 const PAGE_DIR = 'rpk/'
 
@@ -184,6 +188,73 @@ function loadRpkForLinks (contentCatalog, component, version) {
   return undefined
 }
 
+
+/**
+ * What extensions/url-to-xref.js resolves docs URLs against, built from the
+ * content catalog once per build: published URL path -> page, including the
+ * component start pages and page aliases, with the extension's default
+ * hostnames and ignored paths (/api/ and /mcp). By the time a macro runs,
+ * Antora has registered every page alias as an alias file, so buildUrlMap
+ * finds them there. The playbook is out of reach here, so the latest-version
+ * segment is the docs site's (current); candidatePaths also tries each
+ * component's real latest version, which a build without that segment
+ * publishes under.
+ */
+function docsUrlResolver (contentCatalog) {
+  if (contentCatalog[$docsUrls] !== undefined) return contentCatalog[$docsUrls]
+  let resolver = null
+  if (typeof contentCatalog.getComponents === 'function' && typeof contentCatalog.getPages === 'function') {
+    resolver = Object.assign(urlToXref.buildUrlMap(contentCatalog), {
+      hostnames: DOCS_HOSTNAMES,
+      ignore: urlToXref.DEFAULT_IGNORE.map((pattern) => new RegExp(pattern)),
+      latestVersionSegment: 'current',
+      resolveInclude: typeof contentCatalog.resolveResource === 'function'
+        ? (spec, page) => contentCatalog.resolveResource(spec, page.src, 'partial', ['partial', 'page'])
+        : undefined,
+    })
+  }
+  contentCatalog[$docsUrls] = resolver
+  return resolver
+}
+
+const $anchors = new WeakMap()
+const stripTags = (html) => String(html).replace(/<[^>]*>/g, '')
+  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&')
+
+/**
+ * The anchors of a URL's target page, id -> heading text, the way
+ * url-to-xref reads them. Macros run during conversion, when a page Antora
+ * has already converted holds HTML: its anchors are then its id attributes,
+ * and its headings the h1-h6 elements that carry one. undefined when the page
+ * has no contents to read.
+ */
+function targetAnchors (page, resolveInclude) {
+  if (!page || !page.contents) return undefined
+  if (page.mediaType !== 'text/html') return urlToXref.pageAnchors(page, resolveInclude)
+  if ($anchors.has(page)) return $anchors.get(page)
+  const html = page.contents.toString()
+  const anchors = new Map()
+  for (const m of html.matchAll(/<h[1-6]\b[^>]*\bid="([^"]+)"[^>]*>([\s\S]*?)<\/h[1-6]>/g)) {
+    anchors.set(m[1], urlToXref.sanitizeLinkText(stripTags(m[2])) || undefined)
+  }
+  for (const m of html.matchAll(/\bid="([^"]+)"/g)) if (!anchors.has(m[1])) anchors.set(m[1], undefined)
+  $anchors.set(page, anchors)
+  return anchors
+}
+
+/**
+ * A page's title as link text: the title Antora loaded from its header, or
+ * its level-0 heading while it is still AsciiDoc. Empty when neither is
+ * there, so xref:...[] lets Antora fill the title in, as url-to-xref does.
+ */
+function pageTitle (page) {
+  if (!page) return ''
+  const doctitle = page.asciidoc && page.asciidoc.doctitle
+  if (doctitle) return urlToXref.sanitizeLinkText(stripTags(doctitle))
+  if (page.contents && page.mediaType !== 'text/html') return urlToXref.documentTitle(page.contents.toString()) || ''
+  return ''
+}
+
 const cmdText = (names) => ['rpk', ...names].join(' ')
 
 /**
@@ -258,6 +329,32 @@ function resolveRpkCommand ({ registry, text, call }) {
  *                      links outside its own component.
  *   a qualified target (xref:connect:guides:bloblang/about.adoc) stays as
  *                      written.
+ *   a docs URL         (https://docs.redpanda.com/...) maps to a page as
+ *                      extensions/url-to-xref.js maps it: /current/ and
+ *                      version segments, legacy slugs such as
+ *                      /redpanda-connect/, start pages, page aliases, and a
+ *                      fragment only when the anchor is on the page. That
+ *                      extension runs before conversion, so it never sees
+ *                      macro output. A command page then links as above.
+ *                      Any other page links the rendering component's own
+ *                      page: the same page in its version when the target
+ *                      is in its component, otherwise a page alias it
+ *                      declares for the target's path (cloud-docs declares
+ *                      guides:bloblang/about.adoc for its Bloblang page).
+ *                      Otherwise the link names the target's component, as
+ *                      url-to-xref writes it. A Cloud page links only
+ *                      Cloud pages, never the self-managed docs (streaming,
+ *                      or connect, whose Cloud stubs alias its paths): it
+ *                      renders the link text, which is the label, the page
+ *                      title, or the URL, and the URL is returned in
+ *                      unlinked. The link keeps
+ *                      the URL's label; with none, it takes the heading the
+ *                      fragment names or the page title. A URL the catalog
+ *                      does not publish, or one under /api/ or /mcp, or with
+ *                      a query string or a fragment that is not on the
+ *                      page, stays as written: the build's own checks report
+ *                      those. Trailing sentence punctuation is not part of
+ *                      a URL.
  *
  * A target the build has no page for renders as its label, unlinked, and is
  * returned in unlinked.
@@ -306,6 +403,57 @@ function relocateRpkRefs (text, { registry, names = [], src = {}, contentCatalog
     if (!page.ok) return unlink(`${PAGE_MODULE}:${relative}`, label, shown)
     return `xref:${page.id}${fragment ? `#${fragment}` : ''}[${label}]`
   }
+  const urls = docsUrlResolver(contentCatalog)
+  const ownAlias = (module, relative) => (contentCatalog.findBy({ family: 'alias', component, version, module, relative }) || []).length > 0
+  const relinkUrl = (match) => {
+    let url
+    try {
+      url = new URL(match.url)
+    } catch {
+      return undefined
+    }
+    if (!urls.hostnames.has(url.hostname) || match.inAttributeEntry || match.inAttributeValue || match.hasAttributeReference) return undefined
+    if (url.search || urls.ignore.some((pattern) => pattern.test(url.pathname))) return undefined
+    const entry = urlToXref.resolveUrlPath(url.pathname, urls)
+    if (!entry) return undefined
+    const fragment = url.hash ? urlToXref.fragmentId(url.hash) : ''
+    let heading
+    if (fragment) {
+      const anchors = targetAnchors(entry.page, urls.resolveInclude)
+      if (!anchors || !anchors.has(fragment)) return undefined
+      heading = anchors.get(fragment)
+    }
+    // A trailing ^ opens a URL link in a new window; an xref would print it.
+    const given = (match.label || '').replace(/\^$/, '').trim()
+    if (entry.module === PAGE_MODULE && entry.relative.startsWith(PAGE_DIR)) {
+      const command = commandOfPage(tree, entry.relative)
+      if (command) return commandLink(entry.relative, fragment, given || `\`${cmdText(command.names)}\``)
+    }
+    const shown = given || heading || pageTitle(entry.page)
+    const spec = `${entry.module}:${entry.relative}`
+    const own = entry.component === component
+      ? findPage(contentCatalog, spec, { component, version, module: entry.module })
+      : ownAlias(entry.module, entry.relative)
+    if (own) return `xref:${spec}${fragment ? `#${fragment}` : ''}[${shown}]`
+    if (cloud) {
+      unlinked.push(match.url)
+      // A bare URL would still autolink, so one with no text to show is escaped.
+      return shown || `\\${match.url}`
+    }
+    return urlToXref.entryToXref(entry, fragment ? `#${fragment}` : '', shown)
+  }
+  const relinkUrls = (out) => {
+    if (!urls) return out
+    let result = ''
+    let cursor = 0
+    for (const match of scanContentUrls(out)) {
+      const replacement = relinkUrl(match)
+      if (replacement === undefined) continue
+      result += out.slice(cursor, match.start) + replacement
+      cursor = match.end
+    }
+    return result + out.slice(cursor)
+  }
   const lines = annotateVerbatimLines(text).map(({ line, verbatim }) => {
     if (verbatim) return line
     return line
@@ -342,7 +490,7 @@ function relocateRpkRefs (text, { registry, names = [], src = {}, contentCatalog
         return link(qualified)
       })
   })
-  return { text: lines.join('\n'), unlinked }
+  return { text: relinkUrls(lines.join('\n')), unlinked }
 }
 
 module.exports = {

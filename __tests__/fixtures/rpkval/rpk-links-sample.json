@@ -1,6 +1,6 @@
 {
  "_source": {
-  "note": "Trimmed from docs-data/rpk-v26.2.2.json in docs: the commands whose description or content has a link, the commands those links name, and their parents; only the description and the content entries with a link are kept. pages lists the real pages of each repo among the link targets, and aliases the one page alias a target goes through (rp-connect-docs get-started:about.adoc declares streaming:about.adoc).",
+  "note": "Trimmed from docs-data/rpk-v26.2.2.json in docs: the commands whose description or content has a link, the commands those links name, and their parents; only the description and the content entries with a link are kept. pages lists the real pages of each repo among the link targets, and aliases the page aliases the targets go through (rp-connect-docs get-started:about.adoc declares streaming:about.adoc, docs whole-cluster-restore.adoc declares manage:whole-cluster-restore.adoc, the cloud-docs Connect stubs declare the rp-connect-docs paths) and the start page alias Antora registers for rp-connect-docs (start_page home:index.adoc). raw_tree_urls holds the rpk help (raw_tree) of the 7 commands whose description has a docs.redpanda.com URL; the override-merged tree hides them. Pages have their titles, and sections lists real section headings of a page, for anchors.",
   "commits": {
    "docs": "2eb070ff",
    "cloud-docs": "aab67ef",
@@ -352,9 +352,33 @@
     {
      "module": "reference",
      "relative": "rpk/rpk-generate/rpk-generate-app.adoc"
+    },
+    {
+     "module": "manage",
+     "relative": "disaster-recovery/whole-cluster-restore.adoc",
+     "title": "Whole Cluster Restore",
+     "sections": [
+      "Manage source metadata uploads",
+      "Restore data from a source cluster",
+      "Restore data from multiple clusters sharing the same bucket"
+     ]
+    },
+    {
+     "module": "home",
+     "relative": "index.adoc",
+     "title": "Redpanda Streaming Documentation"
     }
    ],
-   "aliases": []
+   "aliases": [
+    {
+     "module": "manage",
+     "relative": "whole-cluster-restore.adoc",
+     "target": {
+      "module": "manage",
+      "relative": "disaster-recovery/whole-cluster-restore.adoc"
+     }
+    }
+   ]
   },
   {
    "repo": "cloud-docs",
@@ -404,9 +428,41 @@
     {
      "module": "reference",
      "relative": "rpk/rpk-generate/rpk-generate-app.adoc"
+    },
+    {
+     "module": "home",
+     "relative": "index.adoc",
+     "title": "Redpanda Cloud Documentation"
+    },
+    {
+     "module": "develop",
+     "relative": "connect/guides/bloblang/about.adoc",
+     "title": "Bloblang"
+    },
+    {
+     "module": "develop",
+     "relative": "connect/configuration/unit_testing.adoc",
+     "title": "Unit Testing"
     }
    ],
-   "aliases": []
+   "aliases": [
+    {
+     "module": "guides",
+     "relative": "bloblang/about.adoc",
+     "target": {
+      "module": "develop",
+      "relative": "connect/guides/bloblang/about.adoc"
+     }
+    },
+    {
+     "module": "configuration",
+     "relative": "unit_testing.adoc",
+     "target": {
+      "module": "develop",
+      "relative": "connect/configuration/unit_testing.adoc"
+     }
+    }
+   ]
   },
   {
    "repo": "adp-docs",
@@ -424,6 +480,11 @@
     {
      "module": "reference",
      "relative": "rpk/rpk-profile/rpk-profile-list.adoc"
+    },
+    {
+     "module": "home",
+     "relative": "index.adoc",
+     "title": "Run agents on all your data, safely."
     }
    ],
    "aliases": []
@@ -436,6 +497,31 @@
     {
      "module": "get-started",
      "relative": "about.adoc"
+    },
+    {
+     "module": "home",
+     "relative": "index.adoc",
+     "title": "Redpanda Connect Documentation"
+    },
+    {
+     "module": "guides",
+     "relative": "bloblang/about.adoc",
+     "title": "Bloblang"
+    },
+    {
+     "module": "guides",
+     "relative": "streams_mode/about.adoc",
+     "title": "Streams Mode"
+    },
+    {
+     "module": "configuration",
+     "relative": "templating.adoc",
+     "title": "Templating"
+    },
+    {
+     "module": "configuration",
+     "relative": "unit_testing.adoc",
+     "title": "Unit Testing"
     }
    ],
    "aliases": [
@@ -446,8 +532,70 @@
       "module": "get-started",
       "relative": "about.adoc"
      }
+    },
+    {
+     "module": "ROOT",
+     "relative": "index.adoc",
+     "start": true,
+     "target": {
+      "module": "home",
+      "relative": "index.adoc"
+     }
     }
    ]
+  }
+ ],
+ "raw_tree_urls": [
+  {
+   "names": [
+    "connect"
+   ],
+   "description": "A stream processor for mundane tasks - https://docs.redpanda.com/redpanda-connect"
+  },
+  {
+   "names": [
+    "connect",
+    "blobl"
+   ],
+   "description": "Provides a convenient tool for mapping JSON documents over the command line:\n\n  cat documents.jsonl | redpanda-connect blobl 'foo.bar.map_each(this.uppercase())'\n\n  echo '{\"foo\":\"bar\"}' | redpanda-connect blobl -f ./mapping.blobl\n\n  redpanda-connect blobl -i input.jsonl -f ./mapping.blobl\n\nFind out more about Bloblang at: https://docs.redpanda.com/redpanda-connect/guides/bloblang/about"
+  },
+  {
+   "names": [
+    "connect",
+    "streams"
+   ],
+   "description": "Run Redpanda Connect in streams mode, where multiple pipelines can be executed in a\nsingle process and can be created, updated and removed via REST HTTP\nendpoints.\n\n  redpanda-connect streams\n  redpanda-connect streams -o ./root_config.yaml\n  redpanda-connect streams ./path/to/stream/configs ./and/some/more\n  redpanda-connect streams -o ./root_config.yaml ./streams/*.yaml\n\nThe config field specified with the --observability/-o flag is known as the root\nconfig and should only contain observability and service-wide config fields such\nas http, metrics, logger, resources, and so on.\n\nFor more information check out the docs at:\nhttps://docs.redpanda.com/redpanda-connect/guides/streams_mode/about"
+  },
+  {
+   "names": [
+    "connect",
+    "template"
+   ],
+   "description": "EXPERIMENTAL: This subcommand, and templates in general, are experimental and\ntherefore are subject to change outside of major version releases.\n\nAllows linting and generating Redpanda Connect templates.\n\n  redpanda-connect template lint ./path/to/templates/...\n\nFor more information check out the docs at:\nhttps://docs.redpanda.com/redpanda-connect/configuration/templating"
+  },
+  {
+   "names": [
+    "connect",
+    "test"
+   ],
+   "description": "Execute any number of Redpanda Connect unit test definitions. If one or more tests\nfail the process will report the errors and exit with a status code 1.\n\n  redpanda-connect test ./path/to/configs/...\n  redpanda-connect test ./foo_configs/*.yaml ./bar_configs/*.yaml\n  redpanda-connect test ./foo.yaml\n\nFor more information check out the docs at:\nhttps://docs.redpanda.com/redpanda-connect/configuration/unit_testing"
+  },
+  {
+   "names": [
+    "cluster",
+    "storage",
+    "restore",
+    "start"
+   ],
+   "description": "Start the cluster restoration process.\n\t\t\nThis command starts the process of restoring data from a failed cluster with\nTiered Storage enabled, including its metadata, onto a new cluster.\nIf the wait flag (--wait/-w) is set, the command will poll the status of the\nrecovery process until it's finished.\n\nUse --cluster-uuid-override if you want to specify an explicit cluster UUID\nto restore from. For more information, visit https://docs.redpanda.com/current/manage/disaster-recovery/whole-cluster-restore/.\n"
+  },
+  {
+   "names": [
+    "cluster",
+    "connections",
+    "list"
+   ],
+   "description": "Display statistics about current kafka connections.\n\nThis command displays a table of active and recently closed connections within the cluster.\n\nUse filtering and sorting to identify the connections of the client applications that you are interested in. See --help for the list of filtering arguments and sorting arguments.\n\nIn addition to the filtering shorthand cli arguments (e.g.; --client-id, --state), you can also use the --filter-raw and --order-by arguments that take string expressions. To understand the syntax of these arguments, refer to the admin API docs of the filter and order-by fields of the ListKafkaConnections endpoint: https://docs.redpanda.com/api/doc/admin/version/11f41833-5783-4f1a-ad64-5957267abd52/operation/operation-redpanda-core-admin-v2-clusterservice-listkafkaconnections\n\nBy default only a subset of the per-connection data is printed. To see all of the available data, use --format=json."
   }
  ]
 }
