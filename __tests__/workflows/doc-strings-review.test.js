@@ -1911,7 +1911,10 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(prompt).toMatch(/nothing\s+after the \], not even spaces/)
       expect(prompt).toMatch(/a conditional in a Summary or example summary/)
       expect(prompt).toMatch(/cloud_ai/)
-      expect(prompt).toContain('`CGO_ENABLED=1 TAGS=x_benthos_extra task docs`')
+      // connect no longer commits generated docs (redpanda-data/connect#4863), so
+      // suggestions must not tell authors to regenerate and commit them
+      expect(prompt).not.toMatch(/task docs/)
+      expect(prompt).not.toMatch(/commit\s+the regenerated docs/)
     })
 
     test('the impact check leaves out the regenerated connector and Bloblang references', () => {
