@@ -120,6 +120,19 @@ describe('rpk commands', () => {
     expect(scan('cloud-data-platform', { 'modules/get-started/partials/get-started-serverless.adoc': page('. Consume from the `hello-world` topic with `rpk topic consume hello-world`.') }).found).toEqual([])
   })
 
+  test('docs acl.adoc:455: a placeholder flag value is a flag value, reported with no proposal', () => {
+    const [f] = scan('streaming', { 'modules/manage/pages/security/authorization/acl.adoc': page('3. *Verify access*: `rpk security acl list --allow-principal <username>`') }).found
+    expect(f).toMatchObject({ target: 'rpk security acl list', written: '`rpk security acl list --allow-principal <username>`', linkable: false, note: expect.stringContaining('a placeholder') })
+    expect(f.proposed).toBeUndefined()
+  })
+
+  test('a positional placeholder is a syntax line, not an example to run', () => {
+    // Changed: cluster-property-configuration.adoc:74, `rpk cluster config get <property_name>`, with a command the trimmed data has.
+    const { found } = scan('streaming', { 'modules/manage/pages/x.adoc': page('To see the messages in a topic, run `rpk topic consume <topic_name>`. For example:') })
+    expect(summary(found)).toEqual([[3, 'rpk-command', '`rpk topic consume <topic_name>`']])
+    expect(found[0].proposed).toBeUndefined()
+  })
+
   test('docs http-proxy.adoc:66: a command streaming has no page for links the Cloud page', () => {
     const [f] = scan('streaming', { 'modules/develop/partials/http-proxy.adoc': page('To log in to your Redpanda Cloud account, run `rpk cloud login`.') }).found
     expect(f.dataValue).toBe('cloud-data-platform:reference:rpk/rpk-cloud/rpk-cloud-login.adoc')

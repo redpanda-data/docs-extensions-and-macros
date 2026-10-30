@@ -52,6 +52,10 @@ const XREF_TARGET_RX = /xref:([^\s[\]]+)(?:\[|\s*$)/gm
 const MACRO_RX = /\b[a-z][\w-]*:{1,2}[^\s[\]]*\[(?:\\\]|[^\]])*\]|\{[\w-]+\}\[(?:\\\]|[^\]])*\]|<<[^>]*>>/gi
 const DLIST_TERM_RX = /^\s*\S.*?(?::{2,4}|;;)(?:\s|$)/
 const TABLE_DELIMITER_RX = /^[|!,:]={3,}\s*$/
+// A placeholder in an rpk span, <filename> or <agent-name>, and the opaque
+// word it is read as.
+const PLACEHOLDER_RX = /<\w[^<>`]*>/g
+const PLACEHOLDER = '{placeholder}'
 
 const cmd = (names) => ['rpk', ...names].join(' ')
 
@@ -164,14 +168,19 @@ function rpkMentions (line, { registry, catalog, component, version }) {
   const out = []
   for (const span of shared.backtickSpans(line)) {
     if (!/^rpk\s/.test(span.text) || inside(ranges, span.start, span.end)) continue
-    const tokens = shellTokens(span.text)
+    // shellTokens reads a placeholder's < and > as redirections, so each
+    // becomes an opaque word first.
+    const text = span.text.replace(PLACEHOLDER_RX, PLACEHOLDER)
+    const tokens = shellTokens(text)
     if (tokens.some((t) => t.type === 'op')) continue
     const parsed = parseInvocation(tree, tokens.slice(1), registry.data.deprecated_commands, { isScrapedPath: (names) => rpkValues.isScraped(registry, names) })
     if (parsed.problem || !parsed.names.length) continue
     // A span with an argument (`rpk topic produce dev-topic`) is an example
-    // to run, not a mention of the command.
-    const words = tokens.slice(1).filter((t) => t.type === 'word').length
-    const separateValues = parsed.flags.filter((f) => f.hasValue && !f.token.value.includes('=') && !(f.short && f.token.value.length > 2)).length
+    // to run, not a mention of the command. A placeholder is never an
+    // argument: `rpk cluster config get <property_name>` is a syntax line.
+    const real = (value) => !String(value).includes(PLACEHOLDER)
+    const words = tokens.slice(1).filter((t) => t.type === 'word' && real(t.value)).length
+    const separateValues = parsed.flags.filter((f) => f.hasValue && real(f.value) && !f.token.value.includes('=') && !(f.short && f.token.value.length > 2)).length
     if (words > parsed.names.length + parsed.flags.length + separateValues) continue
     const relative = rpkLinks.commandPagePath(tree, parsed.names)
     const page = rpkLinks.pickCommandPage(catalog, { component, version, relative })
@@ -190,7 +199,7 @@ function rpkMentions (line, { registry, catalog, component, version }) {
       written: line.slice(span.start, span.end),
       page: page.id,
       proposed: exact ? `rpkcmd:[${span.text.trim()}]` : undefined,
-      note: exact ? undefined : 'the span has a flag value, which rpkcmd: does not render; link the command page by hand',
+      note: exact ? undefined : `the span has ${text !== span.text ? 'a placeholder' : 'a flag value'}, which rpkcmd: does not render; link the command page by hand`,
     })
   }
   return out
