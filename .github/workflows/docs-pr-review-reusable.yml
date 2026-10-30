@@ -1826,10 +1826,9 @@ jobs:
       # the status step below and leave the gate's pending claim in place
       # until the 90-minute stale window expires. The status step still
       # posts the verdict; the run shows the failure.
-      # No report (the review was unavailable, or nothing ran): post
-      # nothing, and collapse the earlier reports, which describe an older
-      # commit and could read as a current "Ready to approve". The status
-      # carries the outcome instead.
+      # No report (nothing ran): post nothing, and collapse the earlier
+      # reports, which describe an older commit and could read as a current
+      # "Ready to approve". The status carries the outcome instead.
       - name: Post the review report and collapse the earlier ones
         continue-on-error: true
         uses: actions/github-script@v7
@@ -1870,10 +1869,18 @@ jobs:
             // Collapse each earlier report not already collapsed. One failure
             // does not stop the rest; the next run retries it.
             for (let i = 0; i < earlier.length; i += 100) {
-              const { nodes } = await github.graphql(
-                'query($ids: [ID!]!) { nodes(ids: $ids) { ... on IssueComment { id isMinimized } } }',
-                { ids: earlier.slice(i, i + 100).map(c => c.node_id) });
-              for (const n of nodes) {
+              let nodes = [];
+              try {
+                ({ nodes } = await github.graphql(
+                  'query($ids: [ID!]!) { nodes(ids: $ids) { ... on IssueComment { id isMinimized } } }',
+                  { ids: earlier.slice(i, i + 100).map(c => c.node_id) }));
+              } catch (e) {
+                // A partial error (a report deleted since the listing) still
+                // returns the other nodes.
+                nodes = (e.data && e.data.nodes) || [];
+                core.warning(`could not read whether the earlier review reports are collapsed: ${e.message}`);
+              }
+              for (const n of nodes || []) {
                 if (!n || n.isMinimized) continue;
                 try {
                   await github.graphql(
