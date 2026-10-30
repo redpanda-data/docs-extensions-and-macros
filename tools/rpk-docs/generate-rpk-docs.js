@@ -890,17 +890,26 @@ function convertIndentedCodeBlocksToAsciiDoc(text, codeBlockStore = []) {
       // Strip trailing backslashes as we'll add them during join
       // Also strip leading "$ " shell prompt if present
       const codeLines = [line.trim().replace(/^\$\s+/, '').replace(/\s*\\$/, '')]
+      // A line that starts with rpk or a prompt is the next command, unless
+      // the line before it ends in a backslash. Joining it would publish two
+      // examples as one broken command (rpk a \ rpk b).
+      const startsCommand = []
+      let continued = /\\\s*$/.test(line)
       let j = i + 1
       while (j < lines.length && /^[ ]{2,}\S/.test(lines[j]) && !/^[ ]{2,}-\s+[A-Z]/.test(lines[j])) {
         // Continue if indented and not a markdown list item (dash followed by capital letter = prose)
-        codeLines.push(lines[j].trim().replace(/\s*\\$/, ''))
+        const newCommand = !continued && /^[ ]{2,}(rpk\s|\$\s)/.test(lines[j])
+        startsCommand[codeLines.length] = newCommand
+        const codeLine = lines[j].trim().replace(/\s*\\$/, '')
+        codeLines.push(newCommand ? codeLine.replace(/^\$\s+/, '') : codeLine)
+        continued = /\\\s*$/.test(lines[j])
         j++
       }
 
-      // Create code block - join with backslash continuation if multi-line
-      const joinedCode = codeLines.length > 1
-        ? codeLines.join(' \\\n')
-        : codeLines[0]
+      // Create code block - join continuation lines with a backslash
+      const joinedCode = codeLines
+        .map((codeLine, k) => k === 0 ? codeLine : (startsCommand[k] ? '\n' : ' \\\n') + codeLine)
+        .join('')
       const codeBlock = `\n[,bash]\n----\n${joinedCode}\n----\n`
       const placeholder = `__EARLY_CODE_BLOCK_${codeBlockStore.length}__`
       codeBlockStore.push(codeBlock)
@@ -1379,11 +1388,13 @@ function applyTextTransformationsToExamples(text, customTransformations) {
 }
 
 /**
- * Apply one replacement rule, skipping any match that starts inside a code
- * span or crosses a span boundary. Rules run in sequence, so a span one rule
- * creates ('trace list -o json' -> `trace list -o json`) is still bare text
- * to the next rule, which would otherwise nest a span inside it (`-o json`).
- * A match that covers a whole span (like "`rpk foo`") still applies.
+ * Apply one replacement rule, skipping any match that crosses a span
+ * boundary, or that starts inside a code span and would add backticks there.
+ * Rules run in sequence, so a span one rule creates ('trace list -o json' ->
+ * `trace list -o json`) is still bare text to the next rule, which would
+ * otherwise nest a span inside it (`-o json`). A rule that only rewords
+ * (/root/.config -> ~/.config) still applies inside a span, and a match that
+ * covers a whole span (like "`rpk foo`") still applies.
  * @param {string} text
  * @param {RegExp} regex
  * @param {string} replacement - Replacement string ($&, $1..$99, $<name>, $$)
@@ -1397,8 +1408,8 @@ function replaceOutsideCodeSpans(text, regex, replacement) {
     const [match, ...groups] = args
     const ticksBefore = (whole.slice(0, offset).match(/`/g) || []).length
     const ticksIn = (match.match(/`/g) || []).length
-    if (ticksBefore % 2 === 1 || ticksIn % 2 === 1) return match
-    return replacement.replace(/\$(\$|&|<([^>]*)>|(\d\d?))/g, (token, kind, name, num) => {
+    if (ticksIn % 2 === 1) return match
+    const expanded = replacement.replace(/\$(\$|&|<([^>]*)>|(\d\d?))/g, (token, kind, name, num) => {
       if (kind === '$') return '$'
       if (kind === '&') return match
       if (name !== undefined) return named ? (named[name] ?? '') : token
@@ -1410,6 +1421,7 @@ function replaceOutsideCodeSpans(text, regex, replacement) {
       }
       return n >= 1 && n <= groups.length ? (groups[n - 1] ?? '') : token
     })
+    return ticksBefore % 2 === 1 && expanded.includes('`') ? match : expanded
   })
 }
 
@@ -1772,8 +1784,11 @@ function formatDescription(desc, customTransformations = null, options = {}) {
     if (i % 2 === 0) {
       // Outside backticks - apply flag wrapping
       // Include =value when present (e.g., --format=json, --var=KEY=VALUE),
-      // and every segment of a dotted name (--local-config.a.b=false)
-      return part.replace(/(?<!rpk\s)(--[a-z][-a-z0-9]*(?:\.[a-z][-a-z0-9]*)*(?:=[^\s,;.)\]]+)?)/gi, '`$1`')
+      // and every segment of a dotted name (--local-config.a.b=false).
+      // A flag family glob (--teams-*) is one span too, as a passthrough:
+      // two plain spans holding * render the text between them in bold.
+      return part.replace(/(?<!rpk\s)(--[a-z][-a-z0-9]*(?:\.[a-z][-a-z0-9]*)*(?:=[^\s,;.)\]]+)?)(?<=-)(\*)|(?<!rpk\s)(--[a-z][-a-z0-9]*(?:\.[a-z][-a-z0-9]*)*(?:=[^\s,;.)\]]+)?)/gi,
+        (match, globFlag, star, flag) => globFlag ? `\`+${globFlag}*+\`` : `\`${flag}\``)
     } else {
       // Inside backticks - don't modify
       return part
@@ -1830,8 +1845,10 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   result = result.replace(/(?<![`\w/])(_redpanda(?:\.[a-z_]+)+)(?!`)/g, '`$1`')
 
   // Add backticks around standalone "rpk" (at end of phrase, before punctuation)
-  // Also exclude rpk inside paths (preceded by /)
-  result = result.replace(/(?<![`\w/])rpk(?=[\s]*[.,;:!?)'"}\]]|[\s]*$)/g, '`rpk`')
+  // Also exclude rpk inside paths (preceded by /) and inside a dotted name
+  // (preceded by .), like the .rpk.ac- plugin prefix. The punctuation must
+  // end the token: rpk.admin_api is a config key, not the binary.
+  result = result.replace(/(?<![`\w/.])rpk(?=\s*[.,;:!?)'"}\]]+(?:\s|$)|\s*$)/g, '`rpk`')
 
   // Convert GitHub issue/PR references to clickable links
   // Pattern: #NNNN (4+ digits) when not inside backticks or code
