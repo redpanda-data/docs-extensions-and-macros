@@ -1,0 +1,3 @@
+= postgres_cdc
+:page-aliases: develop:connect/components/inputs/pg_stream.adoc
+include::connect:components:inputs/postgres_cdc.adoc[tag=single-source]

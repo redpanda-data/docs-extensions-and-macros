@@ -2,7 +2,7 @@
  "_source": {
   "rp-connect-docs": "b520063",
   "cloud-docs": "d9be410",
-  "note": "page paths and page-aliases of the components in connect-4.115.1-sample.json and the Bloblang pages: rp-connect-docs modules/{components,guides}/pages and cloud-docs modules/develop/pages/connect; sources are four rp-connect-docs component pages, verbatim; partials are the heading, include and tag lines of seven partials from the connect v4.115.1 release asset redpanda-connect-docs.tar.gz"
+  "note": "page paths and page-aliases of the components in connect-4.115.1-sample.json and the Bloblang pages: rp-connect-docs modules/{components,guides}/pages and cloud-docs modules/develop/pages/connect; sources are four rp-connect-docs component pages, verbatim; partials are the heading, include and tag lines of seven partials from the connect v4.115.1 release asset redpanda-connect-docs.tar.gz; cloud-sources are two cloud-docs stubs, verbatim"
  },
  "connect": [
   {
@@ -360,5 +360,9 @@
   "descriptions/processors/nats_request_reply.adoc": "// tag::meta[]\n\n// end::meta[]\n\n// tag::body[]\n\ninclude::connect:components:partial$metadata/processors/nats_request_reply.adoc[]\n\n== Connection name\n\n== Authentication\n\n=== NKey file\n\n=== User credentials\n\n=== Token\n\n=== User and password\n\n// end::body[]\n\n// tag::footnotes[]\n\n// end::footnotes[]\n",
   "metadata/processors/nats_request_reply.adoc": "== Metadata\n",
   "fields/processors/nats_request_reply.adoc": "== Fields\n\n=== `auth`\n\n=== `auth.nkey`\n\ninclude::connect:components:partial$secret_warning.adoc[]\n\n=== `auth.nkey_file`\n\n=== `auth.password`\n\ninclude::connect:components:partial$secret_warning.adoc[]\n\n=== `auth.token`\n\ninclude::connect:components:partial$secret_warning.adoc[]\n\n=== `auth.user`\n\n=== `auth.user_credentials_file`\n\n=== `auth.user_jwt`\n\ninclude::connect:components:partial$secret_warning.adoc[]\n\n=== `auth.user_nkey_seed`\n\ninclude::connect:components:partial$secret_warning.adoc[]\n\n=== `headers`\n\n=== `inbox_prefix`\n\n=== `max_reconnects`\n\n=== `metadata`\n\n=== `metadata.include_patterns[]`\n\n=== `metadata.include_prefixes[]`\n\n=== `subject`\n\n=== `timeout`\n\n=== `tls`\n\n=== `tls.client_certs[]`\n\n=== `tls.client_certs[].cert`\n\n=== `tls.client_certs[].cert_file`\n\n=== `tls.client_certs[].key`\n\ninclude::connect:components:partial$secret_warning.adoc[]\n\n=== `tls.client_certs[].key_file`\n\n=== `tls.client_certs[].password`\n\ninclude::connect:components:partial$secret_warning.adoc[]\n\n=== `tls.enable_renegotiation`\n\n=== `tls.enabled`\n\n=== `tls.root_cas`\n\ninclude::connect:components:partial$secret_warning.adoc[]\n\n=== `tls.root_cas_file`\n\n=== `tls.skip_cert_verify`\n\n=== `tls_handshake_first`\n\n=== `urls[]`\n"
+ },
+ "cloud-sources": {
+  "connect/components/inputs/postgres_cdc.adoc": "= postgres_cdc\n:page-aliases: develop:connect/components/inputs/pg_stream.adoc\ninclude::connect:components:partial$descriptions/inputs/postgres_cdc.adoc[tag=meta]\ninclude::connect:components:inputs/postgres_cdc.adoc[tag=single-source]",
+  "connect/components/inputs/redpanda.adoc": "= redpanda\n:page-aliases: components:inputs/redpanda.adoc\ninclude::connect:components:partial$descriptions/inputs/redpanda.adoc[tag=meta]\ninclude::connect:components:inputs/redpanda.adoc[tag=single-source]"
  }
 }

@@ -341,7 +341,15 @@ function linkFindings (line, { index, relative, registry, links, ctx = {}, histo
       if (!page) return { s }
       const resolved = page.version === undefined ? undefined : connectLinks.findPage(catalog, `${page.module}:${page.relative}`, { component: page.component, version: page.version, module: page.module })
       let target = connectTarget(page, { types, resolved })
-      // A Cloud stub, linked by its own path: what it aliases says what it is.
+      // A Cloud stub, linked by its own path: the connect page it includes
+      // says what it is, then what it aliases. The include comes first
+      // because it is what the stub renders (connectLinks.isPageOf).
+      if (!target && resolved) {
+        for (const included of connectLinks.includedPaths(resolved)) {
+          target = connectTarget({ module: connectLinks.COMPONENTS_MODULE, relative: included }, { types })
+          if (target) break
+        }
+      }
       if (!target && resolved) {
         for (const alias of aliasesOf(catalog, resolved)) {
           target = connectTarget(alias.src, { types })

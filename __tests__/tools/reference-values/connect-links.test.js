@@ -39,8 +39,9 @@ const COMPONENTS = {
 }
 
 // One checkout: the component's real Connect pages (connect's with their
-// real source where the fixture has it, Cloud's as stubs that include the
-// connect page), its page-aliases, and the given files.
+// real source where the fixture has it, Cloud's as their real stub source
+// where the fixture has it, otherwise as stubs that include the connect
+// page), its page-aliases, and the given files.
 function checkout (name, files = {}, { data = name === 'connect', nav } = {}) {
   const c = COMPONENTS[name]
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'connect-links-'))
@@ -53,7 +54,7 @@ function checkout (name, files = {}, { data = name === 'connect', nav } = {}) {
     const connectPath = p.aliases[0] ? p.aliases[0].replace(/^[\w-]+:/, '') : p.relative
     const body = name === 'connect'
       ? (PAGES.sources[key] || `= ${key}\n${aliases}\nGenerated.\n`)
-      : `= ${key}\n${aliases}include::connect:${p.relative.includes('/guides/') ? 'guides' : 'components'}:${connectPath}[tag=single-source]\n`
+      : PAGES['cloud-sources'][p.relative] || `= ${key}\n${aliases}include::connect:${p.relative.includes('/guides/') ? 'guides' : 'components'}:${connectPath}[tag=single-source]\n`
     put(dir, `modules/${p.module}/pages/${p.relative}`, body)
   }
   if (data) put(dir, 'modules/components/attachments/connect-4.115.1.json', SAMPLE)
@@ -251,6 +252,13 @@ describe('cloud-docs, scanned as Cloud', () => {
     // modules/get-started/pages/whats-new-cloud.adoc:312
     const { links } = scan('cloud-data-platform', { 'modules/get-started/pages/whats-new-cloud.adoc': page('** xref:develop:connect/guides/bloblang/methods.adoc#escape_url_path[`escape_url_path`]: Escapes a string for safe use in URL path segments using percent-encoding.') })
     expect(links).toEqual([expect.objectContaining({ status: 'exact', proposed: 'blobl:[.escape_url_path(),`escape_url_path`]', note: 'release, upgrade or migration notes: proposed only' })])
+  })
+
+  test('an xref to a stub by its own path is recognized through the connect page it includes, though its alias names none (changed from a real line)', () => {
+    // cloud-docs d9be410 modules/develop/pages/connect/components/inputs/postgres_cdc.adoc
+    // declares only develop:connect/components/inputs/pg_stream.adoc.
+    const { links } = scan('cloud-data-platform', { 'modules/develop/pages/connect/x.adoc': page('Capture changes with the xref:develop:connect/components/inputs/postgres_cdc.adoc[`postgres_cdc` input].') })
+    expect(links).toEqual([expect.objectContaining({ status: 'exact', proposed: 'connect:[inputs/postgres_cdc]', dataValue: 'cloud-data-platform:develop:connect/components/inputs/postgres_cdc.adoc' })])
   })
 
   test('an impure function anchor is broken on Cloud (changed from a real line)', () => {

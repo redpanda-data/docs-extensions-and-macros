@@ -21,6 +21,11 @@
  * path (isPageOf): when Cloud removes a stub, its paths become aliases of the
  * type's about page, which is not the component's page.
  *
+ * A Cloud stub is also found by what it includes: the stub for
+ * inputs/postgres_cdc includes connect:components:inputs/postgres_cdc.adoc,
+ * whatever page aliases it declares. When the include and an alias
+ * disagree, the include wins (see includedPaths).
+ *
  * Anchors are the ids Asciidoctor generates on the published pages (idprefix
  * empty, idseparator -). A field heading such as === `batching.byte_size`
  * becomes batching-byte_size. When a section earlier on the page already has
@@ -205,16 +210,99 @@ const isCloud = (catalog, component, version) =>
 // The file name of a page path: inputs/kafka_franz.adoc -> kafka_franz.adoc.
 const baseName = (relative) => String(relative).split('/').pop()
 
+// ---------------------------------------------------------------------------
+// Stubs: pages that include a connect component page
+
+const $includes = Symbol.for('redpanda.connectIncludes')
+const $stubIndex = Symbol('$connectStubIndex')
+// page$ is optional in a resource ID: cloud-docs oracledb_cdc writes
+// include::connect:components:page$inputs/oracledb_cdc.adoc[].
+const INCLUDE_RX = /^include::connect:components:(?:page\$)?([a-z_]+\/[\w-]+\.adoc)\[/gm
+
+const includeTargets = (text) => [...String(text).matchAll(INCLUDE_RX)].map((m) => m[1])
+
+/**
+ * Record the connect component pages a file includes while its contents are
+ * still AsciiDoc. Antora converts pages one at a time and replaces each
+ * one's contents with HTML (src.contents keeps the source only for
+ * page-partial pages), so a stub converted before the first link to it
+ * would otherwise have lost its includes. The macros' register calls this
+ * for every document, before Asciidoctor loads it.
+ */
+function noteIncludes (file) {
+  if (!file || file[$includes] || file.contents == null) return
+  const text = String(file.contents)
+  if (isHtml(text)) return
+  Object.defineProperty(file, $includes, { value: includeTargets(text), configurable: true })
+}
+
+/**
+ * The connect component page paths (inputs/postgres_cdc.adoc) a page
+ * includes, from its source: what noteIncludes recorded, or the source
+ * fileText reads. [] for a page already converted whose source is gone.
+ */
+function includedPaths (page) {
+  if (!page) return []
+  if (page[$includes]) return page[$includes]
+  const text = fileText(page)
+  return text === undefined || isHtml(text) ? [] : includeTargets(text)
+}
+
+// The pages of a component version, keyed by the connect component page
+// path each includes. The first page wins, or one with the same file name.
+function stubIndex (catalog, component, version) {
+  const all = catalog[$stubIndex] || (catalog[$stubIndex] = new Map())
+  const key = `${version == null ? '' : version}@${component}`
+  if (all.has(key)) return all.get(key)
+  const index = new Map()
+  if (typeof catalog.findBy === 'function') {
+    for (const page of catalog.findBy({ component, version: version == null ? '' : String(version), family: 'page' }) || []) {
+      for (const target of includedPaths(page)) {
+        const held = index.get(target)
+        if (!held || (baseName(held.src.relative) !== baseName(target) && baseName(page.src.relative) === baseName(target))) index.set(target, page)
+      }
+    }
+  }
+  all.set(key, index)
+  return index
+}
+
+// The connect page paths that are a link's page: the path itself and the
+// connect page it resolves to (inputs/pg_stream.adoc -> inputs/postgres_cdc.adoc).
+function pagePaths (catalog, { module, relative }) {
+  const connectPage = findPage(catalog, `${CONNECT}:${module}:${relative}`)
+  return connectPage && connectPage.src.relative !== relative ? [relative, connectPage.src.relative] : [relative]
+}
+
+/**
+ * The page of a component version that includes the connect page for a
+ * path, or undefined.
+ */
+function includingPage (catalog, { component, version, module, relative }) {
+  if (module !== COMPONENTS_MODULE || component === CONNECT || !catalog) return undefined
+  const index = stubIndex(catalog, component, version)
+  for (const target of pagePaths(catalog, { module, relative })) if (index.has(target)) return index.get(target)
+  return undefined
+}
+
 /**
  * Whether a page, found by a connect path (components:inputs/x.adoc) in some
- * component, is the page for that path: the connect page itself, or a page
- * with the same file name as the path or as the connect page it resolves to
- * (a Cloud stub, or the page of a renamed component). A Cloud about page
- * that a removed stub's paths alias is not.
+ * component, is the page for that path: the connect page itself, a page
+ * that includes that connect page (a Cloud stub), or, for a page that
+ * includes no connect page, one with the same file name as the path or as
+ * the connect page it resolves to (the page of a renamed component). A
+ * Cloud about page that a removed stub's paths alias is not.
+ *
+ * A page that includes another component's connect page is not the page,
+ * whatever alias led to it: the include is what the reader sees, since the
+ * stub renders that connect page, while an alias is a path written by hand
+ * that can go stale or be copied from another stub.
  */
 function isPageOf (catalog, page, { module, relative }) {
   const connectPage = findPage(catalog, `${CONNECT}:${module}:${relative}`)
   if (page === connectPage) return true
+  const included = module === COMPONENTS_MODULE ? includedPaths(page) : []
+  if (included.length) return pagePaths(catalog, { module, relative }).some((target) => included.includes(target))
   const name = baseName(page.src.relative)
   return name === baseName(relative) || (Boolean(connectPage) && name === baseName(connectPage.src.relative))
 }
@@ -226,6 +314,9 @@ function isPageOf (catalog, page, { module, relative }) {
  * @returns {{ok: true, page: object, id: string, own: boolean} | {ok: false, reason: 'cloud-no-page'|'no-page'}}
  */
 function pickConnectPage (catalog, { component, version, module, relative, cloud }) {
+  // The include first: it names the page a stub renders (see isPageOf).
+  const stub = includingPage(catalog, { component, version, module, relative })
+  if (stub) return { ok: true, page: stub, id: resourceId(stub), own: true }
   const ownPage = findPage(catalog, `${module}:${relative}`, { component, version, module })
   if (ownPage && isPageOf(catalog, ownPage, { module, relative })) return { ok: true, page: ownPage, id: resourceId(ownPage), own: true }
   if (cloud) return { ok: false, reason: 'cloud-no-page' }
@@ -646,6 +737,9 @@ module.exports = {
   resourceId,
   isCloud,
   isPageOf,
+  noteIncludes,
+  includedPaths,
+  includingPage,
   pickConnectPage,
   connectPartial,
   typeDir,

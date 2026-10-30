@@ -64,6 +64,11 @@ describe('connect: macro', () => {
     expect(linkOf(convert('connect:[inputs/kafka_franz]', { component: 'cloud-data-platform' })).target).toBe('cloud-data-platform:develop:connect/components/inputs/kafka_franz.adoc')
   })
 
+  test('from Cloud, the link goes to the Cloud stub that includes the connect page, though its page-aliases has no components: path', () => {
+    // cloud-docs d9be410 modules/develop/pages/connect/components/inputs/postgres_cdc.adoc:2,4
+    expect(linkOf(convert('connect:[inputs/postgres_cdc]', { component: 'cloud-data-platform' })).target).toBe('cloud-data-platform:develop:connect/components/inputs/postgres_cdc.adoc')
+  })
+
   test('from Cloud, a component with no stub renders plain code and warns, never a self-managed link', () => {
     const warn = warnings()
     const html = convert('connect:[outputs/amqp_1]', { component: 'cloud-data-platform' })

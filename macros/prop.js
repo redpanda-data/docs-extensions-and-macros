@@ -118,6 +118,7 @@ const { escapeHtml } = require('../extension-utils/html-utils')
 const propertyValues = require('../extension-utils/property-values')
 const valueDescriptions = require('../extension-utils/value-descriptions')
 const datasets = require('../extension-utils/attachment-datasets')
+const { noteIncludes } = require('../extension-utils/connect-links')
 const { rpkvalInlineMacro, rpkvalBlockMacro } = require('./rpkval')
 const { connectvalInlineMacro, connectvalBlockMacro } = require('./connectval')
 const { rpkcmdInlineMacro } = require('./rpkcmd')
@@ -931,6 +932,10 @@ function helmPathRequested (attributes, document) {
 }
 
 function register (registry, config = {}) {
+  // Antora registers extensions for each page before converting it: keep
+  // the connect pages a Cloud stub includes before its source becomes HTML,
+  // so connect: and blobl: can find the stub from a page converted later.
+  noteIncludes(config && config.file)
   if (typeof registry.register === 'function') {
     registry.register(function () {
       this.inlineMacro(propInlineMacro(config))

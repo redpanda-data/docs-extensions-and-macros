@@ -103,10 +103,19 @@ rpkval::[rpk cluster storage restore start,description]
 `connect:` and `blobl:` link only this component's own pages. This component
 has a stub page for the `kafka_franz` input that declares
 `components:inputs/kafka_franz.adoc` as a page alias, as the cloud-docs stubs
-do, and no stub for the `generate` input or the Bloblang pages.
+do, a stub for the `postgres_cdc` input that declares no such alias, and no
+stub for the `generate` input or the Bloblang pages.
 
 * connect:[inputs/kafka_franz] must link this component's stub page, not the
   `connect` page.
+* connect:[inputs/postgres_cdc] and connect:[inputs/postgres_cdc.dsn]
+** You should see both linked to this component's `postgres_cdc` stub page,
+   the second to its `dsn` field, with no log warning about either.
+** The stub declares no `components:` page alias, like the cloud-docs
+   `postgres_cdc` stub, whose only alias is
+   `develop:connect/components/inputs/pg_stream.adoc`. The macros find it by
+   the connect page it includes,
+   `include::connect:components:inputs/postgres_cdc.adoc[tag=single-source]`.
 * connect:[inputs/generate] must render as plain code with no link, and the
   log must say this component has no page for it and that a Cloud page links
   only Cloud pages.

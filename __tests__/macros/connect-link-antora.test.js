@@ -23,15 +23,14 @@ function antoraCatalog () {
   for (const component of ['connect', 'cloud-data-platform']) {
     for (const p of PAGES[component]) {
       const key = p.relative.replace(/\.adoc$/, '')
-      const page = add({ component, version: '', module: p.module, relative: p.relative }, (component === 'connect' && PAGES.sources[key]) || `= ${p.relative}\n`)
+      const page = add({ component, version: '', module: p.module, relative: p.relative }, (component === 'connect' ? PAGES.sources[key] : PAGES['cloud-sources'][p.relative]) || `= ${p.relative}\n`)
       for (const alias of p.aliases) catalog.registerPageAlias(alias, page)
     }
   }
   return catalog
 }
 
-function render (line, component = 'streaming', version = component === 'streaming' ? '26.2' : '') {
-  const catalog = antoraCatalog()
+function render (line, component = 'streaming', version = component === 'streaming' ? '26.2' : '', catalog = antoraCatalog()) {
   const file = {
     contents: Buffer.from(`= Example\n\n${line}`),
     src: { component, version, module: 'manage', family: 'page', relative: 'example.adoc', path: 'modules/manage/pages/example.adoc' },
@@ -89,5 +88,24 @@ test('Bloblang functions and methods link their anchors, the second category cop
     '../../../connect/guides/bloblang/methods/#contains-2',
     '../../../connect/guides/bloblang/methods/#length',
     '../../../connect/guides/bloblang/functions/#counter',
+  ])
+})
+
+test('from Cloud, a stub whose page-aliases has no components: path links by the connect page it includes, even once converted', () => {
+  // cloud-docs d9be410 modules/develop/pages/connect/components/inputs/postgres_cdc.adoc
+  // declares only develop:connect/components/inputs/pg_stream.adoc and
+  // includes connect:components:inputs/postgres_cdc.adoc[tag=single-source].
+  const catalog = antoraCatalog()
+  const stub = catalog.getById({ component: 'cloud-data-platform', version: '', module: 'develop', family: 'page', relative: 'connect/components/inputs/postgres_cdc.adoc' })
+  // Convert the stub first, as Antora's convertDocument may: load it with
+  // the extensions, convert it, and replace its contents with the HTML.
+  stub.path = stub.src.path
+  stub.contents = Buffer.from(loadAsciiDoc(stub, catalog, { extensions: [require('../../macros/prop')] }).convert())
+  expect(String(stub.contents)).not.toContain('include::')
+  const html = render('connect:[inputs/postgres_cdc] connect:[inputs/pg_stream] connect:[inputs/redpanda]', 'cloud-data-platform', '', catalog)
+  expect(hrefs(html)).toEqual([
+    '../../develop/connect/components/inputs/postgres_cdc/',
+    '../../develop/connect/components/inputs/postgres_cdc/',
+    '../../develop/connect/components/inputs/redpanda/',
   ])
 })

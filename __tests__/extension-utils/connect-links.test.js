@@ -153,6 +153,58 @@ describe('pages', () => {
     expect(links.pickConnectPage(catalog, { component: 'connect', version: '', module: 'components', relative: 'inputs/pg_stream.adoc' })).toMatchObject({ ok: true, own: true, id: 'connect:components:inputs/postgres_cdc.adoc' })
   })
 
+  describe('a Cloud stub is found by the connect page it includes', () => {
+    const cloudPick = (catalog, relative) => links.pickConnectPage(catalog, { component: 'cloud-data-platform', version: '', module: 'components', relative, cloud: true })
+    const STUB = 'cloud-data-platform:develop:connect/components/inputs/postgres_cdc.adoc'
+
+    // cloud-docs d9be410 modules/develop/pages/connect/components/inputs/postgres_cdc.adoc:2,4
+    test('postgres_cdc, whose page-aliases has no components: path, by its include', () => {
+      const catalog = catalogOf()
+      expect(links.findPage(catalog, 'components:inputs/postgres_cdc.adoc', { component: 'cloud-data-platform', version: '', module: 'components' })).toBeUndefined()
+      expect(cloudPick(catalog, 'inputs/postgres_cdc.adoc')).toMatchObject({ ok: true, own: true, id: STUB })
+      // pg_stream's connect path goes to the postgres_cdc page, which the stub includes.
+      expect(cloudPick(catalog, 'inputs/pg_stream.adoc')).toMatchObject({ ok: true, own: true, id: STUB })
+      // Without the stub's source, only its alias is left, and it names no components: path.
+      expect(cloudPick(catalogOf({ sources: false }), 'inputs/postgres_cdc.adoc')).toEqual({ ok: false, reason: 'cloud-no-page' })
+    })
+
+    // cloud-docs d9be410 modules/develop/pages/connect/components/inputs/redpanda.adoc:2,4
+    test('redpanda, whose alias and include agree, as before', () => {
+      expect(cloudPick(catalogOf(), 'inputs/redpanda.adoc')).toMatchObject({ ok: true, own: true, id: 'cloud-data-platform:develop:connect/components/inputs/redpanda.adoc' })
+      expect(cloudPick(catalogOf({ sources: false }), 'inputs/redpanda.adoc')).toMatchObject({ ok: true, own: true, id: 'cloud-data-platform:develop:connect/components/inputs/redpanda.adoc' })
+    })
+
+    test('the include wins over an alias that disagrees: a stub copied from redpanda that kept its include', () => {
+      const text = PAGES['cloud-sources']['connect/components/inputs/redpanda.adoc'].replace('= redpanda', '= amqp_1').replace('components:inputs/redpanda.adoc', 'components:outputs/amqp_1.adoc')
+      const page = { src: { component: 'cloud-data-platform', version: '', module: 'develop', family: 'page', relative: 'connect/components/outputs/amqp_1.adoc' }, contents: Buffer.from(text) }
+      const alias = { src: { component: 'cloud-data-platform', version: '', module: 'components', family: 'alias', relative: 'outputs/amqp_1.adoc' }, rel: page }
+      const catalog = catalogOf({ extra: [page, alias] })
+      expect(links.findPage(catalog, 'components:outputs/amqp_1.adoc', { component: 'cloud-data-platform', version: '', module: 'components' })).toBe(page)
+      expect(links.isPageOf(catalog, page, { module: 'components', relative: 'outputs/amqp_1.adoc' })).toBe(false)
+      expect(cloudPick(catalog, 'outputs/amqp_1.adoc')).toEqual({ ok: false, reason: 'cloud-no-page' })
+      // The real redpanda stub keeps the redpanda path: it includes that page and has its file name.
+      expect(cloudPick(catalog, 'inputs/redpanda.adoc')).toMatchObject({ id: 'cloud-data-platform:develop:connect/components/inputs/redpanda.adoc' })
+    })
+
+    test('a stub converted before the link keeps the includes noteIncludes recorded', () => {
+      const converted = (note) => {
+        const catalog = catalogOf()
+        const stub = catalog.findBy({ component: 'cloud-data-platform', family: 'page', relative: 'connect/components/inputs/postgres_cdc.adoc' })[0]
+        if (note) links.noteIncludes(stub)
+        stub.contents = Buffer.from('<div class="paragraph"><p>converted</p></div>')
+        return catalog
+      }
+      expect(cloudPick(converted(true), 'inputs/postgres_cdc.adoc')).toMatchObject({ ok: true, id: STUB })
+      expect(cloudPick(converted(false), 'inputs/postgres_cdc.adoc')).toEqual({ ok: false, reason: 'cloud-no-page' })
+    })
+
+    test('includedPaths reads include::connect:components:<type>/<name>.adoc[] with any attributes and an optional page$, and no partials', () => {
+      // cloud-docs aab67ef inputs/oracledb_cdc.adoc:4 and inputs/gateway.adoc:4
+      const page = { src: {}, contents: Buffer.from('= x\ninclude::connect:components:partial$descriptions/inputs/x.adoc[tag=meta]\ninclude::connect:components:inputs/x.adoc[]\ninclude::connect:components:rate_limits/local.adoc[tag=single-source,leveloffset=+1]\ninclude::connect:components:page$inputs/oracledb_cdc.adoc[tag=single-source]\ninclude::connect:components:partial$components/inputs/gateway.adoc[tag=single-source]\n// include::connect:components:inputs/y.adoc[]\n') }
+      expect(links.includedPaths(page)).toEqual(['inputs/x.adoc', 'rate_limits/local.adoc', 'inputs/oracledb_cdc.adoc'])
+    })
+  })
+
   test('findPage resolves a page alias to its page', () => {
     expect(links.findPage(catalogOf(), 'connect:components:inputs/pg_stream.adoc').src.relative).toBe('inputs/postgres_cdc.adoc')
   })

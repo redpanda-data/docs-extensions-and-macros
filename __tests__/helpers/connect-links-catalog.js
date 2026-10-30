@@ -4,8 +4,9 @@
 // data (see _source in each fixture): the trimmed connect-4.115.1.json, the
 // page paths and page-aliases of rp-connect-docs and the cloud-docs stubs for
 // the same components and the Bloblang pages, three rp-connect-docs page
-// sources, and the heading lines of four partials of the connect release
-// asset. Page aliases are alias files whose rel is the page, as Antora
+// sources, two cloud-docs stub sources (postgres_cdc, whose page-aliases
+// has no components: path, and redpanda), and the heading lines of four
+// partials of the connect release asset. Page aliases are alias files whose rel is the page, as Antora
 // registers them.
 
 const fs = require('fs')
@@ -26,7 +27,7 @@ const VERSIONS = { streaming: '26.2' }
  * @param {object} [opts]
  * @param {string[]} [opts.components] - Components whose pages the build has.
  * @param {boolean} [opts.data] - Whether connect publishes the data attachment.
- * @param {boolean} [opts.sources] - Whether the connect pages carry their real source.
+ * @param {boolean} [opts.sources] - Whether the connect pages and Cloud stubs carry their real source.
  * @param {boolean} [opts.partials] - Whether the build has the release asset partials.
  * @param {object[]} [opts.extra] - More files.
  */
@@ -36,7 +37,7 @@ function catalogOf ({ components = ['connect', 'cloud-data-platform'], data = tr
   for (const component of components) {
     for (const p of PAGES[component] || []) {
       const key = p.relative.replace(/^connect\/(?:components|guides)\//, '').replace(/^(?:components\/)?/, '').replace(/\.adoc$/, '')
-      const text = component === 'connect' && sources ? PAGES.sources[key] : undefined
+      const text = !sources ? undefined : component === 'connect' ? PAGES.sources[key] : PAGES['cloud-sources'][p.relative]
       const page = { src: { component, version: '', module: p.module, family: 'page', relative: p.relative }, ...(text ? { contents: Buffer.from(text) } : {}) }
       files.push(page)
       for (const alias of p.aliases) {
