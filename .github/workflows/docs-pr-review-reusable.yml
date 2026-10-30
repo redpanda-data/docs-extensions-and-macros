@@ -1636,7 +1636,8 @@ jobs:
           if-no-files-found: ignore
 
   # ──────────────────────────────────────────────────────────────────────
-  # §6 — one verdict, one upserted comment, final informational status.
+  # §6 — one verdict, one new report per run (earlier ones collapsed),
+  # final informational status.
   # ──────────────────────────────────────────────────────────────────────
   aggregate:
     needs: [gate, classify, adoc_review, json_validation_local, json_validation, code_review, best_fit_review, screenshot_gate, ticket_delta]
@@ -1738,8 +1739,10 @@ jobs:
 
       # The previous report carries a hidden data block with its blockers.
       # aggregate-review.sh compares against it to say what is no longer
-      # reported since the last head. Missing is fine: the first run, or a
-      # report deleted because the review was unavailable.
+      # reported since the last head, and links to it. Each run posts a new
+      # report, so the previous one is this pipeline's latest (comments come
+      # oldest first). Anyone can paste the marker; only the pipeline's own
+      # comment counts. Missing is fine: the first run.
       - name: Fetch the previous report
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1747,8 +1750,10 @@ jobs:
           R: ${{ github.repository }}
         run: |
           gh api --paginate "repos/$R/issues/$PR/comments" \
-            | jq -s -r '[.[][] | select(.body | contains("<!-- docs-review:comment -->"))] | first | .body // ""' \
-            > prev-comment.md || : > prev-comment.md
+            | jq -s '[.[][] | select(.user.login == "github-actions[bot]" and (.body // "" | contains("<!-- docs-review:comment -->")))] | last // {}' \
+            > prev-comment.json || echo '{}' > prev-comment.json
+          jq -r '.body // ""' prev-comment.json > prev-comment.md
+          jq -r '.html_url // ""' prev-comment.json > prev-comment-url.txt
 
       # The earlier blockers the gate handed to the reviews (incremental
       # only). Moved out of results/ so aggregate-review.sh does not read
@@ -1787,6 +1792,8 @@ jobs:
           PREV_COMMENT_FILE: prev-comment.md
         run: |
           set -uo pipefail
+          PREV_COMMENT_URL=$(cat prev-comment-url.txt 2>/dev/null || true)
+          export PREV_COMMENT_URL
           # Guarded like the preview-links call above it. If the aggregator
           # cannot run (missing from a plugin_ref that predates it, or a bug
           # in the script), an unguarded failure skips the two steps below,
@@ -1808,16 +1815,22 @@ jobs:
             : > comment.md
           fi
 
+      # Each run posts a new report and collapses the earlier ones as
+      # outdated, so the PR keeps the whole trail: what each review said,
+      # what changed, and the latest verdict, which is the only one shown
+      # expanded. Editing one report in place lost what the first review
+      # said. The new report goes up first, so a failed post leaves the
+      # previous one showing.
       # continue-on-error for the same reason the aggregator is guarded: a
-      # failed upsert (a transient 5xx or a secondary rate limit) would skip
+      # failed post (a transient 5xx or a secondary rate limit) would skip
       # the status step below and leave the gate's pending claim in place
       # until the 90-minute stale window expires. The status step still
-      # posts the verdict; the run shows the upsert's failure.
+      # posts the verdict; the run shows the failure.
       # No report (the review was unavailable, or nothing ran): post
-      # nothing, and delete an earlier report, which describes an older
+      # nothing, and collapse the earlier reports, which describe an older
       # commit and could read as a current "Ready to approve". The status
       # carries the outcome instead.
-      - name: Upsert the review comment
+      - name: Post the review report and collapse the earlier ones
         continue-on-error: true
         uses: actions/github-script@v7
         env:
@@ -1845,25 +1858,31 @@ jobs:
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner, repo: context.repo.repo, issue_number, per_page: 100,
             });
-            const existing = comments.find(c => c.body && c.body.includes(marker));
-            if (!post) {
-              if (existing) {
-                await github.rest.issues.deleteComment({
-                  owner: context.repo.owner, repo: context.repo.repo,
-                  comment_id: existing.id,
-                });
-              }
-              return;
-            }
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner, repo: context.repo.repo,
-                comment_id: existing.id, body,
-              });
-            } else {
+            // Anyone can paste the marker; only the pipeline's own reports
+            // are collapsed.
+            const earlier = comments.filter(c => c.body && c.body.includes(marker)
+              && c.user && c.user.login === 'github-actions[bot]');
+            if (post) {
               await github.rest.issues.createComment({
                 owner: context.repo.owner, repo: context.repo.repo, issue_number, body,
               });
+            }
+            // Collapse each earlier report not already collapsed. One failure
+            // does not stop the rest; the next run retries it.
+            for (let i = 0; i < earlier.length; i += 100) {
+              const { nodes } = await github.graphql(
+                'query($ids: [ID!]!) { nodes(ids: $ids) { ... on IssueComment { id isMinimized } } }',
+                { ids: earlier.slice(i, i + 100).map(c => c.node_id) });
+              for (const n of nodes) {
+                if (!n || n.isMinimized) continue;
+                try {
+                  await github.graphql(
+                    'mutation($id: ID!) { minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) { minimizedComment { isMinimized } } }',
+                    { id: n.id });
+                } catch (e) {
+                  core.warning(`could not collapse an earlier review report: ${e.message}`);
+                }
+              }
             }
 
       # With no comment there is nowhere else for the preview links to
