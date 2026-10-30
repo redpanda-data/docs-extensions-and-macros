@@ -659,7 +659,7 @@ Path to an existing engineering checkout (for example, a local redpanda clone). 
 Comma-separated surfaces to lint (default: all registered). Registered: properties, metrics, rpk, helm, crd, connect, api
 
 `--diff <base>`::
-Declaration-anchored diff mode: lint only declarations whose full span intersects lines changed in <base>...HEAD
+Declaration-anchored diff mode: lint only declarations whose full span intersects lines changed in <base>...HEAD, and report a finding a rule can place on a source line only when that line changed
 
 `--format <format>`::
 Output format: human or json (default: "human")

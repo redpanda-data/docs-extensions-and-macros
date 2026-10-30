@@ -1928,10 +1928,25 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(review.with.prompt).toMatch(/Each entry carries context/)
       expect(review.with.prompt).toMatch(/articles and subjects/)
       expect(review.with.prompt).toMatch(/Every flag, command, path and URL goes in inline code/)
+      // A lint fix formats or rewords; it never deletes what the text says.
+      expect(review.with.prompt).toMatch(/Fix a lint finding by formatting or rewording the text it\s+names; never delete a field, value or fact to clear it\./)
       // The related-string comment is the named exception to the
       // suggestion-block rule, and still carries the fingerprint footer.
       expect(review.with.prompt).toMatch(/one exception to the suggestion rules above/)
       expect(review.with.prompt).toMatch(/still ends with the changed declaration's\s+fingerprint footer/)
+    })
+
+    // connect#4860: the lint used to report per declaration, and the prompt
+    // told the review to fix a finding on any line, so it commented on lines
+    // the PR never touched. The lint now reports only findings on changed
+    // lines, and the prompt scopes lint findings the same way.
+    test('a lint finding is in scope only on a changed line', () => {
+      const prompt = review.with.prompt
+      expect(prompt).not.toMatch(/the lint reports per\s+declaration/)
+      expect(prompt).not.toMatch(/fix what a finding names on any line/)
+      expect(prompt).not.toMatch(/A lint\s+finding is the one exception/)
+      expect(prompt).toMatch(/A lint\s+finding is in scope only on a changed line, and the lint\s+reports only those/)
+      expect(prompt).toMatch(/A suggestion fixes the changed lines and any line the change\s+made wrong, and keeps every other line byte-identical/)
     })
   })
 })

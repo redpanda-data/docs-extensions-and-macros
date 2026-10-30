@@ -1090,11 +1090,14 @@ jobs:
               contradicts the changed lines or the code. Its wording, style
               and term choices are out of scope even where they break the
               standard; the author did not write them in this PR. A lint
-              finding is the one exception: the lint reports per
-              declaration, so fix what a finding names on any line, and
-              change nothing else on that line. A suggestion fixes the
-              changed lines, any line the change made wrong and any lint
-              finding, and keeps every other line byte-identical.
+              finding is in scope only on a changed line, and the lint
+              reports only those: an issue's `line` is the changed line its
+              text is on, and an issue with no `line` is about the whole
+              declaration, so fix it through the changed lines or leave it.
+              A suggestion fixes the changed lines and any line the change
+              made wrong, and keeps every other line byte-identical.
+              Fix a lint finding by formatting or rewording the text it
+              names; never delete a field, value or fact to clear it.
             - A string must agree with the strings around it. A flag's usage,
               its command's Long text and that text's examples describe the
               same behavior; a change to one that leaves another saying
