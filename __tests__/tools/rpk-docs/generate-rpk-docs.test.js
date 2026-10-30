@@ -21,7 +21,8 @@ const {
   findTopLevelWithSubcommands,
   generateRpkDocs,
   derivePartialsDir,
-  writeEnvVarsPartial
+  writeEnvVarsPartial,
+  detectProtectedPlugins
 } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
 
 describe('rpk Docs Generation', () => {
@@ -1137,6 +1138,35 @@ Specify a time range.`
 
       const written = fs.readFileSync(navPath, 'utf8')
       expect(written).toBe(nav)
+    })
+  })
+
+  describe('detectProtectedPlugins for rpk check', () => {
+    // rpk check has no subcommands of its own: its subtree is the shim
+    // whether or not the plugin installed. Its flags marked from_plugin
+    // are what show the install.
+    const checkTree = (flags) => flattenCommands({
+      name: 'rpk',
+      commands: [
+        { name: 'check', flags, commands: [{ name: 'install' }, { name: 'uninstall' }, { name: 'upgrade' }] },
+        { name: 'connect', commands: [{ name: 'install' }, { name: 'run' }] },
+        { name: 'ai', commands: [{ name: 'agent' }] },
+        { name: 'k8s', commands: [{ name: 'multicluster' }] },
+        { name: 'oxla', commands: [{ name: 'run' }] }
+      ]
+    })
+
+    test('regenerates rpk check when the tree has its plugin flags', () => {
+      const commands = checkTree([
+        { name: 'version', type: 'bool' },
+        { name: 'admin-url', type: 'stringSlice', from_plugin: true }
+      ])
+      expect(detectProtectedPlugins(commands)).toEqual([])
+    })
+
+    test('protects rpk check when only rpk\'s own flags are there', () => {
+      const commands = checkTree([{ name: 'version', type: 'bool' }])
+      expect(detectProtectedPlugins(commands)).toEqual(['check'])
     })
   })
 

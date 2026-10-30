@@ -6,7 +6,7 @@ const fs = require('fs')
 const os = require('os')
 const semver = require('semver')
 const { findRepoRoot } = require('../../cli-utils/doc-tools-utils')
-const { generateRpkDocs, applyOverridesToTree, resolveReferences, shouldExcludeCommand, shouldUsePartialDir, derivePartialsDir } = require('./generate-rpk-docs')
+const { generateRpkDocs, applyOverridesToTree, resolveReferences, shouldExcludeCommand, shouldUsePartialDir, derivePartialsDir, ROOT_ONLY_PLUGINS } = require('./generate-rpk-docs')
 const { detectLinuxOnlyFromSource, warnIfDetectionLooksBroken } = require('./detect-platform-commands')
 const { downloadRpkBinary, RPK_RELEASE_TAG_RE, RPK_CDN_BASE } = require('../../cli-utils/rpk-cdn')
 const { generateRpkDiff, printDiffReport, generateWhatsNewSection, flattenToMap } = require('./report-delta')
@@ -1547,6 +1547,22 @@ function pluginNodeHasRealCommands(node) {
 }
 
 /**
+ * Whether a plugin install resolved a binary. A node with real commands
+ * shows it did. A root-only plugin such as rpk check has none, so check
+ * for the managed binary in the install's HOME instead.
+ * @param {string} plugin - rpk command name (ai, connect, k8s, check)
+ * @param {Object} node - Top-level command node for the plugin
+ * @param {string} homeDir - HOME the install ran with
+ * @returns {boolean}
+ */
+function pluginInstalled(plugin, node, homeDir) {
+  if (pluginNodeHasRealCommands(node)) return true
+  if (!ROOT_ONLY_PLUGINS.has(plugin)) return false
+  const slug = PLUGIN_MANIFEST_SLUGS[plugin] || plugin
+  return fs.existsSync(path.join(homeDir, '.local', 'bin', `.rpk.managed-${slug}`))
+}
+
+/**
  * Replace a plugin's top-level node in a command tree.
  * Replace-only: throws if the plugin is not already present, so a refresh
  * can never introduce a command that the snapshot's rpk version lacks.
@@ -1901,7 +1917,7 @@ function fetchPluginSubtree({ plugin, pluginVersion, rpkBinPath }) {
   if (!node) {
     throw new Error(`Plugin '${plugin}' not found in rpk command tree after install`)
   }
-  if (!pluginNodeHasRealCommands(node)) {
+  if (!pluginInstalled(plugin, node, tmpHome)) {
     throw new Error(
       `Plugin '${plugin}' installed but exposed no commands beyond the ` +
       'install/uninstall/upgrade shim.\n' +
@@ -2987,6 +3003,7 @@ module.exports = {
   pluginTreeHasFlags,
   fetchLatestPluginVersion,
   pluginNodeHasRealCommands,
+  pluginInstalled,
   splicePluginNode,
   preserveLinuxOnlyCommands,
   REFRESHABLE_PLUGINS,

@@ -4,6 +4,7 @@ const {
   splicePluginNode,
   preserveLinuxOnlyCommands,
   pluginNodeHasRealCommands,
+  pluginInstalled,
   REFRESHABLE_PLUGINS,
   PLUGIN_INSTALL_VERSION_FLAGS,
   PLUGIN_MANIFEST_SLUGS
@@ -53,6 +54,41 @@ describe('Plugin refresh (--plugin mode)', () => {
 
     test('false for a node with no subcommands', () => {
       expect(pluginNodeHasRealCommands({ name: 'ai' })).toBe(false)
+    })
+  })
+
+  describe('pluginInstalled', () => {
+    const fs = require('fs')
+    const os = require('os')
+    const path = require('path')
+    const checkShim = {
+      name: 'check',
+      commands: [{ name: 'install' }, { name: 'uninstall' }, { name: 'upgrade' }]
+    }
+    let home
+    beforeEach(() => { home = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-installed-')) })
+    afterEach(() => { fs.rmSync(home, { recursive: true, force: true }) })
+    const writeManaged = (slug) => {
+      fs.mkdirSync(path.join(home, '.local', 'bin'), { recursive: true })
+      fs.writeFileSync(path.join(home, '.local', 'bin', `.rpk.managed-${slug}`), '')
+    }
+
+    test('rpk check has no subcommands, so its managed binary shows the install', () => {
+      writeManaged('check')
+      expect(pluginInstalled('check', checkShim, home)).toBe(true)
+    })
+
+    test('rpk check without its managed binary did not install', () => {
+      expect(pluginInstalled('check', checkShim, home)).toBe(false)
+    })
+
+    test('a shim-only node of a plugin with subcommands did not install, binary or not', () => {
+      writeManaged('k8s')
+      expect(pluginInstalled('k8s', shimOnlyNode, home)).toBe(false)
+    })
+
+    test('real commands show the install', () => {
+      expect(pluginInstalled('connect', installedNode, home)).toBe(true)
     })
   })
 

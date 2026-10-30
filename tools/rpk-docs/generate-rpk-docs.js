@@ -2437,6 +2437,14 @@ const KNOWN_PLUGINS = ['ai', 'check', 'connect', 'k8s', 'oxla']
 const PLUGIN_SHIM_COMMANDS = new Set(['install', 'uninstall', 'upgrade'])
 
 /**
+ * Managed plugins that run from their root command and have no subcommands:
+ * rpk check runs every check from `rpk check` itself, so its subtree is
+ * only ever the shim, installed or not. rpk marks the flags such a plugin
+ * reports with from_plugin, which is what shows it installed.
+ */
+const ROOT_ONLY_PLUGINS = new Set(['check'])
+
+/**
  * Check whether a command path belongs to a protected plugin's subtree
  * (including the plugin's own top-level command).
  * @param {string} commandPath - Full command path, e.g. 'rpk k8s multicluster'
@@ -2469,8 +2477,11 @@ function detectProtectedPlugins(commands, explicitProtected = []) {
     const subNames = commands
       .filter(c => c.path.startsWith(`rpk ${pl} `))
       .map(c => c.path.split(' ')[2])
-    const hasTopLevel = commands.some(c => c.path === `rpk ${pl}`)
-    if (!hasTopLevel) return true
+    const top = commands.find(c => c.path === `rpk ${pl}`)
+    if (!top) return true
+    if (ROOT_ONLY_PLUGINS.has(pl)) {
+      return !((top.command && top.command.flags) || []).some(f => f.from_plugin === true)
+    }
     return subNames.length === 0 || subNames.every(n => PLUGIN_SHIM_COMMANDS.has(n))
   })
   return [...new Set([...explicitProtected, ...autoProtected])]
@@ -3309,6 +3320,7 @@ module.exports = {
   shouldUsePartialDir,
   updateNavFile,
   KNOWN_PLUGINS,
+  ROOT_ONLY_PLUGINS,
   detectProtectedPlugins,
   getCommandMetadata,
   processContentArray,
