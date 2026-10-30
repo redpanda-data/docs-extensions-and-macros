@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.59.1](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.59.0...v5.59.1) (2026-10-30)
+
+
+### Bug fixes
+
+* **doc-strings-review:** stop telling connect authors to commit regenerated docs ([#467](https://github.com/redpanda-data/docs-extensions-and-macros/issues/467)) ([0f1fb05](https://github.com/redpanda-data/docs-extensions-and-macros/commit/0f1fb050ba21ca7134cdc6596036e26a777c02bb))
+
 ## [5.59.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.58.0...v5.59.0) (2026-10-29)
 
 
