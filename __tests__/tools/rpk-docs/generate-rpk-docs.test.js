@@ -745,6 +745,13 @@ Specify a time range.`
       expect(result).toContain('When `rpk` starts up')
     })
 
+    test('does not wrap the rpk in a dotted config key', () => {
+      // rpk redpanda admin config print --host in the v26.1.12 tree
+      const result = formatDescription('An index into rpk.admin_api.addresses to select hosts, as with rpk.')
+      expect(result).toContain('into rpk.admin_api.addresses to')
+      expect(result).toContain('as with `rpk`.')
+    })
+
     test('handles complex flag=value patterns', () => {
       const input = 'Example: --var=KEY=VALUE for environment'
       const result = formatDescription(input)

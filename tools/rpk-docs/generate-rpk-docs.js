@@ -1846,8 +1846,9 @@ function formatDescription(desc, customTransformations = null, options = {}) {
 
   // Add backticks around standalone "rpk" (at end of phrase, before punctuation)
   // Also exclude rpk inside paths (preceded by /) and inside a dotted name
-  // (preceded by .), like the .rpk.ac- plugin prefix
-  result = result.replace(/(?<![`\w/.])rpk(?=[\s]*[.,;:!?)'"}\]]|[\s]*$)/g, '`rpk`')
+  // (preceded by .), like the .rpk.ac- plugin prefix. The punctuation must
+  // end the token: rpk.admin_api is a config key, not the binary.
+  result = result.replace(/(?<![`\w/.])rpk(?=\s*[.,;:!?)'"}\]]+(?:\s|$)|\s*$)/g, '`rpk`')
 
   // Convert GitHub issue/PR references to clickable links
   // Pattern: #NNNN (4+ digits) when not inside backticks or code
