@@ -38,6 +38,7 @@ const { annotateVerbatimLines } = require('../tools/redpanda-connect/metadata-ut
 const { connectFieldName } = require('../tools/redpanda-connect/helpers/flattenConnectFields')
 const { FORMAT_MARKDOWN } = require('./value-descriptions')
 const { latestVersion } = require('./rpk-links')
+const { normalizeType } = require('../extensions/util/connect-catalog')
 
 const CONNECT = connectValues.CONNECT_COMPONENT
 const COMPONENTS_MODULE = 'components'
@@ -283,6 +284,167 @@ function resolveComponentRef (data, text) {
   return { ...base, field: walked.field, segments }
 }
 
+// ---------------------------------------------------------------------------
+// Former names and replacements
+
+// The data key of a component type directory: rate_limits -> rate-limits.
+const keyOfDir = (data, dir) => Object.values(connectValues.componentTypes(data)).find((key) => typeDir(key) === dir)
+
+/**
+ * The component another component's path now goes to: the connect page that
+ * declares components:<type>/<name>.adoc as a page alias, when that page is
+ * another component in the data (outputs/kafka_migrator ->
+ * outputs/redpanda_migrator, inputs/pg_stream -> inputs/postgres_cdc).
+ *
+ * @returns {{key: string, type: string, name: string, entry: object, alias: string} | undefined}
+ */
+function aliasedComponent (catalog, data, key, name) {
+  const relative = componentPagePath(key, name)
+  const page = findPage(catalog, `${CONNECT}:${COMPONENTS_MODULE}:${relative}`)
+  if (!page || !page.src || page.src.relative === relative) return undefined
+  const m = String(page.src.relative).match(/^([a-z_]+)\/([\w-]+)\.adoc$/)
+  const target = m && keyOfDir(data, m[1])
+  const entry = target && (data[target] || []).find((c) => c && c.name === m[2])
+  if (!entry) return undefined
+  return { key: target, type: normalizeType(target), name: m[2], entry, alias: `${COMPONENTS_MODULE}:${relative}` }
+}
+
+/**
+ * A component written by a former name: one the data does not have, whose
+ * path the connect docs alias to a component it has. undefined for a name
+ * the data has, or no alias.
+ */
+function renamedComponent (catalog, data, text) {
+  const { component } = connectValues.parseFieldTarget(text)
+  const parsed = connectValues.parseComponent(component)
+  if (!parsed || !parsed.name || !catalog) return undefined
+  const resolved = connectValues.resolveComponent(data, parsed.type, parsed.name)
+  if (resolved.ok || resolved.kind !== 'unknown-component') return undefined
+  return aliasedComponent(catalog, data, resolved.key || connectValues.componentTypes(data)[normalizeType(parsed.type)], parsed.name)
+}
+
+/**
+ * The component a deprecated component's data names as its replacement: the
+ * page its path is an alias of (pg_stream, whose path the postgres_cdc page
+ * declares), or the one component its description links in the paragraphs
+ * that say it is deprecated ("This input is deprecated as of version 4.68.0.
+ * Use the xref:components:inputs/redpanda.adoc[`redpanda` input] instead.").
+ * undefined when it names none, or more than one (parquet: parquet_decode
+ * and parquet_encode).
+ *
+ * @returns {{key: string, type: string, name: string, entry: object, source: 'page-alias'|'description'} | undefined}
+ */
+function componentReplacement (catalog, data, key, name, entry) {
+  if (!entry || entry.status !== 'deprecated') return undefined
+  const aliased = catalog ? aliasedComponent(catalog, data, key, name) : undefined
+  if (aliased) return { ...aliased, source: 'page-alias' }
+  const found = new Map()
+  for (const paragraph of String(entry.description || '').split(/\n\s*\n/)) {
+    if (!/deprecat/i.test(paragraph)) continue
+    for (const m of paragraph.matchAll(/xref:(?:connect:)?components:([a-z_]+)\/([\w-]+)\.adoc/g)) {
+      const target = keyOfDir(data, m[1])
+      const other = target && (data[target] || []).find((c) => c && c.name === m[2])
+      if (other && !(target === key && m[2] === name)) found.set(`${target}/${m[2]}`, { key: target, type: normalizeType(target), name: m[2], entry: other, source: 'description' })
+    }
+  }
+  return found.size === 1 ? [...found.values()][0] : undefined
+}
+
+/**
+ * The field a deprecated field's description names instead ("Deprecated:
+ * use `commit_backoff.max_elapsed_time` instead", "Deprecated in favor of
+ * `address`"), as a path from the component: beside the field first, then
+ * from the top. undefined when the description names none that the data has
+ * and lists.
+ */
+function fieldReplacement (fields, segments, field) {
+  if (!field || field.is_deprecated !== true) return undefined
+  const m = String(field.description || '').match(/deprecated(?:\s+in\s+favou?r\s+of|[:.,]?\s+use)\s+(?:the\s+)?`?([a-z_][\w.]*[a-z0-9_])`?/i)
+  if (!m) return undefined
+  const named = m[1].split('.')
+  for (const base of [segments.slice(0, -1), []]) {
+    const path = [...base, ...named]
+    const walked = connectValues.resolveFieldPath(fields, path)
+    if (walked.ok && walked.field.is_deprecated !== true && path.join('.') !== segments.join('.')) return path.join('.')
+  }
+  return undefined
+}
+
+/**
+ * The fields of a component entry.
+ */
+const fieldsOf = (entry) => (entry && entry.config && Array.isArray(entry.config.children) ? entry.config.children : [])
+
+/**
+ * What to write instead of a component reference (<type>/<name>[.<field>])
+ * that uses a former or deprecated name, and whether a call may simply be
+ * rewritten to it: the component the data names, with the same field path
+ * when that component has it, or the field the deprecated field's
+ * description names.
+ *
+ * @returns {{kind: 'renamed'|'deprecated-component'|'deprecated-field', ref?: string, writable: boolean, why?: string, replacement?: object} | undefined}
+ *   ref is <dir>/<name>[.<path>], written as the macros take it.
+ */
+function referenceAdvice (catalog, data, text) {
+  const { path } = connectValues.parseFieldTarget(text)
+  const segments = path ? path.split('.').filter(Boolean) : []
+  const renamed = renamedComponent(catalog, data, text)
+  const withPath = (target) => {
+    if (!segments.length) return { ok: true, ref: `${typeDir(target.key)}/${target.name}` }
+    const walked = connectValues.resolveFieldPath(fieldsOf(target.entry), segments)
+    return walked.ok ? { ok: true, ref: `${typeDir(target.key)}/${target.name}.${segments.join('.')}` } : { ok: false }
+  }
+  if (renamed) {
+    const p = withPath(renamed)
+    return { kind: 'renamed', replacement: renamed, ref: p.ok ? p.ref : undefined, writable: p.ok, why: p.ok ? undefined : `${typeDir(renamed.key)}/${renamed.name} has no field ${path}` }
+  }
+  const resolved = resolveComponentRef(data, text)
+  if (!resolved.ok) return undefined
+  if (resolved.field && resolved.field.is_deprecated === true) {
+    const instead = fieldReplacement(fieldsOf(resolved.entry), resolved.segments, resolved.field)
+    if (instead) return { kind: 'deprecated-field', ref: `${typeDir(resolved.key)}/${resolved.name}.${instead}`, field: instead, writable: true }
+    return { kind: 'deprecated-field', writable: false, why: 'the Connect data names no replacement for the field' }
+  }
+  if (resolved.entry.status !== 'deprecated') return undefined
+  const replacement = componentReplacement(catalog, data, resolved.key, resolved.name, resolved.entry)
+  if (!replacement) return { kind: 'deprecated-component', writable: false, why: `the Connect data names no single replacement for the ${resolved.type} '${resolved.name}'` }
+  const p = withPath(replacement)
+  const sameType = replacement.key === resolved.key
+  return {
+    kind: 'deprecated-component',
+    replacement,
+    ref: p.ok ? p.ref : undefined,
+    writable: p.ok && sameType,
+    why: !p.ok ? `${typeDir(replacement.key)}/${replacement.name} has no field ${path}, so find the equivalent by hand` : sameType ? undefined : `${typeDir(replacement.key)}/${replacement.name} is another type of component, so the sentence needs rewording by hand`,
+  }
+}
+
+/**
+ * The sentence a macro warns with for referenceAdvice: what the name is, what
+ * to write instead, or why it cannot simply be rewritten.
+ *
+ * @param {object} advice - From referenceAdvice.
+ * @param {object} opts
+ * @param {string} opts.written - <dir>/<name>[.<path>] as written.
+ * @param {string} opts.dataset - describeDataset of the data.
+ * @param {(ref: string) => string} opts.suggest - The call around a reference.
+ */
+function adviceSentence (advice, { written, dataset, suggest }) {
+  const { component, path } = connectValues.parseFieldTarget(written)
+  const parsed = connectValues.parseComponent(component) || {}
+  const what = `the ${normalizeType(parsed.type || '').replace(/_/g, ' ')} '${parsed.name}'`
+  const instead = advice.ref && advice.writable ? `: write ${suggest(advice.ref)}` : advice.why ? `, but ${advice.why}` : ''
+  if (advice.kind === 'renamed') {
+    const r = advice.replacement
+    return `${what} is now ${typeDir(r.key)}/${r.name}: the connect docs alias its page path, ${r.alias}, to that component's page${advice.ref ? `; write ${suggest(advice.ref)}` : `, and ${advice.why}`}.`
+  }
+  if (advice.kind === 'deprecated-field') {
+    return `'${path}' of ${what} is deprecated in ${dataset}${advice.field ? `; its replacement is ${advice.field}${instead}` : `; ${advice.why}`}.`
+  }
+  const r = advice.replacement
+  return `${what} is deprecated in ${dataset}${r ? `; its replacement is ${typeDir(r.key)}/${r.name}${instead}` : `; ${advice.why}`}.`
+}
+
 /**
  * The heading the reference gives a field (batching.byte_size,
  * addresses[]) and whether the reference lists it: deprecated fields, and
@@ -481,6 +643,12 @@ module.exports = {
   componentPagePath,
   typeWords,
   resolveComponentRef,
+  aliasedComponent,
+  renamedComponent,
+  componentReplacement,
+  fieldReplacement,
+  referenceAdvice,
+  adviceSentence,
   fieldHeading,
   componentPageIds,
   connectPageText,

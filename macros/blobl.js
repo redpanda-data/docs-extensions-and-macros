@@ -22,7 +22,8 @@
  * Cloud page an impure function (count, env, file, file_rel, hostname),
  * which the Cloud reference leaves out, renders plain code. An unknown or
  * hidden name, or no page, renders plain code with no link and says why,
- * according to connect-validate (warn, error or off). See
+ * according to connect-validate (warn, error or off). A deprecated function
+ * or method still links its entry, which documents it, and warns. See
  * macros/REFERENCE.adoc.
  *
  * Registered by macros/prop, so every playbook that registers prop: has it.
@@ -105,6 +106,9 @@ function bloblInlineMacro (config) {
           : `no component in this build has the Bloblang ${kind}s page (guides:${relative})`
         return plain(`${call}: ${why}, so it renders as plain code with no link.`, 'no-page')
       }
+      // A deprecated function or method is still on its page, so it links;
+      // the Connect data names no replacement for any of them.
+      if (entry.status === 'deprecated' && mode !== 'off') logger.warn(`${call}: ${bloblang.deprecationNote(kind, entry, dataset)}`)
       const fragment = connectLinks.bloblangAnchor(entry, picked)
       const content = buildBloblContent({ written, name: entry.name, kind, text })
       return self.createInline(parent, 'anchor', content, {

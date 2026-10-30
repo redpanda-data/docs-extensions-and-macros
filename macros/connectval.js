@@ -32,12 +32,16 @@
  * (env-cloud) a component that is not available in Cloud renders a
  * placeholder. Whenever no verified value exists the macro renders
  * <unknown FIELD> and says why, according to connect-validate (warn, error or
- * off). See macros/REFERENCE.adoc.
+ * off). A former name (a component path the connect docs alias to another
+ * component's page) reads that component and warns with its name; a
+ * deprecated component or field reads its own value and warns with its
+ * replacement when the data names one. See macros/REFERENCE.adoc.
  *
  * Registered by macros/prop, so every playbook that registers prop: has it.
  */
 
 const connectValues = require('../extension-utils/connect-values')
+const connectLinks = require('../extension-utils/connect-links')
 const datasets = require('../extension-utils/attachment-datasets')
 const valueDescriptions = require('../extension-utils/value-descriptions')
 const logger = require('@antora/logger')('connectval-macro')
@@ -115,7 +119,36 @@ function connectvalCall (config, parent, target, attributes, { block = false } =
     cloud = datasets.isAttributeSet(datasets.componentAttributes(contentCatalog, src.component || '', src.version || '')['env-cloud'])
     csvRows = csvRowsOf(contentCatalog)
   }
-  const result = connectValues.resolveConnectValue({ registry, component, path, field: requested, format, cloud, csvRows, filePath, macro })
+  // A former name (inputs/kafka_migrator) reads the component its page path
+  // now goes to; a deprecated name reads its own value. Both warn with what
+  // to write instead, and neither throws.
+  const written = `${componentText}${path ? `.${path}` : ''}`
+  const advice = registry && contentCatalog && componentText ? connectLinks.referenceAdvice(contentCatalog, registry.data, written) : undefined
+  const renamed = advice && advice.kind === 'renamed' ? advice.replacement : undefined
+  const lookup = renamed ? `${connectLinks.typeDir(renamed.key)}/${renamed.name}` : component
+  const result = connectValues.resolveConnectValue({ registry, component: lookup, path, field: requested, format, cloud, csvRows, filePath, macro })
+  // A call that is wrong for another reason says that instead.
+  const malformed = !result.ok && ['unsupported-field', 'unknown-field', 'unknown-component', 'unknown-type'].includes(result.kind)
+  const suggest = (ref) => {
+    if (bracket) return `connectval${block ? '::' : ':'}[${ref}${positional != null ? `,${requested}` : ''}]`
+    const to = connectValues.parseFieldTarget(ref)
+    return `connectval:${to.path}[${requested},component=${to.component}]`
+  }
+  // The error about a former name's field says which component it read.
+  if (renamed && malformed) result.message += ` ${connectLinks.adviceSentence(advice, { written, dataset: datasets.describeDataset(registry), suggest }).replace(/^./, (c) => c.toUpperCase())}`
+  if (advice && !malformed && mode !== 'off') {
+    const call = `${macro || `connectval:${path}[${requested},component=${componentText}]`}${where}`
+    // A deprecated field is already in resolveConnectValue's warnings, and a
+    // call that asks whether something is deprecated knows.
+    const asks = ['status', 'deprecated'].includes(connectValues.normalizeField(requested))
+    if (advice.kind === 'deprecated-field') {
+      for (const warning of result.warnings || []) {
+        if (warning.kind === 'deprecated-field') warning.message += advice.field ? ` Its replacement is ${advice.field}: write ${suggest(advice.ref)}.` : ''
+      }
+    } else if (!(advice.kind === 'deprecated-component' && asks)) {
+      logger.warn(`${call}: ${connectLinks.adviceSentence(advice, { written, dataset: datasets.describeDataset(registry), suggest })}`)
+    }
+  }
   if (mode !== 'off') {
     for (const warning of result.warnings || []) {
       if (warning.kind === 'cloud-unknown') datasets.warnOnce(contentCatalog, `connect:cloudunknown:${componentText}`, warning.message, logger)

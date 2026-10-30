@@ -49,6 +49,11 @@
   },
   {
    "module": "components",
+   "relative": "inputs/redpanda.adoc",
+   "aliases": []
+  },
+  {
+   "module": "components",
    "relative": "inputs/redpanda_migrator.adoc",
    "aliases": [
     "components:inputs/kafka_migrator.adoc"
@@ -207,6 +212,13 @@
    "relative": "connect/components/inputs/postgres_cdc.adoc",
    "aliases": [
     "develop:connect/components/inputs/pg_stream.adoc"
+   ]
+  },
+  {
+   "module": "develop",
+   "relative": "connect/components/inputs/redpanda.adoc",
+   "aliases": [
+    "components:inputs/redpanda.adoc"
    ]
   },
   {

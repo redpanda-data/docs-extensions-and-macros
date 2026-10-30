@@ -180,3 +180,115 @@ describe('blobl: macro', () => {
     })
   })
 })
+
+// Former and deprecated names, against the real data and page aliases of the
+// fixtures: rp-connect-docs' redpanda_migrator pages declare the
+// kafka_migrator paths as page aliases, postgres_cdc declares pg_stream, and
+// the kafka_franz input says "This input is deprecated as of version 4.68.0.
+// Use the xref:components:inputs/redpanda.adoc[`redpanda` input] instead."
+describe('former and deprecated names', () => {
+  afterEach(() => jest.restoreAllMocks())
+
+  describe('connect:', () => {
+    test('a former name renders as written, links the component its page path now goes to, and warns with the current name', () => {
+      const warn = warnings()
+      expect(linkOf(convert('connect:[outputs/kafka_migrator]'))).toEqual({
+        target: 'connect:components:outputs/redpanda_migrator.adoc',
+        inner: '<code class="connect-component" data-connect-component="outputs/redpanda_migrator">kafka_migrator</code> output',
+      })
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(warn.mock.calls[0][0]).toBe("connect:[outputs/kafka_migrator] in modules/guides/pages/example.adoc: the output 'kafka_migrator' is now outputs/redpanda_migrator: the connect docs alias its page path, components:outputs/kafka_migrator.adoc, to that component's page; write connect:[outputs/redpanda_migrator].")
+    })
+
+    test('a former name\'s field is checked against the current component, and the label is kept in the suggestion', () => {
+      const warn = warnings()
+      expect(linkOf(convert('connect:[inputs/kafka_migrator.topics,the topics]')).target).toBe('connect:components:inputs/redpanda_migrator.adoc')
+      expect(warn.mock.calls[0][0]).toContain('write connect:[inputs/redpanda_migrator.topics,the topics].')
+      warn.mockClear()
+      expect(linkOf(convert('connect:[inputs/kafka_migrator.nope]')).plain).toBe('<code>nope</code>')
+      expect(warn.mock.calls[0][0]).toContain("'nope' is not a field in input/redpanda_migrator")
+    })
+
+    test('former and deprecated names never fail the build in error mode, and off silences them', () => {
+      const warn = warnings()
+      for (const input of ['connect:[outputs/kafka_migrator]', 'connect:[inputs/kafka_franz]', 'connect:[inputs/kafka_franz.regexp_topics]']) {
+        expect(() => convert(input, { attributes: { 'connect-validate': 'error' } })).not.toThrow()
+      }
+      warn.mockClear()
+      convert('connect:[outputs/kafka_migrator] connect:[inputs/kafka_franz]', { attributes: { 'connect-validate': 'off' } })
+      expect(warn).not.toHaveBeenCalled()
+    })
+
+    test('a deprecated component links its own page, which documents it, and names its replacement', () => {
+      const warn = warnings()
+      expect(linkOf(convert('connect:[inputs/kafka_franz]')).target).toBe('connect:components:inputs/kafka_franz.adoc')
+      expect(warn.mock.calls[0][0]).toBe("connect:[inputs/kafka_franz] in modules/guides/pages/example.adoc: the input 'kafka_franz' is deprecated in connect-4.115.1.json from connect@unversioned; its replacement is inputs/redpanda: write connect:[inputs/redpanda].")
+    })
+
+    test('a deprecated component\'s field keeps the field in the suggestion when the replacement has it, and says so when it does not', () => {
+      const warn = warnings()
+      convert('connect:[inputs/kafka_franz.consumer_group]')
+      expect(warn.mock.calls[0][0]).toContain('its replacement is inputs/redpanda: write connect:[inputs/redpanda.consumer_group].')
+      warn.mockClear()
+      convert('connect:[inputs/kafka_franz.checkpoint_limit]')
+      expect(warn.mock.calls[0][0]).toContain('its replacement is inputs/redpanda, but inputs/redpanda has no field checkpoint_limit, so find the equivalent by hand.')
+    })
+
+    test('a deprecated component its page alias replaces (pg_stream) links the replacement page and names it', () => {
+      const warn = warnings()
+      expect(linkOf(convert('connect:[inputs/pg_stream]')).target).toBe('connect:components:inputs/postgres_cdc.adoc')
+      expect(warn.mock.calls[0][0]).toContain("the input 'pg_stream' is deprecated in connect-4.115.1.json from connect@unversioned; its replacement is inputs/postgres_cdc: write connect:[inputs/postgres_cdc].")
+    })
+
+    test('a deprecated field names the field its description names ("Deprecated: use regexp_topics_include instead")', () => {
+      const warn = warnings()
+      expect(linkOf(convert('connect:[inputs/kafka_franz.regexp_topics]')).target).toBe('connect:components:inputs/kafka_franz.adoc')
+      expect(warn.mock.calls.map((c) => c[0])).toContain("connect:[inputs/kafka_franz.regexp_topics] in modules/guides/pages/example.adoc: the Connect reference does not list 'regexp_topics' (it is deprecated in connect-4.115.1.json from connect@unversioned), so the link goes to the input page with no anchor. Its replacement is regexp_topics_include: write connect:[inputs/kafka_franz.regexp_topics_include].")
+    })
+
+    test('a current name never warns', () => {
+      const warn = warnings()
+      convert('connect:[inputs/redpanda] connect:[outputs/redpanda_migrator] connect:[inputs/postgres_cdc]')
+      expect(warn).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('connectval:', () => {
+    test.each([
+      ['connectval:[inputs/kafka_migrator.topics,type]', 'array&lt;string&gt;', "the input 'kafka_migrator' is now inputs/redpanda_migrator: the connect docs alias its page path, components:inputs/kafka_migrator.adoc, to that component's page; write connectval:[inputs/redpanda_migrator.topics,type]."],
+      ['connectval:topics[type,component=inputs/kafka_migrator]', 'array&lt;string&gt;', 'write connectval:topics[type,component=inputs/redpanda_migrator].'],
+      ['connectval:[inputs/kafka_franz.topics,type]', 'array&lt;string&gt;', "the input 'kafka_franz' is deprecated in connect-4.115.1.json from connect@unversioned; its replacement is inputs/redpanda: write connectval:[inputs/redpanda.topics,type]."],
+      ['connectval:[inputs/kafka_franz.regexp_topics,default]', 'false', 'the Connect reference does not list deprecated fields. Its replacement is regexp_topics_include: write connectval:[inputs/kafka_franz.regexp_topics_include,default].'],
+    ])('%s renders %s and warns', (input, value, message) => {
+      const warn = warnings()
+      const html = convert(input)
+      expect(html).toContain(`>${value}</span>`)
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(warn.mock.calls[0][0]).toContain(message)
+    })
+
+    test('asking whether a component is deprecated does not warn that it is', () => {
+      const warn = warnings()
+      expect(convert('connectval:[inputs/kafka_franz,status]')).toContain('>deprecated</span>')
+      expect(warn).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('blobl: and bloblval:', () => {
+    test.each([
+      ['blobl:[meta()]', 'connect:guides:bloblang/functions.adoc', 'the function meta() is deprecated in connect-4.115.1.json from connect@unversioned; the Connect data names no replacement.'],
+      ['blobl:[.format_timestamp()]', 'connect:guides:bloblang/methods.adoc', 'the method .format_timestamp() is deprecated in connect-4.115.1.json from connect@unversioned; the Connect data names no replacement.'],
+    ])('%s links its entry, which documents it, and warns', (input, target, message) => {
+      const warn = warnings()
+      expect(linkOf(convert(input)).target).toBe(target)
+      expect(warn.mock.calls[0][0]).toBe(`${input} in modules/guides/pages/example.adoc: ${message}`)
+      expect(() => convert(input, { attributes: { 'connect-validate': 'error' } })).not.toThrow()
+    })
+
+    test('bloblval: says the same', () => {
+      const warn = warnings()
+      convert('bloblval:[meta(),description]')
+      expect(warn.mock.calls[0][0]).toContain('the function meta() is deprecated in connect-4.115.1.json from connect@unversioned; the Connect data names no replacement.')
+    })
+  })
+})

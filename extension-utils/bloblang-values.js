@@ -323,7 +323,7 @@ function resolveBloblValue ({ registry, call: written, field: requested = 'defau
   if (!picked.ok) return { ok: false, kind: 'unknown-category', field, message: `${call}: ${picked.message} in ${dataset}.` }
   const warnings = []
   if (entry.status === 'deprecated' && fieldName !== 'deprecated' && fieldName !== 'status') {
-    warnings.push({ kind: 'deprecated-entry', message: `${call}: the ${kind} ${what} is deprecated in ${dataset}.` })
+    warnings.push({ kind: 'deprecated-entry', message: `${call}: ${deprecationNote(kind, entry, dataset)}` })
   }
   const docsFormat = connectValues.docsFormat(registry.data)
   const value = param ? paramValue(param, fieldName, { docsFormat, format }) : entryValue(kind, entry, fieldName, { format, docsFormat, category: picked.category })
@@ -354,7 +354,18 @@ function buildBloblvalContent ({ call, field, text, html, unknown = false }) {
   return `<span class="${VALUE_ROLE}" ${attrs}>${html !== undefined ? html : escapeHtml(text)}</span>`
 }
 
+/**
+ * The warning for a deprecated function or method. The Connect data has no
+ * field that names a replacement, and the descriptions do not name one
+ * either (format_timestamp's "Use ts_strftime for strftime-style formats" is
+ * the other format, not its successor), so none is named.
+ */
+function deprecationNote (kind, entry, dataset) {
+  return `the ${kind} ${callText(kind, entry.name)} is deprecated in ${dataset}; the Connect data names no replacement.`
+}
+
 module.exports = {
+  deprecationNote,
   FUNCTION,
   METHOD,
   PARAMETER,

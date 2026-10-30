@@ -23,7 +23,11 @@
  * first, where Cloud has its stubs, then the connect component. A Cloud page
  * links only Cloud pages. An unknown component or field, or no page, renders
  * plain code with no link and says why, according to connect-validate
- * (warn, error or off). See macros/REFERENCE.adoc.
+ * (warn, error or off). A former name, one the connect docs alias to another
+ * component's page (outputs/kafka_migrator), renders as written, links that
+ * component, and warns with its name. A deprecated component or field links
+ * as before and warns with its replacement when the data names one. See
+ * macros/REFERENCE.adoc.
  *
  * Registered by macros/prop, so every playbook that registers prop: has it.
  */
@@ -36,7 +40,8 @@ const { normalizeType } = require('../extensions/util/connect-catalog')
 const logger = require('@antora/logger')('connect-macro')
 
 // Kinds that fail the build in error mode: authoring errors. No data and no
-// page are gaps in the build, and plain code still reads correctly.
+// page are gaps in the build, and plain code still reads correctly. A former
+// or deprecated name only warns: it renders and links correctly.
 const THROW_KINDS = ['unknown-type', 'unknown-component', 'unknown-field']
 
 const ROLE = 'connect-component'
@@ -49,9 +54,9 @@ const unescape = (value) => String(value).replace(/&lt;/g, '<').replace(/&gt;/g,
  * default text is the component name as code and its type, or the field
  * path as code. text is used as Asciidoctor passed it, already substituted.
  */
-function buildConnectContent ({ component, path, type, text, plain = false }) {
+function buildConnectContent ({ component, path, type, text, plain = false, shownName }) {
   if (text) return text
-  const shown = path || (component.split('/')[1] || component)
+  const shown = path || shownName || (component.split('/')[1] || component)
   const words = !path && type ? ` ${escapeHtml(connectLinks.typeWords(type))}` : ''
   if (plain) return `<code>${escapeHtml(shown)}</code>${words}`
   const fieldAttr = path ? ` data-connect-field="${escapeHtml(path)}"` : ''
@@ -93,16 +98,36 @@ function connectInlineMacro (config) {
         return plain(`${call}: this build has no Connect data to check '${written}' against (see the connectval macro warning), so it renders as plain code with no link.`, 'no-data', typeOf())
       }
       const dataset = datasets.describeDataset(registry)
-      const resolved = connectLinks.resolveComponentRef(registry.data, written)
+      // A former name (outputs/kafka_migrator) renders as written and links
+      // the component its page path now goes to; a deprecated name links its
+      // own page, which documents it. Both warn with what to write instead,
+      // and neither throws: the output is right.
+      const advice = connectLinks.referenceAdvice(contentCatalog, registry.data, written)
+      const suggest = (ref) => `connect:[${ref}${text === undefined ? '' : `,${unescape(text)}`}]`
+      const renamed = advice && advice.kind === 'renamed' ? advice.replacement : undefined
+      const lookup = renamed ? `${connectLinks.typeDir(renamed.key)}/${renamed.name}${path ? `.${path}` : ''}` : written
+      const resolved = connectLinks.resolveComponentRef(registry.data, lookup)
       if (!resolved.ok) {
         const hint = resolved.suggestions && resolved.suggestions.length ? ` Did you mean: ${resolved.suggestions.join(', ')}?` : ''
-        return plain(`${call}: ${resolved.message} in ${dataset}, so it renders as plain code with no link.${hint}`, resolved.kind, typeOf())
+        const was = renamed ? ` ${connectLinks.adviceSentence(advice, { written, dataset, suggest }).replace(/^./, (c) => c.toUpperCase())}` : ''
+        return plain(`${call}: ${resolved.message} in ${dataset}, so it renders as plain code with no link.${hint}${was}`, resolved.kind, typeOf())
       }
+      // A deprecated field's sentence joins the no-anchor warning below.
+      if (advice && advice.kind !== 'deprecated-field' && mode !== 'off') logger.warn(`${call}: ${connectLinks.adviceSentence(advice, { written, dataset, suggest })}`)
 
       const component = `${connectLinks.typeDir(resolved.key)}/${resolved.name}`
       const relative = connectLinks.componentPagePath(resolved.key, resolved.name)
       const cloud = connectLinks.isCloud(contentCatalog, src.component, src.version)
-      const page = connectLinks.pickConnectPage(contentCatalog, { component: src.component, version: src.version, module: connectLinks.COMPONENTS_MODULE, relative, cloud })
+      let page = connectLinks.pickConnectPage(contentCatalog, { component: src.component, version: src.version, module: connectLinks.COMPONENTS_MODULE, relative, cloud })
+      // A deprecated component whose path the connect docs alias to its
+      // replacement's page (pg_stream to postgres_cdc) links that page where
+      // the rendering component has no page of its own for it, as connect
+      // itself does.
+      const aliased = advice && advice.kind === 'deprecated-component' && advice.replacement && advice.replacement.source === 'page-alias' ? advice.replacement : undefined
+      if (!page.ok && aliased) {
+        const instead = connectLinks.pickConnectPage(contentCatalog, { component: src.component, version: src.version, module: connectLinks.COMPONENTS_MODULE, relative: connectLinks.componentPagePath(aliased.key, aliased.name), cloud })
+        if (instead.ok) page = instead
+      }
       if (!page.ok) {
         const where = `${src.component || 'unknown component'}@${src.version || 'unversioned'}`
         const why = page.reason === 'cloud-no-page'
@@ -114,9 +139,14 @@ function connectInlineMacro (config) {
       if (resolved.path) {
         const anchor = connectLinks.fieldAnchor({ resolved, catalog: contentCatalog, format: connectValues.docsFormat(registry.data) })
         if (anchor.anchor) fragment = anchor.anchor
-        else if (mode !== 'off') logger.warn(`${call}: the Connect reference does not list '${resolved.path}' (it is deprecated in ${dataset}), so the link goes to the ${resolved.type} page with no anchor.`)
+        else if (mode !== 'off') {
+          const field = advice && advice.kind === 'deprecated-field'
+            ? (advice.field ? ` Its replacement is ${advice.field}: write ${suggest(advice.ref)}.` : ` ${advice.why.replace(/^./, (c) => c.toUpperCase())}.`)
+            : ''
+          logger.warn(`${call}: the Connect reference does not list '${resolved.path}' (it is deprecated in ${dataset}), so the link goes to the ${resolved.type} page with no anchor.${field}`)
+        }
       }
-      const content = buildConnectContent({ component, path: resolved.path, type: resolved.type, text })
+      const content = buildConnectContent({ component, path: resolved.path, type: resolved.type, text, shownName: renamed ? (componentText.split('/')[1] || undefined) : undefined })
       // An xref node: Antora's converter resolves path to the page's URL,
       // exactly as it resolves xref:[] in the source.
       return self.createInline(parent, 'anchor', content, {
