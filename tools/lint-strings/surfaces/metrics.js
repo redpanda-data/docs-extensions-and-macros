@@ -4,6 +4,7 @@ const fs = require('fs')
 const path = require('path')
 
 const { SourceCache } = require('../source-text')
+const { STANDARD } = require('../standards')
 
 /**
  * Metrics surface: `sm::description(...)` / `ss::metrics::description(...)`
@@ -351,6 +352,8 @@ const RULES = [
   {
     name: 'trailing-period',
     description: 'Metric descriptions do not end with a period',
+    why: 'Metric help is a label that also becomes the Prometheus HELP text, and the metrics convention is no terminal period, so a period makes it read unlike every other metric.',
+    standard: STANDARD.metrics,
     severity: 'warning',
     check: (decl) => {
       const text = (decl.string || '').trim()
@@ -364,6 +367,8 @@ const RULES = [
   {
     name: 'unverifiable-description',
     description: 'Description argument is not a plain string literal',
+    why: 'The help text is built from a constant or an expression, so the lint cannot see what readers will get and someone has to check the published text by hand.',
+    standard: STANDARD.metrics,
     severity: 'info',
     runOnUnverifiable: true,
     check: (decl) => {

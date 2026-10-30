@@ -653,7 +653,7 @@ doc-tools lint-strings [options]
 *Options:*
 
 `--repo <path>`::
-Path to an existing engineering checkout (for example, a local redpanda clone). Nothing is cloned.
+Path to an existing engineering checkout (for example, a local redpanda clone). Nothing is cloned. Required unless --list-rules is set.
 
 `--surface <list>`::
 Comma-separated surfaces to lint (default: all registered). Registered: properties, metrics, rpk, helm, crd, connect, api
@@ -679,6 +679,9 @@ Diff mode: skip declarations whose text a human reviewer wrote in one of the com
 `--strict`::
 Exit 1 when any error-severity finding exists (default: always exit 0 - suggest, never block)
 
+`--list-rules`::
+Print every rule (id, surfaces, severity, description, why, standard) and exit. Honors --surface and --format.
+
 `-h, --help`::
 display help for command
 
@@ -694,7 +697,568 @@ npx doc-tools lint-strings --repo ~/redpanda --surface properties --format json
 
 # PR mode: only declarations whose span intersects the diff
 npx doc-tools lint-strings --repo ~/redpanda --diff origin/dev
+
+# List every rule with its reason and the standard it enforces
+npx doc-tools lint-strings --list-rules --surface rpk
 ----
+
+*Rules:*
+
+Generated from `doc-tools lint-strings --list-rules`. Each rule links the section of the docs team standard it enforces.
+
+.properties
+[cols="2,1,3,4",options="header"]
+|===
+|Rule |Severity |Checks |Why
+
+|`empty-description`
+|error
+|Declaration ships with no doc string at all
+|A declaration with no string publishes as a blank entry, so readers get a name and nothing about what it does. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#reviewing-a-diff-that-touches-these-strings[Standard]
+
+|`starts-lowercase`
+|warning
+|Description starts with a lowercase letter
+|Published strings are sentences in sentence case, so one that opens in lowercase reads as a fragment or a typo on the page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`name-echo`
+|warning
+|Description merely restates the declared name (tautology)
+|A description that only restates the name tells readers nothing they could not already read from the name. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`too-short`
+|warning
+|Description is under 20 characters
+|A string this short cannot say what the setting does, its unit, or what changes when you set it, so readers are left guessing. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`unexpanded-jargon`
+|warning
+|Internal jargon that ships to users unexpanded
+|Internal terms such as NTP, seastar or nullopt mean nothing to the operators who read the reference page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`em-dash`
+|warning
+|Em dash in prose that ships to docs.redpanda.com
+|The docs style avoids em dashes, and this string is published as written, so a fix made in the generated page is undone at the next regeneration. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#formatting-conventions[Standard]
+
+|`latin-abbreviation`
+|warning
+|Latin abbreviation instead of plain English
+|The docs word list replaces e.g. and i.e. with plain English, and this string is published as written, so the abbreviation reaches the page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/terminology.md#do-not-use-word-list[Standard]
+
+|`long-sentence`
+|warning
+|Sentence longer than 30 words
+|A sentence this long usually carries more than one idea, so readers have to read it twice to follow it. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`unbalanced-backticks`
+|error
+|Odd number of backticks ships broken markup
+|An odd number of backticks leaves an inline code span open, so the rest of the string renders as broken monospace. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`missing-inline-code`
+|warning
+|Code value or field name in prose without inline code
+|Without inline code, a property name, flag or path reads as ordinary prose, so readers cannot tell it is a value to type exactly. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`raw-pipe`
+|error
+|Raw unescaped \| outside backticks breaks AsciiDoc tables
+|These strings render inside AsciiDoc table cells, where a bare \| starts a new cell and breaks the table. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#config-properties-verbatim-asciidoc[Standard]
+
+|`unknown-attribute`
+|warning
+|\{attr} reference that is not a known product attribute
+|An attribute the docs site does not define is not substituted, so readers see the raw \{name} text or the page build warns about it. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#config-properties-verbatim-asciidoc[Standard]
+
+|`broken-macro`
+|error
+|xref:/glossterm:/config_ref: macro with unbalanced brackets
+|A macro with unbalanced brackets does not resolve, so the page shows the raw macro text instead of a link. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`missing-terminal-period`
+|warning
+|Property descriptions are complete sentences ending in a period
+|A property description reads as complete sentences on the page, so one with no final period looks cut off. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`sentinel-default-unexplained`
+|info
+|Property defaults to a sentinel whose meaning the description never explains
+|The page shows a sentinel default such as null, 0 or -1 as a bare value, so only the description can tell readers whether it disables the property, means unlimited, or leaves it unset. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#config-properties-verbatim-asciidoc[Standard]
+
+|===
+
+.metrics
+[cols="2,1,3,4",options="header"]
+|===
+|Rule |Severity |Checks |Why
+
+|`empty-description`
+|error
+|Declaration ships with no doc string at all
+|A declaration with no string publishes as a blank entry, so readers get a name and nothing about what it does. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#reviewing-a-diff-that-touches-these-strings[Standard]
+
+|`starts-lowercase`
+|warning
+|Description starts with a lowercase letter
+|Published strings are sentences in sentence case, so one that opens in lowercase reads as a fragment or a typo on the page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`name-echo`
+|warning
+|Description merely restates the declared name (tautology)
+|A description that only restates the name tells readers nothing they could not already read from the name. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`too-short`
+|warning
+|Description is under 20 characters
+|A string this short cannot say what the setting does, its unit, or what changes when you set it, so readers are left guessing. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`unexpanded-jargon`
+|warning
+|Internal jargon that ships to users unexpanded
+|Internal terms such as NTP, seastar or nullopt mean nothing to the operators who read the reference page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`em-dash`
+|warning
+|Em dash in prose that ships to docs.redpanda.com
+|The docs style avoids em dashes, and this string is published as written, so a fix made in the generated page is undone at the next regeneration. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#formatting-conventions[Standard]
+
+|`latin-abbreviation`
+|warning
+|Latin abbreviation instead of plain English
+|The docs word list replaces e.g. and i.e. with plain English, and this string is published as written, so the abbreviation reaches the page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/terminology.md#do-not-use-word-list[Standard]
+
+|`long-sentence`
+|warning
+|Sentence longer than 30 words
+|A sentence this long usually carries more than one idea, so readers have to read it twice to follow it. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`unbalanced-backticks`
+|error
+|Odd number of backticks ships broken markup
+|An odd number of backticks leaves an inline code span open, so the rest of the string renders as broken monospace. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`missing-inline-code`
+|warning
+|Code value or field name in prose without inline code
+|Without inline code, a property name, flag or path reads as ordinary prose, so readers cannot tell it is a value to type exactly. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`raw-pipe`
+|error
+|Raw unescaped \| outside backticks breaks AsciiDoc tables
+|These strings render inside AsciiDoc table cells, where a bare \| starts a new cell and breaks the table. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#config-properties-verbatim-asciidoc[Standard]
+
+|`unknown-attribute`
+|warning
+|\{attr} reference that is not a known product attribute
+|An attribute the docs site does not define is not substituted, so readers see the raw \{name} text or the page build warns about it. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#config-properties-verbatim-asciidoc[Standard]
+
+|`broken-macro`
+|error
+|xref:/glossterm:/config_ref: macro with unbalanced brackets
+|A macro with unbalanced brackets does not resolve, so the page shows the raw macro text instead of a link. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`trailing-period`
+|warning
+|Metric descriptions do not end with a period
+|Metric help is a label that also becomes the Prometheus HELP text, and the metrics convention is no terminal period, so a period makes it read unlike every other metric. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#metrics-verbatim-zero-escaping[Standard]
+
+|`unverifiable-description`
+|info
+|Description argument is not a plain string literal
+|The help text is built from a constant or an expression, so the lint cannot see what readers will get and someone has to check the published text by hand. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#metrics-verbatim-zero-escaping[Standard]
+
+|===
+
+.rpk
+[cols="2,1,3,4",options="header"]
+|===
+|Rule |Severity |Checks |Why
+
+|`empty-description`
+|error
+|Declaration ships with no doc string at all
+|A declaration with no string publishes as a blank entry, so readers get a name and nothing about what it does. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#reviewing-a-diff-that-touches-these-strings[Standard]
+
+|`starts-lowercase`
+|warning
+|Description starts with a lowercase letter
+|Published strings are sentences in sentence case, so one that opens in lowercase reads as a fragment or a typo on the page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`name-echo`
+|warning
+|Description merely restates the declared name (tautology)
+|A description that only restates the name tells readers nothing they could not already read from the name. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`unexpanded-jargon`
+|warning
+|Internal jargon that ships to users unexpanded
+|Internal terms such as NTP, seastar or nullopt mean nothing to the operators who read the reference page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`em-dash`
+|warning
+|Em dash in prose that ships to docs.redpanda.com
+|The docs style avoids em dashes, and this string is published as written, so a fix made in the generated page is undone at the next regeneration. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#formatting-conventions[Standard]
+
+|`latin-abbreviation`
+|warning
+|Latin abbreviation instead of plain English
+|The docs word list replaces e.g. and i.e. with plain English, and this string is published as written, so the abbreviation reaches the page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/terminology.md#do-not-use-word-list[Standard]
+
+|`long-sentence`
+|warning
+|Sentence longer than 30 words
+|A sentence this long usually carries more than one idea, so readers have to read it twice to follow it. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`unbalanced-backticks`
+|error
+|Odd number of backticks ships broken markup
+|An odd number of backticks leaves an inline code span open, so the rest of the string renders as broken monospace. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`missing-inline-code`
+|warning
+|Code value or field name in prose without inline code
+|Without inline code, a property name, flag or path reads as ordinary prose, so readers cannot tell it is a value to type exactly. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`rpk-short-multiline`
+|warning
+|Short must be a single line
+|A Short is the one-line summary in command lists and the page description, so a second line breaks that summary. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#rpk-commands-and-flags-transformed[Standard]
+
+|`rpk-terminal-period`
+|warning
+|Short and flag usage strings do not end with a period
+|Short and flag usage strings are labels, not sentences, and the rpk docs formatter adds punctuation where the page needs it. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#rpk-commands-and-flags-transformed[Standard]
+
+|`rpk-long-allcaps-heading`
+|info
+|ALLCAPS line in Long becomes a === heading in the docs
+|The rpk docs formatter turns an ALLCAPS line in Long into a section heading, so ALLCAPS used for emphasis becomes an unintended heading. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#rpk-commands-and-flags-transformed[Standard]
+
+|`rpk-long-block-delimiter`
+|warning
+|A standalone ==== or ---- line in Long breaks AsciiDoc blocks
+|A line of ==== or ---- in Long becomes an AsciiDoc block delimiter with nothing to close it, which breaks the rest of the generated page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#rpk-commands-and-flags-transformed[Standard]
+
+|===
+
+.helm
+[cols="2,1,3,4",options="header"]
+|===
+|Rule |Severity |Checks |Why
+
+|`empty-description`
+|error
+|Declaration ships with no doc string at all
+|A declaration with no string publishes as a blank entry, so readers get a name and nothing about what it does. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#reviewing-a-diff-that-touches-these-strings[Standard]
+
+|`starts-lowercase`
+|warning
+|Description starts with a lowercase letter
+|Published strings are sentences in sentence case, so one that opens in lowercase reads as a fragment or a typo on the page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`name-echo`
+|warning
+|Description merely restates the declared name (tautology)
+|A description that only restates the name tells readers nothing they could not already read from the name. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`too-short`
+|warning
+|Description is under 20 characters
+|A string this short cannot say what the setting does, its unit, or what changes when you set it, so readers are left guessing. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`unexpanded-jargon`
+|warning
+|Internal jargon that ships to users unexpanded
+|Internal terms such as NTP, seastar or nullopt mean nothing to the operators who read the reference page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`em-dash`
+|warning
+|Em dash in prose that ships to docs.redpanda.com
+|The docs style avoids em dashes, and this string is published as written, so a fix made in the generated page is undone at the next regeneration. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#formatting-conventions[Standard]
+
+|`latin-abbreviation`
+|warning
+|Latin abbreviation instead of plain English
+|The docs word list replaces e.g. and i.e. with plain English, and this string is published as written, so the abbreviation reaches the page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/terminology.md#do-not-use-word-list[Standard]
+
+|`long-sentence`
+|warning
+|Sentence longer than 30 words
+|A sentence this long usually carries more than one idea, so readers have to read it twice to follow it. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`unbalanced-backticks`
+|error
+|Odd number of backticks ships broken markup
+|An odd number of backticks leaves an inline code span open, so the rest of the string renders as broken monospace. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`missing-inline-code`
+|warning
+|Code value or field name in prose without inline code
+|Without inline code, a property name, flag or path reads as ordinary prose, so readers cannot tell it is a value to type exactly. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`dead-marker`
+|error
+|A # \-- marker no docs pipeline can attach to any key
+|helm-docs cannot attach a # \-- marker buried inside a commented-out block, so the description silently never ships. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#helm-chart-values-helm-docs-markers[Standard]
+
+|`misattached-marker`
+|error
+|One # \-- marker is published under two different keys
+|helm-docs attaches a # \-- marker to the next real key below it, so this text is published as the description of a different key. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#helm-chart-values-helm-docs-markers[Standard]
+
+|`undocumented-key`
+|info
+|Key helm-docs publishes with an empty description
+|A key with no # \-- description renders as an empty row in the Helm chart reference. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#helm-chart-values-helm-docs-markers[Standard]
+
+|===
+
+.crd
+[cols="2,1,3,4",options="header"]
+|===
+|Rule |Severity |Checks |Why
+
+|`starts-lowercase`
+|warning
+|Description starts with a lowercase letter
+|Published strings are sentences in sentence case, so one that opens in lowercase reads as a fragment or a typo on the page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`name-echo`
+|warning
+|Description merely restates the declared name (tautology)
+|A description that only restates the name tells readers nothing they could not already read from the name. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`too-short`
+|warning
+|Description is under 20 characters
+|A string this short cannot say what the setting does, its unit, or what changes when you set it, so readers are left guessing. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`unexpanded-jargon`
+|warning
+|Internal jargon that ships to users unexpanded
+|Internal terms such as NTP, seastar or nullopt mean nothing to the operators who read the reference page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`em-dash`
+|warning
+|Em dash in prose that ships to docs.redpanda.com
+|The docs style avoids em dashes, and this string is published as written, so a fix made in the generated page is undone at the next regeneration. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#formatting-conventions[Standard]
+
+|`latin-abbreviation`
+|warning
+|Latin abbreviation instead of plain English
+|The docs word list replaces e.g. and i.e. with plain English, and this string is published as written, so the abbreviation reaches the page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/terminology.md#do-not-use-word-list[Standard]
+
+|`long-sentence`
+|warning
+|Sentence longer than 30 words
+|A sentence this long usually carries more than one idea, so readers have to read it twice to follow it. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`unbalanced-backticks`
+|error
+|Odd number of backticks ships broken markup
+|An odd number of backticks leaves an inline code span open, so the rest of the string renders as broken monospace. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`missing-inline-code`
+|warning
+|Code value or field name in prose without inline code
+|Without inline code, a property name, flag or path reads as ordinary prose, so readers cannot tell it is a value to type exactly. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`raw-pipe`
+|error
+|Raw unescaped \| outside backticks breaks AsciiDoc tables
+|These strings render inside AsciiDoc table cells, where a bare \| starts a new cell and breaks the table. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#config-properties-verbatim-asciidoc[Standard]
+
+|`unknown-attribute`
+|warning
+|\{attr} reference that is not a known product attribute
+|An attribute the docs site does not define is not substituted, so readers see the raw \{name} text or the page build warns about it. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#config-properties-verbatim-asciidoc[Standard]
+
+|`broken-macro`
+|error
+|xref:/glossterm:/config_ref: macro with unbalanced brackets
+|A macro with unbalanced brackets does not resolve, so the page shows the raw macro text instead of a link. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`undocumented-field`
+|warning
+|Exported user-facing field with no doc comment
+|A field with no doc comment ships blank in the CRD reference and in kubectl explain. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#crd-fields-go-doc-comments[Standard]
+
+|`inherited-type-description`
+|warning
+|Field with no comment publishes its Go type's comment instead
+|With no comment of its own, the field publishes its Go type's comment, which describes the type rather than the YAML key the user sets. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#crd-fields-go-doc-comments[Standard]
+
+|`go-field-name-first`
+|warning
+|Description opens with the Go field name or the YAML key instead of what the field does
+|Users type the YAML key, not the Go field name, so a description that opens with either identifier documents the wrong thing or reads like a broken comment. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#crd-fields-go-doc-comments[Standard]
+
+|===
+
+.connect
+[cols="2,1,3,4",options="header"]
+|===
+|Rule |Severity |Checks |Why
+
+|`starts-lowercase`
+|warning
+|Description starts with a lowercase letter
+|Published strings are sentences in sentence case, so one that opens in lowercase reads as a fragment or a typo on the page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`name-echo`
+|warning
+|Description merely restates the declared name (tautology)
+|A description that only restates the name tells readers nothing they could not already read from the name. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`too-short`
+|warning
+|Description is under 20 characters
+|A string this short cannot say what the setting does, its unit, or what changes when you set it, so readers are left guessing. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`unexpanded-jargon`
+|warning
+|Internal jargon that ships to users unexpanded
+|Internal terms such as NTP, seastar or nullopt mean nothing to the operators who read the reference page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`em-dash`
+|warning
+|Em dash in prose that ships to docs.redpanda.com
+|The docs style avoids em dashes, and this string is published as written, so a fix made in the generated page is undone at the next regeneration. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#formatting-conventions[Standard]
+
+|`latin-abbreviation`
+|warning
+|Latin abbreviation instead of plain English
+|The docs word list replaces e.g. and i.e. with plain English, and this string is published as written, so the abbreviation reaches the page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/terminology.md#do-not-use-word-list[Standard]
+
+|`long-sentence`
+|warning
+|Sentence longer than 30 words
+|A sentence this long usually carries more than one idea, so readers have to read it twice to follow it. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`unbalanced-backticks`
+|error
+|Odd number of backticks ships broken markup
+|An odd number of backticks leaves an inline code span open, so the rest of the string renders as broken monospace. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`missing-inline-code`
+|warning
+|Code value or field name in prose without inline code
+|Without inline code, a property name, flag or path reads as ordinary prose, so readers cannot tell it is a value to type exactly. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`broken-macro`
+|error
+|xref:/glossterm:/config_ref: macro with unbalanced brackets
+|A macro with unbalanced brackets does not resolve, so the page shows the raw macro text instead of a link. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`missing-field-description`
+|warning
+|Config field constructed with no .Description()
+|A field with no .Description() ships as an undocumented field on the connector reference page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#reviewing-a-diff-that-touches-these-strings[Standard]
+
+|`connect-short-description-markup`
+|warning
+|ShortDescription is plain text in form-based editors
+|Form-based config editors, such as the one in Redpanda Cloud, show ShortDescription as plain text, so any markup appears to users as literal symbols. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#connect-fields-governed-in-the-connect-repo[Standard]
+
+|`conditional`
+|warning
+|AsciiDoc conditional that is not a well-formed env-cloud block
+|The same Connect string renders on the self-managed docs, the Cloud docs and in the Connect binaries, so a malformed env-cloud block shows text to the wrong audience or hides it from both. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#connect-fields-governed-in-the-connect-repo[Standard]
+
+|`connect-xref-module`
+|warning
+|xref without a module, or to a module the Connect docs do not have
+|Cloud includes the same partial into a different module, so an xref with no module, or to a module the Connect docs do not have, breaks the link. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#connect-fields-governed-in-the-connect-repo[Standard]
+
+|`connect-availability-prose`
+|warning
+|Cloud or cgo availability written as prose instead of data
+|The generator renders Cloud and cgo availability from data, and availability prose shows on both the self-managed and the Cloud page, so it contradicts the generated notes on one of them. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#connect-fields-governed-in-the-connect-repo[Standard]
+
+|`connect-cli-usage-multiline`
+|warning
+|urfave/cli Usage is a one-line label
+|rpk connect help prints Usage as a one-line label, so a second line breaks the help output. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|===
+
+.api
+[cols="2,1,3,4",options="header"]
+|===
+|Rule |Severity |Checks |Why
+
+|`starts-lowercase`
+|warning
+|Description starts with a lowercase letter
+|Published strings are sentences in sentence case, so one that opens in lowercase reads as a fragment or a typo on the page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`unexpanded-jargon`
+|warning
+|Internal jargon that ships to users unexpanded
+|Internal terms such as NTP, seastar or nullopt mean nothing to the operators who read the reference page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`em-dash`
+|warning
+|Em dash in prose that ships to docs.redpanda.com
+|The docs style avoids em dashes, and this string is published as written, so a fix made in the generated page is undone at the next regeneration. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#formatting-conventions[Standard]
+
+|`latin-abbreviation`
+|warning
+|Latin abbreviation instead of plain English
+|The docs word list replaces e.g. and i.e. with plain English, and this string is published as written, so the abbreviation reaches the page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/terminology.md#do-not-use-word-list[Standard]
+
+|`long-sentence`
+|warning
+|Sentence longer than 30 words
+|A sentence this long usually carries more than one idea, so readers have to read it twice to follow it. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`unbalanced-backticks`
+|error
+|Odd number of backticks ships broken markup
+|An odd number of backticks leaves an inline code span open, so the rest of the string renders as broken monospace. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`missing-inline-code`
+|warning
+|Code value or field name in prose without inline code
+|Without inline code, a property name, flag or path reads as ordinary prose, so readers cannot tell it is a value to type exactly. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`api-rpc-summary-not-separated`
+|error
+|rpc comment has no blank line, so the whole comment becomes the summary
+|The generator takes the first line of an rpc comment as the operation summary, so with no blank line the whole comment becomes the navigation label in the API reference. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#api-fields-and-operations-proto-published-as-markdown[Standard]
+
+|`api-summary-multiline`
+|error
+|An operation summary must be a single line
+|The operation summary is the label in the API reference index, so a second line turns that label into a paragraph. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#api-fields-and-operations-proto-published-as-markdown[Standard]
+
+|`api-summary-terminal-period`
+|error
+|An operation summary takes no terminal period
+|The operation summary is a label, not a sentence, so a period makes it read unlike every other operation in the index. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#api-fields-and-operations-proto-published-as-markdown[Standard]
+
+|`api-name-echo`
+|warning
+|Description merely restates the declared name (tautology)
+|A description that only restates the name tells readers nothing they could not already read from the name. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`api-missing-terminal-period`
+|warning
+|Prose doc string with no terminal period
+|Comments and descriptions publish as prose in the API reference, so one with no full stop looks cut off. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#api-fields-and-operations-proto-published-as-markdown[Standard]
+
+|`api-undocumented-field`
+|warning
+|Published field or message with no doc string
+|A field with no comment renders as a blank entry in the request or response schema of the API reference. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#api-fields-and-operations-proto-published-as-markdown[Standard]
+
+|`api-description-too-short`
+|warning
+|Prose doc string too short to explain anything
+|A string this short cannot say what the field does, its unit, or what changes when you set it, so readers are left guessing. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|===
 
 == detect-enterprise-gating
 

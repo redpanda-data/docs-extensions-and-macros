@@ -264,6 +264,21 @@ function generateCommandDoc(commandName, helpData, jsdoc, level = 2) {
 }
 
 /**
+ * The Rules section under lint-strings, built from the command's own
+ * --list-rules output, so every rule is documented with its reason and the
+ * standard it enforces without a list to keep in step. The drift test in
+ * __tests__/tools/lint-strings/rule-docs.test.js compares it to the file.
+ */
+function lintStringsRulesDoc() {
+  const { formatRulesAsciidoc } = require('./lint-strings');
+  const json = execSync('npx doc-tools lint-strings --list-rules --format json', {
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe']
+  });
+  return formatRulesAsciidoc(JSON.parse(json));
+}
+
+/**
  * Main generation function
  */
 function generateDocs() {
@@ -307,6 +322,7 @@ IMPORTANT: This documentation is auto-generated. Do not edit manually. Run \`npm
     // commands registered directly on programCli still resolve.
     const jsdoc = jsdocs[label] || jsdocs[commandPath[commandPath.length - 1]];
     doc += generateCommandDoc(label, data, jsdoc, level);
+    if (label === 'lint-strings') doc += lintStringsRulesDoc();
     for (const child of data.commands) {
       // Commander lists `help [command]` in every group; it is not a command
       // anyone documents.

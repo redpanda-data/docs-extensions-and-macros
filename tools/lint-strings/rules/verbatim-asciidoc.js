@@ -1,5 +1,7 @@
 'use strict'
 
+const { STANDARD } = require('../standards')
+
 /**
  * Rules for verbatim-AsciiDoc surfaces (properties, metrics, crd, connect).
  *
@@ -52,6 +54,8 @@ const VERBATIM_ASCIIDOC_RULES = [
   {
     name: 'raw-pipe',
     description: 'Raw unescaped | outside backticks breaks AsciiDoc tables',
+    why: 'These strings render inside AsciiDoc table cells, where a bare | starts a new cell and breaks the table.',
+    standard: STANDARD.properties,
     severity: 'error',
     check: (decl) => {
       const text = decl.string || ''
@@ -66,6 +70,8 @@ const VERBATIM_ASCIIDOC_RULES = [
   {
     name: 'unknown-attribute',
     description: '{attr} reference that is not a known product attribute',
+    why: 'An attribute the docs site does not define is not substituted, so readers see the raw {name} text or the page build warns about it.',
+    standard: STANDARD.properties,
     severity: 'warning',
     check: (decl) => {
       const text = decl.string || ''
@@ -86,6 +92,8 @@ const VERBATIM_ASCIIDOC_RULES = [
   {
     name: 'broken-macro',
     description: 'xref:/glossterm:/config_ref: macro with unbalanced brackets',
+    why: 'A macro with unbalanced brackets does not resolve, so the page shows the raw macro text instead of a link.',
+    standard: STANDARD.qualityBar,
     severity: 'error',
     check: (decl) => {
       const text = decl.string || ''
@@ -172,6 +180,8 @@ function stepFence (fence, match) {
 const CONDITIONAL_RULE = {
   name: 'conditional',
   description: 'AsciiDoc conditional that is not a well-formed env-cloud block',
+  why: 'The same Connect string renders on the self-managed docs, the Cloud docs and in the Connect binaries, so a malformed env-cloud block shows text to the wrong audience or hides it from both.',
+  standard: STANDARD.connect,
   severity: 'warning',
   check: (decl) => {
     const text = decl.string || ''

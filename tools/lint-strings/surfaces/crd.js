@@ -6,6 +6,7 @@ const yaml = require('js-yaml')
 
 const { SourceCache } = require('../source-text')
 const { collectGoFiles } = require('../go-source')
+const { STANDARD } = require('../standards')
 
 /**
  * CRD surface: Go doc comments above struct fields in the operator API
@@ -377,6 +378,8 @@ const RULES = [
   {
     name: 'undocumented-field',
     description: 'Exported user-facing field with no doc comment',
+    why: 'A field with no doc comment ships blank in the CRD reference and in kubectl explain.',
+    standard: STANDARD.crd,
     severity: 'warning',
     check: (decl) => {
       if (decl.string !== null) return []
@@ -389,6 +392,8 @@ const RULES = [
   {
     name: 'inherited-type-description',
     description: 'Field with no comment publishes its Go type\'s comment instead',
+    why: 'With no comment of its own, the field publishes its Go type\'s comment, which describes the type rather than the YAML key the user sets.',
+    standard: STANDARD.crd,
     severity: 'warning',
     check: (decl) => {
       if (decl.string !== null || !decl.meta.inherited_from) return []
@@ -406,6 +411,8 @@ const RULES = [
   {
     name: 'go-field-name-first',
     description: 'Description opens with the Go field name or the YAML key instead of what the field does',
+    why: 'Users type the YAML key, not the Go field name, so a description that opens with either identifier documents the wrong thing or reads like a broken comment.',
+    standard: STANDARD.crd,
     severity: 'warning',
     check: (decl) => {
       const text = (decl.string || '').trim()
