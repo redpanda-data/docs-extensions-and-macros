@@ -141,11 +141,11 @@ describe('locating string offsets on source lines', () => {
     file: 'x.cc',
     line_start: 10,
     line_end: 12,
-    string: 'Partition committed offset, i.e. safely persisted on majority of replicas — or not.',
+    string: 'Partition committed offset, i.e. safely persisted on majority of replicas \u2014 or not.',
     declaration_text: [
       'sm::description(',
       '  "Partition committed offset, i.e. safely persisted on "',
-      '  "majority of replicas — or not."),'
+      '  "majority of replicas \u2014 or not."),'
     ].join('\n')
   }
 
@@ -159,7 +159,7 @@ describe('locating string offsets on source lines', () => {
 
   test('a range with no word of its own takes the lines either side', () => {
     const words = wordLines(decl)
-    const dash = decl.string.indexOf('—')
+    const dash = decl.string.indexOf('\u2014')
     expect(linesOfRange(words, dash, 1)).toEqual([12])
   })
 
