@@ -652,6 +652,32 @@ Specify a time range.`
       expect(store[0]).not.toContain('\\ \\')
     })
 
+    test('keeps consecutive rpk commands as separate commands', () => {
+      // rpk cluster partitions move-status help: two examples, not one
+      // command continued onto a second line.
+      const input = 'Examples:\n\n    rpk cluster partitions move-status\n    rpk cluster partitions move-status foo bar kafka_internal/tx'
+      const store = []
+      convertIndentedCodeBlocksToAsciiDoc(input, store)
+
+      expect(store).toEqual(['\n[,bash]\n----\nrpk cluster partitions move-status\nrpk cluster partitions move-status foo bar kafka_internal/tx\n----\n'])
+    })
+
+    test('an rpk line after a backslash is still a continuation', () => {
+      const input = 'Example:\n\n  rpk topic produce \\\n  rpk-input.txt'
+      const store = []
+      convertIndentedCodeBlocksToAsciiDoc(input, store)
+
+      expect(store[0]).toContain('rpk topic produce \\\nrpk-input.txt')
+    })
+
+    test('flag lines still join to their command when the help left out the backslash', () => {
+      const input = 'Example:\n\n  rpk transform deploy --file a.wasm \\\n    --output-topic t2\n    --output-topic t3'
+      const store = []
+      convertIndentedCodeBlocksToAsciiDoc(input, store)
+
+      expect(store[0]).toContain('rpk transform deploy --file a.wasm \\\n--output-topic t2 \\\n--output-topic t3')
+    })
+
     test('detects indented YAML block', () => {
       const input = `Result:\n\n  - job_name: test\n    static_configs:\n      - targets: [localhost]\n        labels:\n          group: one`
       const store = []
