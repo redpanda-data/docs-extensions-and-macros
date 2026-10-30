@@ -1842,8 +1842,9 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   result = result.replace(/(?<![`\w/])(_redpanda(?:\.[a-z_]+)+)(?!`)/g, '`$1`')
 
   // Add backticks around standalone "rpk" (at end of phrase, before punctuation)
-  // Also exclude rpk inside paths (preceded by /)
-  result = result.replace(/(?<![`\w/])rpk(?=[\s]*[.,;:!?)'"}\]]|[\s]*$)/g, '`rpk`')
+  // Also exclude rpk inside paths (preceded by /) and inside a dotted name
+  // (preceded by .), like the .rpk.ac- plugin prefix
+  result = result.replace(/(?<![`\w/.])rpk(?=[\s]*[.,;:!?)'"}\]]|[\s]*$)/g, '`rpk`')
 
   // Convert GitHub issue/PR references to clickable links
   // Pattern: #NNNN (4+ digits) when not inside backticks or code

@@ -738,6 +738,13 @@ Specify a time range.`
       expect(result).toBe('The kind (`+--teams-*+` or\n`+--cron-*+`) is fixed at creation.')
     })
 
+    test('does not wrap rpk inside a dotted plugin prefix', () => {
+      // rpk plugin help: .rpk.ac- published as .`rpk`.ac-
+      const result = formatDescription('All plugins are prefixed with either .rpk- or .rpk.ac-. When rpk starts up, it searches.')
+      expect(result).toContain('.rpk.ac-.')
+      expect(result).toContain('When `rpk` starts up')
+    })
+
     test('handles complex flag=value patterns', () => {
       const input = 'Example: --var=KEY=VALUE for environment'
       const result = formatDescription(input)
