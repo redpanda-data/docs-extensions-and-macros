@@ -192,6 +192,8 @@ If the component, field, function or method doesn't exist in the Connect data, o
 
 `check-reference-values` also checks hand-written xrefs to Connect component and Bloblang pages, on every component that renders the file: it reports links to pages and anchors that don't exist there and labels that name another component, field, function or method, and `--write` replaces each xref whose label is just the name with `connect:[...]` or `blobl:[...]`.
 
+`check-reference-values` also reports unlinked mentions: the first time a page names an `rpk` command in inline code, a Connect component with its type (`+`kafka_franz` input+`), or a Bloblang call (`+`now()`+`, `+`uppercase` method+`) with no link, on a page that links it nowhere. These are suggestions, not errors: they fail the check only with `--fail-on links`, and `--write` turns them into `rpkcmd:`, `connect:` or `blobl:` links only when you also pass `--write-links`. The text stays exactly as you wrote it.
+
 === bloblval - Bloblang values
 
 Render a Bloblang function's, method's or parameter's value from the Connect data instead of typing it:
