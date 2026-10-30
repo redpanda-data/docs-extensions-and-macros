@@ -14,6 +14,11 @@
  * --lender checkouts read into one synthetic content catalog, unless
  * --data-file names it. One combined report; the exit code says whether any
  * finding is at or above --fail-on (1), or the check could not run (2).
+ *
+ * The rpk and Connect engines also report unlinked mentions (mentions.js):
+ * the first mention of a command, component or Bloblang call in a file that
+ * links it nowhere. Only --fail-on links fails on them, and only
+ * --write-links, with --write, converts them.
  */
 
 const fs = require('fs')
@@ -29,9 +34,10 @@ const { scanConnect } = require('./connect')
 const connectLinks = require('./connect-links')
 const { makeRenderGuard } = require('./render-check')
 const shared = require('./shared')
+const mentions = require('./mentions')
 
 const KINDS = ['properties', 'rpk', 'connect']
-const LEVELS = ['none', 'mismatch', 'any']
+const LEVELS = ['none', 'mismatch', 'any', 'links']
 const ALL_KINDS = [PROPERTIES_KIND, rpkValues.RPK_KIND, connectValues.CONNECT_KIND]
 const HISTORICAL_CONNECT_RX = /(?:^|\/)migration\//
 
@@ -126,10 +132,12 @@ function failsAt (kind, f, level) {
   if (level === 'none') return false
   if (f.applied) return false
   if (isHistorical(kind, f.file)) return false
+  // A mention that could be a link fails only when links are asked for.
+  if (f.status === mentions.STATUS) return level === 'links'
   if (f.status === 'mismatch') return true
   if (f.status === 'reference' && f.severity === 'error') return true
   if (f.status === 'example-output' && f.verdict === 'stale' && kind !== 'properties') return true
-  if (level !== 'any') return false
+  if (level !== 'any' && level !== 'links') return false
   if (['exact', 'equivalent', 'unset'].includes(f.status)) return true
   if (f.status === 'reference' && f.severity === 'warning') return true
   return false
@@ -208,7 +216,7 @@ function recount (r) {
   if (r.counts && Object.prototype.hasOwnProperty.call(r.counts, 'referenceErrors')) {
     const extra = {}
     for (const key of ['examplesRestatingDefault', 'yamlRestatingDefault']) if (key in r.counts) extra[key] = r.counts[key]
-    const links = 'linksBroken' in r.counts ? require('./rpk').linkCounts(r.findings) : {}
+    const links = 'linksBroken' in r.counts ? { ...require('./rpk').linkCounts(r.findings), ...mentions.mentionCounts(r.findings) } : {}
     return { ...require('./rpk').countFindings(r.findings), ...extra, ...links }
   }
   const counts = { exact: 0, equivalent: 0, mismatch: 0, unset: 0, unverifiable: 0, autoSafe: 0, 'example-output': 0, exampleStale: 0 }
@@ -232,10 +240,13 @@ function recount (r) {
  *   data for one is a setup error, not a skip.
  * @param {string[]} [opts.files]
  * @param {boolean} [opts.write]
+ * @param {boolean} [opts.writeLinks] - With write, also turn unlinked
+ *   mentions into rpkcmd:, connect: and blobl: links.
  * @param {string} [opts.failOn]
  */
-function scanAll ({ docsDir, lenderDirs = [], dataFiles = [], kinds = KINDS, kindsExplicit = false, files, write = false, failOn = 'mismatch' }) {
+function scanAll ({ docsDir, lenderDirs = [], dataFiles = [], kinds = KINDS, kindsExplicit = false, files, write = false, writeLinks = false, failOn = 'mismatch' }) {
   if (!LEVELS.includes(failOn)) throw new SetupError(`--fail-on ${failOn}: use one of ${LEVELS.join(', ')}`)
+  if (writeLinks && !write) throw new SetupError('--write-links converts unlinked mentions only with --write')
   for (const kind of kinds) if (!KINDS.includes(kind)) throw new SetupError(`--kinds: '${kind}' is not a kind; use ${KINDS.join(', ')}`)
   if (!fs.existsSync(path.join(docsDir, 'antora.yml'))) throw new SetupError(`--docs-dir ${docsDir}: no antora.yml`)
   for (const dir of lenderDirs) if (!fs.existsSync(path.join(dir, 'antora.yml'))) throw new SetupError(`--lender ${dir}: no antora.yml`)
@@ -335,7 +346,7 @@ function scanAll ({ docsDir, lenderDirs = [], dataFiles = [], kinds = KINDS, kin
         aliases: pageAliases,
         cloud: cloudLenders.length === 1 ? { component: cloudLenders[0].component, version: cloudLenders[0].version } : undefined,
       }
-      const r = scanRpk({ docsDir, registry, files, write, renderGuard: guard, links })
+      const r = scanRpk({ docsDir, registry, files, write, writeLinks, renderGuard: guard, links })
       result.kinds.rpk = {
         dataset: given ? `${path.basename(given.explicit)} (--data-file)` : datasets.describeDataset(registry),
         selection: given ? 'explicit' : registry.surface === datasets.SURFACE_CLOUD ? 'cloud' : 'page',
@@ -364,7 +375,7 @@ function scanAll ({ docsDir, lenderDirs = [], dataFiles = [], kinds = KINDS, kin
         // with the build's own Connect data.
         buildHasData: Boolean(connectValues.loadConnect(catalog)),
       }
-      const r = scanConnect({ docsDir, registry, files, write, cloudSurface, renderGuard: guard, component: own.component, links })
+      const r = scanConnect({ docsDir, registry, files, write, writeLinks, cloudSurface, renderGuard: guard, component: own.component, links })
       result.kinds.connect = {
         dataset: given ? `${path.basename(given.explicit)} (--data-file)` : datasets.describeDataset(registry),
         selection: given ? 'explicit' : 'fixed',
@@ -394,6 +405,7 @@ function describe (kind, f) {
   }
   const what = f.target || (kind === 'rpk' ? `${f.command || 'rpk'}${f.flag ? ` --${f.flag}` : ''}` : `${f.componentType || ''}/${f.component || ''}${f.fieldPath ? ` ${f.fieldPath}` : ''}`)
   if (f.status === 'reference') return `${what}: ${f.reason}${f.note ? `: ${f.note}` : ''}`
+  if (f.status === mentions.STATUS) return `${f.written}: ${f.mention} with no link on the page${f.proposed ? `; ${f.proposed} links ${f.dataValue}` : ''}`
   if (f.status === 'example-output') return `${what}: comment says ${f.written}, data ${f.dataValue}`
   return `${what}: written ${f.written}, data ${f.dataValue}`
 }
@@ -403,14 +415,14 @@ function describe (kind, f) {
  */
 function renderMarkdown (result) {
   const out = ['# Reference values report', '']
-  out.push('Statuses: **reference** is a command, flag, component or field that does not exist in the data (error) or is deprecated (warning), or an xref to an rpk, Connect component or Bloblang page or anchor that does not exist (broken-link, error) or whose label names something else (link-label-mismatch, warning). **exact** is what the macro renders, or an xref rpkcmd:[...], connect:[...] or blobl:[...] would render the same; **auto-safe** is an exact match `--write` may apply. **equivalent** is the same value worded differently. **mismatch** differs from the data. **unset** states a value the data leaves empty. **unverifiable** could not be compared, with the reason. **example output** is a value in a block or YAML comment, never written: **stale** when it differs from the data.', '')
+  out.push('Statuses: **reference** is a command, flag, component or field that does not exist in the data (error) or is deprecated (warning), or an xref to an rpk, Connect component or Bloblang page or anchor that does not exist (broken-link, error) or whose label names something else (link-label-mismatch, warning). **exact** is what the macro renders, or an xref rpkcmd:[...], connect:[...] or blobl:[...] would render the same; **auto-safe** is an exact match `--write` may apply. **equivalent** is the same value worded differently. **mismatch** differs from the data. **unset** states a value the data leaves empty. **unverifiable** could not be compared, with the reason. **example output** is a value in a block or YAML comment, never written: **stale** when it differs from the data. **unlinked mention** is the first mention on a page of an rpk command, Connect component or Bloblang call in inline code, on a page that links it nowhere, which rpkcmd:[...], connect:[...] or blobl:[...] would link; it fails only at --fail-on links, and --write converts it only with --write-links.', '')
   out.push(`Checked ${result.component}@${result.version || 'unversioned'} at --fail-on ${result.failOn}: ${result.failing} failing finding(s), ${result.ignored} ignored by \`// value-check: ignore\`.`, '')
-  out.push('| Kind | Dataset | Surface | Files | Findings | Failing | Reference errors | Reference warnings | Mismatch | Exact (auto-safe) | Equivalent | Unset | Unverifiable | Example output (stale) |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|')
+  out.push('| Kind | Dataset | Surface | Files | Findings | Failing | Reference errors | Reference warnings | Mismatch | Exact (auto-safe) | Equivalent | Unset | Unverifiable | Example output (stale) | Unlinked mentions |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|')
   for (const [kind, r] of Object.entries(result.kinds)) {
     const c = r.counts || {}
-    out.push(`| ${kind} | ${mdEscape(r.dataset)} | ${r.surface} | ${r.files} | ${r.findings.length} | ${r.findings.filter((f) => f.failing).length} | ${c.referenceErrors || 0} | ${c.referenceWarnings || 0} | ${c.mismatch || 0} | ${c.exact || 0} (${c.autoSafe || 0}) | ${c.equivalent || 0} | ${c.unset || 0} | ${c.unverifiable || 0} | ${c['example-output'] || 0} (${c.exampleStale || 0}) |`)
+    out.push(`| ${kind} | ${mdEscape(r.dataset)} | ${r.surface} | ${r.files} | ${r.findings.length} | ${r.findings.filter((f) => f.failing).length} | ${c.referenceErrors || 0} | ${c.referenceWarnings || 0} | ${c.mismatch || 0} | ${c.exact || 0} (${c.autoSafe || 0}) | ${c.equivalent || 0} | ${c.unset || 0} | ${c.unverifiable || 0} | ${c['example-output'] || 0} (${c.exampleStale || 0}) | ${c.unlinkedMentions || 0} |`)
   }
-  for (const [kind, why] of Object.entries(result.skipped)) out.push(`| ${kind} | skipped: ${mdEscape(why)} | | | | | | | | | | | | |`)
+  for (const [kind, why] of Object.entries(result.skipped)) out.push(`| ${kind} | skipped: ${mdEscape(why)} | | | | | | | | | | | | | |`)
 
   const failing = failingFindings(result, result.failOn)
   out.push('', `## Failing (${failing.length})`, '')
@@ -465,6 +477,13 @@ function renderMarkdown (result) {
       out.push('', 'Plugin flags whose --help default differs from the prose (listed for a human; the --help scrape is not reliable enough to fail on):', '')
       for (const f of helpDefaults) out.push(`* ${mdEscape(`${f.file}:${f.line}`)} \`${mdEscape(f.target)}\`: written ${mdEscape(f.written)}, --help ${mdEscape(f.dataValue)}`)
     }
+    const unlinked = r.findings.filter((f) => f.status === mentions.STATUS)
+    const byKind = Object.entries((r.counts && r.counts.unlinkedMentionsByKind) || {}).map(([k, n]) => `${n} ${k}`).join(', ')
+    out.push('', `### Unlinked mentions (${unlinked.length}${byKind ? `: ${byKind}` : ''})`, '')
+    if (unlinked.length) {
+      out.push('| File:line | Mention | Written | Links | Proposed |', '|---|---|---|---|---|')
+      for (const f of unlinked) out.push(`| ${mdEscape(`${f.file}:${f.line}`)} | ${f.mention} | ${mdEscape(f.written)} | ${mdEscape(f.dataValue)} | ${f.applied ? 'applied: ' : ''}${f.proposed ? `\`${mdEscape(f.proposed)}\`` : mdEscape(f.note || '')} |`)
+    } else out.push('None.')
     const examples = r.findings.filter((f) => f.status === 'example-output')
     out.push('', `### Example output (${examples.length}: ${examples.filter((f) => f.verdict === 'stale').length} stale, ${examples.filter((f) => f.verdict === 'matches').length} matching)`, '')
     const stale = examples.filter((f) => f.verdict === 'stale')
@@ -518,6 +537,7 @@ function runCli (options, { log = console.log, error = console.error } = {}) {
       kindsExplicit,
       files: options.files,
       write: Boolean(options.write),
+      writeLinks: Boolean(options.writeLinks),
       failOn: options.failOn || 'mismatch',
     })
   } catch (e) {
@@ -538,6 +558,7 @@ function runCli (options, { log = console.log, error = console.error } = {}) {
     const refs = kind === 'properties' ? '' : `${c.referenceErrors} reference error(s), ${c.referenceWarnings} warning(s), `
     log(`${kind}: ${r.dataset} (${r.surface}), ${r.files} files: ${refs}${c.mismatch} mismatch, ${c.unset} unset, ${c.exact} exact (${c.autoSafe} auto-safe), ${c.equivalent} equivalent, ${c.unverifiable} unverifiable, ${c['example-output'] || 0} example output (${c.exampleStale || 0} stale).`)
     if ('linksBroken' in c) log(`${kind} links: ${c.linksBroken} broken, ${c.linksMislabeled} mislabeled, ${c.linksReplaceable} replaceable with ${kind === 'connect' ? 'connect:[...] or blobl:[...]' : 'rpkcmd:[...]'}, ${c.linksNotLoaded} not checked (${kind === 'connect' ? 'not rendered by, or not in, this scan' : 'component not loaded'}).`)
+    if ('unlinkedMentions' in c) log(`${kind} unlinked mentions: ${c.unlinkedMentions}${Object.keys(c.unlinkedMentionsByKind).length ? ` (${Object.entries(c.unlinkedMentionsByKind).map(([k, n]) => `${n} ${k}`).join(', ')})` : ''}.`)
   }
   for (const [kind, why] of Object.entries(result.skipped)) log(`${kind}: skipped (${why})`)
   if (result.ignored) log(`${result.ignored} finding(s) ignored by // value-check: ignore.`)
@@ -547,7 +568,7 @@ function runCli (options, { log = console.log, error = console.error } = {}) {
   if (options.annotations === 'github') for (const line of annotations(result)) log(line)
   if (options.write) {
     const changed = Object.values(result.kinds).reduce((n, r) => n + (r.changedFiles || 0), 0)
-    log(`Replaced auto-safe exact matches in ${changed} file(s).`)
+    log(`Replaced auto-safe exact matches${options.writeLinks ? ' and linked unlinked mentions' : ''} in ${changed} file(s).`)
   }
   log(`Report: ${mdPath}`)
   log(`check (${result.failOn}): ${result.failing} failing finding(s)`)

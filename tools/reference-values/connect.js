@@ -37,6 +37,8 @@ const { formatConnectDefault } = require('../redpanda-connect/helpers/formatConn
 const shared = require('./shared')
 const { countFindings, blockLanguage, linkCounts } = require('./rpk')
 const { linkFindings } = require('./connect-links')
+const mentions = require('./mentions')
+const connectLinkUtils = require('../../extension-utils/connect-links')
 
 // The keys Connect's runtime accepts beside the component name in a component
 // map: a label on any component, and processors on inputs and outputs.
@@ -389,8 +391,10 @@ function targetOf (f) {
 /**
  * The Connect engine. Scans one checkout against one Connect registry.
  */
-function scanConnect ({ docsDir, registry, files: only, write = false, cloudSurface = false, renderGuard, component: ownComponent, links }) {
+function scanConnect ({ docsDir, registry, files: only, write = false, writeLinks = false, cloudSurface = false, renderGuard, component: ownComponent, links }) {
   const data = registry.data
+  const types = {}
+  for (const key of Object.values(connectValues.componentTypes(data))) types[connectLinkUtils.typeDir(key)] = key
   const cindex = { ...componentIndex(data), counts: undefined }
   const counts = { yamlRestatingDefault: 0, yamlUnparsed: 0 }
   cindex.counts = counts
@@ -406,7 +410,7 @@ function scanConnect ({ docsDir, registry, files: only, write = false, cloudSurf
     }
   }
   const report = (f) => {
-    const key = `${f.file}:${f.line}:${f.status}:${f.reason}:${f.fieldPath || f.component || ''}${f.check === 'link' ? `:${f.written}` : ''}`
+    const key = `${f.file}:${f.line}:${f.status}:${f.reason}:${f.fieldPath || f.component || ''}${f.check === 'link' || f.check === 'mention' ? `:${f.written}` : ''}`
     if (seen.has(key)) return
     seen.add(key)
     findings.push(f)
@@ -451,8 +455,35 @@ function scanConnect ({ docsDir, registry, files: only, write = false, cloudSurf
     // Bloblang pages; the SQL reference, whose backticked SQL functions share
     // Bloblang names, is never read for them.
     const linkLine = (index, line, ctxLine) => (links && !(links.skip && links.skip.has(relative))
-      ? linkFindings(line, { index, relative, registry, links, ctx: ctxLine, historical, connectContent: !SQL_REFERENCE_RX.test(relative) })
+      ? [...linkFindings(line, { index, relative, registry, links, ctx: ctxLine, historical, connectContent: !SQL_REFERENCE_RX.test(relative) }), ...mentionLine(index, line, ctxLine)]
       : [])
+
+    // Unlinked mentions: the first of each component and Bloblang call, in
+    // a file that links it nowhere, never in release, upgrade or migration
+    // notes or on the target's own page. Bloblang calls only in Connect content, never in
+    // the SQL reference, whose functions share Bloblang names.
+    const mentionsOn = Boolean(links) && !historical && !(links.skip && links.skip.has(relative))
+    const linked = mentionsOn ? mentions.connectLinked(original, { data, types }) : undefined
+    const firstMention = mentionsOn ? mentions.firstMentions(new Set([...linked.components, ...linked.bloblang])) : undefined
+    const noMention = mentionsOn ? mentions.skippedLines(original.split('\n')) : undefined
+    const bloblangToo = ctx.connectContext && !SQL_REFERENCE_RX.test(relative)
+    // The target's own page, in connect or as a Cloud stub, or a partial of
+    // it (components/inputs/gateway.adoc).
+    const ownPage = (m) => relative.endsWith(`/${m.mention === 'connect-component' ? m.target : `bloblang/${m.mention === 'bloblang-function' ? 'functions' : 'methods'}`}.adoc`)
+    const mentionLine = (index, line, ctxLine) => {
+      if (!firstMention || noMention.has(index) || ignored.has(index + 1)) return []
+      let surfaces = links.surfacesOf(relative, index).filter((s) => !s.unknown)
+      if (ctxLine.cloudExcluded) surfaces = surfaces.filter((s) => !s.cloud)
+      if (ctxLine.qualifier === 'ifdef::env-cloud') surfaces = surfaces.filter((s) => s.cloud)
+      // A file no page in the scan renders is still the scanned component's.
+      if (!surfaces.length && !ctxLine.qualifier) surfaces = [{ component: links.component, version: links.version, cloud: cloudSurface }]
+      const out = []
+      for (const m of mentions.connectMentions(line, { data, types, catalog: links.catalog, surfaces, bloblangToo })) {
+        if (ownPage(m) || !firstMention(m)) continue
+        out.push(mentions.toFinding(m, { kind: 'connect', relative, index, line, historical }))
+      }
+      return out
+    }
 
     const proseLine = (index, line, ctxLine) => {
       const callout = line.match(CALLOUT_ITEM_RX)
@@ -475,17 +506,22 @@ function scanConnect ({ docsDir, registry, files: only, write = false, cloudSurf
     // the line still renders the same.
     const applyLine = (index, line, lineFindings) => {
       let rewritten = line
+      let appliedFrom = Infinity
       for (const f of [...lineFindings].sort((a, b) => b.start - a.start)) {
-        if (write && f.autoSafe && !ignored.has(index + 1)) {
+        if (write && (f.autoSafe || (writeLinks && f.linkable)) && !ignored.has(index + 1)) {
+          // Two findings over the same text: the later one wins.
+          if (f.end > appliedFrom) continue
           const candidate = rewritten.slice(0, f.start) + f.proposed + rewritten.slice(f.end)
           if (renderGuard && !renderGuard(relative, rewritten, candidate)) {
             f.autoSafe = false
             f.applied = false
+            if (f.linkable) f.linkable = false
             f.note = 'render-changed'
             continue
           }
           rewritten = candidate
           f.applied = true
+          appliedFrom = f.start
         }
       }
       for (const f of lineFindings) {
@@ -533,7 +569,7 @@ function scanConnect ({ docsDir, registry, files: only, write = false, cloudSurf
     skippedGenerated,
     yamlUnparsed: counts.yamlUnparsed,
     findings,
-    counts: { ...countFindings(findings), yamlRestatingDefault: counts.yamlRestatingDefault, ...(links ? linkCounts(findings) : {}) },
+    counts: { ...countFindings(findings), yamlRestatingDefault: counts.yamlRestatingDefault, ...(links ? { ...linkCounts(findings), ...mentions.mentionCounts(findings) } : {}) },
     changedFiles,
   }
 }

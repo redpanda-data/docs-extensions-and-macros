@@ -3453,9 +3453,19 @@ programCli
  * block or YAML, and only when the line renders the same visible text before
  * and after through the real macros; an exact rpk xref, in prose or a table
  * cell, becomes rpkcmd:[...], and an exact Connect xref connect:[...] or
- * blobl:[...].
+ * blobl:[...]. It also reports unlinked mentions: the first mention in a
+ * file of an rpk command in inline code (`rpk topic create`), a Connect
+ * component named with its type (`kafka_franz` input, kafka_franz input) or,
+ * in Connect content, a Bloblang call (`now()`, `.uppercase()`, `uppercase`
+ * method), when the file links it nowhere and rpkcmd:, connect: or blobl:
+ * would link it. Never in blocks, headings, titles, table header rows, link
+ * labels, nav files, release, upgrade or migration notes, generated pages
+ * or the target's own page. They fail only at --fail-on links, and --write
+ * turns them into links only with --write-links, keeping the text as
+ * written.
  * Exit 0 when no finding is at or above
- * --fail-on, 1 when one is, 2 when the check could not run.
+ * --fail-on, 1 when one is, 2 when the check could not run (including
+ * --write-links without --write).
  *
  * @why
  * Hand-typed defaults, flags and field names drift from the product with
@@ -3476,6 +3486,9 @@ programCli
  * # Apply the auto-safe exact matches, then fail on anything left
  * npx doc-tools check-reference-values --write --fail-on mismatch
  *
+ * # Also link the first unlinked mention of each command, component and call
+ * npx doc-tools check-reference-values --write --write-links --data-file docs-data/rpk-v26.2.2.json --lender ../rp-connect-docs
+ *
  * @requirements
  * - An Antora component checkout (antora.yml and modules/)
  * - The data: redpanda-properties-<tag>.json and rpk-<version>.json attachments
@@ -3491,7 +3504,8 @@ programCli
   .option('--files <path...>', 'Scan only these files, relative to --docs-dir')
   .option('--report-dir <path>', 'Where to write reference-values-report.json and reference-values-report.md', '.')
   .option('--write', 'Apply auto-safe exact replacements with the value macros')
-  .option('--fail-on <level>', 'none, mismatch (mismatches, reference errors, stale rpk and Connect examples) or any (also exact, equivalent, unset and reference warnings)', 'mismatch')
+  .option('--write-links', 'With --write, also turn unlinked mentions into rpkcmd:, connect: and blobl: links, keeping the text as written')
+  .option('--fail-on <level>', 'none, mismatch (mismatches, reference errors, stale rpk and Connect examples), any (also exact, equivalent, unset and reference warnings) or links (also unlinked mentions)', 'mismatch')
   .option('--annotations <format>', 'Also print GitHub workflow annotations: github')
   .action((options) => {
     const { runCli } = require('../tools/reference-values')

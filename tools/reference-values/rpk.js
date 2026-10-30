@@ -34,6 +34,7 @@ const { DEFAULT_EXCLUDE } = require('../migrate-property-refs')
 const rpkValues = require('../../extension-utils/rpk-values')
 const rpkLinks = require('../../extension-utils/rpk-links')
 const shared = require('./shared')
+const mentions = require('./mentions')
 
 // rpk redpanda start forwards flags it does not know to Seastar, so they are
 // not rpk's to validate. A stopgap until the generator emits passThroughFlags
@@ -320,9 +321,12 @@ const cmd = (names) => ['rpk', ...names].join(' ')
  *   check hand-written xrefs to rpk reference pages against the pages in
  *   catalog, as the scanned component renders them, except in the files in
  *   skip. cloud ({component, version}) is the one Cloud lender, which renders
- *   a self-managed file's ifdef::env-cloud[] content.
+ *   a self-managed file's ifdef::env-cloud[] content. With links, the first
+ *   unlinked mention of each command in a file is reported (mentions.js).
+ * @param {boolean} [opts.writeLinks] - With write, also turn unlinked
+ *   mentions into rpkcmd:[...].
  */
-function scanRpk ({ docsDir, registry, files: only, write = false, renderGuard, readFile = shared.readText, writeFile, links }) {
+function scanRpk ({ docsDir, registry, files: only, write = false, writeLinks = false, renderGuard, readFile = shared.readText, writeFile, links }) {
   const fsPath = require('path')
   const tree = registry.data.tree
   const cloudSurface = registry.surface === 'cloud'
@@ -350,6 +354,14 @@ function scanRpk ({ docsDir, registry, files: only, write = false, renderGuard, 
     const fileFindings = []
     const seen = new Set()
     const sightings = commandSightings(lines, registry)
+    // Unlinked mentions: the first of each command, in a file that links it
+    // nowhere, never in a nav file or release or upgrade notes.
+    const fileModule = (relative.match(/^modules\/([^/]+)\//) || [])[1] || 'ROOT'
+    const mentionsOn = Boolean(links) && !historical && !(links.skip && links.skip.has(relative))
+    const firstMention = mentionsOn
+      ? mentions.firstMentions(mentions.rpkLinked(original, { tree, deprecated: registry.data.deprecated_commands, catalog: links.catalog, component: links.component, version: links.version, module: fileModule, aliases: links.aliases }))
+      : undefined
+    const noMention = mentionsOn ? mentions.skippedLines(lines) : undefined
     // Level 1 and 2 headings bound the section a flag mention looks back in.
     const headings = []
     lines.forEach((l, i) => { if (/^={2,3}\s/.test(l)) headings.push(i) })
@@ -463,17 +475,27 @@ function scanRpk ({ docsDir, registry, files: only, write = false, renderGuard, 
         const finding = classifyClaim(claim, { index, line, ctx, sightings, registry, allFlags, historical, tagged, cloudSurface, relative, table, sectionStart: sectionStartOf(index) })
         if (finding) lineFindings.push(finding)
       }
+      if (firstMention && linkScope && !noMention.has(index) && !ignored.has(index + 1)) {
+        for (const m of mentions.rpkMentions(line, { registry, catalog: linkScope.catalog, component: linkScope.component, version: linkScope.version })) {
+          if (firstMention(m)) lineFindings.push(mentions.toFinding(m, { kind: 'rpk', relative, index, line, historical }))
+        }
+      }
+      let appliedFrom = Infinity
       for (const f of [...lineFindings].sort((a, b) => b.start - a.start)) {
-        if (write && f.autoSafe && !ignored.has(index + 1)) {
+        if (write && (f.autoSafe || (writeLinks && f.linkable)) && !ignored.has(index + 1)) {
+          // Two findings over the same text: the later one wins.
+          if (f.end > appliedFrom) continue
           const candidate = rewritten.slice(0, f.start) + f.proposed + rewritten.slice(f.end)
           if (renderGuard && !renderGuard(relative, rewritten, candidate)) {
             f.autoSafe = false
             f.applied = false
+            if (f.linkable) f.linkable = false
             f.note = 'render-changed'
             continue
           }
           rewritten = candidate
           f.applied = true
+          appliedFrom = f.start
         }
       }
       for (const f of lineFindings) {
@@ -509,7 +531,7 @@ function scanRpk ({ docsDir, registry, files: only, write = false, renderGuard, 
     skippedGenerated,
     skippedStubs,
     findings,
-    counts: { ...tally, examplesRestatingDefault: counts.examplesRestatingDefault, ...(links ? linkCounts(findings) : {}) },
+    counts: { ...tally, examplesRestatingDefault: counts.examplesRestatingDefault, ...(links ? { ...linkCounts(findings), ...mentions.mentionCounts(findings) } : {}) },
     changedFiles,
   }
 }

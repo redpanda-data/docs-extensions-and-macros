@@ -275,7 +275,8 @@ describe('what the link check skips and how findings fail', () => {
 describe('rpkcmd: and the bracket form of rpkval: in the value scan', () => {
   test('a value written as rpkval:[...] is the macro, not a hand-written value, in either form', () => {
     const { result } = scan('streaming', { 'modules/x/pages/x.adoc': page('The `--partitions` flag of `rpk topic create` defaults to rpkval:[rpk topic create --partitions].', '', 'The `--partitions` flag of `rpk topic create` defaults to rpkval:partitions[command=rpk topic create].') })
-    expect(result.kinds.rpk.findings).toEqual([])
+    // The unlinked `rpk topic create` is a mention, checked in mentions.test.js.
+    expect(result.kinds.rpk.findings.filter((f) => f.check !== 'mention')).toEqual([])
   })
 
   test('the block form rpkval::[...] is a macro, and a command-level rpkval:[...] names the command', () => {
