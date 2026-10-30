@@ -257,7 +257,7 @@ reports the same calls, and `--write` rewrites the ones it can.
 * rpkcmd:[rpk redpanda admin]
 ** You should see `rpk redpanda admin` as plain code with no link, and a warning that it is deprecated, naming `+rpkcmd:[rpk cluster]+`.
 * connect:[inputs/kafka_franz]
-** You should see "`kafka_franz` input" linked to the `kafka_franz` stand-in page, and a warning that it is deprecated, naming `+connect:[inputs/redpanda]+`.
+** You should see `kafka_franz` as code and the word "input", linked to the `kafka_franz` stand-in page, and a warning that it is deprecated, naming `+connect:[inputs/redpanda]+`.
 * connect:[inputs/kafka_franz.regexp_topics]
 ** You should see `regexp_topics` linked to the `kafka_franz` page with no anchor, and a warning that the field is deprecated and the data names no single replacement.
 * blobl:[meta()]
