@@ -190,6 +190,41 @@ describe('flag and JSON argument formatting (DOC-2686)', () => {
   })
 })
 
+describe('flags inside single-quoted commands (DOC-2686)', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+  // Rules from redpanda-data/docs rpk-overrides.json. The first turns the
+  // quoted command into a span; the second then nested a flag span inside it.
+  const quotedCommand = { pattern: "'([a-z][a-z0-9_ -]*)'", replacement: '`$1`', flags: 'g', description: 'Convert single-quoted commands/tools to backticks' }
+  const flagWithFormat = { pattern: '(?<![`\\w-])(-{1,2}[a-zA-Z][a-z-]*) (json/yaml|json|yaml|text|wide|csv)(?![/a-zA-Z])', replacement: '`$1 $2`', flags: 'g', description: 'Wrap bare flag with adjacent format/value word as inline code before auto-backtick step splits them' }
+  const quotedSpan = { pattern: '"`([^`"]+)`"', replacement: '`$1`', flags: 'g', description: 'Remove double quotes around a code span' }
+  const transforms = { replacements: [quotedCommand, flagWithFormat, quotedSpan] }
+
+  test('rpk ai trace get: no placeholders and no lost text', () => {
+    const src = "trace link, which also supplies the start time. --start-time (the trace's\n" +
+      "start, from 'trace list -o json') makes the read faster.\n" +
+      '-o json and -o yaml print the GetTraceResponse.'
+    expect(formatDescription(src, transforms)).toBe(
+      "trace link, which also supplies the start time. `--start-time` (the trace's\n" +
+      'start, from `trace list -o json`) makes the read faster.\n' +
+      '`-o json` and `-o yaml` print the GetTraceResponse.'
+    )
+  })
+
+  test('a flag inside a single-quoted command stays in one span', () => {
+    expect(formatDescription("Run 'cluster info -o yaml' first, then -o json.", transforms))
+      .toBe('Run `cluster info -o yaml` first, then `-o json`.')
+  })
+
+  test('a rule that matches a whole span still applies', () => {
+    expect(formatDescription('Run "\'topic list\'" first.', transforms)).toBe('Run `topic list` first.')
+  })
+
+  test('throws instead of publishing an unrestored placeholder', () => {
+    const leak = { replacements: [{ pattern: 'XYZ', replacement: '__INLINE_CODE_99__', flags: 'g' }] }
+    expect(() => formatDescription('Some XYZ text.', leak)).toThrow(/__INLINE_CODE_99__/)
+  })
+})
+
 describe('known command path formatting', () => {
   const { formatDescription, registerKnownCommandPaths } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
 
