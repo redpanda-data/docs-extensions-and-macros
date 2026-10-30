@@ -292,11 +292,86 @@ describe('docs, scanned as streaming', () => {
 describe('the value checks read the new macros', () => {
   test('connect:[...] names the component a stated default belongs to', () => {
     const { result } = scan('connect', { 'modules/guides/pages/x.adoc': page('The connect:[inputs/kafka_franz.client_id] field defaults to `redpanda-connect`.') })
-    expect(result.kinds.connect.findings.filter((f) => f.file === 'modules/guides/pages/x.adoc')).toEqual([expect.objectContaining({ status: 'exact', field: 'default', fieldPath: 'client_id', component: 'kafka_franz', target: 'connectval:[inputs/kafka_franz.client_id,default]' })])
+    // kafka_franz is deprecated, which is a name finding of its own.
+    expect(result.kinds.connect.findings.filter((f) => f.file === 'modules/guides/pages/x.adoc' && f.check !== 'name')).toEqual([expect.objectContaining({ status: 'exact', field: 'default', fieldPath: 'client_id', component: 'kafka_franz', target: 'connectval:[inputs/kafka_franz.client_id,default]' })])
   })
 
   test('a bloblval: value is a macro, not a hand-written value', () => {
     const { result } = scan('connect', { 'modules/guides/pages/x.adoc': page('The `min` of counter defaults to bloblval:[counter(min)] and `client_id` defaults to connect:[inputs/kafka_franz.client_id].') })
-    expect(result.kinds.connect.findings.filter((f) => f.file === 'modules/guides/pages/x.adoc' && f.check !== 'link')).toEqual([])
+    expect(result.kinds.connect.findings.filter((f) => f.file === 'modules/guides/pages/x.adoc' && f.check !== 'link' && f.check !== 'name')).toEqual([])
+  })
+})
+
+// Former and deprecated Connect and Bloblang names (connect-names.js). The
+// prose lines are from cloud-docs aab67ef and rp-connect-docs 62216a2.
+describe('former and deprecated names', () => {
+  const names = (result, file) => result.kinds.connect.findings.filter((f) => f.check === 'name' && f.file === file)
+  // cloud-docs modules/develop/pages/connect/configuration/contextual-variables.adoc:53, and the output of its example.
+  const KAFKA_FRANZ = 'The configuration also uses the `$REDPANDA_BROKERS` contextual variable to automatically populate the bootstrap server address of the cluster on which the pipeline is run, which allows Redpanda Connect to write updated messages to the `data` topic defined in the `kafka_franz` output.'
+  const EXAMPLE = ['[,yaml]', '----', 'output:', ' kafka_franz:', '   seed_brokers:', '   - ${REDPANDA_BROKERS}', '   topic: data', '----']
+
+  test('cloud-docs contextual-variables.adoc:53: the deprecated `kafka_franz` output names outputs/redpanda, but its example still uses kafka_franz, so it is not written', () => {
+    const file = 'modules/develop/pages/connect/configuration/contextual-variables.adoc'
+    const { result } = scan('cloud-data-platform', { [file]: page(KAFKA_FRANZ, '', ...EXAMPLE) })
+    const [f] = names(result, file)
+    expect(f).toMatchObject({ status: 'reference', reason: 'deprecated-component', severity: 'warning', componentType: 'output', component: 'kafka_franz', written: '`kafka_franz`', proposed: '`redpanda`', replacement: 'outputs/redpanda', writable: false, failing: false })
+    expect(f.note).toContain('the page also names kafka_franz elsewhere, such as in an example, so change them together by hand')
+  })
+
+  test('the same sentence with no example is writable, and --write rewrites only the name', () => {
+    const file = 'modules/develop/pages/connect/configuration/contextual-variables.adoc'
+    const { result, docsDir } = scan('cloud-data-platform', { [file]: page(KAFKA_FRANZ) }, { write: true })
+    expect(names(result, file)).toEqual([expect.objectContaining({ reason: 'deprecated-component', applied: true })])
+    expect(fs.readFileSync(path.join(docsDir, file), 'utf8')).toBe(page(KAFKA_FRANZ.replace('`kafka_franz` output', '`redpanda` output')))
+  })
+
+  test('rp-connect-docs whats-new.adoc:2964: a sentence about the rename is reported, never written', () => {
+    const file = 'modules/get-started/pages/whats-new.adoc'
+    const line = 'This release renames the `pg_stream` input to xref:components:inputs/postgres_cdc.adoc[`postgres_cdc`]. '
+    const { result } = scan('connect', { [file]: page(line) }, { write: true })
+    const [f] = names(result, file)
+    expect(f).toMatchObject({ reason: 'deprecated-component', component: 'pg_stream', replacement: 'inputs/postgres_cdc', proposed: '`postgres_cdc`', writable: false })
+  })
+
+  test.each([
+    ['connect:[outputs/kafka_migrator]', 'alias', 'renamed-component', 'connect:[outputs/redpanda_migrator]', true],
+    ['connect:[inputs/kafka_migrator.topics,the topics]', 'alias', 'renamed-component', 'connect:[inputs/redpanda_migrator.topics,the topics]', true],
+    ['connect:[inputs/kafka_franz.consumer_group]', 'reference', 'deprecated-component', 'connect:[inputs/redpanda.consumer_group]', true],
+    ['connect:[inputs/kafka_franz.checkpoint_limit]', 'reference', 'deprecated-component', undefined, false],
+    ['connect:[inputs/kafka_franz.regexp_topics]', 'reference', 'deprecated-field', 'connect:[inputs/kafka_franz.regexp_topics_include]', true],
+    ['connectval:[inputs/kafka_migrator.topics,type]', 'alias', 'renamed-component', 'connectval:[inputs/redpanda_migrator.topics,type]', true],
+    ['connectval:topics[type,component=inputs/kafka_migrator]', 'alias', 'renamed-component', 'connectval:topics[type,component=inputs/redpanda_migrator]', true],
+    ['blobl:[meta()]', 'reference', 'deprecated-function', undefined, false],
+    ['bloblval:[.format_timestamp(),description]', 'reference', 'deprecated-method', undefined, false],
+  ])('%s is %s (%s), proposing %s', (macro, status, reason, proposed, writable) => {
+    const file = 'modules/guides/pages/x.adoc'
+    const [f] = names(scan('connect', { [file]: page(`See ${macro}.`) }).result, file)
+    expect(f).toMatchObject({ status, reason, written: macro, writable })
+    expect(f.proposed).toBe(proposed)
+  })
+
+  test('a call that asks whether something is deprecated is not reported', () => {
+    const file = 'modules/guides/pages/x.adoc'
+    expect(names(scan('connect', { [file]: page('It is connectval:[inputs/kafka_franz,status] and bloblval:[meta(),deprecated].') }).result, file)).toEqual([])
+  })
+
+  test('a deprecated Bloblang call in Connect prose is reported; elsewhere `count()` is SQL', () => {
+    const file = 'modules/guides/pages/x.adoc'
+    expect(names(scan('connect', { [file]: page('Read it with `meta()`.') }).result, file).map((f) => f.reason)).toEqual(['deprecated-function'])
+    // cloud-docs modules/reference/pages/sql/sql-functions/aggregate-functions/count.adoc:5
+    const sql = 'modules/reference/pages/sql/sql-functions/aggregate-functions/count.adoc'
+    expect(names(scan('cloud-data-platform', { [sql]: page('The `count()` function retrieves the number of records that match a specific condition.') }).result, sql)).toEqual([])
+  })
+
+  test('old names fail only at --fail-on any and links', () => {
+    const file = 'modules/guides/pages/x.adoc'
+    const [f] = names(scan('connect', { [file]: page('See connect:[outputs/kafka_migrator].') }).result, file)
+    expect([failsAt('connect', f, 'mismatch'), failsAt('connect', f, 'any'), failsAt('connect', f, 'links')]).toEqual([false, true, true])
+  })
+
+  test('--write rewrites a former name in a macro and keeps the label', () => {
+    const file = 'modules/guides/pages/x.adoc'
+    const { docsDir } = scan('connect', { [file]: page('Copy connect:[inputs/kafka_migrator.topics,the topics] from the source.') }, { write: true })
+    expect(fs.readFileSync(path.join(docsDir, file), 'utf8')).toBe(page('Copy connect:[inputs/redpanda_migrator.topics,the topics] from the source.'))
   })
 })

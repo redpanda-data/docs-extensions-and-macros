@@ -371,7 +371,7 @@ const opaquePlaceholders = (text) => text.replace(/<\w[^<>`]*>/g, (m) => `{${'p'
  *
  * @returns {object[]} findings, with start, end and proposed for a rewrite.
  */
-function nameFindings (line, { index, relative, registry, version, nearby = line, historical = false }) {
+function nameFindings (line, { index, relative, registry, version, nearby = line, elsewhere = '', historical = false }) {
   const tree = registry.data.tree
   const deprecated = registry.data.deprecated_commands
   const out = []
@@ -383,12 +383,15 @@ function nameFindings (line, { index, relative, registry, version, nearby = line
   // table that names both (broker-admin.adoc lists rpk cluster info and its
   // alias rpk cluster metadata), where a rewrite would repeat a row.
   const nearbyHas = (command) => new RegExp(`${command.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-]|[ \\t]+[a-z])`).test(nearby)
+  // The old name written elsewhere on the page, such as in an example to run.
+  const elsewhereHas = (command) => new RegExp(`${command.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+')}(?![\\w-])`).test(elsewhere)
   const decide = (f, writable, why, main) => {
     if (!f.proposed) return { ...f, writable: false }
     if (!writable) return { ...f, writable: false, note: why ? `${f.note}; ${why}` : f.note }
     if (historical) return { ...f, writable: false, note: `${f.note}; release, upgrade and migration notes record the names of their time, so --write leaves them` }
     if (!allowed.writable) return { ...f, writable: false, note: `${f.note}; ${allowed.note}` }
     if (main && nearbyHas(main)) return { ...f, writable: false, note: `${f.note}; ${main} is already written within ${NEARBY_LINES} lines, so the old name may be listed on purpose; change it by hand` }
+    if (f.typed && elsewhereHas(f.typed)) return { ...f, writable: false, note: `${f.note}; the page also writes ${f.typed} elsewhere, such as in an example, so change them together by hand` }
     return { ...f, writable: true }
   }
   const aliasFinding = ({ start, end, written, proposed, typed, main, macro }) => decide({
@@ -413,6 +416,7 @@ function nameFindings (line, { index, relative, registry, version, nearby = line
     reason: 'deprecated-command',
     severity: 'warning',
     command: typed,
+    typed,
     token: typed,
     written,
     proposed: advice.writable ? proposed : undefined,
@@ -699,7 +703,7 @@ function scanRpk ({ docsDir, registry, files: only, write = false, writeLinks = 
         checkLineInvocations(span.text, () => index, { prose: true })
       }
       // Aliases and deprecated commands in spans and macros.
-      const named = nameFindings(line, { index, relative, registry, version, nearby: lines.slice(Math.max(0, index - NEARBY_LINES), index + NEARBY_LINES + 1).join('\n'), historical })
+      const named = nameFindings(line, { index, relative, registry, version, nearby: lines.slice(Math.max(0, index - NEARBY_LINES), index + NEARBY_LINES + 1).join('\n'), elsewhere: [...lines.slice(0, index), ...lines.slice(index + 1)].join('\n'), historical })
       if (ctx.hidden) {
         for (const f of named) {
           delete f.start

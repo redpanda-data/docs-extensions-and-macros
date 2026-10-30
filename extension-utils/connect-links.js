@@ -389,6 +389,9 @@ function referenceAdvice (catalog, data, text) {
   const { path } = connectValues.parseFieldTarget(text)
   const segments = path ? path.split('.').filter(Boolean) : []
   const renamed = renamedComponent(catalog, data, text)
+  const written = connectValues.parseComponent(connectValues.parseFieldTarget(text).component)
+  const writtenKey = written && connectValues.componentTypes(data)[normalizeType(written.type)]
+  const otherType = (target) => `${typeDir(target.key)}/${target.name} is another type of component, so the sentence needs rewording by hand`
   const withPath = (target) => {
     if (!segments.length) return { ok: true, ref: `${typeDir(target.key)}/${target.name}` }
     const walked = connectValues.resolveFieldPath(fieldsOf(target.entry), segments)
@@ -396,7 +399,8 @@ function referenceAdvice (catalog, data, text) {
   }
   if (renamed) {
     const p = withPath(renamed)
-    return { kind: 'renamed', replacement: renamed, ref: p.ok ? p.ref : undefined, writable: p.ok, why: p.ok ? undefined : `${typeDir(renamed.key)}/${renamed.name} has no field ${path}` }
+    const sameType = renamed.key === writtenKey
+    return { kind: 'renamed', replacement: renamed, ref: p.ok ? p.ref : undefined, writable: p.ok && sameType, why: !p.ok ? `${typeDir(renamed.key)}/${renamed.name} has no field ${path}` : sameType ? undefined : otherType(renamed) }
   }
   const resolved = resolveComponentRef(data, text)
   if (!resolved.ok) return undefined
@@ -415,7 +419,7 @@ function referenceAdvice (catalog, data, text) {
     replacement,
     ref: p.ok ? p.ref : undefined,
     writable: p.ok && sameType,
-    why: !p.ok ? `${typeDir(replacement.key)}/${replacement.name} has no field ${path}, so find the equivalent by hand` : sameType ? undefined : `${typeDir(replacement.key)}/${replacement.name} is another type of component, so the sentence needs rewording by hand`,
+    why: !p.ok ? `${typeDir(replacement.key)}/${replacement.name} has no field ${path}, so find the equivalent by hand` : sameType ? undefined : otherType(replacement),
   }
 }
 
@@ -436,7 +440,7 @@ function adviceSentence (advice, { written, dataset, suggest }) {
   const instead = advice.ref && advice.writable ? `: write ${suggest(advice.ref)}` : advice.why ? `, but ${advice.why}` : ''
   if (advice.kind === 'renamed') {
     const r = advice.replacement
-    return `${what} is now ${typeDir(r.key)}/${r.name}: the connect docs alias its page path, ${r.alias}, to that component's page${advice.ref ? `; write ${suggest(advice.ref)}` : `, and ${advice.why}`}.`
+    return `${what} is now ${typeDir(r.key)}/${r.name}: the connect docs alias its page path, ${r.alias}, to that component's page${advice.ref ? `; write ${suggest(advice.ref)}${advice.writable ? '' : `, though ${advice.why}`}` : `, and ${advice.why}`}.`
   }
   if (advice.kind === 'deprecated-field') {
     return `'${path}' of ${what} is deprecated in ${dataset}${advice.field ? `; its replacement is ${advice.field}${instead}` : `; ${advice.why}`}.`

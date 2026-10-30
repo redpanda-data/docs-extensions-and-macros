@@ -39,6 +39,12 @@ const { countFindings, blockLanguage, linkCounts } = require('./rpk')
 const { linkFindings } = require('./connect-links')
 const mentions = require('./mentions')
 const connectLinkUtils = require('../../extension-utils/connect-links')
+const datasets = require('../../extension-utils/attachment-datasets')
+const oldNames = require('./names')
+const { connectNameFindings } = require('./connect-names')
+
+// How far around a line an old name's replacement counts as already written.
+const NEARBY_LINES = 6
 
 // The keys Connect's runtime accepts beside the component name in a component
 // map: a label on any component, and processors on inputs and outputs.
@@ -410,7 +416,7 @@ function scanConnect ({ docsDir, registry, files: only, write = false, writeLink
     }
   }
   const report = (f) => {
-    const key = `${f.file}:${f.line}:${f.status}:${f.reason}:${f.fieldPath || f.component || ''}${f.check === 'link' || f.check === 'mention' ? `:${f.written}` : ''}`
+    const key = `${f.file}:${f.line}:${f.status}:${f.reason}:${f.fieldPath || f.component || ''}${f.check === 'link' || f.check === 'mention' || f.check === 'name' ? `:${f.written}` : ''}`
     if (seen.has(key)) return
     seen.add(key)
     findings.push(f)
@@ -509,6 +515,21 @@ function scanConnect ({ docsDir, registry, files: only, write = false, writeLink
       return out
     }
 
+    // Former and deprecated names in macros and spans (connect-names.js).
+    const fileLines = original.split('\n')
+    const bloblangHere = (ownComponent === 'connect' || /(?:^|\/)(?:connect|rpcn|redpanda-connect)[^/]*\//.test(relative)) && !SQL_REFERENCE_RX.test(relative)
+    const namesLine = (index, line) => connectNameFindings(line, {
+      index,
+      relative,
+      data,
+      catalog: links ? links.catalog : undefined,
+      dataset: datasets.describeDataset(registry),
+      bloblangToo: bloblangHere,
+      nearby: fileLines.slice(Math.max(0, index - NEARBY_LINES), index + NEARBY_LINES + 1).join('\n'),
+      elsewhere: [...fileLines.slice(0, index), ...fileLines.slice(index + 1)].join('\n'),
+      historical,
+    })
+
     const proseLine = (index, line, ctxLine) => {
       const callout = line.match(CALLOUT_ITEM_RX)
       const claims = []
@@ -518,7 +539,7 @@ function scanConnect ({ docsDir, registry, files: only, write = false, writeLink
         if (line.trim() && !callout) callouts = {}
         claims.push(...lineClaims(line, {}))
       }
-      const lineFindings = linkLine(index, line, ctxLine)
+      const lineFindings = [...linkLine(index, line, ctxLine), ...namesLine(index, line)]
       for (const claim of claims) {
         const f = classifyClaim(claim, { index, line, relative, data, componentIndex: cindex, usedComponents, historical, tagged, cloudSurface, ctxLine, fieldNames })
         if (f && (f.reason !== 'no-component-context' || connectPage || usedComponents.size)) lineFindings.push(f)
@@ -532,15 +553,18 @@ function scanConnect ({ docsDir, registry, files: only, write = false, writeLink
       let rewritten = line
       let appliedFrom = Infinity
       for (const f of [...lineFindings].sort((a, b) => b.start - a.start)) {
-        if (write && (f.autoSafe || (writeLinks && f.linkable)) && !ignored.has(index + 1)) {
+        if (write && (f.autoSafe || f.writable || (writeLinks && f.linkable)) && !ignored.has(index + 1)) {
           // Two findings over the same text: the later one wins.
           if (f.end > appliedFrom) continue
           const candidate = rewritten.slice(0, f.start) + f.proposed + rewritten.slice(f.end)
-          if (renderGuard && !renderGuard(relative, rewritten, candidate)) {
+          if (renderGuard && !renderGuard(relative, rewritten, candidate, f.rename)) {
             f.autoSafe = false
             f.applied = false
             if (f.linkable) f.linkable = false
-            f.note = 'render-changed'
+            if (f.writable) {
+              f.writable = false
+              f.note = `${f.note}; render-changed`
+            } else f.note = 'render-changed'
             continue
           }
           rewritten = candidate
@@ -551,6 +575,7 @@ function scanConnect ({ docsDir, registry, files: only, write = false, writeLink
       for (const f of lineFindings) {
         delete f.start
         delete f.end
+        delete f.rename
         pageFindings.push(f)
       }
       return rewritten
@@ -570,7 +595,7 @@ function scanConnect ({ docsDir, registry, files: only, write = false, writeLink
         return proseLine(index, line, ctxLine)
       },
       onTableLine: (index, line, ctxLine) => {
-        const lineFindings = linkLine(index, line, ctxLine)
+        const lineFindings = [...linkLine(index, line, ctxLine), ...namesLine(index, line)]
         for (const claim of lineClaims(line, {})) {
           const f = classifyClaim(claim, { index, line, relative, data, componentIndex: cindex, usedComponents, historical, tagged, cloudSurface, ctxLine, fieldNames, table: true })
           if (f && (f.reason !== 'no-component-context' || connectPage || usedComponents.size)) lineFindings.push(f)
@@ -593,7 +618,7 @@ function scanConnect ({ docsDir, registry, files: only, write = false, writeLink
     skippedGenerated,
     yamlUnparsed: counts.yamlUnparsed,
     findings,
-    counts: { ...countFindings(findings), yamlRestatingDefault: counts.yamlRestatingDefault, ...(links ? { ...linkCounts(findings), ...mentions.mentionCounts(findings) } : {}) },
+    counts: { ...countFindings(findings), yamlRestatingDefault: counts.yamlRestatingDefault, ...(links ? { ...linkCounts(findings), ...mentions.mentionCounts(findings) } : {}), ...oldNames.nameCounts(findings) },
     changedFiles,
   }
 }

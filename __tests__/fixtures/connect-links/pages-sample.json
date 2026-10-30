@@ -81,6 +81,11 @@
   },
   {
    "module": "components",
+   "relative": "outputs/kafka_franz.adoc",
+   "aliases": []
+  },
+  {
+   "module": "components",
    "relative": "outputs/ockam_kafka.adoc",
    "aliases": []
   },
@@ -240,6 +245,13 @@
    "relative": "connect/components/outputs/kafka.adoc",
    "aliases": [
     "components:outputs/kafka.adoc"
+   ]
+  },
+  {
+   "module": "develop",
+   "relative": "connect/components/outputs/kafka_franz.adoc",
+   "aliases": [
+    "components:outputs/kafka_franz.adoc"
    ]
   },
   {
