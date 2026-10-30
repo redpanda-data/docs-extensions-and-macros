@@ -5,6 +5,7 @@ const {
   preserveLinuxOnlyCommands,
   pluginNodeHasRealCommands,
   pluginInstalled,
+  replaceHomeDir,
   REFRESHABLE_PLUGINS,
   PLUGIN_INSTALL_VERSION_FLAGS,
   PLUGIN_MANIFEST_SLUGS
@@ -89,6 +90,24 @@ describe('Plugin refresh (--plugin mode)', () => {
 
     test('real commands show the install', () => {
       expect(pluginInstalled('connect', installedNode, home)).toBe(true)
+    })
+  })
+
+  describe('replaceHomeDir', () => {
+    test('a default under the temporary HOME becomes ~', () => {
+      const fs = require('fs')
+      const os = require('os')
+      const path = require('path')
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-plugin-home-'))
+      const real = fs.realpathSync(home)
+      const out = JSON.stringify([
+        { name: 'rpai-config', default: `${home}/.rpai/config` },
+        { name: 'dir', default: `${real}/.local/bin` },
+        { name: 'other', default: '/etc/redpanda' }
+      ])
+      expect(JSON.parse(replaceHomeDir(out, home)).map(f => f.default))
+        .toEqual(['~/.rpai/config', '~/.local/bin', '/etc/redpanda'])
+      fs.rmSync(home, { recursive: true, force: true })
     })
   })
 

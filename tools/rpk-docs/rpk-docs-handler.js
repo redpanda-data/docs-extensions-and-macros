@@ -1846,6 +1846,26 @@ function fillPluginFlags(node, execHelp) {
 }
 
 /**
+ * Replace a HOME directory in rpk output with `~`. A plugin can report a
+ * default under HOME, such as rpk ai's `--rpai-config`, and the refresh runs
+ * with a new temporary HOME each time, so the raw path would change the
+ * snapshot on every run. Covers the path as given and as resolved (on macOS,
+ * /var/folders is /private/var/folders).
+ * @param {string} text - rpk output
+ * @param {string} homeDir - HOME the command ran with
+ * @returns {string}
+ */
+function replaceHomeDir(text, homeDir) {
+  const homes = new Set([homeDir])
+  try { homes.add(fs.realpathSync(homeDir)) } catch (_) {}
+  let out = text
+  for (const home of [...homes].sort((a, b) => b.length - a.length)) {
+    out = out.split(home).join('~')
+  }
+  return out
+}
+
+/**
  * Install a single plugin and capture its fresh command subtree.
  * Runs with an isolated HOME so the install never touches the caller's
  * rpk plugin state, and the caller's installed plugins never leak in.
@@ -1912,7 +1932,7 @@ function fetchPluginSubtree({ plugin, pluginVersion, rpkBinPath }) {
     throw new Error(`Failed to run rpk --print-tree: ${stderr}`)
   }
 
-  const freshTree = JSON.parse(treeResult.stdout)
+  const freshTree = JSON.parse(replaceHomeDir(treeResult.stdout, tmpHome))
   const node = (freshTree.commands || []).find(c => c.name === plugin)
   if (!node) {
     throw new Error(`Plugin '${plugin}' not found in rpk command tree after install`)
@@ -3004,6 +3024,7 @@ module.exports = {
   fetchLatestPluginVersion,
   pluginNodeHasRealCommands,
   pluginInstalled,
+  replaceHomeDir,
   splicePluginNode,
   preserveLinuxOnlyCommands,
   REFRESHABLE_PLUGINS,
