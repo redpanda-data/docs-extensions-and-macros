@@ -673,7 +673,14 @@ function runChangedLineFindingCase (spec, io) {
   checks.add(`re-lint: \`${spec.fixedToken}\` is in inline code`, !message.includes(`\`${spec.fixedToken}\``), message || 'no finding left')
   checks.add(`re-lint: the untouched tokens are still reported (${spec.untouchedTokens.join(', ')})`,
     spec.untouchedTokens.every((t) => message.includes(`\`${t}\``)), message || 'no finding left')
-  const problems = lib.compareDeclExtraction(extractionBefore, lib.extractDeclarations(repo.dir, repo.surface), `${spec.target}::${spec.targetKind || ''}`)
+  const extractionAfter = lib.extractDeclarations(repo.dir, repo.surface)
+  // The finding must clear by formatting, never by deleting the token: the
+  // evaluated string (after Go concatenation) still names it, in backticks.
+  const fixed = extractionAfter.find((d) => d.name === spec.target && ((d.meta && d.meta.kind) || '') === (spec.targetKind || ''))
+  checks.add(`re-extraction: the string keeps \`${spec.fixedToken}\` in inline code`,
+    Boolean(fixed && fixed.string.includes(`\`${spec.fixedToken}\``)),
+    fixed ? fixed.string.split('\n').find((l) => l.includes(spec.fixedToken)) || `${spec.fixedToken} deleted` : 'declaration not found')
+  const problems = lib.compareDeclExtraction(extractionBefore, extractionAfter, `${spec.target}::${spec.targetKind || ''}`)
   checks.add('re-extraction: every other declaration string unchanged', problems.length === 0, problems.join('; ') || 'ok')
 
   io.cleanup(repo.dir)

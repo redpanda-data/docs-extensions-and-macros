@@ -308,9 +308,15 @@ const CASES = [
     // is the declaration this suggestion may change.
     targetKind: 'description',
     targetRule: 'missing-inline-code',
+    // The PR adds a table_owner field and names it on the changed line, so
+    // the sentence cannot lose it: the fix must keep the word and format it.
     diffEdits: [{
       find: 'The input reads the redo log and emits one message per row change.',
-      replace: 'The input reads the redo log and sets table_owner on each message.'
+      replace: 'The input reads the redo log for the tables that table_owner owns and emits one message per row change.'
+    }, {
+      find: 'Field(service.NewStringField("dsn").Description("The connection string for the Oracle database."))',
+      replace: 'Field(service.NewStringField("dsn").Description("The connection string for the Oracle database.")).\n' +
+        '\t\tField(service.NewStringField("table_owner").Description("The schema that owns the tables to stream."))'
     }],
     fixedToken: 'table_owner',
     untouchedTokens: ['database_schema', 'table_name']

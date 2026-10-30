@@ -1096,6 +1096,8 @@ jobs:
               declaration, so fix it through the changed lines or leave it.
               A suggestion fixes the changed lines and any line the change
               made wrong, and keeps every other line byte-identical.
+              Fix a lint finding by formatting or rewording the text it
+              names; never delete a field, value or fact to clear it.
             - A string must agree with the strings around it. A flag's usage,
               its command's Long text and that text's examples describe the
               same behavior; a change to one that leaves another saying

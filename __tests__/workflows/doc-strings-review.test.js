@@ -1928,6 +1928,8 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(review.with.prompt).toMatch(/Each entry carries context/)
       expect(review.with.prompt).toMatch(/articles and subjects/)
       expect(review.with.prompt).toMatch(/Every flag, command, path and URL goes in inline code/)
+      // A lint fix formats or rewords; it never deletes what the text says.
+      expect(review.with.prompt).toMatch(/Fix a lint finding by formatting or rewording the text it\s+names; never delete a field, value or fact to clear it\./)
       // The related-string comment is the named exception to the
       // suggestion-block rule, and still carries the fingerprint footer.
       expect(review.with.prompt).toMatch(/one exception to the suggestion rules above/)
