@@ -3,36 +3,32 @@
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { spawnSync } = require('child_process')
 
 const {
   buildDocsResolverContext,
+  describeResolverContext,
   convertDocsLinks,
   convertDocsLinksInFile,
+  explainRawDocsUrl,
   formatDocsLinkReport,
 } = require('../../cli-utils/docs-links-to-xrefs')
+const { makeAntoraCheckout } = require('../helpers/antora-checkout')
 
 const FIXTURE = path.join(__dirname, '..', 'fixtures', 'docs-links-component')
+const CONNECT_FIXTURE = path.join(__dirname, '..', 'fixtures', 'docs-links-connect')
 
-/**
- * The converter reads the docs checkout the way Antora does, through the
- * content aggregator, which wants a git repository with a HEAD. The fixture
- * is copied into a throwaway repository and committed once per run.
- */
-function makeDocsCheckout () {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'docs-links-fixture-'))
-  fs.cpSync(FIXTURE, root, { recursive: true })
-  const git = (...args) => {
-    const result = spawnSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@example.com', ...args], {
-      cwd: root,
-      encoding: 'utf8',
-    })
-    if (result.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr}`)
-  }
-  git('init', '-q')
-  git('add', '.')
-  git('commit', '-q', '-m', 'fixture')
-  return root
+const makeDocsCheckout = () => makeAntoraCheckout(FIXTURE)
+
+// Trimmed from raw_tree in redpanda-data/docs docs-data/rpk-v26.2.2.json:
+// the help text of the rpk commands that link to docs.redpanda.com.
+const RPK_HELP = {
+  connect: 'A stream processor for mundane tasks - https://docs.redpanda.com/redpanda-connect',
+  blobl: 'Find out more about Bloblang at: https://docs.redpanda.com/redpanda-connect/guides/bloblang/about',
+  streams: 'For more information check out the docs at:\nhttps://docs.redpanda.com/redpanda-connect/guides/streams_mode/about',
+  template: 'For more information check out the docs at:\nhttps://docs.redpanda.com/redpanda-connect/configuration/templating',
+  test: 'For more information check out the docs at:\nhttps://docs.redpanda.com/redpanda-connect/configuration/unit_testing',
+  restore: 'Use --cluster-uuid-override if you want to specify an explicit cluster UUID\nto restore from. For more information, visit https://docs.redpanda.com/current/manage/disaster-recovery/whole-cluster-restore/.',
+  connections: 'refer to the admin API docs of the filter and order-by fields of the ListKafkaConnections endpoint: https://docs.redpanda.com/api/doc/admin/version/11f41833-5783-4f1a-ad64-5957267abd52/operation/operation-redpanda-core-admin-v2-clusterservice-listkafkaconnections',
 }
 
 describe('docs-links-to-xrefs', () => {
@@ -53,7 +49,9 @@ describe('docs-links-to-xrefs', () => {
 
   test('builds the catalog from the checkout and names its component', () => {
     expect(context.component).toBe('streaming')
-    expect(context.pageCount).toBe(3)
+    expect(context.pageCount).toBe(4)
+    expect(context.loaded).toEqual([{ component: 'streaming', version: '26.2', dir: docsRoot, pageCount: 4 }])
+    expect(describeResolverContext(context, docsRoot)).toBe(`Mapping docs URLs against 4 pages of the streaming component in ${docsRoot}`)
     expect(context.urls.get('/streaming/current/manage/kubernetes/manage-resources')).toMatchObject({
       module: 'manage',
       relative: 'kubernetes/manage-resources.adoc',
@@ -200,6 +198,55 @@ describe('docs-links-to-xrefs', () => {
     )
   })
 
+  test('converts the rpk restore help URL and keeps its sentence period', () => {
+    const { content, converted } = convert(RPK_HELP.restore)
+    expect(content).toBe(
+      'Use --cluster-uuid-override if you want to specify an explicit cluster UUID\nto restore from. For more information, visit xref:manage:disaster-recovery/whole-cluster-restore.adoc[].'
+    )
+    expect(converted).toBe(1)
+  })
+
+  test('leaves the rpk API reference URL as written without reporting it', () => {
+    const result = convert(RPK_HELP.connections)
+    expect(result.content).toBe(RPK_HELP.connections)
+    expect(result.converted).toBe(0)
+    expect(result.unmapped).toEqual([])
+  })
+
+  test('without lenders, reports rpk connect URLs as pointing at a component that was not loaded', () => {
+    const result = convert(RPK_HELP.blobl)
+    expect(result.content).toBe(RPK_HELP.blobl)
+    const report = formatDocsLinkReport(result, 'rpk-connect-blobl.adoc', context)
+    expect(report).toContain('it points at the connect component, which this run did not load; pass its checkout with --lender')
+    expect(report).toContain('  https://docs.redpanda.com/redpanda-connect/guides/bloblang/about')
+    // A URL in a loaded component that matches no page is a likely broken link.
+    const broken = convert('See https://docs.redpanda.com/current/manage/no-such-page/.')
+    expect(formatDocsLinkReport(broken, 'x.adoc', context)).toContain('no page in the loaded components matches; the link is probably broken')
+  })
+
+  test('explains every way a docs URL can stay raw', () => {
+    const urls = {
+      connect: 'https://docs.redpanda.com/redpanda-connect/guides/bloblang/about',
+      broken: 'https://docs.redpanda.com/current/manage/no-such-page/',
+      anchor: 'https://docs.redpanda.com/current/get-started/architecture/#nope',
+      query: 'https://docs.redpanda.com/current/manage/kubernetes/manage-resources/?platform=kubernetes',
+      api: 'https://docs.redpanda.com/api/doc/admin/v2/operation/x',
+      listing: 'https://docs.redpanda.com/current/get-started/architecture/',
+    }
+    const result = convert(
+      [urls.connect, urls.broken, urls.anchor, urls.query, urls.api].map((u) => `See ${u}.`).join('\n\n') +
+        `\n\n----\ncurl ${urls.listing}\n----\n`
+    )
+    const report = { result, context }
+    expect(explainRawDocsUrl(urls.connect, report)).toMatchObject({ severity: 'info', reason: expect.stringContaining('connect component, which this run did not load') })
+    expect(explainRawDocsUrl(urls.broken, report)).toMatchObject({ severity: 'warning', reason: expect.stringContaining('probably broken') })
+    expect(explainRawDocsUrl(urls.anchor, report)).toMatchObject({ severity: 'warning', reason: expect.stringContaining('anchor not found') })
+    expect(explainRawDocsUrl(urls.query, report)).toMatchObject({ severity: 'info', reason: expect.stringContaining('query string') })
+    expect(explainRawDocsUrl(urls.api, report)).toMatchObject({ severity: 'info', reason: expect.stringContaining('outside the Antora catalog') })
+    expect(explainRawDocsUrl(urls.listing, report)).toMatchObject({ severity: 'info', reason: expect.stringContaining('code block') })
+    expect(explainRawDocsUrl(urls.connect, null)).toMatchObject({ severity: 'info', reason: expect.stringContaining('no docs checkout was given') })
+  })
+
   test('does not rewrite a file that has nothing to convert', () => {
     const file = path.join(docsRoot, 'untouched.adoc')
     const input = '= Untouched\n\nSee https://example.com/ and xref:manage:kubernetes/manage-resources.adoc[].\n'
@@ -215,5 +262,114 @@ describe('docs-links-to-xrefs', () => {
     const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'docs-links-empty-'))
     await expect(buildDocsResolverContext(empty)).rejects.toThrow(/No antora\.yml/)
     fs.rmSync(empty, { recursive: true, force: true })
+  })
+})
+
+describe('docs-links-to-xrefs with lenders', () => {
+  jest.setTimeout(60000)
+  let docsRoot
+  let connectRoot
+  let olderDocsRoot
+  let context
+
+  beforeAll(async () => {
+    docsRoot = makeDocsCheckout()
+    connectRoot = makeAntoraCheckout(CONNECT_FIXTURE)
+    // The same component at an older version, as a checkout of a docs
+    // version branch would be.
+    olderDocsRoot = makeAntoraCheckout(FIXTURE, {
+      edit: (root) => {
+        const descriptor = path.join(root, 'antora.yml')
+        fs.writeFileSync(descriptor, fs.readFileSync(descriptor, 'utf8').replace("version: '26.2'", "version: '26.1'"))
+      },
+    })
+    context = await buildDocsResolverContext(docsRoot, {
+      lenders: [connectRoot, olderDocsRoot],
+      cacheDir: path.join(docsRoot, '.antora-cache'),
+    })
+  })
+
+  afterAll(() => {
+    for (const root of [docsRoot, connectRoot, olderDocsRoot]) fs.rmSync(root, { recursive: true, force: true })
+  })
+
+  const convert = (text) => convertDocsLinks(text, context)
+
+  test('reads the lenders into the same catalog and lists what it loaded', () => {
+    expect(context.component).toBe('streaming')
+    expect(context.loaded).toEqual([
+      { component: 'streaming', version: '26.2', dir: docsRoot, pageCount: 4 },
+      { component: 'connect', version: '', dir: connectRoot, pageCount: 6 },
+      { component: 'streaming', version: '26.1', dir: olderDocsRoot, pageCount: 4 },
+    ])
+    expect(describeResolverContext(context, docsRoot)).toBe(
+      `Mapping docs URLs against 4 pages of the streaming component in ${docsRoot}, plus lender pages: ` +
+        `6 of connect in ${connectRoot}; 4 of streaming 26.1 in ${olderDocsRoot}`
+    )
+  })
+
+  test.each([
+    ['connect', 'A stream processor for mundane tasks - xref:connect:home:index.adoc[]'],
+    ['blobl', 'Find out more about Bloblang at: xref:connect:guides:bloblang/about.adoc[]'],
+    ['streams', 'For more information check out the docs at:\nxref:connect:guides:streams_mode/about.adoc[]'],
+    ['template', 'For more information check out the docs at:\nxref:connect:configuration:templating.adoc[]'],
+    ['test', 'For more information check out the docs at:\nxref:connect:configuration:unit_testing.adoc[]'],
+  ])('converts the rpk %s help URL into a component-qualified Connect xref', (name, expected) => {
+    const result = convert(RPK_HELP[name])
+    expect(result.content).toBe(expected)
+    expect(result.converted).toBe(1)
+    expect(result.unmapped).toEqual([])
+  })
+
+  test('keeps the module:page form for targets in the local component', () => {
+    expect(convert(RPK_HELP.restore).content).toContain('visit xref:manage:disaster-recovery/whole-cluster-restore.adoc[].')
+    expect(convert(RPK_HELP.connections).content).toBe(RPK_HELP.connections)
+  })
+
+  test('resolves a lender page through its page alias', () => {
+    expect(convert('https://docs.redpanda.com/connect/streaming/about/').content).toBe('xref:connect:get-started:about.adoc[]')
+  })
+
+  test('converts a lender fragment only when the anchor is on the page', () => {
+    expect(convert('https://docs.redpanda.com/redpanda-connect/guides/bloblang/about/#assignment').content).toBe(
+      'xref:connect:guides:bloblang/about.adoc#assignment[Assignment]'
+    )
+    const missing = convert('https://docs.redpanda.com/redpanda-connect/guides/bloblang/about/#nope')
+    expect(missing.converted).toBe(0)
+    expect(missing.missingAnchor).toEqual(['https://docs.redpanda.com/redpanda-connect/guides/bloblang/about/#nope'])
+  })
+
+  test('maps versioned URLs to the component version they name, as the build-time extension does', () => {
+    const page = 'manage/kubernetes/manage-resources/'
+    expect(convert(`https://docs.redpanda.com/current/${page}`).content).toBe('xref:manage:kubernetes/manage-resources.adoc[]')
+    expect(convert(`https://docs.redpanda.com/26.2/${page}`).content).toBe('xref:manage:kubernetes/manage-resources.adoc[]')
+    expect(convert(`https://docs.redpanda.com/26.1/${page}`).content).toBe('xref:26.1@streaming:manage:kubernetes/manage-resources.adoc[]')
+    expect(convert(`https://docs.redpanda.com/streaming/26.1/${page}`).content).toBe('xref:26.1@streaming:manage:kubernetes/manage-resources.adoc[]')
+    // A version no loaded checkout has falls through to the latest page.
+    expect(convert(`https://docs.redpanda.com/25.3/${page}`).content).toBe('xref:manage:kubernetes/manage-resources.adoc[]')
+  })
+
+  test('reports a lender URL that matches no page as a likely broken link', () => {
+    const result = convert('https://docs.redpanda.com/redpanda-connect/guides/no-such-page/')
+    expect(result.unmapped).toEqual(['https://docs.redpanda.com/redpanda-connect/guides/no-such-page/'])
+    expect(formatDocsLinkReport(result, 'x.adoc', context)).toContain('no page in the loaded components matches')
+  })
+
+  test('refuses a lender that duplicates the local component version', async () => {
+    const twin = makeDocsCheckout()
+    try {
+      await expect(buildDocsResolverContext(docsRoot, { lenders: [twin] })).rejects.toThrow(/Each lender must be a different component, or a different version of one/)
+    } finally {
+      fs.rmSync(twin, { recursive: true, force: true })
+    }
+  })
+
+  test('refuses a lender that is not an Antora component', async () => {
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'docs-links-empty-'))
+    try {
+      await expect(buildDocsResolverContext(docsRoot, { lenders: [empty] })).rejects.toThrow(/No antora\.yml/)
+    } finally {
+      fs.rmSync(empty, { recursive: true, force: true })
+    }
   })
 })

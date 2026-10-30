@@ -1885,7 +1885,9 @@ async function handleRpkDocsGeneration(options = {}) {
     dataDir: customDataDir,
     preserveFrom, // Path to existing docs to preserve cloud conditionals and includes from
     printSummary = false, // Print PR summary to console
-    showInfo = false // Include info-level validation messages
+    showInfo = false, // Include info-level validation messages
+    docsRoot, // Docs checkout to convert docs.redpanda.com URLs against (default: repo root when it holds antora.yml)
+    lenders = [] // Other component checkouts read into the same catalog (cross-component xrefs)
   } = options
 
   // Normalize ref/sourceRef
@@ -1916,6 +1918,13 @@ async function handleRpkDocsGeneration(options = {}) {
 
   // nav.adoc lives at modules/ROOT/nav.adoc relative to the repo root
   const navFile = path.join(repoRoot, 'modules', 'ROOT', 'nav.adoc')
+
+  // Built on first use (only runs that render pages need it) and reused.
+  let docsLinkContextPromise
+  const docsLinkContext = () => {
+    if (!docsLinkContextPromise) docsLinkContextPromise = prepareDocsLinkContext({ docsRoot, lenders, repoRoot })
+    return docsLinkContextPromise
+  }
 
   // Determine which version to document
   const version = effectiveRef || 'dev'
@@ -2124,8 +2133,10 @@ async function handleRpkDocsGeneration(options = {}) {
         draftMissing,
         preservationsDir: preserveFrom,
         navFile,
-        protectedPlugins: failedPlugins
+        protectedPlugins: failedPlugins,
+        docsLinkContext: await docsLinkContext()
       })
+      reportDocsLinks(result.docsLinks, finalOutputDir, await docsLinkContext())
 
       console.log(`\nGeneration complete!`)
       console.log(`  - Commands documented: ${result.commandCount}`)
@@ -2140,7 +2151,8 @@ async function handleRpkDocsGeneration(options = {}) {
 
       // Run validation on generated output
       const validationResult = runValidation(finalOutputDir, {
-        showInfo
+        showInfo,
+        docsLinks: result.docsLinks ? { result: result.docsLinks, context: await docsLinkContext() } : null
       })
 
       // Generate diff if requested (rpk-version diff; not used in --plugin
@@ -2512,8 +2524,10 @@ async function handleRpkDocsGeneration(options = {}) {
       draftMissing,
       preservationsDir: preserveFrom,
       navFile,
-      protectedPlugins: failedPlugins
+      protectedPlugins: failedPlugins,
+      docsLinkContext: await docsLinkContext()
     })
+    reportDocsLinks(result.docsLinks, finalOutputDir, await docsLinkContext())
 
     console.log(`\nGeneration complete!`)
     console.log(`  - Commands documented: ${result.commandCount}`)
@@ -2528,7 +2542,8 @@ async function handleRpkDocsGeneration(options = {}) {
 
     // Run validation on generated output
     const validationResult = runValidation(finalOutputDir, {
-      showInfo
+      showInfo,
+      docsLinks: result.docsLinks ? { result: result.docsLinks, context: await docsLinkContext() } : null
     })
 
     // Generate PR summary
@@ -2852,6 +2867,52 @@ function generatePRSummary(options) {
 }
 
 /**
+ * Builds the resolver context that converts docs.redpanda.com URLs in rpk
+ * help text into xrefs, the way the CRD generator converts Go doc comment
+ * URLs: against the docs checkout (docsRoot, or the repo root when it holds
+ * an antora.yml) plus any lender checkouts of other components. Returns null,
+ * with a note, when there is no docs checkout; the pages then keep their raw
+ * URLs, which the url-to-xref extension converts at build time.
+ *
+ * @param {Object} opts
+ * @param {string} [opts.docsRoot]
+ * @param {string[]} [opts.lenders]
+ * @param {string} opts.repoRoot
+ * @returns {Promise<Object|null>}
+ */
+async function prepareDocsLinkContext ({ docsRoot, lenders = [], repoRoot }) {
+  const root = docsRoot
+    ? path.resolve(docsRoot)
+    : (repoRoot && fs.existsSync(path.join(repoRoot, 'antora.yml')) ? repoRoot : null)
+  if (!root) {
+    if (lenders.length) {
+      throw new Error('--lender needs a docs checkout to convert against: run inside redpanda-data/docs or pass --docs-root')
+    }
+    console.log('No docs checkout to map against (pass --docs-root); docs.redpanda.com URLs in rpk help text are left as written.')
+    return null
+  }
+  const { buildDocsResolverContext, describeResolverContext } = require('../../cli-utils/docs-links-to-xrefs')
+  let context
+  try {
+    context = await buildDocsResolverContext(root, { lenders })
+  } catch (err) {
+    throw new Error(`Cannot map docs URLs to xrefs: ${err.message}`)
+  }
+  console.log(describeResolverContext(context, root))
+  context.docsRoot = root
+  return context
+}
+
+/**
+ * Prints the outcome of the docs link conversion over the generated pages.
+ */
+function reportDocsLinks (docsLinks, outputDir, context) {
+  if (!docsLinks || !context) return
+  const { formatDocsLinkReport } = require('../../cli-utils/docs-links-to-xrefs')
+  console.log(formatDocsLinkReport(docsLinks, `the rpk pages under ${outputDir}`, context))
+}
+
+/**
  * Run validation on generated output and return structured results
  * @param {string} outputDir - Directory containing generated docs
  * @param {Object} options - Validation options
@@ -2861,7 +2922,8 @@ function runValidation(outputDir, options = {}) {
   console.log('\nRunning validation on generated docs...')
 
   const validationOutput = validateDirectory(outputDir, {
-    showInfo: options.showInfo || false
+    showInfo: options.showInfo || false,
+    docsLinks: options.docsLinks || null
   })
 
   // Print console report
@@ -2920,5 +2982,6 @@ module.exports = {
   PLATFORMS,
   COMMON_SOURCE_LOCATIONS,
   generatePRSummary,
-  runValidation
+  runValidation,
+  prepareDocsLinkContext
 }

@@ -1,0 +1,7 @@
+= Bloblang
+
+Bloblang is the native mapping language of Redpanda Connect.
+
+== Assignment
+
+Text.

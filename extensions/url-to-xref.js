@@ -346,6 +346,23 @@ function candidatePaths (normalizedPath, { components, latestVersionSegment }) {
   return candidates
 }
 
+/**
+ * Names the component a docs URL path points at, by the same rules
+ * candidatePaths applies: unprefixed and /docs/ paths belong to the legacy
+ * unprefixed component, and pre-rename slugs map to their current name.
+ * Returns undefined for the site root. Used to explain a URL that matched no
+ * page: its component may simply not be in the catalog.
+ */
+function targetComponentOf (urlPath) {
+  const normalized = normalizeUrlPath(urlPath)
+  if (/^\/docs(\/|$)/.test(normalized) || /^\/(?:current|beta|v?\d+\.\d+(?:\.\d+)?)(\/|$)/.test(normalized)) {
+    return LEGACY_UNPREFIXED_COMPONENT
+  }
+  const slug = normalized.split('/')[1]
+  if (!slug) return undefined
+  return LEGACY_SLUG_REWRITES[slug] || slug
+}
+
 function resolveUrlPath (urlPath, resolverContext) {
   for (const candidate of candidatePaths(normalizeUrlPath(urlPath), resolverContext)) {
     const entry = resolverContext.urls.get(candidate)
@@ -591,3 +608,4 @@ function convertContent (content, resolverContext) {
 module.exports.buildUrlMap = buildUrlMap
 module.exports.convertContent = convertContent
 module.exports.normalizeUrlPath = normalizeUrlPath
+module.exports.targetComponentOf = targetComponentOf
