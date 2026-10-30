@@ -284,8 +284,9 @@ function resolveRpkCommand ({ registry, text, call }) {
   }
   const resolved = rpkValues.resolveCommand(tree, parsed.tokens, registry.data.deprecated_commands)
   if (!resolved.ok && resolved.kind === 'deprecated-command') {
-    const why = resolved.entry.replacement || resolved.entry.deprecatedMessage
-    return { ok: false, kind: 'deprecated-command', typed, registry, message: `${label}: '${cmdText(resolved.typed)}' is deprecated (${resolved.entry.key} in ${dataset}) and has no reference page, so it renders as plain code with no link.${why ? ` ${why}` : ''}` }
+    const line = String(text == null ? '' : text).trim()
+    const said = deprecationSentence({ registry, entry: resolved.entry, typed: resolved.typed, flag: parsed.flag, line, wrap: (l) => `rpkcmd:[${l}]` })
+    return { ok: false, kind: 'deprecated-command', typed, registry, entry: resolved.entry, advice: said.advice, proposed: said.proposed, message: `${label}: '${cmdText(resolved.typed)}' is deprecated (${resolved.entry.key} in ${dataset}) and has no reference page, so it renders as plain code with no link.${said.text}` }
   }
   if (!resolved.ok) {
     const shown = cmdText([...resolved.parentNames, ...parsed.tokens.slice(resolved.at)])
@@ -295,7 +296,7 @@ function resolveRpkCommand ({ registry, text, call }) {
     return { ok: false, kind: 'unknown-command', typed, registry, message: `${label}: '${shown}' is not a command in ${dataset}: ${cmdText(resolved.parentNames)} has no subcommand '${resolved.token}'.${hint}` }
   }
   const { node, nodes, names } = resolved
-  const out = { ok: true, names, node, nodes, typed }
+  const out = { ok: true, names, node, nodes, typed, aliases: resolved.aliases || [] }
   if (!parsed.flag) return out
   const name = parsed.flag.replace(/^-+/, '')
   const where = cmdText(names)
@@ -308,6 +309,129 @@ function resolveRpkCommand ({ registry, text, call }) {
   const suggestions = name.length > 1 ? datasets.suggest(name, [...(names.length ? node.flags || [] : []), ...(tree.global_flags || [])].map((f) => f.name)) : []
   const hint = suggestions.length ? ` Did you mean: ${suggestions.map((s) => `--${s}`).join(', ')}?` : ''
   return { ok: false, kind: 'unknown-flag', typed, registry, message: `${label}: '${parsed.flag}' is not a flag of ${where} in ${dataset}.${hint}` }
+}
+
+/**
+ * The one command a deprecated_commands replacement names: the rpk
+ * reference page it links (xref:reference:rpk/rpk-cluster/rpk-cluster.adoc)
+ * or the `rpk ...` span it quotes, when every one it names is the same
+ * command in the tree. undefined when it names none, or more than one.
+ *
+ * @returns {{names: string[], node: object} | undefined}
+ */
+function replacementCommand (registry, text) {
+  if (!registry || !text) return undefined
+  const tree = registry.data.tree
+  const found = new Map()
+  for (const m of String(text).matchAll(/xref:(?:[\w-]+:)?(?:reference:)?(rpk\/[^\s[#]+\.adoc)/g)) {
+    const command = commandOfPage(tree, m[1])
+    if (command) found.set(command.names.join(' '), { names: command.names, node: command.node })
+  }
+  for (const m of String(text).matchAll(/`(rpk(?:\s+[a-z][\w-]*)+)`/g)) {
+    const resolved = rpkValues.resolveCommand(tree, rpkValues.commandTokens(m[1]))
+    if (resolved.ok) found.set(resolved.names.join(' '), { names: resolved.names, node: resolved.node })
+  }
+  return found.size === 1 ? [...found.values()][0] : undefined
+}
+
+/**
+ * What to do about a deprecated command, from its deprecated_commands
+ * entry: the command that replaces it, and whether a call or span may be
+ * rewritten to it. It may only when the entry's own replacement names one
+ * command, nothing but flags follows the deprecated command, and the
+ * replacement has every one of those flags, by long name or shorthand (a
+ * global flag counts). An ancestor's replacement replaces the ancestor
+ * (rpk redpanda admin -> rpk cluster), never a subcommand of it.
+ *
+ * @param {object} opts
+ * @param {object} opts.registry
+ * @param {object} opts.entry - From rpkValues.deprecatedEntry.
+ * @param {string[]} opts.typed - The deprecated command as written, below rpk.
+ * @param {string[]} [opts.flags] - Flags written after it, without dashes.
+ * @param {boolean} [opts.extra] - Words other than flags follow it.
+ * @returns {{replacement?: string, names?: string[], writable: boolean, why?: string}}
+ */
+function deprecationAdvice ({ registry, entry, typed, flags = [], extra = false }) {
+  const command = cmdText(typed)
+  const found = replacementCommand(registry, entry && entry.replacement)
+  if (!found) return { writable: false, why: `the rpk data names no single replacement for ${command}` }
+  const replacement = cmdText(found.names)
+  const out = { replacement, names: found.names, writable: false }
+  if (entry.replacementKey !== command) return { ...out, why: `the rpk data names a replacement only for ${entry.replacementKey} (${replacement}), not for ${command}` }
+  if (extra) return { ...out, why: `its replacement is ${replacement}, but words follow ${command}, which ${replacement} may not take` }
+  const tree = registry.data.tree
+  const missing = flags.filter((name) => !(found.names.length ? rpkValues.findFlag(found.node, name, tree) : rpkValues.findFlag(tree, name, tree)))
+  if (missing.length) return { ...out, why: `its replacement, ${replacement}, has no ${missing.map((name) => (name.length === 1 ? `-${name}` : `--${name}`)).join(', ')} flag, so find the equivalent by hand` }
+  return { ...out, writable: true }
+}
+
+/**
+ * A command line as written (rpkcmd:[...], rpkval:[...], command=, or a
+ * backticked span) with its command words replaced: the words at the given
+ * positions of commandTokens' output, a leading rpk not counted. Everything
+ * else, spacing, flags and arguments, stays as written.
+ *
+ * @param {string} line
+ * @param {{at: number, name: string}[]} words - Replace word `at` with `name`.
+ * @param {{from: number, to: number, names: string[]}} [span] - Instead,
+ *   replace words from..to-1 with names.
+ */
+function rewriteCommandWords (line, { words = [], span } = {}) {
+  const parts = String(line).split(/(\s+)/)
+  const indices = []
+  parts.forEach((part, i) => { if (part && !/^\s+$/.test(part)) indices.push(i) })
+  const quoted = /^(['"])/.exec(parts[indices[0]] || '')
+  const offset = (parts[indices[0]] || '').replace(/^['"]/, '') === 'rpk' ? 1 : 0
+  if (quoted) return undefined
+  const at = (n) => indices[n + offset]
+  if (span) {
+    const first = at(span.from)
+    const last = at(span.to - 1)
+    if (first === undefined || last === undefined) return undefined
+    return [...parts.slice(0, first), span.names.join(' '), ...parts.slice(last + 1)].join('')
+  }
+  for (const w of words) {
+    const i = at(w.at)
+    if (i === undefined) return undefined
+    parts[i] = w.name
+  }
+  return parts.join('')
+}
+
+/**
+ * The sentence a deprecated-command warning ends with: the replacement and
+ * the call to write, or why the call cannot simply be rewritten, or the
+ * entry's own message when it names no single command.
+ *
+ * @param {object} opts
+ * @param {object} opts.registry
+ * @param {object} opts.entry - From rpkValues.deprecatedEntry.
+ * @param {string[]} opts.typed - The command words as written, below rpk,
+ *   from the first one to the last before any flag.
+ * @param {string} [opts.flag] - The flag written after them, dashes included.
+ * @param {string} [opts.line] - The command line as written in the call.
+ * @param {(line: string) => string} [opts.wrap] - The call around a line.
+ * @returns {{text: string, advice: object, proposed?: string}}
+ */
+function deprecationSentence ({ registry, entry, typed, flag, line, wrap = (l) => l }) {
+  const keyNames = String(entry.key).split(' ').slice(1)
+  const advice = deprecationAdvice({ registry, entry, typed: keyNames, flags: flag ? [flag.replace(/^-+/, '')] : [], extra: typed.length > keyNames.length })
+  if (!advice.replacement) {
+    const why = entry.deprecatedMessage
+    return { text: why ? ` ${why}` : '', advice }
+  }
+  if (!advice.writable) return { text: ` ${advice.why.charAt(0).toUpperCase()}${advice.why.slice(1)}.`, advice }
+  const rewritten = line === undefined ? undefined : rewriteCommandWords(line, { span: { from: 0, to: keyNames.length, names: advice.names } })
+  const proposed = rewritten === undefined ? undefined : wrap(rewritten)
+  return { text: ` Its replacement is ${advice.replacement}${proposed ? `: write ${proposed}` : ''}.`, advice, proposed }
+}
+
+/**
+ * The warning for a command written with an alias: rpk cluster status is an
+ * alias of rpk cluster info. typed and names are below rpk.
+ */
+function aliasNote (typed, names) {
+  return `${cmdText(typed)} is an alias of ${cmdText(names)}`
 }
 
 /**
@@ -505,4 +629,9 @@ module.exports = {
   loadRpkForLinks,
   resolveRpkCommand,
   relocateRpkRefs,
+  replacementCommand,
+  deprecationAdvice,
+  rewriteCommandWords,
+  aliasNote,
+  deprecationSentence,
 }

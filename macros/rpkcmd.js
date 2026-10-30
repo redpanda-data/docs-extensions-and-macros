@@ -19,7 +19,9 @@
  * other component with the page. A Cloud page links only Cloud pages. An
  * unknown or deprecated command, an unknown flag, or no page renders plain
  * code with no link and says why, according to rpk-validate (warn, error or
- * off). See macros/REFERENCE.adoc.
+ * off). An alias renders as written, links its command's page, and warns
+ * with the command's name. A deprecated command warns with its replacement
+ * when the rpk data names one. See macros/REFERENCE.adoc.
  *
  * Registered by macros/prop, so every playbook that registers prop: has it.
  */
@@ -31,7 +33,8 @@ const rpkValues = require('../extension-utils/rpk-values')
 const logger = require('@antora/logger')('rpkcmd-macro')
 
 // Kinds that fail the build in error mode: authoring errors. No data and no
-// page are gaps in the build, and plain code still reads correctly.
+// page are gaps in the build, and plain code still reads correctly. An alias
+// (rpkcmd:[rpk cluster status]) only warns: it renders and links correctly.
 const THROW_KINDS = ['unknown-command', 'unknown-flag', 'deprecated-command']
 
 const ROLE = 'rpk-command'
@@ -83,6 +86,12 @@ function rpkcmdInlineMacro (config) {
       if (!registry && mode !== 'off') datasets.warnDatasetMissing(contentCatalog, component, version, rpkValues.RPK_KIND)
       const resolved = rpkLinks.resolveRpkCommand({ registry, text: line, call })
       if (!resolved.ok) return plain(resolved.message, resolved.kind)
+      // An alias renders as written and links the command's page, but the
+      // docs write the command's name. Never an error: the output is right.
+      if (resolved.aliases.length && mode !== 'off') {
+        const rewritten = rpkLinks.rewriteCommandWords(line, { words: resolved.aliases })
+        logger.warn(`${call}: ${rpkLinks.aliasNote(parsed.tokens.slice(0, resolved.names.length), resolved.names)}; write rpkcmd:[${rewritten}${text === undefined ? '' : `,text=${unescape(text)}`}].`)
+      }
 
       const command = ['rpk', ...resolved.names].join(' ')
       const relative = rpkLinks.commandPagePath(registry.data.tree, resolved.names)

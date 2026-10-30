@@ -286,7 +286,8 @@ function childOf (node, token) {
 /**
  * The deprecated_commands entry for a typed command path, or for one of its
  * ancestors, nearest first, with the first replacement or deprecatedMessage
- * found on the way up.
+ * found on the way up. replacementKey is the entry the replacement came
+ * from: an ancestor's replacement replaces the ancestor, not this command.
  */
 function deprecatedEntry (deprecatedCommands, names) {
   if (!deprecatedCommands || typeof deprecatedCommands !== 'object') return undefined
@@ -295,8 +296,11 @@ function deprecatedEntry (deprecatedCommands, names) {
     const key = `rpk ${names.slice(0, n).join(' ')}`
     if (!own(deprecatedCommands, key)) continue
     const entry = deprecatedCommands[key] || {}
-    if (!found) found = { key, replacement: undefined, deprecatedMessage: undefined }
-    if (!found.replacement && entry.replacement) found.replacement = entry.replacement
+    if (!found) found = { key, replacement: undefined, replacementKey: undefined, deprecatedMessage: undefined }
+    if (!found.replacement && entry.replacement) {
+      found.replacement = entry.replacement
+      found.replacementKey = key
+    }
     if (!found.deprecatedMessage && entry.deprecatedMessage) found.deprecatedMessage = entry.deprecatedMessage
   }
   return found
@@ -322,7 +326,7 @@ function acceptsPositional (node, pathNames) {
  * @param {object} tree
  * @param {string[]} tokens - Command names only, no arguments.
  * @param {object} [deprecatedCommands]
- * @returns {{ok: true, node: object, nodes: object[], names: string[]} |
+ * @returns {{ok: true, node: object, nodes: object[], names: string[], aliases: {at: number, typed: string, name: string}[]} |
  *   {ok: false, kind: 'deprecated-command', typed: string[], entry: object} |
  *   {ok: false, kind: 'unknown-command', at: number, token: string, parentNames: string[], suggestions: string[], argument?: boolean}}
  */
@@ -330,10 +334,13 @@ function resolveCommand (tree, tokens, deprecatedCommands) {
   let node = tree
   const nodes = []
   const names = []
+  // The words written as an alias of the command's name (status for info).
+  const aliases = []
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]
     const child = childOf(node, token)
     if (child) {
+      if (child.name !== token) aliases.push({ at: i, typed: token, name: child.name })
       node = child
       nodes.push(child)
       names.push(child.name)
@@ -350,7 +357,7 @@ function resolveCommand (tree, tokens, deprecatedCommands) {
     const argument = !children.length || acceptsPositional(node, names)
     return { ok: false, kind: 'unknown-command', at: i, token, parentNames: names, suggestions, argument }
   }
-  return { ok: true, node, nodes, names }
+  return { ok: true, node, nodes, names, aliases }
 }
 
 /**
@@ -461,8 +468,8 @@ function resolveRpkValue ({ registry, command, flag: target, field: requested = 
   const resolved = resolveCommand(tree, tokens, registry.data.deprecated_commands)
   if (!resolved.ok && resolved.kind === 'deprecated-command') {
     const { entry } = resolved
-    const why = entry.replacement || entry.deprecatedMessage
-    return { ok: false, kind: 'deprecated-command', field, registry, message: `${call}: '${cmdText(resolved.typed)}' is deprecated (${entry.key} in ${dataset}), so the reference documents none of its flags.${why ? ` ${why}` : ''}` }
+    const said = deprecationOf({ registry, entry, typed: resolved.typed, flag: name, macro, rawTarget, requested, command })
+    return { ok: false, kind: 'deprecated-command', field, registry, entry, advice: said.advice, proposed: said.proposed, message: `${call}: '${cmdText(resolved.typed)}' is deprecated (${entry.key} in ${dataset}), so the reference documents none of its flags.${said.text}` }
   }
   if (!resolved.ok) {
     const typed = cmdText([...resolved.parentNames, ...tokens.slice(resolved.at)])
@@ -547,6 +554,18 @@ function resolveRpkValue ({ registry, command, flag: target, field: requested = 
     return { ok: false, kind, field, registry, message: `${call}: ${messages[value.reason] || messages.missing}` }
   }
   return { ok: true, field: fieldName, invert, registry, text: invert ? inverted(value.text) : value.text, rich: value.rich, source: scraped ? 'help' : 'core', command: where, flag }
+}
+
+/**
+ * The deprecation sentence of an rpkval: call, in the form it was written:
+ * the bracket form rewrites the command line in the brackets, the first
+ * form its command=.
+ */
+function deprecationOf ({ registry, entry, typed, flag, macro, rawTarget, requested, command }) {
+  const { deprecationSentence } = require('./rpk-links')
+  const bracket = macro && macro.match(/^(rpkval::?\[)([^,\]]*)(.*)$/)
+  if (bracket) return deprecationSentence({ registry, entry, typed, flag: flag ? `--${flag}` : undefined, line: bracket[2], wrap: (l) => `${bracket[1]}${l}${bracket[3]}` })
+  return deprecationSentence({ registry, entry, typed, flag: flag ? `--${flag}` : undefined, line: String(command == null ? '' : command).trim(), wrap: (l) => `rpkval:${rawTarget}[${requested},command=${l}]` })
 }
 
 // The opposite of a yes-or-no value, for an inverse alias (optional).

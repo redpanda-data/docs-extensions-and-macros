@@ -117,6 +117,49 @@ describe('rpkcmd macro', () => {
       expect(linkOf(convert('rpkcmd:[rpk cluster status]'))).toEqual({ target: '26.2@streaming:reference:rpk/rpk-cluster/rpk-cluster-info.adoc', inner: '<code class="rpk-command" data-rpk-command="rpk cluster info">rpk cluster status</code>' })
     })
 
+    describe('an alias (rpk cluster info has the aliases status and metadata in rpk-v26.2.2)', () => {
+      test.each([
+        ['rpk cluster status', 'rpk-cluster/rpk-cluster-info.adoc', 'rpk cluster info', 'rpk cluster status is an alias of rpk cluster info; write rpkcmd:[rpk cluster info].'],
+        ['cluster metadata --detailed', 'rpk-cluster/rpk-cluster-info.adoc', 'rpk cluster info', 'rpk cluster metadata is an alias of rpk cluster info; write rpkcmd:[cluster info --detailed].'],
+        ['rpk sec acl ls', 'rpk-security/rpk-security-acl-list.adoc', 'rpk security acl list', 'rpk sec acl ls is an alias of rpk security acl list; write rpkcmd:[rpk security acl list].'],
+        ['rpk sr --skip-context-check', 'rpk-registry/rpk-registry.adoc', 'rpk registry', 'rpk sr is an alias of rpk registry; write rpkcmd:[rpk registry --skip-context-check].'],
+      ])('rpkcmd:[%s] renders as written, links %s, and warns with the main name', (line, page, command, message) => {
+        const warn = warnings()
+        const link = linkOf(convert(`rpkcmd:[${line}]`))
+        expect(link.target).toBe(`26.2@streaming:reference:rpk/${page}`)
+        expect(link.inner).toContain(`data-rpk-command="${command}"`)
+        expect(link.inner).toMatch(new RegExp(`>${['rpk', ...line.replace(/^rpk /, '').split(' ')].join(' ')}</code>$`))
+        expect(warn).toHaveBeenCalledTimes(1)
+        expect(warn.mock.calls[0][0]).toBe(`rpkcmd:[${line}] in modules/manage/pages/example.adoc: ${message}`)
+      })
+
+      test('text= is kept in the suggestion', () => {
+        const warn = warnings()
+        expect(linkOf(convert('rpkcmd:[rpk cluster status,text=check the cluster]')).inner).toBe('check the cluster')
+        expect(warn.mock.calls[0][0]).toContain('write rpkcmd:[rpk cluster info,text=check the cluster].')
+      })
+
+      test('error mode still renders and links an alias, because the output is right', () => {
+        const warn = warnings()
+        let html
+        expect(() => { html = convert('rpkcmd:[rpk cluster status]', { attributes: { 'rpk-validate': 'error' } }) }).not.toThrow()
+        expect(linkOf(html).target).toBe('26.2@streaming:reference:rpk/rpk-cluster/rpk-cluster-info.adoc')
+        expect(warn).toHaveBeenCalledTimes(1)
+      })
+
+      test('rpk-validate=off silences it', () => {
+        const warn = warnings()
+        convert('rpkcmd:[rpk cluster status]', { attributes: { 'rpk-validate': 'off' } })
+        expect(warn).not.toHaveBeenCalled()
+      })
+
+      test('the name itself never warns', () => {
+        const warn = warnings()
+        convert('rpkcmd:[rpk cluster info] and rpkcmd:[rpk security acl list]')
+        expect(warn).not.toHaveBeenCalled()
+      })
+    })
+
     test('a flag renders with the command and links the command page, which has no flag anchors', () => {
       expect(linkOf(convert('rpkcmd:[rpk topic create --partitions]'))).toEqual({ target: '26.2@streaming:reference:rpk/rpk-topic/rpk-topic-create.adoc', inner: '<code class="rpk-command" data-rpk-command="rpk topic create" data-rpk-flag="partitions">rpk topic create --partitions</code>' })
       expect(linkOf(convert('rpkcmd:[rpk topic create -p]')).inner).toContain('data-rpk-flag="partitions">rpk topic create -p<')
@@ -203,6 +246,27 @@ describe('rpkcmd macro', () => {
       expect(warn.mock.calls[0][0]).toContain(message)
       expect(THROW_KINDS).toContain(kind)
       expect(() => convert(`rpkcmd:[${line}]`, { attributes: { 'rpk-validate': 'error' } })).toThrow(message)
+    })
+
+    describe('a deprecated command names its replacement (deprecated_commands in rpk-v26.2.2)', () => {
+      test.each([
+        ['rpk redpanda admin', 'Its replacement is rpk cluster: write rpkcmd:[rpk cluster].'],
+        ['rpk redpanda admin --verbose', 'Its replacement is rpk cluster: write rpkcmd:[rpk cluster --verbose].'],
+        ['rpk redpanda admin --host', 'Its replacement, rpk cluster, has no --host flag, so find the equivalent by hand.'],
+        ['rpk redpanda admin brokers', 'The rpk data names a replacement only for rpk redpanda admin (rpk cluster), not for rpk redpanda admin brokers.'],
+      ])('rpkcmd:[%s] renders plain code and says: %s', (line, sentence) => {
+        const warn = warnings()
+        expect(linkOf(convert(`rpkcmd:[${line}]`))).toEqual({ plain: line })
+        expect(warn).toHaveBeenCalledTimes(1)
+        expect(warn.mock.calls[0][0]).toContain(`'${line.replace(/ --\S+$/, '')}' is deprecated`)
+        expect(warn.mock.calls[0][0]).toMatch(new RegExp(`${sentence.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`))
+      })
+
+      test('a deprecated command with no replacement in the data says only that it is deprecated', () => {
+        const warn = warnings()
+        convert('rpkcmd:[rpk benchmark]')
+        expect(warn.mock.calls[0][0]).toMatch(/'rpk benchmark' is deprecated \(rpk benchmark in rpk-v26.2.2.json from streaming@26.2\) and has no reference page, so it renders as plain code with no link\.$/)
+      })
     })
 
     test('rpk-validate=off silences the warning and still renders plain code', () => {

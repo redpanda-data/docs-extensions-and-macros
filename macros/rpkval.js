@@ -30,7 +30,10 @@
  * release series, a Cloud (env-cloud) or Agentic Data Plane (env-adp) page
  * reads the newest GA streaming file, and anything else has none. Whenever no
  * verified value exists the macro renders <unknown FIELD> and says why,
- * according to rpk-validate (warn, error or off). See macros/REFERENCE.adoc.
+ * according to rpk-validate (warn, error or off). A command written with an
+ * alias reads its command's value and warns with the command's name, even in
+ * error mode; a deprecated command warns with its replacement when the rpk
+ * data names one. See macros/REFERENCE.adoc.
  *
  * Registered by macros/prop, so every playbook that registers prop: has it.
  */
@@ -122,7 +125,19 @@ function rpkvalCall (config, parent, target, attributes, { block = false } = {})
     }
     result = { ...result, rich: { ...result.rich, text: moved.text } }
   }
-  return { mode, flagName, requested, commandText: result.ok ? result.command : commandText(), result, macro: call, where }
+  // A command written with an alias still reads its command's value, but the
+  // docs write the command's name.
+  let alias
+  const words = registry && command !== undefined ? rpkValues.commandTokens(command) : []
+  const walked = words.length ? rpkValues.resolveCommand(registry.data.tree, words) : undefined
+  if (walked && walked.ok && walked.aliases.length) {
+    const rewritten = bracket
+      ? `rpkval${block ? '::' : ':'}[${rpkLinks.rewriteCommandWords(line, { words: walked.aliases })}${positional != null ? `,${requested}` : ''}]`
+      : `rpkval:${target}[${requested},command=${rpkLinks.rewriteCommandWords(String(command).trim(), { words: walked.aliases }) || walked.names.join(' ')}]`
+    const written = bracket ? call : `rpkval:${target}[${requested},command=${String(command).trim()}]`
+    alias = `${written}${where}: ${rpkLinks.aliasNote(words.slice(0, walked.names.length), walked.names)}; write ${rewritten}.`
+  }
+  return { mode, flagName, requested, commandText: result.ok ? result.command : commandText(), result, macro: call, where, alias }
 }
 
 /**
@@ -156,6 +171,7 @@ function rpkvalInlineMacro (config) {
     self.process(function (parent, target, attributes) {
       const call = rpkvalCall(config, parent, target, attributes)
       const { mode, flagName, commandText, result } = call
+      if (call.alias && mode !== 'off') logger.warn(call.alias)
       const content = (extra) => self.createInline(parent, 'quoted', rpkValues.buildRpkvalContent({ command: commandText, flag: flagName, field: fieldLabel(result, call.requested), ...extra }))
       if (result.ok && result.rich) {
         // Help text renders inline only when it is one paragraph.
@@ -183,7 +199,8 @@ function rpkvalBlockMacro (config) {
     self.named('rpkval')
     self.positionalAttributes(['field'])
     self.process(function (parent, target, attributes) {
-      const { mode, flagName, requested, commandText, result } = rpkvalCall(config, parent, target, attributes, { block: true })
+      const { mode, flagName, requested, commandText, result, alias } = rpkvalCall(config, parent, target, attributes, { block: true })
+      if (alias && mode !== 'off') logger.warn(alias)
       const html = (extra) => rpkValues.buildRpkvalContent({ command: commandText, flag: flagName, field: fieldLabel(result, requested), ...extra })
       if (result.ok && result.rich) return valueDescriptions.richBlock(self, parent, result.rich, `rpk-value rpk-value-${result.field}`)
       if (result.ok) return valueDescriptions.htmlParagraph(self, parent, html({ text: result.text, source: result.source }))

@@ -263,6 +263,40 @@ describe('rpkval macro', () => {
       expect(html).toContain(`data-rpk-command="${command}"`)
     })
 
+    describe('an alias reads its command and warns with the main name, in every form', () => {
+      test.each([
+        ['rpkval:[rpk cluster status --format]', 'text', 'rpkval:[rpk cluster status --format] in modules/manage/pages/example.adoc: rpk cluster status is an alias of rpk cluster info; write rpkval:[rpk cluster info --format].'],
+        ['rpkval:[rpk cluster metadata --format,type]', 'string', 'rpk cluster metadata is an alias of rpk cluster info; write rpkval:[rpk cluster info --format,type].'],
+        ['rpkval:[rpk sec acl ls,usage]', 'rpk security acl list [flags]', 'rpk sec acl ls is an alias of rpk security acl list; write rpkval:[rpk security acl list,usage].'],
+        ['rpkval:format[command=rpk cluster status]', 'text', 'rpkval:format[default,command=rpk cluster status] in modules/manage/pages/example.adoc: rpk cluster status is an alias of rpk cluster info; write rpkval:format[default,command=rpk cluster info].'],
+      ])('%s', (input, expected, message) => {
+        const warn = warnings()
+        expect(valueOf(convert(input, { catalog: streaming() }))).toBe(expected)
+        expect(warn).toHaveBeenCalledTimes(1)
+        expect(warn.mock.calls[0][0]).toContain(message)
+      })
+
+      test('the block form keeps its two colons', () => {
+        const warn = warnings()
+        convert('rpkval::[rpk cluster status,description]', { catalog: streaming() })
+        expect(warn.mock.calls.map((c) => c[0])).toContain('rpkval::[rpk cluster status,description] in modules/manage/pages/example.adoc: rpk cluster status is an alias of rpk cluster info; write rpkval::[rpk cluster info,description].')
+      })
+
+      test('error mode does not throw on an alias, and off silences it', () => {
+        const warn = warnings()
+        expect(valueOf(convert('rpkval:[rpk cluster status --format]', { catalog: streaming(), attributes: { 'rpk-validate': 'error' } }))).toBe('text')
+        expect(warn).toHaveBeenCalledTimes(1)
+        convert('rpkval:[rpk cluster status --format]', { catalog: streaming(), attributes: { 'rpk-validate': 'off' } })
+        expect(warn).toHaveBeenCalledTimes(1)
+      })
+    })
+
+    test('a deprecated command names the call to write when the data names its replacement', () => {
+      const warn = warnings()
+      expect(valueOf(convert('rpkval:[rpk redpanda admin --verbose,type]', { catalog: streaming() }))).toBe('<unknown type>')
+      expect(warn.mock.calls[0][0]).toContain("'rpk redpanda admin' is deprecated (rpk redpanda admin in rpk-v26.2.2.json from streaming@26.2), so the reference documents none of its flags. Its replacement is rpk cluster: write rpkval:[rpk cluster --verbose,type].")
+    })
+
     test('a command flag wins over a global flag of the same name', () => {
       const registry = rpkValues.loadRpkFor(streaming(), 'streaming', '26.2')
       const result = rpkValues.resolveRpkValue({ registry, command: 'rpk cloud cluster select', flag: 'profile' })
@@ -300,7 +334,7 @@ describe('rpkval macro', () => {
       const warn = warnings()
       convert('rpkval:x[command=rpk redpanda admin brokers]', { catalog: streaming() })
       expect(warn.mock.calls[0][0]).toContain("'rpk redpanda admin brokers' is deprecated")
-      expect(warn.mock.calls[0][0]).toContain('`rpk cluster`')
+      expect(warn.mock.calls[0][0]).toContain('The rpk data names a replacement only for rpk redpanda admin (rpk cluster), not for rpk redpanda admin brokers.')
     })
 
     test('an unknown command suggests the real one (docs continuous-data-balancing.adoc:101)', () => {
