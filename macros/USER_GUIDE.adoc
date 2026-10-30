@@ -194,6 +194,18 @@ If the component, field, function or method doesn't exist in the Connect data, o
 
 `check-reference-values` also reports unlinked mentions: the first time a page names an `rpk` command in inline code, a Connect component with its type (`+`kafka_franz` input+`), or a Bloblang call (`+`now()`+`, `+`uppercase` method+`) with no link, on a page that links it nowhere. These are suggestions, not errors: they fail the check only with `--fail-on links`, and `--write` turns them into `rpkcmd:`, `connect:` or `blobl:` links only when you also pass `--write-links`. The text stays exactly as you wrote it.
 
+=== Aliases and deprecated names
+
+The macros render what you wrote, but the build log tells you when you used a name the docs no longer use:
+
+* An `rpk` alias, such as `rpkcmd:[rpk cluster status]` or `rpkval:[rpk cluster metadata --format]`, renders as written and links or reads the main command, `rpk cluster info`. The warning names the call to write instead, and never fails the build, even with `rpk-validate: error`.
+* A deprecated `rpk` command, such as `rpkcmd:[rpk redpanda admin]`, still renders plain code with no link. When the rpk data names a replacement, the warning names it: write `rpkcmd:[rpk cluster]`. A subcommand such as `rpk redpanda admin brokers` has no replacement of its own, so you choose the new command.
+* A former Connect component name, such as `connect:[outputs/kafka_migrator]`, renders as written and links the component its page now belongs to, `redpanda_migrator`, with a warning.
+* A deprecated Connect component, such as `connect:[inputs/kafka_franz]`, still links its own page, and the warning names the replacement its description gives, `inputs/redpanda`. A deprecated field links its component's page with no anchor, and the warning names a replacement field when the data gives exactly one.
+* A deprecated Bloblang function or method, such as `blobl:[meta()]`, still links its entry. The data names no replacement, so the warning says only that it is deprecated.
+
+`check-reference-values` reports the same names in macros and in backticked prose, and `--write` changes them to the main or replacement name when it is safe: the replacement has the same flag or field, the sentence isn't about the name itself ("is an alias of", "deprecated", "use ... instead"), the new name isn't already written nearby, and the page doesn't use the old name elsewhere, such as in an example. Everything else in the call stays as you wrote it. These findings fail the check only with `--fail-on any` or `--fail-on links`, never at the default level. See link:REFERENCE.adoc#old-names[the macros reference].
+
 === bloblval - Bloblang values
 
 Render a Bloblang function's, method's or parameter's value from the Connect data instead of typing it:

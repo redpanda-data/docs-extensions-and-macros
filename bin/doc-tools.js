@@ -3465,7 +3465,19 @@ programCli
  * labels, nav files, release, upgrade or migration notes, generated pages
  * or the target's own page. They fail only at --fail-on links, and --write
  * turns them into links only with --write-links, keeping the text as
- * written.
+ * written. It also reports old names in macros and prose spans: an rpk
+ * command written with an alias (`rpk cluster status` for rpk cluster info)
+ * or a Connect component written with the name its page now aliases
+ * (outputs/kafka_migrator) is an alias warning, and a deprecated rpk
+ * command, Connect component or field, or Bloblang function or method is a
+ * deprecated reference warning that names the replacement the data names.
+ * Both fail only at --fail-on any or links. --write rewrites one to the
+ * main or replacement name, keeping the rest of the call, when the data
+ * names one replacement that has the same flag or field (and, for Connect,
+ * is the same type), the line is not about the name, the main name is not
+ * already written nearby, and the page does not use the old name elsewhere,
+ * such as in an example; the line must then render as before except where
+ * the name renders.
  * Exit 0 when no finding is at or above
  * --fail-on, 1 when one is, 2 when the check could not run (including
  * --write-links without --write).
@@ -3506,9 +3518,9 @@ programCli
   .option('--data-file <path...>', 'Dataset files that bypass selection, recognized by name: redpanda-properties-v<tag>.json, rpk-v<version>.json (the docs-data snapshot works), connect-<version>.json')
   .option('--files <path...>', 'Scan only these files, relative to --docs-dir')
   .option('--report-dir <path>', 'Where to write reference-values-report.json and reference-values-report.md', '.')
-  .option('--write', 'Apply auto-safe exact replacements with the value macros')
+  .option('--write', 'Apply auto-safe exact replacements with the value macros, and rewrite writable aliases and deprecated names to the main or replacement name')
   .option('--write-links', 'With --write, also turn unlinked mentions into rpkcmd:, connect: and blobl: links, keeping the text as written')
-  .option('--fail-on <level>', 'none, mismatch (mismatches, reference errors, stale rpk and Connect examples), any (also exact, equivalent, unset and reference warnings) or links (also unlinked mentions)', 'mismatch')
+  .option('--fail-on <level>', 'none, mismatch (mismatches, reference errors, stale rpk and Connect examples), any (also exact, equivalent, unset, reference warnings such as deprecated names, and aliases) or links (also unlinked mentions)', 'mismatch')
   .option('--annotations <format>', 'Also print GitHub workflow annotations: github')
   .action((options) => {
     const { runCli } = require('../tools/reference-values')

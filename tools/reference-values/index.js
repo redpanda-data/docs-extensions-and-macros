@@ -19,6 +19,11 @@
  * the first mention of a command, component or Bloblang call on a page, as
  * it renders with its includes (page-order.js), that links it nowhere. Only --fail-on links fails on them, and only
  * --write-links, with --write, converts them.
+ *
+ * Both also report old names in macros and prose spans (names.js): aliases
+ * and former names (status alias) and deprecated names (reference
+ * warnings), which fail only at --fail-on any or links, and which --write
+ * rewrites when the data names one replacement that fits.
  */
 
 const fs = require('fs')

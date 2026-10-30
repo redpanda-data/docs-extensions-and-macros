@@ -243,3 +243,22 @@ The block form below must render the `counter()` examples, each summary
 followed by a Bloblang listing, as the Bloblang reference prints them.
 
 bloblval::[counter(),examples]
+
+== Aliases and deprecated names
+
+The macros render what you wrote and never fail the build on an alias or a
+deprecated name, but the log names what to write instead. `check-reference-values`
+reports the same calls, and `--write` rewrites the ones it can.
+
+* rpkcmd:[rpk cluster status]
+** You should see `rpk cluster status` as code, linked to the `rpk cluster info` page, and a warning that it is an alias of `rpk cluster info`, naming `+rpkcmd:[rpk cluster info]+`.
+* The value is rpkval:[rpk cluster metadata --format].
+** You should see `text`, read from `rpk cluster info`, and a warning that `rpk cluster metadata` is an alias, naming `+rpkval:[rpk cluster info --format]+`.
+* rpkcmd:[rpk redpanda admin]
+** You should see `rpk redpanda admin` as plain code with no link, and a warning that it is deprecated, naming `+rpkcmd:[rpk cluster]+`.
+* connect:[inputs/kafka_franz]
+** You should see "`kafka_franz` input" linked to the `kafka_franz` stand-in page, and a warning that it is deprecated, naming `+connect:[inputs/redpanda]+`.
+* connect:[inputs/kafka_franz.regexp_topics]
+** You should see `regexp_topics` linked to the `kafka_franz` page with no anchor, and a warning that the field is deprecated and the data names no single replacement.
+* blobl:[meta()]
+** You should see `meta()` linked to `#meta` on the functions page, and a warning that it is deprecated with no replacement in the data.

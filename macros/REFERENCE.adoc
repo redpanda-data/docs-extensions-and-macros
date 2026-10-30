@@ -698,7 +698,9 @@ rpk-validate::
 
 These render a placeholder and warn, and never fail the build: the data gaps `no-data`, `imprecise`, `description-default` (an empty default whose description states the real one, such as `rpk debug bundle --output`), `complex-default` and `plugin-unknown`, and `dropped-field` (`deprecated` on a flag).
 
-`deprecated-command` covers a command that is a key of `deprecated_commands`, or whose ancestor is, and its message carries the replacement. It is checked before `unknown-command`, because deprecated commands are not in the tree.
+`deprecated-command` covers a command that is a key of `deprecated_commands`, or whose ancestor is. It is checked before `unknown-command`, because deprecated commands are not in the tree. When the entry's `replacement` names one command, the message names it and the call to write (`rpkval:[rpk redpanda admin --verbose,type]` says to write `rpkval:[rpk cluster --verbose,type]`). See <<old-names>> for when it cannot.
+
+A command written with an alias reads its command's value (`rpkval:[rpk cluster status --format]` reads `rpk cluster info`) and logs an `alias` warning with the call to write, in the form you wrote. It never fails the build, even in `error` mode, because the value is right; `off` silences it.
 
 === Plugin flags until DOC-2689
 
@@ -777,6 +779,8 @@ Whenever the command can't be linked, `rpkcmd:` renders the command as plain cod
 
 rpk-validate::
 The same attribute as `rpkval:`. `warn` (default) logs each problem. `error` fails the build on `unknown-command`, `unknown-flag` and `deprecated-command`. `off` silences every `rpkcmd:` warning, because plain code still reads correctly.
+
+An alias renders as written and links its command's page, and logs an `alias` warning with the call to write: `rpkcmd:[rpk cluster status]` says "rpk cluster status is an alias of rpk cluster info; write rpkcmd:[rpk cluster info]", keeping the flag and `text=`. It never fails the build. A deprecated command still renders plain code, and its warning names the replacement and the call to write when the data names one (<<old-names>>).
 
 These never fail the build: `no-data` (no rpk data for the page) and `no-page` (no component in the build has the page, or a Cloud page has none of its own).
 
@@ -937,6 +941,8 @@ connect-validate::
 
 These never fail the build: `no-data`, `imprecise`, `description-default`, `complex-default`, `deprecated-field` and `cloud-unknown`.
 
+A former component name, one the connect docs alias to another component's page (`connectval:[inputs/kafka_migrator.topics,type]`), reads that component and warns with the call to write. A deprecated component, or field, reads its own value and warns with the replacement the data names, unless the call asks for `status` or `deprecated`. Neither fails the build. See <<old-names>>.
+
 === Checking prose with check-reference-values
 
 `doc-tools check-reference-values` finds hand-written field defaults that `connectval:` could render, YAML comments that state a stale default, and components and fields the data does not have. See <<check-reference-values>>.
@@ -998,6 +1004,8 @@ Whenever the component can't be linked, `connect:` renders plain code with no li
 connect-validate::
 The same attribute as `connectval:`. `warn` (default) logs each problem. `error` fails the build on `unknown-type`, `unknown-component` and `unknown-field`. `off` silences every `connect:` warning.
 
+A former name renders as written, links the component its page path now goes to, and warns with the current name: `connect:[outputs/kafka_migrator]` renders "`kafka_migrator` output", links the `redpanda_migrator` page, and says to write `connect:[outputs/redpanda_migrator]`. A field after it is checked against the current component. A deprecated component links its own page, which still documents it and carries the deprecation notice, and warns with its replacement; one whose path the connect docs alias to its replacement (`inputs/pg_stream`) links that page, on any component that has no page of its own for it. A deprecated field links its component's page with no anchor, as before, and the warning names the field to write when the data names one. None of these fail the build. See <<old-names>>.
+
 These never fail the build: `no-data` (no Connect data) and `no-page` (no page in the build, or a Cloud page has none of its own).
 
 === Registration
@@ -1047,6 +1055,8 @@ The Cloud functions page leaves out the impure functions (`count`, `env`, `file`
 
 connect-validate::
 `error` fails the build on `unknown-function`, `unknown-method`, `unknown-parameter`, `ambiguous-name`, `hidden` (`nothing()` and `var()`, which the reference does not document) and `unknown-category`. `no-data`, `no-page` and an impure function on Cloud never fail the build.
+
+A deprecated function or method (`meta()`, `.format_timestamp()`) links its entry, which the reference still lists under Deprecated, and warns. The Connect data names no replacement for any of them, so the warning names none.
 
 === Registration
 
@@ -1147,7 +1157,7 @@ On a Cloud page an impure function is `unavailable`, because the Cloud reference
 === Failures and validation modes
 
 connect-validate::
-`error` fails the build on `unknown-function`, `unknown-method`, `unknown-parameter`, `ambiguous-name`, `hidden`, `unknown-category`, `missing-field`, `unsupported-field`, `cloud-hidden`, `unavailable`, `needs-block` and `block-form-inline`. `no-data`, `imprecise` and `complex-default` never do.
+`error` fails the build on `unknown-function`, `unknown-method`, `unknown-parameter`, `ambiguous-name`, `hidden`, `unknown-category`, `missing-field`, `unsupported-field`, `cloud-hidden`, `unavailable`, `needs-block` and `block-form-inline`. `no-data`, `imprecise` and `complex-default` never do, and neither does the `deprecated-entry` warning for a deprecated function or method, which says the data names no replacement.
 
 === Registration
 
@@ -1431,6 +1441,42 @@ An rpk description was written for its command's reference page in the component
 
 Property descriptions and examples link with module-qualified xrefs that resolve wherever the property reference itself renders, so they are not rewritten.
 
+[[old-names]]
+== Aliases, former names and deprecated names
+
+The build never changes what you wrote. A macro that names something by an alias, a former name or a deprecated name renders it as written and says, in a warning, what to write instead. `check-reference-values` reports the same calls and prose spans, and its `--write` rewrites the ones it safely can (<<check-reference-values>>).
+
+[cols="1,2,2"]
+|===
+| Name | What the macros do | Where the data says what to write
+
+| An `rpk` command alias (`rpk cluster status`, `rpk sec acl ls`)
+| `rpkcmd:` and `rpkval:` render it as written and link or read the main command. `alias` warning, never an error.
+| The command's `aliases` in the rpk data. The rpk data has no flag aliases.
+
+| A deprecated `rpk` command (`rpk redpanda admin`)
+| Plain code with no link (`rpkcmd:`) or `<unknown FIELD>` (`rpkval:`), as before. `deprecated-command` warning.
+| The `replacement` of its own `deprecated_commands` entry, when it names one command (as an xref to its page or a backticked `rpk ...`). An ancestor's replacement replaces the ancestor: `rpk redpanda admin brokers` has none of its own.
+
+| A former Connect component name (`outputs/kafka_migrator`)
+| `connect:` and `connectval:` render it as written and link or read the current component. Warning, never an error.
+| A page alias: the connect page that declares `components:<type>/<name>.adoc` (`redpanda_migrator` declares `kafka_migrator`), when the data has no component by the written name.
+
+| A deprecated Connect component (`kafka_franz`)
+| Links its own page and reads its own values, as before. Warning.
+| A page alias of its path (`pg_stream` to `postgres_cdc`), or the one component its description links in the paragraphs that say it is deprecated ("Use the `redpanda` input instead"). None when it names two (`parquet`).
+
+| A deprecated Connect field
+| Links its component's page with no anchor, and reads its value. Warning.
+| The one field its description names: "Deprecated: use `X` instead", "DEPRECATED: Use avro.raw_json instead", "Deprecated in favor of `address`", beside the field first. None when it names two (`regexp_topics`).
+
+| A deprecated Bloblang function or method (`meta()`)
+| Links its entry and reads its values. Warning.
+| Nothing: the data has no replacement field, and the descriptions name none.
+|===
+
+A replacement is a proposal, and it can be rewritten only when it fits the call: `rpkcmd:[rpk redpanda admin --hosts]` names `rpk cluster`, which has no `--hosts`, so the warning says to find the equivalent by hand. The same goes for a Connect field the replacement component does not have, and for a replacement of another type (the `jira` processor is deprecated for the `jira` input), where the sentence needs rewording.
+
 [[check-reference-values]]
 == Checking prose: check-reference-values
 
@@ -1463,11 +1509,26 @@ unlinked mentions:: The docs link a term on its first mention in a document, so 
 A page is judged as it renders: its own lines, with each `include::` replaced by the lines it includes, in order. Includes are followed into nested includes, the lines a `tag=` or `tags=` selects (`!` negations too; a wildcard includes every line), a target built from attributes when each is set at that point, and other components the scan has as a `--lender` (a cloud-docs stub's `include::streaming:...`). An include of a component the scan did not load is not followed. `ifdef::` and `ifndef::` keep or drop lines by the attributes set at that point: the component's `antora.yml` attributes (`env-cloud` on Cloud), then the attribute entries of the page and what it includes, so a partial's `ifndef::env-kubernetes[]` lines are not on a page that sets `:env-kubernetes: true`. `ifeval::` keeps its lines, and an attribute only the playbook or Antora sets (`page-*`) reads as unset.
 +
 Only the first mention of a target on a page is reported, and none when the page links the target anywhere, before or after: an xref to its page (any fragment, a Cloud stub's path, or a page alias), or `rpkcmd:`, `connect:` or `blobl:`. A mention in a partial is reported at the partial's own file and line, where a writer fixes it, when it is the first unlinked mention on at least one page that includes the partial; the finding's `pages` and note name those pages. When every page that shows it links the target or mentions it first, it is not reported. A partial no loaded page includes, or a line no loaded page shows, is judged on its own file: its first mention, in a file that links the target nowhere. So a scan without the cloud-docs checkout judges the lines only Cloud shows as a file, and a cloud-docs page that includes `streaming:` content is judged without that content unless the docs checkout is a `--lender`. A mention is never read in a block, a heading, a block title, a description list term, a table header row (`%header`, `options="header"`, or the implicit header: a first row on one line followed by a blank line), a link label or a macro (`xref:`, `link:`, a URL, `+{attr}[label]+`, `<<id,label>>`), and never in nav files, release, upgrade or migration notes, generated pages, the target's own page or its partials, or a line under `// value-check: ignore`, after which the next mention is the first. Each finding names the page the macro would link and proposes the macro: `rpkcmd:[rpk topic create]` when the span is the command and at most one flag, and `connect:[...]` or `blobl:[...]` with the mention's text as the label when it is not what the macro renders (`+connect:[processors/mapping,`mapping` Processor]+`). The report counts them in `unlinkedMentions` and `unlinkedMentionsByKind`.
+old names:: The macros and prose spans that use an alias, a former name or a deprecated name (<<old-names>>): `rpkcmd:`, `rpkval:` (both forms), `connect:`, `connectval:` (both forms), `blobl:` and `bloblval:` calls, backticked `rpk` commands, backticked Connect components with their type (`+`kafka_franz` output+`), and, in Connect content, backticked Bloblang calls (`+`meta()`+`). Shell blocks and YAML are examples to run, so an alias there is not reported, and deprecated names there stay the reference warnings above.
++
+* `alias` (a new status, a warning): an `rpk` alias (reason `alias`) or a former Connect component name (reason `renamed-component`).
+* `deprecated-command`, `deprecated-component`, `deprecated-field`, `deprecated-function` and `deprecated-method` (reference warnings), with the replacement the data names.
++
+Each finding has the text written, the main or replacement name, and `proposed`, the call or span with the name changed and everything else kept: `rpkcmd:[rpk cluster info --detailed,text=the check]` for `rpkcmd:[rpk cluster status --detailed,text=the check]`, `+`rpk cluster info`+` for `+`rpk cluster metadata`+`. It is `writable` when `--write` may apply it: the data names one replacement, the replacement has the flag or field written with it and, for Connect, is the same type, and none of these holds:
++
+* the line talks about the name ("alias", "deprecated", "replaced", "instead", "migrate", "renamed", "formerly", "legacy", "no longer", "in favor of"), so a rewrite would change what it says ("`rpk cluster info` and `rpk cluster metadata` instead require ...");
+* the main or replacement name is already written within six lines, so the old one may be listed on purpose (a table with a row for each of `rpk cluster info` and `rpk cluster metadata`);
+* the page uses the old name elsewhere, such as in an example (a sentence about the `kafka_franz` output above YAML that configures it);
+* the file is release, upgrade or migration notes, which record the names of their time.
++
+The note says which. The report lists the `alias` findings under "Aliases and former names" and counts them in `aliases`; the counts `deprecatedNames`, `namesWritable` and `namesApplied` cover both classes, in macros and spans.
 connect:: Every pipeline config in a YAML listing block or an examples file is walked from its root keys. An unknown component is `unknown-component`, an unknown field is `unknown-field`, and deprecated components and fields are warnings. A YAML comment that states a default ("# Optional (default: "benthos")") is example output that `matches` or is `stale`. A callout ("<3> ... The default is `1024`.") or a sentence that states a field's default is compared with what `connectval:` renders. A `connect:[...]` link names the component and field a stated default belongs to, and `bloblval:` and `connect:` values are macros, never hand-written values.
 
-Statuses are propval's, plus `reference` for a thing the data does not have. `--fail-on mismatch` (the default) fails on mismatches, reference errors, and stale rpk and Connect examples; `any` also fails on exact, equivalent and unset values and on reference warnings, which catches every hand-written value a macro could render. Unlinked mentions never fail at these levels: `links` fails on everything `any` does and on unlinked mentions. Plugin flags scraped from `--help` never fail, and neither do findings in release notes, upgrade notes or Connect migration guides. A `// value-check: ignore` comment line suppresses the findings on the next line, or in the block it sits directly above. Exit 0 means nothing failed, 1 that something did, and 2 that the check could not run.
+Statuses are propval's, plus `reference` for a thing the data does not have. `--fail-on mismatch` (the default) fails on mismatches, reference errors, and stale rpk and Connect examples; `any` also fails on exact, equivalent and unset values, on reference warnings (deprecated names among them) and on `alias` findings, which catches every hand-written value a macro could render and every name the docs no longer use. An alias renders correctly, so it never fails at the default level, as a deprecated name never does. Unlinked mentions never fail at these levels: `links` fails on everything `any` does and on unlinked mentions. Plugin flags scraped from `--help` never fail, and neither do findings in release notes, upgrade notes or Connect migration guides. A `// value-check: ignore` comment line suppresses the findings on the next line, or in the block it sits directly above. Exit 0 means nothing failed, 1 that something did, and 2 that the check could not run.
 
 `--write` applies only exact matches in the same sentence (or a Connect callout) that name one target, never in a table, block or YAML, never a scraped plugin flag or an empty default, and never in a file that may be single-sourced into Cloud where the macro would render a placeholder. An exact `rpk` or Connect xref is replaced in prose or a table cell: `rpkcmd:`, `connect:` and `blobl:` link the same page from the page's own component, and on Cloud render plain code where the xref would be broken. Each replacement is kept only when the line renders the same visible text before and after, through the real macros.
+
+`--write` also rewrites each writable alias or deprecated name to its proposal (see old names above). The line may then render differently, but only where the name renders: the render check accepts the rewrite when the line renders as before with the old call's or span's rendering replaced by the new one's, that rendering has no placeholder, and, for an alias, every link goes where it went before. A rewrite that fails the check is reverted and its note ends `render-changed`.
 
 Turning a mention into a link changes the page, so `--write` leaves unlinked mentions as written unless `--write-links` is given as well; `--write-links` without `--write` is a setup error (exit 2). With both, each reported mention that has a proposed macro becomes that macro, under the same render check, so its text stays exactly as written. A mention that is not reported, because each page that shows it already links the target or mentions it first, is never written. A mention whose span has a flag value, a placeholder, or a second flag, is reported and never written: link the command page by hand.
 
