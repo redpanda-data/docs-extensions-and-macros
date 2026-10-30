@@ -1080,10 +1080,6 @@ jobs:
             - CLI help (kinds cli-*) is `rpk connect` help: Usage is a
               one-line label with no terminal period, and Description is
               plain text, not AsciiDoc.
-            - End every connect suggestion comment, on the line before the
-              fingerprint line, with exactly: After you make this change,
-              run `CGO_ENABLED=1 TAGS=x_benthos_extra task docs` and commit
-              the regenerated docs, or the docs check fails.
 
             REVIEW IN CONTEXT: judge each string as the reader of its page,
             not on its own. Read it together with its context entries and
