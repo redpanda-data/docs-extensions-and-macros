@@ -1388,11 +1388,13 @@ function applyTextTransformationsToExamples(text, customTransformations) {
 }
 
 /**
- * Apply one replacement rule, skipping any match that starts inside a code
- * span or crosses a span boundary. Rules run in sequence, so a span one rule
- * creates ('trace list -o json' -> `trace list -o json`) is still bare text
- * to the next rule, which would otherwise nest a span inside it (`-o json`).
- * A match that covers a whole span (like "`rpk foo`") still applies.
+ * Apply one replacement rule, skipping any match that crosses a span
+ * boundary, or that starts inside a code span and would add backticks there.
+ * Rules run in sequence, so a span one rule creates ('trace list -o json' ->
+ * `trace list -o json`) is still bare text to the next rule, which would
+ * otherwise nest a span inside it (`-o json`). A rule that only rewords
+ * (/root/.config -> ~/.config) still applies inside a span, and a match that
+ * covers a whole span (like "`rpk foo`") still applies.
  * @param {string} text
  * @param {RegExp} regex
  * @param {string} replacement - Replacement string ($&, $1..$99, $<name>, $$)
@@ -1406,8 +1408,8 @@ function replaceOutsideCodeSpans(text, regex, replacement) {
     const [match, ...groups] = args
     const ticksBefore = (whole.slice(0, offset).match(/`/g) || []).length
     const ticksIn = (match.match(/`/g) || []).length
-    if (ticksBefore % 2 === 1 || ticksIn % 2 === 1) return match
-    return replacement.replace(/\$(\$|&|<([^>]*)>|(\d\d?))/g, (token, kind, name, num) => {
+    if (ticksIn % 2 === 1) return match
+    const expanded = replacement.replace(/\$(\$|&|<([^>]*)>|(\d\d?))/g, (token, kind, name, num) => {
       if (kind === '$') return '$'
       if (kind === '&') return match
       if (name !== undefined) return named ? (named[name] ?? '') : token
@@ -1419,6 +1421,7 @@ function replaceOutsideCodeSpans(text, regex, replacement) {
       }
       return n >= 1 && n <= groups.length ? (groups[n - 1] ?? '') : token
     })
+    return ticksBefore % 2 === 1 && expanded.includes('`') ? match : expanded
   })
 }
 

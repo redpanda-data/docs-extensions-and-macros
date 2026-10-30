@@ -219,6 +219,15 @@ describe('flags inside single-quoted commands (DOC-2686)', () => {
     expect(formatDescription('Run "\'topic list\'" first.', transforms)).toBe('Run `topic list` first.')
   })
 
+  test('a rule that only rewords still applies inside a span an earlier rule made', () => {
+    // rpk --config in the v26.1.12 tree: the quoted-path rule makes a span,
+    // then the home-dir rule must still normalize the path inside it.
+    const quotedPath = { pattern: '"(\\/[^"]+)"', replacement: '`$1`', flags: 'g', description: 'Convert double-quoted absolute paths to backticks' }
+    const homeDir = { pattern: '(?:/root|/home/[A-Za-z0-9._-]+|/Users/[A-Za-z0-9._-]+)/\\.config/rpk/rpk\\.yaml', replacement: '~/.config/rpk/rpk.yaml', flags: 'g', description: 'Normalize the user-dependent config path' }
+    expect(formatDescription('Default search paths are "/root/.config/rpk/rpk.yaml" and more.', { replacements: [quotedPath, homeDir] }))
+      .toBe('Default search paths are `~/.config/rpk/rpk.yaml` and more.')
+  })
+
   test('throws instead of publishing an unrestored placeholder', () => {
     const leak = { replacements: [{ pattern: 'XYZ', replacement: '__INLINE_CODE_99__', flags: 'g' }] }
     expect(() => formatDescription('Some XYZ text.', leak)).toThrow(/__INLINE_CODE_99__/)
