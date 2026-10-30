@@ -322,7 +322,8 @@ const cmd = (names) => ['rpk', ...names].join(' ')
  *   catalog, as the scanned component renders them, except in the files in
  *   skip. cloud ({component, version}) is the one Cloud lender, which renders
  *   a self-managed file's ifdef::env-cloud[] content. With links, the first
- *   unlinked mention of each command in a file is reported (mentions.js).
+ *   unlinked mention of each command on a page is reported (mentions.js),
+ *   over links.pages, the rendered pages (page-order.js).
  * @param {boolean} [opts.writeLinks] - With write, also turn unlinked
  *   mentions into rpkcmd:[...].
  */
@@ -339,6 +340,40 @@ function scanRpk ({ docsDir, registry, files: only, write = false, writeLinks = 
   const version = registry.data.rpk_version || registry.tag
   const allFlags = rpkValues.allFlagNames(registry)
 
+  // The commands a line names, as the scope that renders it links them: a
+  // self-managed file's ifdef::env-cloud[] content as the Cloud lender does,
+  // and not at all without one.
+  const scopeOf = (ctx, cloud) => {
+    if (!links) return undefined
+    if (cloud || ctx.qualifier !== 'ifdef::env-cloud') return links
+    return links.cloud ? { ...links, ...links.cloud } : undefined
+  }
+  const lineMentions = (index, line, ctx, cloud = cloudSurface) => {
+    const scope = scopeOf(ctx, cloud)
+    return scope ? mentions.rpkMentions(line, { registry, catalog: scope.catalog, component: scope.component, version: scope.version }) : []
+  }
+  const judge = links
+    ? mentions.mentionJudge({
+      pages: links.pages,
+      collect: (file) => mentions.collectMentions(file.text, { cloudSurface: file.repo === 0 ? cloudSurface : Boolean(file.cloud), lineMentions: (index, line, ctx) => lineMentions(index, line, ctx, file.repo === 0 ? cloudSurface : Boolean(file.cloud)) }),
+      linkedOn: (file, line) => mentions.rpkLinked(line, {
+        tree,
+        deprecated: registry.data.deprecated_commands,
+        catalog: links.catalog,
+        component: file.repo === 0 || file.component === undefined ? links.component : file.component,
+        version: file.repo === 0 || file.component === undefined ? links.version : file.version,
+        module: (file.relative.match(/^modules\/([^/]+)\//) || [])[1] || 'ROOT',
+        aliases: links.aliases,
+      }),
+      historical: (relative) => HISTORICAL_RX.test(relative) || shared.RELEASES_RX.test(relative),
+      ownPage: (file, m) => {
+        const page = file.relative.match(/^modules\/reference\/pages\/(rpk\/.+)$/)
+        const command = page && rpkLinks.commandOfPage(tree, page[1])
+        return Boolean(command) && command.names.join(' ') === m.key
+      },
+    })
+    : undefined
+
   for (const relative of shared.walkFiles(docsDir, { exclude: RPK_EXCLUDE, only })) {
     const full = fsPath.join(docsDir, relative)
     const original = readFile(full)
@@ -354,13 +389,9 @@ function scanRpk ({ docsDir, registry, files: only, write = false, writeLinks = 
     const fileFindings = []
     const seen = new Set()
     const sightings = commandSightings(lines, registry)
-    // Unlinked mentions: the first of each command, in a file that links it
+    // Unlinked mentions: the first of each command on a page that links it
     // nowhere, never in a nav file or release or upgrade notes.
-    const fileModule = (relative.match(/^modules\/([^/]+)\//) || [])[1] || 'ROOT'
     const mentionsOn = Boolean(links) && !historical && !(links.skip && links.skip.has(relative))
-    const firstMention = mentionsOn
-      ? mentions.firstMentions(mentions.rpkLinked(original, { tree, deprecated: registry.data.deprecated_commands, catalog: links.catalog, component: links.component, version: links.version, module: fileModule, aliases: links.aliases }))
-      : undefined
     const noMention = mentionsOn ? mentions.skippedLines(lines) : undefined
     // Level 1 and 2 headings bound the section a flag mention looks back in.
     const headings = []
@@ -475,9 +506,10 @@ function scanRpk ({ docsDir, registry, files: only, write = false, writeLinks = 
         const finding = classifyClaim(claim, { index, line, ctx, sightings, registry, allFlags, historical, tagged, cloudSurface, relative, table, sectionStart: sectionStartOf(index) })
         if (finding) lineFindings.push(finding)
       }
-      if (firstMention && linkScope && !noMention.has(index) && !ignored.has(index + 1)) {
-        for (const m of mentions.rpkMentions(line, { registry, catalog: linkScope.catalog, component: linkScope.component, version: linkScope.version })) {
-          if (firstMention(m)) lineFindings.push(mentions.toFinding(m, { kind: 'rpk', relative, index, line, historical }))
+      if (mentionsOn && !noMention.has(index) && !ignored.has(index + 1)) {
+        for (const m of lineMentions(index, line, ctx)) {
+          const verdict = judge(relative, original, index, m)
+          if (verdict) lineFindings.push(mentions.toFinding(m, { kind: 'rpk', relative, index, line, historical, verdict }))
         }
       }
       let appliedFrom = Infinity

@@ -16,8 +16,8 @@
  * finding is at or above --fail-on (1), or the check could not run (2).
  *
  * The rpk and Connect engines also report unlinked mentions (mentions.js):
- * the first mention of a command, component or Bloblang call in a file that
- * links it nowhere. Only --fail-on links fails on them, and only
+ * the first mention of a command, component or Bloblang call on a page, as
+ * it renders with its includes (page-order.js), that links it nowhere. Only --fail-on links fails on them, and only
  * --write-links, with --write, converts them.
  */
 
@@ -35,6 +35,7 @@ const connectLinks = require('./connect-links')
 const { makeRenderGuard } = require('./render-check')
 const shared = require('./shared')
 const mentions = require('./mentions')
+const { renderedPages } = require('./page-order')
 
 const KINDS = ['properties', 'rpk', 'connect']
 const LEVELS = ['none', 'mismatch', 'any', 'links']
@@ -312,6 +313,10 @@ function scanAll ({ docsDir, lenderDirs = [], dataFiles = [], kinds = KINDS, kin
     result.skipped[kind] = why
   }
   const where = `${own.component}@${own.version || 'unversioned'}`
+  // The pages of the scan and its lenders in rendered order, for the
+  // unlinked-mention check, read once for both engines.
+  let rendered
+  const pages = () => rendered || (rendered = renderedPages({ repos: [{ dir: docsDir, comp: own }, ...lenderDirs.map((dir, i) => ({ dir, comp: lenders[i] }))] }))
 
   if (kinds.includes('properties')) {
     const given = explicit.properties && explicit.properties.registry
@@ -344,6 +349,7 @@ function scanAll ({ docsDir, lenderDirs = [], dataFiles = [], kinds = KINDS, kin
         version: own.version,
         skip: navFiles(docsDir),
         aliases: pageAliases,
+        pages: pages(),
         cloud: cloudLenders.length === 1 ? { component: cloudLenders[0].component, version: cloudLenders[0].version } : undefined,
       }
       const r = scanRpk({ docsDir, registry, files, write, writeLinks, renderGuard: guard, links })
@@ -370,6 +376,7 @@ function scanAll ({ docsDir, lenderDirs = [], dataFiles = [], kinds = KINDS, kin
         component: own.component,
         version: own.version,
         skip: navFiles(docsDir),
+        pages: pages(),
         surfacesOf: connectLinks.renderingSurfaces({ docsDir, own, lenders: lenderDirs.map((dir, i) => ({ dir, comp: lenders[i] })) }),
         // --data-file checks the links, but connect: and blobl: link only
         // with the build's own Connect data.

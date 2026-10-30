@@ -72,10 +72,10 @@ function checkout (name, files = {}, { nav } = {}) {
 
 const LENDERS = { streaming: ['cloud-data-platform', 'connect'], 'cloud-data-platform': ['streaming', 'connect'], connect: ['streaming', 'cloud-data-platform'], 'agentic-data-plane': ['streaming', 'connect'] }
 
-function scan (name, files, { lenders = LENDERS[name], nav, write = false, writeLinks = false, failOn = 'mismatch', kinds = ['rpk', 'connect'] } = {}) {
+function scan (name, files, { lenders = LENDERS[name], lenderFiles = {}, data = RPK, nav, write = false, writeLinks = false, failOn = 'mismatch', kinds = ['rpk', 'connect'] } = {}) {
   const docsDir = checkout(name, files, { nav })
-  const lenderDirs = lenders.map((n) => checkout(n))
-  const result = scanAll({ docsDir, lenderDirs, dataFiles: [RPK], kinds, kindsExplicit: true, write, writeLinks, failOn })
+  const lenderDirs = lenders.map((n) => checkout(n, lenderFiles[n]))
+  const result = scanAll({ docsDir, lenderDirs, dataFiles: [data], kinds, kindsExplicit: true, write, writeLinks, failOn })
   const all = Object.values(result.kinds).flatMap((r) => r.findings)
   return { result, docsDir, found: all.filter((f) => f.status === mentions.STATUS && Object.keys(files).includes(f.file)) }
 }
@@ -224,6 +224,214 @@ describe('Connect components and Bloblang calls', () => {
       'modules/guides/pages/bloblang/functions.adoc': page('The `now()` function.'),
     })
     expect(found).toEqual([])
+  })
+})
+
+describe('judged on the pages that render the line', () => {
+  // The trimmed data has rpk ai but none of its subcommands these pages
+  // name, so this copy adds them, as rpk v26.2.2 has them.
+  const AI_DATA = path.join(path.dirname(RPK), 'ai', 'rpk-v26.2.2.json')
+  const aiData = JSON.parse(fs.readFileSync(RPK, 'utf8'))
+  const ai = aiData.tree.commands.find((c) => c.name === 'ai')
+  const node = (name, commands = []) => ({ name, usage: `rpk ai ${name} [flags]`, aliases: [], flags: [], commands })
+  ai.commands.push(node('upgrade'), node('auth', [node('login')]), node('env', [node('list')]))
+  fs.mkdirSync(path.dirname(AI_DATA), { recursive: true })
+  fs.writeFileSync(AI_DATA, JSON.stringify(aiData))
+
+  // adp-docs 8af585a: two pages include the same two partials of the cli
+  // module, after they link rpk ai and rpk ai upgrade.
+  const UPGRADE_NOTE = 'NOTE: Upgrading `rpk` does not upgrade the plugin. The plugin is a separate binary that stays at its installed version, even across `rpk` upgrades, until you run `rpk ai upgrade`. New commands and flags in the reference marked "introduced in ai version X" require the plugin at that version or later.\n'
+  const SIGNIN = [
+    '[NOTE]',
+    '====',
+    '// Keep these comments inside the NOTE. The partial is included right after a + list continuation, and a comment line there detaches the NOTE and restarts the step numbering.',
+    '// Shared by cli:index.adoc and gateway:connect-agent.adoc so both sign-in steps carry the same wording.',
+    '// Source: the --email, --connection, and --no-browser flags are in the `rpk ai auth login` reference (docs repo modules/reference/partials/rpk-ai/rpk-ai-auth-login.adoc), which also states that a successful login rewrites the config in the current schema. The 0.2.90 plugin requirement was reported in the docs team Slack thread, 2026-10-19, and is not recorded in the reference.',
+    'If the browser opens the wrong sign-in provider, or your email address belongs to more than one Redpanda Cloud organization, pass `--email <address>` so `rpk ai` looks up your sign-in provider before the browser opens, or `--connection <name>` to name the Auth0 connection directly. Both flags require the plugin at version 0.2.90 or later. If the browser keeps reusing an earlier session, add `--no-browser` and open the printed URL in a private window.',
+    '',
+    'After a plugin upgrade, `rpk ai env list` reports that no environments are configured until you run `rpk ai auth login` again. This is expected, because the login rewrites the config.',
+    '====',
+    '',
+  ].join('\n')
+  const ADP = {
+    'modules/cli/partials/rpk-ai-upgrade-note.adoc': UPGRADE_NOTE,
+    'modules/cli/partials/rpk-ai-signin-troubleshooting.adoc': SIGNIN,
+    // index.adoc:14, :34, :36, :55, and the exit-code table row at :361.
+    'modules/cli/pages/index.adoc': page(
+      'The Agentic Data Plane CLI, also called the Redpanda AI CLI, runs as an xref:reference:rpk/rpk-ai/rpk-ai.adoc[`rpk`] plugin, so you install and run it through your existing `rpk` setup.',
+      '',
+      'Update the plugin later with xref:reference:rpk/rpk-ai/rpk-ai-upgrade.adoc[`rpk ai upgrade`], and remove it with xref:reference:rpk/rpk-ai/rpk-ai-uninstall.adoc[`rpk ai uninstall`].',
+      '',
+      'include::partial$rpk-ai-upgrade-note.adoc[]',
+      '',
+      'include::partial$rpk-ai-signin-troubleshooting.adoc[]',
+      '',
+      '|===',
+      '|Exit code |Meaning',
+      '',
+      '|3',
+      '|Not authenticated or not authorized. Either your credentials are missing or expired, or your account lacks a permission the command needs. Run `rpk ai auth login` and retry.',
+      '|===',
+    ),
+    // connect-agent.adoc:10, :78, :80, :89 and :108.
+    'modules/gateway/pages/connect-agent.adoc': page(
+      'This guide shows how to connect your glossterm:AI agent[] or application to the AI Gateway. You construct the proxy URL for a provider you have already created, authenticate (with the xref:reference:rpk/rpk-ai/rpk-ai.adoc[`rpk ai`] CLI for local development, with OIDC client credentials for CI and application code, or with an <<authenticate-with-an-api-key,API key>> for a long-lived client), and send your first request with the SDK of your choice.',
+      '',
+      'Update later with xref:reference:rpk/rpk-ai/rpk-ai-upgrade.adoc[`rpk ai upgrade`]. Remove with xref:reference:rpk/rpk-ai/rpk-ai-uninstall.adoc[`rpk ai uninstall`].',
+      '',
+      'include::cli:partial$rpk-ai-upgrade-note.adoc[]',
+      '',
+      'include::cli:partial$rpk-ai-signin-troubleshooting.adoc[]',
+      '',
+      'If the cached token has expired, `rpk ai` returns a 401. Rerun `rpk ai auth login` to refresh it.',
+    ),
+  }
+  const at = (found) => found.map((f) => [f.file, f.line, f.written])
+  const BOTH = ['modules/cli/pages/index.adoc', 'modules/gateway/pages/connect-agent.adoc']
+
+  test('adp-docs rpk-ai-upgrade-note.adoc:1 and rpk-ai-signin-troubleshooting.adoc:6: a partial every including page already links is not reported', () => {
+    const { found } = scan('agentic-data-plane', ADP, { data: AI_DATA, kinds: ['rpk'] })
+    expect(at(found)).toEqual([
+      ['modules/cli/partials/rpk-ai-signin-troubleshooting.adoc', 8, '`rpk ai env list`'],
+      ['modules/cli/partials/rpk-ai-signin-troubleshooting.adoc', 8, '`rpk ai auth login`'],
+    ])
+    // Reported at the partial, naming the pages it is the first mention on;
+    // the pages' later rpk ai auth login (index.adoc:361,
+    // connect-agent.adoc:108) is no longer their first.
+    expect(found[1]).toMatchObject({ pages: BOTH, note: `the first mention on ${BOTH.join(', ')}, which do not link it`, proposed: 'rpkcmd:[rpk ai auth login]' })
+  })
+
+  test('a partial no page includes is judged on its own file', () => {
+    const files = { 'modules/cli/partials/rpk-ai-upgrade-note.adoc': UPGRADE_NOTE, 'modules/cli/partials/rpk-ai-signin-troubleshooting.adoc': SIGNIN }
+    const { found } = scan('agentic-data-plane', files, { data: AI_DATA, kinds: ['rpk'] })
+    expect(at(found)).toEqual([
+      ['modules/cli/partials/rpk-ai-signin-troubleshooting.adoc', 6, '`rpk ai`'],
+      ['modules/cli/partials/rpk-ai-signin-troubleshooting.adoc', 8, '`rpk ai env list`'],
+      ['modules/cli/partials/rpk-ai-signin-troubleshooting.adoc', 8, '`rpk ai auth login`'],
+      ['modules/cli/partials/rpk-ai-upgrade-note.adoc', 1, '`rpk ai upgrade`'],
+    ])
+    expect(found.every((f) => f.pages === undefined && f.note === undefined)).toBe(true)
+  })
+
+  test('--write-links converts only the mentions reported on the pages', () => {
+    const { docsDir } = scan('agentic-data-plane', ADP, { data: AI_DATA, kinds: ['rpk'], write: true, writeLinks: true })
+    const read = (file) => fs.readFileSync(path.join(docsDir, file), 'utf8')
+    expect(read('modules/cli/partials/rpk-ai-upgrade-note.adoc')).toBe(UPGRADE_NOTE)
+    expect(read('modules/cli/partials/rpk-ai-signin-troubleshooting.adoc')).toBe(SIGNIN
+      .replace('After a plugin upgrade, `rpk ai env list`', 'After a plugin upgrade, rpkcmd:[rpk ai env list]')
+      .replace('until you run `rpk ai auth login` again', 'until you run rpkcmd:[rpk ai auth login] again'))
+    // The pages' own later mentions stay as written. (--write also replaces
+    // the pages' exact xrefs, which are not mentions.)
+    expect(read('modules/cli/pages/index.adoc')).toContain('Run `rpk ai auth login` and retry.')
+    expect(read('modules/gateway/pages/connect-agent.adoc')).toContain('If the cached token has expired, `rpk ai` returns a 401. Rerun `rpk ai auth login` to refresh it.')
+  })
+
+  // docs manage/partials/authentication.adoc:1459, included by
+  // security/authentication.adoc:7 and k-authentication.adoc:8. Changed: the
+  // Kubernetes page links rpk cluster info before the include.
+  const K_AUTH_LINK = 'Check the brokers with xref:reference:rpk/rpk-cluster/rpk-cluster-info.adoc[`rpk cluster info`].'
+  const authPages = (kLines) => ({
+    'modules/manage/partials/authentication.adoc': page(AUTH_LIST),
+    'modules/manage/pages/security/authentication.adoc': page('include::manage:partial$authentication.adoc[]'),
+    'modules/manage/pages/kubernetes/security/authentication/k-authentication.adoc': page(':env-kubernetes: true', '', ...kLines, 'include::manage:partial$authentication.adoc[]'),
+  })
+
+  test('a partial two pages include, one of which links the target: reported, naming the other page', () => {
+    const { found } = scan('streaming', authPages([K_AUTH_LINK, '']), { kinds: ['rpk'] })
+    const byTarget = Object.fromEntries(found.map((f) => [f.target, f]))
+    expect(Object.keys(byTarget)).toEqual(['rpk topic create', 'rpk topic consume', 'rpk cluster info', 'rpk security acl list'])
+    expect(byTarget['rpk cluster info']).toMatchObject({ file: 'modules/manage/partials/authentication.adoc', line: 3, pages: ['modules/manage/pages/security/authentication.adoc'], note: 'the first mention on modules/manage/pages/security/authentication.adoc, which does not link it' })
+    expect(byTarget['rpk topic consume'].pages).toEqual(['modules/manage/pages/kubernetes/security/authentication/k-authentication.adoc', 'modules/manage/pages/security/authentication.adoc'])
+  })
+
+  test('the same partial, when both pages link the target: not reported', () => {
+    const files = authPages([K_AUTH_LINK, ''])
+    files['modules/manage/pages/security/authentication.adoc'] = page(K_AUTH_LINK, '', 'include::manage:partial$authentication.adoc[]')
+    expect(scan('streaming', files, { kinds: ['rpk'] }).found.map((f) => f.target)).toEqual(['rpk topic create', 'rpk topic consume', 'rpk security acl list'])
+  })
+
+  test('docs audit-logging.adoc:374: a conditional on an attribute the including page sets', () => {
+    // manage/partials/audit-logging.adoc:373-375, included by
+    // manage/pages/audit-logging.adoc:7 and k-audit-logging.adoc:6, which
+    // sets env-kubernetes. Changed: the self-managed page links rpk cluster
+    // config before the include, so only the Kubernetes page could report
+    // it, and it never shows the line.
+    const files = {
+      'modules/manage/partials/audit-logging.adoc': page('ifndef::env-cloud,env-kubernetes[]', 'Use `rpk cluster config` to configure audit logs. Some options require a cluster restart. You can verify this using `rpk cluster config status`.', 'endif::[]'),
+      'modules/manage/pages/audit-logging.adoc': page(':env-linux: true', '// tag::single-source[]', '', 'Configure with xref:reference:rpk/rpk-cluster/rpk-cluster-config.adoc[`rpk cluster config`].', '', 'include::manage:partial$audit-logging.adoc[]'),
+      'modules/manage/pages/kubernetes/security/k-audit-logging.adoc': page(':env-kubernetes: true', '', 'include::manage:partial$audit-logging.adoc[]'),
+    }
+    const { found } = scan('streaming', files, { kinds: ['rpk'] })
+    expect(at(found)).toEqual([['modules/manage/partials/audit-logging.adoc', 4, '`rpk cluster config status`']])
+    expect(found[0].pages).toEqual(['modules/manage/pages/audit-logging.adoc'])
+  })
+
+  // cloud-docs reference/pages/properties/topic-properties.adoc:8 and :34,
+  // which includes a category of the streaming partial less its deprecated
+  // properties. Changed: rpk topic create for rpk topic alter-config, which
+  // the trimmed data lacks, and the partial cut to the tag regions around
+  // its link (docs reference/partials/properties/topic-properties.adoc:1911).
+  const CLOUD_PROPS = page(
+    'Unless a property says otherwise, you can set it with `rpk topic create`, the Kafka API, or Redpanda Cloud Console. Some properties have different limits on Serverless clusters.',
+    '',
+    'include::streaming:reference:partial$properties/topic-properties.adoc[tags=category-performance-cluster;!deprecated;!exclude-from-docs]',
+  )
+  const streamingProps = (linkTag) => ({
+    streaming: {
+      'modules/reference/partials/properties/topic-properties.adoc': [
+        '// tag::category-performance-cluster[]',
+        ...(linkTag ? [`// tag::${linkTag}[]`] : []),
+        '* xref:reference:rpk/rpk-topic/rpk-topic-create.adoc[`rpk topic create`]',
+        ...(linkTag ? [`// end::${linkTag}[]`] : []),
+        '// end::category-performance-cluster[]',
+        '',
+      ].join('\n'),
+    },
+  })
+  const CLOUD_FILE = 'modules/reference/pages/properties/topic-properties.adoc'
+
+  test('cloud-docs topic-properties.adoc:8: a page whose lender partial links the target is not reported', () => {
+    expect(scan('cloud-data-platform', { [CLOUD_FILE]: CLOUD_PROPS }, { kinds: ['rpk'], lenderFiles: streamingProps() }).found).toEqual([])
+  })
+
+  test('the link in a region the include leaves out (!deprecated) does not count', () => {
+    const { found } = scan('cloud-data-platform', { [CLOUD_FILE]: CLOUD_PROPS }, { kinds: ['rpk'], lenderFiles: streamingProps('deprecated') })
+    expect(at(found)).toEqual([[CLOUD_FILE, 3, '`rpk topic create`']])
+    // Judged only as itself: no note.
+    expect(found[0].note).toBeUndefined()
+  })
+
+  test('an include of a component the scan did not load is not followed', () => {
+    const { found } = scan('cloud-data-platform', { [CLOUD_FILE]: CLOUD_PROPS }, { kinds: ['rpk'], lenders: ['connect'] })
+    expect(at(found)).toEqual([[CLOUD_FILE, 3, '`rpk topic create`']])
+  })
+
+  // rp-connect-docs components/pages/rate_limits/about.adoc:18-31, and the
+  // cloud-docs stub that includes its single-source region. Changed: the
+  // kafka input for http_client, which the trimmed data lacks.
+  const ABOUT = [
+    '= Rate Limits',
+    '// tag::single-source[]',
+    '',
+    'ifndef::env-cloud[]',
+    'And most components that hit external services have a field `rate_limit` for specifying a rate limit resource to use, identified by the `label` field. For example, if we wanted to use our `foobar` rate limit with an xref:components:inputs/kafka.adoc[`kafka`] input it would look like this:',
+    'endif::[]',
+    'ifdef::env-cloud[]',
+    'And most components that hit external services have a field `rate_limit` for specifying a rate limit resource to use, identified by the `label` field. For example, if we wanted to use our `foobar` rate limit with a `kafka` input it would look like this:',
+    'endif::[]',
+    '// end::single-source[]',
+    '',
+  ].join('\n')
+  const STUB = { 'cloud-data-platform': { 'modules/develop/pages/connect/components/rate_limits/about.adoc': '= Rate Limits\n:page-aliases: components:rate_limits/about.adoc\ninclude::connect:components:rate_limits/about.adoc[tag=single-source]\n' } }
+
+  test('rp-connect-docs rate_limits/about.adoc:31: a Cloud-only line on a page Cloud includes, whose link Cloud never shows', () => {
+    const { found } = scan('connect', { 'modules/components/pages/rate_limits/about.adoc': ABOUT }, { kinds: ['connect'], lenderFiles: STUB })
+    expect(at(found)).toEqual([['modules/components/pages/rate_limits/about.adoc', 8, '`kafka` input']])
+    expect(found[0].pages).toEqual(['cloud-data-platform:modules/develop/pages/connect/components/rate_limits/about.adoc'])
+  })
+
+  test('the same page with no Cloud checkout: judged as today, and the file links the input', () => {
+    expect(scan('connect', { 'modules/components/pages/rate_limits/about.adoc': ABOUT }, { kinds: ['connect'], lenders: ['streaming'] }).found).toEqual([])
   })
 })
 

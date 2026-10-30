@@ -417,6 +417,41 @@ function scanConnect ({ docsDir, registry, files: only, write = false, writeLink
   }
   const isHistorical = (relative) => HISTORICAL_RX.test(relative) || shared.RELEASES_RX.test(relative) || HISTORICAL_CONNECT_RX.test(relative)
 
+  // The components and Bloblang calls a line of a file names: Bloblang calls
+  // only in Connect content, never in the SQL reference, whose functions
+  // share Bloblang names, and never the target of the file's own page, in
+  // connect or as a Cloud stub, or a partial of it
+  // (components/inputs/gateway.adoc). A file of the scanned checkout is read
+  // on the surfaces that render it; a lender's file on its own.
+  const ownPageOf = (file, m) => file.relative.endsWith(`/${m.mention === 'connect-component' ? m.target : `bloblang/${m.mention === 'bloblang-function' ? 'functions' : 'methods'}`}.adoc`)
+  const mentionsIn = (file) => {
+    const own = file.repo === 0
+    const bloblangToo = (own ? ownComponent === 'connect' : file.component === 'connect') || /(?:^|\/)(?:connect|rpcn|redpanda-connect)[^/]*\//.test(file.relative)
+    const surfacesAt = (index, ctxLine) => {
+      if (!own) return [{ component: file.component, version: file.version, cloud: Boolean(file.cloud) }]
+      let surfaces = links.surfacesOf(file.relative, index).filter((s) => !s.unknown)
+      if (ctxLine.cloudExcluded) surfaces = surfaces.filter((s) => !s.cloud)
+      if (ctxLine.qualifier === 'ifdef::env-cloud') surfaces = surfaces.filter((s) => s.cloud)
+      // A file no page in the scan renders is still the scanned component's.
+      if (!surfaces.length && !ctxLine.qualifier) surfaces = [{ component: links.component, version: links.version, cloud: cloudSurface }]
+      return surfaces
+    }
+    return (index, line, ctxLine) => mentions.connectMentions(line, { data, types, catalog: links.catalog, surfaces: surfacesAt(index, ctxLine), bloblangToo: bloblangToo && !SQL_REFERENCE_RX.test(file.relative) })
+      .filter((m) => !ownPageOf(file, m))
+  }
+  const judge = links
+    ? mentions.mentionJudge({
+      pages: links.pages,
+      collect: (file) => mentions.collectMentions(file.text, { cloudSurface: file.repo === 0 ? cloudSurface : Boolean(file.cloud), lineMentions: mentionsIn(file) }),
+      linkedOn: (file, line) => {
+        const linked = mentions.connectLinked(line, { data, types })
+        return [...linked.components, ...linked.bloblang]
+      },
+      historical: isHistorical,
+      ownPage: ownPageOf,
+    })
+    : undefined
+
   // Examples files, walked on their own.
   for (const relative of shared.walkFiles(docsDir, { exclude: EXAMPLE_EXCLUDE, extensions: ['.yaml', '.yml'], only, include: (r) => /^modules\/[^/]+\/examples\//.test(r) })) {
     files++
@@ -458,29 +493,18 @@ function scanConnect ({ docsDir, registry, files: only, write = false, writeLink
       ? [...linkFindings(line, { index, relative, registry, links, ctx: ctxLine, historical, connectContent: !SQL_REFERENCE_RX.test(relative) }), ...mentionLine(index, line, ctxLine)]
       : [])
 
-    // Unlinked mentions: the first of each component and Bloblang call, in
-    // a file that links it nowhere, never in release, upgrade or migration
-    // notes or on the target's own page. Bloblang calls only in Connect content, never in
-    // the SQL reference, whose functions share Bloblang names.
+    // Unlinked mentions: the first of each component and Bloblang call on a
+    // page that links it nowhere, never in release, upgrade or migration
+    // notes or on the target's own page.
     const mentionsOn = Boolean(links) && !historical && !(links.skip && links.skip.has(relative))
-    const linked = mentionsOn ? mentions.connectLinked(original, { data, types }) : undefined
-    const firstMention = mentionsOn ? mentions.firstMentions(new Set([...linked.components, ...linked.bloblang])) : undefined
     const noMention = mentionsOn ? mentions.skippedLines(original.split('\n')) : undefined
-    const bloblangToo = ctx.connectContext && !SQL_REFERENCE_RX.test(relative)
-    // The target's own page, in connect or as a Cloud stub, or a partial of
-    // it (components/inputs/gateway.adoc).
-    const ownPage = (m) => relative.endsWith(`/${m.mention === 'connect-component' ? m.target : `bloblang/${m.mention === 'bloblang-function' ? 'functions' : 'methods'}`}.adoc`)
+    const fileMentions = mentionsOn ? mentionsIn({ repo: 0, relative }) : undefined
     const mentionLine = (index, line, ctxLine) => {
-      if (!firstMention || noMention.has(index) || ignored.has(index + 1)) return []
-      let surfaces = links.surfacesOf(relative, index).filter((s) => !s.unknown)
-      if (ctxLine.cloudExcluded) surfaces = surfaces.filter((s) => !s.cloud)
-      if (ctxLine.qualifier === 'ifdef::env-cloud') surfaces = surfaces.filter((s) => s.cloud)
-      // A file no page in the scan renders is still the scanned component's.
-      if (!surfaces.length && !ctxLine.qualifier) surfaces = [{ component: links.component, version: links.version, cloud: cloudSurface }]
+      if (!mentionsOn || noMention.has(index) || ignored.has(index + 1)) return []
       const out = []
-      for (const m of mentions.connectMentions(line, { data, types, catalog: links.catalog, surfaces, bloblangToo })) {
-        if (ownPage(m) || !firstMention(m)) continue
-        out.push(mentions.toFinding(m, { kind: 'connect', relative, index, line, historical }))
+      for (const m of fileMentions(index, line, ctxLine)) {
+        const verdict = judge(relative, original, index, m)
+        if (verdict) out.push(mentions.toFinding(m, { kind: 'connect', relative, index, line, historical, verdict }))
       }
       return out
     }

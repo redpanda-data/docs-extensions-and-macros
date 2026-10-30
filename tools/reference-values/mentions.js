@@ -12,9 +12,11 @@
  *   bloblang-method    `.uppercase()`, or `uppercase` method (blobl:).
  *
  * The docs link a term on its first mention in a document (the style guide's
- * rule for glossary terms), so only the first mention of a target in a file
- * is reported, and none when the file links that target anywhere, by xref or
- * by the macro. A mention is never read in a block, a heading, a block title,
+ * rule for glossary terms), so only the first mention of a target on a page
+ * is reported, and none when the page links that target anywhere, by xref
+ * or by the macro. A page is judged as it renders, with its includes
+ * (page-order.js), and a mention in a partial on the pages that include it
+ * (mentionJudge). A mention is never read in a block, a heading, a block title,
  * a description list term, a table header row, a link label or a macro, and
  * never in nav files, release, upgrade or migration notes, generated pages,
  * or the target's own page. Bloblang calls are read only in Connect
@@ -292,25 +294,107 @@ function connectMentions (line, { data, types, catalog, surfaces, bloblangToo })
 // One file
 
 /**
- * The first-mention rule for one file: a mention is reported when it is the
- * file's first of its target and the file links that target nowhere.
+ * The mentions of one file, line by line, as an engine reads them: prose and
+ * table lines outside the lines that never hold a mention, and outside the
+ * lines a // value-check: ignore comment covers.
  *
- * @param {Set<string>} linked
- * @returns {(mention: object) => boolean}
+ * @param {(index: number, line: string, ctx: object) => {key: string, start: number}[]} lineMentions
+ * @returns {Map<number, {key: string, start: number}[]>}
  */
-function firstMentions (linked) {
-  const seen = new Set()
-  return (mention) => {
-    if (linked.has(mention.key) || seen.has(mention.key)) return false
-    seen.add(mention.key)
-    return true
+function collectMentions (text, { cloudSurface = false, lineMentions }) {
+  const { walkAdoc } = require('../migrate-property-values')
+  const noMention = skippedLines(String(text).split('\n'))
+  const ignored = shared.ignoredLines(text)
+  const out = new Map()
+  const visit = (index, line, ctx) => {
+    if (noMention.has(index) || ignored.has(index + 1)) return
+    const found = lineMentions(index, line, ctx).map((m) => ({ key: m.key, start: m.start }))
+    if (found.length) out.set(index, found)
+  }
+  walkAdoc(text, {
+    onProse: (index, line, ctx) => { visit(index, ctx.inner !== undefined ? ctx.inner : line, ctx); return line },
+    onTableLine: (index, line, ctx) => { visit(index, line, ctx); return line },
+  }, { cloudSurface })
+  return out
+}
+
+/**
+ * The first-mention rule, judged on each page that renders the line: a
+ * mention is reported when, on at least one page, it is the page's first
+ * mention of its target and the page links that target nowhere. The page's
+ * lines are its own and those of every file it includes, in rendered order
+ * (page-order.js), so a partial's mention is judged where it is shown, and a
+ * page's mention after a partial that links or names the target first is
+ * not reported. A line no page renders (a partial no loaded page includes)
+ * is judged on its own file: the file's first mention of the target, in a
+ * file that links it nowhere.
+ *
+ * @param {object} opts
+ * @param {object} [opts.pages] - renderedPages(); without it every file is
+ *   judged on its own.
+ * @param {(file: object) => Map<number, {key: string, start: number}[]>} opts.collect -
+ *   The mentions of a file ({id, repo, relative, text, component, version,
+ *   cloud}; repo 0 is the scanned checkout) by line.
+ * @param {(file: object, line: string) => Iterable<string>} opts.linkedOn -
+ *   The targets a line links.
+ * @param {(relative: string) => boolean} [opts.historical] - A page whose
+ *   mentions are never reported (release, upgrade or migration notes).
+ * @param {(file: object, mention: object) => boolean} [opts.ownPage] - Whether
+ *   a page is the mention's target's own page, which never reports it.
+ * @returns {(relative: string, text: string, index: number, mention: object) => {pages: string[], note?: string}|undefined}
+ *   the verdict for a mention: undefined when it is not reported.
+ */
+function mentionJudge ({ pages, collect, linkedOn, historical = () => false, ownPage = () => false }) {
+  const found = new Map()
+  const mentionsOf = (file) => {
+    if (!found.has(file.id)) found.set(file.id, collect(file))
+    return found.get(file.id)
+  }
+  const links = new Map()
+  const linksOf = (file, index) => {
+    if (!links.has(file.id)) links.set(file.id, file.text.split('\n').map((line) => (/xref:|rpkcmd:|connect:|blobl:/.test(line) ? new Set(linkedOn(file, line)) : undefined)))
+    return links.get(file.id)[index] || []
+  }
+  const summaries = new Map()
+  // The targets a page links, and where it first mentions each.
+  const summary = (id, lines) => {
+    if (summaries.has(id)) return summaries.get(id)
+    const linked = new Set()
+    const first = new Map()
+    lines.forEach(({ file, index }, pos) => {
+      for (const key of linksOf(file, index)) linked.add(key)
+      for (const m of mentionsOf(file).get(index) || []) if (!first.has(m.key)) first.set(m.key, { pos, start: m.start })
+    })
+    const out = { linked, first }
+    summaries.set(id, out)
+    return out
+  }
+  const holds = ({ linked, first }, pos, mention) => {
+    if (linked.has(mention.key)) return false
+    const f = first.get(mention.key)
+    return !f || f.pos > pos || (f.pos === pos && f.start >= mention.start)
+  }
+  return (relative, text, index, mention) => {
+    const at = pages ? pages.rendering(relative, index) : []
+    if (!at.length) {
+      const id = `0:${String(relative)}`
+      const file = (pages && pages.files.get(id)) || { id, repo: 0, relative, text }
+      const lines = file.text.split('\n').map((line, i) => ({ file, index: i }))
+      return holds(summary(`file:${id}`, lines), index, mention) ? { pages: [] } : undefined
+    }
+    const shown = at.filter(({ page, pos }) => !historical(page.file.relative) && !ownPage(page.file, mention) && holds(summary(page.id, page.lines.map(({ file, index: i }) => ({ file: pages.files.get(file), index: i }))), pos, mention))
+    if (!shown.length) return undefined
+    const labels = [...new Set(shown.map(({ page }) => page.label))]
+    // A page judged only as itself needs no note.
+    if (labels.length === 1 && shown[0].page.file.relative === relative && shown[0].page.file.repo === 0) return { pages: [] }
+    return { pages: labels, note: `the first mention on ${labels.join(', ')}, which ${labels.length === 1 ? 'does' : 'do'} not link it` }
   }
 }
 
 /**
  * A mention as a finding.
  */
-function toFinding (mention, { kind, relative, index, line, historical }) {
+function toFinding (mention, { kind, relative, index, line, historical, verdict }) {
   const finding = {
     file: relative,
     line: index + 1,
@@ -330,7 +414,9 @@ function toFinding (mention, { kind, relative, index, line, historical }) {
     end: mention.end,
   }
   if (mention.proposed) finding.proposed = mention.proposed
-  if (mention.note) finding.note = mention.note
+  const notes = [mention.note, verdict && verdict.note].filter(Boolean)
+  if (notes.length) finding.note = notes.join('; ')
+  if (verdict && verdict.pages.length) finding.pages = verdict.pages
   return finding
 }
 
@@ -356,7 +442,8 @@ module.exports = {
   connectLinked,
   rpkMentions,
   connectMentions,
-  firstMentions,
+  collectMentions,
+  mentionJudge,
   toFinding,
   mentionCounts,
 }
