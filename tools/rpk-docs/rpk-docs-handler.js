@@ -1714,11 +1714,63 @@ function parseHelpFlags(helpText) {
 }
 
 /**
+ * Positional arguments from the Usage line of a command's cobra --help
+ * output. For `rpai agent get <name> [flags]` and the argument path
+ * ['ai', 'agent', 'get'], returns '<name>'. The line may start with the
+ * plugin's own binary name, so the command is found by the path after the
+ * plugin's name. Returns null when the line has no arguments, when the
+ * path cannot be found in it, and for urfave/cli help, whose USAGE line
+ * gives a generic [arguments...] rather than the command's arguments.
+ * @param {string} helpText
+ * @param {string[]} argPath - Argument path, plugin name first
+ * @returns {string|null}
+ */
+function parseCobraUsageArgs(helpText, argPath) {
+  const m = /^Usage:[ \t]*\n[ \t]+(\S.*)$/m.exec(helpText || '')
+  if (!m) return null
+  const sub = argPath.slice(1)
+  if (sub.length === 0) return null
+  const words = m[1].trim().split(/\s+/)
+  for (let i = 0; i + sub.length <= words.length; i++) {
+    if (sub.every((w, k) => words[i + k] === w)) {
+      // cobra prints `<path> [command]` as the first line for a command
+      // that only groups subcommands
+      const args = words.slice(i + sub.length).filter(w => w !== '[flags]' && w !== '[command]')
+      return args.length > 0 ? args.join(' ') : null
+    }
+  }
+  return null
+}
+
+/**
+ * Add positional arguments from --help to a command's usage, when the
+ * tree's usage has none. rpk puts them in --print-tree when the plugin
+ * sends a `use` line in --help-autocomplete; older rpk and plugin versions
+ * give only `rpk <path> [flags]`. A usage that already has more than the
+ * command path and [flags] is left as it is.
+ * @param {Object} cmd - The command's tree node (mutated)
+ * @param {string[]} argPath - Argument path, plugin name first
+ * @param {string} helpText - The command's --help output
+ * @returns {boolean} Whether the usage changed
+ */
+function fillUsageArgsFromHelp(cmd, argPath, helpText) {
+  const base = ['rpk', ...argPath].join(' ')
+  const usage = (cmd.usage || '').trim()
+  if (usage && usage !== base && usage !== `${base} [flags]`) return false
+  const args = parseCobraUsageArgs(helpText, argPath)
+  if (!args) return false
+  cmd.usage = `${base} ${args}${usage.endsWith('[flags]') ? ' [flags]' : ''}`
+  return true
+}
+
+/**
  * Fill in flags for plugin subtree commands by running `--help` per command.
  * Plugin subcommand nodes come from the plugin's --help-autocomplete output,
  * which carries no flag information, so without this every plugin command
  * page renders with an empty flags section. Nodes that already have flags
  * (the install/uninstall/upgrade shim compiled into rpk) are left alone.
+ * The same --help output also gives the command's positional arguments
+ * when the tree's usage leaves them out (see fillUsageArgsFromHelp).
  * Help failures are non-fatal: the affected command keeps an empty list.
  * @param {Object} node - The plugin's top-level command node (mutated)
  * @param {Function} execHelp - (argPath: string[]) => string|null, returns
@@ -1731,6 +1783,7 @@ function enrichPluginTreeWithFlags(node, execHelp) {
     if (!cmd.flags || cmd.flags.length === 0) {
       const helpText = execHelp(argPath)
       if (helpText) {
+        fillUsageArgsFromHelp(cmd, argPath, helpText)
         const flags = parseHelpFlags(helpText)
         if (flags.length > 0) {
           cmd.flags = flags
@@ -2928,6 +2981,8 @@ module.exports = {
   mergeVisibleDeprecationsIntoOverrides,
   makeLinkablePredicate,
   enrichPluginTreeWithFlags,
+  parseCobraUsageArgs,
+  fillUsageArgsFromHelp,
   fillPluginFlags,
   pluginTreeHasFlags,
   fetchLatestPluginVersion,

@@ -1410,6 +1410,35 @@ describe('vanishing Flags tripwire', () => {
   })
 })
 
+describe('command usage with positional arguments', () => {
+  const os2 = require('os')
+
+  // rpk puts a plugin's positional arguments in the usage field of
+  // --print-tree, so the Usage line comes from the tree as for rpk's own
+  // commands
+  test('renders the Usage line from the tree, positional arguments included', async () => {
+    const tmp = fs.mkdtempSync(path.join(os2.tmpdir(), 'plugin-usage-'))
+    const tree = {
+      name: 'rpk',
+      commands: [{
+        name: 'widget',
+        description: 'Widget things.',
+        usage: 'rpk widget [flags]',
+        commands: [
+          { name: 'get', description: 'Get a widget.', usage: 'rpk widget get <name> [flags]', commands: [] },
+          { name: 'list', description: 'List widgets.', usage: 'rpk widget list [flags]', commands: [] }
+        ]
+      }]
+    }
+    await generateRpkDocs({ tree, overrides: { commands: {} }, outputDir: tmp })
+    const get = fs.readFileSync(path.join(tmp, 'rpk-widget', 'rpk-widget-get.adoc'), 'utf8')
+    expect(get).toMatch(/== Usage\n\n\[,bash\]\n----\nrpk widget get <name> \[flags\]\n----/)
+    const list = fs.readFileSync(path.join(tmp, 'rpk-widget', 'rpk-widget-list.adoc'), 'utf8')
+    expect(list).toContain('----\nrpk widget list [flags]\n----')
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+})
+
 describe('env vars partial output location', () => {
   const treeWithXOptions = () => ({
     name: 'rpk',
