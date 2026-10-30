@@ -592,6 +592,89 @@ function runUnchangedLinesCase (spec, io, sabotage) {
   return finish(checks.allPass() ? 'PASS' : 'FAIL', checks, model)
 }
 
+/**
+ * A lint finding on a line the PR changed, in a declaration that also has
+ * untouched lines breaking the same rule (connect#4860's sibling). The
+ * review must fix the changed line and keep every unchanged line
+ * byte-identical, so after applying its suggestion the lint names the
+ * untouched tokens and no longer names the fixed one.
+ */
+function runChangedLineFindingCase (spec, io) {
+  const checks = makeChecks()
+  const repo = lib.materializeRepo(spec.layout)
+  const base = lib.gitInit(repo.dir)
+  lib.applyEdits(repo.targetAbs, spec.diffEdits)
+  lib.gitCommitAll(repo.dir, 'reword one description line')
+  io.saveFixture('after', repo)
+
+  // Precondition: the REAL --diff lint reports the finding on the changed
+  // line and names only the changed line's token.
+  const lint = lib.runLint(repo.dir, repo.surface, ['--diff', base])
+  const changed = lib.changedLines(repo.dir, base, repo.targetRel)
+  const finding = (lint.findings || []).find((f) => f.name === spec.target && f.file === repo.targetRel)
+  const issue = finding && finding.rules.find((r) => r.id === spec.targetRule)
+  if (!issue) return harnessError(checks, `Precondition: expected ${spec.targetRule} on ${spec.target}, got ${JSON.stringify((lint.findings || []).map((f) => [f.name, f.rules.map((r) => r.id)]))}`)
+  if (!changed.has(issue.line) || !issue.message.includes(`\`${spec.fixedToken}\``) ||
+    spec.untouchedTokens.some((t) => issue.message.includes(t))) {
+    return harnessError(checks, `Precondition: the finding must sit on a changed line and name only ${spec.fixedToken}, got line ${issue.line} (changed ${JSON.stringify([...changed])}): ${issue.message}`)
+  }
+  checks.add('precondition: real lint-strings --diff reports the finding on the changed line only', true,
+    `line ${issue.line}: ${issue.message}`)
+
+  const head = fs.readFileSync(repo.targetAbs, 'utf8')
+  const headLines = head.split('\n')
+  const keep = []
+  for (let n = finding.line_start; n <= finding.line_end; n++) {
+    if (!changed.has(n)) keep.push(headLines[n - 1])
+  }
+  const extractionBefore = lib.extractDeclarations(repo.dir, repo.surface)
+
+  const diff = lib.gitDiff(repo.dir, base)
+  const model = io.callProduction({ repo, lint, diff })
+  if (model.failed) return modelCallFailed(checks, model)
+  checkImpactFile(checks, model, false)
+  checkBlockType(checks, model, io.committable)
+  checkWrites(checks, model)
+  checkStandardsRead(checks, model)
+
+  const kept = lib.linesKept(model.comments, finding, keep)
+  checks.add(ROW_KEEPS_UNCHANGED, kept.pass && kept.judged > 0,
+    kept.judged === 0 ? 'no suggestion on the declaration' : kept.pass ? `all ${keep.length} unchanged lines kept in order` : `reworded: ${JSON.stringify(kept.dropped)}`)
+
+  const target = lib.checkSuggestionComment(model.comments, {
+    file: finding.file, lineStart: finding.line_start, lineEnd: finding.line_end, fingerprint: finding.fingerprint
+  })
+  if (!checks.add('suggestion is posted on the declaration span with its fingerprint footer',
+    target.problems.length === 0, target.problems.join('; ') || 'ok')) {
+    return finish('FAIL', checks, model)
+  }
+  const replacement = lib.parseFences(target.comment.body, 'suggestion').pop()
+  let applied
+  try {
+    applied = lib.replaceSpan(head, finding.line_start, finding.line_end, replacement)
+  } catch (err) {
+    checks.add('suggestion applies to the declaration span', false, err.message)
+    return finish('FAIL', checks, model)
+  }
+  fs.writeFileSync(repo.targetAbs, applied.text)
+  io.saveFixture('applied', repo)
+
+  // Executed, not read: the whole-repo lint after the suggestion still names
+  // the untouched tokens (the list was kept) and no longer names the fixed
+  // one (the changed line was fixed).
+  const after = lib.runLint(repo.dir, repo.surface)
+  const remaining = lib.findingsFor(after, spec.target, finding.file).filter((r) => r.id === spec.targetRule)
+  const message = remaining.map((r) => r.message).join(' ')
+  checks.add(`re-lint: \`${spec.fixedToken}\` is in inline code`, !message.includes(`\`${spec.fixedToken}\``), message || 'no finding left')
+  checks.add(`re-lint: the untouched tokens are still reported (${spec.untouchedTokens.join(', ')})`,
+    spec.untouchedTokens.every((t) => message.includes(`\`${t}\``)), message || 'no finding left')
+  const problems = lib.compareDeclExtraction(extractionBefore, lib.extractDeclarations(repo.dir, repo.surface), `${spec.target}::${(extractionBefore.find((d) => d.name === spec.target && d.file === finding.file) || { meta: {} }).meta.kind || ''}`)
+  checks.add('re-extraction: every other declaration string unchanged', problems.length === 0, problems.join('; ') || 'ok')
+
+  io.cleanup(repo.dir)
+  return finish(checks.allPass() ? 'PASS' : 'FAIL', checks, model)
+}
+
 function runNegativeAuditCase (spec, io, sabotage) {
   const checks = makeChecks()
   const repo = lib.materializeRepo(spec.layout, sabotage ? spec.sabotageEdits : [])
@@ -724,7 +807,7 @@ const SABOTAGE_ROWS = {
 // The case kinds that run the production review and so carry the must-read
 // check. The upstream and negative-audit kinds use prompts.js templates with
 // no tools, so there is no transcript to grade.
-const PRODUCTION_KINDS = ['rewrite', 'prose-review', 'negative-review']
+const PRODUCTION_KINDS = ['rewrite', 'prose-review', 'negative-review', 'changed-line-finding']
 
 const EXECUTORS = {
   rewrite: runRewriteCase,
@@ -732,6 +815,7 @@ const EXECUTORS = {
   'prose-review': runProseReviewCase,
   'negative-review': runNegativeReviewCase,
   'unchanged-lines': runUnchangedLinesCase,
+  'changed-line-finding': runChangedLineFindingCase,
   'negative-audit': runNegativeAuditCase
 }
 

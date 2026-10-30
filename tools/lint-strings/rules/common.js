@@ -118,9 +118,17 @@ const CODE_TOKEN_PATTERNS = Object.freeze([
  * Exported for tests and for the surfaces that scope the rule differently.
  */
 function findBareCodeTokens (text, name = null) {
+  return scanBareCodeTokens(text, name).map(({ token, kind }) => ({ token, kind }))
+}
+
+/**
+ * findBareCodeTokens with the offset of every bare occurrence of each token
+ * (`indices`), so diff mode can tell which occurrences a PR changed.
+ */
+function scanBareCodeTokens (text, name = null) {
   const masked = maskNonProse(String(text || ''))
   const found = []
-  const seen = new Set()
+  const byToken = new Map()
   for (const { id, re } of CODE_TOKEN_PATTERNS) {
     re.lastIndex = 0
     let match
@@ -129,12 +137,61 @@ function findBareCodeTokens (text, name = null) {
       // The declaration's own name restating itself is name-echo's finding,
       // not a markup one.
       if (name && token === name) continue
-      if (seen.has(token)) continue
-      seen.add(token)
-      found.push({ token, kind: id })
+      if (byToken.has(token)) {
+        const entry = byToken.get(token)
+        if (!entry.indices.includes(match.index)) entry.indices.push(match.index)
+        continue
+      }
+      const entry = { token, kind: id, indices: [match.index] }
+      byToken.set(token, entry)
+      found.push(entry)
     }
   }
   return found
+}
+
+/**
+ * Offsets of every match of a global regex in `text`, as issue.at entries
+ * (see ../locate.js). `group` names a capture group to skip over, for
+ * patterns that match a boundary character before the text itself.
+ */
+function offsetsOf (text, re, group = null) {
+  const at = []
+  re.lastIndex = 0
+  let match
+  while ((match = re.exec(text)) !== null) {
+    const skip = group != null ? (match[group] || '').length : 0
+    at.push({ index: match.index + skip, length: match[0].length - skip })
+    if (match[0].length === 0) re.lastIndex++
+  }
+  return at
+}
+
+/**
+ * Where a sentence that findLongSentences reported sits in the original
+ * text. Its words are matched in order across any whitespace, line breaks
+ * and indentation; a CODE or URL placeholder matches the span it replaced.
+ * Null when the sentence cannot be found, which keeps the finding.
+ */
+function locateSentence (text, sentence) {
+  const parts = sentence.split(/\s+/).filter(Boolean).map((word) =>
+    word.split(/(CODE|URL)/).map((piece) =>
+      piece === 'CODE' ? '(?:`[^`]*`|CODE)'
+        : piece === 'URL' ? '\\S*?'
+          : piece.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join(''))
+  if (parts.length === 0) return null
+  const match = new RegExp(parts.join('\\s+')).exec(String(text || ''))
+  return match ? { index: match.index, length: match[0].length } : null
+}
+
+/**
+ * A short window of `text` around offset `at`, for messages that name the
+ * occurrence a diff kept rather than the first one.
+ */
+function excerptAt (text, at, width = 60) {
+  const start = Math.max(0, at - Math.floor(width / 2))
+  const slice = text.slice(start, start + width)
+  return `${start > 0 ? '...' : ''}${slice}${start + width < text.length ? '...' : ''}`
 }
 
 /**
@@ -235,7 +292,8 @@ const COMMON_RULES = [
         // written; only all-lowercase first words are capitalization drift.
         const firstWord = text.split(/\s/, 1)[0]
         if (/[A-Z]/.test(firstWord)) return []
-        return [{ message: `Description starts with a lowercase letter: "${text.slice(0, 60)}"` }]
+        const lead = (decl.string || '').length - (decl.string || '').trimStart().length
+        return [{ message: `Description starts with a lowercase letter: "${text.slice(0, 60)}"`, at: [{ index: lead, length: firstWord.length }] }]
       }
       return []
     }
@@ -277,7 +335,10 @@ const COMMON_RULES = [
       for (const term of JARGON_TERMS) {
         const pattern = new RegExp(`\\b${term}\\b`, 'i')
         if (pattern.test(text)) {
-          issues.push({ message: `Contains internal jargon "${term}". Expand or replace it; users do not know this term.` })
+          issues.push({
+            message: `Contains internal jargon "${term}". Expand or replace it; users do not know this term.`,
+            at: offsetsOf(text, new RegExp(`\\b${term}\\b`, 'gi'))
+          })
         }
       }
       return issues
@@ -296,8 +357,11 @@ const COMMON_RULES = [
       // correcting it in the generated partial is undone by the next
       // regeneration.
       const count = (text.match(/\u2014/g) || []).length
+      const say = (n, at) => `Contains ${n} em dash${n === 1 ? '' : 'es'}. Use a comma, parentheses, or a separate sentence: "${at}"`
       return [{
-        message: `Contains ${count} em dash${count === 1 ? '' : 'es'}. Use a comma, parentheses, or a separate sentence: "${excerpt(text, '\u2014')}"`
+        message: say(count, excerpt(text, '\u2014')),
+        at: offsetsOf(text, /\u2014/g),
+        messageFor: (kept) => say(kept.length, excerptAt(text, kept[0].index))
       }]
     }
   },
@@ -318,8 +382,11 @@ const COMMON_RULES = [
         // (https://e.g.example/path) is left alone.
         const pattern = new RegExp(`(^|[^\\w.])${abbr.replace(/\./g, '\\.')}(?=$|[^\\w])`, 'i')
         if (pattern.test(text)) {
+          const say = (at) => `Uses "${abbr}". Write ${replacement} instead: "${at}"`
           issues.push({
-            message: `Uses "${abbr}". Write ${replacement} instead: "${excerpt(text, abbr)}"`
+            message: say(excerpt(text, abbr)),
+            at: offsetsOf(text, new RegExp(pattern.source, 'gi'), 1),
+            messageFor: (kept) => say(excerptAt(text, kept[0].index))
           })
         }
       }
@@ -333,9 +400,13 @@ const COMMON_RULES = [
     check: (decl) => {
       // The standard asks for one idea per sentence. A sentence this long
       // usually chains clauses a reader has to parse twice.
-      return findLongSentences(decl.string).map(({ sentence, words }) => ({
-        message: `Sentence has ${words} words. Split it into shorter sentences with one idea each: "${sentence.slice(0, 80)}${sentence.length > 80 ? '...' : ''}"`
-      }))
+      return findLongSentences(decl.string).map(({ sentence, words }) => {
+        const where = locateSentence(decl.string, sentence)
+        return {
+          message: `Sentence has ${words} words. Split it into shorter sentences with one idea each: "${sentence.slice(0, 80)}${sentence.length > 80 ? '...' : ''}"`,
+          ...(where ? { at: [where] } : {})
+        }
+      })
     }
   },
   {
@@ -359,16 +430,20 @@ const COMMON_RULES = [
       // A surface whose generator formats some code values itself declares
       // which (convention.auto_inline_code); those are not findings there.
       const auto = (decl.convention && decl.convention.auto_inline_code) || null
-      const bare = findBareCodeTokens(decl.string, decl.name).filter((b) => !auto ||
+      const bare = scanBareCodeTokens(decl.string, decl.name).filter((b) => !auto ||
         !((auto.kinds || []).includes(b.kind) ||
           (b.kind === 'path' && (auto.path_prefixes || []).some((prefix) => b.token.startsWith(prefix)))))
       if (bare.length === 0) return []
-      const list = bare.map((b) => `\`${b.token}\``).join(', ')
+      const say = (tokens) => `Code values and field names belong in inline code: ${tokens.map((t) => `\`${t}\``).join(', ')}. Wrap each in backticks, which render as inline code in both AsciiDoc and Markdown.`
       return [{
-        message: `Code values and field names belong in inline code: ${list}. Wrap each in backticks, which render as inline code in both AsciiDoc and Markdown.`
+        message: say(bare.map((b) => b.token)),
+        // Every bare occurrence, so diff mode names only the tokens on lines
+        // the PR changed.
+        at: bare.flatMap((b) => b.indices.map((index) => ({ index, length: b.token.length, label: b.token }))),
+        messageFor: (kept) => say([...new Set(kept.map((k) => k.label))])
       }]
     }
   }
 ]
 
-module.exports = { COMMON_RULES, JARGON_TERMS, MAX_SENTENCE_WORDS, isNameEcho, tokenize, findBareCodeTokens, findLongSentences, maskNonProse }
+module.exports = { COMMON_RULES, JARGON_TERMS, MAX_SENTENCE_WORDS, isNameEcho, tokenize, findBareCodeTokens, scanBareCodeTokens, findLongSentences, locateSentence, maskNonProse }

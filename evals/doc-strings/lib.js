@@ -56,6 +56,14 @@ const SURFACE_LAYOUT = {
   },
   'connect-input': { tree: CONNECT_TREE, target: 'internal/impl/azure/input_thing.go', surface: 'connect' },
   'connect-common': { tree: CONNECT_TREE, target: 'internal/impl/azure/common.go', surface: 'connect' },
+  // redpanda-data/connect#4860: a long input Description whose == Metadata
+  // list names fields without inline code, added to the connect tree.
+  'connect-oracledb': {
+    tree: CONNECT_TREE,
+    files: [{ from: path.join(LINT_FIXTURES, 'connect-changed-lines', 'input.go'), to: 'internal/impl/oracledb/input.go' }],
+    target: 'internal/impl/oracledb/input.go',
+    surface: 'connect'
+  },
   // rpk topic delete's help text before the change in streaming-enterprise
   // PR 461; the case commits the after side (delete.head.go) on top.
   'rpk-pr461': {

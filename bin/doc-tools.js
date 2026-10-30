@@ -3110,7 +3110,7 @@ programCli
   // Read off the registry rather than restated here: a hardcoded list silently
   // went stale the moment a surface was added.
   .option('--surface <list>', `Comma-separated surfaces to lint (default: all registered). Registered: ${Object.keys(require('../tools/lint-strings').SURFACES).join(', ')}`)
-  .option('--diff <base>', 'Declaration-anchored diff mode: lint only declarations whose full span intersects lines changed in <base>...HEAD')
+  .option('--diff <base>', 'Declaration-anchored diff mode: lint only declarations whose full span intersects lines changed in <base>...HEAD, and report a finding a rule can place on a source line only when that line changed')
   .option('--format <format>', 'Output format: human or json', 'human')
   .option('--skip-rules <list>', 'Comma-separated rule ids to skip')
   .option('--only-rules <list>', 'Comma-separated rule ids to run exclusively')
