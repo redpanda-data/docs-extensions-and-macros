@@ -234,6 +234,13 @@ jobs:
       # On-request repos (review_trigger in the config): the request label to
       # remove when the run ends. Empty otherwise.
       request_label: ${{ steps.request.outputs.request_label }}
+      # When this run started (UTC), so clear_request keeps a label someone
+      # added again while it ran.
+      started_at: ${{ steps.request.outputs.started_at }}
+      # Why no review runs, in words for the writer. clear_request posts it
+      # when a request ends without a review, so removing the label is never
+      # silent. Empty when a review runs.
+      no_review_why: ${{ steps.scope.outputs.why || steps.eval.outputs.why }}
     steps:
       # The pin is checked first, without writing anything: the config that
       # says whether this repo reviews on request comes from plugin_ref.
@@ -285,6 +292,7 @@ jobs:
           EVENT_LABEL: ${{ github.event.label.name }}
         run: |
           set -euo pipefail
+          echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
           gh api "repos/$R/pulls/$PR" > "$RUNNER_TEMP/pr.json"
           CFG=.standards/.github/docs-review-config.json
           if [[ -f "$CFG" ]] && grep -q -- '--request' .standards/scripts/docs-review-scope.py 2>/dev/null; then
@@ -322,7 +330,7 @@ jobs:
           echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
           # skip: leave the PR untouched — no status, no comment, no label.
-          skip() { echo "$1"; echo "proceed=false" >> "$GITHUB_OUTPUT"; exit 0; }
+          skip() { echo "$1"; { echo "proceed=false"; echo "why=$1"; } >> "$GITHUB_OUTPUT"; exit 0; }
 
           # ── Fork PRs are never reviewed ───────────────────────────────
           # Derived HERE, from the PR object above, rather than trusted from
@@ -415,7 +423,10 @@ jobs:
                    | select(.state=="success" or .state=="failure")] | length')
           if [[ "$DONE" -gt 0 ]]; then
             echo "Review already completed for $HEAD_SHA — exiting (exactly-once)."
-            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "proceed=false"
+              echo "why=The latest commit (${HEAD_SHA:0:7}) already has a completed review: see its docs-review check. Push new commits, then ask again."
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -476,7 +487,14 @@ jobs:
           DECISION=$(grep '^decision=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2)
           if [[ "$DECISION" != "full" && "$DECISION" != "incremental" && "$DECISION" != "approve_only" ]]; then
             # skip / noop: no status, no comment, no review, no label.
-            echo "run_review=false" >> "$GITHUB_OUTPUT"
+            # Without "@": the note would notify every reviewer the reason names.
+            REASON=$(grep '^reason=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2- | tr -d '@')
+            if [[ "$DECISION" == "noop" ]]; then
+              WHY="Nothing to review: $REASON. Push new commits, then ask again."
+            else
+              WHY="Not reviewed: $REASON."
+            fi
+            { echo "run_review=false"; echo "why=$WHY"; } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -510,7 +528,7 @@ jobs:
             AGE=$(( $(date +%s) - $(date -d "$(jq -r .updated_at <<< "$CURRENT")" +%s) ))
             if (( AGE < 5400 )); then
               echo "Head $HEAD_SHA is already claimed: '$DESC' (${AGE}s ago) — exiting (exactly-once)."
-              echo "run_review=false" >> "$GITHUB_OUTPUT"
+              { echo "run_review=false"; echo "why=A review of ${HEAD_SHA:0:7} is already running; its report answers this request."; } >> "$GITHUB_OUTPUT"
               exit 0
             fi
             echo "::warning::stale claim '$DESC' (${AGE}s old) — taking over"
@@ -519,7 +537,7 @@ jobs:
           sleep 3   # let a racing writer land before the read-back
           if [[ "$(latest_claim | jq -r .description)" != "$CLAIM" ]]; then
             echo "Lost the claim race for $HEAD_SHA to another run — exiting (exactly-once)."
-            echo "run_review=false" >> "$GITHUB_OUTPUT"
+            { echo "run_review=false"; echo "why=A review of ${HEAD_SHA:0:7} is already running; its report answers this request."; } >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "run_review=true" >> "$GITHUB_OUTPUT"
@@ -1804,15 +1822,36 @@ jobs:
           # `error`, not `failure`:
           # exactly-once treats failure as a finished review, so the SHA
           # could never be retried (see aggregate-review.sh).
+          # The short report it posts carries a data block that records the
+          # unavailable review, so the gate makes the next run full. With no
+          # report, the previous one would stay the latest, and a docs-team
+          # review of this head would make a re-run a noop that never clears
+          # the error.
           if ! bash .standards/scripts/aggregate-review.sh results comment.md; then
-            echo "::warning::aggregate-review.sh could not run — no comment; error status instead"
+            echo "::warning::aggregate-review.sh could not run — a short report and an error status instead"
             {
               echo "state=error"
               echo "description=automated review unavailable, human review required"
               echo "labels="
-              echo "post_comment=false"
+              echo "post_comment=true"
             } >> "$GITHUB_OUTPUT"
-            : > comment.md
+            # Keep the earlier runs' history for the metrics script.
+            PREV_HISTORY=$(grep -oE '<!-- docs-review:data [A-Za-z0-9+/=]+ -->' prev-comment.md 2>/dev/null | head -1 \
+              | sed -E 's/^<!-- docs-review:data ([A-Za-z0-9+\/=]+) -->$/\1/' | base64 -d 2>/dev/null \
+              | jq -c 'if type == "object" then (.history // []) else [] end' 2>/dev/null) || true
+            DATA=$(jq -cn --arg head "$HEAD_SHA" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg mode "$MODE" \
+              --argjson prev "${PREV_HISTORY:-[]}" \
+              '{v: 1, head: $head, state: "error", at: $at, mode: $mode, unavailable: ["aggregate"], blockers: [],
+                history: (($prev | if (.[-1].head // "") == $head then .[:-1] else . end)
+                          + [{head: $head, state: "error", at: $at, blockers: 0}])[-30:]}')
+            {
+              echo "<!-- docs-review:comment -->"
+              echo "## 📋 Docs review: ⚠️ Automated review unavailable: review by hand before approving"
+              echo
+              echo "The report could not be built (see the workflow run). Re-run the workflow to retry."
+              echo
+              echo "<!-- docs-review:data $(printf '%s' "$DATA" | base64 | tr -d '\n') -->"
+            } > comment.md
           fi
 
       # Each run posts a new report and collapses the earlier ones as
@@ -1828,7 +1867,8 @@ jobs:
       # posts the verdict; the run shows the failure.
       # No report (nothing ran): post nothing, and collapse the earlier
       # reports, which describe an older commit and could read as a current
-      # "Ready to approve". The status carries the outcome instead.
+      # "Ready to approve". The status carries the outcome instead. A failed
+      # post leaves the previous report as the latest; the run shows why.
       - name: Post the review report and collapse the earlier ones
         continue-on-error: true
         uses: actions/github-script@v7
@@ -2030,10 +2070,22 @@ jobs:
           fi
 
   # ──────────────────────────────────────────────────────────────────────
-  # On-request repos: remove the request label when the run ends, whatever
-  # it decided (reviewed, approved, nothing new to review, or unavailable),
-  # so the label always means "a review is wanted" and adding it again asks
-  # for the next round. Not after a gate failure: the request still stands.
+  # On-request repos: remove the request label when the run has served the
+  # request (reviewed, approved, or nothing new to review), so the label
+  # always means "a review is wanted" and adding it again asks for the next
+  # round.
+  # - A request that ends without a review (already reviewed, nothing new,
+  #   a review already running, out of scope) gets a short comment saying
+  #   why, so the label never just disappears.
+  # - A label added again while this run was going is kept: the run it
+  #   started is waiting in the concurrency group, and removing the label
+  #   now would make that run read no request.
+  # - A review that ran but did not finish (unavailable: the docs-review
+  #   status is error, or still pending after a cancel) did not serve the
+  #   request, so the label stays: re-running the workflow, or the next
+  #   event on the PR, retries it.
+  # - Not after a gate failure: the request still stands, and the next
+  #   event on the PR (any event, while the label is on) retries it.
   # ──────────────────────────────────────────────────────────────────────
   clear_request:
     needs: [gate, aggregate, approve_ready]
@@ -2043,13 +2095,43 @@ jobs:
     permissions:
       issues: write
       pull-requests: write
+      statuses: read
     steps:
       - env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ inputs.pr_number }}
           R: ${{ github.repository }}
+          HEAD_SHA: ${{ needs.gate.outputs.head_sha }}
           LABEL: ${{ needs.gate.outputs.request_label }}
+          STARTED_AT: ${{ needs.gate.outputs.started_at }}
+          RUN_REVIEW: ${{ needs.gate.outputs.run_review }}
+          WHY: ${{ needs.gate.outputs.no_review_why }}
         run: |
+          set -uo pipefail
+          if [[ "$RUN_REVIEW" != "true" && -n "$WHY" ]]; then
+            {
+              echo "<!-- docs-review:request-note -->"
+              echo "**Docs review request (\`$LABEL\`):** no review ran. $WHY"
+            } > note.md
+            gh api "repos/$R/issues/$PR/comments" -F body=@note.md > /dev/null \
+              || echo "::warning::could not post the request note on $R#$PR"
+          fi
+          if [[ "$RUN_REVIEW" == "true" ]]; then
+            STATE=$(gh api "repos/$R/commits/$HEAD_SHA/status" \
+              --jq '[.statuses[] | select(.context=="'"$REVIEW_STATUS_CONTEXT"'")] | first | .state // ""') || STATE=""
+            if [[ "$STATE" != "success" && "$STATE" != "failure" ]]; then
+              echo "The review of ${HEAD_SHA:0:7} did not finish (docs-review status '${STATE:-none}'): keeping '$LABEL' so a re-run or the next event retries the request"
+              exit 0
+            fi
+          fi
+          # ISO 8601 UTC strings compare in time order.
+          LAST_ADDED=$(gh api --paginate "repos/$R/issues/$PR/events" \
+            | jq -s -r --arg l "$LABEL" '[.[][] | select(.event == "labeled" and .label.name == $l) | .created_at] | max // ""') \
+            || LAST_ADDED=""
+          if [[ -n "$STARTED_AT" && "$LAST_ADDED" > "$STARTED_AT" ]]; then
+            echo "'$LABEL' was added again at $LAST_ADDED, after this run started ($STARTED_AT): keeping it for the run that request started"
+            exit 0
+          fi
           ENC=$(jq -rn --arg l "$LABEL" '$l | @uri')
           gh api -X DELETE "repos/$R/issues/$PR/labels/$ENC" > /dev/null 2>&1 \
             && echo "Removed the '$LABEL' label from $R#$PR" \
