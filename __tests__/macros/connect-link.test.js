@@ -240,10 +240,16 @@ describe('former and deprecated names', () => {
       expect(warn.mock.calls[0][0]).toContain("the input 'pg_stream' is deprecated in connect-4.115.1.json from connect@unversioned; its replacement is inputs/postgres_cdc: write connect:[inputs/postgres_cdc].")
     })
 
-    test('a deprecated field names the field its description names ("Deprecated: use regexp_topics_include instead")', () => {
+    test('a deprecated field names the field its description names ("DEPRECATED: Use avro.raw_json instead.")', () => {
       const warn = warnings()
-      expect(linkOf(convert('connect:[inputs/kafka_franz.regexp_topics]')).target).toBe('connect:components:inputs/kafka_franz.adoc')
-      expect(warn.mock.calls.map((c) => c[0])).toContain("connect:[inputs/kafka_franz.regexp_topics] in modules/guides/pages/example.adoc: the Connect reference does not list 'regexp_topics' (it is deprecated in connect-4.115.1.json from connect@unversioned), so the link goes to the input page with no anchor. Its replacement is regexp_topics_include: write connect:[inputs/kafka_franz.regexp_topics_include].")
+      expect(linkOf(convert('connect:[processors/schema_registry_encode.avro_raw_json]')).target).toBe('connect:components:processors/schema_registry_encode.adoc')
+      expect(warn.mock.calls.map((c) => c[0])).toContain("connect:[processors/schema_registry_encode.avro_raw_json] in modules/guides/pages/example.adoc: the Connect reference does not list 'avro_raw_json' (it is deprecated in connect-4.115.1.json from connect@unversioned), so the link goes to the processor page with no anchor. Its replacement is avro.raw_json: write connect:[processors/schema_registry_encode.avro.raw_json].")
+    })
+
+    test('a deprecated field whose description names two fields names neither ("in favor of `regexp_topics_include` and `regexp_topics_exclude`")', () => {
+      const warn = warnings()
+      convert('connect:[inputs/kafka_franz.regexp_topics]')
+      expect(warn.mock.calls.map((c) => c[0])).toContain("connect:[inputs/kafka_franz.regexp_topics] in modules/guides/pages/example.adoc: the Connect reference does not list 'regexp_topics' (it is deprecated in connect-4.115.1.json from connect@unversioned), so the link goes to the input page with no anchor. The Connect data names no single replacement for the field.")
     })
 
     test('a current name never warns', () => {
@@ -258,7 +264,7 @@ describe('former and deprecated names', () => {
       ['connectval:[inputs/kafka_migrator.topics,type]', 'array&lt;string&gt;', "the input 'kafka_migrator' is now inputs/redpanda_migrator: the connect docs alias its page path, components:inputs/kafka_migrator.adoc, to that component's page; write connectval:[inputs/redpanda_migrator.topics,type]."],
       ['connectval:topics[type,component=inputs/kafka_migrator]', 'array&lt;string&gt;', 'write connectval:topics[type,component=inputs/redpanda_migrator].'],
       ['connectval:[inputs/kafka_franz.topics,type]', 'array&lt;string&gt;', "the input 'kafka_franz' is deprecated in connect-4.115.1.json from connect@unversioned; its replacement is inputs/redpanda: write connectval:[inputs/redpanda.topics,type]."],
-      ['connectval:[inputs/kafka_franz.regexp_topics,default]', 'false', 'the Connect reference does not list deprecated fields. Its replacement is regexp_topics_include: write connectval:[inputs/kafka_franz.regexp_topics_include,default].'],
+      ['connectval:[processors/schema_registry_encode.avro_raw_json,default]', 'false', 'the Connect reference does not list deprecated fields. Its replacement is avro.raw_json: write connectval:[processors/schema_registry_encode.avro.raw_json,default].'],
     ])('%s renders %s and warns', (input, value, message) => {
       const warn = warnings()
       const html = convert(input)

@@ -143,6 +143,11 @@
   },
   {
    "module": "components",
+   "relative": "processors/schema_registry_encode.adoc",
+   "aliases": []
+  },
+  {
+   "module": "components",
    "relative": "rate_limits/local.adoc",
    "aliases": []
   },
@@ -303,6 +308,13 @@
    "relative": "connect/components/processors/ollama_chat.adoc",
    "aliases": [
     "components:processors/ollama_chat.adoc"
+   ]
+  },
+  {
+   "module": "develop",
+   "relative": "connect/components/processors/schema_registry_encode.adoc",
+   "aliases": [
+    "components:processors/schema_registry_encode.adoc"
    ]
   },
   {

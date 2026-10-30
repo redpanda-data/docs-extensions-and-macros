@@ -355,12 +355,17 @@ function componentReplacement (catalog, data, key, name, entry) {
  * use `commit_backoff.max_elapsed_time` instead", "Deprecated in favor of
  * `address`"), as a path from the component: beside the field first, then
  * from the top. undefined when the description names none that the data has
- * and lists.
+ * and lists, or names more than one ("in favor of `regexp_topics_include`
+ * and `regexp_topics_exclude`").
  */
 function fieldReplacement (fields, segments, field) {
   if (!field || field.is_deprecated !== true) return undefined
-  const m = String(field.description || '').match(/deprecated(?:\s+in\s+favou?r\s+of|[:.,]?\s+use)\s+(?:the\s+)?`?([a-z_][\w.]*[a-z0-9_])`?/i)
+  const text = String(field.description || '')
+  const m = text.match(/deprecated(?:\s+in\s+favou?r\s+of|[:.,]?\s+use)\s+(?:the\s+)?`?([a-z_][\w.]*[a-z0-9_])`?/i)
   if (!m) return undefined
+  // "in favor of `regexp_topics_include` and `regexp_topics_exclude`" names
+  // two, so neither is the replacement.
+  if (/^\s*(?:,|and\b|or\b)\s*`?[a-z_]/i.test(text.slice(m.index + m[0].length))) return undefined
   const named = m[1].split('.')
   for (const base of [segments.slice(0, -1), []]) {
     const path = [...base, ...named]
@@ -407,7 +412,7 @@ function referenceAdvice (catalog, data, text) {
   if (resolved.field && resolved.field.is_deprecated === true) {
     const instead = fieldReplacement(fieldsOf(resolved.entry), resolved.segments, resolved.field)
     if (instead) return { kind: 'deprecated-field', ref: `${typeDir(resolved.key)}/${resolved.name}.${instead}`, field: instead, writable: true }
-    return { kind: 'deprecated-field', writable: false, why: 'the Connect data names no replacement for the field' }
+    return { kind: 'deprecated-field', writable: false, why: 'the Connect data names no single replacement for the field' }
   }
   if (resolved.entry.status !== 'deprecated') return undefined
   const replacement = componentReplacement(catalog, data, resolved.key, resolved.name, resolved.entry)
