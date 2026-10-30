@@ -1,0 +1,3 @@
+= Redpanda Connect Documentation
+
+Stand-in for the Connect home page in redpanda-data/rp-connect-docs.

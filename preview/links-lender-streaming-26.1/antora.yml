@@ -1,0 +1,7 @@
+# For the showcase build: an older version of the stand-in streaming
+# component, as a checkout of a docs version branch passed with --lender
+# would supply, so a URL pinned to /26.1/ resolves to 26.1@streaming.
+# local-macro-test-playbook.yml must not include it.
+name: streaming
+title: Streaming
+version: '26.1'
