@@ -356,6 +356,9 @@ const COMMON_RULES = [
     description: 'Code value or field name in prose without inline code',
     severity: 'warning',
     check: (decl) => {
+      // A plain-text string (convention.plain_text), such as a connect
+      // ShortDescription, cannot hold inline code: backticks show literally.
+      if (decl.convention && decl.convention.plain_text) return []
       // A surface whose generator formats some code values itself declares
       // which (convention.auto_inline_code); those are not findings there.
       const auto = (decl.convention && decl.convention.auto_inline_code) || null
