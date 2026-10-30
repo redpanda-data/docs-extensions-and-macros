@@ -3453,12 +3453,15 @@ programCli
  * block or YAML, and only when the line renders the same visible text before
  * and after through the real macros; an exact rpk xref, in prose or a table
  * cell, becomes rpkcmd:[...], and an exact Connect xref connect:[...] or
- * blobl:[...]. It also reports unlinked mentions: the first mention in a
- * file of an rpk command in inline code (`rpk topic create`), a Connect
- * component named with its type (`kafka_franz` input, kafka_franz input) or,
- * in Connect content, a Bloblang call (`now()`, `.uppercase()`, `uppercase`
- * method), when the file links it nowhere and rpkcmd:, connect: or blobl:
- * would link it. Never in blocks, headings, titles, table header rows, link
+ * blobl:[...]. It also reports unlinked mentions: the first mention on a
+ * page, as it renders with its includes, of an rpk command in inline code
+ * (`rpk topic create`), a Connect component named with its type
+ * (`kafka_franz` input, kafka_franz input) or, in Connect content, a
+ * Bloblang call (`now()`, `.uppercase()`, `uppercase` method), when the page
+ * links it nowhere and rpkcmd:, connect: or blobl: would link it. A mention
+ * in a partial is reported at the partial when one page that includes it
+ * shows it that way, and a partial no loaded page includes is judged on its
+ * own. Never in blocks, headings, titles, table header rows, link
  * labels, nav files, release, upgrade or migration notes, generated pages
  * or the target's own page. They fail only at --fail-on links, and --write
  * turns them into links only with --write-links, keeping the text as
