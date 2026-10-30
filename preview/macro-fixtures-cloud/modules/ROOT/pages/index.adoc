@@ -85,6 +85,18 @@ a link in an rpk description goes to the page `rpkcmd:` would link.
 
 rpkval::[rpk cloud mcp stdio,description]
 
+The block forms below render rpk help that links docs.redpanda.com URLs. This
+component has no page for either target, and a Cloud page links only Cloud
+pages.
+
+rpkval::[rpk connect test,description]
+
+* You should see "Unit Testing" on the last line as plain text with no link, and a log warning that names the `/redpanda-connect/configuration/unit_testing` URL.
+
+rpkval::[rpk cluster storage restore start,description]
+
+* You should see `<unknown description>` and a log warning that the command is self-managed only, so its whole-cluster-restore URL never reaches a Cloud page.
+
 [[connect-links-on-cloud]]
 == Connect links on Cloud
 

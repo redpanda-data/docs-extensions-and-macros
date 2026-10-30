@@ -1,0 +1,4 @@
+= Unit Testing
+
+Stand-in for the rp-connect-docs page that the `rpk connect test` help links
+by its legacy `/redpanda-connect/` URL, so the showcase build publishes it.

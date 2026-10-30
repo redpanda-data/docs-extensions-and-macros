@@ -72,6 +72,27 @@ paragraph followed by a literal block:
 
 rpkval::[rpk security acl list,examples]
 
+[[rpk-description-urls]]
+=== Docs URLs in rpk descriptions
+
+rpk's help links some pages with docs.redpanda.com URLs. The descriptions
+below are that help, as the fixture carries it. The macro maps each URL to a
+page as the `url-to-xref` extension does, then links it as it links any other
+target in a description.
+
+rpkval::[rpk cluster storage restore start,description]
+
+* You should see "Whole Cluster Restore" in the last sentence as a link to the `streaming` stand-in page, not a URL.
+* You should see the sentence period after that link, outside it.
+
+rpkval::[rpk connect test,description]
+
+* You should see "Unit Testing" on the last line as a link to the `connect` stand-in page, not the `/redpanda-connect/` URL.
+
+rpkval::[rpk cluster connections list,description]
+
+* You should see the Admin API URL unchanged, as a plain URL link, and no warning for it in the log.
+
 == rpk placeholders
 
 * Must show `<unknown default>` and log description-default (the description

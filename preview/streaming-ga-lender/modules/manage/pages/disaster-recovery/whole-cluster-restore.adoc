@@ -1,0 +1,5 @@
+= Whole Cluster Restore
+:page-aliases: manage:whole-cluster-restore.adoc
+
+Stand-in for the docs page that the `rpk cluster storage restore start` help
+links by URL, so the showcase build publishes that URL's page.

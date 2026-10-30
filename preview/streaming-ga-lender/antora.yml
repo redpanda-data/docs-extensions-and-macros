@@ -6,7 +6,8 @@
 # the same role with little more than the files Cloud actually reads: the GA
 # properties and rpk attachments macro-fixtures-cloud validates against, and
 # a few stand-in rpk reference pages (no nav) for rpkcmd: to link, one of
-# which macro-fixtures-cloud includes as cloud-docs stubs do.
+# which macro-fixtures-cloud includes as cloud-docs stubs do, and a stand-in
+# for the page an rpk description links by docs URL.
 name: streaming
 title: Streaming GA data (lender-only fixture)
 version: '26.2'
