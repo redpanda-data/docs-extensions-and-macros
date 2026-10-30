@@ -663,12 +663,17 @@ function runChangedLineFindingCase (spec, io) {
   // the untouched tokens (the list was kept) and no longer names the fixed
   // one (the changed line was fixed).
   const after = lib.runLint(repo.dir, repo.surface)
-  const remaining = lib.findingsFor(after, spec.target, finding.file).filter((r) => r.id === spec.targetRule)
-  const message = remaining.map((r) => r.message).join(' ')
+  // Read messages off the raw result: findingsFor keeps only id and severity.
+  const message = (after.findings || [])
+    .filter((f) => f.name === spec.target && f.file === finding.file)
+    .flatMap((f) => f.rules)
+    .filter((r) => r.id === spec.targetRule)
+    .map((r) => r.message)
+    .join(' ')
   checks.add(`re-lint: \`${spec.fixedToken}\` is in inline code`, !message.includes(`\`${spec.fixedToken}\``), message || 'no finding left')
   checks.add(`re-lint: the untouched tokens are still reported (${spec.untouchedTokens.join(', ')})`,
     spec.untouchedTokens.every((t) => message.includes(`\`${t}\``)), message || 'no finding left')
-  const problems = lib.compareDeclExtraction(extractionBefore, lib.extractDeclarations(repo.dir, repo.surface), `${spec.target}::${(extractionBefore.find((d) => d.name === spec.target && d.file === finding.file) || { meta: {} }).meta.kind || ''}`)
+  const problems = lib.compareDeclExtraction(extractionBefore, lib.extractDeclarations(repo.dir, repo.surface), `${spec.target}::${spec.targetKind || ''}`)
   checks.add('re-extraction: every other declaration string unchanged', problems.length === 0, problems.join('; ') || 'ok')
 
   io.cleanup(repo.dir)

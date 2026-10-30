@@ -304,6 +304,9 @@ const CASES = [
     description: 'A connect Description whose changed line names a field without inline code; the review must fix that line and keep the untouched == Metadata list',
     layout: 'connect-oracledb',
     target: 'oracledb_cdc',
+    // A component's summary and description share its name; the description
+    // is the declaration this suggestion may change.
+    targetKind: 'description',
     targetRule: 'missing-inline-code',
     diffEdits: [{
       find: 'The input reads the redo log and emits one message per row change.',
