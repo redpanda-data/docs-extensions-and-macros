@@ -1379,6 +1379,41 @@ function applyTextTransformationsToExamples(text, customTransformations) {
 }
 
 /**
+ * Apply one replacement rule, skipping any match that starts inside a code
+ * span or crosses a span boundary. Rules run in sequence, so a span one rule
+ * creates ('trace list -o json' -> `trace list -o json`) is still bare text
+ * to the next rule, which would otherwise nest a span inside it (`-o json`).
+ * A match that covers a whole span (like "`rpk foo`") still applies.
+ * @param {string} text
+ * @param {RegExp} regex
+ * @param {string} replacement - Replacement string ($&, $1..$99, $<name>, $$)
+ * @returns {string}
+ */
+function replaceOutsideCodeSpans(text, regex, replacement) {
+  return text.replace(regex, (...args) => {
+    const named = typeof args[args.length - 1] === 'object' ? args.pop() : undefined
+    const whole = args.pop()
+    const offset = args.pop()
+    const [match, ...groups] = args
+    const ticksBefore = (whole.slice(0, offset).match(/`/g) || []).length
+    const ticksIn = (match.match(/`/g) || []).length
+    if (ticksBefore % 2 === 1 || ticksIn % 2 === 1) return match
+    return replacement.replace(/\$(\$|&|<([^>]*)>|(\d\d?))/g, (token, kind, name, num) => {
+      if (kind === '$') return '$'
+      if (kind === '&') return match
+      if (name !== undefined) return named ? (named[name] ?? '') : token
+      let n = parseInt(num, 10)
+      if (n > groups.length && num.length === 2) {
+        n = parseInt(num[0], 10)
+        if (n >= 1 && n <= groups.length) return (groups[n - 1] ?? '') + num[1]
+        return token
+      }
+      return n >= 1 && n <= groups.length ? (groups[n - 1] ?? '') : token
+    })
+  })
+}
+
+/**
  * Format description by adding backticks around flags and code
  * @param {string} desc - Description text
  * @param {Object} [customTransformations] - Optional custom text transformations from overrides
@@ -1479,6 +1514,16 @@ function formatDescription(desc, customTransformations = null, options = {}) {
     return placeholder
   })
 
+  // Single-quoted JSON arguments ('{"topic":"oncall"}') are one literal.
+  // Protect each whole, as a passthrough span so AsciiDoc leaves its quotes
+  // alone; otherwise double-quote rules in the overrides turn each key and
+  // value into its own code span, and the result is no longer JSON.
+  preProcessed = preProcessed.replace(/'(?:\{"|\[["{])[^'\n]*[}\]]'/g, (match) => {
+    const placeholder = `__INLINE_CODE_${inlineCode.length}__`
+    inlineCode.push(`\`+${match}+\``)
+    return placeholder
+  })
+
   // === STEP 3: Apply remaining text transformations ===
   // Apply text transformations from overrides (textTransformations.replacements)
   // These are applied AFTER protecting code blocks so they don't affect code content
@@ -1493,7 +1538,7 @@ function formatDescription(desc, customTransformations = null, options = {}) {
       try {
         const flags = rule.flags || 'g'
         const regex = new RegExp(rule.pattern, flags)
-        preProcessed = preProcessed.replace(regex, rule.replacement)
+        preProcessed = replaceOutsideCodeSpans(preProcessed, regex, rule.replacement)
       } catch (err) {
         console.warn(`⚠ Invalid replacement pattern: ${rule.pattern}`)
         if (rule.description) console.warn(`  Description: ${rule.description}`)
@@ -1726,8 +1771,9 @@ function formatDescription(desc, customTransformations = null, options = {}) {
     // Even indices are outside backticks, odd indices are inside
     if (i % 2 === 0) {
       // Outside backticks - apply flag wrapping
-      // Include =value when present (e.g., --format=json, --var=KEY=VALUE)
-      return part.replace(/(?<!rpk\s)(--[a-z][-a-z0-9]*(?:=[^\s,;.)\]]+)?)/gi, '`$1`')
+      // Include =value when present (e.g., --format=json, --var=KEY=VALUE),
+      // and every segment of a dotted name (--local-config.a.b=false)
+      return part.replace(/(?<!rpk\s)(--[a-z][-a-z0-9]*(?:\.[a-z][-a-z0-9]*)*(?:=[^\s,;.)\]]+)?)/gi, '`$1`')
     } else {
       // Inside backticks - don't modify
       return part
@@ -1854,6 +1900,14 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   // e.g., "`rpk cluster status`." → "`rpk cluster status`"
   // Only consume trailing spaces, not newlines (to preserve paragraph breaks)
   result = result.replace(/^(`[^`]+`)\.[ \t]*$/gm, '$1')
+
+  // A placeholder left in the output means a span was captured inside
+  // another one and never restored, and the text around it is lost. Fail
+  // the generation instead of publishing it.
+  const leaked = result.match(/__(?:EARLY_CODE_BLOCK|CODE_BLOCK|INLINE_CODE|XREF)_\d+__/)
+  if (leaked) {
+    throw new Error(`formatDescription left placeholder ${leaked[0]} unrestored in: ${JSON.stringify(desc)}`)
+  }
 
   return result
 }
