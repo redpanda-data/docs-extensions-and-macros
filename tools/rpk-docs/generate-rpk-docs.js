@@ -1781,8 +1781,11 @@ function formatDescription(desc, customTransformations = null, options = {}) {
     if (i % 2 === 0) {
       // Outside backticks - apply flag wrapping
       // Include =value when present (e.g., --format=json, --var=KEY=VALUE),
-      // and every segment of a dotted name (--local-config.a.b=false)
-      return part.replace(/(?<!rpk\s)(--[a-z][-a-z0-9]*(?:\.[a-z][-a-z0-9]*)*(?:=[^\s,;.)\]]+)?)/gi, '`$1`')
+      // and every segment of a dotted name (--local-config.a.b=false).
+      // A flag family glob (--teams-*) is one span too, as a passthrough:
+      // two plain spans holding * render the text between them in bold.
+      return part.replace(/(?<!rpk\s)(--[a-z][-a-z0-9]*(?:\.[a-z][-a-z0-9]*)*(?:=[^\s,;.)\]]+)?)(?<=-)(\*)|(?<!rpk\s)(--[a-z][-a-z0-9]*(?:\.[a-z][-a-z0-9]*)*(?:=[^\s,;.)\]]+)?)/gi,
+        (match, globFlag, star, flag) => globFlag ? `\`+${globFlag}*+\`` : `\`${flag}\``)
     } else {
       // Inside backticks - don't modify
       return part

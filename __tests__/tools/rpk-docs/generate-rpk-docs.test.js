@@ -731,6 +731,13 @@ Specify a time range.`
       expect(result).not.toContain('`--format`=json')
     })
 
+    test('a flag family glob is one span, as a passthrough', () => {
+      // rpk ai trigger help. Two plain spans holding * render the text
+      // between them in bold, and the old pattern left the * outside.
+      const result = formatDescription('The kind (--teams-* or\n--cron-*) is fixed at creation.')
+      expect(result).toBe('The kind (`+--teams-*+` or\n`+--cron-*+`) is fixed at creation.')
+    })
+
     test('handles complex flag=value patterns', () => {
       const input = 'Example: --var=KEY=VALUE for environment'
       const result = formatDescription(input)
