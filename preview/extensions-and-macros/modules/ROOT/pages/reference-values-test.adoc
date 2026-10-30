@@ -49,10 +49,11 @@ description, with its backticks as inline code:
 rpkval::[rpk topic create,description]
 
 The block form below must render the `rpk cloud mcp stdio` description with
-its xref to `rpk cloud mcp install` as a link. The xref names
-`reference:rpk/...` in the page's own component, and this component has no rpk
-reference pages, so here the link is unresolved and the build logs that the
-xref target was not found:
+its xref to `rpk cloud mcp install` as a link to the `macro-fixtures-cloud`
+stand-in page, the only page for that command in this build, as
+rpkcmd:[rpk cloud mcp install] links it. The description names
+`reference:rpk/...` in the component its data came from, and this component
+has no rpk reference pages, so the macro rewrites the link for this page:
 
 rpkval::[rpk cloud mcp stdio,description]
 

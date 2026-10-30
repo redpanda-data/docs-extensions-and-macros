@@ -131,7 +131,7 @@ With Connect 4.114.0 data, that renders "defaults to `1024`", "Valid strategies:
 * Address array fields without `[]`: `sasl.mechanism`, not `sasl[].mechanism`.
 * Don't wrap `values` in backticks: each value already renders as inline code.
 * The field names are the same in every value macro, so `introduced`, `values`, `description` and `required` (or its opposite, `optional`) work wherever the data has them. A field a macro doesn't support logs a warning that lists the ones it does.
-* A description longer than one paragraph needs the block form, on a line of its own: `rpkval::[rpk topic create,description]`, `connectval::[inputs/kafka_franz.consumer_group,description]`. rpk descriptions render as AsciiDoc, as the rpk reference renders them, and rpk examples render exactly as written; Connect text renders as AsciiDoc, with its links rewritten for the page it appears on.
+* A description longer than one paragraph needs the block form, on a line of its own: `rpkval::[rpk topic create,description]`, `connectval::[inputs/kafka_franz.consumer_group,description]`. rpk descriptions render as AsciiDoc, as the rpk reference renders them, and rpk examples render exactly as written; Connect text renders as AsciiDoc. The links in rpk descriptions and Connect text are rewritten for the page they appear on, and a link the build has no page for renders as text with a warning.
 
 Both come with `@redpanda-data/docs-extensions-and-macros/macros/prop`. If a value can't be verified, the page shows `<unknown default>` and the build log says why. See link:REFERENCE.adoc#rpkval[the macros reference], and link:REFERENCE.adoc#value-fields[the table of every field].
 

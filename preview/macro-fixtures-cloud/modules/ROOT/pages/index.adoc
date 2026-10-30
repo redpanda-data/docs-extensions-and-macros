@@ -79,6 +79,12 @@ as the cloud-docs stubs do, and no page for `rpk cluster info`.
   log must say this component has no page for it and that a Cloud page links
   only Cloud pages.
 
+The block form below must render the `rpk cloud mcp stdio` description with
+its link to `rpk cloud mcp install` going to this component's stand-in page:
+a link in an rpk description goes to the page `rpkcmd:` would link.
+
+rpkval::[rpk cloud mcp stdio,description]
+
 [[connect-links-on-cloud]]
 == Connect links on Cloud
 

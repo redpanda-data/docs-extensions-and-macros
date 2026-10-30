@@ -641,7 +641,7 @@ rpkval::[rpk topic create,description]
 rpkval::[rpk security acl list,examples]
 ----
 
-It renders an open block with the roles `rpk-value` and `rpk-value-<field>`. A description is parsed as AsciiDoc, as the rpk reference renders it: code, links, and `----` listings render as they do there. Examples render literally (<<value-text>>).
+It renders an open block with the roles `rpk-value` and `rpk-value-<field>`. A description is parsed as AsciiDoc, as the rpk reference renders it: code, links, and `----` listings render as they do there, with its links rewritten for the page it renders on. Examples render literally (<<value-text>>).
 
 === Formatting
 
@@ -1414,6 +1414,14 @@ A Connect string was written for its component's page in `connect:components`, s
 * A target the rendering page's build has no page for renders as its label, unlinked, with a warning. A Cloud reader is never linked to the self-managed docs.
 
 A Bloblang string was written for the functions or methods page in `connect:guides`, so `bloblval:` rewrites its links the same way, with that page in place of the component's page and `guides` in place of `components`: `<<round,...>>` in a method description links `guides:bloblang/methods.adoc#round`.
+
+An rpk description was written for its command's reference page in the component the rpk data came from (`streaming`, for a Cloud or Agentic Data Plane page too), so its links are relative to that page. `rpkval:` and `rpkval::` rewrite them for the page that renders the description:
+
+* An xref to a command's page, such as `xref:reference:rpk/rpk-cloud/rpk-cloud-mcp-install.adoc[]`, links the page `rpkcmd:` would link for that command (<<rpkcmd>>), fragment included: the page's own component first, so a Cloud page links its Cloud stub and an Agentic Data Plane page its own `rpk` page, then `streaming`, then any other component with the page. A Cloud page links only Cloud pages.
+* `xref:./rpk-redpanda-tune-list.adoc[]` names a page beside the command's page, and is resolved there first. `<<disk_irq,...>>` is an anchor on the command's page, and links it, unless the description renders on that page.
+* Any other xref with no component, such as `xref:manage:security/authorization/acl.adoc[]`, stays as written when the rendering page's component version has the page, and is otherwise qualified with the data's component and version (`26.2@streaming:manage:...`). On a Cloud page it is never qualified.
+* An xref that names a component, such as `xref:connect:streaming:about.adoc[]`, stays as written.
+* A target the rendering page's build has no page for renders as its label, unlinked, with a warning, as for Connect strings. An unlinked target with an empty label renders as the command in backticks, or as the page title or file name.
 
 Property descriptions and examples link with module-qualified xrefs that resolve wherever the property reference itself renders, so they are not rewritten.
 
