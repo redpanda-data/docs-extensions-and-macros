@@ -264,3 +264,80 @@ describe('skips and suppression', () => {
     expect(result.kinds.rpk.skippedGenerated).toBe(1)
   })
 })
+
+// Aliases and deprecated commands in prose spans and macros. Each line is
+// from docs 2eb070ff, against the aliases and deprecated_commands of the
+// rpk-v26.2.2 sample (rpk cluster info has the aliases status and metadata;
+// rpk redpanda admin is replaced by rpk cluster).
+describe('old names in prose spans and macros', () => {
+  const names = (list) => list.filter((f) => f.check === 'name')
+
+  test('docs broker-admin.adoc:28: `rpk cluster metadata` is an alias, not writable beside the rpk cluster info row of :25', () => {
+    const table = ['|===', '| Command | Address flag required', '', '| `rpk cluster info`', '| `-X brokers`', '', '| `rpk cluster metadata`', '| `-X brokers`', '|===']
+    const [f] = names(findings({ 'modules/get-started/pages/broker-admin.adoc': page(table.join('\n')) }))
+    expect(f).toMatchObject({ status: 'alias', reason: 'alias', severity: 'warning', command: 'rpk cluster info', typed: 'rpk cluster metadata', written: '`rpk cluster metadata`', proposed: '`rpk cluster info`', writable: false, failing: false })
+    expect(f.note).toBe('rpk cluster metadata is an alias of rpk cluster info; rpk cluster info is already written within 6 lines, so the old name may be listed on purpose; change it by hand')
+  })
+
+  test('the same row with no rpk cluster info nearby is writable', () => {
+    const [f] = names(findings({ 'modules/get-started/pages/broker-admin.adoc': page(['|===', '| `rpk cluster metadata`', '| `-X brokers`', '|==='].join('\n')) }))
+    expect(f).toMatchObject({ status: 'alias', writable: true, proposed: '`rpk cluster info`' })
+  })
+
+  test('docs admin-addresses.adoc:16: a sentence about the names ("instead") is never writable', () => {
+    const line = 'Provide these addresses with the `—-api-urls` flag for commands related to cluster or user tasks, such as xref:reference:rpk/rpk-cluster/rpk-cluster-health.adoc[`rpk cluster health`] and xref:reference:rpk/rpk-cluster/rpk-cluster-maintenance.adoc[`rpk cluster maintenance enable <node_id>`]. Note that `rpk cluster info` and `rpk cluster metadata` instead require the xref:get-started:broker-admin.adoc[`-X brokers` flag].'
+    const list = names(findings({ 'modules/get-started/pages/admin-addresses.adoc': page(line) }))
+    expect(list.map((f) => [f.written, f.writable])).toEqual([['`rpk cluster metadata`', false]])
+    expect(list[0].note).toContain('the line is about the name itself, so --write leaves it')
+  })
+
+  test('docs admin-addresses.adoc:29: `rpk redpanda admin` is deprecated, names rpk cluster, and the line is about the deprecation', () => {
+    const [f] = names(findings({ 'modules/get-started/pages/admin-addresses.adoc': page('| `rpk redpanda admin` (deprecated in 26.2, see xref:upgrade:deprecated/index.adoc[Deprecated Features])') }))
+    expect(f).toMatchObject({ status: 'reference', reason: 'deprecated-command', severity: 'warning', command: 'rpk redpanda admin', replacement: 'rpk cluster', proposed: '`rpk cluster`', writable: false })
+  })
+
+  test('docs deprecated/index.adoc:132: a subcommand of rpk redpanda admin has no replacement of its own, so nothing is proposed', () => {
+    const [f] = names(findings({ 'modules/manage/pages/x.adoc': page('- `rpk redpanda admin brokers list` → xref:reference:rpk/rpk-cluster/rpk-cluster-info.adoc[`rpk cluster info`] with `-b --detailed --include-decommissioned`') }))
+    expect(f).toMatchObject({ reason: 'deprecated-command', command: 'rpk redpanda admin brokers', writable: false })
+    expect(f.proposed).toBeUndefined()
+    expect(f.note).toBe('rpk redpanda admin brokers is deprecated in rpk v26.2.2; the rpk data names a replacement only for rpk redpanda admin (rpk cluster), not for rpk redpanda admin brokers')
+  })
+
+  test('a deprecated command with a flag the replacement lacks is proposed, never written', () => {
+    const [f] = names(findings({ 'modules/manage/pages/x.adoc': page('Run `rpk redpanda admin --hosts`.') }))
+    expect(f).toMatchObject({ reason: 'deprecated-command', writable: false })
+    expect(f.note).toContain('its replacement, rpk cluster, has no --hosts flag, so find the equivalent by hand')
+  })
+
+  test('upgrade notes are historical: reported, never writable or failing', () => {
+    const [f] = names(findings({ 'modules/upgrade/pages/deprecated/index.adoc': page('| `rpk redpanda admin`') }, { failOn: 'any' }))
+    expect(f).toMatchObject({ reason: 'deprecated-command', writable: false, failing: false })
+  })
+
+  test.each([
+    ['rpkcmd:[rpk cluster status]', 'rpkcmd:[rpk cluster info]'],
+    ['rpkcmd:[rpk cluster status --detailed,text=the cluster]', 'rpkcmd:[rpk cluster info --detailed,text=the cluster]'],
+    ['rpkval:[rpk sec acl ls --format]', 'rpkval:[rpk security acl list --format]'],
+    ['rpkval::[rpk cluster metadata,description]', 'rpkval::[rpk cluster info,description]'],
+    ['rpkval:format[command=rpk cluster status]', 'rpkval:format[command=rpk cluster info]'],
+  ])('the macro %s uses an alias; it proposes %s', (macro, proposed) => {
+    const [f] = names(findings({ 'modules/manage/pages/x.adoc': page(macro) }))
+    expect(f).toMatchObject({ status: 'alias', written: macro, proposed, writable: true })
+  })
+
+  test('a deprecated command in a macro proposes the replacement in the same call', () => {
+    const [f] = names(findings({ 'modules/manage/pages/x.adoc': page('Run rpkcmd:[rpk redpanda admin --verbose].') }))
+    expect(f).toMatchObject({ status: 'reference', reason: 'deprecated-command', written: 'rpkcmd:[rpk redpanda admin --verbose]', proposed: 'rpkcmd:[rpk cluster --verbose]', writable: true })
+  })
+
+  test('aliases fail only at --fail-on any and links; the default level and exit code are unchanged', () => {
+    const files = { 'modules/manage/pages/x.adoc': page('Run `rpk cluster status`.') }
+    expect(scan(files).failing).toBe(0)
+    expect(scan(files, { failOn: 'any' }).failing).toBe(1)
+    expect(scan(files, { failOn: 'links' }).failing).toBe(1)
+  })
+
+  test('an alias in a shell block is an example to run, not reported', () => {
+    expect(names(findings({ 'modules/manage/pages/x.adoc': page(block('rpk cluster status')) }))).toEqual([])
+  })
+})

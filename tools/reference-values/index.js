@@ -35,6 +35,7 @@ const connectLinks = require('./connect-links')
 const { makeRenderGuard } = require('./render-check')
 const shared = require('./shared')
 const mentions = require('./mentions')
+const oldNames = require('./names')
 const { renderedPages } = require('./page-order')
 
 const KINDS = ['properties', 'rpk', 'connect']
@@ -139,6 +140,9 @@ function failsAt (kind, f, level) {
   if (f.status === 'reference' && f.severity === 'error') return true
   if (f.status === 'example-output' && f.verdict === 'stale' && kind !== 'properties') return true
   if (level !== 'any' && level !== 'links') return false
+  // An alias renders and links correctly, so it fails only when every
+  // finding is asked for, as a deprecated name does.
+  if (f.status === oldNames.STATUS) return true
   if (['exact', 'equivalent', 'unset'].includes(f.status)) return true
   if (f.status === 'reference' && f.severity === 'warning') return true
   return false
@@ -218,7 +222,7 @@ function recount (r) {
     const extra = {}
     for (const key of ['examplesRestatingDefault', 'yamlRestatingDefault']) if (key in r.counts) extra[key] = r.counts[key]
     const links = 'linksBroken' in r.counts ? { ...require('./rpk').linkCounts(r.findings), ...mentions.mentionCounts(r.findings) } : {}
-    return { ...require('./rpk').countFindings(r.findings), ...extra, ...links }
+    return { ...require('./rpk').countFindings(r.findings), ...extra, ...links, ...oldNames.nameCounts(r.findings) }
   }
   const counts = { exact: 0, equivalent: 0, mismatch: 0, unset: 0, unverifiable: 0, autoSafe: 0, 'example-output': 0, exampleStale: 0 }
   for (const f of r.findings) {
@@ -411,7 +415,7 @@ function describe (kind, f) {
     return `${f.property} ${f.field}: ${f.status}${f.note ? ` (${f.note})` : ''}`
   }
   const what = f.target || (kind === 'rpk' ? `${f.command || 'rpk'}${f.flag ? ` --${f.flag}` : ''}` : `${f.componentType || ''}/${f.component || ''}${f.fieldPath ? ` ${f.fieldPath}` : ''}`)
-  if (f.status === 'reference') return `${what}: ${f.reason}${f.note ? `: ${f.note}` : ''}`
+  if (f.status === 'reference' || f.status === oldNames.STATUS) return `${f.check === 'name' ? f.written : what}: ${f.reason}${f.note ? `: ${f.note}` : ''}${f.proposed ? `; ${f.applied ? 'applied' : f.writable ? '--write writes' : 'proposed'} ${f.proposed}` : ''}`
   if (f.status === mentions.STATUS) return `${f.written}: ${f.mention} with no link on the page${f.proposed ? `; ${f.proposed} links ${f.dataValue}` : ''}`
   if (f.status === 'example-output') return `${what}: comment says ${f.written}, data ${f.dataValue}`
   return `${what}: written ${f.written}, data ${f.dataValue}`
@@ -422,14 +426,14 @@ function describe (kind, f) {
  */
 function renderMarkdown (result) {
   const out = ['# Reference values report', '']
-  out.push('Statuses: **reference** is a command, flag, component or field that does not exist in the data (error) or is deprecated (warning), or an xref to an rpk, Connect component or Bloblang page or anchor that does not exist (broken-link, error) or whose label names something else (link-label-mismatch, warning). **exact** is what the macro renders, or an xref rpkcmd:[...], connect:[...] or blobl:[...] would render the same; **auto-safe** is an exact match `--write` may apply. **equivalent** is the same value worded differently. **mismatch** differs from the data. **unset** states a value the data leaves empty. **unverifiable** could not be compared, with the reason. **example output** is a value in a block or YAML comment, never written: **stale** when it differs from the data. **unlinked mention** is the first mention on a page of an rpk command, Connect component or Bloblang call in inline code, on a page that links it nowhere, which rpkcmd:[...], connect:[...] or blobl:[...] would link; it fails only at --fail-on links, and --write converts it only with --write-links.', '')
+  out.push('Statuses: **reference** is a command, flag, component or field that does not exist in the data (error) or is deprecated (warning), or an xref to an rpk, Connect component or Bloblang page or anchor that does not exist (broken-link, error) or whose label names something else (link-label-mismatch, warning). **exact** is what the macro renders, or an xref rpkcmd:[...], connect:[...] or blobl:[...] would render the same; **auto-safe** is an exact match `--write` may apply. **equivalent** is the same value worded differently. **mismatch** differs from the data. **unset** states a value the data leaves empty. **unverifiable** could not be compared, with the reason. **example output** is a value in a block or YAML comment, never written: **stale** when it differs from the data. **unlinked mention** is the first mention on a page of an rpk command, Connect component or Bloblang call in inline code, on a page that links it nowhere, which rpkcmd:[...], connect:[...] or blobl:[...] would link; it fails only at --fail-on links, and --write converts it only with --write-links. **alias** is an rpk command written with an alias, or a Connect component written with the name its page now aliases, in a macro or a prose span: it renders and links correctly, fails only at --fail-on any or links, and `--write` rewrites it to the main name when it is writable, as it rewrites a deprecated name whose data names one replacement.', '')
   out.push(`Checked ${result.component}@${result.version || 'unversioned'} at --fail-on ${result.failOn}: ${result.failing} failing finding(s), ${result.ignored} ignored by \`// value-check: ignore\`.`, '')
-  out.push('| Kind | Dataset | Surface | Files | Findings | Failing | Reference errors | Reference warnings | Mismatch | Exact (auto-safe) | Equivalent | Unset | Unverifiable | Example output (stale) | Unlinked mentions |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|')
+  out.push('| Kind | Dataset | Surface | Files | Findings | Failing | Reference errors | Reference warnings | Mismatch | Exact (auto-safe) | Equivalent | Unset | Unverifiable | Example output (stale) | Unlinked mentions | Aliases |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|')
   for (const [kind, r] of Object.entries(result.kinds)) {
     const c = r.counts || {}
-    out.push(`| ${kind} | ${mdEscape(r.dataset)} | ${r.surface} | ${r.files} | ${r.findings.length} | ${r.findings.filter((f) => f.failing).length} | ${c.referenceErrors || 0} | ${c.referenceWarnings || 0} | ${c.mismatch || 0} | ${c.exact || 0} (${c.autoSafe || 0}) | ${c.equivalent || 0} | ${c.unset || 0} | ${c.unverifiable || 0} | ${c['example-output'] || 0} (${c.exampleStale || 0}) | ${c.unlinkedMentions || 0} |`)
+    out.push(`| ${kind} | ${mdEscape(r.dataset)} | ${r.surface} | ${r.files} | ${r.findings.length} | ${r.findings.filter((f) => f.failing).length} | ${c.referenceErrors || 0} | ${c.referenceWarnings || 0} | ${c.mismatch || 0} | ${c.exact || 0} (${c.autoSafe || 0}) | ${c.equivalent || 0} | ${c.unset || 0} | ${c.unverifiable || 0} | ${c['example-output'] || 0} (${c.exampleStale || 0}) | ${c.unlinkedMentions || 0} | ${c.aliases || 0} |`)
   }
-  for (const [kind, why] of Object.entries(result.skipped)) out.push(`| ${kind} | skipped: ${mdEscape(why)} | | | | | | | | | | | | | |`)
+  for (const [kind, why] of Object.entries(result.skipped)) out.push(`| ${kind} | skipped: ${mdEscape(why)} | | | | | | | | | | | | | | |`)
 
   const failing = failingFindings(result, result.failOn)
   out.push('', `## Failing (${failing.length})`, '')
@@ -459,9 +463,16 @@ function renderMarkdown (result) {
     if (refs.length) {
       out.push('| File:line | Severity | Reason | Where | Note |', '|---|---|---|---|---|')
       for (const f of [...errors, ...warnings]) {
-        const where = kind === 'rpk' ? `${f.command || ''}${f.token ? ` ${f.token}` : ''}` : `${f.componentType || ''}/${f.component || ''}${f.fieldPath ? ` ${f.fieldPath}` : ''}`
-        out.push(`| ${mdEscape(`${f.file}:${f.line}`)} | ${f.severity} | ${f.reason} | ${mdEscape(where)} | ${mdEscape(f.note)} |`)
+        const where = f.check === 'name' ? f.written : kind === 'rpk' ? `${f.command || ''}${f.token ? ` ${f.token}` : ''}` : `${f.componentType || ''}/${f.component || ''}${f.fieldPath ? ` ${f.fieldPath}` : ''}`
+        const proposal = f.proposed ? `; ${f.applied ? 'applied' : f.writable ? '--write writes' : 'proposed'} \`${f.proposed}\`` : ''
+        out.push(`| ${mdEscape(`${f.file}:${f.line}`)} | ${f.severity} | ${f.reason} | ${mdEscape(where)} | ${mdEscape(`${f.note || ''}${proposal}`)} |`)
       }
+    } else out.push('None.')
+    const aliases = r.findings.filter((f) => f.status === oldNames.STATUS)
+    out.push('', `### Aliases and former names (${aliases.length}, ${aliases.filter((f) => f.writable || f.applied).length} writable)`, '')
+    if (aliases.length) {
+      out.push('| File:line | Written | Main name | Proposed |', '|---|---|---|---|')
+      for (const f of aliases) out.push(`| ${mdEscape(`${f.file}:${f.line}`)} | ${mdEscape(f.written)} | ${mdEscape(f.command || (f.componentType ? `${f.componentType}/${f.component}` : ''))} | ${f.applied ? 'applied: ' : ''}${f.proposed ? `\`${mdEscape(f.proposed)}\`` : ''}${f.writable || f.applied ? '' : ` (not written: ${mdEscape(f.note)})`} |`)
     } else out.push('None.')
     const section = (title, list, cols) => {
       out.push('', `### ${title} (${list.length})`, '')
@@ -512,7 +523,7 @@ function annotations (result) {
   for (const [kind, r] of Object.entries(result.kinds)) {
     for (const f of r.findings) {
       if (f.failing) lines.push(`::error file=${f.file},line=${f.line}::${clean(`${kind} ${f.status}: ${describe(kind, f)}`)}`)
-      else if (f.status === 'reference' && f.severity === 'warning') lines.push(`::warning file=${f.file},line=${f.line}::${clean(`${kind} ${f.reason}: ${describe(kind, f)}`)}`)
+      else if ((f.status === 'reference' && f.severity === 'warning') || f.status === oldNames.STATUS) lines.push(`::warning file=${f.file},line=${f.line}::${clean(`${kind} ${f.reason}: ${describe(kind, f)}`)}`)
     }
   }
   return lines
@@ -565,6 +576,7 @@ function runCli (options, { log = console.log, error = console.error } = {}) {
     const refs = kind === 'properties' ? '' : `${c.referenceErrors} reference error(s), ${c.referenceWarnings} warning(s), `
     log(`${kind}: ${r.dataset} (${r.surface}), ${r.files} files: ${refs}${c.mismatch} mismatch, ${c.unset} unset, ${c.exact} exact (${c.autoSafe} auto-safe), ${c.equivalent} equivalent, ${c.unverifiable} unverifiable, ${c['example-output'] || 0} example output (${c.exampleStale || 0} stale).`)
     if ('linksBroken' in c) log(`${kind} links: ${c.linksBroken} broken, ${c.linksMislabeled} mislabeled, ${c.linksReplaceable} replaceable with ${kind === 'connect' ? 'connect:[...] or blobl:[...]' : 'rpkcmd:[...]'}, ${c.linksNotLoaded} not checked (${kind === 'connect' ? 'not rendered by, or not in, this scan' : 'component not loaded'}).`)
+    if ('aliases' in c) log(`${kind} old names: ${c.aliases} alias(es), ${c.deprecatedNames} deprecated name(s) in macros and prose spans, ${c.namesWritable} writable${options.write ? `, ${c.namesApplied} rewritten` : ''}.`)
     if ('unlinkedMentions' in c) log(`${kind} unlinked mentions: ${c.unlinkedMentions}${Object.keys(c.unlinkedMentionsByKind).length ? ` (${Object.entries(c.unlinkedMentionsByKind).map(([k, n]) => `${n} ${k}`).join(', ')})` : ''}.`)
   }
   for (const [kind, why] of Object.entries(result.skipped)) log(`${kind}: skipped (${why})`)
@@ -575,7 +587,7 @@ function runCli (options, { log = console.log, error = console.error } = {}) {
   if (options.annotations === 'github') for (const line of annotations(result)) log(line)
   if (options.write) {
     const changed = Object.values(result.kinds).reduce((n, r) => n + (r.changedFiles || 0), 0)
-    log(`Replaced auto-safe exact matches${options.writeLinks ? ' and linked unlinked mentions' : ''} in ${changed} file(s).`)
+    log(`Replaced auto-safe exact matches and writable old names${options.writeLinks ? ' and linked unlinked mentions' : ''} in ${changed} file(s).`)
   }
   log(`Report: ${mdPath}`)
   log(`check (${result.failOn}): ${result.failing} failing finding(s)`)

@@ -35,6 +35,7 @@ const rpkValues = require('../../extension-utils/rpk-values')
 const rpkLinks = require('../../extension-utils/rpk-links')
 const shared = require('./shared')
 const mentions = require('./mentions')
+const oldNames = require('./names')
 
 // rpk redpanda start forwards flags it does not know to Seastar, so they are
 // not rpk's to validate. A stopgap until the generator emits passThroughFlags
@@ -176,6 +177,8 @@ function parseInvocation (tree, tokens, deprecatedCommands, { isScrapedPath = ()
   const nodes = []
   const names = []
   const flags = []
+  // The token each command name was written as, which may be an alias.
+  const commandTokens = []
   let problem
   let positional = false
   const findAny = (name, short) => {
@@ -243,6 +246,7 @@ function parseInvocation (tree, tokens, deprecatedCommands, { isScrapedPath = ()
       node = child
       nodes.push(child)
       names.push(child.name)
+      commandTokens.push(t)
       continue
     }
     // cobra's own help command, on every command with subcommands.
@@ -253,7 +257,26 @@ function parseInvocation (tree, tokens, deprecatedCommands, { isScrapedPath = ()
     }
     const deprecated = rpkValues.deprecatedEntry(deprecatedCommands, [...names, word])
     if (deprecated) {
-      problem = { kind: 'deprecated-command', token: t, typed: [...names, word], entry: deprecated }
+      // The deprecated command is the longest deprecated_commands key the
+      // words that follow extend it to (rpk redpanda admin brokers); the
+      // tokens after it are its flags and arguments.
+      const following = []
+      for (const next of tokens.slice(i + 1)) {
+        if (next.type !== 'word' || next.quoted || isFlagToken(next.value) || isOpaque(next.value)) break
+        following.push(next)
+      }
+      let entry = deprecated
+      let words = [t]
+      for (let n = following.length; n >= 1; n--) {
+        const longer = rpkValues.deprecatedEntry(deprecatedCommands, [...names, word, ...following.slice(0, n).map((x) => x.value)])
+        if (longer && longer.key.split(' ').length === names.length + 2 + n) {
+          entry = longer
+          words = [t, ...following.slice(0, n)]
+          break
+        }
+      }
+      const last = tokens.indexOf(words[words.length - 1])
+      problem = { kind: 'deprecated-command', token: t, typed: [...names, ...words.map((x) => x.value)], entry, commandTokens: [...commandTokens, ...words], after: tokens.slice(last + 1) }
       break
     }
     const children = Array.isArray(node.commands) ? node.commands : []
@@ -272,7 +295,7 @@ function parseInvocation (tree, tokens, deprecatedCommands, { isScrapedPath = ()
     }
     positional = true
   }
-  return { names, nodes, node, flags, problem }
+  return { names, nodes, node, flags, problem, commandTokens }
 }
 
 /**
@@ -305,7 +328,189 @@ function resolveInvocationFlag (registry, parsed, f) {
   return { status: 'unknown' }
 }
 
-const cmd = (names) => ['rpk', ...names].join(' ')
+const cmd = (words) => ['rpk', ...words].join(' ')
+
+/**
+ * Whether flags and words after a deprecated command fit its replacement:
+ * the flags the replacement lacks, and whether a word other than a flag's
+ * value follows.
+ */
+function afterDeprecated (registry, replacement, tokens) {
+  const tree = registry.data.tree
+  const flags = []
+  let extra = false
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i]
+    if (t.type === 'op') break
+    if (t.quoted || !isFlagToken(t.value) || /^-\d/.test(t.value)) {
+      extra = true
+      continue
+    }
+    const long = t.value.startsWith('--')
+    const name = long ? t.value.slice(2).split('=')[0] : t.value[1]
+    flags.push(name)
+    const found = replacement && (replacement.names.length ? rpkValues.findFlag(replacement.node, name, tree) : rpkValues.findFlag(tree, name, tree))
+    const inline = long ? t.value.includes('=') : t.value.length > 2
+    if (found && found.flag.type !== 'bool' && !inline) i++
+  }
+  return { flags, extra }
+}
+
+// How far around a line an old name's main name counts as already written.
+const NEARBY_LINES = 6
+
+// A placeholder (<topic>) as an opaque word of the same length, so token
+// offsets stay offsets into the line.
+const opaquePlaceholders = (text) => text.replace(/<\w[^<>`]*>/g, (m) => `{${'p'.repeat(m.length - 2)}}`)
+
+/**
+ * The old names on a prose line: backticked rpk spans and rpkcmd:/rpkval:
+ * macros that write a command with an alias (status alias) or name a
+ * deprecated command (reference warning), each with what to write instead
+ * and whether --write may (names.js).
+ *
+ * @returns {object[]} findings, with start, end and proposed for a rewrite.
+ */
+function nameFindings (line, { index, relative, registry, version, nearby = line, historical = false }) {
+  const tree = registry.data.tree
+  const deprecated = registry.data.deprecated_commands
+  const out = []
+  const base = { file: relative, line: index + 1, text: line.trim(), kind: 'rpk', check: 'name' }
+  const allowed = oldNames.lineAllowsRewrite(line)
+  const ranges = mentions.linkRanges(line)
+  const inMacro = (start, end) => ranges.some(([a, b]) => start >= a && end <= b)
+  // The main or replacement name already written near the line: a list or
+  // table that names both (broker-admin.adoc lists rpk cluster info and its
+  // alias rpk cluster metadata), where a rewrite would repeat a row.
+  const nearbyHas = (command) => new RegExp(`${command.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-]|[ \\t]+[a-z])`).test(nearby)
+  const decide = (f, writable, why, main) => {
+    if (!f.proposed) return { ...f, writable: false }
+    if (!writable) return { ...f, writable: false, note: why ? `${f.note}; ${why}` : f.note }
+    if (historical) return { ...f, writable: false, note: `${f.note}; release, upgrade and migration notes record the names of their time, so --write leaves them` }
+    if (!allowed.writable) return { ...f, writable: false, note: `${f.note}; ${allowed.note}` }
+    if (main && nearbyHas(main)) return { ...f, writable: false, note: `${f.note}; ${main} is already written within ${NEARBY_LINES} lines, so the old name may be listed on purpose; change it by hand` }
+    return { ...f, writable: true }
+  }
+  const aliasFinding = ({ start, end, written, proposed, typed, main, macro }) => decide({
+    ...base,
+    status: oldNames.STATUS,
+    reason: 'alias',
+    severity: 'warning',
+    command: main,
+    typed,
+    token: typed,
+    written,
+    proposed,
+    target: macro ? undefined : main,
+    rename: { before: written, after: proposed, links: 'same' },
+    start,
+    end,
+    note: `${rpkLinks.aliasNote(typed.split(' ').slice(1), main.split(' ').slice(1))}`,
+  }, true, undefined, main)
+  const deprecatedFinding = ({ start, end, written, proposed, typed, entry, advice, macro }) => decide({
+    ...base,
+    status: 'reference',
+    reason: 'deprecated-command',
+    severity: 'warning',
+    command: typed,
+    token: typed,
+    written,
+    proposed: advice.writable ? proposed : undefined,
+    replacement: advice.replacement,
+    target: macro ? undefined : typed,
+    rename: { before: written, after: proposed, links: 'any' },
+    start,
+    end,
+    note: `${entry.key} is deprecated in rpk ${version}${!advice.replacement ? (entry.deprecatedMessage ? `: ${entry.deprecatedMessage}` : '') : advice.writable ? `; its replacement is ${advice.replacement}` : `; ${advice.why}`}`,
+  }, advice.writable, undefined, advice.replacement)
+
+  // Backticked spans.
+  for (const span of shared.backtickSpans(line)) {
+    if (!/^rpk\s/.test(span.text) || inMacro(span.start, span.end)) continue
+    const tokens = shellTokens(opaquePlaceholders(span.text))
+    const written = line.slice(span.start, span.end)
+    const at = span.innerStart - span.start
+    const swap = (tokens, words) => {
+      // The span with the tokens from first to last replaced by words.
+      const first = tokens[0]
+      const last = tokens[tokens.length - 1]
+      return written.slice(0, at + first.start) + words + written.slice(at + last.start + last.raw.length)
+    }
+    for (const start of invocationStarts(tokens)) {
+      const parsed = parseInvocation(tree, tokens.slice(start + 1), deprecated, { isScrapedPath: (n) => rpkValues.isScraped(registry, n) })
+      const p = parsed.problem
+      if (p && p.kind === 'not-a-command') continue
+      const aliased = parsed.commandTokens.filter((t, i) => t.value !== parsed.names[i])
+      if (aliased.length) {
+        const words = parsed.commandTokens.map((t, i) => (t.value !== parsed.names[i] ? parsed.names[i] : t.raw))
+        const region = parsed.commandTokens
+        // Keep whatever sits between command words (rarely a flag) as written.
+        let replaced = ''
+        region.forEach((t, i) => {
+          replaced += words[i]
+          if (i < region.length - 1) replaced += span.text.slice(t.start + t.raw.length, region[i + 1].start)
+        })
+        out.push(aliasFinding({
+          start: span.start,
+          end: span.end,
+          written,
+          proposed: swap(region, replaced),
+          typed: cmd(parsed.commandTokens.map((t) => t.value)),
+          main: cmd(parsed.names),
+        }))
+      }
+      if (p && p.kind === 'deprecated-command') {
+        const keyNames = String(p.entry.key).split(' ').slice(1)
+        const replacement = rpkLinks.replacementCommand(registry, p.entry.replacement)
+        const after = afterDeprecated(registry, replacement, p.after)
+        const advice = rpkLinks.deprecationAdvice({ registry, entry: p.entry, typed: keyNames, flags: after.flags, extra: after.extra })
+        out.push(deprecatedFinding({
+          start: span.start,
+          end: span.end,
+          written,
+          proposed: advice.names ? swap(p.commandTokens, advice.names.join(' ')) : undefined,
+          typed: cmd(p.typed),
+          entry: p.entry,
+          advice,
+        }))
+      }
+    }
+  }
+
+  // rpkcmd:[...], rpkval:[...] and rpkval::[...]: the command line before
+  // the first comma.
+  const macroCall = (start, end, written, tokens, rewrite, flag) => {
+    const resolved = rpkValues.resolveCommand(tree, tokens, deprecated)
+    if (resolved.ok && resolved.aliases.length) {
+      out.push(aliasFinding({ start, end, written, proposed: rewrite({ words: resolved.aliases }), typed: cmd(tokens.slice(0, resolved.names.length)), main: cmd(resolved.names), macro: true }))
+    }
+    if (!resolved.ok && resolved.kind === 'deprecated-command') {
+      const keyNames = String(resolved.entry.key).split(' ').slice(1)
+      const advice = rpkLinks.deprecationAdvice({ registry, entry: resolved.entry, typed: keyNames, flags: flag ? [flag.replace(/^-+/, '')] : [], extra: resolved.typed.length > keyNames.length })
+      out.push(deprecatedFinding({ start, end, written, proposed: advice.names ? rewrite({ span: { from: 0, to: keyNames.length, names: advice.names } }) : undefined, typed: cmd(resolved.typed), entry: resolved.entry, advice, macro: true }))
+    }
+  }
+  for (const m of line.matchAll(/\b(rpkcmd|rpkval)(::?)\[((?:\\\]|[^\]])*)\]/g)) {
+    const commandLine = m[3].split(',')[0]
+    const rest = m[3].slice(commandLine.length)
+    const parsed = rpkValues.parseCommandLine(commandLine)
+    if (parsed.extra.length) continue
+    macroCall(m.index, m.index + m[0].length, m[0], parsed.tokens, (how) => {
+      const rewritten = rpkLinks.rewriteCommandWords(commandLine, how)
+      return rewritten === undefined ? undefined : `${m[1]}${m[2]}[${rewritten}${rest}]`
+    }, parsed.flag)
+  }
+  for (const m of line.matchAll(/\brpkval:(-{0,2}[\w.-]+)\[([^\]]*)\]/g)) {
+    const attr = m[2].match(/(^|,)(\s*command=)("[^"]*"|[^,\]]*)/)
+    if (!attr) continue
+    const valueStart = attr.index + attr[1].length + attr[2].length
+    macroCall(m.index, m.index + m[0].length, m[0], rpkValues.commandTokens(attr[3]), (how) => {
+      const rewritten = rpkLinks.rewriteCommandWords(attr[3], how)
+      return rewritten === undefined ? undefined : `rpkval:${m[1]}[${m[2].slice(0, valueStart)}${rewritten}${m[2].slice(valueStart + attr[3].length)}]`
+    }, `--${m[1].replace(/^-+/, '')}`)
+  }
+  return out.sort((a, b) => a.start - b.start)
+}
 
 /**
  * The rpk engine. Scans one checkout against one rpk registry.
@@ -410,12 +615,14 @@ function scanRpk ({ docsDir, registry, files: only, write = false, writeLinks = 
     }
 
     // Parse one invocation's tokens and report reference problems.
-    const checkInvocation = (tokens, lineOfToken, { example = false } = {}) => {
+    const checkInvocation = (tokens, lineOfToken, { example = false, prose = false } = {}) => {
       const parsed = parseInvocation(tree, tokens, registry.data.deprecated_commands, { isScrapedPath: (names) => rpkValues.isScraped(registry, names) })
       const command = cmd(parsed.names)
       if (parsed.problem) {
         const p = parsed.problem
         const typed = cmd(p.typed)
+        // A prose span's deprecated command is a name finding (nameFindings).
+        if (p.kind === 'deprecated-command' && prose) return parsed
         if (p.kind === 'deprecated-command') {
           const why = p.entry.replacement || p.entry.deprecatedMessage
           reference(lineOfToken(p.token), { reason: 'deprecated-command', severity: 'warning', command: typed, token: p.token.value, note: `${p.entry.key} is deprecated in rpk ${version}${why ? `: ${why}` : ''}` })
@@ -489,9 +696,19 @@ function scanRpk ({ docsDir, registry, files: only, write = false, writeLinks = 
       // Reference check of backticked rpk spans.
       for (const span of shared.backtickSpans(line)) {
         if (!/^rpk\s/.test(span.text)) continue
-        checkLineInvocations(span.text, () => index)
+        checkLineInvocations(span.text, () => index, { prose: true })
       }
-      if (ctx.hidden) return line
+      // Aliases and deprecated commands in spans and macros.
+      const named = nameFindings(line, { index, relative, registry, version, nearby: lines.slice(Math.max(0, index - NEARBY_LINES), index + NEARBY_LINES + 1).join('\n'), historical })
+      if (ctx.hidden) {
+        for (const f of named) {
+          delete f.start
+          delete f.end
+          delete f.rename
+          fileFindings.push(f)
+        }
+        return line
+      }
       const claims = table ? tableClaims(index, line, ctx, registry) : proseClaims(index, line, ctx)
       let rewritten = line
       // A self-managed file's ifdef::env-cloud[] content renders only where
@@ -502,6 +719,7 @@ function scanRpk ({ docsDir, registry, files: only, write = false, writeLinks = 
       const lineFindings = linkScope && !(links.skip && links.skip.has(relative))
         ? linkFindings(line, { index, relative, registry, links: linkScope, historical })
         : []
+      lineFindings.push(...named)
       for (const claim of claims) {
         const finding = classifyClaim(claim, { index, line, ctx, sightings, registry, allFlags, historical, tagged, cloudSurface, relative, table, sectionStart: sectionStartOf(index) })
         if (finding) lineFindings.push(finding)
@@ -514,15 +732,18 @@ function scanRpk ({ docsDir, registry, files: only, write = false, writeLinks = 
       }
       let appliedFrom = Infinity
       for (const f of [...lineFindings].sort((a, b) => b.start - a.start)) {
-        if (write && (f.autoSafe || (writeLinks && f.linkable)) && !ignored.has(index + 1)) {
+        if (write && (f.autoSafe || f.writable || (writeLinks && f.linkable)) && !ignored.has(index + 1)) {
           // Two findings over the same text: the later one wins.
           if (f.end > appliedFrom) continue
           const candidate = rewritten.slice(0, f.start) + f.proposed + rewritten.slice(f.end)
-          if (renderGuard && !renderGuard(relative, rewritten, candidate)) {
+          if (renderGuard && !renderGuard(relative, rewritten, candidate, f.rename)) {
             f.autoSafe = false
             f.applied = false
             if (f.linkable) f.linkable = false
-            f.note = 'render-changed'
+            if (f.writable) {
+              f.writable = false
+              f.note = `${f.note}; render-changed`
+            } else f.note = 'render-changed'
             continue
           }
           rewritten = candidate
@@ -533,6 +754,7 @@ function scanRpk ({ docsDir, registry, files: only, write = false, writeLinks = 
       for (const f of lineFindings) {
         delete f.start
         delete f.end
+        delete f.rename
         fileFindings.push(f)
       }
       return rewritten
@@ -563,7 +785,7 @@ function scanRpk ({ docsDir, registry, files: only, write = false, writeLinks = 
     skippedGenerated,
     skippedStubs,
     findings,
-    counts: { ...tally, examplesRestatingDefault: counts.examplesRestatingDefault, ...(links ? { ...linkCounts(findings), ...mentions.mentionCounts(findings) } : {}) },
+    counts: { ...tally, examplesRestatingDefault: counts.examplesRestatingDefault, ...(links ? { ...linkCounts(findings), ...mentions.mentionCounts(findings) } : {}), ...oldNames.nameCounts(findings) },
     changedFiles,
   }
 }
@@ -1156,6 +1378,7 @@ function countFindings (findings) {
 
 module.exports = {
   scanRpk,
+  nameFindings,
   shellTokens,
   invocationStarts,
   parseInvocation,

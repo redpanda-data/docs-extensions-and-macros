@@ -200,6 +200,66 @@ describe('check-reference-values --write', () => {
   })
 })
 
+// Aliases and deprecated names (names.js): --write rewrites them to the main
+// or replacement name, and the render guard allows only that change.
+describe('--write and old names', () => {
+  const repoWith = (files) => {
+    const docs = tmp()
+    put(docs, 'antora.yml', "name: streaming\nversion: '26.2'\n")
+    put(docs, 'modules/reference/attachments/rpk-v26.2.2.json', fs.readFileSync(path.join(FIXTURES, 'rpkval', 'rpk-v26.2.2-sample.json')))
+    // The reference pages the macros link, as docs has them.
+    for (const page of ['rpk-cluster/rpk-cluster.adoc', 'rpk-cluster/rpk-cluster-info.adoc', 'rpk-security/rpk-security-acl-list.adoc']) put(docs, `modules/reference/pages/rpk/${page}`, '= Page\n')
+    for (const [file, content] of Object.entries(files)) put(docs, file, content)
+    return docs
+  }
+  const read = (docs, file) => fs.readFileSync(path.join(docs, file), 'utf8')
+
+  test('rewrites writable aliases and deprecated names, keeps the rest of each call, and leaves the others as written', () => {
+    const files = {
+      // docs broker-admin.adoc:28, alone in its table.
+      'modules/get-started/pages/alias.adoc': ['= A', '', '|===', '| `rpk cluster metadata`', '| `-X brokers`', '|===', ''].join('\n'),
+      'modules/get-started/pages/macros.adoc': ['= M', '', 'Run rpkcmd:[rpk cluster status --detailed,text=the cluster check] and read rpkval:[rpk sec acl ls --format].', '', 'Old: rpkcmd:[rpk redpanda admin --verbose].', ''].join('\n'),
+      // docs admin-addresses.adoc:16 and :29: about the names, never written.
+      'modules/get-started/pages/about.adoc': ['= B', '', 'Note that `rpk cluster info` and `rpk cluster metadata` instead require the `-X brokers` flag.', '', '| `rpk redpanda admin` (deprecated in 26.2, see xref:upgrade:deprecated/index.adoc[Deprecated Features])', ''].join('\n'),
+      // A flag rpk cluster does not have.
+      'modules/get-started/pages/flag.adoc': ['= C', '', 'Run `rpk redpanda admin --hosts`.', ''].join('\n'),
+    }
+    const docs = repoWith(files)
+    const result = scanAll({ docsDir: docs, kinds: ['rpk'], kindsExplicit: true, write: true })
+    expect(read(docs, 'modules/get-started/pages/alias.adoc')).toBe(files['modules/get-started/pages/alias.adoc'].replace('`rpk cluster metadata`', '`rpk cluster info`'))
+    expect(read(docs, 'modules/get-started/pages/macros.adoc')).toBe(['= M', '', 'Run rpkcmd:[rpk cluster info --detailed,text=the cluster check] and read rpkval:[rpk security acl list --format].', '', 'Old: rpkcmd:[rpk cluster --verbose].', ''].join('\n'))
+    expect(read(docs, 'modules/get-started/pages/about.adoc')).toBe(files['modules/get-started/pages/about.adoc'])
+    expect(read(docs, 'modules/get-started/pages/flag.adoc')).toBe(files['modules/get-started/pages/flag.adoc'])
+    const named = result.kinds.rpk.findings.filter((f) => f.check === 'name')
+    expect(named.filter((f) => f.applied).map((f) => f.written).sort()).toEqual(['`rpk cluster metadata`', 'rpkcmd:[rpk cluster status --detailed,text=the cluster check]', 'rpkcmd:[rpk redpanda admin --verbose]', 'rpkval:[rpk sec acl ls --format]'].sort())
+    expect(named.filter((f) => !f.applied).map((f) => f.written).sort()).toEqual(['`rpk cluster metadata`', '`rpk redpanda admin --hosts`', '`rpk redpanda admin`'].sort())
+    // Applied findings no longer fail, even at --fail-on any.
+    expect(named.filter((f) => f.applied).every((f) => !f.failing)).toBe(true)
+  })
+
+  test('the render guard accepts only the rename: the written text\'s rendering replaced by the proposed text\'s, with the same links for an alias', () => {
+    const docs = repoWith({})
+    const comp = migrate.readComponent(docs, [PROPERTIES_KIND, RPK_KIND, CONNECT_KIND])
+    // The reference pages, as scanAll adds them, so rpkcmd: links.
+    for (const relative of ['rpk/rpk-cluster/rpk-cluster.adoc', 'rpk/rpk-cluster/rpk-cluster-info.adoc']) comp.files.push({ src: { component: 'streaming', version: '26.2', module: 'reference', family: 'page', relative } })
+    const guard = makeRenderGuard({ catalog: migrate.catalogFor([comp]), component: 'streaming', version: '26.2' })
+    expect(renderLine('Run rpkcmd:[rpk cluster status].', { catalog: migrate.catalogFor([comp]), src: { component: 'streaming', version: '26.2', module: 'x' } })).toContain('href="#26.2@streaming:reference:rpk/rpk-cluster/rpk-cluster-info.adoc"')
+    const file = 'modules/x/pages/y.adoc'
+    const alias = { before: 'rpkcmd:[rpk cluster status]', after: 'rpkcmd:[rpk cluster info]', links: 'same' }
+    expect(guard(file, 'Run rpkcmd:[rpk cluster status].', 'Run rpkcmd:[rpk cluster info].', alias)).toBe(true)
+    // Anything else on the line changing is still a change.
+    expect(guard(file, 'Run rpkcmd:[rpk cluster status].', 'Then run rpkcmd:[rpk cluster info].', alias)).toBe(false)
+    // An alias rewrite that links another page is not an alias rewrite.
+    expect(guard(file, 'Run rpkcmd:[rpk cluster status].', 'Run rpkcmd:[rpk cluster].', { ...alias, after: 'rpkcmd:[rpk cluster]' })).toBe(false)
+    // A value read through an alias renders the same value.
+    expect(guard(file, 'It is rpkval:[rpk cluster status --format].', 'It is rpkval:[rpk cluster info --format].', { before: 'rpkval:[rpk cluster status --format]', after: 'rpkval:[rpk cluster info --format]', links: 'same' })).toBe(true)
+    // A replacement that renders a placeholder is refused.
+    expect(guard(file, 'It is rpkval:[rpk redpanda admin --hosts,type].', 'It is rpkval:[rpk cluster --hosts,type].', { before: 'rpkval:[rpk redpanda admin --hosts,type]', after: 'rpkval:[rpk cluster --hosts,type]', links: 'any' })).toBe(false)
+    // Without a rename, the guard is unchanged: any visible change reverts.
+    expect(guard(file, 'Run rpkcmd:[rpk cluster status].', 'Run rpkcmd:[rpk cluster info].')).toBe(false)
+  })
+})
+
 describe('--write and // value-check: ignore', () => {
   const IGNORE = '// value-check: ignore'
 
