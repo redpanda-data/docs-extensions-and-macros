@@ -8,7 +8,7 @@
 #     exempt: the ADP docs repo (adp-docs), and the reference and rpk automations' PRs
 #     ("auto-docs:" titles and their branches);
 #   - incremental re-review: after any earlier doc review on the PR (this
-#     pipeline's report, or a review by anyone), only the commits since
+#     pipeline's report, or a docs-team review), only the commits since
 #     that review's head SHA are reviewed;
 #   - approval: a PR that passes the review is approved, with any
 #     non-blocking suggestions listed in the approval. Review feedback that
@@ -561,6 +561,7 @@ jobs:
       recheck_adoc: ${{ steps.c.outputs.recheck_adoc }}
       recheck_code: ${{ steps.c.outputs.recheck_code }}
       recheck_best_fit: ${{ steps.c.outputs.recheck_best_fit }}
+      recheck_ticket: ${{ steps.c.outputs.recheck_ticket }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -597,6 +598,7 @@ jobs:
             echo "recheck_adoc=$([[ $(prior_for adoc-review) -gt 0 ]] && echo true || echo false)"
             echo "recheck_code=$([[ $(prior_for code-review) -gt 0 ]] && echo true || echo false)"
             echo "recheck_best_fit=$([[ $(prior_for best-fit-review) -gt 0 ]] && echo true || echo false)"
+            echo "recheck_ticket=$([[ $(prior_for ticket-delta) -gt 0 ]] && echo true || echo false)"
           } >> "$GITHUB_OUTPUT"
           ADOC=$(grep -cE '\.adoc$' files.txt || true)
           JSON=$(grep -cE '\.json$' files.txt || true)
@@ -1527,12 +1529,16 @@ jobs:
     # skipped delta drops out of the report silently instead of showing
     # as unavailable. !cancelled() rather than always() so a cancelled run
     # does not start a paid job.
-    # Full reviews only: the ticket delta compares the whole PR with the
-    # ticket, so an incremental re-review (which looks at the new commits
-    # alone) leaves it to the earlier run.
+    # A full review, or an incremental one when the earlier report has a
+    # ticket-delta blocker. The delta always compares the whole PR with the
+    # ticket, so on a re-review it recomputes its blockers and the aggregate
+    # drops the earlier ones (like a deterministic check's): without this
+    # rerun, "the ticket asks for X" would stay open after the writer adds X.
+    # An incremental run without one leaves the delta to the earlier run.
     if: >-
-      !cancelled() && needs.classify.result == 'success' && needs.gate.outputs.mode == 'full' &&
-      needs.classify.outputs.ticket != '' && needs.classify.outputs.has_adoc == 'true'
+      !cancelled() && needs.classify.result == 'success' && needs.classify.outputs.ticket != '' &&
+      ((needs.gate.outputs.mode == 'full' && needs.classify.outputs.has_adoc == 'true') ||
+       (needs.gate.outputs.mode == 'incremental' && needs.classify.outputs.recheck_ticket == 'true'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1587,6 +1593,7 @@ jobs:
             requirements: "jira" only if you read the ticket itself,
             "pr-body" if you used a description quoted in the PR body, and
             "none" if you could read neither.
+            ${{ needs.gate.outputs.mode == 'incremental' && 'This is a re-review: the pr-review findings cover only the commits since the last review, so judge the requirements against the WHOLE PR (`gh pr diff` and the current files in the working tree), not those findings. List every requirement the PR still misses in "blocking", including ones an earlier review raised: this run replaces the blockers of the earlier delta.' || '' }}
             Also add to verdict.json "needs_human": open questions for the
             writer, one sentence each. Include a question only when the PR's
             own content raises it and a person, not a code change, has to
