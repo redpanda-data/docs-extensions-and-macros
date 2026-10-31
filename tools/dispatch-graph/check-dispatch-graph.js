@@ -15,7 +15,7 @@
  *
  * Findings (exit 1):
  *   sender-without-listener        a dispatch nothing in the target repo listens for
- *   listener-without-sender        a docs-repo listener nothing dispatches to (no cron backstop)
+ *   listener-without-sender        a docs-repo listener nothing dispatches to, or whose every sender is disabled (no cron backstop)
  *   sender-never-fired             the sending workflow has no runs at all
  *   receiver-failing               more than --fail-threshold of the receiver's newest runs failed
  *   receiver-never-received        the sender has fired, the receiver has never run from a dispatch
@@ -34,6 +34,11 @@
  *   archived-repo                  a configured repo that is archived; its workflows cannot run, so it sends nothing
  *   renamed-repo                   a configured repo that GitHub redirects to a new name; it is checked under the new name
  *   conditional-sender             a gated dispatch step that could not be located in the jobs API, so the workflow run counts
+ *   sender-disabled                a sending workflow that is disabled, so it dispatches nothing and is left out of the sender checks
+ *
+ * Workflow states are read after the graph is built, so the graph-level
+ * checks (sender-without-listener, payload-variant-without-sender) still
+ * count a disabled sender as a sender.
  *
  * Could-not-run (exit 2) is anything that stops the check seeing the whole
  * graph: a repo that cannot be read, a runs query that fails. The findings
@@ -90,8 +95,8 @@ function createGitHubApi (octokit) {
       return { fullName: data.full_name, defaultBranch: data.default_branch, archived: Boolean(data.archived) }
     },
     async listWorkflows (slug) {
-      const { data } = await octokit.actions.listRepoWorkflows({ ...split(slug), per_page: 100 })
-      return (data.workflows || []).map((w) => ({ path: w.path, state: w.state }))
+      const workflows = await octokit.paginate(octokit.actions.listRepoWorkflows, { ...split(slug), per_page: 100 })
+      return workflows.map((w) => ({ path: w.path, state: w.state }))
     },
     async listJobsForRun (slug, runId) {
       const { data } = await octokit.actions.listJobsForWorkflowRun({ ...split(slug), run_id: runId, per_page: 100 })
@@ -353,7 +358,8 @@ function buildGraph ({ listeners, senders, scannedRepos, docsRepos, aliases = {}
  * Fetch the run record of every workflow that takes part in an edge and
  * derive the run-based findings.
  */
-async function recordRuns ({ edges, api, perPage, window, threshold, concurrency, stepRuns = 20 }) {
+async function recordRuns ({ edges, api, perPage, window, threshold, concurrency, stepRuns = 20, docsRepos = [] }) {
+  const docsSet = new Set(docsRepos)
   const workflows = new Map() // repo/file -> { repo, file, listener }
   for (const e of edges) {
     for (const s of e.senders) {
@@ -390,11 +396,12 @@ async function recordRuns ({ edges, api, perPage, window, threshold, concurrency
   })
 
   // A disabled workflow receives nothing: GitHub still answers the dispatch
-  // with 204. One workflow list per repo that holds a listener.
+  // with 204. A disabled sender sends nothing, so it is neither a dead edge
+  // nor a duplicate. One workflow list per repo in the graph.
   const states = new Map() // repo -> Map(file -> state)
   if (api.listWorkflows) {
-    const listenerRepos = [...new Set([...workflows.values()].filter((w) => w.listener).map((w) => w.repo))]
-    await mapLimit(listenerRepos, concurrency, async (repo) => {
+    const graphRepos = [...new Set([...workflows.values()].map((w) => w.repo))]
+    await mapLimit(graphRepos, concurrency, async (repo) => {
       try {
         extraCalls += 1
         const list = await api.listWorkflows(repo)
@@ -452,13 +459,22 @@ async function recordRuns ({ edges, api, perPage, window, threshold, concurrency
   const findings = []
   const info = []
   const reportedSenders = new Set()
+  const stateOf = (w) => states.get(w.repo) && states.get(w.repo).get(w.file)
   for (const e of edges) {
     const target = shortRepo(e.targetRepo)
     let anySenderFired = false
+    const activeSenders = []
+    const disabledSenders = []
     for (const s of e.senders) {
-      const summary = runs.get(`${s.repo}/${s.file}`)
-      if (!summary) continue
       const id = `${s.repo}/${s.file}`
+      const state = stateOf(s)
+      if (state && state !== 'active') {
+        disabledSenders.push({ s, state })
+        continue
+      }
+      activeSenders.push(s)
+      const summary = runs.get(id)
+      if (!summary) continue
       if (s.conditional && summary.total > 0) {
         const check = stepChecks.get(s)
         if (check && check.succeeded > 0) {
@@ -516,12 +532,52 @@ async function recordRuns ({ edges, api, perPage, window, threshold, concurrency
         })
       }
     }
+    // Name the senders left on the edge and when they last ran, so a reader
+    // can tell when the copy still active is the stale one.
+    const lastRun = (s) => {
+      const r = runs.get(`${s.repo}/${s.file}`)
+      return r ? (r.total === 0 ? 'never ran' : `last run ${day(r.lastRunAt)}`) : 'runs unknown'
+    }
+    for (const { s, state } of disabledSenders) {
+      const key = `${s.repo}/${s.file}#disabled#${e.key}`
+      if (reportedSenders.has(key)) continue
+      reportedSenders.add(key)
+      const left = activeSenders.length
+        ? `Still sending ${target}#${e.eventType}: ${activeSenders.map((a) => `${describeSender(a)} (${lastRun(a)})`).join('; ')}.`
+        : `No active sender of ${target}#${e.eventType} is left.`
+      info.push({
+        kind: 'sender-disabled',
+        edge: e.key,
+        message: `${describeSender(s)} is ${state}, so it dispatches nothing and is left out of the sender checks. ${left}`,
+      })
+    }
+    // Every sender disabled: nothing will dispatch to the listeners, which is
+    // the same as having no sender at all.
+    if (e.senders.length && activeSenders.length === 0) {
+      for (const l of e.listeners) {
+        if (!docsSet.has(l.repo)) continue
+        if (l.cronBackstop) {
+          info.push({
+            kind: 'listener-without-sender',
+            edge: e.key,
+            message: `${target}/${l.file} listens for ${e.eventType} but every sender is disabled; a schedule runs it anyway`,
+          })
+        } else {
+          findings.push({
+            severity: 'error',
+            kind: 'listener-without-sender',
+            edge: e.key,
+            message: `${target}/${l.file} listens for ${e.eventType} but every sender is disabled, and it has no cron backstop, so it only runs by hand.`,
+          })
+        }
+      }
+    }
     // The same (target, type) dispatched from more than one repo with
     // payloads that cannot be told apart is almost always a stale copy left
     // behind by a repo move. Senders whose literal payloads differ (one
     // event, several plugin values) are distinct variants, not duplicates.
     const byPayload = new Map()
-    for (const s of e.senders) {
+    for (const s of activeSenders) {
       const sig = JSON.stringify(Object.entries(s.payload || {}).sort())
       if (!byPayload.has(sig)) byPayload.set(sig, [])
       byPayload.get(sig).push(s)
@@ -529,11 +585,7 @@ async function recordRuns ({ edges, api, perPage, window, threshold, concurrency
     for (const group of byPayload.values()) {
       const repos = [...new Set(group.map((s) => s.repo))]
       if (repos.length < 2) continue
-      const described = group.map((s) => {
-        const r = runs.get(`${s.repo}/${s.file}`)
-        const last = r ? (r.total === 0 ? 'never ran' : `last run ${day(r.lastRunAt)}`) : 'runs unknown'
-        return `${describeSender(s)} (${last})`
-      })
+      const described = group.map((s) => `${describeSender(s)} (${lastRun(s)})`)
       findings.push({
         severity: 'warning',
         kind: 'duplicate-sender',
@@ -542,7 +594,7 @@ async function recordRuns ({ edges, api, perPage, window, threshold, concurrency
       })
     }
     for (const l of e.listeners) {
-      const state = states.get(l.repo) && states.get(l.repo).get(l.file)
+      const state = stateOf(l)
       if (state && state !== 'active') {
         findings.push({
           severity: 'error',
@@ -629,7 +681,7 @@ async function runCheck (opts) {
   const scannedRepos = scan.scanned.map((s) => s.repo)
   const docsRepos = scan.scanned.filter((r) => r.role === 'docs').map((r) => r.repo)
   const graph = buildGraph({ listeners: scan.listeners, senders: scan.senders, scannedRepos, docsRepos, aliases: scan.aliases })
-  const runRecord = await recordRuns({ edges: graph.edges, api, perPage, window, threshold, concurrency, stepRuns: opts.stepRuns })
+  const runRecord = await recordRuns({ edges: graph.edges, api, perPage, window, threshold, concurrency, stepRuns: opts.stepRuns, docsRepos })
 
   const findings = [...graph.findings, ...runRecord.findings]
   const info = [
