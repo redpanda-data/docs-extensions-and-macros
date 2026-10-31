@@ -24,6 +24,15 @@ name: Check page metadata
 #
 # The taxonomy comes from the caller's checkout when it is the docs repo, and
 # from https://docs.redpanda.com/shared/_attachments/taxonomy.yml otherwise.
+#
+# With suggest (the default), the check also runs --suggest: the taxonomy
+# values a changed page's text names that its header does not carry, at the
+# default minimum score, with evidence. They go to the job summary, to a
+# notice on the attribute line (or the page's first line when the page has no
+# such attribute), and to the result JSON under `suggest`, apart from
+# `findings`. Suggestions never fail the job, strict or not. A
+# doc_tools_version from before suggestions carried their line puts every
+# notice on line 1.
 
 on:
   workflow_call:
@@ -54,6 +63,13 @@ on:
           one, else the published file.
         type: string
         default: ''
+      suggest:
+        description: >-
+          Also suggest taxonomy values the changed pages' text names that
+          their headers do not carry (`check-metadata --suggest`), in the job
+          summary and as notices. Suggestions never fail the job.
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -82,9 +98,11 @@ jobs:
           STRICT: ${{ inputs.strict }}
           PATHS: ${{ inputs.paths }}
           TAXONOMY: ${{ inputs.taxonomy }}
+          SUGGEST: ${{ inputs.suggest }}
         run: |
           args=(check-metadata --changed "$BASE" --output check-metadata.json)
           if [ "$STRICT" = "true" ]; then args+=(--strict); fi
+          if [ "$SUGGEST" = "true" ]; then args+=(--suggest); fi
           if [ -n "$TAXONOMY" ]; then args+=(--taxonomy "$TAXONOMY"); fi
           # Word-splitting PATHS is intended: it is a space-separated list. No
           # globbing here; check-metadata expands globs itself.
@@ -99,11 +117,13 @@ jobs:
           set -e
 
           cat check-metadata.txt
+          # The summary leaves out the --suggest TERM lines (terms no concept
+          # matches): they stay in the log above and in check-metadata.json.
           {
             echo '### Page metadata'
             echo
             echo '```'
-            cat check-metadata.txt
+            grep -v '^TERM ' check-metadata.txt || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -116,6 +136,46 @@ jobs:
             exit 2
           fi
           exit "$status"
+
+      # Informational only: this step exits 0 whatever it finds, so strict
+      # never applies to it. A suggestion is a value at or above the default
+      # minimum score that the page does not carry (every suggestion on a
+      # page without page-categories qualifies the same way). At most 10
+      # notices, the most GitHub shows per step; the summary lists all of them.
+      - name: Report taxonomy suggestions
+        if: always() && inputs.suggest
+        run: |
+          set -uo pipefail
+          R=check-metadata.json
+          if [ ! -s "$R" ] || ! jq -e '(.suggest.suggestions | type) == "array"' "$R" > /dev/null 2>&1; then
+            echo "check-metadata: no suggestions in the result"
+            exit 0
+          fi
+          # Workflow-command escaping: % and newlines in the message.
+          jq -r '
+            def esc: gsub("%"; "%25") | gsub("\r"; "%0D") | gsub("\n"; "%0A");
+            def ev: [.evidence[:3][] | "\"\(.term)\" in the \(.location)"] | join(", ");
+            .suggest.suggestions | sort_by(.file, -.score) | .[:10][]
+            | "::notice file=\(.file),line=\(.line // 1),title=check-metadata suggestion::"
+              + ("Consider \(.label) (\(.facet) \(.conceptId)) in :\(.attribute):, score \(.score): \(.reason)" + (if (.evidence | length) > 0 then "; " + ev else "" end) | esc)
+          ' "$R"
+          jq -r '
+            def cell: tostring | gsub("\\|"; "\\|") | gsub("\n"; " ");
+            def ev: .file as $f | [.evidence[:3][] | "`\(.term)` \(if .location == "path" then "in the path" else "\(.location), \(if .source and .source != $f then "\(.source):" else "line " end)\(.line)" end)"] | join("; ");
+            .suggest as $s
+            | ($s.suggestions | length) as $n
+            | "### Suggested taxonomy values", "",
+              (if $n == 0 then "No suggestions: the changed pages carry what their text names at or above the minimum score (\($s.minScore.docs) on Product Docs pages, \($s.minScore.solution) on solution overviews)."
+               else "\($n) suggestion(s) at or above the minimum score (\($s.minScore.docs) on Product Docs pages, \($s.minScore.solution) on solution overviews). They never fail the check; choose the values that fit and add them to the page header.", "",
+                 "| Page | Attribute | Value | Score | Evidence |", "|---|---|---|---|---|",
+                 ($s.suggestions | sort_by(.file, -.score)[]
+                   | "| `\(.file):\(.line // 1)`\(if .uncategorized then " (no page-categories yet)" else "" end) | `:\(.attribute):` | \(.label) (`\(.conceptId)`) | \(.score) | \(.reason | cell); \(ev | cell) |")
+               end),
+              (($s.uncategorized // []) | map(select(.suggestions == 0)) | if length > 0 then "", "Pages with no page-categories whose text names no concept above the minimum score: " + (map("`\(.file)`") | join(", ")) + "." else empty end),
+              (($s.needs // []) | if length > 0 then "", (.[] | "- `\(.file)`: \(.message)") else empty end),
+              ""
+          ' "$R" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '"check-metadata: \(.suggest.suggestions | length) suggestion(s) for \(.suggest.suggestions | map(.file) | unique | length) page(s)"' "$R"
 
       - name: Upload the result
         if: always()
