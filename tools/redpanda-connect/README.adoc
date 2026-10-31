@@ -586,6 +586,7 @@ tools/redpanda-connect/
 ├── pr-summary-formatter.js          # PR-friendly summary generation
 ├── helpers/
 │   ├── renderConnectFields.js       # Renders field documentation
+│   ├── formatConnectDefault.js      # *Type*: and inline *Default*: text, shared with connectval:
 │   ├── renderConnectExamples.js     # Renders examples
 │   ├── buildConfigYaml.js           # Builds YAML examples
 │   ├── commonConfig.js              # Common config helper
@@ -602,6 +603,8 @@ extensions/
 ├── collect-bloblang-samples.js       # Collects Bloblang playground examples
 └── generate-rp-connect-categories.js # Generates category pages from CSV data
 ----
+
+`formatConnectDefault.js` is shared with the `connectval:` macro (see `macros/REFERENCE.adoc`), so changing how the reference prints a type or a default changes what the macro renders too.
 
 === Connector documentation generation
 

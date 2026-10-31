@@ -1,0 +1,601 @@
+{
+ "_source": {
+  "note": "Trimmed from docs-data/rpk-v26.2.2.json in docs: the commands whose description or content has a link, the commands those links name, and their parents; only the description and the content entries with a link are kept. pages lists the real pages of each repo among the link targets, and aliases the page aliases the targets go through (rp-connect-docs get-started:about.adoc declares streaming:about.adoc, docs whole-cluster-restore.adoc declares manage:whole-cluster-restore.adoc, the cloud-docs Connect stubs declare the rp-connect-docs paths) and the start page alias Antora registers for rp-connect-docs (start_page home:index.adoc). raw_tree_urls holds the rpk help (raw_tree) of the 7 commands whose description has a docs.redpanda.com URL; the override-merged tree hides them. Pages have their titles, and sections lists real section headings of a page, for anchors.",
+  "commits": {
+   "docs": "2eb070ff",
+   "cloud-docs": "aab67ef",
+   "adp-docs": "8af585a",
+   "rp-connect-docs": "62216a2"
+  }
+ },
+ "rpk": {
+  "schema": 1,
+  "rpk_version": "v26.2.2",
+  "generated_at": "2026-10-28T12:58:53.280Z",
+  "plugin_versions": {
+   "ai": "0.2.99",
+   "connect": "4.106.0",
+   "k8s": "26.2.2"
+  },
+  "deprecated_commands": {},
+  "tree": {
+   "name": "rpk",
+   "usage": "rpk [flags]",
+   "commands": [
+    {
+     "name": "cloud",
+     "usage": "rpk cloud [flags]",
+     "aliases": [],
+     "flags": [],
+     "commands": [
+      {
+       "name": "mcp",
+       "usage": "rpk cloud mcp [flags]",
+       "aliases": [],
+       "flags": [],
+       "commands": [
+        {
+         "name": "install",
+         "usage": "rpk cloud mcp install [flags]",
+         "aliases": [],
+         "flags": [
+          {
+           "name": "allow-delete",
+           "type": "bool"
+          },
+          {
+           "name": "client",
+           "type": "string"
+          }
+         ],
+         "commands": []
+        },
+        {
+         "name": "stdio",
+         "usage": "rpk cloud mcp stdio [flags]",
+         "aliases": [],
+         "flags": [
+          {
+           "name": "allow-delete",
+           "type": "bool"
+          }
+         ],
+         "description": "Communicate with the local MCP server for Redpanda Cloud using the stdio protocol.\n\nThis command provides a direct stdio interface for communicating with the local MCP server for Redpanda Cloud. The local MCP server runs on your machine and provides tools for managing your Redpanda Cloud account and clusters. It's typically used as the transport mechanism when your MCP client is configured to use `rpk` as the stdio server process.\n\nMost users should use xref:reference:rpk/rpk-cloud/rpk-cloud-mcp-install.adoc[`rpk cloud mcp install`] instead, which automatically configures your MCP client.",
+         "commands": []
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "name": "connect",
+     "usage": "rpk connect [flags]",
+     "aliases": [],
+     "flags": [],
+     "content": [
+      {
+       "type": "section",
+       "id": "connect-docs-link",
+       "title": null,
+       "position": "after_description",
+       "content": "For full details, see the xref:connect:streaming:about.adoc[Redpanda Connect documentation]."
+      }
+     ],
+     "commands": []
+    },
+    {
+     "name": "generate",
+     "usage": "rpk generate [template] [flags]",
+     "aliases": [],
+     "flags": [],
+     "commands": [
+      {
+       "name": "app",
+       "usage": "rpk generate app [flags]",
+       "aliases": [],
+       "flags": [
+        {
+         "name": "language",
+         "type": "string"
+        },
+        {
+         "name": "new-sasl-credentials",
+         "type": "string"
+        }
+       ],
+       "content": [
+        {
+         "type": "self-hosted",
+         "position": "after_description",
+         "content": "If you are having trouble connecting to your cluster, you can use the common xref:reference:rpk/rpk-x-options.adoc#adminhosts[`-X admin.hosts=<host:ports>`] flag to pass a specific Admin API address."
+        }
+       ],
+       "commands": []
+      }
+     ]
+    },
+    {
+     "name": "profile",
+     "usage": "rpk profile [flags]",
+     "aliases": [],
+     "flags": [],
+     "commands": [
+      {
+       "name": "create",
+       "usage": "rpk profile create [NAME] [flags]",
+       "aliases": [],
+       "flags": [
+        {
+         "name": "description",
+         "type": "string"
+        },
+        {
+         "name": "from-cloud",
+         "type": "string"
+        }
+       ],
+       "description": "Create a new rpk profile with connection settings for a Redpanda cluster.\n\nThere are multiple ways to create a profile. A name must be provided if not using `--from-cloud` or `--from-rpk-container`.\n\n* You can use `--from-redpanda` to generate a new profile from an existing `redpanda.yaml` file. The special value `current` creates a profile from the current `redpanda.yaml` as it is loaded within `rpk`.\n* You can use `--from-rpk-container` to generate a profile from an existing cluster created using `rpk container start` command. The name is not needed when using this flag.\n* You can use `--from-profile` to generate a profile from an existing profile or from a profile in a yaml file. First, the filename is checked, then an existing profile name is checked. The special value `current` creates a new profile from the existing profile with any active environment variables or flags applied.\n* You can use `--from-cloud` to generate a profile from an existing cloud cluster ID. Note that you must be logged in with `rpk cloud login` first. The special value `prompt` will prompt to select a cloud cluster to create a profile for.\n* For serverless clusters that support both public and private networking, you will be prompted to select a network type unless you specify `--serverless-network`. To avoid prompts in automation, explicitly set `--serverless-network` to `public` or `private`.\n* You can use `--set key=value` to directly set fields. The key can either be the name of a `-X` flag or the path to the field in the profile's YAML format. For example, using `--set tls.enabled=true` OR `--set kafka_api.tls.enabled=true` is equivalent.\n\nThe `--set` flag is always applied last and can be used to set additional fields in tandem with `--from-redpanda` or `--from-cloud`.\n\nThe `--set` flag supports autocompletion, suggesting the `-X` key format. If you begin writing a YAML path, the flag will suggest the rest of the path.\n\nIt is recommended to always use the `--description` flag; the description is printed in the output of xref:reference:rpk/rpk-profile/rpk-profile-list.adoc[`rpk profile list`].\n\nOnce the command completes successfully, `rpk` switches to the newly created profile.",
+       "commands": []
+      },
+      {
+       "name": "list",
+       "usage": "rpk profile list [flags]",
+       "aliases": [
+        "ls"
+       ],
+       "flags": [
+        {
+         "name": "format",
+         "type": "string"
+        }
+       ],
+       "commands": []
+      }
+     ]
+    },
+    {
+     "name": "redpanda",
+     "usage": "rpk redpanda [flags]",
+     "aliases": [],
+     "flags": [],
+     "commands": [
+      {
+       "name": "config",
+       "usage": "rpk redpanda config [flags]",
+       "aliases": [],
+       "flags": [],
+       "commands": [
+        {
+         "name": "set",
+         "usage": "rpk redpanda config set [KEY] [VALUE] [flags]",
+         "aliases": [],
+         "flags": [],
+         "commands": []
+        }
+       ]
+      },
+      {
+       "name": "mode",
+       "usage": "rpk redpanda mode [MODE] [flags]",
+       "aliases": [],
+       "flags": [],
+       "commands": []
+      },
+      {
+       "name": "tune",
+       "usage": "rpk redpanda tune [list of elements to tune] [flags]",
+       "aliases": [],
+       "flags": [
+        {
+         "name": "cpu-set",
+         "type": "string"
+        },
+        {
+         "name": "dirs",
+         "type": "stringSlice"
+        }
+       ],
+       "content": [
+        {
+         "type": "section",
+         "id": "examples",
+         "title": "Examples",
+         "position": "end",
+         "headingLevel": 2,
+         "content": "This section provides examples of using the autotuner.\n\n* To enable a predetermined set of tuners for production, run the xref:./rpk-redpanda-mode.adoc[`rpk redpanda mode prod`] command. This command modifies settings in the `redpanda.yaml` configuration file.\n* To list the available tuners and to see whether they're enabled or supported (and a reason for if they're unsupported), run the xref:./rpk-redpanda-tune-list.adoc[`rpk redpanda tune list`] command.\n* To enable or disable a tuner, run the xref:./rpk-redpanda-config-set.adoc[`rpk redpanda config set`], as the tuner flags are configurable node properties.\n** Each tuner has a YAML key flag for enabling/disabling itself in `redpanda.yaml`. Most are formed by prepending `rpk.tune_` to the name of the tuner listed by xref:./rpk-redpanda-tune-list.adoc[`rpk redpanda tune list`]. See the xref:./rpk-redpanda-tune-list.adoc#tuners[Tuners reference] for the exact key for a tuner. For an example of enabling a tuner, the key for the `aio_events` tuner is `rpk.tune_aio_events`, and it can be enabled with the following command:\n+\n[,bash]\n----\nrpk redpanda config set rpk.tune_aio_events true\n----\n* To run all available tuners, use the xref:./rpk-redpanda-tune.adoc[`rpk redpanda tune`] command for `all`:\n+\n[,bash]\n----\nrpk redpanda tune all\n----\n* To run a specific tuner, use the xref:./rpk-redpanda-tune.adoc[`rpk redpanda tune`] command for the tuner:\n+\n[,bash]\n----\nrpk redpanda tune <tuner>\n----\n* To learn more about a tuner, use the xref:./rpk-redpanda-tune.adoc[`rpk redpanda tune help`] command for the tuner:\n+\n[,bash]\n----\nrpk redpanda tune help <tuner>\n----\n+\nSee also the xref:./rpk-redpanda-tune-list.adoc#tuners[Tuners reference] for descriptions about each tuner.\n\n'''\n\n=== Related topics\n\n* xref:deploy:redpanda/manual/production/production-deployment.adoc[Deploy for Production]\n* xref:deploy:redpanda/kubernetes/k-tune-workers.adoc[Tune Kubernetes Worker Nodes for Production]\n* xref:./rpk-redpanda-mode.adoc[`rpk redpanda mode production`]\n* xref:./rpk-redpanda-tune-list.adoc[`rpk redpanda tune list`]"
+        }
+       ],
+       "commands": [
+        {
+         "name": "list",
+         "usage": "rpk redpanda tune list [flags]",
+         "aliases": [],
+         "flags": [
+          {
+           "name": "dirs",
+           "type": "stringSlice"
+          },
+          {
+           "name": "disks",
+           "type": "stringSlice"
+          }
+         ],
+         "content": [
+          {
+           "type": "section",
+           "id": "tuners",
+           "title": "Tuners",
+           "position": "end",
+           "headingLevel": 2,
+           "content": "This section describes each tuner and their configuration settings in xref:reference:node-configuration-sample.adoc[redpanda.yaml]. It provides overlapping and additional content to the descriptions returned by xref:reference:rpk/rpk-redpanda/rpk-redpanda-tune.adoc[rpk redpanda tune help].\n\n=== aio_events\n\nThe `aio_events` tuner maximizes throughput by increasing the number of simultaneous I/O requests. It sets the maximum number of outstanding asynchronous I/O operations to be above a calculated threshold.\n\nConfiguration (yaml):\n\n* `rpk.tune_aio_events`: flag to enable the tuner (Default for production mode: true)\n\n'''\n\n=== ballast_file\n\nThe `ballast_file` tuner improves debuggability and recoverability of a system with a full disk by creating a ballast file: if the disk becomes full, the ballast file can be deleted, thereby unblocking processes that are failing due to write failures and providing time for operators to stop any problematic processes causing the disk to fill, and to delete topics or records and change retention settings.\n\nConfiguration (yaml):\n\n* `rpk.tune_ballast_file`: flag to enable the tuner (Default for production mode: true)\n* `rpk.ballast_file_size`: size of the ballast file in bytes (Default for production mode: 1 GiB)\n* `rpk.ballast_file_path`: path to the ballast file (Default for production mode: `/var/lib/redpanda/data/ballast`)\n\n'''\n\n=== clocksource\n\nThe `clocksource` tuner improves the performance of getting system time by changing the clock source. It sets the clock source to the Time Stamp Counter (TSC) so time can be read in userspace via the Virtual Dynamic Shared Object (vDSO). This is more efficient than the usual virtual machine clock source, `xen`, that involves the overhead of a system call.\n\nConfiguration (yaml):\n\n* `rpk.tune_clocksource`: flag to enable the tuner (Default for production mode: true)\n\n'''\n\n=== coredump\n\nThe `coredump` tuner enables coredumps to be saved for production mode. By default, coredumps are not enabled for production. Enabling this tuner sets the location to save coredumps.\n\nConfiguration (yaml):\n\n* `rpk.tune_coredump`: flag to enable the tuner (Default for production mode: false)\n* `rpk.coredump_dir`: path to the saved coredump (Default for production mode: `/var/lib/redpanda/coredump`)\n\n'''\n\n=== cpu\n\nThe `cpu` tuner maximizes CPU performance for I/O intensive workloads by optimizing various CPU settings. It performs the following operations:\n\n* Sets the ACPI-cpufreq governor to `performance`\n\nIf system reboot is allowed (`rpk redpanda tune --reboot-allowed` option is set), the system must be rebooted after the first pass of the tuner, and it performs additional operations:\n\n* Disables Intel P-states\n* Disables Intel C-states\n* Disables turbo boost\n\nAfter tuning, the system CPUs operate at the maximum non-turbo frequency.\n\nConfiguration (yaml):\n\n* `rpk.tune_cpu`: flag to enable the tuner (Default for production mode: true)\n\n'''\n\n=== disk_irq\n\nThe `disk_irq` tuner optimizes the handling of interrupt requests (IRQs) for disks binding all disk IRQs to a requested set of CPUs. It tries to distribute IRQs according to the following guidelines:\n\n* Distribute NVMe disks IRQs equally among all available CPUs.\n* Distribute non-NVMe disks IRQs equally among designated CPUs or among all available CPUs in the `mq` mode.\n\nIRQs are distributed according to the operation mode set by `rpk redpanda tune --mode <operation-mode>`. The available operation modes:\n\n* `sq`: set all IRQs of a given device to CPU0\n* `sq_split`: divide all IRQs of a given device between CPU0 and its HT siblings\n* `mq`: distribute device IRQs among all available CPUs instead of binding them all to CPU0\n\nIf no `--mode` is specified, a default mode is determined:\n\n* If there are only NVMe disks, the `mq` mode is set as the default.\n* For non-NVMe disks:\n** If the number of HT siblings is less than or equal to four, the `mq` mode is set as the default.\n** Otherwise, if the number of cores is less than or equal to four, the `sq` mode is set as the default.\n** For all other conditions, the `sq_split` mode is set as the default.\n\nConfiguration (yaml):\n\n* `rpk.tune_disk_irq`: flag to enable the tuner (Default for production mode: true)\n* `rpk redpanda tune --mode <operation-mode>` sets the IRQ distribution mode\n\n'''\n\n=== net\n\nThe `net` tuner optimizes the handling of interrupt requests (IRQs) for network interfaces (NICs) by binding all NIC IRQs to a requested set of CPUs.\n\nIts IRQ distribution operation modes are the same as described for the <<disk_irq,disk_irq tuner>> with NICs as the devices.\n\nConfiguration (yaml):\n\n* `rpk.tune_network`: flag to enable the tuner (Default for production mode: true)\n* `rpk redpanda tune --mode <operation-mode>` sets the IRQ distribution mode\n\n'''\n\n=== disk_nomerges\n\nThe `disk_nomerges` tuner reduces CPU overhead by disabling the merging of adjacent I/O requests.\n\nConfiguration (yaml):\n\n* `rpk.tune_disk_nomerges`: flag to enable the tuner (Default for production mode: true)\n\n'''\n\n=== disk_scheduler\n\nThe `disk_scheduler` tuner optimizes disk scheduler performance for the type of device (NVME, non-NVME). It provides a selectable set of schedulers:\n\n* `none`: minimizes latency of modern NVMe devices by bypassing the operating system's I/O scheduler\n* `noop`: preferred for non-NVME devices (and used when `none` is unavailable), this scheduler uses a simple FIFO queue where all I/O operations are first stored and then handled by the driver.\n\nConfiguration (yaml):\n\n* `rpk.tune_disk_scheduler`: flag to enable the tuner (Default for production mode: true)\n\n'''\n\n=== disk_write_cache\n\nThe `disk_write_cache` tuner optimizes performance in Google Cloud Platform (GCP) by enabling write-through caching for its NVMe `Local SSD` drives.\n\nConfiguration (yaml):\n\n* `rpk.tune_disk_write_cache`: flag to enable the tuner (Default for production mode: true)\n\n'''\n\n=== fstrim\n\nThe `fstrim` tuner improves SSD performance by starting a background systemd service to periodically wipe memory blocks that are not used by the file system. This is desirable for SSDs because they require wiping the space where new data will be written, so not wiping during non-write cycles will eventually cause performance degradations, when the lack of free space results in writes triggering synchronous erasures.\n\nIf it's available, the `fstrim` systemd service will be run. If it's unavailable but systemd is available, an equivalent service will be installed and run. Otherwise, no service will be run.\n\nConfiguration (yaml):\n\n* `rpk.tune_fstrim`: flag to enable the tuner (Default for production mode: true)\n\n'''\n\n=== swappiness\n\nThe `swappiness` tuner tunes the kernel to keep process data in-memory for as long as possible instead of swapping it out to disk.\n\nConfiguration (yaml):\n\n* `rpk.tune_swappiness`: flag to enable the tuner (Default for production mode: true)\n\n'''\n\n=== transparent_hugepages\n\nRedpanda makes excellent use of operating system-level Transparent HugePages (THP) by pre-allocating memory at startup. For CPUs that support THPs, this results in improved memory page caching and reduced cache misses from translation lookaside buffer (TLB) lookups.\n\nMost operating systems configure THP use to `madvise` by default, meaning a process must explicitly request them. Redpanda is designed to make the required `madvise` call, meaning THPs are in use under typical operation scenarios. Other possible values for THP use are `disabled` or `always`.\n\nThe `transparent_hugepages` tuner overrides the operating system setting, configuring THP use to `always`. This tuner only has a practical effect if the operating system is configured to `disabled` for THP use. For this reason, this tuner is disabled by default in production mode. It primarily exists to allow operators to ensure THPs are in use for their installations if there is any possibility the operating system is configured to `disabled`.\n\nConfiguration (yaml):\n\n* `rpk.tune_transparent_hugepages`: flag to enable the tuner (Default for production mode: false)\n\n'''\n\n=== Related topics\n\n* xref:reference:rpk/rpk-redpanda/rpk-redpanda-tune.adoc[rpk redpanda tune]"
+          }
+         ],
+         "commands": []
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "name": "security",
+     "usage": "rpk security [flags]",
+     "aliases": [
+      "sec"
+     ],
+     "flags": [],
+     "commands": [
+      {
+       "name": "acl",
+       "usage": "rpk security acl [flags]",
+       "aliases": [],
+       "flags": [
+        {
+         "name": "help-operations",
+         "type": "bool"
+        }
+       ],
+       "description": "Manage ACLs and SASL users.\n\nThis command space creates, lists, and deletes ACLs, as well as creates SASL users. This page is specific to ACLs. To learn about SASL users, see xref:reference:rpk/rpk-security/rpk-security-user.adoc[`rpk security user`].\n\nWhen using SASL, ACLs allow or deny you access to certain requests. The `create`, `delete`, and `list` commands help you manage your ACLs.\n\nAn ACL is made up of five components:\n\n* A principal (the user) or role\n* A host, which the principal (or role) is allowed or denied requests from\n* What resource to access (such as a topic name or group ID)\n* The operation (such as read or write)\n* The permission: whether to allow or deny the above\n\nACL commands work on a multiplicative basis. If creating, specifying two principals and two permissions creates four ACLs: both permissions for the first principal, as well as both permissions for the second principal. Adding two resources further doubles the ACLs created.\n\nIt is recommended to be as specific as possible when granting ACLs. Granting more ACLs than necessary per principal may inadvertently allow clients to do things they should not, such as deleting topics or joining the wrong consumer group.\n\nIn flag form, to set up a general producing and consuming client, you can invoke `rpk security acl create` three times with the following (including your `--allow-principal`):\n\n* `--operation write,read,describe --topic [topics]`\n* `--operation describe,read --group [group.id]`\n* `--operation describe,write --transactional-id [id]`",
+       "commands": [
+        {
+         "name": "create",
+         "usage": "rpk security acl create [flags]",
+         "aliases": [],
+         "flags": [
+          {
+           "name": "allow-host",
+           "type": "stringSlice"
+          },
+          {
+           "name": "allow-principal",
+           "type": "stringSlice"
+          }
+         ],
+         "content": [
+          {
+           "type": "note",
+           "position": "after_usage",
+           "content": "The schema migration examples on this page are Schema Registry ACLs only. You also require Kafka ACLs for topics, consumer groups, and cluster operations. See xref:manage:security/authorization/acl.adoc[Configure Access Control Lists]."
+          }
+         ],
+         "commands": []
+        }
+       ]
+      },
+      {
+       "name": "user",
+       "usage": "rpk security user [flags]",
+       "aliases": [],
+       "flags": [
+        {
+         "name": "format",
+         "type": "string"
+        }
+       ],
+       "commands": []
+      }
+     ]
+    }
+   ],
+   "global_flags": []
+  }
+ },
+ "components": [
+  {
+   "repo": "docs",
+   "name": "streaming",
+   "version": "26.2",
+   "pages": [
+    {
+     "module": "manage",
+     "relative": "security/authorization/acl.adoc"
+    },
+    {
+     "module": "reference",
+     "relative": "rpk/rpk-x-options.adoc"
+    },
+    {
+     "module": "reference",
+     "relative": "rpk/rpk-profile/rpk-profile-create.adoc"
+    },
+    {
+     "module": "reference",
+     "relative": "rpk/rpk-profile/rpk-profile-list.adoc"
+    },
+    {
+     "module": "reference",
+     "relative": "rpk/rpk-security/rpk-security-acl.adoc"
+    },
+    {
+     "module": "reference",
+     "relative": "rpk/rpk-security/rpk-security-acl-create.adoc"
+    },
+    {
+     "module": "reference",
+     "relative": "rpk/rpk-security/rpk-security-user.adoc"
+    },
+    {
+     "module": "reference",
+     "relative": "rpk/rpk-redpanda/rpk-redpanda-tune.adoc"
+    },
+    {
+     "module": "reference",
+     "relative": "rpk/rpk-redpanda/rpk-redpanda-tune-list.adoc"
+    },
+    {
+     "module": "reference",
+     "relative": "rpk/rpk-redpanda/rpk-redpanda-mode.adoc"
+    },
+    {
+     "module": "reference",
+     "relative": "rpk/rpk-redpanda/rpk-redpanda-config-set.adoc"
+    },
+    {
+     "module": "reference",
+     "relative": "rpk/rpk-generate/rpk-generate-app.adoc"
+    },
+    {
+     "module": "manage",
+     "relative": "disaster-recovery/whole-cluster-restore.adoc",
+     "title": "Whole Cluster Restore",
+     "sections": [
+      "Manage source metadata uploads",
+      "Restore data from a source cluster",
+      "Restore data from multiple clusters sharing the same bucket"
+     ]
+    },
+    {
+     "module": "home",
+     "relative": "index.adoc",
+     "title": "Redpanda Streaming Documentation"
+    }
+   ],
+   "aliases": [
+    {
+     "module": "manage",
+     "relative": "whole-cluster-restore.adoc",
+     "target": {
+      "module": "manage",
+      "relative": "disaster-recovery/whole-cluster-restore.adoc"
+     }
+    }
+   ]
+  },
+  {
+   "repo": "cloud-docs",
+   "name": "cloud-data-platform",
+   "version": "",
+   "pages": [
+    {
+     "module": "security",
+     "relative": "authorization/acl.adoc"
+    },
+    {
+     "module": "develop",
+     "relative": "cloud-mcp/overview.adoc"
+    },
+    {
+     "module": "reference",
+     "relative": "rpk/rpk-x-options.adoc"
+    },
+    {
+     "module": "reference",
+     "relative": "rpk/rpk-cloud/rpk-cloud-mcp-install.adoc"
+    },
+    {
+     "module": "reference",
+     "relative": "rpk/rpk-cloud/rpk-cloud-mcp-stdio.adoc"
+    },
+    {
+     "module": "reference",
+     "relative": "rpk/rpk-profile/rpk-profile-create.adoc"
+    },
+    {
+     "module": "reference",
+     "relative": "rpk/rpk-profile/rpk-profile-list.adoc"
+    },
+    {
+     "module": "reference",
+     "relative": "rpk/rpk-security/rpk-security-acl.adoc"
+    },
+    {
+     "module": "reference",
+     "relative": "rpk/rpk-security/rpk-security-acl-create.adoc"
+    },
+    {
+     "module": "reference",
+     "relative": "rpk/rpk-security/rpk-security-user.adoc"
+    },
+    {
+     "module": "reference",
+     "relative": "rpk/rpk-generate/rpk-generate-app.adoc"
+    },
+    {
+     "module": "home",
+     "relative": "index.adoc",
+     "title": "Redpanda Cloud Documentation"
+    },
+    {
+     "module": "develop",
+     "relative": "connect/guides/bloblang/about.adoc",
+     "title": "Bloblang"
+    },
+    {
+     "module": "develop",
+     "relative": "connect/configuration/unit_testing.adoc",
+     "title": "Unit Testing"
+    }
+   ],
+   "aliases": [
+    {
+     "module": "guides",
+     "relative": "bloblang/about.adoc",
+     "target": {
+      "module": "develop",
+      "relative": "connect/guides/bloblang/about.adoc"
+     }
+    },
+    {
+     "module": "configuration",
+     "relative": "unit_testing.adoc",
+     "target": {
+      "module": "develop",
+      "relative": "connect/configuration/unit_testing.adoc"
+     }
+    }
+   ]
+  },
+  {
+   "repo": "adp-docs",
+   "name": "agentic-data-plane",
+   "version": "",
+   "pages": [
+    {
+     "module": "reference",
+     "relative": "rpk/rpk-x-options.adoc"
+    },
+    {
+     "module": "reference",
+     "relative": "rpk/rpk-profile/rpk-profile-create.adoc"
+    },
+    {
+     "module": "reference",
+     "relative": "rpk/rpk-profile/rpk-profile-list.adoc"
+    },
+    {
+     "module": "home",
+     "relative": "index.adoc",
+     "title": "Run agents on all your data, safely."
+    }
+   ],
+   "aliases": []
+  },
+  {
+   "repo": "rp-connect-docs",
+   "name": "connect",
+   "version": "",
+   "pages": [
+    {
+     "module": "get-started",
+     "relative": "about.adoc"
+    },
+    {
+     "module": "home",
+     "relative": "index.adoc",
+     "title": "Redpanda Connect Documentation"
+    },
+    {
+     "module": "guides",
+     "relative": "bloblang/about.adoc",
+     "title": "Bloblang"
+    },
+    {
+     "module": "guides",
+     "relative": "streams_mode/about.adoc",
+     "title": "Streams Mode"
+    },
+    {
+     "module": "configuration",
+     "relative": "templating.adoc",
+     "title": "Templating"
+    },
+    {
+     "module": "configuration",
+     "relative": "unit_testing.adoc",
+     "title": "Unit Testing"
+    }
+   ],
+   "aliases": [
+    {
+     "module": "streaming",
+     "relative": "about.adoc",
+     "target": {
+      "module": "get-started",
+      "relative": "about.adoc"
+     }
+    },
+    {
+     "module": "ROOT",
+     "relative": "index.adoc",
+     "start": true,
+     "target": {
+      "module": "home",
+      "relative": "index.adoc"
+     }
+    }
+   ]
+  }
+ ],
+ "raw_tree_urls": [
+  {
+   "names": [
+    "connect"
+   ],
+   "description": "A stream processor for mundane tasks - https://docs.redpanda.com/redpanda-connect"
+  },
+  {
+   "names": [
+    "connect",
+    "blobl"
+   ],
+   "description": "Provides a convenient tool for mapping JSON documents over the command line:\n\n  cat documents.jsonl | redpanda-connect blobl 'foo.bar.map_each(this.uppercase())'\n\n  echo '{\"foo\":\"bar\"}' | redpanda-connect blobl -f ./mapping.blobl\n\n  redpanda-connect blobl -i input.jsonl -f ./mapping.blobl\n\nFind out more about Bloblang at: https://docs.redpanda.com/redpanda-connect/guides/bloblang/about"
+  },
+  {
+   "names": [
+    "connect",
+    "streams"
+   ],
+   "description": "Run Redpanda Connect in streams mode, where multiple pipelines can be executed in a\nsingle process and can be created, updated and removed via REST HTTP\nendpoints.\n\n  redpanda-connect streams\n  redpanda-connect streams -o ./root_config.yaml\n  redpanda-connect streams ./path/to/stream/configs ./and/some/more\n  redpanda-connect streams -o ./root_config.yaml ./streams/*.yaml\n\nThe config field specified with the --observability/-o flag is known as the root\nconfig and should only contain observability and service-wide config fields such\nas http, metrics, logger, resources, and so on.\n\nFor more information check out the docs at:\nhttps://docs.redpanda.com/redpanda-connect/guides/streams_mode/about"
+  },
+  {
+   "names": [
+    "connect",
+    "template"
+   ],
+   "description": "EXPERIMENTAL: This subcommand, and templates in general, are experimental and\ntherefore are subject to change outside of major version releases.\n\nAllows linting and generating Redpanda Connect templates.\n\n  redpanda-connect template lint ./path/to/templates/...\n\nFor more information check out the docs at:\nhttps://docs.redpanda.com/redpanda-connect/configuration/templating"
+  },
+  {
+   "names": [
+    "connect",
+    "test"
+   ],
+   "description": "Execute any number of Redpanda Connect unit test definitions. If one or more tests\nfail the process will report the errors and exit with a status code 1.\n\n  redpanda-connect test ./path/to/configs/...\n  redpanda-connect test ./foo_configs/*.yaml ./bar_configs/*.yaml\n  redpanda-connect test ./foo.yaml\n\nFor more information check out the docs at:\nhttps://docs.redpanda.com/redpanda-connect/configuration/unit_testing"
+  },
+  {
+   "names": [
+    "cluster",
+    "storage",
+    "restore",
+    "start"
+   ],
+   "description": "Start the cluster restoration process.\n\t\t\nThis command starts the process of restoring data from a failed cluster with\nTiered Storage enabled, including its metadata, onto a new cluster.\nIf the wait flag (--wait/-w) is set, the command will poll the status of the\nrecovery process until it's finished.\n\nUse --cluster-uuid-override if you want to specify an explicit cluster UUID\nto restore from. For more information, visit https://docs.redpanda.com/current/manage/disaster-recovery/whole-cluster-restore/.\n"
+  },
+  {
+   "names": [
+    "cluster",
+    "connections",
+    "list"
+   ],
+   "description": "Display statistics about current kafka connections.\n\nThis command displays a table of active and recently closed connections within the cluster.\n\nUse filtering and sorting to identify the connections of the client applications that you are interested in. See --help for the list of filtering arguments and sorting arguments.\n\nIn addition to the filtering shorthand cli arguments (e.g.; --client-id, --state), you can also use the --filter-raw and --order-by arguments that take string expressions. To understand the syntax of these arguments, refer to the admin API docs of the filter and order-by fields of the ListKafkaConnections endpoint: https://docs.redpanda.com/api/doc/admin/version/11f41833-5783-4f1a-ad64-5957267abd52/operation/operation-redpanda-core-admin-v2-clusterservice-listkafkaconnections\n\nBy default only a subset of the per-connection data is printed. To see all of the available data, use --format=json."
+  }
+ ]
+}

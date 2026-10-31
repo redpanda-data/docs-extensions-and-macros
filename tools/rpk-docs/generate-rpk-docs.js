@@ -2421,20 +2421,8 @@ function findTopLevelWithSubcommands(tree) {
   return result
 }
 
-/**
- * Known rpk plugins that are managed separately from rpk core (they have
- * install/uninstall/upgrade shim commands, and their real command tree only
- * appears when the plugin binary is installed in the generation environment).
- * Shared with rpk-docs-handler.js, which iterates this list to install each
- * plugin before running --print-tree.
- */
-const KNOWN_PLUGINS = ['ai', 'check', 'connect', 'k8s', 'oxla']
-
-/**
- * Subcommands that rpk core ships as a built-in shim for managed plugins,
- * present even when the plugin binary itself is not installed.
- */
-const PLUGIN_SHIM_COMMANDS = new Set(['install', 'uninstall', 'upgrade'])
+// KNOWN_PLUGINS and PLUGIN_SHIM_COMMANDS: see known-plugins.js.
+const { KNOWN_PLUGINS, PLUGIN_SHIM_COMMANDS } = require('./known-plugins')
 
 /**
  * Check whether a command path belongs to a protected plugin's subtree
@@ -3306,6 +3294,7 @@ module.exports = {
   shouldUsePartialDir,
   updateNavFile,
   KNOWN_PLUGINS,
+  PLUGIN_SHIM_COMMANDS,
   detectProtectedPlugins,
   getCommandMetadata,
   processContentArray,

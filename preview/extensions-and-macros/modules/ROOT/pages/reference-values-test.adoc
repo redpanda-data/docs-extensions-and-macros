@@ -1,0 +1,264 @@
+= Reference values test
+:description: Exercises the rpkval, connectval, bloblval, rpkcmd, connect and blobl macros, and the fields and block forms they share with propval: fields, formats, command and component resolution, links, text values, and each placeholder case.
+
+Each line below states what it must render, and what the build log must say
+for it. The rpk values come from this component's `rpk-v26.2.2.json` fixture
+(trimmed real data from the docs repo's rpk snapshot). The Connect values come
+from `connect-4.114.0.json` in the `connect` component, which the showcase
+build supplies from `preview/connect-data-lender`, with a few stand-in
+component and Bloblang pages for the links to land on.
+
+== rpk flags
+
+* Must read -1: rpkval:[rpk topic create --partitions]
+* Must read -p: rpkval:[rpk topic create --partitions,shorthand]
+* Must read 30000: rpkval:[rpk cluster self-test start --disk-duration-ms]
+* Must read 24h, with `data-source="help"` in the HTML because the flag comes
+  from the `ai` plugin's `--help`: rpkval:[rpk ai auditlog list --since]
+* Must read stringArray, a global flag with no command:
+  rpkval:[rpk --config-opt,type]
+* Must read no, and false:
+  rpkval:[rpk topic create --partitions,required], and
+  rpkval:[rpk topic create --partitions,required,format=raw]
+* Must read -1, the `rpk cluster partitions move-cancel` value reached
+  through its alias: rpkval:[rpk cluster partitions alter-cancel --node]
+* Must read 1m0s in inline code, as Go prints the duration:
+  `rpkval:[rpk debug bundle --timeout]`
+* Must read -1 again, in the first form of the macro, which is still accepted:
+  rpkval:partitions[command=rpk topic create]
+
+== rpk command fields and help text
+
+* Must read `+rpk topic create [TOPICS...] [flags]+`: rpkval:[rpk topic create,usage]
+* Must read "status, metadata", the aliases of `rpk cluster info`:
+  rpkval:[rpk cluster info,aliases]
+* Must read yes, because `--partitions` is not required:
+  rpkval:[rpk topic create --partitions,optional]
+* Must read the flag's help text, with `-1` and `default_topic_partitions`
+  as inline code:
+  rpkval:[rpk topic create --partitions,description]
+* Must show `<unknown description>` and log needs-block, naming
+  `+rpkval::[rpk topic create,description]+`:
+  rpkval:[rpk topic create,description]
+* Must show `<unknown deprecated>` and log dropped-field:
+  rpkval:[rpk topic create --partitions,deprecated]
+
+The block form below must render the two paragraphs of the `rpk topic create`
+description, with its backticks as inline code:
+
+rpkval::[rpk topic create,description]
+
+The block form below must render the `rpk cloud mcp stdio` description with
+its xref to `rpk cloud mcp install` as a link to the `macro-fixtures-cloud`
+stand-in page, the only page for that command in this build, as
+rpkcmd:[rpk cloud mcp install] links it. The description names
+`reference:rpk/...` in the component its data came from, and this component
+has no rpk reference pages, so the macro rewrites the link for this page:
+
+rpkval::[rpk cloud mcp stdio,description]
+
+The block form below must render the `rpk cluster quotas import` description
+with the import schema as a listing block:
+
+rpkval::[rpk cluster quotas import,description]
+
+The block form below must render the `rpk ai trigger` description with
+`+agents/{agent}/triggers/{trigger}+` as inline code, braces included:
+
+rpkval::[rpk ai trigger,description]
+
+The block form below must render each example of `rpk security acl list` as a
+paragraph followed by a literal block:
+
+rpkval::[rpk security acl list,examples]
+
+[[rpk-description-urls]]
+=== Docs URLs in rpk descriptions
+
+rpk's help links some pages with docs.redpanda.com URLs. The descriptions
+below are that help, as the fixture carries it. The macro maps each URL to a
+page as the `url-to-xref` extension does, then links it as it links any other
+target in a description.
+
+rpkval::[rpk cluster storage restore start,description]
+
+* You should see "Whole Cluster Restore" in the last sentence as a link to the `streaming` stand-in page, not a URL.
+* You should see the sentence period after that link, outside it.
+
+rpkval::[rpk connect test,description]
+
+* You should see "Unit Testing" on the last line as a link to the `connect` stand-in page, not the `/redpanda-connect/` URL.
+
+rpkval::[rpk cluster connections list,description]
+
+* You should see the Admin API URL unchanged, as a plain URL link, and no warning for it in the log.
+
+== rpk placeholders
+
+* Must show `<unknown default>` and log description-default (the description
+  states the default the flag itself does not hold):
+  rpkval:[rpk debug bundle --output]
+* Must show a placeholder and log unknown-flag:
+  rpkval:[rpk transform deploy --from-timestamp]
+* Must show a placeholder and log deprecated-command, with the replacement:
+  rpkval:[rpk redpanda admin brokers --x]
+* Must show a placeholder and log unknown-flag naming `rpk registry`, where
+  the flag is defined: rpkval:[rpk registry mode set --schema-context]
+* Must show a placeholder and log unknown-flag, because the brackets name no
+  flag: rpkval:[rpk topic create]
+
+== Connect fields
+
+* Must read redpanda-connect: connectval:client_id[default,component=inputs/redpanda]
+* Must read 1024 in code:
+  `connectval:incremental_snapshot.chunk_size[default,component=inputs/postgres_cdc]`
+* Must list merge-on-read, copy-on-write, each in code:
+  connectval:merge_strategy[options,component=outputs/iceberg]
+* Must read -1: connectval:pipeline.threads[default,component=config]
+* Must read yes, and log deprecated-field:
+  connectval:regexp_topics[deprecated,component=inputs/redpanda]
+* Must read array<string>: connectval:topics[type,component=inputs/redpanda]
+
+== Connect bracket form, component fields and text
+
+* Must read redpanda-connect, as the first form above does:
+  connectval:[inputs/redpanda.client_id]
+* Must read -1: connectval:[config.pipeline.threads]
+* Must list merge-on-read, copy-on-write, each in code, through the `options`
+  alias of `values`: connectval:[outputs/iceberg.merge_strategy,options]
+* Must read deprecated: connectval:[inputs/kafka_franz,status]
+* Must read yes: connectval:[inputs/generate.mapping,required]
+* Must read the one-paragraph summary of the `consumer_group` field:
+  connectval:[inputs/kafka_franz.consumer_group,summary]
+* Must read the `generate` summary. Its `Bloblang` link is rewritten to
+  `connect:guides:bloblang/about.adoc`, because this page is in another
+  component, and this build's stand-in Connect pages do not include that one,
+  so it must render as text and log that the build has no page for it:
+  connectval:[inputs/generate,summary]
+* Must show `<unknown description>` and log needs-block:
+  connectval:[inputs/kafka_franz.consumer_group,description]
+
+The block form below must render the `consumer_group` description: a
+paragraph, a two-item list and a paragraph.
+
+connectval::[inputs/kafka_franz.consumer_group,description]
+
+The block form below must render the `unchanged_toast_value` description.
+Its `signal_table_name` reference is an anchor on the `postgres_cdc` page,
+not on this page, so it is rewritten to that page in the `connect`
+component; with no stand-in `postgres_cdc` page in this build, it must render
+as text and log why:
+
+connectval::[inputs/postgres_cdc.unchanged_toast_value,description]
+
+== Property text values
+
+* Must read "Default log segment size in bytes for topics that do not set
+  `segment.bytes`.", with `segment.bytes` in code:
+  propval:log_segment_size[description]
+* Must read `2147483648` in code, the example:
+  propval:log_segment_size[examples]
+* Must read yes: propval:cloud_storage_enabled[enterprise]
+
+== Connect placeholders
+
+* Must show a placeholder and log complex-default:
+  connectval:partition_assignment_strategy[default,component=inputs/redpanda]
+* Must show a placeholder and log unknown-field, suggesting client_id:
+  connectval:clinet_id[default,component=inputs/redpanda]
+* Must show a placeholder and log unknown-type:
+  connectval:x[default,component=widgets/local]
+
+== rpk command links
+
+`rpkcmd:` checks the command against the same rpk data and links the page in
+the build: this component has no `rpk` pages, so it links the stand-in pages
+of `streaming-ga-lender`, then any other component that has the page.
+
+* Must render `rpk topic create` as code, linked to the `streaming` page:
+  rpkcmd:[rpk topic create]
+* Must render `rpk topic create --partitions` as code, linked to the same
+  page, because the generated pages have no flag anchors:
+  rpkcmd:[rpk topic create --partitions]
+* Must render `rpk cluster status` as code, linked to the `rpk cluster info`
+  page through the alias: rpkcmd:[rpk cluster status]
+* Must link the top-level `rpk version` page: rpkcmd:[rpk version]
+* Must link the `macro-fixtures-cloud` page, the only component that has one:
+  rpkcmd:[rpk cloud login]
+* Must link the words "create a topic": rpkcmd:[rpk topic create,text=create a topic]
+
+== rpk command placeholders
+
+Each must render as plain code with no link, and log why.
+
+* unknown-command, suggesting nothing close: rpkcmd:[rpk topic make]
+* unknown-flag, suggesting `--partitions`: rpkcmd:[rpk topic create --partition]
+* deprecated-command, with the replacement: rpkcmd:[rpk redpanda admin brokers]
+* no-page, because no component in this build has a page for it:
+  rpkcmd:[rpk debug bundle]
+
+== Connect component links
+
+`connect:` checks the component and field against the same Connect data and
+links the page in the build: this component has no Connect pages, so it links
+the stand-in pages of `connect-data-lender`.
+
+* Must render "`kafka_franz` input", the name in code, linked to the
+  `kafka_franz` page: connect:[inputs/kafka_franz]
+* Must render `consumer_group` in code, linked to `#consumer_group` on the
+  same page: connect:[inputs/kafka_franz.consumer_group]
+* Must render `sasl.mechanism` in code, linked to `#sasl-mechanism`:
+  connect:[inputs/kafka_franz.sasl.mechanism]
+* Must link the words "the generator": connect:[inputs/generate,text=the generator]
+* Must render "`redpanda` input" as plain code with no link, and log that no
+  component in this build has its page: connect:[inputs/redpanda]
+* Must render plain code and log unknown-component, suggesting kafka_franz:
+  connect:[inputs/kafka_frans]
+
+== Bloblang links and values
+
+* Must render `now()` in code, linked to `#now` on the functions page:
+  blobl:[now()]
+* Must render `.uppercase()` in code, linked to `#uppercase` on the methods
+  page: blobl:[.uppercase()]
+* Must link `#contains`, the copy under Object & Array Manipulation, which is
+  first on the page: blobl:[.contains()]
+* Must link `#contains-2`, the String Manipulation copy:
+  blobl:[.contains(),category=String Manipulation]
+* Must render `counter(min)` in code, linked to `#counter`:
+  blobl:[counter(min)]
+* Must render plain code and log hidden, because the reference does not
+  document it: blobl:[var()]
+* Must read 1: bloblval:[counter(min),default]
+* Must read string: bloblval:[.replace_all(old),type]
+* Must read experimental: bloblval:[counter(),status]
+* Must read "Checks whether a string contains a substring and returns a
+  boolean result.": bloblval:[.contains(),description,category=String Manipulation]
+* Must show `<unknown default>` and log imprecise, because the data's
+  maximum lost precision in a float round-trip: bloblval:[counter(max),default]
+* Must show `<unknown default>` and log complex-default, because the data's
+  seed is a Go struct: bloblval:[random_int(seed),default]
+
+The block form below must render the `counter()` examples, each summary
+followed by a Bloblang listing, as the Bloblang reference prints them.
+
+bloblval::[counter(),examples]
+
+== Aliases and deprecated names
+
+The macros render what you wrote and never fail the build on an alias or a
+deprecated name, but the log names what to write instead. `check-reference-values`
+reports the same calls, and `--write` rewrites the ones it can.
+
+* rpkcmd:[rpk cluster status]
+** You should see `rpk cluster status` as code, linked to the `rpk cluster info` page, and a warning that it is an alias of `rpk cluster info`, naming `+rpkcmd:[rpk cluster info]+`.
+* The value is rpkval:[rpk cluster metadata --format].
+** You should see `text`, read from `rpk cluster info`, and a warning that `rpk cluster metadata` is an alias, naming `+rpkval:[rpk cluster info --format]+`.
+* rpkcmd:[rpk redpanda admin]
+** You should see `rpk redpanda admin` as plain code with no link, and a warning that it is deprecated, naming `+rpkcmd:[rpk cluster]+`.
+* connect:[inputs/kafka_franz]
+** You should see `kafka_franz` as code and the word "input", linked to the `kafka_franz` stand-in page, and a warning that it is deprecated, naming `+connect:[inputs/redpanda]+`.
+* connect:[inputs/kafka_franz.regexp_topics]
+** You should see `regexp_topics` linked to the `kafka_franz` page with no anchor, and a warning that the field is deprecated and the data names no single replacement.
+* blobl:[meta()]
+** You should see `meta()` linked to `#meta` on the functions page, and a warning that it is deprecated with no replacement in the data.

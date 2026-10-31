@@ -44,7 +44,8 @@ content:
     branches: HEAD
     start_paths: [preview/extensions-and-macros, preview/shared,
                  preview/streaming-ga-lender, preview/macro-fixtures-ga,
-                 preview/macro-fixtures-beta, preview/macro-fixtures-cloud]
+                 preview/macro-fixtures-beta, preview/macro-fixtures-cloud,
+                 preview/connect-data-lender]
 ui:
   bundle:
     url: https://github.com/redpanda-data/docs-ui/releases/latest/download/ui-bundle.zip
@@ -55,18 +56,25 @@ asciidoc:
     # default) is what a writer should build with while learning the macros:
     # everything still renders, and every problem still gets reported.
     property-validate: warn
+    rpk-validate: warn
+    connect-validate: warn
     enterprise-validate: warn
     # The real licensing page lives on a real page in the streaming component.
     # preview/streaming-ga-lender registers that component name (Cloud's GA
     # data lookup only trusts one literally called streaming or ROOT), but it
-    # is data-only and carries no pages, so the real licensing page still
-    # doesn't exist here. Point at a resolvable stand-in instead, so a feature
+    # carries only data and a few stand-in rpk pages, so the real licensing
+    # page still doesn't exist here. Point at a resolvable stand-in instead, so a feature
     # mention with no xref of its own still links somewhere. A page that
     # already sets its own enterprise-licensing-page (test.adoc,
     # enterprise-kubernetes-test.adoc) keeps pointing at the real target and
     # stays unresolved here on purpose: build with local-macro-test-playbook.yml
     # to see those resolve for real.
     enterprise-licensing-page: shared:ROOT:licensing-placeholder.adoc
+    # docs.redpanda.com generates section ids with no prefix and - as the
+    # separator (#batching-byte_size, #contains-2), and connect: and blobl:
+    # link those ids. Generate the same ids here, so their links land.
+    idprefix: ''
+    idseparator: '-'
   extensions:
   - '@asciidoctor/tabs'
   - './macros/glossary'

@@ -1,0 +1,7 @@
+= rpk topic create
+:description: Stand-in for the rpk topic create reference page.
+
+// tag::single-source[]
+A stand-in for the generated reference page, so the showcase build has an
+`rpk` page for `rpkcmd:` to link.
+// end::single-source[]

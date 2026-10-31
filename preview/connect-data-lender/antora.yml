@@ -1,0 +1,11 @@
+# For the showcase build: the connectval:, bloblval:, connect: and blobl:
+# macros read the newest connect-<version>.json in the component literally
+# named 'connect', the role rp-connect-docs plays in production. This fixture
+# carries that one attachment (trimmed real data: the connectval test fixture,
+# plus the Bloblang lists of the same release) and a few stand-in pages with
+# the headings the generated pages have, so connect: and blobl: have real
+# pages and anchors to link. No nav. local-macro-test-playbook.yml pulls the
+# real rp-connect-docs instead, so it must not include this component.
+name: connect
+title: Connect data (lender-only fixture)
+version: ~

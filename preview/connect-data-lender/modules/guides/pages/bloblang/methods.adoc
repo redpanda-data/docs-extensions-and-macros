@@ -1,0 +1,32 @@
+= Bloblang Methods
+// Stand-in page for the showcase build: the headings the generated page has,
+// so connect: and blobl: links land on real anchors. Generated from
+// connect-4.114.0.json in this component.
+
+== General
+
+=== catch
+
+== Object & Array Manipulation
+
+=== contains
+
+=== fold
+
+=== length
+
+=== map_each
+
+=== slice
+
+== String Manipulation
+
+=== contains
+
+=== length
+
+=== replace_all
+
+=== slice
+
+=== uppercase

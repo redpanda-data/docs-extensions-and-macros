@@ -1,0 +1,4 @@
+= rpk topic create
+:description: Cloud stub for the rpk topic create reference page.
+
+include::streaming:reference:rpk/rpk-topic/rpk-topic-create.adoc[tag=single-source]

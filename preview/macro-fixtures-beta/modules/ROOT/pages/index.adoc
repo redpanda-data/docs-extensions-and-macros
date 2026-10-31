@@ -34,3 +34,10 @@ xref:26.2@macro-fixtures::index.adoc[the released fixtures] (26.2), which
 predates 26.3, the identical mention renders as plain text and warns -- a
 different gate than the unreleased feature above, checked against a version
 number rather than against which branch the page lives on.
+
+== rpk values need this release's data
+
+This version publishes no rpk data of its own; only the released 26.2 version
+of this component does. rpkval:partitions[command=rpk topic create] must read
+"<unknown default>", and the log must give the series warning: no
+rpk-v26.3.*.json in this component, rather than a value from 26.2.

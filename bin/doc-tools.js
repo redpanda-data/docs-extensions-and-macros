@@ -1149,7 +1149,8 @@ automation
  * findings. Dry run by default, writing a JSON and a Markdown report; --write
  * applies only exact matches stated in the same sentence as their property,
  * never a mismatch, a table cell or example output. Skips prose inside code
- * blocks and generated content.
+ * blocks and generated content. `check-reference-values` runs these property
+ * checks together with rpk and Connect checks, and can fail CI.
  *
  * @example
  * # Report on a docs checkout
@@ -3416,6 +3417,114 @@ programCli
   .action(async (paths, options) => {
     const { runCli } = require('../tools/check-metadata')
     await runCli(paths, options)
+  })
+
+/**
+ * check-reference-values
+ *
+ * @description
+ * Check a docs checkout for reference values and references that the
+ * propval:, rpkval:, connectval:, bloblval:, rpkcmd:, connect: and blobl:
+ * macros could render from the published data, and for references to things the data does not have. Three kinds run
+ * together, each selecting its dataset exactly as its macro does (from the
+ * repo and any --lender checkouts), unless --data-file names one:
+ * properties runs the migrate-property-values scan unchanged; rpk parses
+ * every rpk invocation in shell blocks and backticked prose (unknown-command,
+ * unknown-flag and deprecated-command, with "did you mean" suggestions) and
+ * compares flag defaults stated in prose and in Default table columns with
+ * the rpk data, and checks each hand-written xref to an rpk reference page as
+ * the scanned component renders it (broken-link when the page does not
+ * exist there, link-label-mismatch when the label names another command, and
+ * exact when the label is the command in backticks and rpkcmd: would link the
+ * same page); connect walks every pipeline config in YAML blocks and
+ * examples files (unknown-component, unknown-field, deprecated components and
+ * fields), compares YAML comments that state a default ("# Optional
+ * (default: ...)") and callouts and sentences that state one with the Connect
+ * data, and checks each hand-written xref to a Connect component page, field
+ * anchor or Bloblang page on every component that renders the file
+ * (broken-link, link-label-mismatch, and exact when the label is just the
+ * name and connect: or blobl: would link the same page and anchor). Statuses are propval's (exact, equivalent, mismatch, unset,
+ * unverifiable, example output) plus reference. Plugin flags scraped from
+ * --help never fail, and neither do findings in release notes, upgrade notes
+ * or Connect migration guides. A `// value-check: ignore` comment line
+ * suppresses findings on the next line or in the next block. Writes one JSON
+ * and one Markdown report. --write applies only exact matches in the same
+ * sentence (or a Connect callout) that name one target, never in a table,
+ * block or YAML, and only when the line renders the same visible text before
+ * and after through the real macros; an exact rpk xref, in prose or a table
+ * cell, becomes rpkcmd:[...], and an exact Connect xref connect:[...] or
+ * blobl:[...]. It also reports unlinked mentions: the first mention on a
+ * page, as it renders with its includes, of an rpk command in inline code
+ * (`rpk topic create`), a Connect component named with its type
+ * (`kafka_franz` input, kafka_franz input) or, in Connect content, a
+ * Bloblang call (`now()`, `.uppercase()`, `uppercase` method), when the page
+ * links it nowhere and rpkcmd:, connect: or blobl: would link it. A mention
+ * in a partial is reported at the partial when one page that includes it
+ * shows it that way, and a partial no loaded page includes is judged on its
+ * own. Never in blocks, headings, titles, table header rows, link
+ * labels, nav files, release, upgrade or migration notes, generated pages
+ * or the target's own page. They fail only at --fail-on links, and --write
+ * turns them into links only with --write-links, keeping the text as
+ * written. It also reports old names in macros and prose spans: an rpk
+ * command written with an alias (`rpk cluster status` for rpk cluster info)
+ * or a Connect component written with the name its page now aliases
+ * (outputs/kafka_migrator) is an alias warning, and a deprecated rpk
+ * command, Connect component or field, or Bloblang function or method is a
+ * deprecated reference warning that names the replacement the data names.
+ * Both fail only at --fail-on any or links. --write rewrites one to the
+ * main or replacement name, keeping the rest of the call, when the data
+ * names one replacement that has the same flag or field (and, for Connect,
+ * is the same type), the line is not about the name, the main name is not
+ * already written nearby, and the page does not use the old name elsewhere,
+ * such as in an example; the line must then render as before except where
+ * the name renders.
+ * Exit 0 when no finding is at or above
+ * --fail-on, 1 when one is, 2 when the check could not run (including
+ * --write-links without --write).
+ *
+ * @why
+ * Hand-typed defaults, flags and field names drift from the product with
+ * every release, and nothing notices until a reader runs the command. The
+ * value macros fix that for new prose; this finds the prose that needs them,
+ * and the references that are already wrong, in a form CI can fail on.
+ *
+ * @example
+ * # docs: rpk from the generator snapshot until the attachment is published
+ * npx doc-tools check-reference-values --docs-dir . --data-file docs-data/rpk-v26.2.2.json --lender ../rp-connect-docs --report-dir ./reference-values
+ *
+ * # cloud-docs borrows property and rpk data from docs, Connect data from rp-connect-docs
+ * npx doc-tools check-reference-values --docs-dir ../cloud-docs --lender ../docs ../rp-connect-docs --data-file ../docs/docs-data/rpk-v26.2.2.json
+ *
+ * # Only the files a pull request changed, with GitHub annotations
+ * npx doc-tools check-reference-values --files $(git diff --name-only origin/main -- '*.adoc') --annotations github
+ *
+ * # Apply the auto-safe exact matches, then fail on anything left
+ * npx doc-tools check-reference-values --write --fail-on mismatch
+ *
+ * # Also link the first unlinked mention of each command, component and call
+ * npx doc-tools check-reference-values --write --write-links --data-file docs-data/rpk-v26.2.2.json --lender ../rp-connect-docs
+ *
+ * @requirements
+ * - An Antora component checkout (antora.yml and modules/)
+ * - The data: redpanda-properties-<tag>.json and rpk-<version>.json attachments
+ *   in a reference module, connect-<version>.json in rp-connect-docs, or --data-file
+ */
+programCli
+  .command('check-reference-values')
+  .description('Check prose, shell blocks and YAML against the property, rpk and Connect data: report hand-written values the value macros could render, and unknown or deprecated commands, flags, components and fields')
+  .option('--docs-dir <path>', 'Root of the repo being scanned (antora.yml and modules/)', '.')
+  .option('--lender <path...>', 'Other component checkouts read into the same catalog, so data is selected exactly as the macros select it (for example ../docs ../rp-connect-docs)')
+  .option('--kinds <list>', 'Comma-separated kinds to run: properties, rpk, connect (default: all; a named kind with no data is a setup error)')
+  .option('--data-file <path...>', 'Dataset files that bypass selection, recognized by name: redpanda-properties-v<tag>.json, rpk-v<version>.json (the docs-data snapshot works), connect-<version>.json')
+  .option('--files <path...>', 'Scan only these files, relative to --docs-dir')
+  .option('--report-dir <path>', 'Where to write reference-values-report.json and reference-values-report.md', '.')
+  .option('--write', 'Apply auto-safe exact replacements with the value macros, and rewrite writable aliases and deprecated names to the main or replacement name')
+  .option('--write-links', 'With --write, also turn unlinked mentions into rpkcmd:, connect: and blobl: links, keeping the text as written')
+  .option('--fail-on <level>', 'none, mismatch (mismatches, reference errors, stale rpk and Connect examples), any (also exact, equivalent, unset, reference warnings such as deprecated names, and aliases) or links (also unlinked mentions)', 'mismatch')
+  .option('--annotations <format>', 'Also print GitHub workflow annotations: github')
+  .action((options) => {
+    const { runCli } = require('../tools/reference-values')
+    process.exitCode = runCli(options)
   })
 
 /**
