@@ -26,6 +26,17 @@ const semver = require('semver');
 const DEPRECATED_REMOVAL_MIN_VERSION = '26.1.0';
 
 /**
+ * Whether a property entry is marked deprecated, by the extractor's flag or
+ * by its visibility (a deprecated_property in source).
+ *
+ * @param {object} prop - A property entry from an attachment.
+ * @returns {boolean} True if the property is deprecated.
+ */
+function isDeprecatedProperty(prop) {
+  return Boolean(prop && (prop.is_deprecated === true || prop.visibility === 'deprecated'));
+}
+
+/**
  * Check if the new version deletes deprecated properties from source.
  *
  * Before v26.1, deprecated properties were kept in the C++ source tagged as
@@ -257,10 +268,13 @@ function compareProperties(oldData, newData, oldVersion, newVersion) {
       // Check both the is_experimental_property field and development_ prefix
       const isExperimental = oldProp.is_experimental_property || name.startsWith('development_');
       if (!isExperimental) {
-        // In v26.1+, deprecated properties are deleted from source instead of
-        // being tagged. If a property existed before and is gone now, it was
-        // deprecated.
-        if (removesDeprecated) {
+        // In v26.1+, a deprecated property can be deleted from source rather
+        // than kept as a tagged deprecated_property. Only a property the old
+        // tag already marked deprecated counts as removed-deprecated and is
+        // restored into the new attachment. Anything else missing from the
+        // new tag, such as a backport the new line does not have yet, is
+        // reported as removed and never injected (#231).
+        if (removesDeprecated && isDeprecatedProperty(oldProp)) {
           report.removedDeprecatedProperties.push({
             name,
             type: oldProp.type,
