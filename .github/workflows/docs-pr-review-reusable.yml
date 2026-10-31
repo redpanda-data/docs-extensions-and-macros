@@ -1,26 +1,35 @@
 # Reusable docs PR review pipeline. Called by the thin docs-review.yml
-# caller in each of the nine docs repos (template: .github/docs-review-caller-template.yml).
+# caller in each in-scope repo (template: .github/docs-review-caller-template.yml).
 #
-# Two caller modes (the `sme_gate` input):
-#   - SME-gated content repos (docs, cloud-docs, api-docs, adp-docs,
-#     adp-cloud-docs, rp-connect-docs): the review waits for one SME approval.
-#   - Docs-only repos (docs-site, docs-team-standards, docs-template): no page
-#     is owned by an engineer, so there is no SME step — the review runs as
-#     soon as the PR is ready for review; the docs-team approval is the only
-#     review these repos require.
+# Scope, re-review and approval rules live in .github/docs-review-config.json
+# in docs-team-standards, read at the caller's plugin_ref, so they change
+# without editing this file or any caller:
+#   - which repos are reviewed (scope.include_repos), and which PRs are
+#     exempt: the ADP docs repo (adp-docs), and the reference and rpk automations' PRs
+#     ("auto-docs:" titles and their branches);
+#   - incremental re-review: after any earlier doc review on the PR (this
+#     pipeline's report, or a docs-team review), only the commits since
+#     that review's head SHA are reviewed;
+#   - approval: a PR that passes the review is approved, with any
+#     non-blocking suggestions listed in the approval. Review feedback that
+#     says the PR is ready for approval, on the current head, is approved
+#     without a re-review.
+# There is no SME step: the review never waits for an SME approval. (The
+# daily sme-nag still asks authors to tag an SME, but nothing here waits.)
 #
-# What never gets reviewed here (gate exits without touching the PR):
+# What never gets reviewed here (gate exits without touching the PR: no
+# comment, review, label or status; in an on-request repo, a request that
+# ends this way gets a one-line note saying why, from clear_request):
 #   - draft PRs — marking a PR "ready for review" is the review-now button
+#   - PRs out of scope per the config (repo not included, ADP, auto-docs)
 #   - bot-authored PRs (GitHub Apps, plus the `bot_logins` service accounts,
-#     e.g. vbotbuildovich) unless the caller sets bot_pr_policy: review, in
-#     which case they are reviewed WITHOUT an SME gate (api-docs auto PRs)
+#     e.g. vbotbuildovich) unless the caller sets bot_pr_policy: review
 #   - PRs matching a caller's skip_branch_patterns / skip_title_patterns
-#     (adp-docs' daily sync PRs, which have their own critic)
 #   - fork PRs (derived in the gate from the PR object, not trusted
 #     from the caller's `if`, which cannot see head.repo on a
 #     repository_dispatch event)
-# The `no-sme-needed` label bypasses the SME gate on any PR in an SME-gated
-# repo, exactly as it already silences the daily nag.
+#   - PRs with no new commits since the last doc review (and no
+#     ready-for-approval feedback to act on)
 #
 # HOSTING: this is the CANONICAL copy (public host, next to the
 # doc-strings review that runs the same host/skills split in production).
@@ -37,23 +46,23 @@
 # so #303 merged with the claude-skill `uses:` refs at @main (step 1,
 # SHA-1 = 681c7a5). Step 2 replaced @main with SHA-1 in every claude-skill
 # ref. Callers pin the step-2 merge SHA, and from there nothing in the
-# pipeline floats. A change to the action needs the same two steps again.
+# pipeline floats. A change to the action needs the same two steps again:
+# #418 changed it (the gh shim refuses a non-GitHub GH_HOST or GH_REPO),
+# so every claude-skill ref now pins #418's merge SHA, 0fac2b8.
 #
 # Design doc + decision record: https://claude.ai/code/artifact/36e1362f-11d3-4532-8fe1-a5191c8def9f
 #
-# Ordering contract: in an SME-gated repo the automated docs review never
-# runs before one SME approval (SME = (requested ∪ reviewed) − docs team −
-# author − bots, where "reviewed" means any review that is not COMMENTED,
-# recomputed from the API on every run — never cached). Everywhere
-# it runs exactly once per (PR, head SHA), and it never merges anything.
-# The only physical merge gate is the docs-team approval (CODEOWNERS).
+# Ordering contract: the review runs at most once per (PR, head SHA), and it
+# never merges anything. The pipeline may approve; wherever branch
+# protection requires a code-owner review, the docs-team CODEOWNERS approval
+# is still the merge gate.
 #
 # `docs-review` is a COMMIT STATUS, not a label: the workflow writes it on
 # the PR's head SHA and it shows up in the PR's checks list. pending =
-# holding (waiting for SME / review running), success/failure = the review's
-# verdict. It is informational — nothing here blocks a merge. The labels the
-# workflow applies (`needs-human-review`, `screenshot-standards`) and the one
-# humans apply (`no-sme-needed`) are listed in .github/DOCS_REVIEW_ROLLOUT.md.
+# review running, success/failure = the review's verdict. It is
+# informational — nothing here blocks a merge. The labels the workflow
+# applies (`screenshot-standards`) are listed in
+# .github/DOCS_REVIEW_ROLLOUT.md.
 #
 # Exactly-once = two layers: the caller's `concurrency` group serializes
 # runs per PR (primary; every caller must keep it), and the gate CLAIMS the
@@ -87,18 +96,20 @@ on:
       # #826 (merged 2026-09-18).
       sme_gate:
         description: >-
-          true (default): hold the review until one SME approves. false for
-          docs-only repos (docs-site, docs-team-standards, docs-template):
-          no engineer owns pages there, so the review runs as soon as the PR
-          is ready for review and only the docs-team approval is required.
+          DEPRECATED, ignored. The review no longer waits for an SME
+          approval in any repo. Kept so callers that still pass it do not
+          fail with "unexpected input"; remove it from callers at the next
+          pin bump.
         type: boolean
-        default: true
+        default: false
       bot_pr_policy:
         description: >-
           What to do with bot-authored PRs (GitHub App authors, plus the
           logins in bot_logins). "skip" (default): no review at all — the
           writers run the deterministic checks by hand. "review": run the
-          automated review WITHOUT an SME gate (api-docs auto PRs).
+          automated review. Either way, the reference and rpk automations'
+          PRs are exempt through the config (scope.exempt), whatever this
+          says.
         type: string
         default: 'skip'
       bot_logins:
@@ -201,10 +212,10 @@ env:
 
 jobs:
   # ──────────────────────────────────────────────────────────────────────
-  # §2 — skip rules, SME gating, exactly-once. Event-agnostic: every event
-  # (opened, ready_for_review, synchronize, review_requested, labeled,
-  # pull_request_review, repository_dispatch) re-evaluates the same rules
-  # from the live API — nothing is cached between runs.
+  # §2 — skip rules, scope, re-review baseline, exactly-once. Event-agnostic:
+  # every event (opened, ready_for_review, synchronize, pull_request_review,
+  # repository_dispatch) re-evaluates the same rules from the live API —
+  # nothing is cached between runs except this pipeline's own report.
   # ──────────────────────────────────────────────────────────────────────
   gate:
     runs-on: ubuntu-latest
@@ -214,25 +225,93 @@ jobs:
       pull-requests: read
       statuses: write
     outputs:
-      run_review: ${{ steps.eval.outputs.run_review }}
+      run_review: ${{ steps.scope.outputs.run_review }}
       head_sha: ${{ steps.eval.outputs.head_sha }}
-      sme_approver: ${{ steps.eval.outputs.sme_approver }}
-      sme_set: ${{ steps.eval.outputs.sme_set }}
-      # How the SME requirement was satisfied — the review comment says so:
-      # approved | repo-not-gated | no-sme-needed-label | author-is-sme-label |
-      # bot-author
-      sme_mode: ${{ steps.eval.outputs.sme_mode }}
+      # full | incremental | approve_only (scripts/docs-review-scope.py)
+      mode: ${{ steps.scope.outputs.decision }}
+      baseline_sha: ${{ steps.scope.outputs.baseline_sha }}
+      baseline_source: ${{ steps.scope.outputs.baseline_source }}
+      ready_by: ${{ steps.scope.outputs.ready_by }}
+      # On-request repos (review_trigger in the config): the request label to
+      # remove when the run ends. Empty otherwise.
+      request_label: ${{ steps.request.outputs.request_label }}
+      # When this run started (UTC), so clear_request keeps a label someone
+      # added again while it ran.
+      started_at: ${{ steps.request.outputs.started_at }}
+      # Why no review runs, in words for the writer. clear_request posts it
+      # when a request ends without a review, so removing the label is never
+      # silent. Empty when a review runs.
+      no_review_why: ${{ steps.scope.outputs.why || steps.eval.outputs.why }}
+      # true when another run's claim on the head stopped this one: that run
+      # is reviewing, or died without finishing (cancelled), so the request
+      # is not served yet.
+      request_held: ${{ steps.scope.outputs.held }}
     steps:
-      - id: eval
+      # The pin is checked first, without writing anything: the config that
+      # says whether this repo reviews on request comes from plugin_ref.
+      # The eval step below holds the PR pending when the pin is bad.
+      - id: pin
+        env:
+          PLUGIN_REF: ${{ inputs.plugin_ref }}
+        run: |
+          if [[ "${PLUGIN_REF:-}" =~ ^[0-9a-f]{40}$ ]]; then echo "ok=true" >> "$GITHUB_OUTPUT"; fi
+
+      # The scope rules and the scope script come from docs-team-standards
+      # at plugin_ref, like the skills (private repo: see aggregate for the
+      # token).
+      - name: Mint a read-only token for the config checkout
+        id: standards_token
+        if: steps.pin.outputs.ok == 'true' && inputs.docs_app_id != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.docs_app_id }}
+          private-key: ${{ secrets.docs_app_private_key }}
+          owner: redpanda-data
+          repositories: docs-team-standards
+          permission-contents: read
+
+      - uses: actions/checkout@v4
+        if: steps.pin.outputs.ok == 'true'
+        with:
+          repository: redpanda-data/docs-team-standards
+          ref: ${{ inputs.plugin_ref }}
+          path: .standards
+          token: ${{ steps.standards_token.outputs.token || github.token }}
+          persist-credentials: false
+          sparse-checkout: |
+            .github/docs-review-config.json
+            scripts/docs-review-scope.py
+          sparse-checkout-cone-mode: false
+
+      # review_trigger: is this repo reviewed only on request, and is this
+      # event the request? A plugin_ref that predates the setting has no
+      # --request mode; the repo is then reviewed automatically, as before.
+      - id: request
+        if: steps.pin.outputs.ok == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ inputs.pr_number }}
           R: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
           EVENT_ACTION: ${{ github.event.action }}
-          DOC_TEAM: ${{ vars.DOC_TEAM_LOGINS }}
+          EVENT_LABEL: ${{ github.event.label.name }}
+        run: |
+          set -euo pipefail
+          echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          gh api "repos/$R/pulls/$PR" > "$RUNNER_TEMP/pr.json"
+          CFG=.standards/.github/docs-review-config.json
+          if [[ -f "$CFG" ]] && grep -q -- '--request' .standards/scripts/docs-review-scope.py 2>/dev/null; then
+            python3 -I .standards/scripts/docs-review-scope.py --request "$CFG" "$RUNNER_TEMP/pr.json"
+          fi
+
+      - id: eval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr_number }}
+          R: ${{ github.repository }}
           PLUGIN_REF: ${{ inputs.plugin_ref }}
-          SME_GATE: ${{ inputs.sme_gate }}
+          ON_REQUEST: ${{ steps.request.outputs.on_request }}
+          IS_REQUEST: ${{ steps.request.outputs.is_request }}
           BOT_PR_POLICY: ${{ inputs.bot_pr_policy }}
           BOT_LOGINS: ${{ inputs.bot_logins }}
           SKIP_BRANCHES: ${{ inputs.skip_branch_patterns }}
@@ -240,7 +319,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          PRJ=$(gh api "repos/$R/pulls/$PR")
+          if [[ -s "$RUNNER_TEMP/pr.json" ]]; then
+            PRJ=$(cat "$RUNNER_TEMP/pr.json")
+          else
+            PRJ=$(gh api "repos/$R/pulls/$PR")
+            printf '%s' "$PRJ" > "$RUNNER_TEMP/pr.json"
+          fi
           HEAD_SHA=$(jq -r .head.sha <<< "$PRJ")
           AUTHOR=$(jq -r .user.login <<< "$PRJ")
           AUTHOR_TYPE=$(jq -r .user.type <<< "$PRJ")     # "User" | "Bot" (GitHub Apps)
@@ -248,16 +332,10 @@ jobs:
           TITLE=$(jq -r .title <<< "$PRJ")
           BRANCH=$(jq -r .head.ref <<< "$PRJ")
           HEAD_REPO=$(jq -r '.head.repo.full_name // ""' <<< "$PRJ")
-          LABELS=$(jq -r '[.labels[].name] | join(",")' <<< "$PRJ")
-          {
-            echo "head_sha=$HEAD_SHA"
-            echo "sme_set="
-            echo "sme_approver="
-            echo "sme_mode="
-          } >> "$GITHUB_OUTPUT"
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
           # skip: leave the PR untouched — no status, no comment, no label.
-          skip() { echo "$1"; echo "run_review=false" >> "$GITHUB_OUTPUT"; exit 0; }
+          skip() { echo "$1"; { echo "proceed=false"; echo "why=$1"; } >> "$GITHUB_OUTPUT"; exit 0; }
 
           # ── Fork PRs are never reviewed ───────────────────────────────
           # Derived HERE, from the PR object above, rather than trusted from
@@ -283,6 +361,15 @@ jobs:
             skip "PR #$PR is a draft — not reviewed. Mark it ready for review to request the automated review."
           fi
 
+          # ── On-request repos (review_trigger in the config) ────────────
+          # A review runs only while the PR carries the request label (or on
+          # the Slack scan's dispatch); any event then serves the request.
+          # Without the label, every event in such a repo, pushes and reviews
+          # included, exits here with nothing written.
+          if [[ "${ON_REQUEST:-}" == "true" && "${IS_REQUEST:-}" != "true" ]]; then
+            skip "PR #$PR is in an on-request repo and this event is not a review request — not reviewed."
+          fi
+
           # ── Bot-authored PRs ───────────────────────────────────────────
           IS_BOT=false
           if [[ "$AUTHOR_TYPE" == "Bot" ]] || [[ "$AUTHOR" == *"[bot]" ]]; then
@@ -299,70 +386,30 @@ jobs:
 
           # ── Caller exclusions (branch glob / title regex) ──────────────
           while IFS= read -r pat; do
-            pat="${pat#"${pat%%[![:space:]]*}"}"; [[ -z "$pat" ]] && continue
+            # Trim both ends: a trailing space in a multi-line input would
+            # otherwise make a pattern that can never match. MIRROR: sme-nag.yml
+            # trims the same way, so the gate and the nag skip the same PRs.
+            pat="${pat#"${pat%%[![:space:]]*}"}"; pat="${pat%"${pat##*[![:space:]]}"}"
+            [[ -z "$pat" ]] && continue
             # shellcheck disable=SC2053  # unquoted on purpose: glob match
             if [[ "$BRANCH" == $pat ]]; then
               skip "PR #$PR head branch '$BRANCH' matches skip_branch_patterns '$pat' — not reviewed by this pipeline."
             fi
           done <<< "${SKIP_BRANCHES:-}"
           while IFS= read -r pat; do
-            pat="${pat#"${pat%%[![:space:]]*}"}"; [[ -z "$pat" ]] && continue
+            pat="${pat#"${pat%%[![:space:]]*}"}"; pat="${pat%"${pat##*[![:space:]]}"}"
+            [[ -z "$pat" ]] && continue
             if [[ "$TITLE" =~ $pat ]]; then
               skip "PR #$PR title matches skip_title_patterns '$pat' — not reviewed by this pipeline."
             fi
           done <<< "${SKIP_TITLES:-}"
 
-          # Helpers ---------------------------------------------------------
-          derive_smes() {
-            # MIRROR: .github/workflows/sme-nag.yml derives the same set from
-            # `gh pr list --json reviewRequests,reviews` (a different API
-            # shape, so the code cannot be shared verbatim). The RULE must stay
-            # identical — (requested ∪ reviewed) − docs team − author − bots —
-            # or the nag will chase authors the gate is already satisfied
-            # with, or vice versa. Change both together; docs-team-standards'
-            # scripts/test-sme-parity.sh (sme-parity.yml) fails CI if they drift.
-            #
-            # (requested ∪ reviewed) − docs team − author − bots, recomputed
-            # ("reviewed" = any review that is not COMMENTED),
-            # from the API on EVERY run. Deliberately not cached anywhere: a
-            # marker comment would be shared mutable state that anyone with
-            # write access can edit or delete, and a stale snapshot silently
-            # changes gate behaviour. requested_reviewers alone is DESTRUCTIVE
-            # (GitHub drops a user the moment they submit any review), which
-            # is why the union with users-who-reviewed is what makes this
-            # recomputable at any moment.
-            local live reviewed
-            # From the PR object this run fetched at the top of the gate.
-            live=$(jq -r '[.requested_reviewers[].login] | join(",")' <<< "$PRJ")
-            # Pipe into `jq -s`, never `--paginate --jq`: gh applies --jq to
-            # each 30-item page separately and prints one line per page, so
-            # a PR with >30 reviews yields "a,b\nc,d" and a bogus login
-            # "b\nc" after split(",") — real SMEs silently dropped. (gh's
-            # own --slurp cannot be combined with --jq.)
-            reviews=$(gh api "repos/$R/pulls/$PR/reviews" --paginate \
-              | jq -cs '[.[][] | {login: .user.login, state}]')
-            # A COMMENTED review does not make someone an SME (decision with
-            # Jake, 2026-10-19): the approval check below ignores COMMENTED,
-            # so a drive-by commenter counted here could never satisfy the
-            # gate, and the nag (which only fires on an empty set) would
-            # stay silent. Anyone with an APPROVED, CHANGES_REQUESTED or
-            # DISMISSED review still counts, even if they commented later.
-            jq -nr --arg live "$live" --argjson reviews "$reviews" \
-              --arg team "$DOC_TEAM" --arg author "$AUTHOR" --arg bots "$BOT_LOGINS" '
-              (($live | split(",")) + ($reviews | map(select(.state != "COMMENTED") | .login))) | unique
-              | map(select(. != "" and . != $author))
-              | map(select(endswith("[bot]") | not))
-              | map(select(. as $l | ($bots | split(",") | map(gsub("\\s";""))) | index($l) | not))
-              | map(select(. as $l | ($team | split(",") | map(gsub("\\s";""))) | index($l) | not))
-              | join(",")'
-          }
           set_pending() {
             # Truncated to 139: GitHub rejects a status description over 140
             # characters with a 422, and under `set -e` that would abort the
             # gate entirely, leaving the PR with no review, no comment and no
-            # status. The SME-list caller below is unbounded (one login per
-            # tagged reviewer), and aggregate-review.sh truncates its own
-            # description for the same reason.
+            # status. aggregate-review.sh truncates its own description for
+            # the same reason.
             gh api "repos/$R/statuses/$HEAD_SHA" \
               -f context="$REVIEW_STATUS_CONTEXT" -f state=pending \
               -f description="${1:0:139}" \
@@ -370,8 +417,8 @@ jobs:
           }
 
           # ── Exactly-once per (PR, head SHA) ───────────────────────────
-          # Checked before anything writes a status, so a review_requested or
-          # labeled event after a completed review leaves the verdict alone.
+          # Checked before anything writes a status, so a later event (a
+          # review submitted) after a completed review leaves the verdict alone.
           # This has to stay ABOVE the plugin_ref guard below: that guard
           # writes a pending status, and writing one over a head SHA that
           # already carries a completed verdict would both destroy the verdict
@@ -382,7 +429,10 @@ jobs:
                    | select(.state=="success" or .state=="failure")] | length')
           if [[ "$DONE" -gt 0 ]]; then
             echo "Review already completed for $HEAD_SHA — exiting (exactly-once)."
-            echo "run_review=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "proceed=false"
+              echo "why=The latest commit (${HEAD_SHA:0:7}) already has a completed review: see its docs-review check. Push new commits, then ask again."
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -395,105 +445,83 @@ jobs:
           if [[ ! "${PLUGIN_REF:-}" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::warning::plugin_ref is not a full commit SHA ('${PLUGIN_REF:-}') — holding the gate (pending), skipping review"
             set_pending "Docs review pipeline misconfigured (plugin_ref is not pinned)"
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
+
+      # Scope, baseline and ready-for-approval: scripts/docs-review-scope.py,
+      # driven by .github/docs-review-config.json. skip and noop exit here
+      # with nothing written to the PR.
+      - id: scope
+        if: steps.eval.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr_number }}
+          R: ${{ github.repository }}
+          HEAD_SHA: ${{ steps.eval.outputs.head_sha }}
+          DOC_TEAM: ${{ vars.DOC_TEAM_LOGINS }}
+          # An explicit request (on-request repo): people's reviews are no
+          # baseline, so it is never answered with a noop.
+          IS_REQUEST: ${{ steps.request.outputs.on_request == 'true' && steps.request.outputs.is_request || '' }}
+        run: |
+          set -euo pipefail
+          set_pending() {
+            # Truncated to 139: GitHub rejects a status description over 140
+            # characters with a 422, and under `set -e` that would abort the
+            # gate entirely, leaving the PR with no review, no comment and no
+            # status. aggregate-review.sh truncates its own description for
+            # the same reason.
+            gh api "repos/$R/statuses/$HEAD_SHA" \
+              -f context="$REVIEW_STATUS_CONTEXT" -f state=pending \
+              -f description="${1:0:139}" \
+              -f target_url="${GITHUB_SERVER_URL}/${R}/actions/runs/${GITHUB_RUN_ID}" > /dev/null
+          }
+
+          CFG=.standards/.github/docs-review-config.json
+          if [[ ! -f "$CFG" || ! -f .standards/scripts/docs-review-scope.py ]]; then
+            echo "::warning::plugin_ref predates .github/docs-review-config.json — holding the gate (pending), skipping review"
+            set_pending "Docs review pipeline misconfigured (plugin_ref has no docs-review-config.json)"
             echo "run_review=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-
-          # ── Does this PR need an SME approval first? ──────────────────
-          SME_MODE=approved
-          if [[ "$SME_GATE" != "true" ]]; then
-            SME_MODE=repo-not-gated          # docs-only repo: no engineer-owned pages
-          elif [[ ",$LABELS," == *",no-sme-needed,"* ]]; then
-            SME_MODE=no-sme-needed-label     # same escape hatch the daily nag honours
-          elif [[ ",$LABELS," == *",author-is-sme,"* ]]; then
-            # Engineer-authored PR (e.g. adp-docs-author): the author IS the
-            # SME, and derive_smes subtracts the author, so the set would be
-            # empty forever. Same effect as no-sme-needed; a label the
-            # engineer reads should describe their situation.
-            SME_MODE=author-is-sme-label
-          elif [[ "$IS_BOT" == "true" ]]; then
-            SME_MODE=bot-author              # bot_pr_policy=review: auto PRs get no SME review
+          IN="$RUNNER_TEMP/scope-in"; mkdir -p "$IN" review-scope
+          cp "$RUNNER_TEMP/pr.json" "$IN/pr.json"
+          # Files API, not `gh pr diff --name-only` (see classify). Reviews
+          # and comments: pipe into `jq -s`, never `--paginate --jq`.
+          gh api --paginate "repos/$R/pulls/$PR/files" --jq '.[].filename' > "$IN/files.txt"
+          gh api --paginate "repos/$R/pulls/$PR/reviews" | jq -s '[.[][]]' > "$IN/reviews.json"
+          gh api --paginate "repos/$R/issues/$PR/comments" | jq -s '[.[][]]' > "$IN/comments.json"
+          python3 -I .standards/scripts/docs-review-scope.py "$CFG" "$IN" review-scope
+          DECISION=$(grep '^decision=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2)
+          if [[ "$DECISION" != "full" && "$DECISION" != "incremental" && "$DECISION" != "approve_only" ]]; then
+            # skip / noop: no status, no comment, no review, no label.
+            REASON=$(grep '^reason=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2-)
+            if [[ "$DECISION" == "noop" ]]; then
+              WHY="Nothing to review: $REASON. Push new commits, then ask again."
+            else
+              WHY="Not reviewed: $REASON."
+            fi
+            { echo "run_review=false"; echo "why=$WHY"; } >> "$GITHUB_OUTPUT"
+            exit 0
           fi
-
-          if [[ "$SME_MODE" == "approved" ]]; then
-            # A missing DOC_TEAM_LOGINS is environment misconfiguration, not
-            # a review verdict — hold with an informative pending status.
-            # See .github/DOCS_REVIEW_ROLLOUT.md org-setup for the variable.
-            if [[ -z "${DOC_TEAM:-}" ]]; then
-              echo "::warning::DOC_TEAM_LOGINS org variable is not set — holding the SME gate (pending), skipping review"
-              set_pending "Waiting for SME approval (DOC_TEAM_LOGINS is not configured)"
-              echo "run_review=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-
-            # ── Evaluate the SME gate (event-agnostic, stateless) ───────
-            SMES=$(derive_smes)
-            echo "sme_set=$SMES" >> "$GITHUB_OUTPUT"
-
-            if [[ -z "$SMES" ]]; then
-              set_pending "Waiting for SME approval (no SME tagged — daily nag active; or label no-sme-needed / author-is-sme)"
-              echo "run_review=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-
-            # Latest non-COMMENTED review state per SME, by submitted_at.
-            # `jq -s` + [.[][]] flattens the pages into ONE array; per-page
-            # `--jq` output would make PASS a multi-line string that never
-            # equals "true", holding the gate forever on PRs with >30 reviews.
-            gh api "repos/$R/pulls/$PR/reviews" --paginate \
-              | jq -s '[.[][] | select(.state != "COMMENTED")]
-                    | group_by(.user.login)
-                    | map(max_by(.submitted_at))
-                    | map({login: .user.login, state})' > states.json
-
-            # Decision 2 (corrected): ONE SME approval opens the gate, but any
-            # other SME's outstanding CHANGES_REQUESTED vetoes it until that
-            # SME approves or their review is dismissed (either fires a
-            # pull_request_review event, re-evaluating here). The gate does
-            # NOT assume dismiss-stale-approvals: enabling it changes merge
-            # behaviour for every human contributor across the docs repos and
-            # is its own decision, outside this project. With it ON, APPROVED
-            # always refers to current code; with it OFF, an earlier SME
-            # approval persists across pushes — the review still runs at most
-            # once per head SHA either way, and the status stays informational.
-            PASS=$(jq -r --arg smes "$SMES" '
-              ($smes | split(",")) as $set
-              | [ .[] | select(.login as $l | $set | index($l)) ] as $sme
-              | if ($sme | map(select(.state=="CHANGES_REQUESTED")) | length) > 0
-                then "false"
-                elif ($sme | map(select(.state=="APPROVED")) | length) > 0
-                then "true"
-                else "false"
-                end' states.json)
-
-            APPROVER=$(jq -r --arg smes "$SMES" '
-              ($smes | split(",")) as $set
-              | [ .[] | select(.login as $l | $set | index($l)) | select(.state=="APPROVED") | .login ]
-              | join(", ")' states.json)
-            echo "sme_approver=$APPROVER" >> "$GITHUB_OUTPUT"
-
-            if [[ "$PASS" != "true" ]]; then
-              set_pending "Waiting for SME approval (${SMES})"
-              echo "run_review=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-          else
-            echo "SME gate not required for PR #$PR ($SME_MODE) — proceeding to review."
-          fi
-          echo "sme_mode=$SME_MODE" >> "$GITHUB_OUTPUT"
 
           # ── Claim this head SHA before spending anything ──────────────
           # The exactly-once check above only sees success/failure, which
           # aggregate writes at the END of a run — so two events for the same
-          # SHA that overlap (an SME approval plus a synchronize seconds
-          # later, or two SME approvals) would both read DONE=0 and both
+          # SHA that overlap (a review submitted plus a synchronize seconds
+          # later) would both read DONE=0 and both
           # start the paid Claude jobs. The caller's `concurrency` group
           # (docs-review-<pr>, cancel-in-progress: false — REQUIRED in every
           # caller) serializes runs per PR and is the primary guard; this
           # claim is the belt to that braces for a caller that dropped it:
           # write a pending status naming this run, then read back the
-          # latest docs-review status — statuses are ordered, so of two
-          # racing writers exactly one sees its own claim on top. A claim
+          # latest docs-review status. Statuses are ordered, so two writers
+          # whose claims land inside the 3-second window below cannot both
+          # see their own on top. This narrows the race rather than closing
+          # it: a writer that claims more than ~3 s after another has read
+          # back can still proceed too, which is why the concurrency group
+          # stays required. A claim
           # older than 90 minutes (a run that died before aggregate) is
           # stale and may be taken over.
           CLAIM="Review running (run ${GITHUB_RUN_ID})"
@@ -508,7 +536,7 @@ jobs:
             AGE=$(( $(date +%s) - $(date -d "$(jq -r .updated_at <<< "$CURRENT")" +%s) ))
             if (( AGE < 5400 )); then
               echo "Head $HEAD_SHA is already claimed: '$DESC' (${AGE}s ago) — exiting (exactly-once)."
-              echo "run_review=false" >> "$GITHUB_OUTPUT"
+              { echo "run_review=false"; echo "held=true"; } >> "$GITHUB_OUTPUT"
               exit 0
             fi
             echo "::warning::stale claim '$DESC' (${AGE}s old) — taking over"
@@ -517,17 +545,26 @@ jobs:
           sleep 3   # let a racing writer land before the read-back
           if [[ "$(latest_claim | jq -r .description)" != "$CLAIM" ]]; then
             echo "Lost the claim race for $HEAD_SHA to another run — exiting (exactly-once)."
-            echo "run_review=false" >> "$GITHUB_OUTPUT"
+            { echo "run_review=false"; echo "held=true"; } >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "run_review=true" >> "$GITHUB_OUTPUT"
+
+      # The file list (the delta when incremental), the delta's diff and the
+      # earlier blockers, for classify and every review job.
+      - uses: actions/upload-artifact@v4
+        if: steps.scope.outputs.run_review == 'true'
+        with:
+          name: review-scope
+          path: review-scope/
+          if-no-files-found: error
 
   # ──────────────────────────────────────────────────────────────────────
   # §4 — content classification for skill routing.
   # ──────────────────────────────────────────────────────────────────────
   classify:
     needs: gate
-    if: needs.gate.outputs.run_review == 'true'
+    if: needs.gate.outputs.run_review == 'true' && needs.gate.outputs.mode != 'approve_only'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -539,37 +576,93 @@ jobs:
       overrides_json: ${{ steps.c.outputs.overrides_json }}
       code_heavy: ${{ steps.c.outputs.code_heavy }}
       has_images: ${{ steps.c.outputs.has_images }}
+      best_fit: ${{ steps.c.outputs.best_fit }}
+      json_review: ${{ steps.c.outputs.json_review }}
+      large: ${{ steps.c.outputs.large }}
+      review_minutes: ${{ steps.c.outputs.review_minutes }}
       ticket: ${{ steps.c.outputs.ticket }}
+      # Incremental re-review: a routed review that raised merge-blockers
+      # last time runs again even when the delta has none of its files, so
+      # it can say whether they are fixed instead of carrying them over.
+      recheck_adoc: ${{ steps.c.outputs.recheck_adoc }}
+      recheck_code: ${{ steps.c.outputs.recheck_code }}
+      recheck_best_fit: ${{ steps.c.outputs.recheck_best_fit }}
+      recheck_ticket: ${{ steps.c.outputs.recheck_ticket }}
+      # A model review whose earlier blocker may be fixed outside the files
+      # it is routed by (alt text in the .adoc for the vision pass, a page
+      # for the overrides review) reruns to re-check it.
+      recheck_shots: ${{ steps.c.outputs.recheck_shots }}
+      recheck_json: ${{ steps.c.outputs.recheck_json }}
     steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: review-scope
+          path: review-scope
       - id: c
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ inputs.pr_number }}
           R: ${{ github.repository }}
+          MODE: ${{ needs.gate.outputs.mode }}
         run: |
           set -euo pipefail
-          # The files API, not `gh pr diff --name-only`: the diff endpoint
-          # refuses any PR with more than 300 changed files (HTTP 406, e.g.
-          # rp-connect-docs#494), which failed classify and skipped every
-          # review on exactly the large regeneration PRs. The files API
-          # pages to 3,000 files; past that, say so instead of classifying
-          # on a silently partial list.
-          gh api --paginate "repos/$R/pulls/$PR/files" --jq '.[].filename' > files.txt
+          # The gate wrote the file list: the files changed since the
+          # baseline review when incremental, every changed file otherwise.
+          # It comes from the files API, not `gh pr diff --name-only`: the
+          # diff endpoint refuses any PR with more than 300 changed files
+          # (HTTP 406, e.g. rp-connect-docs#494). The files API pages to
+          # 3,000 files; past that, say so instead of classifying on a
+          # silently partial list.
+          cp review-scope/files.txt files.txt
           LISTED=$(grep -c . files.txt || true)
-          CHANGED=$(gh api "repos/$R/pulls/$PR" --jq '.changed_files')
-          if (( LISTED < CHANGED )); then
-            echo "::warning::the files API listed $LISTED of $CHANGED changed files (it stops at 3,000); classifying on the partial list"
+          if [[ "$MODE" != "incremental" ]]; then
+            CHANGED=$(gh api "repos/$R/pulls/$PR" --jq '.changed_files')
+            if (( LISTED < CHANGED )); then
+              echo "::warning::the files API listed $LISTED of $CHANGED changed files (it stops at 3,000); classifying on the partial list"
+            fi
           fi
-          TOTAL=$(grep -c . files.txt || true)
+          TOTAL=$LISTED
+          PRIOR=review-scope/prior-blockers.json
+          [[ -f "$PRIOR" ]] || echo '[]' > "$PRIOR"
+          prior_for() { jq --arg a "$1" '[.[] | select(.artifact == $a and .src == "model")] | length' "$PRIOR"; }
+          {
+            echo "recheck_adoc=$([[ $(prior_for adoc-review) -gt 0 ]] && echo true || echo false)"
+            echo "recheck_code=$([[ $(prior_for code-review) -gt 0 ]] && echo true || echo false)"
+            echo "recheck_best_fit=$([[ $(prior_for best-fit-review) -gt 0 ]] && echo true || echo false)"
+            echo "recheck_ticket=$([[ $(prior_for ticket-delta) -gt 0 ]] && echo true || echo false)"
+            echo "recheck_shots=$([[ $(prior_for screenshot-gate) -gt 0 ]] && echo true || echo false)"
+            echo "recheck_json=$([[ $(prior_for json-validation) -gt 0 ]] && echo true || echo false)"
+          } >> "$GITHUB_OUTPUT"
           ADOC=$(grep -cE '\.adoc$' files.txt || true)
           JSON=$(grep -cE '\.json$' files.txt || true)
           OVERRIDES=$(grep -ciE '(^|/)[^/]*overrides[^/]*\.json$' files.txt || true)
           IMG=$(grep -ciE '\.(png|svg|jpe?g|gif|webp)$' files.txt || true)   # -i: .PNG, .JPG
           CODE=$(grep -cE '\.(go|java|py|js|ts|jsx|tsx|sh|sql|proto|c|cc|cpp|rs)$' files.txt || true)
+          # docs-team-standards plugin files. Only this repo has them; in a
+          # content repo the count is always 0.
+          PLUGIN=$(grep -cE '^(skills|agents|commands|hooks|resources)/' files.txt || true)
+          if [[ "$MODE" == "incremental" ]]; then
+            CHURN=$(grep -cE '^[+-][^+-]|^[+-]$' review-scope/delta.patch || true)
+          else
+            CHURN=$(gh api "repos/$R/pulls/$PR" --jq '.additions + .deletions')
+          fi
           {
             echo "has_adoc=$([[ $ADOC -gt 0 ]] && echo true || echo false)"
             echo "only_json=$([[ $TOTAL -gt 0 && $JSON -eq $TOTAL ]] && echo true || echo false)"
             echo "overrides_json=$([[ $OVERRIDES -gt 0 ]] && echo true || echo false)"
+            # JSON validation runs on a JSON-only PR, and on any PR that
+            # changes an overrides file: a mixed PR (overrides plus a README
+            # or a workflow) used to classify as neither and leave the
+            # highest-traffic JSON in these repos unvalidated.
+            # Only in content repos: here the overrides review does not run
+            # (json_validation excludes this repo), and files such as
+            # evaluations/suites/overrides-review.eval.json only look like
+            # overrides files. Counting them would suppress best_fit with no
+            # JSON review to replace it, so nothing would run at all.
+            JSON_REVIEW=false
+            if [[ $TOTAL -gt 0 && $JSON -eq $TOTAL ]]; then JSON_REVIEW=true; fi
+            if [[ $OVERRIDES -gt 0 && "$R" != "redpanda-data/docs-team-standards" ]]; then JSON_REVIEW=true; fi
+            echo "json_review=$JSON_REVIEW"
             # Code-heavy heuristic (decision 3): ≥3 code files AND more code
             # files than .adoc files. In the content repos what this catches
             # is EXAMPLE code shipped alongside a page (a lab, a quickstart's
@@ -581,6 +674,29 @@ jobs:
             # quickstart's docker-compose file) never trips this. Tune with data.
             echo "code_heavy=$([[ $CODE -ge 3 && $CODE -gt $ADOC ]] && echo true || echo false)"
             echo "has_images=$([[ $IMG -gt 0 ]] && echo true || echo false)"
+            # Best-fit: no routed branch applies (no .adoc, no images, no
+            # JSON review, not code-heavy), e.g. a workflow, a README, or one
+            # or two scripts. Instead of posting "no checks apply",
+            # best_fit_review picks the review that suits the change. It also
+            # runs whenever plugin files change, even alongside a routed
+            # review: code_review does not apply skill-authoring, so a skill
+            # edited next to three scripts would otherwise get no skill
+            # review at all.
+            BEST_FIT=false
+            if [[ $TOTAL -gt 0 && $ADOC -eq 0 && $IMG -eq 0 && "$JSON_REVIEW" == "false" ]] \
+               && ! [[ $CODE -ge 3 && $CODE -gt $ADOC ]]; then
+              BEST_FIT=true
+            fi
+            [[ $PLUGIN -gt 0 ]] && BEST_FIT=true
+            echo "best_fit=$BEST_FIT"
+            # Large PRs (by churn or file count) get a longer model budget:
+            # #2912's own 3,749-line review hit the 20-minute default and came
+            # back unavailable. 35 minutes still fits the 45-minute job
+            # timeout with the action's setup and plugin probe.
+            LARGE=false
+            if (( CHURN >= 1500 || TOTAL >= 40 )); then LARGE=true; fi
+            echo "large=$LARGE"
+            echo "review_minutes=$([[ $LARGE == true ]] && echo 35 || echo 20)"
           } >> "$GITHUB_OUTPUT"
           TICKET=$(gh pr view "$PR" --repo "$R" --json title,body,headRefName \
             --jq '[.title, .body // "", .headRefName] | join(" ")' \
@@ -605,7 +721,10 @@ jobs:
   # ──────────────────────────────────────────────────────────────────────
   metadata_check:
     needs: [gate, classify]
-    if: needs.classify.outputs.has_adoc == 'true'
+    # Runs whenever adoc_review does (recheck_adoc included): its errors join
+    # that branch's verdict as check_blocking, which an incremental re-review
+    # treats as recomputed, so it must actually have re-run.
+    if: needs.classify.outputs.has_adoc == 'true' || needs.classify.outputs.recheck_adoc == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -687,7 +806,7 @@ jobs:
     # check that did not run.
     if: >-
       !cancelled() && needs.classify.result == 'success' &&
-      needs.classify.outputs.has_adoc == 'true'
+      (needs.classify.outputs.has_adoc == 'true' || needs.classify.outputs.recheck_adoc == 'true')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -695,7 +814,14 @@ jobs:
       id-token: write   # OIDC role for the ADP gateway credential
     timeout-minutes: 45
     steps:
-      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@681c7a5774f3dd72733ca1f6f4bbdb8633f548a5 # TWO-STEP PIN step 2: #303's merge SHA
+      # Incremental re-review inputs from the gate (the delta's diff and file
+      # list, and the earlier blockers). Under RUNNER_TEMP: the claude-skill
+      # action's checkout runs `git clean` on the workspace.
+      - uses: actions/download-artifact@v4
+        with:
+          name: review-scope
+          path: ${{ runner.temp }}/review-scope
+      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@0fac2b82207dd97787654a990cd6baf95b2bfcbe # pinned: #418's merge SHA
         id: claude
         with:
           repo: ${{ github.repository }}
@@ -709,6 +835,8 @@ jobs:
           plugin_app_private_key: ${{ secrets.docs_app_private_key }}
           cli_version: ${{ vars.CLAUDE_CLI_VERSION || '2.1.258' }}
           output_dir: review-output
+          # Longer for large PRs (classify: large); see classify for why.
+          timeout_minutes: ${{ needs.classify.outputs.review_minutes || '20' }}
           prompt: >
             /docs-team-standards:pr-review ${{ github.server_url }}/${{ github.repository }}/pull/${{ inputs.pr_number }}
             HEADLESS MODE — you are running in CI with no human present.
@@ -734,6 +862,21 @@ jobs:
             {"verdict":"pass"|"fail","blocking":["..."],"suggestions":["..."]}
             where "fail" means at least one genuinely blocking violation of
             team standards.
+            Also add to verdict.json "needs_human": open questions for the
+            writer, one sentence each. Include a question only when the PR's
+            own content raises it and a person, not a code change, has to
+            answer it: a product fact the page asserts that needs an SME's
+            confirmation (a default, a flag, a version, a behavior), or a
+            product decision the content depends on. Do NOT include anything
+            about this review itself (a command, build, or source you could
+            not run, read, or reach here), the PR's process or status (test
+            PR, draft, when to merge or close, labels, target branch),
+            questions about this review pipeline's own policy, or anything
+            already in "blocking" or "suggestions". These questions do not
+            block approval. Leave the list empty when there are none, which
+            is the usual case.
+            ${{ needs.gate.outputs.mode == 'incremental' && format('INCREMENTAL RE-REVIEW. This PR was already reviewed at commit {0} ({1}). Review ONLY what changed since then. The diff of those changes is in {2}/review-scope/delta.patch and the files it touches are listed in {2}/review-scope/files.txt: use them instead of `gh pr diff` or the files API, which show the whole PR. Read the changed files in the working tree for context, but report a merge-blocker or a suggestion only when these changes introduce it or expose it. Earlier merge-blockers: {2}/review-scope/prior-blockers.json lists the blockers this pipeline reported before; the entries whose artifact is "adoc-review" and whose src is "model" are yours. Check each against the CURRENT files in the working tree, and add to verdict.json a "prior" list with one object per such entry, holding its exact "text" from that file and a "status" of "resolved" or "open". Do not repeat an open earlier blocker in "blocking": the pipeline carries it over. An entry you leave out of "prior" is carried over as open.', needs.gate.outputs.baseline_sha, needs.gate.outputs.baseline_source, runner.temp) || '' }}
+            ${{ needs.classify.outputs.large == 'true' && 'This is a large PR: review the riskiest files first, and if you run out of time or turns before covering every changed file, add one entry to a "not_reviewed" list in verdict.json naming the files you did not review, so the report does not read as complete and the PR is not approved on a partial review.' || '' }}
       # metadata_check's result. Under RUNNER_TEMP, not the workspace: the
       # claude-skill action's own checkout runs `git clean` there.
       # continue-on-error: a missing result is handled in the next step.
@@ -810,6 +953,10 @@ jobs:
               ($m[0].findings | map(select(.severity == "error") | line)) as $errors
               | ($m[0].findings | map(select(.severity != "error") | line)) as $warnings
               | .blocking = (list("blocking") + $errors)
+              # Deterministic: re-run on the whole PR every time, so an
+              # incremental re-review never carries these over (see
+              # aggregate-review.sh).
+              | if ($errors | length) > 0 then .check_blocking = (list("check_blocking") + $errors) else . end
               | ((($m[0].suggest.suggestions // []) | sort_by(-.score)) as $s
                   | ($s[:10] | map("page metadata suggestion: `\(.file):\(.line // 1)` consider \(.label | md) (`\(.conceptId)`) in `:\(.attribute):`, score \(.score): \(.reason | md)"))
                     + (if ($s | length) > 10 then ["page metadata: \(($s | length) - 10) more suggestion(s) in check-metadata.json"] else [] end)) as $suggested
@@ -863,7 +1010,7 @@ jobs:
               -d "evaluations/suites/*.eval.json" || FAILED=1
           fi
           if [[ "$FAILED" -eq 1 ]]; then
-            jq -n '{verdict:"fail",blocking:["JSON validation failed (validate-manifests / eval schema) — see job log"],suggestions:[]}' > review-output/verdict.json
+            jq -n '{verdict:"fail",blocking:["JSON validation failed (validate-manifests / eval schema) — see job log"],suggestions:[]} | .check_blocking = .blocking' > review-output/verdict.json
           else
             jq -n '{verdict:"pass",blocking:[],suggestions:[]}' > review-output/verdict.json
           fi
@@ -877,18 +1024,29 @@ jobs:
 
   json_validation:
     needs: [gate, classify]
-    if: needs.classify.outputs.only_json == 'true' && github.repository != 'redpanda-data/docs-team-standards'
+    if: (needs.classify.outputs.json_review == 'true' || needs.classify.outputs.recheck_json == 'true') && github.repository != 'redpanda-data/docs-team-standards'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: read
       id-token: write   # OIDC role for the ADP gateway credential (overrides review)
-    timeout-minutes: 30
+    # 45 like every job that takes review_minutes: setup plus a 35-minute
+    # large-PR budget does not fit in 30, and a job killed by its own timeout
+    # writes no verdict.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
           ref: refs/pull/${{ inputs.pr_number }}/head
           persist-credentials: false
+
+      # Incremental re-review inputs from the gate (the delta's diff and file
+      # list, and the earlier blockers). Under RUNNER_TEMP: the claude-skill
+      # action's checkout runs `git clean` on the workspace.
+      - uses: actions/download-artifact@v4
+        with:
+          name: review-scope
+          path: ${{ runner.temp }}/review-scope
 
       # Runs on every content-repo JSON-only PR, including ones that also
       # change an overrides file, so an unrelated .json beside it is still
@@ -913,8 +1071,8 @@ jobs:
           fi
 
       - name: Overrides review (content repos, decision 4)
-        if: github.repository != 'redpanda-data/docs-team-standards' && needs.classify.outputs.overrides_json == 'true'
-        uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@681c7a5774f3dd72733ca1f6f4bbdb8633f548a5 # TWO-STEP PIN step 2: #303's merge SHA
+        if: github.repository != 'redpanda-data/docs-team-standards' && (needs.classify.outputs.overrides_json == 'true' || needs.classify.outputs.recheck_json == 'true')
+        uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@0fac2b82207dd97787654a990cd6baf95b2bfcbe # pinned: #418's merge SHA
         with:
           repo: ${{ github.repository }}
           pr_number: ${{ inputs.pr_number }}
@@ -927,6 +1085,8 @@ jobs:
           plugin_app_private_key: ${{ secrets.docs_app_private_key }}
           cli_version: ${{ vars.CLAUDE_CLI_VERSION || '2.1.258' }}
           output_dir: review-output
+          # Longer for large PRs (classify: large); see classify for why.
+          timeout_minutes: ${{ needs.classify.outputs.review_minutes || '20' }}
           prompt: >
             /docs-team-standards:overrides-review — review the overrides
             JSON changes in ${{ github.server_url }}/${{ github.repository }}/pull/${{ inputs.pr_number }}.
@@ -935,6 +1095,21 @@ jobs:
             base branch) alongside the skill. Write findings to
             review-output/findings.md and review-output/verdict.json with schema
             {"verdict":"pass"|"fail","blocking":[...],"suggestions":[...]}.
+            Also add to verdict.json "needs_human": open questions for the
+            writer, one sentence each. Include a question only when the PR's
+            own content raises it and a person, not a code change, has to
+            answer it: a product fact the page asserts that needs an SME's
+            confirmation (a default, a flag, a version, a behavior), or a
+            product decision the content depends on. Do NOT include anything
+            about this review itself (a command, build, or source you could
+            not run, read, or reach here), the PR's process or status (test
+            PR, draft, when to merge or close, labels, target branch),
+            questions about this review pipeline's own policy, or anything
+            already in "blocking" or "suggestions". These questions do not
+            block approval. Leave the list empty when there are none, which
+            is the usual case.
+            ${{ needs.gate.outputs.mode == 'incremental' && format('INCREMENTAL RE-REVIEW. This PR was already reviewed at commit {0} ({1}). Review ONLY what changed since then. The diff of those changes is in {2}/review-scope/delta.patch and the files it touches are listed in {2}/review-scope/files.txt: use them instead of `gh pr diff` or the files API, which show the whole PR. Read the changed files in the working tree for context, but report a merge-blocker or a suggestion only when these changes introduce it or expose it. Earlier merge-blockers: {2}/review-scope/prior-blockers.json lists the blockers this pipeline reported before; the entries whose artifact is "json-validation" and whose src is "model" are yours. Check each against the CURRENT files in the working tree, and add to verdict.json a "prior" list with one object per such entry, holding its exact "text" from that file and a "status" of "resolved" or "open". Do not repeat an open earlier blocker in "blocking": the pipeline carries it over. An entry you leave out of "prior" is carried over as open.', needs.gate.outputs.baseline_sha, needs.gate.outputs.baseline_source, runner.temp) || '' }}
+            ${{ needs.classify.outputs.large == 'true' && 'This is a large PR: review the riskiest files first, and if you run out of time or turns before covering every changed file, add one entry to a "not_reviewed" list in verdict.json naming the files you did not review, so the report does not read as complete and the PR is not approved on a partial review.' || '' }}
 
       # Fold the jq result into the job's single verdict.json. With no
       # overrides file it IS the verdict. With one, invalid JSON joins the
@@ -946,7 +1121,7 @@ jobs:
         if: always() && github.repository != 'redpanda-data/docs-team-standards'
         env:
           JQ_VERDICT: ${{ runner.temp }}/json-validity.json
-          OVERRIDES: ${{ needs.classify.outputs.overrides_json }}
+          OVERRIDES: ${{ (needs.classify.outputs.overrides_json == 'true' || needs.classify.outputs.recheck_json == 'true') && 'true' || 'false' }}
         run: |
           set -euo pipefail
           mkdir -p review-output
@@ -954,11 +1129,14 @@ jobs:
           if [[ ! -f "$JQ_VERDICT" ]]; then
             jq -n '{verdict:"fail",blocking:["JSON validity check did not run — see job log"],suggestions:[]}' > "$JQ_VERDICT"
           fi
+          # check_blocking: the jq validity blockers, recomputed every run
+          # (see the screenshot gate's merge step).
           if [[ "$OVERRIDES" != "true" ]]; then
-            cp "$JQ_VERDICT" "$V"
+            jq '.check_blocking = .blocking' "$JQ_VERDICT" > "$V"
           elif [[ -f "$V" ]] && jq -e 'type == "object"' "$V" > /dev/null 2>&1; then
             jq -s '.[0] as $o | .[1] as $j
-              | $o + {blocking: ((($o.blocking // []) | if type == "array" then . else [.] end) + $j.blocking)}
+              | $o + {blocking: ((($o.blocking // []) | if type == "array" then . else [.] end) + $j.blocking),
+                      check_blocking: $j.blocking}
               | if (.blocking | length) > 0 then .verdict = "fail" else . end' "$V" "$JQ_VERDICT" > "$V.tmp"
             mv "$V.tmp" "$V"
           elif jq -e '.verdict == "fail"' "$JQ_VERDICT" > /dev/null; then
@@ -992,7 +1170,7 @@ jobs:
   # ──────────────────────────────────────────────────────────────────────
   code_review:
     needs: [gate, classify]
-    if: needs.classify.outputs.code_heavy == 'true'
+    if: needs.classify.outputs.code_heavy == 'true' || needs.classify.outputs.recheck_code == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1000,7 +1178,14 @@ jobs:
       id-token: write   # OIDC role for the ADP gateway credential
     timeout-minutes: 45
     steps:
-      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@681c7a5774f3dd72733ca1f6f4bbdb8633f548a5 # TWO-STEP PIN step 2: #303's merge SHA
+      # Incremental re-review inputs from the gate (the delta's diff and file
+      # list, and the earlier blockers). Under RUNNER_TEMP: the claude-skill
+      # action's checkout runs `git clean` on the workspace.
+      - uses: actions/download-artifact@v4
+        with:
+          name: review-scope
+          path: ${{ runner.temp }}/review-scope
+      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@0fac2b82207dd97787654a990cd6baf95b2bfcbe # pinned: #418's merge SHA
         with:
           repo: ${{ github.repository }}
           pr_number: ${{ inputs.pr_number }}
@@ -1013,6 +1198,8 @@ jobs:
           plugin_app_private_key: ${{ secrets.docs_app_private_key }}
           cli_version: ${{ vars.CLAUDE_CLI_VERSION || '2.1.258' }}
           output_dir: review-output
+          # Longer for large PRs (classify: large); see classify for why.
+          timeout_minutes: ${{ needs.classify.outputs.review_minutes || '20' }}
           prompt: >
             Review the code changed by pull request
             ${{ inputs.pr_number }} in this repository. Read the diff with
@@ -1043,10 +1230,131 @@ jobs:
             review-output/findings.md and review-output/verdict.json
             with schema {"verdict":"pass"|"fail","blocking":[...],"suggestions":[...]}
             where "fail" means a confirmed correctness bug.
+            Also add to verdict.json "needs_human": open questions for the
+            writer, one sentence each. Include a question only when the PR's
+            own content raises it and a person, not a code change, has to
+            answer it: a product fact the page asserts that needs an SME's
+            confirmation (a default, a flag, a version, a behavior), or a
+            product decision the content depends on. Do NOT include anything
+            about this review itself (a command, build, or source you could
+            not run, read, or reach here), the PR's process or status (test
+            PR, draft, when to merge or close, labels, target branch),
+            questions about this review pipeline's own policy, or anything
+            already in "blocking" or "suggestions". These questions do not
+            block approval. Leave the list empty when there are none, which
+            is the usual case.
+            ${{ needs.gate.outputs.mode == 'incremental' && format('INCREMENTAL RE-REVIEW. This PR was already reviewed at commit {0} ({1}). Review ONLY what changed since then. The diff of those changes is in {2}/review-scope/delta.patch and the files it touches are listed in {2}/review-scope/files.txt: use them instead of `gh pr diff` or the files API, which show the whole PR. Read the changed files in the working tree for context, but report a merge-blocker or a suggestion only when these changes introduce it or expose it. Earlier merge-blockers: {2}/review-scope/prior-blockers.json lists the blockers this pipeline reported before; the entries whose artifact is "code-review" and whose src is "model" are yours. Check each against the CURRENT files in the working tree, and add to verdict.json a "prior" list with one object per such entry, holding its exact "text" from that file and a "status" of "resolved" or "open". Do not repeat an open earlier blocker in "blocking": the pipeline carries it over. An entry you leave out of "prior" is carried over as open.', needs.gate.outputs.baseline_sha, needs.gate.outputs.baseline_source, runner.temp) || '' }}
+            ${{ needs.classify.outputs.large == 'true' && 'This is a large PR: review the riskiest files first, and if you run out of time or turns before covering every changed file, add one entry to a "not_reviewed" list in verdict.json naming the files you did not review, so the report does not read as complete and the PR is not approved on a partial review.' || '' }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: code-review
+          path: review-output/
+          if-no-files-found: ignore
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Best-fit review for changes no routed branch covers (classify's
+  # best_fit): a skill, agent, or command file, a workflow, a README, one or
+  # two scripts. Claude reads the diff and applies the plugin skill that
+  # suits it, so every reviewed PR gets a report instead of "no checks
+  # apply". It also runs next to a routed review when plugin files change
+  # (classify); then the prompt limits it to those files, so it does not
+  # re-review what the routed review owns. Same posture as code_review: the prompt spells out the code
+  # pass rather than invoking /code-review, which never loads here (see
+  # code_review). It runs no PR-head scripts, so it may hold id-token.
+  # ──────────────────────────────────────────────────────────────────────
+  best_fit_review:
+    needs: [gate, classify]
+    if: needs.classify.outputs.best_fit == 'true' || needs.classify.outputs.recheck_best_fit == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write   # OIDC role for the ADP gateway credential
+    timeout-minutes: 45
+    steps:
+      # Incremental re-review inputs from the gate (the delta's diff and file
+      # list, and the earlier blockers). Under RUNNER_TEMP: the claude-skill
+      # action's checkout runs `git clean` on the workspace.
+      - uses: actions/download-artifact@v4
+        with:
+          name: review-scope
+          path: ${{ runner.temp }}/review-scope
+      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@0fac2b82207dd97787654a990cd6baf95b2bfcbe # pinned: #418's merge SHA
+        with:
+          repo: ${{ github.repository }}
+          pr_number: ${{ inputs.pr_number }}
+          plugin_ref: ${{ inputs.plugin_ref }}
+          aws_region: ${{ inputs.aws_region }}
+          aws_role_name_prefix: ${{ inputs.aws_role_name_prefix }}
+          aws_cred_account_id: ${{ secrets.aws_cred_account_id }}
+          adp_client_secret_id: ${{ inputs.adp_client_secret_id }}
+          plugin_app_id: ${{ inputs.docs_app_id }}
+          plugin_app_private_key: ${{ secrets.docs_app_private_key }}
+          cli_version: ${{ vars.CLAUDE_CLI_VERSION || '2.1.258' }}
+          output_dir: review-output
+          # Longer for large PRs (classify: large); see classify for why.
+          timeout_minutes: ${{ needs.classify.outputs.review_minutes || '20' }}
+          prompt: >
+            Review pull request ${{ inputs.pr_number }} in
+            ${{ github.repository }}.
+            ${{ needs.classify.outputs.best_fit != 'true' && 'You run only to re-check your earlier merge-blockers, listed below: none of the files changed since the last review is yours to review.' || (needs.classify.outputs.has_adoc == 'true' || needs.classify.outputs.has_images == 'true' || needs.classify.outputs.json_review == 'true' || needs.classify.outputs.code_heavy == 'true') && format('Other reviews in this pipeline already cover part of this PR ({0}{1}{2}{3}). You run because it also changes docs-team-standards plugin files (skills/, agents/, commands/, hooks/, resources/), which those reviews do not check against skill-authoring. Review ONLY those plugin files, choosing the skill below that suits each, and do not report on the files the other reviews own.', needs.classify.outputs.has_adoc == 'true' && 'AsciiDoc pages; ' || '', needs.classify.outputs.has_images == 'true' && 'images; ' || '', needs.classify.outputs.json_review == 'true' && 'JSON; ' || '', needs.classify.outputs.code_heavy == 'true' && 'code; ' || '') || 'None of this pipeline''s routed reviews (AsciiDoc pages, images, JSON, code-heavy) applies to it, so your job is to pick the review that best suits what it changes and run it.' }}
+            Read the diff with `gh pr diff` and the PR body with
+            `gh pr view`. On a PR with more than 300 changed files
+            `gh pr diff` fails (HTTP 406): use `gh api --paginate
+            repos/${{ github.repository }}/pulls/${{ inputs.pr_number }}/files`
+            instead, whose entries carry each file's patch. No git command
+            other than `git status` is allowed;
+            use Grep and Read, and read the changed files in the working tree
+            for context the diff does not show.
+            Choose by what the files are, and load the matching
+            docs-team-standards skill with the Skill tool before reviewing:
+            a skill, agent, command, hook, or resource of the
+            docs-team-standards plugin → skill-authoring (also check the
+            change against any skill it edits or references, and that evals
+            or manifests it should update were updated); a GitHub workflow,
+            action, or script → review it as code (correctness bugs first:
+            what breaks, under which inputs, at which line; skip style);
+            product UI strings → ux-text; strings that generate reference
+            docs (property descriptions, CLI help, metric help) →
+            embedded-reference-strings; Antora config (antora.yml, nav.adoc,
+            playbooks) → antora-conventions; Markdown documentation (README,
+            CONTRIBUTING, guides) → the review skill's style and accuracy
+            checks. A mixed PR may need more than one; apply each to its
+            files. Verify factual claims against the repository rather than
+            trusting the PR description.
+            Apply this repository's own CLAUDE.md rules (in the working tree,
+            from the base branch) alongside the skills.
+            HEADLESS MODE: do NOT post anything to GitHub and do not apply
+            fixes. Write the review report to review-output/findings.md in
+            this structure: a one-line summary of what the PR does and which
+            review(s) you applied; "Merge-blockers" (numbered, each with the
+            file, the problem, and the fix; or "None"); "Suggestions"
+            (numbered; or "None"); "What works well" (brief). Calibrate
+            strictly: a merge-blocker is something broken, incorrect, or a
+            violation of a hard team standard, never a style preference.
+            Write review-output/verdict.json as
+            {"verdict":"pass"|"fail","blocking":["..."],"suggestions":["..."],"review_type":"<the skill or review you applied, e.g. skill-authoring>"}
+            where "fail" means at least one merge-blocker.
+            Also add to verdict.json "needs_human": open questions for the
+            writer, one sentence each. Include a question only when the PR's
+            own content raises it and a person, not a code change, has to
+            answer it: a product fact the page asserts that needs an SME's
+            confirmation (a default, a flag, a version, a behavior), or a
+            product decision the content depends on. Do NOT include anything
+            about this review itself (a command, build, or source you could
+            not run, read, or reach here), the PR's process or status (test
+            PR, draft, when to merge or close, labels, target branch),
+            questions about this review pipeline's own policy, or anything
+            already in "blocking" or "suggestions". These questions do not
+            block approval. Leave the list empty when there are none, which
+            is the usual case.
+            ${{ needs.gate.outputs.mode == 'incremental' && format('INCREMENTAL RE-REVIEW. This PR was already reviewed at commit {0} ({1}). Review ONLY what changed since then. The diff of those changes is in {2}/review-scope/delta.patch and the files it touches are listed in {2}/review-scope/files.txt: use them instead of `gh pr diff` or the files API, which show the whole PR. Read the changed files in the working tree for context, but report a merge-blocker or a suggestion only when these changes introduce it or expose it. Earlier merge-blockers: {2}/review-scope/prior-blockers.json lists the blockers this pipeline reported before; the entries whose artifact is "best-fit-review" and whose src is "model" are yours. Check each against the CURRENT files in the working tree, and add to verdict.json a "prior" list with one object per such entry, holding its exact "text" from that file and a "status" of "resolved" or "open". Do not repeat an open earlier blocker in "blocking": the pipeline carries it over. An entry you leave out of "prior" is carried over as open.', needs.gate.outputs.baseline_sha, needs.gate.outputs.baseline_source, runner.temp) || '' }}
+            ${{ needs.classify.outputs.large == 'true' && 'This is a large PR: review the riskiest files first, and if you run out of time or turns before covering every changed file, add one entry to a "not_reviewed" list in verdict.json naming the files you did not review, so the report does not read as complete and the PR is not approved on a partial review.' || '' }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: best-fit-review
           path: review-output/
           if-no-files-found: ignore
 
@@ -1057,17 +1365,20 @@ jobs:
   # that cloud-docs also runs on every PR and in its daily screenshot cron
   # — so no two jobs disagree about the same 100KB limit. It runs on any
   # .adoc or image change (alt text lives in the .adoc); the paid vision
-  # pass runs only when an image file changed.
+  # pass runs when an image file changed, or to re-check its own earlier
+  # blockers (one fixed in the .adoc would otherwise stay carried).
   # ──────────────────────────────────────────────────────────────────────
   screenshot_gate:
     needs: [gate, classify]
-    if: needs.classify.outputs.has_images == 'true' || needs.classify.outputs.has_adoc == 'true'
+    if: needs.classify.outputs.has_images == 'true' || needs.classify.outputs.has_adoc == 'true' || needs.classify.outputs.recheck_shots == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: read
       id-token: write   # OIDC role for the ADP gateway credential
-    timeout-minutes: 30
+    # 45, like the other model jobs: the vision pass gets 35 minutes on a
+    # large PR (classify), plus the lint and the action's setup.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1095,8 +1406,8 @@ jobs:
             # Not an Antora content repo (docs-site, docs-team-standards): the
             # lint cannot run. Not a failure (a red X on every image PR in a
             # docs-only repo), but not a clean pass either: `not_run` makes the
-            # aggregate show that this check did not run, in the table and
-            # outside the collapsed details, instead of a bare ✅.
+            # aggregate list this check under "Did not run" and count it in
+            # the headline, instead of a bare ✅.
             jq -n '{verdict:"pass", blocking:[], suggestions:[], not_run:["Screenshot lint (doc-tools lint-screenshots): this repo has no root modules/ directory, so the size and alt-text checks did not run"]}' > "$OUT"
             exit 0
           fi
@@ -1134,10 +1445,19 @@ jobs:
             ' "$LINT_DIR/result.json" > "$OUT"
           jq -r '"screenshot-lint: verdict=\(.verdict), \(.blocking | length) blocking, \(.suggestions | length) suggestion(s)"' "$OUT"
 
-      - name: Claude vision pass
-        if: needs.classify.outputs.has_images == 'true'
-        uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@681c7a5774f3dd72733ca1f6f4bbdb8633f548a5 # TWO-STEP PIN step 2: #303's merge SHA
+      # Incremental re-review inputs from the gate (the delta's diff and file
+      # list, and the earlier blockers). Under RUNNER_TEMP: the claude-skill
+      # action's checkout runs `git clean` on the workspace.
+      - uses: actions/download-artifact@v4
         with:
+          name: review-scope
+          path: ${{ runner.temp }}/review-scope
+      - name: Claude vision pass
+        if: needs.classify.outputs.has_images == 'true' || needs.classify.outputs.recheck_shots == 'true'
+        uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@0fac2b82207dd97787654a990cd6baf95b2bfcbe # pinned: #418's merge SHA
+        with:
+          # Longer for large PRs (classify: large); see classify for why.
+          timeout_minutes: ${{ needs.classify.outputs.review_minutes || '20' }}
           repo: ${{ github.repository }}
           pr_number: ${{ inputs.pr_number }}
           plugin_ref: ${{ inputs.plugin_ref }}
@@ -1175,11 +1495,16 @@ jobs:
             and review-output/vision/verdict.json as
             {"verdict":"pass"|"fail","blocking":[...],"suggestions":[...]}
             covering only the judgment checks.
+            ${{ needs.classify.outputs.has_images != 'true' && 'No image file changed in these commits: you run only to re-check your earlier merge-blockers, listed below, against the current images and pages.' || '' }}
+            ${{ needs.gate.outputs.mode == 'incremental' && format('INCREMENTAL RE-REVIEW. This PR was already reviewed at commit {0} ({1}). Review ONLY what changed since then. The diff of those changes is in {2}/review-scope/delta.patch and the files it touches are listed in {2}/review-scope/files.txt: use them instead of `gh pr diff` or the files API, which show the whole PR. Read the changed files in the working tree for context, but report a merge-blocker or a suggestion only when these changes introduce it or expose it. Earlier merge-blockers: {2}/review-scope/prior-blockers.json lists the blockers this pipeline reported before; the entries whose artifact is "screenshot-gate" and whose src is "model" are yours. Check each against the CURRENT files in the working tree, and add to verdict.json a "prior" list with one object per such entry, holding its exact "text" from that file and a "status" of "resolved" or "open". Do not repeat an open earlier blocker in "blocking": the pipeline carries it over. An entry you leave out of "prior" is carried over as open.', needs.gate.outputs.baseline_sha, needs.gate.outputs.baseline_source, runner.temp) || '' }}
+            ${{ needs.classify.outputs.large == 'true' && 'This is a large PR: review the riskiest files first, and if you run out of time or turns before covering every changed image, add one entry to a "not_reviewed" list in verdict.json naming the images you did not review, so the report does not read as complete and the PR is not approved on a partial review.' || '' }}
 
       - name: Merge deterministic + vision verdicts
         if: always()
         env:
-          HAS_IMAGES: ${{ needs.classify.outputs.has_images }}
+          # The vision pass ran (and must have a verdict) for a changed image
+          # or a re-check.
+          HAS_IMAGES: ${{ (needs.classify.outputs.has_images == 'true' || needs.classify.outputs.recheck_shots == 'true') && 'true' || 'false' }}
         run: |
           set -uo pipefail
           mkdir -p review-output
@@ -1197,10 +1522,14 @@ jobs:
             echo "::warning::no deterministic lint result — leaving no verdict so the aggregate reports this branch unavailable"
             exit 0
           fi
+          # check_blocking marks the blockers a deterministic check found.
+          # On an incremental re-review those are recomputed every run, so the
+          # aggregate never carries them over; the vision pass's are carried
+          # unless the pass reports them resolved (its "prior" list).
           if [[ "${HAS_IMAGES:-}" != "true" ]]; then
             # No image changed, so the vision pass was never meant to run and
             # the lint alone is the complete answer for this PR.
-            cp "$LINT" "$FINAL"
+            jq '.check_blocking = (.blocking // [])' "$LINT" > "$FINAL"
             echo "no image changes: verdict is the deterministic lint alone"
             exit 0
           fi
@@ -1211,8 +1540,11 @@ jobs:
           jq -s '{
             verdict: (if (.[0].verdict=="fail" or .[1].verdict=="fail") then "fail" else "pass" end),
             blocking: ((.[0].blocking // []) + (.[1].blocking // [])),
+            check_blocking: (.[0].blocking // []),
             suggestions: ((.[0].suggestions // []) + (.[1].suggestions // [])),
-            not_run: ((.[0].not_run // []) + (.[1].not_run // []))
+            not_run: ((.[0].not_run // []) + (.[1].not_run // [])),
+            not_reviewed: (.[1].not_reviewed // []),
+            prior: (.[1].prior // [])
           }' "$LINT" "$VISION" > "$FINAL"
           echo "merged the deterministic lint with the vision verdict"
 
@@ -1231,12 +1563,19 @@ jobs:
     # !cancelled(), not the implicit success(): a hard adoc_review failure
     # (job timeout, plugin-load assertion, CLAUDE.md fetch) must degrade
     # the delta (the prompt handles a missing findings.md), not skip it. A
-    # skipped delta drops its row from the comment instead of showing it
-    # unavailable. !cancelled() rather than always() so a cancelled run
+    # skipped delta drops out of the report silently instead of showing
+    # as unavailable. !cancelled() rather than always() so a cancelled run
     # does not start a paid job.
+    # A full review, or an incremental one when the earlier report has a
+    # ticket-delta blocker. The delta always compares the whole PR with the
+    # ticket, so on a re-review it recomputes its blockers and the aggregate
+    # drops the earlier ones (like a deterministic check's): without this
+    # rerun, "the ticket asks for X" would stay open after the writer adds X.
+    # An incremental run without one leaves the delta to the earlier run.
     if: >-
-      !cancelled() && needs.classify.result == 'success' &&
-      needs.classify.outputs.ticket != '' && needs.classify.outputs.has_adoc == 'true'
+      !cancelled() && needs.classify.result == 'success' && needs.classify.outputs.ticket != '' &&
+      ((needs.gate.outputs.mode == 'full' && needs.classify.outputs.has_adoc == 'true') ||
+       (needs.gate.outputs.mode == 'incremental' && needs.classify.outputs.recheck_ticket == 'true'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1257,7 +1596,7 @@ jobs:
       # No --add-dir needed for the prompt to read it: a bare `Read` in the
       # action's allowlist is not scoped to the workspace in -p mode
       # (verified on CLI 2.1.258, reading a file outside the cwd).
-      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@681c7a5774f3dd72733ca1f6f4bbdb8633f548a5 # TWO-STEP PIN step 2: #303's merge SHA
+      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@0fac2b82207dd97787654a990cd6baf95b2bfcbe # pinned: #418's merge SHA
         with:
           repo: ${{ github.repository }}
           pr_number: ${{ inputs.pr_number }}
@@ -1270,6 +1609,8 @@ jobs:
           plugin_app_private_key: ${{ secrets.docs_app_private_key }}
           cli_version: ${{ vars.CLAUDE_CLI_VERSION || '2.1.258' }}
           output_dir: review-output
+          # Longer for large PRs (classify: large); see classify for why.
+          timeout_minutes: ${{ needs.classify.outputs.review_minutes || '20' }}
           prompt: >
             Run ONLY stages 1–2 of /docs-team-standards:doc-ticket for
             ${{ needs.classify.outputs.ticket }} (dedupe + research; NO plan,
@@ -1289,6 +1630,21 @@ jobs:
             requirements: "jira" only if you read the ticket itself,
             "pr-body" if you used a description quoted in the PR body, and
             "none" if you could read neither.
+            ${{ needs.gate.outputs.mode == 'incremental' && 'This is a re-review: the pr-review findings cover only the commits since the last review, so judge the requirements against the WHOLE PR (`gh pr diff` and the current files in the working tree), not those findings. List every requirement the PR still misses in "blocking", including ones an earlier review raised: this run replaces the blockers of the earlier delta.' || '' }}
+            Also add to verdict.json "needs_human": open questions for the
+            writer, one sentence each. Include a question only when the PR's
+            own content raises it and a person, not a code change, has to
+            answer it: a product fact the page asserts that needs an SME's
+            confirmation (a default, a flag, a version, a behavior), or a
+            product decision the content depends on. Do NOT include anything
+            about this review itself (a command, build, or source you could
+            not run, read, or reach here), the PR's process or status (test
+            PR, draft, when to merge or close, labels, target branch),
+            questions about this review pipeline's own policy, or anything
+            already in "blocking" or "suggestions". These questions do not
+            block approval. Leave the list empty when there are none, which
+            is the usual case.
+            ${{ needs.classify.outputs.large == 'true' && 'This is a large PR: review the riskiest files first, and if you run out of time or turns before covering every changed file, add one entry to a "not_reviewed" list in verdict.json naming the files you did not review, so the report does not read as complete and the PR is not approved on a partial review.' || '' }}
       # This job has no Jira credential yet (DOCS_REVIEW_ROLLOUT.md, org
       # setup item 6), so unless the PR body quotes the ticket, the delta
       # had nothing to compare against and its "pass" means nothing. Mark
@@ -1317,11 +1673,12 @@ jobs:
           if-no-files-found: ignore
 
   # ──────────────────────────────────────────────────────────────────────
-  # §6 — one verdict, one upserted comment, final informational status.
+  # §6 — one verdict, one new report per run (earlier ones collapsed),
+  # final informational status.
   # ──────────────────────────────────────────────────────────────────────
   aggregate:
-    needs: [gate, classify, adoc_review, json_validation_local, json_validation, code_review, screenshot_gate, ticket_delta]
-    if: always() && needs.gate.outputs.run_review == 'true'
+    needs: [gate, classify, adoc_review, json_validation_local, json_validation, code_review, best_fit_review, screenshot_gate, ticket_delta]
+    if: always() && needs.gate.outputs.run_review == 'true' && needs.gate.outputs.mode != 'approve_only'
     runs-on: ubuntu-latest
     # 25, not 15: preview-links.sh now waits up to 10 minutes for the
     # Netlify deploy (observed docs-repo deploys land between 4m22s and
@@ -1374,6 +1731,79 @@ jobs:
         run: |
           bash .standards/scripts/preview-links.sh "$R" "$PR" preview-links.md || : > preview-links.md
 
+      # Deterministic checks (scripts/pr-checks.py): the preview pages, the
+      # PR itself (conflicts, placeholders, stale approvals, open threads)
+      # and overlap with other open PRs. No model and no PR-head code. A
+      # crash here must not hide the rest of the review, so it degrades to
+      # "skipped" with a warning instead of counting as unavailable. A
+      # plugin_ref that predates the script also skips.
+      # docs and cloud-docs are private and pair up on single-sourced pages,
+      # so the paired-PR check needs to read the other repo. Best effort: if
+      # the App cannot mint this (not installed there, or lacking
+      # pull_requests: read), pr-checks.py notes the skipped check instead.
+      - name: Mint a read-only token for the companion repo
+        id: companion_token
+        if: >-
+          inputs.docs_app_id != '' &&
+          (github.repository == 'redpanda-data/docs' || github.repository == 'redpanda-data/cloud-docs')
+        continue-on-error: true
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.docs_app_id }}
+          private-key: ${{ secrets.docs_app_private_key }}
+          owner: redpanda-data
+          repositories: docs,cloud-docs
+          permission-pull-requests: read
+
+      - name: PR and preview checks
+        id: prchecks
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMPANION_TOKEN: ${{ steps.companion_token.outputs.token }}
+          PR: ${{ inputs.pr_number }}
+          R: ${{ github.repository }}
+        run: |
+          if [[ ! -f .standards/scripts/pr-checks.py ]]; then
+            echo "result=skipped" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if python3 -I .standards/scripts/pr-checks.py "$R" "$PR" preview-links.md results/pr-checks \
+             && [[ -f results/pr-checks/verdict.json ]]; then
+            echo "result=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::pr-checks.py failed; the report goes out without the PR and preview checks"
+            echo "result=skipped" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The previous report carries a hidden data block with its blockers.
+      # aggregate-review.sh compares against it to say what is no longer
+      # reported since the last head, and links to it. Each run posts a new
+      # report, so the previous one is this pipeline's latest (comments come
+      # oldest first). Anyone can paste the marker; only the pipeline's own
+      # comment counts. Missing is fine: the first run.
+      - name: Fetch the previous report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr_number }}
+          R: ${{ github.repository }}
+        run: |
+          gh api --paginate "repos/$R/issues/$PR/comments" \
+            | jq -s '[.[][] | select(.user.login == "github-actions[bot]" and (.body // "" | contains("<!-- docs-review:comment -->")))] | last // {}' \
+            > prev-comment.json || echo '{}' > prev-comment.json
+          jq -r '.body // ""' prev-comment.json > prev-comment.md
+          jq -r '.html_url // ""' prev-comment.json > prev-comment-url.txt
+
+      # The earlier blockers the gate handed to the reviews (incremental
+      # only). Moved out of results/ so aggregate-review.sh does not read
+      # the artifact as a review branch.
+      - name: Earlier blockers
+        run: |
+          if [[ -f results/review-scope/prior-blockers.json ]]; then
+            cp results/review-scope/prior-blockers.json prior-blockers.json
+          else
+            echo '[]' > prior-blockers.json
+          fi
+          rm -rf results/review-scope
+
       - name: Merge verdicts and build the comment
         id: verdict
         env:
@@ -1381,85 +1811,167 @@ jobs:
           PR: ${{ inputs.pr_number }}
           R: ${{ github.repository }}
           HEAD_SHA: ${{ needs.gate.outputs.head_sha }}
-          SME_APPROVER: ${{ needs.gate.outputs.sme_approver }}
-          SME_MODE: ${{ needs.gate.outputs.sme_mode }}
+          MODE: ${{ needs.gate.outputs.mode }}
+          BASELINE_SHA: ${{ needs.gate.outputs.baseline_sha }}
+          BASELINE_SOURCE: ${{ needs.gate.outputs.baseline_source }}
+          PRIOR_BLOCKERS_FILE: prior-blockers.json
+          CONFIG_FILE: .standards/.github/docs-review-config.json
           TICKET: ${{ needs.classify.outputs.ticket }}
           RESULT_CLASSIFY: ${{ needs.classify.result }}
           RESULT_ADOC: ${{ needs.adoc_review.result }}
           # Exactly one JSON job runs (docs-team-standards: _local).
           RESULT_JSON: ${{ needs.json_validation.result != 'skipped' && needs.json_validation.result || needs.json_validation_local.result }}
           RESULT_CODE: ${{ needs.code_review.result }}
+          RESULT_BEST_FIT: ${{ needs.best_fit_review.result }}
           RESULT_SHOTS: ${{ needs.screenshot_gate.result }}
           RESULT_TICKET: ${{ needs.ticket_delta.result }}
+          RESULT_PR_CHECKS: ${{ steps.prchecks.outputs.result }}
+          PREV_COMMENT_FILE: prev-comment.md
         run: |
           set -uo pipefail
+          PREV_COMMENT_URL=$(cat prev-comment-url.txt 2>/dev/null || true)
+          export PREV_COMMENT_URL
           # Guarded like the preview-links call above it. If the aggregator
           # cannot run (missing from a plugin_ref that predates it, or a bug
           # in the script), an unguarded failure skips the two steps below,
           # so the PR gets no comment, no terminal status, and keeps the
           # gate's pending claim until the 90-minute stale window expires.
           # Degrade to the pipeline's standard infra-failure posture instead:
-          # a comment carrying the same marker (so it still upserts in place),
-          # an error status, and needs-human-review. `error`, not `failure`:
+          # a short "unavailable" report and an error status. `error`, not
+          # `failure`:
           # exactly-once treats failure as a finished review, so the SHA
           # could never be retried (see aggregate-review.sh).
+          # The short report it posts carries a data block that records the
+          # unavailable review, so the gate makes the next run full. With no
+          # report, the previous one would stay the latest, and a docs-team
+          # review of this head would make a re-run a noop that never clears
+          # the error.
           if ! bash .standards/scripts/aggregate-review.sh results comment.md; then
-            echo "::warning::aggregate-review.sh could not run — posting the unavailable fallback"
+            echo "::warning::aggregate-review.sh could not run — a short report and an error status instead"
             {
               echo "state=error"
               echo "description=automated review unavailable, human review required"
-              echo "labels=needs-human-review"
+              echo "labels="
+              echo "post_comment=true"
+              # Overrides whatever the script wrote before it failed.
+              echo "approve=false"
+              echo "approval_withheld="
             } >> "$GITHUB_OUTPUT"
+            # Keep the earlier runs' history and the open blockers, so the next
+            # report's "since the last review" and the metrics stay right.
+            PREV_DATA=$(grep -oE '<!-- docs-review:data [A-Za-z0-9+/=]+ -->' prev-comment.md 2>/dev/null | head -1 \
+              | sed -E 's/^<!-- docs-review:data ([A-Za-z0-9+\/=]+) -->$/\1/' | base64 -d 2>/dev/null \
+              | jq -c 'if type == "object" then {history: (.history // []), blockers: (.blockers // [])} else null end' 2>/dev/null) || true
+            DATA=$(jq -cn --arg head "$HEAD_SHA" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg mode "$MODE" \
+              --argjson prev "${PREV_DATA:-null}" \
+              '($prev // {history: [], blockers: []}) as $p |
+               {v: 1, head: $head, state: "error", at: $at, mode: $mode, unavailable: ["aggregate"], blockers: $p.blockers,
+                history: (($p.history | if (.[-1].head // "") == $head then .[:-1] else . end)
+                          + [{head: $head, state: "error", at: $at, blockers: ($p.blockers | length)}])[-30:]}')
             {
               echo "<!-- docs-review:comment -->"
-              echo "## 📋 Docs review: ⚠️ automated review unavailable"
+              echo "## 📋 Docs review: ⚠️ Automated review unavailable: review by hand before approving"
               echo
-              echo "The pipeline could not assemble a verdict for this revision (the"
-              echo "aggregation step failed to run), so there is no automated result here."
-              echo "Human review is required. See the [workflow run](${GITHUB_SERVER_URL}/${R}/actions/runs/${GITHUB_RUN_ID}) for details."
+              echo "The report could not be built (see the workflow run). Re-run all jobs to retry."
               echo
-              echo "**This workflow never merges.** Merge requires a documentation approval"
-              echo "from a docs team member."
+              if [[ -s preview-links.md ]]; then
+                echo "### 🔍 Preview pages"
+                echo
+                cat preview-links.md
+                echo
+              fi
+              echo "<!-- docs-review:data $(printf '%s' "$DATA" | base64 | tr -d '\n') -->"
             } > comment.md
           fi
 
+      # Each run posts a new report and collapses the earlier ones as
+      # outdated, so the PR keeps the whole trail: what each review said,
+      # what changed, and the latest verdict, which is the only one shown
+      # expanded. Editing one report in place lost what the first review
+      # said. The new report goes up first, so a failed post leaves the
+      # previous one showing.
       # continue-on-error for the same reason the aggregator is guarded: a
-      # failed upsert (a transient 5xx or a secondary rate limit) would skip
+      # failed post (a transient 5xx or a secondary rate limit) would skip
       # the status step below and leave the gate's pending claim in place
       # until the 90-minute stale window expires. The status step still
-      # posts the verdict; the run shows the upsert's failure.
-      - name: Upsert the review comment
+      # posts the verdict; the run shows the failure.
+      # No report (nothing ran): post nothing, and collapse the earlier
+      # reports, which describe an older commit and could read as a current
+      # "Ready to approve". The status carries the outcome instead. A failed
+      # post leaves the previous report as the latest; the run shows why.
+      - name: Post the review report and collapse the earlier ones
         continue-on-error: true
         uses: actions/github-script@v7
         env:
           PR: ${{ inputs.pr_number }}
+          POST_COMMENT: ${{ steps.verdict.outputs.post_comment }}
         with:
           script: |
             const fs = require('fs');
             let body = fs.readFileSync('comment.md', 'utf8');
             const issue_number = Number(process.env.PR);
             const marker = '<!-- docs-review:comment -->';
+            const post = process.env.POST_COMMENT !== 'false' && body.trim() !== '';
             // GitHub rejects issue comments over 65,536 characters; five
             // model-written findings files can exceed that even after the
             // aggregator's per-file cap.
             const MAX = 60000;
             if (body.length > MAX) {
-              body = body.slice(0, MAX) + '\n\n…\n\n_Comment truncated — the full findings are in the workflow run artifacts._';
+              // Keep the hidden data block (it is the last line): the next
+              // run's "since the last review" and the metrics script read it,
+              // and a large PR is where the report is most likely to be cut.
+              const m = body.match(/\n<!-- docs-review:data [A-Za-z0-9+\/=]+ -->\s*$/);
+              const data = m ? m[0] : '';
+              body = body.slice(0, MAX - data.length) + '\n\n…\n\n_Comment truncated — the full findings are in the workflow run artifacts._' + data;
             }
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner, repo: context.repo.repo, issue_number, per_page: 100,
             });
-            const existing = comments.find(c => c.body && c.body.includes(marker));
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner, repo: context.repo.repo,
-                comment_id: existing.id, body,
-              });
-            } else {
+            // Anyone can paste the marker; only the pipeline's own reports
+            // are collapsed.
+            const earlier = comments.filter(c => c.body && c.body.includes(marker)
+              && c.user && c.user.login === 'github-actions[bot]');
+            if (post) {
               await github.rest.issues.createComment({
                 owner: context.repo.owner, repo: context.repo.repo, issue_number, body,
               });
             }
+            // Collapse each earlier report not already collapsed. One failure
+            // does not stop the rest; the next run retries it.
+            for (let i = 0; i < earlier.length; i += 100) {
+              let nodes = [];
+              try {
+                ({ nodes } = await github.graphql(
+                  'query($ids: [ID!]!) { nodes(ids: $ids) { ... on IssueComment { id isMinimized } } }',
+                  { ids: earlier.slice(i, i + 100).map(c => c.node_id) }));
+              } catch (e) {
+                // A partial error (a report deleted since the listing) still
+                // returns the other nodes.
+                nodes = (e.data && e.data.nodes) || [];
+                core.warning(`could not read whether the earlier review reports are collapsed: ${e.message}`);
+              }
+              for (const n of nodes || []) {
+                if (!n || n.isMinimized) continue;
+                try {
+                  await github.graphql(
+                    'mutation($id: ID!) { minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) { minimizedComment { isMinimized } } }',
+                    { id: n.id });
+                } catch (e) {
+                  core.warning(`could not collapse an earlier review report: ${e.message}`);
+                }
+              }
+            }
+
+      # With no comment there is nowhere else for the preview links to
+      # appear, and a PR that needs a review by hand is when the reviewer
+      # wants them most. The docs-review status links to this run, so its
+      # summary is one click from the checks list.
+      - name: Preview links in the run summary (no comment posted)
+        if: steps.verdict.outputs.post_comment == 'false'
+        run: |
+          if [[ -s preview-links.md ]]; then
+            { echo "### 🔍 Preview pages"; echo; cat preview-links.md; } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Apply labels and set the final status
         env:
@@ -1481,6 +1993,15 @@ jobs:
                 echo "::warning::could not add label '$L' to $R#$PR"
             done
           fi
+          # needs-human-review is retired (an unavailable review now shows only
+          # as the error status). Remove the copy this pipeline added on
+          # earlier runs; one a person added stays.
+          ADDED_BY=$(gh api --paginate "repos/$R/issues/$PR/events" \
+            | jq -s -r '[.[][] | select(.event == "labeled" and .label.name == "needs-human-review")] | last | .actor.login // ""') || ADDED_BY=""
+          if [[ "$ADDED_BY" == "github-actions[bot]" ]]; then
+            gh api -X DELETE "repos/$R/issues/$PR/labels/needs-human-review" > /dev/null 2>&1 \
+              && echo "Removed the retired needs-human-review label" || true
+          fi
           # Informational status (decision 7 corrected): docs-review is NOT
           # a required check; the docs-team approval is the physical gate.
           gh api "repos/$R/statuses/$HEAD_SHA" \
@@ -1488,3 +2009,188 @@ jobs:
             -f state="$STATE" \
             -f description="${DESCRIPTION:0:139}" \
             -f target_url="${GITHUB_SERVER_URL}/${R}/actions/runs/${GITHUB_RUN_ID}" > /dev/null
+
+      # Approve a PR that passed (aggregate-review.sh decides, from the
+      # config's approval criteria; approval.md lists the non-blocking
+      # suggestions). Whenever a run does not approve (merge-blockers, a
+      # review unavailable, or approval withheld for any criterion, such as
+      # a person's change request), dismiss this pipeline's own earlier
+      # approvals so none can be mistaken for a current one. Only reviews by github-actions[bot] that carry the
+      # marker are touched; a person's approval never is.
+      # continue-on-error: approving needs the org or repo setting "Allow
+      # GitHub Actions to create and approve pull requests". Without it
+      # GitHub answers 422; the report and status above still stand.
+      - name: Approve, or withdraw an earlier automatic approval
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr_number }}
+          R: ${{ github.repository }}
+          HEAD_SHA: ${{ needs.gate.outputs.head_sha }}
+          APPROVE: ${{ steps.verdict.outputs.approve }}
+          STATE: ${{ steps.verdict.outputs.state }}
+          WITHHELD: ${{ steps.verdict.outputs.approval_withheld }}
+        run: |
+          set -euo pipefail
+          MARK='<!-- docs-review:approval -->'
+          if [[ "$APPROVE" == "true" ]]; then
+            [[ -s approval.md ]] || { echo "::warning::approve=true but approval.md is empty: not approving"; exit 1; }
+            jq -n --rawfile body approval.md --arg sha "$HEAD_SHA" \
+              '{event: "APPROVE", commit_id: $sha, body: $body}' > approve.json
+            if ! gh api -X POST "repos/$R/pulls/$PR/reviews" --input approve.json > /dev/null; then
+              echo "::warning::could not approve $R#$PR. Check that \"Allow GitHub Actions to create and approve pull requests\" is on for this repo (Settings > Actions > General)."
+              exit 1
+            fi
+            echo "Approved $R#$PR at $HEAD_SHA"
+          else
+            case "$STATE" in
+              failure) WHY="found merge-blockers" ;;
+              error)   WHY="could not complete (a review was unavailable)" ;;
+              *)       WHY="did not approve it${WITHHELD:+: ${WITHHELD}}" ;;
+            esac
+            gh api --paginate "repos/$R/pulls/$PR/reviews" \
+              | jq -s -r --arg m "$MARK" '[.[][] | select(.state == "APPROVED" and .user.login == "github-actions[bot]"
+                                                     and ((.body // "") | contains($m)))] | .[].id' \
+              | while read -r id; do
+                  gh api -X PUT "repos/$R/pulls/$PR/reviews/$id/dismissals" -f event=DISMISS \
+                    -f message="Withdrawn: the docs review of ${HEAD_SHA:0:7} ${WHY:0:300}. See the review comment, or the run's summary." > /dev/null \
+                    && echo "Dismissed the pipeline's earlier approval $id" \
+                    || echo "::warning::could not dismiss the pipeline's earlier approval $id"
+                done
+          fi
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Ready-for-approval shortcut: review feedback on the current head says the
+  # PR is ready for approval (scripts/docs-review-scope.py; only the docs
+  # team or this pipeline's own report count, never the PR author), so
+  # approve without re-reviewing. No comment beyond the approval itself.
+  # ──────────────────────────────────────────────────────────────────────
+  approve_ready:
+    needs: gate
+    if: needs.gate.outputs.run_review == 'true' && needs.gate.outputs.mode == 'approve_only'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+      statuses: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr_number }}
+          R: ${{ github.repository }}
+          HEAD_SHA: ${{ needs.gate.outputs.head_sha }}
+          READY_BY: ${{ needs.gate.outputs.ready_by }}
+        run: |
+          set -euo pipefail
+          status() {
+            gh api "repos/$R/statuses/$HEAD_SHA" -f context="$REVIEW_STATUS_CONTEXT" \
+              -f state="$1" -f description="${2:0:139}" \
+              -f target_url="${GITHUB_SERVER_URL}/${R}/actions/runs/${GITHUB_RUN_ID}" > /dev/null
+          }
+          BODY=$(printf '%s\n%s' '<!-- docs-review:approval -->' \
+            "Approved by the docs-review pipeline without a re-review: ${READY_BY} marked this PR ready for approval at \`${HEAD_SHA:0:7}\`, and nothing has changed since.")
+          jq -n --arg body "$BODY" --arg sha "$HEAD_SHA" '{event: "APPROVE", commit_id: $sha, body: $body}' > approve.json
+          if gh api -X POST "repos/$R/pulls/$PR/reviews" --input approve.json > /dev/null; then
+            status success "docs review: approved (ready for approval per ${READY_BY})"
+          else
+            # error, not success: exactly-once ignores error, so the next
+            # event retries the approval.
+            echo "::warning::could not approve $R#$PR. Check that \"Allow GitHub Actions to create and approve pull requests\" is on for this repo (Settings > Actions > General)."
+            status error "docs review: ready for approval, but the automatic approval failed"
+          fi
+
+  # ──────────────────────────────────────────────────────────────────────
+  # On-request repos: remove the request label when the run has served the
+  # request (reviewed, approved, or nothing new to review), so the label
+  # always means "a review is wanted" and adding it again asks for the next
+  # round.
+  # - A request that ends without a review (already reviewed, nothing new,
+  #   a review already running, out of scope) gets a short comment saying
+  #   why, so the label never just disappears.
+  # - A label added again while this run was going is kept: the run it
+  #   started is waiting in the concurrency group, and removing the label
+  #   now would make that run read no request.
+  # - A request that was not served keeps the label for ONE retry, with a
+  #   note: the review ran but did not finish (the docs-review status is
+  #   error, or still pending after a cancel), or another run's claim on the
+  #   head stopped this one (a run in progress, or one that died). While the
+  #   label is on, the next event on the PR or a re-run retries it. A second
+  #   miss on the same head removes the label and says so: a failure that
+  #   repeats every run would otherwise re-run a full paid review on every
+  #   event in a repo that asked for reviews on request only.
+  # - Not after a gate failure: the request still stands, and the next
+  #   event on the PR (any event, while the label is on) retries it.
+  # ──────────────────────────────────────────────────────────────────────
+  clear_request:
+    needs: [gate, aggregate, approve_ready]
+    if: always() && needs.gate.result == 'success' && needs.gate.outputs.request_label != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+      pull-requests: write
+      statuses: read
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr_number }}
+          R: ${{ github.repository }}
+          HEAD_SHA: ${{ needs.gate.outputs.head_sha }}
+          LABEL: ${{ needs.gate.outputs.request_label }}
+          STARTED_AT: ${{ needs.gate.outputs.started_at }}
+          RUN_REVIEW: ${{ needs.gate.outputs.run_review }}
+          HELD: ${{ needs.gate.outputs.request_held }}
+          WHY: ${{ needs.gate.outputs.no_review_why }}
+        run: |
+          set -uo pipefail
+          # Without "@": a note would notify everyone the reason names.
+          note() {
+            { echo "<!-- docs-review:request-note${2:+ $2} -->"; echo "**Docs review request (\`$LABEL\`):** ${1//@/}"; } > note.md
+            gh api "repos/$R/issues/$PR/comments" -F body=@note.md > /dev/null \
+              || echo "::warning::could not post the request note on $R#$PR"
+          }
+          if [[ "$RUN_REVIEW" != "true" && "$HELD" != "true" && -n "$WHY" ]]; then
+            note "no review ran. $WHY"
+          fi
+          # Was the request served? Not when the review did not finish, or
+          # when another run's claim stopped this one.
+          UNSERVED=""
+          if [[ "$RUN_REVIEW" == "true" ]]; then
+            STATE=$(gh api "repos/$R/commits/$HEAD_SHA/status" \
+              --jq '[.statuses[] | select(.context=="'"$REVIEW_STATUS_CONTEXT"'")] | first | .state // ""') || STATE=""
+            [[ "$STATE" == "success" || "$STATE" == "failure" ]] || UNSERVED="the review of ${HEAD_SHA:0:7} did not finish (docs-review status: ${STATE:-none})"
+          elif [[ "$HELD" == "true" ]]; then
+            UNSERVED="a review of ${HEAD_SHA:0:7} was already running, or stopped without finishing"
+          fi
+          # ISO 8601 UTC strings compare in time order.
+          LAST_ADDED=$(gh api --paginate "repos/$R/issues/$PR/events" \
+            | jq -s -r --arg l "$LABEL" '[.[][] | select(.event == "labeled" and .label.name == $l) | .created_at] | max // ""') \
+            || LAST_ADDED=""
+          if [[ -n "$STARTED_AT" && "$LAST_ADDED" > "$STARTED_AT" ]]; then
+            echo "'$LABEL' was added again at $LAST_ADDED, after this run started ($STARTED_AT): keeping it for the run that request started"
+            exit 0
+          fi
+          if [[ -n "$UNSERVED" ]]; then
+            # One retry per request: count the "kept" notes since the label
+            # was last added, whatever the head (a push must not earn a new
+            # retry).
+            KEPT=$(gh api --paginate "repos/$R/issues/$PR/comments" \
+              | jq -s --arg since "$LAST_ADDED" \
+                  '[.[][] | select(.user.login == "github-actions[bot]" and .created_at > $since
+                                   and (.body // "" | startswith("<!-- docs-review:request-note kept -->")))] | length') || KEPT=""
+            # Unknown counts as used: an extra review costs more than a
+            # request the writer has to make again.
+            if [[ "$KEPT" == "0" ]]; then
+              echo "Request not served ($UNSERVED): keeping '$LABEL' for one retry"
+              note "$UNSERVED. The label stays on: re-run the workflow (all jobs), or the next push or review on this PR, retries the review once." kept
+              exit 0
+            fi
+            AGAIN=", again after a retry"
+            [[ -n "$KEPT" ]] || AGAIN=" (and an earlier retry could not be ruled out)"
+            echo "Request not served$AGAIN: removing '$LABEL'"
+            note "$UNSERVED$AGAIN. Removing the label, so further pushes don't each start a review. Add it again to retry."
+          fi
+          ENC=$(jq -rn --arg l "$LABEL" '$l | @uri')
+          gh api -X DELETE "repos/$R/issues/$PR/labels/$ENC" > /dev/null 2>&1 \
+            && echo "Removed the '$LABEL' label from $R#$PR" \
+            || echo "'$LABEL' was already gone from $R#$PR"
