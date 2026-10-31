@@ -58,10 +58,45 @@ const LLMS_DIRECTIVE_REGEX = new RegExp(
 const SOURCE_COMMENT_REGEX = /^<!--\s*(?:Source:|Note for AI:)[\s\S]*?-->\s*/gm;
 
 /**
+ * Regex pattern to match the YAML front matter block that opens a page export.
+ * Anchored to the start of the content, so a thematic break later in the body
+ * is left alone.
+ */
+const FRONTMATTER_REGEX = /^---\r?\n[\s\S]*?\r?\n---\r?\n/;
+
+/**
+ * A fenced code block: an opening fence of three or more backticks or tildes,
+ * closed by a line with at least as many of the same character, or running to
+ * the end of the text when never closed.
+ */
+const FENCED_BLOCK_REGEX = /^ {0,3}(`{3,}|~{3,})[^\n]*(?:\n[\s\S]*?\n {0,3}\1[`~]*[ \t]*$|\n[\s\S]*$|$)/gm;
+
+/**
+ * Apply a text transform to every stretch of Markdown that is not inside a
+ * fenced code block. The stretches include the newlines on either side of a
+ * fence, so a transform that collapses blank lines sees them whole.
+ *
+ * @param {string} markdown - Markdown text
+ * @param {Function} transform - Receives a stretch of non-code text, returns its replacement
+ * @returns {string} The Markdown with the transform applied outside fences
+ */
+function transformOutsideFences(markdown, transform) {
+  let out = '';
+  let last = 0;
+  for (const match of markdown.matchAll(FENCED_BLOCK_REGEX)) {
+    out += transform(markdown.slice(last, match.index)) + match[0];
+    last = match.index + match[0].length;
+  }
+  return out + transform(markdown.slice(last));
+}
+
+/**
  * Strip metadata added by convert-to-markdown extension from page content.
  * This removes:
- * 1. HTML comments (source URLs)
- * 2. llms.txt directive blockquotes (redundant in aggregated exports)
+ * 1. The YAML front matter block (the aggregated exports carry their own
+ *    per-page title and URL, and front matter mid-file is just body text)
+ * 2. HTML comments (source URLs)
+ * 3. llms.txt directive blockquotes (redundant in aggregated exports)
  *
  * @param {string|Buffer} content - The markdown content to strip
  * @returns {string} Cleaned markdown content
@@ -69,11 +104,17 @@ const SOURCE_COMMENT_REGEX = /^<!--\s*(?:Source:|Note for AI:)[\s\S]*?-->\s*/gm;
 function stripMarkdownMetadata(content) {
   let text = typeof content === 'string' ? content : content.toString('utf8');
 
+  // Strip the front matter block
+  text = text.replace(FRONTMATTER_REGEX, '');
+
   // Strip HTML comments (source URLs)
   text = text.replace(SOURCE_COMMENT_REGEX, '');
 
   // Strip llms.txt directive blockquotes
   text = text.replace(LLMS_DIRECTIVE_REGEX, '');
+
+  // Close the gaps the removed blocks leave behind, leaving code blocks alone
+  text = transformOutsideFences(text, (prose) => prose.replace(/\n{3,}/g, '\n\n'));
 
   return text.trim();
 }
@@ -436,10 +477,12 @@ module.exports = {
   LLMS_DIRECTIVE_BASE,
   LLMS_DIRECTIVE_REGEX,
   SOURCE_COMMENT_REGEX,
+  FRONTMATTER_REGEX,
   MAX_INDEX_CHARS,
   formatLlmsDirective,
   linkDestination,
   stripMarkdownMetadata,
+  transformOutsideFences,
   componentsWithExports,
   buildPageIndexes,
   renderPageIndexSection,
