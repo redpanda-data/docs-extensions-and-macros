@@ -23,9 +23,13 @@
  *
  * A term is dropped when a taxonomy label or altLabel matches inside it, when
  * it is in the terminology list (the style guide's word lists or the docs
- * glossary, see loadTerminology), when every word is common English
- * (COMMON_WORDS), or when a single word also appears in lowercase in the
- * page's prose, which is the mark of an ordinary word that started a phrase.
+ * glossary, see loadTerminology), when every word is a stop word or common
+ * English (COMMON_WORDS), a language keyword (NULL, GROUP BY), or a
+ * Kubernetes object kind (Pods, PersistentVolumeClaim), when every mention is
+ * on a sales or licensing line (Redpanda Sales, Enterprise Edition), or when
+ * a single word also appears in lowercase in the page's prose, which is the
+ * mark of an ordinary word that started a phrase. The product's own name is
+ * stripped from the front of a term, and alone it is no term.
  *
  * Each candidate has a likely facet from simple cues: a connector name or a
  * database, format, or product cue word next to it is a technology; a
@@ -73,6 +77,67 @@ monday tuesday wednesday thursday friday saturday sunday
 january february march april june july august september october november december
 `.trim().split(/\s+/))
 
+// English stop words and the verbs and nouns of UI and docs boilerplate that
+// COMMON_WORDS does not already hold. A term made only of these is dropped.
+for (const w of `
+am aren't couldn't did didn't doesn't don't few further hadn't hasn't haven't having he her hers herself him himself his
+i i'm me mine my myself nor ours ourselves own she shan't shouldn't themselves very wasn't we're weren't won't wouldn't yours
+yourself yourselves itself whom
+manage manager show hide logs log home overview dashboard details detail general advanced basic premium standard
+support sales data user users account accounts team teams project projects organization organizations
+`.trim().split(/\s+/)) COMMON_WORDS.add(w)
+
+// Keywords of SQL, Bloblang, and common programming languages. A term made
+// only of these (NULL, GROUP BY, INSERT INTO) is syntax, not a name. Uppercase
+// keys are compared case-insensitively.
+const LANGUAGE_KEYWORDS = new Set(`
+select from where insert into update delete create drop alter table tables view index join inner outer left right full cross
+on using group by order having limit offset union intersect except distinct values set returning with as case when then
+else end null not and or is in like ilike between exists any all some primary key foreign references constraint default
+unique check cascade begin commit rollback transaction grant revoke partition over window rows range filter lateral
+true false nan uuid int integer bigint smallint varchar char text boolean bool decimal numeric float double real date time
+timestamp timestamptz interval jsonb bytea serial array struct map
+if elif else for while do switch break continue return func function def class import package var let const new
+nil none undefined self this root meta match try catch throw finally async await yield public private protected static void
+usage catalog schema owner privileges ok error warn warning info debug trace fatal completed failed running pending succeeded
+`.trim().split(/\s+/))
+
+// Kubernetes object kinds and resource words. Generic to every Kubernetes
+// page, so a term made only of these (Pods, PersistentVolumeClaim, NodePort
+// Service) is not a taxonomy value. Folded to singular, lowercase.
+const KUBERNETES_KINDS = new Set(`
+pod deployment statefulset daemonset replicaset service ingress ingressclass configmap secret persistentvolume
+persistentvolumeclaim pvc pv storageclass namespace node job cronjob serviceaccount role rolebinding clusterrole
+clusterrolebinding networkpolicy customresourcedefinition crd cr endpoint endpointslice horizontalpodautoscaler hpa
+poddisruptionbudget pdb limitrange resourcequota servicemonitor podmonitor nodeport clusterip loadbalancer container
+initcontainer sidecar volume volumemount affinity toleration taint kubelet
+`.trim().split(/\s+/))
+
+// The product's own name. A term made of it alone (Redpanda, Redpanda Data)
+// is dropped, and a leading "Redpanda" is stripped, so "Redpanda Terraform"
+// counts as Terraform and "Redpanda Support" is dropped as a common word.
+const PRODUCT_WORDS = new Set(['redpanda'])
+
+// A line that sells rather than documents: sales contact, pricing, buying.
+// A term every one of whose mentions is on such a line (Redpanda Sales) is
+// boilerplate. Words that technical lines use too (subscription, trial,
+// upgrade to, license, Enterprise Edition) are left out, so "Pub/Sub
+// subscription" and "available in Enterprise Edition" lines still count.
+const SALES_LINE_RE = /\b(?:contact (?:redpanda )?sales|account team|pricing|request a (?:trial|license)|purchase)\b/i
+
+// Licensing names that are boilerplate wherever they appear. Dropped as terms
+// without making the rest of their line a sales line.
+const SALES_TERMS = new Set(['enterprise edition'])
+
+/** Why a term, as its words, is not a candidate, or null. */
+function excluded (ws) {
+  const keys = ws.map((w) => w.toLowerCase())
+  if (keys.every((k) => COMMON_WORDS.has(k))) return 'stop-word'
+  if (keys.every((k) => LANGUAGE_KEYWORDS.has(k))) return 'language-keyword'
+  if (keys.every((k) => KUBERNETES_KINDS.has(k) || KUBERNETES_KINDS.has(k.replace(/s$/, '')) || KUBERNETES_KINDS.has(k.replace(/es$/, '')))) return 'kubernetes-kind'
+  return null
+}
+
 // Words next to a term that say which facet it belongs to.
 const CUES = [
   { facet: 'technology', cue: 'connector-name', re: /^(?:input|output|processor|cache|buffer|connector|scanner|tracer|rate[_ -]?limit|component)s?$/i },
@@ -80,7 +145,10 @@ const CUES = [
   { facet: 'technology', cue: 'format-name', re: /^(?:format|formats|schema|schemas|serialization|encoding|file|files)$/i },
   { facet: 'technology', cue: 'product-name', re: /^(?:cli|api|apis|sdk|sdks|client|clients|library|libraries|server|servers|service|services|catalog|catalogs|bucket|buckets|operator|chart|cluster|clusters|plugin|plugins|driver|drivers|provider|providers|console|dashboard|dashboards)$/i },
 ]
-const CONNECT_COMPONENT_XREF_RE = /\bxref:(?:connect:)?components:(?:inputs|outputs|processors|caches|buffers|rate_limits|metrics|tracers|scanners)\/([a-z0-9_]+)\.adoc/g
+// Inputs, outputs, and caches connect to an external system, so their names
+// are technologies. Processors, buffers, and the rest are Connect's own
+// building blocks (mapping, switch, branch) and are left out.
+const CONNECT_COMPONENT_XREF_RE = /\bxref:(?:connect:)?components:(?:inputs|outputs|caches)\/([a-z0-9_]+)\.adoc/g
 const BACKTICK_RE = /`([^`\s]+)`/g
 const IDENT_RE = /^[a-z][a-z0-9]*(?:[_-][a-z0-9]+)+$/
 const CAP_WORD_RE = /^(?:[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)*|[A-Z]{2,}[a-z]?[0-9]*|[A-Z][a-z]*[0-9]+[A-Za-z0-9]*|[a-z]+[A-Z][A-Za-z0-9]*)$/
@@ -174,12 +242,27 @@ function cueAfter (word) {
  */
 function pageCandidates (parts, matcher, { terminology = new Set(), minCount = 2, max = 10 } = {}) {
   const found = new Map() // key -> { spellings: Map, count, lines, cues: Map }
-  const note = (term, part, cue) => {
+  const note = (raw, part, cue) => {
+    // Strip the product's own name from the front; nothing left, no term.
+    let words = raw.split(/\s+/)
+    if (PRODUCT_WORDS.has(words[0].toLowerCase())) {
+      // Redpanda Console is a label: the whole term is covered, not "Console".
+      // Only a match of the whole term: a "Redpanda" label alone must not
+      // drop "Redpanda Terraform", which counts as Terraform.
+      if (matchText(matcher, raw).some((h) => keyOf(h.term) === keyOf(raw))) return
+      while (words.length && PRODUCT_WORDS.has(words[0].toLowerCase())) words = words.slice(1)
+    }
+    if (!words.length) return
+    const identifier = words.length === 1 && /[_-]/.test(words[0])
+    if (excluded(identifier ? words[0].split(/[_-]/) : words)) return
+    const term = words.join(' ')
     const key = keyOf(term)
-    if (!found.has(key)) found.set(key, { spellings: new Map(), count: 0, lines: [], cues: new Map() })
+    if (SALES_TERMS.has(key)) return
+    if (!found.has(key)) found.set(key, { spellings: new Map(), count: 0, sales: 0, lines: [], cues: new Map() })
     const f = found.get(key)
     f.spellings.set(term, (f.spellings.get(term) || 0) + 1)
     f.count++
+    if (SALES_LINE_RE.test(part.raw || part.text || '')) f.sales++
     if (f.lines.length < MAX_LINES && !f.lines.some((l) => l.line === part.line && l.source === part.source)) {
       f.lines.push(part.source ? { line: part.line, source: part.source } : { line: part.line })
     }
@@ -191,7 +274,13 @@ function pageCandidates (parts, matcher, { terminology = new Set(), minCount = 2
   // lowercase is an ordinary word.
   const lowercase = new Set()
   const prose = [parts.description, ...parts.body.filter((b) => !b.code && !b.sourceLanguage)].filter(Boolean)
-  for (const p of prose) for (const w of words(p.text)) if (w.raw === w.raw.toLowerCase()) lowercase.add(foldWord(w.raw))
+  const capitalized = new Set()
+  for (const p of prose) {
+    for (const w of words(p.text)) {
+      if (w.raw === w.raw.toLowerCase()) lowercase.add(foldWord(w.raw))
+      else capitalized.add(w.raw.toLowerCase())
+    }
+  }
 
   // Capitalized terms.
   for (const p of prose) {
@@ -214,7 +303,6 @@ function pageCandidates (parts, matcher, { terminology = new Set(), minCount = 2
       // A lowerCamelCase word is an identifier (stringArray), unless the rest
       // is capitals (mTLS).
       if (span.some((w) => /^[a-z]/.test(w.raw) && !/^[a-z]{1,2}[A-Z0-9]+$/.test(w.raw))) continue
-      if (span.every((w) => COMMON_WORDS.has(w.raw.toLowerCase()))) continue
       if (span.every((w) => /^[A-Z0-9]+$/.test(w.raw) && w.raw.length < 2)) continue
       const term = p.text.slice(span[0].index, span[span.length - 1].index + span[span.length - 1].raw.length)
       // Part of a hyphenated compound ("Comma-separated"), not a name.
@@ -227,7 +315,13 @@ function pageCandidates (parts, matcher, { terminology = new Set(), minCount = 2
   // Code identifiers used as components, and Connect component xrefs.
   for (const b of parts.body) {
     if (b.sourceLanguage || !b.raw) continue
-    for (const m of b.raw.matchAll(CONNECT_COMPONENT_XREF_RE)) note(m[1], b, CUES[0])
+    for (const m of b.raw.matchAll(CONNECT_COMPONENT_XREF_RE)) {
+      // A one-word name (cache, generate, redis) is a system's name only
+      // when the page also writes it capitalized (Redis); otherwise it is a
+      // Connect building block named with an ordinary word.
+      if (!m[1].includes('_') && !capitalized.has(m[1])) continue
+      note(m[1], b, CUES[0])
+    }
     if (b.code) continue
     for (const m of b.raw.matchAll(BACKTICK_RE)) {
       const ident = m[1]
@@ -242,6 +336,7 @@ function pageCandidates (parts, matcher, { terminology = new Set(), minCount = 2
   for (const [key, f] of found) {
     if (f.count < minCount) continue
     if (terminology.has(key)) continue
+    if (f.sales === f.count) continue // only ever in sales or licensing lines
     const spelling = [...f.spellings.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0]
     if (matchText(matcher, spelling).length) continue // a label already covers it
     const best = [...f.cues.entries()].filter(([k]) => k !== 'none').sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]
@@ -298,6 +393,9 @@ function aggregateCandidates (perPage, { minPages = 1, minCount = 2, maxPageShar
 
 module.exports = {
   COMMON_WORDS,
+  LANGUAGE_KEYWORDS,
+  KUBERNETES_KINDS,
+  excluded,
   loadTerminology,
   pageCandidates,
   aggregateCandidates,
