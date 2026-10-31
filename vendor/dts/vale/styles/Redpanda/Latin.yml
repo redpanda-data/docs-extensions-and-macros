@@ -1,0 +1,11 @@
+# Checks: e.g., i.e., and etc.
+extends: substitution
+message: "Use '%s' instead of '%s'."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/terminology.md#do-not-use-word-list
+level: error
+ignorecase: true
+nonword: true
+swap:
+  '\be\.g\.': for example
+  '\bi\.e\.': that is
+  '\betc\.': concrete examples

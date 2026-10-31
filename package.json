@@ -97,7 +97,8 @@
     "./extensions/kapa-source-groups": "./extensions/kapa-source-groups.js",
     "./docs-data/kapa-source-groups.json": "./docs-data/kapa-source-groups.json",
     "./macros/iceberg-explorer": "./macros/iceberg-explorer.js",
-    "./macros/iceberg-explorer.js": "./macros/iceberg-explorer.js"
+    "./macros/iceberg-explorer.js": "./macros/iceberg-explorer.js",
+    "./vendor/dts/manifest.json": "./vendor/dts/manifest.json"
   },
   "files": [
     "extensions",
@@ -110,7 +111,8 @@
     "docker-compose",
     "mcp",
     "docs-data/*.schema.json",
-    "docs-data/kapa-source-groups.json"
+    "docs-data/kapa-source-groups.json",
+    "vendor/dts"
   ],
   "license": "ISC",
   "engines": {

@@ -1,0 +1,40 @@
+# Checks: a heading with no intro text before its first subheading
+extends: script
+message: "Add intro text between this heading and its first subheading."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#intro-text-before-child-headings
+level: warning
+scope: raw
+script: |
+  text := import("text")
+  matches := []
+  pos := 0
+  delim := ""
+  last := 0
+  lastpos := 0
+  lastlen := 0
+  for l in text.split(scope, "\n") {
+    t := text.trim_space(l)
+    if delim != "" {
+      if t == delim { delim = "" }
+      last = 0
+    } else if text.re_match(`^(-{4,}|\.{4,}|/{4,}|\+{4,}|_{4,}|\*{4,})$`, t) {
+      delim = t
+      last = 0
+    } else {
+      m := text.re_find(`^(=+) \S`, l)
+      if m != undefined {
+        lvl := len(m[0][1].text)
+        if last > 1 && lvl > last {
+          matches = append(matches, {begin: lastpos, end: lastpos + lastlen})
+        }
+        last = lvl
+        // Release notes group entries under a bare version heading by design.
+        if text.re_match(`^=+ v?\d+\.\d+`, l) { last = 0 }
+        lastpos = pos
+        lastlen = len(l)
+      } else if t != "" && !text.re_match(`^(\[.*\]|:[\w-]+:.*|//.*|ifn?def::.*|endif::.*)$`, t) {
+        last = 0
+      }
+    }
+    pos += len(l) + 1
+  }

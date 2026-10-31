@@ -1,0 +1,50 @@
+// Best Practices Template
+// Use for pages that provide design guidance and recommendations.
+// Reader question: "What's the right way to do this?"
+
+= [Topic] Best Practices
+:description: [One sentence describing what design decisions this page guides.]
+:page-topic-type: best-practices
+:learning-objective-1: Identify [good pattern] for [context]
+:learning-objective-2: Evaluate [options] for [scenario]
+:learning-objective-3: Apply [principle] to [situation]
+
+// Intro: 1-2 sentences, ~15-30 words. Imperative tone, outcome-focused.
+[Imperative statement of what to achieve and the quality outcome it produces.]
+
+After reading this page, you will be able to:
+
+* [ ] {learning-objective-1}
+* [ ] {learning-objective-2}
+* [ ] {learning-objective-3}
+
+== [Category 1] best practices
+
+=== [Specific practice]
+
+[Explanation of why this matters]
+
+.Do
+[,yaml]
+----
+# Good example
+----
+
+.Don't
+[,yaml]
+----
+# Anti-pattern example
+----
+
+== Summary
+
+|===
+| Area | Recommendation
+
+| [Area 1]
+| [Key point]
+|===
+
+== Next steps
+
+* xref:tool-patterns.adoc[]

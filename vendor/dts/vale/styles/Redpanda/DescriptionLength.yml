@@ -1,0 +1,9 @@
+# Checks: :description: longer than 155 characters
+extends: existence
+message: "Keep :description: under 155 characters."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/content-architecture.md#page-metadata
+level: warning
+scope: raw
+nonword: true
+tokens:
+  - '(?m)^:description:[ \t]*[^\n]{156,}'

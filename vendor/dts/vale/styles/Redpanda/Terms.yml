@@ -1,0 +1,9 @@
+# Checks: longer words where a short one works, such as utilize and facilitate
+extends: substitution
+message: "Use '%s' instead of '%s'."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#specific-guidance
+level: error
+ignorecase: true
+swap:
+  utiliz(?:e|es|ed|ing): use
+  facilitat(?:e|es|ed|ing): help

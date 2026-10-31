@@ -1,0 +1,10 @@
+# Checks: we, our, and let's
+extends: existence
+message: "Address the reader as 'you'. Avoid '%s' (use 'Redpanda Data recommends' for recommendations)."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#specific-guidance
+level: warning
+ignorecase: true
+tokens:
+  - '\bwe\b'
+  - '\bour\b'
+  - "\\blet's\\b"

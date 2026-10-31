@@ -1,0 +1,8 @@
+# Checks: em dashes, including AsciiDoc's ' -- '
+extends: existence
+message: "Don't use em dashes (AsciiDoc renders ' -- ' as one). Use a comma, parentheses, or a colon, or split the sentence."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#redpanda-team-preferences
+level: error
+nonword: true
+tokens:
+  - '—'

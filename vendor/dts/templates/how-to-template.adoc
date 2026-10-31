@@ -1,0 +1,45 @@
+// How-to Template
+// Use for task-focused pages that help readers accomplish specific goals.
+// Reader question: "How do I do X?"
+
+= [Verb] [Specific Task]
+:description: [One sentence describing what task this page helps accomplish.]
+:page-topic-type: how-to
+:learning-objective-1: [Verb] [specific outcome]
+:learning-objective-2: [Verb] [specific outcome]
+:learning-objective-3: [Verb] [specific outcome]
+
+// Intro: 1-2 sentences, ~30-50 words. State what you can accomplish and why, with no implementation details.
+[What can you accomplish with this task, and why would you do it?]
+
+After reading this page, you will be able to:
+
+* [ ] {learning-objective-1}
+* [ ] {learning-objective-2}
+* [ ] {learning-objective-3}
+
+== Prerequisites
+
+* [Prerequisite 1]
+* xref:concepts.adoc[Understand X concepts]
+
+== [Task 1 title]
+
+[Brief context - when and why you'd do this.]
+
+. [Step 1]
+. [Step 2]
+. [Step 3]
+
+== Examples
+
+=== [Example scenario 1]
+
+[,yaml]
+----
+# Complete working example
+----
+
+== Next steps
+
+* xref:best-practices.adoc[]

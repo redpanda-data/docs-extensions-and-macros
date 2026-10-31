@@ -1,0 +1,50 @@
+// Release Notes Template (Self-Managed)
+// Use for a Self-Managed per-release changelog page — one page per release line
+// (main = current line; v/26.1, v/25.3 = older supported lines).
+// Other products are out of scope or pending: see the "Scope for this standard"
+// table in resources/writing-style/release-notes.md.
+// Reader question: "What changed in each release?"
+// Follow the entry standard in resources/writing-style/release-notes.md — it defines
+// the entry bar (present-tense outcome, body required, no PR/author/commit noise),
+// the category set and order, the version-heading format, and the page structure.
+
+= Redpanda Release Notes
+:description: Detailed release notes for each Redpanda patch release, organized by version.
+:page-topic-type: reference
+// Floor version for the release-notes automation: only releases newer than this are added automatically.
+:earliest-tracked-version: [X.Y.Z]
+
+// Intro: 1-2 sentences. What the page covers, and where the curated highlights live.
+This page lists the changes in each Redpanda release from version {earliest-tracked-version} onward, organized by version. For a curated summary of the major features in this release line, see xref:get-started:release-notes/redpanda.adoc[What's New].
+
+// One section per release, newest first. Heading is the version and release date on one
+// line: v<version> (<YYYY-MM-DD>). The date is authored — the release captain writes it
+// (see the standard); there is no timezone label.
+== v[X.Y.Z] ([YYYY-MM-DD])
+
+// Categories in this order: Features, then Bug fixes, then Improvements. Omit a category
+// with no entries. Each entry is a complete sentence in present tense, with a body —
+// never a headline-only entry.
+// Within a category, group entries by area so same-area entries are adjacent, with
+// areas in alphabetical order and source order kept within an area. See release-notes.md.
+// Entries are an AsciiDoc definition list: the product area is the term, the
+// entry is the description (`Cloud Topics:: Timequeries no longer …`), matching
+// ADP. This is a scoped exception to the no-definition-lists rule for
+// release-notes pages. See release-notes.md.
+=== Features
+
+[Area]:: [A new capability, in present tense and with no "now" (it has no prior behavior to contrast): "X supports …".]
+
+=== Bug fixes
+
+[Area]:: [A defect corrected, as a present-tense outcome: "X no longer …" / "X now …". Not "Fixed a bug where …".]
+
+=== Improvements
+
+[Area]:: [Better behavior for an existing capability, in present tense.]
+
+// Footer: link releases before the floor to the public GitHub releases page, which
+// keeps hosting historical Redpanda releases.
+== Release notes for older versions
+
+Release notes for versions before {earliest-tracked-version} are published on GitHub. See the https://github.com/redpanda-data/redpanda/releases[Redpanda releases page^].

@@ -1,0 +1,59 @@
+// Troubleshooting Template
+// Use for pages that help diagnose and fix problems.
+// Reader question: "Something's broken"
+
+= Troubleshoot [topic]
+:description: [One sentence describing what problems this page helps solve.]
+:page-topic-type: troubleshooting
+:learning-objective-1: Diagnose and fix [problem type 1]
+:learning-objective-2: Resolve [problem type 2]
+:learning-objective-3: Apply systematic debugging techniques
+
+// Intro: 1 sentence, ~15-25 words. Direct problem scope. Self-referential phrasing okay (e.g., "Use this page to...").
+[One sentence stating what problems this page helps you diagnose and fix.]
+
+Use this page to:
+
+* [ ] {learning-objective-1}
+* [ ] {learning-objective-2}
+* [ ] {learning-objective-3}
+
+== Quick diagnostics
+
+[cols="1,2"]
+|===
+| Symptom | Jump to
+
+| [Symptom description]
+| <<section-anchor>>
+|===
+
+== [Problem category 1]
+
+=== [Specific symptom]
+
+[What the reader observes]
+
+[Why this happens]
+
+To fix this:
+
+. [Step 1]
+. [Step 2]
+
+== Debugging techniques
+
+=== Enable verbose logging
+
+[,yaml]
+----
+# How to enable debug output
+----
+
+== Getting help
+
+If you can't resolve your issue:
+
+. Gather diagnostic information
+. Check for known issues
+. Contact support
