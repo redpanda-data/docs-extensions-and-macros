@@ -399,7 +399,7 @@ function fetchRpkTreeFromSource(sourcePath) {
  * Builds rpk binary, installs plugins, then runs --print-tree for complete command coverage.
  * Falls back to native Go build if Docker is unavailable.
  * @param {string} sourcePath - Path to rpk Go source directory (e.g., ~/redpanda/src/go/rpk)
- * @returns {Object} { tree, failedPlugins, pluginFlagSources } — the parsed JSON tree plus the
+ * @returns {Object} { tree, failedPlugins, installedPlugins, pluginFlagSources } — the parsed JSON tree plus the
  *   names of managed plugins whose install failed this run. Callers pass
  *   failedPlugins to generateRpkDocs as protectedPlugins so those plugins'
  *   existing pages and nav entries are preserved instead of treated as stale.
@@ -561,6 +561,7 @@ function fetchRpkTreeFromLinuxSource(sourcePath, pluginPins = {}) {
     // Step 2: Install plugins
     console.log('Installing plugins for complete command coverage...')
     const failedPlugins = []
+    const installedPlugins = []
     for (const plugin of KNOWN_PLUGINS) {
       // A pin installs a specific version instead of the manifest's latest.
       // This is how pre-GA plugins (no version promoted to latest) get into a
@@ -588,11 +589,13 @@ function fetchRpkTreeFromLinuxSource(sourcePath, pluginPins = {}) {
 
       if (installResult.status === 0) {
         console.log(`    ✓ ${plugin} installed`)
+        installedPlugins.push(plugin)
       } else {
         const stderr = installResult.stderr || ''
         const stdout = installResult.stdout || ''
         if (stderr.includes('already installed') || stdout.includes('already installed')) {
           console.log(`    ✓ ${plugin} already installed`)
+          installedPlugins.push(plugin)
         } else if (stderr.includes('unknown command') || stderr.includes('Error: unknown command')) {
           console.log(`    - ${plugin} is not an installable plugin`)
         } else {
@@ -669,7 +672,7 @@ function fetchRpkTreeFromLinuxSource(sourcePath, pluginPins = {}) {
       }
     }
 
-    return { tree, failedPlugins, pluginFlagSources }
+    return { tree, failedPlugins, installedPlugins, pluginFlagSources }
   } finally {
     // Clean up container
     console.log('Cleaning up build container...')
@@ -1866,6 +1869,38 @@ function replaceHomeDir(text, homeDir) {
 }
 
 /**
+ * Record the version of each plugin that actually installed during a full
+ * build (`rpk <plugin> install` resolves the manifest's latest, so the
+ * manifest lookup reflects what the tree contains). Shim-only plugins
+ * (failed installs) are skipped: their subtree carries no plugin commands.
+ * A root-only plugin such as rpk check has no subcommands, so it counts as
+ * installed when its install succeeded or the tree carries its flags.
+ * @param {Object} tree - Full command tree (root node)
+ * @param {Object} [options]
+ * @param {Object} [options.pluginPins] - Pinned versions keyed by plugin
+ * @param {string[]} [options.installedPlugins] - Plugins whose install succeeded
+ * @param {Function} [options.fetchLatest] - (plugin) => latest version or null
+ * @returns {Object} Versions keyed by rpk command name
+ */
+function recordPluginVersions(tree, { pluginPins = {}, installedPlugins = [], fetchLatest = fetchLatestPluginVersion } = {}) {
+  const pluginVersions = {}
+  for (const pluginName of REFRESHABLE_PLUGINS) {
+    const node = (tree.commands || []).find(c => c.name === pluginName)
+    if (!node) continue
+    const installed = pluginNodeHasRealCommands(node) || (
+      ROOT_ONLY_PLUGINS.has(pluginName) &&
+      (installedPlugins.includes(pluginName) || (node.flags || []).some(f => f.from_plugin === true))
+    )
+    if (!installed) continue
+    const installedVersion = pluginPins[pluginName] || fetchLatest(pluginName)
+    if (installedVersion) {
+      pluginVersions[pluginName] = installedVersion
+    }
+  }
+  return pluginVersions
+}
+
+/**
  * Install a single plugin and capture its fresh command subtree.
  * Runs with an isolated HOME so the install never touches the caller's
  * rpk plugin state, and the caller's installed plugins never leak in.
@@ -2053,6 +2088,7 @@ async function handleRpkDocsGeneration(options = {}) {
   // as explicit protectedPlugins (merged there with auto-detection) so a
   // failed install never deletes or rewrites that plugin's existing docs.
   let failedPlugins = []
+  let installedPlugins = []
   let pluginFlagSources = {}
 
   try {
@@ -2436,7 +2472,7 @@ async function handleRpkDocsGeneration(options = {}) {
       try {
         // Build on Linux (in container) - has all commands
         console.log('Building rpk in Linux container...')
-        const { tree: linuxTree, failedPlugins: linuxFailedPlugins, pluginFlagSources: linuxFlagSources } = fetchRpkTreeFromLinuxSource(sourcePath, pluginPins)
+        const { tree: linuxTree, failedPlugins: linuxFailedPlugins, installedPlugins: linuxInstalledPlugins, pluginFlagSources: linuxFlagSources } = fetchRpkTreeFromLinuxSource(sourcePath, pluginPins)
 
         // Build natively (on Darwin) for comparison. The Linux tree is
         // authoritative, so a comparison-build failure (for example, local
@@ -2466,6 +2502,7 @@ async function handleRpkDocsGeneration(options = {}) {
         // Use the Linux tree (has all commands)
         tree = linuxTree
         failedPlugins = linuxFailedPlugins
+        installedPlugins = linuxInstalledPlugins || []
         pluginFlagSources = linuxFlagSources || {}
       } catch (dockerErr) {
         // Docker build failed - fall back to native build
@@ -2477,7 +2514,7 @@ async function handleRpkDocsGeneration(options = {}) {
     } else if (canBuildLinux) {
       console.log('\nBuilding rpk in Linux container...')
       try {
-        ({ tree, failedPlugins, pluginFlagSources = {} } = fetchRpkTreeFromLinuxSource(sourcePath, pluginPins))
+        ({ tree, failedPlugins, installedPlugins = [], pluginFlagSources = {} } = fetchRpkTreeFromLinuxSource(sourcePath, pluginPins))
       } catch (dockerErr) {
         if (canBuildNative) {
           console.warn(`\n⚠ Docker build failed: ${dockerErr.message}`)
@@ -2514,20 +2551,7 @@ async function handleRpkDocsGeneration(options = {}) {
     const plugins = detectPlugins(tree)
     console.log(`Detected plugins: ${plugins.join(', ') || 'none'}`)
 
-    // Record the version of each plugin that actually installed during the
-    // build (`rpk <plugin> install` resolves the manifest's latest, so the
-    // manifest lookup reflects what the tree contains). Shim-only plugins
-    // (failed installs) are skipped: their subtree carries no plugin commands.
-    const pluginVersions = {}
-    for (const pluginName of REFRESHABLE_PLUGINS) {
-      const node = (tree.commands || []).find(c => c.name === pluginName)
-      if (node && pluginNodeHasRealCommands(node)) {
-        const installedVersion = pluginPins[pluginName] || fetchLatestPluginVersion(pluginName)
-        if (installedVersion) {
-          pluginVersions[pluginName] = installedVersion
-        }
-      }
-    }
+    const pluginVersions = recordPluginVersions(tree, { pluginPins, installedPlugins })
     if (Object.keys(pluginVersions).length > 0) {
       console.log(`Plugin versions: ${JSON.stringify(pluginVersions)}`)
     }
@@ -3011,6 +3035,7 @@ module.exports = {
   buildRpkBinary,
   downloadRpkRelease,
   fetchPluginSubtree,
+  recordPluginVersions,
   parseCobraFlags,
   parseUrfaveFlags,
   parseHelpFlags,
