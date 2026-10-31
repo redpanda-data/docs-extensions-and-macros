@@ -1903,7 +1903,8 @@ function recordPluginVersions(tree, { pluginPins = {}, installedPlugins = [], fe
 /**
  * Install a single plugin and capture its fresh command subtree.
  * Runs with an isolated HOME so the install never touches the caller's
- * rpk plugin state, and the caller's installed plugins never leak in.
+ * rpk plugin state, and the caller's installed plugins never leak in. The
+ * temporary HOME is removed afterward, on success and on failure.
  * @param {Object} params
  * @param {string} params.plugin - rpk command name (ai, connect, k8s, check)
  * @param {string} [params.pluginVersion] - Version to pin; defaults to latest
@@ -1913,6 +1914,16 @@ function recordPluginVersions(tree, { pluginPins = {}, installedPlugins = [], fe
  */
 function fetchPluginSubtree({ plugin, pluginVersion, rpkBinPath }) {
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-plugin-home-'))
+  try {
+    return fetchPluginSubtreeInHome({ plugin, pluginVersion, rpkBinPath, tmpHome })
+  } finally {
+    // The install puts the plugin binary here, which is tens to hundreds
+    // of MB, so remove it whether the refresh succeeded or not
+    fs.rmSync(tmpHome, { recursive: true, force: true })
+  }
+}
+
+function fetchPluginSubtreeInHome({ plugin, pluginVersion, rpkBinPath, tmpHome }) {
   const env = { ...process.env, HOME: tmpHome }
 
   const runInstall = (pinned) => {

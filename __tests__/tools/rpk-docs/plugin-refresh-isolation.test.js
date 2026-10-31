@@ -9,6 +9,7 @@ jest.mock('child_process')
 const { spawnSync } = require('child_process')
 
 const {
+  fetchPluginSubtree,
   recordPluginVersions
 } = require('../../../tools/rpk-docs/rpk-docs-handler.js')
 
@@ -22,6 +23,52 @@ const connectTree = {
     ]
   }]
 }
+
+describe('fetchPluginSubtree temporary HOME', () => {
+  let homes
+
+  beforeEach(() => {
+    spawnSync.mockReset()
+    homes = []
+    jest.spyOn(console, 'log').mockImplementation(() => {})
+    jest.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
+  const recordHome = (opts) => {
+    const home = opts && opts.env && opts.env.HOME
+    if (home) homes.push({ home, existed: fs.existsSync(home) })
+  }
+
+  test('is removed after a successful refresh', () => {
+    spawnSync.mockImplementation((cmd, args, opts) => {
+      recordHome(opts)
+      if (args[0] === '--print-tree') return { status: 0, stdout: JSON.stringify(connectTree), stderr: '' }
+      return { status: 0, stdout: '', stderr: '' }
+    })
+    const { node, version } = fetchPluginSubtree({ plugin: 'connect', pluginVersion: '4.1.0', rpkBinPath: '/bin/rpk' })
+    expect(node.name).toBe('connect')
+    expect(version).toBe('4.1.0')
+    expect(homes.length).toBeGreaterThan(0)
+    expect(homes.every(h => h.existed)).toBe(true)
+    expect(new Set(homes.map(h => h.home)).size).toBe(1)
+    expect(fs.existsSync(homes[0].home)).toBe(false)
+  })
+
+  test('is removed when the refresh fails', () => {
+    spawnSync.mockImplementation((cmd, args, opts) => {
+      recordHome(opts)
+      return { status: 1, stdout: '', stderr: 'boom' }
+    })
+    expect(() => fetchPluginSubtree({ plugin: 'connect', rpkBinPath: '/bin/rpk' })).toThrow(/Failed to install plugin 'connect'/)
+    expect(homes.length).toBeGreaterThan(0)
+    expect(homes[0].existed).toBe(true)
+    expect(fs.existsSync(homes[0].home)).toBe(false)
+  })
+})
 
 describe('recordPluginVersions', () => {
   const fetchLatest = (plugin) => `${plugin}-latest`
