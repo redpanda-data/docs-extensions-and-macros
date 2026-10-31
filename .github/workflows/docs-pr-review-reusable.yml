@@ -18,7 +18,8 @@
 # daily sme-nag still asks authors to tag an SME, but nothing here waits.)
 #
 # What never gets reviewed here (gate exits without touching the PR: no
-# comment, review, label or status):
+# comment, review, label or status; in an on-request repo, a request that
+# ends this way gets a one-line note saying why, from clear_request):
 #   - draft PRs — marking a PR "ready for review" is the review-now button
 #   - PRs out of scope per the config (repo not included, ADP, auto-docs)
 #   - bot-authored PRs (GitHub Apps, plus the `bot_logins` service accounts,
@@ -241,6 +242,10 @@ jobs:
       # when a request ends without a review, so removing the label is never
       # silent. Empty when a review runs.
       no_review_why: ${{ steps.scope.outputs.why || steps.eval.outputs.why }}
+      # true when another run's claim on the head stopped this one: that run
+      # is reviewing, or died without finishing (cancelled), so the request
+      # is not served yet.
+      request_held: ${{ steps.scope.outputs.held }}
     steps:
       # The pin is checked first, without writing anything: the config that
       # says whether this repo reviews on request comes from plugin_ref.
@@ -357,9 +362,10 @@ jobs:
           fi
 
           # ── On-request repos (review_trigger in the config) ────────────
-          # Only the request label (or marking the PR ready while it has the
-          # label) starts a review. Every other event in such a repo, pushes
-          # and reviews included, exits here with nothing written.
+          # A review runs only while the PR carries the request label (or on
+          # the Slack scan's dispatch); any event then serves the request.
+          # Without the label, every event in such a repo, pushes and reviews
+          # included, exits here with nothing written.
           if [[ "${ON_REQUEST:-}" == "true" && "${IS_REQUEST:-}" != "true" ]]; then
             skip "PR #$PR is in an on-request repo and this event is not a review request — not reviewed."
           fi
@@ -455,6 +461,9 @@ jobs:
           R: ${{ github.repository }}
           HEAD_SHA: ${{ steps.eval.outputs.head_sha }}
           DOC_TEAM: ${{ vars.DOC_TEAM_LOGINS }}
+          # An explicit request (on-request repo): people's reviews are no
+          # baseline, so it is never answered with a noop.
+          IS_REQUEST: ${{ steps.request.outputs.on_request == 'true' && steps.request.outputs.is_request || '' }}
         run: |
           set -euo pipefail
           set_pending() {
@@ -487,8 +496,7 @@ jobs:
           DECISION=$(grep '^decision=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2)
           if [[ "$DECISION" != "full" && "$DECISION" != "incremental" && "$DECISION" != "approve_only" ]]; then
             # skip / noop: no status, no comment, no review, no label.
-            # Without "@": the note would notify every reviewer the reason names.
-            REASON=$(grep '^reason=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2- | tr -d '@')
+            REASON=$(grep '^reason=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2-)
             if [[ "$DECISION" == "noop" ]]; then
               WHY="Nothing to review: $REASON. Push new commits, then ask again."
             else
@@ -528,7 +536,7 @@ jobs:
             AGE=$(( $(date +%s) - $(date -d "$(jq -r .updated_at <<< "$CURRENT")" +%s) ))
             if (( AGE < 5400 )); then
               echo "Head $HEAD_SHA is already claimed: '$DESC' (${AGE}s ago) — exiting (exactly-once)."
-              { echo "run_review=false"; echo "why=A review of ${HEAD_SHA:0:7} is already running; its report answers this request."; } >> "$GITHUB_OUTPUT"
+              { echo "run_review=false"; echo "held=true"; } >> "$GITHUB_OUTPUT"
               exit 0
             fi
             echo "::warning::stale claim '$DESC' (${AGE}s old) — taking over"
@@ -537,7 +545,7 @@ jobs:
           sleep 3   # let a racing writer land before the read-back
           if [[ "$(latest_claim | jq -r .description)" != "$CLAIM" ]]; then
             echo "Lost the claim race for $HEAD_SHA to another run — exiting (exactly-once)."
-            { echo "run_review=false"; echo "why=A review of ${HEAD_SHA:0:7} is already running; its report answers this request."; } >> "$GITHUB_OUTPUT"
+            { echo "run_review=false"; echo "held=true"; } >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "run_review=true" >> "$GITHUB_OUTPUT"
@@ -580,6 +588,11 @@ jobs:
       recheck_code: ${{ steps.c.outputs.recheck_code }}
       recheck_best_fit: ${{ steps.c.outputs.recheck_best_fit }}
       recheck_ticket: ${{ steps.c.outputs.recheck_ticket }}
+      # A model review whose earlier blocker may be fixed outside the files
+      # it is routed by (alt text in the .adoc for the vision pass, a page
+      # for the overrides review) reruns to re-check it.
+      recheck_shots: ${{ steps.c.outputs.recheck_shots }}
+      recheck_json: ${{ steps.c.outputs.recheck_json }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -617,6 +630,8 @@ jobs:
             echo "recheck_code=$([[ $(prior_for code-review) -gt 0 ]] && echo true || echo false)"
             echo "recheck_best_fit=$([[ $(prior_for best-fit-review) -gt 0 ]] && echo true || echo false)"
             echo "recheck_ticket=$([[ $(prior_for ticket-delta) -gt 0 ]] && echo true || echo false)"
+            echo "recheck_shots=$([[ $(prior_for screenshot-gate) -gt 0 ]] && echo true || echo false)"
+            echo "recheck_json=$([[ $(prior_for json-validation) -gt 0 ]] && echo true || echo false)"
           } >> "$GITHUB_OUTPUT"
           ADOC=$(grep -cE '\.adoc$' files.txt || true)
           JSON=$(grep -cE '\.json$' files.txt || true)
@@ -1009,7 +1024,7 @@ jobs:
 
   json_validation:
     needs: [gate, classify]
-    if: needs.classify.outputs.json_review == 'true' && github.repository != 'redpanda-data/docs-team-standards'
+    if: (needs.classify.outputs.json_review == 'true' || needs.classify.outputs.recheck_json == 'true') && github.repository != 'redpanda-data/docs-team-standards'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1056,7 +1071,7 @@ jobs:
           fi
 
       - name: Overrides review (content repos, decision 4)
-        if: github.repository != 'redpanda-data/docs-team-standards' && needs.classify.outputs.overrides_json == 'true'
+        if: github.repository != 'redpanda-data/docs-team-standards' && (needs.classify.outputs.overrides_json == 'true' || needs.classify.outputs.recheck_json == 'true')
         uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@0fac2b82207dd97787654a990cd6baf95b2bfcbe # pinned: #418's merge SHA
         with:
           repo: ${{ github.repository }}
@@ -1106,7 +1121,7 @@ jobs:
         if: always() && github.repository != 'redpanda-data/docs-team-standards'
         env:
           JQ_VERDICT: ${{ runner.temp }}/json-validity.json
-          OVERRIDES: ${{ needs.classify.outputs.overrides_json }}
+          OVERRIDES: ${{ (needs.classify.outputs.overrides_json == 'true' || needs.classify.outputs.recheck_json == 'true') && 'true' || 'false' }}
         run: |
           set -euo pipefail
           mkdir -p review-output
@@ -1283,7 +1298,7 @@ jobs:
           prompt: >
             Review pull request ${{ inputs.pr_number }} in
             ${{ github.repository }}.
-            ${{ (needs.classify.outputs.has_adoc == 'true' || needs.classify.outputs.has_images == 'true' || needs.classify.outputs.json_review == 'true' || needs.classify.outputs.code_heavy == 'true') && format('Other reviews in this pipeline already cover part of this PR ({0}{1}{2}{3}). You run because it also changes docs-team-standards plugin files (skills/, agents/, commands/, hooks/, resources/), which those reviews do not check against skill-authoring. Review ONLY those plugin files, choosing the skill below that suits each, and do not report on the files the other reviews own.', needs.classify.outputs.has_adoc == 'true' && 'AsciiDoc pages; ' || '', needs.classify.outputs.has_images == 'true' && 'images; ' || '', needs.classify.outputs.json_review == 'true' && 'JSON; ' || '', needs.classify.outputs.code_heavy == 'true' && 'code; ' || '') || 'None of this pipeline''s routed reviews (AsciiDoc pages, images, JSON, code-heavy) applies to it, so your job is to pick the review that best suits what it changes and run it.' }}
+            ${{ needs.classify.outputs.best_fit != 'true' && 'You run only to re-check your earlier merge-blockers, listed below: none of the files changed since the last review is yours to review.' || (needs.classify.outputs.has_adoc == 'true' || needs.classify.outputs.has_images == 'true' || needs.classify.outputs.json_review == 'true' || needs.classify.outputs.code_heavy == 'true') && format('Other reviews in this pipeline already cover part of this PR ({0}{1}{2}{3}). You run because it also changes docs-team-standards plugin files (skills/, agents/, commands/, hooks/, resources/), which those reviews do not check against skill-authoring. Review ONLY those plugin files, choosing the skill below that suits each, and do not report on the files the other reviews own.', needs.classify.outputs.has_adoc == 'true' && 'AsciiDoc pages; ' || '', needs.classify.outputs.has_images == 'true' && 'images; ' || '', needs.classify.outputs.json_review == 'true' && 'JSON; ' || '', needs.classify.outputs.code_heavy == 'true' && 'code; ' || '') || 'None of this pipeline''s routed reviews (AsciiDoc pages, images, JSON, code-heavy) applies to it, so your job is to pick the review that best suits what it changes and run it.' }}
             Read the diff with `gh pr diff` and the PR body with
             `gh pr view`. On a PR with more than 300 changed files
             `gh pr diff` fails (HTTP 406): use `gh api --paginate
@@ -1350,11 +1365,12 @@ jobs:
   # that cloud-docs also runs on every PR and in its daily screenshot cron
   # — so no two jobs disagree about the same 100KB limit. It runs on any
   # .adoc or image change (alt text lives in the .adoc); the paid vision
-  # pass runs only when an image file changed.
+  # pass runs when an image file changed, or to re-check its own earlier
+  # blockers (one fixed in the .adoc would otherwise stay carried).
   # ──────────────────────────────────────────────────────────────────────
   screenshot_gate:
     needs: [gate, classify]
-    if: needs.classify.outputs.has_images == 'true' || needs.classify.outputs.has_adoc == 'true'
+    if: needs.classify.outputs.has_images == 'true' || needs.classify.outputs.has_adoc == 'true' || needs.classify.outputs.recheck_shots == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1437,7 +1453,7 @@ jobs:
           name: review-scope
           path: ${{ runner.temp }}/review-scope
       - name: Claude vision pass
-        if: needs.classify.outputs.has_images == 'true'
+        if: needs.classify.outputs.has_images == 'true' || needs.classify.outputs.recheck_shots == 'true'
         uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@0fac2b82207dd97787654a990cd6baf95b2bfcbe # pinned: #418's merge SHA
         with:
           # Longer for large PRs (classify: large); see classify for why.
@@ -1479,13 +1495,16 @@ jobs:
             and review-output/vision/verdict.json as
             {"verdict":"pass"|"fail","blocking":[...],"suggestions":[...]}
             covering only the judgment checks.
+            ${{ needs.classify.outputs.has_images != 'true' && 'No image file changed in these commits: you run only to re-check your earlier merge-blockers, listed below, against the current images and pages.' || '' }}
             ${{ needs.gate.outputs.mode == 'incremental' && format('INCREMENTAL RE-REVIEW. This PR was already reviewed at commit {0} ({1}). Review ONLY what changed since then. The diff of those changes is in {2}/review-scope/delta.patch and the files it touches are listed in {2}/review-scope/files.txt: use them instead of `gh pr diff` or the files API, which show the whole PR. Read the changed files in the working tree for context, but report a merge-blocker or a suggestion only when these changes introduce it or expose it. Earlier merge-blockers: {2}/review-scope/prior-blockers.json lists the blockers this pipeline reported before; the entries whose artifact is "screenshot-gate" and whose src is "model" are yours. Check each against the CURRENT files in the working tree, and add to verdict.json a "prior" list with one object per such entry, holding its exact "text" from that file and a "status" of "resolved" or "open". Do not repeat an open earlier blocker in "blocking": the pipeline carries it over. An entry you leave out of "prior" is carried over as open.', needs.gate.outputs.baseline_sha, needs.gate.outputs.baseline_source, runner.temp) || '' }}
             ${{ needs.classify.outputs.large == 'true' && 'This is a large PR: review the riskiest files first, and if you run out of time or turns before covering every changed image, add one entry to a "not_reviewed" list in verdict.json naming the images you did not review, so the report does not read as complete and the PR is not approved on a partial review.' || '' }}
 
       - name: Merge deterministic + vision verdicts
         if: always()
         env:
-          HAS_IMAGES: ${{ needs.classify.outputs.has_images }}
+          # The vision pass ran (and must have a verdict) for a changed image
+          # or a re-check.
+          HAS_IMAGES: ${{ (needs.classify.outputs.has_images == 'true' || needs.classify.outputs.recheck_shots == 'true') && 'true' || 'false' }}
         run: |
           set -uo pipefail
           mkdir -p review-output
@@ -1818,8 +1837,8 @@ jobs:
           # so the PR gets no comment, no terminal status, and keeps the
           # gate's pending claim until the 90-minute stale window expires.
           # Degrade to the pipeline's standard infra-failure posture instead:
-          # no comment (there is no report to give) and an error status.
-          # `error`, not `failure`:
+          # a short "unavailable" report and an error status. `error`, not
+          # `failure`:
           # exactly-once treats failure as a finished review, so the SHA
           # could never be retried (see aggregate-review.sh).
           # The short report it posts carries a data block that records the
@@ -1834,22 +1853,33 @@ jobs:
               echo "description=automated review unavailable, human review required"
               echo "labels="
               echo "post_comment=true"
+              # Overrides whatever the script wrote before it failed.
+              echo "approve=false"
+              echo "approval_withheld="
             } >> "$GITHUB_OUTPUT"
-            # Keep the earlier runs' history for the metrics script.
-            PREV_HISTORY=$(grep -oE '<!-- docs-review:data [A-Za-z0-9+/=]+ -->' prev-comment.md 2>/dev/null | head -1 \
+            # Keep the earlier runs' history and the open blockers, so the next
+            # report's "since the last review" and the metrics stay right.
+            PREV_DATA=$(grep -oE '<!-- docs-review:data [A-Za-z0-9+/=]+ -->' prev-comment.md 2>/dev/null | head -1 \
               | sed -E 's/^<!-- docs-review:data ([A-Za-z0-9+\/=]+) -->$/\1/' | base64 -d 2>/dev/null \
-              | jq -c 'if type == "object" then (.history // []) else [] end' 2>/dev/null) || true
+              | jq -c 'if type == "object" then {history: (.history // []), blockers: (.blockers // [])} else null end' 2>/dev/null) || true
             DATA=$(jq -cn --arg head "$HEAD_SHA" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg mode "$MODE" \
-              --argjson prev "${PREV_HISTORY:-[]}" \
-              '{v: 1, head: $head, state: "error", at: $at, mode: $mode, unavailable: ["aggregate"], blockers: [],
-                history: (($prev | if (.[-1].head // "") == $head then .[:-1] else . end)
-                          + [{head: $head, state: "error", at: $at, blockers: 0}])[-30:]}')
+              --argjson prev "${PREV_DATA:-null}" \
+              '($prev // {history: [], blockers: []}) as $p |
+               {v: 1, head: $head, state: "error", at: $at, mode: $mode, unavailable: ["aggregate"], blockers: $p.blockers,
+                history: (($p.history | if (.[-1].head // "") == $head then .[:-1] else . end)
+                          + [{head: $head, state: "error", at: $at, blockers: ($p.blockers | length)}])[-30:]}')
             {
               echo "<!-- docs-review:comment -->"
               echo "## 📋 Docs review: ⚠️ Automated review unavailable: review by hand before approving"
               echo
-              echo "The report could not be built (see the workflow run). Re-run the workflow to retry."
+              echo "The report could not be built (see the workflow run). Re-run all jobs to retry."
               echo
+              if [[ -s preview-links.md ]]; then
+                echo "### 🔍 Preview pages"
+                echo
+                cat preview-links.md
+                echo
+              fi
               echo "<!-- docs-review:data $(printf '%s' "$DATA" | base64 | tr -d '\n') -->"
             } > comment.md
           fi
@@ -2080,10 +2110,14 @@ jobs:
   # - A label added again while this run was going is kept: the run it
   #   started is waiting in the concurrency group, and removing the label
   #   now would make that run read no request.
-  # - A review that ran but did not finish (unavailable: the docs-review
-  #   status is error, or still pending after a cancel) did not serve the
-  #   request, so the label stays: re-running the workflow, or the next
-  #   event on the PR, retries it.
+  # - A request that was not served keeps the label for ONE retry, with a
+  #   note: the review ran but did not finish (the docs-review status is
+  #   error, or still pending after a cancel), or another run's claim on the
+  #   head stopped this one (a run in progress, or one that died). While the
+  #   label is on, the next event on the PR or a re-run retries it. A second
+  #   miss on the same head removes the label and says so: a failure that
+  #   repeats every run would otherwise re-run a full paid review on every
+  #   event in a repo that asked for reviews on request only.
   # - Not after a gate failure: the request still stands, and the next
   #   event on the PR (any event, while the label is on) retries it.
   # ──────────────────────────────────────────────────────────────────────
@@ -2105,24 +2139,28 @@ jobs:
           LABEL: ${{ needs.gate.outputs.request_label }}
           STARTED_AT: ${{ needs.gate.outputs.started_at }}
           RUN_REVIEW: ${{ needs.gate.outputs.run_review }}
+          HELD: ${{ needs.gate.outputs.request_held }}
           WHY: ${{ needs.gate.outputs.no_review_why }}
         run: |
           set -uo pipefail
-          if [[ "$RUN_REVIEW" != "true" && -n "$WHY" ]]; then
-            {
-              echo "<!-- docs-review:request-note -->"
-              echo "**Docs review request (\`$LABEL\`):** no review ran. $WHY"
-            } > note.md
+          # Without "@": a note would notify everyone the reason names.
+          note() {
+            { echo "<!-- docs-review:request-note${2:+ $2} -->"; echo "**Docs review request (\`$LABEL\`):** ${1//@/}"; } > note.md
             gh api "repos/$R/issues/$PR/comments" -F body=@note.md > /dev/null \
               || echo "::warning::could not post the request note on $R#$PR"
+          }
+          if [[ "$RUN_REVIEW" != "true" && "$HELD" != "true" && -n "$WHY" ]]; then
+            note "no review ran. $WHY"
           fi
+          # Was the request served? Not when the review did not finish, or
+          # when another run's claim stopped this one.
+          UNSERVED=""
           if [[ "$RUN_REVIEW" == "true" ]]; then
             STATE=$(gh api "repos/$R/commits/$HEAD_SHA/status" \
               --jq '[.statuses[] | select(.context=="'"$REVIEW_STATUS_CONTEXT"'")] | first | .state // ""') || STATE=""
-            if [[ "$STATE" != "success" && "$STATE" != "failure" ]]; then
-              echo "The review of ${HEAD_SHA:0:7} did not finish (docs-review status '${STATE:-none}'): keeping '$LABEL' so a re-run or the next event retries the request"
-              exit 0
-            fi
+            [[ "$STATE" == "success" || "$STATE" == "failure" ]] || UNSERVED="the review of ${HEAD_SHA:0:7} did not finish (docs-review status: ${STATE:-none})"
+          elif [[ "$HELD" == "true" ]]; then
+            UNSERVED="a review of ${HEAD_SHA:0:7} was already running, or stopped without finishing"
           fi
           # ISO 8601 UTC strings compare in time order.
           LAST_ADDED=$(gh api --paginate "repos/$R/issues/$PR/events" \
@@ -2131,6 +2169,26 @@ jobs:
           if [[ -n "$STARTED_AT" && "$LAST_ADDED" > "$STARTED_AT" ]]; then
             echo "'$LABEL' was added again at $LAST_ADDED, after this run started ($STARTED_AT): keeping it for the run that request started"
             exit 0
+          fi
+          if [[ -n "$UNSERVED" ]]; then
+            # One retry per request: count the "kept" notes since the label
+            # was last added, whatever the head (a push must not earn a new
+            # retry).
+            KEPT=$(gh api --paginate "repos/$R/issues/$PR/comments" \
+              | jq -s --arg since "$LAST_ADDED" \
+                  '[.[][] | select(.user.login == "github-actions[bot]" and .created_at > $since
+                                   and (.body // "" | startswith("<!-- docs-review:request-note kept -->")))] | length') || KEPT=""
+            # Unknown counts as used: an extra review costs more than a
+            # request the writer has to make again.
+            if [[ "$KEPT" == "0" ]]; then
+              echo "Request not served ($UNSERVED): keeping '$LABEL' for one retry"
+              note "$UNSERVED. The label stays on: re-run the workflow (all jobs), or the next push or review on this PR, retries the review once." kept
+              exit 0
+            fi
+            AGAIN=", again after a retry"
+            [[ -n "$KEPT" ]] || AGAIN=" (and an earlier retry could not be ruled out)"
+            echo "Request not served$AGAIN: removing '$LABEL'"
+            note "$UNSERVED$AGAIN. Removing the label, so further pushes don't each start a review. Add it again to retry."
           fi
           ENC=$(jq -rn --arg l "$LABEL" '$l | @uri')
           gh api -X DELETE "repos/$R/issues/$PR/labels/$ENC" > /dev/null 2>&1 \
