@@ -1058,20 +1058,34 @@ jobs:
   # — so no two jobs disagree about the same 100KB limit. It runs on any
   # .adoc or image change (alt text lives in the .adoc); the paid vision
   # pass runs only when an image file changed.
+  #
+  # The lint is its own job because it checks out the PR head and runs npx
+  # next to it, and must not hold id-token: write while it does: npm reads
+  # a project .npmrc from the nearest directory with a package.json, so an
+  # edited .npmrc could pick the registry npx installs doc-tools from, and
+  # whatever that served could mint an OIDC token. Nothing in it needs a
+  # credential. As defense in depth, npx runs from RUNNER_TEMP with --root
+  # pointing at the checkout, and without GH_TOKEN.
+  # screenshot_gate, which holds id-token for the vision pass, makes no
+  # direct PR-head checkout, runs no npx, and reads the lint result from the
+  # screenshot-lint artifact. The claude-skill action it calls does check
+  # out the PR head, but only runs npm install -g there, which ignores a
+  # project .npmrc.
   # ──────────────────────────────────────────────────────────────────────
-  screenshot_gate:
+  screenshot_lint:
     needs: [gate, classify]
     if: needs.classify.outputs.has_images == 'true' || needs.classify.outputs.has_adoc == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: read
-      id-token: write   # OIDC role for the ADP gateway credential
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out the PR head for lint-screenshots
+        uses: actions/checkout@v4
         with:
           ref: refs/pull/${{ inputs.pr_number }}/head
+          path: .screenshot-lint
           persist-credentials: false
 
       - uses: actions/setup-node@v4
@@ -1084,14 +1098,14 @@ jobs:
           PR: ${{ inputs.pr_number }}
           R: ${{ github.repository }}
           DOC_TOOLS_VERSION: ${{ inputs.doc_tools_version }}
+          SRC: ${{ github.workspace }}/.screenshot-lint
         run: |
           set -euo pipefail
-          # Everything lands under RUNNER_TEMP: the claude-skill action's
-          # own checkout runs `git clean` in the workspace and would delete
-          # anything written there before the merge step reads it.
+          # Everything lands under RUNNER_TEMP, which the upload below
+          # passes to screenshot_gate.
           LINT_DIR="$RUNNER_TEMP/screenshot-lint"; mkdir -p "$LINT_DIR"
           OUT="$LINT_DIR/screenshot-lint.json"
-          if [[ ! -d modules ]]; then
+          if [[ ! -d "$SRC/modules" ]]; then
             # Not an Antora content repo (docs-site, docs-team-standards): the
             # lint cannot run. Not a failure (a red X on every image PR in a
             # docs-only repo), but not a clean pass either: `not_run` makes the
@@ -1106,9 +1120,12 @@ jobs:
           # in a repo that has never been linted (docs has dozens today).
           # Exit 1 means findings — the jq below turns them into the verdict.
           # Any other non-zero exit (usage error, npx failure) fails the step.
-          npx --yes --package "@redpanda-data/docs-extensions-and-macros@${DOC_TOOLS_VERSION}" \
-            doc-tools lint-screenshots --files "$LINT_DIR/changed-files.txt" \
-            --format json --output "$LINT_DIR/result.json" > /dev/null || [[ $? -eq 1 ]]
+          # From RUNNER_TEMP, never the checkout: npm takes its project config
+          # from the nearest directory with a package.json, and the PR head
+          # has one. --root points the tool at the checkout instead.
+          ( cd "$RUNNER_TEMP" && env -u GH_TOKEN npx --yes --package "@redpanda-data/docs-extensions-and-macros@${DOC_TOOLS_VERSION}" \
+            doc-tools lint-screenshots --root "$SRC" --files "$LINT_DIR/changed-files.txt" \
+            --format json --output "$LINT_DIR/result.json" ) > /dev/null || [[ $? -eq 1 ]]
           # An unrecognized `lint-screenshots` subcommand (doc_tools_version
           # pinned to a release that predates it) also exits 1, the same code
           # the line above tolerates for "findings present" — but it writes no
@@ -1134,8 +1151,43 @@ jobs:
             ' "$LINT_DIR/result.json" > "$OUT"
           jq -r '"screenshot-lint: verdict=\(.verdict), \(.blocking | length) blocking, \(.suggestions | length) suggestion(s)"' "$OUT"
 
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshot-lint
+          path: ${{ runner.temp }}/screenshot-lint/
+          if-no-files-found: ignore
+
+  screenshot_gate:
+    needs: [gate, classify, screenshot_lint]
+    # !cancelled(), not the implicit success(): a skipped screenshot_gate
+    # reads as "nothing to review" in the aggregate, so a failed
+    # screenshot_lint must still reach the merge step, which reports a
+    # missing lint result as this branch unavailable, never as a pass. The
+    # vision pass is skipped then, as it was when the lint was a step here:
+    # with no lint result its verdict would be discarded.
+    if: >-
+      !cancelled() && needs.classify.result == 'success' &&
+      (needs.classify.outputs.has_images == 'true' || needs.classify.outputs.has_adoc == 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write   # OIDC role for the ADP gateway credential
+    timeout-minutes: 30
+    steps:
+      # screenshot_lint's result. Under RUNNER_TEMP, not the workspace: the
+      # claude-skill action's own checkout runs `git clean` there.
+      # continue-on-error: with no result, the merge step leaves no verdict
+      # and the aggregate reports this branch unavailable.
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: screenshot-lint
+          path: ${{ runner.temp }}/screenshot-lint
+
       - name: Claude vision pass
-        if: needs.classify.outputs.has_images == 'true'
+        if: needs.classify.outputs.has_images == 'true' && needs.screenshot_lint.result == 'success'
         uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@681c7a5774f3dd72733ca1f6f4bbdb8633f548a5 # TWO-STEP PIN step 2: #303's merge SHA
         with:
           repo: ${{ github.repository }}
