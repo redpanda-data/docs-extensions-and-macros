@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.59.2](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.59.1...v5.59.2) (2026-10-31)
+
+
+### Reusable workflows and CI
+
+* **publish-to-npm:** dispatch only after npm serves the version ([#452](https://github.com/redpanda-data/docs-extensions-and-macros/issues/452)) ([6a1f73a](https://github.com/redpanda-data/docs-extensions-and-macros/commit/6a1f73a93419ac93b2e5aa55c05434ca7160d552))
+
 ## [5.59.1](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.59.0...v5.59.1) (2026-10-30)
 
 
