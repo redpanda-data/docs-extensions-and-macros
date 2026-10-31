@@ -1,3 +1,5 @@
+'use strict'
+
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
@@ -249,5 +251,233 @@ describe('info.csv ref', () => {
     expect(refOf()).toMatchObject({ ref: 'main' })
     expect(logs.some(([l, m]) => l === 'warn' && /read from connect main/.test(m))).toBe(true)
     expect(csvData.data.length).toBe(6)
+  })
+})
+
+const { extractDescription } = ext
+
+const page = (adoc, attributes) => ({
+  asciidoc: attributes ? { attributes } : undefined,
+  contents: Buffer.from(adoc, 'utf8')
+})
+
+describe('generate-rp-connect-info extractDescription', () => {
+  test('returns empty string when no page is available', () => {
+    expect(extractDescription(null)).toBe('')
+    expect(extractDescription(undefined)).toBe('')
+    expect(extractDescription({})).toBe('')
+  })
+
+  test('prefers the parsed asciidoc description attribute', () => {
+    const src = page('= Kafka\n\ncomponent_type_dropdown::[]\n\nBody paragraph that should be ignored.\n', {
+      description: 'Attribute description wins'
+    })
+    expect(extractDescription(src)).toBe('Attribute description wins')
+  })
+
+  // The :description: attribute is AsciiDoc too, and it is the source almost
+  // every card uses, so it needs the same cleaning as the body fallback.
+  describe('the description attribute path', () => {
+    const body = '= Kafka\n\ncomponent_type_dropdown::[]\n\nIgnored body paragraph.\n'
+
+    test('strips URL macros, xrefs, backticks and attribute references', () => {
+      const src = page(body, {
+        description: 'Executes a http://jmespath.org/[JMESPath query] on `code` docs, see xref:reference:about.adoc[the reference] with {page-component-title}.'
+      })
+      expect(extractDescription(src)).toBe('Executes a JMESPath query on code docs, see the reference with.')
+    })
+
+    test('truncates at the first sentence and stays within the cap', () => {
+      const long = 'Streams change data capture events from the upstream database into the pipeline with configurable batching and checkpointing. It also does a great deal more that no card should try to show.'
+      expect(long.length).toBeGreaterThan(150)
+      const description = extractDescription(page(body, { description: long }))
+      expect(description).toBe('Streams change data capture events from the upstream database into the pipeline with configurable batching and checkpointing.')
+      expect(description.length).toBeLessThanOrEqual(150)
+    })
+
+    test('cuts a single long sentence at a word boundary, ellipsis included in the cap', () => {
+      const description = extractDescription(page(body, { description: 'A '.concat('very long single sentence with no punctuation at all '.repeat(6)) }))
+      expect(description.length).toBeLessThanOrEqual(150)
+      expect(description.endsWith('...')).toBe(true)
+      expect(description).not.toMatch(/\s\.\.\.$/)
+    })
+
+    test('keeps underscored identifiers intact while dropping formatting', () => {
+      const src = page(body, { description: 'Writes to redpanda_migrator_offsets using the *native* client.' })
+      expect(extractDescription(src)).toBe('Writes to redpanda_migrator_offsets using the native client.')
+    })
+  })
+
+  test('falls back to an explicit :description: attribute in the raw contents', () => {
+    const src = page('= Kafka\n:type: input\n:description: Reads records from Kafka topics.\n\ncomponent_type_dropdown::[]\n\nSomething else.\n')
+    expect(extractDescription(src)).toBe('Reads records from Kafka topics.')
+  })
+
+  test('extracts the first paragraph after component_type_dropdown::[]', () => {
+    const src = page([
+      '= Kafka',
+      ':type: input',
+      '',
+      'component_type_dropdown::[]',
+      '',
+      'Consumes messages from Kafka topics with consumer groups.',
+      '',
+      '== Fields'
+    ].join('\n'))
+    expect(extractDescription(src)).toBe('Consumes messages from Kafka topics with consumer groups.')
+  })
+
+  test('returns empty string when the page has no component_type_dropdown marker', () => {
+    const src = page('= Kafka\n\nJust a paragraph with no dropdown macro in sight, sadly.\n')
+    expect(extractDescription(src)).toBe('')
+  })
+
+  test('strips xref and URL macros, formatting, and attribute references', () => {
+    const src = page([
+      '= Kafka',
+      '',
+      'component_type_dropdown::[]',
+      '',
+      'Consumes data from xref:components/inputs/kafka.adoc[Apache Kafka] using the *native* `client` with _tuned_ {max-batch} batching.',
+      ''
+    ].join('\n'))
+    expect(extractDescription(src)).toBe('Consumes data from Apache Kafka using the native client with tuned batching.')
+  })
+
+  // Same body, but the page actually defines {max-batch} -- the value must
+  // survive into the card, not just leave a gap where it was dropped.
+  test('substitutes an attribute reference the page actually defines', () => {
+    const src = page([
+      '= Kafka',
+      '',
+      'component_type_dropdown::[]',
+      '',
+      'Consumes data from xref:components/inputs/kafka.adoc[Apache Kafka] using the *native* `client` with _tuned_ {max-batch} batching.',
+      ''
+    ].join('\n'), { 'max-batch': '100msgs' })
+    expect(extractDescription(src)).toBe('Consumes data from Apache Kafka using the native client with tuned 100msgs batching.')
+  })
+
+  test('converts external links spanning source lines to their text', () => {
+    const src = page([
+      '= Kafka',
+      '',
+      'component_type_dropdown::[]',
+      '',
+      'Streams change events from',
+      'https://www.mongodb.com/[MongoDB^] collections into downstream systems.',
+      ''
+    ].join('\n'))
+    expect(extractDescription(src)).toBe('Streams change events from MongoDB collections into downstream systems.')
+  })
+
+  test('skips admonition blocks, conditionals, and include directives', () => {
+    const src = page([
+      '= Kafka',
+      '',
+      'component_type_dropdown::[]',
+      '',
+      '[WARNING]',
+      '====',
+      'Scary warning that must not leak into the description.',
+      '====',
+      '',
+      'ifndef::env-cloud[]',
+      'include::partial$deprecated.adoc[]',
+      'endif::[]',
+      '',
+      'The real first paragraph describing the connector behavior.',
+      ''
+    ].join('\n'))
+    expect(extractDescription(src)).toBe('The real first paragraph describing the connector behavior.')
+  })
+
+  test('truncates long descriptions at the first sentence boundary', () => {
+    const longPara = 'This connector reads a very large number of records from the upstream system and applies a long series of documented transformations before delivery. It also does much more that should be cut.'
+    const src = page(`= Kafka\n\ncomponent_type_dropdown::[]\n\n${longPara}\n`)
+    expect(extractDescription(src)).toBe('This connector reads a very large number of records from the upstream system and applies a long series of documented transformations before delivery.')
+  })
+
+  test('drops the "Introduced in version" suffix', () => {
+    const src = page('= Kafka\n\ncomponent_type_dropdown::[]\n\nDoes something useful with streams. Introduced in version 4.53.0.\n')
+    expect(extractDescription(src)).toBe('Does something useful with streams.')
+  })
+
+  test('keeps decimals inside the first sentence when truncating', () => {
+    const long = 'Supports Kafka 2.8 and later, including clusters that run with tiered storage, transactions, and idempotent producers enabled. More text follows here and keeps going.'
+    expect(long.length).toBeGreaterThan(150)
+    expect(ext.cleanDescription(long)).toBe('Supports Kafka 2.8 and later, including clusters that run with tiered storage, transactions, and idempotent producers enabled.')
+  })
+
+  test('does not end the first sentence at an abbreviation when truncating', () => {
+    const long = 'Writes to object stores, e.g. Amazon S3 or Google Cloud Storage, with batching, compression, and configurable path templates for every message. More text follows.'
+    expect(long.length).toBeGreaterThan(150)
+    expect(ext.cleanDescription(long)).toBe('Writes to object stores, e.g. Amazon S3 or Google Cloud Storage, with batching, compression, and configurable path templates for every message.')
+  })
+
+  // contentClassified runs before Antora parses pages, so asciidoc.attributes
+  // is unset there; the page header in the source still defines attributes.
+  test('resolves attribute references from the page header when the page is not parsed yet', () => {
+    const src = page([
+      '= Kafka',
+      ':max-batch: 100msgs',
+      '',
+      'component_type_dropdown::[]',
+      '',
+      'Consumes data from Apache Kafka with {max-batch} batching.',
+      ''
+    ].join('\n'))
+    expect(src.asciidoc).toBeUndefined()
+    expect(extractDescription(src)).toBe('Consumes data from Apache Kafka with 100msgs batching.')
+    expect(extractDescription(page('= Kafka\n:max-batch: 100msgs\n:description: Batches {max-batch} at a time.\n'))).toBe('Batches 100msgs at a time.')
+  })
+
+  test('converts <<anchor,text>>, link: macros, and escaped braces to plain text', () => {
+    expect(ext.cleanDescription('Parses common log <<formats,formats>> into structured data.')).toBe('Parses common log formats into structured data.')
+    expect(ext.cleanDescription('Sends to link:https://kafka.apache.org[Kafka^] brokers.')).toBe('Sends to Kafka brokers.')
+    expect(ext.cleanDescription('Calls /services/data/\\{api_version\\}/graphql on the org.')).toBe('Calls /services/data/{api_version}/graphql on the org.')
+  })
+
+  test('drops ifndef::env-cloud[] blocks whole in the body fallback', () => {
+    const src = page([
+      '= Iceberg',
+      '',
+      'component_type_dropdown::[]',
+      '',
+      'ifndef::env-cloud[]',
+      'For tested configurations that tune this output, see the self-managed guide.',
+      'endif::[]',
+      '',
+      'Writes data to Apache Iceberg tables through a REST catalog.',
+      ''
+    ].join('\n'))
+    expect(extractDescription(src)).toBe('Writes data to Apache Iceberg tables through a REST catalog.')
+  })
+})
+
+describe('card descriptions in a real build', () => {
+  // Connector pages pull :description: and the summary paragraph from
+  // includes, and at contentClassified a page has no parsed attributes, so the
+  // page scan finds nothing. catalog.json carries a summary for every row.
+  const includeOnlyPage = (relative) => ({
+    ...connectPage(relative),
+    asciidoc: undefined,
+    contents: Buffer.from('= x\ninclude::connect:components:partial$descriptions/inputs/x.adoc[tag=meta]\n\ncomponent_type_dropdown::[]\n\ninclude::connect:components:partial$descriptions/inputs/x.adoc[tag=body]\n')
+  })
+
+  it('uses the catalog.json summary, and the page scan only without one', async () => {
+    const files = [
+      ...referencePartials({ url: CONNECT_URL }),
+      connectPartial('platforms/catalog.json', { url: CONNECT_URL }, JSON.stringify([
+        { type: 'cache', name: 'redis', status: 'stable', cloud: true, support: 'certified', summary: 'Use a Redis instance as a cache.' },
+        { type: 'input', name: 'file', status: 'stable', cloud: false, support: 'certified', summary: '' }
+      ])),
+      includeOnlyPage('caches/redis.adoc'),
+      { ...connectPage('inputs/file.adoc'), contents: Buffer.from('= file\n:description: Consumes data from files on disk.\n') }
+    ]
+    const { csvData } = await run(files, { csvpath: csvFile })
+    const byName = Object.fromEntries(csvData.data.map((r) => [r.connector, r.description]))
+    expect(byName.redis).toBe('Use a Redis instance as a cache.')
+    expect(byName.file).toBe('Consumes data from files on disk.')
   })
 })
