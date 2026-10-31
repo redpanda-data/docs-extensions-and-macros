@@ -76,6 +76,16 @@ const CLI_CONVENTION = {
   }
 }
 
+// ShortDescription is plain text: the benthos field spec defines it as a
+// summary for inline help in a form UI, with no markup, and Redpanda Cloud's
+// form editor shows it raw. It is not AsciiDoc, so the AsciiDoc form rules
+// skip it and plain_text tells the common rules not to ask for backticks.
+const SHORT_DESCRIPTION_CONVENTION = {
+  ...CONVENTION,
+  verbatim_asciidoc: false,
+  plain_text: true
+}
+
 // Field constructors that ship with NO built-in documentation: a chain on
 // one of these without .Description() publishes an empty field description.
 // Composite helpers (NewTLSToggledField, NewAutoRetryNacksToggleField,
@@ -1067,7 +1077,8 @@ class ConnectScanner {
         valueExpr: { text: args[0], offset: argStart(0) },
         start: head.type === 'call' ? head.start : open,
         end: close,
-        extra: { ctor: cls.ctor || null, ...(cls.via ? { via: cls.via } : {}), ...this.componentMeta(file, dot) }
+        extra: { ctor: cls.ctor || null, ...(cls.via ? { via: cls.via } : {}), ...this.componentMeta(file, dot) },
+        ...(kind === 'field-short' ? { convention: SHORT_DESCRIPTION_CONVENTION } : {})
       })
     }
     this.scanFieldCtors(file, rel, declarations, describedVars)
@@ -1515,12 +1526,19 @@ function scanFile (content, file) {
 }
 
 // AsciiDoc and Markdown markup that a plain-text UI shows literally.
+// Single-character emphasis counts only in AsciiDoc's constrained form:
+// the marks sit at word boundaries with no space just inside them, so
+// identifiers (max_in_flight), globs (*.json) and arithmetic (a * b) pass.
 const MARKUP_PATTERNS = [
   [/`/, 'backticks'],
   [/\b(?:xref|link|image|include|glossterm):[^\s[]*\[/, 'an AsciiDoc macro'],
+  [/\bpass:[a-z,]*\[/, 'an AsciiDoc passthrough'],
   [/https?:\/\/\S+\[[^\]]*\]/, 'an AsciiDoc link'],
   [/<<[^>]+>>/, 'a cross-reference'],
   [/\*\*[^*]+\*\*/, 'bold markup'],
+  [/(?:^|[\s(])\*[^\s*](?:[^*\n]*[^\s*])?\*(?=$|[\s.,;:!?)])/, 'bold markup'],
+  [/(?:^|[\s(])_[^\s_](?:[^_\n]*[^\s_])?_(?=$|[\s.,;:!?)])/, 'italic markup'],
+  [/^\s*(?:ifn?def|ifeval|endif)::/m, 'an AsciiDoc conditional'],
   [/^\s*(?:=+|\*+|-|\.)\s/m, 'a heading or list marker'],
   [/\{[a-z][a-z0-9_-]*\}/, 'an attribute reference'],
   [/\n/, 'a line break']
@@ -1564,12 +1582,13 @@ const RULES = [
   {
     name: 'connect-short-description-markup',
     description: 'ShortDescription is plain text in form-based editors',
-    severity: 'warning',
+    // Error, not warning: the markup renders literally in the form UI.
+    severity: 'error',
     check: (decl) => {
       if (decl.meta.kind !== 'field-short' || !decl.string) return []
-      const found = MARKUP_PATTERNS.filter(([re]) => re.test(decl.string)).map(([, what]) => what)
+      const found = [...new Set(MARKUP_PATTERNS.filter(([re]) => re.test(decl.string)).map(([, what]) => what))]
       if (found.length === 0) return []
-      return [{ message: `ShortDescription contains ${found.join(', ')}. Form-based config editors, such as the one in Redpanda Cloud, show it as plain text, so markup renders literally. Write one plain sentence and keep markup in Description().` }]
+      return [{ message: `ShortDescription contains ${found.join(', ')}. ShortDescription is plain text shown as inline help in form-based config editors, such as the one in Redpanda Cloud, so markup renders literally. Write it as plain text and move the formatting to Description().` }]
     }
   },
   // Spec strings publish to the self-managed and the Cloud docs, and the
