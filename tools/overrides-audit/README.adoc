@@ -25,7 +25,16 @@ npx doc-tools overrides audit \
 node tools/overrides-audit/index.js --overrides <path> --extracted <path> [--surface properties|rpk] [--format json|human] [--output <file>]
 ----
 
-IMPORTANT: `--extracted` must be the property extractor's *raw* output (the `--output` file), never the enhanced output (`--enhanced-output`) or the versioned `redpanda-properties-<tag>.json` attachments: those already have overrides applied, so every override would classify as REDUNDANT. The same trap exists for rpk: the versioned `rpk-v<version>.json` files in docs repos are post-override snapshots.
+IMPORTANT: For the properties surface, `--extracted` must be the property extractor's *raw* output (the `--output` file), never the enhanced output (`--enhanced-output`) or the versioned `redpanda-properties-<tag>.json` attachments: those already have overrides applied, so every override would classify as REDUNDANT. For the rpk surface, `--extracted` is the newest `docs-data/rpk-v<version>.json` snapshot: it carries two trees, and the audit reads only `raw_tree` (what `rpk --print-tree` printed) and refuses a file that has only the override-merged `tree`.
+
+[,bash]
+----
+# rpk surface
+npx doc-tools overrides audit --surface rpk \
+  --overrides docs-data/rpk-overrides.json \
+  --extracted docs-data/rpk-v26.2.2.json \
+  --format human
+----
 
 To produce a raw extraction from a local Redpanda checkout:
 
@@ -125,14 +134,58 @@ JSON (default): `{ surface, overrides_file, extracted_file, manifest, summary, c
 ** `content_hash` is a stable 16-hex-char digest of `(name, normalized override description)`. The docs-repo upstreaming workflow keeps a manifest of already-PRed hashes, so re-runs skip candidates whose hash is unchanged and re-draft when the override text moved.
 ** `source_line` is populated only when the extracted JSON carries `line_start` (pending the extractor line-span patch); today it is absent.
 * `summary`: total, counts per class, and counts per (field, class).
-* `cross_check` (properties only): reuses `tools/property-extractor/compare-properties.js` -- the override descriptions are overlaid on the extracted properties and diffed. Every raw-equal description must have classified `REDUNDANT`; `violations` lists classifier bugs (expected empty).
+* `cross_check` (properties): reuses `tools/property-extractor/compare-properties.js` -- the override descriptions are overlaid on the extracted properties and diffed. Every raw-equal description must have classified `REDUNDANT`; `violations` lists classifier bugs (expected empty). For rpk, see <<rpk cross-check>>.
+* `snapshot_version` (rpk only): the `rpk_version` of the snapshot audited.
 
 `--format human` prints the summary plus per-class listings for the actionable classes.
+
+== Classification rules (rpk surface)
+
+`rpk-overrides.json` (schema: `docs-data/rpk-overrides.schema.json`) is audited against the `raw_tree` of the newest `docs-data/rpk-v<version>.json` snapshot. The prose fields are the command `description` (cobra Long/Short) and `flags.<flag>.description` (flag usage strings).
+
+"Redundant" for rpk means *deleting the field changes nothing in the generated page*. Both sides are rendered through the generator's own functions imported from `tools/rpk-docs/generate-rpk-docs.js` (`mergeCommandOverrides`, `parseDescriptionSections`, `formatDescription` with the file's `textTransformations`, `ensurePeriod`, `formatExamples`), so an override that only restates what the formatter already does to the raw help text -- ALL-CAPS lines become sections, flags and `rpk` commands get backticks, a trailing period is added, `Note:` becomes `NOTE:` -- is REDUNDANT, and one that differs in substance is not. The comparison covers every place a prose override lands: the command's description (main text and sections, with the raw sections `mergeCommandOverrides` keeps when an override has none), its page `:description:` attribute, the row for the command in its parent page's subcommand table (which formats the unparsed description), and the flag table. Commands the generator writes no page for are not compared: prose overrides on the root `rpk` command and `exclude: true` entries are REVIEW as dead, and those on a protected plugin (absent or shim-only in this snapshot) are REVIEW as not compared, since a run with the plugin installed renders them.
+
+[cols="1,1,3"]
+|===
+|Field |Class |Rule
+
+|`description`, `flags.<flag>.description`
+|`REDUNDANT`
+|Rendered output is identical with and without the field. Safe to delete. `differs_in` is absent.
+
+|`description`, `flags.<flag>.description`
+|`UPSTREAMABLE`
+|Rendered output differs and the override is free of docs-only markup. `upstream_candidate_text` is a starting point for the rpk Long/Short or flag usage string, not a drop-in: edit it to the rpk string rules in `embedded-reference-strings` first (for example, remove backticks the formatter adds itself). For a description it is the override's lead text plus the raw help sections unless the override has its own, even when `content` items replace those sections on the page, so it does not drop sections from `rpk --help`; for a flag the terminal period is stripped. `source_text` is the rendered raw text, and `differs_in` names what changes: `main`, `section:<NAME>`, `shortDesc` (the page `:description:`), or `subcommand-table` (the parent page's row).
+
+|`description`, `flags.<flag>.description`
+|`KEEP`
+|Contains docs-only markup (`xref:`, `glossterm:`, `include::`, conditionals, `pass:`, `<<anchor>>`, `prop:`/`config_ref:`, `link:`, `image:`, `btn:`/`menu:`/`kbd:`, `footnote:`, unescaped `{attr}`), or the command carries a `descriptionScope` other than `both` (the help text has one audience). Docs-layer enrichment by design.
+
+|`description`, `flags.<flag>.description`
+|`REVIEW`
+|Written in AsciiDoc block syntax (`[,bash]` / `----` / `\|===` / `== Heading`): help text carries code and tables as indented lines, so it cannot go upstream as written and cannot be auto-retired. Also dead overrides the generator never applies: the command is missing from `raw_tree` (stale override or a plugin absent from the snapshot); the command has no generated page (root `rpk`, `exclude: true`; a protected plugin is REVIEW as not compared instead); or the flag is not on the command in `raw_tree` (`rpk --config` and `rpk --verbose` are global flags rendered without overrides, and the override may name a flag that was renamed). Flag metadata on such a flag is REVIEW for the same reason.
+
+|`seeAlso`, `pageAliases`, `content`, `platforms`, `selfHostedOnly`, `cloudOnly`, `introducedInVersion`, `pageAttributes`, `$refs` (unless every definition it reaches is dead), `_note`, `prerequisites`, `descriptionScope`, `appendToDescription`, `exclude`, `asPartial`, `excludeFlags`, `excludeExamples`, `aliases`, `aliasNotes`, deprecation fields, `flags.<flag>.<anything but description>` on a flag the command has
+|`KEEP`
+|Docs-site structure the help text has no slot for.
+
+|`definitions/<name> --<flag>` (`flags.description`)
+|`REVIEW`
+|Dead override. `resolveReferences` merges a command-level `$refs` target at the top level of the command entry, but `mergeCommandOverrides` reads only the entry's `flags`, so the definition text never reaches a page. The note counts the referencing commands and says whether any of them has the flag in `raw_tree`; when none does, delete the definition and the `$refs` entries that point to it. A command's `$refs` is REVIEW as dead too when every definition it reaches is dead, because a `$refs` entry left pointing at a deleted definition logs an error on every generate run. A definition that something reaches through `$ref` is `KEEP`.
+
+|`textTransformations` (`replacements`, `inlineCode`)
+|`KEEP`
+|Global rewrite rules applied to every description on the way to AsciiDoc.
+|===
+
+=== rpk cross-check
+
+`cross_check` for rpk is the retirement safety property itself: every REDUNDANT prose field is deleted from a copy of the overrides, every command the generator writes a page for is rendered with the full and the pruned overrides, and `violations` lists any command whose output differs (expected empty). Two fields that are each redundant alone but not together would show up here.
 
 == Surfaces
 
 * `properties` (complete): `property-overrides.json` vs the property extractor's raw JSON.
-* `rpk` (structural): enumerates `rpk-overrides.json` (see `docs-data/rpk-overrides.schema.json`) -- command/flag `description` fields are the upstreamable prose (classified `REVIEW` with a TODO note until source comparison lands; it needs a raw pre-override `--print-tree` snapshot plus the `formatDescription()` pipeline from `tools/rpk-docs`), everything else (`seeAlso`, `pageAliases`, `content`, platform scoping, ...) is `KEEP` by design.
+* `rpk` (complete): `rpk-overrides.json` vs the `raw_tree` of the newest `rpk-v<version>.json` snapshot, rendered through the generator's own formatting.
 
 == Golden run (local checkouts required)
 
@@ -149,3 +202,15 @@ node tools/overrides-audit/index.js \
 ----
 
 Sanity expectations for the live 445-entry file: ~343 description fields classified; tens of REDUNDANT (source already matches); a large UPSTREAMABLE plus KEEP_UNTIL_UPSTREAMED (SPLIT) population; exactly one `acceptable_values` typo flag; `cross_check.violations` empty.
+
+For rpk the snapshot is committed in the docs repo, so the golden run needs only a docs checkout:
+
+[,bash]
+----
+node tools/overrides-audit/index.js --surface rpk \
+  --overrides <docs-repo>/docs-data/rpk-overrides.json \
+  --extracted <docs-repo>/docs-data/rpk-v26.2.2.json \
+  --format human
+----
+
+Sanity expectations for the live 269-command file against `rpk-v26.2.2.json`: ~650 fields; one or two REDUNDANT (overrides that only added the period or backticks the formatter adds); UPSTREAMABLE in the low hundreds; about 45 REVIEW, all of them dead or not compared (flags the command does not have, the shared `definitions` and the `$refs` that point at them, the root `rpk` description, a plugin absent from the snapshot); `cross_check.violations` empty.
