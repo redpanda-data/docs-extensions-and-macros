@@ -86,6 +86,51 @@ describe('enrichPluginTreeWithFlags', () => {
   })
 })
 
+describe('fillPluginFlags', () => {
+  const { fillPluginFlags, pluginTreeHasFlags } = require('../../../tools/rpk-docs/rpk-docs-handler.js')
+
+  const node = (subFlags) => ({
+    name: 'ai',
+    flags: [],
+    commands: [
+      { name: 'install', flags: [{ name: 'ai-version', type: 'string' }], commands: [] },
+      { name: 'agent', flags: [], commands: [{ name: 'create', flags: subFlags, commands: [] }] }
+    ]
+  })
+
+  test('uses the tree and runs no --help when plugin commands already have flags', () => {
+    const calls = []
+    const n = node([{ name: 'name', type: 'string', default: '', required: true, from_plugin: true }])
+    const result = fillPluginFlags(n, (argPath) => { calls.push(argPath); return null })
+    expect(result).toEqual({ source: 'tree', enriched: 0 })
+    expect(calls).toEqual([])
+  })
+
+  test('uses plugin flags on the root of a plugin with no subcommands', () => {
+    // rpk check: one command, with rpk's own --version beside the plugin's flags
+    const n = { name: 'check', flags: [{ name: 'version', type: 'bool' }, { name: 'all', type: 'bool', from_plugin: true }], commands: [] }
+    expect(fillPluginFlags(n, () => { throw new Error('no --help expected') })).toEqual({ source: 'tree', enriched: 0 })
+  })
+
+  test('does not take rpk flags on the root or the shim for plugin flags', () => {
+    const n = { name: 'check', flags: [{ name: 'version', type: 'bool' }], commands: [] }
+    expect(pluginTreeHasFlags(n)).toBe(false)
+  })
+
+  test('ignores the install shim when deciding, and falls back to --help', () => {
+    const n = node([])
+    expect(pluginTreeHasFlags(n)).toBe(false)
+    const help = 'Flags:\n      --name string   agent name\n'
+    const result = fillPluginFlags(n, (argPath) => argPath.join(' ') === 'ai agent create' ? help : null)
+    expect(result).toEqual({ source: 'help', enriched: 1 })
+    expect(n.commands[1].commands[0].flags.map(f => f.name)).toEqual(['name'])
+  })
+
+  test('reports none when neither source has flags', () => {
+    expect(fillPluginFlags(node([]), () => null)).toEqual({ source: 'none', enriched: 0 })
+  })
+})
+
 describe('mergeVisibleDeprecationsIntoOverrides', () => {
   const fs = require('fs')
   const path = require('path')
@@ -176,5 +221,78 @@ describe('parseUrfaveFlags (Redpanda Connect help format)', () => {
     expect(parseHelpFlags(HELP).length).toBe(4)
     expect(parseHelpFlags('Flags:\n      --no-browser   print URL\n').length).toBe(1)
     expect(parseHelpFlags('Usage: nothing here')).toEqual([])
+  })
+})
+
+describe('usage arguments from --help', () => {
+  const { parseCobraUsageArgs, fillUsageArgsFromHelp, fillPluginFlags } = require('../../../tools/rpk-docs/rpk-docs-handler.js')
+  const help = (line) => `Get an agent\n\nUsage:\n  ${line}\n\nFlags:\n  -h, --help   help for get\n`
+
+  test('reads the arguments after the command path, whatever the binary name', () => {
+    expect(parseCobraUsageArgs(help('rpai agent get <name> [flags]'), ['ai', 'agent', 'get'])).toBe('<name>')
+    expect(parseCobraUsageArgs(help('rpk ai agent transcript get <agent> <conversation-id> [flags]'), ['ai', 'agent', 'transcript', 'get']))
+      .toBe('<agent> <conversation-id>')
+  })
+
+  test('returns null without arguments, without a match, for groups, and for urfave help', () => {
+    expect(parseCobraUsageArgs(help('rpai trace get [flags]'), ['ai', 'trace', 'get'])).toBeNull()
+    expect(parseCobraUsageArgs(help('rpai agent get <name> [flags]'), ['ai', 'model', 'get'])).toBeNull()
+    expect(parseCobraUsageArgs('Usage:\n  rpai agent [command]\n', ['ai', 'agent'])).toBeNull()
+    expect(parseCobraUsageArgs(help('rpai <x>'), ['ai'])).toBeNull()
+    expect(parseCobraUsageArgs('USAGE:\n   rpk connect lint [command options] [arguments...]\n', ['connect', 'lint'])).toBeNull()
+    expect(parseCobraUsageArgs('', ['ai', 'agent'])).toBeNull()
+  })
+
+  test('adds the arguments to a usage that has none, keeping [flags]', () => {
+    const cmd = { name: 'get', usage: 'rpk ai agent get [flags]' }
+    expect(fillUsageArgsFromHelp(cmd, ['ai', 'agent', 'get'], help('rpai agent get <name> [flags]'))).toBe(true)
+    expect(cmd.usage).toBe('rpk ai agent get <name> [flags]')
+
+    const bare = { name: 'get', usage: 'rpk ai agent get' }
+    fillUsageArgsFromHelp(bare, ['ai', 'agent', 'get'], help('rpai agent get <name> [flags]'))
+    expect(bare.usage).toBe('rpk ai agent get <name>')
+  })
+
+  test('keeps a usage that already has arguments, and one --help cannot improve', () => {
+    const fromTree = { name: 'get', usage: 'rpk ai agent get <name> [flags]' }
+    expect(fillUsageArgsFromHelp(fromTree, ['ai', 'agent', 'get'], help('rpai agent get <other> [flags]'))).toBe(false)
+    expect(fromTree.usage).toBe('rpk ai agent get <name> [flags]')
+
+    const noArgs = { name: 'get', usage: 'rpk ai trace get [flags]' }
+    expect(fillUsageArgsFromHelp(noArgs, ['ai', 'trace', 'get'], help('rpai trace get [flags]'))).toBe(false)
+    expect(noArgs.usage).toBe('rpk ai trace get [flags]')
+  })
+
+  test('a tree without plugin flags takes usage arguments from --help', () => {
+    const node = {
+      name: 'ai',
+      usage: 'rpk ai [flags]',
+      commands: [{ name: 'agent', usage: 'rpk ai agent', commands: [{ name: 'get', usage: 'rpk ai agent get [flags]', commands: [] }] }]
+    }
+    const helps = {
+      'ai': 'Usage:\n  rpk ai [flags]\n  rpk ai [command]\n',
+      'ai agent': 'Usage:\n  rpai agent [command]\n',
+      'ai agent get': help('rpai agent get <name> [flags]')
+    }
+    fillPluginFlags(node, (argPath) => helps[argPath.join(' ')] || null)
+    expect(node.usage).toBe('rpk ai [flags]')
+    expect(node.commands[0].usage).toBe('rpk ai agent')
+    expect(node.commands[0].commands[0].usage).toBe('rpk ai agent get <name> [flags]')
+  })
+
+  test('a tree with plugin flags keeps its own usage and runs no --help', () => {
+    const node = {
+      name: 'ai',
+      commands: [{
+        name: 'get',
+        usage: 'rpk ai get <name> [flags]',
+        flags: [{ name: 'format', type: 'string', from_plugin: true }],
+        commands: []
+      }]
+    }
+    const calls = []
+    expect(fillPluginFlags(node, (p) => { calls.push(p); return null }).source).toBe('tree')
+    expect(calls).toEqual([])
+    expect(node.commands[0].usage).toBe('rpk ai get <name> [flags]')
   })
 })
