@@ -79,6 +79,18 @@ describe('production workflow extraction', () => {
     expect(lib.validateImpact('not json', filter).valid).toBe(false)
   })
 
+  test('the dispatch filter is read from a schema= assignment used by jq -e', () => {
+    const step = "schema='\n  .findings | length > 0\n'\nif ! jq -e \"$schema\" \"$model\"; then exit 1; fi"
+    expect(lib.extractDispatchFilter(step)).toBe('\n  .findings | length > 0\n')
+    expect(() => lib.extractDispatchFilter(step.replace('jq -e "$schema"', 'jq -e "$other"'))).toThrow(/never runs jq -e/)
+  })
+
+  test('the dispatch filter is read from the older inline jq -e form', () => {
+    const step = "jq -e '.findings | length > 0' doc-impact.json >/dev/null || exit 1"
+    expect(lib.extractDispatchFilter(step)).toBe('.findings | length > 0')
+    expect(() => lib.extractDispatchFilter('echo none')).toThrow(/schema='\.\.\.' assignment/)
+  })
+
   test('the built prompt carries both production sections and the PR number', () => {
     const p = lib.extractImpactPrompt(wf.prompt)
     const text = lib.buildPrompt(p, item('x', 'no_change', { repo: 'redpanda-data/streaming-enterprise', pr_url: 'https://github.com/redpanda-data/streaming-enterprise/pull/123' }))
