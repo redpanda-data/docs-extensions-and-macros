@@ -1467,6 +1467,46 @@ describe('command usage with positional arguments', () => {
     expect(list).toContain('----\nrpk widget list [flags]\n----')
     fs.rmSync(tmp, { recursive: true, force: true })
   })
+
+  // rpk writes every argument of its own commands as [UPPERCASE], required
+  // or not, while plugins use cobra's convention, where [NAME] is optional
+  // and <name> is required. A plugin's optional argument keeps its brackets.
+  test('keeps a plugin command\'s optional argument optional', async () => {
+    const tmp = fs.mkdtempSync(path.join(os2.tmpdir(), 'plugin-usage-'))
+    const tree = {
+      name: 'rpk',
+      commands: [
+        {
+          name: 'widget',
+          description: 'Widget things.',
+          usage: 'rpk widget [flags]',
+          commands: [
+            { name: 'get', description: 'Get a widget.', usage: 'rpk widget get [KEY] [flags]', commands: [] }
+          ]
+        },
+        {
+          name: 'connect',
+          description: 'Connect things.',
+          usage: 'rpk connect [flags]',
+          commands: [
+            { name: 'show', description: 'Show an environment.', usage: 'rpk connect show [NAME] [flags]', commands: [] },
+            { name: 'get', description: 'Get an agent.', usage: 'rpk connect get <name> [NAMES...] [flags]', commands: [] }
+          ]
+        }
+      ]
+    }
+    await generateRpkDocs({ tree, overrides: { commands: {} }, outputDir: tmp })
+    const find = (name) => {
+      const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap(e =>
+        e.isDirectory() ? walk(path.join(dir, e.name)) : (e.name === name ? [path.join(dir, e.name)] : []))
+      const [file] = walk(tmp)
+      return fs.readFileSync(file, 'utf8')
+    }
+    expect(find('rpk-widget-get.adoc')).toContain('----\nrpk widget get <key> [flags]\n----')
+    expect(find('rpk-connect-show.adoc')).toContain('----\nrpk connect show [name] [flags]\n----')
+    expect(find('rpk-connect-get.adoc')).toContain('----\nrpk connect get <name> [names...] [flags]\n----')
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
 })
 
 describe('env vars partial output location', () => {

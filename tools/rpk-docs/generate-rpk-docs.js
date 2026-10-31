@@ -1860,15 +1860,25 @@ function formatDescription(desc, customTransformations = null, options = {}) {
 
 /**
  * Format usage string - convert [PLACEHOLDER] to <placeholder>
+ *
+ * rpk's own commands write every positional argument as [UPPERCASE],
+ * required or not, so those become <lowercase>. Plugin commands follow
+ * cobra's convention instead: <name> is required and [NAME] is optional.
+ * For them, [NAME] keeps its brackets and is lowercased, the way an
+ * optional argument such as `rpk generate [template]` already renders.
  * @param {string} usage - Usage string from rpk
+ * @param {Object} [options]
+ * @param {boolean} [options.plugin] - The usage belongs to a plugin command
  * @returns {string} Formatted usage string
  */
-function formatUsage(usage) {
+function formatUsage(usage, { plugin = false } = {}) {
   if (!usage) return ''
   // Convert [UPPERCASE-PLACEHOLDER] to <lowercase-placeholder>
   // But keep [flags] as-is since that's the standard convention
   return usage.replace(/\[([A-Z][-A-Z0-9_]*(?:\.\.\.)?)\]/g, (match, placeholder) => {
-    return '<' + placeholder.toLowerCase() + '>'
+    return plugin
+      ? '[' + placeholder.toLowerCase() + ']'
+      : '<' + placeholder.toLowerCase() + '>'
   })
 }
 
@@ -2936,7 +2946,7 @@ async function generateRpkDocs(options = {}) {
       name: command.name,
       description: formattedDescription,
       shortDesc: ensurePeriod(capToTwoSentences(formatDescription(mainDescription, textTransformations, { skipTableConversion: true, skipListConversion: true }))),
-      usage: formatUsage(command.usage),
+      usage: formatUsage(command.usage, { plugin: pathParts.length >= 3 && KNOWN_PLUGINS.includes(pathParts[1]) }),
       aliases: (mergedCommand.aliases || command.aliases || [])
         .filter(alias => !commandOverride.excludeAliases?.includes(alias))
         .map(alias => {
