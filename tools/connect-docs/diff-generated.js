@@ -81,6 +81,15 @@ function listTree (componentsDir) {
   return out
 }
 
+// An AsciiDoc line comment: // followed by anything but another slash
+// (//// opens a comment block). Asciidoctor drops these lines, so a change
+// to them alone, such as the generator's banner, publishes nothing.
+const COMMENT_LINE = /^\/\/(?!\/)/
+
+function withoutCommentLines (text) {
+  return text.split('\n').filter((line) => !COMMENT_LINE.test(line)).join('\n')
+}
+
 function normalizeType (type) {
   return type.replace(/-/g, '_')
 }
@@ -227,8 +236,9 @@ function diffGenerated ({ baseDir, headDir, siteUrl = DEFAULTS.siteUrl, componen
     let status
     if (!oldFile) status = 'added'
     else if (!newFile) status = 'removed'
-    else if (oldText !== newText) status = 'changed'
-    else continue
+    else if (oldText === newText) continue
+    else if (rel.endsWith('.adoc') && withoutCommentLines(oldText) === withoutCommentLines(newText)) continue
+    else status = 'changed'
     const pages = pagesFor(rel).map((p) => ({
       url: `${root}${p.page}${p.anchor ? `#${p.anchor}` : ''}`,
       page: `${root}${p.page}`,
