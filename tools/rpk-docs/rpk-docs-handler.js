@@ -26,6 +26,48 @@ const KNOWN_PLUGINS = ['ai', 'check', 'connect', 'k8s', 'oxla']
 const REFRESHABLE_PLUGINS = ['ai', 'check', 'connect', 'k8s']
 
 /**
+ * Plugins whose docs only main owns. rpk ai renders to partials that a
+ * separate plugin-release pipeline keeps current on main, and adp-docs
+ * single-sources them from main. A full regeneration on a version branch
+ * (beta, v/*) would re-render them from whatever plugin version installed
+ * that day, so those runs leave the subtree untouched.
+ */
+const MAIN_ONLY_PLUGINS = ['ai']
+
+/**
+ * Resolve the docs branch a run's output is for: an explicit value, else
+ * the pull request base branch on GitHub Actions (GITHUB_BASE_REF), else
+ * the branch checked out in the repo. Null when none is known (for
+ * example, a detached HEAD).
+ * @param {string} repoRoot - Docs repo root
+ * @param {string} [explicit] - Branch passed by the caller
+ * @param {Object} [env] - Environment (defaults to process.env)
+ * @returns {string|null}
+ */
+function resolveTargetBranch(repoRoot, explicit, env = process.env) {
+  if (explicit) return explicit
+  if (env.GITHUB_BASE_REF) return env.GITHUB_BASE_REF
+  // symbolic-ref fails on a detached HEAD, which has no branch
+  const head = spawnSync('git', ['symbolic-ref', '--short', '-q', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' })
+  const branch = head.status === 0 ? head.stdout.trim() : ''
+  return branch || null
+}
+
+/**
+ * Main-only plugins to protect (leave untouched) for a run on this branch.
+ * Only version branches protect them: beta, v/*, and v-WIP/*. main, an
+ * unknown branch, and a run that refreshes the plugin itself (--plugin ai)
+ * render them as before.
+ * @param {string|null} branch - Target branch from resolveTargetBranch
+ * @param {string} [refreshedPlugin] - Plugin this run refreshes, if any
+ * @returns {string[]}
+ */
+function mainOnlyPluginsToProtect(branch, refreshedPlugin) {
+  if (!branch || !(branch === 'beta' || /^v(-WIP)?\//.test(branch))) return []
+  return MAIN_ONLY_PLUGINS.filter(pl => pl !== refreshedPlugin)
+}
+
+/**
  * Per-plugin install flags that pin a version (rpk <plugin> install <flag> <version>).
  * k8s uses the generic flag name; the others embed the plugin name.
  */
@@ -1126,14 +1168,20 @@ function makeLinkablePredicate(overridesData) {
   }
 }
 
-// Command subtrees whose changes never belong in the Self-Managed What's
-// new. rpk ai's documentation home is adp-docs, and the ADP release notes
-// already cover its CLI changes per release. The plugin-release receiver
-// workflow excludes ai from --update-whats-new for exactly this reason; the
-// full-regeneration path must agree, or a full run floods the Self-Managed
-// release notes with rpk ai entries (a rename release alone produces 21 new
-// plus 21 removed bullets).
+// Plugin subtrees that never get a What's new block, even from their own
+// plugin-release run. rpk ai's documentation home is adp-docs, and the ADP
+// release notes already cover its CLI changes per release.
 const WHATS_NEW_EXCLUDED_SUBTREES = ['rpk ai']
+
+// Command subtrees a full rpk regeneration leaves out of its What's new
+// block: every plugin that releases on its own cadence. Each one's changes
+// are published by its plugin-release run under the plugin's own version
+// (or, for rpk ai, by adp-docs), so a full run that also listed them would
+// attribute them to the Redpanda release and duplicate them. Without this,
+// a full run floods the Self-Managed release notes with plugin entries (an
+// rpk ai rename release alone produces 21 new plus 21 removed bullets, and
+// v26.3.1-rc2 listed rpk connect 4.115.1 flags as Redpanda changes).
+const FULL_REGEN_WHATS_NEW_EXCLUDED_SUBTREES = REFRESHABLE_PLUGINS.map(pl => `rpk ${pl}`)
 
 /**
  * Return a copy of diffData without entries under the excluded subtrees.
@@ -1147,7 +1195,7 @@ const WHATS_NEW_EXCLUDED_SUBTREES = ['rpk ai']
  * @param {Object} [overridesData] - rpk overrides; asPartial subtrees are dropped
  * @returns {Object} Filtered copy
  */
-function filterDiffForWhatsNew(diffData, excluded = WHATS_NEW_EXCLUDED_SUBTREES, overridesData = null) {
+function filterDiffForWhatsNew(diffData, excluded = FULL_REGEN_WHATS_NEW_EXCLUDED_SUBTREES, overridesData = null) {
   const resolved = overridesData ? resolveReferences(overridesData, overridesData) : null
   const outside = (cmdPath) => !excluded.some(prefix =>
     cmdPath === prefix || (typeof cmdPath === 'string' && cmdPath.startsWith(prefix + ' '))) &&
@@ -1161,6 +1209,43 @@ function filterDiffForWhatsNew(diffData, excluded = WHATS_NEW_EXCLUDED_SUBTREES,
     if (Array.isArray(details[key])) filteredDetails[key] = details[key].filter(e => outside(e.commandPath))
   }
   return { ...diffData, details: filteredDetails }
+}
+
+/**
+ * Return a copy of diffData without entries for commands and flags the
+ * overrides exclude from the docs (`exclude: true`, `excludeFlags`). Those
+ * have no pages, so reporting them as new or removed is noise: when the
+ * excluded `rpk oxla` stub dropped out of the tree, the What's new block
+ * and PR summary listed it as a removed command. Summary counts are
+ * recomputed from the filtered details.
+ * @param {Object} diffData - Diff from generateRpkDiff
+ * @param {Object|null} overridesData - rpk overrides
+ * @returns {Object} Filtered copy (the input when there are no overrides)
+ */
+function dropExcludedFromDiff(diffData, overridesData) {
+  if (!diffData || !overridesData?.commands) return diffData
+  const resolved = resolveReferences(overridesData, overridesData)
+  const excludedCommand = (cmdPath) => typeof cmdPath === 'string' && shouldExcludeCommand(resolved, cmdPath)
+  const excludedFlag = (cmdPath, flagName) => {
+    const flags = resolved.commands[cmdPath]?.excludeFlags
+    return Array.isArray(flags) && flags.includes(flagName)
+  }
+  const details = diffData.details || {}
+  const filteredDetails = { ...details }
+  for (const key of ['newCommands', 'newlyDeprecatedCommands', 'removedCommands', 'descriptionChanges']) {
+    if (Array.isArray(details[key])) filteredDetails[key] = details[key].filter(e => !excludedCommand(e.path))
+  }
+  for (const key of ['newFlags', 'removedFlags', 'changedDefaults', 'changedFlagTypes', 'changedFlagRequirements', 'changedFlagDescriptions', 'flagDataBackfilled']) {
+    if (Array.isArray(details[key])) {
+      filteredDetails[key] = details[key].filter(e =>
+        !excludedCommand(e.commandPath) && !(e.flagName && excludedFlag(e.commandPath, e.flagName)))
+    }
+  }
+  const summary = { ...(diffData.summary || {}) }
+  for (const key of Object.keys(summary)) {
+    if (Array.isArray(filteredDetails[key])) summary[key] = filteredDetails[key].length
+  }
+  return { ...diffData, summary, details: filteredDetails }
 }
 
 function updateWhatsNewFile(diffData, whatsNewPath, version, options = {}) {
@@ -1885,7 +1970,8 @@ async function handleRpkDocsGeneration(options = {}) {
     dataDir: customDataDir,
     preserveFrom, // Path to existing docs to preserve cloud conditionals and includes from
     printSummary = false, // Print PR summary to console
-    showInfo = false // Include info-level validation messages
+    showInfo = false, // Include info-level validation messages
+    targetBranch // Docs branch the output is for (detected when omitted)
   } = options
 
   // Normalize ref/sourceRef
@@ -1913,6 +1999,12 @@ async function handleRpkDocsGeneration(options = {}) {
     ? derivePartialsDir(finalOutputDir)
     : path.join(repoRoot, 'modules', 'reference', 'partials')
   const finalCloudSecretDir = cloudSecretDir || derivedPartialsDir
+
+  // On version branches, main-only plugin docs (rpk ai) are left untouched
+  const branchProtectedPlugins = mainOnlyPluginsToProtect(resolveTargetBranch(repoRoot, targetBranch), plugin)
+  if (branchProtectedPlugins.length > 0) {
+    console.log(`Leaving ${branchProtectedPlugins.map(pl => `rpk ${pl}`).join(', ')} docs untouched: main owns them`)
+  }
 
   // nav.adoc lives at modules/ROOT/nav.adoc relative to the repo root
   const navFile = path.join(repoRoot, 'modules', 'ROOT', 'nav.adoc')
@@ -2124,7 +2216,7 @@ async function handleRpkDocsGeneration(options = {}) {
         draftMissing,
         preservationsDir: preserveFrom,
         navFile,
-        protectedPlugins: failedPlugins
+        protectedPlugins: [...failedPlugins, ...branchProtectedPlugins]
       })
 
       console.log(`\nGeneration complete!`)
@@ -2151,12 +2243,12 @@ async function handleRpkDocsGeneration(options = {}) {
         if (oldData) {
           // Use raw_tree for diffing (falls back to tree for backward compatibility)
           const oldTree = oldData.raw_tree || oldData.tree
-          diffData = generateRpkDiff(oldTree, tree, {
+          diffData = dropExcludedFromDiff(generateRpkDiff(oldTree, tree, {
             oldVersion: diffVersion,
             newVersion: rpkVersion,
             oldDeprecatedCommands: oldData.deprecated_commands || {},
             newDeprecatedCommands: jsonData.deprecated_commands || {}
-          })
+          }), overridesData)
 
           // Save diff
           const diffFileName = `rpk-diff-${diffVersion}_to_${rpkVersion}.json`
@@ -2169,7 +2261,7 @@ async function handleRpkDocsGeneration(options = {}) {
 
           // Update what's-new file if requested
           if (whatsNewPath) {
-            updateWhatsNewFile(filterDiffForWhatsNew(diffData, WHATS_NEW_EXCLUDED_SUBTREES, overridesData), whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
+            updateWhatsNewFile(filterDiffForWhatsNew(diffData, FULL_REGEN_WHATS_NEW_EXCLUDED_SUBTREES, overridesData), whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
           }
         } else {
           console.warn(`Warning: Could not load previous version ${diffVersion} for diff`)
@@ -2463,12 +2555,12 @@ async function handleRpkDocsGeneration(options = {}) {
       if (oldData) {
         // Use raw_tree for diffing (falls back to tree for backward compatibility)
         const oldTree = oldData.raw_tree || oldData.tree
-        diffData = generateRpkDiff(oldTree, tree, {
+        diffData = dropExcludedFromDiff(generateRpkDiff(oldTree, tree, {
           oldVersion: diffVersion,
           newVersion: rpkVersion,
           oldDeprecatedCommands: oldData.deprecated_commands || {},
           newDeprecatedCommands: deprecatedCommands
-        })
+        }), overridesData)
 
         // Save diff
         const diffFileName = `rpk-diff-${diffVersion}_to_${rpkVersion}.json`
@@ -2491,7 +2583,7 @@ async function handleRpkDocsGeneration(options = {}) {
 
         // Update what's-new file if requested
         if (whatsNewPath) {
-          updateWhatsNewFile(filterDiffForWhatsNew(diffData, WHATS_NEW_EXCLUDED_SUBTREES, overridesData), whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
+          updateWhatsNewFile(filterDiffForWhatsNew(diffData, FULL_REGEN_WHATS_NEW_EXCLUDED_SUBTREES, overridesData), whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
         }
       } else {
         console.warn(`Warning: Could not load previous version ${diffVersion} for diff`)
@@ -2512,7 +2604,7 @@ async function handleRpkDocsGeneration(options = {}) {
       draftMissing,
       preservationsDir: preserveFrom,
       navFile,
-      protectedPlugins: failedPlugins
+      protectedPlugins: [...failedPlugins, ...branchProtectedPlugins]
     })
 
     console.log(`\nGeneration complete!`)
@@ -2889,6 +2981,9 @@ module.exports = {
   splicePluginNode,
   preserveLinuxOnlyCommands,
   REFRESHABLE_PLUGINS,
+  MAIN_ONLY_PLUGINS,
+  resolveTargetBranch,
+  mainOnlyPluginsToProtect,
   PLUGIN_INSTALL_VERSION_FLAGS,
   PLUGIN_MANIFEST_SLUGS,
   getRequiredGoVersion,
@@ -2912,6 +3007,9 @@ module.exports = {
   // Exported for tests to seed manifest data without network access
   pluginManifestVersionsCache,
   filterDiffForWhatsNew,
+  FULL_REGEN_WHATS_NEW_EXCLUDED_SUBTREES,
+  WHATS_NEW_EXCLUDED_SUBTREES,
+  dropExcludedFromDiff,
   computeDescriptionCoverage,
   updateWhatsNewFile,
   KNOWN_PLUGINS,

@@ -253,3 +253,103 @@ describe('applyTextTransformationsToExamples', () => {
     expect(out).toContain('  rpk ai agent a2a send hello')
   })
 })
+
+describe('indented lines inside list items (rpk shadow failover)', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  // Upstream help text from rpk shadow failover (v26.3.1-rc2)
+  const src = [
+    '* Without a scope flag, it fails over the whole Shadow Link. Besides failing',
+    "  over its topics, the link stops after it reaches the 'FAILED_OVER' state. A",
+    "  phase that misses it leaves the link in the 'FAILOVER_FAULTED' state, and running the",
+    "  command again resumes from that phase. 'rpk shadow status' reports the link",
+    '  state.',
+    '',
+    "Use --wait to block until the failover reaches 'FAILED_OVER'."
+  ].join('\n')
+  const quotedRpk = { replacements: [{ pattern: "'(rpk\\s+[^']+)'", replacement: '`$1`', flags: 'g' }] }
+
+  test('a continuation line that starts with a shell word stays prose', () => {
+    const out = formatDescription(src, quotedRpk)
+    expect(out).not.toContain('`command again')
+    expect(out).toContain('  command again resumes from that phase. `rpk shadow status` reports the link')
+  })
+
+  test('single-quoted constants become code', () => {
+    const out = formatDescription(src, null)
+    expect(out).toContain('the `FAILED_OVER` state')
+    expect(out).toContain('the `FAILOVER_FAULTED` state')
+    expect(out).toContain('reaches `FAILED_OVER`.')
+    expect(out).not.toContain("'FAILED_OVER'")
+  })
+
+  test('quoted lowercase prose and single capitals keep their quotes', () => {
+    const out = formatDescription("Answer 'yes' or 'Y' to the prompt.", null)
+    expect(out).toBe("Answer 'yes' or 'Y' to the prompt.")
+  })
+
+  test('a continuation line that starts with rpk stays prose, not a code block', () => {
+    const out = formatDescription('* With --all, it fails over every topic. Afterwards\n  rpk shadow status reports the link state.', null)
+    expect(out).not.toContain('----')
+    expect(out).toContain('  `rpk` shadow status reports the link state.')
+  })
+
+  test('indented commands outside list items are still code', () => {
+    expect(formatDescription('Prose line\n\n  echo "hello world"', null)).toBe('Prose line\n\n`echo "hello world"`')
+    expect(formatDescription('Run:\n  rpk topic list', null)).toContain('[,bash]\n----\nrpk topic list\n----')
+  })
+
+  test('an example introduced by a colon inside a list item is still code', () => {
+    const out = formatDescription('* To list topics, run:\n  rpk topic list', null)
+    expect(out).toContain('[,bash]\n----\nrpk topic list\n----')
+  })
+})
+
+describe('known command paths wrapped across lines (rpk shadow create)', () => {
+  const { formatDescription, registerKnownCommandPaths } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  beforeEach(() => registerKnownCommandPaths(['rpk', 'rpk shadow', 'rpk shadow config', 'rpk shadow config generate', 'rpk cloud', 'rpk cloud login']))
+  afterEach(() => registerKnownCommandPaths([]))
+
+  test('a path split by a line wrap becomes one span', () => {
+    const out = formatDescription('Before you create a Shadow Link, generate a configuration file with rpk shadow\nconfig generate and update it with your source cluster details.', null)
+    expect(out).toContain('with `rpk shadow config generate` and update it')
+    expect(out).not.toContain('`rpk` shadow')
+  })
+
+  test('a wrap inside an indented list item joins too', () => {
+    const out = formatDescription('* Generate one with rpk\n  shadow config generate first.', null)
+    expect(out).toContain('`rpk shadow config generate` first.')
+  })
+
+  test('never crosses a blank line', () => {
+    const out = formatDescription('Run rpk shadow\n\nconfig generate is a phrase here.', null)
+    expect(out).not.toContain('`rpk shadow config generate`')
+  })
+
+  test('a line ending in a full path keeps the next line separate', () => {
+    const out = formatDescription('See rpk cloud login\nfor details.', null)
+    expect(out).toBe('See `rpk cloud login`\nfor details.')
+  })
+})
+
+describe('dotfile names (rpk redpanda start)', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+  // The docs repo's .yaml filename rule matches from the first letter
+  const yamlRule = { replacements: [{ pattern: "(?<![`\"'\\w/])([a-z][-a-z0-9_]*\\.ya?ml)(?![`\\w])", replacement: '`$1`', flags: 'gi' }] }
+
+  test('the leading dot of a dotfile stays inside the code span', () => {
+    const out = formatDescription('These apply when the cluster is first\nbootstrapped and no .bootstrap.yaml is present; on later starts they are ignored.', yamlRule)
+    expect(out).toContain('no `.bootstrap.yaml` is present')
+    expect(out).not.toContain('.`bootstrap.yaml`')
+  })
+
+  test('a dot before a span that is not a file name is untouched', () => {
+    expect(formatDescription('a .`rpk` prefix', null)).toBe('a .`rpk` prefix')
+  })
+
+  test('a sentence-final period before a code span is untouched', () => {
+    const out = formatDescription('Edit the file.`redpanda.yaml` holds the config.', yamlRule)
+    expect(out).toContain('file.`redpanda.yaml`')
+  })
+})
