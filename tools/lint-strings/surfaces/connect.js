@@ -9,6 +9,7 @@ const { splitTopLevelArgs, findBalancedClose, collectGoFiles } = require('../go-
 const { GoIndex, statementEnd, straightLineReturn, stripStrings, renderResult, isResolved, unresolvedParts } = require('../go-index')
 const { parseLiteralFields } = require('./rpk')
 const { CONDITIONAL_RULE } = require('../rules/verbatim-asciidoc')
+const { STANDARD } = require('../standards')
 
 /**
  * Connect surface: every published string a Redpanda Connect build defines.
@@ -1555,6 +1556,8 @@ const RULES = [
   {
     name: 'missing-field-description',
     description: 'Config field constructed with no .Description()',
+    why: 'A field with no .Description() ships as an undocumented field on the connector reference page.',
+    standard: STANDARD.reviewingADiff,
     severity: 'warning',
     check: (decl) => {
       if (decl.meta.kind !== 'field' || !decl.meta.missing_description) return []
@@ -1563,6 +1566,8 @@ const RULES = [
   },
   {
     name: 'connect-short-description-markup',
+    why: 'Form-based config editors, such as the one in Redpanda Cloud, show ShortDescription as plain text, so any markup appears to users as literal symbols.',
+    standard: STANDARD.connect,
     description: 'ShortDescription is plain text in form-based editors',
     severity: 'warning',
     check: (decl) => {
@@ -1580,6 +1585,8 @@ const RULES = [
   {
     name: 'connect-xref-module',
     description: 'xref without a module, or to a module the Connect docs do not have',
+    why: 'Cloud includes the same partial into a different module, so an xref with no module, or to a module the Connect docs do not have, breaks the link.',
+    standard: STANDARD.connect,
     severity: 'warning',
     check: (decl) => {
       if (!decl.string || (decl.convention && decl.convention.verbatim_asciidoc === false)) return []
@@ -1602,6 +1609,8 @@ const RULES = [
   {
     name: 'connect-availability-prose',
     description: 'Cloud or cgo availability written as prose instead of data',
+    why: 'The generator renders Cloud and cgo availability from data, and availability prose shows on both the self-managed and the Cloud page, so it contradicts the generated notes on one of them.',
+    standard: STANDARD.connect,
     severity: 'warning',
     check: (decl) => {
       if (!decl.string) return []
@@ -1613,6 +1622,8 @@ const RULES = [
   {
     name: 'connect-cli-usage-multiline',
     description: 'urfave/cli Usage is a one-line label',
+    why: 'rpk connect help prints Usage as a one-line label, so a second line breaks the help output.',
+    standard: STANDARD.qualityBar,
     severity: 'warning',
     check: (decl) => {
       if (decl.meta.kind !== 'cli-usage' && decl.meta.kind !== 'cli-flag') return []

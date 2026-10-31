@@ -5,6 +5,7 @@ const path = require('path')
 
 const { SourceCache } = require('../source-text')
 const { isNameEcho } = require('../rules/common')
+const { STANDARD } = require('../standards')
 
 /**
  * API surface: doc strings in the API protos, which reach readers as OpenAPI
@@ -659,6 +660,8 @@ const RULES = [
   {
     name: 'api-rpc-summary-not-separated',
     description: 'rpc comment has no blank line, so the whole comment becomes the summary',
+    why: 'The generator takes the first line of an rpc comment as the operation summary, so with no blank line the whole comment becomes the navigation label in the API reference.',
+    standard: STANDARD.api,
     severity: 'error',
     check: (decl) => {
       if (decl.meta?.kind !== 'rpc-summary' || !decl.meta.collapsed) return []
@@ -671,6 +674,8 @@ const RULES = [
   {
     name: 'api-summary-multiline',
     description: 'An operation summary must be a single line',
+    why: 'The operation summary is the label in the API reference index, so a second line turns that label into a paragraph.',
+    standard: STANDARD.api,
     severity: 'error',
     check: (decl) => {
       // api-rpc-summary-not-separated owns the collapsed case and gives the
@@ -685,6 +690,8 @@ const RULES = [
   {
     name: 'api-summary-terminal-period',
     description: 'An operation summary takes no terminal period',
+    why: 'The operation summary is a label, not a sentence, so a period makes it read unlike every other operation in the index.',
+    standard: STANDARD.api,
     severity: 'error',
     check: (decl) => {
       if (!isSummary(decl) || decl.meta?.collapsed) return []
@@ -697,6 +704,8 @@ const RULES = [
   {
     name: 'api-name-echo',
     description: 'Description merely restates the declared name (tautology)',
+    why: 'A description that only restates the name tells readers nothing they could not already read from the name.',
+    standard: STANDARD.qualityBar,
     severity: 'warning',
     check: (decl) => {
       // Replaces the generic name-echo, which cannot be scoped per kind. An
@@ -715,6 +724,8 @@ const RULES = [
   {
     name: 'api-missing-terminal-period',
     description: 'Prose doc string with no terminal period',
+    why: 'Comments and descriptions publish as prose in the API reference, so one with no full stop looks cut off.',
+    standard: STANDARD.api,
     severity: 'warning',
     check: (decl) => {
       if (!isProse(decl)) return []
@@ -735,6 +746,8 @@ const RULES = [
   {
     name: 'api-undocumented-field',
     description: 'Published field or message with no doc string',
+    why: 'A field with no comment renders as a blank entry in the request or response schema of the API reference.',
+    standard: STANDARD.api,
     severity: 'warning',
     check: (decl) => {
       if (decl.meta?.kind !== 'field') return []
@@ -745,6 +758,8 @@ const RULES = [
   {
     name: 'api-description-too-short',
     description: 'Prose doc string too short to explain anything',
+    why: 'A string this short cannot say what the field does, its unit, or what changes when you set it, so readers are left guessing.',
+    standard: STANDARD.qualityBar,
     severity: 'warning',
     check: (decl) => {
       // Scoped to prose kinds because an operation `summary` is a label and

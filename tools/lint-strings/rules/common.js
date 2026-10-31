@@ -1,5 +1,7 @@
 'use strict'
 
+const { STANDARD } = require('../standards')
+
 /**
  * Rules that apply to every doc-string surface.
  *
@@ -211,6 +213,8 @@ const COMMON_RULES = [
   {
     name: 'empty-description',
     description: 'Declaration ships with no doc string at all',
+    why: 'A declaration with no string publishes as a blank entry, so readers get a name and nothing about what it does.',
+    standard: STANDARD.reviewingADiff,
     severity: 'error',
     check: (decl) => {
       if (decl.string == null || decl.string.trim() === '') {
@@ -222,6 +226,8 @@ const COMMON_RULES = [
   {
     name: 'starts-lowercase',
     description: 'Description starts with a lowercase letter',
+    why: 'Published strings are sentences in sentence case, so one that opens in lowercase reads as a fragment or a typo on the page.',
+    standard: STANDARD.qualityBar,
     severity: 'warning',
     check: (decl) => {
       const text = (decl.string || '').trim()
@@ -243,6 +249,8 @@ const COMMON_RULES = [
   {
     name: 'name-echo',
     description: 'Description merely restates the declared name (tautology)',
+    why: 'A description that only restates the name tells readers nothing they could not already read from the name.',
+    standard: STANDARD.qualityBar,
     severity: 'warning',
     check: (decl) => {
       const text = (decl.string || '').trim()
@@ -256,6 +264,8 @@ const COMMON_RULES = [
   {
     name: 'too-short',
     description: 'Description is under 20 characters',
+    why: 'A string this short cannot say what the setting does, its unit, or what changes when you set it, so readers are left guessing.',
+    standard: STANDARD.qualityBar,
     severity: 'warning',
     check: (decl) => {
       const text = (decl.string || '').trim()
@@ -269,6 +279,8 @@ const COMMON_RULES = [
   {
     name: 'unexpanded-jargon',
     description: 'Internal jargon that ships to users unexpanded',
+    why: 'Internal terms such as NTP, seastar or nullopt mean nothing to the operators who read the reference page.',
+    standard: STANDARD.qualityBar,
     severity: 'warning',
     check: (decl) => {
       const text = decl.string || ''
@@ -286,6 +298,8 @@ const COMMON_RULES = [
   {
     name: 'em-dash',
     description: 'Em dash in prose that ships to docs.redpanda.com',
+    why: 'The docs style avoids em dashes, and this string is published as written, so a fix made in the generated page is undone at the next regeneration.',
+    standard: STANDARD.styleFormatting,
     severity: 'warning',
     check: (decl) => {
       const text = decl.string || ''
@@ -304,6 +318,8 @@ const COMMON_RULES = [
   {
     name: 'latin-abbreviation',
     description: 'Latin abbreviation instead of plain English',
+    why: 'The docs word list replaces e.g. and i.e. with plain English, and this string is published as written, so the abbreviation reaches the page.',
+    standard: STANDARD.doNotUseWords,
     severity: 'warning',
     check: (decl) => {
       const text = decl.string || ''
@@ -329,6 +345,8 @@ const COMMON_RULES = [
   {
     name: 'long-sentence',
     description: `Sentence longer than ${MAX_SENTENCE_WORDS} words`,
+    why: 'A sentence this long usually carries more than one idea, so readers have to read it twice to follow it.',
+    standard: STANDARD.qualityBar,
     severity: 'warning',
     check: (decl) => {
       // The standard asks for one idea per sentence. A sentence this long
@@ -341,6 +359,8 @@ const COMMON_RULES = [
   {
     name: 'unbalanced-backticks',
     description: 'Odd number of backticks ships broken markup',
+    why: 'An odd number of backticks leaves an inline code span open, so the rest of the string renders as broken monospace.',
+    standard: STANDARD.qualityBar,
     severity: 'error',
     check: (decl) => {
       const text = decl.string || ''
@@ -354,6 +374,8 @@ const COMMON_RULES = [
   {
     name: 'missing-inline-code',
     description: 'Code value or field name in prose without inline code',
+    why: 'Without inline code, a property name, flag or path reads as ordinary prose, so readers cannot tell it is a value to type exactly.',
+    standard: STANDARD.qualityBar,
     severity: 'warning',
     check: (decl) => {
       // A surface whose generator formats some code values itself declares

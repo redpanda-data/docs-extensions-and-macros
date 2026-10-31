@@ -4,7 +4,10 @@
  * Rule runner for lint-strings.
  *
  * Adopts the VALIDATION_RULES shape from tools/rpk-docs/validate-output.js:
- * each rule is { name, description, severity, check() -> issues[] }, with
+ * each rule is { name, description, why, standard, severity, check() ->
+ * issues[] }, where `why` says what breaks for readers when the rule is
+ * violated and `standard` links the section of the docs team standard it
+ * enforces (see ./standards.js). Each issue carries both. Runs support
  * skipRules/onlyRules filtering and a byRule summary. The difference is the
  * unit of work: rules here check one extracted *declaration* (a property,
  * metric, rpk command, ...) rather than a generated .adoc file.
@@ -67,14 +70,18 @@ function runRules (declarations, rules, options = {}) {
           issues.push({
             id: rule.name,
             severity: SEVERITIES.includes(severity) ? severity : 'warning',
-            message: issue.message
+            message: issue.message,
+            why: rule.why,
+            standard: rule.standard
           })
         }
       } catch (err) {
         issues.push({
           id: rule.name,
           severity: 'error',
-          message: `Rule execution failed: ${err.message}`
+          message: `Rule execution failed: ${err.message}`,
+          why: rule.why,
+          standard: rule.standard
         })
       }
     }

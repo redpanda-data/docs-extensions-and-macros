@@ -3102,11 +3102,14 @@ validation
  *
  * # PR mode: only declarations whose span intersects the diff
  * npx doc-tools lint-strings --repo ~/redpanda --diff origin/dev
+ *
+ * # List every rule with its reason and the standard it enforces
+ * npx doc-tools lint-strings --list-rules --surface rpk
  */
 programCli
   .command('lint-strings')
   .description('Lint user-facing doc strings embedded in engineering source code (properties, metrics, ...)')
-  .requiredOption('--repo <path>', 'Path to an existing engineering checkout (for example, a local redpanda clone). Nothing is cloned.')
+  .option('--repo <path>', 'Path to an existing engineering checkout (for example, a local redpanda clone). Nothing is cloned. Required unless --list-rules is set.')
   // Read off the registry rather than restated here: a hardcoded list silently
   // went stale the moment a surface was added.
   .option('--surface <list>', `Comma-separated surfaces to lint (default: all registered). Registered: ${Object.keys(require('../tools/lint-strings').SURFACES).join(', ')}`)
@@ -3117,7 +3120,10 @@ programCli
   .option('--reviewed <file>', 'Diff mode: skip declarations whose fingerprint is listed in <file> (already reviewed on an earlier push)')
   .option('--reviewer-comments <file>', 'Diff mode: skip declarations whose text a human reviewer wrote in one of the comment bodies in <file> (a JSON array of strings)')
   .option('--strict', 'Exit 1 when any error-severity finding exists (default: always exit 0 - suggest, never block)')
-  .action((options) => {
+  .option('--list-rules', 'Print every rule (id, surfaces, severity, description, why, standard) and exit. Honors --surface and --format.')
+  .action((options, command) => {
+    // --repo stays required for a lint run; only --list-rules runs without it.
+    if (!options.listRules && !options.repo) command.error("error: required option '--repo <path>' not specified")
     const { runCli } = require('../tools/lint-strings')
     runCli(options)
   })
