@@ -10,6 +10,7 @@ const { generateRpcnConnectorDocs } = require('./generate-rpcn-connector-docs.js
 const { getRpkConnectVersion, printDeltaReport } = require('./report-delta')
 const { discoverIntermediateReleases, findCloudVersionForDate } = require('./github-release-utils')
 const { analyzeAllBinaries } = require('./connector-binary-analyzer.js')
+const releaseAttachment = require('./release-attachment.js')
 const parseCSVConnectors = require('./parse-csv-connectors.js')
 const { resolvePageTypeDir } = require('./metadata-utils.js')
 const semver = require('semver')
@@ -794,15 +795,198 @@ function snapshotReuseBlocker (data, version) {
 }
 
 /**
+ * The release's connect-<version>.json from its docs asset, or null when the
+ * binaries have to be compared instead, plus why. `source.reason` is one of:
+ * - `release-asset`: the asset has the file
+ * - `asset-missing-file`: the asset was read but has no such file (v4.115.x
+ *   and older releases, or a release whose docs step didn't write it)
+ * - `asset-unreadable`: the asset couldn't be read (`source.error` says why)
+ * - `override`: --cloud-version or --cgo-version asks for Cloud or cgo
+ *   availability from another Connect version's binaries (`source.cloudVersion`
+ *   and `source.cgoVersion` carry them). Only a person running doc-tools or
+ *   the MCP tool sets these; CI never does.
+ *
+ * @param {string} version - Connect version
+ * @param {Object} [options] - Handler options
+ * @returns {Promise<{attachment: Object|null, source: {reason: string, version: string, file: string, error?: string, cloudVersion?: string|null, cgoVersion?: string|null}}>}
+ */
+async function findReleaseAttachmentWithSource (version, options = {}) {
+  const file = releaseAttachment.attachmentPath(version)
+  const source = (reason, extra = {}) => ({ reason, version, file, ...extra })
+  if (options.cloudVersion || options.cgoVersion) {
+    const requested = { cloudVersion: options.cloudVersion || null, cgoVersion: options.cgoVersion || null }
+    console.log(`ℹ️  ${require('./pr-summary-formatter.js').overrideRequestText({ version, ...requested })}, so ${version} is analyzed from the binaries rather than ${file}`)
+    return { attachment: null, source: source('override', requested) }
+  }
+  try {
+    const data = await releaseAttachment.loadReleaseAttachment(version)
+    if (data) {
+      console.log(`✓ Using ${file} from the v${version} docs asset: no binary downloads needed`)
+      return { attachment: data, source: source('release-asset') }
+    }
+    console.log(`ℹ️  The v${version} docs asset has no ${file}, so the binaries are compared instead`)
+    return { attachment: null, source: source('asset-missing-file') }
+  } catch (err) {
+    console.warn(`Warning: Could not read ${file} from the v${version} docs asset (${err.message}), so the binaries are compared instead`)
+    return { attachment: null, source: source('asset-unreadable', { error: err.message }) }
+  }
+}
+
+/**
+ * The release's connect-<version>.json from its docs asset, or null.
+ * See findReleaseAttachmentWithSource().
+ *
+ * @param {string} version - Connect version
+ * @param {Object} [options] - Handler options
+ * @returns {Promise<Object|null>}
+ */
+async function findReleaseAttachment (version, options = {}) {
+  return (await findReleaseAttachmentWithSource(version, options)).attachment
+}
+
+/**
+ * Detect a fallback to the binaries that shouldn't have happened: the
+ * release's docs asset has no readable attachment but the previous release's
+ * (the version the diff compares against) does, so the release's docs step
+ * likely stopped writing it. Advisory only: never throws or changes the exit
+ * code, and returns null (logging why) whenever it can't tell.
+ *
+ * @param {Object|null} source - `source` from findReleaseAttachmentWithSource()
+ * @param {string|null} previousVersion - Version the diff compares against
+ * @returns {Promise<{version: string, previousVersion: string}|null>}
+ */
+async function checkUnexpectedFallback (source, previousVersion) {
+  if (!source || !['asset-missing-file', 'asset-unreadable'].includes(source.reason)) return null
+  if (!previousVersion || previousVersion === source.version) {
+    console.log(`ℹ️  Not checking the previous release's docs asset: no previous version to compare v${source.version} against`)
+    return null
+  }
+  let previous
+  try {
+    previous = await releaseAttachment.loadReleaseAttachment(previousVersion)
+  } catch (err) {
+    console.log(`ℹ️  Not checking for an unexpected fallback: could not read the v${previousVersion} docs asset (${err.message})`)
+    return null
+  }
+  if (!previous) return null
+  const warning = { version: source.version, previousVersion }
+  console.warn(`Warning: ${require('./pr-summary-formatter.js').unexpectedFallbackMessage(warning)}`)
+  return warning
+}
+
+/**
+ * Warn once per component the release ships that Connect's docs_gen does not
+ * document (the attachment's `undocumented` list) and return the list for the
+ * PR summary. Advisory only: never throws or changes the exit code.
+ *
+ * @param {Object|null} attachment - Result of findReleaseAttachment()
+ * @returns {Array<{type: string, name: string, builds: string[]}>}
+ */
+function reportUndocumentedComponents (attachment) {
+  if (!attachment) return []
+  const entries = releaseAttachment.undocumentedFromAttachment(attachment)
+  for (const entry of entries) console.warn(releaseAttachment.undocumentedWarning(entry))
+  return entries
+}
+
+/**
+ * Cloud and cgo platform data for a version: from the release's attachment
+ * when there is one, otherwise from downloading and comparing the standard,
+ * Cloud, and cgo binaries.
+ *
+ * @param {string} version - Connect version
+ * @param {Object} params
+ * @param {Object|null} params.attachment - Result of findReleaseAttachment()
+ * @param {string|null} params.cloudVersion - Cloud binary version for the fallback
+ * @param {string} params.dataDir - Data directory for the fallback
+ * @param {Object} params.analysisOptions - analyzeAllBinaries() options
+ * @returns {Promise<Object>} analyzeAllBinaries()-shaped result
+ */
+async function resolvePlatformAnalysis (version, { attachment = null, cloudVersion = null, dataDir, analysisOptions = {} } = {}) {
+  if (attachment) return releaseAttachment.binaryAnalysisFromAttachment(attachment)
+  return analyzeAllBinaries(version, cloudVersion, dataDir, analysisOptions)
+}
+
+/**
+ * Write the connector data the site's Bloblang playground and other tools
+ * read to modules/components/attachments/connect-<version>.json, replacing
+ * the previous version's.
+ *
+ * Skipped when the data came from the release's docs asset and there are no
+ * overrides to merge: the docs site already serves the asset's copy
+ * (extensions/modify-connect-tag-playbook.js), and a committed file of the
+ * same name would take precedence over it. Committed files for older
+ * versions are left alone in that case.
+ *
+ * @returns {string|null} Path written, or null when skipped
+ */
+function publishConnectorAttachment ({ newIndex, newVersion, overrides, fromReleaseAsset = false, root = process.cwd() }) {
+  const hasOverrides = !!(overrides && fs.existsSync(overrides))
+  if (fromReleaseAsset && !hasOverrides) {
+    console.log(`⏭️  Not writing modules/components/attachments/connect-${newVersion}.json: the docs site serves the copy in the v${newVersion} docs asset`)
+    return null
+  }
+
+  const mergedData = JSON.parse(JSON.stringify(newIndex))
+
+  if (hasOverrides) {
+    const { mergeOverrides, resolveReferences } = require('./generate-rpcn-connector-docs.js')
+    const ovObj = JSON.parse(fs.readFileSync(overrides, 'utf8'))
+    mergeOverrides(mergedData, resolveReferences(ovObj, ovObj))
+  }
+
+  const attachmentsRoot = path.resolve(root, 'modules/components/attachments')
+  fs.mkdirSync(attachmentsRoot, { recursive: true })
+
+  const existingVersions = fs.readdirSync(attachmentsRoot)
+    .filter(f => /^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/.test(f))
+    .map(f => {
+      const match = f.match(/^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/)
+      return match ? match[1] : null
+    })
+    .filter(v => v && semver.valid(v))
+
+  const sortedVersions = semver.sort(existingVersions) // ascending order
+
+  for (const version of sortedVersions) {
+    const oldFile = `connect-${version}.json`
+    const oldFilePath = path.join(attachmentsRoot, oldFile)
+    fs.unlinkSync(oldFilePath)
+    console.log(`🧹 Deleted old version from attachments: ${oldFile}`)
+  }
+
+  const destFile = path.join(attachmentsRoot, `connect-${newVersion}.json`)
+  fs.writeFileSync(destFile, JSON.stringify(mergedData, null, 2), 'utf8')
+  console.log(`✓ Published merged version to: ${path.relative(root, destFile)}`)
+  return destFile
+}
+
+/**
  * Load or fetch connector data for a specific version
  * @param {string} version - Version to load (e.g., "4.50.0")
  * @param {string} dataDir - Directory where JSON files are stored
  * @param {Object} options - Options for fetching if needed
  * @param {boolean} [options.forceFresh] - Refetch even when a usable file exists
+ * @param {Object|null} [options.attachment] - The release's connect-<version>.json
+ *   (findReleaseAttachment()). When set, the snapshot comes from it and no
+ *   binary is downloaded.
  * @returns {Promise<Object>} Parsed connector data
  */
 async function loadConnectorDataForVersion(version, dataDir, options = {}) {
   const dataFile = path.join(dataDir, `connect-${version}.json`);
+
+  // The attachment holds what the standard binary lists, plus the cgo-only
+  // and cloud-only components and the platform flags. Strip those back off,
+  // so the snapshot is the same raw data the binary would have given and the
+  // augmentation step treats it the same way.
+  if (options.attachment) {
+    const parsed = releaseAttachment.ossIndexFromAttachment(options.attachment);
+    const tmpFile = path.join(dataDir, `connect-${version}.tmp.json`);
+    fs.writeFileSync(tmpFile, JSON.stringify(parsed, null, 2));
+    fs.renameSync(tmpFile, dataFile);
+    console.log(`✓ Connector data for ${version} from the release's docs asset`);
+    return parsed;
+  }
 
   // If forceFresh is set, always fetch even if file exists
   // This ensures we have accurate connector lists for diff comparison
@@ -895,6 +1079,10 @@ async function handleRpcnConnectorDocs (options) {
   let draftFiles = []
   let needsAugmentation = false
   let csvMetadata = []
+  // The release's connect-<version>.json from its docs asset, when it has one,
+  // and where the platform data came from (for the PR summary).
+  let attachment = null
+  let platformSource = null
 
   if (options.fetchConnectors) {
     try {
@@ -911,7 +1099,8 @@ async function handleRpcnConnectorDocs (options) {
         // snapshot when it is raw, unaugmented output for this same version,
         // and leaves the caller's own Connect install alone either way.
         console.log(`Fetching connector data for Connect ${newVersion}...`)
-        await loadConnectorDataForVersion(newVersion, dataDir)
+        ;({ attachment, source: platformSource } = await findReleaseAttachmentWithSource(newVersion, options))
+        await loadConnectorDataForVersion(newVersion, dataDir, { attachment })
         dataFile = path.join(dataDir, `connect-${newVersion}.json`)
         needsAugmentation = true
         console.log(`Done: Fetched connector data for version ${newVersion}`)
@@ -924,23 +1113,28 @@ async function handleRpcnConnectorDocs (options) {
         const tmpFile = path.join(dataDir, `connect-${newVersion}.tmp.json`)
         const finalFile = path.join(dataDir, `connect-${newVersion}.json`)
 
-        const fd = fs.openSync(tmpFile, 'w')
-        spawnSync('rpk', ['connect', 'list', '--format', 'json-full'], { stdio: ['ignore', fd, 'inherit'] })
-        fs.closeSync(fd)
+        ;({ attachment, source: platformSource } = await findReleaseAttachmentWithSource(newVersion, options))
+        if (attachment) {
+          await loadConnectorDataForVersion(newVersion, dataDir, { attachment })
+        } else {
+          const fd = fs.openSync(tmpFile, 'w')
+          spawnSync('rpk', ['connect', 'list', '--format', 'json-full'], { stdio: ['ignore', fd, 'inherit'] })
+          fs.closeSync(fd)
 
-        const rawJson = fs.readFileSync(tmpFile, 'utf8')
-        // Deliberately plain JSON.parse/stringify, not bigIntJson: this is connect
-        // data, which carries example config text as escaped JSON-shaped strings
-        // (e.g. bloblang examples), indistinguishable by regex from real JSON
-        // value position. bigIntJson's value-position regex matches inside such a
-        // string and inserts stray quotes -- confirmed to throw on the real,
-        // currently-published connect attachment, not merely round a number. A
-        // plain round trip still silently rounds int64 defaults past MaxInt64 (the
-        // pre-existing defect this file has always had), which is the safer
-        // failure mode until a real JSON scanner replaces the regex.
-        const parsed = JSON.parse(rawJson)
-        fs.writeFileSync(finalFile, JSON.stringify(parsed, null, 2))
-        fs.unlinkSync(tmpFile)
+          const rawJson = fs.readFileSync(tmpFile, 'utf8')
+          // Deliberately plain JSON.parse/stringify, not bigIntJson: this is connect
+          // data, which carries example config text as escaped JSON-shaped strings
+          // (e.g. bloblang examples), indistinguishable by regex from real JSON
+          // value position. bigIntJson's value-position regex matches inside such a
+          // string and inserts stray quotes -- confirmed to throw on the real,
+          // currently-published connect attachment, not merely round a number. A
+          // plain round trip still silently rounds int64 defaults past MaxInt64 (the
+          // pre-existing defect this file has always had), which is the safer
+          // failure mode until a real JSON scanner replaces the regex.
+          const parsed = JSON.parse(rawJson)
+          fs.writeFileSync(finalFile, JSON.stringify(parsed, null, 2))
+          fs.unlinkSync(tmpFile)
+        }
         dataFile = finalFile
         needsAugmentation = true
         console.log(`Done: Fetched connector data for version ${newVersion}`)
@@ -1040,6 +1234,7 @@ async function handleRpcnConnectorDocs (options) {
     const sortedVersions = semver.rsort(candidates)
     newVersion = sortedVersions[0]
     dataFile = path.join(dataDir, `connect-${newVersion}.json`)
+    ;({ attachment, source: platformSource } = await findReleaseAttachmentWithSource(newVersion, options))
   }
 
   // ========================================================================
@@ -1111,11 +1306,14 @@ async function handleRpcnConnectorDocs (options) {
             try {
               // Load data for both versions - FORCE FRESH to avoid stale/incomplete data
               // This ensures we have accurate connector lists for both versions
+              const oldAttachment = await findReleaseAttachment(fromVer, options)
+              const { attachment: newAttachment, source: newSource } = await findReleaseAttachmentWithSource(toVer, options)
+
               console.log(`Loading connector data for ${fromVer} (fresh fetch)...`)
-              const oldData = await loadConnectorDataForVersion(fromVer, dataDir, { forceFresh: true })
+              const oldData = await loadConnectorDataForVersion(fromVer, dataDir, { forceFresh: true, attachment: oldAttachment })
 
               console.log(`Loading connector data for ${toVer} (fresh fetch)...`)
-              const newData = await loadConnectorDataForVersion(toVer, dataDir, { forceFresh: true })
+              const newData = await loadConnectorDataForVersion(toVer, dataDir, { forceFresh: true, attachment: newAttachment })
 
               const analysisOptions = {
                 skipCloud: false,
@@ -1151,12 +1349,12 @@ async function handleRpcnConnectorDocs (options) {
 
               // Run binary analysis for BOTH versions to ensure symmetric comparison
               console.log(`\nAnalyzing binaries for OLD version ${fromVer}...`)
-              const oldAnalysis = await analyzeAllBinaries(
-                fromVer,
-                cloudVersionForOldRelease,
+              const oldAnalysis = await resolvePlatformAnalysis(fromVer, {
+                attachment: oldAttachment,
+                cloudVersion: cloudVersionForOldRelease,
                 dataDir,
                 analysisOptions
-              )
+              })
 
               console.log(`Done: Binary analysis for ${fromVer}:`)
               console.log(`   - OSS version: ${oldAnalysis.ossVersion}`)
@@ -1165,12 +1363,12 @@ async function handleRpcnConnectorDocs (options) {
               }
 
               console.log(`\nAnalyzing binaries for NEW version ${toVer}...`)
-              const intermediateAnalysis = await analyzeAllBinaries(
-                toVer,
-                cloudVersionForRelease,
+              const intermediateAnalysis = await resolvePlatformAnalysis(toVer, {
+                attachment: newAttachment,
+                cloudVersion: cloudVersionForRelease,
                 dataDir,
                 analysisOptions
-              )
+              })
 
               console.log(`Done: Binary analysis for ${toVer}:`)
               console.log(`   - OSS version: ${intermediateAnalysis.ossVersion}`)
@@ -1236,6 +1434,7 @@ async function handleRpcnConnectorDocs (options) {
                 fromVersion: fromVer,
                 toVersion: toVer,
                 diffPath,
+                platformSource: newSource,
                 success: true
               })
 
@@ -1416,7 +1615,9 @@ async function handleRpcnConnectorDocs (options) {
   try {
     console.log('\nAnalyzing connector binaries...')
 
-    if (fs.existsSync(cleanOssDataPath)) {
+    // The attachment needs no OSS snapshot on disk, so the swap is only for
+    // the binary comparison.
+    if (!attachment && fs.existsSync(cleanOssDataPath)) {
       if (fs.existsSync(expectedPath)) {
         fs.renameSync(expectedPath, path.join(dataDir, `._connect-${newVersion}-augmented.json.tmp`))
         tempRenamed = true
@@ -1430,12 +1631,12 @@ async function handleRpcnConnectorDocs (options) {
       cgoVersion: options.cgoVersion || null
     }
 
-    binaryAnalysis = await analyzeAllBinaries(
-      newVersion,
-      options.cloudVersion || null,
+    binaryAnalysis = await resolvePlatformAnalysis(newVersion, {
+      attachment,
+      cloudVersion: options.cloudVersion || null,
       dataDir,
       analysisOptions
-    )
+    })
 
     console.log('Done: Binary analysis complete:')
     console.log(`   • OSS version: ${binaryAnalysis.ossVersion}`)
@@ -1543,46 +1744,14 @@ async function handleRpcnConnectorDocs (options) {
   }
 
   // Publish the connector data to attachments. The Bloblang playground and
-  // other site tools read this file, so it is published on every run, with
-  // overrides merged in only when an overrides file still exists.
+  // other site tools read this file. It is skipped when the release's docs
+  // asset already carries it (see publishConnectorAttachment).
   // IMPORTANT: This must run AFTER binary analysis and augmentation to include CGO-only connectors
-  {
-    try {
-      // Use the augmented newIndex which now includes CGO-only and cloud-only connectors
-      const mergedData = JSON.parse(JSON.stringify(newIndex))
-
-      if (options.overrides && fs.existsSync(options.overrides)) {
-        const { mergeOverrides, resolveReferences } = require('./generate-rpcn-connector-docs.js')
-        const ovObj = JSON.parse(fs.readFileSync(options.overrides, 'utf8'))
-        mergeOverrides(mergedData, resolveReferences(ovObj, ovObj))
-      }
-
-      const attachmentsRoot = path.resolve(process.cwd(), 'modules/components/attachments')
-      fs.mkdirSync(attachmentsRoot, { recursive: true })
-
-      const existingVersions = fs.readdirSync(attachmentsRoot)
-        .filter(f => /^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/.test(f))
-        .map(f => {
-          const match = f.match(/^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/)
-          return match ? match[1] : null
-        })
-        .filter(v => v && semver.valid(v))
-
-      const sortedVersions = semver.sort(existingVersions) // ascending order
-
-      for (const version of sortedVersions) {
-        const oldFile = `connect-${version}.json`
-        const oldFilePath = path.join(attachmentsRoot, oldFile)
-        fs.unlinkSync(oldFilePath)
-        console.log(`🧹 Deleted old version from attachments: ${oldFile}`)
-      }
-
-      const destFile = path.join(attachmentsRoot, `connect-${newVersion}.json`)
-      fs.writeFileSync(destFile, JSON.stringify(mergedData, null, 2), 'utf8')
-      console.log(`✓ Published merged version to: ${path.relative(process.cwd(), destFile)}`)
-    } catch (err) {
-      console.error(`Error: Failed to publish merged version: ${err.message}`)
-    }
+  try {
+    // Use the augmented newIndex which now includes CGO-only and cloud-only connectors
+    publishConnectorAttachment({ newIndex, newVersion, overrides: options.overrides, fromReleaseAsset: !!attachment })
+  } catch (err) {
+    console.error(`Error: Failed to publish merged version: ${err.message}`)
   }
 
   // Generate diff JSON
@@ -1596,7 +1765,9 @@ async function handleRpcnConnectorDocs (options) {
     // to prevent false "removed" reports when comparing augmented old vs non-augmented new
     let oldIndexForDiff = oldIndex
     // Check if CGO analysis specifically failed (cgoIndex will be undefined if CGO binary couldn't be analyzed)
-    const cgoAnalysisFailed = !binaryAnalysis || !binaryAnalysis.ossVersion || !binaryAnalysis.cgoIndex
+    // The attachment has no cgo binary index, but carries the cgo-only flags.
+    const cgoAnalysisFailed = !binaryAnalysis || !binaryAnalysis.ossVersion ||
+      (!binaryAnalysis.cgoIndex && binaryAnalysis.source !== 'release-asset')
     if (cgoAnalysisFailed) {
       console.log('⚠️  Binary analysis unavailable - stripping CGO/cloud metadata from old data for clean comparison')
 
@@ -2153,7 +2324,8 @@ async function handleRpcnConnectorDocs (options) {
 
   // Generate PR summary
   try {
-    const { printPRSummary, renderLostSectionWarnings, renderStyleRegressionWarnings, renderDescriptionReports } = require('./pr-summary-formatter.js')
+    const { printPRSummary, renderLostSectionWarnings, renderStyleRegressionWarnings, renderDescriptionReports, renderUndocumentedComponents } = require('./pr-summary-formatter.js')
+    const undocumentedComponents = reportUndocumentedComponents(attachment)
     // Use master diff if available, otherwise use single diff. Content-loss
     // warnings and structure reports ride the diff object so they land in the
     // PR summary body instead of dying in the collapsed workflow log.
@@ -2162,8 +2334,15 @@ async function handleRpcnConnectorDocs (options) {
       if (lostSectionWarnings.length) summaryDiff.lostSectionWarnings = lostSectionWarnings
       if (styleRegressionWarnings.length) summaryDiff.styleRegressionWarnings = styleRegressionWarnings
       if (descriptionReports.length) summaryDiff.descriptionReports = descriptionReports
+      if (undocumentedComponents.length) summaryDiff.undocumentedComponents = undocumentedComponents
+      summaryDiff.platformSource = platformSource
+      summaryDiff.releasePlatformSources = intermediateProcessingResults
+        .filter(r => r.success && r.platformSource)
+        .map(r => r.platformSource)
+      const fallbackWarning = await checkUnexpectedFallback(platformSource, oldVersion)
+      if (fallbackWarning) summaryDiff.platformFallbackWarning = fallbackWarning
       printPRSummary(summaryDiff, binaryAnalysis, draftFiles, masterDiff ? true : false)
-    } else if (lostSectionWarnings.length || styleRegressionWarnings.length || descriptionReports.length) {
+    } else if (lostSectionWarnings.length || styleRegressionWarnings.length || descriptionReports.length || undocumentedComponents.length) {
       // No diff to summarize (no prior version, or versions match), but this
       // run still produced content-loss warnings or description-structure
       // reports that a reviewer needs to see -- print them on their own
@@ -2171,7 +2350,8 @@ async function handleRpcnConnectorDocs (options) {
       const lines = [
         ...renderLostSectionWarnings(lostSectionWarnings),
         ...renderStyleRegressionWarnings(styleRegressionWarnings),
-        ...renderDescriptionReports(descriptionReports)
+        ...renderDescriptionReports(descriptionReports),
+        ...renderUndocumentedComponents(undocumentedComponents)
       ]
       console.log('\n' + lines.join('\n') + '\n')
     }
@@ -2249,6 +2429,12 @@ module.exports = {
   buildCleanOssData,
   loadConnectorDataForVersion,
   snapshotReuseBlocker,
+  findReleaseAttachment,
+  findReleaseAttachmentWithSource,
+  checkUnexpectedFallback,
+  reportUndocumentedComponents,
+  resolvePlatformAnalysis,
+  publishConnectorAttachment,
   fieldAnchor,
   buildFieldsTable,
   buildChangedDefaultsTable

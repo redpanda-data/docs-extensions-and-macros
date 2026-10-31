@@ -342,8 +342,11 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
         !oldCloudSet.has(`${c.type}:${c.name}`)
       ) || [];
 
+      // Platform data from a release's docs asset covers only the groups it
+      // flags (no Bloblang), so groups it doesn't cover aren't "removed".
+      const covered = Array.isArray(ba.coveredTypes) ? new Set(ba.coveredTypes) : null;
       const removedFromCloud = oldBa.comparison.inCloud?.filter(c =>
-        !newCloudSet.has(`${c.type}:${c.name}`)
+        !newCloudSet.has(`${c.type}:${c.name}`) && (!covered || covered.has(c.type))
       ) || [];
 
       result.binaryAnalysis.changes.cloud = {
