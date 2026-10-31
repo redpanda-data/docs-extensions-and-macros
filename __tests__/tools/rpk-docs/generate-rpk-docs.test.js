@@ -1540,10 +1540,21 @@ describe('inline code for paths and URLs in help prose', () => {
 
   test('bare URLs are inline code, with sentence punctuation outside', () => {
     expect(formatDescription('Point it at http://127.0.0.1:8081.')).toBe('Point it at `http://127.0.0.1:8081`.')
-    expect(formatDescription('See https://docs.redpanda.com/current/get-started/ for details.'))
-      .toBe('See `https://docs.redpanda.com/current/get-started/` for details.')
-    expect(formatDescription('Read the guide (https://docs.redpanda.com/x/).')).toBe('Read the guide (`https://docs.redpanda.com/x/`).')
     expect(formatDescription('Query https://host/p?a=1&b=2, then stop.')).toBe('Query `https://host/p?a=1&b=2`, then stop.')
+  })
+
+  // A docs site URL is a link, not a code value: left bare, it is converted
+  // into an xref (by generateRpkDocs, or by the url-to-xref extension at
+  // build time); a code span would be neither converted nor linked.
+  test('docs site URLs stay bare links, still protected from the later passes', () => {
+    expect(formatDescription('See https://docs.redpanda.com/current/get-started/ for details.'))
+      .toBe('See https://docs.redpanda.com/current/get-started/ for details.')
+    expect(formatDescription('Read the guide (https://docs.redpanda.com/x/).')).toBe('Read the guide (https://docs.redpanda.com/x/).')
+    expect(formatDescription('visit https://docs.redpanda.com/current/manage/disaster-recovery/whole-cluster-restore/.'))
+      .toBe('visit https://docs.redpanda.com/current/manage/disaster-recovery/whole-cluster-restore/.')
+    expect(formatDescription('See https://docs.redpanda.com/foo-a/tmp/file#12345 now.')).toBe('See https://docs.redpanda.com/foo-a/tmp/file#12345 now.')
+    // Only the docs host: a look-alike host is still a code value.
+    expect(formatDescription('See https://docs.redpanda.com.example/x now.')).toBe('See `https://docs.redpanda.com.example/x` now.')
   })
 
   // Every later pass matches inside a URL it has not yet seen as one: the path

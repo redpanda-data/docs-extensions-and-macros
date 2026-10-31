@@ -1378,6 +1378,9 @@ function applyTextTransformationsToExamples(text, customTransformations) {
   ).join('\n')
 }
 
+// A link to a docs site page (see the bare-URL pass in formatDescription).
+const DOCS_SITE_URL_RX = /^https?:\/\/docs\.redpanda\.com(?:[/?#]|$)/
+
 /**
  * Format description by adding backticks around flags and code
  * @param {string} desc - Description text
@@ -1581,13 +1584,21 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   // passes backticked /tmp/file out of https://host/tmp/file, the short-flag
   // pass took -a out of /foo-a/, and the issue-reference pass rewrote #NNNN
   // anchors into link macros.
+  //
+  // A docs.redpanda.com URL is always a link to a docs page, never a code
+  // value, so it is protected but left bare: generateRpkDocs converts it into
+  // an xref when it matches a page of the loaded docs components, and the
+  // url-to-xref extension converts it at build time otherwise. Backticks
+  // would make it a code span, which neither converts and which renders as
+  // text rather than a link.
   protectedDesc = protectedDesc.replace(/(?<![`\w/]|\]\()https?:\/\/[^\s`<>"'()[\]]+/g, (url, offset, whole) => {
     if (whole[offset + url.length] === '[') return url // AsciiDoc link macro
     const trail = url.match(/[.,;:!?]+$/)
     const core = trail ? url.slice(0, -trail[0].length) : url
     if (core.length <= 'https://'.length) return url
     const placeholder = `__INLINE_CODE_${inlineCode.length}__`
-    inlineCode.push(`\`${decodeHtmlEntities(core)}\``)
+    const decoded = decodeHtmlEntities(core)
+    inlineCode.push(DOCS_SITE_URL_RX.test(decoded) ? decoded : `\`${decoded}\``)
     return placeholder + (trail ? trail[0] : '')
   })
 
@@ -2645,7 +2656,12 @@ async function generateRpkDocs(options = {}) {
     // rpk k8s before its GA plugin publishes). Their pages and nav entries are
     // preserved instead of treated as stale, because their absence from the
     // command tree reflects the generation environment, not the product.
-    protectedPlugins = []
+    protectedPlugins = [],
+    // Optional resolver context from cli-utils/docs-links-to-xrefs.js
+    // (buildDocsResolverContext). When given, docs.redpanda.com URLs in each
+    // rendered page are rewritten as xrefs before the page is written, so the
+    // committed pages keep one link form across regenerations.
+    docsLinkContext = null
   } = options
 
   // Register partials
@@ -2707,6 +2723,8 @@ async function generateRpkDocs(options = {}) {
   let filesFailed = 0
   let filesDeleted = 0
   const writtenFiles = new Set()
+  const docsLinkResults = []
+  const docsLinks = docsLinkContext ? require('../../cli-utils/docs-links-to-xrefs') : null
 
   for (const { path: commandPath, command } of commands) {
     // Skip the root `rpk` command: its reference is the section's hand-written
@@ -3067,7 +3085,16 @@ async function generateRpkDocs(options = {}) {
     // absent optional sections (plugin commands have no aliases or flags, so
     // the separators between skipped blocks stack up). Blank lines inside
     // delimited blocks are preserved: they are content there.
-    const content = collapseBlankLines(template(context))
+    let content = collapseBlankLines(template(context))
+
+    // rpk help text can only carry absolute docs URLs. Convert those that
+    // match a page of the loaded components into xrefs, as the CRD
+    // generator does; the rest stay as written and are reported.
+    if (docsLinks) {
+      const linkResult = docsLinks.convertDocsLinks(content, docsLinkContext)
+      content = linkResult.content
+      docsLinkResults.push(linkResult)
+    }
 
     // Duplicate top-level headings almost always mean an override adds a
     // section the page already renders (or embeds its own heading in raw
@@ -3232,6 +3259,7 @@ async function generateRpkDocs(options = {}) {
     filesDeleted,
     subdirectoriesCreated: createdSubdirs.size,
     envPartial: envPartialResult,
+    docsLinks: docsLinks ? docsLinks.mergeDocsLinkResults(docsLinkResults) : null,
     ...navResult
   }
 }

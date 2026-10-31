@@ -1,0 +1,9 @@
+# For the showcase build: stand-in pages of the connect component, the
+# targets of the URLs in rpk connect's help text, as rp-connect-docs passed
+# with --lender supplies them. Titles and headings match the real pages.
+# No nav. local-macro-test-playbook.yml pulls the real rp-connect-docs
+# instead, so it must not include this component.
+name: connect
+title: Connect
+version: ~
+start_page: home:index.adoc

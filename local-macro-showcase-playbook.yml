@@ -44,7 +44,9 @@ content:
     branches: HEAD
     start_paths: [preview/extensions-and-macros, preview/shared,
                  preview/streaming-ga-lender, preview/macro-fixtures-ga,
-                 preview/macro-fixtures-beta, preview/macro-fixtures-cloud]
+                 preview/macro-fixtures-beta, preview/macro-fixtures-cloud,
+                 preview/links-lender-streaming, preview/links-lender-streaming-26.1,
+                 preview/links-lender-connect]
 ui:
   bundle:
     url: https://github.com/redpanda-data/docs-ui/releases/latest/download/ui-bundle.zip

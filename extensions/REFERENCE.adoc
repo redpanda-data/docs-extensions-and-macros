@@ -623,6 +623,15 @@ Behavior details:
 * A URL that carries a query string is left as a raw link, because an xref cannot express one and dropping it would change the link (for example `?platform=kubernetes`, which the UI reads to preselect a tab). These are reported at info level, not as warnings.
 * Builds that publish the latest version under its real version number instead of a symbolic segment (such as this repository's preview build) still resolve `/current/...` URLs, so the same content works in both.
 
+=== Converting generated pages before commit
+
+The `generate crd-spec` and `generate rpk-docs` commands apply the same mapping to the pages they write, so the committed source carries xrefs instead of URLs that flip back and forth on every regeneration (see `cli-utils/docs-links-to-xrefs.js`). They build a content catalog from the docs checkout they run in, or from `--docs-root`:
+
+* Targets in the checkout's own component are written as `module:page` xrefs, the form the docs repositories use for same-component links.
+* By default, a URL that points at another component, such as `/redpanda-connect/...`, stays raw, because a single-repository catalog lacks those pages. Pass the checkouts of those components with `--lender` (for example `--lender ../rp-connect-docs`) to read them into the same catalog. A URL that matches one of their pages then becomes a component-qualified xref, such as `xref:connect:guides:bloblang/about.adoc[]`, with the same version handling and anchor check as at build time: a URL pinned to a version that is not the component's latest becomes `version@component:module:page`, and a lender checkout of an older version of the local component (a docs version branch) makes `/26.1/...` URLs resolve to that version.
+* Each lender must be a different component, or a different version of one; two checkouts of the same component version are refused.
+* Every URL left as written is listed in the run output with the reason: its component was not loaded, no loaded page matches it (a likely broken link), its anchor is missing, it carries a query string, or its path is outside the catalog (`/api/`, `/mcp`). The rpk validation report lists only the docs URLs still raw after conversion, with the same reasons.
+
 === Environment variables
 
 This extension does not require any environment variables.

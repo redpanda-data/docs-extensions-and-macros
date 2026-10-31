@@ -1,0 +1,5 @@
+= Whole Cluster Restore
+:description: Restore a failed cluster, including its metadata.
+:page-aliases: manage:whole-cluster-restore.adoc
+
+Stand-in for the 26.1 version of the page in redpanda-data/docs.
