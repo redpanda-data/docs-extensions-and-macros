@@ -1,0 +1,80 @@
+{
+  "name": "redpanda-docs",
+  "displayName": "Redpanda Docs",
+  "description": "Completion, hover, and build checks for Redpanda docs pages and data files.",
+  "version": "0.1.0",
+  "private": true,
+  "license": "ISC",
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Linters",
+    "Other"
+  ],
+  "activationEvents": [
+    "workspaceContains:antora.yml",
+    "onLanguage:asciidoc"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "asciidoc",
+        "extensions": [
+          ".adoc"
+        ]
+      }
+    ],
+    "jsonValidation": [
+      {
+        "fileMatch": [
+          "**/docs-data/property-overrides.json"
+        ],
+        "url": "redpanda-docs-schema:/property-overrides.schema.json"
+      },
+      {
+        "fileMatch": [
+          "**/docs-data/rpk-overrides.json"
+        ],
+        "url": "redpanda-docs-schema:/rpk-overrides.schema.json"
+      }
+    ],
+    "configuration": {
+      "title": "Redpanda Docs",
+      "properties": {
+        "redpandaDocs.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to bin/docs-language-server.js. Empty uses the copy of @redpanda-data/docs-extensions-and-macros installed in the workspace, so the editor runs the same version as the build."
+        },
+        "redpandaDocs.docsPath": {
+          "type": "string",
+          "default": "",
+          "description": "A local checkout of redpanda-data/docs, passed to the server as REDPANDA_DOCS_PATH. Cloud pages read their property data from it, and repositories without the taxonomy read taxonomy.yml from it."
+        },
+        "redpandaDocs.componentPaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Local checkouts of other docs components (for example cloud-docs or rp-connect-docs), for features that resolve references across components. Passed to the server at start."
+        },
+        "redpandaDocs.standardsPath": {
+          "type": "string",
+          "default": "",
+          "description": "A local checkout of redpanda-data/docs-team-standards, for features that read its templates or style rules. Passed to the server at start."
+        }
+      }
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/redpanda-data/docs-extensions-and-macros",
+    "directory": "editors/vscode"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^10.1.2"
+  }
+}
