@@ -1901,10 +1901,42 @@ function recordPluginVersions(tree, { pluginPins = {}, installedPlugins = [], fe
 }
 
 /**
+ * Whether a directory holds an rpk plugin: an executable named .rpk-<name>,
+ * .rpk.ac-<name> or .rpk.managed-<name>, the names rpk looks for.
+ * @param {string} dir - Directory from PATH
+ * @returns {boolean}
+ */
+function dirHasRpkPlugins(dir) {
+  let entries
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch (_) {
+    return false
+  }
+  return entries.some(e => !e.isDirectory() && /^\.rpk(\.ac|\.managed)?-./.test(e.name))
+}
+
+/**
+ * Environment for a plugin refresh. rpk finds plugins in $HOME/.local/bin
+ * and in every PATH directory, so HOME is the temporary install HOME and
+ * PATH loses any directory that holds an rpk plugin, such as the caller's
+ * own ~/.local/bin. Only the plugin installed into the temporary HOME is
+ * then visible. Every other PATH directory is kept.
+ * @param {string} tmpHome - Temporary HOME for the install
+ * @param {Object} [baseEnv] - Environment to start from
+ * @returns {Object}
+ */
+function isolatedPluginEnv(tmpHome, baseEnv = process.env) {
+  const keep = (baseEnv.PATH || '').split(path.delimiter).filter(dir => dir && !dirHasRpkPlugins(dir))
+  return { ...baseEnv, HOME: tmpHome, PATH: keep.join(path.delimiter) }
+}
+
+/**
  * Install a single plugin and capture its fresh command subtree.
- * Runs with an isolated HOME so the install never touches the caller's
- * rpk plugin state, and the caller's installed plugins never leak in. The
- * temporary HOME is removed afterward, on success and on failure.
+ * Runs with an isolated HOME and a PATH without plugin directories (see
+ * isolatedPluginEnv), so the install never touches the caller's rpk plugin
+ * state and the caller's installed plugins never leak in. The temporary
+ * HOME is removed afterward, on success and on failure.
  * @param {Object} params
  * @param {string} params.plugin - rpk command name (ai, connect, k8s, check)
  * @param {string} [params.pluginVersion] - Version to pin; defaults to latest
@@ -1924,7 +1956,7 @@ function fetchPluginSubtree({ plugin, pluginVersion, rpkBinPath }) {
 }
 
 function fetchPluginSubtreeInHome({ plugin, pluginVersion, rpkBinPath, tmpHome }) {
-  const env = { ...process.env, HOME: tmpHome }
+  const env = isolatedPluginEnv(tmpHome)
 
   const runInstall = (pinned) => {
     const args = [plugin, 'install']
@@ -3047,6 +3079,7 @@ module.exports = {
   downloadRpkRelease,
   fetchPluginSubtree,
   recordPluginVersions,
+  isolatedPluginEnv,
   parseCobraFlags,
   parseUrfaveFlags,
   parseHelpFlags,

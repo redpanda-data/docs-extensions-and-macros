@@ -10,6 +10,7 @@ const { spawnSync } = require('child_process')
 
 const {
   fetchPluginSubtree,
+  isolatedPluginEnv,
   recordPluginVersions
 } = require('../../../tools/rpk-docs/rpk-docs-handler.js')
 
@@ -67,6 +68,60 @@ describe('fetchPluginSubtree temporary HOME', () => {
     expect(homes.length).toBeGreaterThan(0)
     expect(homes[0].existed).toBe(true)
     expect(fs.existsSync(homes[0].home)).toBe(false)
+  })
+})
+
+describe('plugin refresh PATH isolation', () => {
+  let tmp, pluginDir, toolDir, savedPath
+
+  beforeEach(() => {
+    spawnSync.mockReset()
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-path-test-'))
+    pluginDir = path.join(tmp, 'local-bin')
+    toolDir = path.join(tmp, 'tools')
+    fs.mkdirSync(pluginDir)
+    fs.mkdirSync(toolDir)
+    fs.writeFileSync(path.join(pluginDir, '.rpk.managed-rpai'), '#!/bin/sh\n', { mode: 0o755 })
+    fs.writeFileSync(path.join(toolDir, 'tar'), '#!/bin/sh\n', { mode: 0o755 })
+    savedPath = process.env.PATH
+    jest.spyOn(console, 'log').mockImplementation(() => {})
+    jest.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    process.env.PATH = savedPath
+    jest.restoreAllMocks()
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  test('drops PATH directories that hold rpk plugins and keeps the rest', () => {
+    const otherPlugins = path.join(tmp, 'other')
+    fs.mkdirSync(otherPlugins)
+    fs.writeFileSync(path.join(otherPlugins, '.rpk-legacy'), '#!/bin/sh\n', { mode: 0o755 })
+    fs.writeFileSync(path.join(otherPlugins, '.rpk.ac-foo'), '#!/bin/sh\n', { mode: 0o755 })
+    const missing = path.join(tmp, 'missing')
+    const env = isolatedPluginEnv('/tmp/home', {
+      PATH: [pluginDir, toolDir, otherPlugins, missing].join(path.delimiter),
+      KEEP: 'yes'
+    })
+    expect(env.HOME).toBe('/tmp/home')
+    expect(env.KEEP).toBe('yes')
+    expect(env.PATH).toBe([toolDir, missing].join(path.delimiter))
+  })
+
+  test('the refresh never runs rpk with a PATH that holds the caller\'s plugins', () => {
+    process.env.PATH = [pluginDir, toolDir].join(path.delimiter)
+    const rpkEnvs = []
+    spawnSync.mockImplementation((cmd, args, opts) => {
+      if (cmd === '/bin/rpk') rpkEnvs.push(opts.env)
+      if (args[0] === '--print-tree') return { status: 0, stdout: JSON.stringify(connectTree), stderr: '' }
+      return { status: 0, stdout: '', stderr: '' }
+    })
+    fetchPluginSubtree({ plugin: 'connect', pluginVersion: '4.1.0', rpkBinPath: '/bin/rpk' })
+    expect(rpkEnvs.length).toBeGreaterThan(1)
+    for (const env of rpkEnvs) {
+      expect(env.PATH.split(path.delimiter)).toEqual([toolDir])
+    }
   })
 })
 
