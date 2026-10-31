@@ -1,0 +1,9 @@
+// Production topic: Security. No headings or anchors here; _all.adoc adds them.
+// tag::summary[]
+Enable TLS and SASL, and give each service its own principal with ACLs for only the topics it uses.
+// end::summary[]
+// tag::detail[]
+In this solution: This demo runs with no authentication so it starts in a minute.
+
+In production: Enable TLS and SASL, and give each service its own principal with ACLs for only the topics it uses. See xref:preview:ROOT:test.adoc[].
+// end::detail[]
