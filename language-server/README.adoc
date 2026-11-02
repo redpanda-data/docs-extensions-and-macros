@@ -1,0 +1,84 @@
+= Docs language server
+
+An LSP server for AsciiDoc pages in Redpanda docs repositories. It checks a page with the same code the build runs, so the editor and the build report the same problems in the same words.
+
+== What it does
+
+* Completion of property names after `prop:` and `propval:`, of `propval:` fields and `format=` inside the brackets, and of taxonomy labels on a `:page-categories:` header line.
+* Hover with a property's description, type, default, limits and enterprise status; the value a `propval:` renders; and a category's definition and replacement.
+* Diagnostics for an unknown or Cloud-unavailable `prop:` name, a `propval:` that would render `<unknown ...>`, and an unknown, deprecated, or untaxonomized `:page-categories:` value. `:property-validate:` in the page header is honored.
+* A quick fix that rewrites a deprecated category the way `doc-tools check-metadata --fix` does.
+
+== Where the data comes from
+
+[cols="1,2"]
+|===
+|Data |Loader
+
+|Property JSON
+|`loadPropertiesFor` in `macros/prop.js`, over the minimal content catalog in `extension-utils/component-catalog.js` (the component's `antora.yml` and its `modules/reference/attachments/` property files), which `migrate-property-values` uses too. The release series comes from the `version` in `antora.yml`, exactly as in the build.
+
+|Taxonomy
+|`loadTaxonomyFrom` in `extension-utils/taxonomy.js`: the checkout's `shared/modules/ROOT/attachments/taxonomy.yml`, then `$REDPANDA_DOCS_PATH`, then the published file.
+
+|Legacy categories
+|`loadLegacyCategories` in `tools/check-metadata`.
+|===
+
+A Cloud component (`env-cloud`) has no property data of its own. Set `REDPANDA_DOCS_PATH` to a local checkout of `redpanda-data/docs` and the server reads its property JSON as the streaming component, as the build does.
+
+== Module layout
+
+[,text]
+----
+language-server/
+  server.js          LSP wiring; loops over the registry, never names a feature
+  dispatch.js        the feature module contract; unions capabilities, merges results
+  workspace.js       shared build data per component, then each module's load()
+  lib/asciidoc.js    inert lines, attribute lists, header lookups, inline macro scanner, ranges
+  lib/lsp.js         SEVERITY, COMPLETION_KIND, SOURCE, diagnostic(), markdownHover()
+  features/
+    index.js         the only registry, alphabetical, one line per module
+    metadata.js      :page-categories: and :page-topic-type:
+    properties.js    prop: and propval:
+----
+
+== Contributing a feature
+
+A feature is one file, `features/<id>.js`, exporting a plain object with an `id` that matches the file name and any of the optional hooks documented at the top of `dispatch.js`: `load`, `diagnostics`, `completion`, `hover`, `codeActions`, `codeLens`, `definition`, `documentLinks`, `commands`, plus `languages`, `watch`, `triggerCharacters` and `codeActionKinds`. Add one line for it to `features/index.js`, in alphabetical order. Nothing else changes: the server advertises a capability as soon as one module implements its hook, and the VS Code client already selects AsciiDoc, JSON and YAML files, watches the usual data files, and passes the `redpandaDocs.*` settings to every `load` as `ctx.settings`.
+
+* *Reuse, do not duplicate.* A check must call the function the build or the `doc-tools` command runs, so the editor and the build report the same problem in the same words. If that logic is inline or in another repository, export it (or promote it into this package) in the same change, and delete any other copy. Share text helpers through `lib/`, not by copying them between features.
+* *Fail alone.* Data only your feature needs is loaded in `load(ws, ctx)` and stored at `ws.data[id]`. If it throws, only your feature is turned off for that component, and the reason is logged. A hook that throws is logged and contributes nothing. Missing data degrades to "not checked", never to "clean".
+* *Tests are required.* Each feature has `+__tests__/language-server/features/<id>.test.js+` (the first two features share `features.test.js`) with unit tests that include a negative control (valid input gives no diagnostic), and at least one request over stdio in `stdio.e2e.test.js` or its own e2e suite. Build fixtures with `buildWorkspace` from `+__tests__/language-server/fixture.js+`; a part only your feature needs is passed as a builder (`buildWorkspace(spec, { parts })`), not added to the shared file.
+
+== Run it
+
+[,bash]
+----
+npx --no-install docs-language-server --stdio
+----
+
+`--no-install` runs the copy installed in the docs repository. Without it, `npx` in a directory without this package installs whatever is published under the npm name `docs-language-server`, which is not this package.
+
+* VS Code: the extension in `editors/vscode`.
+* Claude Code: a plugin `.lsp.json` that runs the server for `.adoc` files:
++
+[,json]
+----
+{
+  "redpanda-docs": {
+    "command": "npx",
+    "args": ["--no-install", "docs-language-server", "--stdio"],
+    "extensionToLanguage": { ".adoc": "asciidoc" }
+  }
+}
+----
+
+== Test it
+
+[,bash]
+----
+npm run test:language-server
+# The same requests against a real docs checkout:
+DOCS_LS_REAL_DOCS=/path/to/docs npm run test:language-server
+----

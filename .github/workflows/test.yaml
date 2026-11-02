@@ -55,6 +55,8 @@ jobs:
               - 'package-lock.json'
             all_tests:
               - '__tests__/**'
+              - 'language-server/**'
+              - 'editors/**'
               - 'jest.config.js'
               - 'jest.unit.config.js'
               - '.github/workflows/**'

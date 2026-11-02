@@ -15,7 +15,8 @@
   },
   "bin": {
     "doc-tools": "./bin/doc-tools.js",
-    "doc-tools-mcp": "./bin/doc-tools-mcp.js"
+    "doc-tools-mcp": "./bin/doc-tools-mcp.js",
+    "docs-language-server": "./bin/docs-language-server.js"
   },
   "scripts": {
     "install-test-dependencies": "doc-tools install-test-dependencies",
@@ -37,7 +38,8 @@
     "generate:cli-docs": "node tools/generate-cli-docs.js",
     "bundle:admin": "doc-tools generate bundle-openapi --surface admin",
     "bundle:connect": "doc-tools generate bundle-openapi --surface connect",
-    "bundle:both": "doc-tools generate bundle-openapi --surface both"
+    "bundle:both": "doc-tools generate bundle-openapi --surface both",
+    "test:language-server": "jest __tests__/language-server/"
   },
   "contributors": [
     {
@@ -109,6 +111,7 @@
     "tools",
     "docker-compose",
     "mcp",
+    "language-server",
     "docs-data/*.schema.json",
     "docs-data/kapa-source-groups.json"
   ],
@@ -152,6 +155,8 @@
     "tree-sitter": "^0.22.4",
     "turndown": "^7.2.2",
     "turndown-plugin-gfm": "^1.0.2",
+    "vscode-languageserver": "^10.1.2",
+    "vscode-languageserver-textdocument": "^1.0.15",
     "xml2js": "^0.6.2",
     "yaml": "^2.8.2",
     "yargs": "^17.7.2"
