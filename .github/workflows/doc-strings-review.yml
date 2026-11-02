@@ -939,7 +939,13 @@ jobs:
           show_full_output: false
           track_progress: false
           use_commit_signing: false
+          # User settings only: the caller's .claude/ skills and CLAUDE.md are
+          # written for authors and conflict with this prompt (what to report,
+          # where published impact goes). The settings input above writes
+          # ~/.claude/settings.json, which is the user source, so it still
+          # applies.
           claude_args: >
+            --setting-sources user
             --model ${{ inputs.use_adp_gateway && inputs.gateway_model || 'sonnet' }}
             --max-turns 40
             --disallowed-tools "WebFetch,WebSearch,Edit,MultiEdit,NotebookEdit,Bash(git *)"

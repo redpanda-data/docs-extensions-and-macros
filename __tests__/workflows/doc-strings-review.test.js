@@ -561,6 +561,13 @@ describe('doc-strings-review workflow: source diff (executed)', () => {
     expect(review.with.claude_args).not.toContain('gh pr diff')
   })
 
+  // The caller's .claude/ skills and CLAUDE.md are written for authors and
+  // contradict the review prompt, so only user settings load.
+  test('the review loads user settings only, not the caller repo\'s', () => {
+    const review = stepNamed('Claude review with suggestions')
+    expect(review.with.claude_args).toMatch(/--setting-sources user\s/)
+  })
+
   // Bash output is cut off far below the diff cap, so a large diff only
   // reaches the model in full when it can page through it with Read.
   test('the review can page through a large diff with Read', () => {
