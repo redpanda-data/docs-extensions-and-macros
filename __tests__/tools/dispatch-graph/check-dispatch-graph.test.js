@@ -505,11 +505,85 @@ describe('runCheck: archived repos, disabled workflows, case and renames', () =>
     expect(r.findings[0].message).toMatch(/disabled_manually/)
   })
 
-  test('negative control: an active listener is not flagged, and the workflow list is one call per listener repo', async () => {
+  test('negative control: an active listener is not flagged, and the workflow list is one call per repo in the graph', async () => {
     const api = fakeApi({ 'redpanda-data/eng': { 's.yml': sender('docs', 'ev') }, 'redpanda-data/docs': { 'r.yml': listener('ev') } }, healthyRuns)
     const r = await runCheck({ repos: [ENG('eng'), DOCS('docs')], api })
     expect(r.exitCode).toBe(0)
-    expect(api.calls.filter((c) => c[0] === 'workflows')).toEqual([['workflows', 'redpanda-data/docs']])
+    expect(api.calls.filter((c) => c[0] === 'workflows').map((c) => c[1]).sort()).toEqual(['redpanda-data/docs', 'redpanda-data/eng'])
+  })
+
+  // The stale copy left in the frozen public repo after the move to
+  // streaming-enterprise: disabling it is the fix, so the check must accept it.
+  const duplicateFiles = {
+    'redpanda-data/redpanda': { 'dispatch-docs-updates.yml': sender('api-docs', 'redpanda-openapi-bundle') },
+    'redpanda-data/streaming-enterprise': { 'dispatch-docs-updates.yml': sender('api-docs', 'redpanda-openapi-bundle') },
+    'redpanda-data/api-docs': { 'get-admin-api-spec.yml': listener('redpanda-openapi-bundle') },
+  }
+  const duplicateRuns = {
+    'redpanda-data/redpanda/dispatch-docs-updates.yml': [run(63, 'success', 'release')],
+    'redpanda-data/streaming-enterprise/dispatch-docs-updates.yml': [run(6, 'success', 'release')],
+    'redpanda-data/api-docs/get-admin-api-spec.yml': nRuns(5, 'success'),
+  }
+  const duplicateRepos = [ENG('redpanda'), ENG('streaming-enterprise'), DOCS('api-docs')]
+
+  test('a disabled sender is not a duplicate, with an info note', async () => {
+    const api = fakeApi(duplicateFiles, duplicateRuns, { states: { 'redpanda-data/redpanda': { 'dispatch-docs-updates.yml': 'disabled_manually' } } })
+    const r = await runCheck({ repos: duplicateRepos, api })
+    expect(r.exitCode).toBe(0)
+    expect(kinds(r)).toEqual([])
+    expect(infoKinds(r)).toEqual(['sender-disabled'])
+    expect(r.info[0].message).toMatch(/redpanda\/dispatch-docs-updates\.yml is disabled_manually/)
+    expect(r.info[0].message).toMatch(/Still sending api-docs#redpanda-openapi-bundle: streaming-enterprise\/dispatch-docs-updates\.yml \(last run 2026-10-16\)/)
+  })
+
+  test('disabling the live copy instead: the note names the stale copy still sending and its last run', async () => {
+    const api = fakeApi(duplicateFiles, duplicateRuns, { states: { 'redpanda-data/streaming-enterprise': { 'dispatch-docs-updates.yml': 'disabled_manually' } } })
+    const r = await runCheck({ repos: duplicateRepos, api })
+    expect(infoKinds(r)).toEqual(['sender-disabled'])
+    expect(r.info[0].message).toMatch(/Still sending api-docs#redpanda-openapi-bundle: redpanda\/dispatch-docs-updates\.yml \(last run 2026-08-20\)/)
+  })
+
+  test('every sender disabled: a listener with no cron backstop is listener-without-sender', async () => {
+    for (const senderRuns of [[], nRuns(3, 'success', 'release')]) {
+      const api = fakeApi(
+        { 'redpanda-data/eng': { 's.yml': sender('docs', 'ev') }, 'redpanda-data/docs': { 'r.yml': listener('ev') } },
+        { 'redpanda-data/eng/s.yml': senderRuns, 'redpanda-data/docs/r.yml': nRuns(3, 'success', 'workflow_dispatch') },
+        { states: { 'redpanda-data/eng': { 's.yml': 'disabled_manually' } } },
+      )
+      const r = await runCheck({ repos: [ENG('eng'), DOCS('docs')], api })
+      expect(r.exitCode).toBe(1)
+      expect(kinds(r)).toEqual(['listener-without-sender'])
+      expect(r.findings[0].message).toMatch(/docs\/r\.yml listens for ev but every sender is disabled/)
+      expect(r.info.find((i) => i.kind === 'sender-disabled').message).toMatch(/No active sender of docs#ev is left/)
+    }
+  })
+
+  test('negative control: one of two senders disabled leaves the listener covered', async () => {
+    const api = fakeApi(
+      { 'redpanda-data/eng': { 's.yml': sender('docs', 'ev', { v: 'a' }) }, 'redpanda-data/eng2': { 's.yml': sender('docs', 'ev', { v: 'b' }) }, 'redpanda-data/docs': { 'r.yml': listener('ev') } },
+      { 'redpanda-data/eng/s.yml': nRuns(3, 'success', 'release'), 'redpanda-data/eng2/s.yml': nRuns(3, 'success', 'release'), 'redpanda-data/docs/r.yml': nRuns(3, 'success') },
+      { states: { 'redpanda-data/eng': { 's.yml': 'disabled_manually' } } },
+    )
+    const r = await runCheck({ repos: [ENG('eng'), ENG('eng2'), DOCS('docs')], api })
+    expect(r.exitCode).toBe(0)
+    expect(kinds(r)).toEqual([])
+  })
+
+  test('negative control: the same two senders, both active, are still a duplicate', async () => {
+    const r = await runCheck({ repos: duplicateRepos, api: fakeApi(duplicateFiles, duplicateRuns) })
+    expect(kinds(r)).toEqual(['duplicate-sender'])
+    expect(infoKinds(r)).toEqual([])
+  })
+
+  test('a disabled sender that never ran is not sender-never-fired', async () => {
+    const api = fakeApi(
+      { 'redpanda-data/eng': { 's.yml': sender('docs', 'ev') }, 'redpanda-data/docs': { 'r.yml': cronListener('ev') } },
+      { 'redpanda-data/eng/s.yml': [], 'redpanda-data/docs/r.yml': nRuns(3, 'success', 'schedule') },
+      { states: { 'redpanda-data/eng': { 's.yml': 'disabled_inactivity' } } },
+    )
+    const r = await runCheck({ repos: [ENG('eng'), DOCS('docs')], api })
+    expect(kinds(r)).toEqual([])
+    expect(infoKinds(r)).toEqual(['listener-without-sender', 'receiver-no-dispatch-runs', 'sender-disabled'])
   })
 
   test('a mixed-case repository: target matches the lowercase listener', async () => {
@@ -609,6 +683,7 @@ describe('the default repo set', () => {
 describe('createGitHubApi adapts Octokit', () => {
   test('decodes file content and maps the runs call', async () => {
     const octokit = {
+      paginate: async (method, params) => (await method(params)).data.workflows,
       repos: {
         get: async () => ({ data: { default_branch: 'dev', full_name: 'O/Renamed', archived: true } }),
         getContent: async ({ path: p }) => p === '.github/workflows'

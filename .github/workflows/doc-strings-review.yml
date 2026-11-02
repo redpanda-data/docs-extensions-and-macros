@@ -939,7 +939,13 @@ jobs:
           show_full_output: false
           track_progress: false
           use_commit_signing: false
+          # User settings only: the caller's .claude/ skills and CLAUDE.md are
+          # written for authors and conflict with this prompt (what to report,
+          # where published impact goes). The settings input above writes
+          # ~/.claude/settings.json, which is the user source, so it still
+          # applies.
           claude_args: >
+            --setting-sources user
             --model ${{ inputs.use_adp_gateway && inputs.gateway_model || 'sonnet' }}
             --max-turns 40
             --disallowed-tools "WebFetch,WebSearch,Edit,MultiEdit,NotebookEdit,Bash(git *)"
@@ -1080,10 +1086,6 @@ jobs:
             - CLI help (kinds cli-*) is `rpk connect` help: Usage is a
               one-line label with no terminal period, and Description is
               plain text, not AsciiDoc.
-            - End every connect suggestion comment, on the line before the
-              fingerprint line, with exactly: After you make this change,
-              run `CGO_ENABLED=1 TAGS=x_benthos_extra task docs` and commit
-              the regenerated docs, or the docs check fails.
 
             REVIEW IN CONTEXT: judge each string as the reader of its page,
             not on its own. Read it together with its context entries and

@@ -117,6 +117,16 @@ describe('path -> surface routing', () => {
     expect(routeFile('src/v/raft/BUILD')).toBeNull()
   })
 
+  test('rpk ai commands in cloudv2 route to rpk', () => {
+    expect(routeFile('apps/rpai/internal/cmd/mcp/google_identity.go')).toBe('rpk')
+    expect(routeFile('apps/rpai/main.go')).toBe('rpk')
+    expect(routeFile('apps/rpai/internal/cmd/mcp/google_identity_test.go')).toBeNull()
+    expect(routeFile('apps/rpai/internal/cmd/testdata/fixture.go')).toBeNull()
+    expect(routeFile('apps/rpai/README.md')).toBeNull()
+    // Other cloudv2 apps are not rpk ai.
+    expect(routeFile('apps/aigw/internal/server/google_id_token.go')).toBeNull()
+  })
+
   test('classifyDiff groups changed files by surface', () => {
     const changed = new Map([
       ['src/v/config/configuration.cc', new Set([10])],

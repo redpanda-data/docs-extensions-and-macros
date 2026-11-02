@@ -561,6 +561,13 @@ describe('doc-strings-review workflow: source diff (executed)', () => {
     expect(review.with.claude_args).not.toContain('gh pr diff')
   })
 
+  // The caller's .claude/ skills and CLAUDE.md are written for authors and
+  // contradict the review prompt, so only user settings load.
+  test('the review loads user settings only, not the caller repo\'s', () => {
+    const review = stepNamed('Claude review with suggestions')
+    expect(review.with.claude_args).toMatch(/--setting-sources user\s/)
+  })
+
   // Bash output is cut off far below the diff cap, so a large diff only
   // reaches the model in full when it can page through it with Read.
   test('the review can page through a large diff with Read', () => {
@@ -1911,7 +1918,10 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(prompt).toMatch(/nothing\s+after the \], not even spaces/)
       expect(prompt).toMatch(/a conditional in a Summary or example summary/)
       expect(prompt).toMatch(/cloud_ai/)
-      expect(prompt).toContain('`CGO_ENABLED=1 TAGS=x_benthos_extra task docs`')
+      // connect no longer commits generated docs (redpanda-data/connect#4863), so
+      // suggestions must not tell authors to regenerate and commit them
+      expect(prompt).not.toMatch(/task docs/)
+      expect(prompt).not.toMatch(/commit\s+the regenerated docs/)
     })
 
     test('the impact check leaves out the regenerated connector and Bloblang references', () => {
