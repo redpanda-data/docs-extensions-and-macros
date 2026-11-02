@@ -1,0 +1,8 @@
+# Checks: headings deeper than H4
+extends: existence
+message: "Headings deeper than H4 (====) mean the page should be split."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#heading-rules
+level: warning
+scope: [heading.h5, heading.h6]
+raw:
+  - '.+'

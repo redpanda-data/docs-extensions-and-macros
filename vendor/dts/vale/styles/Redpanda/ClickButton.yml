@@ -1,0 +1,8 @@
+# Checks: 'click the X button' instead of 'click X'
+extends: existence
+message: "Omit 'the' and 'button': write 'Click **Name**'."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#minimalist-ui-writing
+level: warning
+ignorecase: true
+tokens:
+  - '(?<=\bclick\s)the\s+(?:\S+\s+){0,3}?button\b'
