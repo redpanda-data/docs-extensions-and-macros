@@ -1,0 +1,233 @@
+{
+  "findings": [
+    {
+      "surface": "crd",
+      "name": "group",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/clusterref.go",
+      "line_start": 17,
+      "line_end": 17,
+      "string": null,
+      "declaration_text": "\tGroup     *string `json:\"group,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"Group\" (json: \"group\") in ClusterRefApplyConfiguration has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "b2f654e94cda8af5"
+    },
+    {
+      "surface": "crd",
+      "name": "kind",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/clusterref.go",
+      "line_start": 18,
+      "line_end": 18,
+      "string": null,
+      "declaration_text": "\tKind      *string `json:\"kind,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"Kind\" (json: \"kind\") in ClusterRefApplyConfiguration has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "8e0e05919e5f7dcd"
+    },
+    {
+      "surface": "crd",
+      "name": "name",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/clusterref.go",
+      "line_start": 19,
+      "line_end": 19,
+      "string": null,
+      "declaration_text": "\tName      *string `json:\"name,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"Name\" (json: \"name\") in ClusterRefApplyConfiguration has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "5acf2661969e4714"
+    },
+    {
+      "surface": "crd",
+      "name": "namespace",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/clusterref.go",
+      "line_start": 20,
+      "line_end": 20,
+      "string": null,
+      "declaration_text": "\tNamespace *string `json:\"namespace,omitempty\"`",
+      "rules": [
+        {
+          "id": "undocumented-field",
+          "severity": "warning",
+          "message": "Field \"Namespace\" (json: \"namespace\") in ClusterRefApplyConfiguration has no doc comment. It ships blank in the CRD reference and in kubectl explain."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "40fb3a18624d050e"
+    },
+    {
+      "surface": "crd",
+      "name": "namespace",
+      "file": "operator/api/redpanda/v1alpha2/common.go",
+      "line_start": 326,
+      "line_end": 332,
+      "string": "Namespace specifies the namespace of the cluster being referenced.\nIf unspecified, defaults to the namespace of the referencing object.\nSetting this allows referencing a cluster that resides in a different\nnamespace, e.g. a ShadowLink whose source and shadow Redpanda clusters\nlive in separate namespaces on the same Kubernetes cluster.",
+      "declaration_text": "\t// Namespace specifies the namespace of the cluster being referenced.\n\t// If unspecified, defaults to the namespace of the referencing object.\n\t// Setting this allows referencing a cluster that resides in a different\n\t// namespace, e.g. a ShadowLink whose source and shadow Redpanda clusters\n\t// live in separate namespaces on the same Kubernetes cluster.\n\t// +optional\n\tNamespace *string `json:\"namespace,omitempty\"`",
+      "rules": [
+        {
+          "id": "latin-abbreviation",
+          "severity": "warning",
+          "message": "Uses \"e.g.\". Write \"for example\" instead: \"...des in a different\nnamespace, e.g. a ShadowLink whose source...\""
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "1ed70a266104e80f"
+    }
+  ],
+  "summary": {
+    "totalDeclarations": 5,
+    "flaggedDeclarations": 5,
+    "removedSurfaceLines": 0,
+    "removedSurfaceFiles": [],
+    "errors": 0,
+    "warnings": 5,
+    "info": 0,
+    "byRule": {
+      "undocumented-field": {
+        "errors": 0,
+        "warnings": 4,
+        "info": 0
+      },
+      "latin-abbreviation": {
+        "errors": 0,
+        "warnings": 1,
+        "info": 0
+      }
+    },
+    "bySurface": {
+      "crd": {
+        "declarations": 5,
+        "flagged": 5,
+        "errors": 0,
+        "warnings": 5,
+        "info": 0
+      }
+    },
+    "alreadyReviewed": 0,
+    "removedDeclarations": [],
+    "unverifiableDeclarations": 0,
+    "skippedDeclarations": []
+  },
+  "unsupported_surfaces": [],
+  "declarations": [
+    {
+      "surface": "crd",
+      "name": "group",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/clusterref.go",
+      "line_start": 17,
+      "line_end": 17,
+      "fingerprint": "b2f654e94cda8af5",
+      "context": [
+        {
+          "name": "group",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/common.go",
+          "line_start": 317,
+          "string": "Group is used to override the object group that this reference points to.\nIf unspecified, defaults to \"cluster.redpanda.com\"."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "kind",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/clusterref.go",
+      "line_start": 18,
+      "line_end": 18,
+      "fingerprint": "8e0e05919e5f7dcd",
+      "context": [
+        {
+          "name": "kind",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/common.go",
+          "line_start": 320,
+          "string": "Kind is used to override the object kind that this reference points to.\nIf unspecified, defaults to \"Redpanda\"."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "name",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/clusterref.go",
+      "line_start": 19,
+      "line_end": 19,
+      "fingerprint": "5acf2661969e4714",
+      "context": [
+        {
+          "name": "name",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/common.go",
+          "line_start": 323,
+          "string": "Name specifies the name of the cluster being referenced."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "namespace",
+      "file": "operator/api/applyconfiguration/redpanda/v1alpha2/clusterref.go",
+      "line_start": 20,
+      "line_end": 20,
+      "fingerprint": "40fb3a18624d050e",
+      "context": [
+        {
+          "name": "namespace",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/common.go",
+          "line_start": 326,
+          "string": "Namespace specifies the namespace of the cluster being referenced.\nIf unspecified, defaults to the namespace of the referencing object.\nSetting this allows referencing a cluster that resides in a different\nnamespace, e.g. a ShadowLink whose source and shadow Redpanda clusters\nlive in separate namespaces on the same Kubernetes cluster."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "namespace",
+      "file": "operator/api/redpanda/v1alpha2/common.go",
+      "line_start": 326,
+      "line_end": 332,
+      "fingerprint": "1ed70a266104e80f",
+      "context": []
+    }
+  ]
+}

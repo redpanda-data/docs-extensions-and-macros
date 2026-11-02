@@ -1,0 +1,9 @@
+= Object storage properties
+:page-property-source: object-storage-properties
+:description: Preview fixture for the prop macro.
+
+Fixture page. The `page-property-source` attribute above declares this page as
+the reference for the `object-storage-properties` collection, so `prop:` links resolve here by
+declaration rather than by inferring ownership from headings.
+
+include::reference:partial$properties/preview-properties.adoc[tags=category-object-storage;!deprecated;!exclude-from-docs]

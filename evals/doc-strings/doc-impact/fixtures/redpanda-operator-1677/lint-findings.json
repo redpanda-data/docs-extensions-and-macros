@@ -1,0 +1,1171 @@
+{
+  "findings": [
+    {
+      "surface": "crd",
+      "name": "configYaml",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 124,
+      "line_end": 144,
+      "string": "ConfigYAML is the user-supplied Redpanda Connect pipeline YAML.\nReference cluster-bound or sensitive values from .valueSources via\n${NAME} interpolation; the operator resolves them at render time.\n\nWhen .cluster is set, the operator inline-merges connection fields\n(seed_brokers, tls, sasl) into any `input.redpanda` and\n`output.redpanda` blocks in this YAML, derived from the resolved\ncluster connection and .userRef. Users only need to write the\nper-plugin fields (topic, key, consumer_group, etc.); brokers, TLS,\nand SASL are filled in by the operator.\n\nUser-side keys win on conflict — set a key explicitly (for example,\nseed_brokers pointing at a different cluster) and the operator's\ngenerated value is skipped for that key.\n\nThe merge targets the `redpanda` input/output plugins specifically.\nAny `redpanda_common` blocks the user authors are passed through\nunchanged — the operator does not inject connection fields into\nthem.",
+      "declaration_text": "\t// ConfigYAML is the user-supplied Redpanda Connect pipeline YAML.\n\t// Reference cluster-bound or sensitive values from .valueSources via\n\t// ${NAME} interpolation; the operator resolves them at render time.\n\t//\n\t// When .cluster is set, the operator inline-merges connection fields\n\t// (seed_brokers, tls, sasl) into any `input.redpanda` and\n\t// `output.redpanda` blocks in this YAML, derived from the resolved\n\t// cluster connection and .userRef. Users only need to write the\n\t// per-plugin fields (topic, key, consumer_group, etc.); brokers, TLS,\n\t// and SASL are filled in by the operator.\n\t//\n\t// User-side keys win on conflict — set a key explicitly (for example,\n\t// seed_brokers pointing at a different cluster) and the operator's\n\t// generated value is skipped for that key.\n\t//\n\t// The merge targets the `redpanda` input/output plugins specifically.\n\t// Any `redpanda_common` blocks the user authors are passed through\n\t// unchanged — the operator does not inject connection fields into\n\t// them.\n\t// +kubebuilder:validation:Required\n\tConfigYAML string `json:\"configYaml\"`",
+      "rules": [
+        {
+          "id": "em-dash",
+          "severity": "warning",
+          "message": "Contains 2 em dashes. Use a comma, parentheses, or a separate sentence: \"...ser-side keys win on conflict — set a key explicitly (for ex...\""
+        },
+        {
+          "id": "missing-inline-code",
+          "severity": "warning",
+          "message": "Code values and field names belong in inline code: `seed_brokers`, `consumer_group`. Wrap each in backticks, which render as inline code in both AsciiDoc and Markdown."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "ae1f2a88e422920d"
+    },
+    {
+      "surface": "crd",
+      "name": "replicas",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 169,
+      "line_end": 197,
+      "string": "Replicas is the number of pipeline replicas to run.\n\nThis field backs the Pipeline's scale subresource, so `kubectl scale\npipeline/<name>`, HorizontalPodAutoscaler, and KEDA ScaledObjects all\nread and write it through `/scale`. To autoscale a pipeline, point the\nautoscaler at the Pipeline itself — NOT at its Deployment, whose\nreplica count the operator continuously resets to this field:\n\n  scaleTargetRef:\n    apiVersion: cluster.redpanda.com/v1alpha2\n    kind: Pipeline\n    name: <pipeline-name>\n\nCPU and memory HPAs work out of the box: pipeline pods always carry\nresource requests (operator defaults apply when .resources is unset).\nTo scale on the metrics Redpanda Connect itself emits (input_received,\noutput_sent, processor_latency_ns, ...) feed them to the autoscaler —\ne.g. scrape the pods' `http` port at /metrics (the operator's\nmonitoring PodMonitor does this) into Prometheus, then use\nprometheus-adapter for HPA custom metrics or a KEDA prometheus\ntrigger.\n\nWhen an autoscaler manages this field, omit it from applied manifests\n(or have your GitOps tool ignore it) so config syncs don't undo the\nautoscaler's writes.",
+      "declaration_text": "\t// Replicas is the number of pipeline replicas to run.\n\t//\n\t// This field backs the Pipeline's scale subresource, so `kubectl scale\n\t// pipeline/<name>`, HorizontalPodAutoscaler, and KEDA ScaledObjects all\n\t// read and write it through `/scale`. To autoscale a pipeline, point the\n\t// autoscaler at the Pipeline itself — NOT at its Deployment, whose\n\t// replica count the operator continuously resets to this field:\n\t//\n\t//   scaleTargetRef:\n\t//     apiVersion: cluster.redpanda.com/v1alpha2\n\t//     kind: Pipeline\n\t//     name: <pipeline-name>\n\t//\n\t// CPU and memory HPAs work out of the box: pipeline pods always carry\n\t// resource requests (operator defaults apply when .resources is unset).\n\t// To scale on the metrics Redpanda Connect itself emits (input_received,\n\t// output_sent, processor_latency_ns, ...) feed them to the autoscaler —\n\t// e.g. scrape the pods' `http` port at /metrics (the operator's\n\t// monitoring PodMonitor does this) into Prometheus, then use\n\t// prometheus-adapter for HPA custom metrics or a KEDA prometheus\n\t// trigger.\n\t//\n\t// When an autoscaler manages this field, omit it from applied manifests\n\t// (or have your GitOps tool ignore it) so config syncs don't undo the\n\t// autoscaler's writes.\n\t// +kubebuilder:default=1\n\t// +kubebuilder:validation:Minimum=0\n\t// +optional\n\tReplicas *int32 `json:\"replicas,omitempty\"`",
+      "rules": [
+        {
+          "id": "em-dash",
+          "severity": "warning",
+          "message": "Contains 2 em dashes. Use a comma, parentheses, or a separate sentence: \"...scaler at the Pipeline itself — NOT at its Deployment, whose...\""
+        },
+        {
+          "id": "latin-abbreviation",
+          "severity": "warning",
+          "message": "Uses \"e.g.\". Write \"for example\" instead: \"...feed them to the autoscaler —\ne.g. scrape the pods' `http` p...\""
+        },
+        {
+          "id": "missing-inline-code",
+          "severity": "warning",
+          "message": "Code values and field names belong in inline code: `input_received`, `output_sent`, `processor_latency_ns`. Wrap each in backticks, which render as inline code in both AsciiDoc and Markdown."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "7e9657784821d001"
+    },
+    {
+      "surface": "crd",
+      "name": "serviceAccountName",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 203,
+      "line_end": 215,
+      "string": "ServiceAccountName is the ServiceAccount to bind to the pipeline pod.\nWhen unset, the namespace's default ServiceAccount is used.\n\nSetting this is the recommended way to scope per-pipeline cloud-IAM\ntrust (e.g. IRSA on EKS, Workload Identity on GKE, Pod Identity on\nAKS). Annotating the namespace's default SA works but grants every\npipeline in the namespace the same role — naming a Pipeline-specific\nSA here keeps the trust boundary per-pipeline.\n\nThe operator does NOT create the ServiceAccount; provision it\n(along with the appropriate cloud-IAM annotations) out-of-band.",
+      "declaration_text": "\t// ServiceAccountName is the ServiceAccount to bind to the pipeline pod.\n\t// When unset, the namespace's default ServiceAccount is used.\n\t//\n\t// Setting this is the recommended way to scope per-pipeline cloud-IAM\n\t// trust (e.g. IRSA on EKS, Workload Identity on GKE, Pod Identity on\n\t// AKS). Annotating the namespace's default SA works but grants every\n\t// pipeline in the namespace the same role — naming a Pipeline-specific\n\t// SA here keeps the trust boundary per-pipeline.\n\t//\n\t// The operator does NOT create the ServiceAccount; provision it\n\t// (along with the appropriate cloud-IAM annotations) out-of-band.\n\t// +optional\n\tServiceAccountName string `json:\"serviceAccountName,omitempty\"`",
+      "rules": [
+        {
+          "id": "em-dash",
+          "severity": "warning",
+          "message": "Contains 1 em dash. Use a comma, parentheses, or a separate sentence: \"...n the namespace the same role — naming a Pipeline-specific\nS...\""
+        },
+        {
+          "id": "latin-abbreviation",
+          "severity": "warning",
+          "message": "Uses \"e.g.\". Write \"for example\" instead: \"...per-pipeline cloud-IAM\ntrust (e.g. IRSA on EKS, Workload Ide...\""
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "04341da944a9f8bc"
+    },
+    {
+      "surface": "crd",
+      "name": "extraInitContainers",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 230,
+      "line_end": 261,
+      "string": "ExtraInitContainers are additional init containers run to completion,\nin order, before the pipeline's lint and connect containers start. Use\nthem for setup steps the pipeline depends on — fetching certificate\nmaterial, warming a cache, or waiting on an external dependency. They run\nahead of the operator's built-in `lint` init container, so anything they\nwrite into a volume from .extraVolumes is visible to lint and to the\nconnect runtime (mount it into the pipeline via .extraVolumeMounts).\n\nThis is a raw container passthrough with no operator-applied policy; the\npod's service account and security posture apply. It is distinct from a\nlong-lived plugin sidecar (which would be an init container with\nrestartPolicy: Always and is not expressed here).\n\nExample (with the backing volume and the mount that exposes the staged\nfile to the pipeline containers):\n  spec:\n    extraVolumes:\n      - name: shared\n        emptyDir: {}\n    extraVolumeMounts:\n      - name: shared\n        mountPath: /shared\n        readOnly: true\n    extraInitContainers:\n      - name: fetch-certs\n        image: curlimages/curl:8.11.0\n        command: [\"sh\", \"-c\", \"curl -fsSL $CERT_URL -o /shared/ca.pem\"]\n        volumeMounts:\n          - name: shared\n            mountPath: /shared",
+      "declaration_text": "\t// ExtraInitContainers are additional init containers run to completion,\n\t// in order, before the pipeline's lint and connect containers start. Use\n\t// them for setup steps the pipeline depends on — fetching certificate\n\t// material, warming a cache, or waiting on an external dependency. They run\n\t// ahead of the operator's built-in `lint` init container, so anything they\n\t// write into a volume from .extraVolumes is visible to lint and to the\n\t// connect runtime (mount it into the pipeline via .extraVolumeMounts).\n\t//\n\t// This is a raw container passthrough with no operator-applied policy; the\n\t// pod's service account and security posture apply. It is distinct from a\n\t// long-lived plugin sidecar (which would be an init container with\n\t// restartPolicy: Always and is not expressed here).\n\t//\n\t// Example (with the backing volume and the mount that exposes the staged\n\t// file to the pipeline containers):\n\t//   spec:\n\t//     extraVolumes:\n\t//       - name: shared\n\t//         emptyDir: {}\n\t//     extraVolumeMounts:\n\t//       - name: shared\n\t//         mountPath: /shared\n\t//         readOnly: true\n\t//     extraInitContainers:\n\t//       - name: fetch-certs\n\t//         image: curlimages/curl:8.11.0\n\t//         command: [\"sh\", \"-c\", \"curl -fsSL $CERT_URL -o /shared/ca.pem\"]\n\t//         volumeMounts:\n\t//           - name: shared\n\t//             mountPath: /shared\n\t// +optional\n\tExtraInitContainers []corev1.Container `json:\"extraInitContainers,omitempty\"`",
+      "rules": [
+        {
+          "id": "em-dash",
+          "severity": "warning",
+          "message": "Contains 1 em dash. Use a comma, parentheses, or a separate sentence: \"...steps the pipeline depends on — fetching certificate\nmateria...\""
+        },
+        {
+          "id": "missing-inline-code",
+          "severity": "warning",
+          "message": "Code values and field names belong in inline code: `/shared/ca.pem`. Wrap each in backticks, which render as inline code in both AsciiDoc and Markdown."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "b745b5d7dbb19798"
+    },
+    {
+      "surface": "crd",
+      "name": "valueSources",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 278,
+      "line_end": 303,
+      "string": "ValueSources is a list of named values the pipeline YAML can reference\nvia ${NAME} interpolation. Each value is fetched at render time from\ninline / ConfigMap / Secret / ExternalSecret and projected into the\npipeline pod as an environment variable. One named pull per entry —\navoids the bag-of-Secrets env-splat pattern.\n\nExample:\n  spec:\n    valueSources:\n      - name: S3_SECRET_KEY\n        source:\n          secretKeyRef:\n            name: s3-creds\n            key: secret_access_key\n    configYaml: |\n      output:\n        aws_s3:\n          bucket: my-bucket\n          credentials:\n            secret: ${S3_SECRET_KEY}\n\nSee: https://docs.redpanda.com/redpanda-connect/configuration/secrets/",
+      "declaration_text": "\t// ValueSources is a list of named values the pipeline YAML can reference\n\t// via ${NAME} interpolation. Each value is fetched at render time from\n\t// inline / ConfigMap / Secret / ExternalSecret and projected into the\n\t// pipeline pod as an environment variable. One named pull per entry —\n\t// avoids the bag-of-Secrets env-splat pattern.\n\t//\n\t// Example:\n\t//   spec:\n\t//     valueSources:\n\t//       - name: S3_SECRET_KEY\n\t//         source:\n\t//           secretKeyRef:\n\t//             name: s3-creds\n\t//             key: secret_access_key\n\t//     configYaml: |\n\t//       output:\n\t//         aws_s3:\n\t//           bucket: my-bucket\n\t//           credentials:\n\t//             secret: ${S3_SECRET_KEY}\n\t//\n\t// See: https://docs.redpanda.com/redpanda-connect/configuration/secrets/\n\t// +optional\n\t// +listType=map\n\t// +listMapKey=name\n\tValueSources []NamedValueSource `json:\"valueSources,omitempty\"`",
+      "rules": [
+        {
+          "id": "em-dash",
+          "severity": "warning",
+          "message": "Contains 1 em dash. Use a comma, parentheses, or a separate sentence: \"...ble. One named pull per entry —\navoids the bag-of-Secrets en...\""
+        },
+        {
+          "id": "missing-inline-code",
+          "severity": "warning",
+          "message": "Code values and field names belong in inline code: `secret_access_key`, `aws_s3`. Wrap each in backticks, which render as inline code in both AsciiDoc and Markdown."
+        },
+        {
+          "id": "raw-pipe",
+          "severity": "error",
+          "message": "Contains 1 raw unescaped \"|\" outside backticks. This string is rendered verbatim inside AsciiDoc tables; escape it (\\|) or wrap it in backticks."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "aa495ae7179ecd08"
+    },
+    {
+      "surface": "crd",
+      "name": "nodeSelector",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 316,
+      "line_end": 321,
+      "string": "NodeSelector constrains pipeline pods to nodes with matching labels — the\nsimplest way to pin a pipeline to a specific Kubernetes node pool (match\nthe node pool's label, e.g. eks.amazonaws.com/nodegroup or a custom\nlabel). Combine with Tolerations if the node pool is tainted.",
+      "declaration_text": "\t// NodeSelector constrains pipeline pods to nodes with matching labels — the\n\t// simplest way to pin a pipeline to a specific Kubernetes node pool (match\n\t// the node pool's label, e.g. eks.amazonaws.com/nodegroup or a custom\n\t// label). Combine with Tolerations if the node pool is tainted.\n\t// +optional\n\tNodeSelector map[string]string `json:\"nodeSelector,omitempty\"`",
+      "rules": [
+        {
+          "id": "em-dash",
+          "severity": "warning",
+          "message": "Contains 1 em dash. Use a comma, parentheses, or a separate sentence: \"...to nodes with matching labels — the\nsimplest way to pin a pi...\""
+        },
+        {
+          "id": "latin-abbreviation",
+          "severity": "warning",
+          "message": "Uses \"e.g.\". Write \"for example\" instead: \"...(match\nthe node pool's label, e.g. eks.amazonaws.com/nodegro...\""
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "be792937e8d7f731"
+    },
+    {
+      "surface": "crd",
+      "name": "affinity",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 323,
+      "line_end": 330,
+      "string": "Affinity sets pod affinity/anti-affinity for the pipeline pods. Use it for\nnode-pool scheduling that NodeSelector can't express — required-OR-of-pools\n(multiple acceptable node pools), preferred (soft) node-pool placement, or\npod anti-affinity to spread a pipeline across nodes. It is merged with any\nauto-generated zone affinity from Zones: the zone requirement is AND-ed\ninto the node affinity so both constraints apply.",
+      "declaration_text": "\t// Affinity sets pod affinity/anti-affinity for the pipeline pods. Use it for\n\t// node-pool scheduling that NodeSelector can't express — required-OR-of-pools\n\t// (multiple acceptable node pools), preferred (soft) node-pool placement, or\n\t// pod anti-affinity to spread a pipeline across nodes. It is merged with any\n\t// auto-generated zone affinity from Zones: the zone requirement is AND-ed\n\t// into the node affinity so both constraints apply.\n\t// +optional\n\tAffinity *corev1.Affinity `json:\"affinity,omitempty\"`",
+      "rules": [
+        {
+          "id": "em-dash",
+          "severity": "warning",
+          "message": "Contains 1 em dash. Use a comma, parentheses, or a separate sentence: \"...at NodeSelector can't express — required-OR-of-pools\n(multip...\""
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "75b8a8034d4be883"
+    },
+    {
+      "surface": "crd",
+      "name": "cluster",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 354,
+      "line_end": 375,
+      "string": "ClusterSource declaratively binds the pipeline's redpanda input/output\nto a Redpanda cluster. Mirrors the ClusterSource pattern used by the\nUser/Topic CRDs:\n\n  - clusterRef: point at an existing Redpanda CR by name, in the same\n    namespace as the Pipeline (cross-namespace references are rejected —\n    the resolved TLS/SASL Secrets must be mountable by the pipeline\n    pod). The operator resolves the internal broker addresses + TLS\n    material automatically; the SASL identity is taken from .userRef.\n    SECURITY: when .userRef is NOT set and the referenced cluster has\n    SASL enabled, the pipeline authenticates as the cluster's bootstrap\n    superuser — its credentials are projected into the pipeline pod's\n    environment. Set .userRef so each pipeline runs with an ACL-scoped\n    identity instead.\n  - staticConfiguration: hard-code brokers, TLS, and SASL. The password\n    is a ValueSource so it can come from inline / Secret / ConfigMap /\n    ExternalSecret.\n\nWhen unset, the pipeline runs against whatever brokers the user wires\ninline in configYaml (e.g. an external Kafka, Confluent Cloud, etc.).",
+      "declaration_text": "\t// ClusterSource declaratively binds the pipeline's redpanda input/output\n\t// to a Redpanda cluster. Mirrors the ClusterSource pattern used by the\n\t// User/Topic CRDs:\n\t//\n\t//   - clusterRef: point at an existing Redpanda CR by name, in the same\n\t//     namespace as the Pipeline (cross-namespace references are rejected —\n\t//     the resolved TLS/SASL Secrets must be mountable by the pipeline\n\t//     pod). The operator resolves the internal broker addresses + TLS\n\t//     material automatically; the SASL identity is taken from .userRef.\n\t//     SECURITY: when .userRef is NOT set and the referenced cluster has\n\t//     SASL enabled, the pipeline authenticates as the cluster's bootstrap\n\t//     superuser — its credentials are projected into the pipeline pod's\n\t//     environment. Set .userRef so each pipeline runs with an ACL-scoped\n\t//     identity instead.\n\t//   - staticConfiguration: hard-code brokers, TLS, and SASL. The password\n\t//     is a ValueSource so it can come from inline / Secret / ConfigMap /\n\t//     ExternalSecret.\n\t//\n\t// When unset, the pipeline runs against whatever brokers the user wires\n\t// inline in configYaml (e.g. an external Kafka, Confluent Cloud, etc.).\n\t// +optional\n\tClusterSource *ClusterSource `json:\"cluster,omitempty\"`",
+      "rules": [
+        {
+          "id": "em-dash",
+          "severity": "warning",
+          "message": "Contains 2 em dashes. Use a comma, parentheses, or a separate sentence: \"...space references are rejected —\n    the resolved TLS/SASL Se...\""
+        },
+        {
+          "id": "latin-abbreviation",
+          "severity": "warning",
+          "message": "Uses \"e.g.\". Write \"for example\" instead: \"...r wires\ninline in configYaml (e.g. an external Kafka, Conflu...\""
+        },
+        {
+          "id": "go-field-name-first",
+          "severity": "warning",
+          "message": "Description starts with the Go field name \"ClusterSource\", but users type \"cluster\" in YAML. Describe the json key: \"cluster\" (or start with what the field does)."
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "5c4646c2f874f9dd"
+    },
+    {
+      "surface": "crd",
+      "name": "userRef",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 377,
+      "line_end": 400,
+      "string": "UserRef binds the pipeline to a User CR. When set alongside\n.cluster.clusterRef, the operator reads the referenced User's\npassword Secret + SASL mechanism and uses the User's metadata.name\nas the SASL username, emitting REDPANDA_SASL_USERNAME / _PASSWORD /\n_MECHANISM env vars in the pipeline pod and a `sasl:` block in the\nauto-generated `redpanda` config.\n\nSet this when the cluster the pipeline talks to has SASL enabled.\nOn unauthenticated clusters (and in clusterRef-only modes that\nonly need broker discovery), leave it empty.\n\nCEL restrictions:\n  - userRef must NOT be set alongside .cluster.staticConfiguration —\n    the static path carries its own inline SASL config.\n  - userRef must NOT be set without .cluster.clusterRef — there's no\n    cluster context to authenticate against otherwise.\n\nThe referenced User CR is expected to live in the same namespace as\nthe Pipeline and to declare ACLs scoped to the topics, schema\nsubjects, and consumer groups this pipeline reads/writes. The\noperator does NOT auto-create or modify the User CR — ACL scoping\nstays an explicit, auditable user-controlled action.",
+      "declaration_text": "\t// UserRef binds the pipeline to a User CR. When set alongside\n\t// .cluster.clusterRef, the operator reads the referenced User's\n\t// password Secret + SASL mechanism and uses the User's metadata.name\n\t// as the SASL username, emitting REDPANDA_SASL_USERNAME / _PASSWORD /\n\t// _MECHANISM env vars in the pipeline pod and a `sasl:` block in the\n\t// auto-generated `redpanda` config.\n\t//\n\t// Set this when the cluster the pipeline talks to has SASL enabled.\n\t// On unauthenticated clusters (and in clusterRef-only modes that\n\t// only need broker discovery), leave it empty.\n\t//\n\t// CEL restrictions:\n\t//   - userRef must NOT be set alongside .cluster.staticConfiguration —\n\t//     the static path carries its own inline SASL config.\n\t//   - userRef must NOT be set without .cluster.clusterRef — there's no\n\t//     cluster context to authenticate against otherwise.\n\t//\n\t// The referenced User CR is expected to live in the same namespace as\n\t// the Pipeline and to declare ACLs scoped to the topics, schema\n\t// subjects, and consumer groups this pipeline reads/writes. The\n\t// operator does NOT auto-create or modify the User CR — ACL scoping\n\t// stays an explicit, auditable user-controlled action.\n\t// +optional\n\tUserRef *PipelineUserRef `json:\"userRef,omitempty\"`",
+      "rules": [
+        {
+          "id": "em-dash",
+          "severity": "warning",
+          "message": "Contains 3 em dashes. Use a comma, parentheses, or a separate sentence: \"... .cluster.staticConfiguration —\n    the static path carries ...\""
+        }
+      ],
+      "convention": {
+        "case": "sentence",
+        "terminal_period": true,
+        "verbatim_asciidoc": true
+      },
+      "in_pr_diff": true,
+      "fingerprint": "84339c77000830ec"
+    }
+  ],
+  "summary": {
+    "totalDeclarations": 35,
+    "flaggedDeclarations": 9,
+    "removedSurfaceLines": 0,
+    "removedSurfaceFiles": [],
+    "errors": 1,
+    "warnings": 18,
+    "info": 0,
+    "byRule": {
+      "em-dash": {
+        "errors": 0,
+        "warnings": 9,
+        "info": 0
+      },
+      "missing-inline-code": {
+        "errors": 0,
+        "warnings": 4,
+        "info": 0
+      },
+      "latin-abbreviation": {
+        "errors": 0,
+        "warnings": 4,
+        "info": 0
+      },
+      "raw-pipe": {
+        "errors": 1,
+        "warnings": 0,
+        "info": 0
+      },
+      "go-field-name-first": {
+        "errors": 0,
+        "warnings": 1,
+        "info": 0
+      }
+    },
+    "bySurface": {
+      "crd": {
+        "declarations": 35,
+        "flagged": 9,
+        "errors": 1,
+        "warnings": 18,
+        "info": 0
+      }
+    },
+    "alreadyReviewed": 0,
+    "removedDeclarations": [],
+    "unverifiableDeclarations": 0,
+    "skippedDeclarations": []
+  },
+  "unsupported_surfaces": [],
+  "declarations": [
+    {
+      "surface": "crd",
+      "name": "configYaml",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 124,
+      "line_end": 144,
+      "fingerprint": "ae1f2a88e422920d",
+      "context": [
+        {
+          "name": "valueSources",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 278,
+          "string": "ValueSources is a list of named values the pipeline YAML can reference\nvia ${NAME} interpolation. Each value is fetched at render time from\ninline / ConfigMap / Secret / ExternalSecret and projected into the\npipeline pod as an environment variable. One named pull per entry —\navoids the bag-of-Secrets env-splat pattern.\n\nExample:\n  spec:\n    valueSources:\n      - name: S3_SECRET_KEY\n        source:\n          secretKeyRef:\n            name: s3-creds\n            key: secret_access_key\n    configYaml: |\n      output:\n        aws_s3:\n          bucket: my-bucket\n          credentials:\n            se..."
+        },
+        {
+          "name": "cluster",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 354,
+          "string": "ClusterSource declaratively binds the pipeline's redpanda input/output\nto a Redpanda cluster. Mirrors the ClusterSource pattern used by the\nUser/Topic CRDs:\n\n  - clusterRef: point at an existing Redpanda CR by name, in the same\n    namespace as the Pipeline (cross-namespace references are rejected —\n    the resolved TLS/SASL Secrets must be mountable by the pipeline\n    pod). The operator resolves the internal broker addresses + TLS\n    material automatically; the SASL identity is taken from .userRef.\n    SECURITY: when .userRef is NOT set and the referenced cluster has\n    SASL enabled, the p..."
+        },
+        {
+          "name": "userRef",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 377,
+          "string": "UserRef binds the pipeline to a User CR. When set alongside\n.cluster.clusterRef, the operator reads the referenced User's\npassword Secret + SASL mechanism and uses the User's metadata.name\nas the SASL username, emitting REDPANDA_SASL_USERNAME / _PASSWORD /\n_MECHANISM env vars in the pipeline pod and a `sasl:` block in the\nauto-generated `redpanda` config.\n\nSet this when the cluster the pipeline talks to has SASL enabled.\nOn unauthenticated clusters (and in clusterRef-only modes that\nonly need broker discovery), leave it empty.\n\nCEL restrictions:\n  - userRef must NOT be set alongside .cluster.s..."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "displayName",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 146,
+      "line_end": 149,
+      "fingerprint": "0ff97390dc6c2318",
+      "context": [
+        {
+          "name": "name",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 406,
+          "string": "Name of the User CR (in the same namespace as the Pipeline)."
+        },
+        {
+          "name": "name",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 414,
+          "string": "Name is the environment-variable name the pipeline YAML references.\nMust match standard env-var characters: [A-Z_][A-Z0-9_]*."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "description",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 151,
+      "line_end": 154,
+      "fingerprint": "35f3349f9a78b8e6",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "tags",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 156,
+      "line_end": 159,
+      "fingerprint": "5d72e01b88023a0c",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "configFiles",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 161,
+      "line_end": 167,
+      "fingerprint": "6ee327a6b6e711c4",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "replicas",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 169,
+      "line_end": 197,
+      "fingerprint": "7e9657784821d001",
+      "context": [
+        {
+          "name": "paused",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 217,
+          "string": "Paused stops the pipeline by scaling replicas to zero when set to true.\n\nPaused wins over .replicas, including values an autoscaler writes\nthrough the scale subresource: while paused the Deployment stays at\nzero (the pipeline reports Stopped) even if HPA/KEDA keep updating\n.replicas, and unpausing resumes at the current .replicas count."
+        },
+        {
+          "name": "resources",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 226,
+          "string": "Resources defines the compute resource requirements for the pipeline pods."
+        },
+        {
+          "name": "cluster",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 354,
+          "string": "ClusterSource declaratively binds the pipeline's redpanda input/output\nto a Redpanda cluster. Mirrors the ClusterSource pattern used by the\nUser/Topic CRDs:\n\n  - clusterRef: point at an existing Redpanda CR by name, in the same\n    namespace as the Pipeline (cross-namespace references are rejected —\n    the resolved TLS/SASL Secrets must be mountable by the pipeline\n    pod). The operator resolves the internal broker addresses + TLS\n    material automatically; the SASL identity is taken from .userRef.\n    SECURITY: when .userRef is NOT set and the referenced cluster has\n    SASL enabled, the p..."
+        },
+        {
+          "name": "name",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 406,
+          "string": "Name of the User CR (in the same namespace as the Pipeline)."
+        },
+        {
+          "name": "name",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 414,
+          "string": "Name is the environment-variable name the pipeline YAML references.\nMust match standard env-var characters: [A-Z_][A-Z0-9_]*."
+        },
+        {
+          "name": "replicas",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 449,
+          "string": "Replicas is the number of pipeline pods observed on the underlying\nDeployment. The scale subresource reports it as status.replicas, which\nis how HPA and KEDA observe the pipeline's current scale."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "image",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 199,
+      "line_end": 201,
+      "fingerprint": "f9fca09e1c44d62e",
+      "context": [
+        {
+          "name": "extraInitContainers",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 230,
+          "string": "ExtraInitContainers are additional init containers run to completion,\nin order, before the pipeline's lint and connect containers start. Use\nthem for setup steps the pipeline depends on — fetching certificate\nmaterial, warming a cache, or waiting on an external dependency. They run\nahead of the operator's built-in `lint` init container, so anything they\nwrite into a volume from .extraVolumes is visible to lint and to the\nconnect runtime (mount it into the pipeline via .extraVolumeMounts).\n\nThis is a raw container passthrough with no operator-applied policy; the\npod's service account and securi..."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "serviceAccountName",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 203,
+      "line_end": 215,
+      "fingerprint": "04341da944a9f8bc",
+      "context": [
+        {
+          "name": "annotations",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 305,
+          "string": "Annotations specifies additional annotations to apply to the pipeline pod\ntemplate. These are merged with any operator-level commonAnnotations, with\nper-pipeline annotations taking precedence. Useful for integrations like\nDatadog autodiscovery that rely on pod annotations."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "paused",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 217,
+      "line_end": 224,
+      "fingerprint": "6030dc7f319dbdd6",
+      "context": [
+        {
+          "name": "replicas",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 169,
+          "string": "Replicas is the number of pipeline replicas to run.\n\nThis field backs the Pipeline's scale subresource, so `kubectl scale\npipeline/<name>`, HorizontalPodAutoscaler, and KEDA ScaledObjects all\nread and write it through `/scale`. To autoscale a pipeline, point the\nautoscaler at the Pipeline itself — NOT at its Deployment, whose\nreplica count the operator continuously resets to this field:\n\n  scaleTargetRef:\n    apiVersion: cluster.redpanda.com/v1alpha2\n    kind: Pipeline\n    name: <pipeline-name>\n\nCPU and memory HPAs work out of the box: pipeline pods always carry\nresource requests (operator def..."
+        },
+        {
+          "name": "replicas",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 449,
+          "string": "Replicas is the number of pipeline pods observed on the underlying\nDeployment. The scale subresource reports it as status.replicas, which\nis how HPA and KEDA observe the pipeline's current scale."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "resources",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 226,
+      "line_end": 228,
+      "fingerprint": "abcb336d09d2b159",
+      "context": [
+        {
+          "name": "replicas",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 169,
+          "string": "Replicas is the number of pipeline replicas to run.\n\nThis field backs the Pipeline's scale subresource, so `kubectl scale\npipeline/<name>`, HorizontalPodAutoscaler, and KEDA ScaledObjects all\nread and write it through `/scale`. To autoscale a pipeline, point the\nautoscaler at the Pipeline itself — NOT at its Deployment, whose\nreplica count the operator continuously resets to this field:\n\n  scaleTargetRef:\n    apiVersion: cluster.redpanda.com/v1alpha2\n    kind: Pipeline\n    name: <pipeline-name>\n\nCPU and memory HPAs work out of the box: pipeline pods always carry\nresource requests (operator def..."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "extraInitContainers",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 230,
+      "line_end": 261,
+      "fingerprint": "b745b5d7dbb19798",
+      "context": [
+        {
+          "name": "image",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 199,
+          "string": "Image is the container image for the Redpanda Connect deployment."
+        },
+        {
+          "name": "extraVolumes",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 263,
+          "string": "ExtraVolumes are additional volumes added to the pipeline pod, typically\nbacking an .extraInitContainers staging step or an .extraVolumeMounts\nentry. Raw passthrough: any Kubernetes volume source is accepted. The\nnames \"config\", \"cluster-tls-ca\", and \"cluster-tls-client\" are reserved\nby the operator."
+        },
+        {
+          "name": "extraVolumeMounts",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 271,
+          "string": "ExtraVolumeMounts are additional volume mounts applied to the built-in\nlint init container and the connect container (both, so the linted view\nof the filesystem matches the runtime's). Mounts for\n.extraInitContainers are declared on those containers directly."
+        },
+        {
+          "name": "name",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 406,
+          "string": "Name of the User CR (in the same namespace as the Pipeline)."
+        },
+        {
+          "name": "name",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 414,
+          "string": "Name is the environment-variable name the pipeline YAML references.\nMust match standard env-var characters: [A-Z_][A-Z0-9_]*."
+        },
+        {
+          "name": "spec",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 482,
+          "string": "Spec defines the desired state of the Pipeline."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "extraVolumes",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 263,
+      "line_end": 269,
+      "fingerprint": "f5461f8f4fc0a6ec",
+      "context": [
+        {
+          "name": "extraInitContainers",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 230,
+          "string": "ExtraInitContainers are additional init containers run to completion,\nin order, before the pipeline's lint and connect containers start. Use\nthem for setup steps the pipeline depends on — fetching certificate\nmaterial, warming a cache, or waiting on an external dependency. They run\nahead of the operator's built-in `lint` init container, so anything they\nwrite into a volume from .extraVolumes is visible to lint and to the\nconnect runtime (mount it into the pipeline via .extraVolumeMounts).\n\nThis is a raw container passthrough with no operator-applied policy; the\npod's service account and securi..."
+        },
+        {
+          "name": "extraVolumeMounts",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 271,
+          "string": "ExtraVolumeMounts are additional volume mounts applied to the built-in\nlint init container and the connect container (both, so the linted view\nof the filesystem matches the runtime's). Mounts for\n.extraInitContainers are declared on those containers directly."
+        },
+        {
+          "name": "cluster",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 354,
+          "string": "ClusterSource declaratively binds the pipeline's redpanda input/output\nto a Redpanda cluster. Mirrors the ClusterSource pattern used by the\nUser/Topic CRDs:\n\n  - clusterRef: point at an existing Redpanda CR by name, in the same\n    namespace as the Pipeline (cross-namespace references are rejected —\n    the resolved TLS/SASL Secrets must be mountable by the pipeline\n    pod). The operator resolves the internal broker addresses + TLS\n    material automatically; the SASL identity is taken from .userRef.\n    SECURITY: when .userRef is NOT set and the referenced cluster has\n    SASL enabled, the p..."
+        },
+        {
+          "name": "source",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 420,
+          "string": "Source is the value provider. Exactly one of inline / configMapKeyRef\n/ secretKeyRef / externalSecretRef must be set; the ValueSource\nXValidation rules enforce this."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "extraVolumeMounts",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 271,
+      "line_end": 276,
+      "fingerprint": "50f6078532d118ae",
+      "context": [
+        {
+          "name": "extraInitContainers",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 230,
+          "string": "ExtraInitContainers are additional init containers run to completion,\nin order, before the pipeline's lint and connect containers start. Use\nthem for setup steps the pipeline depends on — fetching certificate\nmaterial, warming a cache, or waiting on an external dependency. They run\nahead of the operator's built-in `lint` init container, so anything they\nwrite into a volume from .extraVolumes is visible to lint and to the\nconnect runtime (mount it into the pipeline via .extraVolumeMounts).\n\nThis is a raw container passthrough with no operator-applied policy; the\npod's service account and securi..."
+        },
+        {
+          "name": "extraVolumes",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 263,
+          "string": "ExtraVolumes are additional volumes added to the pipeline pod, typically\nbacking an .extraInitContainers staging step or an .extraVolumeMounts\nentry. Raw passthrough: any Kubernetes volume source is accepted. The\nnames \"config\", \"cluster-tls-ca\", and \"cluster-tls-client\" are reserved\nby the operator."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "valueSources",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 278,
+      "line_end": 303,
+      "fingerprint": "aa495ae7179ecd08",
+      "context": [
+        {
+          "name": "configYaml",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 124,
+          "string": "ConfigYAML is the user-supplied Redpanda Connect pipeline YAML.\nReference cluster-bound or sensitive values from .valueSources via\n${NAME} interpolation; the operator resolves them at render time.\n\nWhen .cluster is set, the operator inline-merges connection fields\n(seed_brokers, tls, sasl) into any `input.redpanda` and\n`output.redpanda` blocks in this YAML, derived from the resolved\ncluster connection and .userRef. Users only need to write the\nper-plugin fields (topic, key, consumer_group, etc.); brokers, TLS,\nand SASL are filled in by the operator.\n\nUser-side keys win on conflict — set a key ..."
+        },
+        {
+          "name": "name",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 406,
+          "string": "Name of the User CR (in the same namespace as the Pipeline)."
+        },
+        {
+          "name": "name",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 414,
+          "string": "Name is the environment-variable name the pipeline YAML references.\nMust match standard env-var characters: [A-Z_][A-Z0-9_]*."
+        },
+        {
+          "name": "source",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 420,
+          "string": "Source is the value provider. Exactly one of inline / configMapKeyRef\n/ secretKeyRef / externalSecretRef must be set; the ValueSource\nXValidation rules enforce this."
+        },
+        {
+          "name": "spec",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 482,
+          "string": "Spec defines the desired state of the Pipeline."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "annotations",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 305,
+      "line_end": 310,
+      "fingerprint": "965d092e05dac611",
+      "context": [
+        {
+          "name": "serviceAccountName",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 203,
+          "string": "ServiceAccountName is the ServiceAccount to bind to the pipeline pod.\nWhen unset, the namespace's default ServiceAccount is used.\n\nSetting this is the recommended way to scope per-pipeline cloud-IAM\ntrust (e.g. IRSA on EKS, Workload Identity on GKE, Pod Identity on\nAKS). Annotating the namespace's default SA works but grants every\npipeline in the namespace the same role — naming a Pipeline-specific\nSA here keeps the trust boundary per-pipeline.\n\nThe operator does NOT create the ServiceAccount; provision it\n(along with the appropriate cloud-IAM annotations) out-of-band."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "tolerations",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 312,
+      "line_end": 314,
+      "fingerprint": "e12689878876bd5e",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "nodeSelector",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 316,
+      "line_end": 321,
+      "fingerprint": "be792937e8d7f731",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "affinity",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 323,
+      "line_end": 330,
+      "fingerprint": "75b8a8034d4be883",
+      "context": [
+        {
+          "name": "zones",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 340,
+          "string": "Zones specifies the availability zones across which pipeline pods should\nbe spread. When set, the controller configures:\n  - A node affinity to schedule pods only on nodes in these zones\n  - A topology spread constraint to distribute pods evenly across zones\nThe zone label used is \"topology.kubernetes.io/zone\"."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "topologySpreadConstraints",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 332,
+      "line_end": 338,
+      "fingerprint": "775516eae83fff21",
+      "context": [
+        {
+          "name": "zones",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 340,
+          "string": "Zones specifies the availability zones across which pipeline pods should\nbe spread. When set, the controller configures:\n  - A node affinity to schedule pods only on nodes in these zones\n  - A topology spread constraint to distribute pods evenly across zones\nThe zone label used is \"topology.kubernetes.io/zone\"."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "zones",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 340,
+      "line_end": 346,
+      "fingerprint": "00652684b0c3b29a",
+      "context": [
+        {
+          "name": "affinity",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 323,
+          "string": "Affinity sets pod affinity/anti-affinity for the pipeline pods. Use it for\nnode-pool scheduling that NodeSelector can't express — required-OR-of-pools\n(multiple acceptable node pools), preferred (soft) node-pool placement, or\npod anti-affinity to spread a pipeline across nodes. It is merged with any\nauto-generated zone affinity from Zones: the zone requirement is AND-ed\ninto the node affinity so both constraints apply."
+        },
+        {
+          "name": "topologySpreadConstraints",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 332,
+          "string": "TopologySpreadConstraints controls how pipeline pods are spread across\ntopology domains such as availability zones. When Zones is specified,\na default topology spread constraint is generated automatically.\nAny constraints specified here are used in addition to (or instead of)\nthe auto-generated zone constraint."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "budget",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 348,
+      "line_end": 352,
+      "fingerprint": "6eb36f35e10fd80f",
+      "context": [
+        {
+          "name": "cluster",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 354,
+          "string": "ClusterSource declaratively binds the pipeline's redpanda input/output\nto a Redpanda cluster. Mirrors the ClusterSource pattern used by the\nUser/Topic CRDs:\n\n  - clusterRef: point at an existing Redpanda CR by name, in the same\n    namespace as the Pipeline (cross-namespace references are rejected —\n    the resolved TLS/SASL Secrets must be mountable by the pipeline\n    pod). The operator resolves the internal broker addresses + TLS\n    material automatically; the SASL identity is taken from .userRef.\n    SECURITY: when .userRef is NOT set and the referenced cluster has\n    SASL enabled, the p..."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "cluster",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 354,
+      "line_end": 375,
+      "fingerprint": "5c4646c2f874f9dd",
+      "context": [
+        {
+          "name": "configYaml",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 124,
+          "string": "ConfigYAML is the user-supplied Redpanda Connect pipeline YAML.\nReference cluster-bound or sensitive values from .valueSources via\n${NAME} interpolation; the operator resolves them at render time.\n\nWhen .cluster is set, the operator inline-merges connection fields\n(seed_brokers, tls, sasl) into any `input.redpanda` and\n`output.redpanda` blocks in this YAML, derived from the resolved\ncluster connection and .userRef. Users only need to write the\nper-plugin fields (topic, key, consumer_group, etc.); brokers, TLS,\nand SASL are filled in by the operator.\n\nUser-side keys win on conflict — set a key ..."
+        },
+        {
+          "name": "replicas",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 169,
+          "string": "Replicas is the number of pipeline replicas to run.\n\nThis field backs the Pipeline's scale subresource, so `kubectl scale\npipeline/<name>`, HorizontalPodAutoscaler, and KEDA ScaledObjects all\nread and write it through `/scale`. To autoscale a pipeline, point the\nautoscaler at the Pipeline itself — NOT at its Deployment, whose\nreplica count the operator continuously resets to this field:\n\n  scaleTargetRef:\n    apiVersion: cluster.redpanda.com/v1alpha2\n    kind: Pipeline\n    name: <pipeline-name>\n\nCPU and memory HPAs work out of the box: pipeline pods always carry\nresource requests (operator def..."
+        },
+        {
+          "name": "extraVolumes",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 263,
+          "string": "ExtraVolumes are additional volumes added to the pipeline pod, typically\nbacking an .extraInitContainers staging step or an .extraVolumeMounts\nentry. Raw passthrough: any Kubernetes volume source is accepted. The\nnames \"config\", \"cluster-tls-ca\", and \"cluster-tls-client\" are reserved\nby the operator."
+        },
+        {
+          "name": "budget",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 348,
+          "string": "Budget configures a PodDisruptionBudget for the pipeline Deployment,\nprotecting pipeline pods from voluntary disruptions such as node drains\nand cluster autoscaler evictions. When not set, no PDB is created."
+        },
+        {
+          "name": "userRef",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 377,
+          "string": "UserRef binds the pipeline to a User CR. When set alongside\n.cluster.clusterRef, the operator reads the referenced User's\npassword Secret + SASL mechanism and uses the User's metadata.name\nas the SASL username, emitting REDPANDA_SASL_USERNAME / _PASSWORD /\n_MECHANISM env vars in the pipeline pod and a `sasl:` block in the\nauto-generated `redpanda` config.\n\nSet this when the cluster the pipeline talks to has SASL enabled.\nOn unauthenticated clusters (and in clusterRef-only modes that\nonly need broker discovery), leave it empty.\n\nCEL restrictions:\n  - userRef must NOT be set alongside .cluster.s..."
+        },
+        {
+          "name": "name",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 406,
+          "string": "Name of the User CR (in the same namespace as the Pipeline)."
+        },
+        {
+          "name": "name",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 414,
+          "string": "Name is the environment-variable name the pipeline YAML references.\nMust match standard env-var characters: [A-Z_][A-Z0-9_]*."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "userRef",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 377,
+      "line_end": 400,
+      "fingerprint": "84339c77000830ec",
+      "context": [
+        {
+          "name": "configYaml",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 124,
+          "string": "ConfigYAML is the user-supplied Redpanda Connect pipeline YAML.\nReference cluster-bound or sensitive values from .valueSources via\n${NAME} interpolation; the operator resolves them at render time.\n\nWhen .cluster is set, the operator inline-merges connection fields\n(seed_brokers, tls, sasl) into any `input.redpanda` and\n`output.redpanda` blocks in this YAML, derived from the resolved\ncluster connection and .userRef. Users only need to write the\nper-plugin fields (topic, key, consumer_group, etc.); brokers, TLS,\nand SASL are filled in by the operator.\n\nUser-side keys win on conflict — set a key ..."
+        },
+        {
+          "name": "cluster",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 354,
+          "string": "ClusterSource declaratively binds the pipeline's redpanda input/output\nto a Redpanda cluster. Mirrors the ClusterSource pattern used by the\nUser/Topic CRDs:\n\n  - clusterRef: point at an existing Redpanda CR by name, in the same\n    namespace as the Pipeline (cross-namespace references are rejected —\n    the resolved TLS/SASL Secrets must be mountable by the pipeline\n    pod). The operator resolves the internal broker addresses + TLS\n    material automatically; the SASL identity is taken from .userRef.\n    SECURITY: when .userRef is NOT set and the referenced cluster has\n    SASL enabled, the p..."
+        },
+        {
+          "name": "name",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 406,
+          "string": "Name of the User CR (in the same namespace as the Pipeline)."
+        },
+        {
+          "name": "name",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 414,
+          "string": "Name is the environment-variable name the pipeline YAML references.\nMust match standard env-var characters: [A-Z_][A-Z0-9_]*."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "name",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 406,
+      "line_end": 408,
+      "fingerprint": "25918280418951d3",
+      "context": [
+        {
+          "name": "displayName",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 146,
+          "string": "DisplayName is a human-readable name for the pipeline.\nMaps to the pipeline display name when migrating to Redpanda Cloud."
+        },
+        {
+          "name": "replicas",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 169,
+          "string": "Replicas is the number of pipeline replicas to run.\n\nThis field backs the Pipeline's scale subresource, so `kubectl scale\npipeline/<name>`, HorizontalPodAutoscaler, and KEDA ScaledObjects all\nread and write it through `/scale`. To autoscale a pipeline, point the\nautoscaler at the Pipeline itself — NOT at its Deployment, whose\nreplica count the operator continuously resets to this field:\n\n  scaleTargetRef:\n    apiVersion: cluster.redpanda.com/v1alpha2\n    kind: Pipeline\n    name: <pipeline-name>\n\nCPU and memory HPAs work out of the box: pipeline pods always carry\nresource requests (operator def..."
+        },
+        {
+          "name": "extraInitContainers",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 230,
+          "string": "ExtraInitContainers are additional init containers run to completion,\nin order, before the pipeline's lint and connect containers start. Use\nthem for setup steps the pipeline depends on — fetching certificate\nmaterial, warming a cache, or waiting on an external dependency. They run\nahead of the operator's built-in `lint` init container, so anything they\nwrite into a volume from .extraVolumes is visible to lint and to the\nconnect runtime (mount it into the pipeline via .extraVolumeMounts).\n\nThis is a raw container passthrough with no operator-applied policy; the\npod's service account and securi..."
+        },
+        {
+          "name": "valueSources",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 278,
+          "string": "ValueSources is a list of named values the pipeline YAML can reference\nvia ${NAME} interpolation. Each value is fetched at render time from\ninline / ConfigMap / Secret / ExternalSecret and projected into the\npipeline pod as an environment variable. One named pull per entry —\navoids the bag-of-Secrets env-splat pattern.\n\nExample:\n  spec:\n    valueSources:\n      - name: S3_SECRET_KEY\n        source:\n          secretKeyRef:\n            name: s3-creds\n            key: secret_access_key\n    configYaml: |\n      output:\n        aws_s3:\n          bucket: my-bucket\n          credentials:\n            se..."
+        },
+        {
+          "name": "cluster",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 354,
+          "string": "ClusterSource declaratively binds the pipeline's redpanda input/output\nto a Redpanda cluster. Mirrors the ClusterSource pattern used by the\nUser/Topic CRDs:\n\n  - clusterRef: point at an existing Redpanda CR by name, in the same\n    namespace as the Pipeline (cross-namespace references are rejected —\n    the resolved TLS/SASL Secrets must be mountable by the pipeline\n    pod). The operator resolves the internal broker addresses + TLS\n    material automatically; the SASL identity is taken from .userRef.\n    SECURITY: when .userRef is NOT set and the referenced cluster has\n    SASL enabled, the p..."
+        },
+        {
+          "name": "userRef",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 377,
+          "string": "UserRef binds the pipeline to a User CR. When set alongside\n.cluster.clusterRef, the operator reads the referenced User's\npassword Secret + SASL mechanism and uses the User's metadata.name\nas the SASL username, emitting REDPANDA_SASL_USERNAME / _PASSWORD /\n_MECHANISM env vars in the pipeline pod and a `sasl:` block in the\nauto-generated `redpanda` config.\n\nSet this when the cluster the pipeline talks to has SASL enabled.\nOn unauthenticated clusters (and in clusterRef-only modes that\nonly need broker discovery), leave it empty.\n\nCEL restrictions:\n  - userRef must NOT be set alongside .cluster.s..."
+        },
+        {
+          "name": "name",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 414,
+          "string": "Name is the environment-variable name the pipeline YAML references.\nMust match standard env-var characters: [A-Z_][A-Z0-9_]*."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "name",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 414,
+      "line_end": 418,
+      "fingerprint": "f6c86505b434ddae",
+      "context": [
+        {
+          "name": "displayName",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 146,
+          "string": "DisplayName is a human-readable name for the pipeline.\nMaps to the pipeline display name when migrating to Redpanda Cloud."
+        },
+        {
+          "name": "replicas",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 169,
+          "string": "Replicas is the number of pipeline replicas to run.\n\nThis field backs the Pipeline's scale subresource, so `kubectl scale\npipeline/<name>`, HorizontalPodAutoscaler, and KEDA ScaledObjects all\nread and write it through `/scale`. To autoscale a pipeline, point the\nautoscaler at the Pipeline itself — NOT at its Deployment, whose\nreplica count the operator continuously resets to this field:\n\n  scaleTargetRef:\n    apiVersion: cluster.redpanda.com/v1alpha2\n    kind: Pipeline\n    name: <pipeline-name>\n\nCPU and memory HPAs work out of the box: pipeline pods always carry\nresource requests (operator def..."
+        },
+        {
+          "name": "extraInitContainers",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 230,
+          "string": "ExtraInitContainers are additional init containers run to completion,\nin order, before the pipeline's lint and connect containers start. Use\nthem for setup steps the pipeline depends on — fetching certificate\nmaterial, warming a cache, or waiting on an external dependency. They run\nahead of the operator's built-in `lint` init container, so anything they\nwrite into a volume from .extraVolumes is visible to lint and to the\nconnect runtime (mount it into the pipeline via .extraVolumeMounts).\n\nThis is a raw container passthrough with no operator-applied policy; the\npod's service account and securi..."
+        },
+        {
+          "name": "valueSources",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 278,
+          "string": "ValueSources is a list of named values the pipeline YAML can reference\nvia ${NAME} interpolation. Each value is fetched at render time from\ninline / ConfigMap / Secret / ExternalSecret and projected into the\npipeline pod as an environment variable. One named pull per entry —\navoids the bag-of-Secrets env-splat pattern.\n\nExample:\n  spec:\n    valueSources:\n      - name: S3_SECRET_KEY\n        source:\n          secretKeyRef:\n            name: s3-creds\n            key: secret_access_key\n    configYaml: |\n      output:\n        aws_s3:\n          bucket: my-bucket\n          credentials:\n            se..."
+        },
+        {
+          "name": "cluster",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 354,
+          "string": "ClusterSource declaratively binds the pipeline's redpanda input/output\nto a Redpanda cluster. Mirrors the ClusterSource pattern used by the\nUser/Topic CRDs:\n\n  - clusterRef: point at an existing Redpanda CR by name, in the same\n    namespace as the Pipeline (cross-namespace references are rejected —\n    the resolved TLS/SASL Secrets must be mountable by the pipeline\n    pod). The operator resolves the internal broker addresses + TLS\n    material automatically; the SASL identity is taken from .userRef.\n    SECURITY: when .userRef is NOT set and the referenced cluster has\n    SASL enabled, the p..."
+        },
+        {
+          "name": "userRef",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 377,
+          "string": "UserRef binds the pipeline to a User CR. When set alongside\n.cluster.clusterRef, the operator reads the referenced User's\npassword Secret + SASL mechanism and uses the User's metadata.name\nas the SASL username, emitting REDPANDA_SASL_USERNAME / _PASSWORD /\n_MECHANISM env vars in the pipeline pod and a `sasl:` block in the\nauto-generated `redpanda` config.\n\nSet this when the cluster the pipeline talks to has SASL enabled.\nOn unauthenticated clusters (and in clusterRef-only modes that\nonly need broker discovery), leave it empty.\n\nCEL restrictions:\n  - userRef must NOT be set alongside .cluster.s..."
+        },
+        {
+          "name": "name",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 406,
+          "string": "Name of the User CR (in the same namespace as the Pipeline)."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "source",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 420,
+      "line_end": 423,
+      "fingerprint": "9ccff80eb9706f6b",
+      "context": [
+        {
+          "name": "extraVolumes",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 263,
+          "string": "ExtraVolumes are additional volumes added to the pipeline pod, typically\nbacking an .extraInitContainers staging step or an .extraVolumeMounts\nentry. Raw passthrough: any Kubernetes volume source is accepted. The\nnames \"config\", \"cluster-tls-ca\", and \"cluster-tls-client\" are reserved\nby the operator."
+        },
+        {
+          "name": "valueSources",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 278,
+          "string": "ValueSources is a list of named values the pipeline YAML can reference\nvia ${NAME} interpolation. Each value is fetched at render time from\ninline / ConfigMap / Secret / ExternalSecret and projected into the\npipeline pod as an environment variable. One named pull per entry —\navoids the bag-of-Secrets env-splat pattern.\n\nExample:\n  spec:\n    valueSources:\n      - name: S3_SECRET_KEY\n        source:\n          secretKeyRef:\n            name: s3-creds\n            key: secret_access_key\n    configYaml: |\n      output:\n        aws_s3:\n          bucket: my-bucket\n          credentials:\n            se..."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "maxUnavailable",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 428,
+      "line_end": 432,
+      "fingerprint": "6086a52b71a70011",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "observedGeneration",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 437,
+      "line_end": 439,
+      "fingerprint": "d98cc56bbaf46095",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "conditions",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 441,
+      "line_end": 443,
+      "fingerprint": "f2d60c7362d21f68",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "phase",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 445,
+      "line_end": 447,
+      "fingerprint": "12a724111500b0e3",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "replicas",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 449,
+      "line_end": 453,
+      "fingerprint": "56ef0ebcff380d60",
+      "context": [
+        {
+          "name": "replicas",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 169,
+          "string": "Replicas is the number of pipeline replicas to run.\n\nThis field backs the Pipeline's scale subresource, so `kubectl scale\npipeline/<name>`, HorizontalPodAutoscaler, and KEDA ScaledObjects all\nread and write it through `/scale`. To autoscale a pipeline, point the\nautoscaler at the Pipeline itself — NOT at its Deployment, whose\nreplica count the operator continuously resets to this field:\n\n  scaleTargetRef:\n    apiVersion: cluster.redpanda.com/v1alpha2\n    kind: Pipeline\n    name: <pipeline-name>\n\nCPU and memory HPAs work out of the box: pipeline pods always carry\nresource requests (operator def..."
+        },
+        {
+          "name": "paused",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 217,
+          "string": "Paused stops the pipeline by scaling replicas to zero when set to true.\n\nPaused wins over .replicas, including values an autoscaler writes\nthrough the scale subresource: while paused the Deployment stays at\nzero (the pipeline reports Stopped) even if HPA/KEDA keep updating\n.replicas, and unpausing resumes at the current .replicas count."
+        },
+        {
+          "name": "status",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 485,
+          "string": "Status represents the current observed state of the Pipeline."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "readyReplicas",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 455,
+      "line_end": 457,
+      "fingerprint": "50f87c4ca56f558d",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "selector",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 459,
+      "line_end": 464,
+      "fingerprint": "4f3709170dcb2f2f",
+      "context": [
+        {
+          "name": "status",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 485,
+          "string": "Status represents the current observed state of the Pipeline."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "spec",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 482,
+      "line_end": 483,
+      "fingerprint": "76c6e272bf786350",
+      "context": [
+        {
+          "name": "extraInitContainers",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 230,
+          "string": "ExtraInitContainers are additional init containers run to completion,\nin order, before the pipeline's lint and connect containers start. Use\nthem for setup steps the pipeline depends on — fetching certificate\nmaterial, warming a cache, or waiting on an external dependency. They run\nahead of the operator's built-in `lint` init container, so anything they\nwrite into a volume from .extraVolumes is visible to lint and to the\nconnect runtime (mount it into the pipeline via .extraVolumeMounts).\n\nThis is a raw container passthrough with no operator-applied policy; the\npod's service account and securi..."
+        },
+        {
+          "name": "valueSources",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 278,
+          "string": "ValueSources is a list of named values the pipeline YAML can reference\nvia ${NAME} interpolation. Each value is fetched at render time from\ninline / ConfigMap / Secret / ExternalSecret and projected into the\npipeline pod as an environment variable. One named pull per entry —\navoids the bag-of-Secrets env-splat pattern.\n\nExample:\n  spec:\n    valueSources:\n      - name: S3_SECRET_KEY\n        source:\n          secretKeyRef:\n            name: s3-creds\n            key: secret_access_key\n    configYaml: |\n      output:\n        aws_s3:\n          bucket: my-bucket\n          credentials:\n            se..."
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "status",
+      "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+      "line_start": 485,
+      "line_end": 486,
+      "fingerprint": "baf490dc0dcdc913",
+      "context": [
+        {
+          "name": "replicas",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 449,
+          "string": "Replicas is the number of pipeline pods observed on the underlying\nDeployment. The scale subresource reports it as status.replicas, which\nis how HPA and KEDA observe the pipeline's current scale."
+        },
+        {
+          "name": "selector",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/pipeline_types.go",
+          "line_start": 459,
+          "string": "Selector is the label selector for this pipeline's pods, in string\nform. The scale subresource reports it as status.selector, which is\nhow HPA and KEDA discover the pods backing this Pipeline when\ncomputing per-pod (cpu/memory/custom) metrics."
+        }
+      ]
+    }
+  ]
+}

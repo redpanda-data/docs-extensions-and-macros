@@ -1,0 +1,77 @@
+name: Test MCP Server
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'bin/**'
+      - '__tests__/mcp/**'
+      - 'package.json'
+  pull_request:
+    paths:
+      - 'bin/**'
+      - '__tests__/mcp/**'
+      - 'package.json'
+
+permissions:
+  checks: write
+  pull-requests: write
+  contents: read
+
+jobs:
+  test-mcp:
+    name: Test MCP Server Integration
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run MCP integration tests
+        run: npm test -- __tests__/mcp/
+        env:
+          # Set test timeout for network operations
+          JEST_TIMEOUT: 30000
+
+      - name: Report test results
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: MCP Test Results
+          path: 'test-results/**/*.xml'
+          reporter: jest-junit
+          fail-on-error: true
+
+  test-cli-contract:
+    name: Verify CLI Contract
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run CLI contract tests
+        run: npm test -- __tests__/mcp/cli-contract.test.js
+
+      - name: Verify all generate commands exist
+        run: |
+          echo "Verifying generate commands..."
+          npx doc-tools generate --help | grep -E "(property-docs|metrics-docs|rpk-docs|rpcn-connector-docs|helm-spec|cloud-regions|crd-spec|bundle-openapi)"

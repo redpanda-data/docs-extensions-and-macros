@@ -1,0 +1,13 @@
+{{#if this.config.children}}
+{{{generatedMarker "rpcn-connector-docs" "the component spec in redpanda-data/connect or redpanda-data/benthos" "This file is a doc-tools preview. The published partials are generated in redpanda-data/connect by `task docs`, and their first line names the file that registers the component. To change the text, edit the component spec in that file."}}}
+
+== Fields
+
+{{{renderConnectFields this.config.children}}}
+{{else if this.children}}
+{{{generatedMarker "rpcn-connector-docs" "the component spec in redpanda-data/connect or redpanda-data/benthos" "This file is a doc-tools preview. The published partials are generated in redpanda-data/connect by `task docs`, and their first line names the file that registers the component. To change the text, edit the component spec in that file."}}}
+
+== Fields
+
+{{{renderConnectFields this.children}}}
+{{/if}}

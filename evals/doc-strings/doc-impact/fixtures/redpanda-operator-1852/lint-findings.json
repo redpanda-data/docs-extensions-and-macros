@@ -1,0 +1,179 @@
+{
+  "findings": [],
+  "summary": {
+    "totalDeclarations": 11,
+    "flaggedDeclarations": 0,
+    "removedSurfaceLines": 0,
+    "removedSurfaceFiles": [],
+    "errors": 0,
+    "warnings": 0,
+    "info": 0,
+    "byRule": {},
+    "bySurface": {
+      "helm": {
+        "declarations": 9,
+        "flagged": 0,
+        "errors": 0,
+        "warnings": 0,
+        "info": 0
+      },
+      "crd": {
+        "declarations": 2,
+        "flagged": 0,
+        "errors": 0,
+        "warnings": 0,
+        "info": 0
+      }
+    },
+    "alreadyReviewed": 0,
+    "removedDeclarations": [],
+    "unverifiableDeclarations": 0,
+    "skippedDeclarations": []
+  },
+  "unsupported_surfaces": [],
+  "declarations": [
+    {
+      "surface": "helm",
+      "name": "listeners.admin.address",
+      "file": "charts/redpanda/chart/values.yaml",
+      "line_start": 874,
+      "line_end": 876,
+      "fingerprint": "c8d31a29d0e9bb72",
+      "context": []
+    },
+    {
+      "surface": "helm",
+      "name": "listeners.admin.external.default.address",
+      "file": "charts/redpanda/chart/values.yaml",
+      "line_start": 885,
+      "line_end": 887,
+      "fingerprint": "23bb47275e7ee542",
+      "context": []
+    },
+    {
+      "surface": "helm",
+      "name": "listeners.kafka.address",
+      "file": "charts/redpanda/chart/values.yaml",
+      "line_start": 910,
+      "line_end": 912,
+      "fingerprint": "4e8dcf4e705b5235",
+      "context": []
+    },
+    {
+      "surface": "helm",
+      "name": "listeners.kafka.external.default.address",
+      "file": "charts/redpanda/chart/values.yaml",
+      "line_start": 925,
+      "line_end": 927,
+      "fingerprint": "c06de3f89d4131cb",
+      "context": []
+    },
+    {
+      "surface": "helm",
+      "name": "listeners.rpc.address",
+      "file": "charts/redpanda/chart/values.yaml",
+      "line_start": 953,
+      "line_end": 955,
+      "fingerprint": "587201fbede7c81d",
+      "context": []
+    },
+    {
+      "surface": "helm",
+      "name": "listeners.schemaRegistry.address",
+      "file": "charts/redpanda/chart/values.yaml",
+      "line_start": 965,
+      "line_end": 967,
+      "fingerprint": "d2b7b97d8be4c3aa",
+      "context": []
+    },
+    {
+      "surface": "helm",
+      "name": "listeners.schemaRegistry.external.default.address",
+      "file": "charts/redpanda/chart/values.yaml",
+      "line_start": 979,
+      "line_end": 981,
+      "fingerprint": "d65ca624c4e7e1af",
+      "context": []
+    },
+    {
+      "surface": "helm",
+      "name": "listeners.http.address",
+      "file": "charts/redpanda/chart/values.yaml",
+      "line_start": 994,
+      "line_end": 996,
+      "fingerprint": "578cc462368c1f49",
+      "context": []
+    },
+    {
+      "surface": "helm",
+      "name": "listeners.http.external.default.address",
+      "file": "charts/redpanda/chart/values.yaml",
+      "line_start": 1008,
+      "line_end": 1010,
+      "fingerprint": "50b2c82192705672",
+      "context": []
+    },
+    {
+      "surface": "crd",
+      "name": "address",
+      "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+      "line_start": 1004,
+      "line_end": 1005,
+      "fingerprint": "7bc2dbc22ac00ac4",
+      "context": [
+        {
+          "name": "domain",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 535,
+          "string": "Specifies the domain to advertise to external clients. If specified, then it will be appended to the `external.addresses` values as each broker's advertised address."
+        },
+        {
+          "name": "address",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1013,
+          "string": "The address to bind this listener to. Default 0.0.0.0"
+        },
+        {
+          "name": "listener",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1373,
+          "string": "Kafka external listener name, note that it must have `authenticationMethod` set to sasl"
+        }
+      ]
+    },
+    {
+      "surface": "crd",
+      "name": "address",
+      "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+      "line_start": 1013,
+      "line_end": 1014,
+      "fingerprint": "7bc2dbc22ac00ac4",
+      "context": [
+        {
+          "name": "domain",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 535,
+          "string": "Specifies the domain to advertise to external clients. If specified, then it will be appended to the `external.addresses` values as each broker's advertised address."
+        },
+        {
+          "name": "address",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1004,
+          "string": "The address to bind this listener to. Default 0.0.0.0"
+        },
+        {
+          "name": "listener",
+          "kind": "field",
+          "file": "operator/api/redpanda/v1alpha2/redpanda_clusterspec_types.go",
+          "line_start": 1373,
+          "string": "Kafka external listener name, note that it must have `authenticationMethod` set to sasl"
+        }
+      ]
+    }
+  ]
+}

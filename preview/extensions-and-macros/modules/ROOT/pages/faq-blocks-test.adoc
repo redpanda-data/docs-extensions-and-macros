@@ -1,0 +1,26 @@
+= FAQ Block Types Test
+:page-faq-1-anchor: #heading-block
+:page-faq-2-anchor: #example-block
+:page-faq-3-anchor: #sidebar-block
+
+Test which AsciiDoc blocks work with FAQ auto-extraction.
+
+[#heading-block]
+== Heading Block Test
+
+This is content under a heading with an anchor.
+This should work.
+
+[#example-block]
+.Example Block Test
+====
+This is an example block with an anchor.
+Does this work?
+====
+
+[#sidebar-block]
+.Sidebar Block Test
+****
+This is a sidebar block with an anchor.
+What about this?
+****

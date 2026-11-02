@@ -1,0 +1,7 @@
+name: Any dispatch
+on: [repository_dispatch, workflow_dispatch]
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi

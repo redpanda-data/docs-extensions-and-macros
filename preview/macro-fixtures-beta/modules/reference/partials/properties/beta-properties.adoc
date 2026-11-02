@@ -1,0 +1,7 @@
+=== iceberg_delete_orphans_enabled
+
+Removes Iceberg data files no longer referenced by any snapshot.
+
+=== log_segment_size
+
+Default log segment size in bytes.

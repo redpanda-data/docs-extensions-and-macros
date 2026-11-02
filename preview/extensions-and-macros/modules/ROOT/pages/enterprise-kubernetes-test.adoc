@@ -1,0 +1,23 @@
+= Kubernetes Environment Test (enterprise and prop macros)
+:env-kubernetes: true
+:enterprise-licensing-page: streaming:get-started:licensing/overview.adoc
+
+This page sets `:env-kubernetes: true`. The `enterprise` macro resolves each registry entry's `xref-kubernetes` when one exists, and the `prop` macro's `helm-path=auto` displays properties as their Helm values paths. Compare with the same calls on the xref:preview:ROOT:test.adoc[main test page], which render the default (Linux / self-managed) forms.
+
+== Enterprise macro
+
+Tiered Storage's registry entry carries an `xref-kubernetes`, so this links to the Kubernetes feature page: enterprise:Tiered Storage[] in a sentence.
+
+Continuous Data Balancing's entry has no `xref-kubernetes`, so it falls back to the entry's default `xref` (its Linux feature page): enterprise:Continuous Data Balancing[] in a sentence.
+
+The alias `cloud_storage` canonicalizes and gets the environment-specific link too: enterprise:cloud_storage[] in a sentence.
+
+== Prop macro helm-path
+
+With `helm-path=auto`, properties display as the Helm values path readers actually set on Kubernetes. The path is derived per property, fixing the old `config_ref` behavior that prefixed everything with `storage.tiered.config.`:
+
+A tiered storage property keeps the chart's dedicated block: prop:cloud_storage_enabled[helm-path=auto,link=true] in a sentence.
+
+Any other cluster property maps to the generic block: prop:log_segment_size[helm-path=auto,link=true] in a sentence.
+
+A broker property maps to the node block: prop:empty_seed_starts_cluster[helm-path=auto] in a sentence.

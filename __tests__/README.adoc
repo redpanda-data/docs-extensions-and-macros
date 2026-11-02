@@ -1,0 +1,221 @@
+= Test Directory
+:toc:
+:toc-title: Contents
+
+This directory contains all test files for the Redpanda docs extensions and macros project. The CI system automatically runs tests based on file changes using specific naming conventions.
+
+== Test file organization
+
+Tests are organized using a directory-based structure by component type. This provides clear organization and makes it easy for the CI system to run only relevant tests when files change.
+
+=== Directory structure
+
+Organize tests into subdirectories by type:
+
+* `__tests__/extensions/` - Extension tests
+* `__tests__/macros/` - Macro tests
+* `__tests__/asciidoc-extensions/` - AsciiDoc extension tests
+* `__tests__/tools/` - Tool tests
+* `__tests__/fixtures/` - Shared test fixtures and data
+* `__tests__/utils/` - Test utilities and helpers
+
+=== Test triggers
+
+The CI system automatically runs tests based on file changes:
+
+* *Extension changes* (`extensions/**/*.js`) → Runs `__tests__/extensions/` tests
+* *Macro changes* (`macros/**/*.js`) → Runs `__tests__/macros/` tests  
+* *AsciiDoc extension changes* (`asciidoc-extensions/**/*.js`) → Runs `__tests__/asciidoc-extensions/` tests
+* *Tool changes* (`tools/**/*`, `cli-utils/**/*`, `bin/**/*`) → Runs `__tests__/tools/` tests
+* *Core changes* (`package.json`, `jest.config.js`, etc.) → Runs all tests
+
+=== Test file naming
+
+With directory-based organization, test files can have simple descriptive names:
+
+* `__tests__/extensions/process-context-switcher.test.js` ✅
+* `__tests__/macros/config-ref.test.js` ✅
+* `__tests__/tools/generate-rpcn-connector-docs.test.js` ✅
+* `__tests__/asciidoc-extensions/add-line-numbers.test.js` ✅
+
+== CI workflow behavior
+
+=== Smart test execution
+
+The CI system uses the https://github.com/dorny/paths-filter[dorny/paths-filter] action to detect file changes and run only relevant tests:
+
+. *Extension changes* → Runs tests in `__tests__/extensions/`
+. *Macro changes* → Runs tests in `__tests__/macros/`  
+. *AsciiDoc extension changes* → Runs tests in `__tests__/asciidoc-extensions/`
+. *Tool changes* → Runs tests in `__tests__/tools/`
+. *Core changes* → Runs all tests
+
+=== Core files (run all tests)
+
+Changes to these files trigger the complete test suite:
+
+* `package.json`
+* `package-lock.json`
+* `__tests__/**` (any test file changes)
+* `jest.config.js`
+* `.github/workflows/**`
+
+=== Specific file matching
+
+When possible, the CI attempts to run tests for the specific files that changed:
+
+[source,bash]
+----
+# If extensions/process-context-switcher.js changes
+# CI looks for: __tests__/extensions/process-context-switcher.test.js
+----
+
+== Test file structure
+
+=== Recommended test file template
+
+[source,javascript]
+----
+const { describe, it, expect, beforeEach } = require('@jest/globals');
+
+// Import the module under test
+const extensionUnderTest = require('../../extensions/my-extension.js');
+
+describe('My Extension', () => {
+  let mockLogger;
+  let mockContext;
+
+  beforeEach(() => {
+    mockLogger = {
+      info: jest.fn(),
+      debug: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn()
+    };
+    
+    mockContext = {
+      getLogger: jest.fn(() => mockLogger),
+      on: jest.fn()
+    };
+  });
+
+  it('should register correctly', () => {
+    extensionUnderTest.register.call(mockContext, { config: {} });
+    expect(mockContext.on).toHaveBeenCalled();
+  });
+
+  // Add more specific tests...
+});
+----
+
+== Test organization
+
+=== Directory structure
+
+----
+__tests__/
+├── README.adoc                         # This file
+├── extensions/                         # Extension tests
+│   └── process-context-switcher.test.js
+├── macros/                            # Macro tests (empty, ready for use)
+├── asciidoc-extensions/               # AsciiDoc extension tests (empty, ready for use)
+├── tools/                             # Tool tests
+│   └── generate-rpcn-connector-docs.test.js
+├── fixtures/                          # Shared test fixtures (empty, ready for use)
+├── utils/                             # Test utilities and helpers (empty, ready for use)
+├── docs-data/                         # Test data
+│   └── overrides.json
+└── rpcn-connector-docs/               # Test fixtures for connector docs
+    └── docs-data/
+----
+
+=== Test data and fixtures
+
+* Store shared test fixtures in the `fixtures/` subdirectory
+* Use descriptive names for test fixture files
+* Keep test data minimal and focused
+* Place test utilities and helpers in the `utils/` subdirectory
+* Each test type directory (`extensions/`, `macros/`, etc.) can have its own local fixtures if needed
+
+== Running tests locally
+
+=== Run all tests
+
+[source,bash]
+----
+npm test
+----
+
+=== Run specific test types
+
+[source,bash]
+----
+# Extension tests only
+npm test -- __tests__/extensions/
+
+# Macro tests only  
+npm test -- __tests__/macros/
+
+# AsciiDoc extension tests only
+npm test -- __tests__/asciidoc-extensions/
+
+# Tool tests only
+npm test -- __tests__/tools/
+
+# Specific test file
+npm test -- __tests__/extensions/process-context-switcher.test.js
+----
+
+=== Run tests with coverage
+
+[source,bash]
+----
+npm test -- --coverage
+----
+
+== Best practices
+
+=== Naming guidelines
+
+. *Use directory structure* - Organize tests into `extensions/`, `macros/`, `asciidoc-extensions/`, `tools/` subdirectories
+. *Be descriptive* - Use clear, descriptive names that match the source file
+. *Use kebab-case* - Match the source file naming convention  
+. *End with `.test.js`* - Always use the `.test.js` suffix
+
+=== Test content guidelines
+
+. *Test the public API* - Focus on the module's exports and main functionality
+. *Mock dependencies* - Use Jest mocks for external dependencies
+. *Test error cases* - Include tests for error handling and edge cases
+. *Use descriptive test names* - Make test intentions clear
+
+=== Examples of good vs bad naming
+
+✅ *Good examples*:
+
+* `__tests__/extensions/process-context-switcher.test.js` (clear location and purpose)
+* `__tests__/macros/config-ref.test.js` (clear location and purpose)
+* `__tests__/tools/generate-rpcn-connector-docs.test.js` (clear location and purpose)
+
+❌ *Bad examples*:
+
+* `__tests__/context-switcher.test.js` (unclear type without directory structure)
+* `__tests__/config-ref.test.js` (unclear type without directory structure)  
+* `__tests__/utils.test.js` (too generic, unclear type and location)
+
+== CI test matrix
+
+The workflow tests against multiple Node.js versions:
+
+* *Node.js 18* (primary)
+* *Node.js 20* (compatibility)
+
+== Coverage requirements
+
+* Aim for *>80% code coverage* on new code
+* Coverage reports are generated and uploaded to Codecov
+* Coverage is only calculated on Node.js 18 to avoid duplication
+
+---
+
+Following these conventions ensures your tests will be automatically discovered and executed by the CI system, providing fast feedback and maintaining code quality.

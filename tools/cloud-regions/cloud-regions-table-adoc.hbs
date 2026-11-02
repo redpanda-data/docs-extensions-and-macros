@@ -1,0 +1,38 @@
+{{!-- AsciiDoc Cloud Regions Table Template --}}
+{{{generatedMarker "cloud-regions" "the Redpanda Cloud infrastructure definitions in redpanda-data/cloudv2"}}}
+
+////
+To regenerate this content, run:
+  npx doc-tools generate cloud-regions --help
+
+For source code and documentation:
+- Source: https://github.com/redpanda-data/docs-extensions-and-macros/tree/main/tools/cloud-regions
+- Docs: https://redpandadata.atlassian.net/wiki/spaces/DOC/pages/1185054748/Doc+Tools+CLI
+////
+
+Usage tiers define the sizing of a cluster and provide tested and guaranteed workload configurations for throughput, logical partitions, and connections. Availability depends on the region{{#if clusterType}}. This table lists only the tiers available for {{clusterType}} clusters{{else}} and the cluster type (BYOC, Dedicated){{/if}}. See link:https://docs.redpanda.com/redpanda-cloud/reference/tiers/byoc-tiers/[BYOC tiers] and link:https://docs.redpanda.com/redpanda-cloud/reference/tiers/dedicated-tiers/[Dedicated tiers] for further details.
+
+{{!--{{#if lastUpdated}}
+_Last Updated: {{lastUpdated}}_
+{{/if}}--}}
+
+{{#each providers}}
+
+=== {{name}}
+.Regions for {{name}}
+[%collapsible]
+====
+[cols="1,1,2",options="header"]
+|===
+|Region
+|Zones
+|Throughput Tiers
+{{#each regions}}
+|{{name}} 
+|{{zones}} 
+|{{#each tiers}}* {{this}}
+{{/each}}
+{{/each}}
+|===
+====
+{{/each}}

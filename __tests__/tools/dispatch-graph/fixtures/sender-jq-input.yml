@@ -1,0 +1,23 @@
+# jq builds the body, gh api --input reads it; the repo is a shell variable
+# whose value is a workflow_call input with a literal default.
+name: Reusable review
+on:
+  workflow_call:
+    inputs:
+      dispatch_repo:
+        type: string
+        default: "redpanda-data/docs-site"
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch doc impact
+        env:
+          GH_TOKEN: ${{ secrets.actions_bot_token }}
+          DISPATCH_REPO: ${{ inputs.dispatch_repo }}
+        run: |
+          set -euo pipefail
+          jq -n --slurpfile impact doc-impact.json \
+            --arg repo "${{ github.repository }}" \
+            '{event_type: "doc-impact", client_payload: {source_repo: $repo, impact: $impact[0]}}' \
+          | gh api "repos/$DISPATCH_REPO/dispatches" --input -

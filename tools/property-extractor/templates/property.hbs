@@ -1,0 +1,298 @@
+{{#if category}}
+// tag::category-{{category}}[]
+{{/if}}
+{{#if exclude_from_docs}}
+// tag::exclude-from-docs[]
+{{/if}}
+{{#if is_deprecated}}
+// tag::deprecated[]
+{{/if}}
+{{#if is_experimental_property}}
+// tag::experimental[]
+{{/if}}
+{{#if cloud_supported}}
+// tag::redpanda-cloud[]
+{{/if}}
+=== {{name}}
+{{#if version}}
+
+ifndef::env-cloud[]
+*Introduced in {{version}}*
+endif::[]
+{{/if}}
+{{#if description}}
+
+{{{description}}}
+{{else}}
+
+No description available.
+
+{{/if}}
+{{#if includes}}
+{{#each includes}}
+
+{{#if cloud_only}}
+ifdef::env-cloud[]
+{{/if}}
+{{#if self_managed_only}}
+ifndef::env-cloud[]
+{{/if}}
+include::{{{target}}}
+{{#if cloud_only}}
+endif::[]
+{{/if}}
+{{#if self_managed_only}}
+endif::[]
+{{/if}}
+{{/each}}
+{{/if}}
+{{#if admonitions}}
+{{#each admonitions}}
+
+{{#if cloud_only}}
+ifdef::env-cloud[]
+{{/if}}
+{{#if self_managed_only}}
+ifndef::env-cloud[]
+{{/if}}
+{{#if title}}
+.{{{title}}}
+{{/if}}
+[{{type}}]
+====
+{{{text}}}
+====
+{{#if cloud_only}}
+endif::[]
+{{/if}}
+{{#if self_managed_only}}
+endif::[]
+{{/if}}
+{{/each}}
+{{/if}}
+{{#if is_enterprise}}
+
+ifndef::env-cloud[]
+.Enterprise license required
+[NOTE]
+====
+{{#if enterprise_constructor}}
+{{#if (eq enterprise_constructor "simple")}}
+Some values of this property require an Enterprise license.
+{{else if (eq enterprise_constructor "restricted_only")}}
+The following values require an Enterprise license: {{#each enterprise_restricted_value}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}}
+{{else if (eq enterprise_constructor "restricted_with_sanctioned")}}
+*License-based defaults:*
+
+* *Community:* {{#each enterprise_sanctioned_value}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}} (if no Enterprise license is present)
+* *Enterprise:* {{#each enterprise_restricted_value}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}} (if an Enterprise license is present)
+{{/if}}
+{{else}}
+Enterprise license required: `{{enterprise_value}}`
+{{/if}}
+
+For license details, see xref:get-started:licensing/index.adoc[Redpanda Licensing].
+====
+endif::[]
+{{/if}}
+{{#if cloud_byoc_only}}
+
+ifdef::env-cloud[]
+NOTE: This property is available only in Redpanda Cloud BYOC deployments.
+endif::[]
+
+{{/if}}
+
+[cols="1s,2a"]
+|===
+| Property | Value
+
+| Type
+| `{{type}}`{{#if (or enum items.enum)}} (enum){{/if}}
+
+{{#if enum}}
+| Accepted values
+|
+ifndef::env-cloud[]
+{{#each enum}}`{{this}}`{{#if (isEnterpriseEnum this ../x-enum-metadata)}} (Enterprise){{else}}{{#if ../is_enterprise}}{{#if (includes ../enterprise_restricted_value this)}} (Enterprise){{/if}}{{/if}}{{/if}}{{#unless @last}}, {{/unless}}{{/each}}
+endif::[]
+ifdef::env-cloud[]
+{{#each enum}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}}
+endif::[]
+{{else}}{{#if items.enum}}
+| Accepted values
+|
+ifndef::env-cloud[]
+{{#each items.enum}}`{{this}}`{{#if (isEnterpriseEnum this ../items.x-enum-metadata)}} (Enterprise){{/if}}{{#unless @last}}, {{/unless}}{{/each}}
+endif::[]
+ifdef::env-cloud[]
+{{#each items.enum}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}}
+endif::[]
+{{/if}}{{/if}}
+{{#if (and (ne minimum undefined) (ne maximum undefined))}}
+
+| Range
+| [`{{minimum}}`, `{{maximum}}`]
+{{else}}
+{{#if (ne minimum undefined)}}
+
+| Minimum
+| `{{minimum}}`
+{{/if}}
+{{#if (ne maximum undefined)}}
+
+| Maximum
+| `{{maximum}}`
+{{/if}}
+{{/if}}
+
+| Default
+|
+{{#if is_enterprise}}
+ifdef::env-cloud[]
+Available in the Redpanda Cloud Console{{#if cloud_readonly}} (read-only){{else if cloud_editable}} (editable){{/if}}
+endif::[]
+ifndef::env-cloud[]
+`{{formatPropertyValue default type}}`{{#if default_human_readable}} ({{default_human_readable}}){{/if}}
+endif::[]
+{{else}}
+ifdef::env-cloud[]
+Available in the Redpanda Cloud Console{{#if cloud_readonly}} (read-only){{else if cloud_editable}} (editable){{/if}}
+endif::[]
+ifndef::env-cloud[]
+`{{formatPropertyValue default type}}`{{#if default_human_readable}} ({{default_human_readable}}){{/if}}
+endif::[]
+{{/if}}
+
+| Nullable
+| {{#if nullable}}Yes{{else}}No{{/if}}
+{{#if units}}
+
+| Unit
+| {{capitalize units}}
+{{else}}
+{{#if (formatUnits name)}}
+
+| Unit
+| {{capitalize (formatUnits name)}}
+{{/if}}
+{{/if}}
+{{#if (ne defined_in "src/v/config/node_config.cc")}}
+{{#if (ne needs_restart undefined)}}
+
+| Requires restart
+| {{#if needs_restart}}Yes{{else}}No{{/if}}
+{{/if}}
+{{/if}}
+
+{{#if (ne gets_restored undefined)}}
+
+ifndef::env-cloud[]
+| Restored on xref:manage:whole-cluster-restore.adoc[Whole Cluster Restore]
+| {{#if gets_restored}}Yes{{else}}No{{/if}}
+endif::[]
+{{else if (eq rp_util_merge_status "unavailable")}}
+
+ifndef::env-cloud[]
+| Restored on xref:manage:whole-cluster-restore.adoc[Whole Cluster Restore]
+| Unknown (rp_util merge unavailable this build)
+endif::[]
+{{/if}}
+{{#if visibility}}
+
+ifndef::env-cloud[]
+| Visibility
+| {{capitalize visibility}}
+endif::[]
+{{/if}}
+{{#if aliases}}
+
+ifndef::env-cloud[]
+| Aliases
+| {{#each aliases}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}}
+endif::[]
+{{/if}}
+{{#if example}}
+
+| Example
+|
+{{{example}}}
+{{/if}}
+{{#with (seeAlsoView .) as |seeAlso|}}
+{{#if seeAlso.items.length}}
+
+{{#if (eq seeAlso.sectionType "cloud")}}
+ifdef::env-cloud[]
+| Related topics
+|{{#if (gt seeAlso.items.length 1)}}{{#each seeAlso.items}}
+* {{{content}}}
+{{/each}}
+{{else}}
+{{#each seeAlso.items}}
+{{{content}}}
+{{/each}}
+{{/if}}
+endif::[]
+{{else if (eq seeAlso.sectionType "self-managed")}}
+ifndef::env-cloud[]
+| Related topics
+|{{#if (gt seeAlso.items.length 1)}}{{#each seeAlso.items}}
+* {{{content}}}
+{{/each}}
+{{else}}
+{{#each seeAlso.items}}
+{{{content}}}
+{{/each}}
+{{/if}}
+endif::[]
+{{else}}
+| Related topics
+|{{#if (gt seeAlso.items.length 1)}}{{#each seeAlso.items}}
+{{#if cloudOnly}}
+ifdef::env-cloud[]
+* {{{content}}}
+endif::[]
+{{else if selfManagedOnly}}
+ifndef::env-cloud[]
+* {{{content}}}
+endif::[]
+{{else}}
+* {{{content}}}
+{{/if}}
+{{/each}}
+{{else}}
+{{#each seeAlso.items}}
+{{#if cloudOnly}}
+ifdef::env-cloud[]
+{{{content}}}
+endif::[]
+{{else if selfManagedOnly}}
+ifndef::env-cloud[]
+{{{content}}}
+endif::[]
+{{else}}
+{{{content}}}
+{{/if}}
+{{/each}}
+{{/if}}
+{{/if}}
+{{/if}}
+{{/with}}
+
+|===
+
+{{#if is_experimental_property}}
+// end::experimental[]
+{{/if}}
+{{#if cloud_supported}}
+// end::redpanda-cloud[]
+{{/if}}
+{{#if is_deprecated}}
+// end::deprecated[]
+{{/if}}
+{{#if exclude_from_docs}}
+// end::exclude-from-docs[]
+{{/if}}
+{{#if category}}
+// end::category-{{category}}[]
+{{/if}}

@@ -1,0 +1,9 @@
+// Generated partial: one heading per property.
+
+=== cloud_storage_enabled
+
+Enables Tiered Storage.
+
+=== default_topic_replications
+
+Default replication factor for new topics.

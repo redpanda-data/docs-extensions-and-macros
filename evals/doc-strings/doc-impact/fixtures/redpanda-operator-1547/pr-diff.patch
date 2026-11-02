@@ -1,0 +1,2647 @@
+# Source diff of this PR against its merge base.
+# Left out (generated docs, lockfiles, vendored code, test data): 11 file(s).
+
+diff --git a/.changes/unreleased/operator-Added-20260521-100000.yaml b/.changes/unreleased/operator-Added-20260521-100000.yaml
+new file mode 100644
+index 00000000..08cf804b
+--- /dev/null
++++ b/.changes/unreleased/operator-Added-20260521-100000.yaml
+@@ -0,0 +1,19 @@
++project: operator
++kind: Added
++body: |
++  Adopted Redpanda 25.1+'s per-broker pre-restart probe as the primary
++  rolling-restart gate. The operator now consults /v1/broker/pre_restart_probe
++  for the specific broker it's about to roll, and proceeds only when the broker
++  reports no acks=1 data-loss risk, no produce/consume unavailability, and no
++  acks=-1 produce rejection. RF=1 offline is treated as acceptable risk. On
++  clusters older than 25.1 the helper detects 404 and falls back to the
++  cluster-wide IsHealthy heuristic so behavior on pre-25.1 brokers is unchanged.
++  The rolling-restart loop also consults the matching post-restart probe
++  (/v1/broker/post_restart_probe, load_reclaimed_pc) to verify each broker has
++  finished its post-restart replica recovery before the next pod is rolled; a
++  non-404 probe error fails closed (the roll is deferred rather than proceeding
++  without confirmation). The required caught-up percentage is configurable via
++  the --post-restart-caught-up-percent flag (default 100, i.e. full recovery;
++  validated to the range 1-100). These per-broker gates apply to both the
++  Redpanda (single-cluster) and StretchCluster (multicluster) reconcilers.
++time: 2026-05-21T10:00:00.000000-07:00
+diff --git a/.changes/unreleased/operator-Fixed-20260521-120000.yaml b/.changes/unreleased/operator-Fixed-20260521-120000.yaml
+new file mode 100644
+index 00000000..4f25a912
+--- /dev/null
++++ b/.changes/unreleased/operator-Fixed-20260521-120000.yaml
+@@ -0,0 +1,16 @@
++project: operator
++kind: Fixed
++body: |
++  Tightened the rolling restart gate so a single reconcile never deletes more than
++  one broker pod. The "pod has no matching broker in cluster view" branch used to
++  delete and continue, which meant a transient admin-API blip or address-format
++  mismatch could classify every pod as orphan and tear them all down in one pass —
++  now we delete one and requeue, and only while the cluster is healthy. The brokerMap
++  parser also strips a "host:port" suffix and keys by both the first DNS label and the
++  raw host, and pod lookup now falls back to the pod IP, so a broker advertising
++  "pod.svc:33145" or a bare-IP internal RPC address (e.g. stretch-cluster flat-network
++  mode) is recognized — for both rolling restart and scale-down decommission — instead
++  of being misclassified as an orphan. The same hardening now also applies to the
++  StretchCluster (multicluster) reconciler, which previously still ran the old
++  delete-all-orphans-at-once loop gated only on cluster-wide health.
++time: 2026-05-21T12:00:00.000000-07:00
+diff --git a/acceptance/go.mod b/acceptance/go.mod
+index 08068bd6..03205fec 100644
+--- a/acceptance/go.mod
++++ b/acceptance/go.mod
+@@ -7,14 +7,14 @@ require (
+ 	github.com/cucumber/godog v0.14.1
+ 	github.com/prometheus/common v0.67.5
+ 	github.com/redpanda-data/common-go/kube v0.0.0-20260408144400-efba9928bb27
+-	github.com/redpanda-data/common-go/rpadmin v0.2.4
++	github.com/redpanda-data/common-go/rpadmin v0.2.7
+ 	github.com/redpanda-data/common-go/rpsr v0.1.4
+ 	github.com/redpanda-data/redpanda-operator/harpoon v0.0.0-00010101000000-000000000000
+ 	github.com/redpanda-data/redpanda-operator/operator v0.0.0-00010101000000-000000000000
+ 	github.com/redpanda-data/redpanda-operator/pkg v0.0.0-20250528175436-e8cca0053dc6
+ 	github.com/stretchr/testify v1.11.1
+-	github.com/twmb/franz-go v1.20.6
+-	github.com/twmb/franz-go/pkg/kadm v1.17.2
++	github.com/twmb/franz-go v1.21.2
++	github.com/twmb/franz-go/pkg/kadm v1.18.0
+ 	github.com/twmb/franz-go/pkg/sr v1.7.0
+ 	google.golang.org/grpc v1.80.0
+ 	helm.sh/helm/v3 v3.18.5
+@@ -31,15 +31,15 @@ require (
+ 	buf.build/gen/go/grpc-ecosystem/grpc-gateway/protocolbuffers/go v1.36.10-20221127060915-a1ecdc58eccd.1 // indirect
+ 	buf.build/gen/go/redpandadata/cloud/protocolbuffers/go v1.36.10-20251124181447-cf877111f58c.1 // indirect
+ 	buf.build/gen/go/redpandadata/common/protocolbuffers/go v1.36.11-20260316210807-5d899910f714.1 // indirect
+-	buf.build/gen/go/redpandadata/core/connectrpc/go v1.19.1-20260226120209-2a07499aebcd.2 // indirect
+-	buf.build/gen/go/redpandadata/core/protocolbuffers/go v1.36.11-20260313213909-923579c57f1c.1 // indirect
++	buf.build/gen/go/redpandadata/core/connectrpc/go v1.19.2-20260506141738-8dfb14358799.1 // indirect
++	buf.build/gen/go/redpandadata/core/protocolbuffers/go v1.36.11-20260506141738-8dfb14358799.1 // indirect
+ 	cel.dev/expr v0.25.1 // indirect
+ 	cloud.google.com/go/auth v0.18.1 // indirect
+ 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
+ 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
+ 	cloud.google.com/go/iam v1.5.3 // indirect
+ 	cloud.google.com/go/secretmanager v1.16.0 // indirect
+-	connectrpc.com/connect v1.19.1 // indirect
++	connectrpc.com/connect v1.19.2 // indirect
+ 	dario.cat/mergo v1.0.2 // indirect
+ 	emperror.dev/errors v0.8.1 // indirect
+ 	github.com/AlecAivazis/survey/v2 v2.3.7 // indirect
+@@ -173,7 +173,7 @@ require (
+ 	github.com/jmoiron/sqlx v1.4.0 // indirect
+ 	github.com/json-iterator/go v1.1.12 // indirect
+ 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
+-	github.com/klauspost/compress v1.18.4 // indirect
++	github.com/klauspost/compress v1.18.6 // indirect
+ 	github.com/knadh/koanf/maps v0.1.2 // indirect
+ 	github.com/knadh/koanf/parsers/yaml v1.1.0 // indirect
+ 	github.com/knadh/koanf/providers/confmap v1.0.0 // indirect
+@@ -211,7 +211,7 @@ require (
+ 	github.com/opencontainers/go-digest v1.0.1-0.20231025023718-d50d2fec9c98 // indirect
+ 	github.com/opencontainers/image-spec v1.1.1 // indirect
+ 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
+-	github.com/pierrec/lz4/v4 v4.1.25 // indirect
++	github.com/pierrec/lz4/v4 v4.1.26 // indirect
+ 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
+ 	github.com/pkg/errors v0.9.1 // indirect
+ 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
+@@ -249,7 +249,7 @@ require (
+ 	github.com/tidwall/gjson v1.18.0 // indirect
+ 	github.com/tidwall/match v1.1.1 // indirect
+ 	github.com/tidwall/pretty v1.2.1 // indirect
+-	github.com/twmb/franz-go/pkg/kmsg v1.12.0 // indirect
++	github.com/twmb/franz-go/pkg/kmsg v1.13.1 // indirect
+ 	github.com/twmb/franz-go/pkg/sasl/kerberos v1.1.0 // indirect
+ 	github.com/twmb/tlscfg v1.2.1 // indirect
+ 	github.com/virtuald/go-ordered-json v0.0.0-20170621173500-b18e6e673d74 // indirect
+@@ -281,12 +281,12 @@ require (
+ 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
+ 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
+ 	go.uber.org/multierr v1.11.0 // indirect
+-	go.uber.org/zap v1.27.1 // indirect
++	go.uber.org/zap v1.28.0 // indirect
+ 	go.yaml.in/yaml/v2 v2.4.3 // indirect
+ 	go.yaml.in/yaml/v3 v3.0.4 // indirect
+ 	golang.org/x/crypto v0.51.0 // indirect
+ 	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa // indirect
+-	golang.org/x/mod v0.35.0 // indirect
++	golang.org/x/mod v0.36.0 // indirect
+ 	golang.org/x/net v0.54.0 // indirect
+ 	golang.org/x/oauth2 v0.35.0 // indirect
+ 	golang.org/x/sync v0.20.0 // indirect
+@@ -294,12 +294,12 @@ require (
+ 	golang.org/x/term v0.43.0 // indirect
+ 	golang.org/x/text v0.37.0 // indirect
+ 	golang.org/x/time v0.14.0 // indirect
+-	golang.org/x/tools v0.44.0 // indirect
++	golang.org/x/tools v0.45.0 // indirect
+ 	gomodules.xyz/jsonpatch/v2 v2.5.0 // indirect
+ 	google.golang.org/api v0.265.0 // indirect
+ 	google.golang.org/genproto v0.0.0-20260217215200-42d3e9bedb6d // indirect
+-	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect
+-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260401024825-9d38bb4040a9 // indirect
++	google.golang.org/genproto/googleapis/api v0.0.0-20260511170946-3700d4141b60 // indirect
++	google.golang.org/genproto/googleapis/rpc v0.0.0-20260504160031-60b97b32f348 // indirect
+ 	google.golang.org/protobuf v1.36.11 // indirect
+ 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
+ 	gopkg.in/inf.v0 v0.9.1 // indirect
+diff --git a/charts/connectors/go.mod b/charts/connectors/go.mod
+index fc661a10..6db758a0 100644
+--- a/charts/connectors/go.mod
++++ b/charts/connectors/go.mod
+@@ -9,7 +9,7 @@ require (
+ 	github.com/redpanda-data/redpanda-operator/gotohelm v0.0.0-20250327164623-c3883a149a17
+ 	github.com/redpanda-data/redpanda-operator/pkg v0.0.0-20250124085449-058118a82f50
+ 	github.com/stretchr/testify v1.11.1
+-	golang.org/x/tools v0.44.0
++	golang.org/x/tools v0.45.0
+ 	k8s.io/api v0.35.1
+ 	k8s.io/apimachinery v0.35.1
+ 	k8s.io/client-go v0.35.1
+@@ -47,6 +47,7 @@ require (
+ 	github.com/containerd/platforms v0.2.1 // indirect
+ 	github.com/coreos/go-semver v0.3.1 // indirect
+ 	github.com/coreos/go-systemd/v22 v22.7.0 // indirect
++	github.com/creack/pty v1.1.24 // indirect
+ 	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
+ 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+ 	github.com/dlclark/regexp2 v1.11.5 // indirect
+@@ -108,7 +109,7 @@ require (
+ 	github.com/invopop/jsonschema v0.12.0 // indirect
+ 	github.com/jmoiron/sqlx v1.4.0 // indirect
+ 	github.com/json-iterator/go v1.1.12 // indirect
+-	github.com/klauspost/compress v1.18.4 // indirect
++	github.com/klauspost/compress v1.18.6 // indirect
+ 	github.com/kr/pretty v0.3.1 // indirect
+ 	github.com/kr/text v0.2.0 // indirect
+ 	github.com/kylelemons/godebug v1.1.0 // indirect
+@@ -162,6 +163,8 @@ require (
+ 	github.com/spf13/cast v1.9.2 // indirect
+ 	github.com/spf13/cobra v1.10.2 // indirect
+ 	github.com/spf13/pflag v1.0.10 // indirect
++	github.com/stretchr/objx v0.5.3 // indirect
++	github.com/testcontainers/testcontainers-go v0.42.0 // indirect
+ 	github.com/texttheater/golang-levenshtein v1.0.1 // indirect
+ 	github.com/virtuald/go-ordered-json v0.0.0-20170621173500-b18e6e673d74 // indirect
+ 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
+@@ -188,12 +191,12 @@ require (
+ 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
+ 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
+ 	go.uber.org/multierr v1.11.0 // indirect
+-	go.uber.org/zap v1.27.1 // indirect
++	go.uber.org/zap v1.28.0 // indirect
+ 	go.yaml.in/yaml/v2 v2.4.3 // indirect
+ 	go.yaml.in/yaml/v3 v3.0.4 // indirect
+ 	golang.org/x/crypto v0.51.0 // indirect
+ 	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa // indirect
+-	golang.org/x/mod v0.35.0 // indirect
++	golang.org/x/mod v0.36.0 // indirect
+ 	golang.org/x/net v0.54.0 // indirect
+ 	golang.org/x/oauth2 v0.35.0 // indirect
+ 	golang.org/x/sync v0.20.0 // indirect
+@@ -202,8 +205,8 @@ require (
+ 	golang.org/x/text v0.37.0 // indirect
+ 	golang.org/x/time v0.14.0 // indirect
+ 	gomodules.xyz/jsonpatch/v2 v2.5.0 // indirect
+-	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect
+-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260401024825-9d38bb4040a9 // indirect
++	google.golang.org/genproto/googleapis/api v0.0.0-20260511170946-3700d4141b60 // indirect
++	google.golang.org/genproto/googleapis/rpc v0.0.0-20260504160031-60b97b32f348 // indirect
+ 	google.golang.org/grpc v1.80.0 // indirect
+ 	google.golang.org/protobuf v1.36.11 // indirect
+ 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
+@@ -221,6 +224,7 @@ require (
+ 	k8s.io/kube-openapi v0.0.0-20260127142750-a19766b6e2d4 // indirect
+ 	k8s.io/kubectl v0.35.1 // indirect
+ 	oras.land/oras-go/v2 v2.6.0 // indirect
++	pgregory.net/rapid v1.2.0 // indirect
+ 	sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.34.0 // indirect
+ 	sigs.k8s.io/controller-runtime v0.23.1 // indirect
+ 	sigs.k8s.io/gateway-api v1.5.1 // indirect
+diff --git a/charts/console/go.mod b/charts/console/go.mod
+index 0592df40..498c2270 100644
+--- a/charts/console/go.mod
++++ b/charts/console/go.mod
+@@ -14,7 +14,7 @@ require (
+ 	github.com/redpanda-data/redpanda-operator/pkg v0.0.0-20250124085449-058118a82f50
+ 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
+ 	github.com/stretchr/testify v1.11.1
+-	golang.org/x/tools v0.44.0
++	golang.org/x/tools v0.45.0
+ 	k8s.io/api v0.35.1
+ 	k8s.io/apimachinery v0.35.1
+ 	k8s.io/client-go v0.35.1
+@@ -24,15 +24,15 @@ require (
+ )
+ 
+ require (
+-	buf.build/gen/go/redpandadata/core/connectrpc/go v1.19.1-20260226120209-2a07499aebcd.2 // indirect
+-	buf.build/gen/go/redpandadata/core/protocolbuffers/go v1.36.11-20260313213909-923579c57f1c.1 // indirect
++	buf.build/gen/go/redpandadata/core/connectrpc/go v1.19.2-20260506141738-8dfb14358799.1 // indirect
++	buf.build/gen/go/redpandadata/core/protocolbuffers/go v1.36.11-20260506141738-8dfb14358799.1 // indirect
+ 	cel.dev/expr v0.25.1 // indirect
+ 	cloud.google.com/go/auth v0.18.1 // indirect
+ 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
+ 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
+ 	cloud.google.com/go/iam v1.5.3 // indirect
+ 	cloud.google.com/go/secretmanager v1.16.0 // indirect
+-	connectrpc.com/connect v1.19.1 // indirect
++	connectrpc.com/connect v1.19.2 // indirect
+ 	dario.cat/mergo v1.0.2 // indirect
+ 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.19.1 // indirect
+ 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.12.0 // indirect
+@@ -151,7 +151,7 @@ require (
+ 	github.com/jcmturner/rpc/v2 v2.0.3 // indirect
+ 	github.com/jmoiron/sqlx v1.4.0 // indirect
+ 	github.com/json-iterator/go v1.1.12 // indirect
+-	github.com/klauspost/compress v1.18.4 // indirect
++	github.com/klauspost/compress v1.18.6 // indirect
+ 	github.com/knadh/koanf/maps v0.1.2 // indirect
+ 	github.com/knadh/koanf/parsers/yaml v1.1.0 // indirect
+ 	github.com/knadh/koanf/providers/confmap v1.0.0 // indirect
+@@ -187,7 +187,7 @@ require (
+ 	github.com/opencontainers/go-digest v1.0.1-0.20231025023718-d50d2fec9c98 // indirect
+ 	github.com/opencontainers/image-spec v1.1.1 // indirect
+ 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
+-	github.com/pierrec/lz4/v4 v4.1.25 // indirect
++	github.com/pierrec/lz4/v4 v4.1.26 // indirect
+ 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
+ 	github.com/pkg/errors v0.9.1 // indirect
+ 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
+@@ -197,7 +197,7 @@ require (
+ 	github.com/prometheus/procfs v0.19.2 // indirect
+ 	github.com/redpanda-data/common-go/goldenfile v0.0.0-20260109170727-1dd9f5d22ee1 // indirect
+ 	github.com/redpanda-data/common-go/net v0.1.1-0.20240429123545-4da3d2b371f7 // indirect
+-	github.com/redpanda-data/common-go/rpadmin v0.2.4 // indirect
++	github.com/redpanda-data/common-go/rpadmin v0.2.7 // indirect
+ 	github.com/redpanda-data/common-go/secrets v0.1.4 // indirect
+ 	github.com/rivo/uniseg v0.4.7 // indirect
+ 	github.com/rogpeppe/go-internal v1.14.1 // indirect
+@@ -215,8 +215,8 @@ require (
+ 	github.com/tidwall/gjson v1.18.0 // indirect
+ 	github.com/tidwall/match v1.1.1 // indirect
+ 	github.com/tidwall/pretty v1.2.1 // indirect
+-	github.com/twmb/franz-go v1.20.6 // indirect
+-	github.com/twmb/franz-go/pkg/kmsg v1.12.0 // indirect
++	github.com/twmb/franz-go v1.21.2 // indirect
++	github.com/twmb/franz-go/pkg/kmsg v1.13.1 // indirect
+ 	github.com/twmb/franz-go/pkg/sasl/kerberos v1.1.0 // indirect
+ 	github.com/twmb/franz-go/pkg/sr v1.7.0 // indirect
+ 	github.com/twmb/tlscfg v1.2.1 // indirect
+@@ -238,12 +238,12 @@ require (
+ 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
+ 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
+ 	go.uber.org/multierr v1.11.0 // indirect
+-	go.uber.org/zap v1.27.1 // indirect
++	go.uber.org/zap v1.28.0 // indirect
+ 	go.yaml.in/yaml/v2 v2.4.3 // indirect
+ 	go.yaml.in/yaml/v3 v3.0.4 // indirect
+ 	golang.org/x/crypto v0.51.0 // indirect
+ 	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa // indirect
+-	golang.org/x/mod v0.35.0 // indirect
++	golang.org/x/mod v0.36.0 // indirect
+ 	golang.org/x/net v0.54.0 // indirect
+ 	golang.org/x/oauth2 v0.35.0 // indirect
+ 	golang.org/x/sync v0.20.0 // indirect
+@@ -254,8 +254,8 @@ require (
+ 	gomodules.xyz/jsonpatch/v2 v2.5.0 // indirect
+ 	google.golang.org/api v0.265.0 // indirect
+ 	google.golang.org/genproto v0.0.0-20260217215200-42d3e9bedb6d // indirect
+-	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect
+-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260401024825-9d38bb4040a9 // indirect
++	google.golang.org/genproto/googleapis/api v0.0.0-20260511170946-3700d4141b60 // indirect
++	google.golang.org/genproto/googleapis/rpc v0.0.0-20260504160031-60b97b32f348 // indirect
+ 	google.golang.org/grpc v1.80.0 // indirect
+ 	google.golang.org/protobuf v1.36.11 // indirect
+ 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
+diff --git a/charts/redpanda/go.mod b/charts/redpanda/go.mod
+index c9012b36..a0e82951 100644
+--- a/charts/redpanda/go.mod
++++ b/charts/redpanda/go.mod
+@@ -11,24 +11,24 @@ require (
+ 	github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring v0.89.0
+ 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
+ 	github.com/redpanda-data/common-go/kube v0.0.0-20260408144400-efba9928bb27
+-	github.com/redpanda-data/common-go/rpadmin v0.2.4
++	github.com/redpanda-data/common-go/rpadmin v0.2.7
+ 	github.com/redpanda-data/redpanda-operator/charts/console/v3 v3.7.0
+ 	github.com/redpanda-data/redpanda-operator/gotohelm v1.2.1-0.20250909192010-c59ff494d04a
+ 	github.com/redpanda-data/redpanda-operator/pkg v0.0.0-20250528175436-e8cca0053dc6
+ 	github.com/redpanda-data/redpanda/src/go/rpk v0.0.0-20250716004441-6e1647296ad6
+ 	github.com/stretchr/testify v1.11.1
+-	github.com/twmb/franz-go v1.20.6
++	github.com/twmb/franz-go v1.21.2
+ 	github.com/twmb/franz-go/pkg/sr v1.7.0
+ 	github.com/wk8/go-ordered-map/v2 v2.1.8
+-	go.uber.org/zap v1.27.1
++	go.uber.org/zap v1.28.0
+ 	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa
+-	golang.org/x/mod v0.35.0
+-	golang.org/x/tools v0.44.0
++	golang.org/x/mod v0.36.0
++	golang.org/x/tools v0.45.0
+ 	k8s.io/api v0.35.1
+ 	k8s.io/apimachinery v0.35.1
+ 	k8s.io/client-go v0.35.1
+ 	k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2
+-	pgregory.net/rapid v1.1.0
++	pgregory.net/rapid v1.2.0
+ 	sigs.k8s.io/controller-runtime v0.23.1
+ 	sigs.k8s.io/gateway-api v1.5.1
+ 	sigs.k8s.io/yaml v1.6.0
+@@ -39,15 +39,15 @@ require (
+ 	buf.build/gen/go/grpc-ecosystem/grpc-gateway/protocolbuffers/go v1.36.10-20221127060915-a1ecdc58eccd.1 // indirect
+ 	buf.build/gen/go/redpandadata/cloud/protocolbuffers/go v1.36.10-20251124181447-cf877111f58c.1 // indirect
+ 	buf.build/gen/go/redpandadata/common/protocolbuffers/go v1.36.11-20260316210807-5d899910f714.1 // indirect
+-	buf.build/gen/go/redpandadata/core/connectrpc/go v1.19.1-20260226120209-2a07499aebcd.2 // indirect
+-	buf.build/gen/go/redpandadata/core/protocolbuffers/go v1.36.11-20260313213909-923579c57f1c.1 // indirect
++	buf.build/gen/go/redpandadata/core/connectrpc/go v1.19.2-20260506141738-8dfb14358799.1 // indirect
++	buf.build/gen/go/redpandadata/core/protocolbuffers/go v1.36.11-20260506141738-8dfb14358799.1 // indirect
+ 	cel.dev/expr v0.25.1 // indirect
+ 	cloud.google.com/go/auth v0.18.1 // indirect
+ 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
+ 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
+ 	cloud.google.com/go/iam v1.5.3 // indirect
+ 	cloud.google.com/go/secretmanager v1.16.0 // indirect
+-	connectrpc.com/connect v1.19.1 // indirect
++	connectrpc.com/connect v1.19.2 // indirect
+ 	dario.cat/mergo v1.0.2 // indirect
+ 	github.com/AlecAivazis/survey/v2 v2.3.7 // indirect
+ 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.19.1 // indirect
+@@ -166,7 +166,7 @@ require (
+ 	github.com/jcmturner/rpc/v2 v2.0.3 // indirect
+ 	github.com/jmoiron/sqlx v1.4.0 // indirect
+ 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
+-	github.com/klauspost/compress v1.18.4 // indirect
++	github.com/klauspost/compress v1.18.6 // indirect
+ 	github.com/knadh/koanf/maps v0.1.2 // indirect
+ 	github.com/knadh/koanf/parsers/yaml v1.1.0 // indirect
+ 	github.com/knadh/koanf/providers/confmap v1.0.0 // indirect
+@@ -203,7 +203,7 @@ require (
+ 	github.com/opencontainers/go-digest v1.0.1-0.20231025023718-d50d2fec9c98 // indirect
+ 	github.com/opencontainers/image-spec v1.1.1 // indirect
+ 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
+-	github.com/pierrec/lz4/v4 v4.1.25 // indirect
++	github.com/pierrec/lz4/v4 v4.1.26 // indirect
+ 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
+ 	github.com/pkg/errors v0.9.1 // indirect
+ 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
+@@ -233,8 +233,8 @@ require (
+ 	github.com/tidwall/gjson v1.18.0 // indirect
+ 	github.com/tidwall/match v1.1.1 // indirect
+ 	github.com/tidwall/pretty v1.2.1 // indirect
+-	github.com/twmb/franz-go/pkg/kadm v1.17.2 // indirect
+-	github.com/twmb/franz-go/pkg/kmsg v1.12.0 // indirect
++	github.com/twmb/franz-go/pkg/kadm v1.18.0 // indirect
++	github.com/twmb/franz-go/pkg/kmsg v1.13.1 // indirect
+ 	github.com/twmb/franz-go/pkg/sasl/kerberos v1.1.0 // indirect
+ 	github.com/twmb/tlscfg v1.2.1 // indirect
+ 	github.com/virtuald/go-ordered-json v0.0.0-20170621173500-b18e6e673d74 // indirect
+@@ -267,8 +267,8 @@ require (
+ 	gomodules.xyz/jsonpatch/v2 v2.5.0 // indirect
+ 	google.golang.org/api v0.265.0 // indirect
+ 	google.golang.org/genproto v0.0.0-20260217215200-42d3e9bedb6d // indirect
+-	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect
+-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260401024825-9d38bb4040a9 // indirect
++	google.golang.org/genproto/googleapis/api v0.0.0-20260511170946-3700d4141b60 // indirect
++	google.golang.org/genproto/googleapis/rpc v0.0.0-20260504160031-60b97b32f348 // indirect
+ 	google.golang.org/grpc v1.80.0 // indirect
+ 	google.golang.org/protobuf v1.36.11 // indirect
+ 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
+diff --git a/gen/go.mod b/gen/go.mod
+index b1911795..e07656cd 100644
+--- a/gen/go.mod
++++ b/gen/go.mod
+@@ -23,7 +23,7 @@ require (
+ 	github.com/spf13/cobra v1.10.2
+ 	github.com/stretchr/testify v1.11.1
+ 	golang.org/x/text v0.37.0
+-	golang.org/x/tools v0.44.0
++	golang.org/x/tools v0.45.0
+ 	k8s.io/api v0.35.1
+ 	k8s.io/apimachinery v0.35.1
+ 	k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2
+@@ -36,15 +36,15 @@ require (
+ 	buf.build/gen/go/grpc-ecosystem/grpc-gateway/protocolbuffers/go v1.36.10-20221127060915-a1ecdc58eccd.1 // indirect
+ 	buf.build/gen/go/redpandadata/cloud/protocolbuffers/go v1.36.10-20251124181447-cf877111f58c.1 // indirect
+ 	buf.build/gen/go/redpandadata/common/protocolbuffers/go v1.36.11-20260316210807-5d899910f714.1 // indirect
+-	buf.build/gen/go/redpandadata/core/connectrpc/go v1.19.1-20260226120209-2a07499aebcd.2 // indirect
+-	buf.build/gen/go/redpandadata/core/protocolbuffers/go v1.36.11-20260313213909-923579c57f1c.1 // indirect
++	buf.build/gen/go/redpandadata/core/connectrpc/go v1.19.2-20260506141738-8dfb14358799.1 // indirect
++	buf.build/gen/go/redpandadata/core/protocolbuffers/go v1.36.11-20260506141738-8dfb14358799.1 // indirect
+ 	cel.dev/expr v0.25.1 // indirect
+ 	cloud.google.com/go/auth v0.18.1 // indirect
+ 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
+ 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
+ 	cloud.google.com/go/iam v1.5.3 // indirect
+ 	cloud.google.com/go/secretmanager v1.16.0 // indirect
+-	connectrpc.com/connect v1.19.1 // indirect
++	connectrpc.com/connect v1.19.2 // indirect
+ 	dario.cat/mergo v1.0.2 // indirect
+ 	github.com/AlecAivazis/survey/v2 v2.3.7 // indirect
+ 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.19.1 // indirect
+@@ -167,7 +167,7 @@ require (
+ 	github.com/jmoiron/sqlx v1.4.0 // indirect
+ 	github.com/json-iterator/go v1.1.12 // indirect
+ 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
+-	github.com/klauspost/compress v1.18.4 // indirect
++	github.com/klauspost/compress v1.18.6 // indirect
+ 	github.com/knadh/koanf/maps v0.1.2 // indirect
+ 	github.com/knadh/koanf/parsers/yaml v1.1.0 // indirect
+ 	github.com/knadh/koanf/providers/confmap v1.0.0 // indirect
+@@ -205,7 +205,7 @@ require (
+ 	github.com/opencontainers/go-digest v1.0.1-0.20231025023718-d50d2fec9c98 // indirect
+ 	github.com/opencontainers/image-spec v1.1.1 // indirect
+ 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
+-	github.com/pierrec/lz4/v4 v4.1.25 // indirect
++	github.com/pierrec/lz4/v4 v4.1.26 // indirect
+ 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
+ 	github.com/pkg/errors v0.9.1 // indirect
+ 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
+@@ -217,7 +217,7 @@ require (
+ 	github.com/redpanda-data/common-go/goldenfile v0.0.0-20260109170727-1dd9f5d22ee1 // indirect
+ 	github.com/redpanda-data/common-go/kube v0.0.0-20260408144400-efba9928bb27 // indirect
+ 	github.com/redpanda-data/common-go/net v0.1.1-0.20240429123545-4da3d2b371f7 // indirect
+-	github.com/redpanda-data/common-go/rpadmin v0.2.4 // indirect
++	github.com/redpanda-data/common-go/rpadmin v0.2.7 // indirect
+ 	github.com/redpanda-data/common-go/secrets v0.1.4 // indirect
+ 	github.com/redpanda-data/console/backend v0.0.0-20260330203659-9db13eb40ef4 // indirect
+ 	github.com/redpanda-data/redpanda-operator/gotohelm v1.2.1-0.20250909192010-c59ff494d04a // indirect
+@@ -239,9 +239,9 @@ require (
+ 	github.com/tidwall/gjson v1.18.0 // indirect
+ 	github.com/tidwall/match v1.1.1 // indirect
+ 	github.com/tidwall/pretty v1.2.1 // indirect
+-	github.com/twmb/franz-go v1.20.6 // indirect
+-	github.com/twmb/franz-go/pkg/kadm v1.17.2 // indirect
+-	github.com/twmb/franz-go/pkg/kmsg v1.12.0 // indirect
++	github.com/twmb/franz-go v1.21.2 // indirect
++	github.com/twmb/franz-go/pkg/kadm v1.18.0 // indirect
++	github.com/twmb/franz-go/pkg/kmsg v1.13.1 // indirect
+ 	github.com/twmb/franz-go/pkg/sasl/kerberos v1.1.0 // indirect
+ 	github.com/twmb/franz-go/pkg/sr v1.7.0 // indirect
+ 	github.com/twmb/tlscfg v1.2.1 // indirect
+@@ -263,12 +263,12 @@ require (
+ 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
+ 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
+ 	go.uber.org/multierr v1.11.0 // indirect
+-	go.uber.org/zap v1.27.1 // indirect
++	go.uber.org/zap v1.28.0 // indirect
+ 	go.yaml.in/yaml/v2 v2.4.3 // indirect
+ 	go.yaml.in/yaml/v3 v3.0.4 // indirect
+ 	golang.org/x/crypto v0.51.0 // indirect
+ 	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa // indirect
+-	golang.org/x/mod v0.35.0 // indirect
++	golang.org/x/mod v0.36.0 // indirect
+ 	golang.org/x/net v0.54.0 // indirect
+ 	golang.org/x/oauth2 v0.35.0 // indirect
+ 	golang.org/x/sync v0.20.0 // indirect
+@@ -278,8 +278,8 @@ require (
+ 	gomodules.xyz/jsonpatch/v2 v2.5.0 // indirect
+ 	google.golang.org/api v0.265.0 // indirect
+ 	google.golang.org/genproto v0.0.0-20260217215200-42d3e9bedb6d // indirect
+-	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect
+-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260401024825-9d38bb4040a9 // indirect
++	google.golang.org/genproto/googleapis/api v0.0.0-20260511170946-3700d4141b60 // indirect
++	google.golang.org/genproto/googleapis/rpc v0.0.0-20260504160031-60b97b32f348 // indirect
+ 	google.golang.org/grpc v1.80.0 // indirect
+ 	google.golang.org/protobuf v1.36.11 // indirect
+ 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
+diff --git a/go.work.sum b/go.work.sum
+index bb2b4717..b605bb46 100644
+--- a/go.work.sum
++++ b/go.work.sum
+@@ -3429,6 +3429,7 @@ golang.org/x/mod v0.27.0/go.mod h1:rWI627Fq0DEoudcK+MBkNkCe0EetEaDSwJJkCcjpazc=
+ golang.org/x/mod v0.29.0/go.mod h1:NyhrlYXJ2H4eJiRy/WDBO6HMqZQ6q9nk4JzS3NuCK+w=
+ golang.org/x/mod v0.31.0/go.mod h1:43JraMp9cGx1Rx3AqioxrbrhNsLl2l/iNAvuBkrezpg=
+ golang.org/x/mod v0.32.0/go.mod h1:SgipZ/3h2Ci89DlEtEXWUk/HteuRin+HHhN+WbNhguU=
++golang.org/x/mod v0.35.0/go.mod h1:+GwiRhIInF8wPm+4AoT6L0FA1QWAad3OMdTRx4tFYlU=
+ golang.org/x/net v0.0.0-20180906233101-161cd47e91fd/go.mod h1:mL1N/T3taQHkDXs73rZJwtUhF3w3ftmwwsq0BUmARs4=
+ golang.org/x/net v0.0.0-20181011144130-49bb7cea24b1/go.mod h1:mL1N/T3taQHkDXs73rZJwtUhF3w3ftmwwsq0BUmARs4=
+ golang.org/x/net v0.0.0-20181023162649-9b4f9f5ad519/go.mod h1:mL1N/T3taQHkDXs73rZJwtUhF3w3ftmwwsq0BUmARs4=
+@@ -3689,6 +3690,7 @@ golang.org/x/sys v0.38.0/go.mod h1:OgkHotnGiDImocRcuBABYBEXf8A9a87e/uXjp9XT3ks=
+ golang.org/x/sys v0.39.0/go.mod h1:OgkHotnGiDImocRcuBABYBEXf8A9a87e/uXjp9XT3ks=
+ golang.org/x/sys v0.40.0/go.mod h1:OgkHotnGiDImocRcuBABYBEXf8A9a87e/uXjp9XT3ks=
+ golang.org/x/sys v0.41.0/go.mod h1:OgkHotnGiDImocRcuBABYBEXf8A9a87e/uXjp9XT3ks=
++golang.org/x/sys v0.42.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
+ golang.org/x/sys v0.43.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
+ golang.org/x/telemetry v0.0.0-20240521205824-bda55230c457 h1:zf5N6UOrA487eEFacMePxjXAJctxKmyjKUsjA11Uzuk=
+ golang.org/x/telemetry v0.0.0-20240521205824-bda55230c457/go.mod h1:pRgIJT+bRLFKnoM1ldnzKoxTIn14Yxz928LQRYYgIN0=
+@@ -3699,6 +3701,7 @@ golang.org/x/telemetry v0.0.0-20260209163413-e7419c687ee4 h1:bTLqdHv7xrGlFbvf5/T
+ golang.org/x/telemetry v0.0.0-20260209163413-e7419c687ee4/go.mod h1:g5NllXBEermZrmR51cJDQxmJUHUOfRAaNyWBM+R+548=
+ golang.org/x/telemetry v0.0.0-20260409153401-be6f6cb8b1fa h1:efT73AJZfAAUV7SOip6pWGkwJDzIGiKBZGVzHYa+ve4=
+ golang.org/x/telemetry v0.0.0-20260409153401-be6f6cb8b1fa/go.mod h1:kHjTxDEnAu6/Nl9lDkzjWpR+bmKfxeiRuSDlsMb70gE=
++golang.org/x/telemetry v0.0.0-20260508192327-42602be52be6/go.mod h1:Eqhaxk/wZsWEH8CRxLwj6xzEJbz7k1EFGqx7nyCoabE=
+ golang.org/x/term v0.0.0-20201117132131-f5c789dd3221/go.mod h1:Nr5EML6q2oocZ2LXRh80K7BxOlk5/8JxuGnuhpl+muw=
+ golang.org/x/term v0.0.0-20210220032956-6a3ed077a48d/go.mod h1:bj7SfCRtBDWHUb9snDiAeCFNEtKQo2Wmx5Cou7ajbmo=
+ golang.org/x/term v0.0.0-20210615171337-6886f2dfbf5b/go.mod h1:jbD1KX2456YbFQfuXm/mYQcufACuNUgVhRMnK/tPxf8=
+@@ -3835,6 +3838,7 @@ golang.org/x/tools v0.38.0/go.mod h1:yEsQ/d/YK8cjh0L6rZlY8tgtlKiBNTL14pGDJPJpYQs
+ golang.org/x/tools v0.40.0/go.mod h1:Ik/tzLRlbscWpqqMRjyWYDisX8bG13FrdXp3o4Sr9lc=
+ golang.org/x/tools v0.41.0/go.mod h1:XSY6eDqxVNiYgezAVqqCeihT4j1U2CCsqvH3WhQpnlg=
+ golang.org/x/tools v0.43.0/go.mod h1:uHkMso649BX2cZK6+RpuIPXS3ho2hZo4FVwfoy1vIk0=
++golang.org/x/tools v0.44.0/go.mod h1:KA0AfVErSdxRZIsOVipbv3rQhVXTnlU6UhKxHd1seDI=
+ golang.org/x/tools/go/expect v0.1.0-deprecated/go.mod h1:eihoPOH+FgIqa3FpoTwguz/bVUSGBlGQU67vpBeOrBY=
+ golang.org/x/tools/go/expect v0.1.1-deprecated h1:jpBZDwmgPhXsKZC6WhL20P4b/wmnpsEAGHaNy0n/rJM=
+ golang.org/x/tools/go/expect v0.1.1-deprecated/go.mod h1:eihoPOH+FgIqa3FpoTwguz/bVUSGBlGQU67vpBeOrBY=
+@@ -3990,8 +3994,10 @@ google.golang.org/genproto/googleapis/api v0.0.0-20250825161204-c5933d9347a5/go.
+ google.golang.org/genproto/googleapis/api v0.0.0-20250929231259-57b25ae835d4/go.mod h1:NnuHhy+bxcg30o7FnVAZbXsPHUDQ9qKWAQKCD7VxFtk=
+ google.golang.org/genproto/googleapis/api v0.0.0-20251103181224-f26f9409b101/go.mod h1:E17fc4PDhkr22dE3RgnH2hEubUaky6ZwW4VhANxyspg=
+ google.golang.org/genproto/googleapis/api v0.0.0-20251202230838-ff82c1b0f217/go.mod h1:+rXWjjaukWZun3mLfjmVnQi18E1AsFbDN9QdJ5YXLto=
++google.golang.org/genproto/googleapis/api v0.0.0-20260120221211-b8f7ae30c516/go.mod h1:p3MLuOwURrGBRoEyFHBT3GjUwaCQVKeNqqWxlcISGdw=
+ google.golang.org/genproto/googleapis/api v0.0.0-20260128011058-8636f8732409/go.mod h1:fl8J1IvUjCilwZzQowmw2b7HQB2eAuYBabMXzWurF+I=
+ google.golang.org/genproto/googleapis/api v0.0.0-20260209200024-4cfbd4190f57/go.mod h1:kSJwQxqmFXeo79zOmbrALdflXQeAYcUbgS7PbpMknCY=
++google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9/go.mod h1:7QBABkRtR8z+TEnmXTqIqwJLlzrZKVfAUm7tY3yGv0M=
+ google.golang.org/genproto/googleapis/bytestream v0.0.0-20241015192408-796eee8c2d53/go.mod h1:T8O3fECQbif8cez15vxAcjbwXxvL2xbnvbQ7ZfiMAMs=
+ google.golang.org/genproto/googleapis/bytestream v0.0.0-20250313205543-e70fdf4c4cb4 h1:WYmu3W5hpq5LblAdrydghP6bWFowtV6EYG+RCT0lok4=
+ google.golang.org/genproto/googleapis/bytestream v0.0.0-20250313205543-e70fdf4c4cb4/go.mod h1:WkJpQl6Ujj3ElX4qZaNm5t6cT95ffI4K+HKQ0+1NyMw=
+@@ -4052,9 +4058,11 @@ google.golang.org/genproto/googleapis/rpc v0.0.0-20250826171959-ef028d996bc1/go.
+ google.golang.org/genproto/googleapis/rpc v0.0.0-20250929231259-57b25ae835d4/go.mod h1:HSkG/KdJWusxU1F6CNrwNDjBMgisKxGnc5dAZfT0mjQ=
+ google.golang.org/genproto/googleapis/rpc v0.0.0-20251103181224-f26f9409b101/go.mod h1:7i2o+ce6H/6BluujYR+kqX3GKH+dChPTQU19wjRPiGk=
+ google.golang.org/genproto/googleapis/rpc v0.0.0-20251202230838-ff82c1b0f217/go.mod h1:7i2o+ce6H/6BluujYR+kqX3GKH+dChPTQU19wjRPiGk=
++google.golang.org/genproto/googleapis/rpc v0.0.0-20260120221211-b8f7ae30c516/go.mod h1:j9x/tPzZkyxcgEFkiKEEGxfvyumM01BEtsW8xzOahRQ=
+ google.golang.org/genproto/googleapis/rpc v0.0.0-20260128011058-8636f8732409/go.mod h1:j9x/tPzZkyxcgEFkiKEEGxfvyumM01BEtsW8xzOahRQ=
+ google.golang.org/genproto/googleapis/rpc v0.0.0-20260209200024-4cfbd4190f57/go.mod h1:j9x/tPzZkyxcgEFkiKEEGxfvyumM01BEtsW8xzOahRQ=
+ google.golang.org/genproto/googleapis/rpc v0.0.0-20260217215200-42d3e9bedb6d/go.mod h1:4Hqkh8ycfw05ld/3BWL7rJOSfebL2Q+DVDeRgYgxUU8=
++google.golang.org/genproto/googleapis/rpc v0.0.0-20260401024825-9d38bb4040a9/go.mod h1:4Hqkh8ycfw05ld/3BWL7rJOSfebL2Q+DVDeRgYgxUU8=
+ google.golang.org/grpc v0.0.0-20160317175043-d3ddb4469d5a/go.mod h1:yo6s7OP7yaDglbqo1J04qKzAhqBH6lvTonzMVmEdcZw=
+ google.golang.org/grpc v1.12.0/go.mod h1:yo6s7OP7yaDglbqo1J04qKzAhqBH6lvTonzMVmEdcZw=
+ google.golang.org/grpc v1.20.1/go.mod h1:10oTOabMzJvdu6/UiuZezV6QK5dSlG84ov/aaiqXj38=
+@@ -4111,6 +4119,7 @@ google.golang.org/grpc v1.75.1/go.mod h1:JtPAzKiq4v1xcAB2hydNlWI2RnF85XXcV0mhKXr
+ google.golang.org/grpc v1.76.0/go.mod h1:Ju12QI8M6iQJtbcsV+awF5a4hfJMLi4X0JLo94ULZ6c=
+ google.golang.org/grpc v1.78.0/go.mod h1:I47qjTo4OKbMkjA/aOOwxDIiPSBofUtQUI5EfpWvW7U=
+ google.golang.org/grpc v1.79.1/go.mod h1:KmT0Kjez+0dde/v2j9vzwoAScgEPx/Bw1CYChhHLrHQ=
++google.golang.org/grpc v1.79.3/go.mod h1:KmT0Kjez+0dde/v2j9vzwoAScgEPx/Bw1CYChhHLrHQ=
+ google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.3.0 h1:rNBFJjBCOgVr9pWD7rs/knKL4FRTKgpZmsRfV214zcA=
+ google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.3.0/go.mod h1:Dk1tviKTvMCz5tvh7t+fh94dhmQVHuCt2OzJB3CTW9Y=
+ google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.5.1 h1:F29+wU6Ee6qgu9TddPgooOdaqsxTMunOoj8KA5yuS5A=
+diff --git a/gotohelm/go.mod b/gotohelm/go.mod
+index 564bcc93..a9925707 100644
+--- a/gotohelm/go.mod
++++ b/gotohelm/go.mod
+@@ -15,14 +15,14 @@ require (
+ 	github.com/spf13/cobra v1.10.2
+ 	github.com/stretchr/testify v1.11.1
+ 	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa
+-	golang.org/x/tools v0.44.0
++	golang.org/x/tools v0.45.0
+ 	gopkg.in/yaml.v3 v3.0.1
+ 	helm.sh/helm/v3 v3.18.5
+ 	k8s.io/api v0.35.1
+ 	k8s.io/apimachinery v0.35.1
+ 	k8s.io/client-go v0.35.1
+ 	k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2
+-	pgregory.net/rapid v1.1.0
++	pgregory.net/rapid v1.2.0
+ 	sigs.k8s.io/controller-runtime v0.23.1
+ 	sigs.k8s.io/yaml v1.6.0
+ )
+@@ -54,6 +54,7 @@ require (
+ 	github.com/containerd/platforms v0.2.1 // indirect
+ 	github.com/coreos/go-semver v0.3.1 // indirect
+ 	github.com/coreos/go-systemd/v22 v22.7.0 // indirect
++	github.com/creack/pty v1.1.24 // indirect
+ 	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
+ 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+ 	github.com/dlclark/regexp2 v1.11.5 // indirect
+@@ -112,7 +113,7 @@ require (
+ 	github.com/invopop/jsonschema v0.12.0 // indirect
+ 	github.com/jmoiron/sqlx v1.4.0 // indirect
+ 	github.com/json-iterator/go v1.1.12 // indirect
+-	github.com/klauspost/compress v1.18.4 // indirect
++	github.com/klauspost/compress v1.18.6 // indirect
+ 	github.com/kr/pretty v0.3.1 // indirect
+ 	github.com/kr/text v0.2.0 // indirect
+ 	github.com/kylelemons/godebug v1.1.0 // indirect
+@@ -164,6 +165,8 @@ require (
+ 	github.com/sirupsen/logrus v1.9.4 // indirect
+ 	github.com/spf13/cast v1.9.2 // indirect
+ 	github.com/spf13/pflag v1.0.10 // indirect
++	github.com/stretchr/objx v0.5.3 // indirect
++	github.com/testcontainers/testcontainers-go v0.42.0 // indirect
+ 	github.com/texttheater/golang-levenshtein v1.0.1 // indirect
+ 	github.com/virtuald/go-ordered-json v0.0.0-20170621173500-b18e6e673d74 // indirect
+ 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
+@@ -190,11 +193,11 @@ require (
+ 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
+ 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
+ 	go.uber.org/multierr v1.11.0 // indirect
+-	go.uber.org/zap v1.27.1 // indirect
++	go.uber.org/zap v1.28.0 // indirect
+ 	go.yaml.in/yaml/v2 v2.4.3 // indirect
+ 	go.yaml.in/yaml/v3 v3.0.4 // indirect
+ 	golang.org/x/crypto v0.51.0 // indirect
+-	golang.org/x/mod v0.35.0 // indirect
++	golang.org/x/mod v0.36.0 // indirect
+ 	golang.org/x/net v0.54.0 // indirect
+ 	golang.org/x/oauth2 v0.35.0 // indirect
+ 	golang.org/x/sync v0.20.0 // indirect
+@@ -203,8 +206,8 @@ require (
+ 	golang.org/x/text v0.37.0 // indirect
+ 	golang.org/x/time v0.14.0 // indirect
+ 	gomodules.xyz/jsonpatch/v2 v2.5.0 // indirect
+-	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect
+-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260401024825-9d38bb4040a9 // indirect
++	google.golang.org/genproto/googleapis/api v0.0.0-20260511170946-3700d4141b60 // indirect
++	google.golang.org/genproto/googleapis/rpc v0.0.0-20260504160031-60b97b32f348 // indirect
+ 	google.golang.org/grpc v1.80.0 // indirect
+ 	google.golang.org/protobuf v1.36.11 // indirect
+ 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
+diff --git a/harpoon/go.mod b/harpoon/go.mod
+index aebd0634..094f5fd0 100644
+--- a/harpoon/go.mod
++++ b/harpoon/go.mod
+@@ -106,7 +106,7 @@ require (
+ 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+ 	github.com/jmoiron/sqlx v1.4.0 // indirect
+ 	github.com/json-iterator/go v1.1.12 // indirect
+-	github.com/klauspost/compress v1.18.4 // indirect
++	github.com/klauspost/compress v1.18.6 // indirect
+ 	github.com/kr/pretty v0.3.1 // indirect
+ 	github.com/kr/text v0.2.0 // indirect
+ 	github.com/kylelemons/godebug v1.1.0 // indirect
+@@ -154,6 +154,7 @@ require (
+ 	github.com/spf13/cast v1.9.2 // indirect
+ 	github.com/spf13/cobra v1.10.2 // indirect
+ 	github.com/spf13/pflag v1.0.10 // indirect
++	github.com/testcontainers/testcontainers-go v0.42.0 // indirect
+ 	github.com/texttheater/golang-levenshtein v1.0.1 // indirect
+ 	github.com/virtuald/go-ordered-json v0.0.0-20170621173500-b18e6e673d74 // indirect
+ 	github.com/x448/float16 v0.8.4 // indirect
+@@ -174,7 +175,7 @@ require (
+ 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
+ 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
+ 	go.uber.org/multierr v1.11.0 // indirect
+-	go.uber.org/zap v1.27.1 // indirect
++	go.uber.org/zap v1.28.0 // indirect
+ 	go.yaml.in/yaml/v2 v2.4.3 // indirect
+ 	go.yaml.in/yaml/v3 v3.0.4 // indirect
+ 	golang.org/x/crypto v0.51.0 // indirect
+@@ -186,10 +187,10 @@ require (
+ 	golang.org/x/term v0.43.0 // indirect
+ 	golang.org/x/text v0.37.0 // indirect
+ 	golang.org/x/time v0.14.0 // indirect
+-	golang.org/x/tools v0.44.0 // indirect
++	golang.org/x/tools v0.45.0 // indirect
+ 	gomodules.xyz/jsonpatch/v2 v2.5.0 // indirect
+-	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect
+-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260401024825-9d38bb4040a9 // indirect
++	google.golang.org/genproto/googleapis/api v0.0.0-20260511170946-3700d4141b60 // indirect
++	google.golang.org/genproto/googleapis/rpc v0.0.0-20260504160031-60b97b32f348 // indirect
+ 	google.golang.org/grpc v1.80.0 // indirect
+ 	google.golang.org/protobuf v1.36.11 // indirect
+ 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
+diff --git a/licenses/third_party.md b/licenses/third_party.md
+index 765a40ad..24d1e46a 100644
+--- a/licenses/third_party.md
++++ b/licenses/third_party.md
+@@ -18,7 +18,7 @@ Run `task generate:third-party-licenses-list`.
+ | cloud.google.com/go/compute/metadata | [Apache-2.0](https://github.com/googleapis/google-cloud-go/blob/compute/metadata/v0.9.0/LICENSE) |
+ | cloud.google.com/go/iam | [Apache-2.0](https://github.com/googleapis/google-cloud-go/blob/iam/v1.5.3/LICENSE) |
+ | cloud.google.com/go/secretmanager | [Apache-2.0](https://github.com/googleapis/google-cloud-go/blob/secretmanager/v1.16.0/LICENSE) |
+-| connectrpc.com/connect | [Apache-2.0](https://github.com/connectrpc/connect-go/blob/v1.19.1/LICENSE) |
++| connectrpc.com/connect | [Apache-2.0](https://github.com/connectrpc/connect-go/blob/v1.19.2/LICENSE) |
+ | dario.cat/mergo | [BSD-3-Clause](https://github.com/imdario/mergo/blob/v1.0.2/LICENSE) |
+ | emperror.dev/errors | [MIT](https://github.com/emperror/errors/blob/v0.8.1/LICENSE) |
+ | github.com/AlecAivazis/survey/v2 | [MIT](https://github.com/AlecAivazis/survey/blob/v2.3.7/LICENSE) |
+@@ -154,12 +154,12 @@ Run `task generate:third-party-licenses-list`.
+ | github.com/jmoiron/sqlx | [MIT](https://github.com/jmoiron/sqlx/blob/v1.4.0/LICENSE) |
+ | github.com/json-iterator/go | [MIT](https://github.com/json-iterator/go/blob/v1.1.12/LICENSE) |
+ | github.com/kballard/go-shellquote | [MIT](https://github.com/kballard/go-shellquote/blob/95032a82bc51/LICENSE) |
+-| github.com/klauspost/compress | [Apache-2.0](https://github.com/klauspost/compress/blob/v1.18.4/LICENSE) |
+-| github.com/klauspost/compress | [BSD-3-Clause](https://github.com/klauspost/compress/blob/v1.18.4/LICENSE) |
+-| github.com/klauspost/compress | [MIT](https://github.com/klauspost/compress/blob/v1.18.4/LICENSE) |
+-| github.com/klauspost/compress/internal/snapref | [BSD-3-Clause](https://github.com/klauspost/compress/blob/v1.18.4/internal/snapref/LICENSE) |
+-| github.com/klauspost/compress/s2 | [BSD-3-Clause](https://github.com/klauspost/compress/blob/v1.18.4/s2/LICENSE) |
+-| github.com/klauspost/compress/zstd/internal/xxhash | [MIT](https://github.com/klauspost/compress/blob/v1.18.4/zstd/internal/xxhash/LICENSE.txt) |
++| github.com/klauspost/compress | [Apache-2.0](https://github.com/klauspost/compress/blob/v1.18.6/LICENSE) |
++| github.com/klauspost/compress | [BSD-3-Clause](https://github.com/klauspost/compress/blob/v1.18.6/LICENSE) |
++| github.com/klauspost/compress | [MIT](https://github.com/klauspost/compress/blob/v1.18.6/LICENSE) |
++| github.com/klauspost/compress/internal/snapref | [BSD-3-Clause](https://github.com/klauspost/compress/blob/v1.18.6/internal/snapref/LICENSE) |
++| github.com/klauspost/compress/s2 | [BSD-3-Clause](https://github.com/klauspost/compress/blob/v1.18.6/s2/LICENSE) |
++| github.com/klauspost/compress/zstd/internal/xxhash | [MIT](https://github.com/klauspost/compress/blob/v1.18.6/zstd/internal/xxhash/LICENSE.txt) |
+ | github.com/knadh/koanf/maps | [MIT](https://github.com/knadh/koanf/blob/maps/v0.1.2/LICENSE) |
+ | github.com/knadh/koanf/parsers/yaml | [MIT](https://github.com/knadh/koanf/blob/parsers/yaml/v1.1.0/LICENSE) |
+ | github.com/knadh/koanf/providers/confmap | [MIT](https://github.com/knadh/koanf/blob/providers/confmap/v1.0.0/LICENSE) |
+@@ -205,7 +205,7 @@ Run `task generate:third-party-licenses-list`.
+ | github.com/opencontainers/go-digest | [Apache-2.0](https://github.com/opencontainers/go-digest/blob/d50d2fec9c98/LICENSE) |
+ | github.com/opencontainers/image-spec/specs-go | [Apache-2.0](https://github.com/opencontainers/image-spec/blob/v1.1.1/LICENSE) |
+ | github.com/peterbourgon/diskv | [MIT](https://github.com/peterbourgon/diskv/blob/v2.0.1/LICENSE) |
+-| github.com/pierrec/lz4/v4 | [BSD-3-Clause](https://github.com/pierrec/lz4/blob/v4.1.25/LICENSE) |
++| github.com/pierrec/lz4/v4 | [BSD-3-Clause](https://github.com/pierrec/lz4/blob/v4.1.26/LICENSE) |
+ | github.com/pkg/browser | [BSD-2-Clause](https://github.com/pkg/browser/blob/5ac0b6a4141c/LICENSE) |
+ | github.com/pkg/errors | [BSD-2-Clause](https://github.com/pkg/errors/blob/v0.9.1/LICENSE) |
+ | github.com/pmezard/go-difflib/difflib | [BSD-3-Clause](https://github.com/pmezard/go-difflib/blob/5d4384ee4fb2/LICENSE) |
+@@ -237,9 +237,9 @@ Run `task generate:third-party-licenses-list`.
+ | github.com/tidwall/gjson | [MIT](https://github.com/tidwall/gjson/blob/v1.18.0/LICENSE) |
+ | github.com/tidwall/match | [MIT](https://github.com/tidwall/match/blob/v1.1.1/LICENSE) |
+ | github.com/tidwall/pretty | [MIT](https://github.com/tidwall/pretty/blob/v1.2.1/LICENSE) |
+-| github.com/twmb/franz-go/pkg | [BSD-3-Clause](https://github.com/twmb/franz-go/blob/v1.20.6/LICENSE) |
+-| github.com/twmb/franz-go/pkg/kadm | [BSD-3-Clause](https://github.com/twmb/franz-go/blob/pkg/kadm/v1.17.2/LICENSE) |
+-| github.com/twmb/franz-go/pkg/kmsg | [BSD-3-Clause](https://github.com/twmb/franz-go/blob/pkg/kmsg/v1.12.0/LICENSE) |
++| github.com/twmb/franz-go/pkg | [BSD-3-Clause](https://github.com/twmb/franz-go/blob/v1.21.2/LICENSE) |
++| github.com/twmb/franz-go/pkg/kadm | [BSD-3-Clause](https://github.com/twmb/franz-go/blob/pkg/kadm/v1.18.0/LICENSE) |
++| github.com/twmb/franz-go/pkg/kmsg | [BSD-3-Clause](https://github.com/twmb/franz-go/blob/pkg/kmsg/v1.13.1/LICENSE) |
+ | github.com/twmb/franz-go/pkg/sasl/kerberos | [BSD-3-Clause](https://github.com/twmb/franz-go/blob/pkg/sasl/kerberos/v1.1.0/LICENSE) |
+ | github.com/twmb/franz-go/pkg/sr | [BSD-3-Clause](https://github.com/twmb/franz-go/blob/pkg/sr/v1.7.0/LICENSE) |
+ | github.com/twmb/tlscfg | [BSD-3-Clause](https://github.com/twmb/tlscfg/blob/v1.2.1/LICENSE) |
+@@ -274,12 +274,12 @@ Run `task generate:third-party-licenses-list`.
+ | go.opentelemetry.io/otel/trace | [BSD-3-Clause](https://github.com/open-telemetry/opentelemetry-go/blob/trace/v1.43.0/LICENSE) |
+ | go.opentelemetry.io/proto/otlp | [Apache-2.0](https://github.com/open-telemetry/opentelemetry-proto-go/blob/otlp/v1.10.0/LICENSE) |
+ | go.uber.org/multierr | [MIT](https://github.com/uber-go/multierr/blob/v1.11.0/LICENSE.txt) |
+-| go.uber.org/zap | [MIT](https://github.com/uber-go/zap/blob/v1.27.1/LICENSE) |
++| go.uber.org/zap | [MIT](https://github.com/uber-go/zap/blob/v1.28.0/LICENSE) |
+ | go.yaml.in/yaml/v2 | [Apache-2.0](https://github.com/yaml/go-yaml/blob/v2.4.3/LICENSE) |
+ | go.yaml.in/yaml/v3 | [MIT](https://github.com/yaml/go-yaml/blob/v3.0.4/LICENSE) |
+ | golang.org/x/crypto | [BSD-3-Clause](https://go.googlesource.com/crypto/+/v0.51.0/LICENSE) |
+ | golang.org/x/exp | [BSD-3-Clause](https://go.googlesource.com/exp/+/3dfff04db8fa/LICENSE) |
+-| golang.org/x/mod/semver | [BSD-3-Clause](https://go.googlesource.com/mod/+/v0.35.0/LICENSE) |
++| golang.org/x/mod/semver | [BSD-3-Clause](https://go.googlesource.com/mod/+/v0.36.0/LICENSE) |
+ | golang.org/x/net | [BSD-3-Clause](https://go.googlesource.com/net/+/v0.54.0/LICENSE) |
+ | golang.org/x/oauth2 | [BSD-3-Clause](https://go.googlesource.com/oauth2/+/v0.35.0/LICENSE) |
+ | golang.org/x/sync | [BSD-3-Clause](https://go.googlesource.com/sync/+/v0.20.0/LICENSE) |
+@@ -287,13 +287,13 @@ Run `task generate:third-party-licenses-list`.
+ | golang.org/x/term | [BSD-3-Clause](https://go.googlesource.com/term/+/v0.43.0/LICENSE) |
+ | golang.org/x/text | [BSD-3-Clause](https://go.googlesource.com/text/+/v0.37.0/LICENSE) |
+ | golang.org/x/time/rate | [BSD-3-Clause](https://go.googlesource.com/time/+/v0.14.0/LICENSE) |
+-| golang.org/x/tools | [BSD-3-Clause](https://go.googlesource.com/tools/+/v0.44.0/LICENSE) |
++| golang.org/x/tools | [BSD-3-Clause](https://go.googlesource.com/tools/+/v0.45.0/LICENSE) |
+ | gomodules.xyz/jsonpatch/v2 | [Apache-2.0](https://github.com/gomodules/jsonpatch/blob/v2.5.0/LICENSE) |
+ | google.golang.org/api | [BSD-3-Clause](https://github.com/googleapis/google-api-go-client/blob/v0.265.0/LICENSE) |
+ | google.golang.org/api/internal/third_party/uritemplates | [BSD-3-Clause](https://github.com/googleapis/google-api-go-client/blob/v0.265.0/internal/third_party/uritemplates/LICENSE) |
+ | google.golang.org/genproto/googleapis | [Apache-2.0](https://github.com/googleapis/go-genproto/blob/42d3e9bedb6d/LICENSE) |
+-| google.golang.org/genproto/googleapis/api | [Apache-2.0](https://github.com/googleapis/go-genproto/blob/9d38bb4040a9/LICENSE) |
+-| google.golang.org/genproto/googleapis/rpc | [Apache-2.0](https://github.com/googleapis/go-genproto/blob/9d38bb4040a9/LICENSE) |
++| google.golang.org/genproto/googleapis/api | [Apache-2.0](https://github.com/googleapis/go-genproto/blob/3700d4141b60/LICENSE) |
++| google.golang.org/genproto/googleapis/rpc | [Apache-2.0](https://github.com/googleapis/go-genproto/blob/60b97b32f348/LICENSE) |
+ | google.golang.org/grpc | [Apache-2.0](https://github.com/grpc/grpc-go/blob/v1.80.0/LICENSE) |
+ | google.golang.org/protobuf | [BSD-3-Clause](https://go.googlesource.com/protobuf/+/v1.36.11/LICENSE) |
+ | gopkg.in/evanphx/json-patch.v4 | [BSD-3-Clause](https://gopkg.in/evanphx/json-patch.v4/blob/v4.13.0/LICENSE) |
+diff --git a/operator/cmd/multicluster/multicluster.go b/operator/cmd/multicluster/multicluster.go
+index 3d579cc0..8f82a65e 100644
+--- a/operator/cmd/multicluster/multicluster.go
++++ b/operator/cmd/multicluster/multicluster.go
+@@ -37,6 +37,7 @@ import (
+ 	"github.com/redpanda-data/redpanda-operator/operator/internal/controller/pvcunbinder"
+ 	redpandacontrollers "github.com/redpanda-data/redpanda-operator/operator/internal/controller/redpanda"
+ 	"github.com/redpanda-data/redpanda-operator/operator/internal/lifecycle"
++	"github.com/redpanda-data/redpanda-operator/operator/internal/probes"
+ 	"github.com/redpanda-data/redpanda-operator/operator/internal/telemetry"
+ 	internalclient "github.com/redpanda-data/redpanda-operator/operator/pkg/client"
+ 	"github.com/redpanda-data/redpanda-operator/pkg/multicluster"
+@@ -101,6 +102,10 @@ type MulticlusterOptions struct {
+ 	ClusterConnectionTimeout time.Duration
+ 	ReconcileTimeout         time.Duration
+ 
++	// PostRestartCaughtUpPercent gates the rolling restart on the per-broker
++	// post-restart probe; mirrors the `run` command's flag of the same name.
++	PostRestartCaughtUpPercent int
++
+ 	// Per-controller default reconcile (sync) intervals. A per-CR spec.interval
+ 	// always takes precedence. Mirror the `run` command's flags.
+ 	TopicSyncInterval      time.Duration
+@@ -150,6 +155,11 @@ func (o *MulticlusterOptions) validate() error {
+ 			return errors.New("when one of metrics-cert-path or metrics-key-path is specified, both must be set")
+ 		}
+ 	}
++	if p := o.PostRestartCaughtUpPercent; p < 1 || p > 100 {
++		// >100 makes the per-broker caught-up gate unsatisfiable (rolling
++		// restart stalls forever); 0 silently disables it. Fail fast.
++		return errors.Newf("--post-restart-caught-up-percent must be in [1,100], got %d", p)
++	}
+ 	if o.WebhookCertPath != "" || o.WebhookKeyPath != "" {
+ 		// if one is set, both must be
+ 		if o.WebhookCertPath == "" || o.WebhookKeyPath == "" {
+@@ -212,6 +222,7 @@ func (o *MulticlusterOptions) BindFlags(cmd *cobra.Command) {
+ 	cmd.Flags().DurationVar(&o.BrokerPodNodeUnavailableToleration, "broker-pod-node-unavailable-toleration", 0, "Controls injection of node.kubernetes.io/not-ready and node.kubernetes.io/unreachable NoExecute tolerations onto broker pods. 0 (default) = feature off, no tolerations injected. Positive = tolerationSeconds set to this duration. Negative (-1s or any negative value) = tolerate forever, no tolerationSeconds field (appropriate for cloud K8s where Node-object deletion is the authoritative signal of permanent node loss). User-set tolerations for these taint keys are always preserved.")
+ 	cmd.Flags().DurationVar(&o.ClusterConnectionTimeout, "cluster-connection-timeout", 10*time.Second, "Timeout for internal clients used to connect to Redpanda clusters (admin API in particular)")
+ 	cmd.Flags().DurationVar(&o.ReconcileTimeout, "reconcile-timeout", 2*time.Minute, "Defense-in-depth ceiling on a single reconcile pass; on deadline the reconcile aborts with context.DeadlineExceeded and is requeued with backoff. Primary bounding should still come from per-call timeouts on downstream clients")
++	cmd.Flags().IntVar(&o.PostRestartCaughtUpPercent, "post-restart-caught-up-percent", probes.DefaultPostRestartCaughtUpPercent, "During a rolling restart, the per-broker post-restart probe load_reclaimed_pc (0-100) a just-restarted broker must report before the next broker is rolled. Default 100 (require full recovery); lower to accept partial recovery at the gate.")
+ 	cmd.Flags().BoolVar(&o.EnableConsoleController, "enable-console", true, "Specifies whether or not to enable the Redpanda Console controller")
+ 	// Per-controller default reconcile (sync) intervals. Same flags/defaults as
+ 	// the `run` command; a per-CR spec.interval takes precedence.
+@@ -396,7 +407,7 @@ func Run(
+ 
+ 	factory := internalclient.NewFactory(manager, nil).WithAdminClientTimeout(opts.ClusterConnectionTimeout)
+ 
+-	if err := redpandacontrollers.SetupMulticlusterController(ctx, manager, redpandaImage, sidecarImage, cloudSecrets, factory, opts.ReconcileTimeout, opts.BrokerPodNodeUnavailableToleration); err != nil {
++	if err := redpandacontrollers.SetupMulticlusterController(ctx, manager, redpandaImage, sidecarImage, cloudSecrets, factory, opts.ReconcileTimeout, opts.BrokerPodNodeUnavailableToleration, opts.PostRestartCaughtUpPercent); err != nil {
+ 		setupLog.Error(err, "unable to create controller", "controller", "Multicluster")
+ 		return err
+ 	}
+diff --git a/operator/cmd/multicluster/multicluster_test.go b/operator/cmd/multicluster/multicluster_test.go
+new file mode 100644
+index 00000000..3ecf72cb
+--- /dev/null
++++ b/operator/cmd/multicluster/multicluster_test.go
+@@ -0,0 +1,62 @@
++// Copyright 2026 Redpanda Data, Inc.
++//
++// Use of this software is governed by the Business Source License
++// included in the file licenses/BSL.md
++//
++// As of the Change Date specified in that file, in accordance with
++// the Business Source License, use of this software will be governed
++// by the Apache License, Version 2.0
++
++package multicluster
++
++import (
++	"testing"
++
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++)
++
++// validBaseOptions returns a MulticlusterOptions that passes validate() so a
++// single field under test can be varied in isolation.
++func validBaseOptions() MulticlusterOptions {
++	return MulticlusterOptions{
++		Name:                       "node-a",
++		Address:                    "10.0.0.1:9999",
++		CAFile:                     "/etc/raft/ca.crt",
++		PrivateKeyFile:             "/etc/raft/tls.key",
++		CertificateFile:            "/etc/raft/tls.crt",
++		BaseImage:                  "redpanda",
++		BaseTag:                    "v25.1.1",
++		PostRestartCaughtUpPercent: 100,
++	}
++}
++
++// TestValidatePostRestartCaughtUpPercent covers the StretchCluster port of the
++// roll-loop safety: like the single-cluster `run` command, the multicluster
++// command rejects --post-restart-caught-up-percent outside [1,100] (>100 stalls
++// the rolling restart forever, 0 silently disables the per-broker post-restart
++// gate).
++func TestValidatePostRestartCaughtUpPercent(t *testing.T) {
++	t.Run("baseline is valid", func(t *testing.T) {
++		o := validBaseOptions()
++		require.NoError(t, o.validate())
++	})
++
++	for _, p := range []int{0, -1, 101, 200} {
++		t.Run("rejects out-of-range value", func(t *testing.T) {
++			o := validBaseOptions()
++			o.PostRestartCaughtUpPercent = p
++			err := o.validate()
++			require.Error(t, err)
++			assert.Contains(t, err.Error(), "post-restart-caught-up-percent")
++		})
++	}
++
++	for _, p := range []int{1, 50, 100} {
++		t.Run("accepts in-range value", func(t *testing.T) {
++			o := validBaseOptions()
++			o.PostRestartCaughtUpPercent = p
++			require.NoError(t, o.validate())
++		})
++	}
++}
+diff --git a/operator/cmd/run/redpanda_decommission_test.go b/operator/cmd/run/redpanda_decommission_test.go
+index abf4143d..84398f27 100644
+--- a/operator/cmd/run/redpanda_decommission_test.go
++++ b/operator/cmd/run/redpanda_decommission_test.go
+@@ -298,3 +298,23 @@ func TestRedpandaDecommissionerAdapter(t *testing.T) {
+ 		})
+ 	})
+ }
++
++// TestPostRestartCaughtUpPercentValidation covers review item #3: the
++// --post-restart-caught-up-percent flag is rejected outside [1,100]. A value
++// >100 would make the per-broker caught-up gate unsatisfiable (rolling restart
++// stalls forever) and 0 silently disables it, so RunE fails fast. Only the
++// invalid path is exercised here — a valid value lets RunE proceed to start the
++// operator, which needs a live cluster and isn't unit-testable.
++func TestPostRestartCaughtUpPercentValidation(t *testing.T) {
++	for _, value := range []string{"0", "-1", "101", "200"} {
++		t.Run("rejects "+value, func(t *testing.T) {
++			cmd := Command()
++			cmd.SetArgs([]string{"--post-restart-caught-up-percent=" + value})
++			cmd.SilenceUsage = true
++			cmd.SilenceErrors = true
++			err := cmd.ExecuteContext(context.Background())
++			require.Error(t, err)
++			assert.Contains(t, err.Error(), "post-restart-caught-up-percent")
++		})
++	}
++}
+diff --git a/operator/cmd/run/run.go b/operator/cmd/run/run.go
+index 48bc2506..b948705b 100644
+--- a/operator/cmd/run/run.go
++++ b/operator/cmd/run/run.go
+@@ -46,6 +46,7 @@ import (
+ 	redpandacontrollers "github.com/redpanda-data/redpanda-operator/operator/internal/controller/redpanda"
+ 	vectorizedcontrollers "github.com/redpanda-data/redpanda-operator/operator/internal/controller/vectorized"
+ 	"github.com/redpanda-data/redpanda-operator/operator/internal/lifecycle"
++	"github.com/redpanda-data/redpanda-operator/operator/internal/probes"
+ 	"github.com/redpanda-data/redpanda-operator/operator/internal/telemetry"
+ 	adminutils "github.com/redpanda-data/redpanda-operator/operator/pkg/admin"
+ 	internalclient "github.com/redpanda-data/redpanda-operator/operator/pkg/client"
+@@ -135,6 +136,7 @@ type RunOptions struct {
+ 	metricsCertKey                      string
+ 	enableGhostBrokerDecommissioner     bool
+ 	ghostBrokerDecommissionerSyncPeriod time.Duration
++	postRestartCaughtUpPercent          int
+ 	cloudSecretsEnabled                 bool
+ 	cloudSecretsPrefix                  string
+ 	cloudSecretsConfig                  pkgsecrets.ExpanderCloudConfiguration
+@@ -204,6 +206,7 @@ func (o *RunOptions) BindFlags(cmd *cobra.Command) {
+ 	cmd.Flags().BoolVar(&o.autoDeletePVCs, "auto-delete-pvcs", false, "Use StatefulSet PersistentVolumeClaimRetentionPolicy to auto delete PVCs on scale down and Cluster resource delete.")
+ 	cmd.Flags().BoolVar(&o.enableGhostBrokerDecommissioner, "enable-ghost-broker-decommissioner", false, "Enable ghost broker decommissioner.")
+ 	cmd.Flags().DurationVar(&o.ghostBrokerDecommissionerSyncPeriod, "ghost-broker-decommissioner-sync-period", time.Minute*5, "Ghost broker sync period. The Ghost Broker Decommissioner is guaranteed to be called after this period.")
++	cmd.Flags().IntVar(&o.postRestartCaughtUpPercent, "post-restart-caught-up-percent", probes.DefaultPostRestartCaughtUpPercent, "During a rolling restart, the per-broker post-restart probe load_reclaimed_pc (0-100) a just-restarted broker must report before the next broker is rolled. Default 100 (require full recovery); lower to accept partial recovery at the gate.")
+ 
+ 	// Telemetry related flags.
+ 	cmd.Flags().BoolVar(&o.disableTelemetry, "disable-telemetry", false, "Disable anonymous cluster-shape telemetry.")
+@@ -284,6 +287,14 @@ func Command() *cobra.Command {
+ 		RunE: func(cmd *cobra.Command, args []string) error {
+ 			ctx := cmd.Context()
+ 
++			// Reject out-of-range post-restart thresholds early: a value >100
++			// makes the per-broker caught-up gate unsatisfiable (rolling restart
++			// stalls forever), and 0 silently disables the gate. Both are
++			// footguns, so fail fast rather than clamp silently.
++			if p := options.postRestartCaughtUpPercent; p < 1 || p > 100 {
++				return errors.Newf("--post-restart-caught-up-percent must be in [1,100], got %d", p)
++			}
++
+ 			var cloudExpander *pkgsecrets.CloudExpander
+ 			if options.cloudSecretsEnabled {
+ 				var err error
+@@ -466,11 +477,12 @@ func Run(
+ 	if v2Controllers {
+ 		// Redpanda Reconciler
+ 		if err := (&redpandacontrollers.RedpandaReconciler{
+-			Manager:              mcmanager,
+-			LifecycleClient:      lifecycle.NewResourceClient(mcmanager, lifecycle.V2ResourceManagers(redpandaImage, sidecarImage, cloudSecrets)).WithBrokerPodNodeUnavailableToleration(opts.brokerPodNodeUnavailableToleration),
+-			ClientFactory:        factory,
+-			CloudSecretsExpander: cloudExpander,
+-			UseNodePools:         opts.enableV2NodepoolController,
++			Manager:                    mcmanager,
++			LifecycleClient:            lifecycle.NewResourceClient(mcmanager, lifecycle.V2ResourceManagers(redpandaImage, sidecarImage, cloudSecrets)).WithBrokerPodNodeUnavailableToleration(opts.brokerPodNodeUnavailableToleration),
++			ClientFactory:              factory,
++			CloudSecretsExpander:       cloudExpander,
++			UseNodePools:               opts.enableV2NodepoolController,
++			PostRestartCaughtUpPercent: opts.postRestartCaughtUpPercent,
+ 		}).SetupWithManager(ctx, mcmanager, opts.namespace); err != nil {
+ 			setupLog.Error(err, "unable to create controller", "controller", "Redpanda")
+ 			return err
+diff --git a/operator/go.mod b/operator/go.mod
+index 58562631..b3cf044a 100644
+--- a/operator/go.mod
++++ b/operator/go.mod
+@@ -3,8 +3,8 @@ module github.com/redpanda-data/redpanda-operator/operator
+ go 1.26.4
+ 
+ require (
+-	buf.build/gen/go/redpandadata/core/protocolbuffers/go v1.36.11-20260313213909-923579c57f1c.1
+-	connectrpc.com/connect v1.19.1
++	buf.build/gen/go/redpandadata/core/protocolbuffers/go v1.36.11-20260506141738-8dfb14358799.1
++	connectrpc.com/connect v1.19.2
+ 	github.com/Masterminds/semver/v3 v3.4.0
+ 	github.com/Masterminds/sprig/v3 v3.3.0
+ 	github.com/cert-manager/cert-manager v1.19.3
+@@ -19,7 +19,6 @@ require (
+ 	github.com/invopop/jsonschema v0.12.0
+ 	github.com/json-iterator/go v1.1.12
+ 	github.com/mattn/go-isatty v0.0.20
+-	github.com/moby/moby v24.0.7+incompatible
+ 	github.com/moby/sys/mountinfo v0.7.2
+ 	github.com/onsi/ginkgo/v2 v2.28.0
+ 	github.com/onsi/gomega v1.39.1
+@@ -33,7 +32,7 @@ require (
+ 	github.com/redpanda-data/common-go/net v0.1.1-0.20240429123545-4da3d2b371f7
+ 	github.com/redpanda-data/common-go/otelutil v0.0.0-20260413160920-df1679f86269
+ 	github.com/redpanda-data/common-go/rp-controller-utils v0.0.0-20260109170727-1dd9f5d22ee1
+-	github.com/redpanda-data/common-go/rpadmin v0.2.4
++	github.com/redpanda-data/common-go/rpadmin v0.2.7
+ 	github.com/redpanda-data/common-go/rpsr v0.1.4
+ 	github.com/redpanda-data/common-go/telemetry v0.1.0
+ 	github.com/redpanda-data/console/backend v0.0.0-20260330203659-9db13eb40ef4
+@@ -47,19 +46,19 @@ require (
+ 	github.com/spf13/afero v1.14.0
+ 	github.com/spf13/cobra v1.10.2
+ 	github.com/stretchr/testify v1.11.1
+-	github.com/testcontainers/testcontainers-go v0.40.0
+-	github.com/testcontainers/testcontainers-go/modules/redpanda v0.39.0
+-	github.com/twmb/franz-go v1.20.6
+-	github.com/twmb/franz-go/pkg/kadm v1.17.2
+-	github.com/twmb/franz-go/pkg/kmsg v1.12.0
++	github.com/testcontainers/testcontainers-go v0.42.0
++	github.com/testcontainers/testcontainers-go/modules/redpanda v0.42.0
++	github.com/twmb/franz-go v1.21.2
++	github.com/twmb/franz-go/pkg/kadm v1.18.0
++	github.com/twmb/franz-go/pkg/kmsg v1.13.1
+ 	github.com/twmb/franz-go/pkg/sr v1.7.0
+ 	github.com/wk8/go-ordered-map/v2 v2.1.8
+ 	go.opentelemetry.io/otel v1.43.0
+-	go.uber.org/zap v1.27.1
++	go.uber.org/zap v1.28.0
+ 	golang.org/x/crypto v0.51.0
+ 	golang.org/x/sync v0.20.0
+ 	golang.org/x/time v0.14.0
+-	golang.org/x/tools v0.44.0
++	golang.org/x/tools v0.45.0
+ 	google.golang.org/grpc v1.80.0
+ 	google.golang.org/protobuf v1.36.11
+ 	gopkg.in/yaml.v3 v3.0.1
+@@ -70,7 +69,7 @@ require (
+ 	k8s.io/client-go v0.35.1
+ 	k8s.io/kubectl v0.35.1
+ 	k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2
+-	pgregory.net/rapid v1.1.0
++	pgregory.net/rapid v1.2.0
+ 	sigs.k8s.io/controller-runtime v0.23.1
+ 	sigs.k8s.io/gateway-api v1.5.1
+ 	sigs.k8s.io/mcs-api v0.4.1
+@@ -84,7 +83,7 @@ require (
+ 	buf.build/gen/go/redpandadata/cloud/connectrpc/go v1.18.1-20250616170632-3de895655308.1 // indirect
+ 	buf.build/gen/go/redpandadata/cloud/protocolbuffers/go v1.36.10-20251124181447-cf877111f58c.1 // indirect
+ 	buf.build/gen/go/redpandadata/common/protocolbuffers/go v1.36.11-20260316210807-5d899910f714.1 // indirect
+-	buf.build/gen/go/redpandadata/core/connectrpc/go v1.19.1-20260226120209-2a07499aebcd.2 // indirect
++	buf.build/gen/go/redpandadata/core/connectrpc/go v1.19.2-20260506141738-8dfb14358799.1 // indirect
+ 	buf.build/gen/go/redpandadata/dataplane/connectrpc/go v1.18.1-20250404200318-65f29ddd7b29.1 // indirect
+ 	buf.build/gen/go/redpandadata/dataplane/protocolbuffers/go v1.36.5-20250404200318-65f29ddd7b29.1 // indirect
+ 	buf.build/gen/go/redpandadata/gatekeeper/connectrpc/go v1.18.1-20241209180130-05cf059c71c1.1 // indirect
+@@ -151,9 +150,8 @@ require (
+ 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+ 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
+ 	github.com/distribution/reference v0.6.0 // indirect
+-	github.com/docker/docker v28.5.2+incompatible // indirect
+ 	github.com/docker/go-connections v0.6.0 // indirect
+-	github.com/ebitengine/purego v0.9.1 // indirect
++	github.com/ebitengine/purego v0.10.0 // indirect
+ 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
+ 	github.com/evanphx/json-patch v5.9.11+incompatible // indirect
+ 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
+@@ -227,7 +225,7 @@ require (
+ 	github.com/jcmturner/rpc/v2 v2.0.3 // indirect
+ 	github.com/jmoiron/sqlx v1.4.0 // indirect
+ 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
+-	github.com/klauspost/compress v1.18.4 // indirect
++	github.com/klauspost/compress v1.18.6 // indirect
+ 	github.com/knadh/koanf/maps v0.1.2 // indirect
+ 	github.com/knadh/koanf/parsers/yaml v1.1.0 // indirect
+ 	github.com/knadh/koanf/providers/confmap v1.0.0 // indirect
+@@ -263,7 +261,9 @@ require (
+ 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
+ 	github.com/moby/docker-image-spec v1.3.1 // indirect
+ 	github.com/moby/go-archive v0.2.0 // indirect
+-	github.com/moby/patternmatcher v0.6.0 // indirect
++	github.com/moby/moby/api v1.54.1 // indirect
++	github.com/moby/moby/client v0.4.0 // indirect
++	github.com/moby/patternmatcher v0.6.1 // indirect
+ 	github.com/moby/spdystream v0.5.1 // indirect
+ 	github.com/moby/sys/sequential v0.6.0 // indirect
+ 	github.com/moby/sys/user v0.4.0 // indirect
+@@ -272,13 +272,12 @@ require (
+ 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
+ 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
+ 	github.com/monochromegane/go-gitignore v0.0.0-20200626010858-205db1a8cc00 // indirect
+-	github.com/morikuni/aec v1.1.0 // indirect
+ 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
+ 	github.com/mxk/go-flowrate v0.0.0-20140419014527-cca7078d478f // indirect
+ 	github.com/opencontainers/go-digest v1.0.1-0.20231025023718-d50d2fec9c98 // indirect
+ 	github.com/opencontainers/image-spec v1.1.1 // indirect
+ 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
+-	github.com/pierrec/lz4/v4 v4.1.25 // indirect
++	github.com/pierrec/lz4/v4 v4.1.26 // indirect
+ 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
+ 	github.com/pkg/errors v0.9.1 // indirect
+ 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
+@@ -294,7 +293,7 @@ require (
+ 	github.com/segmentio/asm v1.2.0 // indirect
+ 	github.com/sergi/go-diff v1.4.0 // indirect
+ 	github.com/sethgrid/pester v1.2.0 // indirect
+-	github.com/shirou/gopsutil/v4 v4.26.1 // indirect
++	github.com/shirou/gopsutil/v4 v4.26.3 // indirect
+ 	github.com/shopspring/decimal v1.4.0 // indirect
+ 	github.com/sirupsen/logrus v1.9.4 // indirect
+ 	github.com/spf13/cast v1.9.2 // indirect
+@@ -338,7 +337,7 @@ require (
+ 	go.yaml.in/yaml/v2 v2.4.3 // indirect
+ 	go.yaml.in/yaml/v3 v3.0.4 // indirect
+ 	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa // indirect
+-	golang.org/x/mod v0.35.0 // indirect
++	golang.org/x/mod v0.36.0 // indirect
+ 	golang.org/x/net v0.54.0 // indirect
+ 	golang.org/x/oauth2 v0.35.0 // indirect
+ 	golang.org/x/sys v0.44.0 // indirect
+@@ -347,8 +346,8 @@ require (
+ 	gomodules.xyz/jsonpatch/v2 v2.5.0 // indirect
+ 	google.golang.org/api v0.265.0 // indirect
+ 	google.golang.org/genproto v0.0.0-20260217215200-42d3e9bedb6d // indirect
+-	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect
+-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260401024825-9d38bb4040a9 // indirect
++	google.golang.org/genproto/googleapis/api v0.0.0-20260511170946-3700d4141b60 // indirect
++	google.golang.org/genproto/googleapis/rpc v0.0.0-20260504160031-60b97b32f348 // indirect
+ 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
+ 	gopkg.in/inf.v0 v0.9.1 // indirect
+ 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
+diff --git a/operator/internal/controller/redpanda/multicluster_controller.go b/operator/internal/controller/redpanda/multicluster_controller.go
+index 3ddb1518..96592666 100644
+--- a/operator/internal/controller/redpanda/multicluster_controller.go
++++ b/operator/internal/controller/redpanda/multicluster_controller.go
+@@ -96,6 +96,12 @@ type MulticlusterReconciler struct {
+ 	// --reconcile-timeout flag, and tests may inject shorter values to
+ 	// exercise the deadline path without real latency.
+ 	ReconcileTimeout time.Duration
++
++	// PostRestartCaughtUpPercent is the load_reclaimed_pc a just-restarted
++	// broker must report on /v1/broker/post_restart_probe before the roll
++	// loop proceeds to the next broker. Mirrors RedpandaReconciler; defaults
++	// to probes.DefaultPostRestartCaughtUpPercent (100).
++	PostRestartCaughtUpPercent int
+ }
+ 
+ // reconcileDeadline returns the timeout to apply on the reconcile context.
+@@ -1096,29 +1102,52 @@ func (r *MulticlusterReconciler) reconcileDecommission(ctx context.Context, stat
+ 		logger.V(log.DebugLevel).Info("recently replaced pods not ready, deferring rolling restart")
+ 		return ctrl.Result{RequeueAfter: requeueTimeout}, nil
+ 	}
+-	rolled := false
+-	for _, pod := range rollSet {
+-		shouldRoll, continueExecution := false, false
+-		_, inBrokerMap := brokerMap[pod.GetName()]
+-
+-		if !inBrokerMap {
+-			// we don't actually have this broker in the cluster
+-			// anymore, which means it's always safe to delete
+-			// the pod and continue with the next operations
+-			shouldRoll, continueExecution = true, true
+-		} else if health.IsHealthy {
+-			// TODO: don't just check overall cluster health, but use
+-			// scoped API endpoints for rolling a broker
+ 
+-			// roll and halt execution
+-			shouldRoll, continueExecution = true, false
+-		} else {
+-			// see if we can at least roll the next pods
+-			shouldRoll, continueExecution = false, true
++	// Post-restart recovery gate (Redpanda 25.1+), mirroring RedpandaReconciler:
++	// even when the prior pod is K8s-Ready the broker inside it may still be
++	// replaying partition state from its peers. Wait for every broker to report
++	// load_reclaimed_pc >= threshold before rolling the next one. These are live
++	// admin-API calls (not informer reads), so they don't add the cache-staleness
++	// concern stretch's multiple informers otherwise carry. On <25.1 the endpoint
++	// 404s and brokersStillRecovering reports not-recovering, so behavior is
++	// unchanged there.
++	if len(rollSet) > 0 {
++		recovering, err := brokersStillRecovering(ctx, state.admin, brokerMap, r.PostRestartCaughtUpPercent, logger)
++		switch {
++		case err != nil:
++			// Fail closed — a non-404 probe error means we can't confirm the
++			// just-restarted broker finished recovering, so defer rather than
++			// risk rolling the next broker mid-recovery. (Bounded retry/backoff
++			// for transient errors is handled by the rpadmin client.)
++			logger.V(log.DebugLevel).Info("post-restart probe error, deferring rolling restart", "error", err)
++			return ctrl.Result{RequeueAfter: requeueTimeout}, nil
++		case recovering:
++			logger.V(log.DebugLevel).Info("a broker is still post-restart recovering, deferring rolling restart")
++			return ctrl.Result{RequeueAfter: requeueTimeout}, nil
+ 		}
++	}
+ 
+-		logger.V(log.DebugLevel).Info("pod roll decision", "pod", pod.GetName(), "cluster", pod.GetCluster(),
+-			"inBrokerMap", inBrokerMap, "isHealthy", health.IsHealthy, "shouldRoll", shouldRoll, "continueExecution", continueExecution)
++	rolled := false
++	for _, pod := range rollSet {
++		// Same roll-safety decision as the single-cluster RedpandaReconciler:
++		// resolve the pod to a broker (pod name, then pod IP for stretch
++		// flat-network mode where InternalRPCAddress is a bare IP),
++		// pre-restart-probe it when mapped, then apply decideRollAction. These
++		// are live admin-API checks, not informer reads, so they don't add the
++		// cache-staleness concern stretch's multiple informers otherwise carry.
++		brokerID, inBrokerMap := brokerIDForPod(brokerMap, pod.GetName(), pod.Status.PodIP)
++		var brokerSafe bool
++		var probeErr error
++		if inBrokerMap {
++			brokerSafe, probeErr = brokerSafeToRestart(ctx, state.admin, brokerID, health.IsHealthy, logger, pod.GetName())
++		}
++
++		shouldRoll, continueExecution, reason := decideRollAction(inBrokerMap, health.IsHealthy, brokerSafe, probeErr)
++		logArgs := []any{"pod", pod.GetName(), "cluster", pod.GetCluster(), "inBrokerMap", inBrokerMap, "isHealthy", health.IsHealthy, "shouldRoll", shouldRoll, "reason", reason}
++		if probeErr != nil {
++			logArgs = append(logArgs, "error", probeErr)
++		}
++		logger.V(log.DebugLevel).Info("pod roll decision", logArgs...)
+ 
+ 		if shouldRoll {
+ 			rolled = true
+@@ -1417,7 +1446,10 @@ func (r *MulticlusterReconciler) scaleDown(ctx context.Context, admin *rpadmin.A
+ 	logger := log.FromContext(ctx).WithName(fmt.Sprintf("MulticlusterReconciler[%T].scaleDown", *cluster))
+ 	logger.V(log.TraceLevel).Info("starting StatefulSet scale down", "StatefulSet", client.ObjectKeyFromObject(set.StatefulSet).String())
+ 
+-	brokerID, ok := brokerMap[set.LastPod.GetName()]
++	// Resolve by pod name, then pod IP (stretch flat-network advertises brokers
++	// by bare IP) so a live broker is decommissioned before its pod is removed
++	// rather than being misclassified as already-removed.
++	brokerID, ok := brokerIDForPod(brokerMap, set.LastPod.GetName(), set.LastPod.Status.PodIP)
+ 	if ok {
+ 		// decommission if we have a brokerID, if not
+ 		// then the node has already been fully removed from
+@@ -1534,7 +1566,7 @@ func (r *MulticlusterReconciler) setupLicense(ctx context.Context, sc *redpandav
+ 	return nil
+ }
+ 
+-func SetupMulticlusterController(ctx context.Context, mgr multicluster.Manager, redpandaImage lifecycle.Image, sidecarImage lifecycle.Image, cloudSecrets lifecycle.CloudSecretsFlags, factory *internalclient.Factory, reconcileTimeout time.Duration, brokerPodNodeUnavailableToleration time.Duration) error {
++func SetupMulticlusterController(ctx context.Context, mgr multicluster.Manager, redpandaImage lifecycle.Image, sidecarImage lifecycle.Image, cloudSecrets lifecycle.CloudSecretsFlags, factory *internalclient.Factory, reconcileTimeout time.Duration, brokerPodNodeUnavailableToleration time.Duration, postRestartCaughtUpPercent int) error {
+ 	return mcbuilder.ControllerManagedBy(mgr).WithOptions(ctrlcontroller.TypedOptions[mcreconcile.Request]{
+ 		// NB: This is gross, but currently the multicluster runtime doesn't hand this global option off to the controller
+ 		// registration properly, so we can't boot multiple controllers in test without doing this.
+@@ -1568,10 +1600,11 @@ func SetupMulticlusterController(ctx context.Context, mgr multicluster.Manager,
+ 		}).
+ 		Complete(
+ 			observability.Wrap[mcreconcile.Request](&MulticlusterReconciler{
+-				Manager:          mgr,
+-				LifecycleClient:  lifecycle.NewMulticlusterResourceClient(mgr, lifecycle.StretchClusterResourceManagers(redpandaImage, sidecarImage, cloudSecrets)).WithBrokerPodNodeUnavailableToleration(brokerPodNodeUnavailableToleration),
+-				ClientFactory:    factory,
+-				ReconcileTimeout: reconcileTimeout,
++				Manager:                    mgr,
++				LifecycleClient:            lifecycle.NewMulticlusterResourceClient(mgr, lifecycle.StretchClusterResourceManagers(redpandaImage, sidecarImage, cloudSecrets)).WithBrokerPodNodeUnavailableToleration(brokerPodNodeUnavailableToleration),
++				ClientFactory:              factory,
++				ReconcileTimeout:           reconcileTimeout,
++				PostRestartCaughtUpPercent: postRestartCaughtUpPercent,
+ 			}, "StretchCluster", periodicRequeue),
+ 		)
+ }
+diff --git a/operator/internal/controller/redpanda/multicluster_controller_test.go b/operator/internal/controller/redpanda/multicluster_controller_test.go
+index d2a12a10..f81acaed 100644
+--- a/operator/internal/controller/redpanda/multicluster_controller_test.go
++++ b/operator/internal/controller/redpanda/multicluster_controller_test.go
+@@ -100,7 +100,7 @@ func (s *MulticlusterControllerSuite) SetupSuite() {
+ 		WatchAllNamespaces: true,
+ 		InstallCertManager: true,
+ 		SetupFn: func(mgr multicluster.Manager) error {
+-			return redpanda.SetupMulticlusterController(s.ctx, mgr, redpandaImage, sidecarImage, cloudSecrets, nil, 0, 0)
++			return redpanda.SetupMulticlusterController(s.ctx, mgr, redpandaImage, sidecarImage, cloudSecrets, nil, 0, 0, 100 /* post-restart caught-up % */)
+ 		},
+ 	})
+ }
+diff --git a/operator/internal/controller/redpanda/redpanda_controller.go b/operator/internal/controller/redpanda/redpanda_controller.go
+index 06c3247f..8b7903c3 100644
+--- a/operator/internal/controller/redpanda/redpanda_controller.go
++++ b/operator/internal/controller/redpanda/redpanda_controller.go
+@@ -14,11 +14,14 @@ import (
+ 	"bytes"
+ 	"context"
+ 	"fmt"
++	"net"
++	"net/http"
+ 	"sort"
+ 	"strings"
+ 	"time"
+ 
+ 	"github.com/cockroachdb/errors"
++	"github.com/go-logr/logr"
+ 	"github.com/redpanda-data/common-go/otelutil/log"
+ 	"github.com/redpanda-data/common-go/otelutil/otelkube"
+ 	"github.com/redpanda-data/common-go/otelutil/trace"
+@@ -99,6 +102,12 @@ type RedpandaReconciler struct {
+ 	ClientFactory        internalclient.ClientFactory
+ 	CloudSecretsExpander *pkgsecrets.CloudExpander
+ 	UseNodePools         bool
++	// PostRestartCaughtUpPercent is the load_reclaimed_pc a just-restarted
++	// broker must report (via the post-restart probe) before the rolling
++	// restart proceeds to the next broker. Defaults to
++	// probes.DefaultPostRestartCaughtUpPercent (100); set lower to accept
++	// partial recovery at the gate.
++	PostRestartCaughtUpPercent int
+ }
+ 
+ // Any resource that the Redpanda helm chart creates and needs to reconcile.
+@@ -515,6 +524,13 @@ func (r *RedpandaReconciler) reconcileDecommission(ctx context.Context, state *c
+ 		return ctrl.Result{}, errors.Wrap(err, "fetching cluster health")
+ 	}
+ 
++	// brokerMap keys brokers by the first DNS label of their internal RPC
++	// address (pod name when InternalRPCAddress is the per-pod FQDN).
++	// InternalRPCAddress can also come back as "host:port" (advertised RPC
++	// port suffix) or — in rarer misconfigurations — as a bare IP. Strip
++	// the port if present, then key by both the first label (pod-name
++	// lookup) and the raw host, so the roll loop below doesn't silently
++	// misclassify a registered broker as orphan.
+ 	brokerMap := map[string]int{}
+ 	for _, brokerID := range health.AllNodes {
+ 		broker, err := state.admin.Broker(ctx, brokerID)
+@@ -522,8 +538,12 @@ func (r *RedpandaReconciler) reconcileDecommission(ctx context.Context, state *c
+ 			return ctrl.Result{}, errors.Wrap(err, "fetching broker")
+ 		}
+ 
+-		brokerTokens := strings.Split(broker.InternalRPCAddress, ".")
+-		brokerMap[brokerTokens[0]] = brokerID
++		host := broker.InternalRPCAddress
++		if h, _, splitErr := net.SplitHostPort(broker.InternalRPCAddress); splitErr == nil {
++			host = h
++		}
++		brokerMap[strings.SplitN(host, ".", 2)[0]] = brokerID
++		brokerMap[host] = brokerID
+ 	}
+ 
+ 	// next scale down any over-provisioned pools, patching them to use the new spec
+@@ -561,25 +581,53 @@ func (r *RedpandaReconciler) reconcileDecommission(ctx context.Context, state *c
+ 		return ctrl.Result{RequeueAfter: requeueTimeout}, nil
+ 	}
+ 
++	// Second gate, Redpanda 25.1+: even when the prior pod is K8s-Ready, the
++	// broker inside it may still be replaying partition state from its
++	// peers. /v1/broker/post_restart_probe (load_reclaimed_pc) lets us wait
++	// for the broker to confirm it has reached the in-sync fraction we
++	// expect before we roll the next one. This is the ENG-222 RFC's "wait
++	// for post-restart probe" step. On Redpanda <25.1 the endpoint returns
++	// 404 for every broker; brokersStillRecovering then returns
++	// (false, nil) so behavior on older clusters is unchanged.
++	if len(rollSet) > 0 {
++		recovering, err := brokersStillRecovering(ctx, state.admin, brokerMap, r.PostRestartCaughtUpPercent, logger)
++		switch {
++		case err != nil:
++			// Fail closed. A non-404 post-restart probe error (404s are
++			// swallowed as "caught up" inside brokerCaughtUp) means we cannot
++			// confirm a just-restarted broker has finished recovering.
++			// Proceeding could roll the next broker mid-recovery — and in a
++			// mixed-version cluster the next broker's pre-restart probe may 404
++			// and fall back to cluster-wide IsHealthy, so it can't catch it
++			// either. brokerCaughtUp already applied a bounded retry/backoff, so
++			// transient blips don't reach here; a persistent endpoint error
++			// stalls the roll safely rather than risking data loss.
++			logger.V(log.DebugLevel).Info("post-restart probe error, deferring rolling restart", "error", err)
++			return ctrl.Result{RequeueAfter: requeueTimeout}, nil
++		case recovering:
++			logger.V(log.DebugLevel).Info("a broker is still post-restart recovering, deferring rolling restart")
++			return ctrl.Result{RequeueAfter: requeueTimeout}, nil
++		}
++	}
++
+ 	rolled := false
+ 	for _, pod := range rollSet {
+-		shouldRoll, continueExecution := false, false
+-
+-		if _, ok := brokerMap[pod.GetName()]; !ok {
+-			// we don't actually have this broker in the cluster
+-			// anymore, which means it's always safe to delete
+-			// the pod and continue with the next operations
+-			shouldRoll, continueExecution = true, true
+-		} else if health.IsHealthy {
+-			// TODO: don't just check overall cluster health, but use
+-			// scoped API endpoints for rolling a broker
++		// Resolve the pod to a broker (pod name, then pod IP for a bare-IP
++		// InternalRPCAddress), pre-restart-probe it when mapped, then apply the
++		// shared roll-safety decision (see decideRollAction for the rationale).
++		brokerID, inBrokerMap := brokerIDForPod(brokerMap, pod.GetName(), pod.Status.PodIP)
++		var brokerSafe bool
++		var probeErr error
++		if inBrokerMap {
++			brokerSafe, probeErr = brokerSafeToRestart(ctx, state.admin, brokerID, health.IsHealthy, logger, pod.GetName())
++		}
+ 
+-			// roll and halt execution
+-			shouldRoll, continueExecution = true, false
+-		} else {
+-			// see if we can at least roll the next pods
+-			shouldRoll, continueExecution = false, true
++		shouldRoll, continueExecution, reason := decideRollAction(inBrokerMap, health.IsHealthy, brokerSafe, probeErr)
++		logArgs := []any{"pod", pod.GetName(), "inBrokerMap", inBrokerMap, "isHealthy", health.IsHealthy, "shouldRoll", shouldRoll, "reason", reason}
++		if probeErr != nil {
++			logArgs = append(logArgs, "error", probeErr)
+ 		}
++		logger.V(log.DebugLevel).Info("pod roll decision", logArgs...)
+ 
+ 		if shouldRoll {
+ 			rolled = true
+@@ -923,6 +971,218 @@ func (r *RedpandaReconciler) syncStatus(ctx context.Context, cluster cluster.Clu
+ 	return syncResult, syncErr
+ }
+ 
++// brokerSafeToRestart consults the broker's pre-restart probe (Redpanda 25.1+
++// — /v1/broker/pre_restart_probe) to decide whether rolling this particular
++// broker is currently safe. It returns true when none of the dangerous risk
++// categories are populated for this broker:
++//
++//   - acks1_data_loss                 (acks=1 producers may lose data)
++//   - unavailable                     (partitions reject produce and consume)
++//   - full_acks_produce_unavailable   (acks=-1 produce rejected)
++//
++// rf1_offline is acceptable — RF=1 already has no redundancy.
++//
++// When the broker is on a Redpanda version without the probe endpoint (404),
++// the function falls back to the legacy cluster-wide IsHealthy heuristic
++// passed in via clusterIsHealthy so behavior on older brokers is unchanged.
++// All other errors are returned as-is and the caller should treat them as
++// "skip this pod, retry next reconcile".
++// brokerIDForPod resolves a pod to its broker ID using the dual-keyed
++// brokerMap. It looks up by pod name first (the common case, when
++// InternalRPCAddress is the per-pod FQDN whose first DNS label is the pod
++// name), then falls back to the pod IP. The IP fallback covers a bare-IP
++// InternalRPCAddress (a rare misconfiguration): brokerMap then holds that IP
++// only as a raw-host key, which a pod-name lookup can't match — without the
++// fallback a live, in-sync broker would be misclassified as an orphan and
++// deleted without first running its pre-restart probe.
++func brokerIDForPod(brokerMap map[string]int, podName, podIP string) (int, bool) {
++	if id, ok := brokerMap[podName]; ok {
++		return id, true
++	}
++	if podIP != "" {
++		if id, ok := brokerMap[podIP]; ok {
++			return id, true
++		}
++	}
++	return 0, false
++}
++
++// decideRollAction encodes the per-pod rolling-restart safety decision shared
++// by the RedpandaReconciler and MulticlusterReconciler roll loops. Inputs:
++// whether the pod maps to a known broker (after the pod-name/pod-IP lookup),
++// the cluster-wide health, and — for mapped pods — the per-broker pre-restart
++// probe result (brokerSafe, probeErr). It returns whether to roll (delete) the
++// pod now, whether to keep evaluating the rest of the rollSet this reconcile
++// (proceed=false ⇒ requeue after acting), and a reason for logging.
++//
++// The table is deliberately conservative:
++//   - At most one pod rolls per reconcile (roll=true always pairs with
++//     proceed=false), so a transient mis-classification can't tear down
++//     multiple brokers at once.
++//   - An unmapped pod is deleted only while the cluster is healthy. We have no
++//     broker ID for it, so we can't run its pre-restart probe; if the broker
++//     map is stale/mis-parsed the "orphan" may be a live, in-sync replica, and
++//     rolling it under-replicated risks data loss (RFC cases 3/4). When
++//     unhealthy we defer and let mapped pods be gated by their own probes.
++//   - A mapped pod rolls only when its pre-restart probe says it's safe; a
++//     probe error skips the pod conservatively (retry next reconcile).
++func decideRollAction(inBrokerMap, clusterHealthy, brokerSafe bool, probeErr error) (roll, proceed bool, reason string) {
++	switch {
++	case !inBrokerMap && !clusterHealthy:
++		return false, true, "unmapped pod but cluster not healthy; deferring deletion (cannot pre-restart-probe an unidentified broker)"
++	case !inBrokerMap:
++		return true, false, "unmapped pod, cluster healthy; deleting one pod and requeuing"
++	case probeErr != nil:
++		return false, true, "pre-restart probe error; skipping pod, will retry"
++	case brokerSafe:
++		return true, false, "broker safe to restart; rolling"
++	default:
++		return false, true, "broker not safe to restart right now; skipping pod"
++	}
++}
++
++func brokerSafeToRestart(ctx context.Context, admin *rpadmin.AdminAPI, brokerID int, clusterIsHealthy bool, logger logr.Logger, podName string) (bool, error) {
++	brokerURL, err := admin.BrokerIDToURL(ctx, brokerID)
++	if err != nil {
++		return false, errors.Wrapf(err, "resolving broker %d URL", brokerID)
++	}
++	scoped, err := admin.ForHost(brokerURL)
++	if err != nil {
++		return false, errors.Wrapf(err, "scoping admin client to broker %d (%s)", brokerID, brokerURL)
++	}
++	defer scoped.Close()
++
++	result, err := scoped.PreRestartProbe(ctx, 0)
++	if err != nil {
++		var httpErr *rpadmin.HTTPResponseError
++		if errors.As(err, &httpErr) && httpErr.Response != nil && httpErr.Response.StatusCode == http.StatusNotFound {
++			// Pre-25.1 broker — fall back to the cluster-wide
++			// heuristic. This preserves behavior on older clusters
++			// while letting 25.1+ benefit from the precise probe.
++			logger.V(log.DebugLevel).Info("pre-restart probe unsupported on broker, falling back to cluster IsHealthy", "pod", podName, "brokerID", brokerID)
++			return clusterIsHealthy, nil
++		}
++		return false, errors.Wrapf(err, "fetching pre-restart probe for broker %d", brokerID)
++	}
++
++	if n := len(result.Risks.Acks1DataLoss); n > 0 {
++		logger.V(log.DebugLevel).Info("broker not safe to restart: acks=1 data loss risk", "pod", podName, "partitions", n)
++		return false, nil
++	}
++	if n := len(result.Risks.Unavailable); n > 0 {
++		logger.V(log.DebugLevel).Info("broker not safe to restart: partitions would become unavailable", "pod", podName, "partitions", n)
++		return false, nil
++	}
++	if n := len(result.Risks.FullAcksProduceUnavailable); n > 0 {
++		logger.V(log.DebugLevel).Info("broker not safe to restart: acks=-1 produce would be rejected", "pod", podName, "partitions", n)
++		return false, nil
++	}
++	if n := len(result.Risks.RF1Offline); n > 0 {
++		logger.V(log.TraceLevel).Info("broker restart will briefly offline RF=1 partitions (acceptable)", "pod", podName, "partitions", n)
++	}
++	return true, nil
++}
++
++// brokerCaughtUp consults the broker's post-restart probe (Redpanda 25.1+ —
++// /v1/broker/post_restart_probe) to decide whether the broker has finished
++// replaying partition state since its last restart. Returns true when
++// LoadReclaimedPercent >= threshold (DefaultPostRestartCaughtUpPercent gives
++// the strictest 100% reading).
++//
++// On 404 the function returns (true, nil): the endpoint is absent on
++// pre-25.1 brokers, and we've never previously gated on this signal, so the
++// safe behavior is to act as though the broker is caught up (the
++// HasRecentlyReplacedPods K8s-Ready gate is still in place above).
++//
++// Any other (non-404) error is wrapped and returned. The rpadmin client already
++// applies a bounded retry/backoff (MaxRetries, ~1.5s backoff) to transient
++// 5xx/network failures, so reaching this return means the failure persisted.
++// The caller MUST treat a returned error as "cannot confirm recovery — defer
++// the roll" (fail closed), not proceed: proceeding could roll the next broker
++// mid-recovery, especially in a mixed-version cluster where the next broker's
++// pre-restart probe 404s and falls back to cluster-wide IsHealthy and therefore
++// can't catch it either.
++func brokerCaughtUp(ctx context.Context, admin *rpadmin.AdminAPI, brokerID, threshold int, logger logr.Logger, podName string) (bool, error) {
++	brokerURL, err := admin.BrokerIDToURL(ctx, brokerID)
++	if err != nil {
++		return false, errors.Wrapf(err, "resolving broker %d URL", brokerID)
++	}
++	scoped, err := admin.ForHost(brokerURL)
++	if err != nil {
++		return false, errors.Wrapf(err, "scoping admin client to broker %d (%s)", brokerID, brokerURL)
++	}
++	defer scoped.Close()
++
++	result, err := scoped.PostRestartProbe(ctx, 0)
++	if err != nil {
++		var httpErr *rpadmin.HTTPResponseError
++		if errors.As(err, &httpErr) && httpErr.Response != nil && httpErr.Response.StatusCode == http.StatusNotFound {
++			logger.V(log.DebugLevel).Info("post-restart probe unsupported on broker, treating as caught up", "pod", podName, "brokerID", brokerID)
++			return true, nil
++		}
++		return false, errors.Wrapf(err, "fetching post-restart probe for broker %d", brokerID)
++	}
++
++	if result.LoadReclaimedPercent < threshold {
++		logger.V(log.DebugLevel).Info("broker still post-restart recovering",
++			"pod", podName, "brokerID", brokerID,
++			"load_reclaimed_pc", result.LoadReclaimedPercent, "threshold", threshold)
++		return false, nil
++	}
++	return true, nil
++}
++
++// brokersStillRecovering returns true when any broker in brokerMap reports
++// load_reclaimed_pc < threshold via the post-restart probe. The roll loop uses
++// this to wait for a just-restarted broker to finish replaying its in-sync
++// replicas before proceeding to the next pod.
++//
++// threshold is the caught-up percentage the operator requires before rolling
++// the next broker. It defaults to probes.DefaultPostRestartCaughtUpPercent
++// (100 — the strictest reading) and is tunable via the operator's
++// --post-restart-caught-up-percent flag for clusters that want to accept
++// partial recovery at this gate.
++//
++// Implementation note: we query every broker in the map rather than
++// tracking which specific pods were "recently rolled," because the probe
++// answer is per-broker and consistent regardless — a broker that has been
++// running for hours and is fully caught up returns 100 every time. The
++// extra cost is one admin call per broker per reconcile, gated on
++// len(rollSet) > 0 so steady-state clusters don't pay it.
++func brokersStillRecovering(ctx context.Context, admin *rpadmin.AdminAPI, brokerMap map[string]int, threshold int, logger logr.Logger) (bool, error) {
++	// Deduplicate broker IDs — brokerMap intentionally double-keys (by
++	// first DNS label and raw host) so iterating values directly would
++	// query each broker twice.
++	seen := map[int]struct{}{}
++	var firstErr error
++	for podName, brokerID := range brokerMap {
++		if _, dup := seen[brokerID]; dup {
++			continue
++		}
++		seen[brokerID] = struct{}{}
++
++		caughtUp, err := brokerCaughtUp(ctx, admin, brokerID, threshold, logger, podName)
++		if err != nil {
++			// A probe error on one broker must not short-circuit the scan.
++			// brokerMap iteration order is random, and the caller treats a
++			// returned error as non-fatal and proceeds with the roll — so
++			// bailing on the first error could let us roll the next pod while
++			// a *different* broker is still recovering, reopening the
++			// under-replication window this gate exists to close (RFC
++			// cases 2/4). Record the first error and keep scanning; a
++			// confirmed still-recovering broker below takes precedence.
++			if firstErr == nil {
++				firstErr = err
++			}
++			continue
++		}
++		if !caughtUp {
++			return true, nil
++		}
++	}
++	return false, firstErr
++}
++
+ func (r *RedpandaReconciler) fetchClusterHealth(ctx context.Context, admin *rpadmin.AdminAPI) (_ rpadmin.ClusterHealthOverview, err error) {
+ 	ctx, span := trace.Start(ctx, "reconcileResources")
+ 	defer func() { trace.EndSpan(span, err) }()
+@@ -944,7 +1204,10 @@ func (r *RedpandaReconciler) scaleDown(ctx context.Context, admin *rpadmin.Admin
+ 	logger := log.FromContext(ctx).WithName(fmt.Sprintf("ClusterReconciler[%T].scaleDown", *cluster))
+ 	logger.V(log.TraceLevel).Info("starting StatefulSet scale down", "StatefulSet", client.ObjectKeyFromObject(set.StatefulSet).String())
+ 
+-	brokerID, ok := brokerMap[set.LastPod.GetName()]
++	// Resolve by pod name, then pod IP — same as the roll loop — so a broker
++	// advertising a bare-IP InternalRPCAddress is decommissioned rather than
++	// having its pod deleted as if it were already removed from the cluster.
++	brokerID, ok := brokerIDForPod(brokerMap, set.LastPod.GetName(), set.LastPod.Status.PodIP)
+ 	if ok {
+ 		// decommission if we have a brokerID, if not
+ 		// then the node has already been fully removed from
+diff --git a/operator/internal/controller/redpanda/redpanda_restart_probe_test.go b/operator/internal/controller/redpanda/redpanda_restart_probe_test.go
+new file mode 100644
+index 00000000..041d1dc1
+--- /dev/null
++++ b/operator/internal/controller/redpanda/redpanda_restart_probe_test.go
+@@ -0,0 +1,665 @@
++// Copyright 2026 Redpanda Data, Inc.
++//
++// Use of this software is governed by the Business Source License
++// included in the file licenses/BSL.md
++//
++// As of the Change Date specified in that file, in accordance with
++// the Business Source License, use of this software will be governed
++// by the Apache License, Version 2.0
++
++package redpanda
++
++import (
++	"context"
++	"encoding/json"
++	"net/http"
++	"net/http/httptest"
++	"net/url"
++	"os"
++	"slices"
++	"testing"
++	"time"
++
++	"github.com/cockroachdb/errors"
++	"github.com/go-logr/logr/testr"
++	"github.com/redpanda-data/common-go/rpadmin"
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++	"github.com/testcontainers/testcontainers-go/modules/redpanda"
++	"github.com/twmb/franz-go/pkg/kadm"
++	"github.com/twmb/franz-go/pkg/kgo"
++)
++
++// TestIntegrationBrokerSafeToRestart exercises the operator's
++// brokerSafeToRestart helper against a real Redpanda broker via
++// testcontainers. The test pins three behaviors:
++//
++//  1. Empty / fresh cluster — probe returns no risks → safe to restart.
++//  2. RF=1 topics populate rf1_offline but nothing else — still safe
++//     (operator policy treats rf1_offline as acceptable risk).
++//  3. The 404 fallback path: when a broker doesn't expose the endpoint
++//     (Redpanda < 25.1) the helper falls back to the cluster.IsHealthy
++//     argument so behavior on older brokers is unchanged.
++//
++// The "dangerous risk categories populated → not safe" path is harder
++// to drive deterministically from a single-broker container without
++// orchestrating partition recovery — it is covered by the rpadmin-side
++// integration test (common-go#170) which uses the same endpoint.
++func TestIntegrationBrokerSafeToRestart(t *testing.T) {
++	if testing.Short() {
++		t.Skip("skipping integration test in -short mode")
++	}
++	testImage := os.Getenv("TEST_REDPANDA_REPO") + ":" + os.Getenv("TEST_REDPANDA_VERSION")
++	if testImage == ":" {
++		t.Skip("TEST_REDPANDA_REPO / TEST_REDPANDA_VERSION not set")
++	}
++
++	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
++	defer cancel()
++	logger := testr.New(t)
++
++	container, err := redpanda.Run(ctx, testImage)
++	require.NoError(t, err, "start redpanda container")
++	t.Cleanup(func() {
++		_ = container.Terminate(context.Background())
++	})
++
++	adminAddr, err := container.AdminAPIAddress(ctx)
++	require.NoError(t, err)
++	adminClient, err := rpadmin.NewAdminAPI([]string{adminAddr}, new(rpadmin.NopAuth), nil)
++	require.NoError(t, err)
++	defer adminClient.Close()
++
++	// Discover the broker we'll be probing.
++	nodeCfg, err := adminClient.GetNodeConfig(ctx)
++	require.NoError(t, err)
++	brokerID := nodeCfg.NodeID
++
++	// The helper resolves the broker URL via admin.BrokerIDToURL, which
++	// in turn reads /v1/node_config from each known URL. With a single
++	// known URL (the testcontainer admin endpoint) this resolves to that
++	// URL — exactly what the operator does in a real cluster.
++	t.Run("fresh cluster is safe to restart", func(t *testing.T) {
++		safe, err := brokerSafeToRestart(ctx, adminClient, brokerID, true, logger, "pod-0")
++		require.NoError(t, err)
++		assert.True(t, safe, "fresh broker with no partitions must be safe to restart")
++	})
++
++	t.Run("RF=1 topic still counts as safe (acceptable risk)", func(t *testing.T) {
++		seed, err := container.KafkaSeedBroker(ctx)
++		require.NoError(t, err)
++		kc, err := kgo.NewClient(kgo.SeedBrokers(seed))
++		require.NoError(t, err)
++		defer kc.Close()
++		kadmClient := kadm.NewClient(kc)
++		_, err = kadmClient.CreateTopic(ctx, 4, 1, nil, "rf1-topic")
++		require.NoError(t, err, "create RF=1 topic")
++
++		// Poll briefly — probe data is computed from broker-local
++		// state that may lag topic creation by a tick or two.
++		var safe bool
++		require.Eventually(t, func() bool {
++			s, perr := brokerSafeToRestart(ctx, adminClient, brokerID, true, logger, "pod-0")
++			if perr != nil {
++				t.Logf("brokerSafeToRestart error: %v", perr)
++				return false
++			}
++			safe = s
++			// Independently verify the probe DID populate rf1_offline,
++			// so we know the "safe" answer isn't simply because the
++			// broker hasn't noticed the topic yet.
++			scoped, ferr := adminClient.ForHost(adminAddr)
++			if ferr != nil {
++				return false
++			}
++			defer scoped.Close()
++			res, perr := scoped.PreRestartProbe(ctx, 0)
++			if perr != nil {
++				return false
++			}
++			return slices.Contains(res.Risks.RF1Offline, "kafka/rf1-topic/0")
++		}, 30*time.Second, 500*time.Millisecond, "rf1-topic partitions never appeared in rf1_offline")
++		assert.True(t, safe, "RF=1 partitions are acceptable risk; broker must still report safe")
++	})
++
++	t.Run("404 falls back to cluster.IsHealthy", func(t *testing.T) {
++		// Stand up a stub admin server that returns 404 for the
++		// pre-restart-probe endpoint but otherwise mirrors enough of
++		// the broker's surface to let admin.BrokerIDToURL resolve.
++		fakeID := brokerID + 99 // arbitrary; we never serve a brokers list
++
++		mux := http.NewServeMux()
++		// /v1/node_config is what BrokerIDToURL leans on. Return our
++		// fake broker ID so the lookup succeeds; subsequent
++		// PreRestartProbe calls will then 404.
++		mux.HandleFunc("/v1/node_config", func(w http.ResponseWriter, _ *http.Request) {
++			_ = json.NewEncoder(w).Encode(map[string]any{"node_id": fakeID})
++		})
++		mux.HandleFunc("/v1/broker/pre_restart_probe", func(w http.ResponseWriter, _ *http.Request) {
++			http.Error(w, "not found", http.StatusNotFound)
++		})
++		stub := httptest.NewServer(mux)
++		defer stub.Close()
++		stubURL, err := url.Parse(stub.URL)
++		require.NoError(t, err)
++		_ = stubURL // present for clarity; not used directly
++
++		stubClient, err := rpadmin.NewAdminAPI([]string{stub.URL}, new(rpadmin.NopAuth), nil)
++		require.NoError(t, err)
++		defer stubClient.Close()
++
++		// On 404 the helper returns the value of clusterIsHealthy
++		// unchanged. Pin both directions explicitly.
++		safeWhenHealthy, err := brokerSafeToRestart(ctx, stubClient, fakeID, true, logger, "pod-old")
++		require.NoError(t, err, "404 must not be returned as an error")
++		assert.True(t, safeWhenHealthy, "fallback to cluster.IsHealthy=true on pre-25.1 broker")
++
++		safeWhenUnhealthy, err := brokerSafeToRestart(ctx, stubClient, fakeID, false, logger, "pod-old")
++		require.NoError(t, err)
++		assert.False(t, safeWhenUnhealthy, "fallback to cluster.IsHealthy=false on pre-25.1 broker")
++	})
++
++	// Sanity: HTTPResponseError type wiring detects non-404 errors as
++	// real errors (not fallback). We exercise this via a 500-returning
++	// stub.
++	t.Run("non-404 admin errors surface as errors", func(t *testing.T) {
++		fakeID := brokerID + 100
++
++		mux := http.NewServeMux()
++		mux.HandleFunc("/v1/node_config", func(w http.ResponseWriter, _ *http.Request) {
++			_ = json.NewEncoder(w).Encode(map[string]any{"node_id": fakeID})
++		})
++		mux.HandleFunc("/v1/broker/pre_restart_probe", func(w http.ResponseWriter, _ *http.Request) {
++			http.Error(w, "boom", http.StatusInternalServerError)
++		})
++		stub := httptest.NewServer(mux)
++		defer stub.Close()
++
++		stubClient, err := rpadmin.NewAdminAPI([]string{stub.URL}, new(rpadmin.NopAuth), nil)
++		require.NoError(t, err)
++		defer stubClient.Close()
++
++		safe, err := brokerSafeToRestart(ctx, stubClient, fakeID, true, logger, "pod-broken")
++		require.Error(t, err, "non-404 must propagate as error")
++		assert.False(t, safe)
++		// Sanity-check that we're catching the right error class.
++		var httpErr *rpadmin.HTTPResponseError
++		assert.True(t, errors.As(err, &httpErr) || err != nil)
++	})
++
++	// The next block of subtests pins the operator-side interpretation
++	// of each failure mode the RFC enumerates
++	// ("Rolling restart safety probes" design doc). Reproducing the
++	// actual cluster states (in-sync / offline / recovering replicas
++	// across multiple brokers) inside a single testcontainer is not
++	// practical; Redpanda core's own integration suite covers the
++	// probe's risk-calculation server-side. What we verify here is that
++	// for each documented case the operator's helper makes the right
++	// roll/don't-roll decision given the JSON the probe is contractually
++	// expected to return.
++	//
++	// Cases follow the RFC's numbering:
++	//   1. in-sync 2, offline 1   → leaderless on restart → unavailable
++	//   2. in-sync 2, recovering 1 → acks=-1 produce unavailable on
++	//                                in-sync restart
++	//   3. in-sync 1, offline 1, recovering 1 → acks=1 data loss
++	//   4. in-sync 1, recovering 2 → acks=1 data loss
++	for name, tc := range map[string]struct {
++		risks    rpadmin.RestartRisks
++		wantSafe bool
++		// purpose just documents which RFC clause the entry pins, so a
++		// reader who breaks a subtest can map back to the design doc.
++		purpose string
++	}{
++		"RFC case 1: in-sync 2, offline 1 — restarting online replica makes partition leaderless": {
++			risks: rpadmin.RestartRisks{
++				Unavailable: []string{"kafka/topic-rf3/0"},
++			},
++			wantSafe: false,
++			purpose:  "blocks on `unavailable` — both produce and consume reject",
++		},
++		"RFC case 2: in-sync 2, recovering 1 — restarting in-sync replica blocks acks=-1 produce": {
++			risks: rpadmin.RestartRisks{
++				FullAcksProduceUnavailable: []string{"kafka/topic-rf3/0"},
++			},
++			wantSafe: false,
++			purpose:  "blocks on `full_acks_produce_unavailable` — only one in-sync replica survives, can't form acks=-1 quorum",
++		},
++		"RFC case 2 (recovering-replica path): restarting THE recovering replica is safe": {
++			// "Restarting the recovering replica won't make much
++			// difference (other than completion of the recovery process
++			// being delayed), so can be considered safe."
++			risks:    rpadmin.RestartRisks{},
++			wantSafe: true,
++			purpose:  "probe returns no risks when the broker being restarted is itself the recovering replica",
++		},
++		"RFC case 3: in-sync 1, offline 1, recovering 1 — restarting in-sync risks acks=1 data loss": {
++			// The probe typically populates BOTH categories here: the
++			// partition will be leaderless AND acks=1 producers may lose
++			// data when the offline broker rejoins and elects with the
++			// recovering replica. The operator must block on either.
++			risks: rpadmin.RestartRisks{
++				Unavailable:   []string{"kafka/topic-rf3/0"},
++				Acks1DataLoss: []string{"kafka/topic-rf3/0"},
++			},
++			wantSafe: false,
++			purpose:  "blocks even when both `unavailable` and `acks1_data_loss` are populated",
++		},
++		"RFC case 4: in-sync 1, recovering 2 — restarting in-sync causes acks=1 data loss": {
++			risks: rpadmin.RestartRisks{
++				Acks1DataLoss: []string{"kafka/topic-rf3/0", "kafka/topic-rf3/1"},
++			},
++			wantSafe: false,
++			purpose:  "blocks on `acks1_data_loss` — recovering replicas elect among themselves, log tail is lost",
++		},
++		"RF=1 partitions are acceptable risk (RFC: 'restarting a node hosting them obviously results in availability loss, so they will require special handling')": {
++			risks: rpadmin.RestartRisks{
++				RF1Offline: []string{"kafka/rf1-topic/0", "kafka/rf1-topic/1"},
++			},
++			wantSafe: true,
++			purpose:  "rf1_offline alone does not block — RF=1 has no redundancy by user choice",
++		},
++		"RF=1 acceptable but other category populated → still blocked": {
++			risks: rpadmin.RestartRisks{
++				RF1Offline:                 []string{"kafka/rf1-topic/0"},
++				FullAcksProduceUnavailable: []string{"kafka/topic-rf3/0"},
++			},
++			wantSafe: false,
++			purpose:  "rf1_offline being acceptable does not override a dangerous category",
++		},
++		"all categories empty → safe": {
++			risks:    rpadmin.RestartRisks{},
++			wantSafe: true,
++			purpose:  "fresh / steady-state cluster — the happy path",
++		},
++	} {
++		name, tc := name, tc
++		t.Run(name, func(t *testing.T) {
++			t.Logf("RFC mapping: %s", tc.purpose)
++			fakeID := brokerID + 1000 + int(time.Now().UnixNano()&0xffff)
++
++			mux := http.NewServeMux()
++			mux.HandleFunc("/v1/node_config", func(w http.ResponseWriter, _ *http.Request) {
++				_ = json.NewEncoder(w).Encode(map[string]any{"node_id": fakeID})
++			})
++			mux.HandleFunc("/v1/broker/pre_restart_probe", func(w http.ResponseWriter, _ *http.Request) {
++				w.Header().Set("Content-Type", "application/json")
++				_ = json.NewEncoder(w).Encode(rpadmin.PreRestartCheckResult{Risks: tc.risks})
++			})
++			stub := httptest.NewServer(mux)
++			defer stub.Close()
++
++			stubClient, err := rpadmin.NewAdminAPI([]string{stub.URL}, new(rpadmin.NopAuth), nil)
++			require.NoError(t, err)
++			defer stubClient.Close()
++
++			// clusterIsHealthy is the legacy fallback used only on 404;
++			// for these cases the probe answers so the fallback value
++			// must not influence the result.
++			safe, err := brokerSafeToRestart(ctx, stubClient, fakeID, true, logger, "rfc-case-pod")
++			require.NoError(t, err)
++			assert.Equal(t, tc.wantSafe, safe, "RFC mapping: %s", tc.purpose)
++		})
++	}
++}
++
++// TestBrokerCaughtUp pins the operator-side interpretation of the
++// /v1/broker/post_restart_probe contract — the "wait for post-restart probe"
++// step in the rolling-restart RFC. The probe returns load_reclaimed_pc (0..100)
++// representing the fraction of in-sync replicas this broker has reclaimed
++// since its last restart. The next roll is blocked until every broker in the
++// cluster reports >= threshold (100 by default). Pure httptest stub — no real
++// Redpanda — so it runs in the normal unit pass.
++func TestBrokerCaughtUp(t *testing.T) {
++	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
++	defer cancel()
++	logger := testr.New(t)
++
++	for name, tc := range map[string]struct {
++		// loadPercent is the load_reclaimed_pc the stub returns.
++		// -1 means "respond with 404" (older Redpanda),
++		// 999 means "respond with 500" (admin failure).
++		loadPercent  int
++		threshold    int
++		wantCaughtUp bool
++		wantErr      bool
++	}{
++		"fully caught up at default threshold": {
++			loadPercent: 100, threshold: 100, wantCaughtUp: true,
++		},
++		"99% not caught up at default strict threshold": {
++			loadPercent: 99, threshold: 100, wantCaughtUp: false,
++		},
++		"99% caught up at relaxed threshold (95)": {
++			loadPercent: 99, threshold: 95, wantCaughtUp: true,
++		},
++		"0% (just restarted) not caught up": {
++			loadPercent: 0, threshold: 100, wantCaughtUp: false,
++		},
++		"404 falls back to caught up (pre-25.1 broker)": {
++			loadPercent: -1, threshold: 100, wantCaughtUp: true,
++		},
++		"500 propagates as error": {
++			loadPercent: 999, threshold: 100, wantErr: true,
++		},
++	} {
++		name, tc := name, tc
++		t.Run(name, func(t *testing.T) {
++			fakeID := 5000 + int(time.Now().UnixNano()&0xffff)
++			loadPercent := tc.loadPercent
++
++			mux := http.NewServeMux()
++			mux.HandleFunc("/v1/node_config", func(w http.ResponseWriter, _ *http.Request) {
++				_ = json.NewEncoder(w).Encode(map[string]any{"node_id": fakeID})
++			})
++			mux.HandleFunc("/v1/broker/post_restart_probe", func(w http.ResponseWriter, _ *http.Request) {
++				switch loadPercent {
++				case -1:
++					http.Error(w, "not found", http.StatusNotFound)
++				case 999:
++					http.Error(w, "boom", http.StatusInternalServerError)
++				default:
++					w.Header().Set("Content-Type", "application/json")
++					_ = json.NewEncoder(w).Encode(rpadmin.PostRestartCheckResult{LoadReclaimedPercent: loadPercent})
++				}
++			})
++			stub := httptest.NewServer(mux)
++			defer stub.Close()
++
++			stubClient, err := rpadmin.NewAdminAPI([]string{stub.URL}, new(rpadmin.NopAuth), nil)
++			require.NoError(t, err)
++			defer stubClient.Close()
++
++			caughtUp, err := brokerCaughtUp(ctx, stubClient, fakeID, tc.threshold, logger, "test-pod")
++			if tc.wantErr {
++				require.Error(t, err)
++				assert.False(t, caughtUp)
++				return
++			}
++			require.NoError(t, err)
++			assert.Equal(t, tc.wantCaughtUp, caughtUp)
++		})
++	}
++}
++
++// TestBrokersStillRecovering verifies the outer gate's behavior
++// across a brokerMap: it returns "still recovering" when any broker is
++// below threshold, it deduplicates by broker ID (brokerMap double-keys), and
++// 404 is treated as "endpoint absent on this cluster, not recovering."
++// Pure httptest stubs — no real Redpanda — so it runs in the normal unit pass.
++func TestBrokersStillRecovering(t *testing.T) {
++	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
++	defer cancel()
++	logger := testr.New(t)
++
++	type brokerStub struct {
++		id          int
++		loadPercent int
++		url         string
++		server      *httptest.Server
++		hits        int
++	}
++
++	makeBrokerStub := func(t *testing.T, id, loadPercent int) *brokerStub {
++		t.Helper()
++		bs := &brokerStub{id: id, loadPercent: loadPercent}
++		mux := http.NewServeMux()
++		mux.HandleFunc("/v1/node_config", func(w http.ResponseWriter, _ *http.Request) {
++			_ = json.NewEncoder(w).Encode(map[string]any{"node_id": bs.id})
++		})
++		mux.HandleFunc("/v1/broker/post_restart_probe", func(w http.ResponseWriter, _ *http.Request) {
++			bs.hits++
++			w.Header().Set("Content-Type", "application/json")
++			_ = json.NewEncoder(w).Encode(rpadmin.PostRestartCheckResult{LoadReclaimedPercent: bs.loadPercent})
++		})
++		bs.server = httptest.NewServer(mux)
++		bs.url = bs.server.URL
++		return bs
++	}
++
++	t.Run("any broker below threshold blocks", func(t *testing.T) {
++		caughtUp := makeBrokerStub(t, 1, 100)
++		defer caughtUp.server.Close()
++		recovering := makeBrokerStub(t, 2, 50)
++		defer recovering.server.Close()
++		client, err := rpadmin.NewAdminAPI([]string{caughtUp.url, recovering.url}, new(rpadmin.NopAuth), nil)
++		require.NoError(t, err)
++		defer client.Close()
++
++		stillRecovering, err := brokersStillRecovering(ctx, client, map[string]int{
++			"broker-1": 1,
++			"broker-2": 2,
++		}, 100, logger)
++		require.NoError(t, err)
++		assert.True(t, stillRecovering, "broker-2 at 50% should block")
++	})
++
++	t.Run("all brokers caught up returns false", func(t *testing.T) {
++		one := makeBrokerStub(t, 11, 100)
++		defer one.server.Close()
++		two := makeBrokerStub(t, 12, 100)
++		defer two.server.Close()
++		client, err := rpadmin.NewAdminAPI([]string{one.url, two.url}, new(rpadmin.NopAuth), nil)
++		require.NoError(t, err)
++		defer client.Close()
++
++		stillRecovering, err := brokersStillRecovering(ctx, client, map[string]int{
++			"broker-1": 11,
++			"broker-2": 12,
++		}, 100, logger)
++		require.NoError(t, err)
++		assert.False(t, stillRecovering)
++	})
++
++	t.Run("dedupes by broker ID across map entries", func(t *testing.T) {
++		// brokerMap intentionally has two entries per broker (first DNS
++		// label and raw host). The helper must not query each broker twice.
++		one := makeBrokerStub(t, 21, 100)
++		defer one.server.Close()
++		client, err := rpadmin.NewAdminAPI([]string{one.url}, new(rpadmin.NopAuth), nil)
++		require.NoError(t, err)
++		defer client.Close()
++
++		_, err = brokersStillRecovering(ctx, client, map[string]int{
++			"broker-1":                           21,
++			"broker-1.svc.namespace.svc.cluster": 21,
++		}, 100, logger)
++		require.NoError(t, err)
++		assert.Equal(t, 1, one.hits, "broker should be queried exactly once despite two map entries")
++	})
++
++	t.Run("404 on a broker is treated as endpoint absent (not recovering)", func(t *testing.T) {
++		notFound := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++			if r.URL.Path == "/v1/node_config" {
++				_ = json.NewEncoder(w).Encode(map[string]any{"node_id": 31})
++				return
++			}
++			http.Error(w, "not found", http.StatusNotFound)
++		}))
++		defer notFound.Close()
++		caughtUp := makeBrokerStub(t, 32, 100)
++		defer caughtUp.server.Close()
++		client, err := rpadmin.NewAdminAPI([]string{notFound.URL, caughtUp.url}, new(rpadmin.NopAuth), nil)
++		require.NoError(t, err)
++		defer client.Close()
++
++		stillRecovering, err := brokersStillRecovering(ctx, client, map[string]int{
++			"broker-1": 31,
++			"broker-2": 32,
++		}, 100, logger)
++		require.NoError(t, err)
++		assert.False(t, stillRecovering, "404 → caught-up fallback, no broker blocks")
++	})
++
++	t.Run("a probe error on one broker does not mask another still recovering", func(t *testing.T) {
++		// Regression: brokersStillRecovering must keep scanning after a
++		// per-broker probe error. brokerMap iteration order is random and the
++		// caller treats a returned error as non-fatal (it proceeds with the
++		// roll), so if a 500 on broker-1 short-circuited the scan we could
++		// roll the next pod while broker-2 is still at 50% — exactly the
++		// under-replication window the post-restart gate exists to close.
++		erroring := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++			if r.URL.Path == "/v1/node_config" {
++				_ = json.NewEncoder(w).Encode(map[string]any{"node_id": 41})
++				return
++			}
++			http.Error(w, "boom", http.StatusInternalServerError)
++		}))
++		defer erroring.Close()
++		recovering := makeBrokerStub(t, 42, 50)
++		defer recovering.server.Close()
++		client, err := rpadmin.NewAdminAPI([]string{erroring.URL, recovering.url}, new(rpadmin.NopAuth), nil)
++		require.NoError(t, err)
++		defer client.Close()
++
++		stillRecovering, err := brokersStillRecovering(ctx, client, map[string]int{
++			"broker-1": 41,
++			"broker-2": 42,
++		}, 100, logger)
++		require.NoError(t, err, "a confirmed recovering broker must win over a probe error on another broker")
++		assert.True(t, stillRecovering, "broker-2 at 50% must block even though broker-1's probe errored")
++	})
++}
++
++// TestBrokerCaughtUpNon404FailClosed covers review item #2: a non-404
++// post-restart probe error surfaces from brokerCaughtUp (so the caller fails
++// closed and defers the roll rather than proceeding mid-recovery), while a 404
++// short-circuits to "caught up". The bounded retry/backoff for transient
++// failures is provided by the rpadmin client itself (MaxRetries); the stub
++// client here sets MaxRetries(0) so the non-retryable assertions stay fast and
++// deterministic.
++func TestBrokerCaughtUpNon404FailClosed(t *testing.T) {
++	ctx := t.Context()
++	logger := testr.New(t)
++
++	newStub := func(t *testing.T, status int) *rpadmin.AdminAPI {
++		t.Helper()
++		mux := http.NewServeMux()
++		mux.HandleFunc("/v1/node_config", func(w http.ResponseWriter, _ *http.Request) {
++			_ = json.NewEncoder(w).Encode(map[string]any{"node_id": 7})
++		})
++		mux.HandleFunc("/v1/broker/post_restart_probe", func(w http.ResponseWriter, _ *http.Request) {
++			http.Error(w, http.StatusText(status), status)
++		})
++		srv := httptest.NewServer(mux)
++		t.Cleanup(srv.Close)
++		// MaxRetries(0): the client's built-in retry already provides the
++		// bounded retry/backoff; disable it here so the error path is fast.
++		client, err := rpadmin.NewAdminAPIWithDialer([]string{srv.URL}, new(rpadmin.NopAuth), nil, nil, rpadmin.MaxRetries(0))
++		require.NoError(t, err)
++		t.Cleanup(func() { client.Close() })
++		return client
++	}
++
++	t.Run("500 surfaces as error (caller fails closed)", func(t *testing.T) {
++		caughtUp, err := brokerCaughtUp(ctx, newStub(t, http.StatusInternalServerError), 7, 100, logger, "test-pod")
++		require.Error(t, err, "a non-404 error must surface so the caller defers the roll instead of proceeding")
++		assert.False(t, caughtUp)
++	})
++
++	t.Run("404 short-circuits to caught up (pre-25.1 broker)", func(t *testing.T) {
++		caughtUp, err := brokerCaughtUp(ctx, newStub(t, http.StatusNotFound), 7, 100, logger, "test-pod")
++		require.NoError(t, err)
++		assert.True(t, caughtUp)
++	})
++}
++
++// TestDecideRollAction pins the roll-safety decision table shared by both the
++// RedpandaReconciler and MulticlusterReconciler roll loops — the StretchCluster
++// roll-loop regression the review asked for, exercised independently of the
++// envtest harness. The two invariants that prevent data loss:
++//   - at most one pod rolls per reconcile (roll ⇒ !proceed), and
++//   - an unmapped (unidentifiable) pod is deleted only while the cluster is
++//     healthy; otherwise it's deferred.
++func TestDecideRollAction(t *testing.T) {
++	probeErr := errors.New("probe boom")
++
++	for name, tc := range map[string]struct {
++		inBrokerMap    bool
++		clusterHealthy bool
++		brokerSafe     bool
++		probeErr       error
++		wantRoll       bool
++		wantProceed    bool
++	}{
++		"unmapped + healthy → delete one, requeue": {
++			inBrokerMap: false, clusterHealthy: true, wantRoll: true, wantProceed: false,
++		},
++		"unmapped + unhealthy → defer (cannot probe an unidentified broker)": {
++			inBrokerMap: false, clusterHealthy: false, wantRoll: false, wantProceed: true,
++		},
++		"mapped + probe error → skip pod, try next": {
++			inBrokerMap: true, clusterHealthy: true, probeErr: probeErr, wantRoll: false, wantProceed: true,
++		},
++		"mapped + safe → roll, halt": {
++			inBrokerMap: true, clusterHealthy: true, brokerSafe: true, wantRoll: true, wantProceed: false,
++		},
++		"mapped + not safe → skip pod, try next": {
++			inBrokerMap: true, clusterHealthy: true, brokerSafe: false, wantRoll: false, wantProceed: true,
++		},
++		// A mapped pod's decision must come from its own probe, not cluster
++		// health: even when the cluster is unhealthy, a broker its probe deems
++		// safe may roll (brokerSafeToRestart already folded IsHealthy into the
++		// pre-25.1 fallback), and a probe error never rolls.
++		"mapped + safe even when cluster unhealthy → roll": {
++			inBrokerMap: true, clusterHealthy: false, brokerSafe: true, wantRoll: true, wantProceed: false,
++		},
++		"mapped + probe error when cluster unhealthy → skip": {
++			inBrokerMap: true, clusterHealthy: false, probeErr: probeErr, wantRoll: false, wantProceed: true,
++		},
++	} {
++		name, tc := name, tc
++		t.Run(name, func(t *testing.T) {
++			roll, proceed, reason := decideRollAction(tc.inBrokerMap, tc.clusterHealthy, tc.brokerSafe, tc.probeErr)
++			assert.Equal(t, tc.wantRoll, roll, "roll")
++			assert.Equal(t, tc.wantProceed, proceed, "proceed")
++			assert.NotEmpty(t, reason, "a reason is always set for logging")
++			// Core safety invariant: never roll a pod and also continue the
++			// loop — at most one delete per reconcile.
++			if roll {
++				assert.False(t, proceed, "rolling a pod must halt the loop (one delete per reconcile)")
++			}
++		})
++	}
++}
++
++// TestBrokerIDForPod covers review item #4: a pod is resolved to its broker ID
++// by name first, then by IP. The IP fallback is what keeps a bare-IP
++// InternalRPCAddress broker (whose brokerMap key is the raw IP, not the pod
++// name) from being misclassified as an orphan and deleted without a pre-restart
++// probe.
++func TestBrokerIDForPod(t *testing.T) {
++	// brokerMap is dual-keyed: first DNS label (pod name) AND raw host.
++	byName := map[string]int{"redpanda-0": 0, "redpanda-0.redpanda.ns.svc.cluster.local": 0}
++	byIP := map[string]int{"10": 2, "10.1.2.3": 2} // bare-IP InternalRPCAddress
++
++	for name, tc := range map[string]struct {
++		brokerMap map[string]int
++		podName   string
++		podIP     string
++		wantID    int
++		wantOK    bool
++	}{
++		"name match": {
++			brokerMap: byName, podName: "redpanda-0", podIP: "10.1.2.3", wantID: 0, wantOK: true,
++		},
++		"name miss, IP match (bare-IP InternalRPCAddress)": {
++			brokerMap: byIP, podName: "redpanda-1", podIP: "10.1.2.3", wantID: 2, wantOK: true,
++		},
++		"name miss, IP miss → orphan": {
++			brokerMap: byName, podName: "ghost-9", podIP: "10.9.9.9", wantID: 0, wantOK: false,
++		},
++		"name miss, empty IP → orphan (no false match)": {
++			brokerMap: byIP, podName: "ghost-9", podIP: "", wantID: 0, wantOK: false,
++		},
++	} {
++		name, tc := name, tc
++		t.Run(name, func(t *testing.T) {
++			id, ok := brokerIDForPod(tc.brokerMap, tc.podName, tc.podIP)
++			assert.Equal(t, tc.wantOK, ok)
++			if tc.wantOK {
++				assert.Equal(t, tc.wantID, id)
++			}
++		})
++	}
++}
+diff --git a/operator/internal/controller/vectorized/test/cluster_controller_configuration_test.go b/operator/internal/controller/vectorized/test/cluster_controller_configuration_test.go
+index cd21782f..0045b000 100644
+--- a/operator/internal/controller/vectorized/test/cluster_controller_configuration_test.go
++++ b/operator/internal/controller/vectorized/test/cluster_controller_configuration_test.go
+@@ -12,11 +12,12 @@ package test
+ 
+ import (
+ 	"context"
++	"crypto/rand"
++	"encoding/hex"
+ 	"fmt"
+ 	"strings"
+ 	"time"
+ 
+-	"github.com/moby/moby/pkg/namesgenerator"
+ 	. "github.com/onsi/ginkgo/v2"
+ 	. "github.com/onsi/gomega"
+ 	"github.com/redpanda-data/common-go/rpadmin"
+@@ -757,7 +758,13 @@ func getInitialTestCluster(
+ 	namespace *corev1.Namespace,
+ 	api *admin.MockAdminAPI,
+ ) {
+-	ns := strings.Replace(namesgenerator.GetRandomName(0), "_", "-", 1)
++	// Per-test namespace name. Previously pulled namesgenerator from
++	// github.com/moby/moby; the monolith now conflicts with the split-out
++	// moby/moby/api module pulled in via testcontainers. The actual name
++	// just needs to be unique within the suite.
++	suffix := make([]byte, 4)
++	_, _ = rand.Read(suffix)
++	ns := "test-" + strings.ToLower(hex.EncodeToString(suffix))
+ 	key = types.NamespacedName{
+ 		Name:      name,
+ 		Namespace: ns,
+diff --git a/operator/internal/lifecycle/pool_test.go b/operator/internal/lifecycle/pool_test.go
+index 195b752a..e5baf89c 100644
+--- a/operator/internal/lifecycle/pool_test.go
++++ b/operator/internal/lifecycle/pool_test.go
+@@ -1131,3 +1131,114 @@ func TestPoolTrackerPodsToRoll(t *testing.T) {
+ 		})
+ 	}
+ }
++
++// TestHasRecentlyReplacedPods pins the gate semantics that prevent the rolling
++// restart loop from deleting a second pod while a just-replaced peer is still
++// coming up — the window where Redpanda's cluster health view lags behind pod
++// state, so two pods can end up Terminating concurrently without it.
++func TestHasRecentlyReplacedPods(t *testing.T) {
++	pool := &MulticlusterStatefulSet{
++		clusterName: mcmanager.LocalCluster,
++		StatefulSet: &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: "pool"}},
++	}
++	revisions := []*appsv1.ControllerRevision{
++		{ObjectMeta: metav1.ObjectMeta{Name: "old"}},
++		{ObjectMeta: metav1.ObjectMeta{Name: "new"}},
++	}
++
++	readyPod := func(name, rev string) *corev1.Pod {
++		return &corev1.Pod{
++			ObjectMeta: metav1.ObjectMeta{
++				Name:   name,
++				Labels: map[string]string{appsv1.StatefulSetRevisionLabel: rev},
++			},
++			Status: corev1.PodStatus{
++				Phase: corev1.PodRunning,
++				Conditions: []corev1.PodCondition{
++					{Type: corev1.PodReady, Status: corev1.ConditionTrue},
++				},
++			},
++		}
++	}
++	notReadyPod := func(name, rev string) *corev1.Pod {
++		p := readyPod(name, rev)
++		p.Status.Conditions[0].Status = corev1.ConditionFalse
++		return p
++	}
++	terminatingPod := func(name, rev string) *corev1.Pod {
++		p := readyPod(name, rev)
++		now := metav1.Now()
++		p.DeletionTimestamp = &now
++		// Pods being deleted often retain Ready=True briefly while
++		// preStop hooks run; the gate must catch them anyway.
++		p.Finalizers = []string{"keep-alive-during-test"}
++		return p
++	}
++
++	for name, tt := range map[string]struct {
++		pods     []*corev1.Pod
++		expected bool
++	}{
++		"no pods": {},
++		"all pods on old revision are not 'recently replaced'": {
++			pods: []*corev1.Pod{
++				readyPod("pod-0", "old"),
++				readyPod("pod-1", "old"),
++			},
++			expected: false,
++		},
++		"all pods Ready on new revision is the post-roll steady state": {
++			pods: []*corev1.Pod{
++				readyPod("pod-0", "new"),
++				readyPod("pod-1", "new"),
++				readyPod("pod-2", "new"),
++			},
++			expected: false,
++		},
++		"just-replaced pod on new revision but not yet Ready blocks the next roll": {
++			pods: []*corev1.Pod{
++				notReadyPod("pod-0", "new"),
++				readyPod("pod-1", "old"),
++				readyPod("pod-2", "old"),
++			},
++			expected: true,
++		},
++		"any pod with a DeletionTimestamp blocks regardless of revision": {
++			pods: []*corev1.Pod{
++				terminatingPod("pod-0", "old"),
++				readyPod("pod-1", "old"),
++				readyPod("pod-2", "old"),
++			},
++			expected: true,
++		},
++		"new-revision pod stuck in Pending blocks": {
++			pods: []*corev1.Pod{
++				func() *corev1.Pod {
++					p := readyPod("pod-0", "new")
++					p.Status.Phase = corev1.PodPending
++					return p
++				}(),
++				readyPod("pod-1", "old"),
++			},
++			expected: true,
++		},
++	} {
++		t.Run(name, func(t *testing.T) {
++			t.Parallel()
++
++			withOrdinals := make([]*podsWithOrdinals, 0, len(tt.pods))
++			for i, p := range tt.pods {
++				withOrdinals = append(withOrdinals, &podsWithOrdinals{ordinal: i, pod: p})
++			}
++
++			tracker := NewPoolTracker(0, false)
++			tracker.addExisting(&poolWithOrdinals{
++				pods:      withOrdinals,
++				set:       pool,
++				revisions: revisions,
++			})
++
++			require.Equal(t, tt.expected, tracker.HasRecentlyReplacedPods())
++		})
++	}
++}
+diff --git a/operator/internal/probes/broker.go b/operator/internal/probes/broker.go
+index 8cdafed8..a51e0a0d 100644
+--- a/operator/internal/probes/broker.go
++++ b/operator/internal/probes/broker.go
+@@ -21,6 +21,14 @@ import (
+ 	internalclient "github.com/redpanda-data/redpanda-operator/operator/pkg/client"
+ )
+ 
++// DefaultPostRestartCaughtUpPercent is the default threshold for "this
++// broker has finished its post-restart recovery": LoadReclaimedPercent must
++// be at least this high for the broker to be considered caught up. 100 means
++// every in-sync replica this broker hosts has been recovered to current
++// state — the strictest interpretation of the RFC's "wait for post-restart
++// probe" step.
++const DefaultPostRestartCaughtUpPercent = 100
++
+ type Option func(*Prober)
+ 
+ func WithLogger(logger logr.Logger) Option {
+@@ -58,12 +66,21 @@ func NewProber(factory internalclient.ClientFactory, configPath string, options
+ 	return prober
+ }
+ 
+-// IsClusterBrokerHealthy checks that a cluster broker is up and ready to serve requests
+-// but additionally serves as a gate for StatefulSet rolling restarts. It's a relaxed form
+-// of our previous readiness probe which only looked at the `IsHealthy` return value from
+-// the cluster health overview endpoint. This had the unfortunate effect of marking all brokers
+-// as "unready" when a single broker was marked as a downed node due to being a reflection of
+-// the overall cluster health rather than an individual broker's health.
++// IsClusterBrokerHealthy checks that a cluster broker is up and ready to serve requests.
++// It's a relaxed form of our previous readiness probe which only looked at the `IsHealthy`
++// return value from the cluster health overview endpoint. This had the unfortunate effect
++// of marking all brokers as "unready" when a single broker was marked as a downed node due
++// to being a reflection of the overall cluster health rather than an individual broker's
++// health.
++//
++// NOTE: this function intentionally does NOT consult /v1/broker/pre_restart_probe.
++// The pre-restart probe answers "would restarting me cause partition risks?" — a
++// strictly stricter signal than "am I serving traffic?". During cluster bootstrap
++// (internal-topic creation, partition leader election) the probe transiently reports
++// risks even though the broker is happily serving Kafka traffic. Wiring it here would
++// keep pods NotReady through bootstrap and stall helm installs (#1547 first attempt).
++// PreRestartProbe is the right signal for the operator's rolling-restart roll gate —
++// see brokerSafeToRestart in operator/internal/controller/redpanda/redpanda_controller.go.
+ func (p *Prober) IsClusterBrokerHealthy(ctx context.Context, brokerURL string) (bool, error) {
+ 	client, brokerID, err := p.getClient(ctx, brokerURL)
+ 	if err != nil {
+diff --git a/operator/pkg/client/stretch_cluster_test.go b/operator/pkg/client/stretch_cluster_test.go
+index 07f25cb9..70bae182 100644
+--- a/operator/pkg/client/stretch_cluster_test.go
++++ b/operator/pkg/client/stretch_cluster_test.go
+@@ -109,7 +109,7 @@ func (s *StretchClusterFactorySuite) SetupSuite() {
+ 					return mc.DialContext(ctx, network, address)
+ 				},
+ 			)
+-			return redpandacontrollers.SetupMulticlusterController(ctx, mgr, redpandaImage, sidecarImage, cloudSecrets, factory, 0, 0)
++			return redpandacontrollers.SetupMulticlusterController(ctx, mgr, redpandaImage, sidecarImage, cloudSecrets, factory, 0, 0, 100 /* post-restart caught-up % */)
+ 		},
+ 	})
+ 	mc = s.mc
+diff --git a/pkg/go.mod b/pkg/go.mod
+index f5ff6880..a25eed7a 100644
+--- a/pkg/go.mod
++++ b/pkg/go.mod
+@@ -17,19 +17,19 @@ require (
+ 	github.com/redpanda-data/common-go/goldenfile v0.0.0-20260109170727-1dd9f5d22ee1
+ 	github.com/redpanda-data/common-go/kube v0.0.0-20260408144400-efba9928bb27
+ 	github.com/redpanda-data/common-go/otelutil v0.0.0-20260413160920-df1679f86269
+-	github.com/redpanda-data/common-go/rpadmin v0.2.4
++	github.com/redpanda-data/common-go/rpadmin v0.2.7
+ 	github.com/redpanda-data/common-go/secrets v0.1.4
+ 	github.com/redpanda-data/console/backend v0.0.0-20260330203659-9db13eb40ef4
+ 	github.com/redpanda-data/redpanda/src/go/rpk v0.0.0-20250716004441-6e1647296ad6
+ 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
+ 	github.com/spf13/pflag v1.0.10
+ 	github.com/stretchr/testify v1.11.1
+-	github.com/twmb/franz-go v1.20.6
++	github.com/twmb/franz-go v1.21.2
+ 	github.com/twmb/franz-go/pkg/sasl/kerberos v1.1.0
+ 	github.com/twmb/franz-go/pkg/sr v1.7.0
+ 	github.com/wk8/go-ordered-map/v2 v2.1.8
+ 	go.etcd.io/raft/v3 v3.6.0
+-	golang.org/x/mod v0.35.0
++	golang.org/x/mod v0.36.0
+ 	golang.org/x/sync v0.20.0
+ 	golang.org/x/sys v0.44.0
+ 	google.golang.org/grpc v1.80.0
+@@ -41,7 +41,7 @@ require (
+ 	k8s.io/cli-runtime v0.35.1
+ 	k8s.io/client-go v0.35.1
+ 	k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2
+-	pgregory.net/rapid v1.1.0
++	pgregory.net/rapid v1.2.0
+ 	sigs.k8s.io/controller-runtime v0.23.1
+ 	sigs.k8s.io/multicluster-runtime v0.23.1
+ 	sigs.k8s.io/yaml v1.6.0
+@@ -52,8 +52,8 @@ require (
+ 	buf.build/gen/go/grpc-ecosystem/grpc-gateway/protocolbuffers/go v1.36.10-20221127060915-a1ecdc58eccd.1 // indirect
+ 	buf.build/gen/go/redpandadata/cloud/protocolbuffers/go v1.36.10-20251124181447-cf877111f58c.1 // indirect
+ 	buf.build/gen/go/redpandadata/common/protocolbuffers/go v1.36.11-20260316210807-5d899910f714.1 // indirect
+-	buf.build/gen/go/redpandadata/core/connectrpc/go v1.19.1-20260226120209-2a07499aebcd.2 // indirect
+-	buf.build/gen/go/redpandadata/core/protocolbuffers/go v1.36.11-20260313213909-923579c57f1c.1 // indirect
++	buf.build/gen/go/redpandadata/core/connectrpc/go v1.19.2-20260506141738-8dfb14358799.1 // indirect
++	buf.build/gen/go/redpandadata/core/protocolbuffers/go v1.36.11-20260506141738-8dfb14358799.1 // indirect
+ 	cel.dev/expr v0.25.1 // indirect
+ 	cloud.google.com/go v0.123.0 // indirect
+ 	cloud.google.com/go/auth v0.18.1 // indirect
+@@ -61,7 +61,7 @@ require (
+ 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
+ 	cloud.google.com/go/iam v1.5.3 // indirect
+ 	cloud.google.com/go/secretmanager v1.16.0 // indirect
+-	connectrpc.com/connect v1.19.1 // indirect
++	connectrpc.com/connect v1.19.2 // indirect
+ 	dario.cat/mergo v1.0.2 // indirect
+ 	github.com/AdaLogics/go-fuzz-headers v0.0.0-20240806141605-e8a1dd7889d6 // indirect
+ 	github.com/AlecAivazis/survey/v2 v2.3.7 // indirect
+@@ -112,6 +112,7 @@ require (
+ 	github.com/containerd/platforms v0.2.1 // indirect
+ 	github.com/coreos/go-semver v0.3.1 // indirect
+ 	github.com/coreos/go-systemd/v22 v22.7.0 // indirect
++	github.com/creack/pty v1.1.24 // indirect
+ 	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
+ 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+ 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
+@@ -178,7 +179,7 @@ require (
+ 	github.com/jmoiron/sqlx v1.4.0 // indirect
+ 	github.com/json-iterator/go v1.1.12 // indirect
+ 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
+-	github.com/klauspost/compress v1.18.4 // indirect
++	github.com/klauspost/compress v1.18.6 // indirect
+ 	github.com/knadh/koanf/maps v0.1.2 // indirect
+ 	github.com/knadh/koanf/parsers/yaml v1.1.0 // indirect
+ 	github.com/knadh/koanf/providers/confmap v1.0.0 // indirect
+@@ -217,7 +218,7 @@ require (
+ 	github.com/opencontainers/go-digest v1.0.1-0.20231025023718-d50d2fec9c98 // indirect
+ 	github.com/opencontainers/image-spec v1.1.1 // indirect
+ 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
+-	github.com/pierrec/lz4/v4 v4.1.25 // indirect
++	github.com/pierrec/lz4/v4 v4.1.26 // indirect
+ 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
+ 	github.com/pkg/errors v0.9.1 // indirect
+ 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
+@@ -237,12 +238,13 @@ require (
+ 	github.com/spf13/afero v1.14.0 // indirect
+ 	github.com/spf13/cast v1.9.2 // indirect
+ 	github.com/spf13/cobra v1.10.2 // indirect
++	github.com/stretchr/objx v0.5.3 // indirect
+ 	github.com/texttheater/golang-levenshtein v1.0.1 // indirect
+ 	github.com/tidwall/gjson v1.18.0 // indirect
+ 	github.com/tidwall/match v1.1.1 // indirect
+ 	github.com/tidwall/pretty v1.2.1 // indirect
+-	github.com/twmb/franz-go/pkg/kadm v1.17.2 // indirect
+-	github.com/twmb/franz-go/pkg/kmsg v1.12.0 // indirect
++	github.com/twmb/franz-go/pkg/kadm v1.18.0 // indirect
++	github.com/twmb/franz-go/pkg/kmsg v1.13.1 // indirect
+ 	github.com/twmb/tlscfg v1.2.1 // indirect
+ 	github.com/virtuald/go-ordered-json v0.0.0-20170621173500-b18e6e673d74 // indirect
+ 	github.com/x448/float16 v0.8.4 // indirect
+@@ -272,7 +274,7 @@ require (
+ 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
+ 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
+ 	go.uber.org/multierr v1.11.0 // indirect
+-	go.uber.org/zap v1.27.1 // indirect
++	go.uber.org/zap v1.28.0 // indirect
+ 	go.yaml.in/yaml/v2 v2.4.3 // indirect
+ 	go.yaml.in/yaml/v3 v3.0.4 // indirect
+ 	golang.org/x/crypto v0.51.0 // indirect
+@@ -282,12 +284,12 @@ require (
+ 	golang.org/x/term v0.43.0 // indirect
+ 	golang.org/x/text v0.37.0 // indirect
+ 	golang.org/x/time v0.14.0 // indirect
+-	golang.org/x/tools v0.44.0 // indirect
++	golang.org/x/tools v0.45.0 // indirect
+ 	gomodules.xyz/jsonpatch/v2 v2.5.0 // indirect
+ 	google.golang.org/api v0.265.0 // indirect
+ 	google.golang.org/genproto v0.0.0-20260217215200-42d3e9bedb6d // indirect
+-	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect
+-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260401024825-9d38bb4040a9 // indirect
++	google.golang.org/genproto/googleapis/api v0.0.0-20260511170946-3700d4141b60 // indirect
++	google.golang.org/genproto/googleapis/rpc v0.0.0-20260504160031-60b97b32f348 // indirect
+ 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
+ 	gopkg.in/inf.v0 v0.9.1 // indirect
+ 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect

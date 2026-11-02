@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://docs.redpanda.com/shared/_attachments/taxonomy.schema.json",
+  "title": "Redpanda docs taxonomy",
+  "description": "Schema for taxonomy.yml. Structure only: the build also checks that IDs are unique, that labels and altLabels are unique across all schemes (case-insensitive), and that every broader, related, implies, and replacedBy ID exists.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema-version", "schemes"],
+  "properties": {
+    "schema-version": { "const": 1 },
+    "schemes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/scheme" }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^\\S(.*\\S)?$"
+    },
+    "idList": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/id" },
+      "uniqueItems": true
+    },
+    "cardinality": {
+      "type": "string",
+      "pattern": "^[0-9]+-([0-9]+|n)$"
+    },
+    "scheme": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "prefLabel", "scopeNote", "cardinality", "hierarchy", "assignment", "concepts"],
+      "properties": {
+        "id": {
+          "enum": ["topic", "task", "content-type", "use-case", "industry", "technology", "deployment"]
+        },
+        "prefLabel": { "$ref": "#/$defs/label" },
+        "scopeNote": { "type": "string", "minLength": 1 },
+        "cardinality": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "docs": { "$ref": "#/$defs/cardinality" },
+            "solutions": { "$ref": "#/$defs/cardinality" }
+          }
+        },
+        "hierarchy": { "enum": ["flat", "two-level"] },
+        "assignment": { "enum": ["authored", "derived", "defined"] },
+        "concepts": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/concept" }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "id": { "const": "technology" } } },
+          "then": { "properties": { "concepts": { "items": { "required": ["kind"] } } } },
+          "else": { "properties": { "concepts": { "items": { "not": { "anyOf": [{ "required": ["kind"] }, { "required": ["component"] }] } } } } }
+        },
+        {
+          "if": { "properties": { "hierarchy": { "const": "flat" } } },
+          "then": { "properties": { "concepts": { "items": { "properties": { "broader": { "type": "null" } } } } } }
+        }
+      ]
+    },
+    "concept": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "prefLabel", "altLabels", "definition", "broader", "related", "deprecated", "replacedBy"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "prefLabel": { "$ref": "#/$defs/label" },
+        "altLabels": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/label" },
+          "uniqueItems": true
+        },
+        "definition": { "type": "string", "minLength": 20 },
+        "broader": {
+          "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/id" }]
+        },
+        "related": { "$ref": "#/$defs/idList" },
+        "implies": { "$ref": "#/$defs/idList" },
+        "deprecated": { "type": "boolean" },
+        "replacedBy": { "$ref": "#/$defs/idList" },
+        "kind": {
+          "enum": ["redpanda-product", "database", "format", "language", "runtime", "system", "storage", "proxy", "tool"]
+        },
+        "component": { "$ref": "#/$defs/id" }
+      },
+      "if": { "properties": { "deprecated": { "const": false } } },
+      "then": { "properties": { "replacedBy": { "maxItems": 0 } } }
+    }
+  }
+}

@@ -1,0 +1,614 @@
+'use strict'
+
+/**
+ * Extracts documentation for commented-out values in a Helm chart's
+ * values.yaml, and injects the resulting entries into the AsciiDoc reference
+ * that `doc-tools generate helm-spec` produces.
+ *
+ * helm-docs only renders rows for keys that exist in the YAML tree, so
+ * optional values that ship commented out (for example `external.domain` in
+ * the Redpanda chart) never appear in the generated reference, even when the
+ * chart author wrote a `# --` description for them. This module closes that
+ * gap without requiring any change to chart behavior.
+ *
+ * Two comment conventions are recognized:
+ *
+ * 1. helm-docs style, attached to a commented-out key. A comment block that
+ *    contains a `# -- description` marker and is immediately followed by a
+ *    commented-out key documents that key. The key's path is derived from
+ *    the enclosing uncommented keys by indentation:
+ *
+ *      external:
+ *        # -- Optional domain advertised to external clients.
+ *        # domain: local
+ *
+ *    yields `external.domain`.
+ *
+ *    The description attaches to the first commented-out key after it. When
+ *    more commented-out siblings follow in the same comment run, each one
+ *    with its own plain comment above it is documented by that comment:
+ *
+ *      external:
+ *        # -- Optional domain advertised to external clients.
+ *        # domain: local
+ *        # Optional list of advertised addresses.
+ *        # addresses:
+ *
+ *    yields `external.domain` and `external.addresses`. A sibling with no
+ *    comment of its own is not documented.
+ *
+ * 2. Explicit, fully-qualified syntax that works anywhere in the file:
+ *
+ *      # @doc external.addresses -- Optional list of advertised addresses.
+ *      # @default -- `nil`
+ *
+ * In both forms, an optional `# @default -- text` line overrides the
+ * displayed default, which is otherwise `nil`.
+ */
+
+const { spawnSync } = require('child_process')
+
+// Key names never contain dots or slashes: a dotted or slashed "key" in a
+// comment is prose or a URL (`# docker.redpanda.com/...:4.101.0`), and
+// treating it as a key both fabricates a path and truncates the description.
+// Fully-qualified dotted paths are supported through the @doc syntax instead.
+const COMMENTED_KEY_RE = /^(\s*)#(\s{0,4})([a-z][A-Za-z0-9_-]*):\s*(.*)$/
+const REAL_KEY_RE = /^(\s*)([A-Za-z0-9_."/-]+):(.*)$/
+// `(?!-)` keeps comment dividers such as `# ----------------` from being
+// mistaken for an empty description marker.
+const DESC_MARKER_RE = /^\s*#\s*--\s*(?!-)(.*)$/
+const AT_DOC_RE = /^\s*#\s*@doc\s+([A-Za-z0-9_./-]+)\s+--\s*(.*)$/
+const AT_DEFAULT_RE = /^\s*#\s*@default\s+--\s*(.*)$/
+// helm-docs' bare word annotations: `# @raw`, `# @ignored`.
+const AT_WORD_RE = /^\s*#\s*@(\w+)\s*$/
+const COMMENT_RE = /^\s*#\s?(.*)$/
+// A block scalar header may carry an explicit indentation indicator digit on
+// either side of the chomping indicator: `|2`, `|-2`, `|2-`, `>2`, ...
+const BLOCK_SCALAR_RE = /[|>][0-9]?[+-]?[0-9]?\s*(#.*)?$/
+const LIST_ITEM_RE = /^\s*-\s/
+
+/**
+ * The one values.yaml comment walk in this repo. Two consumers share it:
+ *
+ * - `extractCommentedValueDocs` below, which the helm-spec generator uses to
+ *   inject rows for documented commented-out keys.
+ * - `tools/lint-strings/surfaces/helm.js`, which needs the same attachment
+ *   decisions plus line spans, real-key (helm-docs) attachments, and the
+ *   blocks that attach to NOTHING.
+ *
+ * The linter used to hold a byte-identical copy of every regex above and a
+ * near-copy of this walk, so that "the linter never calls a marker dead that
+ * the generator in this repo renders" - a promise nothing enforced. When the
+ * copies drifted, the linter emitted exactly the false dead-marker the
+ * comment promised to prevent and every test stayed green. There is now one
+ * walk, so they cannot disagree.
+ *
+ * Records are the union of what both consumers need. Line numbers are
+ * 0-indexed; descriptions are returned as the raw comment lines so each
+ * consumer can join them its own way (the generator preserves newlines, the
+ * linter flattens to one line).
+ *
+ * @param {string} yamlText - Raw contents of values.yaml.
+ * @param {object} [options]
+ * @param {boolean} [options.attachRealKeys=false] - Model helm-docs' own
+ *   attachment: a `# --` block sitting DIRECTLY above an uncommented key
+ *   documents that key, and a top-level uncommented key with no block above
+ *   it is recorded as undocumented. The generator leaves this off because
+ *   helm-docs already renders those rows; only the linter judges them.
+ * @returns {Array<object>} records: { kind: 'key'|'dead-marker', path,
+ *   descLines, default, annotations, lineStart, lineEnd, commentedOut,
+ *   topLevel, undocumented }
+ */
+function parseValuesFile (yamlText, { attachRealKeys = false } = {}) {
+  const lines = yamlText.split(/\r?\n/)
+  const records = []
+  const stack = [] // enclosing real keys: { name, indent }
+
+  // Accumulating comment block: { marked, descLines, default, candidate }.
+  // A marked block opens at a `# --` line. Its description is every comment
+  // line up to the first commented-out key, and that key (the candidate) is
+  // the one it documents, the same way helm-docs reads a `# --` block as the
+  // description of the key directly below it.
+  //
+  // Optional values often ship as a run of commented-out siblings under one
+  // marker, each with its own plain comment above it:
+  //
+  //     # -- Optional domain.
+  //     # domain: local
+  //     # Optional list of addresses.
+  //     # addresses:
+  //
+  // Once a block has its key, a plain comment line at that key's depth (or
+  // shallower) ends it and opens an unmarked block for the next sibling, so
+  // `addresses` is documented by its own comment instead of handing its key
+  // line to the domain description. An unmarked block is only ever emitted
+  // when it has description text and a key; it never becomes a dead marker.
+  // The run ends at the first non-comment line, as a marked block does.
+  let block = null
+  let atDoc = null // accumulating @doc entry: { path, descLines, default }
+  let skipScalarIndent = -1 // inside a block scalar when >= 0
+  let suppressInnerIndent = -1 // inside an emitted commented key's subtree when >= 0
+  let looseIgnored = false // bare `# @ignored` with no `# --` block above a key
+
+  const record = (fields) => {
+    records.push({
+      kind: 'key',
+      path: null,
+      descLines: [],
+      default: '',
+      annotations: {},
+      lineStart: 0,
+      lineEnd: 0,
+      commentedOut: false,
+      topLevel: false,
+      undocumented: false,
+      ...fields,
+    })
+  }
+
+  const flushAtDoc = () => {
+    if (atDoc) {
+      record({
+        path: atDoc.path,
+        descLines: atDoc.descLines,
+        default: atDoc.default,
+        annotations: atDoc.annotations,
+        lineStart: atDoc.line,
+        lineEnd: atDoc.lastLine,
+        commentedOut: true,
+        topLevel: !atDoc.path.includes('.'),
+      })
+      atDoc = null
+    }
+  }
+
+  // A `# --` block that reached the end of its life with no key to attach to.
+  // The generator drops these; the linter reports them, because their
+  // description silently never ships.
+  const emitDead = (b) => {
+    if (!b.marked) return
+    record({
+      kind: 'dead-marker',
+      descLines: b.descLines,
+      default: b.default,
+      annotations: b.annotations,
+      lineStart: b.markerLine,
+      lineEnd: b.lastLine,
+    })
+  }
+
+  const openUnmarkedBlock = (line, firstDescLine) => ({
+    marked: false,
+    markerLine: line,
+    lastLine: line,
+    descLines: firstDescLine === null ? [] : [firstDescLine],
+    default: '',
+    annotations: {},
+    candidate: null,
+  })
+
+  // Emit the active block's candidate, if any, and close the block. The
+  // emitted key suppresses its own commented subtree until real content
+  // appears, so nested example structures do not emit bogus paths.
+  const flushBlock = () => {
+    if (!block) return
+    if (block.candidate && !block.marked && !block.descLines.some((l) => l.trim() !== '')) {
+      // An unmarked sibling with no comment of its own has nothing to say;
+      // still suppress its commented subtree.
+      suppressInnerIndent = block.candidate.effIndent
+    } else if (block.candidate) {
+      const { name, effIndent } = block.candidate
+      const parents = stack.filter((k) => k.indent < effIndent).map((k) => k.name)
+      record({
+        path: [...parents, name].join('.'),
+        descLines: block.descLines,
+        default: block.default,
+        annotations: block.annotations,
+        lineStart: block.markerLine,
+        lineEnd: block.lastLine,
+        commentedOut: true,
+        topLevel: parents.length === 0,
+      })
+      suppressInnerIndent = effIndent
+    } else {
+      emitDead(block)
+    }
+    block = null
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    // Skip the body of block scalars so their content is never mistaken for
+    // keys or comments.
+    if (skipScalarIndent >= 0) {
+      const indent = line.match(/^\s*/)[0].length
+      if (line.trim() === '' || indent > skipScalarIndent) continue
+      skipScalarIndent = -1
+    }
+
+    const atDocMatch = line.match(AT_DOC_RE)
+    if (atDocMatch) {
+      flushAtDoc()
+      flushBlock()
+      atDoc = { line: i, lastLine: i, path: atDocMatch[1], descLines: [atDocMatch[2]], default: '', annotations: {} }
+      continue
+    }
+
+    const atDefault = line.match(AT_DEFAULT_RE)
+    if (atDefault) {
+      if (atDoc) { atDoc.default = atDefault[1].trim(); atDoc.lastLine = i }
+      else if (block) { block.default = atDefault[1].trim(); block.lastLine = i }
+      continue
+    }
+
+    const atWord = line.match(AT_WORD_RE)
+    if (atWord) {
+      if (block) { block.annotations[atWord[1]] = true; block.lastLine = i }
+      else if (atWord[1] === 'ignored') looseIgnored = true
+      continue
+    }
+
+    const commentedKey = line.match(COMMENTED_KEY_RE)
+    if (commentedKey) {
+      // A commented-out key line terminates an @doc entry rather than being
+      // swallowed into its description, so @doc lines can sit directly above
+      // the commented key they document.
+      flushAtDoc()
+      // Authors indent a commented key either before the marker ("  # child:")
+      // or after it ("#   child:"), and the two forms mean the same nesting.
+      // Counting only one side made them disagree: a child indented before the
+      // marker escaped its parent's subtree and was emitted as a top-level
+      // path. Fold both sides into one depth, treating the single space that
+      // separates "#" from its text as punctuation rather than indentation, so
+      // the result lines up with the real-key indents held on the stack.
+      const effIndent = commentedKey[1].length + Math.max(0, commentedKey[2].length - 1)
+      // A previously emitted commented key suppresses its own commented
+      // subtree, so nested example structures do not emit bogus paths. A
+      // marker in there is documentation neither pipeline ever renders.
+      if (suppressInnerIndent >= 0 && effIndent > suppressInnerIndent) {
+        if (block) emitDead(block)
+        block = null
+        continue
+      }
+      suppressInnerIndent = -1
+      // Only bare keys or simple scalar values look like real chart values.
+      // Prose such as `# Warning: If you use LoadBalancers...` has spaces in
+      // the trailing text and is rejected.
+      const value = commentedKey[4].trim()
+      // Reject URL-like lines such as `# https://github.com/...`, where the
+      // "key" is a URL scheme and the "value" is the scheme-relative part.
+      const simpleValue = (value === '' || !/\s/.test(value)) && !value.startsWith('/')
+      if (block && simpleValue) {
+        const key = { name: commentedKey[3], effIndent }
+        if (!block.candidate || effIndent < block.candidate.effIndent) {
+          // The first key line after the description is the documented key.
+          // A shallower key replaces it, because the deeper line was a nested
+          // example structure rather than the key itself.
+          block.candidate = key
+          block.lastLine = i
+        } else if (effIndent > block.candidate.effIndent) {
+          // A nested line of the documented key's commented-out example.
+          block.lastLine = i
+        } else {
+          // A sibling key with no comment of its own. The documented key is
+          // complete; the sibling opens an unmarked block, which flushBlock
+          // drops because it has no description, while still suppressing
+          // the sibling's own commented subtree.
+          flushBlock()
+          suppressInnerIndent = -1
+          block = openUnmarkedBlock(i, null)
+          block.candidate = key
+        }
+        continue
+      }
+    }
+
+    const descMarker = line.match(DESC_MARKER_RE)
+    if (descMarker) {
+      flushAtDoc()
+      flushBlock()
+      block = { marked: true, markerLine: i, lastLine: i, descLines: [descMarker[1]], default: '', annotations: {}, candidate: null }
+      continue
+    }
+
+    const comment = line.match(COMMENT_RE)
+    if (comment && line.trim().startsWith('#')) {
+      if (atDoc) { atDoc.descLines.push(comment[1]); atDoc.lastLine = i }
+      // Description lines precede the documented key.
+      else if (block && !block.candidate) { block.descLines.push(comment[1]); block.lastLine = i }
+      else if (block) {
+        // After the key: deeper lines, list items, and bare `#` lines belong
+        // to its commented-out example. Prose at the key's own depth or
+        // shallower is the description of the next commented-out sibling.
+        const [, before, after] = line.match(/^(\s*)#(\s*)/)
+        const proseIndent = before.length + Math.max(0, after.length - 1)
+        const text = comment[1].trim()
+        if (text === '' || text.startsWith('- ') || text === '-' || proseIndent > block.candidate.effIndent) {
+          block.lastLine = i
+        } else {
+          flushBlock()
+          suppressInnerIndent = -1
+          block = openUnmarkedBlock(i, comment[1])
+        }
+      }
+      continue
+    }
+
+    // Any non-comment line ends comment accumulation. Only real content also
+    // ends subtree suppression: a blank line inside a commented-out example
+    // structure must not re-enable emission against a stale parent key, since
+    // the real-key stack is not rebuilt by comment lines.
+    flushAtDoc()
+
+    const realKey = line.match(REAL_KEY_RE)
+    if (attachRealKeys && realKey && block && block.marked && !block.candidate && block.lastLine === i - 1) {
+      // helm-docs' own attachment: the marked block sits DIRECTLY above a
+      // real key.
+      const indent = realKey[1].length
+      while (stack.length > 0 && stack[stack.length - 1].indent >= indent) stack.pop()
+      const name = realKey[2].replace(/^"|"$/g, '')
+      const keyPath = [...stack.map((k) => k.name), name].join('.')
+      stack.push({ name, indent })
+      if (!block.annotations.ignored) {
+        record({
+          path: keyPath,
+          descLines: block.descLines,
+          default: block.default,
+          annotations: block.annotations,
+          lineStart: block.markerLine,
+          lineEnd: i,
+          topLevel: indent === 0,
+        })
+      }
+      block = null
+      suppressInnerIndent = -1
+      if (BLOCK_SCALAR_RE.test(realKey[3])) skipScalarIndent = indent
+      continue
+    }
+
+    flushBlock()
+    if (line.trim() === '') continue
+    suppressInnerIndent = -1
+
+    if (LIST_ITEM_RE.test(line)) continue
+
+    if (realKey) {
+      const indent = realKey[1].length
+      while (stack.length > 0 && stack[stack.length - 1].indent >= indent) {
+        stack.pop()
+      }
+      const name = realKey[2].replace(/^"|"$/g, '')
+      stack.push({ name, indent })
+      if (BLOCK_SCALAR_RE.test(realKey[3])) skipScalarIndent = indent
+      if (attachRealKeys && indent === 0 && !looseIgnored) {
+        // Top-level user-visible key with no attached `# --` marker.
+        record({ path: name, lineStart: i, lineEnd: i, topLevel: true, undocumented: true })
+      }
+    }
+    looseIgnored = false
+  }
+
+  flushAtDoc()
+  flushBlock()
+  return records
+}
+
+/**
+ * Parse values.yaml text and return entries for documented commented-out keys.
+ *
+ * A filter over `parseValuesFile`: the commented-out keys it attaches, with
+ * their comment lines joined the way the AsciiDoc injector wants them.
+ *
+ * @param {string} yamlText - Raw contents of values.yaml.
+ * @returns {Array<{path: string, description: string, default: string}>}
+ */
+function extractCommentedValueDocs (yamlText) {
+  return parseValuesFile(yamlText)
+    .filter((r) => r.kind === 'key' && r.commentedOut)
+    .map((r) => ({
+      path: r.path,
+      description: r.descLines.join('\n').trim(),
+      default: r.default || '`nil`',
+    }))
+}
+
+/**
+ * Check a dotted value path against a chart's values.schema.json. A path is
+ * rejected only when the walk can prove the schema forbids it: an object
+ * level whose `properties` lack the segment, whose `patternProperties` (if
+ * any) do not match it, and whose `additionalProperties` is `false`.
+ * Anything the walk cannot interpret ($ref, allOf, open objects) is allowed,
+ * so an incomplete schema never hides documentation.
+ *
+ * @param {object} schema - Parsed values.schema.json.
+ * @param {string} path - Dotted value path, for example `external.domain`.
+ * @returns {boolean}
+ */
+function isPathAllowedBySchema (schema, path) {
+  let node = schema
+  for (const segment of path.split('.')) {
+    if (!node || typeof node !== 'object' || node.$ref || node.allOf || node.anyOf || node.oneOf) {
+      return true
+    }
+    const props = node.properties
+    if (props && Object.prototype.hasOwnProperty.call(props, segment)) {
+      node = props[segment]
+      continue
+    }
+    if (node.patternProperties) {
+      const pattern = Object.keys(node.patternProperties)
+        .find((p) => { try { return new RegExp(p).test(segment) } catch { return true } })
+      if (pattern !== undefined) {
+        node = node.patternProperties[pattern]
+        continue
+      }
+    }
+    return node.additionalProperties !== false
+  }
+  return true
+}
+
+/**
+ * Split extracted entries into those permitted by the chart's
+ * values.schema.json and those provably rejected by it, such as keys whose
+ * `# --` comment is a deprecation notice for a removed value.
+ *
+ * @param {Array<{path: string}>} entries
+ * @param {object} schema - Parsed values.schema.json.
+ * @returns {{accepted: Array, rejected: Array}}
+ */
+function filterEntriesBySchema (entries, schema) {
+  const accepted = []
+  const rejected = []
+  for (const entry of entries) {
+    (isPathAllowedBySchema(schema, entry.path) ? accepted : rejected).push(entry)
+  }
+  return { accepted, rejected }
+}
+
+/**
+ * Convert Markdown to AsciiDoc with pandoc. `generate helm-spec` uses this for
+ * the helm-docs README and for each values.yaml comment it injects, so both
+ * get the same conversion. values.yaml comments are Markdown (helm-docs copies
+ * them into the README as is), so without it an injected comment's links and
+ * emphasis are published as literal Markdown.
+ *
+ * The `smart` extension is turned off on input. With it, pandoc turns straight
+ * quotes into curly ones and writes them as ``text'', which only AsciiDoc
+ * Python understood. Asciidoctor prints those backticks and apostrophes
+ * literally, so straight quotes are passed through instead.
+ *
+ * @param {string} markdown - Markdown text.
+ * @returns {string} AsciiDoc text, without a trailing newline.
+ * @throws {Error} When pandoc cannot be run or exits non-zero.
+ */
+function markdownToAsciiDoc (markdown) {
+  if (!markdown || !markdown.trim()) return markdown
+  const r = spawnSync('pandoc', ['-f', 'markdown-smart', '-t', 'asciidoc'], { input: markdown, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+  if (r.error) throw new Error(`pandoc failed: ${r.error.message}`)
+  if (r.status !== 0) throw new Error(`pandoc exited ${r.status}: ${(r.stderr || '').trim()}`)
+  if (r.stderr) process.stderr.write(r.stderr)
+  return r.stdout.replace(/\s+$/, '')
+}
+
+// Neutralize description lines that would otherwise parse as AsciiDoc
+// structure when injected at block level: section titles re-parent the
+// following sections, and an unclosed block delimiter swallows the rest of
+// the document. `{empty}` renders as nothing but demotes the line to a
+// plain paragraph.
+function sanitizeDescription (text) {
+  return text
+    .split('\n')
+    .map((line) => (/^(=+\s|-{2,}\s*$|[=*_.+]{4,}\s*$|\|===)/.test(line) ? `{empty}${line}` : line))
+    .join('\n')
+}
+
+/**
+ * Inject extracted entries into a generated AsciiDoc Helm reference.
+ *
+ * Sections are matched by their `=== link:++<url>?...path=<key>++[<key>]`
+ * headings. New sections reuse the Artifact Hub URL prefix of the existing
+ * sections and are inserted in alphabetical key order. Keys that are already
+ * documented are skipped.
+ *
+ * Descriptions and defaults come from values.yaml comments, which are
+ * Markdown. Pass `toAsciiDoc` (for example `markdownToAsciiDoc`) to convert
+ * them the way the rest of the document was converted. Without it, the text
+ * is inserted as is.
+ *
+ * @param {string} adoc - The converted AsciiDoc document.
+ * @param {Array<{path: string, description: string, default: string}>} entries
+ * @param {{toAsciiDoc?: (markdown: string) => string}} [options]
+ * @returns {{doc: string, injected: string[], sectionsFound: number}}
+ */
+function injectIntoAsciiDoc (adoc, entries, { toAsciiDoc = (text) => text } = {}) {
+  // The label may itself contain brackets (`[storage.volume[0].name]` in the
+  // connectors chart), so it is matched to end of line rather than to the
+  // first closing bracket.
+  const headingRe = /^=== link:\+\+(https?:\/\/[^+]*[?&]path=)([^+]+)\+\+\[.*\]\s*$/gm
+  const sections = []
+  let match
+  while ((match = headingRe.exec(adoc)) !== null) {
+    sections.push({ index: match.index, urlPrefix: match[1], key: match[2] })
+  }
+  if (sections.length === 0) {
+    return { doc: adoc, injected: [], sectionsFound: 0 }
+  }
+
+  const urlPrefix = sections[0].urlPrefix
+  // Tracks both keys present in the document and keys queued for injection,
+  // so a path extracted twice (for example, from both @doc and # -- comments
+  // for the same key) is only injected once.
+  const existingKeys = new Set(sections.map((s) => s.key))
+  const additions = []
+  for (const entry of entries) {
+    if (existingKeys.has(entry.path)) continue
+    existingKeys.add(entry.path)
+    additions.push(entry)
+  }
+  additions.sort((a, b) => a.path.localeCompare(b.path))
+
+  let doc = adoc
+  const injected = []
+
+  for (const entry of additions) {
+    // Recompute section offsets after each insertion.
+    const current = []
+    headingRe.lastIndex = 0
+    while ((match = headingRe.exec(doc)) !== null) {
+      current.push({ index: match.index, key: match[2] })
+    }
+    const after = current.find((s) => s.key.localeCompare(entry.path) > 0)
+
+    const section = [
+      `=== link:++${urlPrefix}${entry.path}++[${entry.path}]`,
+      '',
+      sanitizeDescription(toAsciiDoc(entry.description)),
+      '',
+      `*Default:* ${toAsciiDoc(entry.default)}`,
+      '',
+      '',
+    ].join('\n')
+
+    if (after) {
+      doc = doc.slice(0, after.index) + section + doc.slice(after.index)
+    } else {
+      // Append after the final section, before the next heading (levels 1-3)
+      // if one exists, so a trailing non-values subsection stays last.
+      const last = current[current.length - 1]
+      const rest = doc.slice(last.index)
+      const nextHeading = rest.search(/\n={1,3} /)
+      if (nextHeading > 0) {
+        const cut = last.index + nextHeading + 1
+        doc = doc.slice(0, cut) + section + doc.slice(cut)
+      } else {
+        doc = doc.trimEnd() + '\n\n' + section
+      }
+    }
+    injected.push(entry.path)
+  }
+
+  return { doc, injected, sectionsFound: sections.length }
+}
+
+module.exports = {
+  parseValuesFile,
+  extractCommentedValueDocs,
+  injectIntoAsciiDoc,
+  markdownToAsciiDoc,
+  filterEntriesBySchema,
+  isPathAllowedBySchema,
+  // Exported so the lint surface cannot hold its own copy. Every one of these
+  // was duplicated character-for-character before.
+  PATTERNS: {
+    COMMENTED_KEY_RE,
+    REAL_KEY_RE,
+    DESC_MARKER_RE,
+    AT_DOC_RE,
+    AT_DEFAULT_RE,
+    AT_WORD_RE,
+    COMMENT_RE,
+    BLOCK_SCALAR_RE,
+    LIST_ITEM_RE,
+  },
+}

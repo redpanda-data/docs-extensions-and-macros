@@ -1,0 +1,27 @@
+= FAQ Test Page
+:description: Test page for FAQ structured data
+:page-faq-1-anchor: #installation
+:page-faq-2-anchor: #requirements
+:page-faq-3-question: Does Redpanda support Kafka APIs?
+:page-faq-3-answer: Yes! Redpanda is fully compatible with Kafka APIs, including producers, consumers, and Kafka Connect.
+
+This page tests the FAQ structured data extension.
+
+FAQ 1 and 2 will be auto-extracted from sections.
+FAQ 3 uses manual question/answer (no anchor needed).
+
+[#installation]
+== How do I install Redpanda?
+
+You can install Redpanda using Docker, Kubernetes, or as a native binary.
+Visit our installation guide for detailed instructions.
+
+[#requirements]
+== What are the system requirements for Redpanda?
+
+Redpanda requires at least 2GB of RAM and 2 CPU cores.
+For production deployments, we recommend 16GB of RAM and 8 CPU cores per broker.
+
+== Additional Info
+
+Redpanda is awesome!

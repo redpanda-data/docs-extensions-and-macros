@@ -1,0 +1,30 @@
+# Legacy categories for the validate-attributes tests, in the shape of
+# shared/modules/ROOT/partials/valid-categories.yml.
+page-valid-categories:
+  - category: Management
+    definition: Operating.
+    subcategories:
+      - category: Security
+        definition: Security.
+  - category: Deployment
+    definition: Deploying.
+    subcategories:
+      - category: Iceberg
+        definition: Iceberg.
+      - category: Tiered Storage
+        definition: Tiered Storage.
+      - category: Integration
+        definition: Integration.
+  - category: High Availability
+    definition: HA.
+    subcategories:
+      - category: Data Replication
+        definition: Replication.
+      - category: Disaster Recovery
+        definition: DR.
+  - category: Stream Processing
+    definition: Stream processing.
+  - category: rpk
+    definition: rpk.
+  - category: Troubleshooting
+    definition: Not in the fixture taxonomy.

@@ -1,0 +1,12 @@
+# The target comes from a secret and the type from a step output: neither
+# can be read from this file, so the sender is reported as unresolved.
+name: Unresolvable
+on: [push]
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: peter-evans/repository-dispatch@v4
+        with:
+          repository: ${{ secrets.TARGET }}
+          event-type: ${{ steps.pick.outputs.type }}

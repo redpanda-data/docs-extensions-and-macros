@@ -1,0 +1,192 @@
+{
+  "server_url": "https://docs.redpanda.com/mcp",
+  "server_version": "1.3.2",
+  "captured_at": "2026-10-07T18:06:12.551Z",
+  "tools": [
+    {
+      "name": "ask_redpanda_question",
+      "title": "Search Redpanda Sources",
+      "description": "Search the official Redpanda documentation and return the most relevant sections from it for a user query. Each returned section includes the url and its actual content in markdown. Use this tool for all queries that require Redpanda knowledge. Results are ordered by relevance, with the most relevant result returned first. If you know the user's deployment platform, pass \"platform\" so results from the other platform's docs are excluded. Note that \"platform\" filters the sections already retrieved rather than re-running the search, so it can return substantially fewer sections: on a broker-level question where most matches come from the other platform's docs, it can cut a 15-section response to 1 or 2. Omit \"platform\" if you would rather have more context and judge platform relevance yourself from each section's url. If you know which Redpanda version the user runs, pass \"version\" (use 'current' for the latest release; its release number is also accepted). Unlike \"platform\", \"version\" is applied during retrieval, so it does not shrink the result set: it stops the same page being returned once per indexed version, which is otherwise most of the response. Version-neutral docs (Cloud, Connect, Agentic Data Plane, API reference) are always included. Omitting \"version\" searches the latest release.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "cloud",
+              "self-managed"
+            ],
+            "description": "The user's deployment platform. 'cloud' excludes Self-Managed sections; 'self-managed' excludes Redpanda Cloud sections. Platform-neutral docs (Connect, API reference, labs) are always kept. Applied after retrieval, so it shrinks the result set rather than finding more of the right platform's pages. Omit to search all docs."
+          },
+          "version": {
+            "type": "string",
+            "description": "Docs version to search, written as the docs URLs spell it (23.3, 24.1, 24.2, 24.3, 25.1, 25.2, 25.3, 26.1, current). Use 'current' for the latest release; a release number newer than every listed one is also read as the latest release. Applied at retrieval, so unlike \"platform\" it does not shrink the result set: every section returned is from this version, plus version-neutral docs (Cloud, Connect, Agentic Data Plane, API reference), which are always included. Omit to search the latest release. Any other value is rejected with the list of valid versions."
+          },
+          "top_k": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Maximum number of sections to return, applied after platform filtering. Must be a positive integer."
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional. In one concise sentence (third person), describe what the user is trying to accomplish with this request. Do not include credentials, tokens, personal data, or verbatim secrets."
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_api_reference_pages",
+      "title": "List API Reference Pages",
+      "description": "List pages in Redpanda API reference documentation. Returns endpoints, schemas, and topic pages with URL, title, type, and description.\n\nSCOPING (important for accurate results):\n- api=\"all\" or omit: Lists all available APIs\n- api=\"admin\": Cluster management operations (brokers, partitions, configs, users)\n- api=\"cloud-controlplane\": Redpanda Cloud resource management (clusters, networks, namespaces)\n- api=\"cloud-dataplane\": Cloud cluster data operations (topics, ACLs, connectors)\n- api=\"http-proxy\": Kafka operations over HTTP (produce, consume, offsets)\n- api=\"schema-registry\": Schema management (register, retrieve, compatibility)\n\nUse this to browse API structure. For general Redpanda docs, use ask_redpanda_question instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "api": {
+            "type": "string",
+            "description": "Which API to list: \"all\" or omit for overview of all APIs, or a specific API name (admin, cloud-controlplane, cloud-dataplane, http-proxy, schema-registry)"
+          },
+          "url": {
+            "type": "string",
+            "description": "Specific URL path to list children of (optional, defaults to API root)"
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional. In one concise sentence (third person), describe what the user is trying to accomplish with this request. Do not include credentials, tokens, personal data, or verbatim secrets."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "search_api_reference",
+      "title": "Search API Reference",
+      "description": "Search Redpanda API reference documentation by keyword. Returns up to 20 matching endpoints, schemas, or topics with URL, title, and text excerpts.\n\nSCOPING (important for accurate results):\n- api=\"all\" or omit: Search across ALL APIs at once - useful when unsure which API contains the endpoint\n- api=\"admin\": Search only cluster management (brokers, partitions, configs, users, maintenance)\n- api=\"cloud-controlplane\": Search only Cloud resource management (clusters, networks, namespaces)\n- api=\"cloud-dataplane\": Search only Cloud data operations (topics, ACLs, connectors)\n- api=\"http-proxy\": Search only HTTP Proxy (produce, consume, offsets over HTTP)\n- api=\"schema-registry\": Search only Schema Registry (register, retrieve, compatibility)\n\nWHEN TO USE WHICH:\n- User asks \"broker endpoints\" → api=\"admin\" (brokers are cluster management)\n- User asks \"create topic API\" → api=\"all\" (topics exist in admin AND cloud-dataplane)\n- User asks \"Cloud cluster API\" → api=\"cloud-controlplane\"\n- User asks about Redpanda APIs generally → api=\"all\" or omit\n\nFor general Redpanda questions (not API-specific), use ask_redpanda_question instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "api": {
+            "type": "string",
+            "description": "Scope: \"all\" or omit to search all APIs, or specific API name (admin, cloud-controlplane, cloud-dataplane, http-proxy, schema-registry)"
+          },
+          "query": {
+            "type": "string",
+            "description": "Search keywords (e.g., \"broker\", \"create topic\", \"ACL\")"
+          },
+          "type": {
+            "type": "string",
+            "description": "Filter by type: operation (endpoints), schema (data types), topic (guides), authentication, webhook"
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional. In one concise sentence (third person), describe what the user is trying to accomplish with this request. Do not include credentials, tokens, personal data, or verbatim secrets."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_api_reference_content",
+      "title": "Get API Reference Content",
+      "description": "Retrieve full content of API reference pages by URL. Returns complete endpoint details including parameters, request/response schemas, and examples.\n\nUse this after finding pages via list_api_reference_pages or search_api_reference. Pass the URLs from those results directly.\n\nReturns up to 10 pages per request. URLs must be from docs.redpanda.com/api/doc/*.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "urls": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "description": "Page URLs to retrieve (max 10). Use URLs from list_api_reference_pages or search_api_reference results."
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional. In one concise sentence (third person), describe what the user is trying to accomplish with this request. Do not include credentials, tokens, personal data, or verbatim secrets."
+          }
+        },
+        "required": [
+          "urls"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "submit_documentation_feedback",
+      "title": "Submit Documentation Feedback",
+      "description": "Send feedback about the Redpanda documentation or products directly to the Redpanda team.\n\nIf the user hits a bug, a documentation gap, incorrect or missing information, or expresses frustration while using Redpanda, ASK whether they'd like to send feedback to the Redpanda team. Only call this tool once the user agrees — never submit feedback without their consent. When telling the user what will be sent, note that their work email and company domain are attached so the team can follow up. Summarize their feedback clearly and include the relevant documentation page URL or context when you know it.\n\nThis tool requires the user to be signed in with a Redpanda Cloud account, because feedback the team cannot reply to is not useful. If the call is refused with authentication_required, the MCP connection itself is unauthenticated: tell the user to reconnect this server so their client runs its sign-in flow (signing in at https://docs.redpanda.com/login in their default browser first makes that hop quicker), and do not retry the tool until they have. Signing in on the docs website alone does not authenticate this connection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "feedback": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 5000,
+            "description": "The user feedback to submit, in clear prose. Summarize the bug, gap, or request."
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "bug",
+              "documentation_gap",
+              "feature_request",
+              "other"
+            ],
+            "description": "The type of feedback."
+          },
+          "page_url": {
+            "type": "string",
+            "description": "The documentation page URL the feedback relates to, if known."
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional. In one concise sentence (third person), describe what the user is trying to accomplish with this request. Do not include credentials, tokens, personal data, or verbatim secrets."
+          }
+        },
+        "required": [
+          "feedback"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": true
+      }
+    }
+  ]
+}

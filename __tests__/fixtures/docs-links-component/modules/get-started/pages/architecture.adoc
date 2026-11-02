@@ -1,0 +1,14 @@
+= Redpanda Architecture
+:description: How Redpanda is built.
+
+== Thread-per-core model
+
+Redpanda pins one thread to each core.
+
+[[pinning-note]]
+Pinning is automatic.
+
+[#shard-layout]
+== How shards are laid out
+
+Each shard owns a slice of memory.

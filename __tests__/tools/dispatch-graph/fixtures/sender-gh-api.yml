@@ -1,0 +1,22 @@
+# gh api forms: one-liners, a backslash-continued call with payload fields,
+# and a commented-out line that must NOT count.
+name: Release
+on:
+  push:
+    tags: ['v*']
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify docs
+        env:
+          GH_TOKEN: ${{ env.ACTIONS_BOT_TOKEN }}
+          VERSION: 1.2.3
+        run: |
+          gh api repos/redpanda-data/docs-ui/dispatches -f event_type=update-go-mod
+          gh api repos/redpanda-data/rp-connect-docs/dispatches -f event_type=generate-rpcn-docs
+          # gh api repos/redpanda-data/docs/dispatches -f event_type=commented-out-event
+          gh api repos/redpanda-data/docs/dispatches \
+            -f event_type=update-rpk-plugin-docs \
+            -f 'client_payload[plugin]=ai' \
+            -f "client_payload[version]=$VERSION"

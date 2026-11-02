@@ -1,0 +1,255 @@
+# Source diff of this PR against its merge base.
+# Left out (generated docs, lockfiles, vendored code, test data): 2 file(s).
+
+diff --git a/.changes/unreleased/operator-Fixed-20260831-210000.yaml b/.changes/unreleased/operator-Fixed-20260831-210000.yaml
+new file mode 100644
+index 00000000..1323c40e
+--- /dev/null
++++ b/.changes/unreleased/operator-Fixed-20260831-210000.yaml
+@@ -0,0 +1,4 @@
++project: operator
++kind: Fixed
++body: Fixed false-positive `OperatorReconcileRunaway` and `OperatorWorkerPoolSaturated` alerts during healthy interval reconciliation. A new `OperatorReconcileChurn` alert tracks non-interval work, Runaway retains a higher-threshold total-rate backstop, and saturation now measures sustained workqueue delay instead of worker utilization.
++time: 2026-08-31T21:00:00-07:00
+diff --git a/docs/operator-metrics.md b/docs/operator-metrics.md
+index 3ea8f299..8f715d68 100644
+--- a/docs/operator-metrics.md
++++ b/docs/operator-metrics.md
+@@ -11,7 +11,7 @@ It covers four groups:
+ 
+ 1. **controller-runtime built-ins** — exported automatically by every
+    controller registered through `ctrl.NewControllerManagedBy(mgr)`. Useful
+-   for reconcile rate, errors, queue depth, and worker pool saturation.
++   for reconcile rate, errors, queue depth, and queue backlog.
+ 2. **operator reconcile-health metrics** — added by the operator on top of
+    the built-ins to surface spinning controllers and time-since-success.
+ 3. **resource-state metrics** — per-CR gauges describing what the operator
+@@ -88,7 +88,7 @@ controller making progress".
+ | `controller_runtime_reconcile_total` | Counter | `controller`, `result` | Reconcile invocations. `result` is one of `success`, `error`, `requeue`, `requeue_after`. |
+ | `controller_runtime_reconcile_errors_total` | Counter | `controller` | Errored reconciles. Sustained rate = something is broken. |
+ | `controller_runtime_reconcile_time_seconds` | Histogram | `controller` | Reconcile duration distribution. p99 climbing = controller is slowing down. |
+-| `controller_runtime_active_workers` | Gauge | `controller` | Currently-busy workers. Pegged at `max_concurrent_reconciles` = saturation. |
++| `controller_runtime_active_workers` | Gauge | `controller` | Currently-busy workers. Reaching `max_concurrent_reconciles` can be normal for interval-driven controllers; use queue latency to distinguish healthy load from backlog. |
+ | `controller_runtime_max_concurrent_reconciles` | Gauge | `controller` | Configured worker pool ceiling. |
+ | `workqueue_depth` | Gauge | `name` | Items waiting to be reconciled per controller. |
+ | `workqueue_adds_total` | Counter | `name` | Enqueues. |
+@@ -100,7 +100,7 @@ controller making progress".
+ **Suggested alerts**:
+ 
+ - **Errored reconciles**: `sum by (controller) (rate(controller_runtime_reconcile_errors_total[5m])) > 0.1` for 5m → warning.
+-- **Worker pool saturated**: `controller_runtime_active_workers >= controller_runtime_max_concurrent_reconciles` for 10m → warning.
++- **Worker pool saturated**: `operator:workqueue_over_10s_ratio:5m > 0.01` for 10m → warning. This bucket-exact signal means more than 1% of items waited over 10 seconds; the alert identifies the affected workqueue with the `name` label.
+ 
+ Both are emitted by the PrometheusRule when `monitoring.rulesEnabled=true`.
+ 
+@@ -115,12 +115,26 @@ them for every controller — no per-controller wiring required.
+ | `operator_controller_reconcile_steady_state_total` | Counter | `controller` | Reconciles that returned "no work to do" — either `(Result{}, nil)` *or* `(Result{RequeueAfter: defaultRequeueTimeout}, nil)` matching the controller's configured periodic-requeue interval (the wrapper accepts both shapes so controllers using a periodic-wake pattern still register as steady). Healthy controllers see this dominate once the system is converged. A controller whose `reconcile_total` rate is high while `steady_state_total` rate is flat is spinning. |
+ | `operator_controller_reconcile_last_success_timestamp_seconds` | Gauge | `controller` | Unix timestamp of the most recent steady-state reconcile per controller. Query as `time() - operator_controller_reconcile_last_success_timestamp_seconds` for seconds-since-last-success — a flat value while `reconcile_total` is climbing means the controller is failing or spinning. |
+ 
++The chart records shorter, install-scoped series from these metrics and the
++controller-runtime built-ins:
++
++| Recording rule | Labels | What it records |
++|----------------|--------|-----------------|
++| `operator:reconcile_rate:5m` | `controller`, `job`, `namespace` | Total reconcile rate, including scheduled interval requeues. |
++| `operator:reconcile_churn_rate:5m` | `controller`, `job`, `namespace` | Reconcile rate excluding `result="requeue_after"`. This stays near zero for healthy interval-driven controllers while retaining errors, explicit requeues, and success-result loops. It cannot distinguish event-driven work from interval work when a controller stamps `RequeueAfter` on every successful return; the total-rate runaway alert is the backstop for sufficiently fast loops of that shape. |
++| `operator:reconcile_error_rate:5m` | `controller`, `job`, `namespace` | Reconcile error rate. |
++| `operator:reconcile_steady_state_rate:5m` | `controller`, `job`, `namespace` | Steady-state reconcile rate. |
++| `operator:reconcile_p99_seconds:5m` | `controller`, `job`, `namespace` | p99 reconcile execution time. |
++| `operator:workqueue_p99_seconds:5m` | `name`, `job`, `namespace` | Estimated p99 time an item waits in a workqueue before a worker picks it up. controller-runtime uses decade-wide histogram buckets, so treat values between bucket boundaries as interpolated estimates. |
++| `operator:workqueue_over_10s_ratio:5m` | `name`, `job`, `namespace` | Exact share of workqueue items that waited longer than the histogram's 10-second bucket boundary. |
++
+ **Suggested alerts** (all shipped in the chart's PrometheusRule):
+ 
+ - **Errored reconciles**: `operator:reconcile_error_rate:5m > 0.1` for 5m → warning.
+-- **Runaway reconcile rate**: `operator:reconcile_rate:5m > 5` for 5m → warning. Cross-check `operator_controller_reconcile_steady_state_total` — if it is flat while the rate is high, the controller is spinning.
++- **Reconcile churn**: `operator:reconcile_churn_rate:5m > 5` for 5m → warning. This sensitive signal excludes `requeue_after` results and catches errors, explicit requeues, and success-result event loops.
++- **Runaway reconcile rate**: `operator:reconcile_rate:5m > 30` for 15m → warning. This high-headroom backstop includes `requeue_after` results because that label describes the controller's return value, not what triggered the reconcile.
+ - **Reconcile stalled**: a controller that was active in the last hour but has reconciled zero times in the past 10 minutes → warning.
+-- **Worker pool saturated**: `controller_runtime_active_workers >= controller_runtime_max_concurrent_reconciles` for 10m → warning.
++- **Worker pool saturated**: `operator:workqueue_over_10s_ratio:5m > 0.01` for 10m → warning. More than 1% of items crossed the real 10-second histogram boundary; the alert's workqueue identifier is the `name` label, not `controller`.
+ 
+ ## Group 3: resource-state metrics
+ 
+diff --git a/operator/chart/prometheusrule.go b/operator/chart/prometheusrule.go
+index 188be0ec..30611d53 100644
+--- a/operator/chart/prometheusrule.go
++++ b/operator/chart/prometheusrule.go
+@@ -62,6 +62,19 @@ import (
+ // same Prometheus, and a recorded series is not namespaced to its producer, so an
+ // unscoped alert expression evaluates against every install's series: two
+ // installs would each alert on the other's controllers.
++//
++// The load-shaped alerts are calibrated for the interval-driven CR controllers
++// (Topic, User, Schema, ...), which requeue every CR every sync interval: the
++// steady-state reconcile rate is proportional to CR count × engaged clusters /
++// sync interval, and each controller runs a single worker that legitimately
++// sits busy under that load while its queue stays empty. OperatorReconcileChurn
++// is the sensitive signal for non-scheduled work (everything but
++// result="requeue_after"). OperatorReconcileRunaway remains a high-headroom
++// total-rate backstop because the result label cannot distinguish a scheduled
++// interval requeue from a watch-driven spin whose reconciler also returns
++// RequeueAfter. Saturation is measured as the exact share of items above the
++// histogram's real 10-second bucket rather than the sampled busy-worker gauge
++// or an interpolated threshold between buckets. See K8S-927.
+ func PrometheusRule(dot *helmette.Dot) *monitoringv1.PrometheusRule {
+ 	values := helmette.Unwrap[Values](dot.Values)
+ 
+@@ -94,6 +107,23 @@ func PrometheusRule(dot *helmette.Dot) *monitoringv1.PrometheusRule {
+ 							Record: "operator:reconcile_rate:5m",
+ 							Expr:   intstr.FromString(fmt.Sprintf(`sum by (controller, job, namespace) (rate(controller_runtime_reconcile_total{%s}[5m]))`, scope)),
+ 						},
++						{
++							// Churn: reconciles that are NOT the interval-driven
++							// "come back in sync-interval" shape. The interval
++							// controllers (Topic, User, Schema, ...) end every
++							// healthy pass with RequeueAfter, which
++							// controller-runtime counts as result="requeue_after",
++							// so the total reconcile rate scales with CR count ×
++							// engaged clusters / sync interval on a perfectly
++							// healthy install. Excluding that result keeps errors,
++							// explicit requeues, and success-result loops visible,
++							// but it also excludes event-driven loops when the
++							// reconciler stamps RequeueAfter on every successful
++							// return. The total-rate runaway alert below provides a
++							// high-headroom backstop for that shape. See K8S-927.
++							Record: "operator:reconcile_churn_rate:5m",
++							Expr:   intstr.FromString(fmt.Sprintf(`sum by (controller, job, namespace) (rate(controller_runtime_reconcile_total{result!="requeue_after", %s}[5m]))`, scope)),
++						},
+ 						{
+ 							Record: "operator:reconcile_error_rate:5m",
+ 							Expr:   intstr.FromString(fmt.Sprintf(`sum by (controller, job, namespace) (rate(controller_runtime_reconcile_errors_total{%s}[5m]))`, scope)),
+@@ -109,6 +139,30 @@ func PrometheusRule(dot *helmette.Dot) *monitoringv1.PrometheusRule {
+ 								scope,
+ 							)),
+ 						},
++						{
++							// Time spent waiting in the workqueue before a worker
++							// picks the item up. This, not the busy-worker gauge,
++							// is the backlog signal: workqueue metrics label the
++							// queue with `name` (== the controller name).
++							Record: "operator:workqueue_p99_seconds:5m",
++							Expr: intstr.FromString(fmt.Sprintf(
++								`histogram_quantile(0.99, sum by (le, name, job, namespace) (rate(workqueue_queue_duration_seconds_bucket{%s}[5m])))`,
++								scope,
++							)),
++						},
++						{
++							// Bucket-exact share of workqueue items that waited more
++							// than 10 seconds. controller-runtime's queue-duration
++							// histogram has decade boundaries (..., 1, 10, 100, ...),
++							// so a p99 threshold at 30 seconds relies on linear
++							// interpolation across the wide (10, 100] bucket and can
++							// misrepresent the observed waits.
++							Record: "operator:workqueue_over_10s_ratio:5m",
++							Expr: intstr.FromString(fmt.Sprintf(
++								`1 - (sum by (name, job, namespace) (rate(workqueue_queue_duration_seconds_bucket{le="10", %s}[5m])) / sum by (name, job, namespace) (rate(workqueue_queue_duration_seconds_bucket{le="+Inf", %s}[5m])))`,
++								scope, scope,
++							)),
++						},
+ 					},
+ 				},
+ 				{
+@@ -131,20 +185,41 @@ func PrometheusRule(dot *helmette.Dot) *monitoringv1.PrometheusRule {
+ 							},
+ 						},
+ 						{
+-							// Runaway reconcile rate on a stable cluster.
+-							// Healthy controllers reach steady state and
+-							// rarely fire — a sustained >5/s is almost
+-							// always a controller spinning on the same
+-							// resource without making progress.
+-							Alert: "OperatorReconcileRunaway",
+-							Expr:  intstr.FromString(fmt.Sprintf(`operator:reconcile_rate:5m{%s} > 5`, scope)),
++							// Sensitive signal for non-scheduled reconcile churn.
++							// Interval-driven controllers requeue every CR every
++							// sync interval, so the total rate is proportional to
++							// CR count. Churn — anything but
++							// result="requeue_after" — stays near zero on a stable
++							// cluster, but cannot see loops from reconcilers that
++							// stamp RequeueAfter on every successful return.
++							Alert: "OperatorReconcileChurn",
++							Expr:  intstr.FromString(fmt.Sprintf(`operator:reconcile_churn_rate:5m{%s} > 5`, scope)),
+ 							For:   ptrDuration("5m"),
+ 							Labels: map[string]string{
+ 								"severity": "warning",
+ 							},
+ 							Annotations: map[string]string{
+-								"summary":     "Redpanda operator controller {{ $labels.controller }} in {{ $labels.namespace }} is reconciling at a high rate",
+-								"description": "Controller {{ $labels.controller }} has been reconciling at >5/s for 5+ minutes. On a stable cluster this means the controller is spinning. Cross-check operator_controller_reconcile_steady_state_total — if it is flat while the reconcile rate is high, the controller is making no progress.",
++								"summary":     "Redpanda operator controller {{ $labels.controller }} in {{ $labels.namespace }} has high non-interval reconcile churn",
++								"description": "Controller {{ $labels.controller }} has completed >5 reconciles per second for 5+ minutes with a result other than requeue_after. Investigate errors, explicit requeues, or success-result event loops.",
++							},
++						},
++						{
++							// High-headroom total-rate backstop. This intentionally
++							// includes result="requeue_after": controller-runtime's
++							// result label describes the return value, not whether
++							// the reconcile was triggered by the interval timer or
++							// an event. The higher threshold and longer hold avoid
++							// alerting on normal interval-driven fleets while still
++							// catching sufficiently fast loops of either shape.
++							Alert: "OperatorReconcileRunaway",
++							Expr:  intstr.FromString(fmt.Sprintf(`operator:reconcile_rate:5m{%s} > 30`, scope)),
++							For:   ptrDuration("15m"),
++							Labels: map[string]string{
++								"severity": "warning",
++							},
++							Annotations: map[string]string{
++								"summary":     "Redpanda operator controller {{ $labels.controller }} in {{ $labels.namespace }} is reconciling at an extreme rate",
++								"description": "Controller {{ $labels.controller }} has completed >30 reconciles per second for 15+ minutes. This total-rate backstop includes requeue_after results because the result label cannot distinguish scheduled interval work from event-driven spin loops.",
+ 							},
+ 						},
+ 						{
+@@ -169,23 +244,26 @@ func PrometheusRule(dot *helmette.Dot) *monitoringv1.PrometheusRule {
+ 							},
+ 						},
+ 						{
+-							// Worker pool saturation. Workers pegged at
+-							// max_concurrent_reconciles for >10m means the
+-							// queue is consistently full — either the
+-							// controller is too slow or
+-							// MaxConcurrentReconciles is misconfigured.
++							// Worker pool saturation, measured as the share of items
++							// waiting more than 10 seconds rather than the busy-worker
++							// gauge. The controllers
++							// run one worker each, and on interval-driven
++							// controllers with a few dozen CRs that single
++							// worker legitimately sits near 100% busy while the
++							// queue stays empty — the sampled
++							// active>=max_concurrent comparison read that as
++							// saturation on a healthy install (K8S-927). More than
++							// 1% of items crossing the real 10-second histogram
++							// boundary for 10 minutes is an actual backlog.
+ 							Alert: "OperatorWorkerPoolSaturated",
+-							Expr: intstr.FromString(fmt.Sprintf(
+-								`controller_runtime_active_workers{%s} >= controller_runtime_max_concurrent_reconciles{%s}`,
+-								scope, scope,
+-							)),
+-							For: ptrDuration("10m"),
++							Expr:  intstr.FromString(fmt.Sprintf(`operator:workqueue_over_10s_ratio:5m{%s} > 0.01`, scope)),
++							For:   ptrDuration("10m"),
+ 							Labels: map[string]string{
+ 								"severity": "warning",
+ 							},
+ 							Annotations: map[string]string{
+-								"summary":     "Redpanda operator controller {{ $labels.controller }} in {{ $labels.namespace }} worker pool saturated",
+-								"description": "Controller {{ $labels.controller }} has all reconcile workers busy for 10+ minutes. Reconciles may be queueing. Consider increasing MaxConcurrentReconciles or investigating per-reconcile latency.",
++								"summary":     "Redpanda operator controller {{ $labels.name }} in {{ $labels.namespace }} reconcile queue is backlogged",
++								"description": "More than 1% of items on controller {{ $labels.name }}'s workqueue have taken over 10 seconds to be dequeued, sustained for 10+ minutes. Work is arriving faster than the worker pool drains it. Consider increasing MaxConcurrentReconciles or investigating per-reconcile latency (operator:reconcile_p99_seconds:5m).",
+ 							},
+ 						},
+ 					},
+diff --git a/operator/chart/templates/_prometheusrule.go.tpl b/operator/chart/templates/_prometheusrule.go.tpl
+index 53891c4e..198a5ae3 100644
+--- a/operator/chart/templates/_prometheusrule.go.tpl
++++ b/operator/chart/templates/_prometheusrule.go.tpl
+@@ -13,7 +13,7 @@
+ {{- end -}}
+ {{- $scope := (printf `job="%s", namespace="%s"` (get (fromJson (include "operator.cleanForK8sWithSuffix" (dict "a" (list (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "metrics-service")))) "r") $dot.Release.Namespace) -}}
+ {{- $_is_returning = true -}}
+-{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict)) (mustMergeOverwrite (dict) (dict "kind" "PrometheusRule" "apiVersion" "monitoring.coreos.com/v1")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.cleanForK8sWithSuffix" (dict "a" (list (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "reconcile-health")))) "r") "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "namespace" $dot.Release.Namespace "annotations" $values.annotations)) "spec" (mustMergeOverwrite (dict) (dict "groups" (list (mustMergeOverwrite (dict "name" "") (dict "name" "redpanda-operator.controller-runtime.recording" "rules" (list (mustMergeOverwrite (dict "expr" 0) (dict "record" "operator:reconcile_rate:5m" "expr" (printf `sum by (controller, job, namespace) (rate(controller_runtime_reconcile_total{%s}[5m]))` $scope))) (mustMergeOverwrite (dict "expr" 0) (dict "record" "operator:reconcile_error_rate:5m" "expr" (printf `sum by (controller, job, namespace) (rate(controller_runtime_reconcile_errors_total{%s}[5m]))` $scope))) (mustMergeOverwrite (dict "expr" 0) (dict "record" "operator:reconcile_steady_state_rate:5m" "expr" (printf `sum by (controller, job, namespace) (rate(operator_controller_reconcile_steady_state_total{%s}[5m]))` $scope))) (mustMergeOverwrite (dict "expr" 0) (dict "record" "operator:reconcile_p99_seconds:5m" "expr" (printf `histogram_quantile(0.99, sum by (le, controller, job, namespace) (rate(controller_runtime_reconcile_time_seconds_bucket{%s}[5m])))` $scope)))))) (mustMergeOverwrite (dict "name" "") (dict "name" "redpanda-operator.controller-runtime.alerts" "rules" (list (mustMergeOverwrite (dict "expr" 0) (dict "alert" "OperatorReconcileErrors" "expr" (printf `operator:reconcile_error_rate:5m{%s} > 0.1` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "5m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "Redpanda operator controller {{ $labels.controller }} in {{ $labels.namespace }} is failing reconciles" "description" "Controller {{ $labels.controller }} has been returning errors at >0.1/s for 5+ minutes. Check the operator pod logs and the relevant resource's status."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "OperatorReconcileRunaway" "expr" (printf `operator:reconcile_rate:5m{%s} > 5` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "5m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "Redpanda operator controller {{ $labels.controller }} in {{ $labels.namespace }} is reconciling at a high rate" "description" "Controller {{ $labels.controller }} has been reconciling at >5/s for 5+ minutes. On a stable cluster this means the controller is spinning. Cross-check operator_controller_reconcile_steady_state_total — if it is flat while the reconcile rate is high, the controller is making no progress."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "OperatorReconcileStalled" "expr" (printf `max_over_time(operator:reconcile_rate:5m{%s}[1h]) > 0 and operator:reconcile_rate:5m{%s} == 0` $scope $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "10m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "Redpanda operator controller {{ $labels.controller }} in {{ $labels.namespace }} has stopped reconciling" "description" "Controller {{ $labels.controller }} was active in the last hour but has reconciled zero times in the past 10 minutes. The controller may have stopped responding to events."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "OperatorWorkerPoolSaturated" "expr" (printf `controller_runtime_active_workers{%s} >= controller_runtime_max_concurrent_reconciles{%s}` $scope $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "10m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "Redpanda operator controller {{ $labels.controller }} in {{ $labels.namespace }} worker pool saturated" "description" "Controller {{ $labels.controller }} has all reconcile workers busy for 10+ minutes. Reconciles may be queueing. Consider increasing MaxConcurrentReconciles or investigating per-reconcile latency.")))))) (mustMergeOverwrite (dict "name" "") (dict "name" "redpanda-operator.stretchcluster.alerts" "rules" (list (mustMergeOverwrite (dict "expr" 0) (dict "alert" "StretchClusterMemberUnreachable" "expr" (printf `operator_stretchcluster_member_reachable{%s} == 0` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "2m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "Redpanda operator cannot reach StretchCluster member {{ $labels.member }}" "description" "The multicluster manager's reachability probe has reported member {{ $labels.member }} of StretchCluster {{ $labels.stretchcluster }} as unreachable for 2+ minutes. Sustained unreachability is a real network outage or a peer apiserver that's down — sync operations targeting that peer (CA, bootstrap user, status updates) will be skipped until it recovers."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "StretchClusterBrokerCountSkew" "expr" (printf `operator_stretchcluster_brokers{%s} - operator_stretchcluster_brokers_ready{%s} > 0` $scope $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "10m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "StretchCluster {{ $labels.stretchcluster }} member {{ $labels.member }} has fewer ready brokers than desired" "description" "Member {{ $labels.member }} of StretchCluster {{ $labels.stretchcluster }} has had ready_brokers < desired_brokers for 10+ minutes. Expected briefly during scale operations; sustained skew means a broker pod is failing to start or pass readiness."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "StretchClusterSpecDrift" "expr" (printf `operator_stretchcluster_spec_drift{%s} > 0` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "5m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "StretchCluster {{ $labels.stretchcluster }} spec has drifted on member {{ $labels.member }}" "description" "Member {{ $labels.member }}'s local StretchCluster.spec differs from this operator's view for 5+ minutes. Reconciliation is blocked across all peers until specs match — reapply the canonical manifest to {{ $labels.member }} to clear the drift."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "StretchClusterReplicationUnhealthy" "expr" (printf `operator_stretchcluster_replication_health{%s} == 0` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "5m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "StretchCluster {{ $labels.stretchcluster }} reports unhealthy replication" "description" "The admin API reports StretchCluster {{ $labels.stretchcluster }} as unhealthy for 5+ minutes. Check broker readiness across members, cross-region network health, and partition replication status (rpk cluster health).")))))))))))) | toJson -}}
++{{- (dict "r" (mustMergeOverwrite (dict "metadata" (dict) "spec" (dict)) (mustMergeOverwrite (dict) (dict "kind" "PrometheusRule" "apiVersion" "monitoring.coreos.com/v1")) (dict "metadata" (mustMergeOverwrite (dict) (dict "name" (get (fromJson (include "operator.cleanForK8sWithSuffix" (dict "a" (list (get (fromJson (include "operator.Fullname" (dict "a" (list $dot)))) "r") "reconcile-health")))) "r") "labels" (get (fromJson (include "operator.Labels" (dict "a" (list $dot)))) "r") "namespace" $dot.Release.Namespace "annotations" $values.annotations)) "spec" (mustMergeOverwrite (dict) (dict "groups" (list (mustMergeOverwrite (dict "name" "") (dict "name" "redpanda-operator.controller-runtime.recording" "rules" (list (mustMergeOverwrite (dict "expr" 0) (dict "record" "operator:reconcile_rate:5m" "expr" (printf `sum by (controller, job, namespace) (rate(controller_runtime_reconcile_total{%s}[5m]))` $scope))) (mustMergeOverwrite (dict "expr" 0) (dict "record" "operator:reconcile_churn_rate:5m" "expr" (printf `sum by (controller, job, namespace) (rate(controller_runtime_reconcile_total{result!="requeue_after", %s}[5m]))` $scope))) (mustMergeOverwrite (dict "expr" 0) (dict "record" "operator:reconcile_error_rate:5m" "expr" (printf `sum by (controller, job, namespace) (rate(controller_runtime_reconcile_errors_total{%s}[5m]))` $scope))) (mustMergeOverwrite (dict "expr" 0) (dict "record" "operator:reconcile_steady_state_rate:5m" "expr" (printf `sum by (controller, job, namespace) (rate(operator_controller_reconcile_steady_state_total{%s}[5m]))` $scope))) (mustMergeOverwrite (dict "expr" 0) (dict "record" "operator:reconcile_p99_seconds:5m" "expr" (printf `histogram_quantile(0.99, sum by (le, controller, job, namespace) (rate(controller_runtime_reconcile_time_seconds_bucket{%s}[5m])))` $scope))) (mustMergeOverwrite (dict "expr" 0) (dict "record" "operator:workqueue_p99_seconds:5m" "expr" (printf `histogram_quantile(0.99, sum by (le, name, job, namespace) (rate(workqueue_queue_duration_seconds_bucket{%s}[5m])))` $scope))) (mustMergeOverwrite (dict "expr" 0) (dict "record" "operator:workqueue_over_10s_ratio:5m" "expr" (printf `1 - (sum by (name, job, namespace) (rate(workqueue_queue_duration_seconds_bucket{le="10", %s}[5m])) / sum by (name, job, namespace) (rate(workqueue_queue_duration_seconds_bucket{le="+Inf", %s}[5m])))` $scope $scope)))))) (mustMergeOverwrite (dict "name" "") (dict "name" "redpanda-operator.controller-runtime.alerts" "rules" (list (mustMergeOverwrite (dict "expr" 0) (dict "alert" "OperatorReconcileErrors" "expr" (printf `operator:reconcile_error_rate:5m{%s} > 0.1` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "5m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "Redpanda operator controller {{ $labels.controller }} in {{ $labels.namespace }} is failing reconciles" "description" "Controller {{ $labels.controller }} has been returning errors at >0.1/s for 5+ minutes. Check the operator pod logs and the relevant resource's status."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "OperatorReconcileChurn" "expr" (printf `operator:reconcile_churn_rate:5m{%s} > 5` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "5m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "Redpanda operator controller {{ $labels.controller }} in {{ $labels.namespace }} has high non-interval reconcile churn" "description" "Controller {{ $labels.controller }} has completed >5 reconciles per second for 5+ minutes with a result other than requeue_after. Investigate errors, explicit requeues, or success-result event loops."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "OperatorReconcileRunaway" "expr" (printf `operator:reconcile_rate:5m{%s} > 30` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "15m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "Redpanda operator controller {{ $labels.controller }} in {{ $labels.namespace }} is reconciling at an extreme rate" "description" "Controller {{ $labels.controller }} has completed >30 reconciles per second for 15+ minutes. This total-rate backstop includes requeue_after results because the result label cannot distinguish scheduled interval work from event-driven spin loops."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "OperatorReconcileStalled" "expr" (printf `max_over_time(operator:reconcile_rate:5m{%s}[1h]) > 0 and operator:reconcile_rate:5m{%s} == 0` $scope $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "10m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "Redpanda operator controller {{ $labels.controller }} in {{ $labels.namespace }} has stopped reconciling" "description" "Controller {{ $labels.controller }} was active in the last hour but has reconciled zero times in the past 10 minutes. The controller may have stopped responding to events."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "OperatorWorkerPoolSaturated" "expr" (printf `operator:workqueue_over_10s_ratio:5m{%s} > 0.01` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "10m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "Redpanda operator controller {{ $labels.name }} in {{ $labels.namespace }} reconcile queue is backlogged" "description" "More than 1% of items on controller {{ $labels.name }}'s workqueue have taken over 10 seconds to be dequeued, sustained for 10+ minutes. Work is arriving faster than the worker pool drains it. Consider increasing MaxConcurrentReconciles or investigating per-reconcile latency (operator:reconcile_p99_seconds:5m).")))))) (mustMergeOverwrite (dict "name" "") (dict "name" "redpanda-operator.stretchcluster.alerts" "rules" (list (mustMergeOverwrite (dict "expr" 0) (dict "alert" "StretchClusterMemberUnreachable" "expr" (printf `operator_stretchcluster_member_reachable{%s} == 0` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "2m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "Redpanda operator cannot reach StretchCluster member {{ $labels.member }}" "description" "The multicluster manager's reachability probe has reported member {{ $labels.member }} of StretchCluster {{ $labels.stretchcluster }} as unreachable for 2+ minutes. Sustained unreachability is a real network outage or a peer apiserver that's down — sync operations targeting that peer (CA, bootstrap user, status updates) will be skipped until it recovers."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "StretchClusterBrokerCountSkew" "expr" (printf `operator_stretchcluster_brokers{%s} - operator_stretchcluster_brokers_ready{%s} > 0` $scope $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "10m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "StretchCluster {{ $labels.stretchcluster }} member {{ $labels.member }} has fewer ready brokers than desired" "description" "Member {{ $labels.member }} of StretchCluster {{ $labels.stretchcluster }} has had ready_brokers < desired_brokers for 10+ minutes. Expected briefly during scale operations; sustained skew means a broker pod is failing to start or pass readiness."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "StretchClusterSpecDrift" "expr" (printf `operator_stretchcluster_spec_drift{%s} > 0` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "5m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "StretchCluster {{ $labels.stretchcluster }} spec has drifted on member {{ $labels.member }}" "description" "Member {{ $labels.member }}'s local StretchCluster.spec differs from this operator's view for 5+ minutes. Reconciliation is blocked across all peers until specs match — reapply the canonical manifest to {{ $labels.member }} to clear the drift."))) (mustMergeOverwrite (dict "expr" 0) (dict "alert" "StretchClusterReplicationUnhealthy" "expr" (printf `operator_stretchcluster_replication_health{%s} == 0` $scope) "for" (get (fromJson (include "operator.ptrDuration" (dict "a" (list "5m")))) "r") "labels" (dict "severity" "warning") "annotations" (dict "summary" "StretchCluster {{ $labels.stretchcluster }} reports unhealthy replication" "description" "The admin API reports StretchCluster {{ $labels.stretchcluster }} as unhealthy for 5+ minutes. Check broker readiness across members, cross-region network health, and partition replication status (rpk cluster health).")))))))))))) | toJson -}}
+ {{- break -}}
+ {{- end -}}
+ {{- end -}}

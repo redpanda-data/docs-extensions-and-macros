@@ -1,0 +1,204 @@
+= Extending MCP Tools
+:toc:
+:toc-title: Contents
+
+== Overview
+
+This guide covers extending the MCP server in `docs-extensions-and-macros`. For creating skills, agents, and other Claude Code extensions, see the https://github.com/redpanda-data/docs-team-standards[docs-team-standards] repository.
+
+[cols="1,2,2"]
+|===
+|Repository |Purpose |What to add there
+
+|**docs-team-standards**
+|Knowledge, guidance, orchestration
+|Skills, agents, commands, rules, hooks
+
+|**docs-extensions-and-macros**
+|Execution tools
+|MCP tools that need CLI/web access
+|===
+
+== Decision guide
+
+=== Add to docs-team-standards when:
+
+* You have **knowledge or guidance** to share (style rules, best practices)
+* You want to create a **reusable workflow** (review process, content planning)
+* The extension is **text-based** and doesn't need code execution
+
+See the `skill-authoring` skill in docs-team-standards for detailed guidance on creating skills, agents, commands, and rules.
+
+=== Add to docs-extensions-and-macros when:
+
+* You need to **execute CLI commands** (doc-tools, git, npm)
+* You need to **fetch data from the web** (GitHub API, version info)
+* You need to **parse files programmatically** (JSON validation)
+* The extension requires **Node.js code**
+
+== Adding MCP tools
+
+Only add MCP tools when you need code execution. Most extensions should go in docs-team-standards.
+
+=== When to add an MCP tool
+
+Add an MCP tool when you need to:
+
+* Execute `doc-tools` CLI commands
+* Make HTTP requests to external APIs
+* Parse or validate files programmatically
+* Run background jobs with progress tracking
+
+=== Tool implementation
+
+See link:DEVELOPMENT.adoc[DEVELOPMENT.adoc] for detailed implementation guidance.
+
+**Location**: `bin/mcp-tools/<tool-name>.js`
+
+**Basic structure**:
+
+[source,javascript]
+----
+/**
+ * My Tool
+ *
+ * Brief description of what this tool does.
+ */
+
+const { findRepoRoot, executeCommand } = require('./utils');
+
+/**
+ * Execute the tool
+ * @param {Object} args - Tool arguments
+ * @returns {Object} Result object
+ */
+function myTool(args) {
+  const repoRoot = findRepoRoot();
+
+  try {
+    // Tool implementation
+    return {
+      success: true,
+      result: 'output'
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err.message
+    };
+  }
+}
+
+module.exports = { myTool };
+----
+
+**Registration steps**:
+
+1. Create tool module in `bin/mcp-tools/`
+2. Export from `bin/mcp-tools/index.js`
+3. Add tool definition to `bin/doc-tools-mcp.js`
+
+=== Tool definition format
+
+Add to the `tools` array in `bin/doc-tools-mcp.js`:
+
+[source,javascript]
+----
+{
+  name: 'my_tool',
+  description: 'What this tool does. Include when writers should use it.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      required_arg: {
+        type: 'string',
+        description: 'Description of this argument'
+      },
+      optional_arg: {
+        type: 'boolean',
+        description: 'Optional argument (default: false)'
+      }
+    },
+    required: ['required_arg']
+  }
+}
+----
+
+=== What NOT to add as MCP tools
+
+Do NOT add MCP tools for:
+
+* Style guidelines → use a skill in docs-team-standards
+* Style/content review → use an agent (applies guidelines, no code needed)
+* Decision criteria → use a skill or rule in docs-team-standards
+* Templates → use templates in docs-team-standards
+
+NOTE: Structural validation that requires code (JSON parsing, file analysis) belongs in MCP. Style review that applies guidelines belongs in an agent.
+
+== Current MCP tools
+
+=== Generation tools
+
+* `generate_property_docs` - Configuration property documentation
+* `generate_metrics_docs` - Metrics reference documentation
+* `generate_rpk_docs` - RPK CLI documentation
+* `generate_rpcn_connector_docs` - Connector reference documentation
+* `generate_helm_docs` - Helm chart documentation
+* `generate_crd_docs` - Kubernetes CRD documentation
+* `generate_cloud_regions` - Cloud regions documentation
+* `generate_bundle_openapi` - OpenAPI specification bundling
+
+=== Utility tools
+
+* `get_redpanda_version` - Latest Redpanda version info
+* `get_console_version` - Latest Console version info
+* `get_antora_structure` - Repository structure analysis
+* `review_generated_docs` - Structural validation (JSON parsing, $ref checking, quality scores). For style review, use the content-reviewer agent.
+* `run_doc_tools_command` - Raw doc-tools CLI execution
+* `get_job_status` / `list_jobs` - Background job management
+
+=== Resources
+
+Only one resource remains in MCP:
+
+* `redpanda://personas` - Loaded from the current repository's `docs-data/personas.yaml`
+
+This stays in MCP because it's repository-specific and loaded at runtime.
+
+== Migration reference
+
+The following were migrated to docs-team-standards in January 2026:
+
+[cols="2,2"]
+|===
+|Was (MCP) |Is now (docs-team-standards)
+
+|`mcp/prompts/*`
+|`agents/` directory
+
+|`team-standards/*`
+|`skills/` directory
+
+|`review_content` tool
+|`content-reviewer` agent
+
+|`mcp/templates/*`
+|`skill-authoring` skill
+|===
+
+== Testing
+
+Run MCP tests:
+
+[source,bash]
+----
+npm test -- --testPathPattern=mcp
+----
+
+See link:../__tests__/mcp/README.adoc[Test documentation] for details.
+
+== Getting help
+
+* **MCP tools**: See link:DEVELOPMENT.adoc[DEVELOPMENT.adoc]
+* **Skills/agents**: See https://github.com/redpanda-data/docs-team-standards[docs-team-standards]
+* **Questions**: Ask in the docs team channel

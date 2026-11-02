@@ -1,0 +1,16 @@
+name: Update property docs
+on:
+  workflow_dispatch:
+    inputs:
+      plugin:
+        type: choice
+        options: [ai, connect, k8s, check]
+      free:
+        type: string
+  repository_dispatch:
+    types: [trigger-property-docs-generation, trigger-cloud-property-sync]
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi

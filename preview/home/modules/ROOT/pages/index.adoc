@@ -1,0 +1,11 @@
+= Home Component Preview
+:description: Start page for the preview build's home component
+
+This page exists so that the `home` component has a start page, which the real
+docs site also has. Without it, the component landing URL (`/home/`) resolves to
+nothing in this build, and any content that links to `https://docs.redpanda.com/home/`
+is reported as a broken link by the `url-to-xref` extension even though the page
+is published on the live site.
+
+See xref:preview:ROOT:test.adoc[the extensions and macros preview] for the pages
+that exercise the extensions and macros in this repository.

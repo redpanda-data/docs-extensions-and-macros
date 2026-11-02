@@ -1,0 +1,119 @@
+{
+  "project_id": "97f44223-f930-4fb9-ae1e-ecd436a4d85c",
+  "parent_group": {
+    "id": "238b3c08-5cf6-4615-937c-fa2f5a2e83a4",
+    "name": "Streaming",
+    "type": "product"
+  },
+  "default_segment": "current",
+  "segments": {
+    "23.3": {
+      "group_id": "625e5538-aa73-4969-a5c1-4c35a0108a94",
+      "group_name": "23.3",
+      "source_ids": [
+        "21672ac9-cc94-4529-8835-55334ede0a18"
+      ],
+      "source_names": [
+        "Documentation (23.3)"
+      ]
+    },
+    "24.1": {
+      "group_id": "29357fc1-30b1-46d4-a9de-e30f9b696b2f",
+      "group_name": "24.1",
+      "source_ids": [
+        "0d68df8c-1f9b-45f6-baa3-25d8bb46b164"
+      ],
+      "source_names": [
+        "Documentation (24.1)"
+      ]
+    },
+    "24.2": {
+      "group_id": "3442b9cb-67db-4800-a320-9def40551b93",
+      "group_name": "24.2",
+      "source_ids": [
+        "11659ad5-b7df-4a06-9e8b-4e9913795889"
+      ],
+      "source_names": [
+        "Documentation (24.2)"
+      ]
+    },
+    "24.3": {
+      "group_id": "11288265-8a9e-4a49-8c63-2f9fbe459b76",
+      "group_name": "24.3",
+      "source_ids": [
+        "f1377953-8bcc-48c9-a0e7-acb8efae701e"
+      ],
+      "source_names": [
+        "Documentation (24.3)"
+      ]
+    },
+    "25.1": {
+      "group_id": "317edba8-6c78-4cca-bad5-1dfe47c9d3dc",
+      "group_name": "25.1",
+      "source_ids": [
+        "6cfe84a2-4d5b-4123-b302-f372a5500d02"
+      ],
+      "source_names": [
+        "Documentation (25.1)"
+      ]
+    },
+    "25.2": {
+      "group_id": "639427c4-06fb-4b8f-8df3-d6a444b85101",
+      "group_name": "25.2",
+      "source_ids": [
+        "4d4d1a66-08e7-46aa-ac72-fea301f96b5f"
+      ],
+      "source_names": [
+        "Documentation (25.2)"
+      ]
+    },
+    "25.3": {
+      "group_id": "65723bc1-941c-4b3b-b5ba-2c601f7b3ba9",
+      "group_name": "25.3",
+      "source_ids": [
+        "d1213d06-6132-47e2-abca-43fe0a85dde6"
+      ],
+      "source_names": [
+        "Documentation (25.3)"
+      ]
+    },
+    "26.1": {
+      "group_id": "f0751d2d-de07-4a9c-8d75-7960121178b7",
+      "group_name": "26.1",
+      "source_ids": [
+        "ec6810ab-6208-4e6b-acef-83da55d45762"
+      ],
+      "source_names": [
+        "Documentation (26.1)"
+      ]
+    },
+    "current": {
+      "group_id": "35567e94-30c7-4608-ab5d-1ff982339d05",
+      "group_name": "current",
+      "source_ids": [
+        "f5c1e522-be3a-45f6-8463-11abc1b35ea9"
+      ],
+      "source_names": [
+        "Documentation (current)"
+      ]
+    }
+  },
+  "global_sources": [
+    "Admin API",
+    "Agentic Data Plane",
+    "Cloud Controlplane API",
+    "Cloud Dataplane API",
+    "Corrected Responses",
+    "Documentation (Cloud)",
+    "Documentation (RPCN)",
+    "GitHub Discussions",
+    "HTTP Proxy API",
+    "pylon",
+    "Recruitment Scam Page",
+    "Redpanda Connect Release Notes",
+    "Redpanda Core Release Notes",
+    "Schema Registry API",
+    "Terraform provider",
+    "YouTube Tutorials"
+  ]
+}

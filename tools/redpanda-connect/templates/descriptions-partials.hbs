@@ -1,0 +1,21 @@
+{{#if (or summary description version)}}
+{{{generatedMarker "rpcn-connector-docs" "the component spec in redpanda-data/connect or redpanda-data/benthos" "The summary and description come from the component spec. This file is a doc-tools preview. The published partials are generated in redpanda-data/connect by `task docs`, and their first line names the file that registers the component. To change the text, edit the component spec in that file."}}}
+//
+// Pages consume this partial in two places so both stay fresh:
+//   header: include::...[tag=meta]  (sets :description: for search snippets and meta tags)
+//   body:   include::...[tag=body]   (renders the summary and description)
+
+// tag::meta[]
+{{#if summary}}:description: {{{summaryAttribute summary}}}
+{{/if}}// end::meta[]
+
+// tag::body[]
+{{#if summary}}{{{summary}}}
+
+{{/if}}{{#if version}}ifndef::env-cloud[]
+Introduced in version {{version}}.
+endif::[]
+
+{{/if}}{{{renderConnectDescription this}}}
+// end::body[]
+{{/if}}

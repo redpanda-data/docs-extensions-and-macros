@@ -1,0 +1,9 @@
+= Broker properties
+:page-property-source: broker-properties
+:description: Preview fixture for the prop macro.
+
+Fixture page. The `page-property-source` attribute above declares this page as
+the reference for the `broker-properties` collection, so `prop:` links resolve here by
+declaration rather than by inferring ownership from headings.
+
+include::reference:partial$properties/preview-properties.adoc[tags=category-broker;!deprecated;!exclude-from-docs]

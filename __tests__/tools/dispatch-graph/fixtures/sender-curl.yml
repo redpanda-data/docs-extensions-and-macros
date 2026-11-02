@@ -1,0 +1,11 @@
+name: Curl form
+on: [push]
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -sS -X POST \
+            -H "Authorization: Bearer $TOKEN" \
+            https://api.github.com/repos/redpanda-data/adp-docs/dispatches \
+            -d '{"event_type": "sync-rpk-ai-stubs", "client_payload": {"plugin": "ai"}}'

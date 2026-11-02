@@ -1,0 +1,72 @@
+= Property macro on Kubernetes pages
+:description: How helm-path=auto changes what a property reference displays.
+:env-kubernetes:
+
+This page sets `env-kubernetes`, which is what single-sourced Kubernetes
+content does. Compare it with
+xref:ROOT:macros-showcase.adoc[the Linux showcase^]: the same macro calls, a
+different rendering.
+
+== The same call, two audiences
+
+[,asciidoc]
+----
+prop:cloud_storage_enabled[helm-path=auto]
+prop:empty_seed_starts_cluster[helm-path=auto]
+prop:log_segment_size[helm-path=auto]
+----
+
+On this page those render as:
+
+* prop:cloud_storage_enabled[helm-path=auto]
+* prop:empty_seed_starts_cluster[helm-path=auto]
+* prop:log_segment_size[helm-path=auto]
+
+On a page without `env-kubernetes` each shows its plain property name instead,
+so one sentence reads correctly for both audiences.
+
+The path is derived per property rather than prefixed blindly:
+`storage.tiered.config.*` for tiered storage settings, `config.node.*` for
+broker properties, and `config.cluster.*` for cluster properties. The deprecated
+`config_ref` macro prefixed *every* property with `storage.tiered.config.`,
+which is why the live docs once showed `storage.tiered.config.log_segment_size`
+-- a path that mislabels where that setting belongs.
+
+== A property with no Helm path
+
+[,asciidoc]
+----
+prop:retention.ms[helm-path=auto]
+----
+
+prop:retention.ms[helm-path=auto]
+
+Topic properties render as the plain name even here, because they have no
+`values.yaml` key at all -- they are set per topic through the Kafka API, rpk,
+or a Topic resource. Deriving `config.cluster.retention.ms` for them would hand
+the reader a confident, copy-pasteable key that does not exist, which is the
+same failure as the `config_ref` prefixing above, just less obvious.
+
+== With a link
+
+[,asciidoc]
+----
+prop:cloud_storage_enabled[helm-path=auto,link=true]
+----
+
+prop:cloud_storage_enabled[helm-path=auto,link=true]
+
+The display text is the Helm path; the link still goes to the property's
+reference page and the tooltip still describes the property.
+
+== Explicit text wins
+
+[,asciidoc]
+----
+prop:log_segment_size[helm-path=auto,text=segment size]
+----
+
+prop:log_segment_size[helm-path=auto,text=segment size]
+
+`text=` beats the Helm path, for when the sentence needs prose rather than a
+values path.

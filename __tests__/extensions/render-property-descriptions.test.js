@@ -1,0 +1,435 @@
+'use strict'
+
+const extension = require('../../extensions/render-property-descriptions')
+const glossary = require('../../macros/glossary')
+
+// The constructs the browser's hand-written formatter never handled, alongside
+// the ones it did, so a regression shows up as a missing tag rather than as
+// silently leaked source.
+function dataset (descriptions) {
+  const properties = {}
+  for (const [name, description] of Object.entries(descriptions)) {
+    properties[name] = { name, config_scope: 'cluster', description }
+  }
+  return JSON.stringify({ properties })
+}
+
+function catalogWith (json, { pages = true, partialSource, extraFiles = [] } = {}) {
+  const files = [
+    {
+      src: { component: 'streaming', version: '26.2', module: 'reference', family: 'attachment', relative: 'redpanda-properties-v26.2.1.json', path: 'modules/reference/attachments/redpanda-properties-v26.2.1.json' },
+      contents: Buffer.from(json),
+    },
+    ...extraFiles,
+  ]
+  if (pages) {
+    files.push({
+      src: { component: 'streaming', version: '26.2', module: 'reference', family: 'page', relative: 'properties/cluster-properties.adoc' },
+      pub: { url: '/streaming/26.2/reference/properties/cluster-properties/', moduleRootPath: '..', rootPath: '../../../..' },
+      contents: Buffer.from(partialSource || 'include::reference:partial$properties/cluster-properties.adoc[]'),
+    })
+  }
+  if (partialSource) {
+    files.push({
+      src: { component: 'streaming', version: '26.2', module: 'reference', family: 'partial', relative: 'properties/cluster-properties.adoc' },
+      contents: Buffer.from(partialSource),
+    })
+  }
+  return {
+    files,
+    findBy: (query) => files.filter((f) => Object.entries(query).every(([k, v]) => f.src[k] === v)),
+    getComponents: () => [{ name: 'streaming', versions: [{ version: '26.2' }] }],
+    // Antora's loader reads component.title and component.latest.version when
+    // computing page attributes, so a component without them crashes the
+    // converter rather than the extension.
+    getComponent: () => {
+      const versions = [{ version: '26.2', displayVersion: '26.2', asciidoc: { attributes: {} } }]
+      return { name: 'streaming', title: 'Redpanda', versions, latest: versions[0] }
+    },
+    // A resolver that actually resolves. With `() => undefined` Antora emits its
+    // unresolved placeholder (`href="#reference:...adoc#anchor" class="xref
+    // unresolved"`), which a loose regex matches happily -- so the test passed
+    // while xref resolution was doing nothing.
+    // Resolves any <module>:<path>.adoc, as Antora does, so a target outside the
+    // reference module is exercised too.
+    resolveResource: (spec) => {
+      const match = /^([\w-]+):(.+)\.adoc$/.exec(String(spec).split('#')[0])
+      if (!match) return undefined
+      return { pub: { url: `/streaming/26.2/${match[1]}/${match[2]}/` } }
+    },
+    getById: () => undefined,
+  }
+}
+
+function run (contentCatalog, { extensions = [], attributes = {} } = {}) {
+  const warnings = []
+  const context = {
+    handlers: {},
+    getLogger: () => ({ info: () => {}, debug: () => {}, warn: (m) => warnings.push(m), error: () => {} }),
+    once (event, handler) { this.handlers[event] = handler },
+    on (event, handler) { this.handlers[event] = handler },
+    getMaxListeners: () => 20,
+    setMaxListeners: () => {},
+  }
+  extension.register.call(context)
+  // Both events, in build order. The anchor index is built at contentClassified
+  // because Antora deletes page.src.contents once conversion finishes; firing
+  // only documentsConverted would leave the index empty, which is precisely the
+  // silent degradation this ordering exists to prevent.
+  context.handlers.contentClassified({ contentCatalog })
+  context.handlers.documentsConverted({
+    contentCatalog,
+    siteAsciiDocConfig: { attributes: { 'attribute-missing': 'drop', ...attributes }, extensions },
+  })
+  const attachment = contentCatalog.files.find((f) => f.src.family === 'attachment')
+  const raw = attachment.contents.toString()
+  let data
+  try {
+    data = JSON.parse(raw)
+  } catch (error) {
+    data = undefined
+  }
+  return { data, raw, warnings }
+}
+
+describe('render-property-descriptions extension', () => {
+  it('renders AsciiDoc the browser formatter never handled', () => {
+    const catalog = catalogWith(dataset({
+      bolded: 'Interval between runs.\n\n*Unit*: milliseconds',
+      italicised: 'Toggle to `true` _only_ when forcing compaction.',
+      arrowed: 'Applies when a -> b.',
+    }))
+    const { data } = run(catalog)
+    expect(data.properties.bolded.description_html).toContain('<strong>Unit</strong>')
+    expect(data.properties.italicised.description_html).toContain('<em>only</em>')
+    expect(data.properties.italicised.description_html).toContain('<code>true</code>')
+    // Asciidoctor's character replacement, which the browser never did.
+    expect(data.properties.arrowed.description_html).toContain('&#8594;')
+  })
+
+  it('runs the repo\'s own macros rather than reimplementing them', () => {
+    // glossterm's bracketed value is the definition, not display text. Rendering
+    // through macros/glossary.js is what makes that impossible to get wrong.
+    const catalog = catalogWith(dataset({
+      admin: 'Network address for the glossterm:Admin API[] server.',
+      custom: 'See glossterm:wire format[wire-format] for details.',
+    }))
+    const { data } = run(catalog, { extensions: [glossary] })
+    expect(data.properties.admin.description_html).toContain('Admin API')
+    expect(data.properties.admin.description_html).not.toContain('glossterm:')
+    expect(data.properties.custom.description_html).toContain('wire format')
+    expect(data.properties.custom.description_html).not.toContain('wire-format')
+  })
+
+  it('keeps the source description alongside the rendered HTML', () => {
+    const catalog = catalogWith(dataset({ plain: 'A plain description.' }))
+    const { data } = run(catalog)
+    expect(data.properties.plain.description).toBe('A plain description.')
+    expect(data.properties.plain.description_html).toBe('A plain description.')
+  })
+
+  it('points an <<anchor>> reference at the page documenting that property', () => {
+    // Asciidoctor renders <<anchor>> as a same-page fragment, which is wrong in
+    // a tooltip shown on some other page.
+    const partial = '=== iceberg_enabled\n\nEnables Iceberg.\n\n=== other_property\n\nSomething else.\n'
+    const catalog = catalogWith(
+      dataset({ other_property: 'Companion to <<iceberg_enabled,`iceberg_enabled`>>.', iceberg_enabled: 'Enables Iceberg.' }),
+      { partialSource: partial }
+    )
+    const { data } = run(catalog)
+    const html = data.properties.other_property.description_html
+    expect(html).not.toContain('<<')
+    // A resolved, site-root-relative link -- not Antora's unresolved placeholder.
+    expect(html).toContain('href="/streaming/26.2/reference/properties/cluster-properties/#iceberg_enabled"')
+    expect(html).toContain('class="xref page"')
+    expect(html).not.toContain('unresolved')
+  })
+
+  // Display text is pasted into an attribute list, where an unescaped ] ends the
+  // list and a bare = is read as a named attribute. Untreated, the first was
+  // published as a truncated link with the tail outside it, and the second lost
+  // the label entirely and applied part of it as a CSS role.
+  it.each([
+    ['brackets', 'the flag [beta] option'],
+    ['closing bracket', 'element a] b'],
+    ['equals sign', 'x=y mapping'],
+    ['equals and bracket', 'x=y and a] b'],
+    ['quotes', 'say "hi" now'],
+    ['comma', 'comma, separated'],
+  ])('keeps display text intact through the attribute list: %s', (_label, text) => {
+    const partial = '=== iceberg_enabled\n\nEnables Iceberg.\n\n=== other_property\n\nElse.\n'
+    const catalog = catalogWith(
+      dataset({ other_property: `See <<iceberg_enabled,${text}>>.`, iceberg_enabled: 'Enables Iceberg.' }),
+      { partialSource: partial }
+    )
+    const { data } = run(catalog)
+    const html = data.properties.other_property.description_html
+    expect(html).toContain('#iceberg_enabled"')
+    // The label survives whole, inside the anchor, with nothing trailing it.
+    expect(html).toMatch(new RegExp('>' + text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '</a>'))
+  })
+
+  // Antora converts each page with its component version's own AsciiDoc config,
+  // not the site config, so attributes declared in antora.yml exist only there.
+  // Five real descriptions branch on env-cloud.
+  it('converts with the component version\'s own attributes', () => {
+    const catalog = catalogWith(dataset({ conditional: 'Base.\n\nifdef::env-cloud[]\nCloud only.\nendif::[]' }))
+    catalog.getComponentVersion = () => ({
+      version: '26.2',
+      asciidoc: { attributes: { 'env-cloud': '', 'attribute-missing': 'drop' }, extensions: [] },
+    })
+    const { data } = run(catalog)
+    expect(data.properties.conditional.description_html).toContain('Cloud only.')
+  })
+
+  it('falls back to the site config when the component version has none', () => {
+    const catalog = catalogWith(dataset({ plain: 'A description.' }))
+    catalog.getComponentVersion = () => undefined
+    const { data } = run(catalog)
+    expect(data.properties.plain.description_html).toBe('A description.')
+  })
+
+  // Antora deletes page.src.contents after conversion, so an index built at
+  // documentsConverted comes back empty and every reference degrades to plain
+  // text. Warming it at contentClassified is what prevents that, and the
+  // degradation must be reported rather than silent.
+  it('reports rather than silently degrading when no page documents a property', () => {
+    const catalog = catalogWith(dataset({ lonely: 'See <<iceberg_enabled,the flag>>.' }), { pages: true })
+    const { warnings } = run(catalog)
+    expect(warnings.some((w) => String(w).includes('render as plain text'))).toBe(true)
+  })
+
+  // The attachment is a published download. `xref:...[]` means nothing to
+  // someone reading the JSON on its own, which is why the xref extension used to
+  // rewrite these files; this extension owns that job for property datasets now.
+  it('resolves xref macros in the description itself, for downloaders', () => {
+    const catalog = catalogWith(dataset({
+      linked: 'See xref:reference:internal-metrics-reference.adoc[the metrics reference].',
+      fragmented: 'See xref:reference:properties/cluster-properties.adoc#log_cleanup_policy[the policy].',
+      noext: 'See xref:develop:transactions#transaction-usage-tips[the tips].',
+    }))
+    const { data } = run(catalog)
+    // Antora's own output shape, classes included, so a downloaded attachment's
+    // links match the site's rather than a hand-built approximation.
+    expect(data.properties.linked.description)
+      .toContain('<a href="/streaming/26.2/reference/internal-metrics-reference/" class="xref page">the metrics reference</a>')
+    // The anchor is passed through exactly as authored. The previous
+    // implementation converted underscores to hyphens, and property page anchors
+    // keep their underscores, so all 25 of its fragment links were dead.
+    expect(data.properties.fragmented.description).toContain('cluster-properties/#log_cleanup_policy"')
+    expect(data.properties.fragmented.description).toContain('>the policy</a>')
+    expect(data.properties.fragmented.description).not.toContain('#log-cleanup-policy')
+    expect(data.properties.noext.description).toContain('#transaction-usage-tips"')
+    expect(data.properties.noext.description).toContain('>the tips</a>')
+    for (const name of ['linked', 'fragmented', 'noext']) {
+      expect(data.properties[name].description).not.toContain('xref:')
+    }
+  })
+
+  it('leaves an unresolvable xref as a macro and reports it', () => {
+    const catalog = catalogWith(dataset({ dangling: 'See xref:nowhere:missing.adoc[nothing].' }))
+    catalog.resolveResource = () => undefined
+    const { data, warnings } = run(catalog)
+    // A raw macro a reader can interpret beats a link to nowhere.
+    expect(data.properties.dangling.description).toContain('xref:nowhere:missing.adoc[nothing]')
+    expect(warnings.some((w) => String(w).includes('could not be resolved'))).toBe(true)
+  })
+
+  it('does not treat a shift expression as a property reference', () => {
+    // <<20>> is not an anchor. Reporting it as a broken one told writers to fix
+    // an anchor that never existed.
+    const catalog = catalogWith(dataset({ shifty: 'Compute 1<<20>> bytes.' }))
+    const { warnings } = run(catalog)
+    expect(warnings.some((w) => String(w).includes('20'))).toBe(false)
+  })
+
+  it('renders an anchor it cannot attribute to a property as plain text, and reports it', () => {
+    // A same-page fragment goes nowhere in a tooltip shown on another page, and
+    // a dead link still invites a click. Several real descriptions carry anchors
+    // with the dots stripped (redpandastoragemode), which match nothing.
+    const catalog = catalogWith(dataset({ lonely: 'See <<redpandastoragemode,the storage mode>>.' }))
+    const { data, warnings } = run(catalog)
+    const html = data.properties.lonely.description_html
+    expect(html).toContain('the storage mode')
+    expect(html).not.toContain('<a href')
+    expect(html).not.toContain('&lt;&lt;')
+    expect(warnings.some((w) => w.includes('redpandastoragemode'))).toBe(true)
+  })
+
+  it('resolves the legacy dot-free anchor spelling to the documented property', () => {
+    // Before property anchors replaced dots with hyphens they dropped them, so
+    // descriptions written then say <<redpandaremoteread>> for
+    // redpanda.remote.read, and a few carry a stray hyphen
+    // (<<redpandastorage-mode>>). Every release branch still ships those, and
+    // each one warned on every build although the property is documented.
+    const partial = '=== redpanda.remote.read\n\nReads.\n\n=== redpanda.storage.mode\n\nMode.\n\n=== other_property\n\nSomething else.\n'
+    const catalog = catalogWith(
+      dataset({
+        other_property: 'See <<redpandaremoteread,`redpanda.remote.read`>> and <<redpandastorage-mode>>.',
+        'redpanda.remote.read': 'Reads.',
+        'redpanda.storage.mode': 'Mode.'
+      }),
+      { partialSource: partial }
+    )
+    const { data, warnings } = run(catalog)
+    const html = data.properties.other_property.description_html
+    expect(html).toContain('href="/streaming/26.2/reference/properties/cluster-properties/#redpanda-remote-read"')
+    expect(html).toContain('href="/streaming/26.2/reference/properties/cluster-properties/#redpanda-storage-mode"')
+    expect(html).not.toContain('<<')
+    expect(warnings.some((w) => w.includes('redpandaremoteread') || w.includes('redpandastorage-mode'))).toBe(false)
+  })
+
+  it('falls back to the anchor name when a broken reference has no display text', () => {
+    const catalog = catalogWith(dataset({ lonely: 'See <<flushbytes>> for details.' }))
+    const { data } = run(catalog)
+    expect(data.properties.lonely.description_html).toContain('<code>flushbytes</code>')
+    expect(data.properties.lonely.description_html).not.toContain('<a href')
+  })
+
+  it('skips properties with no usable description', () => {
+    const json = JSON.stringify({ properties: {
+      nulled: { name: 'nulled', description: null },
+      blank: { name: 'blank', description: '   ' },
+      missing: { name: 'missing' },
+    } })
+    const { data } = run(catalogWith(json))
+    for (const name of ['nulled', 'blank', 'missing']) {
+      expect(data.properties[name].description_html).toBeUndefined()
+    }
+  })
+
+  it('warns and leaves the attachment alone when the JSON is unusable', () => {
+    const catalog = catalogWith('{"properties": {')
+    const { warnings } = run(catalog)
+    expect(warnings.some((w) => w.includes('not valid JSON'))).toBe(true)
+    expect(catalog.files[0].contents.toString()).toBe('{"properties": {')
+  })
+
+  it('does nothing when the component has no reference page to convert as', () => {
+    const catalog = catalogWith(dataset({ plain: 'A description.' }), { pages: false })
+    const { data } = run(catalog)
+    expect(data.properties.plain.description_html).toBeUndefined()
+  })
+
+  it('orders prerelease counters numerically when picking the newest dataset', () => {
+    // rc10 is newer than rc9. A string comparison says otherwise, and a branch
+    // retaining its two newest datasets can hold exactly that pair.
+    const mk = (tag, desc) => ({
+      src: { component: 'streaming', version: '26.2', module: 'reference', family: 'attachment', relative: `redpanda-properties-${tag}.json`, path: `modules/reference/attachments/redpanda-properties-${tag}.json` },
+      contents: Buffer.from(dataset({ p: desc })),
+    })
+    const older = dataset({ p: 'From rc9.' })
+    const catalog = catalogWith(older, { extraFiles: [mk('v26.2.2-rc10', 'From rc10.')] })
+    catalog.files[0].src.relative = 'redpanda-properties-v26.2.2-rc9.json'
+    run(catalog)
+    expect(JSON.parse(catalog.files[1].contents.toString()).properties.p.description_html).toBe('From rc10.')
+    expect(catalog.files[0].contents.toString()).toBe(older)
+  })
+
+  it('renders only the newest dataset when a branch ships a retained baseline', () => {
+    // doc-tools keeps the 2 newest property JSONs on purpose: the next
+    // generation run needs the older one as its --diff baseline. Converting a
+    // baseline rewrites the descriptions that diff reads, and reports every
+    // dead anchor in a superseded dataset a second time.
+    const baseline = dataset({ stale: 'See <<redpandastoragemode,the storage mode>>.' })
+    const catalog = catalogWith(baseline, {
+      extraFiles: [{
+        src: { component: 'streaming', version: '26.2', module: 'reference', family: 'attachment', relative: 'redpanda-properties-v26.2.2.json', path: 'modules/reference/attachments/redpanda-properties-v26.2.2.json' },
+        contents: Buffer.from(dataset({ current: 'A current description.' })),
+      }],
+    })
+    const { warnings } = run(catalog)
+    const [older, newer] = catalog.files
+    expect(JSON.parse(newer.contents.toString()).properties.current.description_html).toBe('A current description.')
+    expect(older.contents.toString()).toBe(baseline)
+    expect(warnings.some((w) => w.includes('redpandastoragemode'))).toBe(false)
+  })
+})
+
+// A glossterm: reference in a property description runs through the same
+// macros/glossary.js inline macro as a normal page, with the real site's
+// glossary-tooltip attribute (streaming/shared/modules/ROOT/partials/
+// global-attributes.yml sets glossary-tooltip: 'data-tippy-content'), so a
+// term whose hover-text breaks or injects through a directly-authored
+// glossterm: call (the bug macros/glossary.js's own tests cover, and its fix
+// resolves) breaks or injects through a property tooltip the same way --
+// description_html is embedded directly, unescaped, into the tooltip content
+// docs-ui hands to Tippy with allowHTML: true
+// (docs-ui/src/js/19-property-tooltips.js), same as the standalone case.
+//
+// description_html itself is raw, not-yet-parsed HTML text -- the same state
+// macros/glossary.test.js's convert() output is in before its
+// decodeAttributeOnce simulates the one browser parse a normal page gets
+// before docs-ui's own decode. Reusing that exact helper here asserts the
+// same escaping level reaches a property tooltip as reaches a standalone
+// glossary term: this only proves macros/glossary.js's fix applies here too,
+// not the full docs-ui-side decode chain (truncateDescriptionHtml's own
+// innerHTML probe, then Tippy's), which is a docs-ui-side concern this test
+// suite (docs-extensions-and-macros) cannot exercise.
+function decodeAttributeOnce (value) {
+  return value
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+}
+
+function termFile (termName, hoverText) {
+  return {
+    src: { component: 'shared', module: 'terms', family: 'partial', relative: `${termName}.adoc` },
+    contents: Buffer.from(`= ${termName}\n:term-name: ${termName}\n:hover-text: ${hoverText}\n\nBody.\n`),
+  }
+}
+
+describe('glossterm: references inside a description (shared with macros/glossary.js)', () => {
+  const attributes = { 'glossary-tooltip': 'data-tippy-content' }
+
+  it('escapes a malicious hover-text term the same way a directly-authored glossterm: call is escaped', () => {
+    const terms = [termFile('sql-engine', 'Danger `<img src=x onerror=alert(1)>` here. The "engine" runs queries.')]
+    const catalog = catalogWith(
+      dataset({ query_engine: 'Powered by the glossterm:sql-engine[] under the hood.' }),
+      { extraFiles: terms }
+    )
+    const { data } = run(catalog, { extensions: [glossary], attributes })
+
+    const html = data.properties.query_engine.description_html
+    // Not yet live: the raw description_html still has the img text escaped
+    // once, same as macros/glossary.test.js asserts for a directly-authored
+    // glossterm: call -- <code> is the only real tag in the attribute value.
+    expect(html).toContain(
+      '<a data-tippy-content="Danger <code>&amp;lt;img src=x onerror=alert(1)&amp;gt;</code> here. The &amp;quot;engine&amp;quot; runs queries."'
+    )
+    // After the one decode a normal page's own HTML parse would already have
+    // done, <code> is still the only live markup -- the img text is inert.
+    expect(decodeAttributeOnce(html)).toContain(
+      'Danger <code>&lt;img src=x onerror=alert(1)&gt;</code> here. The &quot;engine&quot; runs queries.'
+    )
+  })
+
+  it('does not let a literal quote in hover-text terminate the attribute early', () => {
+    const terms = [termFile('oxla', 'The engine. "Oxla" may appear in logs.')]
+    const catalog = catalogWith(
+      dataset({ query_engine: 'See glossterm:oxla[] for details.' }),
+      { extraFiles: terms }
+    )
+    const { data } = run(catalog, { extensions: [glossary], attributes })
+
+    const html = data.properties.query_engine.description_html
+    // A broken attribute would show a second, bare data-tippy-content
+    // attribute or truncate the link text -- assert the whole anchor and its
+    // attribute parse as one well-formed unit.
+    expect(html).toMatch(/^See <a data-tippy-content="[^"]*" href="[^"]*" class="glossary-term">oxla<\/a> for details\.$/)
+    expect(decodeAttributeOnce(html)).toContain('The engine. &quot;Oxla&quot; may appear in logs.')
+  })
+
+  it('renders a safe hover-text term identically to a directly-authored glossterm: call', () => {
+    const terms = [termFile('wal', 'Uses `fsync` to persist writes.')]
+    const catalog = catalogWith(
+      dataset({ durability: 'Backed by the glossterm:wal[] for crash recovery.' }),
+      { extraFiles: terms }
+    )
+    const { data } = run(catalog, { extensions: [glossary], attributes })
+
+    expect(decodeAttributeOnce(data.properties.durability.description_html)).toContain('<code>fsync</code>')
+  })
+})

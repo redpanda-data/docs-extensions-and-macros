@@ -1,0 +1,3 @@
+= Configuration Properties
+
+include::configuration:partial$generated-properties.adoc[]
