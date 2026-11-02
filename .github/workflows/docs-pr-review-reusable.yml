@@ -168,7 +168,8 @@ on:
           skills plugin at runtime. EVERY CALLER MUST PASS IT: there is no
           usable default, and the gate holds the PR pending (never a silent
           skill-less review) when it is not a full SHA. The dogfood caller
-          passes its own PR head SHA; every other caller pins a verified SHA
+          passes the SHA it runs from (the PR's merge commit, github.sha);
+          every other caller pins a verified SHA
           and bumps it deliberately — it is the rollback unit.
         type: string
         default: ''
