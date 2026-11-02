@@ -210,6 +210,19 @@ on:
 
 env:
   REVIEW_STATUS_CONTEXT: docs-review
+  # The goal every review prompt opens with. One copy, so the reviews can't
+  # drift apart on it.
+  REVIEW_GOAL: >-
+    GOAL: this review exists to get the pull request to approval. Report only
+    what stands between this PR and approval: a problem its own changes
+    introduce, or something they leave wrong or incomplete for what the PR
+    sets out to do. Do not go looking for issues outside that: problems that
+    were already there in content the PR does not change, other pages, other
+    PRs, repo-wide cleanups, this review pipeline, or anything else that would
+    not change whether this PR should be approved. Never make such an issue a
+    merge-blocker. Keep suggestions few, and only ones that make this PR
+    better. When the PR does what it sets out to do and nothing blocks it,
+    the verdict is pass.
 
 jobs:
   # ──────────────────────────────────────────────────────────────────────
@@ -843,6 +856,7 @@ jobs:
           timeout_minutes: ${{ needs.classify.outputs.review_minutes || '20' }}
           prompt: >
             /docs-team-standards:pr-review ${{ github.server_url }}/${{ github.repository }}/pull/${{ inputs.pr_number }}
+            ${{ env.REVIEW_GOAL }}
             HEADLESS MODE — you are running in CI with no human present.
             The PR's head is ALREADY checked out in the working directory:
             do not run `gh pr checkout` or any git command other than
@@ -1094,6 +1108,7 @@ jobs:
           prompt: >
             /docs-team-standards:overrides-review — review the overrides
             JSON changes in ${{ github.server_url }}/${{ github.repository }}/pull/${{ inputs.pr_number }}.
+            ${{ env.REVIEW_GOAL }}
             HEADLESS MODE: do NOT post anything to GitHub. Apply this
             repository's own CLAUDE.md rules (in the working tree, from the
             base branch) alongside the skill. Write findings to
@@ -1205,6 +1220,7 @@ jobs:
           # Longer for large PRs (classify: large); see classify for why.
           timeout_minutes: ${{ needs.classify.outputs.review_minutes || '20' }}
           prompt: >
+            ${{ env.REVIEW_GOAL }}
             Review the code changed by pull request
             ${{ inputs.pr_number }} in this repository. Read the diff with
             `gh pr diff` (on a PR with more than 300 changed files it fails
@@ -1300,6 +1316,7 @@ jobs:
           # Longer for large PRs (classify: large); see classify for why.
           timeout_minutes: ${{ needs.classify.outputs.review_minutes || '20' }}
           prompt: >
+            ${{ env.REVIEW_GOAL }}
             Review pull request ${{ inputs.pr_number }} in
             ${{ github.repository }}.
             ${{ needs.classify.outputs.best_fit != 'true' && 'You run only to re-check your earlier merge-blockers, listed below: none of the files changed since the last review is yours to review.' || (needs.classify.outputs.has_adoc == 'true' || needs.classify.outputs.has_images == 'true' || needs.classify.outputs.json_review == 'true' || needs.classify.outputs.code_heavy == 'true') && format('Other reviews in this pipeline already cover part of this PR ({0}{1}{2}{3}). You run because it also changes docs-team-standards plugin files (skills/, agents/, commands/, hooks/, resources/), which those reviews do not check against skill-authoring. Review ONLY those plugin files, choosing the skill below that suits each, and do not report on the files the other reviews own.', needs.classify.outputs.has_adoc == 'true' && 'AsciiDoc pages; ' || '', needs.classify.outputs.has_images == 'true' && 'images; ' || '', needs.classify.outputs.json_review == 'true' && 'JSON; ' || '', needs.classify.outputs.code_heavy == 'true' && 'code; ' || '') || 'None of this pipeline''s routed reviews (AsciiDoc pages, images, JSON, code-heavy) applies to it, so your job is to pick the review that best suits what it changes and run it.' }}
@@ -1480,6 +1497,7 @@ jobs:
           # file with the deterministic lint's pass.
           output_dir: review-output/vision
           prompt: >
+            ${{ env.REVIEW_GOAL }}
             Review every image file changed in PR #${{ inputs.pr_number }} of
             ${{ github.repository }} against the plugin's screenshot
             standard: read .docs-team-standards-plugin/resources/screenshot-standards.md
@@ -1616,6 +1634,7 @@ jobs:
           # Longer for large PRs (classify: large); see classify for why.
           timeout_minutes: ${{ needs.classify.outputs.review_minutes || '20' }}
           prompt: >
+            ${{ env.REVIEW_GOAL }}
             Run ONLY stages 1–2 of /docs-team-standards:doc-ticket for
             ${{ needs.classify.outputs.ticket }} (dedupe + research; NO plan,
             NO draft — approval checkpoints cannot be granted in CI). If Jira
