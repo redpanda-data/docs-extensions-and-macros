@@ -320,7 +320,8 @@ function updateWhatsNew ({ dataDir, oldVersion, newVersion, binaryAnalysis }) {
     if (diff.comparison && diff.comparison.newVersion) {
       releaseNotesLink = `link:https://github.com/redpanda-data/connect/releases/tag/v${diff.comparison.newVersion}[See the full release notes^].\n\n`
     }
-    let section = `\n== Version ${diff.comparison.newVersion}\n\n${releaseNotesLink}`
+    const sectionHead = `\n== Version ${diff.comparison.newVersion}\n\n${releaseNotesLink}`
+    let section = sectionHead
 
     // Separate Bloblang and regular components
     const bloblangComponents = []
@@ -495,6 +496,14 @@ function updateWhatsNew ({ dataDir, oldVersion, newVersion, binaryAnalysis }) {
         section += 'This release includes the following default value changes:\n\n'
         section += buildChangedDefaultsTable(regularChangedDefaults, capToTwoSentences)
       }
+    }
+
+    // A release with nothing for this page (no new components or fields, no
+    // deprecations, no changed defaults) would get a bare heading and link.
+    // Say so where a writer reviewing the PR sees it; the comment doesn't
+    // render.
+    if (section === sectionHead) {
+      section += '// TODO: The diff found nothing to list for this release. Add highlights from the release notes, or delete this section.\n\n'
     }
 
     // Update the file
