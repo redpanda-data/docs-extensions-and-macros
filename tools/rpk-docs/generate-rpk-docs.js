@@ -2458,6 +2458,8 @@ function isProtectedCommandPath(commandPath, protectedPlugins) {
  * commands, so they must be preserved. Pre-GA windows hit this every time:
  * the plugin publisher only promotes stable X.Y.Z releases, so `rpk <plugin>
  * install` finds nothing until GA (see redpanda-data/docs#1831).
+ * A single-command plugin is not protected when its root carries flags
+ * marked from_plugin, because those show the plugin was installed.
  *
  * @param {Array} commands - Flat command list from flattenCommands()
  * @param {Array<string>} explicitProtected - Plugins the caller already knows
@@ -2469,8 +2471,12 @@ function detectProtectedPlugins(commands, explicitProtected = []) {
     const subNames = commands
       .filter(c => c.path.startsWith(`rpk ${pl} `))
       .map(c => c.path.split(' ')[2])
-    const hasTopLevel = commands.some(c => c.path === `rpk ${pl}`)
-    if (!hasTopLevel) return true
+    const topLevel = commands.find(c => c.path === `rpk ${pl}`)
+    if (!topLevel) return true
+    // A single-command plugin (rpk check) has only the shim subcommands, but
+    // its root carries flags from the installed plugin
+    const hasPluginFlags = ((topLevel.command && topLevel.command.flags) || []).some(f => f.from_plugin === true)
+    if (hasPluginFlags) return false
     return subNames.length === 0 || subNames.every(n => PLUGIN_SHIM_COMMANDS.has(n))
   })
   return [...new Set([...explicitProtected, ...autoProtected])]
