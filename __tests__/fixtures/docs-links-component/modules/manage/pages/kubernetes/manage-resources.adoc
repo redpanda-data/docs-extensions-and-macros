@@ -1,4 +1,0 @@
-= Manage Pod Resources in Kubernetes
-:description: Configure CPU, memory and storage for Redpanda Pods.
-
-Text.

@@ -1,3 +1,0 @@
-=== retention_ms
-
-How long records are kept.

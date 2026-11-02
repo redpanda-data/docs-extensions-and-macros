@@ -334,7 +334,8 @@ jobs:
           HEAD_REPO=$(jq -r '.head.repo.full_name // ""' <<< "$PRJ")
           echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
-          # skip: leave the PR untouched — no status, no comment, no label.
+          # skip: no status, comment or label from the gate. (In an on-request
+          # repo, clear_request then posts a one-line note when this ends a request.)
           skip() { echo "$1"; { echo "proceed=false"; echo "why=$1"; } >> "$GITHUB_OUTPUT"; exit 0; }
 
           # ── Fork PRs are never reviewed ───────────────────────────────
@@ -452,7 +453,8 @@ jobs:
 
       # Scope, baseline and ready-for-approval: scripts/docs-review-scope.py,
       # driven by .github/docs-review-config.json. skip and noop exit here
-      # with nothing written to the PR.
+      # with nothing written to the PR by the gate (see clear_request for the
+      # on-request note).
       - id: scope
         if: steps.eval.outputs.proceed == 'true'
         env:
@@ -495,7 +497,8 @@ jobs:
           python3 -I .standards/scripts/docs-review-scope.py "$CFG" "$IN" review-scope
           DECISION=$(grep '^decision=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2)
           if [[ "$DECISION" != "full" && "$DECISION" != "incremental" && "$DECISION" != "approve_only" ]]; then
-            # skip / noop: no status, no comment, no review, no label.
+            # skip / noop: no status, review or label, and no comment from the
+            # gate (in an on-request repo, clear_request notes why for a request).
             REASON=$(grep '^reason=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2-)
             if [[ "$DECISION" == "noop" ]]; then
               WHY="Nothing to review: $REASON. Push new commits, then ask again."

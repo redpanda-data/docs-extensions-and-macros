@@ -1,3 +1,0 @@
-name           ,type      ,commercial_name ,support    ,deprecated ,cloud ,cloud_with_gpu ,cloud_unsupported_reason
-azure_thing    ,input     ,Azure Thing     ,certified  ,n          ,y     ,n              ,
-azure_thing    ,output    ,Azure Thing     ,community  ,n          ,n     ,n              ,needs local disk

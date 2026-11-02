@@ -1,3 +1,0 @@
-= Target Page
-
-A page other pages link to.
