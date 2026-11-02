@@ -120,7 +120,10 @@ function extractDispatchFilter (dispatchScript) {
   // jq -e '...' doc-impact.json. Accept either, so the eval tracks the step.
   const m = dispatchScript.match(/^\s*schema='([\s\S]*?)'\s*$/m) ||
     dispatchScript.match(/jq -e '([\s\S]*?)'\s+doc-impact\.json/)
-  if (!m) throw new Error('jq -e schema filter not found in the dispatch step')
+  if (!m) throw new Error("dispatch filter not found: expected a schema='...' assignment or an inline jq -e '...' doc-impact.json in the dispatch step")
+  if (/^\s*schema=/.test(m[0]) && !dispatchScript.includes('jq -e "$schema"')) {
+    throw new Error('the dispatch step assigns schema=\'...\' but never runs jq -e "$schema"')
+  }
   return m[1]
 }
 
