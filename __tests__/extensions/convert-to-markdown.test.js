@@ -82,6 +82,13 @@ describe('export structure', () => {
     expect(md).toContain('title: "&lt;literal&gt; 😀"')
   })
 
+  test('does not decode an entity name without a semicolon in an attribute', () => {
+    const md = convert('<h1>x</h1>', {
+      asciidoc: { doctitle: 'x', attributes: { 'page-edit-url': 'https://x/edit?a=1&lt=2&copy=3' } },
+    })
+    expect(md).toContain('page-edit-url: https://x/edit?a=1&lt=2&copy=3')
+  })
+
   test('gives field-only pages the body alone', () => {
     const md = convert('<h2 id="f"><a class="anchor" href="#f"></a>Fields</h2><p>Body</p>', { isFieldOnlyPage: true })
     expect(md).toBe('## Fields\n\nBody')
@@ -109,6 +116,16 @@ describe('headings', () => {
   test('removes the empty anchor link Antora puts in every heading', () => {
     const md = convert('<h1>T</h1><h2 id="discovery"><a class="anchor" href="#discovery"></a>Discovery</h2>')
     expect(bodyOf(md)).toBe('## Discovery')
+  })
+
+  test('does not escape underscores in a heading', () => {
+    const md = convert('<h1>T</h1><h2 id="_x">The __consumer_offsets topic and _private</h2>')
+    expect(bodyOf(md)).toBe('## The __consumer_offsets topic and _private')
+  })
+
+  test('keeps a heading whose id contains a chrome fragment', () => {
+    const md = convert('<h1>T</h1><h2 id="_pagination">Pagination</h2><p>body</p><h3 id="_footer_options">Footer options</h3>')
+    expect(bodyOf(md)).toBe('## Pagination\n\nbody\n\n### Footer options')
   })
 
   test('keeps a heading with an underscore in a name readable', () => {
@@ -215,6 +232,19 @@ describe('tables', () => {
     expect(bodyOf(md).split('\n')[0]).toBe('> 📝 **NOTE**')
   })
 
+  test('keeps a table inside an admonition as a table', () => {
+    const md = convert(
+      '<h1>T</h1><div class="admonitionblock note"><table><tr><td class="icon"><i class="fa icon-note"></i></td><td class="content">' +
+      '<table class="tableblock"><thead><tr><th>A</th><th>B</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table></td></tr></table></div>'
+    )
+    expect(bodyOf(md)).toBe('> 📝 **NOTE**\n>\n> | A | B |\n> | --- | --- |\n> | 1 | 2 |')
+  })
+
+  test('keeps a table inside callout text as a table', () => {
+    const md = convert('<h1>T</h1><div class="colist"><table><tr><td><i class="conum" data-value="1"></i></td><td><table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table></td></tr></table></div>')
+    expect(bodyOf(md)).toBe('1. | A | B |\n   | --- | --- |\n   | 1 | 2 |')
+  })
+
   test('still renders admonitions as blockquotes', () => {
     const md = convert(
       '<h1>T</h1><div class="admonitionblock note"><table><tr><td class="icon"><i class="fa icon-note" title="Note"></i></td>' +
@@ -233,6 +263,11 @@ describe('escaping', () => {
   test('keeps a line-start escape when only an invisible sibling precedes the text', () => {
     const md = convert('<h1>T</h1><p><a id="z"></a># not a heading</p><p><a id="y"></a>1. not a list</p><div><!-- c -->- after comment</div>')
     expect(bodyOf(md)).toBe('\\# not a heading\n\n1\\. not a list\n\n\\- after comment')
+  })
+
+  test('uses * for emphasis that touches a letter, so a later underscore cannot close it', () => {
+    const md = convert('<h1>T</h1><p><em>file</em>name and other_ text, and <em>alone</em> here</p>')
+    expect(bodyOf(md)).toBe('*file*name and other_ text, and _alone_ here')
   })
 
   test('still escapes a hyphen that starts a paragraph', () => {

@@ -246,6 +246,10 @@ describe('stripMarkdownMetadata', () => {
     expect(stripMarkdownMetadata('---\ntitle: x\n---\n\n\n\n```\na\n\n\n\nb\n```\n\n\n\nafter')).toBe('```\na\n\n\n\nb\n```\n\nafter')
   })
 
+  it('does not collapse blank lines in a fenced code block inside a list item', () => {
+    expect(stripMarkdownMetadata('- step\n\n    ```\n    a\n\n\n\n    b\n    ```\n')).toBe('- step\n\n    ```\n    a\n\n\n\n    b\n    ```')
+  })
+
   it('leaves a thematic break inside the body alone', () => {
     expect(stripMarkdownMetadata('# Title\n\nabove\n\n---\n\nbelow')).toBe('# Title\n\nabove\n\n---\n\nbelow')
   })

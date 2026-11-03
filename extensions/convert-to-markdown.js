@@ -110,7 +110,8 @@ function collectGeneratedProvenance (page, contentCatalog) {
  */
 function decodeHtmlEntities (str) {
   if (!str || typeof str !== 'string') return str
-  return decode(str)
+  // Strict: a bare `&copy` or `&lt` in a URL query is not an entity.
+  return decode(str, { scope: 'strict' })
 }
 
 /**
@@ -798,18 +799,17 @@ function addRemoveUnwantedRule (td) {
       // Tracking or hidden images
       if (tag === 'img' && isTrackingImage(node)) return true
 
-      return UNWANTED_FRAGMENTS.some((x) => classAttr.includes(x) || idAttr.includes(x))
+      // A heading's id comes from its title (`_pagination`), not from chrome.
+      const checkId = !/^h[1-6]$/.test(tag)
+      return UNWANTED_FRAGMENTS.some((x) => classAttr.includes(x) || (checkId && idAttr.includes(x)))
     },
     replacement: () => '',
   })
 }
 
 /**
- * Build the converter for one page.
- *
- * Two instances are created so a rule that converts a fragment of its own
- * (tabs, admonitions, table cells) can hand it to a sibling converter instead
- * of re-entering itself.
+ * Build the converter for one page. Rules that convert a fragment of their
+ * own (tabs, admonitions, table cells) call this same instance on it.
  *
  * @param {Object} options
  * @param {URL|null} options.pageUrl - Absolute HTML URL of the page, for
@@ -819,12 +819,17 @@ function addRemoveUnwantedRule (td) {
  */
 function createTurndownForPage ({ pageUrl, logger }) {
   const outerTurndown = createTurndownBase()
-  const nestedTurndown = createTurndownBase()
 
-  function addCustomRules (turndownInstance, isInner = false) {
-    const convert = (node) => {
-      const converter = isInner ? nestedTurndown : turndownInstance
-      return converter.turndown(node)
+  function addCustomRules (turndownInstance) {
+    const convert = (node) => turndownInstance.turndown(node)
+
+    // Convert an element's children without the element. Turndown takes the
+    // node it is given as the root, so a TD passed whole makes every table
+    // inside it look like a table in a cell.
+    const convertContents = (el) => {
+      const wrapper = el.ownerDocument.createElement('div')
+      Array.from(el.childNodes).forEach((child) => wrapper.appendChild(child.cloneNode(true)))
+      return convert(wrapper)
     }
 
     function findNearestHeadingLevel (el) {
@@ -938,7 +943,7 @@ function createTurndownForPage ({ pageUrl, logger }) {
 
         let innerMd = ''
         try {
-          innerMd = convert(contentCell).trim()
+          innerMd = convertContents(contentCell).trim()
         } catch (e) {
           logger.warn(`Turndown failed in admonition: ${e.message}`)
         }
@@ -1032,7 +1037,7 @@ function createTurndownForPage ({ pageUrl, logger }) {
               (conum && conum.getAttribute('data-value')) ||
               (cells[0].textContent || '').trim().replace(/\D/g, '') ||
               String(index + 1)
-            const text = convert(cells[1]).trim().replace(/\n/g, '\n   ')
+            const text = convertContents(cells[1]).trim().replace(/\n/g, '\n   ')
             return `${number}. ${text}`
           })
           .filter(Boolean)
@@ -1088,6 +1093,22 @@ function createTurndownForPage ({ pageUrl, logger }) {
       },
     })
 
+    // Emphasis next to a letter or digit uses `*`: an intraword `_` cannot
+    // close, so `_file_name` would run on to the next stray underscore.
+    turndownInstance.addRule('emphasis', {
+      filter: ['em', 'i'],
+      replacement: (content, node, options) => {
+        if (!content.trim()) return ''
+        const edge = (sibling, end) => {
+          const text = (sibling && sibling.textContent ? sibling.textContent : '').split(CONTINUATION_SENTINEL).join('')
+          return end ? text[text.length - 1] : text[0]
+        }
+        const intraword = isAlphanumeric(edge(node.previousSibling, true)) || isAlphanumeric(edge(node.nextSibling, false))
+        const delimiter = intraword ? '*' : options.emDelimiter
+        return delimiter + content + delimiter
+      },
+    })
+
     // Description lists have no Markdown form. Bold the term so it reads as
     // a label for the paragraphs that follow.
     turndownInstance.addRule('description-term', {
@@ -1104,9 +1125,7 @@ function createTurndownForPage ({ pageUrl, logger }) {
   }
 
   addRemoveUnwantedRule(outerTurndown)
-  addRemoveUnwantedRule(nestedTurndown)
-  addCustomRules(outerTurndown, false)
-  addCustomRules(nestedTurndown, true)
+  addCustomRules(outerTurndown)
   return outerTurndown
 }
 
@@ -1213,9 +1232,13 @@ function convertPageHtml ({ html, page, siteUrl = '', logger = noopLogger }) {
   }
 
   // Tidy prose without touching code blocks, where blank lines and trailing
-  // spaces are content. A two-space hard break is kept.
+  // spaces are content. A two-space hard break is kept. Headings drop the
+  // underscore escapes, which in names like `__consumer_offsets` are noise.
   return transformOutsideFences(markdown, (text) =>
-    text.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+$/gm, (spaces) => (spaces === '  ' ? spaces : ''))
+    text
+      .replace(/\n{3,}/g, '\n\n')
+      .replace(/[ \t]+$/gm, (spaces) => (spaces === '  ' ? spaces : ''))
+      .replace(/^#{1,6}[ \t].*$/gm, (heading) => heading.replace(/\\_/g, '_'))
   ).trim()
 }
 

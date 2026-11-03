@@ -67,9 +67,10 @@ const FRONTMATTER_REGEX = /^---\r?\n[\s\S]*?\r?\n---\r?\n/;
 /**
  * A fenced code block: an opening fence of three or more backticks or tildes,
  * closed by a line with at least as many of the same character, or running to
- * the end of the text when never closed.
+ * the end of the text when never closed. Any indent is allowed, because a
+ * fence inside a list item is indented with the item's content.
  */
-const FENCED_BLOCK_REGEX = /^ {0,3}(`{3,}|~{3,})[^\n]*(?:\n[\s\S]*?\n {0,3}\1[`~]*[ \t]*$|\n[\s\S]*$|$)/gm;
+const FENCED_BLOCK_REGEX = /^[ \t]*(`{3,}|~{3,})[^\n]*(?:\n[\s\S]*?\n[ \t]*\1[`~]*[ \t]*$|\n[\s\S]*$|$)/gm;
 
 /**
  * Apply a text transform to every stretch of Markdown that is not inside a
