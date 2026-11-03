@@ -114,8 +114,10 @@ function findCommandNode (tree, fullName) {
 /**
  * Pick the raw (pre-override) tree out of a snapshot document.
  *
- * Refuses a snapshot that only carries the override-merged `tree`: auditing
- * against it would classify every override REDUNDANT and retire them all.
+ * Refuses a snapshot that only carries the override-merged `tree`, and a
+ * bare { name, commands } tree (`jq .tree` of a snapshot has that shape):
+ * auditing against the merged view would classify every override REDUNDANT
+ * and retire them all.
  *
  * @param {Object} snapshot - Parsed rpk-v<version>.json.
  * @param {string} snapshotPath - For the error message.
@@ -123,15 +125,40 @@ function findCommandNode (tree, fullName) {
  */
 function rawTreeOf (snapshot, snapshotPath) {
   if (snapshot && snapshot.raw_tree && typeof snapshot.raw_tree === 'object') return snapshot.raw_tree
-  if (snapshot && snapshot.name === 'rpk' && Array.isArray(snapshot.commands)) {
-    // A bare `rpk --print-tree` dump: raw by definition.
-    return snapshot
-  }
   throw new Error(
     `rpk snapshot ${snapshotPath} has no "raw_tree". The audit needs the pre-override tree the binary printed; ` +
     'the "tree" key is the override-merged view and would classify every override REDUNDANT. ' +
+    'A bare { name, commands } tree is refused too, because `jq .tree` of a snapshot has that shape. ' +
     'Pass the newest docs-data/rpk-v<version>.json written by `doc-tools generate rpk-docs`.'
   )
+}
+
+/**
+ * Normalize rendered AsciiDoc for comparison. Outside listing blocks this is
+ * classify.normalizeText (re-wrapped prose renders the same). Inside a
+ * `----` listing block, lines are kept as written apart from trailing
+ * whitespace, because indentation in a code sample or nested YAML is
+ * published as is: an override that only re-indents a sample must not
+ * compare equal to the raw text.
+ *
+ * @param {string} text - Rendered AsciiDoc.
+ * @returns {string} Normalized text.
+ */
+function normalizeRendered (text) {
+  if (typeof text !== 'string') return ''
+  let inListing = false
+  return text
+    .split('\n')
+    .map((line) => {
+      if (/^-{4,}\s*$/.test(line)) {
+        inListing = !inListing
+        return '----'
+      }
+      return inListing ? line.replace(/\s+$/, '') : line.replace(/[ \t]+/g, ' ').trim()
+    })
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }
 
 /**
@@ -147,7 +174,7 @@ function rawTreeOf (snapshot, snapshotPath) {
 function renderDescription (description, command, tt) {
   const { mainDescription, sections } = generator.parseDescriptionSections(description || '')
   const rendered = {
-    main: classify.normalizeText(generator.ensurePeriod(generator.formatDescription(mainDescription, tt))),
+    main: normalizeRendered(generator.ensurePeriod(generator.formatDescription(mainDescription, tt))),
     sections: {}
   }
   for (const [name, content] of Object.entries(sections)) {
@@ -157,9 +184,9 @@ function renderDescription (description, command, tt) {
         examples = generator.filterExamples(examples, command.excludeExamples)
       }
       examples = generator.applyTextTransformationsToExamples(examples, tt)
-      rendered.sections[name] = classify.normalizeText(generator.formatExamples(examples))
+      rendered.sections[name] = normalizeRendered(generator.formatExamples(examples))
     } else {
-      rendered.sections[name] = classify.normalizeText(generator.formatDescription(content, tt))
+      rendered.sections[name] = normalizeRendered(generator.formatDescription(content, tt))
     }
   }
   return rendered
@@ -173,7 +200,7 @@ function renderDescription (description, command, tt) {
  * @returns {string} Rendered, normalized text.
  */
 function renderFlag (description, tt) {
-  return classify.normalizeText(generator.ensurePeriod(generator.formatDescription(description || '', tt)))
+  return normalizeRendered(generator.ensurePeriod(generator.formatDescription(description || '', tt)))
 }
 
 // The generator's summary formatting, used for the page `:description:`
@@ -181,7 +208,7 @@ function renderFlag (description, tt) {
 const SHORT_DESC_OPTIONS = Object.freeze({ skipTableConversion: true, skipListConversion: true })
 
 function renderShortDesc (text, tt) {
-  return classify.normalizeText(generator.ensurePeriod(generator.capToTwoSentences(generator.formatDescription(text || '', tt, SHORT_DESC_OPTIONS))))
+  return normalizeRendered(generator.ensurePeriod(generator.capToTwoSentences(generator.formatDescription(text || '', tt, SHORT_DESC_OPTIONS))))
 }
 
 /**
@@ -467,7 +494,13 @@ function classifyCommandEntry (commandName, entry, ctx) {
       // carries its own. Content items replace sections on the page only,
       // so they do not count here.
       const candidate = generator.mergeCommandOverrides(node, { commands: { [commandName]: { description: value } } }, commandName).description
-      rows.push(classifyProse({
+      // When the override carries any section of its own, mergeCommandOverrides
+      // uses it as written, so raw sections it does not restate are missing
+      // from the candidate. Name them so they are not lost from rpk --help.
+      const candidateSections = Object.keys(generator.parseDescriptionSections(candidate || '').sections)
+      const omitted = Object.keys(generator.parseDescriptionSections(node.description || '').sections)
+        .filter((sectionName) => !candidateSections.includes(sectionName))
+      const row = classifyProse({
         name: commandName,
         field,
         overrideText: value,
@@ -478,7 +511,11 @@ function classifyCommandEntry (commandName, entry, ctx) {
         renderedText: withAll.description.main,
         scope,
         differsIn
-      }))
+      })
+      if (row.class === CLASSES.UPSTREAMABLE && omitted.length > 0) {
+        row.note += ` The candidate leaves out raw help sections ${omitted.join(', ')}; add them back before setting Long, or rpk --help loses them.`
+      }
+      rows.push(row)
       continue
     }
 

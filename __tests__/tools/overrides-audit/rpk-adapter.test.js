@@ -159,6 +159,22 @@ describe('overrides-audit rpk adapter (prose classification)', () => {
       expect(result.cross_check.violations).toEqual([])
     })
 
+    test('indentation inside an example code block counts: re-indenting a continuation line is not REDUNDANT', () => {
+      // Deleting this override flattens the published sample, so the page changes.
+      const tree = JSON.parse(JSON.stringify(snapshot))
+      tree.raw_tree.commands[0].commands[0].description = 'Create widgets\n\nEXAMPLES\n\nCreate a widget with a config\n  rpk widget create foo \\\n  -c a=b\n'
+      const result = runAudit({
+        overrides: writeFixture('o.json', overridesWith({
+          'rpk widget create': { description: 'Create widgets\n\nEXAMPLES\n\nCreate a widget with a config\n  rpk widget create foo \\\n      -c a=b\n' }
+        })),
+        extracted: writeFixture('s.json', tree),
+        surface: 'rpk'
+      })
+      const row = result.manifest.find((r) => r.name === 'rpk widget create' && r.field === 'description')
+      expect(row.class).not.toBe(CLASSES.REDUNDANT)
+      expect(row.differs_in).toEqual(['section:EXAMPLES'])
+    })
+
     test('whitespace-only differences (re-wrapped lines) are redundant', () => {
       const { byKey } = auditWith({
         'rpk widget create': { flags: { dry: { description: 'Dry run:  validate the request;   do not create widgets.' } } }
@@ -195,6 +211,18 @@ describe('overrides-audit rpk adapter (prose classification)', () => {
       expect(row.class).toBe(CLASSES.UPSTREAMABLE)
       expect(row.upstream_candidate_text).toContain(text)
       expect(row.upstream_candidate_text).toBe(`${text}\n\nEXAMPLES\n\nCreate a widget named foo\n  rpk widget create foo`)
+    })
+
+    test('an override with its own sections names the raw sections the candidate leaves out', () => {
+      // mergeCommandOverrides uses the override as written once it has any
+      // section, so the raw EXAMPLES is not in the candidate.
+      const { byKey } = auditWith({
+        'rpk widget create': { description: 'Create widgets.\n\nSIZE\n\nSizes are in bytes.' }
+      })
+      const row = byKey['rpk widget create|description']
+      expect(row.class).toBe(CLASSES.UPSTREAMABLE)
+      expect(row.upstream_candidate_text).not.toContain('EXAMPLES')
+      expect(row.note).toMatch(/leaves out raw help sections EXAMPLES/)
     })
 
     test('a one-word change (capitalization, a backtick the formatter would not add) still counts', () => {
@@ -396,8 +424,9 @@ describe('overrides-audit rpk adapter (prose classification)', () => {
       })).toThrow(/no "raw_tree"/)
     })
 
-    test('accepts a bare --print-tree dump as raw', () => {
-      expect(rpk.rawTreeOf(rawTree, 'dump.json')).toBe(rawTree)
+    test('refuses a bare { name, commands } tree: `jq .tree` of a snapshot has that shape', () => {
+      expect(() => rpk.rawTreeOf(rawTree, 'dump.json')).toThrow(/no "raw_tree"/)
+      expect(rpk.rawTreeOf(snapshot, 'rpk-v1.2.3.json')).toBe(rawTree)
     })
 
     test('requires --extracted for the rpk surface', () => {
