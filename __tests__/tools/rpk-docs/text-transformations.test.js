@@ -225,6 +225,38 @@ describe('flags inside single-quoted commands (DOC-2686)', () => {
   })
 })
 
+describe('rules that add no backticks apply inside code spans (DOC-2686)', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+  // Rules from redpanda-data/docs rpk-overrides.json, in their live order
+  const quotedCommand = { pattern: "'([a-z][a-z0-9_ -]*)'", replacement: '`$1`', flags: 'g', description: 'Convert single-quoted commands/tools to backticks' }
+  const quotedRpk = { pattern: '"(rpk\\s+[^"]+)"', replacement: '`$1`', flags: 'g', description: 'Convert double-quoted rpk commands (with arguments and flags) to inline code' }
+  const quotedPath = { pattern: '"(\\/[^"]+)"', replacement: '`$1`', flags: 'g', description: 'Convert double-quoted absolute paths to backticks' }
+  const listBlankLine = { pattern: '([^\n])\n([-*] )', replacement: '$1\n\n$2', flags: 'g', description: 'Ensure blank line before bullet lists' }
+  const configPath = { pattern: '(?:/root|/home/[A-Za-z0-9._-]+|/Users/[A-Za-z0-9._-]+)/\\.config/rpk/rpk\\.yaml', replacement: '~/.config/rpk/rpk.yaml', flags: 'g', description: 'Normalize the user-dependent os.UserConfigDir() path' }
+
+  test('normalizes the --config path after it is wrapped in a span', () => {
+    const out = formatDescription('Redpanda or rpk config file; default search paths are "/root/.config/rpk/rpk.yaml", $PWD/redpanda.yaml', { replacements: [quotedPath, configPath] })
+    expect(out).toContain('`~/.config/rpk/rpk.yaml`')
+    expect(out).not.toContain('/root/')
+  })
+
+  test('adds the blank line before a list that follows a code span', () => {
+    const out = formatDescription("Run 'cluster info'\n- foo\n- bar", { replacements: [quotedCommand, listBlankLine] })
+    expect(out).toMatch(/`cluster info`\n\n/)
+  })
+
+  test('a span wrapped around a JSON argument does not leak a placeholder', () => {
+    const out = formatDescription('Run "rpk ai trace list --args \'{"a":"bc"}\'" now.', { replacements: [quotedRpk] })
+    expect(out).not.toMatch(/__INLINE_CODE_\d+__/)
+    expect(out).toContain('{"a":"bc"}')
+  })
+
+  test('keeps a single-quoted JSON argument with spaces whole', () => {
+    const out = formatDescription('Pass --args \'{ "topic": "oncall" }\' to fill the prompt.', null)
+    expect(out).toContain("`+'{ \"topic\": \"oncall\" }'+`")
+  })
+})
+
 describe('known command path formatting', () => {
   const { formatDescription, registerKnownCommandPaths } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
 
