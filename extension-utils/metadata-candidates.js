@@ -24,7 +24,7 @@
  * A term is dropped when a taxonomy label or altLabel matches inside it, when
  * it is in the terminology list (the style guide's word lists or the docs
  * glossary, see loadTerminology), when every word is a stop word or common
- * English (COMMON_WORDS), a language keyword (NULL, GROUP BY), or a
+ * English (STOP_WORDS), a language keyword (NULL, GROUP BY), or a
  * Kubernetes object kind (Pods, PersistentVolumeClaim), when every mention is
  * on a sales or licensing line (Redpanda Sales, Enterprise Edition), or when
  * a single word also appears in lowercase in the page's prose, which is the
@@ -77,15 +77,17 @@ monday tuesday wednesday thursday friday saturday sunday
 january february march april june july august september october november december
 `.trim().split(/\s+/))
 
-// English stop words and the verbs and nouns of UI and docs boilerplate that
-// COMMON_WORDS does not already hold. A term made only of these is dropped.
+// COMMON_WORDS plus English stop words and the verbs and nouns of UI and docs
+// boilerplate. A term made only of these is dropped. Kept apart from
+// COMMON_WORDS so the sentence-start strip does not take Basic from "Basic Auth".
+const STOP_WORDS = new Set(COMMON_WORDS)
 for (const w of `
-am aren't couldn't did didn't doesn't don't few further hadn't hasn't haven't having he her hers herself him himself his
-i i'm me mine my myself nor ours ourselves own she shan't shouldn't themselves very wasn't we're weren't won't wouldn't yours
+am did few further having he her hers herself him himself his
+i me mine my myself nor ours ourselves own she themselves very yours
 yourself yourselves itself whom
 manage manager show hide logs log home overview dashboard details detail general advanced basic premium standard
 support sales data user users account accounts team teams project projects organization organizations
-`.trim().split(/\s+/)) COMMON_WORDS.add(w)
+`.trim().split(/\s+/)) STOP_WORDS.add(w)
 
 // Keywords of SQL, Bloblang, and common programming languages. A term made
 // only of these (NULL, GROUP BY, INSERT INTO) is syntax, not a name. Uppercase
@@ -132,7 +134,7 @@ const SALES_TERMS = new Set(['enterprise edition'])
 /** Why a term, as its words, is not a candidate, or null. */
 function excluded (ws) {
   const keys = ws.map((w) => w.toLowerCase())
-  if (keys.every((k) => COMMON_WORDS.has(k))) return 'stop-word'
+  if (keys.every((k) => STOP_WORDS.has(k))) return 'stop-word'
   if (keys.every((k) => LANGUAGE_KEYWORDS.has(k))) return 'language-keyword'
   if (keys.every((k) => KUBERNETES_KINDS.has(k) || KUBERNETES_KINDS.has(k.replace(/s$/, '')) || KUBERNETES_KINDS.has(k.replace(/es$/, '')))) return 'kubernetes-kind'
   return null
@@ -244,25 +246,27 @@ function pageCandidates (parts, matcher, { terminology = new Set(), minCount = 2
   const found = new Map() // key -> { spellings: Map, count, lines, cues: Map }
   const note = (raw, part, cue) => {
     // Strip the product's own name from the front; nothing left, no term.
-    let words = raw.split(/\s+/)
-    if (PRODUCT_WORDS.has(words[0].toLowerCase())) {
-      // Redpanda Console is a label: the whole term is covered, not "Console".
-      // Only a match of the whole term: a "Redpanda" label alone must not
-      // drop "Redpanda Terraform", which counts as Terraform.
-      if (matchText(matcher, raw).some((h) => keyOf(h.term) === keyOf(raw))) return
-      while (words.length && PRODUCT_WORDS.has(words[0].toLowerCase())) words = words.slice(1)
+    let tokens = raw.split(/\s+/)
+    if (PRODUCT_WORDS.has(tokens[0].toLowerCase())) {
+      // Redpanda Console is a label, so "Redpanda Console" and "Redpanda
+      // Console UI" are covered, not "Console" or "Console UI". A "Redpanda"
+      // label alone must not drop "Redpanda Terraform", which counts as Terraform.
+      if (matchText(matcher, raw).some((h) => !words(h.term).every((w) => PRODUCT_WORDS.has(w.key)))) return
+      while (tokens.length && PRODUCT_WORDS.has(tokens[0].toLowerCase())) tokens = tokens.slice(1)
+      // What is left is an ordinary word if the page also writes it in lowercase.
+      if (tokens.length === 1 && lowercase.has(foldWord(tokens[0].toLowerCase()))) return
     }
-    if (!words.length) return
-    const identifier = words.length === 1 && /[_-]/.test(words[0])
-    if (excluded(identifier ? words[0].split(/[_-]/) : words)) return
-    const term = words.join(' ')
+    if (!tokens.length) return
+    const identifier = tokens.length === 1 && /[_-]/.test(tokens[0])
+    if (excluded(identifier ? tokens[0].split(/[_-]/) : tokens)) return
+    const term = tokens.join(' ')
     const key = keyOf(term)
     if (SALES_TERMS.has(key)) return
     if (!found.has(key)) found.set(key, { spellings: new Map(), count: 0, sales: 0, lines: [], cues: new Map() })
     const f = found.get(key)
     f.spellings.set(term, (f.spellings.get(term) || 0) + 1)
     f.count++
-    if (SALES_LINE_RE.test(part.raw || part.text || '')) f.sales++
+    if (SALES_LINE_RE.test(part.text || '')) f.sales++
     if (f.lines.length < MAX_LINES && !f.lines.some((l) => l.line === part.line && l.source === part.source)) {
       f.lines.push(part.source ? { line: part.line, source: part.source } : { line: part.line })
     }
@@ -278,7 +282,7 @@ function pageCandidates (parts, matcher, { terminology = new Set(), minCount = 2
   for (const p of prose) {
     for (const w of words(p.text)) {
       if (w.raw === w.raw.toLowerCase()) lowercase.add(foldWord(w.raw))
-      else capitalized.add(w.raw.toLowerCase())
+      else if (!w.sentenceStart) capitalized.add(w.raw.toLowerCase())
     }
   }
 
@@ -317,9 +321,10 @@ function pageCandidates (parts, matcher, { terminology = new Set(), minCount = 2
     if (b.sourceLanguage || !b.raw) continue
     for (const m of b.raw.matchAll(CONNECT_COMPONENT_XREF_RE)) {
       // A one-word name (cache, generate, redis) is a system's name only
-      // when the page also writes it capitalized (Redis); otherwise it is a
+      // when the page also writes it capitalized (Redis), not only at the
+      // start of a sentence, and never in lowercase; otherwise it is a
       // Connect building block named with an ordinary word.
-      if (!m[1].includes('_') && !capitalized.has(m[1])) continue
+      if (!m[1].includes('_') && (!capitalized.has(m[1]) || lowercase.has(foldWord(m[1])))) continue
       note(m[1], b, CUES[0])
     }
     if (b.code) continue

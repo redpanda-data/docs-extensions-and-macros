@@ -93,7 +93,7 @@ Expose it through a NodePort Service, or a second NodePort Service. Two StorageC
 To get a license, contact Redpanda Sales. For a trial license, contact Redpanda Sales.
 This feature requires an Enterprise Edition license. Enterprise Edition licenses are sold by your account team.
 We deploy with Redpanda Terraform, and Terraform again.
-See xref:connect:components:outputs/redis.adoc[] and xref:connect:components:outputs/redis.adoc[]. Redis holds it.
+See xref:connect:components:outputs/redis.adoc[] and xref:connect:components:outputs/redis.adoc[]. It writes to Redis.
 `
   const found = candidates(NOISY, { max: Infinity })
   const got = terms(found)
@@ -145,6 +145,31 @@ See xref:connect:components:outputs/redis.adoc[] and xref:connect:components:out
     expect(azure).toContain('Azure Private Link')
     expect(terms(candidates('= X\n\nBefore you upgrade to version 25.1, back up Shadow Indexing.\nAfter you upgrade to 25.1, check Shadow Indexing.\n'))).toContain('Shadow Indexing')
     expect(terms(candidates('= X\n\nContinuous Data Balancing requires an enterprise license.\nApply the license key to use Continuous Data Balancing.\n'))).toContain('Continuous Data Balancing')
+  })
+
+  test('a label that covers the front of a product-name term drops the term', () => {
+    const small = parseTaxonomy('schema-version: 1\nschemes:\n  - id: technology\n    concepts:\n      - { id: redpanda-cloud, prefLabel: Redpanda Cloud }\n')
+    const parts = pageParts('= X\n\nDeploy Redpanda Cloud BYOC here, and Redpanda Cloud BYOC there.\n', parseHeader, {})
+    expect(pageCandidates(parts, buildMatcher(small, { allLabels: true }))).toEqual([])
+  })
+
+  test('a word left after the product name is dropped when the page also writes it in lowercase', () => {
+    expect(terms(candidates('= X\n\nTry Redpanda Serverless today, and Redpanda Serverless again. A serverless cluster scales.\n'))).toEqual([])
+  })
+
+  test('a one-word Connect xref needs a capitalized mention that is not a sentence start', () => {
+    const page = '= X\n\nSee xref:connect:components:caches/memory.adoc[] and xref:connect:components:caches/memory.adoc[].\nMemory is fast. The memory cache is local.\n'
+    expect(terms(candidates(page))).not.toContain('memory')
+  })
+
+  test('a URL or xref target does not make a line a sales line', () => {
+    const page = '= X\n\nWe use Acme Widgets, see link:https://example.com/pricing[the docs].\nAcme Widgets setup is in xref:a:b.adoc#purchase[setup].\n'
+    expect(terms(candidates(page))).toContain('Acme Widgets')
+  })
+
+  test('the sentence-start strip keeps Basic and User', () => {
+    expect(terms(candidates('= X\n\nBasic Auth works. Then use Basic Auth.\n'))).toContain('Basic Auth')
+    expect(terms(candidates('= X\n\nUser Defined Functions run. Then User Defined Functions stop.\n'))).toContain('User Defined Functions')
   })
 
   test('Admin API is a candidate', () => {
