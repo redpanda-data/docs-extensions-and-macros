@@ -224,6 +224,48 @@ env:
     better. When the PR does what it sets out to do and nothing blocks it,
     the verdict is pass.
 
+  # The needs_human instruction, the incremental re-review instruction and
+  # the large-PR sentence, shared by the review prompts like REVIEW_GOAL so
+  # they can't drift apart. The jobs fill the placeholders with format():
+  # INCREMENTAL_PROMPT {0} baseline SHA, {1} baseline source, {2}
+  # runner.temp, {3} the job's artifact name; LARGE_PR_PROMPT {0} and {1}
+  # what the job reviews, singular and plural. No other braces in these
+  # texts: format() would read them as placeholders.
+  NEEDS_HUMAN_PROMPT: >-
+    Also add to verdict.json "needs_human": open questions for the writer, one
+    sentence each. Include a question only when the PR's own content raises it
+    and a person, not a code change, has to answer it: a product fact the page
+    asserts that needs an SME's confirmation (a default, a flag, a version, a
+    behavior), or a product decision the content depends on. Do NOT include
+    anything about this review itself (a command, build, or source you could
+    not run, read, or reach here), the PR's process or status (test PR, draft,
+    when to merge or close, labels, target branch), questions about this
+    review pipeline's own policy, or anything already in "blocking" or
+    "suggestions". These questions do not block approval. Leave the list empty
+    when there are none, which is the usual case.
+  INCREMENTAL_PROMPT: >-
+    INCREMENTAL RE-REVIEW. This PR was already reviewed at commit {0} ({1}).
+    Review ONLY what changed since then. The diff of those changes is in
+    {2}/review-scope/delta.patch and the files it touches are listed in
+    {2}/review-scope/files.txt: use them instead of `gh pr diff` or the files
+    API, which show the whole PR. Read the changed files in the working tree
+    for context, but report a merge-blocker or a suggestion only when these
+    changes introduce it or expose it. Earlier merge-blockers:
+    {2}/review-scope/prior-blockers.json lists the blockers this pipeline
+    reported before; the entries whose artifact is "{3}" and whose src is
+    "model" are yours. Check each against the CURRENT files in the working
+    tree, and add to verdict.json a "prior" list with one object per such
+    entry, holding its exact "text" from that file and a "status" of
+    "resolved" or "open". Do not repeat an open earlier blocker in "blocking":
+    the pipeline carries it over. An entry you leave out of "prior" is carried
+    over as open.
+  LARGE_PR_PROMPT: >-
+    This is a large PR: review the riskiest files first, and if you run out of
+    time or turns before covering every changed {0}, add one entry to a
+    "not_reviewed" list in verdict.json naming the {1} you did not review, so
+    the report does not read as complete and the PR is not approved on a
+    partial review.
+
 jobs:
   # ──────────────────────────────────────────────────────────────────────
   # §2 — skip rules, scope, re-review baseline, exactly-once. Event-agnostic:
@@ -330,6 +372,8 @@ jobs:
           PR: ${{ inputs.pr_number }}
           R: ${{ github.repository }}
           PLUGIN_REF: ${{ inputs.plugin_ref }}
+          # The pin step's verdict, so the 40-hex rule lives in one place.
+          PIN_OK: ${{ steps.pin.outputs.ok }}
           EVENT_NAME: ${{ github.event_name }}
           ON_REQUEST: ${{ steps.request.outputs.on_request }}
           IS_REQUEST: ${{ steps.request.outputs.is_request }}
@@ -426,6 +470,8 @@ jobs:
             fi
           done <<< "${SKIP_TITLES:-}"
 
+          # MIRROR: the eval and scope steps each define set_pending (steps
+          # cannot share a shell function). Keep the two copies identical.
           set_pending() {
             # Truncated to 139: GitHub rejects a status description over 140
             # characters with a 422, and under `set -e` that would abort the
@@ -455,7 +501,7 @@ jobs:
             --jq '[.statuses[] | select(.context=="'"$REVIEW_STATUS_CONTEXT"'")
                    | select(.state=="success" or .state=="failure")] | length')
           if [[ "$DONE" -gt 0 ]]; then
-            if [[ "$EVENT_NAME" != "pull_request_review" || ! "${PLUGIN_REF:-}" =~ ^[0-9a-f]{40}$ ]]; then
+            if [[ "$EVENT_NAME" != "pull_request_review" || "${PIN_OK:-}" != "true" ]]; then
               echo "Review already completed for $HEAD_SHA — exiting (exactly-once)."
               {
                 echo "proceed=false"
@@ -473,7 +519,7 @@ jobs:
           # informative pending status instead of a hard fail (the same
           # posture as every other infra failure in this pipeline: never a
           # red X for a broken environment).
-          if [[ ! "${PLUGIN_REF:-}" =~ ^[0-9a-f]{40}$ ]]; then
+          if [[ "${PIN_OK:-}" != "true" ]]; then
             echo "::warning::plugin_ref is not a full commit SHA ('${PLUGIN_REF:-}') — holding the gate (pending), skipping review"
             set_pending "Docs review pipeline misconfigured (plugin_ref is not pinned)"
             echo "proceed=false" >> "$GITHUB_OUTPUT"
@@ -500,6 +546,8 @@ jobs:
           SCOPE_OK: ${{ steps.request.outputs.scope_ok }}
         run: |
           set -euo pipefail
+          # MIRROR: the eval and scope steps each define set_pending (steps
+          # cannot share a shell function). Keep the two copies identical.
           set_pending() {
             # Truncated to 139: GitHub rejects a status description over 140
             # characters with a 422, and under `set -e` that would abort the
@@ -530,6 +578,12 @@ jobs:
           gh api --paginate "repos/$R/pulls/$PR/reviews" | jq -s '[.[][]]' > "$IN/reviews.json"
           gh api --paginate "repos/$R/issues/$PR/comments" | jq -s '[.[][]]' > "$IN/comments.json"
           python3 -I .standards/scripts/docs-review-scope.py "$CFG" "$IN" review-scope
+          # The previous report, for aggregate, so the comments are fetched
+          # once per run (the concurrency group keeps another run from
+          # posting a report in between). Only this pipeline's own report:
+          # anyone can paste the marker.
+          jq '[.[] | select(.user.login == "github-actions[bot]" and (.body // "" | contains("<!-- docs-review:comment -->")))] | last // {}' \
+            "$IN/comments.json" > review-scope/prev-comment.json || echo '{}' > review-scope/prev-comment.json
           DECISION=$(grep '^decision=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2)
           if [[ "$DECISION" != "full" && "$DECISION" != "incremental" && "$DECISION" != "approve_only" ]]; then
             # skip / noop: no status, review or label, and no comment from the
@@ -904,21 +958,9 @@ jobs:
             {"verdict":"pass"|"fail","blocking":["..."],"suggestions":["..."]}
             where "fail" means at least one genuinely blocking violation of
             team standards.
-            Also add to verdict.json "needs_human": open questions for the
-            writer, one sentence each. Include a question only when the PR's
-            own content raises it and a person, not a code change, has to
-            answer it: a product fact the page asserts that needs an SME's
-            confirmation (a default, a flag, a version, a behavior), or a
-            product decision the content depends on. Do NOT include anything
-            about this review itself (a command, build, or source you could
-            not run, read, or reach here), the PR's process or status (test
-            PR, draft, when to merge or close, labels, target branch),
-            questions about this review pipeline's own policy, or anything
-            already in "blocking" or "suggestions". These questions do not
-            block approval. Leave the list empty when there are none, which
-            is the usual case.
-            ${{ needs.gate.outputs.mode == 'incremental' && format('INCREMENTAL RE-REVIEW. This PR was already reviewed at commit {0} ({1}). Review ONLY what changed since then. The diff of those changes is in {2}/review-scope/delta.patch and the files it touches are listed in {2}/review-scope/files.txt: use them instead of `gh pr diff` or the files API, which show the whole PR. Read the changed files in the working tree for context, but report a merge-blocker or a suggestion only when these changes introduce it or expose it. Earlier merge-blockers: {2}/review-scope/prior-blockers.json lists the blockers this pipeline reported before; the entries whose artifact is "adoc-review" and whose src is "model" are yours. Check each against the CURRENT files in the working tree, and add to verdict.json a "prior" list with one object per such entry, holding its exact "text" from that file and a "status" of "resolved" or "open". Do not repeat an open earlier blocker in "blocking": the pipeline carries it over. An entry you leave out of "prior" is carried over as open.', needs.gate.outputs.baseline_sha, needs.gate.outputs.baseline_source, runner.temp) || '' }}
-            ${{ needs.classify.outputs.large == 'true' && 'This is a large PR: review the riskiest files first, and if you run out of time or turns before covering every changed file, add one entry to a "not_reviewed" list in verdict.json naming the files you did not review, so the report does not read as complete and the PR is not approved on a partial review.' || '' }}
+            ${{ env.NEEDS_HUMAN_PROMPT }}
+            ${{ needs.gate.outputs.mode == 'incremental' && format(env.INCREMENTAL_PROMPT, needs.gate.outputs.baseline_sha, needs.gate.outputs.baseline_source, runner.temp, 'adoc-review') || '' }}
+            ${{ needs.classify.outputs.large == 'true' && format(env.LARGE_PR_PROMPT, 'file', 'files') || '' }}
       # metadata_check's result. Under RUNNER_TEMP, not the workspace: the
       # claude-skill action's own checkout runs `git clean` there.
       # continue-on-error: a missing result is handled in the next step.
@@ -1138,21 +1180,9 @@ jobs:
             base branch) alongside the skill. Write findings to
             review-output/findings.md and review-output/verdict.json with schema
             {"verdict":"pass"|"fail","blocking":[...],"suggestions":[...]}.
-            Also add to verdict.json "needs_human": open questions for the
-            writer, one sentence each. Include a question only when the PR's
-            own content raises it and a person, not a code change, has to
-            answer it: a product fact the page asserts that needs an SME's
-            confirmation (a default, a flag, a version, a behavior), or a
-            product decision the content depends on. Do NOT include anything
-            about this review itself (a command, build, or source you could
-            not run, read, or reach here), the PR's process or status (test
-            PR, draft, when to merge or close, labels, target branch),
-            questions about this review pipeline's own policy, or anything
-            already in "blocking" or "suggestions". These questions do not
-            block approval. Leave the list empty when there are none, which
-            is the usual case.
-            ${{ needs.gate.outputs.mode == 'incremental' && format('INCREMENTAL RE-REVIEW. This PR was already reviewed at commit {0} ({1}). Review ONLY what changed since then. The diff of those changes is in {2}/review-scope/delta.patch and the files it touches are listed in {2}/review-scope/files.txt: use them instead of `gh pr diff` or the files API, which show the whole PR. Read the changed files in the working tree for context, but report a merge-blocker or a suggestion only when these changes introduce it or expose it. Earlier merge-blockers: {2}/review-scope/prior-blockers.json lists the blockers this pipeline reported before; the entries whose artifact is "json-validation" and whose src is "model" are yours. Check each against the CURRENT files in the working tree, and add to verdict.json a "prior" list with one object per such entry, holding its exact "text" from that file and a "status" of "resolved" or "open". Do not repeat an open earlier blocker in "blocking": the pipeline carries it over. An entry you leave out of "prior" is carried over as open.', needs.gate.outputs.baseline_sha, needs.gate.outputs.baseline_source, runner.temp) || '' }}
-            ${{ needs.classify.outputs.large == 'true' && 'This is a large PR: review the riskiest files first, and if you run out of time or turns before covering every changed file, add one entry to a "not_reviewed" list in verdict.json naming the files you did not review, so the report does not read as complete and the PR is not approved on a partial review.' || '' }}
+            ${{ env.NEEDS_HUMAN_PROMPT }}
+            ${{ needs.gate.outputs.mode == 'incremental' && format(env.INCREMENTAL_PROMPT, needs.gate.outputs.baseline_sha, needs.gate.outputs.baseline_source, runner.temp, 'json-validation') || '' }}
+            ${{ needs.classify.outputs.large == 'true' && format(env.LARGE_PR_PROMPT, 'file', 'files') || '' }}
 
       # Fold the jq result into the job's single verdict.json. With no
       # overrides file it IS the verdict. With one, invalid JSON joins the
@@ -1276,21 +1306,9 @@ jobs:
             review-output/findings.md and review-output/verdict.json
             with schema {"verdict":"pass"|"fail","blocking":[...],"suggestions":[...]}
             where "fail" means a confirmed correctness bug.
-            Also add to verdict.json "needs_human": open questions for the
-            writer, one sentence each. Include a question only when the PR's
-            own content raises it and a person, not a code change, has to
-            answer it: a product fact the page asserts that needs an SME's
-            confirmation (a default, a flag, a version, a behavior), or a
-            product decision the content depends on. Do NOT include anything
-            about this review itself (a command, build, or source you could
-            not run, read, or reach here), the PR's process or status (test
-            PR, draft, when to merge or close, labels, target branch),
-            questions about this review pipeline's own policy, or anything
-            already in "blocking" or "suggestions". These questions do not
-            block approval. Leave the list empty when there are none, which
-            is the usual case.
-            ${{ needs.gate.outputs.mode == 'incremental' && format('INCREMENTAL RE-REVIEW. This PR was already reviewed at commit {0} ({1}). Review ONLY what changed since then. The diff of those changes is in {2}/review-scope/delta.patch and the files it touches are listed in {2}/review-scope/files.txt: use them instead of `gh pr diff` or the files API, which show the whole PR. Read the changed files in the working tree for context, but report a merge-blocker or a suggestion only when these changes introduce it or expose it. Earlier merge-blockers: {2}/review-scope/prior-blockers.json lists the blockers this pipeline reported before; the entries whose artifact is "code-review" and whose src is "model" are yours. Check each against the CURRENT files in the working tree, and add to verdict.json a "prior" list with one object per such entry, holding its exact "text" from that file and a "status" of "resolved" or "open". Do not repeat an open earlier blocker in "blocking": the pipeline carries it over. An entry you leave out of "prior" is carried over as open.', needs.gate.outputs.baseline_sha, needs.gate.outputs.baseline_source, runner.temp) || '' }}
-            ${{ needs.classify.outputs.large == 'true' && 'This is a large PR: review the riskiest files first, and if you run out of time or turns before covering every changed file, add one entry to a "not_reviewed" list in verdict.json naming the files you did not review, so the report does not read as complete and the PR is not approved on a partial review.' || '' }}
+            ${{ env.NEEDS_HUMAN_PROMPT }}
+            ${{ needs.gate.outputs.mode == 'incremental' && format(env.INCREMENTAL_PROMPT, needs.gate.outputs.baseline_sha, needs.gate.outputs.baseline_source, runner.temp, 'code-review') || '' }}
+            ${{ needs.classify.outputs.large == 'true' && format(env.LARGE_PR_PROMPT, 'file', 'files') || '' }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -1383,21 +1401,9 @@ jobs:
             Write review-output/verdict.json as
             {"verdict":"pass"|"fail","blocking":["..."],"suggestions":["..."],"review_type":"<the skill or review you applied, e.g. skill-authoring>"}
             where "fail" means at least one merge-blocker.
-            Also add to verdict.json "needs_human": open questions for the
-            writer, one sentence each. Include a question only when the PR's
-            own content raises it and a person, not a code change, has to
-            answer it: a product fact the page asserts that needs an SME's
-            confirmation (a default, a flag, a version, a behavior), or a
-            product decision the content depends on. Do NOT include anything
-            about this review itself (a command, build, or source you could
-            not run, read, or reach here), the PR's process or status (test
-            PR, draft, when to merge or close, labels, target branch),
-            questions about this review pipeline's own policy, or anything
-            already in "blocking" or "suggestions". These questions do not
-            block approval. Leave the list empty when there are none, which
-            is the usual case.
-            ${{ needs.gate.outputs.mode == 'incremental' && format('INCREMENTAL RE-REVIEW. This PR was already reviewed at commit {0} ({1}). Review ONLY what changed since then. The diff of those changes is in {2}/review-scope/delta.patch and the files it touches are listed in {2}/review-scope/files.txt: use them instead of `gh pr diff` or the files API, which show the whole PR. Read the changed files in the working tree for context, but report a merge-blocker or a suggestion only when these changes introduce it or expose it. Earlier merge-blockers: {2}/review-scope/prior-blockers.json lists the blockers this pipeline reported before; the entries whose artifact is "best-fit-review" and whose src is "model" are yours. Check each against the CURRENT files in the working tree, and add to verdict.json a "prior" list with one object per such entry, holding its exact "text" from that file and a "status" of "resolved" or "open". Do not repeat an open earlier blocker in "blocking": the pipeline carries it over. An entry you leave out of "prior" is carried over as open.', needs.gate.outputs.baseline_sha, needs.gate.outputs.baseline_source, runner.temp) || '' }}
-            ${{ needs.classify.outputs.large == 'true' && 'This is a large PR: review the riskiest files first, and if you run out of time or turns before covering every changed file, add one entry to a "not_reviewed" list in verdict.json naming the files you did not review, so the report does not read as complete and the PR is not approved on a partial review.' || '' }}
+            ${{ env.NEEDS_HUMAN_PROMPT }}
+            ${{ needs.gate.outputs.mode == 'incremental' && format(env.INCREMENTAL_PROMPT, needs.gate.outputs.baseline_sha, needs.gate.outputs.baseline_source, runner.temp, 'best-fit-review') || '' }}
+            ${{ needs.classify.outputs.large == 'true' && format(env.LARGE_PR_PROMPT, 'file', 'files') || '' }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -1544,8 +1550,8 @@ jobs:
             {"verdict":"pass"|"fail","blocking":[...],"suggestions":[...]}
             covering only the judgment checks.
             ${{ needs.classify.outputs.has_images != 'true' && 'No image file changed in these commits: you run only to re-check your earlier merge-blockers, listed below, against the current images and pages.' || '' }}
-            ${{ needs.gate.outputs.mode == 'incremental' && format('INCREMENTAL RE-REVIEW. This PR was already reviewed at commit {0} ({1}). Review ONLY what changed since then. The diff of those changes is in {2}/review-scope/delta.patch and the files it touches are listed in {2}/review-scope/files.txt: use them instead of `gh pr diff` or the files API, which show the whole PR. Read the changed files in the working tree for context, but report a merge-blocker or a suggestion only when these changes introduce it or expose it. Earlier merge-blockers: {2}/review-scope/prior-blockers.json lists the blockers this pipeline reported before; the entries whose artifact is "screenshot-gate" and whose src is "model" are yours. Check each against the CURRENT files in the working tree, and add to verdict.json a "prior" list with one object per such entry, holding its exact "text" from that file and a "status" of "resolved" or "open". Do not repeat an open earlier blocker in "blocking": the pipeline carries it over. An entry you leave out of "prior" is carried over as open.', needs.gate.outputs.baseline_sha, needs.gate.outputs.baseline_source, runner.temp) || '' }}
-            ${{ needs.classify.outputs.large == 'true' && 'This is a large PR: review the riskiest files first, and if you run out of time or turns before covering every changed image, add one entry to a "not_reviewed" list in verdict.json naming the images you did not review, so the report does not read as complete and the PR is not approved on a partial review.' || '' }}
+            ${{ needs.gate.outputs.mode == 'incremental' && format(env.INCREMENTAL_PROMPT, needs.gate.outputs.baseline_sha, needs.gate.outputs.baseline_source, runner.temp, 'screenshot-gate') || '' }}
+            ${{ needs.classify.outputs.large == 'true' && format(env.LARGE_PR_PROMPT, 'image', 'images') || '' }}
 
       - name: Merge deterministic + vision verdicts
         if: always()
@@ -1680,20 +1686,8 @@ jobs:
             "pr-body" if you used a description quoted in the PR body, and
             "none" if you could read neither.
             ${{ needs.gate.outputs.mode == 'incremental' && 'This is a re-review: the pr-review findings cover only the commits since the last review, so judge the requirements against the WHOLE PR (`gh pr diff` and the current files in the working tree), not those findings. List every requirement the PR still misses in "blocking", including ones an earlier review raised: this run replaces the blockers of the earlier delta.' || '' }}
-            Also add to verdict.json "needs_human": open questions for the
-            writer, one sentence each. Include a question only when the PR's
-            own content raises it and a person, not a code change, has to
-            answer it: a product fact the page asserts that needs an SME's
-            confirmation (a default, a flag, a version, a behavior), or a
-            product decision the content depends on. Do NOT include anything
-            about this review itself (a command, build, or source you could
-            not run, read, or reach here), the PR's process or status (test
-            PR, draft, when to merge or close, labels, target branch),
-            questions about this review pipeline's own policy, or anything
-            already in "blocking" or "suggestions". These questions do not
-            block approval. Leave the list empty when there are none, which
-            is the usual case.
-            ${{ needs.classify.outputs.large == 'true' && 'This is a large PR: review the riskiest files first, and if you run out of time or turns before covering every changed file, add one entry to a "not_reviewed" list in verdict.json naming the files you did not review, so the report does not read as complete and the PR is not approved on a partial review.' || '' }}
+            ${{ env.NEEDS_HUMAN_PROMPT }}
+            ${{ needs.classify.outputs.large == 'true' && format(env.LARGE_PR_PROMPT, 'file', 'files') || '' }}
       # This job has no Jira credential yet (DOCS_REVIEW_ROLLOUT.md, org
       # setup item 6), so unless the PR body quotes the ticket, the delta
       # had nothing to compare against and its "pass" means nothing. Mark
@@ -1828,16 +1822,15 @@ jobs:
       # reported since the last head, and links to it. Each run posts a new
       # report, so the previous one is this pipeline's latest (comments come
       # oldest first). Anyone can paste the marker; only the pipeline's own
-      # comment counts. Missing is fine: the first run.
-      - name: Fetch the previous report
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ inputs.pr_number }}
-          R: ${{ github.repository }}
+      # comment counts. The gate picked it out of the comments it fetched
+      # (review-scope/prev-comment.json). Missing is fine: the first run.
+      - name: Read the previous report
         run: |
-          gh api --paginate "repos/$R/issues/$PR/comments" \
-            | jq -s '[.[][] | select(.user.login == "github-actions[bot]" and (.body // "" | contains("<!-- docs-review:comment -->")))] | last // {}' \
-            > prev-comment.json || echo '{}' > prev-comment.json
+          if [[ -s results/review-scope/prev-comment.json ]]; then
+            cp results/review-scope/prev-comment.json prev-comment.json
+          else
+            echo '{}' > prev-comment.json
+          fi
           jq -r '.body // ""' prev-comment.json > prev-comment.md
           jq -r '.html_url // ""' prev-comment.json > prev-comment-url.txt
 
@@ -2044,9 +2037,13 @@ jobs:
           fi
           # needs-human-review is retired (an unavailable review now shows only
           # as the error status). Remove the copy this pipeline added on
-          # earlier runs; one a person added stays.
-          ADDED_BY=$(gh api --paginate "repos/$R/issues/$PR/events" \
-            | jq -s -r '[.[][] | select(.event == "labeled" and .label.name == "needs-human-review")] | last | .actor.login // ""') || ADDED_BY=""
+          # earlier runs; one a person added stays. The events API is paged
+          # only when the label is on the PR.
+          ADDED_BY=""
+          if gh api "repos/$R/issues/$PR/labels?per_page=100" --jq '.[].name' 2>/dev/null | grep -qx 'needs-human-review'; then
+            ADDED_BY=$(gh api --paginate "repos/$R/issues/$PR/events" \
+              | jq -s -r '[.[][] | select(.event == "labeled" and .label.name == "needs-human-review")] | last | .actor.login // ""') || ADDED_BY=""
+          fi
           if [[ "$ADDED_BY" == "github-actions[bot]" ]]; then
             gh api -X DELETE "repos/$R/issues/$PR/labels/needs-human-review" > /dev/null 2>&1 \
               && echo "Removed the retired needs-human-review label" || true
