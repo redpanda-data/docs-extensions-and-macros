@@ -114,13 +114,13 @@ describe('rpk Docs Diff Generation', () => {
     // once the plugin publishes its flags there
     test('treats a scraped flag and its tree form as the same flag', () => {
       const pairs = [
-        [{ name: 'all', type: 'bool', default: 'false' }, { name: 'all', type: 'bool', default: false, required: false }],
-        [{ name: 'format', type: 'string', default: '"text"' }, { name: 'format', type: 'string', default: 'text', required: false }],
-        [{ name: 'retries', type: 'int', default: '3' }, { name: 'retries', type: 'int64', default: 3, required: false }],
-        [{ name: 'brokers', type: 'strings' }, { name: 'brokers', type: 'stringSlice', default: [], required: false }],
-        [{ name: 'tags', type: 'strings', default: '[a,b]' }, { name: 'tags', type: 'stringSlice', default: '[a,b]', required: false }],
-        [{ name: 'name', type: 'string' }, { name: 'name', type: 'string', default: '', required: true }],
-        [{ name: 'timeout', type: 'duration', default: '30s' }, { name: 'timeout', type: 'duration', default: '30s', required: false }]
+        [{ name: 'all', type: 'bool', default: 'false' }, { name: 'all', type: 'bool', default: false, required: false, from_plugin: true }],
+        [{ name: 'format', type: 'string', default: '"text"' }, { name: 'format', type: 'string', default: 'text', required: false, from_plugin: true }],
+        [{ name: 'retries', type: 'int', default: '3' }, { name: 'retries', type: 'int64', default: 3, required: false, from_plugin: true }],
+        [{ name: 'brokers', type: 'strings' }, { name: 'brokers', type: 'stringSlice', default: [], required: false, from_plugin: true }],
+        [{ name: 'tags', type: 'strings', default: '[a,b]' }, { name: 'tags', type: 'stringSlice', default: '[a,b]', required: false, from_plugin: true }],
+        [{ name: 'name', type: 'string' }, { name: 'name', type: 'string', default: '', required: true, from_plugin: true }],
+        [{ name: 'timeout', type: 'duration', default: '30s' }, { name: 'timeout', type: 'duration', default: '30s', required: false, from_plugin: true }]
       ]
       for (const [scraped, tree] of pairs) {
         expect(compareFlags(scraped, tree)).toBeNull()
@@ -135,6 +135,35 @@ describe('rpk Docs Diff Generation', () => {
       // pflag prints float32 unshortened, so float32 to float64 is a real change
       expect(compareFlags({ name: 'r', type: 'float32' }, { name: 'r', type: 'float64' }).type)
         .toEqual({ old: 'float32', new: 'float64' })
+    })
+
+    // cobra's --help leaves out a default that is the type's zero value,
+    // while the tree always carries it
+    test('treats an omitted scraped default as the zero value of the tree type', () => {
+      const tree = (type, def) => ({ name: 'f', type, default: def, required: false, from_plugin: true })
+      expect(compareFlags({ name: 'f', type: 'bool' }, tree('bool', false))).toBeNull()
+      expect(compareFlags({ name: 'f', type: 'int' }, tree('int64', 0))).toBeNull()
+      expect(compareFlags({ name: 'f', type: 'float' }, tree('float64', 0))).toBeNull()
+      expect(compareFlags({ name: 'f', type: 'duration' }, tree('duration', '0s'))).toBeNull()
+      expect(compareFlags({ name: 'f', type: 'strings' }, tree('stringSlice', '[]'))).toBeNull()
+      expect(compareFlags({ name: 'f', type: 'bool' }, tree('bool', true)).default)
+        .toEqual({ old: undefined, new: true })
+      expect(compareFlags({ name: 'f', type: 'int' }, tree('int64', 5)).default)
+        .toEqual({ old: undefined, new: 5 })
+    })
+
+    test('keeps brackets in a string default', () => {
+      expect(compareFlags({ name: 'env', type: 'string', default: '[prod]' }, { name: 'env', type: 'string', default: 'prod' }).default)
+        .toEqual({ old: '[prod]', new: 'prod' })
+    })
+
+    // Only a plugin flag scraped from --help uses the short type names, so
+    // the aliases never apply between two tree flags
+    test('reports a type change between two tree flags, such as rpk\'s own', () => {
+      expect(compareFlags({ name: 'n', type: 'int' }, { name: 'n', type: 'int64' }).type)
+        .toEqual({ old: 'int', new: 'int64' })
+      expect(compareFlags({ name: 'n', type: 'int', from_plugin: true }, { name: 'n', type: 'int64', from_plugin: true }).type)
+        .toEqual({ old: 'int', new: 'int64' })
     })
 
     test('reports required changes only when both sides say', () => {
