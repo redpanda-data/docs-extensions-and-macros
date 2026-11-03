@@ -170,7 +170,7 @@ on:
           5.45.0 is the release that first ships that subcommand (#313). Every
           earlier version, including the 5.38.0 this used to name, exits 1
           with "unknown command" and writes no result file, which the guard in
-          screenshot_gate turns into a loud error rather than a silent pass.
+          screenshot_lint turns into a loud error rather than a silent pass.
           Do not lower this below 5.45.0. The same version runs
           `doc-tools check-metadata` in metadata_check; a version without
           that subcommand skips it (a notice in the job log, nothing in the
@@ -1232,6 +1232,7 @@ jobs:
         if: always()
         env:
           HAS_IMAGES: ${{ needs.classify.outputs.has_images }}
+          LINT_RESULT: ${{ needs.screenshot_lint.result }}
         run: |
           set -uo pipefail
           mkdir -p review-output
@@ -1245,7 +1246,9 @@ jobs:
           # branch produced a verdict", so when a pass that was SUPPOSED to run
           # produced nothing, the only honest thing is to leave verdict.json
           # absent and let the aggregate say "automated review unavailable".
-          if [[ ! -f "$LINT" ]]; then
+          # A failed screenshot_lint can still upload a partial or empty
+          # file, so its job result decides, not the file alone.
+          if [[ "${LINT_RESULT:-}" != "success" || ! -f "$LINT" ]]; then
             echo "::warning::no deterministic lint result — leaving no verdict so the aggregate reports this branch unavailable"
             exit 0
           fi

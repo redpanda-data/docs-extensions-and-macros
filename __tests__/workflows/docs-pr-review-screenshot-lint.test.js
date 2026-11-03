@@ -30,7 +30,17 @@ const stepNamed = (job, name) => {
 const LINT = stepNamed(LINT_JOB, 'Deterministic checks (doc-tools lint-screenshots)')
 const HOSTILE_REGISTRY = 'http://127.0.0.1:9/'
 
-const tmpdir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pr-review-shots-'))
+// Every temp dir this file creates, some holding a hostile .npmrc, is
+// removed after the tests.
+const TEMP_DIRS = []
+const tmpdir = () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-review-shots-'))
+  TEMP_DIRS.push(d)
+  return d
+}
+afterAll(() => {
+  for (const d of TEMP_DIRS) fs.rmSync(d, { recursive: true, force: true })
+})
 const write = (dir, rel, text) => {
   fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true })
   fs.writeFileSync(path.join(dir, rel), text)
@@ -64,6 +74,7 @@ function runLint ({ step = LINT, npx = NPX_PROBE, src = hostileCheckout() } = {}
     stubs: { gh: 'echo modules/manage/pages/a.adoc', npx },
   })
   const log = fs.existsSync(path.join(runnerTemp, 'npx.log')) ? fs.readFileSync(path.join(runnerTemp, 'npx.log'), 'utf8').trim().split('\n').map((l) => l.split('|')) : []
+  TEMP_DIRS.push(r.dir)
   const out = path.join(runnerTemp, 'screenshot-lint', 'screenshot-lint.json')
   return { ...r, runnerTemp, src, log, result: fs.existsSync(out) ? JSON.parse(fs.readFileSync(out, 'utf8')) : null }
 }
@@ -141,5 +152,44 @@ exec node "${path.join(ROOT, 'bin', 'doc-tools.js')}" "$@"
     expect({ status: r.status, out: r.all }).toMatchObject({ status: 0 })
     expect(r.result.verdict).toBe('fail')
     expect(r.result.blocking.join('\n')).toMatch(/modules\/manage\/pages\/a\.adoc:3 .*missing\.png/)
+  })
+})
+
+describe('docs PR review: the merge step', () => {
+  const MERGE = stepNamed(GATE_JOB, 'Merge deterministic + vision verdicts')
+
+  // An .adoc-only PR, so the merge step would copy the lint file straight
+  // to verdict.json.
+  function runMerge ({ step = MERGE, lintResult, lintFile }) {
+    const runnerTemp = tmpdir()
+    write(runnerTemp, 'screenshot-lint/screenshot-lint.json', lintFile)
+    const r = execRun(step, { env: { RUNNER_TEMP: runnerTemp, HAS_IMAGES: 'false', LINT_RESULT: lintResult } })
+    TEMP_DIRS.push(r.dir)
+    return r
+  }
+
+  test('reads the lint job result', () => {
+    expect(MERGE.env.LINT_RESULT).toBe('${{ needs.screenshot_lint.result }}')
+  })
+
+  test('a failed screenshot_lint leaves no verdict, even when it uploaded a file', () => {
+    const r = runMerge({ lintResult: 'failure', lintFile: '' })
+    expect({ status: r.status, out: r.all }).toMatchObject({ status: 0 })
+    expect(r.exists('review-output/verdict.json')).toBe(false)
+    expect(r.all).toMatch(/no deterministic lint result/)
+  })
+
+  test('negative control: deciding on the file alone copies the failed lint file to verdict.json', () => {
+    const fileOnly = { ...MERGE, run: MERGE.run.replace('"${LINT_RESULT:-}" != "success" || ', '') }
+    expect(fileOnly.run).not.toBe(MERGE.run)
+    const r = runMerge({ step: fileOnly, lintResult: 'failure', lintFile: '' })
+    expect(r.exists('review-output/verdict.json')).toBe(true)
+  })
+
+  test('a successful screenshot_lint on an .adoc-only PR is the verdict', () => {
+    const lint = '{"verdict":"pass","blocking":[],"suggestions":[]}\n'
+    const r = runMerge({ lintResult: 'success', lintFile: lint })
+    expect({ status: r.status, out: r.all }).toMatchObject({ status: 0 })
+    expect(r.read('review-output/verdict.json')).toBe(lint)
   })
 })
