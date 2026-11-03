@@ -71,6 +71,47 @@ describe('fetchPluginSubtree temporary HOME', () => {
   })
 })
 
+describe('rpk check refresh', () => {
+  beforeEach(() => {
+    spawnSync.mockReset()
+    jest.spyOn(console, 'log').mockImplementation(() => {})
+    jest.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
+  const refreshWith = (rootFlags) => {
+    spawnSync.mockImplementation((cmd, args, opts) => {
+      if (args[0] === 'check' && args[1] === 'install') {
+        const bin = path.join(opts.env.HOME, '.local', 'bin')
+        fs.mkdirSync(bin, { recursive: true })
+        fs.writeFileSync(path.join(bin, '.rpk.managed-check'), '')
+        return { status: 0, stdout: '', stderr: '' }
+      }
+      if (args[0] === '--print-tree') {
+        const tree = { name: 'rpk', commands: [{ name: 'check', flags: rootFlags, commands: [{ name: 'install' }] }] }
+        return { status: 0, stdout: JSON.stringify(tree), stderr: '' }
+      }
+      return { status: 1, stdout: '', stderr: '' }
+    })
+    return fetchPluginSubtree({ plugin: 'check', pluginVersion: '0.2.0', rpkBinPath: '/bin/rpk' })
+  }
+
+  // Released rpk installs check but puts none of its flags in the tree, so
+  // generateRpkDocs would keep the old pages while the snapshot moved on
+  test('fails when the tree has none of the plugin\'s flags', () => {
+    expect(() => refreshWith([{ name: 'version', type: 'bool' }])).toThrow(/carries none of its flags/)
+  })
+
+  test('succeeds when the tree has the plugin\'s flags', () => {
+    const { node, flagSource } = refreshWith([{ name: 'all', type: 'bool', from_plugin: true }])
+    expect(node.name).toBe('check')
+    expect(flagSource).toBe('tree')
+  })
+})
+
 describe('plugin refresh PATH isolation', () => {
   let tmp, pluginDir, toolDir, savedPath
 

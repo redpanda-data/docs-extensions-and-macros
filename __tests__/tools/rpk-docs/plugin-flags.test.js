@@ -98,12 +98,15 @@ describe('fillPluginFlags', () => {
     ]
   })
 
-  test('uses the tree and runs no --help when plugin commands already have flags', () => {
+  test('uses the tree and scrapes no flags when plugin commands already have flags', () => {
     const calls = []
     const n = node([{ name: 'name', type: 'string', default: '', required: true, from_plugin: true }])
-    const result = fillPluginFlags(n, (argPath) => { calls.push(argPath); return null })
+    const result = fillPluginFlags(n, (argPath) => { calls.push(argPath); return 'Flags:\n      --extra string   scraped\n' })
     expect(result).toEqual({ source: 'tree', enriched: 0 })
-    expect(calls).toEqual([])
+    expect(n.commands[1].flags).toEqual([])
+    expect(n.commands[1].commands[0].flags.map(f => f.name)).toEqual(['name'])
+    // --help runs only for usage arguments, never for the root or the shim
+    expect(calls).toEqual([['ai', 'agent'], ['ai', 'agent', 'create']])
   })
 
   test('uses plugin flags on the root of a plugin with no subcommands', () => {
@@ -278,6 +281,21 @@ describe('usage arguments from --help', () => {
     expect(node.usage).toBe('rpk ai [flags]')
     expect(node.commands[0].usage).toBe('rpk ai agent')
     expect(node.commands[0].commands[0].usage).toBe('rpk ai agent get <name> [flags]')
+  })
+
+  test('a tree with plugin flags but no usage arguments takes them from --help', () => {
+    const node = {
+      name: 'ai',
+      commands: [{
+        name: 'get',
+        usage: 'rpk ai get [flags]',
+        flags: [{ name: 'format', type: 'string', from_plugin: true }],
+        commands: []
+      }]
+    }
+    expect(fillPluginFlags(node, (p) => p.join(' ') === 'ai get' ? help('rpai get <name> [flags]') : null).source).toBe('tree')
+    expect(node.commands[0].usage).toBe('rpk ai get <name> [flags]')
+    expect(node.commands[0].flags.map(f => f.name)).toEqual(['format'])
   })
 
   test('a tree with plugin flags keeps its own usage and runs no --help', () => {

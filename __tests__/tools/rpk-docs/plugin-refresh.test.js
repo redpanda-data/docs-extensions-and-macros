@@ -6,6 +6,7 @@ const {
   pluginNodeHasRealCommands,
   pluginInstalled,
   replaceHomeDir,
+  pluginFlagSourcesFromTree,
   REFRESHABLE_PLUGINS,
   PLUGIN_INSTALL_VERSION_FLAGS,
   PLUGIN_MANIFEST_SLUGS
@@ -108,6 +109,43 @@ describe('Plugin refresh (--plugin mode)', () => {
       expect(JSON.parse(replaceHomeDir(out, home)).map(f => f.default))
         .toEqual(['~/.rpai/config', '~/.local/bin', '/etc/redpanda'])
       fs.rmSync(home, { recursive: true, force: true })
+    })
+
+    // The Docker build runs with HOME=/root, a native build with the
+    // caller's HOME, so both get the same ~ form as a refresh
+    test('replaces only whole path segments of HOME', () => {
+      const out = JSON.stringify([
+        { default: '/root/.rpai/config' },
+        { default: '/root' },
+        { default: '/rootfs/data' },
+        { default: '/srv/root/data' }
+      ])
+      expect(JSON.parse(replaceHomeDir(out, '/root')).map(f => f.default))
+        .toEqual(['~/.rpai/config', '~', '/rootfs/data', '/srv/root/data'])
+      expect(replaceHomeDir('  --rpai-config string   config (default "/root/.rpai/config")', '/root'))
+        .toBe('  --rpai-config string   config (default "~/.rpai/config")')
+    })
+  })
+
+  describe('pluginFlagSourcesFromTree', () => {
+    const tree = {
+      name: 'rpk',
+      commands: [
+        { name: 'topic', commands: [] },
+        { name: 'ai', commands: [{ name: 'install' }, { name: 'agent', flags: [{ name: 'x', from_plugin: true }] }] },
+        { name: 'connect', commands: [{ name: 'install' }, { name: 'run', flags: [] }] },
+        { name: 'k8s', commands: [{ name: 'install' }] },
+        { name: 'check', flags: [{ name: 'all', from_plugin: true }], commands: [{ name: 'install' }] }
+      ]
+    }
+
+    // A native build fills no flag sources, so they come from the tree
+    test('reads sources a build path did not record from the tree', () => {
+      expect(pluginFlagSourcesFromTree(tree)).toEqual({ ai: 'tree', connect: 'none', check: 'tree' })
+    })
+
+    test('keeps the sources a build path recorded', () => {
+      expect(pluginFlagSourcesFromTree(tree, { connect: 'help' })).toEqual({ ai: 'tree', connect: 'help', check: 'tree' })
     })
   })
 
