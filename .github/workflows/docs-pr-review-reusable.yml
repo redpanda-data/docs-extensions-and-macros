@@ -298,8 +298,11 @@ jobs:
           sparse-checkout-cone-mode: false
 
       # review_trigger: is this repo reviewed only on request, and is this
-      # event the request? A plugin_ref that predates the setting has no
-      # --request mode; the repo is then reviewed automatically, as before.
+      # event the request? scope_ok: the scope script at plugin_ref has what
+      # this workflow needs (its GATE_INTERFACE line), checked by version, not
+      # by grepping for a flag a comment could mention. An older script would
+      # read the first report as the baseline, or lack --request; the scope
+      # step then holds the PR pending instead.
       - id: request
         if: steps.pin.outputs.ok == 'true'
         env:
@@ -314,8 +317,11 @@ jobs:
           echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
           gh api "repos/$R/pulls/$PR" > "$RUNNER_TEMP/pr.json"
           CFG=.standards/.github/docs-review-config.json
-          if [[ -f "$CFG" ]] && grep -q -- '--request' .standards/scripts/docs-review-scope.py 2>/dev/null; then
-            python3 -I .standards/scripts/docs-review-scope.py --request "$CFG" "$RUNNER_TEMP/pr.json"
+          SCOPE=.standards/scripts/docs-review-scope.py
+          IFACE=$(sed -n 's/^GATE_INTERFACE = \([0-9][0-9]*\)$/\1/p' "$SCOPE" 2>/dev/null | head -1)
+          if [[ -f "$CFG" && "${IFACE:-0}" -ge 2 ]]; then
+            echo "scope_ok=true" >> "$GITHUB_OUTPUT"
+            python3 -I "$SCOPE" --request "$CFG" "$RUNNER_TEMP/pr.json"
           fi
 
       - id: eval
@@ -324,6 +330,7 @@ jobs:
           PR: ${{ inputs.pr_number }}
           R: ${{ github.repository }}
           PLUGIN_REF: ${{ inputs.plugin_ref }}
+          EVENT_NAME: ${{ github.event_name }}
           ON_REQUEST: ${{ steps.request.outputs.on_request }}
           IS_REQUEST: ${{ steps.request.outputs.is_request }}
           BOT_PR_POLICY: ${{ inputs.bot_pr_policy }}
@@ -434,6 +441,11 @@ jobs:
           # ── Exactly-once per (PR, head SHA) ───────────────────────────
           # Checked before anything writes a status, so a later event (a
           # review submitted) after a completed review leaves the verdict alone.
+          # One exception: a review event goes on to the scope step with
+          # head_reviewed=true, so the approval paths there (the
+          # ready-for-approval shortcut) can still run on a reviewed head.
+          # With head_reviewed the scope script returns only approve_only or
+          # noop, and nothing on the way writes a status unless it approves.
           # This has to stay ABOVE the plugin_ref guard below: that guard
           # writes a pending status, and writing one over a head SHA that
           # already carries a completed verdict would both destroy the verdict
@@ -443,12 +455,16 @@ jobs:
             --jq '[.statuses[] | select(.context=="'"$REVIEW_STATUS_CONTEXT"'")
                    | select(.state=="success" or .state=="failure")] | length')
           if [[ "$DONE" -gt 0 ]]; then
-            echo "Review already completed for $HEAD_SHA — exiting (exactly-once)."
-            {
-              echo "proceed=false"
-              echo "why=The latest commit (${HEAD_SHA:0:7}) already has a completed review: see its docs-review check. Push new commits, then ask again."
-            } >> "$GITHUB_OUTPUT"
-            exit 0
+            if [[ "$EVENT_NAME" != "pull_request_review" || ! "${PLUGIN_REF:-}" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "Review already completed for $HEAD_SHA — exiting (exactly-once)."
+              {
+                echo "proceed=false"
+                echo "why=The latest commit (${HEAD_SHA:0:7}) already has a completed review: see its docs-review check. Push new commits, then ask again."
+              } >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Review already completed for $HEAD_SHA — checking only whether to approve."
+            echo "head_reviewed=true" >> "$GITHUB_OUTPUT"
           fi
 
           # Config guard for the skills pin: an empty plugin_ref would make
@@ -480,6 +496,8 @@ jobs:
           # An explicit request (on-request repo): people's reviews are no
           # baseline, so it is never answered with a noop.
           IS_REQUEST: ${{ steps.request.outputs.on_request == 'true' && steps.request.outputs.is_request || '' }}
+          HEAD_REVIEWED: ${{ steps.eval.outputs.head_reviewed }}
+          SCOPE_OK: ${{ steps.request.outputs.scope_ok }}
         run: |
           set -euo pipefail
           set_pending() {
@@ -495,9 +513,12 @@ jobs:
           }
 
           CFG=.standards/.github/docs-review-config.json
-          if [[ ! -f "$CFG" || ! -f .standards/scripts/docs-review-scope.py ]]; then
-            echo "::warning::plugin_ref predates .github/docs-review-config.json — holding the gate (pending), skipping review"
-            set_pending "Docs review pipeline misconfigured (plugin_ref has no docs-review-config.json)"
+          if [[ "${SCOPE_OK:-}" != "true" ]]; then
+            echo "::warning::plugin_ref predates the scope script this workflow needs (no docs-review-config.json, or GATE_INTERFACE below 2 in scripts/docs-review-scope.py) — holding the gate (pending), skipping review"
+            # Never over a completed verdict (see exactly-once in eval).
+            if [[ "${HEAD_REVIEWED:-}" != "true" ]]; then
+              set_pending "Docs review pipeline misconfigured (plugin_ref predates this workflow's scope script)"
+            fi
             echo "run_review=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -659,7 +680,10 @@ jobs:
           # content repo the count is always 0.
           PLUGIN=$(grep -cE '^(skills|agents|commands|hooks|resources)/' files.txt || true)
           if [[ "$MODE" == "incremental" ]]; then
-            CHURN=$(grep -cE '^[+-][^+-]|^[+-]$' review-scope/delta.patch || true)
+            # Every changed line but the ---/+++ file headers, so a changed
+            # line that itself starts with - or + (an AsciiDoc ---- or ++++
+            # delimiter, a SQL -- comment) still counts.
+            CHURN=$(grep -vE '^(\+\+\+|---) (a/|b/|/dev/null)' review-scope/delta.patch | grep -cE '^[+-]' || true)
           else
             CHURN=$(gh api "repos/$R/pulls/$PR" --jq '.additions + .deletions')
           fi
@@ -1159,7 +1183,9 @@ jobs:
               | if (.blocking | length) > 0 then .verdict = "fail" else . end' "$V" "$JQ_VERDICT" > "$V.tmp"
             mv "$V.tmp" "$V"
           elif jq -e '.verdict == "fail"' "$JQ_VERDICT" > /dev/null; then
-            jq '.blocking += ["Overrides review produced no verdict — human review required"]' "$JQ_VERDICT" > "$V"
+            # A check blocker, like the branches above: recomputed every run,
+            # not carried as a model blocker the model cannot mark resolved.
+            jq '.blocking += ["Overrides review produced no verdict — human review required"] | .check_blocking = .blocking' "$JQ_VERDICT" > "$V"
           fi
 
       - uses: actions/upload-artifact@v4
@@ -2040,9 +2066,12 @@ jobs:
       # a person's change request), dismiss this pipeline's own earlier
       # approvals so none can be mistaken for a current one. Only reviews by github-actions[bot] that carry the
       # marker are touched; a person's approval never is.
-      # continue-on-error: approving needs the org or repo setting "Allow
-      # GitHub Actions to create and approve pull requests". Without it
-      # GitHub answers 422; the report and status above still stand.
+      # A failed approval (the org or repo setting "Allow GitHub Actions to
+      # create and approve pull requests" is off, so GitHub answers 422, or a
+      # 5xx) sets the status to error, as approve_ready does: exactly-once
+      # ignores error, so the next event retries the approval through the
+      # scope script's approval retry, with no re-review. continue-on-error
+      # keeps the report standing.
       - name: Approve, or withdraw an earlier automatic approval
         continue-on-error: true
         env:
@@ -2056,13 +2085,19 @@ jobs:
         run: |
           set -euo pipefail
           MARK='<!-- docs-review:approval -->'
+          approval_failed() {
+            echo "::warning::$1"
+            gh api "repos/$R/statuses/$HEAD_SHA" -f context="$REVIEW_STATUS_CONTEXT" \
+              -f state=error -f description="docs review: passed, but the automatic approval failed" \
+              -f target_url="${GITHUB_SERVER_URL}/${R}/actions/runs/${GITHUB_RUN_ID}" > /dev/null
+            exit 1
+          }
           if [[ "$APPROVE" == "true" ]]; then
-            [[ -s approval.md ]] || { echo "::warning::approve=true but approval.md is empty: not approving"; exit 1; }
+            [[ -s approval.md ]] || approval_failed "approve=true but approval.md is empty: not approving"
             jq -n --rawfile body approval.md --arg sha "$HEAD_SHA" \
               '{event: "APPROVE", commit_id: $sha, body: $body}' > approve.json
             if ! gh api -X POST "repos/$R/pulls/$PR/reviews" --input approve.json > /dev/null; then
-              echo "::warning::could not approve $R#$PR. Check that \"Allow GitHub Actions to create and approve pull requests\" is on for this repo (Settings > Actions > General)."
-              exit 1
+              approval_failed "could not approve $R#$PR. Check that \"Allow GitHub Actions to create and approve pull requests\" is on for this repo (Settings > Actions > General)."
             fi
             echo "Approved $R#$PR at $HEAD_SHA"
           else
