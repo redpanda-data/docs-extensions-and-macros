@@ -91,9 +91,17 @@ describe('doc-impact MCP artifact: wiring', () => {
   })
 
   test('records the same docs server the review is configured with', () => {
-    const args = stepNamed('Claude review with suggestions').with.claude_args
-    const config = JSON.parse(args.match(/--mcp-config '([^']+)'/)[1])
-    expect(stepNamed(EXTRACT).env.DOCS_MCP_URL).toBe(config.mcpServers['redpanda-docs'].url)
+    // The review's --mcp-config is built at run time by this step.
+    expect(stepNamed('Claude review with suggestions').with.claude_args).toContain("--mcp-config '${{ env.DOCS_MCP_CONFIG }}'")
+    expect(stepNamed(EXTRACT).env.DOCS_MCP_URL).toBe(stepNamed('Build the docs MCP config').env.DOCS_MCP_URL)
+  })
+
+  test('the extract never sees the docs MCP client key', () => {
+    // The recording becomes an artifact, and log masking does not cover
+    // artifacts. The extractor only stores the URL; it never calls the server.
+    const step = stepNamed(EXTRACT)
+    expect(step.env).toHaveProperty('DOCS_MCP_CONFIG', '')
+    expect(JSON.stringify(step)).not.toMatch(/DOCS_MCP_KEY|x-client-key/)
   })
 
   test('uses the resolved doc-tools package, like the lint step', () => {

@@ -1443,6 +1443,129 @@ exit 0
   })
 })
 
+describe('doc-strings-review workflow: docs MCP client key (executed)', () => {
+  // The docs MCP server's anonymous quota is per IP, and GitHub-hosted
+  // runners share IPs, so without the trusted key the review's doc-impact
+  // lookups run dry. These run the real step with the real jq.
+  const BUILD = 'Build the docs MCP config'
+  const SECRET_ID = 'sdlc/prod/github/docs_doc_strings_client'
+  const KEY = 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90'
+  const ANONYMOUS = '{"mcpServers":{"redpanda-docs":{"type":"http","url":"https://docs.redpanda.com/mcp"}}}'
+
+  function build (credEnv = {}, secretId = SECRET_ID) {
+    const step = stepNamed(BUILD)
+    const r = execRun(step, {
+      env: { ...step.env, CLIENT_SECRET_ID: secretId, GITHUB_ENV: 'github_env', ...credEnv }
+    })
+    const envFile = r.exists('github_env') ? r.read('github_env') : ''
+    const line = envFile.split('\n').find((l) => l.startsWith('DOCS_MCP_CONFIG=')) || ''
+    return { r, envFile, config: line.slice('DOCS_MCP_CONFIG='.length) }
+  }
+
+  // What the review receives: the env value substituted into claude_args,
+  // pulled back out the way the action's single-quote parsing sees it.
+  function reviewConfig (config) {
+    const args = stepNamed('Claude review with suggestions').with.claude_args
+      .split('${{ env.DOCS_MCP_CONFIG }}').join(config)
+    return JSON.parse(args.match(/--mcp-config '([^']+)'/)[1])
+  }
+
+  test('a key in the secret is sent as x-client-key, and masked before anything else prints it', () => {
+    const { r, config } = build({ DOCS_DOC_STRINGS_CLIENT_DOCS_MCP_KEY: KEY })
+    expect(r.status).toBe(0)
+    const parsed = reviewConfig(config)
+    expect(parsed.mcpServers['redpanda-docs']).toEqual({
+      type: 'http',
+      url: 'https://docs.redpanda.com/mcp',
+      headers: { 'x-client-key': KEY }
+    })
+    const lines = r.stdout.split('\n')
+    expect(lines[0]).toBe(`::add-mask::${KEY}`)
+    // The mask command is the only log line that carries the value.
+    expect(lines.filter((l) => l.includes(KEY))).toEqual([`::add-mask::${KEY}`])
+    expect(r.stderr).not.toContain(KEY)
+  })
+
+  test('no key: today\'s anonymous config, no header, nothing masked', () => {
+    const { r, config } = build({})
+    expect(r.status).toBe(0)
+    expect(config).toBe(ANONYMOUS)
+    expect(reviewConfig(config).mcpServers['redpanda-docs']).not.toHaveProperty('headers')
+    expect(r.all).not.toContain('::add-mask::')
+  })
+
+  test('an empty key is the same as no key', () => {
+    const { r, config } = build({ DOCS_DOC_STRINGS_CLIENT_DOCS_MCP_KEY: '' })
+    expect(r.status).toBe(0)
+    expect(config).toBe(ANONYMOUS)
+  })
+
+  test.each([
+    ['a single quote, which would break out of claude_args', "abc'def"],
+    ['whitespace, which would break the GITHUB_ENV line', 'abc def'],
+    ['a newline, which would smuggle another env var', 'abc\nEVIL=1']
+  ])('a key containing %s falls back to anonymous without printing it', (_, bad) => {
+    const { r, config, envFile } = build({ DOCS_DOC_STRINGS_CLIENT_DOCS_MCP_KEY: bad })
+    expect(r.status).toBe(0)
+    expect(config).toBe(ANONYMOUS)
+    expect(envFile).not.toMatch(/^EVIL=/m)
+    expect(r.all).toContain('::warning::DOCS_DOC_STRINGS_CLIENT_DOCS_MCP_KEY has characters')
+    const unmasked = r.all.split('\n').filter((l) => !l.startsWith('::add-mask::'))
+    expect(unmasked.join('\n')).not.toContain(bad)
+  })
+
+  test('the key env name follows the secret id, like the mint step', () => {
+    const { config } = build({ ADP_PRIV_CLIENT_DOCS_MCP_KEY: KEY }, 'sdlc/prod/github/adp_priv_client')
+    expect(reviewConfig(config).mcpServers['redpanda-docs'].headers).toEqual({ 'x-client-key': KEY })
+    // ...and the docs secret's name does not satisfy another secret id.
+    expect(build({ DOCS_DOC_STRINGS_CLIENT_DOCS_MCP_KEY: KEY }, 'sdlc/prod/github/adp_priv_client').config).toBe(ANONYMOUS)
+  })
+
+  test('the build step derives the prefix exactly as the mint step does', () => {
+    const derive = (run) => (run.match(/prefix=\$\(printf '%s' "\$CLIENT_SECRET_ID" \| [^\n]*\)/) || [])[0]
+    expect(derive(stepNamed(BUILD).run)).toBe(derive(stepNamed('Mint the ADP gateway token').run))
+  })
+
+  test('the config is built before the scrub and the review, whenever the review runs', () => {
+    const at = (n) => job.steps.findIndex((s) => s.name === n)
+    expect(at(BUILD)).toBeGreaterThan(at('Fetch the ADP client credential'))
+    expect(at(BUILD)).toBeLessThan(at('Drop fetched credentials from the review\'s environment'))
+    expect(stepNamed(BUILD).if).toBe(stepNamed('Claude review with suggestions').if)
+    expect(stepNamed(BUILD)['continue-on-error']).toBeUndefined()
+  })
+
+  test('the scrub blanks the raw key so the review sees it only inside its MCP config', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'scrub-key-'))
+    const githubEnv = path.join(tmp, 'github-env')
+    fs.writeFileSync(githubEnv, '')
+    const r = execRun(stepNamed('Drop fetched credentials from the review\'s environment'), {
+      env: { CLIENT_SECRET_ID: SECRET_ID, DOCS_DOC_STRINGS_CLIENT_DOCS_MCP_KEY: KEY, RUNNER_TEMP: tmp, GITHUB_ENV: githubEnv }
+    })
+    expect(r.status).toBe(0)
+    const written = fs.readFileSync(githubEnv, 'utf8')
+    expect(written).toMatch(/^DOCS_DOC_STRINGS_CLIENT_DOCS_MCP_KEY=$/m)
+    expect(written).not.toContain(KEY)
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  test('the review reads its docs MCP config only from the built env value', () => {
+    const args = stepNamed('Claude review with suggestions').with.claude_args
+    expect(args).toContain("--mcp-config '${{ env.DOCS_MCP_CONFIG }}'")
+    expect(args).not.toContain('docs.redpanda.com/mcp')
+  })
+
+  test('no other step is handed the key or the config holding it', () => {
+    for (const step of job.steps) {
+      if (step.name === BUILD) continue
+      const text = JSON.stringify({ env: step.env || {}, with: step.with || {}, run: step.run || '' })
+      if (step.name !== 'Claude review with suggestions') expect(text).not.toMatch(/env\.DOCS_MCP_CONFIG/)
+      if (step.name !== 'Drop fetched credentials from the review\'s environment') expect(text).not.toMatch(/DOCS_MCP_KEY/)
+    }
+    // The recording step, whose output becomes an artifact, has it blanked.
+    expect(stepNamed('Extract the docs MCP calls for the doc-impact eval').env.DOCS_MCP_CONFIG).toBe('')
+  })
+})
+
 describe('doc-strings-review workflow: package resolution (executed)', () => {
   const step = stepNamed('Resolve the doc-tools package')
   const NAME = '@redpanda-data/docs-extensions-and-macros'
