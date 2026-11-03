@@ -360,7 +360,9 @@ jobs:
           gh api "repos/$R/pulls/$PR" > "$RUNNER_TEMP/pr.json"
           CFG=.standards/.github/docs-review-config.json
           SCOPE=.standards/scripts/docs-review-scope.py
-          IFACE=$(sed -n 's/^GATE_INTERFACE = \([0-9][0-9]*\)$/\1/p' "$SCOPE" 2>/dev/null | head -1)
+          # || true: sed fails on a missing script, and under pipefail that
+          # would fail the gate instead of holding the PR pending.
+          IFACE=$(sed -n 's/^GATE_INTERFACE = \([0-9][0-9]*\)$/\1/p' "$SCOPE" 2>/dev/null | head -1 || true)
           if [[ -f "$CFG" && "${IFACE:-0}" -ge 2 ]]; then
             echo "scope_ok=true" >> "$GITHUB_OUTPUT"
             python3 -I "$SCOPE" --request "$CFG" "$RUNNER_TEMP/pr.json"
@@ -581,9 +583,12 @@ jobs:
           # The previous report, for aggregate, so the comments are fetched
           # once per run (the concurrency group keeps another run from
           # posting a report in between). Only this pipeline's own report:
-          # anyone can paste the marker.
+          # anyone can paste the marker. Its own artifact (prev-report), not
+          # review-scope, which every model review downloads: the reviews get
+          # earlier blockers only from prior-blockers.json.
+          mkdir -p prev-report
           jq '[.[] | select(.user.login == "github-actions[bot]" and (.body // "" | contains("<!-- docs-review:comment -->")))] | last // {}' \
-            "$IN/comments.json" > review-scope/prev-comment.json || echo '{}' > review-scope/prev-comment.json
+            "$IN/comments.json" > prev-report/prev-comment.json || echo '{}' > prev-report/prev-comment.json
           DECISION=$(grep '^decision=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2)
           if [[ "$DECISION" != "full" && "$DECISION" != "incremental" && "$DECISION" != "approve_only" ]]; then
             # skip / noop: no status, review or label, and no comment from the
@@ -616,6 +621,16 @@ jobs:
           # stays required. A claim
           # older than 90 minutes (a run that died before aggregate) is
           # stale and may be taken over.
+          # Not on a reviewed head (HEAD_REVIEWED; approve_only is the only
+          # decision that gets here): a pending claim would overwrite its
+          # completed verdict, and if approve_ready then wrote no status,
+          # exactly-once would be re-armed and the next event would review
+          # the head again. approve_only makes no model call, so a race there
+          # costs at most a second approval.
+          if [[ "${HEAD_REVIEWED:-}" == "true" ]]; then
+            echo "run_review=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           CLAIM="Review running (run ${GITHUB_RUN_ID})"
           latest_claim() {
             gh api "repos/$R/commits/$HEAD_SHA/status" \
@@ -650,6 +665,13 @@ jobs:
           name: review-scope
           path: review-scope/
           if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: steps.scope.outputs.run_review == 'true' && steps.scope.outputs.decision != 'approve_only'
+        with:
+          name: prev-report
+          path: prev-report/
+          if-no-files-found: ignore
 
   # ──────────────────────────────────────────────────────────────────────
   # §4 — content classification for skill routing.
@@ -1823,14 +1845,17 @@ jobs:
       # report, so the previous one is this pipeline's latest (comments come
       # oldest first). Anyone can paste the marker; only the pipeline's own
       # comment counts. The gate picked it out of the comments it fetched
-      # (review-scope/prev-comment.json). Missing is fine: the first run.
+      # (the prev-report artifact). Missing is fine: the first run. Moved
+      # out of results/ so aggregate-review.sh does not read the artifact as
+      # a review branch.
       - name: Read the previous report
         run: |
-          if [[ -s results/review-scope/prev-comment.json ]]; then
-            cp results/review-scope/prev-comment.json prev-comment.json
+          if [[ -s results/prev-report/prev-comment.json ]]; then
+            cp results/prev-report/prev-comment.json prev-comment.json
           else
             echo '{}' > prev-comment.json
           fi
+          rm -rf results/prev-report
           jq -r '.body // ""' prev-comment.json > prev-comment.md
           jq -r '.html_url // ""' prev-comment.json > prev-comment-url.txt
 
