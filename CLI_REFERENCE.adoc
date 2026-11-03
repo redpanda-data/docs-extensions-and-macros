@@ -41,6 +41,7 @@ display help for command
 * `check-dispatch-graph` - Check the repository_dispatch graph between engineering and docs repos: senders without listeners, listeners without senders, never-fired senders, failing receivers (exit 0 clean, 1 findings, 2 could not run)
 * `lint-strings` - Lint user-facing doc strings embedded in engineering source code (properties, metrics, ...)
 * `detect-enterprise-gating` - Find enterprise gating changes (license_required_feature values, config::enterprise<> wrappers and restricted values) in a core diff and print them as a doc-impact report
+* `declared-changes` - Read the user-facing change a PR description declares (UX Changes, User impact and why, and non-bug-fix Release Notes) and print it as JSON
 * `doc-impact-recording` - Extract the docs MCP calls from a Claude Code transcript into a doc-impact eval recording
 * `lint-screenshots` - Lint image macros and image files in a docs repo against the screenshot standard (alt text, size, format, width)
 * `check-sources` - Check that `// Source:` comments in AsciiDoc pages cite GitHub lines, PRs, Jira keys, or URLs that exist and still contain the quoted text; free-form comments are counted as unchecked notes
@@ -730,6 +731,35 @@ display help for command
 [,bash]
 ----
 npx doc-tools detect-enterprise-gating --repo . --diff origin/dev
+----
+
+== declared-changes
+
+Read the user-facing change a PR author declares in the PR description: the UX Changes section, the User impact and why section, and Release Notes sub-sections other than Bug Fixes. Prints whether anything is declared, which sections declare it, and a hash of the text, and writes the text to a file for the doc-strings review to read. A PR whose diff changes no doc string still reaches the review's published-content check this way.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools declared-changes [options]
+----
+
+*Options:*
+
+`--body-file <file>`::
+File holding the PR description
+
+`--output <file>`::
+Write the declared text here when anything is declared
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+npx doc-tools declared-changes --body-file pr-body.md --output pr-notes.md
 ----
 
 == doc-impact-recording
