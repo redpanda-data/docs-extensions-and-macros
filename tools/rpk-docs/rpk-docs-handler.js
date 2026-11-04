@@ -653,7 +653,20 @@ function fetchRpkTreeFromLinuxSource(sourcePath, pluginPins = {}) {
     console.log('Extracting flags from plugin command help output...')
     for (const plugin of KNOWN_PLUGINS) {
       const node = (tree.commands || []).find(c => c.name === plugin)
-      if (!node || !pluginNodeHasRealCommands(node)) continue
+      if (!node) continue
+      if (!pluginNodeHasRealCommands(node)) {
+        // Single-command plugin (rpk check): its flags appear only in the
+        // plugin binary's own help. No binary means the install failed.
+        const helpResult = spawnSync('docker', [
+          'exec', containerId, 'sh', '-c',
+          `exec "$HOME/${managedPluginRelPath(plugin)}" --help`
+        ], { encoding: 'utf8', timeout: 30000 })
+        if (helpResult.status === 0) {
+          const added = addSingleCommandPluginFlags(node, helpResult.stdout)
+          if (added > 0) console.log(`  ${plugin}: read ${added} flag(s) from the plugin binary's help`)
+        }
+        continue
+      }
       const enriched = enrichPluginTreeWithFlags(node, (argPath) => {
         const helpResult = spawnSync('docker', [
           'exec', containerId, '/tmp/rpk', ...argPath, '--help'
@@ -1533,13 +1546,48 @@ function attributablePluginSet(oldPluginVersions = {}, newPluginVersions = {}) {
 }
 
 /**
- * Check whether a plugin node contains real plugin commands, as opposed to
- * only the install/uninstall/upgrade shim compiled into rpk itself.
+ * Check whether a plugin node contains real plugin content, as opposed to
+ * only the install/uninstall/upgrade shim compiled into rpk itself. Real
+ * content is a plugin subcommand, or, for a single-command plugin such as
+ * rpk check, a root flag marked as coming from the plugin.
  * @param {Object} node - Top-level command node for the plugin
  * @returns {boolean}
  */
 function pluginNodeHasRealCommands(node) {
-  return (node.commands || []).some(c => !PLUGIN_SHIM_SUBCOMMANDS.has(c.name))
+  return (node.commands || []).some(c => !PLUGIN_SHIM_SUBCOMMANDS.has(c.name)) ||
+    (node.flags || []).some(f => f.from_plugin === true)
+}
+
+/**
+ * Path of a managed plugin binary, relative to HOME. `rpk <plugin> install`
+ * writes it there.
+ * @param {string} plugin - rpk command name
+ * @returns {string}
+ */
+function managedPluginRelPath(plugin) {
+  return path.join('.local', 'bin', `.rpk.managed-${plugin}`)
+}
+
+/**
+ * Add a single-command plugin's flags to its root node. Plugins with no
+ * subcommands (rpk check) run from the root command, but rpk's compiled-in
+ * shim owns `rpk <plugin> --help`, so that help lists only the shim's flags.
+ * The plugin's own flags appear only in the plugin binary's --help. Added
+ * flags are marked from_plugin, as rpk marks plugin flags in --print-tree.
+ * A shim flag wins on a name clash, because rpk handles it before the plugin.
+ * @param {Object} node - The plugin's top-level command node (mutated)
+ * @param {string|null} helpText - Output of the plugin binary's --help
+ * @returns {number} Number of flags added
+ */
+function addSingleCommandPluginFlags(node, helpText) {
+  const existing = new Set((node.flags || []).map(f => f.name))
+  const added = parseHelpFlags(helpText || '')
+    .filter(f => !existing.has(f.name))
+    .map(f => ({ ...f, from_plugin: true }))
+  if (added.length > 0) {
+    node.flags = [...(node.flags || []), ...added].sort((a, b) => a.name.localeCompare(b.name))
+  }
+  return added.length
 }
 
 /**
@@ -1812,6 +1860,15 @@ function fetchPluginSubtree({ plugin, pluginVersion, rpkBinPath }) {
   const node = (freshTree.commands || []).find(c => c.name === plugin)
   if (!node) {
     throw new Error(`Plugin '${plugin}' not found in rpk command tree after install`)
+  }
+  // A single-command plugin has no subcommands to show for itself, so
+  // read its flags from the installed binary. An install that resolved
+  // nothing leaves no binary and no flags, and fails below.
+  const binPath = path.join(tmpHome, managedPluginRelPath(plugin))
+  if (!pluginNodeHasRealCommands(node) && fs.existsSync(binPath)) {
+    const helpResult = spawnSync(binPath, ['--help'], { encoding: 'utf8', env, timeout: 30000 })
+    const added = addSingleCommandPluginFlags(node, helpResult.status === 0 ? helpResult.stdout : null)
+    console.log(`Read ${added} flag(s) from the ${plugin} plugin binary's help`)
   }
   if (!pluginNodeHasRealCommands(node)) {
     throw new Error(
@@ -2886,6 +2943,8 @@ module.exports = {
   enrichPluginTreeWithFlags,
   fetchLatestPluginVersion,
   pluginNodeHasRealCommands,
+  addSingleCommandPluginFlags,
+  managedPluginRelPath,
   splicePluginNode,
   preserveLinuxOnlyCommands,
   REFRESHABLE_PLUGINS,

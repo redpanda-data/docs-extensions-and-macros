@@ -4,6 +4,8 @@ const {
   splicePluginNode,
   preserveLinuxOnlyCommands,
   pluginNodeHasRealCommands,
+  addSingleCommandPluginFlags,
+  managedPluginRelPath,
   REFRESHABLE_PLUGINS,
   PLUGIN_INSTALL_VERSION_FLAGS,
   PLUGIN_MANIFEST_SLUGS
@@ -54,6 +56,68 @@ describe('Plugin refresh (--plugin mode)', () => {
     test('false for a node with no subcommands', () => {
       expect(pluginNodeHasRealCommands({ name: 'ai' })).toBe(false)
     })
+
+    test('true for a single-command plugin with flags from the plugin', () => {
+      const node = {
+        name: 'check',
+        flags: [{ name: 'all', type: 'bool', from_plugin: true }],
+        commands: [{ name: 'install' }, { name: 'uninstall' }, { name: 'upgrade' }]
+      }
+      expect(pluginNodeHasRealCommands(node)).toBe(true)
+    })
+  })
+
+  describe('addSingleCommandPluginFlags', () => {
+    // Trimmed from redpanda-check 0.2.0's own --help
+    const checkHelp = [
+      'Validates a Redpanda deployment against production readiness standards.',
+      '',
+      'Usage:',
+      '  redpanda-check [flags]',
+      '',
+      'Flags:',
+      '      --admin-url strings       Admin API addresses (comma-separated)',
+      '  -a, --all                     Show all checks including passing and skipped',
+      '      --format string           Output format: text, json (default "text")',
+      '  -h, --help                    help for redpanda-check',
+      '      --version                 Print version and exit',
+      ''
+    ].join('\n')
+
+    const shimRoot = () => ({
+      name: 'check',
+      flags: [{ name: 'version', type: 'bool', description: 'Print the installed redpanda-check plugin version' }],
+      commands: [{ name: 'install' }, { name: 'uninstall' }, { name: 'upgrade' }]
+    })
+
+    test('adds plugin flags, marked from_plugin, sorted with the shim flags', () => {
+      const node = shimRoot()
+      expect(addSingleCommandPluginFlags(node, checkHelp)).toBe(3)
+      expect(node.flags.map(f => f.name)).toEqual(['admin-url', 'all', 'format', 'version'])
+      const all = node.flags.find(f => f.name === 'all')
+      expect(all).toMatchObject({ shorthand: 'a', type: 'bool', from_plugin: true })
+      expect(node.flags.find(f => f.name === 'format').default).toBe('"text"')
+      expect(pluginNodeHasRealCommands(node)).toBe(true)
+    })
+
+    test('keeps the shim flag on a name clash', () => {
+      const node = shimRoot()
+      addSingleCommandPluginFlags(node, checkHelp)
+      const version = node.flags.find(f => f.name === 'version')
+      expect(version.description).toBe('Print the installed redpanda-check plugin version')
+      expect(version.from_plugin).toBeUndefined()
+    })
+
+    test('adds nothing when the help is missing', () => {
+      const node = shimRoot()
+      expect(addSingleCommandPluginFlags(node, null)).toBe(0)
+      expect(node.flags.map(f => f.name)).toEqual(['version'])
+      expect(pluginNodeHasRealCommands(node)).toBe(false)
+    })
+  })
+
+  test('managedPluginRelPath matches where rpk installs managed plugins', () => {
+    expect(managedPluginRelPath('check')).toBe('.local/bin/.rpk.managed-check')
   })
 
   describe('splicePluginNode', () => {
@@ -150,5 +214,23 @@ describe('Plugin refresh (--plugin mode)', () => {
     test('ai maps to the rpai manifest slug', () => {
       expect(PLUGIN_MANIFEST_SLUGS.ai).toBe('rpai')
     })
+  })
+})
+
+describe('detectProtectedPlugins', () => {
+  const { detectProtectedPlugins } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+  const shim = ['install', 'uninstall', 'upgrade'].map(n => ({ path: `rpk check ${n}`, command: { name: n } }))
+
+  test('protects a shim-only plugin', () => {
+    const commands = [{ path: 'rpk check', command: { name: 'check', flags: [{ name: 'version' }] } }, ...shim]
+    expect(detectProtectedPlugins(commands)).toContain('check')
+  })
+
+  test('does not protect a single-command plugin whose root has plugin flags', () => {
+    const commands = [
+      { path: 'rpk check', command: { name: 'check', flags: [{ name: 'all', from_plugin: true }, { name: 'version' }] } },
+      ...shim
+    ]
+    expect(detectProtectedPlugins(commands)).not.toContain('check')
   })
 })
