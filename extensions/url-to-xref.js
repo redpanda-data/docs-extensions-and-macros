@@ -69,15 +69,19 @@ const LEGACY_SLUG_REWRITES = {
 // /streaming/....
 const LEGACY_UNPREFIXED_COMPONENT = 'streaming'
 
+// URL paths that live on the docs domain but outside the Antora catalog: the
+// API reference is hosted by Bump.sh, and /mcp is the docs MCP server
+// endpoint.
+const DEFAULT_IGNORE = ['^/api/', '^/mcp(/|$)']
+
 module.exports.register = function ({ config = {} }) {
   raiseListenerLimit(this)
   const logger = this.getLogger('url-to-xref-extension')
   const hostnames = new Set(config.hostnames || ['docs.redpanda.com'])
   const logUnconverted = config.logUnconverted !== false
-  // URL paths that live on the docs domain but outside the Antora catalog: the
-  // API reference is hosted by Bump.sh, and /mcp is the docs MCP server
-  // endpoint. Left untouched, no warning.
-  const ignore = (config.ignore || ['^/api/', '^/mcp(/|$)']).map((pattern) => new RegExp(pattern))
+  // URL paths outside the Antora catalog (DEFAULT_IGNORE) are left
+  // untouched, with no warning.
+  const ignore = (config.ignore || DEFAULT_IGNORE).map((pattern) => new RegExp(pattern))
 
   this.on('contentClassified', ({ playbook, contentCatalog }) => {
     const resolverContext = Object.assign(buildUrlMap(contentCatalog), {
@@ -591,3 +595,13 @@ function convertContent (content, resolverContext) {
 module.exports.buildUrlMap = buildUrlMap
 module.exports.convertContent = convertContent
 module.exports.normalizeUrlPath = normalizeUrlPath
+// For the value macros, which convert docs URLs in rpk descriptions at
+// conversion time, after this extension has run (extension-utils/rpk-links.js).
+module.exports.DEFAULT_IGNORE = DEFAULT_IGNORE
+module.exports.resolveUrlPath = resolveUrlPath
+module.exports.entryToXref = entryToXref
+module.exports.pageAnchors = pageAnchors
+module.exports.parseHeadingIds = parseHeadingIds
+module.exports.fragmentId = fragmentId
+module.exports.documentTitle = documentTitle
+module.exports.sanitizeLinkText = sanitizeLinkText

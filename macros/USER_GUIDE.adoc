@@ -79,8 +79,15 @@ With Redpanda 26.2 data, that renders "defaults to 2 weeks" and "The minimum is 
 *Syntax:* `prop:name[]` and `propval:name[field,format=raw]`
 
 * `name` - Property name (required)
-* `field` - `default` (when omitted), `type`, `unit`, `min`, `max`, `restart`, `nullable`, `values`, `scope`, `introduced`, `visibility`, `restored`, `aliases`, or `cloud-access`
+* `field` - `default` (when omitted), `type`, `unit`, `min`, `max`, `restart`, `nullable`, `values`, `scope`, `introduced`, `visibility`, `restored`, `aliases`, `cloud-access`, `description`, `examples`, `see-also`, `deprecated`, `enterprise`, `secret`, or `category`
 * `format=raw` - The exact value (`1209600000`) instead of the human-readable one (`2 weeks`)
+
+A description or example longer than one paragraph needs the block form, with two colons, on a line of its own:
+
+[,asciidoc]
+----
+propval::cleanup.policy[description]
+----
 
 Register `@redpanda-data/docs-extensions-and-macros/macros/prop`, which provides both macros. If a value can't be verified for the page's version, the page shows `<unknown default>` and the build log says why. See link:REFERENCE.adoc#propval[the macros reference] for every field and failure case.
 
@@ -90,6 +97,133 @@ To find hand-written values in a repo and check them against the data:
 ----
 npx doc-tools generate migrate-property-values --docs-dir . --report-dir ./propval-report
 ----
+
+=== rpkval and connectval - rpk flag and Connect field values
+
+Render an `rpk` flag's or command's value, or a Redpanda Connect field's or component's value, from the published data instead of typing it. Use `rpkval:` when prose states a flag's default, type, or shorthand, or a command's usage or aliases, and `connectval:` when it states a Connect field's default, type, or accepted values, or a component's status.
+
+[,asciidoc]
+----
+The default is rpkval:[rpk topic create --partitions].
+Use `rpkval:[rpk topic create --partitions,shorthand]` for short.
+The `--since` window defaults to rpkval:[rpk ai auditlog list --since].
+----
+
+With rpk 26.2.2 data, that renders "The default is -1", "Use `-p` for short", and "defaults to 24h".
+
+[,asciidoc]
+----
+The chunk size defaults to `connectval:[inputs/postgres_cdc.incremental_snapshot.chunk_size]`.
+Valid strategies: connectval:[outputs/iceberg.merge_strategy,values].
+The default for `pipeline.threads` is connectval:[config.pipeline.threads,default].
+----
+
+With Connect 4.114.0 data, that renders "defaults to `1024`", "Valid strategies: `merge-on-read`, `copy-on-write`", and "is -1".
+
+*Syntax:* `rpkval:[rpk command --flag,field]`, `rpkval:[rpk command,field]`, `connectval:[type/name.field.path,field]` and `connectval:[type/name,field]`
+
+* Write the command as you would type it, then the long flag, without arguments or values: `rpkval:[rpk topic create --partitions]`, not `rpkval:[rpk topic create my-topic --partitions]`. For a global flag, write `rpk` and the flag: `rpkval:[rpk --config-opt,type]`.
+* Name the long flag (`--partitions`), not the shorthand, and ask for the `shorthand` field to show `-p`.
+* Leave the flag out to read a field of the command itself: `rpkval:[rpk topic create,usage]`, `rpkval:[rpk cluster info,aliases]`.
+* The older form, `rpkval:partitions[command=rpk topic create]`, still works and renders the same.
+* Start a Connect call with the component's page path and the field path: `inputs/postgres_cdc.incremental_snapshot.chunk_size`, or `config.pipeline.threads` for root fields. A component alone reads its own fields, such as `connectval:[inputs/kafka_franz,status]`.
+* The older form, `connectval:client_id[component=inputs/redpanda]`, still works and renders the same.
+* Address array fields without `[]`: `sasl.mechanism`, not `sasl[].mechanism`.
+* Don't wrap `values` in backticks: each value already renders as inline code.
+* The field names are the same in every value macro, so `introduced`, `values`, `description` and `required` (or its opposite, `optional`) work wherever the data has them. A field a macro doesn't support logs a warning that lists the ones it does.
+* A description longer than one paragraph needs the block form, on a line of its own: `rpkval::[rpk topic create,description]`, `connectval::[inputs/kafka_franz.consumer_group,description]`. rpk descriptions render as AsciiDoc, as the rpk reference renders them, and rpk examples render exactly as written; Connect text renders as AsciiDoc. The links in rpk descriptions and Connect text are rewritten for the page they appear on, and a link the build has no page for renders as text with a warning.
+
+Both come with `@redpanda-data/docs-extensions-and-macros/macros/prop`. If a value can't be verified, the page shows `<unknown default>` and the build log says why. See link:REFERENCE.adoc#rpkval[the macros reference], and link:REFERENCE.adoc#value-fields[the table of every field].
+
+To find hand-written values that need these macros, and commands, flags, components and fields that don't exist:
+
+[,bash]
+----
+npx doc-tools check-reference-values --docs-dir . --data-file docs-data/rpk-v26.2.2.json --lender ../rp-connect-docs
+----
+
+=== rpkcmd - Linked rpk commands
+
+Name an `rpk` command as inline code, linked to its reference page, without writing the page path:
+
+[,asciidoc]
+----
+Create the topic with rpkcmd:[rpk topic create].
+Set the partition count with rpkcmd:[rpk topic create --partitions].
+Then rpkcmd:[rpk topic create,text=create a topic] for each tenant.
+----
+
+That renders `rpk topic create` and `rpk topic create --partitions` as code, each linked to the `rpk topic create` page, and links the words "create a topic" to the same page.
+
+*Syntax:* `rpkcmd:[rpk command --flag,text=link text]`
+
+* Write the command as you would type it, aliases included, with at most one flag and no arguments or values. The leading `rpk` is optional.
+* A flag links its command's page: the generated pages have no anchor per flag.
+* Don't wrap the macro in backticks: it already renders code.
+* The link follows the page's own component: a cloud-docs page links the Cloud page, and an Agentic Data Plane page links its own `rpk ai` pages. When Cloud has no page for a command, the macro renders plain code and warns instead of linking self-managed docs.
+
+If the command doesn't exist in the rpk data, is deprecated, or has no page in the build, the page shows plain code with no link and the build log says why. `rpkcmd:` comes with `@redpanda-data/docs-extensions-and-macros/macros/prop`, and uses the same `rpk-validate` attribute as `rpkval:`. See link:REFERENCE.adoc#rpkcmd[the macros reference].
+
+`check-reference-values` also checks hand-written xrefs to `rpk` pages: it reports links to pages that don't exist for the component (including targets missing the `.adoc` extension) and labels that name another command, and `--write` replaces each xref whose label is the command in backticks with `rpkcmd:[...]`, once the build publishes the `rpk-<version>.json` attachment that `rpkcmd:` links with.
+
+=== connect and blobl - Linked Connect components and Bloblang calls
+
+Name a Redpanda Connect component, one of its fields, or a Bloblang function or method as inline code, linked to its reference entry, without writing the page path or the anchor:
+
+[,asciidoc]
+----
+Read from Kafka with the connect:[inputs/kafka_franz].
+Set connect:[inputs/kafka_franz.consumer_group] to share the load.
+Stamp each message with blobl:[now()] and upper-case it with blobl:[.uppercase()].
+----
+
+That renders "`kafka_franz` input" and `consumer_group` as code, linked to the `kafka_franz` input page and to the field's anchor on it, and `now()` and `.uppercase()` linked to their entries on the Bloblang functions and methods pages.
+
+*Syntax:* `connect:[type/name]`, `connect:[type/name.field.path]`, `blobl:[function()]`, `blobl:[.method()]`, each with an optional link text after a comma
+
+* Always write the type: 71 names, such as `kafka`, exist in more than one type.
+* A function has parentheses, a method a leading dot. A name inside the parentheses, `blobl:[counter(min)]`, is shown as written and links its function: parameters have no anchors.
+* `contains`, `length` and `slice` are in two method categories, with one entry each. Add `category=String Manipulation` to link the other one.
+* To keep your own words, add them after a comma: `+connect:[inputs/generate,`generate`]+`, `+blobl:[.fold(),`fold` method]+`.
+* Don't wrap the macro in backticks: it already renders code.
+* The link follows the page's own component: a cloud-docs page links the Cloud page. When Cloud has no page, such as for a component that isn't available in Cloud or an impure function like `env()`, the macro renders plain code and warns instead of linking self-managed docs.
+
+If the component, field, function or method doesn't exist in the Connect data, or has no page in the build, the page shows plain code with no link and the build log says why. Both come with `@redpanda-data/docs-extensions-and-macros/macros/prop`, and use the `connect-validate` attribute. See link:REFERENCE.adoc#connect[the macros reference].
+
+`check-reference-values` also checks hand-written xrefs to Connect component and Bloblang pages, on every component that renders the file: it reports links to pages and anchors that don't exist there and labels that name another component, field, function or method, and `--write` replaces each xref whose label is just the name with `connect:[...]` or `blobl:[...]`.
+
+`check-reference-values` also reports unlinked mentions: the first time a page names an `rpk` command in inline code, a Connect component with its type (`+`kafka_franz` input+`), or a Bloblang call (`+`now()`+`, `+`uppercase` method+`) with no link, on a page that links it nowhere. These are suggestions, not errors: they fail the check only with `--fail-on links`, and `--write` turns them into `rpkcmd:`, `connect:` or `blobl:` links only when you also pass `--write-links`. The text stays exactly as you wrote it.
+
+=== Aliases and deprecated names
+
+The macros render what you wrote, but the build log tells you when you used a name the docs no longer use:
+
+* An `rpk` alias, such as `rpkcmd:[rpk cluster status]` or `rpkval:[rpk cluster metadata --format]`, renders as written and links or reads the main command, `rpk cluster info`. The warning names the call to write instead, and never fails the build, even with `rpk-validate: error`.
+* A deprecated `rpk` command, such as `rpkcmd:[rpk redpanda admin]`, still renders plain code with no link. When the rpk data names a replacement, the warning names it: write `rpkcmd:[rpk cluster]`. A subcommand such as `rpk redpanda admin brokers` has no replacement of its own, so you choose the new command.
+* A former Connect component name, such as `connect:[outputs/kafka_migrator]`, renders as written and links the component its page now belongs to, `redpanda_migrator`, with a warning.
+* A deprecated Connect component, such as `connect:[inputs/kafka_franz]`, still links its own page, and the warning names the replacement its description gives, `inputs/redpanda`. A deprecated field links its component's page with no anchor, and the warning names a replacement field when the data gives exactly one.
+* A deprecated Bloblang function or method, such as `blobl:[meta()]`, still links its entry. The data names no replacement, so the warning says only that it is deprecated.
+
+`check-reference-values` reports the same names in macros and in backticked prose, and `--write` changes them to the main or replacement name when it is safe: the replacement has the same flag or field, the sentence isn't about the name itself ("is an alias of", "deprecated", "use ... instead"), the new name isn't already written nearby, and the page doesn't use the old name elsewhere, such as in an example. Everything else in the call stays as you wrote it. These findings fail the check only with `--fail-on any` or `--fail-on links`, never at the default level. See link:REFERENCE.adoc#old-names[the macros reference].
+
+=== bloblval - Bloblang values
+
+Render a Bloblang function's, method's or parameter's value from the Connect data instead of typing it:
+
+[,asciidoc]
+----
+`counter()` starts at bloblval:[counter(min),default] unless you set `min`.
+The `old` argument of `.replace_all()` is a bloblval:[.replace_all(old),type].
+bloblval::[counter(),examples]
+----
+
+With Connect 4.115.1 data, that renders "starts at 1", "is a string", and the function's examples as the Bloblang reference prints them.
+
+*Syntax:* `bloblval:[function(parameter),field]`, `bloblval:[.method(),field]`, and the block form `bloblval::[call,field]` on a line of its own
+
+* Write the call as for `blobl:`. A parameter has `default`, `type`, `description` and `required` (or `optional`); a function or method has `description`, `examples`, `status`, `deprecated`, `category`, `introduced` and `impure`.
+* A method in two categories has a description and examples per category: add `category=` to pick one.
+* Two parameters have defaults the data gets wrong, `random_int(seed)` and the maximum of `counter()` and `random_int()`. They render `<unknown default>` with a warning: state those values by hand.
 
 === helm_ref - Helm value references
 

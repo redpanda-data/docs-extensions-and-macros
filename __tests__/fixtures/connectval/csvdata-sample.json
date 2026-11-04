@@ -1,0 +1,202 @@
+{
+  "_source": {
+    "repo": "redpanda-data/connect",
+    "commit": "d87a199db",
+    "file": "internal/plugins/info.csv",
+    "transform": "rows whose name/type is a component of connect-4.114.0-sample.json, translated as generate-rp-connect-info translateCsvData does: connector=name, is_cloud_supported=cloud, cloud_ai=cloud_with_gpu"
+  },
+  "data": [
+    {
+      "connector": "aws_dynamodb_cdc",
+      "type": "input",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "bloblang",
+      "type": "processor",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "branch",
+      "type": "processor",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "catch",
+      "type": "processor",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "drop",
+      "type": "output",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "gcp_spanner_cdc",
+      "type": "input",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "generate",
+      "type": "input",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "http_client",
+      "type": "output",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "iceberg",
+      "type": "output",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "kafka",
+      "type": "input",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "kafka",
+      "type": "output",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "kafka_franz",
+      "type": "input",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "lines",
+      "type": "scanner",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "local",
+      "type": "rate_limit",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "log",
+      "type": "processor",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "mapping",
+      "type": "processor",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "memory",
+      "type": "cache",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "mongodb_cdc",
+      "type": "input",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "mysql_cdc",
+      "type": "input",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "none",
+      "type": "buffer",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "none",
+      "type": "tracer",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "ollama_chat",
+      "type": "processor",
+      "is_cloud_supported": "n",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "ollama_embeddings",
+      "type": "processor",
+      "is_cloud_supported": "n",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "postgres_cdc",
+      "type": "input",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "redpanda",
+      "type": "input",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "redpanda",
+      "type": "output",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "redpanda_migrator",
+      "type": "input",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "redpanda_migrator",
+      "type": "output",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "schema_registry_decode",
+      "type": "processor",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    },
+    {
+      "connector": "stdin",
+      "type": "input",
+      "is_cloud_supported": "n",
+      "cloud_ai": "n"
+    },
+    {
+      "connector": "stdout",
+      "type": "output",
+      "is_cloud_supported": "n",
+      "cloud_ai": "n"
+    },
+    {
+      "connector": "switch",
+      "type": "processor",
+      "is_cloud_supported": "y",
+      "cloud_ai": "y"
+    }
+  ]
+}
