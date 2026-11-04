@@ -841,20 +841,45 @@ runs:
             --max-turns 100 > "$OUTPUT_DIR/claude-run.json"
         }
 
-        if run_claude; then
+        # Logs how the last attempt ended, from the CLI's own record. Only
+        # these fields: the result text can quote the run's inputs, which
+        # can be private, and job logs are wider-read than artifacts.
+        log_run() {
+          jq -r '"Claude run: subtype=\(.subtype // "?") is_error=\(if has("is_error") then .is_error else "?" end) turns=\(.num_turns // "?") duration_ms=\(.duration_ms // "?")"' \
+            "$OUTPUT_DIR/claude-run.json" 2>/dev/null || echo "Claude run: no readable claude-run.json"
+        }
+
+        # An attempt succeeds only when the CLI exits 0 AND writes
+        # verdict.json. A clean exit with no verdict is an attempt that
+        # stopped early (the v26.1.20 release-notes run: 7 of 20 minutes,
+        # exit 0, nothing written), so it gets the same one retry as a
+        # failed exit. Exit 200 marks that case for the warning below.
+        attempt() {
+          run_claude || return $?
+          [[ -f "$OUTPUT_DIR/verdict.json" ]] || return 200
+        }
+
+        if attempt; then
           :
         else
           rc=$?
+          log_run
+          if (( rc == 200 )); then
+            why="exited 0 but wrote no verdict.json"
+          else
+            why="failed (exit $rc)"
+          fi
           if (( $(remaining) >= MIN_RETRY_SECS )); then
-            echo "::warning::Claude run failed (exit $rc), retrying once with $(remaining)s left"
-            if ! run_claude; then
+            echo "::warning::Claude run $why, retrying once with $(remaining)s left"
+            if ! attempt; then
+              log_run
               # Soft-fail: the aggregate job turns a missing verdict.json into
               # "automated review unavailable — human review required". Never
               # let an infra failure masquerade as a review verdict.
               soft_fail
             fi
           else
-            echo "::warning::Claude run failed (exit $rc) and under ${MIN_RETRY_SECS}s of the ${TIMEOUT_MIN}m budget remain — not retrying"
+            echo "::warning::Claude run $why and under ${MIN_RETRY_SECS}s of the ${TIMEOUT_MIN}m budget remain — not retrying"
             soft_fail
           fi
         fi

@@ -117,3 +117,70 @@ describe('Assert pr_number is empty or a number', () => {
     expect(r.all.split('\n')).not.toContain('pwned')
   })
 })
+
+/**
+ * The run step retries once. An attempt counts as done only when the CLI
+ * exits 0 AND writes verdict.json: the v26.1.20 release-notes run exited 0
+ * after 7 of its 20 minutes with nothing written, and was never retried.
+ *
+ * The stub claude takes its outcome per attempt from PLAN (one word per
+ * attempt: verdict, none, or fail) and prints a claude-run.json whose result
+ * text is SECRET, so the tests can check that the log never carries it.
+ */
+describe('Run skill retry', () => {
+  const runStep = steps.find((s) => s.name && s.name.startsWith('Run skill'))
+
+  const stubs = {
+    timeout: 'shift; exec "$@"',
+    claude: [
+      'n=$(( $(cat count 2>/dev/null || echo 0) + 1 )); echo "$n" > count',
+      'outcome=$(echo "$PLAN" | cut -d" " -f"$n")',
+      'echo "{\\"subtype\\":\\"success\\",\\"is_error\\":false,\\"num_turns\\":$n,\\"duration_ms\\":1,\\"result\\":\\"SECRET\\"}"',
+      'case "$outcome" in',
+      '  verdict) echo "{}" > "$OUTPUT_DIR/verdict.json" ;;',
+      '  fail) exit 1 ;;',
+      'esac'
+    ].join('\n')
+  }
+
+  function run (plan) {
+    return execRun(runStep, {
+      stubs,
+      files: { 'out/.keep': '' },
+      env: {
+        PLAN: plan,
+        OUTPUT_DIR: 'out',
+        TIMEOUT_MIN: '20',
+        PROMPT: 'x',
+        GH_READONLY_SHIM: '/nonexistent',
+        AWS_BEARER_TOKEN_BEDROCK: 'x'
+      }
+    })
+  }
+
+  it.each([
+    ['a verdict on the first attempt', 'verdict', '1', 'false'],
+    ['no verdict, then a verdict', 'none verdict', '2', 'false'],
+    ['no verdict twice', 'none none', '2', 'true'],
+    ['a failed exit, then a verdict', 'fail verdict', '2', 'false'],
+    ['a failed exit twice', 'fail fail', '2', 'true'],
+  ])('handles %s', (_label, plan, attempts, failed) => {
+    const r = run(plan)
+    expect(r.status).toBe(0)
+    expect(r.read('count').trim()).toBe(attempts)
+    expect(r.outputs.claude_failed).toBe(failed)
+    expect(r.exists('out/verdict.json')).toBe(failed === 'false')
+  })
+
+  it('names a clean exit with no verdict in the retry warning', () => {
+    expect(run('none verdict').all).toMatch(/exited 0 but wrote no verdict\.json, retrying once/)
+    expect(run('fail verdict').all).toMatch(/failed \(exit 1\), retrying once/)
+  })
+
+  it('logs how each failed attempt ended, but never the result text', () => {
+    const r = run('none none')
+    expect(r.all).toMatch(/Claude run: subtype=success is_error=false turns=1 /)
+    expect(r.all).toMatch(/Claude run: subtype=success is_error=false turns=2 /)
+    expect(r.all).not.toMatch(/SECRET/)
+  })
+})
