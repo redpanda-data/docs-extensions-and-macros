@@ -182,7 +182,7 @@ on:
           5.45.0 is the release that first ships that subcommand (#313). Every
           earlier version, including the 5.38.0 this used to name, exits 1
           with "unknown command" and writes no result file, which the guard in
-          screenshot_gate turns into a loud error rather than a silent pass.
+          screenshot_lint turns into a loud error rather than a silent pass.
           Do not lower this below 5.45.0. The same version runs
           `doc-tools check-metadata` in metadata_check; a version without
           that subcommand skips it (a notice in the job log, nothing in the
@@ -1442,22 +1442,34 @@ jobs:
   # .adoc or image change (alt text lives in the .adoc); the paid vision
   # pass runs when an image file changed, or to re-check its own earlier
   # blockers (one fixed in the .adoc would otherwise stay carried).
+  #
+  # The lint is its own job because it checks out the PR head and runs npx
+  # next to it, and must not hold id-token: write while it does: npm reads
+  # a project .npmrc from the nearest directory with a package.json, so an
+  # edited .npmrc could pick the registry npx installs doc-tools from, and
+  # whatever that served could mint an OIDC token. Nothing in it needs a
+  # credential. As defense in depth, npx runs from RUNNER_TEMP with --root
+  # pointing at the checkout, and without GH_TOKEN.
+  # screenshot_gate, which holds id-token for the vision pass, makes no
+  # direct PR-head checkout, runs no npx, and reads the lint result from the
+  # screenshot-lint artifact. The claude-skill action it calls does check
+  # out the PR head, but only runs npm install -g there, which ignores a
+  # project .npmrc.
   # ──────────────────────────────────────────────────────────────────────
-  screenshot_gate:
+  screenshot_lint:
     needs: [gate, classify]
     if: needs.classify.outputs.has_images == 'true' || needs.classify.outputs.has_adoc == 'true' || needs.classify.outputs.recheck_shots == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: read
-      id-token: write   # OIDC role for the ADP gateway credential
-    # 45, like the other model jobs: the vision pass gets 35 minutes on a
-    # large PR (classify), plus the lint and the action's setup.
-    timeout-minutes: 45
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out the PR head for lint-screenshots
+        uses: actions/checkout@v4
         with:
           ref: refs/pull/${{ inputs.pr_number }}/head
+          path: .screenshot-lint
           persist-credentials: false
 
       - uses: actions/setup-node@v4
@@ -1470,14 +1482,14 @@ jobs:
           PR: ${{ inputs.pr_number }}
           R: ${{ github.repository }}
           DOC_TOOLS_VERSION: ${{ inputs.doc_tools_version }}
+          SRC: ${{ github.workspace }}/.screenshot-lint
         run: |
           set -euo pipefail
-          # Everything lands under RUNNER_TEMP: the claude-skill action's
-          # own checkout runs `git clean` in the workspace and would delete
-          # anything written there before the merge step reads it.
+          # Everything lands under RUNNER_TEMP, which the upload below
+          # passes to screenshot_gate.
           LINT_DIR="$RUNNER_TEMP/screenshot-lint"; mkdir -p "$LINT_DIR"
           OUT="$LINT_DIR/screenshot-lint.json"
-          if [[ ! -d modules ]]; then
+          if [[ ! -d "$SRC/modules" ]]; then
             # Not an Antora content repo (docs-site, docs-team-standards): the
             # lint cannot run. Not a failure (a red X on every image PR in a
             # docs-only repo), but not a clean pass either: `not_run` makes the
@@ -1492,9 +1504,12 @@ jobs:
           # in a repo that has never been linted (docs has dozens today).
           # Exit 1 means findings — the jq below turns them into the verdict.
           # Any other non-zero exit (usage error, npx failure) fails the step.
-          npx --yes --package "@redpanda-data/docs-extensions-and-macros@${DOC_TOOLS_VERSION}" \
-            doc-tools lint-screenshots --files "$LINT_DIR/changed-files.txt" \
-            --format json --output "$LINT_DIR/result.json" > /dev/null || [[ $? -eq 1 ]]
+          # From RUNNER_TEMP, never the checkout: npm takes its project config
+          # from the nearest directory with a package.json, and the PR head
+          # has one. --root points the tool at the checkout instead.
+          ( cd "$RUNNER_TEMP" && env -u GH_TOKEN npx --yes --package "@redpanda-data/docs-extensions-and-macros@${DOC_TOOLS_VERSION}" \
+            doc-tools lint-screenshots --root "$SRC" --files "$LINT_DIR/changed-files.txt" \
+            --format json --output "$LINT_DIR/result.json" ) > /dev/null || [[ $? -eq 1 ]]
           # An unrecognized `lint-screenshots` subcommand (doc_tools_version
           # pinned to a release that predates it) also exits 1, the same code
           # the line above tolerates for "findings present" — but it writes no
@@ -1520,6 +1535,43 @@ jobs:
             ' "$LINT_DIR/result.json" > "$OUT"
           jq -r '"screenshot-lint: verdict=\(.verdict), \(.blocking | length) blocking, \(.suggestions | length) suggestion(s)"' "$OUT"
 
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshot-lint
+          path: ${{ runner.temp }}/screenshot-lint/
+          if-no-files-found: ignore
+
+  screenshot_gate:
+    needs: [gate, classify, screenshot_lint]
+    # !cancelled(), not the implicit success(): a skipped screenshot_gate
+    # reads as "nothing to review" in the aggregate, so a failed
+    # screenshot_lint must still reach the merge step, which reports a
+    # missing lint result as this branch unavailable, never as a pass. The
+    # vision pass is skipped then, as it was when the lint was a step here:
+    # with no lint result its verdict would be discarded.
+    if: >-
+      !cancelled() && needs.classify.result == 'success' &&
+      (needs.classify.outputs.has_images == 'true' || needs.classify.outputs.has_adoc == 'true' || needs.classify.outputs.recheck_shots == 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write   # OIDC role for the ADP gateway credential
+    # 45, like the other model jobs: the vision pass gets 35 minutes on a
+    # large PR (classify), plus the action's setup.
+    timeout-minutes: 45
+    steps:
+      # screenshot_lint's result. Under RUNNER_TEMP, not the workspace: the
+      # claude-skill action's own checkout runs `git clean` there.
+      # continue-on-error: with no result, the merge step leaves no verdict
+      # and the aggregate reports this branch unavailable.
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: screenshot-lint
+          path: ${{ runner.temp }}/screenshot-lint
+
       # Incremental re-review inputs from the gate (the delta's diff and file
       # list, and the earlier blockers). Under RUNNER_TEMP: the claude-skill
       # action's checkout runs `git clean` on the workspace.
@@ -1528,7 +1580,7 @@ jobs:
           name: review-scope
           path: ${{ runner.temp }}/review-scope
       - name: Claude vision pass
-        if: needs.classify.outputs.has_images == 'true' || needs.classify.outputs.recheck_shots == 'true'
+        if: (needs.classify.outputs.has_images == 'true' || needs.classify.outputs.recheck_shots == 'true') && needs.screenshot_lint.result == 'success'
         uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@0fac2b82207dd97787654a990cd6baf95b2bfcbe # pinned: #418's merge SHA
         with:
           # Longer for large PRs (classify: large); see classify for why.
@@ -1581,6 +1633,7 @@ jobs:
           # The vision pass ran (and must have a verdict) for a changed image
           # or a re-check.
           HAS_IMAGES: ${{ (needs.classify.outputs.has_images == 'true' || needs.classify.outputs.recheck_shots == 'true') && 'true' || 'false' }}
+          LINT_RESULT: ${{ needs.screenshot_lint.result }}
         run: |
           set -uo pipefail
           mkdir -p review-output
@@ -1594,7 +1647,9 @@ jobs:
           # branch produced a verdict", so when a pass that was SUPPOSED to run
           # produced nothing, the only honest thing is to leave verdict.json
           # absent and let the aggregate say "automated review unavailable".
-          if [[ ! -f "$LINT" ]]; then
+          # A failed screenshot_lint can still upload a partial or empty
+          # file, so its job result decides, not the file alone.
+          if [[ "${LINT_RESULT:-}" != "success" || ! -f "$LINT" ]]; then
             echo "::warning::no deterministic lint result — leaving no verdict so the aggregate reports this branch unavailable"
             exit 0
           fi

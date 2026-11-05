@@ -485,6 +485,7 @@ function harmonic (f, a) {
 
 // Statuses that leave an item out of every score without being an error.
 // GATE_CLOSED: the frozen lint input has no declarations and no removals,
+// and the item description declares no user-facing change,
 // so the workflow would never run the pass; scoring it would credit the
 // lint gate, not the pass, with an abstention. REPLAY_INCOMPLETE: the run
 // asked for docs the recording does not hold, so its verdict was made

@@ -177,6 +177,18 @@ describe('check-rendered-html: anchors and links', () => {
     expect(f['broken-anchor']).toBeUndefined()
   })
 
+  test('a glossterm fragment link is unchecked, not a broken anchor', () => {
+    // A build without the glossary page renders glossterm links as #<term>.
+    const { findings: f, links } = checkHtml(page('<p>Drops messages from the <a data-tippy-content="A pipeline." href="#pipeline" class="glossary-term">pipeline</a>.</p>'))
+    expect(f).toEqual({})
+    expect(links).toEqual({ internal: 0, external: 0, unchecked: 1 })
+  })
+
+  test('negative control: a plain fragment link with the same href is still a broken anchor', () => {
+    const f = findings(page('<p>Drops messages from the <a href="#pipeline">pipeline</a>.</p>'))
+    expect(f['broken-anchor'].samples).toEqual(['pipeline -> #pipeline'])
+  })
+
   test('links in the navigation outside article.doc are not checked', () => {
     expect(findings(page('<p>clean</p>', '<a href="#nowhere">nav</a>'))).toEqual({})
   })

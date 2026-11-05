@@ -4,6 +4,9 @@ const {
   splicePluginNode,
   preserveLinuxOnlyCommands,
   pluginNodeHasRealCommands,
+  pluginInstalled,
+  replaceHomeDir,
+  pluginFlagSourcesFromTree,
   REFRESHABLE_PLUGINS,
   PLUGIN_INSTALL_VERSION_FLAGS,
   PLUGIN_MANIFEST_SLUGS
@@ -53,6 +56,96 @@ describe('Plugin refresh (--plugin mode)', () => {
 
     test('false for a node with no subcommands', () => {
       expect(pluginNodeHasRealCommands({ name: 'ai' })).toBe(false)
+    })
+  })
+
+  describe('pluginInstalled', () => {
+    const fs = require('fs')
+    const os = require('os')
+    const path = require('path')
+    const checkShim = {
+      name: 'check',
+      commands: [{ name: 'install' }, { name: 'uninstall' }, { name: 'upgrade' }]
+    }
+    let home
+    beforeEach(() => { home = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-installed-')) })
+    afterEach(() => { fs.rmSync(home, { recursive: true, force: true }) })
+    const writeManaged = (slug) => {
+      fs.mkdirSync(path.join(home, '.local', 'bin'), { recursive: true })
+      fs.writeFileSync(path.join(home, '.local', 'bin', `.rpk.managed-${slug}`), '')
+    }
+
+    test('rpk check has no subcommands, so its managed binary shows the install', () => {
+      writeManaged('check')
+      expect(pluginInstalled('check', checkShim, home)).toBe(true)
+    })
+
+    test('rpk check without its managed binary did not install', () => {
+      expect(pluginInstalled('check', checkShim, home)).toBe(false)
+    })
+
+    test('a shim-only node of a plugin with subcommands did not install, binary or not', () => {
+      writeManaged('k8s')
+      expect(pluginInstalled('k8s', shimOnlyNode, home)).toBe(false)
+    })
+
+    test('real commands show the install', () => {
+      expect(pluginInstalled('connect', installedNode, home)).toBe(true)
+    })
+  })
+
+  describe('replaceHomeDir', () => {
+    test('a default under the temporary HOME becomes ~', () => {
+      const fs = require('fs')
+      const os = require('os')
+      const path = require('path')
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-plugin-home-'))
+      const real = fs.realpathSync(home)
+      const out = JSON.stringify([
+        { name: 'rpai-config', default: `${home}/.rpai/config` },
+        { name: 'dir', default: `${real}/.local/bin` },
+        { name: 'other', default: '/etc/redpanda' }
+      ])
+      expect(JSON.parse(replaceHomeDir(out, home)).map(f => f.default))
+        .toEqual(['~/.rpai/config', '~/.local/bin', '/etc/redpanda'])
+      fs.rmSync(home, { recursive: true, force: true })
+    })
+
+    // The Docker build runs with HOME=/root, a native build with the
+    // caller's HOME, so both get the same ~ form as a refresh
+    test('replaces only whole path segments of HOME', () => {
+      const out = JSON.stringify([
+        { default: '/root/.rpai/config' },
+        { default: '/root' },
+        { default: '/rootfs/data' },
+        { default: '/srv/root/data' }
+      ])
+      expect(JSON.parse(replaceHomeDir(out, '/root')).map(f => f.default))
+        .toEqual(['~/.rpai/config', '~', '/rootfs/data', '/srv/root/data'])
+      expect(replaceHomeDir('  --rpai-config string   config (default "/root/.rpai/config")', '/root'))
+        .toBe('  --rpai-config string   config (default "~/.rpai/config")')
+    })
+  })
+
+  describe('pluginFlagSourcesFromTree', () => {
+    const tree = {
+      name: 'rpk',
+      commands: [
+        { name: 'topic', commands: [] },
+        { name: 'ai', commands: [{ name: 'install' }, { name: 'agent', flags: [{ name: 'x', from_plugin: true }] }] },
+        { name: 'connect', commands: [{ name: 'install' }, { name: 'run', flags: [] }] },
+        { name: 'k8s', commands: [{ name: 'install' }] },
+        { name: 'check', flags: [{ name: 'all', from_plugin: true }], commands: [{ name: 'install' }] }
+      ]
+    }
+
+    // A native build fills no flag sources, so they come from the tree
+    test('reads sources a build path did not record from the tree', () => {
+      expect(pluginFlagSourcesFromTree(tree)).toEqual({ ai: 'tree', connect: 'none', check: 'tree' })
+    })
+
+    test('keeps the sources a build path recorded', () => {
+      expect(pluginFlagSourcesFromTree(tree, { connect: 'help' })).toEqual({ ai: 'tree', connect: 'help', check: 'tree' })
     })
   })
 
