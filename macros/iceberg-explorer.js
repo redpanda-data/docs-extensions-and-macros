@@ -53,8 +53,21 @@ const logger = require('@antora/logger')('iceberg-explorer-macro');
  * tools/iceberg-mode/generate.js) and which engine build the UI loads.
  *
  * @param {Registry} registry - The Antora/Asciidoctor extension registry.
- * @param {Object} context - The Antora context (unused today; kept for parity
- *   with the other macros and for future content-catalog resolution).
+ * PROPERTY METADATA. In an Antora build the block also emits
+ * `data-property-meta`: the property's description (plain text), default,
+ * is_enterprise, see_also links resolved to URLs, and, on Cloud pages,
+ * cloud_supported, all from the generated redpanda-properties-<tag>.json the
+ * page's version publishes. The dataset is chosen exactly as the prop: macro
+ * chooses it (loadPropertiesFor in macros/prop.js): newest patch of the page's
+ * own release series, or the newest GA streaming file on Cloud. A page whose
+ * version has no dataset, or whose dataset lacks the property, gets a build
+ * warning and no attribute; docs-ui then shows no description rather than one
+ * from another release.
+ *
+ * @param {Registry} registry - The Antora/Asciidoctor extension registry.
+ * @param {Object} context - The Antora context: {file, contentCatalog, config}.
+ *   Without a content catalog (plain Asciidoctor, the docs-ui preview) the
+ *   block emits no property metadata.
  */
 
 // Mount contract shared with docs-ui. Exported so both sides and the tests
@@ -83,15 +96,15 @@ module.exports.register = function (registry, context) {
   //    `.block()`); inside `fn`, `this` is a registry with `.block()`.
   const target = registry || this;
   if (typeof target.block === 'function') {
-    defineBlock(target);
+    defineBlock(target, context);
   } else if (typeof target.register === 'function') {
-    target.register(function () { defineBlock(this); });
+    target.register(function () { defineBlock(this, context); });
   } else {
     throw new Error('iceberg-explorer: no usable Asciidoctor registry provided');
   }
 };
 
-function defineBlock (registry) {
+function defineBlock (registry, context) {
   registry.block(function () {
     const self = this;
     self.named('iceberg-explorer');
@@ -178,6 +191,8 @@ function defineBlock (registry) {
       const styleAttr = height ? ` style="min-height:${height}"` : '';
       const versionAttr = version ? ` data-version="${escapeHtml(version)}"` : '';
       const engineAttr = engineBase ? ` data-engine-base="${escapeHtml(engineBase)}"` : '';
+      const meta = propertyMeta(context, warn);
+      const metaAttr = meta ? ` data-property-meta="${escapeHtml(JSON.stringify(meta))}"` : '';
 
       // The container is a mount point only; docs-ui replaces its contents on
       // hydration. Until then the fallback paragraph is visible, so the two
@@ -186,7 +201,7 @@ function defineBlock (registry) {
       // plain markup, not <noscript>, precisely because the common failure is
       // JS running fine with the module missing, which <noscript> hides.
       const html = `
-<div class="${MOUNT_CLASS}" ${MOUNT_ATTRIBUTE}="${MOUNT_CONTRACT_VERSION}" data-property="${MOUNT_PROPERTY}"${versionAttr}${engineAttr}${dataConfig ? ` data-config="${dataConfig}"` : ''}${styleAttr}>
+<div class="${MOUNT_CLASS}" ${MOUNT_ATTRIBUTE}="${MOUNT_CONTRACT_VERSION}" data-property="${MOUNT_PROPERTY}"${versionAttr}${metaAttr}${engineAttr}${dataConfig ? ` data-config="${dataConfig}"` : ''}${styleAttr}>
   <p class="iceberg-explorer-fallback">Interactive Iceberg Mode Explorer. If this text is still here, the explorer could not load: it needs JavaScript and a docs-ui build that includes the explorer module. See the Iceberg topic configuration reference for the equivalent settings.</p>
 </div>`;
 
@@ -194,6 +209,149 @@ function defineBlock (registry) {
     });
   });
 };
+
+/**
+ * `data-property-meta` for the mount, or undefined when there is nothing
+ * verified to emit. See PROPERTY METADATA above.
+ * @param {{file?: object, contentCatalog?: object, config?: object}} context
+ * @param {function(string): void} warn
+ * @returns {object|undefined}
+ */
+// Per page, so a page with several explorers converts and warns once.
+const $metaByPage = new WeakMap();
+
+function propertyMeta (context, warn) {
+  const contentCatalog = context && context.contentCatalog;
+  const file = context && context.file;
+  if (!contentCatalog || !file || !file.src) return undefined;
+  if (!$metaByPage.has(file)) $metaByPage.set(file, buildPropertyMeta(contentCatalog, file, context.config || {}, warn));
+  return $metaByPage.get(file);
+}
+
+function buildPropertyMeta (contentCatalog, file, asciidocConfig, warn) {
+  // Required here, not at the top: both pull in Antora's AsciiDoc loader, a
+  // peer dependency that plain Asciidoctor harnesses do not install.
+  const { loadPropertiesFor, isAvailable } = require('./prop');
+  const { render, convertXref } = require('../extensions/render-property-descriptions');
+
+  const component = file.src.component || '';
+  const version = file.src.version || '';
+  const where = `${component || 'unknown component'} ${version || '(unversioned)'}`;
+  const registry = loadPropertiesFor(contentCatalog, component, version);
+  if (!registry) {
+    warn(
+      `no redpanda-properties-<tag>.json covers ${where}, so the explorer for ${MOUNT_PROPERTY} carries no ` +
+      'property metadata (description, default, see also).'
+    );
+    return undefined;
+  }
+  const source = `redpanda-properties-${registry.tag}.json`;
+  const entry = Object.prototype.hasOwnProperty.call(registry.properties, MOUNT_PROPERTY)
+    ? registry.properties[MOUNT_PROPERTY]
+    : undefined;
+  if (!entry || typeof entry !== 'object') {
+    warn(
+      `${MOUNT_PROPERTY} is not in ${source}, the property data for ${where}, so the explorer carries no ` +
+      'property metadata. Check that this release has the property.'
+    );
+    return undefined;
+  }
+
+  const meta = {};
+  if (typeof entry.description === 'string' && entry.description.trim()) {
+    try {
+      meta.description = htmlToText(render(entry.description, file, contentCatalog, asciidocConfig) || '');
+    } catch (err) {
+      warn(`the ${MOUNT_PROPERTY} description in ${source} could not be converted (${err.message}), so it is left out.`);
+    }
+    if (!meta.description) delete meta.description;
+  }
+  if (entry.default !== undefined) meta.default = entry.default;
+  if (typeof entry.is_enterprise === 'boolean') meta.is_enterprise = entry.is_enterprise;
+  if (registry.surface === 'cloud') {
+    meta.cloud_supported = typeof entry.cloud_supported === 'boolean' ? entry.cloud_supported : null;
+    if (!isAvailable(registry, entry)) {
+      warn(`${MOUNT_PROPERTY} is marked cloud_supported: false in ${source}, but this is a Cloud page.`);
+    }
+  }
+  // Datasets generated before see_also existed (v26.1 and earlier) carry the
+  // same links as related_topics.
+  const links = Array.isArray(entry.see_also) ? entry.see_also
+    : Array.isArray(entry.related_topics) ? entry.related_topics : [];
+  const seeAlso = links
+    .map((item) => seeAlsoLink(item, { file, contentCatalog, asciidocConfig, registry, convertXref, warn, source }))
+    .filter(Boolean);
+  if (seeAlso.length) meta.see_also = seeAlso;
+  meta.source = source;
+  return meta;
+}
+
+// xref:target[label], the form see_also entries are generated in.
+const XREF_ITEM_RX = /^xref:([^[\]\s]+)\[([^\]]*)\]$/;
+const URL_ITEM_RX = /^(?:link:)?(https?:\/\/[^[\s]+)\[([^\]]*)\]$/;
+
+/**
+ * One see_also entry as {href, text}, resolved by Antora as an xref on this
+ * page would be. A target this page's component lacks (Cloud reusing a
+ * self-managed link) is retried in the component and version the dataset came
+ * from. Anything that resolves nowhere is reported and dropped: a link the
+ * build could not verify would be a broken link.
+ */
+function seeAlsoLink (item, { file, contentCatalog, asciidocConfig, registry, convertXref, warn, source }) {
+  if (typeof item !== 'string') return undefined;
+  const value = item.trim();
+  const url = URL_ITEM_RX.exec(value);
+  if (url) return { href: url[1], text: url[2] || url[1] };
+  const xref = XREF_ITEM_RX.exec(value);
+  if (!xref) {
+    warn(`see_also entry "${value}" for ${MOUNT_PROPERTY} in ${source} is not an xref or URL, so it is left out.`);
+    return undefined;
+  }
+  const attempts = [xref[1]];
+  // module:path is relative to the dataset's component; qualify it for a page
+  // in another component. A target that already names a component is not.
+  if (xref[1].split(':').length === 2 && registry.component && registry.component !== file.src.component) {
+    const owner = registry.version ? `${registry.version}@${registry.component}` : registry.component;
+    attempts.push(`${owner}:${xref[1]}`);
+  }
+  // Ask the catalog first: converting an xref that does not resolve logs an
+  // Asciidoctor error, which a build that fails on errors would fail on.
+  const context = { component: file.src.component, version: file.src.version, module: file.src.module };
+  const exists = (target) => {
+    if (typeof contentCatalog.resolvePage !== 'function') return true;
+    try {
+      return Boolean(contentCatalog.resolvePage(target.split('#')[0], context));
+    } catch {
+      return false;
+    }
+  };
+  for (const target of attempts) {
+    if (!exists(target)) continue;
+    const anchor = convertXref(`xref:${target}[${xref[2]}]`, file, contentCatalog, asciidocConfig);
+    if (!anchor) continue;
+    const href = /\bhref="([^"]*)"/.exec(anchor);
+    if (!href) continue;
+    return { href: decodeEntities(href[1]), text: htmlToText(anchor) };
+  }
+  warn(`see_also entry "${value}" for ${MOUNT_PROPERTY} in ${source} does not resolve to a page, so it is left out.`);
+  return undefined;
+}
+
+/** Plain text from converted inline HTML, as the contract's description wants. */
+function htmlToText (html) {
+  return decodeEntities(String(html).replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim();
+}
+
+function decodeEntities (text) {
+  const named = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0' };
+  return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, code) => {
+    if (code[0] === '#') {
+      const n = code[1] === 'x' || code[1] === 'X' ? parseInt(code.slice(2), 16) : parseInt(code.slice(1), 10);
+      return Number.isFinite(n) ? String.fromCodePoint(n) : match;
+    }
+    return Object.prototype.hasOwnProperty.call(named, code.toLowerCase()) ? named[code.toLowerCase()] : match;
+  });
+}
 
 /**
  * Check the author's config with Redpanda's own grammar for the page's
@@ -286,3 +444,4 @@ module.exports.MOUNT_PROPERTY = MOUNT_PROPERTY;
 module.exports.MOUNT_CLASS = MOUNT_CLASS;
 module.exports.MOUNT_SELECTOR = MOUNT_SELECTOR;
 module.exports.rootRelativePath = rootRelativePath;
+module.exports.htmlToText = htmlToText;

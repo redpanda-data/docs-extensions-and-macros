@@ -5,6 +5,11 @@
 // instead of console.
 jest.mock('@antora/logger', () => {
   const logger = { warn: () => {}, info: () => {}, error: () => {}, debug: () => {} }
+  // Antora's AsciiDoc loader, which converts property descriptions, adapts the
+  // logger through unwrap().
+  logger.unwrap = () => logger
+  logger.level = 'info'
+  logger.setFailOnExit = () => {}
   const getLogger = () => logger
   getLogger.configure = () => getLogger
   return getLogger
@@ -388,6 +393,151 @@ describe('iceberg-explorer macro', () => {
         expect(html).toContain('data-config="key_value"')
         expect(messages()).toMatch(/config="key_value" was not checked: .*no Redpanda release for version 99\.1/)
       })
+    })
+  })
+
+  describe('property metadata', () => {
+    let warn
+
+    beforeEach(() => {
+      warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
+    })
+
+    afterEach(() => {
+      warn.mockRestore()
+    })
+
+    const messages = () => warn.mock.calls.map((call) => call.join(' ')).join('\n')
+
+    const entry = (overrides = {}) => ({
+      name: 'redpanda.iceberg.mode',
+      type: 'string',
+      config_scope: 'topic',
+      description: 'Enable Iceberg. Set `key_value` or see xref:manage:iceberg/about.adoc[About Iceberg] -- or not.',
+      default: null,
+      is_enterprise: false,
+      see_also: ['xref:manage:iceberg/specify-iceberg-schema.adoc#modes[Specify Iceberg Schema]'],
+      ...overrides,
+    })
+
+    const attachment = (component, version, tag, properties) => ({
+      src: { component, version, module: 'reference', family: 'attachment', relative: `redpanda-properties-${tag}.json` },
+      contents: Buffer.from(JSON.stringify({ properties })),
+    })
+
+    // A catalog with real-enough resolution: Antora's own loader converts the
+    // description and see_also xrefs, so a resolver that resolves nothing would
+    // let a broken href pass.
+    function catalog (attachments, { cloud = false, pages = ['manage:iceberg/specify-iceberg-schema', 'manage:iceberg/about'] } = {}) {
+      const files = [...attachments]
+      return {
+        findBy: (query) => files.filter((f) => Object.entries(query).every(([k, v]) => f.src[k] === v)),
+        getComponent: (name) => {
+          const versions = [{ version: name === 'cloud' ? '' : '26.2', displayVersion: '26.2', asciidoc: { attributes: cloud && name === 'cloud' ? { 'env-cloud': '' } : {} } }]
+          return { name, title: name, versions, latest: versions[0] }
+        },
+        getComponentVersion: () => undefined,
+        // Pages exist only in streaming, so a Cloud page's unqualified xref
+        // misses and the qualified retry is what resolves.
+        resolveResource: (spec, context = {}) => {
+          const match = /^(?:([\w.]+)@)?(?:([\w-]+):)?([\w-]+):(.+?)(?:\.adoc)?$/.exec(String(spec).split('#')[0])
+          if (!match || !pages.includes(`${match[3]}:${match[4]}`)) return undefined
+          if ((match[2] || context.component) !== 'streaming') return undefined
+          return { pub: { url: `/streaming/26.2/${match[3]}/${match[4]}/` } }
+        },
+        getById: () => undefined,
+      }
+    }
+
+    const pageFile = (component, version) => ({
+      src: { component, version, module: 'ROOT', family: 'page', relative: 'iceberg.adoc', path: 'modules/ROOT/pages/iceberg.adoc' },
+      pub: { url: `/${component}/${version}/iceberg/`, moduleRootPath: '.', rootPath: '../..' },
+    })
+
+    function convertWith (contentCatalog, file, input = '[iceberg-explorer]\n--\n--') {
+      const registry = asciidoctor.Extensions.create()
+      macro.register(registry, { file, contentCatalog, config: {} })
+      return asciidoctor.convert(input, {
+        extension_registry: registry,
+        attributes: { 'page-relative-src-path': 'ROOT/pages/iceberg.adoc', 'page-version': file.src.version },
+      })
+    }
+
+    const metaOf = (html) => {
+      const m = /data-property-meta="([^"]*)"/.exec(html)
+      if (!m) return undefined
+      return JSON.parse(m[1].replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'))
+    }
+
+    test('emits the contract fields from the newest patch of the page\'s series', () => {
+      const html = convertWith(catalog([
+        attachment('streaming', '26.2', 'v26.2.1', { 'redpanda.iceberg.mode': entry({ description: 'Old text.' }) }),
+        attachment('streaming', '26.2', 'v26.2.4', { 'redpanda.iceberg.mode': entry() }),
+        attachment('streaming', '26.2', 'v26.1.14', { 'redpanda.iceberg.mode': entry({ description: 'Other series.' }) }),
+      ]), pageFile('streaming', '26.2'))
+      expect(metaOf(html)).toEqual({
+        // Converted by Asciidoctor, then reduced to text: no backticks, the
+        // xref is its label, and -- is the typographic dash it renders as.
+        description: 'Enable Iceberg. Set key_value or see About Iceberg \u2014 or not.',
+        default: null,
+        is_enterprise: false,
+        see_also: [{ href: '/streaming/26.2/manage/iceberg/specify-iceberg-schema/#modes', text: 'Specify Iceberg Schema' }],
+        source: 'redpanda-properties-v26.2.4.json',
+      })
+      expect(warn).not.toHaveBeenCalled()
+    })
+
+    test('reads related_topics from datasets generated before see_also', () => {
+      const e = entry()
+      delete e.see_also
+      e.related_topics = ['xref:manage:iceberg/about.adoc[About]']
+      const meta = metaOf(convertWith(catalog([attachment('streaming', '26.2', 'v26.2.1', { 'redpanda.iceberg.mode': e })]), pageFile('streaming', '26.2')))
+      expect(meta.see_also).toEqual([{ href: '/streaming/26.2/manage/iceberg/about/', text: 'About' }])
+    })
+
+    test('warns, naming page, version and property, when the version\'s data lacks the property', () => {
+      const html = convertWith(catalog([attachment('streaming', '26.2', 'v26.2.4', { other: entry({ name: 'other' }) })]), pageFile('streaming', '26.2'))
+      expect(html).toContain(macro.MOUNT_ATTRIBUTE)
+      expect(html).not.toContain('data-property-meta')
+      expect(messages()).toMatch(/^ROOT\/pages\/iceberg\.adoc: redpanda\.iceberg\.mode is not in redpanda-properties-v26\.2\.4\.json, the property data for streaming 26\.2/)
+    })
+
+    // Borrowing a neighbouring release's description would describe a grammar
+    // this page's release does not have.
+    test('warns and emits nothing when no dataset covers the page\'s series', () => {
+      const html = convertWith(catalog([attachment('streaming', '26.2', 'v26.2.4', { 'redpanda.iceberg.mode': entry() })]), pageFile('streaming', '26.1'))
+      expect(html).not.toContain('data-property-meta')
+      expect(messages()).toMatch(/no redpanda-properties-<tag>\.json covers streaming 26\.1/)
+    })
+
+    test('warns once per page however many explorers it has', () => {
+      convertWith(catalog([]), pageFile('streaming', '26.1'), '[iceberg-explorer]\n--\n--\n\n[iceberg-explorer]\n--\n--')
+      expect(warn.mock.calls.filter((c) => /covers/.test(c.join(' ')))).toHaveLength(1)
+    })
+
+    test('a Cloud page uses the newest GA streaming data and carries cloud_supported', () => {
+      const html = convertWith(catalog([
+        attachment('streaming', '26.2', 'v26.2.4', { 'redpanda.iceberg.mode': entry() }),
+        attachment('streaming', '26.2', 'v26.3.1-rc1', { 'redpanda.iceberg.mode': entry({ description: 'RC.' }) }),
+      ], { cloud: true }), pageFile('cloud', ''))
+      const meta = metaOf(html)
+      expect(meta.source).toBe('redpanda-properties-v26.2.4.json')
+      expect(meta.cloud_supported).toBeNull()
+      // The xref is relative to the dataset's component, so a Cloud page that
+      // lacks the target links to the self-managed page.
+      expect(meta.see_also[0].href).toBe('/streaming/26.2/manage/iceberg/specify-iceberg-schema/#modes')
+    })
+
+    test('drops, and reports, a see_also entry that resolves to no page', () => {
+      const html = convertWith(catalog([attachment('streaming', '26.2', 'v26.2.4', {
+        'redpanda.iceberg.mode': entry({ see_also: ['xref:manage:gone.adoc[Gone]', 'https://example.com/x[Example]'] }),
+      })]), pageFile('streaming', '26.2'))
+      expect(metaOf(html).see_also).toEqual([{ href: 'https://example.com/x', text: 'Example' }])
+      expect(messages()).toMatch(/see_also entry "xref:manage:gone\.adoc\[Gone\]" .* does not resolve to a page/)
+    })
+
+    test('emits no metadata outside Antora', () => {
+      expect(convert('[iceberg-explorer]\n--\n--')).not.toContain('data-property-meta')
     })
   })
 

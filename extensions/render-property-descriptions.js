@@ -384,3 +384,8 @@ function render (source, hostPage, contentCatalog, siteAsciiDocConfig) {
   if (blocks.length === 1 && blocks[0].getContext() === 'paragraph') return blocks[0].getContent()
   return doc.convert()
 }
+
+// Shared with the iceberg-explorer macro, which renders one property's
+// description and see_also links at conversion time.
+module.exports.render = render
+module.exports.convertXref = convertXref
