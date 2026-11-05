@@ -33,7 +33,10 @@ const path = require('path')
  * Links are checked against the built site only: external links, `mailto:`
  * and the like are ignored, and a link into a path outside every link root,
  * or into a link root the build does not contain (a trimmed build), is counted
- * as unchecked, never as a finding.
+ * as unchecked, never as a finding. A glossterm link that is only a fragment
+ * (`#pipeline`) is counted as unchecked too: the glossterm macro writes one
+ * when the build has no glossary page, as a trimmed build without the home
+ * component does, and the published site links the term to that page.
  *
  * Only the page body (`article.doc`) is scanned, so the site navigation and
  * footer never count. Findings are reported per page; the command exits 0
@@ -252,6 +255,10 @@ function checkHtml (html, { contextChars = DEFAULTS.contextChars, maxSamples = D
     if (!href || href === '#') return
     const label = `${$(a).text().replace(/\s+/g, ' ').trim()} -> ${href}`.trim()
     if (href.startsWith('#')) {
+      if (hasClass(a, 'glossary-term')) {
+        links.unchecked++
+        return
+      }
       links.internal++
       if (!ids.has(safeDecode(href.slice(1)))) add('broken-anchor', label)
       return
