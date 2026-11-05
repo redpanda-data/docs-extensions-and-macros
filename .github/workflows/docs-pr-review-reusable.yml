@@ -329,6 +329,11 @@ jobs:
       # exported (DOC_TEAM_LOGINS too: the gate reads vars.DOC_TEAM_LOGINS,
       # not this copy) and, whenever this block tried the role, the AWS
       # credentials, before the next step.
+      # id-token: write puts ACTIONS_ID_TOKEN_REQUEST_URL/_TOKEN into every
+      # step of this job, and the later steps parse PR data (comments,
+      # reviews, preview pages, review artifacts). So each later run step
+      # unsets them first: a parsing bug can then never mint an OIDC token,
+      # assume the repo's role and read the secrets granted to it.
       - name: Assume the OIDC role for the App credential
         id: app_aws
         if: steps.pin.outputs.ok == 'true' && github.repository != 'redpanda-data/docs-team-standards'
@@ -423,6 +428,7 @@ jobs:
           EVENT_ACTION: ${{ github.event.action }}
           EVENT_LABEL: ${{ github.event.label.name }}
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN   # see the App-credential block
           set -euo pipefail
           echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
           gh api "repos/$R/pulls/$PR" > "$RUNNER_TEMP/pr.json"
@@ -452,6 +458,7 @@ jobs:
           SKIP_BRANCHES: ${{ inputs.skip_branch_patterns }}
           SKIP_TITLES: ${{ inputs.skip_title_patterns }}
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN   # see the App-credential block
           set -euo pipefail
 
           if [[ -s "$RUNNER_TEMP/pr.json" ]]; then
@@ -615,6 +622,7 @@ jobs:
           HEAD_REVIEWED: ${{ steps.eval.outputs.head_reviewed }}
           SCOPE_OK: ${{ steps.request.outputs.scope_ok }}
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN   # see the App-credential block
           set -euo pipefail
           # MIRROR: the eval and scope steps each define set_pending (steps
           # cannot share a shell function). Keep the two copies identical.
@@ -1837,6 +1845,11 @@ jobs:
       # exported (DOC_TEAM_LOGINS too: the gate reads vars.DOC_TEAM_LOGINS,
       # not this copy) and, whenever this block tried the role, the AWS
       # credentials, before the next step.
+      # id-token: write puts ACTIONS_ID_TOKEN_REQUEST_URL/_TOKEN into every
+      # step of this job, and the later steps parse PR data (comments,
+      # reviews, preview pages, review artifacts). So each later run step
+      # unsets them first: a parsing bug can then never mint an OIDC token,
+      # assume the repo's role and read the secrets granted to it.
       - name: Assume the OIDC role for the App credential
         id: app_aws
         if: github.repository != 'redpanda-data/docs-team-standards'
@@ -1946,6 +1959,7 @@ jobs:
           R: ${{ github.repository }}
           PREVIEW_PATH_PREFIX: ${{ vars.PREVIEW_PATH_PREFIX }}
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN   # see the App-credential block
           bash .standards/scripts/preview-links.sh "$R" "$PR" preview-links.md || : > preview-links.md
 
       # Deterministic checks (scripts/pr-checks.py): the preview pages, the
@@ -1962,6 +1976,7 @@ jobs:
           PR: ${{ inputs.pr_number }}
           R: ${{ github.repository }}
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN   # see the App-credential block
           if [[ ! -f .standards/scripts/pr-checks.py ]]; then
             echo "result=skipped" >> "$GITHUB_OUTPUT"; exit 0
           fi
@@ -1984,6 +1999,7 @@ jobs:
       # a review branch.
       - name: Read the previous report
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN   # see the App-credential block
           if [[ -s results/prev-report/prev-comment.json ]]; then
             cp results/prev-report/prev-comment.json prev-comment.json
           else
@@ -1998,6 +2014,7 @@ jobs:
       # the artifact as a review branch.
       - name: Earlier blockers
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN   # see the App-credential block
           if [[ -f results/review-scope/prior-blockers.json ]]; then
             cp results/review-scope/prior-blockers.json prior-blockers.json
           else
@@ -2029,6 +2046,7 @@ jobs:
           RESULT_PR_CHECKS: ${{ steps.prchecks.outputs.result }}
           PREV_COMMENT_FILE: prev-comment.md
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN   # see the App-credential block
           set -uo pipefail
           PREV_COMMENT_URL=$(cat prev-comment-url.txt 2>/dev/null || true)
           export PREV_COMMENT_URL
@@ -2170,6 +2188,7 @@ jobs:
       - name: Preview links in the run summary (no comment posted)
         if: steps.verdict.outputs.post_comment == 'false'
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN   # see the App-credential block
           if [[ -s preview-links.md ]]; then
             { echo "### 🔍 Preview pages"; echo; cat preview-links.md; } >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -2184,6 +2203,7 @@ jobs:
           DESCRIPTION: ${{ steps.verdict.outputs.description }}
           LABELS: ${{ steps.verdict.outputs.labels }}
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN   # see the App-credential block
           set -euo pipefail
           if [[ -n "${LABELS:-}" ]]; then
             # gh api, not `gh pr edit --add-label`: pr edit trips on the
@@ -2239,6 +2259,7 @@ jobs:
           STATE: ${{ steps.verdict.outputs.state }}
           WITHHELD: ${{ steps.verdict.outputs.approval_withheld }}
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN   # see the App-credential block
           set -euo pipefail
           MARK='<!-- docs-review:approval -->'
           approval_failed() {
