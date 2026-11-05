@@ -91,6 +91,25 @@ describe('iceberg-explorer macro', () => {
       expect(mounted).toContain(`class="${macro.MOUNT_CLASS}"`)
     })
 
+    // Contract 2: docs-ui refuses a mount whose version it does not know, and
+    // picks the property spec from data-property.
+    test('emits contract 2 with the property it configures', () => {
+      expect(macro.MOUNT_CONTRACT_VERSION).toBe('2')
+      expect(macro.MOUNT_PROPERTY).toBe('redpanda.iceberg.mode')
+      const html = convert('[iceberg-explorer]\n--\n--', { 'page-version': '26.2' })
+      expect(html).toMatch(
+        /<div class="iceberg-explorer-mount" data-iceberg-explorer="2" data-property="redpanda\.iceberg\.mode" data-version="26\.2">/
+      )
+    })
+
+    // docs-ui never read data-defaults, so contract 2 does not emit it.
+    test.each([
+      ['an empty block', '--\n--'],
+      ['a JSON body', '----\n{"config":"value:mode=schema_latest","schema":{}}\n----'],
+    ])('never emits data-defaults for %s', (_label, body) => {
+      expect(convert(`[iceberg-explorer]\n${body}`)).not.toContain('data-defaults')
+    })
+
     test('the mount selector keys on an attribute, not on a class name', () => {
       expect(macro.MOUNT_SELECTOR).toBe(`[${macro.MOUNT_ATTRIBUTE}]`)
       expect(macro.MOUNT_ATTRIBUTE.startsWith('data-')).toBe(true)
@@ -101,7 +120,7 @@ describe('iceberg-explorer macro', () => {
     test('emits a hydration mount point for an empty open block', () => {
       const html = convert('[iceberg-explorer]\n--\n--')
       expect(html).toContain(`class="${macro.MOUNT_CLASS}"`)
-      expect(html).toContain(`${macro.MOUNT_ATTRIBUTE}="1"`)
+      expect(html).toContain(`${macro.MOUNT_ATTRIBUTE}="2"`)
     })
 
     // The failure readers actually hit is JS running fine with the docs-ui
@@ -134,13 +153,16 @@ describe('iceberg-explorer macro', () => {
       expect(html).toContain('data-config="key:mode=binary;value:mode=binary"')
     })
 
-    test('embeds valid JSON block-body defaults as an escaped attribute', () => {
+    test('passes the config from a JSON block body', () => {
       const body = JSON.stringify({ config: 'value:mode=schema_latest' })
       const html = convert(`[iceberg-explorer]\n----\n${body}\n----`)
-      expect(html).toContain('data-defaults=')
-      // JSON quotes must be attribute-escaped, never raw, to keep valid HTML.
-      expect(html).toContain('&quot;')
-      expect(html).not.toContain('data-defaults="{"')
+      expect(html).toContain('data-config="value:mode=schema_latest"')
+    })
+
+    test('the config attribute wins over the block body', () => {
+      const body = JSON.stringify({ config: 'value_schema_id_prefix' })
+      const html = convert(`[iceberg-explorer,config=key_value]\n----\n${body}\n----`)
+      expect(html).toContain('data-config="key_value"')
     })
 
     // Every string below is author-controlled and lands inside a double-quoted
@@ -162,7 +184,7 @@ describe('iceberg-explorer macro', () => {
       const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const html = convert('[iceberg-explorer]\n----\nnot json\n----')
       expect(html).toContain(`class="${macro.MOUNT_CLASS}"`)
-      expect(html).not.toContain('data-defaults=')
+      expect(html).not.toContain('data-config=')
       expect(warn).toHaveBeenCalled()
       warn.mockRestore()
     })
@@ -188,7 +210,7 @@ describe('iceberg-explorer macro', () => {
 
     // JSON.parse accepts scalars and arrays, and docs-ui reads .config off the
     // parsed value, so anything that is not an object is as unusable as a
-    // syntax error. It used to sail through as data-defaults="123".
+    // syntax error.
     test.each([
       ['a number', '123'],
       ['a string', '"hello"'],
@@ -196,8 +218,20 @@ describe('iceberg-explorer macro', () => {
     ])('rejects a JSON body that is %s', (_label, body) => {
       const html = convert(`[iceberg-explorer]\n----\n${body}\n----`)
       expect(html).toContain(macro.MOUNT_ATTRIBUTE)
-      expect(html).not.toContain('data-defaults=')
+      expect(html).not.toContain('data-config=')
       expect(messages()).toMatch(/must be a JSON object/)
+    })
+
+    test('warns about block body keys other than config', () => {
+      const html = convert('[iceberg-explorer]\n----\n{"config":"key_value","schema":{},"record":1}\n----')
+      expect(html).toContain('data-config="key_value"')
+      expect(messages()).toMatch(/"schema", "record" are not supported and are ignored/)
+    })
+
+    test('warns about a block body config that is not a string', () => {
+      const html = convert('[iceberg-explorer]\n----\n{"config":42}\n----')
+      expect(html).not.toContain('data-config=')
+      expect(messages()).toMatch(/"config" must be a string, not a number/)
     })
 
     test('names the page in build warnings so they can be traced', () => {

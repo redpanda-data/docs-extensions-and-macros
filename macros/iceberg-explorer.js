@@ -34,7 +34,7 @@ const logger = require('@antora/logger')('iceberg-explorer-macro');
  *   --
  *   --
  *
- * or with author-supplied defaults (JSON) as the block body:
+ * or with an author-supplied initial config (JSON) as the block body:
  *
  *   [iceberg-explorer]
  *   ----
@@ -43,13 +43,13 @@ const logger = require('@antora/logger')('iceberg-explorer-macro');
  *   }
  *   ----
  *
- * The explorer module reads only the "config" key (docs-ui
- * src/js/27-iceberg-explorer.js), rendering its own sample schema and record.
- * Any other key is forwarded verbatim in `data-defaults` and ignored today, so
- * do not advertise author-supplied schemas or records as supported.
+ * Only the "config" key is read. docs-ui renders its own sample schema and
+ * record, so any other key draws a build warning and is dropped.
  *
  * The block reads the page's component version and stamps it onto the mount
- * point so the UI can fetch the engine build that matches the doc version.
+ * point as `data-version`. The version decides which `redpanda.iceberg.mode`
+ * grammar applies (the section format exists from v26.2.1) and which engine
+ * build the UI loads.
  *
  * @param {Registry} registry - The Antora/Asciidoctor extension registry.
  * @param {Object} context - The Antora context (unused today; kept for parity
@@ -61,7 +61,13 @@ const logger = require('@antora/logger')('iceberg-explorer-macro');
 const MOUNT_ATTRIBUTE = 'data-iceberg-explorer';
 // Bumped only if the emitted attributes change shape, so a docs-ui build can
 // refuse a mount point it does not understand.
-const MOUNT_CONTRACT_VERSION = '1';
+//   1: data-version, data-config, data-defaults, data-engine-base.
+//   2: adds data-property; drops data-defaults; data-config is validated at
+//      build time against the grammar for data-version.
+const MOUNT_CONTRACT_VERSION = '2';
+// The topic property the explorer configures. docs-ui picks its spec by this
+// attribute, so the contract can carry another property later.
+const MOUNT_PROPERTY = 'redpanda.iceberg.mode';
 // Styling hook only. Deliberately NOT the block name: see MOUNT CONTRACT above.
 const MOUNT_CLASS = 'iceberg-explorer-mount';
 const MOUNT_SELECTOR = `[${MOUNT_ATTRIBUTE}]`;
@@ -89,7 +95,7 @@ function defineBlock (registry) {
     const self = this;
     self.named('iceberg-explorer');
     // Accept an empty open block (`--`) or a listing/literal/pass block whose
-    // body carries author-supplied JSON defaults. `paragraph` is deliberately
+    // body carries an author-supplied JSON config. `paragraph` is deliberately
     // absent: the processor discards the body, so registering the paragraph
     // context made `[iceberg-explorer]` above ordinary prose delete that
     // paragraph from the published page.
@@ -107,11 +113,11 @@ function defineBlock (registry) {
         logger.warn(`${page}: ${message}`);
       };
 
-      // Author-supplied defaults (optional). Validate that the body is a JSON
-      // object so a typo surfaces at build time rather than silently shipping
-      // bad data. docs-ui reads keys off the parsed value, so a scalar or an
+      // Author-supplied initial config (optional). Validate that the body is a
+      // JSON object so a typo surfaces at build time rather than silently
+      // shipping bad data. Only its "config" key is read, so a scalar or an
       // array is as unusable as a syntax error, and JSON.parse accepts both.
-      let defaults = null;
+      let bodyConfig = '';
       const body = reader.getLines().join('\n').trim();
       if (body) {
         let parsed;
@@ -132,7 +138,20 @@ function defineBlock (registry) {
               'Rendering the explorer with built-in defaults instead.'
             );
           } else {
-            defaults = parsed;
+            // Contract 1 forwarded the whole body as data-defaults, which
+            // docs-ui never read. Say so instead of dropping keys silently.
+            const ignored = Object.keys(parsed).filter((k) => k !== 'config');
+            if (ignored.length) {
+              warn(
+                `block body key(s) ${ignored.map((k) => `"${k}"`).join(', ')} are not supported and are ignored. ` +
+                'The explorer reads only "config".'
+              );
+            }
+            if (typeof parsed.config === 'string') {
+              bodyConfig = parsed.config;
+            } else if ('config' in parsed) {
+              warn(`block body "config" must be a string, not ${describeJson(parsed.config)}. Ignoring it.`);
+            }
           }
         }
       }
@@ -148,13 +167,10 @@ function defineBlock (registry) {
       // Optional named attributes let an author pin behavior without a body.
       // `config` sets the initial DSL string; `height` overrides the min
       // height; `engine-base` overrides where docs-ui fetches the engine from.
-      const initialConfig = attrs.config || (defaults && defaults.config) || '';
+      const initialConfig = attrs.config || bodyConfig;
       const height = cssLength(attrs.height, warn);
       const engineBase = rootRelativePath(attrs['engine-base'], warn);
 
-      const dataDefaults = defaults
-        ? escapeHtml(JSON.stringify(defaults))
-        : '';
       const dataConfig = initialConfig ? escapeHtml(initialConfig) : '';
       const styleAttr = height ? ` style="min-height:${height}"` : '';
       const versionAttr = version ? ` data-version="${escapeHtml(version)}"` : '';
@@ -167,7 +183,7 @@ function defineBlock (registry) {
       // plain markup, not <noscript>, precisely because the common failure is
       // JS running fine with the module missing, which <noscript> hides.
       const html = `
-<div class="${MOUNT_CLASS}" ${MOUNT_ATTRIBUTE}="${MOUNT_CONTRACT_VERSION}"${versionAttr}${engineAttr}${dataConfig ? ` data-config="${dataConfig}"` : ''}${dataDefaults ? ` data-defaults="${dataDefaults}"` : ''}${styleAttr}>
+<div class="${MOUNT_CLASS}" ${MOUNT_ATTRIBUTE}="${MOUNT_CONTRACT_VERSION}" data-property="${MOUNT_PROPERTY}"${versionAttr}${engineAttr}${dataConfig ? ` data-config="${dataConfig}"` : ''}${styleAttr}>
   <p class="iceberg-explorer-fallback">Interactive Iceberg Mode Explorer. If this text is still here, the explorer could not load: it needs JavaScript and a docs-ui build that includes the explorer module. See the Iceberg topic configuration reference for the equivalent settings.</p>
 </div>`;
 
@@ -237,6 +253,7 @@ function rootRelativePath (raw, warn) {
 
 module.exports.MOUNT_ATTRIBUTE = MOUNT_ATTRIBUTE;
 module.exports.MOUNT_CONTRACT_VERSION = MOUNT_CONTRACT_VERSION;
+module.exports.MOUNT_PROPERTY = MOUNT_PROPERTY;
 module.exports.MOUNT_CLASS = MOUNT_CLASS;
 module.exports.MOUNT_SELECTOR = MOUNT_SELECTOR;
 module.exports.rootRelativePath = rootRelativePath;
