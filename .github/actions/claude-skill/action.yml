@@ -829,6 +829,16 @@ runs:
           echo "claude_failed=true" >> "$GITHUB_OUTPUT"
           exit 0
         }
+        # An attempt that exited 0 with no verdict finished: what it wrote, it
+        # wrote on purpose (the release-notes report.md, the screenshot pass's
+        # findings.md about an old plugin pin). Report it as unavailable, but
+        # keep its files. clear_output is for attempts that died partway.
+        no_verdict() {
+          echo "::warning::Claude ran but wrote no verdict.json — treating as unavailable"
+          echo "claude_failed=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        }
+        give_up() { if (( $1 == 200 )); then no_verdict; else soft_fail; fi; }
 
         run_claude() {
           clear_output
@@ -845,6 +855,9 @@ runs:
         # these fields: the result text can quote the run's inputs, which
         # can be private, and job logs are wider-read than artifacts.
         log_run() {
+          # An attempt killed by its timeout leaves an empty file, and jq
+          # prints nothing for empty input.
+          [[ -s "$OUTPUT_DIR/claude-run.json" ]] || { echo "Claude run: no readable claude-run.json"; return; }
           jq -r '"Claude run: subtype=\(.subtype // "?") is_error=\(if has("is_error") then .is_error else "?" end) turns=\(.num_turns // "?") duration_ms=\(.duration_ms // "?")"' \
             "$OUTPUT_DIR/claude-run.json" 2>/dev/null || echo "Claude run: no readable claude-run.json"
         }
@@ -871,22 +884,22 @@ runs:
           fi
           if (( $(remaining) >= MIN_RETRY_SECS )); then
             echo "::warning::Claude run $why, retrying once with $(remaining)s left"
-            if ! attempt; then
+            if attempt; then
+              :
+            else
+              rc=$?
               log_run
-              # Soft-fail: the aggregate job turns a missing verdict.json into
+              # The aggregate job turns a missing verdict.json into
               # "automated review unavailable — human review required". Never
               # let an infra failure masquerade as a review verdict.
-              soft_fail
+              give_up "$rc"
             fi
           else
             echo "::warning::Claude run $why and under ${MIN_RETRY_SECS}s of the ${TIMEOUT_MIN}m budget remain — not retrying"
-            soft_fail
+            give_up "$rc"
           fi
         fi
 
-        if [[ ! -f "$OUTPUT_DIR/verdict.json" ]]; then
-          echo "::warning::Claude ran but wrote no verdict.json — treating as unavailable"
-          echo "claude_failed=true" >> "$GITHUB_OUTPUT"
-        else
-          echo "claude_failed=false" >> "$GITHUB_OUTPUT"
-        fi
+        # Every path that reaches here has a verdict.json from an attempt
+        # that finished.
+        echo "claude_failed=false" >> "$GITHUB_OUTPUT"
