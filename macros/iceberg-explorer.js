@@ -49,8 +49,8 @@ const logger = require('@antora/logger')('iceberg-explorer-macro');
  *
  * The block reads the page's component version and stamps it onto the mount
  * point as `data-version`. The version decides which `redpanda.iceberg.mode`
- * grammar applies (the section format exists from v26.2.1) and which engine
- * build the UI loads.
+ * grammar applies (generated per release from Redpanda's source, see
+ * tools/iceberg-mode/generate.js) and which engine build the UI loads.
  *
  * @param {Registry} registry - The Antora/Asciidoctor extension registry.
  * @param {Object} context - The Antora context (unused today; kept for parity
@@ -197,7 +197,8 @@ function defineBlock (registry) {
 
 /**
  * Check the author's config with Redpanda's own grammar for the page's
- * version (extension-utils/iceberg-mode.js). An invalid value is still
+ * version (extension-utils/iceberg-mode.js, which reads which release accepts
+ * what from the generated extension-utils/iceberg-mode-releases.json). An invalid value is still
  * emitted unchanged: docs-ui shows the problem in the explorer, and replacing
  * it with defaults would publish a different config than the page's prose
  * describes. The build warning is how the author finds out first.
@@ -208,6 +209,10 @@ function defineBlock (registry) {
 function validateConfig (config, version, warn) {
   const result = icebergMode.validateIcebergMode(config, { version });
   if (result.ok) return;
+  if (result.unverified) {
+    warn(`config="${config}" was not checked: ${result.error}.`);
+    return;
+  }
   const forVersion = version ? ` for version ${version}` : '';
   const detail = result.reason ? `${result.error} (${result.reason})` : result.error;
   warn(

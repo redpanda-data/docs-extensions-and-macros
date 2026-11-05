@@ -376,6 +376,18 @@ describe('iceberg-explorer macro', () => {
         convert(block('value:mode=string,layout=flat'))
         expect(warn).not.toHaveBeenCalled()
       })
+
+      // From the generated release data: 24.3's parser has no value_schema_latest.
+      test('a 24.3 page warns on value_schema_latest, which needs v25.1.1', () => {
+        convert(block('value_schema_latest'), { 'page-version': '24.3' })
+        expect(messages()).toMatch(/value_schema_latest requires Redpanda v25\.1\.1 or later/)
+      })
+
+      test('a version with no release data warns that the value was not checked', () => {
+        const html = convert(block('key_value'), { 'page-version': '99.1' })
+        expect(html).toContain('data-config="key_value"')
+        expect(messages()).toMatch(/config="key_value" was not checked: .*no Redpanda release for version 99\.1/)
+      })
     })
   })
 
