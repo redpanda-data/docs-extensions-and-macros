@@ -3,3 +3,6 @@
 # real input: -text stops git from normalizing the EOLs, and -whitespace stops
 # `git diff --check` from flagging the carriage returns as trailing whitespace.
 __tests__/fixtures/release-notes/*-streaming-enterprise.md -text -whitespace
+# Copied from redpanda-data/docs-team-standards by the sync-dts-vendor
+# workflow. Marked generated so PR diffs collapse it; edit the source instead.
+vendor/dts/** linguist-generated=true

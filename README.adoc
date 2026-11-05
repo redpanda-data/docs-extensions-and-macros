@@ -70,6 +70,26 @@ A Model Context Protocol server that exposes doc-tools to Claude Code:
 * Get version information
 * Review generated content for quality
 
+=== Source checks
+
+`doc-tools check-sources` checks the `// Source:` comments that record where a claim on a page came from. Put the comment directly above the claim:
+
+[,asciidoc]
+----
+// Source: redpanda-data/streaming-enterprise:src/v/config/configuration.cc:1086-1094 "7 * 24h"
+The default retention time is seven days.
+----
+
+The marker is case-insensitive, so `// source:` works too, and a parenthesized aside before the colon is allowed, for example `// Source (verified 2026-10-20):`. After the marker comes a ref, an optional quote in double quotes, and nothing else. A ref is one of:
+
+* `redpanda-data/<repo>[@<git-ref>]:<path>:<line>[-<line>]`: the cited lines must exist, and the optional quote in double quotes must appear in them (whitespace is normalized). Without `@<git-ref>`, the repo's default branch is used.
+* `redpanda-data/<repo>#<number>`: the pull request or issue must exist. Its state is reported.
+* An uppercase Jira key, such as `DOC-1234`, or an `https://` URL: syntax only. Add `--check-urls` to HEAD-check URLs.
+
+When the text after the marker does not start with a ref, the comment is free-form provenance prose. It is reported as an `unchecked-note` (info), counted, and never fails the run. An `https://` URL or a Jira-style key followed by prose, such as `KIP-848 consumer group protocol`, is also a note. Prefer a ref: only refs are verified. A comment that starts with a ref but has other text after it is malformed, so put prose on its own comment line.
+
+Malformed comments, missing files, line ranges past the end of the file, and quotes that are no longer in the cited lines are errors and exit 1. When a quote has moved, the message says where it is now. A repository that does not exist is an error when the token is a classic token with the `repo` scope. For any other token, such as a fine-grained token or a GitHub App token limited to selected repositories, a 404 could be a private repo outside that set, so it is a warning. A fetch that fails for auth, rate-limit, timeout, or network reasons is a warning, never a silent pass. A `--files` glob that matches no page exits 2, so a mistyped pattern can't pass by checking nothing. The summary line counts the comments checked, the comments that failed, and the unchecked notes. Run `npx doc-tools check-sources --diff origin/main` to check only the pages changed on a branch. See link:CLI_REFERENCE.adoc#check-sources[CLI reference].
+
 == Support
 
 Report issues at {url-project}/issues

@@ -153,3 +153,44 @@ describe('publish workflow: release check (executed)', () => {
     expect(r.status).toBe(1)
   })
 })
+
+describe('publish workflow: wait until npm serves the version (executed)', () => {
+  const steps = workflow.jobs.publish.steps
+  const step = steps.find((s) => s.id === 'served')
+  // npm prints the version once the registry serves it. calls counts lookups,
+  // so a stub can start serving on the Nth one.
+  // The step's env resolves VERSION to the recovery tag (v<version>) when one
+  // is given, else to release-please's version.
+  const run = ({ servedFrom = 1, tag = '', version = '5.57.0' }) => execRun(step, {
+    env: { VERSION: tag || version },
+    files: { 'package.json': JSON.stringify({ name: '@redpanda-data/docs-extensions-and-macros', version: '5.57.0' }) },
+    stubs: {
+      npm: `n=$(( $(cat calls 2>/dev/null || echo 0) + 1 )); echo $n > calls; echo "$*" >> args; [ $n -ge ${servedFrom} ] && echo 5.57.0; exit 0`,
+      sleep: 'exit 0'
+    }
+  })
+
+  test('it runs after the publish, so dispatch waits for it', () => {
+    const publishAt = steps.findIndex((s) => (s.uses || '').startsWith('JS-DevTools/npm-publish@'))
+    expect(steps.indexOf(step)).toBeGreaterThan(publishAt)
+    expect(workflow.jobs.dispatch.needs).toBe('publish')
+  })
+
+  test('it succeeds once npm serves the version', () => {
+    const r = run({ servedFrom: 3 })
+    expect(r.status).toBe(0)
+    expect(r.all).toMatch(/serves @redpanda-data\/docs-extensions-and-macros@5\.57\.0 \(attempt 3\)/)
+  })
+
+  test('it looks up the exact version, also for a recovery tag', () => {
+    const r = run({ tag: 'v5.57.0', version: '' })
+    expect(r.status).toBe(0)
+    expect(r.read('args')).toMatch(/^view @redpanda-data\/docs-extensions-and-macros@5\.57\.0 version$/m)
+  })
+
+  test('it fails, so dispatch does not run, when npm never serves the version', () => {
+    const r = run({ servedFrom: 999 })
+    expect(r.status).toBe(1)
+    expect(r.all).toMatch(/still does not serve .*@5\.57\.0 after 10 minutes/)
+  })
+})

@@ -1,0 +1,8 @@
+# Checks: more than three learning objectives
+extends: occurrence
+message: "Use at most three learning objectives per page."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/content-architecture.md#page-metadata
+level: error
+scope: raw
+max: 3
+token: '(?m)^:learning-objective-\d+:'

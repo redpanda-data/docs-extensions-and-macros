@@ -1,0 +1,8 @@
+# Checks: '(s)' plurals
+extends: existence
+message: "Don't use '(s)' for an optional plural. Use the plural."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/terminology.md#general-word-list
+level: error
+nonword: true
+tokens:
+  - '[a-z]\(s\)'
