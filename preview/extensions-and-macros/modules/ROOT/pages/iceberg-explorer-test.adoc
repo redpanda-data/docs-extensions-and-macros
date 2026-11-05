@@ -15,10 +15,10 @@ The simplest usage renders the explorer with built-in sample data:
 --
 --
 
-== With author-supplied defaults
+== With a config in the block body
 
-An author can seed the initial config by passing a JSON body. The explorer reads
-the `config` key only; other keys are forwarded but ignored.
+An author can seed the initial config by passing a JSON body. The macro reads
+the `config` key only and warns about any other key.
 
 [iceberg-explorer]
 ----

@@ -17,7 +17,7 @@
  *
  * Two grammars exist:
  *
- * - Legacy names, accepted by every release: `disabled`, `key_value`,
+ * - Legacy names, the only form before v26.2.1 and still accepted after it: `disabled`, `key_value`,
  *   `value_schema_id_prefix`, and `value_schema_latest` with optional
  *   `:subject=<s>,protobuf_name=<p>` options.
  * - The section format, first released in v26.2.1:
