@@ -320,8 +320,10 @@ jobs:
       # token).
       # MIRROR (claude-skill's plugin checkout, and aggregate): the App
       # credential comes from Secrets Manager (devprod-infra#938) and falls
-      # back to docs_app_id / docs_app_private_key. The scrub empties the
-      # private key and the AWS credentials before the next step.
+      # back to docs_app_id / docs_app_private_key. The scrub empties every
+      # key the fetch exported (DOC_TEAM_LOGINS too: the gate reads
+      # vars.DOC_TEAM_LOGINS, not this copy) and the AWS credentials before
+      # the next step.
       - name: Assume the OIDC role for the App credential
         id: app_aws
         if: steps.pin.outputs.ok == 'true' && github.repository != 'redpanda-data/docs-team-standards'
@@ -355,7 +357,7 @@ jobs:
       - name: Scrub the App credential
         if: always()
         run: |
-          for v in DOCS_APP_ID DOCS_APP_PRIVATE_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+          for v in DOCS_APP_ID DOCS_APP_PRIVATE_KEY DOC_TEAM_LOGINS AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
             echo "$v=" >> "$GITHUB_ENV"
           done
 
@@ -1797,8 +1799,10 @@ jobs:
       # docs-team-standards itself and github.token suffices.
       # MIRROR (claude-skill's plugin checkout, and gate): the App
       # credential comes from Secrets Manager (devprod-infra#938) and falls
-      # back to docs_app_id / docs_app_private_key. The scrub empties the
-      # private key and the AWS credentials before the next step.
+      # back to docs_app_id / docs_app_private_key. The scrub empties every
+      # key the fetch exported (DOC_TEAM_LOGINS too: the gate reads
+      # vars.DOC_TEAM_LOGINS, not this copy) and the AWS credentials before
+      # the next step.
       - name: Assume the OIDC role for the App credential
         id: app_aws
         if: github.repository != 'redpanda-data/docs-team-standards'
@@ -1852,7 +1856,7 @@ jobs:
       - name: Scrub the App credential
         if: always()
         run: |
-          for v in DOCS_APP_ID DOCS_APP_PRIVATE_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+          for v in DOCS_APP_ID DOCS_APP_PRIVATE_KEY DOC_TEAM_LOGINS AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
             echo "$v=" >> "$GITHUB_ENV"
           done
 

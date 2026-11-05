@@ -300,9 +300,11 @@ runs:
     # missing. Both fetch steps are continue-on-error, so a repo without the
     # grant, or a run before the secret's value is set, uses the inputs as
     # before. docs-team-standards needs no App: github.token clones itself.
-    # The scrub right after the mint empties the private key and the AWS
-    # credentials before the npm install and everything after it; the ADP
-    # chain below assumes the role again.
+    # The scrub right after the mint empties everything the fetch exported
+    # (the secret also carries DOC_TEAM_LOGINS, which nothing here reads;
+    # the workflow uses vars.DOC_TEAM_LOGINS) and the AWS credentials,
+    # before the npm install and everything after it. The ADP chain below
+    # assumes the role again.
     - name: Assume the OIDC role for the App credential
       id: app_aws
       if: github.repository != 'redpanda-data/docs-team-standards'
@@ -337,7 +339,7 @@ runs:
       if: always()
       shell: bash
       run: |
-        for v in DOCS_APP_ID DOCS_APP_PRIVATE_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+        for v in DOCS_APP_ID DOCS_APP_PRIVATE_KEY DOC_TEAM_LOGINS AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
           echo "$v=" >> "$GITHUB_ENV"
         done
 
