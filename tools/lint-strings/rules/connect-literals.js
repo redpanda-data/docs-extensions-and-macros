@@ -1,5 +1,7 @@
 'use strict'
 
+const { STANDARD } = require('../standards')
+
 /**
  * Two connect rules for text that reaches the page in the wrong form.
  *
@@ -105,6 +107,8 @@ const notAsciiDoc = (decl) => (decl.convention && decl.convention.verbatim_ascii
 const GO_SLICE_RULE = {
   name: 'connect-go-slice-format',
   description: 'A Go slice or map formatted with %v publishes Go syntax, such as [a b c]',
+  why: 'The page shows the list as Go prints it, in brackets with no commas, instead of as a readable list of values.',
+  standard: STANDARD.connect,
   severity: 'warning',
   // The slice is usually built at init time, so the string is
   // unverifiable; the finding comes from the source, not the text.
@@ -126,6 +130,8 @@ const GO_SLICE_RULE = {
 const QUOTED_FIELD_RULE = {
   name: 'connect-quoted-field-name',
   description: 'A field name in quotes instead of inline code',
+  why: 'Every other field name on the page is inline code, so a quoted one reads as an ordinary word and is harder to match to the config.',
+  standard: STANDARD.qualityBar,
   severity: 'warning',
   check: (decl) => {
     if (!decl.string || notAsciiDoc(decl)) return []
