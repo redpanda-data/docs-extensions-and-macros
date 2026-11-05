@@ -62,11 +62,16 @@ inputs:
       plugin checkout. docs-team-standards is PRIVATE: github.token is scoped
       to the calling repository, so in every caller other than
       docs-team-standards itself actions/checkout of the plugin 404s without
-      this. Leave empty only when the caller IS docs-team-standards.
+      an App token. The action reads the App credential from Secrets Manager
+      first (sdlc/prod/github/docs_automation_app) and uses this input only
+      when that fails, so it can stay empty once the org secret is gone.
     required: false
     default: ''
   plugin_app_private_key:
-    description: Private key for plugin_app_id (DOCS_APP_PRIVATE_KEY). Pass from secrets.
+    description: >
+      Private key for plugin_app_id (DOCS_APP_PRIVATE_KEY). Pass from
+      secrets. The fallback for the Secrets Manager credential, like
+      plugin_app_id.
     required: false
     default: ''
   aws_region:
@@ -286,16 +291,55 @@ runs:
     # scoped to that one repo with Contents: read — the narrowest credential
     # that can clone it. Minted here, consumed only by the checkout step,
     # never exported to the environment Claude runs in.
+    #
+    # MIRROR (gate and aggregate in docs-pr-review-reusable.yml): the App
+    # credential comes from Secrets Manager, sdlc/prod/github/docs_automation_app
+    # (devprod-infra#938, DEVPROD-5300), and falls back to the
+    # plugin_app_* inputs (the DOCS_APP_ID org variable and
+    # DOCS_APP_PRIVATE_KEY org secret) when the role or the secret is
+    # missing. Both fetch steps are continue-on-error, so a repo without the
+    # grant, or a run before the secret's value is set, uses the inputs as
+    # before. docs-team-standards needs no App: github.token clones itself.
+    # The scrub right after the mint empties the private key and the AWS
+    # credentials before the npm install and everything after it; the ADP
+    # chain below assumes the role again.
+    - name: Assume the OIDC role for the App credential
+      id: app_aws
+      if: github.repository != 'redpanda-data/docs-team-standards'
+      continue-on-error: true
+      uses: aws-actions/configure-aws-credentials@v6
+      with:
+        aws-region: ${{ inputs.aws_region }}
+        role-to-assume: arn:aws:iam::${{ inputs.aws_cred_account_id }}:role/${{ inputs.aws_role_name_prefix }}${{ github.event.repository.name }}
+
+    - name: Fetch the App credential
+      id: app_secret
+      if: steps.app_aws.outcome == 'success'
+      continue-on-error: true
+      uses: aws-actions/aws-secretsmanager-get-secrets@v3
+      with:
+        secret-ids: |
+          ,sdlc/prod/github/docs_automation_app
+        parse-json-secrets: true
+
     - name: Mint a read-only token for the plugin checkout
       id: plugin_token
-      if: inputs.plugin_app_id != ''
+      if: (env.DOCS_APP_ID || inputs.plugin_app_id) != ''
       uses: actions/create-github-app-token@v2
       with:
-        app-id: ${{ inputs.plugin_app_id }}
-        private-key: ${{ inputs.plugin_app_private_key }}
+        app-id: ${{ env.DOCS_APP_ID || inputs.plugin_app_id }}
+        private-key: ${{ env.DOCS_APP_PRIVATE_KEY || inputs.plugin_app_private_key }}
         owner: redpanda-data
         repositories: docs-team-standards
         permission-contents: read
+
+    - name: Scrub the App credential
+      if: always()
+      shell: bash
+      run: |
+        for v in DOCS_APP_ID DOCS_APP_PRIVATE_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+          echo "$v=" >> "$GITHUB_ENV"
+        done
 
     - uses: actions/checkout@v4
       with:
