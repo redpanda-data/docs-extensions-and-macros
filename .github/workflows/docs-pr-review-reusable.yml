@@ -341,6 +341,10 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ inputs.aws_region }}
+          # 3, not the default 12: with no OIDC token (a Dependabot run, say)
+          # the default backoff stalls the job for a minute or more before
+          # continue-on-error moves on. A transient STS failure still retries.
+          retry-max-attempts: 3
           role-to-assume: arn:aws:iam::${{ secrets.aws_cred_account_id }}:role/${{ inputs.aws_role_name_prefix }}${{ github.event.repository.name }}
 
       - name: Fetch the App credential
@@ -1849,7 +1853,10 @@ jobs:
       # step of this job, and the later steps parse PR data (comments,
       # reviews, preview pages, review artifacts). So each later run step
       # unsets them first: a parsing bug can then never mint an OIDC token,
-      # assume the repo's role and read the secrets granted to it.
+      # assume the repo's role and read the secrets granted to it. The one
+      # exception is "Post the review report" (actions/github-script, a uses:
+      # step that can't unset them). It gets its inputs through env and reads
+      # comment.md only as text.
       - name: Assume the OIDC role for the App credential
         id: app_aws
         if: github.repository != 'redpanda-data/docs-team-standards'
@@ -1857,6 +1864,10 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ inputs.aws_region }}
+          # 3, not the default 12: with no OIDC token (a Dependabot run, say)
+          # the default backoff stalls the job for a minute or more before
+          # continue-on-error moves on. A transient STS failure still retries.
+          retry-max-attempts: 3
           role-to-assume: arn:aws:iam::${{ secrets.aws_cred_account_id }}:role/${{ inputs.aws_role_name_prefix }}${{ github.event.repository.name }}
 
       - name: Fetch the App credential
