@@ -440,6 +440,18 @@ describe('seeding and freezing', () => {
       expect(lib.score([{ item: seItem('gate', 'no_change'), ...ev }]).abstention_recall).toBeNull()
     })
 
+    test('a description that declares a change opens the gate, as the workflow does', () => {
+      // Same frozen lint input as above: no declarations. The workflow opens
+      // the review for the declared change, so the item goes on to the pass
+      // (here it stops at the missing recording, past the gate).
+      const declared = { ...seItem('gate', 'needs_docs'), body: '## UX Changes\n\nClusters over 50 cores need a license.\n' }
+      const ev = runItem(declared, ctx())
+      expect(ev.status).toBe('HARNESS_ERROR')
+      expect(ev.notes[0]).toMatch(/no recording at/)
+      const bugOnly = { ...seItem('gate', 'needs_docs'), body: '## Release Notes\n\n### Bug Fixes\n\n* Fixed a crash.\n' }
+      expect(runItem(bugOnly, ctx()).status).toBe('GATE_CLOSED')
+    })
+
     test('a recording that holds a quota refusal is a harness error in replay', () => {
       const ev = runItem(seItem('poisoned', 'needs_docs'), ctx())
       expect(ev.status).toBe('HARNESS_ERROR')

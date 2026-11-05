@@ -3219,6 +3219,43 @@ programCli
   })
 
 /**
+ * declared-changes
+ *
+ * @description
+ * Read the user-facing change a PR author declares in the PR description:
+ * the UX Changes section, the User impact and why section, and Release Notes
+ * sub-sections other than Bug Fixes. Prints whether anything is declared,
+ * which sections declare it, and a hash of the text, and writes the text to
+ * a file for the doc-strings review to read. A PR whose diff changes no doc
+ * string still reaches the review's published-content check this way.
+ *
+ * @example
+ * npx doc-tools declared-changes --body-file pr-body.md --output pr-notes.md
+ *
+ * @exit 0 always: `{"declared":false}` means nothing is declared, including
+ * when the body file cannot be read.
+ */
+programCli
+  .command('declared-changes')
+  .description('Read the user-facing change a PR description declares (UX Changes, User impact and why, and non-bug-fix Release Notes) and print it as JSON')
+  .requiredOption('--body-file <file>', 'File holding the PR description')
+  .option('--output <file>', 'Write the declared text here when anything is declared')
+  .action((options) => {
+    const { declaredChanges } = require('../tools/declared-changes')
+    let body
+    try {
+      body = fs.readFileSync(options.bodyFile, 'utf8')
+    } catch (err) {
+      console.error(`Could not read ${options.bodyFile}; nothing declared: ${err.message}`)
+      console.log(JSON.stringify({ declared: false, sections: [], hash: null }))
+      return
+    }
+    const result = declaredChanges(body)
+    if (result.declared && options.output) fs.writeFileSync(options.output, result.text)
+    console.log(JSON.stringify({ declared: result.declared, sections: result.sections, hash: result.hash }))
+  })
+
+/**
  * doc-impact-recording
  *
  * @description
