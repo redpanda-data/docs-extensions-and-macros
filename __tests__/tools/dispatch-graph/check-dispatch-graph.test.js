@@ -359,6 +359,60 @@ describe('runCheck: scope and resolution', () => {
     expect(infoKinds(r)).toEqual(['unresolved-sender'])
   })
 
+  test('a fan-out sender counts for every typed listener of its type under the owner', async () => {
+    const api = fakeApi(
+      {
+        'redpanda-data/dts': { 'scan.yml': read('sender-fan-out.yml') },
+        'redpanda-data/docs': { 'review.yml': listener('fan-out-request') },
+        'redpanda-data/cloud-docs': { 'review.yml': listener('fan-out-request'), 'any.yml': read('listener-any-type.yml') },
+      },
+      {
+        'redpanda-data/dts/scan.yml': nRuns(5, 'success', 'schedule'),
+        'redpanda-data/docs/review.yml': nRuns(3, 'success'),
+        'redpanda-data/cloud-docs/review.yml': nRuns(3, 'success'),
+        'redpanda-data/cloud-docs/any.yml': nRuns(3, 'success'),
+      },
+    )
+    const r = await runCheck({ repos: [DOCS('dts'), DOCS('docs'), DOCS('cloud-docs')], api })
+    expect(kinds(r)).not.toContain('listener-without-sender')
+    expect(infoKinds(r)).toEqual(['fan-out-sender', 'unresolved-sender'])
+    expect(r.info.find((i) => i.kind === 'fan-out-sender').message).toMatch(/redpanda-data\/\*#fan-out-request.*cloud-docs, docs/)
+    const fanEdges = r.edges.filter((e) => e.eventType === 'fan-out-request').map((e) => e.targetRepo).sort()
+    expect(fanEdges).toEqual(['redpanda-data/cloud-docs', 'redpanda-data/docs'])
+    // The any-type listener is not attached to a fan-out edge.
+    for (const e of r.edges.filter((x) => x.eventType === 'fan-out-request')) expect(e.listeners).toHaveLength(1)
+  })
+
+  test('a fan-out sender that fires but never reaches a target is one finding, not one per receiver', async () => {
+    const api = fakeApi(
+      {
+        'redpanda-data/dts': { 'scan.yml': read('sender-fan-out.yml') },
+        'redpanda-data/docs': { 'review.yml': listener('fan-out-request') },
+        'redpanda-data/cloud-docs': { 'review.yml': listener('fan-out-request') },
+      },
+      {
+        // The 2026-11 shape: the scan runs daily and fails before it dispatches.
+        'redpanda-data/dts/scan.yml': nRuns(5, 'failure', 'schedule'),
+        'redpanda-data/docs/review.yml': nRuns(3, 'success', 'pull_request'),
+        'redpanda-data/cloud-docs/review.yml': nRuns(3, 'success', 'pull_request'),
+      },
+    )
+    const r = await runCheck({ repos: [DOCS('dts'), DOCS('docs'), DOCS('cloud-docs')], api })
+    expect(kinds(r)).toEqual(['fan-out-never-delivered'])
+    expect(r.findings[0].message).toMatch(/dts\/scan\.yml.*none of its 2 scanned target/)
+    expect(infoKinds(r)).toEqual(['fan-out-sender', 'receiver-no-dispatch-runs', 'receiver-no-dispatch-runs', 'unresolved-sender'])
+    expect(r.exitCode).toBe(1)
+  })
+
+  test('without the fan-out sender, the same listeners are listener-without-sender', async () => {
+    const api = fakeApi(
+      { 'redpanda-data/docs': { 'review.yml': listener('fan-out-request') } },
+      { 'redpanda-data/docs/review.yml': nRuns(3, 'success') },
+    )
+    const r = await runCheck({ repos: [DOCS('docs')], api })
+    expect(kinds(r)).toEqual(['listener-without-sender'])
+  })
+
   test('a reusable (workflow_call-only) sender with no runs of its own is not "never fired"', async () => {
     const api = fakeApi(
       { 'redpanda-data/dem': { 'review.yml': read('sender-jq-input.yml') }, 'redpanda-data/docs-site': { 'impact.yml': listener('doc-impact') } },
@@ -673,7 +727,7 @@ describe('the default repo set', () => {
     for (const r of ['redpanda-data/streaming-enterprise', 'redpanda-data/redpanda', 'redpanda-data/cloudv2', 'redpanda-data/redpanda-operator',
       'redpanda-data/connect', 'redpanda-data/helm-charts', 'redpanda-data/redpanda-check', 'redpanda-data/docs', 'redpanda-data/cloud-docs',
       'redpanda-data/rp-connect-docs', 'redpanda-data/api-docs', 'redpanda-data/adp-docs', 'redpanda-data/docs-site', 'redpanda-data/docs-ui',
-      'redpanda-data/docs-extensions-and-macros']) {
+      'redpanda-data/docs-extensions-and-macros', 'redpanda-data/docs-team-standards']) {
       expect(repos).toContain(r)
     }
     expect(DEFAULT_REPOS.every((r) => ['engineering', 'docs'].includes(r.role))).toBe(true)

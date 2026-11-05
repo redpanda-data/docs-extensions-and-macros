@@ -257,6 +257,15 @@ function resolveValue (value, ctx) {
   return expanded.filter((s) => !/\$/.test(s)).map((s) => s.replace(/^["']|["']$/g, ''))
 }
 
+/**
+ * The owner of a `<owner>/$VAR` dispatch path (lowercased), or null. Only a
+ * literal owner and a single shell variable for the repo qualify.
+ */
+function fanOutOwnerOf (path) {
+  const m = String(path || '').trim().match(/^([A-Za-z0-9_.-]+)\/\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)$/)
+  return m ? m[1].toLowerCase() : null
+}
+
 /** owner/name, or null when the text is not a plain repo slug. */
 function normalizeRepo (slug) {
   if (!slug) return null
@@ -328,6 +337,17 @@ function sendersFromRun (run, ctx, step) {
     for (const m of line.matchAll(PAYLOAD_FLAG_RE)) payload[m[1]] = m[2]
 
     const form = /curl/.test(line) ? 'curl' : 'gh-api'
+    // `repos/<owner>/$REPO/dispatches` with a literal event type: the repo is
+    // picked at run time (from a message, a list, an API result), so there
+    // is no one edge, but every listener of that type under the owner is a
+    // possible target. Still unresolved; the checker matches it as a fan-out.
+    const fanOutOwner = repos.length === 0 ? fanOutOwnerOf(pm[1]) : null
+    if (fanOutOwner && eventTypes.length) {
+      for (const t of eventTypes) {
+        senders.push(ctx.make({ targetRepo: null, eventType: t, unresolved: true, fanOutOwner, raw: line.trim(), form, payload, stepName: step && step.name }))
+      }
+      continue
+    }
     if (repos.length === 0 || eventTypes.length === 0) {
       senders.push(ctx.make({
         targetRepo: repos[0] || null,
