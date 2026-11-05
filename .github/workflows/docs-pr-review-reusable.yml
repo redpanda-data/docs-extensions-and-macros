@@ -196,10 +196,14 @@ on:
           DOCS_APP_ID — the redpanda-docs-automation GitHub App. Used only to
           mint a per-run, Contents:read token scoped to docs-team-standards
           for the plugin/scripts checkout: that repo is private and
-          github.token cannot clone it from any other repo. The fallback
-          only: every job reads the App credential from Secrets Manager
-          first (sdlc/prod/github/docs_automation_app, devprod-infra#938),
-          so this can be empty once the org variable is deleted.
+          github.token cannot clone it from any other repo. A fallback:
+          gate and aggregate, and a claude-skill action that carries the
+          same change, read the App credential from Secrets Manager first
+          (sdlc/prod/github/docs_automation_app, devprod-infra#938). The
+          d-e-m copy pins claude-skill by SHA, so its review jobs read
+          Secrets Manager only once that pin includes the change. Keep
+          passing this until every pin does; only then can the org
+          variable be deleted.
         type: string
         default: ''
     secrets:
@@ -320,10 +324,11 @@ jobs:
       # token).
       # MIRROR (claude-skill's plugin checkout, and aggregate): the App
       # credential comes from Secrets Manager (devprod-infra#938) and falls
-      # back to docs_app_id / docs_app_private_key. The scrub empties every
-      # key the fetch exported (DOC_TEAM_LOGINS too: the gate reads
-      # vars.DOC_TEAM_LOGINS, not this copy) and the AWS credentials before
-      # the next step.
+      # back to docs_app_id / docs_app_private_key, also when the Secrets
+      # Manager mint fails. The scrub empties every DOCSAPP_ key the fetch
+      # exported (DOC_TEAM_LOGINS too: the gate reads vars.DOC_TEAM_LOGINS,
+      # not this copy) and, when this block assumed the role, the AWS
+      # credentials, before the next step.
       - name: Assume the OIDC role for the App credential
         id: app_aws
         if: steps.pin.outputs.ok == 'true' && github.repository != 'redpanda-data/docs-team-standards'
@@ -340,26 +345,52 @@ jobs:
         uses: aws-actions/aws-secretsmanager-get-secrets@v3
         with:
           secret-ids: |
-            ,sdlc/prod/github/docs_automation_app
+            DOCSAPP,sdlc/prod/github/docs_automation_app
           parse-json-secrets: true
+
+      - name: Mint a read-only token for the config checkout (Secrets Manager)
+        id: standards_token_sm
+        if: steps.pin.outputs.ok == 'true' && env.DOCSAPP_DOCS_APP_ID != '' && env.DOCSAPP_DOCS_APP_PRIVATE_KEY != ''
+        # A bad or stale key falls through to the fallback mint below
+        # instead of failing the job. The ID and the key always come as a
+        # pair, never one from each source.
+        continue-on-error: true
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ env.DOCSAPP_DOCS_APP_ID }}
+          private-key: ${{ env.DOCSAPP_DOCS_APP_PRIVATE_KEY }}
+          owner: redpanda-data
+          repositories: docs-team-standards
+          permission-contents: read
 
       - name: Mint a read-only token for the config checkout
         id: standards_token
-        if: steps.pin.outputs.ok == 'true' && (env.DOCS_APP_ID || inputs.docs_app_id) != ''
+        if: steps.pin.outputs.ok == 'true' && steps.standards_token_sm.outputs.token == '' && inputs.docs_app_id != ''
         uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ env.DOCS_APP_ID || inputs.docs_app_id }}
-          private-key: ${{ env.DOCS_APP_PRIVATE_KEY || secrets.docs_app_private_key }}
+          app-id: ${{ inputs.docs_app_id }}
+          private-key: ${{ secrets.docs_app_private_key }}
           owner: redpanda-data
           repositories: docs-team-standards
           permission-contents: read
 
       - name: Scrub the App credential
         if: always()
+        env:
+          ASSUMED: ${{ steps.app_aws.outcome }}
         run: |
-          for v in DOCS_APP_ID DOCS_APP_PRIVATE_KEY DOC_TEAM_LOGINS AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+          # DOCSAPP_ is the alias prefix on the fetch, so this clears every key the
+          # secret carries, whatever it is named (a renamed key would otherwise
+          # survive into later steps). The AWS credentials are cleared only when
+          # this block assumed the role, so a value the job set itself is left alone.
+          for v in $(compgen -e | grep '^DOCSAPP_' || true); do
             echo "$v=" >> "$GITHUB_ENV"
           done
+          if [[ "$ASSUMED" == "success" ]]; then
+            for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+              echo "$v=" >> "$GITHUB_ENV"
+            done
+          fi
 
       - uses: actions/checkout@v4
         if: steps.pin.outputs.ok == 'true'
@@ -367,7 +398,7 @@ jobs:
           repository: redpanda-data/docs-team-standards
           ref: ${{ inputs.plugin_ref }}
           path: .standards
-          token: ${{ steps.standards_token.outputs.token || github.token }}
+          token: ${{ steps.standards_token_sm.outputs.token || steps.standards_token.outputs.token || github.token }}
           persist-credentials: false
           sparse-checkout: |
             .github/docs-review-config.json
@@ -1799,10 +1830,11 @@ jobs:
       # docs-team-standards itself and github.token suffices.
       # MIRROR (claude-skill's plugin checkout, and gate): the App
       # credential comes from Secrets Manager (devprod-infra#938) and falls
-      # back to docs_app_id / docs_app_private_key. The scrub empties every
-      # key the fetch exported (DOC_TEAM_LOGINS too: the gate reads
-      # vars.DOC_TEAM_LOGINS, not this copy) and the AWS credentials before
-      # the next step.
+      # back to docs_app_id / docs_app_private_key, also when the Secrets
+      # Manager mint fails. The scrub empties every DOCSAPP_ key the fetch
+      # exported (DOC_TEAM_LOGINS too: the gate reads vars.DOC_TEAM_LOGINS,
+      # not this copy) and, when this block assumed the role, the AWS
+      # credentials, before the next step.
       - name: Assume the OIDC role for the App credential
         id: app_aws
         if: github.repository != 'redpanda-data/docs-team-standards'
@@ -1819,16 +1851,31 @@ jobs:
         uses: aws-actions/aws-secretsmanager-get-secrets@v3
         with:
           secret-ids: |
-            ,sdlc/prod/github/docs_automation_app
+            DOCSAPP,sdlc/prod/github/docs_automation_app
           parse-json-secrets: true
+
+      - name: Mint a read-only token for the scripts checkout (Secrets Manager)
+        id: standards_token_sm
+        if: env.DOCSAPP_DOCS_APP_ID != '' && env.DOCSAPP_DOCS_APP_PRIVATE_KEY != ''
+        # A bad or stale key falls through to the fallback mint below
+        # instead of failing the job. The ID and the key always come as a
+        # pair, never one from each source.
+        continue-on-error: true
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ env.DOCSAPP_DOCS_APP_ID }}
+          private-key: ${{ env.DOCSAPP_DOCS_APP_PRIVATE_KEY }}
+          owner: redpanda-data
+          repositories: docs-team-standards
+          permission-contents: read
 
       - name: Mint a read-only token for the scripts checkout
         id: standards_token
-        if: (env.DOCS_APP_ID || inputs.docs_app_id) != ''
+        if: steps.standards_token_sm.outputs.token == '' && inputs.docs_app_id != ''
         uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ env.DOCS_APP_ID || inputs.docs_app_id }}
-          private-key: ${{ env.DOCS_APP_PRIVATE_KEY || secrets.docs_app_private_key }}
+          app-id: ${{ inputs.docs_app_id }}
+          private-key: ${{ secrets.docs_app_private_key }}
           owner: redpanda-data
           repositories: docs-team-standards
           permission-contents: read
@@ -1842,23 +1889,36 @@ jobs:
       - name: Mint a read-only token for the companion repo
         id: companion_token
         if: >-
-          (env.DOCS_APP_ID || inputs.docs_app_id) != '' &&
+          (steps.standards_token_sm.outputs.token != '' || inputs.docs_app_id != '') &&
           (github.repository == 'redpanda-data/docs' || github.repository == 'redpanda-data/cloud-docs')
         continue-on-error: true
         uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ env.DOCS_APP_ID || inputs.docs_app_id }}
-          private-key: ${{ env.DOCS_APP_PRIVATE_KEY || secrets.docs_app_private_key }}
+          # The source the scripts mint used: Secrets Manager when its mint
+          # worked, the fallback inputs otherwise.
+          app-id: ${{ steps.standards_token_sm.outputs.token != '' && env.DOCSAPP_DOCS_APP_ID || inputs.docs_app_id }}
+          private-key: ${{ steps.standards_token_sm.outputs.token != '' && env.DOCSAPP_DOCS_APP_PRIVATE_KEY || secrets.docs_app_private_key }}
           owner: redpanda-data
           repositories: docs,cloud-docs
           permission-pull-requests: read
 
       - name: Scrub the App credential
         if: always()
+        env:
+          ASSUMED: ${{ steps.app_aws.outcome }}
         run: |
-          for v in DOCS_APP_ID DOCS_APP_PRIVATE_KEY DOC_TEAM_LOGINS AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+          # DOCSAPP_ is the alias prefix on the fetch, so this clears every key the
+          # secret carries, whatever it is named (a renamed key would otherwise
+          # survive into later steps). The AWS credentials are cleared only when
+          # this block assumed the role, so a value the job set itself is left alone.
+          for v in $(compgen -e | grep '^DOCSAPP_' || true); do
             echo "$v=" >> "$GITHUB_ENV"
           done
+          if [[ "$ASSUMED" == "success" ]]; then
+            for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+              echo "$v=" >> "$GITHUB_ENV"
+            done
+          fi
 
       - uses: actions/checkout@v4
         with:
@@ -1866,7 +1926,7 @@ jobs:
           # Same pin as the skills plugin: scripts and skills version together.
           ref: ${{ inputs.plugin_ref }}
           path: .standards
-          token: ${{ steps.standards_token.outputs.token || github.token }}
+          token: ${{ steps.standards_token_sm.outputs.token || steps.standards_token.outputs.token || github.token }}
           persist-credentials: false
 
       - uses: actions/download-artifact@v4
