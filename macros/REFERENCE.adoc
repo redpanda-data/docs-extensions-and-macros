@@ -631,6 +631,9 @@ Contract 2 emits these attributes:
 | `data-version`
 | The page's component version, when it has one.
 
+| `data-property-meta`
+| Descriptive metadata for the property, as JSON, in an Antora build when the page's version has property data. See <<iceberg-explorer-property-meta>>. Optional: docs-ui renders what it finds and ignores keys it does not know.
+
 | `data-config`
 | The author's initial configuration string, exactly as written, when one is set. An invalid value is still emitted, so the explorer can show the error.
 
@@ -688,17 +691,63 @@ The block accepts an open (`--`), listing (`----`), literal, or pass body. It is
 | Optional base location for the translation engine build, emitted as `data-engine-base`. It must be a root-relative path on the docs site, such as `/_/engine/26.2`, because docs-ui loads a script from it. Any other value (an absolute or protocol-relative URL, a relative path, backslashes, or control characters) is ignored with a build warning. docs-ui falls back to its own default when this is absent, so set it only to pin a specific engine build.
 |===
 
+[[iceberg-explorer-property-meta]]
+=== Property metadata
+
+In an Antora build, the block also emits `data-property-meta`, a JSON object describing the property from the generated property JSON (`modules/reference/attachments/redpanda-properties-v<X.Y.Z>.json` in the docs repo):
+
+[,json]
+----
+{
+  "description": "Enable the Iceberg integration for the topic and ...",
+  "default": null,
+  "is_enterprise": false,
+  "see_also": [
+    { "href": "/streaming/26.2/manage/iceberg/specify-iceberg-schema/", "text": "Specify Iceberg Schema" }
+  ],
+  "source": "redpanda-properties-v26.2.4.json"
+}
+----
+
+|===
+| Key | Value
+
+| `description`
+| The property's `description`, converted by Asciidoctor in the page's own context and reduced to plain text, so inline markup and xref labels read as the page would show them.
+
+| `default`
+| The property's `default`, as JSON.
+
+| `is_enterprise`
+| Whether the property needs an Enterprise license. docs-ui shows an Enterprise badge when it is `true`.
+
+| `cloud_supported`
+| Cloud pages only: the property's `cloud_supported` flag, or `null` when the dataset does not set it. The extractor no longer writes the flag for topic properties, so it is usually `null`.
+
+| `see_also`
+| The property's `see_also` links (`related_topics` in datasets generated before that field existed), each resolved by Antora to `{href, text}`. An xref the page's component cannot resolve is retried in the component and version the dataset belongs to, which is how a Cloud page links to a self-managed page. An entry that resolves nowhere is left out with a build warning.
+
+| `source`
+| The file the metadata came from.
+|===
+
+The dataset is chosen exactly as the `prop:` macro chooses it (`loadPropertiesFor` in `macros/prop.js`): the newest patch for the page's own release series, never a neighbouring release, and on a Cloud component (`env-cloud`) the newest GA self-managed file. When no dataset covers the page's version, or the dataset has no `redpanda.iceberg.mode` entry, the block logs a warning that names the page, the version, and the property, and emits no `data-property-meta`. Outside Antora (plain Asciidoctor, the docs-ui preview) there is no content catalog and the attribute is omitted.
+
 [[iceberg-explorer-validation]]
 === Config validation
 
-The macro checks the initial `config` with a strict parser that follows Redpanda's own grammar for `redpanda.iceberg.mode` (`extension-utils/iceberg-mode.js`, a port of the parser in Redpanda's `src/v/model/model.cc`). A value it accepts is one Redpanda accepts, and a value it rejects is reported with Redpanda's error message.
+The macro checks the initial `config` with a strict parser that follows Redpanda's own grammar for `redpanda.iceberg.mode` (`extension-utils/iceberg-mode.js`, a port of the parser in Redpanda's `src/v/model/model.cc`). A value it accepts is one the page's release accepts. From v26.2.1, the first release whose parser gives a reason, a value it rejects is reported with Redpanda's error message. Earlier releases reject a bad value without a reason, so the warning lists the forms that release accepts instead.
 
-Two grammars exist:
+Which release accepts what is not written in the code. `extension-utils/iceberg-mode-releases.json` is generated from Redpanda's source at every release tag (see <<iceberg-explorer-release-data>>), and records for each release series:
 
-* Legacy names, the only form before v26.2.1 and still accepted after it: `disabled`, `key_value`, `value_schema_id_prefix`, and `value_schema_latest`, optionally followed by `:subject=<name>`, `protobuf_name=<name>`, or both, separated by a comma.
-* The section format, accepted from Redpanda v26.2.1: one or more of `key:`, `value:` and `headers:`, separated by `;`, each followed by comma-separated `name=value` options. `key` and `value` accept `mode` (`binary`, `string`, `schema_id_prefix`, or `schema_latest`), and `subject` and `protobuf_name` only with `mode=schema_latest`. `value` also accepts `layout` (`flat`, or `nested` with `schema_id_prefix` or `schema_latest`). `headers` accepts `value_type` (`binary` or `string`). Unknown sections, unknown options, duplicate sections or options, and options with an empty value are errors.
+* The legacy names its parser compares against. v24.3 accepts `disabled`, `key_value` and `value_schema_id_prefix`. From v25.1.1, `value_schema_latest` is also accepted, optionally followed by `:subject=<name>`, `protobuf_name=<name>`, or both, separated by a comma.
+* Whether it accepts the section format, and with which names. From v26.2.1: one or more of `key:`, `value:` and `headers:`, separated by `;`, each followed by comma-separated `name=value` options. `key` and `value` accept `mode` (`binary`, `string`, `schema_id_prefix`, or `schema_latest`), and `subject` and `protobuf_name` only with `mode=schema_latest`. `value` also accepts `layout` (`flat`, or `nested` with `schema_id_prefix` or `schema_latest`). `headers` accepts `value_type` (`binary` or `string`). Unknown sections, unknown options, duplicate sections or options, and options with an empty value are errors.
 
-The page's `data-version` picks the grammar. On a page for a release series before 26.2, such as `26.1`, only the legacy names are valid, so a section-format value is an error even when it is equivalent to a legacy name. A page with no version, or a version that is not a release series, is checked against the latest grammar.
+The page's version picks the release:
+
+* A release series, such as `26.1`, uses that series' grammar, so on a 26.1 page a section-format value is an error even when it is equivalent to a legacy name, and on a 24.3 page `value_schema_latest` is an error. The warning names the first release that accepts the value.
+* A page with no release series (Cloud, an unversioned component) uses the newest series with a GA release.
+* A series the data does not cover is not checked at all. The warning says so instead of borrowing a neighbouring release's grammar.
 
 An invalid value does not stop the build. The macro logs a warning that names the page, the value, the version and the problem, for example:
 
@@ -708,7 +757,17 @@ ROOT/pages/iceberg-mode.adoc: config="value:mode=banana" is not a valid redpanda
 
 The value is still emitted in `data-config` unchanged. Replacing it with defaults would publish a configuration the page's prose does not describe.
 
-The parser's tests replay the accept, reject, error-message, format and round-trip cases from Redpanda's `src/v/model/tests/iceberg_mode_test.cc`. The vectors, and the upstream commit they came from, are in `__tests__/fixtures/iceberg-mode/upstream-vectors.js`.
+[[iceberg-explorer-release-data]]
+=== Release data and test vectors
+
+`node tools/iceberg-mode/generate.js` reads `src/v/model/model.cc`, `src/v/kafka/server/handlers/configs/config_utils.h` and `src/v/model/tests/iceberg_mode_test.cc` from `redpanda-data/streaming-enterprise` at every release tag (GA tags, or RC tags for a series with no GA yet) and writes two files:
+
+* `extension-utils/iceberg-mode-releases.json`: each series' parser, keyed by a fingerprint of the parser source, and the names that parser compares against. Only the first tag of each parser is recorded, so a patch release that leaves the parser alone changes nothing.
+* `__tests__/fixtures/iceberg-mode/upstream-vectors.js`: the accept, reject, error-message, format and round-trip cases from the upstream tests, which the parser's tests replay against every series that ships them. docs-ui copies this file.
+
+It needs a token that can read the private repository (`GH_TOKEN`, or `gh auth token` locally). The *Iceberg mode drift* workflow (`.github/workflows/iceberg-mode-drift.yml`) runs it weekly with the org bot token and fails when either file changes.
+
+The names a parser compares against are data, but its structure (that `subject` needs `mode=schema_latest`, for example) is code in the port. `PORTED_PARSERS` in `extension-utils/iceberg-mode.js` lists the parser fingerprints the port has been reviewed against, and the tests fail on any other. When the drift job reports a new fingerprint, compare the port with that release's `model.cc`, port any change, then add the fingerprint.
 
 === Registration
 
