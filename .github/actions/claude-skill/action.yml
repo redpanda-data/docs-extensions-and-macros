@@ -303,13 +303,27 @@ runs:
     # The fetch lands every key under the DOCSAPP alias (the secret also
     # carries DOC_TEAM_LOGINS, which nothing here reads; the workflow uses
     # vars.DOC_TEAM_LOGINS). A failed Secrets Manager mint falls back to
-    # the inputs. The scrub right after the mints empties every DOCSAPP
-    # variable and, whenever this block tried the role, the AWS credentials,
-    # before the npm install and everything after it. The ADP chain below
-    # assumes the role again.
-    - name: Assume the OIDC role for the App credential
-      id: app_aws
-      if: github.repository != 'redpanda-data/docs-team-standards'
+    # the inputs.
+    #
+    # One OIDC role serves both credentials this action needs: the App
+    # credential here and the ADP client credential below, so it is assumed
+    # once, before either fetch. The fetches stay separate steps: one
+    # get-secrets call fails whole when either secret isn't granted, and a
+    # repo can have one grant without the other (docs-team-standards skips
+    # the App fetch entirely). A single scrub after both mints empties every
+    # DOCSAPP variable, the ADP client credential and the AWS credentials,
+    # before the plugin checkout, the npm install and everything after it.
+    #
+    # ── ADP gateway auth (DEVPROD-4735 pattern) ────────────────────────────
+    # Every step in this chain is continue-on-error and gated on the previous
+    # one's outcome, so a caller that has not been granted the credential (or
+    # has no OIDC role) degrades to "automated review unavailable" instead of
+    # a red job. Without that, the missing-grant case fails the composite
+    # action before the run step can even report claude_failed, which is the
+    # opposite of this pipeline's stated posture: never a red X for a broken
+    # environment. Same shape as doc-strings-review.yml in this repo.
+    - name: Assume the OIDC role
+      id: aws_credentials
       continue-on-error: true
       uses: aws-actions/configure-aws-credentials@v6
       with:
@@ -322,7 +336,7 @@ runs:
 
     - name: Fetch the App credential
       id: app_secret
-      if: steps.app_aws.outcome == 'success'
+      if: steps.aws_credentials.outcome == 'success' && github.repository != 'redpanda-data/docs-team-standards'
       continue-on-error: true
       uses: aws-actions/aws-secretsmanager-get-secrets@v3
       with:
@@ -356,21 +370,140 @@ runs:
         repositories: docs-team-standards
         permission-contents: read
 
-    - name: Scrub the App credential
+    - name: Fetch the ADP client credential
+      id: adpsecrets
+      if: steps.aws_credentials.outcome == 'success'
+      continue-on-error: true
+      uses: aws-actions/aws-secretsmanager-get-secrets@v3
+      with:
+        secret-ids: |
+          ,${{ inputs.adp_client_secret_id }}
+        parse-json-secrets: true
+
+    - name: Mint the ADP gateway token
+      id: mint
+      if: steps.adpsecrets.outcome == 'success'
+      continue-on-error: true
+      shell: bash
+      env:
+        TOKEN_URL: ${{ inputs.adp_token_url }}
+        TOKEN_AUDIENCE: ${{ inputs.adp_token_audience }}
+        CLIENT_SECRET_ID: ${{ inputs.adp_client_secret_id }}
+      run: |
+        set -euo pipefail
+        # ATTRIBUTION: the credential in this secret belongs to a registered
+        # ADP agent's own service account, and the agent's static tags are
+        # what Cost and usage attributes spend to. Attribution granularity is
+        # therefore agent granularity: one agent per WORKLOAD. This review has
+        # its own agent, `docs-pr-review` on adp-production (client id
+        # serviceaccounts/docs-pr-review, tagged team=docs and env=ci), so its
+        # spend appears on its own line rather than inside doc-detective's,
+        # whose credential is the one in docs_team_agents_client. Do not point
+        # this at another workload's secret to save a registration: sharing an
+        # agent collapses the two workloads' spend permanently.
+        #
+        # NAMING TRAP: parse-json-secrets names the env vars after the
+        # secret's OWN JSON keys, and devprod's convention check (vtools
+        # scripts/cicd-secret/secret.py, _check_secret) requires those keys to
+        # start with the secret name's last path segment, upper-cased. So the
+        # env names follow the secret id and cannot be hardcoded: a caller
+        # overriding adp_client_secret_id used to land the credential in env
+        # vars this step never read, and the mint failed with a misleading
+        # error. The tr mirrors the secrets action's own sanitisation
+        # (non-alphanumerics become _), so a hyphenated segment yields a valid
+        # bash name instead of aborting the indirect expansion under set -u.
+        prefix=$(printf '%s' "$CLIENT_SECRET_ID" | awk -F/ '{print toupper($NF)}' | tr -c 'A-Za-z0-9_\n' '_')
+        id_var="${prefix}_ID"
+        secret_var="${prefix}_SECRET"
+        client_id="${!id_var:-}"
+        client_secret="${!secret_var:-}"
+        if [ -z "$client_id" ] || [ -z "$client_secret" ]; then
+          echo "::warning::ADP client credential missing from env ($id_var, $secret_var) — wrong secret id, wrong JSON key names, or this repository was never granted the secret in devprod-infra. No review will be posted."
+          exit 1
+        fi
+        # client_secret rides in the request body, so refuse to send it
+        # anywhere but https: adp_token_url is a caller-supplied input and a
+        # typo'd or hostile scheme would put the credential on the wire in
+        # cleartext.
+        case "$TOKEN_URL" in
+          https://*) ;;
+          *)
+            echo "::warning::adp_token_url must be https, got: $TOKEN_URL. No review will be posted."
+            exit 1
+            ;;
+        esac
+        # The audience is omitted entirely when empty rather than sent blank.
+        # The gateway's own IdP, which is what an agent credential
+        # authenticates against, rejects the parameter; the Cloud auth service
+        # requires it. `audience=` satisfies neither, so this has to be a
+        # present-or-absent argument. The +"${arr[@]}" form is needed because
+        # a plain expansion of an empty array trips set -u under bash 3.2.
+        audience_args=()
+        if [ -n "${TOKEN_AUDIENCE:-}" ]; then
+          audience_args=(--data-urlencode audience="$TOKEN_AUDIENCE")
+        fi
+        # Secret rides stdin so it never appears in argv; a token containing
+        # whitespace could smuggle extra variables into GITHUB_ENV and
+        # ::add-mask:: covers only the first line.
+        status=$(printf '%s' "$client_secret" | curl -sS --request POST \
+          --connect-timeout 10 --max-time 30 \
+          --retry 3 --retry-all-errors --retry-delay 2 \
+          --output "$RUNNER_TEMP/adp_token.json" --write-out '%{http_code}' \
+          --url "$TOKEN_URL" \
+          --header 'content-type: application/x-www-form-urlencoded' \
+          --data grant_type=client_credentials \
+          --data-urlencode client_id="$client_id" \
+          --data-urlencode client_secret@- \
+          "${audience_args[@]+"${audience_args[@]}"}") || status=000
+        token=$(jq -r '.access_token // empty' "$RUNNER_TEMP/adp_token.json" 2>/dev/null || true)
+        rm -f "$RUNNER_TEMP/adp_token.json"
+        # Every failure path here exits 1 with a warning, and the step is
+        # continue-on-error, so no bearer is exported and the run step below
+        # turns that into claude_failed=true while the aggregate posts "human
+        # review required". Never a red X for a broken environment, and never
+        # an infra failure dressed up as a review verdict.
+        if [ -z "$token" ]; then
+          echo "::warning::failed to mint ADP gateway token (HTTP $status). No review will be posted."
+          exit 1
+        fi
+        case "$token" in *[[:space:][:cntrl:]]*)
+          echo "::warning::minted token contains whitespace or control characters. No review will be posted."
+          exit 1 ;;
+        esac
+        echo "::add-mask::$token"
+        echo "AWS_BEARER_TOKEN_BEDROCK=$token" >> "$GITHUB_ENV"
+
+    - name: Scrub the long-lived credentials
       if: always()
       shell: bash
       env:
-        ASSUMED: ${{ steps.app_aws.outcome }}
+        ASSUMED: ${{ steps.aws_credentials.outcome }}
+        CLIENT_SECRET_ID: ${{ inputs.adp_client_secret_id }}
       run: |
-        # DOCSAPP is the alias on the fetch: a JSON secret lands as
+        set -euo pipefail
+        # AWS_BEARER_TOKEN_BEDROCK deliberately survives: it is the model
+        # auth, short-lived, and usable only against the gateway. The
+        # long-lived credentials that can mint fresh tokens (the App private
+        # key and the ADP client credential) must not be readable from the
+        # review's environment, or from the npm install before it.
+        #
+        # DOCSAPP is the alias on the App fetch: a JSON secret lands as
         # DOCSAPP_<KEY>, and a value that isn't valid JSON lands whole as
-        # DOCSAPP. This clears both, whatever the keys are named. The AWS
-        # credentials are cleared whenever this block tried to assume the role:
-        # configure-aws-credentials exports them before it validates them, so
-        # a failed assume can still leave them set.
+        # DOCSAPP. This clears both, whatever the keys are named.
         for v in $(compgen -e | grep -E '^DOCSAPP(_|$)' || true); do
           echo "$v=" >> "$GITHUB_ENV"
         done
+        # The ADP prefix is derived exactly as the mint step derives it.
+        # Hardcoded names would silently stop scrubbing the moment a caller
+        # pointed adp_client_secret_id at a differently-named secret, leaving
+        # the minting credential live in the environment Claude runs in.
+        prefix=$(printf '%s' "$CLIENT_SECRET_ID" | awk -F/ '{print toupper($NF)}' | tr -c 'A-Za-z0-9_\n' '_')
+        for v in "${prefix}_ID" "${prefix}_SECRET"; do
+          echo "$v=" >> "$GITHUB_ENV"
+        done
+        # The AWS credentials are cleared whenever the assume step ran:
+        # configure-aws-credentials exports them before it validates them, so
+        # a failed assume can still leave them set.
         if [[ "$ASSUMED" != "skipped" ]]; then
           for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
             echo "$v=" >> "$GITHUB_ENV"
@@ -393,6 +526,9 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        # Nothing after the credential scrub needs OIDC, and npm runs
+        # package lifecycle scripts: see the run step.
+        unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
         npm install -g "@anthropic-ai/claude-code@${{ inputs.cli_version }}"
         # --plugin-dir trap: the repo root ships .claude-plugin/marketplace.json,
         # so pointing --plugin-dir at it registers a MARKETPLACE, not a plugin,
@@ -467,6 +603,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN   # see the run step
         SHIM_DIR="$RUNNER_TEMP/gh-readonly"
         mkdir -p "$SHIM_DIR"
         REAL_GH="$(command -v gh)"
@@ -593,146 +730,6 @@ runs:
         OK1=$(PATH="$SHIM_DIR:$PATH" gh pr view https://github.com/o/r/pull/1 2>&1 1>/dev/null || true)
         [[ "$OK1" != *"refused:"* ]] || { echo "::error::gh shim refused a github.com PR URL (got: $OK1)"; exit 1; }
         echo "gh read-only shim installed at $SHIM_DIR"
-
-    # ── ADP gateway auth (DEVPROD-4735 pattern) ────────────────────────────
-    # Every step in this chain is continue-on-error and gated on the previous
-    # one's outcome, so a caller that has not been granted the credential (or
-    # has no OIDC role) degrades to "automated review unavailable" instead of
-    # a red job. Without that, the missing-grant case fails the composite
-    # action before the run step can even report claude_failed, which is the
-    # opposite of this pipeline's stated posture: never a red X for a broken
-    # environment. Same shape as doc-strings-review.yml in this repo.
-    - name: Assume the OIDC role
-      id: aws_credentials
-      continue-on-error: true
-      uses: aws-actions/configure-aws-credentials@v6
-      with:
-        aws-region: ${{ inputs.aws_region }}
-        role-to-assume: arn:aws:iam::${{ inputs.aws_cred_account_id }}:role/${{ inputs.aws_role_name_prefix }}${{ github.event.repository.name }}
-
-    - name: Fetch the ADP client credential
-      id: adpsecrets
-      if: steps.aws_credentials.outcome == 'success'
-      continue-on-error: true
-      uses: aws-actions/aws-secretsmanager-get-secrets@v3
-      with:
-        secret-ids: |
-          ,${{ inputs.adp_client_secret_id }}
-        parse-json-secrets: true
-
-    - name: Mint the ADP gateway token
-      id: mint
-      if: steps.adpsecrets.outcome == 'success'
-      continue-on-error: true
-      shell: bash
-      env:
-        TOKEN_URL: ${{ inputs.adp_token_url }}
-        TOKEN_AUDIENCE: ${{ inputs.adp_token_audience }}
-        CLIENT_SECRET_ID: ${{ inputs.adp_client_secret_id }}
-      run: |
-        set -euo pipefail
-        # ATTRIBUTION: the credential in this secret belongs to a registered
-        # ADP agent's own service account, and the agent's static tags are
-        # what Cost and usage attributes spend to. Attribution granularity is
-        # therefore agent granularity: one agent per WORKLOAD. This review has
-        # its own agent, `docs-pr-review` on adp-production (client id
-        # serviceaccounts/docs-pr-review, tagged team=docs and env=ci), so its
-        # spend appears on its own line rather than inside doc-detective's,
-        # whose credential is the one in docs_team_agents_client. Do not point
-        # this at another workload's secret to save a registration: sharing an
-        # agent collapses the two workloads' spend permanently.
-        #
-        # NAMING TRAP: parse-json-secrets names the env vars after the
-        # secret's OWN JSON keys, and devprod's convention check (vtools
-        # scripts/cicd-secret/secret.py, _check_secret) requires those keys to
-        # start with the secret name's last path segment, upper-cased. So the
-        # env names follow the secret id and cannot be hardcoded: a caller
-        # overriding adp_client_secret_id used to land the credential in env
-        # vars this step never read, and the mint failed with a misleading
-        # error. The tr mirrors the secrets action's own sanitisation
-        # (non-alphanumerics become _), so a hyphenated segment yields a valid
-        # bash name instead of aborting the indirect expansion under set -u.
-        prefix=$(printf '%s' "$CLIENT_SECRET_ID" | awk -F/ '{print toupper($NF)}' | tr -c 'A-Za-z0-9_\n' '_')
-        id_var="${prefix}_ID"
-        secret_var="${prefix}_SECRET"
-        client_id="${!id_var:-}"
-        client_secret="${!secret_var:-}"
-        if [ -z "$client_id" ] || [ -z "$client_secret" ]; then
-          echo "::warning::ADP client credential missing from env ($id_var, $secret_var) — wrong secret id, wrong JSON key names, or this repository was never granted the secret in devprod-infra. No review will be posted."
-          exit 1
-        fi
-        # client_secret rides in the request body, so refuse to send it
-        # anywhere but https: adp_token_url is a caller-supplied input and a
-        # typo'd or hostile scheme would put the credential on the wire in
-        # cleartext.
-        case "$TOKEN_URL" in
-          https://*) ;;
-          *)
-            echo "::warning::adp_token_url must be https, got: $TOKEN_URL. No review will be posted."
-            exit 1
-            ;;
-        esac
-        # The audience is omitted entirely when empty rather than sent blank.
-        # The gateway's own IdP, which is what an agent credential
-        # authenticates against, rejects the parameter; the Cloud auth service
-        # requires it. `audience=` satisfies neither, so this has to be a
-        # present-or-absent argument. The +"${arr[@]}" form is needed because
-        # a plain expansion of an empty array trips set -u under bash 3.2.
-        audience_args=()
-        if [ -n "${TOKEN_AUDIENCE:-}" ]; then
-          audience_args=(--data-urlencode audience="$TOKEN_AUDIENCE")
-        fi
-        # Secret rides stdin so it never appears in argv; a token containing
-        # whitespace could smuggle extra variables into GITHUB_ENV and
-        # ::add-mask:: covers only the first line.
-        status=$(printf '%s' "$client_secret" | curl -sS --request POST \
-          --connect-timeout 10 --max-time 30 \
-          --retry 3 --retry-all-errors --retry-delay 2 \
-          --output "$RUNNER_TEMP/adp_token.json" --write-out '%{http_code}' \
-          --url "$TOKEN_URL" \
-          --header 'content-type: application/x-www-form-urlencoded' \
-          --data grant_type=client_credentials \
-          --data-urlencode client_id="$client_id" \
-          --data-urlencode client_secret@- \
-          "${audience_args[@]+"${audience_args[@]}"}") || status=000
-        token=$(jq -r '.access_token // empty' "$RUNNER_TEMP/adp_token.json" 2>/dev/null || true)
-        rm -f "$RUNNER_TEMP/adp_token.json"
-        # Every failure path here exits 1 with a warning, and the step is
-        # continue-on-error, so no bearer is exported and the run step below
-        # turns that into claude_failed=true while the aggregate posts "human
-        # review required". Never a red X for a broken environment, and never
-        # an infra failure dressed up as a review verdict.
-        if [ -z "$token" ]; then
-          echo "::warning::failed to mint ADP gateway token (HTTP $status). No review will be posted."
-          exit 1
-        fi
-        case "$token" in *[[:space:][:cntrl:]]*)
-          echo "::warning::minted token contains whitespace or control characters. No review will be posted."
-          exit 1 ;;
-        esac
-        echo "::add-mask::$token"
-        echo "AWS_BEARER_TOKEN_BEDROCK=$token" >> "$GITHUB_ENV"
-
-    - name: Scrub the long-lived client credential
-      if: always()
-      shell: bash
-      env:
-        CLIENT_SECRET_ID: ${{ inputs.adp_client_secret_id }}
-      run: |
-        set -euo pipefail
-        # AWS_BEARER_TOKEN_BEDROCK deliberately survives: it is the model
-        # auth, short-lived, and usable only against the gateway. The
-        # long-lived client credential that can mint fresh tokens must not
-        # be readable from the review's environment.
-        #
-        # The prefix is derived exactly as the mint step derives it. Hardcoded
-        # names would silently stop scrubbing the moment a caller pointed
-        # adp_client_secret_id at a differently-named secret, leaving the
-        # minting credential live in the environment Claude runs in.
-        prefix=$(printf '%s' "$CLIENT_SECRET_ID" | awk -F/ '{print toupper($NF)}' | tr -c 'A-Za-z0-9_\n' '_')
-        for v in "${prefix}_ID" "${prefix}_SECRET" AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
-          echo "$v=" >> "$GITHUB_ENV"
-        done
 
     - name: Assert the plugin actually loaded
       shell: bash
