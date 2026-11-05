@@ -300,11 +300,11 @@ runs:
     # missing. Both fetch steps are continue-on-error, so a repo without the
     # grant, or a run before the secret's value is set, uses the inputs as
     # before. docs-team-standards needs no App: github.token clones itself.
-    # The fetch lands every key under the DOCSAPP_ prefix (the secret also
+    # The fetch lands every key under the DOCSAPP alias (the secret also
     # carries DOC_TEAM_LOGINS, which nothing here reads; the workflow uses
     # vars.DOC_TEAM_LOGINS). A failed Secrets Manager mint falls back to
-    # the inputs. The scrub right after the mints empties every DOCSAPP_
-    # variable and, when this block assumed the role, the AWS credentials,
+    # the inputs. The scrub right after the mints empties every DOCSAPP
+    # variable and, whenever this block tried the role, the AWS credentials,
     # before the npm install and everything after it. The ADP chain below
     # assumes the role again.
     - name: Assume the OIDC role for the App credential
@@ -358,14 +358,16 @@ runs:
       env:
         ASSUMED: ${{ steps.app_aws.outcome }}
       run: |
-        # DOCSAPP_ is the alias prefix on the fetch, so this clears every key the
-        # secret carries, whatever it is named (a renamed key would otherwise
-        # survive into later steps). The AWS credentials are cleared only when
-        # this block assumed the role, so a value the job set itself is left alone.
-        for v in $(compgen -e | grep '^DOCSAPP_' || true); do
+        # DOCSAPP is the alias on the fetch: a JSON secret lands as
+        # DOCSAPP_<KEY>, and a value that isn't valid JSON lands whole as
+        # DOCSAPP. This clears both, whatever the keys are named. The AWS
+        # credentials are cleared whenever this block tried to assume the role:
+        # configure-aws-credentials exports them before it validates them, so
+        # a failed assume can still leave them set.
+        for v in $(compgen -e | grep -E '^DOCSAPP(_|$)' || true); do
           echo "$v=" >> "$GITHUB_ENV"
         done
-        if [[ "$ASSUMED" == "success" ]]; then
+        if [[ "$ASSUMED" != "skipped" ]]; then
           for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
             echo "$v=" >> "$GITHUB_ENV"
           done

@@ -325,9 +325,9 @@ jobs:
       # MIRROR (claude-skill's plugin checkout, and aggregate): the App
       # credential comes from Secrets Manager (devprod-infra#938) and falls
       # back to docs_app_id / docs_app_private_key, also when the Secrets
-      # Manager mint fails. The scrub empties every DOCSAPP_ key the fetch
+      # Manager mint fails. The scrub empties every DOCSAPP variable the fetch
       # exported (DOC_TEAM_LOGINS too: the gate reads vars.DOC_TEAM_LOGINS,
-      # not this copy) and, when this block assumed the role, the AWS
+      # not this copy) and, whenever this block tried the role, the AWS
       # credentials, before the next step.
       - name: Assume the OIDC role for the App credential
         id: app_aws
@@ -379,14 +379,16 @@ jobs:
         env:
           ASSUMED: ${{ steps.app_aws.outcome }}
         run: |
-          # DOCSAPP_ is the alias prefix on the fetch, so this clears every key the
-          # secret carries, whatever it is named (a renamed key would otherwise
-          # survive into later steps). The AWS credentials are cleared only when
-          # this block assumed the role, so a value the job set itself is left alone.
-          for v in $(compgen -e | grep '^DOCSAPP_' || true); do
+          # DOCSAPP is the alias on the fetch: a JSON secret lands as
+          # DOCSAPP_<KEY>, and a value that isn't valid JSON lands whole as
+          # DOCSAPP. This clears both, whatever the keys are named. The AWS
+          # credentials are cleared whenever this block tried to assume the role:
+          # configure-aws-credentials exports them before it validates them, so
+          # a failed assume can still leave them set.
+          for v in $(compgen -e | grep -E '^DOCSAPP(_|$)' || true); do
             echo "$v=" >> "$GITHUB_ENV"
           done
-          if [[ "$ASSUMED" == "success" ]]; then
+          if [[ "$ASSUMED" != "skipped" ]]; then
             for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
               echo "$v=" >> "$GITHUB_ENV"
             done
@@ -1831,9 +1833,9 @@ jobs:
       # MIRROR (claude-skill's plugin checkout, and gate): the App
       # credential comes from Secrets Manager (devprod-infra#938) and falls
       # back to docs_app_id / docs_app_private_key, also when the Secrets
-      # Manager mint fails. The scrub empties every DOCSAPP_ key the fetch
+      # Manager mint fails. The scrub empties every DOCSAPP variable the fetch
       # exported (DOC_TEAM_LOGINS too: the gate reads vars.DOC_TEAM_LOGINS,
-      # not this copy) and, when this block assumed the role, the AWS
+      # not this copy) and, whenever this block tried the role, the AWS
       # credentials, before the next step.
       - name: Assume the OIDC role for the App credential
         id: app_aws
@@ -1907,14 +1909,16 @@ jobs:
         env:
           ASSUMED: ${{ steps.app_aws.outcome }}
         run: |
-          # DOCSAPP_ is the alias prefix on the fetch, so this clears every key the
-          # secret carries, whatever it is named (a renamed key would otherwise
-          # survive into later steps). The AWS credentials are cleared only when
-          # this block assumed the role, so a value the job set itself is left alone.
-          for v in $(compgen -e | grep '^DOCSAPP_' || true); do
+          # DOCSAPP is the alias on the fetch: a JSON secret lands as
+          # DOCSAPP_<KEY>, and a value that isn't valid JSON lands whole as
+          # DOCSAPP. This clears both, whatever the keys are named. The AWS
+          # credentials are cleared whenever this block tried to assume the role:
+          # configure-aws-credentials exports them before it validates them, so
+          # a failed assume can still leave them set.
+          for v in $(compgen -e | grep -E '^DOCSAPP(_|$)' || true); do
             echo "$v=" >> "$GITHUB_ENV"
           done
-          if [[ "$ASSUMED" == "success" ]]; then
+          if [[ "$ASSUMED" != "skipped" ]]; then
             for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
               echo "$v=" >> "$GITHUB_ENV"
             done
