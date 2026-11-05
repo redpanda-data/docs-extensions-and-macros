@@ -292,6 +292,93 @@ describe('iceberg-explorer macro', () => {
     })
   })
 
+  describe('config validation', () => {
+    let warn
+    const vectors = require('../fixtures/iceberg-mode/upstream-vectors')
+    const page = { 'page-relative-src-path': 'ROOT/pages/iceberg-mode.adoc' }
+
+    beforeEach(() => {
+      warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
+    })
+
+    afterEach(() => {
+      warn.mockRestore()
+    })
+
+    const messages = () => warn.mock.calls.map((call) => call.join(' ')).join('\n')
+    const block = (config) => `[iceberg-explorer,config="${config}"]\n--\n--`
+
+    // The cases the review found the explorer silently replaced with defaults.
+    test.each([
+      ['value:mode=schema_lastest', "unknown mode 'schema_lastest' in section 'value'"],
+      ['value:mode=banana', "unknown mode 'banana' in section 'value'"],
+      ['key:layout=nested', "layout is only valid in the value section, not 'key'"],
+      ['key_value:subject=x', "unknown section 'key_value'"],
+      ['value:mode=binary;value:mode=string', "duplicate section 'value'"],
+      ['value_schema_latest:layout=nested', "unknown option 'layout' in value_schema_latest"],
+    ])('warns on %s, names the page and the problem, and keeps the value', (config, problem) => {
+      const html = convert(block(config), { ...page, 'page-version': '26.2' })
+      expect(html).toContain(`data-config="${config}"`)
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(messages()).toContain('ROOT/pages/iceberg-mode.adoc')
+      expect(messages()).toContain(`config="${config}" is not a valid redpanda.iceberg.mode value for version 26.2`)
+      expect(messages()).toContain(problem)
+    })
+
+    test('adds the specific reason when upstream reports malformed options', () => {
+      convert(block('value:mode=binary,mode=string'), page)
+      expect(messages()).toContain("malformed options in section 'value' (duplicate option 'mode')")
+    })
+
+    test('validates a config from the JSON block body', () => {
+      const html = convert('[iceberg-explorer]\n----\n{"config":"headers:value_type=blob"}\n----', page)
+      expect(html).toContain('data-config="headers:value_type=blob"')
+      expect(messages()).toContain("unknown value_type 'blob' in section 'headers'")
+    })
+
+    test('disabled is a valid value', () => {
+      convert(block('disabled'), page)
+      expect(warn).not.toHaveBeenCalled()
+    })
+
+    test.each(vectors.accept.map((v) => v.input))('accepts the upstream vector %s', (config) => {
+      convert(block(config), { 'page-version': '26.2' })
+      expect(warn).not.toHaveBeenCalled()
+    })
+
+    test.each(vectors.reject.map((v) => v.input))('warns on the upstream vector %s', (config) => {
+      convert(block(config), { 'page-version': '26.2' })
+      expect(warn).toHaveBeenCalledTimes(1)
+    })
+
+    describe('version gating', () => {
+      test('a 26.1 page warns on the section format, which needs v26.2.1', () => {
+        const html = convert(block('key:mode=schema_id_prefix;value:mode=binary'), { ...page, 'page-version': '26.1' })
+        expect(html).toContain('data-version="26.1"')
+        expect(html).toContain('data-config="key:mode=schema_id_prefix;value:mode=binary"')
+        expect(messages()).toContain('for version 26.1')
+        expect(messages()).toMatch(/requires Redpanda v26\.2\.1 or later/)
+      })
+
+      test.each(['26.2', '26.3'])('a %s page accepts the same section-format value', (version) => {
+        convert(block('key:mode=schema_id_prefix;value:mode=binary'), { 'page-version': version })
+        expect(warn).not.toHaveBeenCalled()
+      })
+
+      test.each(['key_value', 'value_schema_id_prefix', 'value_schema_latest:subject=s', 'disabled'])(
+        'a 25.3 page accepts the legacy value %s', (config) => {
+          convert(block(config), { 'page-version': '25.3' })
+          expect(warn).not.toHaveBeenCalled()
+        }
+      )
+
+      test('an unversioned page uses the latest grammar', () => {
+        convert(block('value:mode=string,layout=flat'))
+        expect(warn).not.toHaveBeenCalled()
+      })
+    })
+  })
+
   describe('block contexts', () => {
     // The processor discards the block body, so the paragraph context made
     // `[iceberg-explorer]` above prose delete that prose from the page.

@@ -1,6 +1,7 @@
 'use strict';
 
 const { escapeHtml } = require('../extension-utils/html-utils');
+const icebergMode = require('../extension-utils/iceberg-mode');
 // Same logger as the other macros (#283): warnings land in Antora's log with
 // a level Antora can fail on, instead of bypassing it through console.warn.
 const logger = require('@antora/logger')('iceberg-explorer-macro');
@@ -156,9 +157,10 @@ function defineBlock (registry) {
         }
       }
 
-      // Doc version drives which engine build the UI loads. `page-version` is
-      // the short component version (for example, "26.2"); fall back to the
-      // component version attribute if present.
+      // Doc version drives which config grammar applies and which engine
+      // build the UI loads. `page-version` is the short component version
+      // (for example, "26.2"); fall back to the component version attribute
+      // if present.
       const version =
         attributes['page-version'] ||
         attributes['page-component-version'] ||
@@ -168,6 +170,7 @@ function defineBlock (registry) {
       // `config` sets the initial DSL string; `height` overrides the min
       // height; `engine-base` overrides where docs-ui fetches the engine from.
       const initialConfig = attrs.config || bodyConfig;
+      if (initialConfig) validateConfig(initialConfig, version, warn);
       const height = cssLength(attrs.height, warn);
       const engineBase = rootRelativePath(attrs['engine-base'], warn);
 
@@ -191,6 +194,27 @@ function defineBlock (registry) {
     });
   });
 };
+
+/**
+ * Check the author's config with Redpanda's own grammar for the page's
+ * version (extension-utils/iceberg-mode.js). An invalid value is still
+ * emitted unchanged: docs-ui shows the problem in the explorer, and replacing
+ * it with defaults would publish a different config than the page's prose
+ * describes. The build warning is how the author finds out first.
+ * @param {string} config
+ * @param {string} version
+ * @param {function(string): void} warn
+ */
+function validateConfig (config, version, warn) {
+  const result = icebergMode.validateIcebergMode(config, { version });
+  if (result.ok) return;
+  const forVersion = version ? ` for version ${version}` : '';
+  const detail = result.reason ? `${result.error} (${result.reason})` : result.error;
+  warn(
+    `config="${config}" is not a valid ${MOUNT_PROPERTY} value${forVersion}: ${detail}. ` +
+    'The mount keeps this value so the explorer can show the error.'
+  );
+}
 
 /**
  * Describe a parsed-but-unusable JSON body for the build warning.
