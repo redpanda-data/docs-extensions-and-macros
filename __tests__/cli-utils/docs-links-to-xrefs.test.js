@@ -265,6 +265,35 @@ describe('docs-links-to-xrefs', () => {
   })
 })
 
+describe('docs-links-to-xrefs in a clone with an origin remote', () => {
+  jest.setTimeout(60000)
+  let docsRoot
+  let context
+
+  // A real docs clone has an origin remote. The catalog must still come from
+  // the worktree, so a page added in the same uncommitted change counts.
+  beforeAll(async () => {
+    docsRoot = makeAntoraCheckout(FIXTURE, {
+      remote: 'https://github.com/redpanda-data/docs.git',
+      afterCommit: (root) => {
+        const page = path.join(root, 'modules', 'manage', 'pages', 'new-page.adoc')
+        fs.writeFileSync(page, '= New Page\n\nNot committed yet.\n')
+      },
+    })
+    context = await buildDocsResolverContext(docsRoot, { cacheDir: path.join(docsRoot, '.antora-cache') })
+  })
+
+  afterAll(() => {
+    fs.rmSync(docsRoot, { recursive: true, force: true })
+  })
+
+  test('reads uncommitted pages and reports the checkout path, not the remote URL', () => {
+    expect(context.loaded).toEqual([{ component: 'streaming', version: '26.2', dir: docsRoot, pageCount: 5 }])
+    expect(describeResolverContext(context, docsRoot)).toBe(`Mapping docs URLs against 5 pages of the streaming component in ${docsRoot}`)
+    expect(convertDocsLinks('https://docs.redpanda.com/current/manage/new-page/', context).content).toBe('xref:manage:new-page.adoc[]')
+  })
+})
+
 describe('docs-links-to-xrefs with lenders', () => {
   jest.setTimeout(60000)
   let docsRoot
@@ -353,6 +382,21 @@ describe('docs-links-to-xrefs with lenders', () => {
     const result = convert('https://docs.redpanda.com/redpanda-connect/guides/no-such-page/')
     expect(result.unmapped).toEqual(['https://docs.redpanda.com/redpanda-connect/guides/no-such-page/'])
     expect(formatDocsLinkReport(result, 'x.adoc', context)).toContain('no page in the loaded components matches')
+  })
+
+  test('pins same-component targets in a newer lender, since an unversioned xref resolves to the page\'s own version', async () => {
+    // The local checkout is the older version branch; the lender is newer and
+    // so is the component's latest version.
+    const newerContext = await buildDocsResolverContext(olderDocsRoot, {
+      lenders: [docsRoot],
+      cacheDir: path.join(olderDocsRoot, '.antora-cache'),
+    })
+    expect(newerContext.localVersion).toBe('26.1')
+    const page = 'manage/kubernetes/manage-resources/'
+    const newer = 'xref:26.2@streaming:manage:kubernetes/manage-resources.adoc[]'
+    expect(convertDocsLinks(`https://docs.redpanda.com/current/${page}`, newerContext).content).toBe(newer)
+    expect(convertDocsLinks(`https://docs.redpanda.com/26.2/${page}`, newerContext).content).toBe(newer)
+    expect(convertDocsLinks(`https://docs.redpanda.com/26.1/${page}`, newerContext).content).toBe('xref:manage:kubernetes/manage-resources.adoc[]')
   })
 
   test('refuses a lender that duplicates the local component version', async () => {

@@ -14,9 +14,13 @@ const { spawnSync } = require('child_process')
  * @param {Object} [options]
  * @param {Function} [options.edit] - Called with the copy's root before the
  *   commit, to vary the fixture (for example, another version).
+ * @param {string} [options.remote] - URL to register as the origin remote, as
+ *   a real clone has.
+ * @param {Function} [options.afterCommit] - Called with the root after the
+ *   commit, to leave uncommitted changes in the worktree.
  * @returns {string} The repository root.
  */
-function makeAntoraCheckout (fixture, { edit } = {}) {
+function makeAntoraCheckout (fixture, { edit, remote, afterCommit } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `${path.basename(fixture)}-`))
   fs.cpSync(fixture, root, { recursive: true })
   if (edit) edit(root)
@@ -30,6 +34,8 @@ function makeAntoraCheckout (fixture, { edit } = {}) {
   git('init', '-q')
   git('add', '.')
   git('commit', '-q', '-m', 'fixture')
+  if (remote) git('remote', 'add', 'origin', remote)
+  if (afterCommit) afterCommit(root)
   return root
 }
 

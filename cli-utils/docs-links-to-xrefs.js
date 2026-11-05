@@ -129,9 +129,12 @@ async function buildDocsResolverContext (docsRoot, options = {}) {
     // covers both the symbolic and the real version segment.
     urls: { htmlExtensionStyle: 'indexify', latestVersionSegment: LATEST_VERSION_SEGMENT },
     // HEAD of the local checkout, read from the worktree, so an unpushed
-    // branch and uncommitted pages count as published.
+    // branch and uncommitted pages count as published. The aggregator is
+    // called directly, so the playbook builder's default worktrees: '.' is
+    // never applied; without it, a checkout with an origin remote is read
+    // from its last commit and reported by its remote URL.
     // Lenders are read the same way, each as its own content source.
-    content: { sources: [root, ...lenderRoots].map((url) => ({ url, branches: 'HEAD' })) },
+    content: { sources: [root, ...lenderRoots].map((url) => ({ url, branches: 'HEAD', worktrees: '.' })) },
   }
   const aggregate = await aggregateContent(playbook)
   let contentCatalog
@@ -162,11 +165,19 @@ async function buildDocsResolverContext (docsRoot, options = {}) {
     if (index !== -1) entry.dir = [root, ...lenderRoots][index]
   }
   loaded.sort((a, b) => order.indexOf(realPath(a.dir)) - order.indexOf(realPath(b.dir)))
+  // The version the generated pages belong to. An xref without a version
+  // resolves to the version of the page it is on, not to the component's
+  // latest, so a same-component target may drop its version only when it is
+  // this one (a newer lender of the same component is not the latest from
+  // the point of view of this checkout's pages).
+  const local = loaded.find((entry) => entry.dir === root && entry.component === component)
+  if (!local) throw new Error(`Cannot find the ${component} component of ${root} in the catalog read from it`)
   return Object.assign(buildUrlMap(contentCatalog), {
     hostnames: new Set(options.hostnames || DEFAULT_HOSTNAMES),
     ignore: (options.ignore || DEFAULT_IGNORE).map((pattern) => new RegExp(pattern)),
     latestVersionSegment: LATEST_VERSION_SEGMENT,
     localComponent: component,
+    localVersion: local.version,
     resolveInclude: (spec, page) => contentCatalog.resolveResource(spec, page.src, 'partial', ['partial', 'page']),
     component,
     pageCount,
