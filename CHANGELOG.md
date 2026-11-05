@@ -1,5 +1,25 @@
 # Changelog
 
+## [5.61.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.60.0...v5.61.0) (2026-11-05)
+
+
+### Features
+
+* **doc-strings-review:** check published impact of changes the PR description declares ([#478](https://github.com/redpanda-data/docs-extensions-and-macros/issues/478)) ([c288a68](https://github.com/redpanda-data/docs-extensions-and-macros/commit/c288a68123fef8abad88d86f3aad78641d72714f))
+* **docs-pr-review:** mirror docs-team-standards[#2998](https://github.com/redpanda-data/docs-extensions-and-macros/issues/2998): scope config, incremental re-review, approval, no SME gate ([#453](https://github.com/redpanda-data/docs-extensions-and-macros/issues/453)) ([e9dcf77](https://github.com/redpanda-data/docs-extensions-and-macros/commit/e9dcf7748be5f8895023efb03732b3a98083c02b))
+* **lint-strings:** document every rule and its reason ([#465](https://github.com/redpanda-data/docs-extensions-and-macros/issues/465)) ([538c9a7](https://github.com/redpanda-data/docs-extensions-and-macros/commit/538c9a71d62068915fa557de8a018b94bed84966))
+* **lint-strings:** flag Go slices printed with %v and quoted field names in connect strings ([#477](https://github.com/redpanda-data/docs-extensions-and-macros/issues/477)) ([e6855b9](https://github.com/redpanda-data/docs-extensions-and-macros/commit/e6855b92d125d435db271dc5ac43b13414f399ce))
+* **lint-strings:** treat connect ShortDescription as plain text ([#464](https://github.com/redpanda-data/docs-extensions-and-macros/issues/464)) ([6ea7ae4](https://github.com/redpanda-data/docs-extensions-and-macros/commit/6ea7ae405e2927a262b7109a6fca178d2709df17))
+* **rpk-docs:** use plugin flags from the command tree when present ([#448](https://github.com/redpanda-data/docs-extensions-and-macros/issues/448)) ([11cc2d2](https://github.com/redpanda-data/docs-extensions-and-macros/commit/11cc2d2a97692c2440a9440efb3acd6196ac1630))
+
+
+### Bug fixes
+
+* **connect-docs-diff:** ignore partials that change only in comment lines ([#457](https://github.com/redpanda-data/docs-extensions-and-macros/issues/457)) ([260cf3a](https://github.com/redpanda-data/docs-extensions-and-macros/commit/260cf3a4b155e8d7bcbba568fd8503969641affc))
+* **lint-strings:** document the two connect literal rules ([#484](https://github.com/redpanda-data/docs-extensions-and-macros/issues/484)) ([4db92e0](https://github.com/redpanda-data/docs-extensions-and-macros/commit/4db92e09b0079b1922e318ed946b57723610e8e5))
+* **lint-strings:** report only findings on changed lines in diff mode ([#470](https://github.com/redpanda-data/docs-extensions-and-macros/issues/470)) ([071b13a](https://github.com/redpanda-data/docs-extensions-and-macros/commit/071b13a4540319776e965b61aa553cabe44bf33a))
+* **rpk-docs:** rendering and What's new fixes from the v26.3.1-rc2 regen ([#459](https://github.com/redpanda-data/docs-extensions-and-macros/issues/459)) ([892c023](https://github.com/redpanda-data/docs-extensions-and-macros/commit/892c023b7e67b98de8bce40b4c2e2c45499a6961))
+
 ## [5.60.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.59.1...v5.60.0) (2026-11-02)
 
 
