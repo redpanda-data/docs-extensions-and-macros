@@ -4,9 +4,12 @@
 # docs-team-standards' .github/docs-review-config.json (scope), not here:
 #
 #   Content: docs (Self-hosted, Console), cloud-docs (Cloud, Redpanda SQL),
-#     rp-connect-docs, api-docs, redpanda-labs, redpanda-solutions
+#     rp-connect-docs, api-docs
 #   Toolchain: docs-ui, docs-extensions-and-macros, docs-site, docs-template
 #   (docs-team-standards itself has its own caller using the local path.)
+#   In scope but no caller yet: redpanda-labs, redpanda-solutions (their
+#     callers follow the Secrets Manager App credential,
+#     docs-extensions-and-macros#486 and its re-pin; devprod-infra#941).
 #   Exempt, so no caller: adp-docs (ADP docs). The reference
 #     and rpk automations' PRs ("auto-docs:" titles) are exempt in every repo.
 #
@@ -30,10 +33,11 @@
 #   PREVIEW_PATH_PREFIX  URL prefix for Netlify preview links when the
 #                        Antora coordinates alone don't produce it
 #                        (e.g. "streaming" for redpanda-data/docs).
-# Org-level prerequisites (once): DOC_TEAM_LOGINS (whose "ready for
-# approval" feedback the pipeline acts on) + CLAUDE_CLI_VERSION variables;
-# "Allow GitHub Actions to create and approve pull requests" on (the
-# pipeline approves PRs that pass); the docs-pr-review agent credential granted to this repo
+# Org-level prerequisites (once): DOC_TEAM_LOGINS (the docs team, whose
+# reviews set the re-review baseline) + CLAUDE_CLI_VERSION variables;
+# "Allow GitHub Actions to create and approve pull requests" on (where
+# automatic approval is on, the pipeline approves PRs that pass; see
+# `approval` in the config); the docs-pr-review agent credential granted to this repo
 # (devprod-infra #826, merged 2026-09-18 — the reusable workflow's default,
 # so do not pass adp_client_secret_id); RP_AWS_CRED_* org variables/secret
 # already exist org-wide.
@@ -52,11 +56,14 @@ on:
     # review on request (review_trigger in docs-team-standards'
     # .github/docs-review-config.json — cloud-docs), adding the request label
     # is what starts a review, and pushes start nothing while it is off. Keep it in every
-    # caller so switching a repo's mode is a config change only.
-    types: [opened, ready_for_review, synchronize, labeled]
+    # caller so switching a repo's mode is a config change only. reopened:
+    # a ready PR that is reopened is reviewed without waiting for a push
+    # (the gate skips a head that already has a completed review).
+    types: [opened, ready_for_review, synchronize, labeled, reopened]
   pull_request_review:
-    # A submitted review moves the re-review baseline, and one from the docs
-    # team that says the PR is ready for approval lets the pipeline approve.
+    # A submitted review moves the re-review baseline. Once ready_for_approval
+    # is on in the config (off today), one from the docs team that says the PR
+    # is ready for approval also lets the pipeline approve.
     types: [submitted]
   repository_dispatch:
     types: [slack-review-request]        # entry point for the Slack scan
