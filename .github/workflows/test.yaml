@@ -47,6 +47,7 @@ jobs:
               - '__tests__/tools/**'
               - '__tests__/cli-utils/**'
               - '__tests__/**/*tool*.test.js'
+              - 'vendor/**'
             property_extractor:
               - 'tools/property-extractor/**/*.py'
               - 'tools/property-extractor/requirements.txt'
@@ -55,6 +56,8 @@ jobs:
               - 'package-lock.json'
             all_tests:
               - '__tests__/**'
+              - 'evals/**'
+              - 'extension-utils/**'
               - 'jest.config.js'
               - 'jest.unit.config.js'
               - '.github/workflows/**'

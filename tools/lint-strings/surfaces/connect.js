@@ -9,6 +9,7 @@ const { splitTopLevelArgs, findBalancedClose, collectGoFiles } = require('../go-
 const { GoIndex, statementEnd, straightLineReturn, stripStrings, renderResult, isResolved, unresolvedParts } = require('../go-index')
 const { parseLiteralFields } = require('./rpk')
 const { CONDITIONAL_RULE } = require('../rules/verbatim-asciidoc')
+const { STANDARD } = require('../standards')
 
 /**
  * Connect surface: every published string a Redpanda Connect build defines.
@@ -74,6 +75,16 @@ const CLI_CONVENTION = {
     kinds: ['flag'],
     path_prefixes: ['/etc/', '/var/', '/usr/', '/home/', '/tmp/', '~/.']
   }
+}
+
+// ShortDescription is plain text: the benthos field spec defines it as a
+// summary for inline help in a form UI, with no markup, and Redpanda Cloud's
+// form editor shows it raw. It is not AsciiDoc, so the AsciiDoc form rules
+// skip it and plain_text tells the common rules not to ask for backticks.
+const SHORT_DESCRIPTION_CONVENTION = {
+  ...CONVENTION,
+  verbatim_asciidoc: false,
+  plain_text: true
 }
 
 // Field constructors that ship with NO built-in documentation: a chain on
@@ -860,6 +871,8 @@ class ConnectScanner {
    *   ({ text, offset }) to re-evaluate with the bound parameters
    */
   pushDecl (declarations, file, rel, d) {
+    const collections = d.valueExpr ? this.goCollectionArgs(file, d.valueExpr) : []
+    if (collections.length > 0) d = { ...d, extra: { ...d.extra, go_collection_args: collections } }
     const fallback = () => declarations.push(this.makeDecl(file, rel, d))
     if (!d.valueExpr) return fallback()
     const bindings = this.callSiteBindings(file, d.valueExpr.offset, [d.result, d.nameResult])
@@ -884,6 +897,91 @@ class ConnectScanner {
       pushed++
     }
     if (pushed === 0) fallback()
+  }
+
+  /**
+   * fmt.Sprint, Sprintf and Sprintln arguments in a string expression that
+   * format a slice or map with %v, %s or %q, which prints Go syntax
+   * ("[a b c]", "map[k:v]"). Read from the source, so it works when the
+   * slice itself cannot be evaluated (a list built from a registry at init
+   * time). Returns [{ call, verb, arg, type }].
+   */
+  goCollectionArgs (file, expr) {
+    const fmtAliases = aliasesFor(file, 'fmt')
+    if (fmtAliases.size === 0) return []
+    const text = expr.text
+    const re = new RegExp(`(?:^|[^\\w.])(?:${[...fmtAliases].map(escapeRe).join('|')})\\s*\\.\\s*(Sprintf|Sprint|Sprintln)\\s*\\(`, 'g')
+    const out = []
+    for (const m of stripStrings(text).matchAll(re)) {
+      const open = m.index + m[0].length - 1
+      const close = findBalancedClose(text, open)
+      if (close === -1) continue
+      const args = splitTopLevelArgs(text.slice(open + 1, close))
+      const argOffset = (i) => expr.offset + open + 1 + args.slice(0, i).reduce((n, a) => n + a.length + 1, 0)
+      const check = (i, verb) => {
+        if (args[i] === undefined) return
+        const type = this.collectionType(file, args[i], argOffset(i), 0)
+        // %s and %q print a []byte as text.
+        if (!type || (type === '[]byte' && verb !== '%v')) return
+        out.push({ call: `fmt.${m[1]}`, verb, arg: args[i].trim(), type })
+      }
+      if (m[1] !== 'Sprintf') {
+        // Sprint and Sprintln format every operand as %v.
+        args.forEach((_, i) => check(i, '%v'))
+        continue
+      }
+      const format = this.evalAt(file, args[0], argOffset(0))
+      if (!isResolved(format)) continue
+      let next = 1
+      for (const v of renderResult(format).matchAll(/%(?:\[(\d+)\])?[-+# 0]*(?:\d+|\*)?(?:\.(?:\d+|\*)?)?([a-zA-Z%])/g)) {
+        if (v[2] === '%') continue
+        const i = v[1] ? Number(v[1]) : next
+        next = i + 1
+        if ('vsq'.includes(v[2])) check(i, `%${v[2]}`)
+      }
+    }
+    return out
+  }
+
+  /** '[]T' or 'map' when a Go expression is a slice or map, else null. */
+  collectionType (file, exprText, offset, depth) {
+    if (depth > 8) return null
+    const ofType = (t) => {
+      const s = String(t || '').replace(/^\(\s*/, '').replace(/^[A-Za-z_]\w*\s+(?=[[m.])/, '').trim()
+      if (/^\.\.\./.test(s)) return `[]${s.slice(3).match(/^[\w.*]+/)?.[0] || ''}`
+      if (/^\[\]/.test(s)) return s.match(/^\[\][\w.*]+/)?.[0] || '[]'
+      if (/^map\[/.test(s)) return 'map'
+      return null
+    }
+    const lead = exprText.length - exprText.trimStart().length
+    const t = exprText.trim()
+    const own = ofType(t)
+    if (own && /^(?:\[\]|map\[)/.test(t)) return own
+    const call = t.match(/^([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s*\(([\s\S]*)\)$/)
+    if (call) {
+      if (call[1] === 'append') {
+        const first = splitTopLevelArgs(call[2])[0]
+        return first ? this.collectionType(file, first, offset + lead + call[1].length + 1, depth + 1) : null
+      }
+      if (/^(?:strings\.(?:Split|SplitN|SplitAfter|Fields)|maps\.Keys|slices\.(?:Sorted|Collect|Clone))$/.test(call[1])) return '[]string'
+      const fn = this.index.lookupFunc(file, call[1])
+      return fn ? ofType(fn.results) : null
+    }
+    if (!/^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?$/.test(t)) return null
+    const fn = enclosingFunc(file, offset)
+    if (fn && !t.includes('.')) {
+      const assignment = this.lastAssignment(file, fn, t, offset)
+      if (assignment) {
+        if (assignment.type) return ofType(assignment.type)
+        if (assignment.expr) return this.collectionType(file, assignment.expr, assignment.exprStart, depth + 1)
+      }
+      const param = fn.params.find((p) => p.name === t)
+      if (param) return ofType(param.type)
+    }
+    const value = this.index.lookupValue(file, t)
+    if (!value) return null
+    if (value.type) return ofType(value.type)
+    return value.expr ? this.collectionType(value.file || file, value.expr, value.exprStart, depth + 1) : null
   }
 
   /** Evaluate { text, offset } in file with parameters bound to `locals`. */
@@ -1067,7 +1165,8 @@ class ConnectScanner {
         valueExpr: { text: args[0], offset: argStart(0) },
         start: head.type === 'call' ? head.start : open,
         end: close,
-        extra: { ctor: cls.ctor || null, ...(cls.via ? { via: cls.via } : {}), ...this.componentMeta(file, dot) }
+        extra: { ctor: cls.ctor || null, ...(cls.via ? { via: cls.via } : {}), ...this.componentMeta(file, dot) },
+        ...(kind === 'field-short' ? { convention: SHORT_DESCRIPTION_CONVENTION } : {})
       })
     }
     this.scanFieldCtors(file, rel, declarations, describedVars)
@@ -1497,8 +1596,35 @@ function extract ({ repo, files = null, external = true, overlay = null }) {
     }
     skipped.push(...result.skipped)
   }
+  attachComponentFields(declarations)
   Object.defineProperty(declarations, 'skipped', { value: skipped, enumerable: false })
   return declarations
+}
+
+/**
+ * Give each declaration the field names of the components it documents
+ * (meta.component_fields, a Set), so a rule can tell that 'level' in the
+ * compress processor's description is one of its fields. Only the files
+ * scanned contribute: in diff mode, the changed files. Not enumerable, so
+ * it stays out of JSON output.
+ */
+function attachComponentFields (declarations) {
+  const byComponent = new Map()
+  const keysOf = (decl) => ((decl.meta && decl.meta.components) || []).filter((c) => c.name).map((c) => `${c.type}/${c.name}`)
+  for (const decl of declarations) {
+    if (!decl.meta || decl.meta.kind !== 'field' || !decl.name) continue
+    for (const key of keysOf(decl)) {
+      if (!byComponent.has(key)) byComponent.set(key, new Set())
+      byComponent.get(key).add(decl.name)
+    }
+  }
+  for (const decl of declarations) {
+    const keys = keysOf(decl)
+    if (keys.length === 0) continue
+    const fields = new Set()
+    for (const key of keys) for (const name of byComponent.get(key) || []) fields.add(name)
+    if (fields.size > 0) Object.defineProperty(decl.meta, 'component_fields', { value: fields, enumerable: false })
+  }
 }
 
 /**
@@ -1515,12 +1641,19 @@ function scanFile (content, file) {
 }
 
 // AsciiDoc and Markdown markup that a plain-text UI shows literally.
+// Single-character emphasis counts only in AsciiDoc's constrained form:
+// the marks sit at word boundaries with no space just inside them, so
+// identifiers (max_in_flight), globs (*.json) and arithmetic (a * b) pass.
 const MARKUP_PATTERNS = [
   [/`/, 'backticks'],
   [/\b(?:xref|link|image|include|glossterm):[^\s[]*\[/, 'an AsciiDoc macro'],
+  [/\bpass:[a-z,]*\[/, 'an AsciiDoc passthrough'],
   [/https?:\/\/\S+\[[^\]]*\]/, 'an AsciiDoc link'],
   [/<<[^>]+>>/, 'a cross-reference'],
   [/\*\*[^*]+\*\*/, 'bold markup'],
+  [/(?:^|[\s(])\*[^\s*](?:[^*\n]*[^\s*])?\*(?=$|[\s.,;:!?)])/, 'bold markup'],
+  [/(?:^|[\s(])_[^\s_](?:[^_\n]*[^\s_])?_(?=$|[\s.,;:!?)])/, 'italic markup'],
+  [/^\s*(?:ifn?def|ifeval|endif)::/m, 'an AsciiDoc conditional'],
   [/^\s*(?:=+|\*+|-|\.)\s/m, 'a heading or list marker'],
   [/\{[a-z][a-z0-9_-]*\}/, 'an attribute reference'],
   [/\n/, 'a line break']
@@ -1550,11 +1683,15 @@ function xrefModuleHint (target) {
 
 const AVAILABILITY_PROSE = /\b(?:not (?:available|supported) (?:in|on) (?:Redpanda )?Cloud|only available (?:in|on|for) (?:self-managed|Redpanda Cloud|Cloud)|self-managed only|requires? (?:a )?cgo|CGO_ENABLED|x_benthos_extra)\b/i
 
+const { GO_SLICE_RULE, QUOTED_FIELD_RULE } = require('../rules/connect-literals')
+
 /** Surface-specific convention rules. */
 const RULES = [
   {
     name: 'missing-field-description',
     description: 'Config field constructed with no .Description()',
+    why: 'A field with no .Description() ships as an undocumented field on the connector reference page.',
+    standard: STANDARD.reviewingADiff,
     severity: 'warning',
     check: (decl) => {
       if (decl.meta.kind !== 'field' || !decl.meta.missing_description) return []
@@ -1563,13 +1700,16 @@ const RULES = [
   },
   {
     name: 'connect-short-description-markup',
+    why: 'Form-based config editors, such as the one in Redpanda Cloud, show ShortDescription as plain text, so any markup appears to users as literal symbols.',
+    standard: STANDARD.connect,
     description: 'ShortDescription is plain text in form-based editors',
-    severity: 'warning',
+    // Error, not warning: the markup renders literally in the form UI.
+    severity: 'error',
     check: (decl) => {
       if (decl.meta.kind !== 'field-short' || !decl.string) return []
-      const found = MARKUP_PATTERNS.filter(([re]) => re.test(decl.string)).map(([, what]) => what)
+      const found = [...new Set(MARKUP_PATTERNS.filter(([re]) => re.test(decl.string)).map(([, what]) => what))]
       if (found.length === 0) return []
-      return [{ message: `ShortDescription contains ${found.join(', ')}. Form-based config editors, such as the one in Redpanda Cloud, show it as plain text, so markup renders literally. Write one plain sentence and keep markup in Description().` }]
+      return [{ message: `ShortDescription contains ${found.join(', ')}. ShortDescription is plain text shown as inline help in form-based config editors, such as the one in Redpanda Cloud, so markup renders literally. Write it as plain text and move the formatting to Description().` }]
     }
   },
   // Spec strings publish to the self-managed and the Cloud docs, and the
@@ -1580,6 +1720,8 @@ const RULES = [
   {
     name: 'connect-xref-module',
     description: 'xref without a module, or to a module the Connect docs do not have',
+    why: 'Cloud includes the same partial into a different module, so an xref with no module, or to a module the Connect docs do not have, breaks the link.',
+    standard: STANDARD.connect,
     severity: 'warning',
     check: (decl) => {
       if (!decl.string || (decl.convention && decl.convention.verbatim_asciidoc === false)) return []
@@ -1602,6 +1744,8 @@ const RULES = [
   {
     name: 'connect-availability-prose',
     description: 'Cloud or cgo availability written as prose instead of data',
+    why: 'The generator renders Cloud and cgo availability from data, and availability prose shows on both the self-managed and the Cloud page, so it contradicts the generated notes on one of them.',
+    standard: STANDARD.connect,
     severity: 'warning',
     check: (decl) => {
       if (!decl.string) return []
@@ -1613,13 +1757,19 @@ const RULES = [
   {
     name: 'connect-cli-usage-multiline',
     description: 'urfave/cli Usage is a one-line label',
+    why: 'rpk connect help prints Usage as a one-line label, so a second line breaks the help output.',
+    standard: STANDARD.qualityBar,
     severity: 'warning',
     check: (decl) => {
       if (decl.meta.kind !== 'cli-usage' && decl.meta.kind !== 'cli-flag') return []
       if (!decl.string || !decl.string.includes('\n')) return []
       return [{ message: 'Usage spans multiple lines. `rpk connect` help prints Usage as a one-line label, so move detail into the command Description.' }]
     }
-  }
+  },
+  // Go values and field names that reach the page in the wrong form. See
+  // rules/connect-literals.js.
+  GO_SLICE_RULE,
+  QUOTED_FIELD_RULE
 ]
 
 /**

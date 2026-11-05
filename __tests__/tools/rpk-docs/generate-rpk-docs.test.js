@@ -21,7 +21,8 @@ const {
   findTopLevelWithSubcommands,
   generateRpkDocs,
   derivePartialsDir,
-  writeEnvVarsPartial
+  writeEnvVarsPartial,
+  detectProtectedPlugins
 } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
 
 describe('rpk Docs Generation', () => {
@@ -1140,6 +1141,35 @@ Specify a time range.`
     })
   })
 
+  describe('detectProtectedPlugins for rpk check', () => {
+    // rpk check has no subcommands of its own: its subtree is the shim
+    // whether or not the plugin installed. Its flags marked from_plugin
+    // are what show the install.
+    const checkTree = (flags) => flattenCommands({
+      name: 'rpk',
+      commands: [
+        { name: 'check', flags, commands: [{ name: 'install' }, { name: 'uninstall' }, { name: 'upgrade' }] },
+        { name: 'connect', commands: [{ name: 'install' }, { name: 'run' }] },
+        { name: 'ai', commands: [{ name: 'agent' }] },
+        { name: 'k8s', commands: [{ name: 'multicluster' }] },
+        { name: 'oxla', commands: [{ name: 'run' }] }
+      ]
+    })
+
+    test('regenerates rpk check when the tree has its plugin flags', () => {
+      const commands = checkTree([
+        { name: 'version', type: 'bool' },
+        { name: 'admin-url', type: 'stringSlice', from_plugin: true }
+      ])
+      expect(detectProtectedPlugins(commands)).toEqual([])
+    })
+
+    test('protects rpk check when only rpk\'s own flags are there', () => {
+      const commands = checkTree([{ name: 'version', type: 'bool' }])
+      expect(detectProtectedPlugins(commands)).toEqual(['check'])
+    })
+  })
+
   describe('stale file cleanup with protected plugins', () => {
     let tmpDir
 
@@ -1406,6 +1436,75 @@ describe('vanishing Flags tripwire', () => {
     warnSpy.mockRestore()
     expect(warned).toContain('rpk widget')
     expect(warned).toContain('Flags section and this render has none')
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+})
+
+describe('command usage with positional arguments', () => {
+  const os2 = require('os')
+
+  // rpk puts a plugin's positional arguments in the usage field of
+  // --print-tree, so the Usage line comes from the tree as for rpk's own
+  // commands
+  test('renders the Usage line from the tree, positional arguments included', async () => {
+    const tmp = fs.mkdtempSync(path.join(os2.tmpdir(), 'plugin-usage-'))
+    const tree = {
+      name: 'rpk',
+      commands: [{
+        name: 'widget',
+        description: 'Widget things.',
+        usage: 'rpk widget [flags]',
+        commands: [
+          { name: 'get', description: 'Get a widget.', usage: 'rpk widget get <name> [flags]', commands: [] },
+          { name: 'list', description: 'List widgets.', usage: 'rpk widget list [flags]', commands: [] }
+        ]
+      }]
+    }
+    await generateRpkDocs({ tree, overrides: { commands: {} }, outputDir: tmp })
+    const get = fs.readFileSync(path.join(tmp, 'rpk-widget', 'rpk-widget-get.adoc'), 'utf8')
+    expect(get).toMatch(/== Usage\n\n\[,bash\]\n----\nrpk widget get <name> \[flags\]\n----/)
+    const list = fs.readFileSync(path.join(tmp, 'rpk-widget', 'rpk-widget-list.adoc'), 'utf8')
+    expect(list).toContain('----\nrpk widget list [flags]\n----')
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  // rpk writes every argument of its own commands as [UPPERCASE], required
+  // or not, while plugins use cobra's convention, where [NAME] is optional
+  // and <name> is required. A plugin's optional argument keeps its brackets.
+  test('keeps a plugin command\'s optional argument optional', async () => {
+    const tmp = fs.mkdtempSync(path.join(os2.tmpdir(), 'plugin-usage-'))
+    const tree = {
+      name: 'rpk',
+      commands: [
+        {
+          name: 'widget',
+          description: 'Widget things.',
+          usage: 'rpk widget [flags]',
+          commands: [
+            { name: 'get', description: 'Get a widget.', usage: 'rpk widget get [KEY] [flags]', commands: [] }
+          ]
+        },
+        {
+          name: 'connect',
+          description: 'Connect things.',
+          usage: 'rpk connect [flags]',
+          commands: [
+            { name: 'show', description: 'Show an environment.', usage: 'rpk connect show [NAME] [flags]', commands: [] },
+            { name: 'get', description: 'Get an agent.', usage: 'rpk connect get <name> [NAMES...] [flags]', commands: [] }
+          ]
+        }
+      ]
+    }
+    await generateRpkDocs({ tree, overrides: { commands: {} }, outputDir: tmp })
+    const find = (name) => {
+      const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap(e =>
+        e.isDirectory() ? walk(path.join(dir, e.name)) : (e.name === name ? [path.join(dir, e.name)] : []))
+      const [file] = walk(tmp)
+      return fs.readFileSync(file, 'utf8')
+    }
+    expect(find('rpk-widget-get.adoc')).toContain('----\nrpk widget get <key> [flags]\n----')
+    expect(find('rpk-connect-show.adoc')).toContain('----\nrpk connect show [name] [flags]\n----')
+    expect(find('rpk-connect-get.adoc')).toContain('----\nrpk connect get <name> [names...] [flags]\n----')
     fs.rmSync(tmp, { recursive: true, force: true })
   })
 })

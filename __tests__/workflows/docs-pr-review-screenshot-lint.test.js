@@ -158,8 +158,7 @@ exec node "${path.join(ROOT, 'bin', 'doc-tools.js')}" "$@"
 describe('docs PR review: the merge step', () => {
   const MERGE = stepNamed(GATE_JOB, 'Merge deterministic + vision verdicts')
 
-  // An .adoc-only PR, so the merge step would copy the lint file straight
-  // to verdict.json.
+  // An .adoc-only PR, so the lint alone becomes verdict.json.
   function runMerge ({ step = MERGE, lintResult, lintFile }) {
     const runnerTemp = tmpdir()
     write(runnerTemp, 'screenshot-lint/screenshot-lint.json', lintFile)
@@ -190,6 +189,6 @@ describe('docs PR review: the merge step', () => {
     const lint = '{"verdict":"pass","blocking":[],"suggestions":[]}\n'
     const r = runMerge({ lintResult: 'success', lintFile: lint })
     expect({ status: r.status, out: r.all }).toMatchObject({ status: 0 })
-    expect(r.read('review-output/verdict.json')).toBe(lint)
+    expect(JSON.parse(r.read('review-output/verdict.json'))).toEqual({ ...JSON.parse(lint), check_blocking: [] })
   })
 })

@@ -690,6 +690,60 @@ Original fields content that should be replaced.`,
       expect(content).toContain('STATUS: OK')
       expect(content).toContain('COUNT: 42')
     }, 30000)
+
+    test('renders the deprecation message when a tree flag carries it as deprecated', async () => {
+      const testTree = {
+        name: 'rpk',
+        description: 'Root command',
+        commands: [
+          {
+            name: 'test-cmd',
+            description: 'Test command.',
+            usage: 'rpk test-cmd [flags]',
+            flags: [{ name: 'retries', type: 'int', description: 'Retries', deprecated: 'use --attempts' }]
+          }
+        ],
+        global_flags: []
+      }
+
+      await generateRpkDocs({
+        tree: testTree,
+        overrides: { commands: {} },
+        outputDir: tempDir,
+        rpkVersion: 'test',
+        pluginVersions: {}
+      })
+
+      const content = fs.readFileSync(path.join(tempDir, 'rpk-test-cmd.adoc'), 'utf8')
+      expect(content).toContain('*[Deprecated: use --attempts]*')
+    }, 30000)
+
+    test('escapes pipes in a flag deprecation message so the cell stays whole', async () => {
+      const testTree = {
+        name: 'rpk',
+        description: 'Root command',
+        commands: [
+          {
+            name: 'test-cmd',
+            description: 'Test command.',
+            usage: 'rpk test-cmd [flags]',
+            flags: [{ name: 'mode', type: 'string', description: 'Mode', deprecated: 'use --format a|b' }]
+          }
+        ],
+        global_flags: []
+      }
+
+      await generateRpkDocs({
+        tree: testTree,
+        overrides: { commands: {} },
+        outputDir: tempDir,
+        rpkVersion: 'test',
+        pluginVersions: {}
+      })
+
+      const content = fs.readFileSync(path.join(tempDir, 'rpk-test-cmd.adoc'), 'utf8')
+      expect(content).toContain('*[Deprecated: use --format a{vbar}b]*')
+    }, 30000)
   })
 
   describe('asPartial write path and stale file cleanup', () => {
