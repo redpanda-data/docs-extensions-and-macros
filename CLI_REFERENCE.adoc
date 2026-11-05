@@ -1159,7 +1159,7 @@ Generated from `doc-tools lint-strings --list-rules`. Each rule links the sectio
 |A field with no .Description() ships as an undocumented field on the connector reference page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#reviewing-a-diff-that-touches-these-strings[Standard]
 
 |`connect-short-description-markup`
-|warning
+|error
 |ShortDescription is plain text in form-based editors
 |Form-based config editors, such as the one in Redpanda Cloud, show ShortDescription as plain text, so any markup appears to users as literal symbols. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#connect-fields-governed-in-the-connect-repo[Standard]
 
@@ -1182,6 +1182,16 @@ Generated from `doc-tools lint-strings --list-rules`. Each rule links the sectio
 |warning
 |urfave/cli Usage is a one-line label
 |rpk connect help prints Usage as a one-line label, so a second line breaks the help output. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`connect-go-slice-format`
+|warning
+|A Go slice or map formatted with %v publishes Go syntax, such as [a b c]
+|The page shows the list as Go prints it, in brackets with no commas, instead of as a readable list of values. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#connect-fields-governed-in-the-connect-repo[Standard]
+
+|`connect-quoted-field-name`
+|warning
+|A field name in quotes instead of inline code
+|Every other field name on the page is inline code, so a quoted one reads as an ordinary word and is harder to match to the config. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
 
 |===
 
