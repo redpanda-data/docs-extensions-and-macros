@@ -6,7 +6,7 @@ const fs = require('fs')
 const os = require('os')
 const semver = require('semver')
 const { findRepoRoot } = require('../../cli-utils/doc-tools-utils')
-const { generateRpkDocs, applyOverridesToTree, resolveReferences, shouldExcludeCommand, shouldUsePartialDir, derivePartialsDir } = require('./generate-rpk-docs')
+const { generateRpkDocs, applyOverridesToTree, resolveReferences, shouldExcludeCommand, shouldUsePartialDir, derivePartialsDir, ROOT_ONLY_PLUGINS } = require('./generate-rpk-docs')
 const { detectLinuxOnlyFromSource, warnIfDetectionLooksBroken } = require('./detect-platform-commands')
 const { downloadRpkBinary, RPK_RELEASE_TAG_RE, RPK_CDN_BASE } = require('../../cli-utils/rpk-cdn')
 const { generateRpkDiff, printDiffReport, generateWhatsNewSection, flattenToMap } = require('./report-delta')
@@ -49,6 +49,11 @@ const PLUGIN_MANIFEST_HOST = 'https://rpk-plugins.redpanda.com'
  * whose children are only these never actually installed.
  */
 const PLUGIN_SHIM_SUBCOMMANDS = new Set(['install', 'uninstall', 'upgrade'])
+
+/**
+ * HOME inside the Docker build container. The golang images run as root.
+ */
+const CONTAINER_HOME = '/root'
 
 /**
  * Parse Go version from 'go version' output
@@ -384,7 +389,7 @@ function fetchRpkTreeFromSource(sourcePath) {
   }
 
   try {
-    return JSON.parse(result.stdout)
+    return JSON.parse(replaceHomeDir(result.stdout, os.homedir()))
   } catch (err) {
     throw new Error(
       `Failed to parse rpk tree JSON from source build: ${err.message}\n` +
@@ -399,7 +404,7 @@ function fetchRpkTreeFromSource(sourcePath) {
  * Builds rpk binary, installs plugins, then runs --print-tree for complete command coverage.
  * Falls back to native Go build if Docker is unavailable.
  * @param {string} sourcePath - Path to rpk Go source directory (e.g., ~/redpanda/src/go/rpk)
- * @returns {Object} { tree, failedPlugins } — the parsed JSON tree plus the
+ * @returns {Object} { tree, failedPlugins, installedPlugins, pluginFlagSources } — the parsed JSON tree plus the
  *   names of managed plugins whose install failed this run. Callers pass
  *   failedPlugins to generateRpkDocs as protectedPlugins so those plugins'
  *   existing pages and nav entries are preserved instead of treated as stale.
@@ -561,6 +566,7 @@ function fetchRpkTreeFromLinuxSource(sourcePath, pluginPins = {}) {
     // Step 2: Install plugins
     console.log('Installing plugins for complete command coverage...')
     const failedPlugins = []
+    const installedPlugins = []
     for (const plugin of KNOWN_PLUGINS) {
       // A pin installs a specific version instead of the manifest's latest.
       // This is how pre-GA plugins (no version promoted to latest) get into a
@@ -588,11 +594,13 @@ function fetchRpkTreeFromLinuxSource(sourcePath, pluginPins = {}) {
 
       if (installResult.status === 0) {
         console.log(`    ✓ ${plugin} installed`)
+        installedPlugins.push(plugin)
       } else {
         const stderr = installResult.stderr || ''
         const stdout = installResult.stdout || ''
         if (stderr.includes('already installed') || stdout.includes('already installed')) {
           console.log(`    ✓ ${plugin} already installed`)
+          installedPlugins.push(plugin)
         } else if (stderr.includes('unknown command') || stderr.includes('Error: unknown command')) {
           console.log(`    - ${plugin} is not an installable plugin`)
         } else {
@@ -638,7 +646,7 @@ function fetchRpkTreeFromLinuxSource(sourcePath, pluginPins = {}) {
 
     let tree
     try {
-      tree = JSON.parse(result.stdout)
+      tree = JSON.parse(replaceHomeDir(result.stdout, CONTAINER_HOME))
     } catch (err) {
       throw new Error(
         `Failed to parse rpk tree JSON from Linux source build: ${err.message}\n` +
@@ -650,22 +658,26 @@ function fetchRpkTreeFromLinuxSource(sourcePath, pluginPins = {}) {
     // Step 4: Fill in flags for plugin subtrees. Their commands come from
     // --help-autocomplete, which carries no flag data, so without this every
     // plugin command page renders an empty flags section.
-    console.log('Extracting flags from plugin command help output...')
+    console.log('Filling in plugin command flags...')
+    const pluginFlagSources = {}
     for (const plugin of KNOWN_PLUGINS) {
       const node = (tree.commands || []).find(c => c.name === plugin)
       if (!node || !pluginNodeHasRealCommands(node)) continue
-      const enriched = enrichPluginTreeWithFlags(node, (argPath) => {
+      const { source, enriched } = fillPluginFlags(node, (argPath) => {
         const helpResult = spawnSync('docker', [
           'exec', containerId, '/tmp/rpk', ...argPath, '--help'
         ], { encoding: 'utf8', timeout: 30000 })
-        return helpResult.status === 0 ? helpResult.stdout : null
+        return helpResult.status === 0 ? replaceHomeDir(helpResult.stdout, CONTAINER_HOME) : null
       })
-      if (enriched > 0) {
-        console.log(`  ${plugin}: extracted flags for ${enriched} command(s)`)
+      pluginFlagSources[plugin] = source
+      if (source === 'tree') {
+        console.log(`  ${plugin}: flags from the command tree`)
+      } else if (enriched > 0) {
+        console.log(`  ${plugin}: extracted flags for ${enriched} command(s) from --help`)
       }
     }
 
-    return { tree, failedPlugins }
+    return { tree, failedPlugins, installedPlugins, pluginFlagSources }
   } finally {
     // Clean up container
     console.log('Cleaning up build container...')
@@ -1543,6 +1555,22 @@ function pluginNodeHasRealCommands(node) {
 }
 
 /**
+ * Whether a plugin install resolved a binary. A node with real commands
+ * shows it did. A root-only plugin such as rpk check has none, so check
+ * for the managed binary in the install's HOME instead.
+ * @param {string} plugin - rpk command name (ai, connect, k8s, check)
+ * @param {Object} node - Top-level command node for the plugin
+ * @param {string} homeDir - HOME the install ran with
+ * @returns {boolean}
+ */
+function pluginInstalled(plugin, node, homeDir) {
+  if (pluginNodeHasRealCommands(node)) return true
+  if (!ROOT_ONLY_PLUGINS.has(plugin)) return false
+  const slug = PLUGIN_MANIFEST_SLUGS[plugin] || plugin
+  return fs.existsSync(path.join(homeDir, '.local', 'bin', `.rpk.managed-${slug}`))
+}
+
+/**
  * Replace a plugin's top-level node in a command tree.
  * Replace-only: throws if the plugin is not already present, so a refresh
  * can never introduce a command that the snapshot's rpk version lacks.
@@ -1710,11 +1738,70 @@ function parseHelpFlags(helpText) {
 }
 
 /**
+ * Positional arguments from the Usage line of a command's cobra --help
+ * output. For `rpai agent get <name> [flags]` and the argument path
+ * ['ai', 'agent', 'get'], returns '<name>'. The line may start with the
+ * plugin's own binary name, so the command is found by the path after the
+ * plugin's name. Returns null when the line has no arguments, when the
+ * path cannot be found in it, and for urfave/cli help, whose USAGE line
+ * gives a generic [arguments...] rather than the command's arguments.
+ * @param {string} helpText
+ * @param {string[]} argPath - Argument path, plugin name first
+ * @returns {string|null}
+ */
+function parseCobraUsageArgs(helpText, argPath) {
+  const m = /^Usage:[ \t]*\n[ \t]+(\S.*)$/m.exec(helpText || '')
+  if (!m) return null
+  const sub = argPath.slice(1)
+  if (sub.length === 0) return null
+  const words = m[1].trim().split(/\s+/)
+  for (let i = 0; i + sub.length <= words.length; i++) {
+    if (sub.every((w, k) => words[i + k] === w)) {
+      // cobra prints `<path> [command]` as the first line for a command
+      // that only groups subcommands
+      const args = words.slice(i + sub.length).filter(w => w !== '[flags]' && w !== '[command]')
+      return args.length > 0 ? args.join(' ') : null
+    }
+  }
+  return null
+}
+
+/**
+ * Add positional arguments from --help to a command's usage, when the
+ * tree's usage has none. rpk puts them in --print-tree when the plugin
+ * sends a `use` line in --help-autocomplete; older rpk and plugin versions
+ * give only `rpk <path> [flags]`. A usage that already has more than the
+ * command path and [flags] is left as it is.
+ * @param {Object} cmd - The command's tree node (mutated)
+ * @param {string[]} argPath - Argument path, plugin name first
+ * @param {string} helpText - The command's --help output
+ * @returns {boolean} Whether the usage changed
+ */
+// Whether a command's usage is only its path, with or without [flags]
+function usageHasNoArgs(cmd, argPath) {
+  const base = ['rpk', ...argPath].join(' ')
+  const usage = (cmd.usage || '').trim()
+  return !usage || usage === base || usage === `${base} [flags]`
+}
+
+function fillUsageArgsFromHelp(cmd, argPath, helpText) {
+  if (!usageHasNoArgs(cmd, argPath)) return false
+  const base = ['rpk', ...argPath].join(' ')
+  const usage = (cmd.usage || '').trim()
+  const args = parseCobraUsageArgs(helpText, argPath)
+  if (!args) return false
+  cmd.usage = `${base} ${args}${usage.endsWith('[flags]') ? ' [flags]' : ''}`
+  return true
+}
+
+/**
  * Fill in flags for plugin subtree commands by running `--help` per command.
  * Plugin subcommand nodes come from the plugin's --help-autocomplete output,
  * which carries no flag information, so without this every plugin command
  * page renders with an empty flags section. Nodes that already have flags
  * (the install/uninstall/upgrade shim compiled into rpk) are left alone.
+ * The same --help output also gives the command's positional arguments
+ * when the tree's usage leaves them out (see fillUsageArgsFromHelp).
  * Help failures are non-fatal: the affected command keeps an empty list.
  * @param {Object} node - The plugin's top-level command node (mutated)
  * @param {Function} execHelp - (argPath: string[]) => string|null, returns
@@ -1727,6 +1814,7 @@ function enrichPluginTreeWithFlags(node, execHelp) {
     if (!cmd.flags || cmd.flags.length === 0) {
       const helpText = execHelp(argPath)
       if (helpText) {
+        fillUsageArgsFromHelp(cmd, argPath, helpText)
         const flags = parseHelpFlags(helpText)
         if (flags.length > 0) {
           cmd.flags = flags
@@ -1743,18 +1831,198 @@ function enrichPluginTreeWithFlags(node, execHelp) {
 }
 
 /**
+ * Whether the tree already carries the plugin's own flags. rpk includes
+ * them in --print-tree, marked "from_plugin": true, when the plugin lists
+ * them in its --help-autocomplete output; older rpk or plugin versions give
+ * none. The marker is what tells them apart from flags rpk defines on the
+ * same commands, such as rpk's own --version on rpk check.
+ * @param {Object} node - The plugin's top-level command node
+ * @returns {boolean}
+ */
+function pluginTreeHasFlags(node) {
+  const any = (cmd) => (cmd.flags || []).some(f => f.from_plugin === true) || (cmd.commands || []).some(any)
+  return any(node)
+}
+
+/**
+ * Add positional arguments from --help to the commands of a plugin whose
+ * flags come from the tree, when the tree's usage has none (a plugin that
+ * lists flags but not `use` in --help-autocomplete). Runs --help only for
+ * those commands, and never for the plugin root or rpk's install shim.
+ * @param {Object} node - The plugin's top-level command node (mutated)
+ * @param {Function} execHelp - See enrichPluginTreeWithFlags
+ */
+function fillTreeUsageArgsFromHelp(node, execHelp) {
+  const walk = (cmd, argPath) => {
+    if (usageHasNoArgs(cmd, argPath)) {
+      const helpText = execHelp(argPath)
+      if (helpText) fillUsageArgsFromHelp(cmd, argPath, helpText)
+    }
+    for (const child of cmd.commands || []) walk(child, [...argPath, child.name])
+  }
+  for (const child of node.commands || []) {
+    if (!PLUGIN_SHIM_SUBCOMMANDS.has(child.name)) walk(child, [node.name, child.name])
+  }
+}
+
+/**
+ * Make sure a plugin's commands have their flags. When the tree already
+ * carries them, use it as is: a command with no flags then really has none,
+ * so no flags are scraped, though --help still fills in usage arguments the
+ * tree leaves out. Otherwise fall back to parsing each command's --help
+ * output.
+ * @param {Object} node - The plugin's top-level command node (mutated)
+ * @param {Function} execHelp - See enrichPluginTreeWithFlags
+ * @returns {{source: 'tree'|'help'|'none', enriched: number}} Where the flags
+ *   came from, and how many commands got flags from --help
+ */
+function fillPluginFlags(node, execHelp) {
+  if (pluginTreeHasFlags(node)) {
+    fillTreeUsageArgsFromHelp(node, execHelp)
+    return { source: 'tree', enriched: 0 }
+  }
+  const enriched = enrichPluginTreeWithFlags(node, execHelp)
+  return { source: enriched > 0 ? 'help' : 'none', enriched }
+}
+
+/**
+ * Where each plugin's flags came from, for the snapshot. A build path that
+ * filled flags records its own sources; any plugin it did not cover, such as
+ * every plugin in a native build or rpk check, which has no subcommands, is
+ * read from the final tree: 'tree' when it carries the plugin's from_plugin
+ * flags, 'none' when the plugin has commands but no flags from either source.
+ * @param {Object} tree - Final command tree (root node)
+ * @param {Object} [sources] - Sources the build path recorded
+ * @returns {Object} Sources keyed by plugin
+ */
+function pluginFlagSourcesFromTree(tree, sources = {}) {
+  const out = { ...sources }
+  for (const plugin of KNOWN_PLUGINS) {
+    if (out[plugin]) continue
+    const node = ((tree && tree.commands) || []).find(c => c.name === plugin)
+    if (!node) continue
+    if (pluginTreeHasFlags(node)) out[plugin] = 'tree'
+    else if (pluginNodeHasRealCommands(node)) out[plugin] = 'none'
+  }
+  return out
+}
+
+/**
+ * Replace a HOME directory in rpk output with `~`. A plugin can report a
+ * default under HOME, such as rpk ai's `--rpai-config`, and each build path
+ * runs with a different HOME (a new temporary HOME per refresh, /root in the
+ * Docker build, the caller's HOME in a native build), so the raw path would
+ * change the snapshot between runs. Covers the path as given and as
+ * resolved (on macOS, /var/folders is /private/var/folders). Only a whole
+ * path segment matches, so a HOME of /root leaves /rootfs alone.
+ * @param {string} text - rpk output
+ * @param {string} homeDir - HOME the command ran with
+ * @returns {string}
+ */
+function replaceHomeDir(text, homeDir) {
+  if (!text || !homeDir || homeDir === '/') return text
+  const homes = new Set([homeDir])
+  try { homes.add(fs.realpathSync(homeDir)) } catch (_) {}
+  let out = text
+  for (const home of [...homes].sort((a, b) => b.length - a.length)) {
+    const escaped = home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    // The path starts after anything but a path character, and ends at a
+    // separator, a quote, whitespace, a JSON escape, a closing bracket or
+    // the end of the text
+    out = out.replace(new RegExp(`(?<![\\w./-])${escaped}(?=[/\\s"'\\\\)\\]]|$)`, 'gm'), '~')
+  }
+  return out
+}
+
+/**
+ * Record the version of each plugin that actually installed during a full
+ * build (`rpk <plugin> install` resolves the manifest's latest, so the
+ * manifest lookup reflects what the tree contains). Shim-only plugins
+ * (failed installs) are skipped: their subtree carries no plugin commands.
+ * A root-only plugin such as rpk check has no subcommands, so it counts as
+ * installed when its install succeeded or the tree carries its flags.
+ * @param {Object} tree - Full command tree (root node)
+ * @param {Object} [options]
+ * @param {Object} [options.pluginPins] - Pinned versions keyed by plugin
+ * @param {string[]} [options.installedPlugins] - Plugins whose install succeeded
+ * @param {Function} [options.fetchLatest] - (plugin) => latest version or null
+ * @returns {Object} Versions keyed by rpk command name
+ */
+function recordPluginVersions(tree, { pluginPins = {}, installedPlugins = [], fetchLatest = fetchLatestPluginVersion } = {}) {
+  const pluginVersions = {}
+  for (const pluginName of REFRESHABLE_PLUGINS) {
+    const node = (tree.commands || []).find(c => c.name === pluginName)
+    if (!node) continue
+    const installed = pluginNodeHasRealCommands(node) || (
+      ROOT_ONLY_PLUGINS.has(pluginName) &&
+      (installedPlugins.includes(pluginName) || (node.flags || []).some(f => f.from_plugin === true))
+    )
+    if (!installed) continue
+    const installedVersion = pluginPins[pluginName] || fetchLatest(pluginName)
+    if (installedVersion) {
+      pluginVersions[pluginName] = installedVersion
+    }
+  }
+  return pluginVersions
+}
+
+/**
+ * Whether a directory holds an rpk plugin: an executable named .rpk-<name>,
+ * .rpk.ac-<name> or .rpk.managed-<name>, the names rpk looks for.
+ * @param {string} dir - Directory from PATH
+ * @returns {boolean}
+ */
+function dirHasRpkPlugins(dir) {
+  let entries
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch (_) {
+    return false
+  }
+  return entries.some(e => !e.isDirectory() && /^\.rpk(\.ac|\.managed)?-./.test(e.name))
+}
+
+/**
+ * Environment for a plugin refresh. rpk finds plugins in $HOME/.local/bin
+ * and in every PATH directory, so HOME is the temporary install HOME and
+ * PATH loses any directory that holds an rpk plugin, such as the caller's
+ * own ~/.local/bin. Only the plugin installed into the temporary HOME is
+ * then visible. Every other PATH directory is kept.
+ * @param {string} tmpHome - Temporary HOME for the install
+ * @param {Object} [baseEnv] - Environment to start from
+ * @returns {Object}
+ */
+function isolatedPluginEnv(tmpHome, baseEnv = process.env) {
+  const keep = (baseEnv.PATH || '').split(path.delimiter).filter(dir => dir && !dirHasRpkPlugins(dir))
+  return { ...baseEnv, HOME: tmpHome, PATH: keep.join(path.delimiter) }
+}
+
+/**
  * Install a single plugin and capture its fresh command subtree.
- * Runs with an isolated HOME so the install never touches the caller's
- * rpk plugin state, and the caller's installed plugins never leak in.
+ * Runs with an isolated HOME and a PATH without plugin directories (see
+ * isolatedPluginEnv), so the install never touches the caller's rpk plugin
+ * state and the caller's installed plugins never leak in. The temporary
+ * HOME is removed afterward, on success and on failure.
  * @param {Object} params
  * @param {string} params.plugin - rpk command name (ai, connect, k8s, check)
  * @param {string} [params.pluginVersion] - Version to pin; defaults to latest
  * @param {string} params.rpkBinPath - rpk binary to run
- * @returns {Object} { node, version } - Fresh plugin node and the version recorded
+ * @returns {Object} { node, version, flagSource } - Fresh plugin node, the version
+ *   recorded, and where its flags came from ('tree', 'help' or 'none')
  */
 function fetchPluginSubtree({ plugin, pluginVersion, rpkBinPath }) {
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-plugin-home-'))
-  const env = { ...process.env, HOME: tmpHome }
+  try {
+    return fetchPluginSubtreeInHome({ plugin, pluginVersion, rpkBinPath, tmpHome })
+  } finally {
+    // The install puts the plugin binary here, which is tens to hundreds
+    // of MB, so remove it whether the refresh succeeded or not
+    fs.rmSync(tmpHome, { recursive: true, force: true })
+  }
+}
+
+function fetchPluginSubtreeInHome({ plugin, pluginVersion, rpkBinPath, tmpHome }) {
+  const env = isolatedPluginEnv(tmpHome)
 
   const runInstall = (pinned) => {
     const args = [plugin, 'install']
@@ -1808,12 +2076,12 @@ function fetchPluginSubtree({ plugin, pluginVersion, rpkBinPath }) {
     throw new Error(`Failed to run rpk --print-tree: ${stderr}`)
   }
 
-  const freshTree = JSON.parse(treeResult.stdout)
+  const freshTree = JSON.parse(replaceHomeDir(treeResult.stdout, tmpHome))
   const node = (freshTree.commands || []).find(c => c.name === plugin)
   if (!node) {
     throw new Error(`Plugin '${plugin}' not found in rpk command tree after install`)
   }
-  if (!pluginNodeHasRealCommands(node)) {
+  if (!pluginInstalled(plugin, node, tmpHome)) {
     throw new Error(
       `Plugin '${plugin}' installed but exposed no commands beyond the ` +
       'install/uninstall/upgrade shim.\n' +
@@ -1822,19 +2090,31 @@ function fetchPluginSubtree({ plugin, pluginVersion, rpkBinPath }) {
       `--plugin-version <version>`
     )
   }
+  // A root-only plugin such as rpk check has only its root page, which
+  // generateRpkDocs regenerates only when the tree carries the plugin's own
+  // from_plugin flags (see detectProtectedPlugins). Without them the pages
+  // would stay as they were while the snapshot recorded a refresh.
+  if (ROOT_ONLY_PLUGINS.has(plugin) && !pluginTreeHasFlags(node)) {
+    throw new Error(
+      `Plugin '${plugin}' installed, but this rpk's --print-tree carries none ` +
+      `of its flags, so its pages cannot be regenerated.\n` +
+      'Pass --rpk-bin with an rpk that includes plugin flags in --print-tree.'
+    )
+  }
 
-  // Fill in per-command flags: autocomplete trees carry none, but the plugin
-  // binary is installed, so each command's --help documents them
-  console.log(`Extracting flags from ${plugin} command help output...`)
-  const enriched = enrichPluginTreeWithFlags(node, (argPath) => {
+  // Fill in per-command flags: from the tree when rpk and the plugin put
+  // them there, otherwise from each command's --help
+  const { source: flagSource, enriched } = fillPluginFlags(node, (argPath) => {
     const helpResult = spawnSync(rpkBinPath, [...argPath, '--help'], {
       encoding: 'utf8',
       env,
       timeout: 30000
     })
-    return helpResult.status === 0 ? helpResult.stdout : null
+    return helpResult.status === 0 ? replaceHomeDir(helpResult.stdout, tmpHome) : null
   })
-  console.log(`  Extracted flags for ${enriched} command(s)`)
+  console.log(flagSource === 'tree'
+    ? `  ${plugin}: flags from the command tree`
+    : `  ${plugin}: extracted flags for ${enriched} command(s) from --help`)
 
   // When the pin was applied, record it. When we fell back to latest (or no
   // pin was given), record what the manifest says latest is: that is what
@@ -1852,7 +2132,7 @@ function fetchPluginSubtree({ plugin, pluginVersion, rpkBinPath }) {
     )
   }
 
-  return { node, version }
+  return { node, version, flagSource }
 }
 
 /**
@@ -1928,6 +2208,8 @@ async function handleRpkDocsGeneration(options = {}) {
   // as explicit protectedPlugins (merged there with auto-detection) so a
   // failed install never deletes or rewrites that plugin's existing docs.
   let failedPlugins = []
+  let installedPlugins = []
+  let pluginFlagSources = {}
 
   try {
     // Fast path: regenerate from existing JSON file
@@ -1958,6 +2240,7 @@ async function handleRpkDocsGeneration(options = {}) {
       // change, and stale-file cleanup, nav rebuild, and override
       // validation all see a complete tree.
       let pluginVersions = jsonData.plugin_versions || {}
+      let refreshFlagSources = jsonData.plugin_flag_sources || {}
       let pluginDiffData = null
       if (plugin) {
         if (!REFRESHABLE_PLUGINS.includes(plugin)) {
@@ -1982,11 +2265,12 @@ async function handleRpkDocsGeneration(options = {}) {
         }
 
         const rpkBinPath = acquireRpkBinary(rpkVersion, { rpkBin })
-        const { node: rawNode, version: resolvedVersion } = fetchPluginSubtree({
+        const { node: rawNode, version: resolvedVersion, flagSource } = fetchPluginSubtree({
           plugin,
           pluginVersion,
           rpkBinPath
         })
+        refreshFlagSources = { ...refreshFlagSources, [plugin]: flagSource }
 
         // Reapply platform markers: the fresh subtree comes from a plain
         // --print-tree run, but every command in the snapshot's tree carries
@@ -2106,6 +2390,7 @@ async function handleRpkDocsGeneration(options = {}) {
         jsonData.raw_tree = tree
         jsonData.tree = enhancedTree
         jsonData.plugin_versions = pluginVersions
+        jsonData.plugin_flag_sources = refreshFlagSources
         jsonData.generated_at = new Date().toISOString()
         saveVersionedJson(jsonData, rpkVersion, dataDir)
       }
@@ -2307,7 +2592,7 @@ async function handleRpkDocsGeneration(options = {}) {
       try {
         // Build on Linux (in container) - has all commands
         console.log('Building rpk in Linux container...')
-        const { tree: linuxTree, failedPlugins: linuxFailedPlugins } = fetchRpkTreeFromLinuxSource(sourcePath, pluginPins)
+        const { tree: linuxTree, failedPlugins: linuxFailedPlugins, installedPlugins: linuxInstalledPlugins, pluginFlagSources: linuxFlagSources } = fetchRpkTreeFromLinuxSource(sourcePath, pluginPins)
 
         // Build natively (on Darwin) for comparison. The Linux tree is
         // authoritative, so a comparison-build failure (for example, local
@@ -2337,6 +2622,8 @@ async function handleRpkDocsGeneration(options = {}) {
         // Use the Linux tree (has all commands)
         tree = linuxTree
         failedPlugins = linuxFailedPlugins
+        installedPlugins = linuxInstalledPlugins || []
+        pluginFlagSources = linuxFlagSources || {}
       } catch (dockerErr) {
         // Docker build failed - fall back to native build
         console.warn(`\n⚠ Docker build failed: ${dockerErr.message}`)
@@ -2347,7 +2634,7 @@ async function handleRpkDocsGeneration(options = {}) {
     } else if (canBuildLinux) {
       console.log('\nBuilding rpk in Linux container...')
       try {
-        ({ tree, failedPlugins } = fetchRpkTreeFromLinuxSource(sourcePath, pluginPins))
+        ({ tree, failedPlugins, installedPlugins = [], pluginFlagSources = {} } = fetchRpkTreeFromLinuxSource(sourcePath, pluginPins))
       } catch (dockerErr) {
         if (canBuildNative) {
           console.warn(`\n⚠ Docker build failed: ${dockerErr.message}`)
@@ -2384,20 +2671,8 @@ async function handleRpkDocsGeneration(options = {}) {
     const plugins = detectPlugins(tree)
     console.log(`Detected plugins: ${plugins.join(', ') || 'none'}`)
 
-    // Record the version of each plugin that actually installed during the
-    // build (`rpk <plugin> install` resolves the manifest's latest, so the
-    // manifest lookup reflects what the tree contains). Shim-only plugins
-    // (failed installs) are skipped: their subtree carries no plugin commands.
-    const pluginVersions = {}
-    for (const pluginName of REFRESHABLE_PLUGINS) {
-      const node = (tree.commands || []).find(c => c.name === pluginName)
-      if (node && pluginNodeHasRealCommands(node)) {
-        const installedVersion = pluginPins[pluginName] || fetchLatestPluginVersion(pluginName)
-        if (installedVersion) {
-          pluginVersions[pluginName] = installedVersion
-        }
-      }
-    }
+    const pluginVersions = recordPluginVersions(tree, { pluginPins, installedPlugins })
+    pluginFlagSources = pluginFlagSourcesFromTree(tree, pluginFlagSources)
     if (Object.keys(pluginVersions).length > 0) {
       console.log(`Plugin versions: ${JSON.stringify(pluginVersions)}`)
     }
@@ -2445,6 +2720,9 @@ async function handleRpkDocsGeneration(options = {}) {
     const augmentedData = {
       rpk_version: rpkVersion,
       plugin_versions: pluginVersions,
+      // Where each plugin's flags came from: 'tree' when rpk's --print-tree
+      // carried them, 'help' when they were parsed from --help output
+      plugin_flag_sources: pluginFlagSources,
       generated_at: new Date().toISOString(),
       tree: enhancedTree,
       // Also include raw tree for diffing purposes (used by diff generation)
@@ -2878,14 +3156,23 @@ module.exports = {
   buildRpkBinary,
   downloadRpkRelease,
   fetchPluginSubtree,
+  recordPluginVersions,
+  isolatedPluginEnv,
   parseCobraFlags,
   parseUrfaveFlags,
   parseHelpFlags,
   mergeVisibleDeprecationsIntoOverrides,
   makeLinkablePredicate,
   enrichPluginTreeWithFlags,
+  parseCobraUsageArgs,
+  fillUsageArgsFromHelp,
+  fillPluginFlags,
+  pluginTreeHasFlags,
   fetchLatestPluginVersion,
   pluginNodeHasRealCommands,
+  pluginInstalled,
+  replaceHomeDir,
+  pluginFlagSourcesFromTree,
   splicePluginNode,
   preserveLinuxOnlyCommands,
   REFRESHABLE_PLUGINS,

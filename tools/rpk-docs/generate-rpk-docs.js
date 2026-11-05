@@ -1860,15 +1860,25 @@ function formatDescription(desc, customTransformations = null, options = {}) {
 
 /**
  * Format usage string - convert [PLACEHOLDER] to <placeholder>
+ *
+ * rpk's own commands write every positional argument as [UPPERCASE],
+ * required or not, so those become <lowercase>. Plugin commands follow
+ * cobra's convention instead: <name> is required and [NAME] is optional.
+ * For them, [NAME] keeps its brackets and is lowercased, the way an
+ * optional argument such as `rpk generate [template]` already renders.
  * @param {string} usage - Usage string from rpk
+ * @param {Object} [options]
+ * @param {boolean} [options.plugin] - The usage belongs to a plugin command
  * @returns {string} Formatted usage string
  */
-function formatUsage(usage) {
+function formatUsage(usage, { plugin = false } = {}) {
   if (!usage) return ''
   // Convert [UPPERCASE-PLACEHOLDER] to <lowercase-placeholder>
   // But keep [flags] as-is since that's the standard convention
   return usage.replace(/\[([A-Z][-A-Z0-9_]*(?:\.\.\.)?)\]/g, (match, placeholder) => {
-    return '<' + placeholder.toLowerCase() + '>'
+    return plugin
+      ? '[' + placeholder.toLowerCase() + ']'
+      : '<' + placeholder.toLowerCase() + '>'
   })
 }
 
@@ -2437,6 +2447,14 @@ const KNOWN_PLUGINS = ['ai', 'check', 'connect', 'k8s', 'oxla']
 const PLUGIN_SHIM_COMMANDS = new Set(['install', 'uninstall', 'upgrade'])
 
 /**
+ * Managed plugins that run from their root command and have no subcommands:
+ * rpk check runs every check from `rpk check` itself, so its subtree is
+ * only ever the shim, installed or not. rpk marks the flags such a plugin
+ * reports with from_plugin, which is what shows it installed.
+ */
+const ROOT_ONLY_PLUGINS = new Set(['check'])
+
+/**
  * Check whether a command path belongs to a protected plugin's subtree
  * (including the plugin's own top-level command).
  * @param {string} commandPath - Full command path, e.g. 'rpk k8s multicluster'
@@ -2469,8 +2487,11 @@ function detectProtectedPlugins(commands, explicitProtected = []) {
     const subNames = commands
       .filter(c => c.path.startsWith(`rpk ${pl} `))
       .map(c => c.path.split(' ')[2])
-    const hasTopLevel = commands.some(c => c.path === `rpk ${pl}`)
-    if (!hasTopLevel) return true
+    const top = commands.find(c => c.path === `rpk ${pl}`)
+    if (!top) return true
+    if (ROOT_ONLY_PLUGINS.has(pl)) {
+      return !((top.command && top.command.flags) || []).some(f => f.from_plugin === true)
+    }
     return subNames.length === 0 || subNames.every(n => PLUGIN_SHIM_COMMANDS.has(n))
   })
   return [...new Set([...explicitProtected, ...autoProtected])]
@@ -2925,7 +2946,7 @@ async function generateRpkDocs(options = {}) {
       name: command.name,
       description: formattedDescription,
       shortDesc: ensurePeriod(capToTwoSentences(formatDescription(mainDescription, textTransformations, { skipTableConversion: true, skipListConversion: true }))),
-      usage: formatUsage(command.usage),
+      usage: formatUsage(command.usage, { plugin: pathParts.length >= 3 && KNOWN_PLUGINS.includes(pathParts[1]) }),
       aliases: (mergedCommand.aliases || command.aliases || [])
         .filter(alias => !commandOverride.excludeAliases?.includes(alias))
         .map(alias => {
@@ -2957,8 +2978,11 @@ async function generateRpkDocs(options = {}) {
         name: flag.shorthand ? `-${flag.shorthand}, --${flag.name}` : `--${flag.name}`,
         type: flag.type || '-',
         description: ensurePeriod(formatDescription(flag.description || '', textTransformations)),
-        deprecated: flag.deprecated,
-        deprecatedMessage: flag.deprecatedMessage,
+        // --print-tree gives pflag's deprecation message as the deprecated
+        // value itself; overrides give deprecated: true plus a message
+        deprecated: Boolean(flag.deprecated),
+        deprecatedMessage: flag.deprecatedMessage ||
+          (typeof flag.deprecated === 'string' ? flag.deprecated : undefined),
         cloudOnly: flag.cloudOnly,
         selfHostedOnly: flag.selfHostedOnly,
         validValues: flag.validValues,
@@ -3306,6 +3330,7 @@ module.exports = {
   shouldUsePartialDir,
   updateNavFile,
   KNOWN_PLUGINS,
+  ROOT_ONLY_PLUGINS,
   detectProtectedPlugins,
   getCommandMetadata,
   processContentArray,
