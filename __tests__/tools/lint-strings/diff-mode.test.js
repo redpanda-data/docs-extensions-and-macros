@@ -190,8 +190,9 @@ describe('declaration-anchored diff mode (end-to-end, temp git repo)', () => {
     expect(finding.name).toBe('committed_offset')
     expect(finding.surface).toBe('metrics')
     expect(finding.in_pr_diff).toBe(true)
-    // The fixture's description also spells its aside as "i.e.".
-    expect(finding.rules.map((r) => r.id).sort()).toEqual(['latin-abbreviation', 'trailing-period'])
+    // The fixture's description also spells its aside as "i.e.", but on the
+    // first literal, which this PR did not change, so it is not reported.
+    expect(finding.rules.map((r) => r.id).sort()).toEqual(['trailing-period'])
 
     // Full-span anchoring: the finding covers the whole sm::description(...)
     // call, not just the edited line.

@@ -160,7 +160,9 @@ function lintStrings (options) {
         const detail = surface.reviewContext ? surface.reviewContext(decl) : null
         pending.push({ ...pendingEntry(decl), ...(detail ? { detail } : {}), context: pageContext(decl, everything || head) })
       }
-      results.push(runRules(declarations, rulesFor(surface), { skipRules, onlyRules }))
+      // Findings a rule can place on a source line are kept only when that
+      // line changed, so a PR is not asked to fix what it did not touch.
+      results.push(runRules(declarations, rulesFor(surface), { skipRules, onlyRules, changedLines: files }))
       // Doc-method calls the extractor saw but could not trace, in the
       // lines this diff changed. Reported so a gap is never silent.
       const skippedHere = (everything ? everything.skipped : head.skipped) || []

@@ -28,6 +28,8 @@
  * Severity levels: error | warning | info.
  */
 
+const { wordLines, filterIssue } = require('./locate')
+
 const SEVERITIES = ['error', 'warning', 'info']
 
 /**
@@ -40,11 +42,14 @@ const SEVERITIES = ['error', 'warning', 'info']
  *     (all other rules are skipped for unverifiable declarations, so a
  *     non-literal source string can never produce an error)
  *   A declaration skips any rule named in decl.meta.skip_rules.
- * @param {Object} options - { skipRules: [names], onlyRules: [names] }
+ * @param {Object} options - { skipRules: [names], onlyRules: [names],
+ *   changedLines: Map(file -> Set(line)) }. With changedLines (diff mode), an
+ *   issue whose rule locates it (issue.at, see ./locate.js) is kept only when
+ *   the offending text is on a changed line, and carries that `line`.
  * @returns {Object} { findings, summary: { byRule, bySurface } }
  */
 function runRules (declarations, rules, options = {}) {
-  const { skipRules = [], onlyRules = null } = options
+  const { skipRules = [], onlyRules = null, changedLines = null } = options
   const findings = []
   const summary = emptySummary()
 
@@ -52,6 +57,8 @@ function runRules (declarations, rules, options = {}) {
     summary.totalDeclarations++
     ensureSurface(summary, decl.surface).declarations++
     const issues = []
+    let words
+    const getWords = () => (words === undefined ? (words = wordLines(decl)) : words)
 
     for (const rule of rules) {
       if (skipRules.includes(rule.name)) continue
@@ -65,7 +72,10 @@ function runRules (declarations, rules, options = {}) {
       if (decl.meta && Array.isArray(decl.meta.skip_rules) && decl.meta.skip_rules.includes(rule.name)) continue
 
       try {
-        for (const issue of rule.check(decl) || []) {
+        for (const raw of rule.check(decl) || []) {
+          const located = changedLines ? filterIssue(decl, raw, changedLines.get(decl.file), getWords) : null
+          if (located && !located.keep) continue
+          const issue = located ? { ...raw, message: located.message } : raw
           const severity = issue.severity || rule.severity
           issues.push({
             id: rule.name,
@@ -74,6 +84,7 @@ function runRules (declarations, rules, options = {}) {
             why: rule.why,
             standard: rule.standard
           })
+          if (located && located.line != null) issues[issues.length - 1].line = located.line
         }
       } catch (err) {
         issues.push({
