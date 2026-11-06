@@ -44,6 +44,13 @@ describe('every rule documents its reason and standard', () => {
     expect({ rule: name, missing }).toEqual({ rule: name, missing: [] })
     expect(rule.standard).toMatch(STANDARD_URL)
   })
+
+  // The PR review reads the tier to decide what is posted on the PR and what
+  // goes to the job summary only, so every rule must state one. A missing
+  // tier would fall back to unclear and post a style nit as a PR comment.
+  test.each(cases)('%s: %s has a tier', (surfaceName, name, rule) => {
+    expect({ rule: name, tier: rule.tier }).toEqual({ rule: name, tier: expect.stringMatching(/^(wrong|unclear|style)$/) })
+  })
 })
 
 describe('--list-rules', () => {
@@ -71,7 +78,7 @@ describe('--list-rules', () => {
     const rules = JSON.parse(result.stdout)
     expect(rules.length).toBeGreaterThan(0)
     for (const rule of rules) {
-      expect(Object.keys(rule)).toEqual(['id', 'surfaces', 'severity', 'description', 'why', 'standard'])
+      expect(Object.keys(rule)).toEqual(['id', 'surfaces', 'severity', 'tier', 'description', 'why', 'standard'])
       expect(rule.surfaces).toContain('rpk')
     }
   })
@@ -79,7 +86,7 @@ describe('--list-rules', () => {
   test('text output carries every field', () => {
     const result = spawnSync('node', [BIN, 'lint-strings', '--list-rules', '--surface', 'metrics'], { encoding: 'utf8' })
     expect(result.status).toBe(0)
-    expect(result.stdout).toMatch(/^trailing-period \(warning\)$/m)
+    expect(result.stdout).toMatch(/^trailing-period \(warning, style\)$/m)
     expect(result.stdout).toMatch(/^ {2}Why: Metric help is a label/m)
     expect(result.stdout).toMatch(/^ {2}Standard: https:\/\/github\.com\/redpanda-data\/docs-team-standards\//m)
   })
@@ -111,6 +118,7 @@ describe('findings carry the reason', () => {
     expect(issue).toEqual({
       id: 'trailing-period',
       severity: 'warning',
+      tier: 'style',
       message: expect.stringContaining('ends with a period'),
       why: rule.why,
       standard: rule.standard
@@ -138,5 +146,25 @@ describe('CLI_REFERENCE.adoc Rules section', () => {
     const section = reference.slice(reference.indexOf('\n== lint-strings\n'))
     const end = section.indexOf('\n== ', 1)
     expect(section.slice(0, end === -1 ? undefined : end + 1)).toContain(expected)
+  })
+})
+
+describe('issue tiers', () => {
+  const { issueTier } = require('../../../tools/lint-strings/engine')
+
+  test('an issue takes its rule\'s tier', () => {
+    expect(issueTier({ tier: 'style' }, 'warning')).toBe('style')
+    expect(issueTier({ tier: 'unclear' }, 'warning')).toBe('unclear')
+    expect(issueTier({ tier: 'wrong' }, 'warning')).toBe('wrong')
+  })
+
+  test('an error is never below unclear, and an info finding is always style', () => {
+    expect(issueTier({ tier: 'style' }, 'error')).toBe('unclear')
+    expect(issueTier({ tier: 'wrong' }, 'error')).toBe('wrong')
+    expect(issueTier({ tier: 'unclear' }, 'info')).toBe('style')
+  })
+
+  test('a rule with no tier falls back to unclear, never to style', () => {
+    expect(issueTier({}, 'warning')).toBe('unclear')
   })
 })

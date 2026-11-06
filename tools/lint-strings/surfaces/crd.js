@@ -381,6 +381,7 @@ const RULES = [
     why: 'A field with no doc comment ships blank in the CRD reference and in kubectl explain.',
     standard: STANDARD.crd,
     severity: 'warning',
+    tier: 'unclear',
     check: (decl) => {
       if (decl.string !== null) return []
       // controller-gen falls back to the field type's own comment, so a
@@ -395,6 +396,7 @@ const RULES = [
     why: 'With no comment of its own, the field publishes its Go type\'s comment, which describes the type rather than the YAML key the user sets.',
     standard: STANDARD.crd,
     severity: 'warning',
+    tier: 'unclear',
     check: (decl) => {
       if (decl.string !== null || !decl.meta.inherited_from) return []
       // An external type's comment is upstream prose we do not own and cannot
@@ -414,6 +416,7 @@ const RULES = [
     why: 'Users type the YAML key, not the Go field name, so a description that opens with either identifier documents the wrong thing or reads like a broken comment.',
     standard: STANDARD.crd,
     severity: 'warning',
+    tier: 'style',
     check: (decl) => {
       const text = (decl.string || '').trim()
       if (!text) return []

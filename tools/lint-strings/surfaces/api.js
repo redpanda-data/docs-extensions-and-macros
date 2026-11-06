@@ -663,6 +663,7 @@ const RULES = [
     why: 'The generator takes the first line of an rpc comment as the operation summary, so with no blank line the whole comment becomes the navigation label in the API reference.',
     standard: STANDARD.api,
     severity: 'error',
+    tier: 'unclear',
     check: (decl) => {
       if (decl.meta?.kind !== 'rpc-summary' || !decl.meta.collapsed) return []
       const text = (decl.string || '').replace(/\s+/g, ' ').trim()
@@ -677,6 +678,7 @@ const RULES = [
     why: 'The operation summary is the label in the API reference index, so a second line turns that label into a paragraph.',
     standard: STANDARD.api,
     severity: 'error',
+    tier: 'unclear',
     check: (decl) => {
       // api-rpc-summary-not-separated owns the collapsed case and gives the
       // actionable fix; reporting both just doubles up on one defect.
@@ -693,6 +695,7 @@ const RULES = [
     why: 'The operation summary is a label, not a sentence, so a period makes it read unlike every other operation in the index.',
     standard: STANDARD.api,
     severity: 'error',
+    tier: 'style',
     check: (decl) => {
       if (!isSummary(decl) || decl.meta?.collapsed) return []
       if (/\.\s*$/.test(decl.string || '')) {
@@ -707,6 +710,7 @@ const RULES = [
     why: 'A description that only restates the name tells readers nothing they could not already read from the name.',
     standard: STANDARD.qualityBar,
     severity: 'warning',
+    tier: 'unclear',
     check: (decl) => {
       // Replaces the generic name-echo, which cannot be scoped per kind. An
       // rpc summary is SUPPOSED to be the rpc's name - that is the documented
@@ -727,6 +731,7 @@ const RULES = [
     why: 'Comments and descriptions publish as prose in the API reference, so one with no full stop looks cut off.',
     standard: STANDARD.api,
     severity: 'warning',
+    tier: 'style',
     check: (decl) => {
       if (!isProse(decl)) return []
       const text = (decl.string || '').trim()
@@ -749,6 +754,7 @@ const RULES = [
     why: 'A field with no comment renders as a blank entry in the request or response schema of the API reference.',
     standard: STANDARD.api,
     severity: 'warning',
+    tier: 'unclear',
     check: (decl) => {
       if (decl.meta?.kind !== 'field') return []
       if (decl.string && decl.string.trim() !== '') return []
@@ -761,6 +767,7 @@ const RULES = [
     why: 'A string this short cannot say what the field does, its unit, or what changes when you set it, so readers are left guessing.',
     standard: STANDARD.qualityBar,
     severity: 'warning',
+    tier: 'unclear',
     check: (decl) => {
       // Scoped to prose kinds because an operation `summary` is a label and
       // is short by design: 151 of console's 216 summaries are under the

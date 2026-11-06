@@ -315,6 +315,7 @@ const RULES = [
     why: 'A Short is the one-line summary in command lists and the page description, so a second line breaks that summary.',
     standard: STANDARD.rpk,
     severity: 'warning',
+    tier: 'style',
     check: (decl) => {
       if (decl.meta.kind !== 'short') return []
       const text = (decl.string || '').trim()
@@ -330,6 +331,7 @@ const RULES = [
     why: 'Short and flag usage strings are labels, not sentences, and the rpk docs formatter adds punctuation where the page needs it.',
     standard: STANDARD.rpk,
     severity: 'warning',
+    tier: 'style',
     check: (decl) => {
       if (decl.meta.kind !== 'short' && decl.meta.kind !== 'flag') return []
       const text = (decl.string || '').trim()
@@ -347,6 +349,7 @@ const RULES = [
     why: 'The rpk docs formatter turns an ALLCAPS line in Long into a section heading, so ALLCAPS used for emphasis becomes an unintended heading.',
     standard: STANDARD.rpk,
     severity: 'info',
+    tier: 'style',
     check: (decl) => {
       if (decl.meta.kind !== 'long' || !decl.string) return []
       const issues = []
@@ -365,6 +368,7 @@ const RULES = [
     why: 'A line of ==== or ---- in Long becomes an AsciiDoc block delimiter with nothing to close it, which breaks the rest of the generated page.',
     standard: STANDARD.rpk,
     severity: 'warning',
+    tier: 'unclear',
     check: (decl) => {
       if (decl.meta.kind !== 'long' || !decl.string) return []
       const issues = []

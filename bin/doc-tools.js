@@ -3146,6 +3146,7 @@ programCli
   .option('--skip-rules <list>', 'Comma-separated rule ids to skip')
   .option('--only-rules <list>', 'Comma-separated rule ids to run exclusively')
   .option('--reviewed <file>', 'Diff mode: skip declarations whose fingerprint is listed in <file> (already reviewed on an earlier push)')
+  .option('--closed <file>', 'Diff mode: declaration keys a review on this PR already closed (one per line). A touched declaration with one of these keys is not reviewed again and is reported under summary.closedChangedDeclarations')
   .option('--reviewer-comments <file>', 'Diff mode: skip declarations whose text a human reviewer wrote in one of the comment bodies in <file> (a JSON array of strings)')
   .option('--strict', 'Exit 1 when any error-severity finding exists (default: always exit 0 - suggest, never block)')
   .option('--list-rules', 'Print every rule (id, surfaces, severity, description, why, standard) and exit. Honors --surface and --format.')

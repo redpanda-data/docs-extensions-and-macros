@@ -183,6 +183,7 @@ const RULES = [
     why: 'A property description reads as complete sentences on the page, so one with no final period looks cut off.',
     standard: STANDARD.qualityBar,
     severity: 'warning',
+    tier: 'style',
     check: (decl) => {
       const text = (decl.string || '').trim()
       if (!text) return []
@@ -198,6 +199,7 @@ const RULES = [
     why: 'The page shows a sentinel default such as null, 0 or -1 as a bare value, so only the description can tell readers whether it disables the property, means unlimited, or leaves it unset.',
     standard: STANDARD.properties,
     severity: 'info',
+    tier: 'unclear',
     // The rendered page already carries a "Default:" row built from the
     // extractor's own `default` field, so asking the prose to restate a
     // concrete default duplicates structured data -- and duplicated facts go

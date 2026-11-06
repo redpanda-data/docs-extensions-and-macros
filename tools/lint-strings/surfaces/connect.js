@@ -1693,6 +1693,7 @@ const RULES = [
     why: 'A field with no .Description() ships as an undocumented field on the connector reference page.',
     standard: STANDARD.reviewingADiff,
     severity: 'warning',
+    tier: 'unclear',
     check: (decl) => {
       if (decl.meta.kind !== 'field' || !decl.meta.missing_description) return []
       return [{ message: `Field ${decl.name ? `"${decl.name}" ` : ''}(${decl.meta.ctor}) has no .Description(). It ships as an undocumented field on the connector page.` }]
@@ -1705,6 +1706,7 @@ const RULES = [
     description: 'ShortDescription is plain text in form-based editors',
     // Error, not warning: the markup renders literally in the form UI.
     severity: 'error',
+    tier: 'unclear',
     check: (decl) => {
       if (decl.meta.kind !== 'field-short' || !decl.string) return []
       const found = [...new Set(MARKUP_PATTERNS.filter(([re]) => re.test(decl.string)).map(([, what]) => what))]
@@ -1723,6 +1725,7 @@ const RULES = [
     why: 'Cloud includes the same partial into a different module, so an xref with no module, or to a module the Connect docs do not have, breaks the link.',
     standard: STANDARD.connect,
     severity: 'warning',
+    tier: 'unclear',
     check: (decl) => {
       if (!decl.string || (decl.convention && decl.convention.verbatim_asciidoc === false)) return []
       const issues = []
@@ -1747,6 +1750,7 @@ const RULES = [
     why: 'The generator renders Cloud and cgo availability from data, and availability prose shows on both the self-managed and the Cloud page, so it contradicts the generated notes on one of them.',
     standard: STANDARD.connect,
     severity: 'warning',
+    tier: 'unclear',
     check: (decl) => {
       if (!decl.string) return []
       const m = decl.string.match(AVAILABILITY_PROSE)
@@ -1760,6 +1764,7 @@ const RULES = [
     why: 'rpk connect help prints Usage as a one-line label, so a second line breaks the help output.',
     standard: STANDARD.qualityBar,
     severity: 'warning',
+    tier: 'style',
     check: (decl) => {
       if (decl.meta.kind !== 'cli-usage' && decl.meta.kind !== 'cli-flag') return []
       if (!decl.string || !decl.string.includes('\n')) return []

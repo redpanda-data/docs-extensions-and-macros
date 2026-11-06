@@ -395,6 +395,72 @@ describe('review once (end-to-end, temp git repo)', () => {
     expect(third.declarations[0].fingerprint).not.toBe(pending.fingerprint)
   })
 
+  test('a declaration keeps its key when its text changes, so a closed key stops a second review', () => {
+    commitEdit('sm::description("start offset")', 'sm::description("start offset.")', 'first push')
+    const first = lintStrings({ repo, diffBase: 'base', log: () => {} })
+    const [pending] = first.declarations
+    expect(pending.key).toMatch(/^[0-9a-f]{16}$/)
+    expect(first.findings[0].key).toBe(pending.key)
+
+    // The author's fix after the review: new text, so a new fingerprint, but
+    // the same declaration, so the same key.
+    commitEdit('sm::description("start offset.")', 'sm::description("Offset of the first record")', 'fix')
+    const open = lintStrings({ repo, diffBase: 'base', reviewedFingerprints: new Set([pending.fingerprint]), log: () => {} })
+    expect(open.declarations[0].fingerprint).not.toBe(pending.fingerprint)
+    expect(open.declarations[0].key).toBe(pending.key)
+
+    const closed = lintStrings({ repo, diffBase: 'base', reviewedFingerprints: new Set([pending.fingerprint]), closedKeys: new Set([pending.key]), log: () => {} })
+    expect(closed.declarations).toEqual([])
+    expect(closed.findings).toHaveLength(0)
+    expect(closed.summary.totalDeclarations).toBe(0)
+    expect(closed.summary.closedChanged).toBe(1)
+    expect(closed.summary.closedChangedDeclarations.map((d) => [d.name, d.key])).toEqual([['start_offset', pending.key]])
+  })
+
+  test('an unchanged reviewed string counts as already reviewed, not as closed and changed', () => {
+    commitEdit('sm::description("start offset")', 'sm::description("start offset.")', 'first push')
+    const [pending] = lintStrings({ repo, diffBase: 'base', log: () => {} }).declarations
+    const again = lintStrings({ repo, diffBase: 'base', reviewedFingerprints: new Set([pending.fingerprint]), closedKeys: new Set([pending.key]), log: () => {} })
+    expect(again.summary.alreadyReviewed).toBe(1)
+    expect(again.summary.closedChanged).toBe(0)
+  })
+
+  test('a closed key closes only its own declaration', () => {
+    commitEdit('sm::description("start offset")', 'sm::description("start offset.")', 'first push')
+    const [pending] = lintStrings({ repo, diffBase: 'base', log: () => {} }).declarations
+    commitEdit('"records_produced"', '"records_written"', 'a second declaration')
+    const next = lintStrings({ repo, diffBase: 'base', closedKeys: new Set([pending.key]), log: () => {} })
+    expect(next.declarations.map((d) => d.name)).toEqual(['records_written'])
+    expect(next.summary.closedChangedDeclarations.map((d) => d.name)).toEqual(['start_offset'])
+  })
+
+  test('the key holds the file: the same identity in another file is another declaration', () => {
+    const { declKey, SURFACES } = require('../../../tools/lint-strings')
+    const decl = { surface: 'metrics', name: 'start_offset', file: 'src/v/a/probe.cc', meta: {} }
+    const moved = { ...decl, file: 'src/v/b/probe.cc' }
+    const reworded = { ...decl, string: 'other text' }
+    expect(declKey(SURFACES.metrics, decl)).toMatch(/^[0-9a-f]{16}$/)
+    expect(declKey(SURFACES.metrics, moved)).not.toBe(declKey(SURFACES.metrics, decl))
+    expect(declKey(SURFACES.metrics, reworded)).toBe(declKey(SURFACES.metrics, decl))
+  })
+
+  test('the CLI reads --closed', () => {
+    commitEdit('sm::description("start offset")', 'sm::description("start offset.")', 'first push')
+    const [pending] = lintStrings({ repo, diffBase: 'base', log: () => {} }).declarations
+    commitEdit('sm::description("start offset.")', 'sm::description("Offset of the first record")', 'fix')
+    const closedFile = path.join(repo, '..', `closed-${path.basename(repo)}.txt`)
+    fs.writeFileSync(closedFile, `${pending.key}\nnot-a-key\n`)
+    try {
+      const bin = path.join(__dirname, '../../../bin/doc-tools.js')
+      const out = execSync(`node ${JSON.stringify(bin)} lint-strings --repo . --diff base --format json --closed ${JSON.stringify(closedFile)}`, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+      const result = JSON.parse(out)
+      expect(result.declarations).toEqual([])
+      expect(result.summary.closedChanged).toBe(1)
+    } finally {
+      fs.rmSync(closedFile, { force: true })
+    }
+  })
+
   test('a reviewed removal is not reported again', () => {
     commitEdit('"records_produced"', '"records_written"', 'rename')
     const first = lintStrings({ repo, diffBase: 'base', log: () => {} })
