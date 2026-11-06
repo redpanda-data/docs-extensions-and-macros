@@ -1,5 +1,13 @@
 # Changelog
 
+## [5.61.1](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.61.0...v5.61.1) (2026-11-06)
+
+
+### Bug fixes
+
+* **claude-skill:** retry an attempt that exits 0 with no verdict.json ([#483](https://github.com/redpanda-data/docs-extensions-and-macros/issues/483)) ([dfcab3f](https://github.com/redpanda-data/docs-extensions-and-macros/commit/dfcab3f98ab364f55fa06a0086547375e8ac279c))
+* **docs-pr-review:** run lint-screenshots in a job without id-token ([#445](https://github.com/redpanda-data/docs-extensions-and-macros/issues/445)) ([5996364](https://github.com/redpanda-data/docs-extensions-and-macros/commit/59963642347f5d5586b8744c138c736484832728))
+
 ## [5.61.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.60.0...v5.61.0) (2026-11-05)
 
 
