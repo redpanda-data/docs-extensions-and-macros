@@ -644,6 +644,43 @@ module.exports.register = function () {
         },
       })
 
+      // Collapsible blocks ([%collapsible]) render as <details> with a
+      // <summary>. Turndown keeps the summary as a bare line and nothing
+      // marks the end, so a reader cannot tell which of the following
+      // paragraphs belong to the block. Wrap it in markers like the platform
+      // blocks, and keep the summary as a bold label.
+      turndownInstance.addRule('collapsible-block', {
+        filter: 'details',
+        replacement: function (content, node) {
+          const converter = isInner ? nestedTurndown : turndownInstance
+          const children = Array.from(node.children || [])
+          const summaryEl = children.find((c) => c.nodeName === 'SUMMARY')
+          const contentEl = children.find((c) => (c.getAttribute('class') || '').split(/\s+/).includes('content'))
+
+          // An HTML comment cannot contain "--".
+          const name = (summaryEl?.textContent || '').trim().replace(/--+/g, '-') || 'Details'
+          let label = ''
+          let body = ''
+          try {
+            if (summaryEl) label = converter.turndown(summaryEl.innerHTML || '').trim().replace(/:$/, '')
+            if (contentEl) {
+              body = converter.turndown(contentEl.innerHTML || '').trim()
+            } else {
+              const rest = children.filter((c) => c !== summaryEl).map((c) => c.outerHTML).join('')
+              body = converter.turndown(rest).trim()
+            }
+          } catch (e) {
+            logger.warn(`Turndown failed in collapsible block: ${e.message}`)
+          }
+
+          const parts = [`<!-- details: ${name} -->`]
+          if (label) parts.push(`**${label}**`)
+          if (body) parts.push(body)
+          parts.push('<!-- /details -->')
+          return '\n\n' + parts.join('\n\n') + '\n\n'
+        },
+      })
+
       // Asciidoctor autolinks a bare URL even inside inline code, so
       // `curl -s http://...` arrives as <code>curl -s <a>http://...</a></code>
       // and Turndown writes a Markdown link inside backticks, which no

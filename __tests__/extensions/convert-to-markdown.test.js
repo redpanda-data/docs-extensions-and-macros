@@ -605,6 +605,32 @@ describe('platform blocks and tab groups in the Markdown twin', () => {
     expect(md).toMatch(/1\. +Start the stack\.\n\n {4}<!-- platform: kubernetes -->\n\n {4}\*\*On Kubernetes:\*\*\n\n {4}It is already running\.\n\n {4}<!-- \/platform -->/)
   })
 
+  const collapsible = (title, inner) =>
+    `<details><summary class="title">${title}</summary><div class="content">${inner}</div></details>`
+
+  test('wraps a collapsible block in markers and keeps its summary as a label', async () => {
+    const md = await render(
+      collapsible('What <code>make up</code> does', '<div class="paragraph"><p>It starts the stack.</p></div><div class="olist arabic"><ol class="arabic"><li><p>Pulls images.</p></li></ol></div>') +
+      '<div class="paragraph"><p>After the block.</p></div>'
+    )
+    expect(md).toContain('<!-- details: What make up does -->\n\n**What `make up` does**\n\nIt starts the stack.\n\n1.  Pulls images.\n\n<!-- /details -->\n\nAfter the block.')
+    expect(md).not.toMatch(/^What `make up` does$/m)
+  })
+
+  test('marks a collapsible block nested in a list item and keeps comments free of "--"', async () => {
+    const md = await render(
+      '<div class="olist arabic"><ol class="arabic"><li><p>Start the stack.</p>' +
+      collapsible('Use --profile', '<div class="paragraph"><p>Details here.</p></div>') +
+      '</li></ol></div>'
+    )
+    expect(md).toMatch(/1\. +Start the stack\.\n\n {4}<!-- details: Use -profile -->\n\n {4}\*\*Use --profile\*\*\n\n {4}Details here\.\n\n {4}<!-- \/details -->/)
+  })
+
+  test('marks a collapsible block nested in another', async () => {
+    const md = await render(collapsible('Outer', '<div class="paragraph"><p>A.</p></div>' + collapsible('Inner', '<div class="paragraph"><p>B.</p></div>')))
+    expect(md).toContain('<!-- details: Outer -->\n\n**Outer**\n\nA.\n\n<!-- details: Inner -->\n\n**Inner**\n\nB.\n\n<!-- /details -->\n\n<!-- /details -->')
+  })
+
   test('closes a tab group after its last tab', async () => {
     const md = await render(
       '<h2>Set up</h2>' +
