@@ -463,6 +463,25 @@ describe('runCheck: scope and resolution', () => {
     expect(r.exitCode).toBe(0)
   })
 
+  test('on an edge shared with a literal sender, a fan-out that fired does not make the receiver never-received', async () => {
+    const api = fakeApi(
+      {
+        'redpanda-data/dts': { 'scan.yml': read('sender-fan-out.yml') },
+        'redpanda-data/eng': { 's.yml': sender('docs', 'fan-out-request') },
+        'redpanda-data/docs': { 'review.yml': listener('fan-out-request') },
+      },
+      {
+        'redpanda-data/dts/scan.yml': nRuns(5, 'success', 'schedule'),
+        'redpanda-data/eng/s.yml': [],
+        'redpanda-data/docs/review.yml': nRuns(3, 'success', 'pull_request'),
+      },
+    )
+    const r = await runCheck({ repos: [DOCS('dts'), ENG('eng'), DOCS('docs')], api })
+    // The literal sender never ran, and the fan-out never delivered: each is
+    // reported once, and the receiver is not blamed for the fan-out.
+    expect(kinds(r)).toEqual(['fan-out-never-delivered', 'sender-never-fired'])
+  })
+
   test('dispatch runs of a target that also listens for another type do not prove fan-out delivery', async () => {
     const api = fakeApi(
       {

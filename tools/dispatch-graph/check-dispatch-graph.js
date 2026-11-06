@@ -529,9 +529,12 @@ async function recordRuns ({ edges, api, perPage, window, threshold, concurrency
       // Tracked before any branch below can move on, so a conditional
       // fan-out sender is still judged on delivery.
       if (s.fanOutOwner && !fanOut.has(s)) fanOut.set(s, { fired: false, targets: 0, delivered: 0, unknown: 0 })
+      // anySenderFired drives the per-receiver receiver-never-received check.
+      // A fan-out run dispatches only to the repos it picks, so it is judged
+      // separately (fan-out-never-delivered) and never sets it.
       const fired = () => {
-        anySenderFired = true
         if (s.fanOutOwner) fanOut.get(s).fired = true
+        else anySenderFired = true
       }
       if (s.conditional && summary.total > 0) {
         const check = stepChecks.get(s)
@@ -564,7 +567,7 @@ async function recordRuns ({ edges, api, perPage, window, threshold, concurrency
       // jobs, so its own run list is empty by construction. Its edge is still
       // reported, but "never fired" cannot be read off this repo.
       if (isReusableOnly(s) && summary.total === 0) {
-        anySenderFired = true
+        if (!s.fanOutOwner) anySenderFired = true
         if (!reportedSenders.has(id)) {
           reportedSenders.add(id)
           info.push({

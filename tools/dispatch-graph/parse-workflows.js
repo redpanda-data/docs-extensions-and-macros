@@ -323,6 +323,7 @@ function sendersFromRun (run, ctx, step) {
   // piped --input form where the type is not on the gh api line.
   const blockTypes = [...new Set([...block.matchAll(EVENT_TYPE_JSON_RE)].map((m) => m[1]))]
   const blockPayload = literalPayloadPairs(block)
+  const dispatchLines = cleaned.filter((l) => DISPATCH_PATH_RE.test(l)).length
 
   for (const line of cleaned) {
     const pm = line.match(DISPATCH_PATH_RE)
@@ -347,6 +348,11 @@ function sendersFromRun (run, ctx, step) {
     // is no one edge, but every listener of that type under the owner is a
     // possible target. Still unresolved; the checker matches it as a fan-out.
     const fanOutOwner = repos.length === 0 ? fanOutOwnerOf(pm[1]) : null
+    // A type borrowed from the block (not on this line) may belong to another
+    // dispatch in it; with more than one, a fan-out would match listeners of
+    // the wrong type, so it stays unresolved instead.
+    const borrowed = !fm && eventTypes === blockTypes
+    if (fanOutOwner && borrowed && dispatchLines > 1) eventTypes = []
     if (fanOutOwner && eventTypes.length) {
       for (const t of eventTypes) {
         senders.push(ctx.make({ targetRepo: null, eventType: t, unresolved: true, fanOutOwner, raw: line.trim(), form, payload, stepName: step && step.name }))

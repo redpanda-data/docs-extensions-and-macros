@@ -76,6 +76,15 @@ describe('parseSenders: expression resolution', () => {
     expect(edges(senders)).toEqual([])
   })
 
+  test('a fan-out does not borrow an event type that belongs to another dispatch in the block', () => {
+    const senders = parseSenders(read('sender-fan-out-borrowed-type.yml'), where('sender-fan-out-borrowed-type.yml'))
+    expect(senders).toHaveLength(2)
+    const [literal, fan] = senders
+    expect(literal).toMatchObject({ targetRepo: 'redpanda-data/docs', eventType: 'literal-request', unresolved: false })
+    expect(fan).toMatchObject({ eventType: null, unresolved: true })
+    expect(fan.fanOutOwner).toBeUndefined()
+  })
+
   test('repository defaults to the sending repo when omitted', () => {
     const text = [
       'on: push', 'jobs:', '  j:', '    runs-on: x', '    steps:',
