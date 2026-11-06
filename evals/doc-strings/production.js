@@ -12,12 +12,22 @@
  * sits in this file is testing exactly what a caller gets when it bumps its
  * pin. Nothing here restates a rule.
  *
- * Two substitutions, both forced by running outside Actions:
- * - The github_inline_comment MCP server is a recording stand-in
- *   (mocks/inline-comment.js) instead of claude-code-action's, so comments
- *   land in a file the harness reads instead of on a pull request.
- * - ${{ ... }} expressions in the prompt are filled with fixture values; any
- *   expression left unfilled is a HARNESS_ERROR, never a silent blank.
+ * The model posts nothing: it writes findings.json, and the workflow's Post
+ * step turns that into one PR review with `doc-tools build-review`. The
+ * harness runs the same build (tools/doc-strings-review, self-check
+ * included) over the same lint report, so the inline comments a case grades
+ * are exactly the ones the workflow would post, and "zero inline comments"
+ * is a statement about the review, not about what the model wrote.
+ *
+ * One substitution is forced by running outside Actions: ${{ ... }}
+ * expressions in the prompt are filled with fixture values; any expression
+ * left unfilled is a HARNESS_ERROR, never a silent blank.
+ *
+ * A baseline run can load the workflow from another commit (workflowRef),
+ * to measure a prompt change against the prompt it replaces. A workflow
+ * whose review still posted through the github_inline_comment tool runs in
+ * legacy mode: that MCP server is a recording stand-in
+ * (mocks/inline-comment.js), and its recorded calls are the comments.
  *
  * The run is captured as a stream-json transcript rather than final text, so
  * the harness sees every tool call the model made and in what order. That is
@@ -44,6 +54,8 @@ const STEP = 'Claude review with suggestions'
 // Opus the CLI knows, which stops being the one callers run.
 const PRODUCTION_MODEL = 'claude-opus-5'
 
+const buildReviewLib = require('../../tools/doc-strings-review')
+
 // The files the workflow's "Fetch the writing standard" step downloads from
 // docs-team-standards main at run time (unpinned, an existing exception; see
 // CLAUDE.md). The eval fetches the same files the same way so it reviews with
@@ -59,12 +71,26 @@ const FETCHED_STANDARDS = {
 // set so the two cannot drift apart.
 const MUST_READ = Object.keys(FETCHED_STANDARDS)
 
-// The inline-comment tool as the transcript names it. A read of a standard
-// counts only if it comes before the first call to this.
+// The inline-comment tool as the transcript names it, in a legacy workflow.
+// A read of a standard counts only if it comes before the first call to
+// this, or, for the current workflow, before findings.json is first written.
 const COMMENT_TOOL = 'mcp__github_inline_comment__create_inline_comment'
+const FINDINGS_FILE = 'findings.json'
 
-function loadStep () {
-  const wf = YAML.parse(fs.readFileSync(WORKFLOW, 'utf8'))
+/**
+ * The review step, from the workflow at this commit or, with `ref`, at
+ * another commit of this repository (a baseline run on the old prompt).
+ */
+function loadStep (ref = null) {
+  let text
+  if (ref) {
+    const r = spawnSync('git', ['show', `${ref}:.github/workflows/doc-strings-review.yml`], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
+    if (r.status !== 0) throw new Error(`cannot read the workflow at ${ref}: ${(r.stderr || '').trim()}`)
+    text = r.stdout
+  } else {
+    text = fs.readFileSync(WORKFLOW, 'utf8')
+  }
+  const wf = YAML.parse(text)
   const step = wf.jobs['doc-strings-review'].steps.find((s) => s.name === STEP)
   if (!step || !step.with || !step.with.prompt) throw new Error(`"${STEP}" step or its prompt not found in doc-strings-review.yml`)
   return step
@@ -351,9 +377,30 @@ function mentions (call, file) {
  * in part, every attempt errored, an attempt never got a result, or never
  * read at all.
  */
+/**
+ * Whether a call is where the review committed to its suggestions: a legacy
+ * inline comment, or a write of findings.json that holds at least one issue.
+ * A findings.json with no issues suggests nothing, so it sets no deadline,
+ * just as no comment did. An Edit counts when the text it adds holds an
+ * issue's problem field; a Write whose content is not JSON counts, since the
+ * harness cannot tell it is empty.
+ */
+function isSuggestionWrite (call) {
+  if (call.name === COMMENT_TOOL) return true
+  if (call.name !== 'Write' && call.name !== 'Edit') return false
+  if (typeof call.input.file_path !== 'string' || path.basename(call.input.file_path) !== FINDINGS_FILE) return false
+  if (call.name === 'Edit') return String(call.input.new_string || '').includes('"problem"')
+  try {
+    const data = JSON.parse(String(call.input.content || ''))
+    return Array.isArray(data.issues) && data.issues.length > 0
+  } catch {
+    return true
+  }
+}
+
 function checkMustRead (calls, cwd, files = MUST_READ) {
   const own = calls.filter((c) => !c.subagent)
-  const firstCommentCall = own.find((c) => c.name === COMMENT_TOOL && c.answered && !c.error)
+  const firstCommentCall = own.find((c) => isSuggestionWrite(c) && c.answered && !c.error)
   const firstComment = firstCommentCall ? firstCommentCall.index : -1
   const deadline = firstCommentCall ? firstCommentCall.seq : Infinity
   const reads = []
@@ -443,6 +490,33 @@ function normalizeComments (comments, committableSuggestions = true) {
 }
 
 /**
+ * The review the workflow's Post step would build from this run: the same
+ * build-review code, over the same lint report, with the PR's hunks taken
+ * from the fixture's own git diff and the self-check run against `base`.
+ * Comments come back in the shape the executors read ({path, line,
+ * startLine, body}).
+ */
+function buildFromFindings ({ repoDir, lint, base, closedKeys, committableSuggestions, styleComments, surface }) {
+  const findingsPath = path.join(repoDir, FINDINGS_FILE)
+  const findings = fs.existsSync(findingsPath) ? fs.readFileSync(findingsPath, 'utf8') : '{}'
+  const readFile = (p) => { try { return fs.readFileSync(path.join(repoDir, p), 'utf8') } catch { return null } }
+  const built = buildReviewLib.buildReview({
+    findings,
+    lint,
+    closedKeys: closedKeys || new Set(),
+    hunks: buildReviewLib.hunksFromGit(repoDir, base),
+    readMerge: readFile,
+    readHead: readFile,
+    headSha: 'HEAD',
+    committable: committableSuggestions,
+    styleComments,
+    check: (groups) => buildReviewLib.selfCheck({ repo: repoDir, base, groups, lint, surfaces: surface ? [surface] : null })
+  })
+  const comments = built.review.comments.map((c) => ({ path: c.path, line: c.line, startLine: c.start_line || c.line, body: c.body }))
+  return { built, comments, findingsText: fs.existsSync(findingsPath) ? findings : null }
+}
+
+/**
  * Write the workflow's pre-review files into the fixture repo and run the
  * production review step there.
  *
@@ -450,14 +524,21 @@ function normalizeComments (comments, committableSuggestions = true) {
  * @param {string} o.repoDir     fixture repo, the model's working directory
  * @param {object} o.lint        lint-strings JSON, as the workflow's lint step writes it
  * @param {string|null} o.diff   source diff, or null to leave pr-diff.patch absent
+ * @param {string} o.base        the commit the PR diff starts from, for the hunks and the self-check
+ * @param {Set<string>} [o.closedKeys]  keys already on the PR (the case's earlier rounds)
  * @param {string} [o.model]
- * @param {boolean} [o.committableSuggestions]  false renders the prompt's off-mode line and normalizes ```text rewrites
+ * @param {boolean} [o.committableSuggestions]  false posts ```text blocks; they are normalized for the executors
+ * @param {boolean} [o.styleComments]  the style_comments workflow input
+ * @param {string} [o.workflowRef]  load the review step from this commit instead (a baseline run)
+ * @param {string} [o.surface]   the lint surface, for the self-check
  * @param {boolean} [o.withoutStandards]  sabotage: strip every sentence naming a staged standard
- * @returns {{ output, comments, files, calls, mustRead, stderr, status, timedOut, ms, failed }}
+ * @returns {{ output, comments, files, calls, mustRead, review, stderr, status, timedOut, ms, failed, legacy }}
  */
-function runReview ({ repoDir, lint, diff, model = PRODUCTION_MODEL, committableSuggestions = true, timeoutMs = 600000, withoutStandards = false, promptEdits = [] }) {
-  const step = loadStep()
+function runReview ({ repoDir, lint, diff, base, closedKeys = null, model = PRODUCTION_MODEL, committableSuggestions = true, styleComments = false, workflowRef = null, surface = null, timeoutMs = 600000, withoutStandards = false, promptEdits = [] }) {
+  const step = loadStep(workflowRef)
   const args = parseClaudeArgs(step.with.claude_args || '')
+  const legacy = args.allowed.includes(COMMENT_TOOL)
+  if (!legacy && !base) throw new Error('runReview needs the PR base to build the review the way the workflow does')
   // A repository that doesn't exist, so a model that looks the PR up with
   // `gh pr view` gets an error rather than a real, unrelated PR.
   const prompt = renderPrompt(editPrompt(step.with.prompt, promptEdits), { repository: 'example-org/doc-strings-eval-fixture', prNumber: 1, committableSuggestions }, { withoutStandards })
@@ -475,7 +556,7 @@ function runReview ({ repoDir, lint, diff, model = PRODUCTION_MODEL, committable
   const mcpConfig = {
     mcpServers: {
       ...args.mcpServers,
-      github_inline_comment: { type: 'stdio', command: process.execPath, args: [MOCK], env: { INLINE_COMMENT_LOG: log } }
+      ...(legacy ? { github_inline_comment: { type: 'stdio', command: process.execPath, args: [MOCK], env: { INLINE_COMMENT_LOG: log } } } : {})
     }
   }
   const mcpPath = path.join(scratch, 'mcp.json')
@@ -498,13 +579,26 @@ function runReview ({ repoDir, lint, diff, model = PRODUCTION_MODEL, committable
 
   const started = Date.now()
   const r = spawnSync('claude', cli, { cwd: repoDir, input: prompt, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 })
-  const comments = fs.existsSync(log)
-    ? fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
-    : []
+  const ms = Date.now() - started
+  let comments
+  let review = null
+  if (legacy) {
+    comments = fs.existsSync(log)
+      ? fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+      : []
+  } else {
+    const out = buildFromFindings({ repoDir, lint, base, closedKeys, committableSuggestions, styleComments, surface })
+    comments = out.comments
+    review = out.built
+  }
   const files = {}
-  for (const name of ['doc-impact.json', 'review-summary.md']) {
+  for (const name of ['doc-impact.json', 'review-summary.md', FINDINGS_FILE]) {
     const p = path.join(repoDir, name)
     if (fs.existsSync(p)) files[name] = fs.readFileSync(p, 'utf8')
+  }
+  if (review) {
+    files['review.json'] = JSON.stringify(review.review, null, 2)
+    files['review-summary-job.md'] = review.summary
   }
   fs.rmSync(scratch, { recursive: true, force: true })
 
@@ -518,19 +612,16 @@ function runReview ({ repoDir, lint, diff, model = PRODUCTION_MODEL, committable
   }
   const mustRead = checkMustRead(stream.calls, repoDir)
 
-  // The executors parse model text. Present each recorded comment the way they
-  // already read one: its span header, then its body with any suggestion block.
-  // With committable suggestions off, the rewrite arrives in a ```text block;
-  // count both forms so the run can assert which one the review used, then
-  // hand the executors the rewrite under the tag they parse.
+  // The executors parse model text. Present each comment the way they
+  // already read one: its span header, then its body with any suggestion
+  // block. With committable suggestions off, the rewrite arrives in a ```text
+  // block; count both forms so the run can assert which one the review used,
+  // then hand the executors the rewrite under the tag they parse.
   const blockCounts = { suggestion: 0, text: 0 }
   for (const c of comments) {
     blockCounts.suggestion += (c.body.match(/```suggestion\b/g) || []).length
     blockCounts.text += (c.body.match(/```text\b/g) || []).length
   }
-  // Both the output text and the comments get the same rewrite: the
-  // executors check placement and footers on the comments, and with the raw
-  // ```text bodies every off-mode case would fail on a correct review.
   const checked = normalizeComments(comments, committableSuggestions)
   const output = checked.map((c) =>
     `FILE ${c.path} LINES ${c.startLine || c.line || 0}-${c.line || c.startLine || 0}\n${c.body}`
@@ -545,18 +636,23 @@ function runReview ({ repoDir, lint, diff, model = PRODUCTION_MODEL, committable
     mustRead,
     comments: checked,
     rawComments: comments,
+    review,
+    legacy,
     blockCounts,
     files,
     stderr: r.stderr || '',
     status: r.status,
     timedOut,
-    ms: Date.now() - started,
+    ms,
     failed: timedOut || r.status !== 0
   }
 }
 
 module.exports = {
   runReview,
+  buildFromFindings,
+  isSuggestionWrite,
+  FINDINGS_FILE,
   loadStep,
   parseClaudeArgs,
   renderPrompt,

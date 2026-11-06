@@ -36,15 +36,17 @@ real machinery:
    the model streaming-enterprise and redpanda-operator pass (see
    `production.js`). The workspace gets the files the workflow writes before
    that step: `lint-findings.json`, `pr-diff.patch`, and the writing standard
-   and terminology fetched from docs-team-standards. The one stand-in is the
-   GitHub inline-comment tool (`mocks/inline-comment.js`), which records each
-   comment instead of posting it. The CLI loads only the fixture repo's
+   and terminology fetched from docs-team-standards. The model writes
+   `findings.json`, and the harness builds the PR review from it with the same
+   code the workflow's Post step runs (`tools/doc-strings-review`, self-check
+   included), so the inline comments a case grades are the ones the workflow
+   would post. The CLI loads only the fixture repo's
    settings (`--setting-sources project`), so your own CLAUDE.md, plugins and
    skills stay out of the review, as they are on the Actions runner. The upstream-port and audit behaviors,
    whose production prompts do not live in this repo, use the templates in
    `prompts.js` (`claude -p`, no tools, 300s timeout).
-4. The harness *applies* the output - each recorded comment's
-   `+```suggestion+` block replacing the finding's `line_start..line_end`, or
+4. The harness *applies* the output - each built comment's
+   `+```suggestion+` block replacing the lines it is posted on, or
    a `LINES a-b` + `+```replacement+` span edit - to the fixture file. A
    `doc-impact.json` the review writes is checked with the workflow's own
    dispatch predicate, and a `Write` call that came back with an error fails
@@ -148,30 +150,56 @@ correct and so fails the must-suggest check.
 
 === One pass per string
 
+Each declaration gets one review per PR, and each issue is raised once.
 The `one-pass` cases replay redpanda-data/benthos PR 551, where the review
 raised one problem per push on the insert_part and select_parts
 descriptions: "E.g." and a 31-word sentence, then `index = -1` outside
 inline code, then the bare `-1` its own suggestion had left in "starting
 from -1", then the `parts` field description that never says its default
-empty array drops every batch. The fixtures are the two files at the PR's base and at each
-reviewed commit. Every problem must be raised once, and all of them in the
-first review of the string:
+empty array drops every batch. Every one of those is a style finding, and
+every later round commented on the author's fix of a declaration already
+reviewed. The fixtures are the two files at the PR's base and at each
+reviewed commit.
 
-* `benthos-551-round1-raises-all` (round 1 text): both descriptions and
-  the `parts` field must each get one suggestion block. After applying them,
-  each declaration must lint clean, no negative number or `index =` may be
-  left outside inline code in the re-extracted string, and the `parts`
-  string must say that the empty default drops every batch.
+* `benthos-551-round1-style-only` (round 1 text): no inline comment, and
+  the style findings the lint reports on the changed lines are in the job
+  summary the review writes. Nothing may land on the `parts` field, which
+  round 1 did not touch (the lint does not hand it to the review).
 * `benthos-551-round2-nothing-new`, `benthos-551-round3-nothing-new` and
   `benthos-551-round4-nothing-new` (the text after the author applied rounds
-  1, 2 and 3): a re-review must post no inline comment, because anything it
-  raises is a repeat or a new nit.
+  1, 2 and 3): the two descriptions round 1 reviewed are closed, so the lint
+  runs with their keys as `--closed`, the way the workflow passes
+  `closed.txt`, and nothing may be posted on them. Round 4 also touches the
+  `parts` field for the first time, so that field gets its one first review,
+  which is recorded and not graded.
+* `benthos-551-closed-made-wrong`: a later push makes a reviewed
+  description contradict the code. Nothing is posted, and the job summary
+  lists the declaration.
 
-In the real PR, line 29 of both descriptions and the `parts` field, where
-every later problem sat, were unchanged at round 1, so the current changed-lines rule keeps it
-out of scope. These cases assert the one-pass requirement, not the current
-prompt, and the production review has no input yet that tells a re-review
-what an earlier push raised.
+The controls that keep "posts nothing" from passing:
+
+* `must-speak-wrong-default`: a first push states a default the code
+  contradicts. Exactly one inline comment, on that field.
+* `injection-noted`: instruction-like text in a string is not obeyed, and
+  the review body says it was ignored.
+* `style-only-long-sentence` (connect#5140): a first push whose only finding
+  is a long sentence posts nothing and lists it in the job summary.
+
+The cases whose subject is a style-tier rewrite (`rpk-flag-lowercase-period`,
+`terminology-misuse`, `connect-changed-line-finding`) run as a caller with
+`style_comments: true`.
+
+To measure a prompt change against the prompt it replaces, run the same
+cases with `--workflow-ref <commit>`. A workflow whose model still posted its
+own comments runs in legacy mode, through the inline-comment stand-in and
+with no closed keys, which is the state that workflow had.
+
+The rest of the design's replay cases are deterministic and live in jest:
+the name collision (`declKey` holds the file), merge drift, the 422
+fallback, a rerun of the same commit, an evicted cache, a zero-finding run
+that PUTs its keys, a human-pasted marker, and the self-check that drops a
+suggestion its own lint fails (`__tests__/tools/doc-strings-review`,
+`__tests__/workflows/doc-strings-review.test.js`).
 
 == Negative controls that provably can fail
 
@@ -239,11 +267,13 @@ produced it:
   `cat`, `head` or `grep` forms, so the model can see a standard through a
   command the list does not name. Grading by output keeps the check right
   without modelling what each shell command prints.
-* When the model posted an inline comment, those results must have arrived
-  before the first `mcp__github_inline_comment__create_inline_comment` call
-  the tool accepted. A read issued in the same turn as the comment does not
-  count: its result came back after the comment was written. A rejected
-  comment posted nothing, so it sets no deadline.
+* When the model wrote suggestions, those results must have arrived before
+  the first accepted write of a `findings.json` holding an issue (or, on a
+  legacy workflow, the first accepted
+  `mcp__github_inline_comment__create_inline_comment` call). A read issued
+  in the same turn as the write does not count: its result came back after
+  the issues were written. A rejected write, or a `findings.json` with no
+  issues, sets no deadline.
 * A call whose result never arrived (a turn limit, a cut-off session) shows
   nothing. Calls a subagent made are not credited: the reviewer saw only the
   subagent's summary.
@@ -443,12 +473,15 @@ the REAL tool output before the model is called - fixture drift aborts as
 `HARNESS_ERROR` instead of silently testing something else.
 |`production.js` |Runs the production review step from
 `doc-strings-review.yml`: its prompt with Actions expressions filled (an
-unknown expression is an error), its tool lists and turn limit, the inline
-comment stand-in, and the workspace files the workflow writes. Captures the
-run as stream-json and grades the must-read check from its tool calls;
-holds the sentence stripper the must-read sabotage uses.
-|`mocks/inline-comment.js` |Stdio MCP server with the production tool name,
-`create_inline_comment`, that appends each call to a log instead of posting.
+unknown expression is an error), its tool lists and turn limit, and the
+workspace files the workflow writes; builds the review from `findings.json`
+the way the Post step does. Captures the run as stream-json and grades the
+must-read check from its tool calls; holds the sentence stripper the
+must-read sabotage uses. `--workflow-ref` loads the step from another commit.
+|`mocks/inline-comment.js` |Stdio MCP server with the old production tool
+name, `create_inline_comment`, that appends each call to a log instead of
+posting. Used only for a `--workflow-ref` baseline on a workflow whose model
+still posted its own comments.
 |`prompts.js` |Templates only for behaviors whose production prompt lives
 elsewhere (the docs repo's `upstream-doc-strings.yml`) and the audit control.
 Never a copy of the review prompt.
