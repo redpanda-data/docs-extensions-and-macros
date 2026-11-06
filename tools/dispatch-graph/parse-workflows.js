@@ -257,6 +257,15 @@ function resolveValue (value, ctx) {
   return expanded.filter((s) => !/\$/.test(s)).map((s) => s.replace(/^["']|["']$/g, ''))
 }
 
+/**
+ * The owner of a `<owner>/$VAR` dispatch path (lowercased), or null. Only a
+ * literal owner and a single shell variable for the repo qualify.
+ */
+function fanOutOwnerOf (path) {
+  const m = String(path || '').trim().match(/^([A-Za-z0-9_.-]+)\/\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)$/)
+  return m ? m[1].toLowerCase() : null
+}
+
 /** owner/name, or null when the text is not a plain repo slug. */
 function normalizeRepo (slug) {
   if (!slug) return null
@@ -301,6 +310,11 @@ const EVENT_TYPE_FLAG_RE = new RegExp(`(?:-f|-F|--field|--raw-field)[= ]+["']?ev
 const EVENT_TYPE_JSON_RE = new RegExp(`["']?event_type["']?\\s*[:=]\\s*["'](${EVENT_TYPE_CHARS})["']`, 'g')
 const PAYLOAD_FLAG_RE = /(?:-f|-F|--field|--raw-field)[= ]+["']?client_payload\[([A-Za-z_][A-Za-z0-9_]*)\]=["']?([^"'\s$]+)/g
 
+/**
+ * The senders in one `run:` script: each dispatch call whose path and event
+ * type can be read. A `<owner>/$VAR` path with a literal type is a fan-out
+ * sender (see fanOutOwnerOf); any other unreadable target is unresolved.
+ */
 function sendersFromRun (run, ctx, step) {
   const senders = []
   const cleaned = shellLogicalLines(run)
@@ -309,6 +323,8 @@ function sendersFromRun (run, ctx, step) {
   // piped --input form where the type is not on the gh api line.
   const blockTypes = [...new Set([...block.matchAll(EVENT_TYPE_JSON_RE)].map((m) => m[1]))]
   const blockPayload = literalPayloadPairs(block)
+  // Dispatch calls, not lines: two can share a line (`a; b`).
+  const dispatchCalls = [...block.matchAll(new RegExp(DISPATCH_PATH_RE.source, 'g'))].length
 
   for (const line of cleaned) {
     const pm = line.match(DISPATCH_PATH_RE)
@@ -328,6 +344,22 @@ function sendersFromRun (run, ctx, step) {
     for (const m of line.matchAll(PAYLOAD_FLAG_RE)) payload[m[1]] = m[2]
 
     const form = /curl/.test(line) ? 'curl' : 'gh-api'
+    // `repos/<owner>/$REPO/dispatches` with a literal event type: the repo is
+    // picked at run time (from a message, a list, an API result), so there
+    // is no one edge, but every listener of that type under the owner is a
+    // possible target. Still unresolved; the checker matches it as a fan-out.
+    const fanOutOwner = repos.length === 0 ? fanOutOwnerOf(pm[1]) : null
+    // A type borrowed from the block (not on this line) may belong to another
+    // dispatch in it; with more than one, a fan-out would match listeners of
+    // the wrong type, so it stays unresolved instead.
+    const borrowed = !fm && eventTypes === blockTypes
+    if (fanOutOwner && borrowed && dispatchCalls > 1) eventTypes = []
+    if (fanOutOwner && eventTypes.length) {
+      for (const t of eventTypes) {
+        senders.push(ctx.make({ targetRepo: null, eventType: t, unresolved: true, fanOutOwner, raw: line.trim(), form, payload, stepName: step && step.name }))
+      }
+      continue
+    }
     if (repos.length === 0 || eventTypes.length === 0) {
       senders.push(ctx.make({
         targetRepo: repos[0] || null,
