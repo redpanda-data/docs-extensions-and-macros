@@ -346,7 +346,13 @@ runs:
 
     - name: Mint a read-only token for the plugin checkout (Secrets Manager)
       id: plugin_token_sm
-      if: env.DOCSAPP_DOCS_APP_ID != '' && env.DOCSAPP_DOCS_APP_PRIVATE_KEY != ''
+      # Gated on the fetch's outcome, not on env.DOCSAPP_*: the env context
+      # in a composite action's step `if` is a less-trodden path, and if it
+      # resolved empty this step would skip silently. In repos with no
+      # fallback (redpanda-labs, redpanda-solutions) that is a 404 at the
+      # plugin checkout. A secret with the wrong key names leaves app-id
+      # empty, this continue-on-error mint fails, and the fallback runs.
+      if: steps.app_secret.outcome == 'success'
       # A bad or stale key falls through to the fallback mint below
       # instead of failing the job. The ID and the key always come as a
       # pair, never one from each source.
@@ -369,6 +375,26 @@ runs:
         owner: redpanda-data
         repositories: docs-team-standards
         permission-contents: read
+
+    # Every step above is continue-on-error or if-gated, so a Secrets Manager
+    # path that never fires looks exactly like one that works. This notice is
+    # the evidence that retiring the DOCS_APP_* org credentials needs: grep
+    # the run logs for "plugin token from".
+    - name: Report the plugin token's source
+      shell: bash
+      env:
+        SM_MINT: ${{ steps.plugin_token_sm.outcome }}
+        FALLBACK_MINT: ${{ steps.plugin_token.outcome }}
+        SM_TOKEN: ${{ steps.plugin_token_sm.outputs.token != '' }}
+        FALLBACK_TOKEN: ${{ steps.plugin_token.outputs.token != '' }}
+      run: |
+        if [[ "$SM_TOKEN" == "true" ]]; then
+          echo "::notice::plugin token from Secrets Manager"
+        elif [[ "$FALLBACK_TOKEN" == "true" ]]; then
+          echo "::notice::plugin token from the plugin_app_id fallback (Secrets Manager mint: $SM_MINT)"
+        else
+          echo "::notice::plugin token from github.token (Secrets Manager mint: $SM_MINT, fallback mint: $FALLBACK_MINT)"
+        fi
 
     - name: Fetch the ADP client credential
       id: adpsecrets
