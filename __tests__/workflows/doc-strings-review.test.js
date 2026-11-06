@@ -1935,6 +1935,11 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(review.with.prompt).toMatch(/Each entry carries context/)
       expect(review.with.prompt).toMatch(/articles and subjects/)
       expect(review.with.prompt).toMatch(/Every flag, command, path and URL goes in inline code/)
+      // openapiv2 operation strings follow their own form, and Admin API v2
+      // rpc comments keep theirs. Pinned so a reword cannot drift from the
+      // embedded-reference-strings standard unnoticed.
+      expect(review.with.prompt).toMatch(/A `summary` or `description` in an\s+`openapiv2_operation` block is the exception: the summary\s+usually drops its articles and matches the other summaries in\s+its tag, and the description opens with an imperative verb and\s+keeps its articles\./)
+      expect(review.with.prompt).toMatch(/In Admin API v2 protos, the rpc's leading\s+comment is its own name and then a third-person description\s+\("Returns a single fixture\."\); leave that form as it is\./)
       // The related-string comment is the named exception to the
       // suggestion-block rule, and still carries the fingerprint footer.
       expect(review.with.prompt).toMatch(/one exception to the suggestion rules above/)
