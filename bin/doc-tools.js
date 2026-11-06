@@ -3264,21 +3264,21 @@ programCli
  * from the findings.json its model writes and the lint report it ran on:
  * one inline comment per issue, style findings kept for the job summary,
  * declarations already reviewed on the PR never commented on again, lines
- * moved from the merge commit to the PR head and checked against the PR's
+ * mapped from the merge commit to the PR head and checked against the PR's
  * hunks, and every suggestion re-linted before it is posted. Writes
  * review.json, review-fallback.json (every comment in the body, for a 422),
- * keys.txt and summary.md, and prints what it decided as one JSON line.
+ * keys.txt and summary.md, and prints what it decided as one JSON line. A
+ * missing or unreadable findings.json exits 1 and closes nothing.
  *
  * @why
- * The review used to let the model post its own inline comments, so how
- * many comments a run made, and whether a string was raised again on a later
- * push, depended on the model. Building the review here makes both
- * mechanical, and the eval runs the same code the workflow does.
+ * The model only writes findings.json. How many comments a run posts, where
+ * they anchor, and which declarations it closes are decided here,
+ * mechanically, and the eval runs the same code the workflow does.
  *
  * @example
  * # What the doc-strings review runs after its Claude step
  * npx doc-tools build-review --findings findings.json --lint lint-findings.json \
- *   --closed closed.txt --pr-files pr-files.json --head-sha "$HEAD_SHA" \
+ *   --closed closed.txt --base "$BASE" --head-sha "$HEAD_SHA" \
  *   --self-check-base "$BASE" --out-dir "$RUNNER_TEMP/review"
  */
 programCli
@@ -3287,9 +3287,9 @@ programCli
   .requiredOption('--findings <file>', 'findings.json the review model wrote (absent means no issues)')
   .requiredOption('--lint <file>', 'lint-findings.json the review ran on (lint-strings --diff --format json)')
   .option('--repo <path>', 'Checkout the lint ran on', '.')
-  .option('--closed <file>', 'Declaration keys already closed on the PR, read just before posting')
-  .option('--pr-files <file>', 'Output of gh api --paginate repos/OWNER/REPO/pulls/N/files, for the PR\'s own hunks')
-  .option('--base <ref>', 'Without --pr-files: take the hunks from git diff <base>...<head-ref> instead')
+  .option('--closed <file>', 'Declaration keys already closed on the PR (its markers and the cached keys)')
+  .option('--base <ref>', 'Take the PR\'s hunks from git diff <base>...<head-ref>, the commits the lint ran on')
+  .option('--pr-files <file>', 'Take the hunks from gh api --paginate repos/OWNER/REPO/pulls/N/files output instead of --base')
   .option('--head-ref <ref>', 'Commit holding the PR head (default: HEAD^2 on a merge commit, otherwise HEAD)')
   .option('--head-sha <sha>', 'PR head SHA, sent as the review\'s commit_id')
   .option('--committable <bool>', 'Carry rewrites in suggestion blocks (true) or text blocks (false)', 'true')
