@@ -10,7 +10,9 @@ const { spawnSync } = require('child_process')
  * FULL declaration. The flow is: parse `git diff <base>...HEAD` into changed
  * (post-image) line numbers per file, route each file to a surface by path,
  * extract declarations from those files at HEAD, and keep declarations whose
- * line span intersects the changed lines.
+ * line span intersects the changed lines. Findings are then narrowed to the
+ * changed lines themselves where a rule can say which text is at fault (see
+ * ./locate.js), so a PR is not asked to fix a declaration's untouched lines.
  */
 
 /**
