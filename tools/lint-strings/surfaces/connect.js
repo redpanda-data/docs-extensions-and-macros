@@ -1785,7 +1785,7 @@ const RULES = [
     why: 'rpk connect help prints Usage as a one-line label, so a second line breaks the help output.',
     standard: STANDARD.qualityBar,
     severity: 'warning',
-    tier: 'style',
+    tier: 'unclear',
     check: (decl) => {
       if (decl.meta.kind !== 'cli-usage' && decl.meta.kind !== 'cli-flag') return []
       if (!decl.string || !decl.string.includes('\n')) return []

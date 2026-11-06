@@ -804,7 +804,7 @@ The tier decides where the doc-strings PR review puts a finding: `wrong` and `un
 |A property description reads as complete sentences on the page, so one with no final period looks cut off. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
 
 |`sentinel-default-unexplained`
-|info
+|warning
 |unclear
 |Property defaults to a sentinel whose meaning the description never explains
 |The page shows a sentinel default such as null, 0 or -1 as a bare value, so only the description can tell readers whether it disables the property, means unlimited, or leaves it unset. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#config-properties-verbatim-asciidoc[Standard]
@@ -969,7 +969,7 @@ The tier decides where the doc-strings PR review puts a finding: `wrong` and `un
 
 |`rpk-short-multiline`
 |warning
-|style
+|unclear
 |Short must be a single line
 |A Short is the one-line summary in command lists and the page description, so a second line breaks that summary. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#rpk-commands-and-flags-transformed[Standard]
 
@@ -1072,7 +1072,7 @@ The tier decides where the doc-strings PR review puts a finding: `wrong` and `un
 
 |`undocumented-key`
 |info
-|unclear
+|style
 |Key helm-docs publishes with an empty description
 |A key with no # \-- description renders as an empty row in the Helm chart reference. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#helm-chart-values-helm-docs-markers[Standard]
 
@@ -1169,7 +1169,7 @@ The tier decides where the doc-strings PR review puts a finding: `wrong` and `un
 
 |`go-field-name-first`
 |warning
-|style
+|unclear
 |Description opens with the Go field name or the YAML key instead of what the field does
 |Users type the YAML key, not the Go field name, so a description that opens with either identifier documents the wrong thing or reads like a broken comment. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#crd-fields-go-doc-comments[Standard]
 
@@ -1272,7 +1272,7 @@ The tier decides where the doc-strings PR review puts a finding: `wrong` and `un
 
 |`connect-cli-usage-multiline`
 |warning
-|style
+|unclear
 |urfave/cli Usage is a one-line label
 |rpk connect help prints Usage as a one-line label, so a second line breaks the help output. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
 
@@ -1350,7 +1350,7 @@ The tier decides where the doc-strings PR review puts a finding: `wrong` and `un
 |The operation summary is the label in the API reference index, so a second line turns that label into a paragraph. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#api-fields-and-operations-proto-published-as-markdown[Standard]
 
 |`api-summary-terminal-period`
-|error
+|warning
 |style
 |An operation summary takes no terminal period
 |The operation summary is a label, not a sentence, so a period makes it read unlike every other operation in the index. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#api-fields-and-operations-proto-published-as-markdown[Standard]

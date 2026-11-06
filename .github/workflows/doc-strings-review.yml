@@ -1166,7 +1166,9 @@ jobs:
               sibling string (a wrong default, condition or unit). "unclear"
               when a reader would misconfigure from it or could not act on
               it (a sentinel default never explained, a term the page never
-              ties to anything observable), and for every lint error.
+              ties to anything observable), for a term or product name in a
+              form terminology.md names as incorrect (such as its casing),
+              and for every lint error.
               "style" for everything else: sentence length, Latin
               abbreviations such as e.g. and i.e., via, once, will, em
               dashes, colon placement, a value or name not in inline code,

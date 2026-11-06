@@ -6,7 +6,7 @@ const os = require('os')
 const path = require('path')
 const { spawnSync } = require('child_process')
 
-const { runRules, mergeResults } = require('./engine')
+const { runRules, mergeResults, issueTier } = require('./engine')
 const { getDiffLines, classifyDiff, spanIntersects, SURFACE_ROUTES } = require('./diff')
 const { COMMON_RULES } = require('./rules/common')
 const { VERBATIM_ASCIIDOC_RULES } = require('./rules/verbatim-asciidoc')
@@ -618,7 +618,8 @@ function listRules ({ surfaces = null } = {}) {
           id: rule.name,
           surfaces: [],
           severity: rule.severity,
-          tier: rule.tier,
+          // The tier a finding of this rule lands in (see issueTier).
+          tier: issueTier(rule, rule.severity),
           description: rule.description,
           why: rule.why,
           standard: rule.standard

@@ -416,7 +416,7 @@ const RULES = [
     why: 'Users type the YAML key, not the Go field name, so a description that opens with either identifier documents the wrong thing or reads like a broken comment.',
     standard: STANDARD.crd,
     severity: 'warning',
-    tier: 'style',
+    tier: 'unclear',
     check: (decl) => {
       const text = (decl.string || '').trim()
       if (!text) return []

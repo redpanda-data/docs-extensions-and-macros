@@ -694,7 +694,7 @@ const RULES = [
     description: 'An operation summary takes no terminal period',
     why: 'The operation summary is a label, not a sentence, so a period makes it read unlike every other operation in the index.',
     standard: STANDARD.api,
-    severity: 'error',
+    severity: 'warning',
     tier: 'style',
     check: (decl) => {
       if (!isSummary(decl) || decl.meta?.collapsed) return []

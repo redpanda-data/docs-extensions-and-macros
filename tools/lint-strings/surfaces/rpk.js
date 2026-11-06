@@ -315,7 +315,7 @@ const RULES = [
     why: 'A Short is the one-line summary in command lists and the page description, so a second line breaks that summary.',
     standard: STANDARD.rpk,
     severity: 'warning',
-    tier: 'style',
+    tier: 'unclear',
     check: (decl) => {
       if (decl.meta.kind !== 'short') return []
       const text = (decl.string || '').trim()
