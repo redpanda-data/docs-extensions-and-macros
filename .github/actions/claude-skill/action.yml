@@ -458,7 +458,7 @@ runs:
         token=$(jq -r '.access_token // empty' "$RUNNER_TEMP/adp_token.json" 2>/dev/null || true)
         rm -f "$RUNNER_TEMP/adp_token.json"
         # Every failure path here exits 1 with a warning, and the step is
-        # continue-on-error, so no bearer is exported and the run step below
+        # continue-on-error, so no bearer is output and the run step below
         # turns that into claude_failed=true while the aggregate posts "human
         # review required". Never a red X for a broken environment, and never
         # an infra failure dressed up as a review verdict.
@@ -471,7 +471,12 @@ runs:
           exit 1 ;;
         esac
         echo "::add-mask::$token"
-        echo "AWS_BEARER_TOKEN_BEDROCK=$token" >> "$GITHUB_ENV"
+        # A step output, not $GITHUB_ENV: an env var would reach every later
+        # step, including the plugin checkout, setup-node and the npm install
+        # (package lifecycle scripts run there). Only the two steps that call
+        # the model (the plugin-load probe and the review) read it, through
+        # their own env.
+        echo "token=$token" >> "$GITHUB_OUTPUT"
 
     - name: Scrub the long-lived credentials
       if: always()
@@ -481,8 +486,8 @@ runs:
         CLIENT_SECRET_ID: ${{ inputs.adp_client_secret_id }}
       run: |
         set -euo pipefail
-        # AWS_BEARER_TOKEN_BEDROCK deliberately survives: it is the model
-        # auth, short-lived, and usable only against the gateway. The
+        # The gateway bearer is not in the environment at all: it is the mint
+        # step's output, passed only to the probe and the review. The
         # long-lived credentials that can mint fresh tokens (the App private
         # key and the ADP client credential) must not be readable from the
         # review's environment, or from the npm install before it.
@@ -737,6 +742,7 @@ runs:
         # `claude -p` makes one model call even though the check below does
         # not depend on it, so it runs after the mint, under the same gateway
         # env as the review itself.
+        AWS_BEARER_TOKEN_BEDROCK: ${{ steps.mint.outputs.token }}
         CLAUDE_CODE_USE_BEDROCK: '1'
         CLAUDE_CODE_SKIP_BEDROCK_AUTH: '1'
         ANTHROPIC_BEDROCK_BASE_URL: ${{ inputs.adp_gateway_base_url }}
@@ -806,6 +812,7 @@ runs:
         # Bedrock mode against the gateway; the bearer minted above is the
         # only model credential. SKIP_BEDROCK_AUTH stops Claude Code from
         # attempting client-side SigV4 signing instead of sending the bearer.
+        AWS_BEARER_TOKEN_BEDROCK: ${{ steps.mint.outputs.token }}
         CLAUDE_CODE_USE_BEDROCK: '1'
         CLAUDE_CODE_SKIP_BEDROCK_AUTH: '1'
         ANTHROPIC_BEDROCK_BASE_URL: ${{ inputs.adp_gateway_base_url }}

@@ -117,3 +117,30 @@ describe('Assert pr_number is empty or a number', () => {
     expect(r.all.split('\n')).not.toContain('pwned')
   })
 })
+
+describe('the ADP gateway bearer', () => {
+  const mint = steps.find((s) => s.id === 'mint')
+  const mintIndex = steps.indexOf(mint)
+  const BEARER = 'AWS_BEARER_TOKEN_BEDROCK'
+
+  it('is a step output of the mint, never written to $GITHUB_ENV', () => {
+    expect(mint.run).toMatch(/echo "token=\$token" >> "\$GITHUB_OUTPUT"/)
+    for (const s of steps) {
+      expect(s.run || '').not.toMatch(new RegExp(`${BEARER}=[^\\n]*GITHUB_ENV`))
+    }
+  })
+
+  it('reaches only the steps that call the model', () => {
+    // The plugin checkout, setup-node and the npm install (package lifecycle
+    // scripts) run after the mint and must not see it.
+    const given = steps.filter((s) => s.env && Object.prototype.hasOwnProperty.call(s.env, BEARER))
+    expect(given.map((s) => s.name)).toEqual(['Assert the plugin actually loaded', 'Run skill (1 retry, findings-only)'])
+    for (const s of given) {
+      expect(s.env[BEARER]).toBe('${{ steps.mint.outputs.token }}')
+      expect(steps.indexOf(s)).toBeGreaterThan(mintIndex)
+    }
+    const install = steps.find((s) => s.name === 'Install Claude Code CLI and stage the plugin')
+    expect(steps.indexOf(install)).toBeGreaterThan(mintIndex)
+    expect(install.env || {}).not.toHaveProperty(BEARER)
+  })
+})
