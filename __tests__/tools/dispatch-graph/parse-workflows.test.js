@@ -85,6 +85,19 @@ describe('parseSenders: expression resolution', () => {
     expect(fan.fanOutOwner).toBeUndefined()
   })
 
+  test('two dispatches on one line also keep a fan-out from borrowing the block type', () => {
+    const text = [
+      'on: push', 'jobs:', '  j:', '    runs-on: x', '    steps:', '      - run: |',
+      `          printf '%s' '{"event_type":"literal-request"}' > body.json`,
+      `          jq -n --arg t "$TYPE" '{event_type: $t}' | gh api "repos/redpanda-data/$REPO/dispatches" --input -; gh api repos/redpanda-data/docs/dispatches --input - < body.json`,
+    ].join('\n')
+    const senders = parseSenders(text, where('one-line.yml'))
+    const fan = senders.find((s) => /\$REPO/.test(s.raw || ''))
+    expect(fan).toBeDefined()
+    expect(fan.eventType).toBeNull()
+    expect(fan.fanOutOwner).toBeUndefined()
+  })
+
   test('repository defaults to the sending repo when omitted', () => {
     const text = [
       'on: push', 'jobs:', '  j:', '    runs-on: x', '    steps:',

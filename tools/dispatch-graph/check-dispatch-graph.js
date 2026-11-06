@@ -31,8 +31,8 @@
  *   unresolved-sender              a dispatch whose target or type cannot be read from the file
  *   fan-out-sender                 a dispatch to `<owner>/$REPO` with a literal type: counted as the sender
  *                                  for every scanned listener of that type under the owner
- *   fan-out-delivery-unknown       a fan-out sender has fired; its only targets with dispatch runs also listen
- *                                  for another type, so whether this type was delivered cannot be told
+ *   fan-out-delivery-unknown       a fan-out sender has fired, and no target is known to have received it: the
+ *                                  ones that might have also listen for another type, or their runs could not be read
  *   reusable-sender                a workflow_call-only sender, whose runs live in its callers
  *   receiver-no-dispatch-runs      a receiver that has only ever run by hand or on a schedule
  *   parse-error                    a workflow file that is not valid YAML
@@ -497,7 +497,7 @@ async function recordRuns ({ edges, api, perPage, window, threshold, concurrency
   // dispatches only to the repos a run picks), so receivers on fan-out-only
   // edges are not "never received". The sender is judged once instead: fired,
   // yet no target has ever run from a dispatch.
-  const fanOut = new Map() // sender -> { fired, targets, delivered, unknown }
+  const fanOut = new Map() // sender -> { fired, targets, delivered, multiType, unread }
   // GitHub records a repository_dispatch run without its event type, so a
   // dispatch run proves delivery of this type only when the workflow listens
   // for no other.
@@ -528,7 +528,7 @@ async function recordRuns ({ edges, api, perPage, window, threshold, concurrency
       if (!summary) continue
       // Tracked before any branch below can move on, so a conditional
       // fan-out sender is still judged on delivery.
-      if (s.fanOutOwner && !fanOut.has(s)) fanOut.set(s, { fired: false, targets: 0, delivered: 0, unknown: 0 })
+      if (s.fanOutOwner && !fanOut.has(s)) fanOut.set(s, { fired: false, targets: 0, delivered: 0, multiType: 0, unread: 0 })
       // anySenderFired drives the per-receiver receiver-never-received check.
       // A fan-out run dispatches only to the repos it picks, so it is judged
       // separately (fan-out-never-delivered) and never sets it.
@@ -658,6 +658,25 @@ async function recordRuns ({ edges, api, perPage, window, threshold, concurrency
       })
     }
     for (const l of e.listeners) {
+      const summary = runs.get(`${l.repo}/${l.file}`)
+      // Every typed listener of the fan-out's type is a target, on a mixed
+      // edge too; an any-type listener is not (it is not attached for the
+      // fan-out, and its dispatch runs say nothing about this type). A
+      // disabled target still counts: its past dispatch runs are delivery.
+      // One whose runs could not be read is unknown, not undelivered.
+      if (l.eventType === e.eventType) {
+        const single = (listenedTypes.get(`${l.repo}/${l.file}`) || new Set()).size <= 1
+        for (const s of e.senders) {
+          const f = fanOut.get(s)
+          if (!f) continue
+          f.targets += 1
+          if (!summary) f.unread += 1
+          else if (summary.dispatchRuns > 0) {
+            if (single) f.delivered += 1
+            else f.multiType += 1
+          }
+        }
+      }
       const state = stateOf(l)
       if (state && state !== 'active') {
         findings.push({
@@ -668,23 +687,7 @@ async function recordRuns ({ edges, api, perPage, window, threshold, concurrency
         })
         continue
       }
-      const summary = runs.get(`${l.repo}/${l.file}`)
       if (!summary) continue
-      // Every typed listener of the fan-out's type is a target, on a mixed
-      // edge too; an any-type listener is not (it is not attached for the
-      // fan-out, and its dispatch runs say nothing about this type).
-      if (l.eventType === e.eventType) {
-        const single = (listenedTypes.get(`${l.repo}/${l.file}`) || new Set()).size <= 1
-        for (const s of e.senders) {
-          const f = fanOut.get(s)
-          if (!f) continue
-          f.targets += 1
-          if (summary.dispatchRuns > 0) {
-            if (single) f.delivered += 1
-            else f.unknown += 1
-          }
-        }
-      }
       const c = classifyReceiver(summary, { threshold })
       if (c.status === 'failing') {
         const w = summary.window
@@ -720,11 +723,14 @@ async function recordRuns ({ edges, api, perPage, window, threshold, concurrency
   }
 
   for (const [s, f] of fanOut) {
-    if (f.fired && f.targets > 0 && f.delivered === 0 && f.unknown > 0) {
+    if (f.fired && f.targets > 0 && f.delivered === 0 && f.multiType + f.unread > 0) {
+      const why = []
+      if (f.multiType) why.push(`${f.multiType} ran from a repository_dispatch but also listen for another dispatch type, and GitHub does not record which type started a run`)
+      if (f.unread) why.push(`the runs of ${f.unread} could not be read`)
       info.push({
         kind: 'fan-out-delivery-unknown',
         edge: `${s.fanOutOwner}/*#${s.eventType}`,
-        message: `${describeSender(s)} has fired. ${f.unknown} of its ${f.targets} scanned target(s) ran from a repository_dispatch, but each also listens for another dispatch type, and GitHub does not record which type started a run, so delivery of ${s.eventType} cannot be confirmed.`,
+        message: `${describeSender(s)} has fired, and none of its ${f.targets} scanned target(s) is known to have received ${s.eventType}: ${why.join('; ')}. So whether it delivers cannot be confirmed.`,
       })
     } else if (f.fired && f.targets > 0 && f.delivered === 0) {
       findings.push({

@@ -482,6 +482,44 @@ describe('runCheck: scope and resolution', () => {
     expect(kinds(r)).toEqual(['fan-out-never-delivered', 'sender-never-fired'])
   })
 
+  test('a disabled fan-out target with past dispatch runs counts as delivered, and is still receiver-disabled', async () => {
+    const api = fakeApi(
+      {
+        'redpanda-data/dts': { 'scan.yml': read('sender-fan-out.yml') },
+        'redpanda-data/docs': { 'review.yml': listener('fan-out-request') },
+        'redpanda-data/cloud-docs': { 'review.yml': listener('fan-out-request') },
+      },
+      {
+        'redpanda-data/dts/scan.yml': nRuns(5, 'success', 'schedule'),
+        'redpanda-data/docs/review.yml': nRuns(3, 'success'),
+        'redpanda-data/cloud-docs/review.yml': nRuns(3, 'success', 'pull_request'),
+      },
+      { states: { 'redpanda-data/docs': { 'review.yml': 'disabled_manually' } } },
+    )
+    const r = await runCheck({ repos: [DOCS('dts'), DOCS('docs'), DOCS('cloud-docs')], api })
+    expect(kinds(r)).toEqual(['receiver-disabled'])
+  })
+
+  test('a fan-out target whose runs cannot be read makes delivery unknown, not never-delivered', async () => {
+    const api = fakeApi(
+      {
+        'redpanda-data/dts': { 'scan.yml': read('sender-fan-out.yml') },
+        'redpanda-data/docs': { 'review.yml': listener('fan-out-request') },
+        'redpanda-data/cloud-docs': { 'review.yml': listener('fan-out-request') },
+      },
+      {
+        'redpanda-data/dts/scan.yml': nRuns(5, 'success', 'schedule'),
+        'redpanda-data/cloud-docs/review.yml': nRuns(3, 'success', 'pull_request'),
+      },
+      { runsUnreadable: ['redpanda-data/docs/review.yml'] },
+    )
+    const r = await runCheck({ repos: [DOCS('dts'), DOCS('docs'), DOCS('cloud-docs')], api })
+    expect(kinds(r)).not.toContain('fan-out-never-delivered')
+    expect(infoKinds(r)).toContain('fan-out-delivery-unknown')
+    expect(r.info.find((i) => i.kind === 'fan-out-delivery-unknown').message).toMatch(/runs of 1 could not be read/)
+    expect(r.exitCode).toBe(2)
+  })
+
   test('dispatch runs of a target that also listens for another type do not prove fan-out delivery', async () => {
     const api = fakeApi(
       {
