@@ -48,7 +48,8 @@
 # ref. Callers pin the step-2 merge SHA, and from there nothing in the
 # pipeline floats. A change to the action needs the same two steps again:
 # #418 changed it (the gh shim refuses a non-GitHub GH_HOST or GH_REPO),
-# so every claude-skill ref now pins #418's merge SHA, 0fac2b8.
+# then #420, #483 and #486 (the App credential from Secrets Manager), so
+# every claude-skill ref now pins #486's merge SHA, a241365.
 #
 # Design doc + decision record: https://claude.ai/code/artifact/36e1362f-11d3-4532-8fe1-a5191c8def9f
 #
@@ -1018,7 +1019,7 @@ jobs:
         with:
           name: review-scope
           path: ${{ runner.temp }}/review-scope
-      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@0fac2b82207dd97787654a990cd6baf95b2bfcbe # pinned: #418's merge SHA
+      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@a2413654b2b4d1cd4ef4768d1f4a3e17f49216d2 # pinned: #486's merge SHA
         id: claude
         with:
           repo: ${{ github.repository }}
@@ -1258,7 +1259,7 @@ jobs:
 
       - name: Overrides review (content repos, decision 4)
         if: github.repository != 'redpanda-data/docs-team-standards' && (needs.classify.outputs.overrides_json == 'true' || needs.classify.outputs.recheck_json == 'true')
-        uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@0fac2b82207dd97787654a990cd6baf95b2bfcbe # pinned: #418's merge SHA
+        uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@a2413654b2b4d1cd4ef4768d1f4a3e17f49216d2 # pinned: #486's merge SHA
         with:
           repo: ${{ github.repository }}
           pr_number: ${{ inputs.pr_number }}
@@ -1362,7 +1363,7 @@ jobs:
         with:
           name: review-scope
           path: ${{ runner.temp }}/review-scope
-      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@0fac2b82207dd97787654a990cd6baf95b2bfcbe # pinned: #418's merge SHA
+      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@a2413654b2b4d1cd4ef4768d1f4a3e17f49216d2 # pinned: #486's merge SHA
         with:
           repo: ${{ github.repository }}
           pr_number: ${{ inputs.pr_number }}
@@ -1446,7 +1447,7 @@ jobs:
         with:
           name: review-scope
           path: ${{ runner.temp }}/review-scope
-      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@0fac2b82207dd97787654a990cd6baf95b2bfcbe # pinned: #418's merge SHA
+      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@a2413654b2b4d1cd4ef4768d1f4a3e17f49216d2 # pinned: #486's merge SHA
         with:
           repo: ${{ github.repository }}
           pr_number: ${{ inputs.pr_number }}
@@ -1661,7 +1662,7 @@ jobs:
           path: ${{ runner.temp }}/review-scope
       - name: Claude vision pass
         if: (needs.classify.outputs.has_images == 'true' || needs.classify.outputs.recheck_shots == 'true') && needs.screenshot_lint.result == 'success'
-        uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@0fac2b82207dd97787654a990cd6baf95b2bfcbe # pinned: #418's merge SHA
+        uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@a2413654b2b4d1cd4ef4768d1f4a3e17f49216d2 # pinned: #486's merge SHA
         with:
           # Longer for large PRs (classify: large); see classify for why.
           timeout_minutes: ${{ needs.classify.outputs.review_minutes || '20' }}
@@ -1807,7 +1808,7 @@ jobs:
       # No --add-dir needed for the prompt to read it: a bare `Read` in the
       # action's allowlist is not scoped to the workspace in -p mode
       # (verified on CLI 2.1.258, reading a file outside the cwd).
-      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@0fac2b82207dd97787654a990cd6baf95b2bfcbe # pinned: #418's merge SHA
+      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@a2413654b2b4d1cd4ef4768d1f4a3e17f49216d2 # pinned: #486's merge SHA
         with:
           repo: ${{ github.repository }}
           pr_number: ${{ inputs.pr_number }}
