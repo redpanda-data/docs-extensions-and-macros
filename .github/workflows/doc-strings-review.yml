@@ -14,7 +14,7 @@
 #      published-content impact check against docs.redpanda.com (public
 #      MCP). It posts nothing itself.
 #   4. one PR review per run, built from findings.json by `doc-tools
-#      build-review`: one inline comment per issue, at most 10,
+#      build-review`: one inline comment per issue, at most 10.
 #   5. doc-impact dispatch to the docs team's Jira router.
 #   6. a workflow artifact holding the docs MCP calls the review made and
 #      the answers it got, for the doc-impact eval (see the step).
@@ -128,7 +128,11 @@
 # workflow and the CLI match. Between releases, package.json still names the
 # PREVIOUS release (release-please bumps it only in the release PR), so a
 # caller pinned to an untagged commit runs this commit's workflow with the
-# previous release's CLI. doc_tools_package remains as an explicit override
+# previous release's CLI. That matters when the two change together: a
+# CLI older than `lint-strings --closed` and `build-review` fails the Post
+# step (and, once a PR has closed state, the lint step), so the run posts
+# nothing and leaves only the lint report in the job summary, with a
+# warning. doc_tools_package remains as an explicit override
 # for callers that need a different version.
 name: doc-strings-review (reusable)
 on:
