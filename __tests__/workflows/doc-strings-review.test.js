@@ -591,7 +591,7 @@ describe('doc-strings-review workflow: source diff (executed)', () => {
     expect(allowed).toContain('Read(./**)')
     expect(allowed.filter((t) => t.startsWith('Edit('))).toEqual([
       'Edit(./doc-impact.json)',
-      'Edit(./review-summary.md)'
+      'Edit(./findings.json)'
     ])
   })
 })
@@ -671,14 +671,16 @@ describe('doc-strings-review workflow: no bot token while the model runs', () =>
         return JSON.stringify(out ? (st.outputs[out] ?? '') : st.outcome)
       })
       .replace(/inputs\.(\w+)/g, (_, k) => JSON.stringify(ctx.inputs[k] ?? ''))
+      .replace(/github\.event\.pull_request\.draft/g, () => JSON.stringify(Boolean(ctx.draft)))
       .replace(/(!?)==/g, (_, not) => (not ? '!==' : '==='))
     // eslint-disable-next-line no-new-func
     return Boolean(new Function(`return (${js})`)())
   }
   const oidc = { aws_region: 'us-east-2', aws_role_name_prefix: 'sdlc-' }
-  const run = ({ lint = '0', removals = '0', enterprise = '0', notes = '0', review = 'skipped', files = [], inputs = oidc }) => ({
+  const run = ({ lint = '0', removals = '0', enterprise = '0', notes = '0', review = 'skipped', files = [], inputs = oidc, draft = false }) => ({
     inputs,
     files,
+    draft,
     steps: {
       lint: { outputs: { declarations: lint, removals } },
       enterprise: { outputs: { found: enterprise } },
@@ -728,6 +730,12 @@ describe('doc-strings-review workflow: no bot token while the model runs', () =>
     expect(evalIf(adp.if, withAws)).toBe(true)
     // Nothing declared and nothing else: none of them run.
     expect(evalIf(stepNamed('Claude review with suggestions').if, run({}))).toBe(false)
+  })
+
+  test('a draft PR runs no review, but a gating finding is still dispatched', () => {
+    expect(evalIf(stepNamed('Claude review with suggestions').if, run({ lint: '3', draft: true }))).toBe(false)
+    expect(evalIf(stepNamed('Claude review with suggestions').if, run({ lint: '3' }))).toBe(true)
+    expect(evalIf(stepNamed('Dispatch doc-impact').if, run({ enterprise: '1', draft: true }))).toBe(true)
   })
 
   test('both token fetch pairs use the same role and secret', () => {
@@ -1371,7 +1379,7 @@ describe('doc-strings-review workflow: doc-impact dispatch merges gating finding
 
 describe('doc-strings-review workflow: checked-in run outputs (executed)', () => {
   const step = stepNamed('Remove run-output files the PR checked in')
-  const OUTPUTS = ['doc-impact.json', 'doc-impact.merged.json', 'review-summary.md', 'lint-findings.json', 'pr-diff.patch', 'pr-diff.full', 'pr-diff.err', 'enterprise-impact.json', 'enterprise-stderr.txt', 'embedded-reference-strings.md', 'terminology.md']
+  const OUTPUTS = ['doc-impact.json', 'doc-impact.merged.json', 'review-summary.md', 'findings.json', 'lint-findings.json', 'pr-diff.patch', 'pr-diff.full', 'pr-diff.err', 'enterprise-impact.json', 'enterprise-stderr.txt', 'embedded-reference-strings.md', 'terminology.md']
 
   test('runs straight after checkout, before any step reads or writes those files', () => {
     const idx = job.steps.indexOf(step)
@@ -1696,62 +1704,112 @@ describe('doc-strings-review workflow: package resolution (executed)', () => {
   })
 })
 
-// Review once: the state that keeps a later push from re-reviewing a string,
-// the lint report that stands in when no model runs, and the single summary
-// comment. Each test pins the behavior that made the review noisy before.
+// Review once: the state that keeps a later push from reviewing a
+// declaration again, the lint report that stands in when no model runs, and
+// the one PR review per run. Each test pins the behavior that made the
+// review noisy before.
 describe('doc-strings-review workflow: review once (executed)', () => {
   const JQ = require('child_process').execSync('command -v jq').toString().trim()
+  const BIN = path.join(__dirname, '..', '..', 'bin', 'doc-tools.js')
 
-  // gh stub backed by a JSON file of comments: `--jq` filters apply to the
-  // stored payload with real jq, and POST/PATCH calls are recorded.
-  const ghCommentsStub = `#!/bin/bash
+  // gh stub backed by JSON files in the step's directory: reviews.json,
+  // comments.json and files.json answer GETs (with real jq for --jq), every
+  // call is logged to gh-calls, a POST of a review copies its --input to
+  // posted-N.json and fails with HTTP 422 while N < FAIL_POSTS, and a PUT
+  // copies its body file to put-body. GH_FAIL_READ makes every GET fail.
+  const ghStub = `#!/bin/bash
 args=("$@")
-filter=""; method=GET; body=""
+filter=""; method=GET; input=""; body=""
 for i in "\${!args[@]}"; do
   case "\${args[$i]}" in
     --jq) filter="\${args[$((i+1))]}" ;;
-    --method) method="\${args[$((i+1))]}" ;;
+    -X|--method) method="\${args[$((i+1))]}" ;;
+    --input) input="\${args[$((i+1))]}" ;;
     -F) body="\${args[$((i+1))]#body=@}" ;;
   esac
 done
 url=""
 for a in "$@"; do case "$a" in repos/*) url="$a" ;; esac; done
 printf '%s %s\\n' "$method" "$url" >> "$HOME/gh-calls"
-if [ "$method" != GET ]; then cp "$body" "$HOME/posted-body"; exit 0; fi
+if [ "$method" = POST ]; then
+  n=$(ls "$HOME"/posted-*.json 2>/dev/null | wc -l | tr -d ' ')
+  cp "$input" "$HOME/posted-$n.json"
+  if [ "$n" -lt "\${FAIL_POSTS:-0}" ]; then echo "gh: Validation Failed (HTTP 422)" >&2; exit 1; fi
+  exit 0
+fi
+if [ "$method" = PUT ] || [ "$method" = PATCH ]; then cp "$body" "$HOME/put-body"; exit 0; fi
+[ -n "\${GH_FAIL_READ:-}" ] && exit 1
 case "$url" in
-  */issues/comments/*) payload=$(${JSON.stringify(JQ)} --argjson id "\${url##*/}" '.[] | select(.id == $id)' "$HOME/comments.json") ;;
-  *) payload=$(cat "$HOME/comments.json") ;;
+  */reviews/*) payload=$(${JSON.stringify(JQ)} --argjson id "\${url##*/}" '.[] | select(.id == $id)' "$HOME/reviews.json") ;;
+  */reviews) payload=$(cat "$HOME/reviews.json" 2>/dev/null || echo '[]') ;;
+  */files) payload=$(cat "$HOME/files.json" 2>/dev/null || echo '[]') ;;
+  *) payload=$(cat "$HOME/comments.json" 2>/dev/null || echo '[]') ;;
 esac
 if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$filter"; else printf '%s' "$payload"; fi
 `
 
-  describe('recovering fingerprints from earlier suggestions', () => {
-    const step = stepNamed('Recover reviewed fingerprints from earlier suggestions')
+  // npx stub that runs THIS checkout's doc-tools, so the post step is
+  // tested against the real build-review, not a stand-in.
+  const npxRealStub = `#!/bin/bash
+out=()
+seen=""
+for a in "$@"; do
+  case "$a" in
+    --yes|--package=*) ;;
+    doc-tools) if [ -z "$seen" ]; then seen=1; else out+=("$a"); fi ;;
+    *) out+=("$a") ;;
+  esac
+done
+exec node ${JSON.stringify(BIN)} "\${out[@]}"
+`
+
+  describe('recovering the review state from earlier reviews', () => {
+    const step = stepNamed('Recover the review state from earlier reviews')
     const env = (dir) => ({ GH_TOKEN: 't', GITHUB_REPOSITORY: 'o/r', PR: '7', STATE_DIR: path.join(dir, 'state') })
 
-    test('only bot-authored markers count, merged with the cached state', () => {
+    test('legacy fp= footers from any bot still reach reviewed.txt, merged with the cached state', () => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-state-'))
       fs.mkdirSync(path.join(dir, 'state'))
       fs.writeFileSync(path.join(dir, 'state', 'reviewed.txt'), 'aaaaaaaaaaaaaaaa\n')
       const comments = [
-        // The footer as it actually reaches GitHub: claude-code-action strips
-        // HTML comments, so the marker is a visible <sub> line.
         { id: 1, user: { login: 'claude[bot]', type: 'Bot' }, body: 'Fix it.\n<sub>doc-strings-review:fp=bbbbbbbbbbbbbbbb</sub>' },
         { id: 2, user: { login: 'someone', type: 'User' }, body: '<!-- doc-strings-review:fp=cccccccccccccccc -->' }
       ]
-      const r = execRun(step, { env: env(dir), stubs: { gh: ghCommentsStub }, files: { 'comments.json': JSON.stringify(comments) } })
+      const r = execRun(step, { env: env(dir), stubs: { gh: ghStub }, files: { 'comments.json': JSON.stringify(comments) } })
       expect(r.status).toBe(0)
       expect(fs.readFileSync(path.join(dir, 'state', 'reviewed.txt'), 'utf8').trim().split('\n'))
         .toEqual(['aaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbb'])
     })
 
-    test('a failed comment read keeps the cached state and does not fail the step', () => {
+    test('closed keys come from this workflow\'s own review ledgers and comment markers, merged with the cache', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-state-'))
+      fs.mkdirSync(path.join(dir, 'state'))
+      fs.writeFileSync(path.join(dir, 'state', 'closed.txt'), '1111111111111111\n')
+      const reviews = [
+        { id: 10, user: { login: 'github-actions[bot]', type: 'Bot' }, body: 'Doc-strings review.\n\n<!-- doc-strings-review:keys=2222222222222222,3333333333333333 -->' },
+        // A human pasting a ledger closes nothing, and neither does another bot.
+        { id: 11, user: { login: 'someone', type: 'User' }, body: '<!-- doc-strings-review:keys=4444444444444444 -->' },
+        { id: 12, user: { login: 'claude[bot]', type: 'Bot' }, body: '<!-- doc-strings-review:keys=5555555555555555 -->' }
+      ]
+      const comments = [
+        { id: 1, user: { login: 'github-actions[bot]', type: 'Bot' }, body: 'p\n<!-- doc-strings-review:key=6666666666666666 issue=prose -->' },
+        { id: 2, user: { login: 'someone', type: 'User' }, body: '<!-- doc-strings-review:key=7777777777777777 issue=x -->' }
+      ]
+      const r = execRun(step, { env: env(dir), stubs: { gh: ghStub }, files: { 'reviews.json': JSON.stringify(reviews), 'comments.json': JSON.stringify(comments) } })
+      expect(r.status).toBe(0)
+      expect(fs.readFileSync(path.join(dir, 'state', 'closed.txt'), 'utf8').trim().split('\n'))
+        .toEqual(['1111111111111111', '2222222222222222', '3333333333333333', '6666666666666666'])
+    })
+
+    test('a failed read keeps the cached state and does not fail the step', () => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-state-'))
       fs.mkdirSync(path.join(dir, 'state'))
       fs.writeFileSync(path.join(dir, 'state', 'reviewed.txt'), 'aaaaaaaaaaaaaaaa\n')
+      fs.writeFileSync(path.join(dir, 'state', 'closed.txt'), '1111111111111111\n')
       const r = execRun(step, { env: env(dir), stubs: { gh: '#!/bin/bash\nexit 1\n' } })
       expect(r.status).toBe(0)
       expect(fs.readFileSync(path.join(dir, 'state', 'reviewed.txt'), 'utf8').trim()).toBe('aaaaaaaaaaaaaaaa')
+      expect(fs.readFileSync(path.join(dir, 'state', 'closed.txt'), 'utf8').trim()).toBe('1111111111111111')
     })
 
     // streaming-enterprise PR 461: the review argued with help text the
@@ -1767,12 +1825,11 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       ]
       const r = execRun(step, {
         env: { ...env(dir), PR_AUTHOR: 'pr-author', REVIEWER_COMMENTS: out },
-        stubs: { gh: ghCommentsStub },
-        files: { 'comments.json': JSON.stringify(comments) }
+        stubs: { gh: ghStub },
+        // Served for review comments and for reviews alike.
+        files: { 'comments.json': JSON.stringify(comments), 'reviews.json': JSON.stringify(comments) }
       })
       expect(r.status).toBe(0)
-      // The stub serves the same payload for review comments and reviews, so
-      // the one human body arrives once from each.
       expect(JSON.parse(fs.readFileSync(out, 'utf8'))).toEqual([comments[0].body, comments[0].body])
     })
 
@@ -1781,7 +1838,7 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       const out = path.join(dir, 'reviewer-comments.json')
       const r = execRun(step, {
         env: { ...env(dir), PR_AUTHOR: '', REVIEWER_COMMENTS: out },
-        stubs: { gh: ghCommentsStub },
+        stubs: { gh: ghStub },
         files: { 'comments.json': '[]' }
       })
       expect(r.status).toBe(0)
@@ -1802,13 +1859,16 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
     const step = stepNamed('Lint doc strings in the diff')
     const baseEnv = { BASE: 'deadbeef', SURFACES: '', PKG: RESOLVED_PKG, LINT_JSON: '{"findings":[],"summary":{"totalDeclarations":0}}' }
 
-    test('passes the reviewed state to the CLI when there is one', () => {
+    test('passes the reviewed state and the closed keys to the CLI when there are any', () => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-state-'))
       fs.writeFileSync(path.join(dir, 'reviewed.txt'), 'aaaaaaaaaaaaaaaa\n')
+      fs.writeFileSync(path.join(dir, 'closed.txt'), '1111111111111111\n')
       const r = execRun(step, { env: { ...baseEnv, STATE_DIR: dir }, stubs: { npx: NPX_STUB } })
       const argv = fs.readFileSync(path.join(r.dir, 'npx-argv'), 'utf8').split('\n')
       expect(argv).toContain('--reviewed')
       expect(argv).toContain(path.join(dir, 'reviewed.txt'))
+      expect(argv).toContain('--closed')
+      expect(argv).toContain(path.join(dir, 'closed.txt'))
     })
 
     test('passes human review comments to the CLI when there are any', () => {
@@ -1821,19 +1881,20 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(argv).toContain(file)
     })
 
-    test('strings a reviewer wrote still open the gate, for the published-content check', () => {
+    test('strings a reviewer wrote, and closed declarations edited since, still open the gate for the published-content check', () => {
       const r = execRun(step, {
-        env: { ...baseEnv, STATE_DIR: path.join(os.tmpdir(), 'no-such-dsr-state'), LINT_JSON: '{"findings":[],"summary":{"totalDeclarations":0,"reviewerWritten":2}}' },
+        env: { ...baseEnv, STATE_DIR: path.join(os.tmpdir(), 'no-such-dsr-state'), LINT_JSON: '{"findings":[],"summary":{"totalDeclarations":0,"reviewerWritten":2,"closedChanged":3}}' },
         stubs: { npx: NPX_STUB }
       })
       expect(r.status).toBe(0)
-      expect(r.outputs.declarations).toBe('2')
+      expect(r.outputs.declarations).toBe('5')
     })
 
-    test('a first run passes no --reviewed at all', () => {
+    test('a first run passes no --reviewed or --closed at all', () => {
       const r = execRun(step, { env: { ...baseEnv, STATE_DIR: path.join(os.tmpdir(), 'no-such-dsr-state') }, stubs: { npx: NPX_STUB } })
       const argv = fs.readFileSync(path.join(r.dir, 'npx-argv'), 'utf8').split('\n')
       expect(argv).not.toContain('--reviewed')
+      expect(argv).not.toContain('--closed')
       expect(argv).not.toContain('--reviewer-comments')
       expect(r.status).toBe(0)
     })
@@ -1842,18 +1903,19 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
   describe('lint report in the job summary', () => {
     const step = stepNamed('Write the lint report to the job summary')
 
-    test('renders findings as a table, escaping pipes so a string cannot break it', () => {
+    test('renders findings as a table with their tier, escaping pipes so a string cannot break it', () => {
       const lint = {
-        findings: [{ name: 'a_prop', file: 'src/v/config/configuration.cc', line_start: 10, rules: [{ id: 'too-short', severity: 'warning', message: 'Use a | b\nnot this' }] }],
-        summary: { totalDeclarations: 3, alreadyReviewed: 2, flaggedDeclarations: 1, removedDeclarations: [{ name: 'old_prop', surface: 'properties' }] }
+        findings: [{ name: 'a_prop', file: 'src/v/config/configuration.cc', line_start: 10, rules: [{ id: 'too-short', severity: 'warning', tier: 'unclear', line: 11, message: 'Use a | b\nnot this' }] }],
+        summary: { totalDeclarations: 3, alreadyReviewed: 2, closedChanged: 1, flaggedDeclarations: 1, removedDeclarations: [{ name: 'old_prop', surface: 'properties' }] }
       }
       const r = execRun(step, { env: { GITHUB_STEP_SUMMARY: 'summary.md' }, files: { 'lint-findings.json': JSON.stringify(lint) } })
       expect(r.status).toBe(0)
       const out = r.read('summary.md')
-      expect(out).toMatch(/New or changed declarations to review: 3\. Already reviewed on an earlier push: 2\./)
+      expect(out).toMatch(/New or changed declarations to review: 3\. Already reviewed on an earlier push: 2\. Reviewed on an earlier push and edited since \(not reviewed again\): 1\./)
       expect(out).toMatch(/Removed or renamed: `old_prop` \(properties\)/)
       const row = out.split('\n').find((l) => l.includes('a_prop'))
       expect(row).toContain('Use a \\| b not this')
+      expect(row).toContain('configuration.cc:11 | too-short (warning, unclear)')
       expect(row.split(/(?<!\\)\|/).length - 2).toBe(4)
     })
 
@@ -1903,86 +1965,186 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
     })
   })
 
-  test('the prompt keeps published-content impact out of the PR summary', () => {
+  test('the prompt keeps published-content impact out of what reaches the PR', () => {
     const prompt = stepNamed('Claude review with suggestions').with.prompt
     expect(prompt).not.toMatch(/"Affected published content" section/)
-    expect(prompt).toMatch(/Never put published-content impact in it/)
+    expect(prompt).toMatch(/Never put published-content impact in findings\.json/)
   })
 
-  describe('summary comment', () => {
-    const step = stepNamed('Update the review summary comment')
-    const env = { GH_TOKEN: 't', GITHUB_REPOSITORY: 'o/r', PR: '7', HEAD_SHA: 'abcdef1234567' }
+  // The post step, executed against the real build-review. One declaration
+  // (key K) on lines 1-3 of f.go, all three lines in the PR's one hunk.
+  describe('posting the one review', () => {
+    const step = stepNamed('Post the review')
+    const K = 'aaaaaaaaaaaaaaaa'
+    const lint = {
+      declarations: [{ surface: 'connect', name: 'f', key: K, file: 'f.go', line_start: 1, line_end: 3, fingerprint: 'ffffffffffffffff', context: [] }],
+      findings: [],
+      summary: { totalDeclarations: 1, closedChangedDeclarations: [] }
+    }
+    const files = (findings, extra = {}) => ({
+      'f.go': 'a := 1\nDescription("Wrong default.")\nb := 2\n',
+      'lint-findings.json': JSON.stringify(lint),
+      'findings.json': JSON.stringify(findings),
+      'files.json': JSON.stringify([{ filename: 'f.go', patch: '@@ -0,0 +1,3 @@\n+a\n+b\n+c' }]),
+      ...extra
+    })
+    const wrong = { checked: [K], issues: [{ key: K, path: 'f.go', start_line: 2, line: 2, tier: 'wrong', rule: 'default', problem: 'The default is 5, not 1.', replacement: 'Description("Defaults to 5.")' }] }
+    const styleOnly = { checked: [K], issues: [{ key: K, path: 'f.go', start_line: 2, line: 2, tier: 'style', rule: 'long-sentence', problem: 'Split it.', replacement: null }] }
+    const env = (dir, extra = {}) => ({
+      GH_TOKEN: 't', GITHUB_REPOSITORY: 'o/r', PR: '7', HEAD_SHA: 'abc123', BASE: 'deadbeef', PKG: RESOLVED_PKG,
+      SURFACES: '', COMMITTABLE: 'true', STYLE_COMMENTS: 'false', OUT: path.join(dir, 'out'), GITHUB_STEP_SUMMARY: path.join(dir, 'step-summary.md'), ...extra
+    })
+    const run = (findings, { extraFiles = {}, extraEnv = {} } = {}) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-post-'))
+      const r = execRun(step, { env: env(dir, extraEnv), stubs: { gh: ghStub, npx: npxRealStub }, files: files(findings, extraFiles) })
+      const readOut = (f) => (fs.existsSync(path.join(dir, 'out', f)) ? fs.readFileSync(path.join(dir, 'out', f), 'utf8') : null)
+      return { ...r, readOut, summary: fs.existsSync(path.join(dir, 'step-summary.md')) ? fs.readFileSync(path.join(dir, 'step-summary.md'), 'utf8') : '' }
+    }
+    const posted = (r, n = 0) => JSON.parse(r.read(`posted-${n}.json`))
 
-    test('no summary file means no comment at all', () => {
-      const r = execRun(step, { env, stubs: { gh: ghCommentsStub }, files: { 'comments.json': '[]' } })
+    test('a wrong default is exactly one review with one inline comment, anchored to the head SHA', () => {
+      const r = run(wrong)
       expect(r.status).toBe(0)
-      expect(r.exists('gh-calls')).toBe(false)
+      expect(r.outputs.ok).toBe('true')
+      expect(r.read('gh-calls').match(/^POST /gm)).toHaveLength(1)
+      const review = posted(r)
+      expect(review).toMatchObject({ commit_id: 'abc123', event: 'COMMENT' })
+      expect(review.comments).toHaveLength(1)
+      expect(review.comments[0]).toMatchObject({ path: 'f.go', line: 2, side: 'RIGHT' })
+      expect(review.comments[0].body).toContain('```suggestion\nDescription("Defaults to 5.")\n```')
+      expect(review.comments[0].body).toContain(`<!-- doc-strings-review:key=${K} issue=default -->`)
+      expect(review.body).toContain(`<!-- doc-strings-review:keys=${K} -->`)
+      expect(r.summary).toMatch(/## Doc-strings review/)
     })
 
-    test('the first summary creates one comment', () => {
-      const r = execRun(step, {
-        env,
-        stubs: { gh: ghCommentsStub },
-        files: { 'comments.json': '[]', 'review-summary.md': 'Affected published content: x' }
-      })
-      expect(r.status).toBe(0)
-      expect(r.read('gh-calls')).toMatch(/^POST repos\/o\/r\/issues\/7\/comments$/m)
-      const body = r.read('posted-body')
-      expect(body.startsWith('<!-- doc-strings-review:summary -->')).toBe(true)
-      expect(body).toMatch(/push abcdef1/)
+    test('committable_suggestions false posts a text block', () => {
+      const r = run(wrong, { extraEnv: { COMMITTABLE: 'false' } })
+      const body = posted(r).comments[0].body
+      expect(body).toContain('```text\n')
+      expect(body).not.toContain('```suggestion')
     })
 
-    test('a later summary edits the same comment, newest push first, with one marker', () => {
-      const previous = '<!-- doc-strings-review:summary -->\n### Doc-strings review, push 1111111\n\nold news\n\n_Suggestions are optional. Each string is reviewed once; editing it gets a fresh review on the next push._\n'
-      const comments = [
-        { id: 5, user: { login: 'someone', type: 'User' }, body: 'quoting <!-- doc-strings-review:summary -->' },
-        { id: 9, user: { login: 'github-actions[bot]', type: 'Bot' }, body: previous }
+    test('style findings post nothing and reach the job summary; the keys go into the newest earlier ledger with a PUT', () => {
+      const reviews = [
+        { id: 3, user: { login: 'github-actions[bot]', type: 'Bot' }, body: 'old\n\n<!-- doc-strings-review:keys=1111111111111111 -->' },
+        { id: 8, user: { login: 'github-actions[bot]', type: 'Bot' }, body: 'newer\n\n<!-- doc-strings-review:keys=2222222222222222 -->' },
+        { id: 9, user: { login: 'someone', type: 'User' }, body: '<!-- doc-strings-review:keys=3333333333333333 -->' }
       ]
-      const r = execRun(step, {
-        env,
-        stubs: { gh: ghCommentsStub },
-        files: { 'comments.json': JSON.stringify(comments), 'review-summary.md': 'new news' }
-      })
+      const r = run(styleOnly, { extraFiles: { 'reviews.json': JSON.stringify(reviews) } })
       expect(r.status).toBe(0)
-      expect(r.read('gh-calls')).toMatch(/^PATCH repos\/o\/r\/issues\/comments\/9$/m)
-      expect(r.read('gh-calls')).not.toMatch(/^POST/m)
-      const body = r.read('posted-body')
-      expect(body.split('<!-- doc-strings-review:summary -->').length - 1).toBe(1)
-      expect(body.indexOf('new news')).toBeLessThan(body.indexOf('old news'))
-      expect(body.split('_Suggestions are optional.').length - 1).toBe(1)
+      expect(r.outputs.ok).toBe('true')
+      expect(r.read('gh-calls')).not.toMatch(/^POST /m)
+      expect(r.read('gh-calls')).toMatch(/^PUT repos\/o\/r\/pulls\/7\/reviews\/8$/m)
+      const body = r.read('put-body')
+      expect(body).toMatch(/^newer/)
+      expect(body).toContain(`<!-- doc-strings-review:keys=2222222222222222,${K} -->`)
+      expect(body.match(/doc-strings-review:keys=/g)).toHaveLength(1)
+      expect(r.summary).toMatch(/Style findings \(not posted on the PR\)/)
+      expect(r.summary).toMatch(/long-sentence/)
+    })
+
+    test('nothing to post and no earlier review: no write at all, the keys stay in the cache', () => {
+      const r = run(styleOnly)
+      expect(r.status).toBe(0)
+      expect(r.outputs.ok).toBe('true')
+      expect(r.read('gh-calls')).not.toMatch(/^(POST|PUT|PATCH) /m)
+      expect(r.readOut('keys.txt')).toBe(`${K}\n`)
+    })
+
+    test('a 422 retries once with every comment in the body', () => {
+      const r = run(wrong, { extraEnv: { FAIL_POSTS: '1' } })
+      expect(r.status).toBe(0)
+      expect(r.outputs.ok).toBe('true')
+      expect(r.read('gh-calls').match(/^POST /gm)).toHaveLength(2)
+      const retry = posted(r, 1)
+      expect(retry.comments).toEqual([])
+      expect(retry.body).toMatch(/The default is 5, not 1\./)
+      expect(retry.body).not.toContain('```suggestion')
+    })
+
+    test('when the retry fails too, nothing is recorded', () => {
+      const r = run(wrong, { extraEnv: { FAIL_POSTS: '2' } })
+      expect(r.status).not.toBe(0)
+      expect(r.outputs.ok).toBeUndefined()
+    })
+
+    test('a key already on the PR is not posted again (a rerun of the same commit)', () => {
+      const reviews = [{ id: 4, user: { login: 'github-actions[bot]', type: 'Bot' }, body: `<!-- doc-strings-review:keys=${K} -->` }]
+      const r = run(wrong, { extraFiles: { 'reviews.json': JSON.stringify(reviews) } })
+      expect(r.status).toBe(0)
+      expect(r.read('gh-calls')).not.toMatch(/^POST /m)
+      expect(r.summary).toMatch(/Late finding on `f`/)
+    })
+
+    test('a human pasting a marker closes nothing', () => {
+      const comments = [{ id: 1, user: { login: 'someone', type: 'User' }, body: `<!-- doc-strings-review:key=${K} issue=x -->` }]
+      const r = run(wrong, { extraFiles: { 'comments.json': JSON.stringify(comments) } })
+      expect(posted(r).comments).toHaveLength(1)
+    })
+
+    test('when the PR\'s reviews cannot be read, nothing is posted', () => {
+      const r = run(wrong, { extraEnv: { GH_FAIL_READ: '1' } })
+      expect(r.status).not.toBe(0)
+      expect(r.exists('posted-0.json')).toBe(false)
+      expect(r.outputs.ok).toBeUndefined()
+    })
+
+    test('a missing findings.json is no issues, not a failure', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-post-'))
+      const all = files({})
+      delete all['findings.json']
+      const r = execRun(step, { env: env(dir), stubs: { gh: ghStub, npx: npxRealStub }, files: all })
+      expect(r.status).toBe(0)
+      expect(r.outputs.ok).toBe('true')
+      expect(r.read('gh-calls')).not.toMatch(/^POST /m)
     })
   })
 
   describe('recording what was reviewed', () => {
     const step = stepNamed('Record the reviewed fingerprints')
 
-    test('adds pending and removed fingerprints, deduplicated, ignoring junk', () => {
+    test('adds pending and removed fingerprints and the closed keys, deduplicated, ignoring junk', () => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-state-'))
+      const out = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-out-'))
       fs.writeFileSync(path.join(dir, 'reviewed.txt'), 'aaaaaaaaaaaaaaaa\n')
+      fs.writeFileSync(path.join(dir, 'closed.txt'), '1111111111111111\n')
+      fs.writeFileSync(path.join(out, 'keys.txt'), '2222222222222222\n1111111111111111\n$(touch pwned2)\n')
       const lint = {
         declarations: [{ fingerprint: 'bbbbbbbbbbbbbbbb' }, { fingerprint: 'aaaaaaaaaaaaaaaa' }, { fingerprint: '$(touch pwned)' }],
         summary: { removedDeclarations: [{ fingerprint: 'cccccccccccccccc' }], reviewerWrittenDeclarations: [{ fingerprint: 'dddddddddddddddd' }] }
       }
-      const r = execRun(step, { env: { STATE_DIR: dir }, files: { 'lint-findings.json': JSON.stringify(lint) } })
+      const r = execRun(step, { env: { STATE_DIR: dir, OUT: out }, files: { 'lint-findings.json': JSON.stringify(lint) } })
       expect(r.status).toBe(0)
-      // Reviewer-written strings are recorded too, so their impact check
-      // runs once, not on every push.
       expect(fs.readFileSync(path.join(dir, 'reviewed.txt'), 'utf8').trim().split('\n'))
         .toEqual(['aaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbb', 'cccccccccccccccc', 'dddddddddddddddd'])
+      expect(fs.readFileSync(path.join(dir, 'closed.txt'), 'utf8').trim().split('\n'))
+        .toEqual(['1111111111111111', '2222222222222222'])
       expect(r.exists('pwned')).toBe(false)
+      expect(r.exists('pwned2')).toBe(false)
     })
   })
 
   describe('static contracts', () => {
     const review = stepNamed('Claude review with suggestions')
 
-    test('the model cannot post a top-level comment itself', () => {
+    test('the model cannot post anything to the PR itself', () => {
       expect(review.with.claude_args).not.toMatch(/add_issue_comment/)
-      expect(review.with.claude_args).toMatch(/create_inline_comment/)
+      expect(review.with.claude_args).not.toMatch(/create_inline_comment/)
+      expect(review.with.claude_args).not.toMatch(/Bash\(gh api/)
     })
 
-    test('state is saved only after a review that actually ran', () => {
+    test('a draft PR gets no review, no post and no record', () => {
+      for (const name of ['Claude review with suggestions', 'Post the review', 'Record the reviewed fingerprints']) {
+        expect(stepNamed(name).if).toMatch(/^github\.event\.pull_request\.draft != true && /)
+      }
+      // The lint report still reaches the job summary on a draft.
+      expect(stepNamed('Write the lint report to the job summary').if).toBe('always()')
+    })
+
+    test('state is saved only after a review that ran and whose post succeeded or had nothing to say', () => {
+      expect(stepNamed('Post the review').if).toMatch(/steps\.review\.outputs\.execution_file != ''/)
       expect(stepNamed('Record the reviewed fingerprints').if).toMatch(/steps\.review\.outputs\.execution_file != ''/)
+      expect(stepNamed('Record the reviewed fingerprints').if).toMatch(/steps\.post\.outputs\.ok == 'true'/)
       expect(stepNamed('Save the review state').if).toMatch(/steps\.record\.outcome == 'success'/)
     })
 
@@ -1994,26 +2156,39 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(save.path).toBe(restore.path)
     })
 
-    test('the prompt caps inline comments and tells the model to mark each one', () => {
-      expect(review.with.prompt).toMatch(/AT MOST 10 inline comments/)
-      // Visible, because the action's comment tools strip HTML comments.
-      expect(review.with.prompt).toMatch(/<sub>doc-strings-review:fp=FINGERPRINT<\/sub>/)
-      expect(review.with.prompt).not.toMatch(/<!-- doc-strings-review:fp/)
-      expect(review.with.prompt).not.toMatch(/Finish with one summary comment/)
+    test('the post step runs without the model token and posts with github.token', () => {
+      const post = stepNamed('Post the review')
+      expect(post.env.AWS_BEARER_TOKEN_BEDROCK).toBe('')
+      expect(post.env.GH_TOKEN).toBe('${{ github.token }}')
+      expect(post['continue-on-error']).toBe(true)
+      // The one review per run: one POST of the review and one 422 retry.
+      expect(post.run.match(/gh api -X POST "repos\/\$GITHUB_REPOSITORY\/pulls\/\$PR\/reviews"/g)).toHaveLength(2)
+      expect(post.run).not.toMatch(/issues\/\$PR\/comments/)
+      expect(post.run).toMatch(/--self-check-base "\$BASE"/)
     })
 
-    // A caller whose policy forbids committable suggestions (connect) sets
-    // committable_suggestions: false. The default keeps today's behavior.
-    test('committable suggestions default on, and turning them off swaps the block type only', () => {
-      const input = workflow.on.workflow_call.inputs.committable_suggestions
-      expect(input.type).toBe('boolean')
-      expect(input.default).toBe(true)
-      const expr = review.with.prompt.match(/\$\{\{\s*!inputs\.committable_suggestions && '([^']*)' \|\| '' \}\}/)
-      expect(expr).not.toBeNull()
-      expect(expr[1]).toMatch(/```text block/)
-      expect(expr[1]).toMatch(/Never post a ```suggestion block here/)
-      // The fingerprint footer stays, so the review-once state keeps working.
-      expect(review.with.prompt.indexOf(expr[0])).toBeGreaterThan(review.with.prompt.indexOf('<sub>doc-strings-review:fp=FINGERPRINT</sub>'))
+    test('the prompt asks for findings.json, one entry per issue, and says this is the only review', () => {
+      const prompt = review.with.prompt
+      expect(prompt).toMatch(/Write\s+findings\.json once/)
+      expect(prompt).toMatch(/This is the only\s+review the string gets/)
+      expect(prompt).toMatch(/At most 10 issues are posted inline/)
+      expect(prompt).toMatch(/"style" for everything else/)
+      expect(prompt).not.toMatch(/doc-strings-review:fp=/)
+      expect(prompt).not.toMatch(/review-summary\.md/)
+      expect(prompt).not.toMatch(/AT MOST 10 inline comments/)
+      // The prose pass covers every declaration, not only lint-clean ones.
+      expect(prompt).not.toMatch(/with NO lint finding/)
+      expect(prompt).toMatch(/summary\.closedChangedDeclarations/)
+    })
+
+    test('committable suggestions and style comments are caller inputs the post step reads, not prompt text', () => {
+      const inputs = workflow.on.workflow_call.inputs
+      expect(inputs.committable_suggestions).toMatchObject({ type: 'boolean', default: true })
+      expect(inputs.style_comments).toMatchObject({ type: 'boolean', default: false })
+      const post = stepNamed('Post the review')
+      expect(post.env.COMMITTABLE).toBe('${{ inputs.committable_suggestions }}')
+      expect(post.env.STYLE_COMMENTS).toBe('${{ inputs.style_comments }}')
+      expect(review.with.prompt).not.toMatch(/inputs\.committable_suggestions/)
     })
 
     test('the prompt carries the connect suggestion rules and the regeneration footer', () => {
@@ -2041,15 +2216,13 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
 
     test('the prompt reviews strings in their page context and keeps articles', () => {
       expect(review.with.prompt).toMatch(/REVIEW IN CONTEXT/)
-      expect(review.with.prompt).toMatch(/Each entry carries context/)
+      expect(review.with.prompt).toMatch(/Each entry carries its key and\s+context/)
       expect(review.with.prompt).toMatch(/articles and subjects/)
       expect(review.with.prompt).toMatch(/Every flag, command, path and URL goes in inline code/)
       // A lint fix formats or rewords; it never deletes what the text says.
       expect(review.with.prompt).toMatch(/Fix a lint finding by formatting or rewording the text it\s+names; never delete a field, value or fact to clear it\./)
-      // The related-string comment is the named exception to the
-      // suggestion-block rule, and still carries the fingerprint footer.
-      expect(review.with.prompt).toMatch(/one exception to the suggestion rules above/)
-      expect(review.with.prompt).toMatch(/still ends with the changed declaration's\s+fingerprint footer/)
+      // A string the change made wrong is an ordinary issue keyed to it.
+      expect(review.with.prompt).toMatch(/keyed to that string's key from the context entries/)
     })
 
     // connect#4860: the lint used to report per declaration, and the prompt

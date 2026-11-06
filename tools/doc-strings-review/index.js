@@ -660,8 +660,8 @@ function jobSummary ({ valid, plan, inline, listed, checkResult, lint, lintIndex
 
   const closedChanged = (lint && lint.summary && lint.summary.closedChangedDeclarations) || []
   if (closedChanged.length || plan.late.length) {
-    out.push('### Declarations already reviewed on this PR and edited since', '',
-      'Not reviewed again and never commented on. A problem the edit brought in is the docs team\'s to follow up.', '')
+    out.push('### Declarations an earlier run on this PR already reviewed', '',
+      'Touched again by this PR (edited since, or seen again after the cache was evicted). Not reviewed again and never commented on: a problem an edit brought in is the docs team\'s to follow up.', '')
     for (const d of closedChanged) out.push(`- \`${cell(d.name)}\` (${cell(d.surface)}), ${cell(d.file)}:${d.line_start}`)
     for (const it of plan.late) out.push(`- Late finding on ${cell(nameOf(lintIndex, it.key))}, ${cell(it.path)}:${it.line} (${it.tier}): ${cell(firstSentence(it.problem, 300))}`)
     out.push('')
