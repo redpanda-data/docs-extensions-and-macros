@@ -568,6 +568,26 @@ describe('build-review: tiers and the self-check', () => {
     expect(kept.review.comments).toHaveLength(1)
   })
 
+  test('a problem that only mentions a style fix its rewrite also makes keeps its own tier', () => {
+    // From a live run: the casing issue's rewrite also split the long
+    // sentence, and its problem said so in its second sentence.
+    const findings = [{ key: A, name: 'na', file: 'a.go', line_start: 1, line_end: 4, rules: [{ id: 'long-sentence', severity: 'warning', tier: 'style', line: 2, message: 'Sentence has 44 words.' }] }]
+    const out = review.buildReview({
+      ...synth({ declarations: [decl(A, 1, 4)], findings }),
+      findings: {
+        checked: [A],
+        issues: [
+          issue({ key: A, start_line: 1, line: 4, tier: 'unclear', rule: 'product-name-casing', problem: '"redpanda broker" writes the product name in a form terminology.md names as incorrect: it is always `Redpanda`. The replacement also splits the 44-word sentence that `long-sentence` flags into three sentences.' }),
+          issue({ key: A, start_line: 1, line: 4, tier: 'unclear', rule: 'prose', problem: 'The description is a single 44-word sentence that carries three ideas.' })
+        ]
+      }
+    })
+    expect(out.review.comments).toHaveLength(1)
+    expect(out.review.comments[0].body).toMatch(/Redpanda/)
+    expect(out.review.comments[0].body).not.toMatch(/single 44-word sentence/)
+    expect(out.summary).toMatch(/single 44-word sentence/)
+  })
+
   test('a rewrite that keeps a finding whose message names its text is not flagged as new', () => {
     const LONG = 'Offset of the first record in the partition, which is the record that the log start offset points at after retention or prefix truncation removed older segments from the local disk of every broker that holds a replica of it'
     fx = prRepo({ text: LONG })

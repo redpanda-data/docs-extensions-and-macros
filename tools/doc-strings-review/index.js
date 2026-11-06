@@ -282,11 +282,13 @@ function overlapsAny (spans, p, start, end) {
  * What a model problem names when it is about one of the lint's style
  * findings, so the model cannot raise a lint style finding under its own
  * rule label and tier: an issue on the lines of a style finding of the same
- * declaration that names the same thing takes the lint's tier.
+ * declaration whose first sentence (the problem it states) names the same
+ * thing takes the lint's tier. A problem that only mentions the style fix
+ * later, as one its rewrite also makes, keeps its own tier.
  */
 const STYLE_SUBJECTS = {
   'latin-abbreviation': /\b(?:e\.\s?g|i\.\s?e|etc)\b|latin/i,
-  'long-sentence': /sentence/i,
+  'long-sentence': /\b(?:long|\d+[- ]words?)\b[^.]*\bsentences?\b|\bsentences?\b[^.]*\b(?:long|words|split)\b/i,
   'em-dash': /em[ -]?dash|\u2014/i,
   'missing-inline-code': /inline code|backtick|monospace|code (?:font|format)/i,
   'connect-quoted-field-name': /inline code|backtick|quot/i,
@@ -306,7 +308,7 @@ function lintTierFor (issue, lintIndex) {
     if (l.tier !== 'style' || l.key !== issue.key || l.file !== issue.path) continue
     if (issue.start_line > l.end || issue.line < l.start) continue
     const subject = STYLE_SUBJECTS[l.id]
-    if (subject && subject.test(issue.problem)) return 'style'
+    if (subject && subject.test(firstSentence(issue.problem, 1000))) return 'style'
   }
   return null
 }
