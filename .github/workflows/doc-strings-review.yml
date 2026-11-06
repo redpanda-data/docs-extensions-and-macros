@@ -37,7 +37,11 @@
 # commented on; a later push can only bring a declaration the PR touches
 # for the first time. Closed keys live in the Actions cache under the PR
 # number and in hidden markers on the bot's own review and comments, so an
-# evicted cache still never produces a second comment on a declaration.
+# evicted cache still never produces a second comment on a declaration. One
+# case is cache-only: a run that finds nothing to post on a PR with no
+# earlier review has no review to hold its keys, so they live in the cache
+# alone, which Actions evicts after 7 days unused. Once they are evicted,
+# those declarations are reviewed again the next time the PR touches them.
 # Lines whose text a human reviewer other than the author wrote on the PR
 # (in a suggestion block or a prose paragraph) are not reviewed: a string
 # whose changed lines all came from a reviewer is skipped, and one with any
@@ -511,8 +515,9 @@ jobs:
       # Only github-actions[bot], the identity github.token posts as, counts,
       # so a human cannot close a declaration by pasting a marker. The
       # fp= footers an earlier version of this workflow had the model post
-      # (under the action's app identity, hence any Bot) are still read into
-      # reviewed.txt, so a PR open across the upgrade keeps its state.
+      # (under the action's app identity, claude[bot]) are still read into
+      # reviewed.txt, so a PR open across the upgrade keeps its state; no
+      # other bot's footer counts.
       - name: Recover the review state from earlier reviews
         continue-on-error: true
         env:
@@ -528,9 +533,9 @@ jobs:
           touch "$STATE_DIR/reviewed.txt" "$STATE_DIR/closed.txt"
           before=$(grep -c . "$STATE_DIR/reviewed.txt" || true)
           closed_before=$(grep -c . "$STATE_DIR/closed.txt" || true)
-          # Legacy fp= footers (one release): any Bot, as before.
+          # Legacy fp= footers (one release): the action's app identity only.
           if markers=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/comments" \
-              --jq '.[] | select(.user.type == "Bot") | .body'); then
+              --jq '.[] | select(.user.login == "claude[bot]") | .body'); then
             printf '%s\n' "$markers" | grep -oE 'doc-strings-review:fp=[0-9a-f]{16}' | cut -d= -f2 >> "$STATE_DIR/reviewed.txt" || true
           else
             echo "::notice::Could not read earlier review comments; relying on the cached state alone."
@@ -1391,11 +1396,15 @@ jobs:
       # handed the review, neutralizes HTML comment markers and @-mentions,
       # keeps style findings and findings on closed declarations for the job
       # summary, merges issues on overlapping lines, caps inline comments at
-      # 10, moves each span from the merge commit the lint ran on to the PR
-      # head (commit_id is the head SHA), checks that both ends sit in one
-      # hunk of the PR's own diff (pulls/N/files, not pr-diff.patch, which is
-      # the merge diff), and re-lints every suggestion on a scratch worktree,
-      # dropping the block of one that brings a new warning.
+      # 10, maps each span from the merge commit the lint ran on to the PR
+      # head line by line from git (commit_id is the head SHA), checks that
+      # both ends sit in one hunk of the PR's own diff as of this run's
+      # commits (git diff BASE...HEAD^2, never the pulls API, which can
+      # already name a newer push), and re-lints every suggestion on a
+      # scratch worktree, dropping the block of one that brings a new
+      # warning. A findings.json that is missing or unreadable builds
+      # nothing: the step fails and records nothing, so the next push
+      # reviews again.
       #
       # Then exactly one write. With anything to say: one POST of the
       # review, and on a 422 (a line GitHub will not anchor) one retry with
@@ -1404,7 +1413,8 @@ jobs:
       # POST, and so no notification; the run's keys are PUT into the
       # newest earlier review's ledger instead, or stay in the cache alone
       # when there is none. The markers are read again just before the
-      # build, so a rerun of the same commit posts nothing new.
+      # build and joined with the cached closed keys, so a rerun of the same
+      # commit posts nothing new.
       - name: Post the review
         id: post
         if: github.event.pull_request.draft != true && steps.review.outcome == 'success' && steps.review.outputs.execution_file != ''
@@ -1422,6 +1432,7 @@ jobs:
           COMMITTABLE: ${{ inputs.committable_suggestions }}
           STYLE_COMMENTS: ${{ inputs.style_comments }}
           OUT: ${{ runner.temp }}/doc-strings-review-out
+          STATE_DIR: ${{ runner.temp }}/doc-strings-review-state
         run: |
           set -uo pipefail
           rm -rf "$OUT"
@@ -1435,19 +1446,21 @@ jobs:
             echo "::warning::Could not read the PR's reviews; not posting, so nothing can be posted twice."
             exit 1
           fi
-          grep -oE 'doc-strings-review:keys?=[0-9a-f,]+' "$OUT/markers.txt" | cut -d= -f2 | tr ',' '\n' \
+          # Plus the keys the cache holds, which include a run's keys that
+          # had no review to hold them.
+          { grep -oE 'doc-strings-review:keys?=[0-9a-f,]+' "$OUT/markers.txt" | cut -d= -f2 | tr ',' '\n'
+            cat "${STATE_DIR:-/nonexistent}/closed.txt" 2>/dev/null; } \
             | grep -E '^[0-9a-f]{16}$' | sort -u > "$OUT/closed-now.txt" || true
-          if ! gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" > "$OUT/pr-files.json"; then
-            echo "::warning::Could not read the PR's files; every comment goes in the review body."
-            : > "$OUT/pr-files.json"
-          fi
+          # The PR's hunks come from this run's own commits (BASE...HEAD^2
+          # on the merge checkout), so they match the lines the lint saw.
           ARGS=(--findings findings.json --lint lint-findings.json --closed "$OUT/closed-now.txt"
-            --pr-files "$OUT/pr-files.json" --head-sha "$HEAD_SHA" --self-check-base "$BASE"
+            --base "$BASE" --head-sha "$HEAD_SHA" --self-check-base "$BASE"
             --committable "$COMMITTABLE" --style-comments "$STYLE_COMMENTS" --out-dir "$OUT")
           if [ -n "$SURFACES" ]; then ARGS+=(--surface "$SURFACES"); fi
           if ! stats=$(npx --yes --package="$PKG" doc-tools build-review "${ARGS[@]}" 2> "$OUT/build-stderr.txt"); then
-            echo "::warning::build-review failed; no review posted."
+            echo "::warning::build-review failed; no review posted and nothing recorded, so the next push reviews again."
             sed -n '1,20p' "$OUT/build-stderr.txt" >&2 || true
+            [ -s "$OUT/summary.md" ] && cat "$OUT/summary.md" >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
           echo "build-review: $stats"

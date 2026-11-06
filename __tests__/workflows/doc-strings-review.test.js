@@ -1767,13 +1767,14 @@ exec node ${JSON.stringify(BIN)} "\${out[@]}"
     const step = stepNamed('Recover the review state from earlier reviews')
     const env = (dir) => ({ GH_TOKEN: 't', GITHUB_REPOSITORY: 'o/r', PR: '7', STATE_DIR: path.join(dir, 'state') })
 
-    test('legacy fp= footers from any bot still reach reviewed.txt, merged with the cached state', () => {
+    test('legacy fp= footers from the action\'s app identity still reach reviewed.txt, merged with the cached state; no other bot\'s do', () => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-state-'))
       fs.mkdirSync(path.join(dir, 'state'))
       fs.writeFileSync(path.join(dir, 'state', 'reviewed.txt'), 'aaaaaaaaaaaaaaaa\n')
       const comments = [
         { id: 1, user: { login: 'claude[bot]', type: 'Bot' }, body: 'Fix it.\n<sub>doc-strings-review:fp=bbbbbbbbbbbbbbbb</sub>' },
-        { id: 2, user: { login: 'someone', type: 'User' }, body: '<!-- doc-strings-review:fp=cccccccccccccccc -->' }
+        { id: 2, user: { login: 'someone', type: 'User' }, body: '<!-- doc-strings-review:fp=cccccccccccccccc -->' },
+        { id: 3, user: { login: 'some-app[bot]', type: 'Bot' }, body: '<sub>doc-strings-review:fp=eeeeeeeeeeeeeeee</sub>' }
       ]
       const r = execRun(step, { env: env(dir), stubs: { gh: ghStub }, files: { 'comments.json': JSON.stringify(comments) } })
       expect(r.status).toBe(0)
@@ -1991,12 +1992,25 @@ exec node ${JSON.stringify(BIN)} "\${out[@]}"
     const wrong = { checked: [K], issues: [{ key: K, path: 'f.go', start_line: 2, line: 2, tier: 'wrong', rule: 'default', problem: 'The default is 5, not 1.', replacement: 'Description("Defaults to 5.")' }] }
     const styleOnly = { checked: [K], issues: [{ key: K, path: 'f.go', start_line: 2, line: 2, tier: 'style', rule: 'long-sentence', problem: 'Split it.', replacement: null }] }
     const env = (dir, extra = {}) => ({
-      GH_TOKEN: 't', GITHUB_REPOSITORY: 'o/r', PR: '7', HEAD_SHA: 'abc123', BASE: 'deadbeef', PKG: RESOLVED_PKG,
-      SURFACES: '', COMMITTABLE: 'true', STYLE_COMMENTS: 'false', OUT: path.join(dir, 'out'), GITHUB_STEP_SUMMARY: path.join(dir, 'step-summary.md'), ...extra
+      GH_TOKEN: 't', GITHUB_REPOSITORY: 'o/r', PR: '7', HEAD_SHA: 'abc123', BASE: 'HEAD^1', PKG: RESOLVED_PKG,
+      SURFACES: '', COMMITTABLE: 'true', STYLE_COMMENTS: 'false', OUT: path.join(dir, 'out'), STATE_DIR: path.join(dir, 'state'),
+      GITHUB_STEP_SUMMARY: path.join(dir, 'step-summary.md'), ...extra
     })
-    const run = (findings, { extraFiles = {}, extraEnv = {} } = {}) => {
+    // The step runs on the merge checkout: build a merge commit whose second
+    // parent adds f.go, so BASE...HEAD^2 is the PR's own diff.
+    const npxMergeStub = npxRealStub.replace('exec node', `if [ ! -d "$HOME/.git" ]; then
+  ( cd "$HOME" && git init -q -b main && git config user.email t@e.invalid && git config user.name t \\
+    && git commit -q --allow-empty -m base && git checkout -q -b pr && git add f.go && git commit -q -m pr \\
+    && git checkout -q main && git commit -q --allow-empty -m main && git merge -q --no-ff --no-edit pr ) > /dev/null 2>&1
+fi
+exec node`)
+    const run = (findings, { extraFiles = {}, extraEnv = {}, cachedClosed = null } = {}) => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-post-'))
-      const r = execRun(step, { env: env(dir, extraEnv), stubs: { gh: ghStub, npx: npxRealStub }, files: files(findings, extraFiles) })
+      if (cachedClosed) {
+        fs.mkdirSync(path.join(dir, 'state'))
+        fs.writeFileSync(path.join(dir, 'state', 'closed.txt'), cachedClosed)
+      }
+      const r = execRun(step, { env: env(dir, extraEnv), stubs: { gh: ghStub, npx: npxMergeStub }, files: files(findings, extraFiles) })
       const readOut = (f) => (fs.existsSync(path.join(dir, 'out', f)) ? fs.readFileSync(path.join(dir, 'out', f), 'utf8') : null)
       return { ...r, readOut, summary: fs.existsSync(path.join(dir, 'step-summary.md')) ? fs.readFileSync(path.join(dir, 'step-summary.md'), 'utf8') : '' }
     }
@@ -2015,6 +2029,22 @@ exec node ${JSON.stringify(BIN)} "\${out[@]}"
       expect(review.comments[0].body).toContain(`<!-- doc-strings-review:key=${K} issue=default -->`)
       expect(review.body).toContain(`<!-- doc-strings-review:keys=${K} -->`)
       expect(r.summary).toMatch(/## Doc-strings review/)
+      // The hunks are the run's own commits, not the pulls API.
+      expect(r.read('gh-calls')).not.toMatch(/pulls\/7\/files/)
+    })
+
+    test('the hunks are this run\'s own commits, whatever the pulls API reports', () => {
+      // files.json claims line 5 changed; the run's diff adds lines 1-3 only.
+      const far = { checked: [K], issues: [{ key: K, path: 'f.go', start_line: 2, line: 2, tier: 'wrong', rule: 'default', problem: 'The default is 5.', replacement: null }] }
+      const r = run(far, { extraFiles: { 'files.json': JSON.stringify([{ filename: 'f.go', patch: '@@ -0,0 +5,1 @@\n+x' }]) } })
+      expect(posted(r).comments.map((c) => c.line)).toEqual([2])
+    })
+
+    test('a key only the cache holds is closed too, not only the PR\'s markers', () => {
+      const r = run(wrong, { cachedClosed: `${K}\n` })
+      expect(r.status).toBe(0)
+      expect(r.read('gh-calls')).not.toMatch(/^POST /m)
+      expect(r.summary).toMatch(/Late finding on `f`/)
     })
 
     test('committable_suggestions false posts a text block', () => {
@@ -2089,14 +2119,18 @@ exec node ${JSON.stringify(BIN)} "\${out[@]}"
       expect(r.outputs.ok).toBeUndefined()
     })
 
-    test('a missing findings.json is no issues, not a failure', () => {
-      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-post-'))
-      const all = files({})
-      delete all['findings.json']
-      const r = execRun(step, { env: env(dir), stubs: { gh: ghStub, npx: npxRealStub }, files: all })
-      expect(r.status).toBe(0)
-      expect(r.outputs.ok).toBe('true')
-      expect(r.read('gh-calls')).not.toMatch(/^POST /m)
+    test('a missing or truncated findings.json posts nothing and records nothing, so the next push reviews again', () => {
+      for (const content of [null, '{"issues":[{"key":"aaaa']) {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-post-'))
+        const all = files({})
+        if (content == null) delete all['findings.json']
+        else all['findings.json'] = content
+        const r = execRun(step, { env: env(dir), stubs: { gh: ghStub, npx: npxMergeStub }, files: all })
+        expect(r.status).not.toBe(0)
+        expect(r.outputs.ok).toBeUndefined()
+        expect(r.read('gh-calls')).not.toMatch(/^(POST|PUT|PATCH) /m)
+        expect(fs.existsSync(path.join(dir, 'out', 'keys.txt'))).toBe(false)
+      }
     })
   })
 
