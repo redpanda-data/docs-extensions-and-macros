@@ -1,5 +1,23 @@
 # Changelog
 
+## [5.62.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.61.1...v5.62.0) (2026-11-06)
+
+
+### Features
+
+* **docs-pr-review:** read the docs App credential from Secrets Manager ([#486](https://github.com/redpanda-data/docs-extensions-and-macros/issues/486)) ([a241365](https://github.com/redpanda-data/docs-extensions-and-macros/commit/a2413654b2b4d1cd4ef4768d1f4a3e17f49216d2))
+
+
+### Bug fixes
+
+* **dispatch-graph:** match fan-out senders to their listeners ([#488](https://github.com/redpanda-data/docs-extensions-and-macros/issues/488)) ([6943a13](https://github.com/redpanda-data/docs-extensions-and-macros/commit/6943a1342a6518eea20e555d3f8342978cfb3d2c))
+* **doc-strings-review:** let API summaries drop articles ([#482](https://github.com/redpanda-data/docs-extensions-and-macros/issues/482)) ([997ba02](https://github.com/redpanda-data/docs-extensions-and-macros/commit/997ba02bd181116e3590ca24ed4373c444cb21e3))
+
+
+### Reusable workflows and CI
+
+* turn on the automated docs PR review ([#481](https://github.com/redpanda-data/docs-extensions-and-macros/issues/481)) ([b087de4](https://github.com/redpanda-data/docs-extensions-and-macros/commit/b087de4859b8970976b4286ca7d466adaaef347c))
+
 ## [5.61.1](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.61.0...v5.61.1) (2026-11-06)
 
 
