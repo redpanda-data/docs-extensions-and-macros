@@ -579,10 +579,51 @@ module.exports.register = function () {
               markdown += `${headingPrefix} ${title}\n\n${md.trim()}\n${nestedMdCombined.trim()}\n\n`
             })
 
-            return markdown.trim()
+            // Close every group, nested ones included, so a reader can tell
+            // where the last tab's content ends and the page resumes.
+            const body = markdown.trim()
+            return body ? `${body}\n\n<!-- /tabs -->` : ''
           }
 
           return '\n' + processTabGroup(node, null) + '\n'
+        },
+      })
+
+      // Platform blocks ([.platform.platform-cloud] open blocks with a
+      // .Title) mark content that applies to only some platforms. The HTML
+      // carries that in classes the Markdown would otherwise drop, so emit
+      // the platform names as a comment and keep the title as a label.
+      turndownInstance.addRule('platform-block', {
+        filter: (node) => {
+          if (node.nodeName !== 'DIV') return false
+          const classes = (node.getAttribute?.('class') || '').split(/\s+/)
+          return classes.includes('openblock') && classes.includes('platform')
+        },
+        replacement: function (content, node) {
+          const names = (node.getAttribute('class') || '')
+            .split(/\s+/)
+            .filter((c) => c.startsWith('platform-'))
+            .map((c) => c.slice('platform-'.length))
+            .filter(Boolean)
+          const converter = isInner ? nestedTurndown : turndownInstance
+          const children = Array.from(node.children || [])
+          const titleEl = children.find((c) => (c.getAttribute('class') || '').split(/\s+/).includes('title'))
+          const contentEl = children.find((c) => (c.getAttribute('class') || '').split(/\s+/).includes('content'))
+
+          let title = ''
+          let body = content.trim()
+          try {
+            if (titleEl) title = converter.turndown(titleEl.innerHTML || '').trim().replace(/:$/, '')
+            if (contentEl) body = converter.turndown(contentEl.innerHTML || '').trim()
+          } catch (e) {
+            logger.warn(`Turndown failed in platform block: ${e.message}`)
+          }
+
+          const parts = [`<!-- platform: ${names.join(' ')} -->`]
+          if (title) parts.push(`**${title}:**`)
+          if (body) parts.push(body)
+          parts.push('<!-- /platform -->')
+          return '\n\n' + parts.join('\n\n') + '\n\n'
         },
       })
 

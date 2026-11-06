@@ -555,3 +555,68 @@ describe('generateFrontmatter page-introduced-in', () => {
     expect(markdown).toContain('Reads rows.')
   })
 })
+
+// Platform blocks and tab groups carry their meaning in HTML classes and
+// widgets, so the Markdown twin needs explicit markers for an agent to know
+// which platform a passage applies to and where a tab group ends.
+describe('platform blocks and tab groups in the Markdown twin', () => {
+  const render = async (body) => {
+    const handlers = {}
+    const noop = () => {}
+    const context = { on: (event, fn) => { handlers[event] = fn }, getLogger: () => ({ info: noop, debug: noop, warn: noop, error: noop }) }
+    require('../../extensions/convert-to-markdown').register.call(context)
+    const page = {
+      contents: Buffer.from(`<html><body><article class="doc"><h1>Page</h1>${body}</article></body></html>`),
+      asciidoc: { doctitle: 'Page', attributes: {} },
+      src: { component: 'solutions', version: 'master', path: 'modules/demo/pages/page.adoc' },
+      pub: { url: '/solutions/demo/page/' },
+    }
+    await handlers.pagesComposed({ playbook: { site: { url: 'https://docs.redpanda.com' } }, contentCatalog: { getPages: () => [page] } })
+    return page.markdownContents.toString()
+  }
+
+  const platformBlock = (classes, title, inner) =>
+    `<div class="openblock platform ${classes}">` +
+    (title ? `<div class="title">${title}</div>` : '') +
+    `<div class="content"><div class="paragraph"><p>${inner}</p></div></div></div>`
+
+  test('wraps a platform block in markers and keeps its title as a label', async () => {
+    const md = await render(platformBlock('platform-cloud', 'On Redpanda Cloud', 'Skip this command.'))
+    expect(md).toContain('<!-- platform: cloud -->\n\n**On Redpanda Cloud:**\n\nSkip this command.\n\n<!-- /platform -->')
+  })
+
+  test('lists every platform a block applies to', async () => {
+    const md = await render(platformBlock('platform-local platform-kubernetes', 'On the local broker or Kubernetes', 'Run <code>make up</code>.'))
+    expect(md).toContain('<!-- platform: local kubernetes -->\n\n**On the local broker or Kubernetes:**\n\nRun `make up`.\n\n<!-- /platform -->')
+  })
+
+  test('omits the label when the block has no title', async () => {
+    const md = await render(platformBlock('platform-local', '', 'Local only.'))
+    expect(md).toContain('<!-- platform: local -->\n\nLocal only.\n\n<!-- /platform -->')
+    expect(md).not.toContain('**')
+  })
+
+  test('indents a platform block nested in a list item', async () => {
+    const md = await render(
+      '<div class="olist arabic"><ol class="arabic"><li><p>Start the stack.</p>' +
+      platformBlock('platform-kubernetes', 'On Kubernetes', 'It is already running.') +
+      '</li></ol></div>'
+    )
+    expect(md).toMatch(/1\. +Start the stack\.\n\n {4}<!-- platform: kubernetes -->\n\n {4}\*\*On Kubernetes:\*\*\n\n {4}It is already running\.\n\n {4}<!-- \/platform -->/)
+  })
+
+  test('closes a tab group after its last tab', async () => {
+    const md = await render(
+      '<h2>Set up</h2>' +
+      '<div class="openblock tabs"><div class="content"><div class="ulist tablist"><ul>' +
+      '<li id="_tabs_1_local" class="tab"><p>Local</p></li>' +
+      '<li id="_tabs_1_cloud" class="tab"><p>Cloud</p></li>' +
+      '</ul></div>' +
+      '<div id="_tabs_1_local--panel" class="tabpanel"><div class="paragraph"><p>Use Docker.</p></div></div>' +
+      '<div id="_tabs_1_cloud--panel" class="tabpanel"><div class="paragraph"><p>Use a cluster.</p></div></div>' +
+      '</div></div>' +
+      '<div class="paragraph"><p>After the tabs.</p></div>'
+    )
+    expect(md).toContain('### Local\n\nUse Docker.\n\n### Cloud\n\nUse a cluster.\n\n<!-- /tabs -->\n\nAfter the tabs.')
+  })
+})
