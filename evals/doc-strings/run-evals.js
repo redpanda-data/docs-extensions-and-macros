@@ -557,10 +557,13 @@ function runUnchangedLinesCase (spec, io, sabotage) {
   }
 
   const diff = lib.gitDiff(repo.dir, base)
-  const model = io.callProduction({ repo, lint, diff, base, promptEdits: sabotage ? spec.sabotagePromptEdits : [] })
+  const model = io.callProduction({ repo, lint, diff, base, styleComments: spec.styleComments, promptEdits: sabotage ? spec.sabotagePromptEdits : [] })
   if (model.failed) return modelCallFailed(checks, model)
 
-  const kept = lib.linesKept(model.comments, target, keep)
+  // Graded on every replacement the model proposed, posted or not. The
+  // workflow also keeps a span outside the PR's hunks off the PR, so judging
+  // only what is posted would credit the workflow with the model's restraint.
+  const kept = lib.linesKept([...model.comments, ...proposedSuggestions(model)], target, keep)
   checks.add(ROW_KEEPS_UNCHANGED, kept.pass,
     kept.pass
       ? (kept.judged === 0
@@ -570,6 +573,21 @@ function runUnchangedLinesCase (spec, io, sabotage) {
 
   io.cleanup(repo.dir)
   return finish(checks.allPass() ? 'PASS' : 'FAIL', checks, model)
+}
+
+/**
+ * Every replacement in the model's findings.json as a comment-shaped
+ * suggestion on the lines it names, for checks that grade what the model
+ * proposed rather than what the workflow let through. Empty for a legacy
+ * run, whose comments are already everything it proposed.
+ */
+function proposedSuggestions (model) {
+  if (model.legacy) return []
+  let data = null
+  try { data = JSON.parse((model.files && model.files['findings.json']) || 'null') } catch {}
+  return ((data && Array.isArray(data.issues)) ? data.issues : [])
+    .filter((it) => it && typeof it.replacement === 'string' && Number.isInteger(it.line))
+    .map((it) => ({ path: it.path, line: it.line, startLine: Number.isInteger(it.start_line) ? it.start_line : it.line, body: '```suggestion\n' + it.replacement + '\n```' }))
 }
 
 /**
