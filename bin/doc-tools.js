@@ -195,6 +195,44 @@ programCli
   })
 
 /**
+ * get-connect-version
+ *
+ * @description
+ * Fetches the latest Redpanda Connect release from GitHub and prints only its version,
+ * without the leading "v" (for example "4.110.0"). That is the form
+ * `generate update-connect-version` writes to the latest-connect-version attribute.
+ *
+ * @why
+ * Redpanda Connect is released separately from Redpanda core. Scripts and agents that need
+ * the current Connect version, for example to pin an image tag or compare against
+ * antora.yml, can read it from this command instead of calling the GitHub API themselves.
+ *
+ * @example
+ * # Get the latest Connect version
+ * npx doc-tools get-connect-version
+ * # Output: 4.110.0
+ *
+ * # Use in scripts
+ * CONNECT_VERSION=$(npx doc-tools get-connect-version)
+ * echo "image: redpandadata/connect:$CONNECT_VERSION"
+ *
+ * @requirements
+ * - Internet connection to access GitHub API
+ * - GitHub API rate limits apply (60 requests/hour unauthenticated)
+ */
+programCli
+  .command('get-connect-version')
+  .description('Print the latest Redpanda Connect version')
+  .action(async () => {
+    try {
+      await require('../tools/get-connect-version.js')()
+    } catch (err) {
+      console.error(`Error: ${err.message}`)
+      process.exit(1)
+    }
+  })
+
+/**
  * get-antora-value
  *
  * @description
