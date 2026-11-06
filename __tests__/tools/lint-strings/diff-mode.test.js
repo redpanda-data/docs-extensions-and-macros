@@ -444,6 +444,66 @@ describe('review once (end-to-end, temp git repo)', () => {
     expect(declKey(SURFACES.metrics, reworded)).toBe(declKey(SURFACES.metrics, decl))
   })
 
+  test('same-name declarations in one file get their own keys: nested fields by path, other repeats by order', () => {
+    // Two `username` fields under two object fields, and the summaries of
+    // an input and an output that share a name, in one connect file.
+    // Closing one of each pair leaves the other open.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-strings-keys-'))
+    const REL = 'internal/impl/thing/input_thing.go'
+    const src = (a, b, s1, s2) => `package thing
+
+import "github.com/redpanda-data/benthos/v4/public/service"
+
+func thingSpec() *service.ConfigSpec {
+	return service.NewConfigSpec().
+		Summary("${s1}").
+		Fields(
+			service.NewObjectField("basic_auth",
+				service.NewStringField("username").
+					Description("${a}"),
+			).Description("Basic authentication settings for the thing server."),
+			service.NewObjectField("sasl",
+				service.NewStringField("username").
+					Description("${b}"),
+			).Description("SASL authentication settings for the thing server."),
+		)
+}
+
+func otherSpec() *service.ConfigSpec {
+	return service.NewConfigSpec().
+		Summary("${s2}")
+}
+
+func init() {
+	_ = service.RegisterInput("thing", thingSpec(), nil)
+	_ = service.RegisterOutput("thing", otherSpec(), nil)
+}
+`
+    try {
+      fs.mkdirSync(path.join(dir, path.dirname(REL)), { recursive: true })
+      const git = (cmd) => execSync(cmd, { cwd: dir, stdio: 'pipe' })
+      fs.writeFileSync(path.join(dir, REL), src('The user name for basic authentication.', 'The user name for SASL authentication.', 'Reads things.', 'Writes things.'))
+      git('git init -q -b main && git config user.email t@e.invalid && git config user.name t && git add . && git commit -qm base && git tag base')
+      fs.writeFileSync(path.join(dir, REL), src('The basic auth user name used to log in to the thing server.', 'The SASL user name used to log in to the thing server.', 'Reads things from a thing server.', 'Writes things to a thing server.'))
+      git('git commit -qam reword')
+      const first = lintStrings({ repo: dir, diffBase: 'base', surfaces: ['connect'], log: () => {} })
+      const users = first.declarations.filter((d) => d.name === 'username')
+      const summaries = first.declarations.filter((d) => d.name === 'thing')
+      expect(users).toHaveLength(2)
+      expect(summaries).toHaveLength(2)
+      expect(new Set(first.declarations.map((d) => d.key)).size).toBe(first.declarations.length)
+      // A nested field is keyed by its path, so a new same-name field added
+      // above it cannot shift its key.
+      const scanned = require('../../../tools/lint-strings/surfaces/connect').scanFile(fs.readFileSync(path.join(dir, REL), 'utf8'), REL)
+      expect(scanned.filter((d) => d.name === 'username').map((d) => d.meta.parent)).toEqual(['basic_auth', 'sasl'])
+      const next = lintStrings({ repo: dir, diffBase: 'base', surfaces: ['connect'], closedKeys: new Set([users[0].key, summaries[0].key]), log: () => {} })
+      expect(next.declarations.map((d) => [d.name, d.line_start])).toEqual(expect.arrayContaining([['username', users[1].line_start], ['thing', summaries[1].line_start]]))
+      expect(next.summary.closedChangedDeclarations.map((d) => [d.name, d.line_start]).sort((a, b) => a[1] - b[1])).toEqual([['thing', summaries[0].line_start], ['username', users[0].line_start]])
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   test('the CLI reads --closed', () => {
     commitEdit('sm::description("start offset")', 'sm::description("start offset.")', 'first push')
     const [pending] = lintStrings({ repo, diffBase: 'base', log: () => {} }).declarations

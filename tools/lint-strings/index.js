@@ -143,12 +143,12 @@ function lintStrings (options) {
         ? everything.filter((d) => touchedFiles.has(d.file))
         : surface.extract({ repo: repoPath, files: touchedFiles, log })
       headBySurface[surfaceName] = head
+      assignKeys(surface, everything || head)
       const declarations = []
       for (const decl of head) {
         if (!touches(decl, files.get(decl.file))) continue
         decl.in_pr_diff = true
         decl.fingerprint = fingerprint(decl)
-        decl.key = declKey(surface, decl)
         if (reviewed.has(decl.fingerprint)) {
           alreadyReviewed++
           continue
@@ -308,7 +308,7 @@ function pageContext (decl, all, surface = null) {
     line_end: d.line_end,
     // So a review can raise one issue on a string this change made wrong,
     // keyed to that string rather than to the changed one.
-    ...(surface ? { key: declKey(surface, d) } : {}),
+    ...(surface ? { key: d.key || declKey(surface, d) } : {}),
     string: d.string.length > CONTEXT_STRING_LIMIT ? `${d.string.slice(0, CONTEXT_STRING_LIMIT)}...` : d.string
   }))
 }
@@ -341,6 +341,26 @@ function declKey (surface, decl) {
     .update(JSON.stringify([decl.file, decl.surface, identityOf(surface, decl)]))
     .digest('hex')
     .slice(0, 16)
+}
+
+/**
+ * Give every declaration its key (decl.key). Declarations of one file that
+ * share an identity (the same flag on two rpk commands in one file, two
+ * metrics with one name, unnamed declarations) are told apart by their
+ * order in the file: the first keeps the plain key, so a file with no
+ * repeats keys as before, and the n-th mixes in n. A span is never folded
+ * into another's key.
+ */
+function assignKeys (surface, decls) {
+  const seen = new Map()
+  const ordered = decls.map((d, i) => ({ d, i })).sort((a, b) =>
+    String(a.d.file).localeCompare(String(b.d.file)) || (a.d.line_start || 0) - (b.d.line_start || 0) || a.i - b.i)
+  for (const { d } of ordered) {
+    const plain = declKey(surface, d)
+    const n = seen.get(plain) || 0
+    seen.set(plain, n + 1)
+    d.key = n === 0 ? plain : crypto.createHash('sha256').update(JSON.stringify([plain, n])).digest('hex').slice(0, 16)
+  }
 }
 
 function removalFingerprint (surfaceName, identity) {

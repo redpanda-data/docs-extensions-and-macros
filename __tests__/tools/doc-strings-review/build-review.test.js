@@ -426,6 +426,14 @@ describe('build-review: what closes a declaration', () => {
     expect(out.summary).toMatch(/Late finding on `na`, a\.go:11/)
   })
 
+  test('two declarations that share a key both keep their spans', () => {
+    const out = review.buildReview({
+      ...synth({ declarations: [decl(A, 1, 3), decl(A, 10, 12)] }),
+      findings: { checked: [A], issues: [issue({ key: A, start_line: 11, line: 11, problem: 'On the second one.' })] }
+    })
+    expect(out.review.comments.map((c) => c.line)).toEqual([11])
+  })
+
   test('an issue keyed to an open declaration must sit inside it', () => {
     const out = review.buildReview({
       ...synth({ declarations: [decl(A, 1, 3)] }),
