@@ -339,6 +339,11 @@ function prose (lines, ctx, { tables = false } = {}) {
   // reader of this module asks for; older pages titled a list inside the last
   // section `.Files for this step`, and only that list is dropped.
   let fileList = false
+  // A platform open block ([.platform.platform-cloud] plus `.On Redpanda
+  // Cloud`, in either order, then `--`) keeps its title as a label, or the
+  // reader can't tell which platform the passage is for.
+  let blockTitle = null
+  let platformAttr = false
   const dropLeadIn = () => {
     let k = out.length - 1
     while (k >= 0 && !out[k].trim()) k--
@@ -370,6 +375,11 @@ function prose (lines, ctx, { tables = false } = {}) {
     }
     if (/^(image|video|include)::/.test(line)) { dropLeadIn(); continue }
     if (/^(ifn?def|endif|ifeval)::/.test(line)) continue
+    if (line === '--' && blockTitle && platformAttr) out.push('', `**${blockTitle.replace(/:$/, '')}:**`, '')
+    if (/^\[\.platform\b.*\]$/.test(line)) { platformAttr = true; continue }
+    if (/^\.\S/.test(line) && !/^\.{2,}/.test(line)) { blockTitle = line.slice(1).trim(); continue }
+    blockTitle = null
+    platformAttr = false
     if (/^\[.*\]$/.test(line) || /^\.\S/.test(line) || /^\/\//.test(line) || line === '+' || line === '--') continue
     if (/^:[\w-]+:/.test(line) || /^={3,} /.test(line)) continue
     out.push(line.replace(/^(NOTE|TIP|IMPORTANT|WARNING|CAUTION): /, (_, k) => `**${k[0]}${k.slice(1).toLowerCase()}:** `))
