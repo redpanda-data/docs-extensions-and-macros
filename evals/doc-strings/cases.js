@@ -233,8 +233,8 @@ const CASES = [
     }],
     mustMentionAny: ['Redpanda'],
     mustNotMention: ['redpanda'],
-    // A casing fix is a style issue, posted only with style_comments on.
-    styleComments: true
+    // A term in a form terminology.md names as incorrect is tier unclear,
+    // so it posts with style_comments off, the default.
   },
   {
     id: 'negative-property-diff',
@@ -450,7 +450,63 @@ const CASES = [
       find: 'Description(`An array of message indexes of a batch. Indexes can be negative, and if so the part will be selected from the end counting backwards starting from -1.`).',
       replace: 'Description(`An array of message indexes of a batch. Defaults to [0], which selects the first message of every batch.`).'
     }],
-    target: { file: 'internal/impl/pure/processor_select_parts.go', name: 'parts' }
+    target: { file: 'internal/impl/pure/processor_select_parts.go', name: 'parts', problem: 'default|empty|\\[\\]|drop' }
+  },
+  {
+    // A first push with two independent wrong facts on changed lines, in the
+    // shape of redpanda-data/connect PR 5006 (a field's stated default and a
+    // second field's stated behavior both contradicting the code). The 5006
+    // fixtures are not in this repo, so the text is synthetic, written on
+    // the benthos-551 insert_part fields. Both must be raised in this first
+    // review: two comments, one per field.
+    id: 'must-speak-two-wrong-facts',
+    kind: 'must-speak',
+    description: 'A first push states two facts the code contradicts, on two fields: exactly two inline comments, one per field, each naming its error',
+    layout: 'benthos-551',
+    editFile: 'internal/impl/pure/processor_insert_part.go',
+    diffEdits: [{
+      find: 'Description("The index within the batch to insert the message at.").',
+      replace: 'Description("The index within the batch to insert the message at. Defaults to 0, which inserts the message at the start of the batch.").'
+    }, {
+      find: 'Description(`The content of the message being inserted.`).',
+      replace: 'Description(`The content of the message being inserted. This field is used as is: interpolation functions are not supported.`).'
+    }],
+    targets: [
+      { file: 'internal/impl/pure/processor_insert_part.go', name: 'index', problem: '-1|default|end' },
+      { file: 'internal/impl/pure/processor_insert_part.go', name: 'content', problem: 'interpolat' }
+    ]
+  },
+  {
+    // With style_comments off (the default), a term in a form terminology.md
+    // names as incorrect and an unexplained sentinel default are posted
+    // inline; a long sentence is not.
+    id: 'routing-default-mode',
+    kind: 'routing',
+    description: 'style_comments off: the lowercased product name and the unexplained -1 default post inline, the long sentence goes to the job summary only',
+    layout: 'properties',
+    target: 'kafka_batch_max_bytes',
+    diffEdits: [{
+      find: '      "Maximum size of a batch processed by the server. If the batch is "\n' +
+            '      "compressed, the limit applies to the compressed batch size. Default "\n' +
+            '      "is 1048576 bytes.",\n' +
+            '      {.needs_restart = needs_restart::no, .visibility = visibility::user},\n' +
+            '      1048576) {}',
+      replace: '      "Maximum size in bytes of a batch the redpanda broker accepts, which "\n' +
+               '      "applies to the compressed size of the batch when the producer "\n' +
+               '      "compresses it and to the uncompressed size otherwise, and which the "\n' +
+               '      "broker checks before it writes the batch to the log.",\n' +
+               '      {.needs_restart = needs_restart::no, .visibility = visibility::user},\n' +
+               '      -1) {}'
+    }],
+    expectLint: ['long-sentence:style', 'sentinel-default-unexplained:unclear'],
+    inline: [
+      { label: 'the product name in a form terminology.md names as incorrect', pattern: 'Redpanda|casing|capitali[sz]|lowercase|terminology' },
+      { label: 'the unexplained sentinel default', pattern: '-1|sentinel|unlimited|disabl|no limit' }
+    ],
+    notInline: [
+      { label: 'the long sentence', pattern: 'long sentence|sentence (is|has|runs)|\\d+ words|split (it|this|the sentence)|shorter sentences' }
+    ],
+    styleRules: ['long-sentence']
   },
   {
     id: 'injection-noted',

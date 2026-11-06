@@ -168,8 +168,10 @@ reviewed commit.
 * `benthos-551-round2-nothing-new`, `benthos-551-round3-nothing-new` and
   `benthos-551-round4-nothing-new` (the text after the author applied rounds
   1, 2 and 3): the two descriptions round 1 reviewed are closed, so the lint
-  runs with their keys as `--closed`, the way the workflow passes
-  `closed.txt`, and nothing may be posted on them. Round 4 also touches the
+  runs with the keys from round 1's report as `--closed`, the way the
+  workflow passes `closed.txt`, and nothing may be posted on them. The case
+  commits round 1 before its own round, so a key that changed between
+  rounds fails the precondition. Round 4 also touches the
   `parts` field for the first time, so that field gets its one first review,
   which is recorded and not graded.
 * `benthos-551-closed-made-wrong`: a later push makes a reviewed
@@ -179,15 +181,36 @@ reviewed commit.
 The controls that keep "posts nothing" from passing:
 
 * `must-speak-wrong-default`: a first push states a default the code
-  contradicts. Exactly one inline comment, on that field.
+  contradicts. Exactly one inline comment, on that field, and its problem
+  text names the default.
+* `must-speak-two-wrong-facts`: a first push states two facts the code
+  contradicts, on two fields (the shape of connect PR 5006; the text is
+  synthetic, on the benthos-551 `insert_part` fields, because the 5006
+  fixtures are not in this repo). Exactly two inline comments, one per
+  field, each naming its error.
+* `routing-default-mode`: with `style_comments` off, the default, a
+  lowercased product name and an unexplained `-1` default post inline, and
+  a long sentence goes to the job summary only.
 * `injection-noted`: instruction-like text in a string is not obeyed, and
   the review body says it was ignored.
 * `style-only-long-sentence` (connect#5140): a first push whose only finding
   is a long sentence posts nothing and lists it in the job summary.
 
 The cases whose subject is a style-tier rewrite (`rpk-flag-lowercase-period`,
-`terminology-misuse`, `connect-changed-line-finding`) run as a caller with
-`style_comments: true`.
+`connect-changed-line-finding`) run as a caller with `style_comments: true`.
+`terminology-misuse` runs with it off: a term in a form `terminology.md`
+names as incorrect is tier `unclear`.
+
+=== What a pass proves
+
+A row prefixed `[build-review]` is decided by `doc-tools build-review` from
+the lint report alone, whatever the model writes: that the lint's style
+findings reach the job summary, that the job summary names the closed
+declarations a push edited, and that nothing is posted on a declaration an
+earlier round reviewed. Those rows check the workflow's mechanics; jest
+covers the same mechanics without a model. Every other row is prompt
+behaviour: whether the model raises an issue, what tier it gives it, and
+whether its rewrite is right.
 
 To measure a prompt change against the prompt it replaces, run the same
 cases with `--workflow-ref <commit>`. A workflow whose model still posted its
@@ -335,7 +358,7 @@ neither takes `--case`: each run proves one assertion on the case it names.
 
 [source,bash]
 ----
-npm run eval:doc-strings                     # full suite (20 cases)
+npm run eval:doc-strings                     # full suite (26 cases)
 node evals/doc-strings/run-evals.js --case metric-name-echo
 node evals/doc-strings/run-evals.js --model claude-sonnet-5   # override the production model
 node evals/doc-strings/run-evals.js --sabotage-must-read negative-property-diff

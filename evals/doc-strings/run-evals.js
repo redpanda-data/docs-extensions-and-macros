@@ -702,24 +702,26 @@ const summarizeComment = (c) => `${c.path}:${c.startLine || c.line}-${c.line} ${
 /**
  * The review state a later round starts from: the declarations an earlier
  * run on the PR reviewed are closed, so the lint is run again with their keys
- * as --closed, the way the workflow's lint step passes closed.txt. Keys do
- * not depend on the text, so they are read off this round's own report. A
- * legacy workflow has no closed keys, so it gets the plain report.
+ * as --closed, the way the workflow's lint step passes closed.txt. The keys
+ * come from the report of the round that reviewed them (`firstLint`, round
+ * 1's), as the workflow's do, so a key that changed between rounds fails the
+ * precondition instead of passing on keys read off the same report. A legacy
+ * workflow has no closed keys, so it gets the plain report.
  */
-function closeDeclarations ({ repo, base, lint, closed, io, checks }) {
+function closeDeclarations ({ repo, base, lint, closed, firstLint, io, checks }) {
   if (!closed || !closed.length || io.legacy) return { lint, closedKeys: null }
   const keys = closed.map((want) => {
-    const d = (lint.declarations || []).find((x) => sameDecl(x, want))
+    const d = ((firstLint || lint).declarations || []).find((x) => x.file === want.file && x.name === want.name)
     return d && d.key
   })
-  if (keys.some((k) => !k)) return { error: `Precondition: every declaration to close must be in this round's report, missing ${JSON.stringify(closed.filter((_, i) => !keys[i]).map((d) => d.name))}` }
+  if (keys.some((k) => !k)) return { error: `Precondition: every declaration to close must be in round 1's report, missing ${JSON.stringify(closed.filter((_, i) => !keys[i]).map((d) => d.name))}` }
   const file = path.join(repo.dir, '..', `${path.basename(repo.dir)}-closed.txt`)
   fs.writeFileSync(file, keys.map((k) => `${k}\n`).join(''))
   const after = lib.runLint(repo.dir, repo.surface, ['--diff', base, '--closed', file])
   fs.rmSync(file, { force: true })
   const got = ((after.summary && after.summary.closedChangedDeclarations) || []).map((d) => d.key)
   if (!keys.every((k) => got.includes(k))) return { error: `Precondition: --closed must move ${JSON.stringify(keys)} to closedChangedDeclarations, got ${JSON.stringify(got)}` }
-  checks.add('precondition: the declarations an earlier round reviewed are closed', true,
+  checks.add('precondition: the keys round 1 closed close the same declarations in this round', true,
     `${closed.map((d) => d.name).join(', ')} -> closedChangedDeclarations; still to review: ${JSON.stringify((after.declarations || []).map((d) => d.name))}`)
   return { lint: after, closedKeys: new Set(keys) }
 }
@@ -754,10 +756,17 @@ function runOnePassCase (spec, io) {
   const repo = lib.materializeRepo(spec.layout)
   const base = lib.gitInit(repo.dir)
   const pureDir = path.join(repo.dir, 'internal/impl/pure')
-  for (const file of spec.roundFiles) {
-    fs.copyFileSync(path.join(lib.EVAL_FIXTURES, spec.layout, `${file}.${spec.round}.go`), path.join(pureDir, `${file}.go`))
+  const putRound = (round) => {
+    for (const file of spec.roundFiles) {
+      fs.copyFileSync(path.join(lib.EVAL_FIXTURES, spec.layout, `${file}.${round}.go`), path.join(pureDir, `${file}.go`))
+    }
+    lib.gitCommitAll(repo.dir, `benthos#551 ${round}`)
   }
-  lib.gitCommitAll(repo.dir, `benthos#551 ${spec.round}`)
+  // Round 1 is the push the closed declarations were reviewed on; its report
+  // holds the keys a later round's lint is given.
+  putRound('round1')
+  const firstLint = spec.closed ? lib.runLint(repo.dir, repo.surface, ['--diff', base]) : null
+  if (spec.round !== 'round1') putRound(spec.round)
   for (const edit of spec.laterEdits || []) {
     lib.applyEdits(path.join(repo.dir, edit.file), [edit])
     lib.gitCommitAll(repo.dir, 'a later push')
@@ -787,7 +796,7 @@ function runOnePassCase (spec, io) {
     checks.add(`precondition: ${spec.round} text lints as expected`, true,
       spec.declarations.map((d) => `${d.name}${d.inDiff === false ? ' (not in the diff)' : ''}: ${JSON.stringify(d.expectRules || [])}`).join('; '))
   }
-  const state = closeDeclarations({ repo, base, lint: open, closed: spec.closed, io, checks })
+  const state = closeDeclarations({ repo, base, lint: open, closed: spec.closed, firstLint, io, checks })
   if (state.error) return harnessError(checks, state.error)
 
   const diff = lib.gitDiff(repo.dir, base)
@@ -816,7 +825,7 @@ function runOnePassCase (spec, io) {
   const summary = (model.files && model.files['review-summary-job.md']) || ''
   for (const d of spec.declarations.filter((x) => x.styleRules)) {
     const missing = d.styleRules.filter((rule) => !summaryHas(summary, d.name, rule))
-    checks.add(`${d.name}: its style findings are in the job summary`, missing.length === 0,
+    checks.add(`${BUILD_REVIEW}${d.name}: its lint style findings are in the job summary`, missing.length === 0,
       missing.length ? `missing ${JSON.stringify(missing)}` : d.styleRules.join(', '))
   }
   const onUntouched = commentsOn(model.comments, spec.declarations.filter((d) => d.inDiff === false))
@@ -830,16 +839,23 @@ function runOnePassCase (spec, io) {
 function checkSummaryNames (checks, model, names) {
   const summary = (model.files && model.files['review-summary-job.md']) || ''
   const missing = names.filter((n) => !summary.includes(`\`${n}\``))
-  return checks.add('the job summary lists the closed declarations this push edited', missing.length === 0,
+  return checks.add(`${BUILD_REVIEW}the job summary lists the closed declarations this push edited`, missing.length === 0,
     missing.length ? `missing ${JSON.stringify(missing)} in: ${summary.slice(0, 300)}` : names.join(', '))
 }
 
+/** A comment's problem text: its body without suggestion or text blocks and markers. */
+function problemText (comment) {
+  return String(comment.body || '').replace(/(`{3,})(?:suggestion|text)\n[\s\S]*?\n\1/g, '').replace(/<!--[\s\S]*?-->/g, '').trim()
+}
+
 /**
- * The bot must still speak where it should. A first push whose changed line
- * states a default the code contradicts must produce exactly one inline
- * comment, on that declaration, so a review that posts nothing cannot pass
- * the suite. spec.target names the declaration, spec.diffEdits plants the
- * error.
+ * The bot must still speak where it should. A first push whose changed lines
+ * state facts the code contradicts must produce exactly one inline comment
+ * per planted error, each on its declaration and naming that error, so a
+ * review that posts nothing, or raises one issue of several, cannot pass
+ * the suite. spec.targets (or spec.target) names the declarations, each with
+ * `problem`, a pattern its comment's problem text must match; spec.diffEdits
+ * plants the errors.
  */
 function runMustSpeakCase (spec, io) {
   const checks = makeChecks()
@@ -849,18 +865,68 @@ function runMustSpeakCase (spec, io) {
   lib.gitCommitAll(repo.dir, 'a first push')
   io.saveFixture('after', repo)
   const lint = lib.runLint(repo.dir, repo.surface, ['--diff', base])
-  const decl = (lint.declarations || []).find((d) => d.name === spec.target.name && d.file === spec.target.file)
-  if (!decl) return harnessError(checks, `Precondition: ${spec.target.name} must be a declaration to review, got ${JSON.stringify((lint.declarations || []).map((d) => d.name))}`)
-  checks.add('precondition: the declaration is in the diff', true, `${decl.name} at ${decl.file}:${decl.line_start}-${decl.line_end}; declarations: ${(lint.declarations || []).length}`)
+  const targets = spec.targets || [spec.target]
+  const decls = targets.map((t) => (lint.declarations || []).find((d) => d.name === t.name && d.file === t.file))
+  const missing = targets.filter((_, i) => !decls[i])
+  if (missing.length) return harnessError(checks, `Precondition: ${missing.map((t) => t.name).join(', ')} must be declarations to review, got ${JSON.stringify((lint.declarations || []).map((d) => d.name))}`)
+  checks.add('precondition: the declarations are in the diff', true, `${decls.map((d) => `${d.name} at ${d.file}:${d.line_start}-${d.line_end}`).join('; ')}; declarations: ${(lint.declarations || []).length}`)
 
   const diff = lib.gitDiff(repo.dir, base)
   const model = io.callProduction({ repo, lint, diff, base })
   if (model.failed) return modelCallFailed(checks, model)
   checkWrites(checks, model)
   checkStandardsRead(checks, model)
+  const per = decls.map((d) => commentsOn(model.comments, [d]))
+  checks.add(ROW_EXACTLY_ONE, model.comments.length === decls.length && per.every((on) => on.length === 1),
+    `${model.comments.length} comment(s) for ${decls.length} planted error(s): ${model.comments.map(summarizeComment).join(' || ') || 'none'}`)
+  const unnamed = targets.filter((t, i) => t.problem && !per[i].some((c) => new RegExp(t.problem, 'i').test(problemText(c))))
+  checks.add('each comment names the error planted on its declaration', unnamed.length === 0,
+    unnamed.length ? `no comment on ${unnamed.map((t) => `${t.name} matching /${t.problem}/i`).join(', ')}` : targets.map((t) => `${t.name}: /${t.problem}/i`).join('; '))
+  io.cleanup(repo.dir)
+  return finish(checks.allPass() ? 'PASS' : 'FAIL', checks, model)
+}
+
+/**
+ * Default-mode routing (style_comments off). spec.inline lists patterns that
+ * must each match the problem text of a comment on the target: problems a
+ * reader is misled by post inline. spec.notInline lists patterns no
+ * comment's problem text may match, and spec.styleRules the lint style
+ * findings that must reach the job summary instead.
+ */
+function runRoutingCase (spec, io) {
+  const checks = makeChecks()
+  const repo = lib.materializeRepo(spec.layout)
+  const base = lib.gitInit(repo.dir)
+  lib.applyEdits(spec.editFile ? path.join(repo.dir, spec.editFile) : repo.targetAbs, spec.diffEdits)
+  lib.gitCommitAll(repo.dir, 'a first push')
+  io.saveFixture('after', repo)
+  const lint = lib.runLint(repo.dir, repo.surface, ['--diff', base])
+  const finding = (lint.findings || []).find((f) => f.name === spec.target)
+  const ids = finding ? finding.rules.map((r) => `${r.id}:${r.tier}`) : []
+  const wantIds = spec.expectLint || []
+  if (!finding || !wantIds.every((r) => ids.includes(r))) {
+    return harnessError(checks, `Precondition: ${spec.target} must carry ${JSON.stringify(wantIds)}, got ${JSON.stringify(ids)}`)
+  }
+  checks.add('precondition: the lint reports the expected tiers on the changed lines', true, ids.join(', '))
+  const decl = (lint.declarations || []).find((d) => d.name === spec.target)
+  const diff = lib.gitDiff(repo.dir, base)
+  const model = io.callProduction({ repo, lint, diff, base, styleComments: false })
+  if (model.failed) return modelCallFailed(checks, model)
+  checkWrites(checks, model)
+  checkStandardsRead(checks, model)
   const on = commentsOn(model.comments, [decl])
-  checks.add(ROW_EXACTLY_ONE, model.comments.length === 1 && on.length === 1,
-    `${model.comments.length} comment(s): ${model.comments.map(summarizeComment).join(' || ') || 'none'}`)
+  const texts = on.map(problemText)
+  for (const want of spec.inline) {
+    const hit = texts.some((t) => new RegExp(want.pattern, 'i').test(t))
+    checks.add(`posted inline by default: ${want.label}`, hit, hit ? `a comment matches /${want.pattern}/i` : `no comment matches /${want.pattern}/i: ${on.map(summarizeComment).join(' || ') || 'none'}`)
+  }
+  for (const not of spec.notInline) {
+    const hit = model.comments.filter((c) => new RegExp(not.pattern, 'i').test(problemText(c)))
+    checks.add(`not posted inline by default: ${not.label}`, hit.length === 0, hit.length ? hit.map(summarizeComment).join(' || ') : 'none')
+  }
+  const summary = (model.files && model.files['review-summary-job.md']) || ''
+  const missing = (spec.styleRules || []).filter((rule) => !summaryHas(summary, spec.target, rule))
+  checks.add(`${BUILD_REVIEW}${spec.target}: its lint style findings are in the job summary`, missing.length === 0, missing.length ? `missing ${JSON.stringify(missing)}` : (spec.styleRules || []).join(', '))
   io.cleanup(repo.dir)
   return finish(checks.allPass() ? 'PASS' : 'FAIL', checks, model)
 }
@@ -920,7 +986,7 @@ function runStyleOnlyCase (spec, io) {
     model.comments.length === 0 ? 'none' : model.comments.map(summarizeComment).join(' || '))
   const summary = (model.files && model.files['review-summary-job.md']) || ''
   const missing = spec.styleRules.filter((rule) => !summaryHas(summary, spec.target, rule))
-  checks.add(`${spec.target}: its style findings are in the job summary`, missing.length === 0, missing.length ? `missing ${JSON.stringify(missing)}` : spec.styleRules.join(', '))
+  checks.add(`${BUILD_REVIEW}${spec.target}: its lint style findings are in the job summary`, missing.length === 0, missing.length ? `missing ${JSON.stringify(missing)}` : spec.styleRules.join(', '))
   io.cleanup(repo.dir)
   return finish(checks.allPass() ? 'PASS' : 'FAIL', checks, model)
 }
@@ -1044,8 +1110,12 @@ function finish (status, checks, model) {
 // Write) proves nothing about the case.
 const ROW_MUST_SUGGEST = 'at least one ```suggestion block (a vacuous string must draw one)'
 const ROW_NO_COMMENTS = 'zero inline comments posted'
-const ROW_NO_COMMENTS_CLOSED = 'zero inline comments on the declarations an earlier round reviewed'
-const ROW_EXACTLY_ONE = 'exactly one inline comment, on the declaration'
+// Rows whose result build-review decides from the lint report alone,
+// whatever the model writes, carry this prefix, so a pass there is read as
+// a check of the workflow's mechanics and not of the prompt.
+const BUILD_REVIEW = '[build-review] '
+const ROW_NO_COMMENTS_CLOSED = `${BUILD_REVIEW}zero inline comments on the declarations an earlier round reviewed`
+const ROW_EXACTLY_ONE = 'exactly one inline comment on each planted error, and no other'
 const ROW_NO_FINDINGS = 'claimed findings array is empty'
 const ROW_NO_SUGGESTIONS = 'zero ```suggestion blocks in the model output'
 const ROW_KEEPS_UNCHANGED = 'every suggestion on the declaration keeps its unchanged lines byte-identical'
@@ -1059,7 +1129,7 @@ const SABOTAGE_ROWS = {
 // The case kinds that run the production review and so carry the must-read
 // check. The upstream and negative-audit kinds use prompts.js templates with
 // no tools, so there is no transcript to grade.
-const PRODUCTION_KINDS = ['rewrite', 'prose-review', 'negative-review', 'changed-line-finding', 'one-pass', 'must-speak', 'injection', 'style-only']
+const PRODUCTION_KINDS = ['rewrite', 'prose-review', 'negative-review', 'changed-line-finding', 'one-pass', 'must-speak', 'injection', 'style-only', 'routing']
 
 const EXECUTORS = {
   rewrite: runRewriteCase,
@@ -1072,6 +1142,7 @@ const EXECUTORS = {
   'must-speak': runMustSpeakCase,
   injection: runInjectionCase,
   'style-only': runStyleOnlyCase,
+  routing: runRoutingCase,
   'negative-audit': runNegativeAuditCase
 }
 
