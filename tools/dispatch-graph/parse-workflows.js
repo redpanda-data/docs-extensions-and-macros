@@ -310,6 +310,11 @@ const EVENT_TYPE_FLAG_RE = new RegExp(`(?:-f|-F|--field|--raw-field)[= ]+["']?ev
 const EVENT_TYPE_JSON_RE = new RegExp(`["']?event_type["']?\\s*[:=]\\s*["'](${EVENT_TYPE_CHARS})["']`, 'g')
 const PAYLOAD_FLAG_RE = /(?:-f|-F|--field|--raw-field)[= ]+["']?client_payload\[([A-Za-z_][A-Za-z0-9_]*)\]=["']?([^"'\s$]+)/g
 
+/**
+ * The senders in one `run:` script: each dispatch call whose path and event
+ * type can be read. A `<owner>/$VAR` path with a literal type is a fan-out
+ * sender (see fanOutOwnerOf); any other unreadable target is unresolved.
+ */
 function sendersFromRun (run, ctx, step) {
   const senders = []
   const cleaned = shellLogicalLines(run)
