@@ -715,9 +715,12 @@ function runOnePassCase (spec, io) {
   io.saveFixture('after', repo)
 
   const lint = lib.runLint(repo.dir, repo.surface, ['--diff', base])
-  const reviewed = (lint.declarations || []).map((d) => `${d.file}::${d.name}`)
-  const missing = spec.declarations.filter((d) => !reviewed.includes(`${d.file}::${d.name}`))
-  if (missing.length) return harnessError(checks, `Precondition: ${JSON.stringify(missing)} must be declarations to review, got ${JSON.stringify(reviewed)}`)
+  // inDiff false marks a declaration the PR has not touched at this round:
+  // lint-findings.json does not hand it to the review, but the one-pass
+  // requirement still expects its problems raised now.
+  const reviewed = (lint.declarations || []).map((d) => `${d.file}::${d.name}@${d.line_start}`)
+  const wrong = spec.declarations.filter((d) => reviewed.includes(`${d.file}::${d.name}@${d.line_start}`) !== (d.inDiff !== false))
+  if (wrong.length) return harnessError(checks, `Precondition: declarations to review must be exactly those with inDiff, wrong for ${JSON.stringify(wrong.map((d) => d.name))}, got ${JSON.stringify(reviewed)}`)
   // The whole-declaration lint fixes what the round's text carries going in,
   // so fixture drift aborts instead of testing something else.
   const whole = lib.runLint(repo.dir, repo.surface)
@@ -732,7 +735,7 @@ function runOnePassCase (spec, io) {
     }
   }
   checks.add(`precondition: ${spec.round} text lints as expected`, true,
-    spec.declarations.map((d) => `${d.name}: ${JSON.stringify(d.expectRules || [])}`).join('; '))
+    spec.declarations.map((d) => `${d.name}${d.inDiff === false ? ' (not in the diff)' : ''}: ${JSON.stringify(d.expectRules || [])}`).join('; '))
 
   const diff = lib.gitDiff(repo.dir, base)
   const model = io.callProduction({ repo, lint, diff })
@@ -755,23 +758,27 @@ function runOnePassCase (spec, io) {
   for (const d of spec.declarations) {
     const on = model.comments.filter((c) => norm(c.path) === d.file &&
       Number(c.startLine || c.line) <= d.line_end && Number(c.line) >= d.line_start)
-    const fences = on.flatMap((c) => lib.parseFences(c.body || '', 'suggestion'))
+    const fences = on.flatMap((c) => lib.parseFences(c.body || '', 'suggestion')
+      .map((text) => ({ text, start: Number(c.startLine || c.line), end: Number(c.line) })))
     if (!checks.add(`${d.name}: one suggestion block on the declaration`, fences.length === 1,
       `${fences.length} block(s) in ${on.length} comment(s)${on.length ? ': ' + on.map(summarize).join(' || ') : ''}`)) continue
-    blocks.push({ d, replacement: fences[0] })
+    // Applied where the comment sits, as GitHub commits it.
+    blocks.push({ d, replacement: fences[0].text, start: fences[0].start, end: fences[0].end })
   }
   const others = model.comments.filter((c) => !blocks.some((b) => norm(c.path) === b.d.file &&
     Number(c.startLine || c.line) <= b.d.line_end && Number(c.line) >= b.d.line_start))
   if (others.length) checks.add('other comments (not graded)', true, others.map(summarize).join(' || '))
-  if (blocks.length !== spec.declarations.length) {
+  // A declaration with no single block has already failed its row; still
+  // grade the blocks that were posted, so the run shows what they left.
+  if (blocks.length === 0) {
     io.cleanup(repo.dir)
     return finish('FAIL', checks, model)
   }
   // Apply bottom-up within each file so earlier spans keep their lines.
-  for (const b of [...blocks].sort((x, y) => x.d.file.localeCompare(y.d.file) || y.d.line_start - x.d.line_start)) {
+  for (const b of [...blocks].sort((x, y) => x.d.file.localeCompare(y.d.file) || y.start - x.start)) {
     const abs = path.join(repo.dir, b.d.file)
     try {
-      fs.writeFileSync(abs, lib.replaceSpan(fs.readFileSync(abs, 'utf8'), b.d.line_start, b.d.line_end, b.replacement).text)
+      fs.writeFileSync(abs, lib.replaceSpan(fs.readFileSync(abs, 'utf8'), b.start, b.end, b.replacement).text)
     } catch (err) {
       checks.add(`${b.d.name}: suggestion applies to the declaration span`, false, err.message)
       return finish('FAIL', checks, model)
@@ -781,8 +788,8 @@ function runOnePassCase (spec, io) {
 
   const extractionAfter = lib.extractDeclarations(repo.dir, repo.surface)
   const after = lib.runLint(repo.dir, repo.surface)
-  for (const d of spec.declarations) {
-    const fixed = extractionAfter.find((x) => x.file === d.file && x.name === d.name && x.meta && x.meta.kind === 'description')
+  for (const { d } of blocks) {
+    const fixed = extractionAfter.find((x) => x.file === d.file && x.name === d.name && x.meta && x.meta.kind === (d.kind || 'description'))
     if (!checks.add(`${d.name}: re-extraction finds the declaration`, Boolean(fixed), fixed ? 'ok' : 'not found')) continue
     const left = (after.findings || []).filter((f) => f.file === d.file && f.name === d.name && f.line_start === fixed.line_start)
       .flatMap((f) => f.rules.map((r) => `${r.id}: ${r.message.slice(0, 120)}`))
@@ -792,9 +799,12 @@ function runOnePassCase (spec, io) {
     const bare = (spec.bareLiterals || []).flatMap((re) => [...prose.matchAll(new RegExp(re, 'g'))]
       .map((m) => `${re} at "${fixed.string.slice(Math.max(0, m.index - 30), m.index + 15)}"`))
     checks.add(`${d.name}: applied suggestion leaves no value or field outside inline code`, bare.length === 0, bare.join('; ') || 'none')
+    if (d.mustMatch) {
+      checks.add(`${d.name}: applied suggestion ${d.mustMatchLabel || 'matches ' + d.mustMatch}`, new RegExp(d.mustMatch, 'i').test(fixed.string), fixed.string.slice(0, 300))
+    }
   }
-  const problems = [...new Set(spec.declarations.flatMap((d) => lib.compareDeclExtraction(extractionBefore, extractionAfter, `${d.name}::description`)))]
-    .filter((p) => !spec.declarations.some((d) => p.includes(`${d.name}::description changed`)))
+  const problems = [...new Set(blocks.flatMap(({ d }) => lib.compareDeclExtraction(extractionBefore, extractionAfter, `${d.name}::${d.kind || 'description'}`)))]
+    .filter((p) => !blocks.some(({ d }) => p.includes(`${d.name}::${d.kind || 'description'} changed`)))
   checks.add('re-extraction: every other declaration string unchanged', problems.length === 0, problems.join('; ') || 'ok')
 
   io.cleanup(repo.dir)

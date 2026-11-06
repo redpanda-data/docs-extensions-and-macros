@@ -39,6 +39,7 @@ const BENTHOS_551_DECLS = [
   { file: 'internal/impl/pure/processor_insert_part.go', name: 'insert_part', line_start: 28, line_end: 33 },
   { file: 'internal/impl/pure/processor_select_parts.go', name: 'select_parts', line_start: 24, line_end: 31 }
 ]
+const BENTHOS_551_PARTS_FIELD = { file: 'internal/impl/pure/processor_select_parts.go', name: 'parts', kind: 'field', line_start: 32, line_end: 33 }
 
 const CASES = [
   {
@@ -331,21 +332,31 @@ const CASES = [
   // the insert_part and select_parts descriptions. Round 1 flagged "E.g."
   // and a 31-word sentence; round 2, after the author's fix, flagged
   // `index = -1` outside inline code; round 3 flagged the bare -1 that round
-  // 2's own suggestion left in "starting from -1". Every problem must be
-  // raised once, all of them in the first review of the string. The
-  // fixtures are the files at the PR's base and at each reviewed commit
-  // (round1 12498b81, round2 ca88b91d, round3 794e7b80).
+  // 2's own suggestion left in "starting from -1"; round 4 flagged that the
+  // `parts` field description never says its default empty array drops
+  // every batch, a line that was already there in round 1. Every problem
+  // must be raised once, all of them in the first review. The fixtures are
+  // the files at the PR's base and at each reviewed commit (round1
+  // 12498b81, round2 ca88b91d, round3 794e7b80, round4 cbdabe5a).
   {
     id: 'benthos-551-round1-raises-all',
     kind: 'one-pass',
-    description: 'benthos#551 round 1 text: the first review must fix E.g., the long sentence, and every bare index and negative value in both descriptions',
+    description: 'benthos#551 round 1 text: the first review must fix E.g., the long sentence, every bare index and negative value, and the unexplained empty parts default',
     layout: 'benthos-551',
     round: 'round1',
     roundFiles: BENTHOS_551_FILES,
     expect: 'raises-all',
     declarations: [
       { ...BENTHOS_551_DECLS[0], expectRules: ['latin-abbreviation', 'long-sentence'] },
-      { ...BENTHOS_551_DECLS[1], expectRules: ['latin-abbreviation', 'long-sentence'] }
+      { ...BENTHOS_551_DECLS[1], expectRules: ['latin-abbreviation', 'long-sentence'] },
+      // Unchanged at round 1, so the diff does not hand it to the review.
+      {
+        ...BENTHOS_551_PARTS_FIELD,
+        inDiff: false,
+        expectRules: [],
+        mustMatch: '(empty|\\[\\s*\\]|no parts)[^.]*(drop|discard)|(drop|discard)[^.]*(empty|\\[\\s*\\]|no parts)',
+        mustMatchLabel: 'says the default empty array drops every batch'
+      }
     ],
     // Matched against the re-extracted string with inline code blanked: a
     // negative number, or the `index = ` form, left in prose.
@@ -370,6 +381,16 @@ const CASES = [
     roundFiles: BENTHOS_551_FILES,
     expect: 'nothing-new',
     declarations: BENTHOS_551_DECLS
+  },
+  {
+    id: 'benthos-551-round4-nothing-new',
+    kind: 'one-pass',
+    description: 'benthos#551 round 4 text (the author applied round 3): a re-review must raise nothing new',
+    layout: 'benthos-551',
+    round: 'round4',
+    roundFiles: BENTHOS_551_FILES,
+    expect: 'nothing-new',
+    declarations: [...BENTHOS_551_DECLS, BENTHOS_551_PARTS_FIELD]
   },
   {
     id: 'negative-metrics-file',
