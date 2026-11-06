@@ -1128,12 +1128,13 @@ jobs:
             never restate the name. Write complete sentences with their
             articles and subjects, even when the surface is terse: "1 when
             this broker is the leader, otherwise 0", not "1 when leader, 0
-            otherwise"; "The request takes no parameters.", not "Takes no
-            parameters." A surface that is a fragment by contract (cobra
-            Short, a flag usage) still keeps its articles. API operation
-            strings follow the API section of the standard instead: a
-            summary may drop its articles to match its sibling summaries,
-            and an operation description opens with an imperative verb.
+            otherwise"; "The request takes no parameters." (a schema
+            description), not "Takes no parameters." A surface that is a
+            fragment by contract (cobra Short, a flag usage) still keeps its
+            articles. API operation strings follow the API section of the
+            standard instead: a summary usually drops its articles and
+            matches the other summaries in its tag, and an operation
+            description opens with an imperative verb.
             Every flag, command, path and URL goes in inline code.
             In rpk strings write them bare, never in single or double
             quotes: the generator formats them, and a Long is a Go raw
