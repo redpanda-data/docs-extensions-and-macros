@@ -1,0 +1,9 @@
+// Production topic: Brokers and replication. No headings or anchors here; _all.adoc adds them.
+// tag::summary[]
+Run three or more brokers and create every topic with replication factor 3, so losing a broker loses no acknowledged event.
+// end::summary[]
+// tag::detail[]
+In this solution: This demo runs one broker with replication factor 1, which is enough to show the behavior on a laptop.
+
+In production: Run three or more brokers and create every topic with replication factor 3, so losing a broker loses no acknowledged event. See xref:preview:ROOT:test.adoc[].
+// end::detail[]

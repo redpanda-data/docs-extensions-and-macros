@@ -1,0 +1,6 @@
+# Public tutorial scaffolding for a Product Docs page. The `examples` module is
+# not a solution: solutions-catalog skips it, and it has no pages of its own.
+services:
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    command: [redpanda, start, --smp, "1", --overprovisioned]
