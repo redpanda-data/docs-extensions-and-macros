@@ -3257,6 +3257,52 @@ programCli
   })
 
 /**
+ * build-review
+ *
+ * @description
+ * Builds the one PR review the doc-strings review workflow posts per run,
+ * from the findings.json its model writes and the lint report it ran on:
+ * one inline comment per issue, style findings kept for the job summary,
+ * declarations already reviewed on the PR never commented on again, lines
+ * moved from the merge commit to the PR head and checked against the PR's
+ * hunks, and every suggestion re-linted before it is posted. Writes
+ * review.json, review-fallback.json (every comment in the body, for a 422),
+ * keys.txt and summary.md, and prints what it decided as one JSON line.
+ *
+ * @why
+ * The review used to let the model post its own inline comments, so how
+ * many comments a run made, and whether a string was raised again on a later
+ * push, depended on the model. Building the review here makes both
+ * mechanical, and the eval runs the same code the workflow does.
+ *
+ * @example
+ * # What the doc-strings review runs after its Claude step
+ * npx doc-tools build-review --findings findings.json --lint lint-findings.json \
+ *   --closed closed.txt --pr-files pr-files.json --head-sha "$HEAD_SHA" \
+ *   --self-check-base "$BASE" --out-dir "$RUNNER_TEMP/review"
+ */
+programCli
+  .command('build-review')
+  .description('Build the doc-strings PR review (one comment per issue) from the review model\'s findings.json')
+  .requiredOption('--findings <file>', 'findings.json the review model wrote (absent means no issues)')
+  .requiredOption('--lint <file>', 'lint-findings.json the review ran on (lint-strings --diff --format json)')
+  .option('--repo <path>', 'Checkout the lint ran on', '.')
+  .option('--closed <file>', 'Declaration keys already closed on the PR, read just before posting')
+  .option('--pr-files <file>', 'Output of gh api --paginate repos/OWNER/REPO/pulls/N/files, for the PR\'s own hunks')
+  .option('--base <ref>', 'Without --pr-files: take the hunks from git diff <base>...<head-ref> instead')
+  .option('--head-ref <ref>', 'Commit holding the PR head (default: HEAD^2 on a merge commit, otherwise HEAD)')
+  .option('--head-sha <sha>', 'PR head SHA, sent as the review\'s commit_id')
+  .option('--committable <bool>', 'Carry rewrites in suggestion blocks (true) or text blocks (false)', 'true')
+  .option('--style-comments <bool>', 'Also post style-tier findings inline', 'false')
+  .option('--self-check-base <ref>', 'Apply every suggestion to a scratch worktree and re-lint against this base; a suggestion that adds a warning loses its block')
+  .option('--surface <list>', 'Surfaces for the self-check lint (default: all)')
+  .option('--out-dir <dir>', 'Where to write review.json, review-fallback.json, keys.txt and summary.md', '.')
+  .action((options) => {
+    const { runCli } = require('../tools/doc-strings-review')
+    process.exit(runCli(options))
+  })
+
+/**
  * doc-impact-recording
  *
  * @description

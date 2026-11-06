@@ -175,7 +175,7 @@ function lintStrings (options) {
         declarations.push(decl)
         if (decl.meta && decl.meta.unverifiable) unverifiable++
         const detail = surface.reviewContext ? surface.reviewContext(decl) : null
-        pending.push({ ...pendingEntry(decl), ...(detail ? { detail } : {}), context: pageContext(decl, everything || head) })
+        pending.push({ ...pendingEntry(decl), ...(detail ? { detail } : {}), context: pageContext(decl, everything || head, surface) })
       }
       // Findings a rule can place on a source line are kept only when that
       // line changed, so a PR is not asked to fix what it did not touch.
@@ -272,9 +272,10 @@ const CONTEXT_STRING_LIMIT = 600
  *   that this string names, plus (metrics) its neighbors in the same group.
  *
  * Drawn from declarations already extracted for the diff, so it costs no
- * extra extraction. Deterministic, capped, and order-stable.
+ * extra extraction. Deterministic, capped, and order-stable. With the
+ * surface module, each entry carries its declaration key (see declKey).
  */
-function pageContext (decl, all) {
+function pageContext (decl, all, surface = null) {
   const others = all.filter((d) => d !== decl && d.string != null)
   const byDistance = (d) => Math.abs((d.line_start || 0) - (decl.line_start || 0))
   const sameFile = others.filter((d) => d.file === decl.file)
@@ -304,6 +305,10 @@ function pageContext (decl, all) {
     kind: (d.meta && d.meta.kind) || d.surface,
     file: d.file,
     line_start: d.line_start,
+    line_end: d.line_end,
+    // So a review can raise one issue on a string this change made wrong,
+    // keyed to that string rather than to the changed one.
+    ...(surface ? { key: declKey(surface, d) } : {}),
     string: d.string.length > CONTEXT_STRING_LIMIT ? `${d.string.slice(0, CONTEXT_STRING_LIMIT)}...` : d.string
   }))
 }
