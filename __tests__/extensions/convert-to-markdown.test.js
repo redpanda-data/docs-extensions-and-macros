@@ -617,6 +617,76 @@ describe('platform blocks and tab groups in the Markdown twin', () => {
       '</div></div>' +
       '<div class="paragraph"><p>After the tabs.</p></div>'
     )
-    expect(md).toContain('### Local\n\nUse Docker.\n\n### Cloud\n\nUse a cluster.\n\n<!-- /tabs -->\n\nAfter the tabs.')
+    expect(md).toContain('### Local\n\nUse Docker.\n\n<!-- tab: Cloud -->\n\n### Cloud\n\nUse a cluster.\n\n<!-- /tabs -->\n\nAfter the tabs.')
+  })
+
+  const tabGroup = (id, tabs) =>
+    '<div class="openblock tabs"><div class="content"><div class="ulist tablist"><ul>' +
+    tabs.map(([name]) => `<li id="_tabs_${id}_${name.toLowerCase()}" class="tab"><p>${name}</p></li>`).join('') +
+    '</ul></div>' +
+    tabs.map(([name, html]) => `<div id="_tabs_${id}_${name.toLowerCase()}--panel" class="tabpanel">${html}</div>`).join('') +
+    '</div></div>'
+
+  test('opens a tab group and names each tab before its heading', async () => {
+    const md = await render(
+      '<h2>Set up</h2>' +
+      tabGroup(1, [['Local', '<div class="paragraph"><p>Use Docker.</p></div>'], ['Kubernetes', '<div class="paragraph"><p>Use kind.</p></div>']])
+    )
+    expect(md).toContain('<!-- tabs -->\n\n<!-- tab: Local -->\n\n### Local\n\nUse Docker.\n\n<!-- tab: Kubernetes -->\n\n### Kubernetes\n\nUse kind.\n\n<!-- /tabs -->')
+  })
+
+  test('marks a nested tab group inside its parent tab', async () => {
+    const inner = tabGroup(2, [['AWS', '<div class="paragraph"><p>Use EKS.</p></div>'], ['GCP', '<div class="paragraph"><p>Use GKE.</p></div>']])
+    const md = await render(
+      '<h2>Set up</h2>' +
+      tabGroup(1, [['Local', '<div class="paragraph"><p>Use Docker.</p></div>'], ['Cloud', '<div class="paragraph"><p>Pick a provider.</p></div>' + inner]])
+    )
+    expect(md).toContain('<!-- tab: Cloud -->\n\n### Cloud\n\nPick a provider.\n\n<!-- tabs -->\n\n<!-- tab: AWS -->\n\n#### AWS\n\nUse EKS.\n\n<!-- tab: GCP -->\n\n#### GCP\n\nUse GKE.\n\n<!-- /tabs -->\n\n<!-- /tabs -->')
+    expect(md.match(/<!-- tabs -->/g)).toHaveLength(2)
+    expect(md.match(/<!-- \/tabs -->/g)).toHaveLength(2)
+  })
+})
+
+// Inline constructs whose meaning the HTML carries in markup a reader of the
+// Markdown twin would otherwise lose.
+describe('links, downloads, and videos in the Markdown twin', () => {
+  const render = async (body) => {
+    const handlers = {}
+    const noop = () => {}
+    const context = { on: (event, fn) => { handlers[event] = fn }, getLogger: () => ({ info: noop, debug: noop, warn: noop, error: noop }) }
+    require('../../extensions/convert-to-markdown').register.call(context)
+    const page = {
+      contents: Buffer.from(`<html><body><article class="doc"><h1>Page</h1>${body}</article></body></html>`),
+      asciidoc: { doctitle: 'Page', attributes: {} },
+      src: { component: 'solutions', version: 'master', path: 'modules/demo/pages/page.adoc' },
+      pub: { url: '/solutions/demo/page/' },
+    }
+    await handlers.pagesComposed({ playbook: { site: { url: 'https://docs.redpanda.com' } }, contentCatalog: { getPages: () => [page] } })
+    return page.markdownContents.toString()
+  }
+
+  test('keeps an autolinked URL in inline code as literal text', async () => {
+    const md = await render('<div class="paragraph"><p>Run <code>curl -s <a href="http://localhost:8090/healthz" class="bare">http://localhost:8090/healthz</a></code> and wait. See <a href="https://example.com">the site</a>.</p></div>')
+    expect(md).toContain('Run `curl -s http://localhost:8090/healthz` and wait.')
+    expect(md).toContain('[the site](https://example.com)')
+  })
+
+  test('says where a Solutions download comes from when the HTML has no link', async () => {
+    const md = await render('<div class="paragraph"><p><span class="solution-download">Download the complete example</span> (sign in required). Unzip it.</p></div>')
+    expect(md).toContain('Download the complete example (sign in required). Unzip it.\n\nThe files are available from the download control on this page: https://docs.redpanda.com/solutions/demo/page/.')
+  })
+
+  test('links a Solutions download when the HTML has an href', async () => {
+    const md = await render('<div class="paragraph"><p><a class="solution-download" href="/solutions/demo/download.zip">Download the complete example</a>. Unzip it.</p></div>')
+    expect(md).toContain('[Download the complete example](https://docs.redpanda.com/solutions/demo/download.zip)')
+    expect(md).not.toContain('download control')
+  })
+
+  test('links a video to its source instead of the fallback text', async () => {
+    const withTitle = await render('<div class="videoblock"><div class="title">The leaderboard during the burst</div><div class="content"><video src="../_images/burst.mp4" controls>Your browser does not support the video tag.</video></div></div>')
+    expect(withTitle).toContain('[The leaderboard during the burst](https://docs.redpanda.com/solutions/demo/_images/burst.mp4)')
+    expect(withTitle).not.toContain('does not support the video tag')
+    const untitled = await render('<div class="videoblock"><div class="content"><video src="burst.mp4" controls>Your browser does not support the video tag.</video></div></div>')
+    expect(untitled).toContain('[burst.mp4](https://docs.redpanda.com/solutions/demo/page/burst.mp4)')
   })
 })

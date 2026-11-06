@@ -504,6 +504,19 @@ module.exports.register = function () {
     const outerTurndown = createTurndownBase()
     const nestedTurndown = createTurndownBase()
 
+    // Resolve a URL from the page's HTML against the page's published URL,
+    // so a relative href or video src still works in the Markdown twin.
+    // Without a site URL the value comes back unchanged.
+    function resolvePageUrl (href) {
+      const siteUrl = playbook?.site?.url
+      if (!siteUrl || !page?.pub?.url) return href
+      try {
+        return new URL(href, new URL(page.pub.url, siteUrl)).toString()
+      } catch (e) {
+        return href
+      }
+    }
+
     // Helper to add custom rules
     function addCustomRules(turndownInstance, isInner = false) {
       // Determine heading depth for tab conversion
@@ -548,7 +561,10 @@ module.exports.register = function () {
             const tabHeadingLevel = Math.min(nearestLevel, 6)
             const headingPrefix = '#'.repeat(tabHeadingLevel)
 
-            let markdown = ''
+            // Open the group, and name each tab before its heading, so a
+            // reader knows the headings that follow are alternatives and not
+            // steps to run one after another.
+            let markdown = '<!-- tabs -->\n\n'
             tabList.forEach((tab) => {
               const title =
                 tab.querySelector('p')?.textContent.trim() ||
@@ -576,13 +592,14 @@ module.exports.register = function () {
                 logger.warn(`Turndown failed in nested tab: ${e.message}`)
               }
 
-              markdown += `${headingPrefix} ${title}\n\n${md.trim()}\n${nestedMdCombined.trim()}\n\n`
+              const label = title.replace(/--+/g, '-')
+              markdown += `<!-- tab: ${label} -->\n\n${headingPrefix} ${title}\n\n${md.trim()}\n\n${nestedMdCombined.trim()}\n\n`
             })
 
             // Close every group, nested ones included, so a reader can tell
             // where the last tab's content ends and the page resumes.
             const body = markdown.trim()
-            return body ? `${body}\n\n<!-- /tabs -->` : ''
+            return body !== '<!-- tabs -->' ? `${body}\n\n<!-- /tabs -->` : ''
           }
 
           return '\n' + processTabGroup(node, null) + '\n'
@@ -624,6 +641,69 @@ module.exports.register = function () {
           if (body) parts.push(body)
           parts.push('<!-- /platform -->')
           return '\n\n' + parts.join('\n\n') + '\n\n'
+        },
+      })
+
+      // Asciidoctor autolinks a bare URL even inside inline code, so
+      // `curl -s http://...` arrives as <code>curl -s <a>http://...</a></code>
+      // and Turndown writes a Markdown link inside backticks, which no
+      // renderer turns into a link and which breaks the command if copied.
+      // Keep the URL as literal text there. Code blocks (<pre>) convert from
+      // textContent and never reach this rule.
+      turndownInstance.addRule('link-in-inline-code', {
+        filter: (node) => {
+          if (node.nodeName !== 'A') return false
+          for (let p = node.parentNode; p; p = p.parentNode) {
+            if (p.nodeName === 'PRE') return false
+            if (p.nodeName === 'CODE') return true
+          }
+          return false
+        },
+        replacement: (content) => content,
+      })
+
+      // The words of a Solutions download offer ([.solution-download]#...#)
+      // render as a plain span. The docs UI turns them into the gated
+      // download link in the browser, so the built HTML has no href to keep.
+      // Tell the reader where the files come from instead of leaving words
+      // that read like a link but go nowhere.
+      turndownInstance.addRule('solution-download', {
+        filter: (node) =>
+          node.nodeName === 'P' &&
+          !!node.querySelector?.('.solution-download'),
+        replacement: (content, node) => {
+          const link = node.querySelector('a.solution-download[href], .solution-download a[href]')
+          const href = link && link.getAttribute('href')
+          let note
+          if (href) {
+            const text = (node.querySelector('.solution-download').textContent || '').trim() || 'Download'
+            note = `[${text}](${resolvePageUrl(href)})`
+          } else {
+            const pageUrl = resolvePageUrl('')
+            note = `The files are available from the download control on this page${pageUrl ? `: ${pageUrl}` : ''}.`
+          }
+          return `\n\n${content}\n\n${note}\n\n`
+        },
+      })
+
+      // A video block renders a <video> whose only text is the fallback
+      // "Your browser does not support the video tag.", or an <iframe> for
+      // a hosted video. Link to the source instead, named by the block's
+      // title or the file name.
+      turndownInstance.addRule('videoblock', {
+        filter: (node) => {
+          if (node.nodeName !== 'DIV') return false
+          const classes = (node.getAttribute?.('class') || '').split(/\s+/)
+          return classes.includes('videoblock')
+        },
+        replacement: (_, node) => {
+          const media = node.querySelector('video[src], video source[src], iframe[src]')
+          const src = media && media.getAttribute('src')
+          const titleEl = node.querySelector('.title')
+          const title = titleEl ? titleEl.textContent.trim() : ''
+          if (!src) return title ? `\n\n${title}\n\n` : ''
+          const name = src.split(/[?#]/)[0].split('/').filter(Boolean).pop() || src
+          return `\n\n[${title || name}](${resolvePageUrl(src)})\n\n`
         },
       })
 
