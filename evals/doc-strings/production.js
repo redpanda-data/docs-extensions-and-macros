@@ -498,7 +498,8 @@ function normalizeComments (comments, committableSuggestions = true) {
  */
 function buildFromFindings ({ repoDir, lint, base, closedKeys, committableSuggestions, styleComments, surface }) {
   const findingsPath = path.join(repoDir, FINDINGS_FILE)
-  const findings = fs.existsSync(findingsPath) ? fs.readFileSync(findingsPath, 'utf8') : '{}'
+  // A missing file builds nothing, as in the workflow (build-review exits 1).
+  const findings = fs.existsSync(findingsPath) ? fs.readFileSync(findingsPath, 'utf8') : 'findings.json was not written'
   const readFile = (p) => { try { return fs.readFileSync(path.join(repoDir, p), 'utf8') } catch { return null } }
   const built = buildReviewLib.buildReview({
     findings,
@@ -512,7 +513,7 @@ function buildFromFindings ({ repoDir, lint, base, closedKeys, committableSugges
     styleComments,
     check: (groups) => buildReviewLib.selfCheck({ repo: repoDir, base, groups, lint, surfaces: surface ? [surface] : null })
   })
-  const comments = built.review.comments.map((c) => ({ path: c.path, line: c.line, startLine: c.start_line || c.line, body: c.body }))
+  const comments = (built.review ? built.review.comments : []).map((c) => ({ path: c.path, line: c.line, startLine: c.start_line || c.line, body: c.body }))
   return { built, comments, findingsText: fs.existsSync(findingsPath) ? findings : null }
 }
 
@@ -597,7 +598,7 @@ function runReview ({ repoDir, lint, diff, base, closedKeys = null, model = PROD
     if (fs.existsSync(p)) files[name] = fs.readFileSync(p, 'utf8')
   }
   if (review) {
-    files['review.json'] = JSON.stringify(review.review, null, 2)
+    if (review.review) files['review.json'] = JSON.stringify(review.review, null, 2)
     files['review-summary-job.md'] = review.summary
   }
   fs.rmSync(scratch, { recursive: true, force: true })
