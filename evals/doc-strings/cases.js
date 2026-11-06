@@ -34,6 +34,12 @@
  * aborts as HARNESS_ERROR instead of silently testing something else.
  */
 
+const BENTHOS_551_FILES = ['processor_insert_part', 'processor_select_parts']
+const BENTHOS_551_DECLS = [
+  { file: 'internal/impl/pure/processor_insert_part.go', name: 'insert_part', line_start: 28, line_end: 33 },
+  { file: 'internal/impl/pure/processor_select_parts.go', name: 'select_parts', line_start: 24, line_end: 31 }
+]
+
 const CASES = [
   {
     id: 'prop-empty-description',
@@ -320,6 +326,50 @@ const CASES = [
     }],
     fixedToken: 'table_owner',
     untouchedTokens: ['database_schema', 'table_name']
+  },
+  // redpanda-data/benthos PR 551: the review raised one problem per push on
+  // the insert_part and select_parts descriptions. Round 1 flagged "E.g."
+  // and a 31-word sentence; round 2, after the author's fix, flagged
+  // `index = -1` outside inline code; round 3 flagged the bare -1 that round
+  // 2's own suggestion left in "starting from -1". Every problem must be
+  // raised once, all of them in the first review of the string. The
+  // fixtures are the files at the PR's base and at each reviewed commit
+  // (round1 12498b81, round2 ca88b91d, round3 794e7b80).
+  {
+    id: 'benthos-551-round1-raises-all',
+    kind: 'one-pass',
+    description: 'benthos#551 round 1 text: the first review must fix E.g., the long sentence, and every bare index and negative value in both descriptions',
+    layout: 'benthos-551',
+    round: 'round1',
+    roundFiles: BENTHOS_551_FILES,
+    expect: 'raises-all',
+    declarations: [
+      { ...BENTHOS_551_DECLS[0], expectRules: ['latin-abbreviation', 'long-sentence'] },
+      { ...BENTHOS_551_DECLS[1], expectRules: ['latin-abbreviation', 'long-sentence'] }
+    ],
+    // Matched against the re-extracted string with inline code blanked: a
+    // negative number, or the `index = ` form, left in prose.
+    bareLiterals: ['(?<![\\w.])-\\d', '\\bindex\\s*=']
+  },
+  {
+    id: 'benthos-551-round2-nothing-new',
+    kind: 'one-pass',
+    description: 'benthos#551 round 2 text (the author applied round 1): a re-review must raise nothing new',
+    layout: 'benthos-551',
+    round: 'round2',
+    roundFiles: BENTHOS_551_FILES,
+    expect: 'nothing-new',
+    declarations: BENTHOS_551_DECLS
+  },
+  {
+    id: 'benthos-551-round3-nothing-new',
+    kind: 'one-pass',
+    description: 'benthos#551 round 3 text (the author applied round 2): a re-review must raise nothing new',
+    layout: 'benthos-551',
+    round: 'round3',
+    roundFiles: BENTHOS_551_FILES,
+    expect: 'nothing-new',
+    declarations: BENTHOS_551_DECLS
   },
   {
     id: 'negative-metrics-file',

@@ -146,6 +146,30 @@ conforming rewording `negative-property-diff` uses, where staying silent is
 correct and so fails the must-suggest check.
 |===
 
+=== One pass per string
+
+The `one-pass` cases replay redpanda-data/benthos PR 551, where the review
+raised one problem per push on the insert_part and select_parts
+descriptions: "E.g." and a 31-word sentence, then `index = -1` outside
+inline code, then the bare `-1` its own suggestion had left in "starting
+from -1". The fixtures are the two files at the PR's base and at each
+reviewed commit. Every problem must be raised once, and all of them in the
+first review of the string:
+
+* `benthos-551-round1-raises-all` (round 1 text): each description must
+  get one suggestion block, and after applying it the whole declaration must
+  lint clean and no negative number or `index =` may be left outside inline
+  code in the re-extracted string.
+* `benthos-551-round2-nothing-new` and `benthos-551-round3-nothing-new`
+  (the text after the author applied rounds 1 and 2): a re-review must post
+  no inline comment, because anything it raises is a repeat or a new nit.
+
+In the real PR, line 29 of both descriptions, where every later problem
+sat, was unchanged at round 1, so the current changed-lines rule keeps it
+out of scope. These cases assert the one-pass requirement, not the current
+prompt, and the production review has no input yet that tells a re-review
+what an earlier push raised.
+
 == Negative controls that provably can fail
 
 A negative control that cannot fail is decoration. `--sabotage <id>` re-runs
@@ -278,7 +302,7 @@ neither takes `--case`: each run proves one assertion on the case it names.
 
 [source,bash]
 ----
-npm run eval:doc-strings                     # full suite (16 cases)
+npm run eval:doc-strings                     # full suite (19 cases)
 node evals/doc-strings/run-evals.js --case metric-name-echo
 node evals/doc-strings/run-evals.js --model claude-sonnet-5   # override the production model
 node evals/doc-strings/run-evals.js --sabotage-must-read negative-property-diff
@@ -409,7 +433,7 @@ Decision:
 |===
 |`run-evals.js` |Driver + per-kind executors (rewrite, upstream,
 prose-review, negative-review, unchanged-lines, changed-line-finding,
-negative-audit). CommonJS, zero new dependencies.
+one-pass, negative-audit). CommonJS, zero new dependencies.
 |`cases.js` |Declarative case table. Every positive case pins
 `expectRules` / `expectClassBefore` preconditions that are asserted against
 the REAL tool output before the model is called - fixture drift aborts as

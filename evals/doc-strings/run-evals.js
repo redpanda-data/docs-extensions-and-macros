@@ -687,6 +687,120 @@ function runChangedLineFindingCase (spec, io) {
   return finish(checks.allPass() ? 'PASS' : 'FAIL', checks, model)
 }
 
+/**
+ * One review round of a real PR whose review fed findings one at a time
+ * (redpanda-data/benthos PR 551). The layout holds the PR's base; the case
+ * commits one round's text on top and runs the production review on the
+ * whole-PR diff, as the workflow does.
+ *
+ * expect 'raises-all': the first review must raise every issue the later
+ * rounds raised. Graded by applying every suggestion block to the
+ * declarations in spec.declarations and re-checking the result: the whole-
+ * declaration lint reports nothing, and no spec.bareLiterals pattern (a value
+ * or field left out of inline code) matches the re-extracted string.
+ *
+ * expect 'nothing-new': a later round's text, after the first review should
+ * already have raised everything. Any inline comment is either a repeat or
+ * a new nit, so the case passes only with zero comments.
+ */
+function runOnePassCase (spec, io) {
+  const checks = makeChecks()
+  const repo = lib.materializeRepo(spec.layout)
+  const base = lib.gitInit(repo.dir)
+  const pureDir = path.join(repo.dir, 'internal/impl/pure')
+  for (const file of spec.roundFiles) {
+    fs.copyFileSync(path.join(lib.EVAL_FIXTURES, spec.layout, `${file}.${spec.round}.go`), path.join(pureDir, `${file}.go`))
+  }
+  lib.gitCommitAll(repo.dir, `benthos#551 ${spec.round}`)
+  io.saveFixture('after', repo)
+
+  const lint = lib.runLint(repo.dir, repo.surface, ['--diff', base])
+  const reviewed = (lint.declarations || []).map((d) => `${d.file}::${d.name}`)
+  const missing = spec.declarations.filter((d) => !reviewed.includes(`${d.file}::${d.name}`))
+  if (missing.length) return harnessError(checks, `Precondition: ${JSON.stringify(missing)} must be declarations to review, got ${JSON.stringify(reviewed)}`)
+  // The whole-declaration lint fixes what the round's text carries going in,
+  // so fixture drift aborts instead of testing something else.
+  const whole = lib.runLint(repo.dir, repo.surface)
+  const rulesFor = (result, d) => (result.findings || [])
+    .filter((f) => f.file === d.file && f.name === d.name && f.line_start === d.line_start)
+    .flatMap((f) => f.rules.map((r) => r.id))
+  for (const d of spec.declarations) {
+    const got = rulesFor(whole, d).sort()
+    const want = [...(d.expectRules || [])].sort()
+    if (JSON.stringify(got) !== JSON.stringify(want)) {
+      return harnessError(checks, `Precondition: whole-declaration lint on ${d.name} expected ${JSON.stringify(want)}, got ${JSON.stringify(got)}`)
+    }
+  }
+  checks.add(`precondition: ${spec.round} text lints as expected`, true,
+    spec.declarations.map((d) => `${d.name}: ${JSON.stringify(d.expectRules || [])}`).join('; '))
+
+  const diff = lib.gitDiff(repo.dir, base)
+  const model = io.callProduction({ repo, lint, diff })
+  if (model.failed) return modelCallFailed(checks, model)
+  checkWrites(checks, model)
+  checkStandardsRead(checks, model)
+
+  const summarize = (c) => `${c.path}:${c.startLine || c.line}-${c.line} ${String(c.body || '').split('\n')[0].slice(0, 160)}`
+  if (spec.expect === 'nothing-new') {
+    checks.add(ROW_NO_COMMENTS, model.comments.length === 0,
+      model.comments.length === 0 ? 'none' : model.comments.map(summarize).join(' || '))
+    io.cleanup(repo.dir)
+    return finish(checks.allPass() ? 'PASS' : 'FAIL', checks, model)
+  }
+
+  // raises-all: apply each declaration's suggestion and re-check it.
+  const norm = (p) => String(p || '').replace(/^\.\//, '')
+  const extractionBefore = lib.extractDeclarations(repo.dir, repo.surface)
+  const blocks = []
+  for (const d of spec.declarations) {
+    const on = model.comments.filter((c) => norm(c.path) === d.file &&
+      Number(c.startLine || c.line) <= d.line_end && Number(c.line) >= d.line_start)
+    const fences = on.flatMap((c) => lib.parseFences(c.body || '', 'suggestion'))
+    if (!checks.add(`${d.name}: one suggestion block on the declaration`, fences.length === 1,
+      `${fences.length} block(s) in ${on.length} comment(s)${on.length ? ': ' + on.map(summarize).join(' || ') : ''}`)) continue
+    blocks.push({ d, replacement: fences[0] })
+  }
+  const others = model.comments.filter((c) => !blocks.some((b) => norm(c.path) === b.d.file &&
+    Number(c.startLine || c.line) <= b.d.line_end && Number(c.line) >= b.d.line_start))
+  if (others.length) checks.add('other comments (not graded)', true, others.map(summarize).join(' || '))
+  if (blocks.length !== spec.declarations.length) {
+    io.cleanup(repo.dir)
+    return finish('FAIL', checks, model)
+  }
+  // Apply bottom-up within each file so earlier spans keep their lines.
+  for (const b of [...blocks].sort((x, y) => x.d.file.localeCompare(y.d.file) || y.d.line_start - x.d.line_start)) {
+    const abs = path.join(repo.dir, b.d.file)
+    try {
+      fs.writeFileSync(abs, lib.replaceSpan(fs.readFileSync(abs, 'utf8'), b.d.line_start, b.d.line_end, b.replacement).text)
+    } catch (err) {
+      checks.add(`${b.d.name}: suggestion applies to the declaration span`, false, err.message)
+      return finish('FAIL', checks, model)
+    }
+  }
+  io.saveFixture('applied', repo)
+
+  const extractionAfter = lib.extractDeclarations(repo.dir, repo.surface)
+  const after = lib.runLint(repo.dir, repo.surface)
+  for (const d of spec.declarations) {
+    const fixed = extractionAfter.find((x) => x.file === d.file && x.name === d.name && x.meta && x.meta.kind === 'description')
+    if (!checks.add(`${d.name}: re-extraction finds the declaration`, Boolean(fixed), fixed ? 'ok' : 'not found')) continue
+    const left = (after.findings || []).filter((f) => f.file === d.file && f.name === d.name && f.line_start === fixed.line_start)
+      .flatMap((f) => f.rules.map((r) => `${r.id}: ${r.message.slice(0, 120)}`))
+    checks.add(`${d.name}: applied suggestion lints clean (whole declaration)`, left.length === 0, left.join('; ') || 'no findings')
+    // Blank inline code spans, so a pattern sees only the prose around them.
+    const prose = fixed.string.replace(/`[^`\n]*`/g, (m) => ' '.repeat(m.length))
+    const bare = (spec.bareLiterals || []).flatMap((re) => [...prose.matchAll(new RegExp(re, 'g'))]
+      .map((m) => `${re} at "${fixed.string.slice(Math.max(0, m.index - 30), m.index + 15)}"`))
+    checks.add(`${d.name}: applied suggestion leaves no value or field outside inline code`, bare.length === 0, bare.join('; ') || 'none')
+  }
+  const problems = [...new Set(spec.declarations.flatMap((d) => lib.compareDeclExtraction(extractionBefore, extractionAfter, `${d.name}::description`)))]
+    .filter((p) => !spec.declarations.some((d) => p.includes(`${d.name}::description changed`)))
+  checks.add('re-extraction: every other declaration string unchanged', problems.length === 0, problems.join('; ') || 'ok')
+
+  io.cleanup(repo.dir)
+  return finish(checks.allPass() ? 'PASS' : 'FAIL', checks, model)
+}
+
 function runNegativeAuditCase (spec, io, sabotage) {
   const checks = makeChecks()
   const repo = lib.materializeRepo(spec.layout, sabotage ? spec.sabotageEdits : [])
@@ -819,7 +933,7 @@ const SABOTAGE_ROWS = {
 // The case kinds that run the production review and so carry the must-read
 // check. The upstream and negative-audit kinds use prompts.js templates with
 // no tools, so there is no transcript to grade.
-const PRODUCTION_KINDS = ['rewrite', 'prose-review', 'negative-review', 'changed-line-finding']
+const PRODUCTION_KINDS = ['rewrite', 'prose-review', 'negative-review', 'changed-line-finding', 'one-pass']
 
 const EXECUTORS = {
   rewrite: runRewriteCase,
@@ -828,6 +942,7 @@ const EXECUTORS = {
   'negative-review': runNegativeReviewCase,
   'unchanged-lines': runUnchangedLinesCase,
   'changed-line-finding': runChangedLineFindingCase,
+  'one-pass': runOnePassCase,
   'negative-audit': runNegativeAuditCase
 }
 

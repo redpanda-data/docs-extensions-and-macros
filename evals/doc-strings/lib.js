@@ -70,6 +70,17 @@ const SURFACE_LAYOUT = {
     files: [{ from: path.join(EVAL_FIXTURES, 'rpk-pr461', 'delete.base.go'), to: 'src/go/rpk/pkg/cli/topic/delete.go' }],
     target: 'src/go/rpk/pkg/cli/topic/delete.go',
     surface: 'rpk'
+  },
+  // redpanda-data/benthos PR 551: insert_part and select_parts at the PR's
+  // base. The one-pass cases commit one review round's text on top.
+  'benthos-551': {
+    tree: CONNECT_TREE,
+    files: [
+      { from: path.join(EVAL_FIXTURES, 'benthos-551', 'processor_insert_part.base.go'), to: 'internal/impl/pure/processor_insert_part.go' },
+      { from: path.join(EVAL_FIXTURES, 'benthos-551', 'processor_select_parts.base.go'), to: 'internal/impl/pure/processor_select_parts.go' }
+    ],
+    target: 'internal/impl/pure/processor_insert_part.go',
+    surface: 'connect'
   }
 }
 
