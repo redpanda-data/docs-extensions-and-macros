@@ -421,23 +421,19 @@ function runProseReviewCase (spec, io, sabotage) {
     suggestions.length >= 1, `found ${suggestions.length}`)) {
     return finish('FAIL', checks, model)
   }
-  const replacement = suggestions[0]
   if (spec.columnLimit) {
-    const overlong = lib.overlongLines(replacement, spec.columnLimit)
+    const overlong = suggestions.flatMap((text) => lib.overlongLines(text, spec.columnLimit))
     checks.add(`every suggestion line within ${spec.columnLimit} columns`, overlong.length === 0,
       overlong.length ? `overlong lines (line,len): ${JSON.stringify(overlong)}` : 'ok')
   }
 
-  // Application is CONTENT-anchored, not line-anchored: the model derives
-  // line numbers from diff hunk math and is reliably off by one or two, and
-  // its suggestion uses GitHub semantics (replace the cited lines), so
-  // trusting either corrupts the fixture. The harness instead pulls the
-  // description literals out of the suggestion and swaps them in for the
-  // vacuous block it inserted itself, which it knows byte-exactly.
-  //
-  // Content-anchored application aside, the comment itself must land on the
-  // declaration in the diffed file and carry its key marker: production
-  // posts it there, and GitHub applies it to those lines.
+  // Applied where each comment sits, as GitHub commits it. The model used
+  // to post the comment itself, from line numbers it worked out from diff
+  // hunks, and was often a line or two off, so this case swapped the
+  // suggestion's literals in by content instead. The workflow now builds the
+  // comment from the lines the model names, and a suggestion replaces only
+  // the lines its issue needs, so the lines are what ships and are what is
+  // tested.
   const decl = (lintDiff.declarations || []).find((d) => d.name === spec.target)
   if (!checks.add('the diff report names the target declaration', Boolean(decl), decl ? `${decl.file}:${decl.line_start}-${decl.line_end}` : 'not found')) {
     return finish('FAIL', checks, model)
@@ -450,30 +446,13 @@ function runProseReviewCase (spec, io, sabotage) {
     target.problems.length === 0, target.problems.join('; ') || 'ok')) {
     return finish('FAIL', checks, model)
   }
-
-  const literalLine = /^\s*"(?:[^"\\]|\\.)*",?\s*$/
-  const nameLiteral = `"${spec.target}",`
-  const descLines = replacement.split('\n')
-    .filter((l) => literalLine.test(l))
-    .filter((l) => l.trim() !== nameLiteral)
-  if (!checks.add('suggestion carries description string literals',
-    descLines.length >= 1, `literal lines found: ${descLines.length}`)) {
-    return finish('FAIL', checks, model)
-  }
-  // The description argument ends with a comma; normalize so the swap-in
-  // preserves the declaration's structure regardless of how the model
-  // terminated its last line.
-  const lastIdx = descLines.length - 1
-  if (!/,\s*$/.test(descLines[lastIdx])) descLines[lastIdx] = descLines[lastIdx].replace(/\s*$/, ',')
-  for (let i = 0; i < lastIdx; i++) descLines[i] = descLines[i].replace(/,\s*$/, '')
-
-  const vacuousBlock = spec.diffEdits[0].replace
   const originalText = fs.readFileSync(repo.targetAbs, 'utf8')
-  if (!checks.add('the vacuous block is still uniquely present to swap',
-    originalText.split(vacuousBlock).length === 2, 'unique-occurrence check')) {
+  try {
+    fs.writeFileSync(repo.targetAbs, lib.applySuggestions(originalText, target.suggestions).text)
+  } catch (err) {
+    checks.add('suggestions apply to the declaration', false, err.message)
     return finish('FAIL', checks, model)
   }
-  fs.writeFileSync(repo.targetAbs, originalText.replace(vacuousBlock, descLines.join('\n')))
   io.saveFixture('applied', repo)
 
   // Execute the output: the rewrite must not trade vacuousness for lint
@@ -797,7 +776,10 @@ function runOnePassCase (spec, io) {
   const model = io.callProduction({ repo, lint: state.lint, diff, base, closedKeys: state.closedKeys })
   if (model.failed) return modelCallFailed(checks, model)
   checkWrites(checks, model)
-  checkStandardsRead(checks, model)
+  // With every declaration closed there is nothing to review against the
+  // standard, so not opening it is correct, not a review from memory.
+  if ((state.lint.declarations || []).length) checkStandardsRead(checks, model)
+  else checks.add('must-read: not required, no declaration is open for review', true, 'every touched declaration is closed')
 
   if (spec.expect === 'nothing-new') {
     const onClosed = commentsOn(model.comments, spec.closed)

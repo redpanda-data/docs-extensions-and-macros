@@ -468,7 +468,9 @@ const CASES = [
     layout: 'connect-input',
     diffEdits: [{
       find: 'f = f.Description("Only things whose name starts with this prefix are read.")',
-      replace: 'f = f.Description("Only the things whose name starts with this prefix are read by the input when it lists the container at startup and again on every scheduled poll, so that a thing whose name does not start with the prefix is skipped and never reaches the rest of the pipeline.")'
+      // Long, and true of the code: a claim the spec does not back is a
+      // correctness finding, which must be posted.
+      replace: 'f = f.Description("Only the things whose name starts with this prefix are read by this input, so a thing whose name does not start with the prefix is skipped by the input and is never passed on to the rest of the pipeline that you configure after the input.")'
     }],
     target: 'prefix',
     styleRules: ['long-sentence']
