@@ -196,8 +196,14 @@ on:
           DOCS_APP_ID — the redpanda-docs-automation GitHub App. Used only to
           mint a per-run, Contents:read token scoped to docs-team-standards
           for the plugin/scripts checkout: that repo is private and
-          github.token cannot clone it from any other repo. Required in
-          every caller except docs-team-standards itself.
+          github.token cannot clone it from any other repo. A fallback:
+          gate and aggregate, and a claude-skill action that carries the
+          same change, read the App credential from Secrets Manager first
+          (sdlc/prod/github/docs_automation_app, devprod-infra#938). The
+          d-e-m copy pins claude-skill by SHA, so its review jobs read
+          Secrets Manager only once that pin includes the change. Keep
+          passing this until every pin does; only then can the org
+          variable be deleted.
         type: string
         default: ''
     secrets:
@@ -205,7 +211,7 @@ on:
         description: RP_AWS_CRED_ACCOUNT_ID org secret (AWS account owning the OIDC role)
         required: true
       docs_app_private_key:
-        description: DOCS_APP_PRIVATE_KEY — private key for docs_app_id (see above)
+        description: DOCS_APP_PRIVATE_KEY — private key for docs_app_id (see above; also the fallback only)
         required: false
 
 env:
@@ -280,6 +286,7 @@ jobs:
       contents: read
       pull-requests: read
       statuses: write
+      id-token: write   # OIDC role for the App credential (no PR-head code runs here)
     outputs:
       run_review: ${{ steps.scope.outputs.run_review }}
       head_sha: ${{ steps.eval.outputs.head_sha }}
@@ -315,9 +322,59 @@ jobs:
       # The scope rules and the scope script come from docs-team-standards
       # at plugin_ref, like the skills (private repo: see aggregate for the
       # token).
+      # MIRROR (claude-skill's plugin checkout, and aggregate): the App
+      # credential comes from Secrets Manager (devprod-infra#938) and falls
+      # back to docs_app_id / docs_app_private_key, also when the Secrets
+      # Manager mint fails. The scrub empties every DOCSAPP variable the fetch
+      # exported (DOC_TEAM_LOGINS too: the gate reads vars.DOC_TEAM_LOGINS,
+      # not this copy) and, whenever this block tried the role, the AWS
+      # credentials, before the next step.
+      # id-token: write puts ACTIONS_ID_TOKEN_REQUEST_URL/_TOKEN into every
+      # step of this job, and the later steps parse PR data (comments,
+      # reviews, preview pages, review artifacts). So each later run step
+      # unsets them first: a parsing bug can then never mint an OIDC token,
+      # assume the repo's role and read the secrets granted to it.
+      - name: Assume the OIDC role for the App credential
+        id: app_aws
+        if: steps.pin.outputs.ok == 'true' && github.repository != 'redpanda-data/docs-team-standards'
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          # 3, not the default 12: with no OIDC token (a Dependabot run, say)
+          # the default backoff stalls the job for a minute or more before
+          # continue-on-error moves on. A transient STS failure still retries.
+          retry-max-attempts: 3
+          role-to-assume: arn:aws:iam::${{ secrets.aws_cred_account_id }}:role/${{ inputs.aws_role_name_prefix }}${{ github.event.repository.name }}
+
+      - name: Fetch the App credential
+        id: app_secret
+        if: steps.app_aws.outcome == 'success'
+        continue-on-error: true
+        uses: aws-actions/aws-secretsmanager-get-secrets@v3
+        with:
+          secret-ids: |
+            DOCSAPP,sdlc/prod/github/docs_automation_app
+          parse-json-secrets: true
+
+      - name: Mint a read-only token for the config checkout (Secrets Manager)
+        id: standards_token_sm
+        if: steps.pin.outputs.ok == 'true' && env.DOCSAPP_DOCS_APP_ID != '' && env.DOCSAPP_DOCS_APP_PRIVATE_KEY != ''
+        # A bad or stale key falls through to the fallback mint below
+        # instead of failing the job. The ID and the key always come as a
+        # pair, never one from each source.
+        continue-on-error: true
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ env.DOCSAPP_DOCS_APP_ID }}
+          private-key: ${{ env.DOCSAPP_DOCS_APP_PRIVATE_KEY }}
+          owner: redpanda-data
+          repositories: docs-team-standards
+          permission-contents: read
+
       - name: Mint a read-only token for the config checkout
         id: standards_token
-        if: steps.pin.outputs.ok == 'true' && inputs.docs_app_id != ''
+        if: steps.pin.outputs.ok == 'true' && steps.standards_token_sm.outputs.token == '' && inputs.docs_app_id != ''
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ inputs.docs_app_id }}
@@ -326,13 +383,33 @@ jobs:
           repositories: docs-team-standards
           permission-contents: read
 
+      - name: Scrub the App credential
+        if: always()
+        env:
+          ASSUMED: ${{ steps.app_aws.outcome }}
+        run: |
+          # DOCSAPP is the alias on the fetch: a JSON secret lands as
+          # DOCSAPP_<KEY>, and a value that isn't valid JSON lands whole as
+          # DOCSAPP. This clears both, whatever the keys are named. The AWS
+          # credentials are cleared whenever this block tried to assume the role:
+          # configure-aws-credentials exports them before it validates them, so
+          # a failed assume can still leave them set.
+          for v in $(compgen -e | grep -E '^DOCSAPP(_|$)' || true); do
+            echo "$v=" >> "$GITHUB_ENV"
+          done
+          if [[ "$ASSUMED" != "skipped" ]]; then
+            for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+              echo "$v=" >> "$GITHUB_ENV"
+            done
+          fi
+
       - uses: actions/checkout@v4
         if: steps.pin.outputs.ok == 'true'
         with:
           repository: redpanda-data/docs-team-standards
           ref: ${{ inputs.plugin_ref }}
           path: .standards
-          token: ${{ steps.standards_token.outputs.token || github.token }}
+          token: ${{ steps.standards_token_sm.outputs.token || steps.standards_token.outputs.token || github.token }}
           persist-credentials: false
           sparse-checkout: |
             .github/docs-review-config.json
@@ -355,6 +432,7 @@ jobs:
           EVENT_ACTION: ${{ github.event.action }}
           EVENT_LABEL: ${{ github.event.label.name }}
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN   # see the App-credential block
           set -euo pipefail
           echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
           gh api "repos/$R/pulls/$PR" > "$RUNNER_TEMP/pr.json"
@@ -384,6 +462,7 @@ jobs:
           SKIP_BRANCHES: ${{ inputs.skip_branch_patterns }}
           SKIP_TITLES: ${{ inputs.skip_title_patterns }}
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN   # see the App-credential block
           set -euo pipefail
 
           if [[ -s "$RUNNER_TEMP/pr.json" ]]; then
@@ -547,6 +626,7 @@ jobs:
           HEAD_REVIEWED: ${{ steps.eval.outputs.head_reviewed }}
           SCOPE_OK: ${{ steps.request.outputs.scope_ok }}
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN   # see the App-credential block
           set -euo pipefail
           # MIRROR: the eval and scope steps each define set_pending (steps
           # cannot share a shell function). Keep the two copies identical.
@@ -1810,15 +1890,69 @@ jobs:
       issues: write
       statuses: write
       checks: read
+      id-token: write   # OIDC role for the App credential (no PR-head code runs here)
     steps:
       # docs-team-standards is private: github.token cannot clone it from
       # any other repo, so the scripts checkout uses a per-run App token
       # scoped to that repo with Contents: read (same as the plugin checkout
-      # inside claude-skill). Empty docs_app_id = the caller is
+      # inside claude-skill). No App credential = the caller is
       # docs-team-standards itself and github.token suffices.
+      # MIRROR (claude-skill's plugin checkout, and gate): the App
+      # credential comes from Secrets Manager (devprod-infra#938) and falls
+      # back to docs_app_id / docs_app_private_key, also when the Secrets
+      # Manager mint fails. The scrub empties every DOCSAPP variable the fetch
+      # exported (DOC_TEAM_LOGINS too: the gate reads vars.DOC_TEAM_LOGINS,
+      # not this copy) and, whenever this block tried the role, the AWS
+      # credentials, before the next step.
+      # id-token: write puts ACTIONS_ID_TOKEN_REQUEST_URL/_TOKEN into every
+      # step of this job, and the later steps parse PR data (comments,
+      # reviews, preview pages, review artifacts). So each later run step
+      # unsets them first: a parsing bug can then never mint an OIDC token,
+      # assume the repo's role and read the secrets granted to it. The one
+      # exception is "Post the review report" (actions/github-script, a uses:
+      # step that can't unset them). It gets its inputs through env and reads
+      # comment.md only as text.
+      - name: Assume the OIDC role for the App credential
+        id: app_aws
+        if: github.repository != 'redpanda-data/docs-team-standards'
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          # 3, not the default 12: with no OIDC token (a Dependabot run, say)
+          # the default backoff stalls the job for a minute or more before
+          # continue-on-error moves on. A transient STS failure still retries.
+          retry-max-attempts: 3
+          role-to-assume: arn:aws:iam::${{ secrets.aws_cred_account_id }}:role/${{ inputs.aws_role_name_prefix }}${{ github.event.repository.name }}
+
+      - name: Fetch the App credential
+        id: app_secret
+        if: steps.app_aws.outcome == 'success'
+        continue-on-error: true
+        uses: aws-actions/aws-secretsmanager-get-secrets@v3
+        with:
+          secret-ids: |
+            DOCSAPP,sdlc/prod/github/docs_automation_app
+          parse-json-secrets: true
+
+      - name: Mint a read-only token for the scripts checkout (Secrets Manager)
+        id: standards_token_sm
+        if: env.DOCSAPP_DOCS_APP_ID != '' && env.DOCSAPP_DOCS_APP_PRIVATE_KEY != ''
+        # A bad or stale key falls through to the fallback mint below
+        # instead of failing the job. The ID and the key always come as a
+        # pair, never one from each source.
+        continue-on-error: true
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ env.DOCSAPP_DOCS_APP_ID }}
+          private-key: ${{ env.DOCSAPP_DOCS_APP_PRIVATE_KEY }}
+          owner: redpanda-data
+          repositories: docs-team-standards
+          permission-contents: read
+
       - name: Mint a read-only token for the scripts checkout
         id: standards_token
-        if: inputs.docs_app_id != ''
+        if: steps.standards_token_sm.outputs.token == '' && inputs.docs_app_id != ''
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ inputs.docs_app_id }}
@@ -1827,13 +1961,55 @@ jobs:
           repositories: docs-team-standards
           permission-contents: read
 
+      # docs and cloud-docs are private and pair up on single-sourced pages,
+      # so the paired-PR check (pr-checks.py, below) needs to read the other
+      # repo. Minted here, next to the scripts token, so the private key is
+      # scrubbed before any other step runs. Best effort: if the App cannot
+      # mint this (not installed there, or lacking pull_requests: read),
+      # pr-checks.py notes the skipped check instead.
+      - name: Mint a read-only token for the companion repo
+        id: companion_token
+        if: >-
+          (steps.standards_token_sm.outputs.token != '' || inputs.docs_app_id != '') &&
+          (github.repository == 'redpanda-data/docs' || github.repository == 'redpanda-data/cloud-docs')
+        continue-on-error: true
+        uses: actions/create-github-app-token@v2
+        with:
+          # The source the scripts mint used: Secrets Manager when its mint
+          # worked, the fallback inputs otherwise.
+          app-id: ${{ steps.standards_token_sm.outputs.token != '' && env.DOCSAPP_DOCS_APP_ID || inputs.docs_app_id }}
+          private-key: ${{ steps.standards_token_sm.outputs.token != '' && env.DOCSAPP_DOCS_APP_PRIVATE_KEY || secrets.docs_app_private_key }}
+          owner: redpanda-data
+          repositories: docs,cloud-docs
+          permission-pull-requests: read
+
+      - name: Scrub the App credential
+        if: always()
+        env:
+          ASSUMED: ${{ steps.app_aws.outcome }}
+        run: |
+          # DOCSAPP is the alias on the fetch: a JSON secret lands as
+          # DOCSAPP_<KEY>, and a value that isn't valid JSON lands whole as
+          # DOCSAPP. This clears both, whatever the keys are named. The AWS
+          # credentials are cleared whenever this block tried to assume the role:
+          # configure-aws-credentials exports them before it validates them, so
+          # a failed assume can still leave them set.
+          for v in $(compgen -e | grep -E '^DOCSAPP(_|$)' || true); do
+            echo "$v=" >> "$GITHUB_ENV"
+          done
+          if [[ "$ASSUMED" != "skipped" ]]; then
+            for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+              echo "$v=" >> "$GITHUB_ENV"
+            done
+          fi
+
       - uses: actions/checkout@v4
         with:
           repository: redpanda-data/docs-team-standards
           # Same pin as the skills plugin: scripts and skills version together.
           ref: ${{ inputs.plugin_ref }}
           path: .standards
-          token: ${{ steps.standards_token.outputs.token || github.token }}
+          token: ${{ steps.standards_token_sm.outputs.token || steps.standards_token.outputs.token || github.token }}
           persist-credentials: false
 
       - uses: actions/download-artifact@v4
@@ -1849,6 +2025,7 @@ jobs:
           R: ${{ github.repository }}
           PREVIEW_PATH_PREFIX: ${{ vars.PREVIEW_PATH_PREFIX }}
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN   # see the App-credential block
           bash .standards/scripts/preview-links.sh "$R" "$PR" preview-links.md || : > preview-links.md
 
       # Deterministic checks (scripts/pr-checks.py): the preview pages, the
@@ -1857,24 +2034,6 @@ jobs:
       # crash here must not hide the rest of the review, so it degrades to
       # "skipped" with a warning instead of counting as unavailable. A
       # plugin_ref that predates the script also skips.
-      # docs and cloud-docs are private and pair up on single-sourced pages,
-      # so the paired-PR check needs to read the other repo. Best effort: if
-      # the App cannot mint this (not installed there, or lacking
-      # pull_requests: read), pr-checks.py notes the skipped check instead.
-      - name: Mint a read-only token for the companion repo
-        id: companion_token
-        if: >-
-          inputs.docs_app_id != '' &&
-          (github.repository == 'redpanda-data/docs' || github.repository == 'redpanda-data/cloud-docs')
-        continue-on-error: true
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ inputs.docs_app_id }}
-          private-key: ${{ secrets.docs_app_private_key }}
-          owner: redpanda-data
-          repositories: docs,cloud-docs
-          permission-pull-requests: read
-
       - name: PR and preview checks
         id: prchecks
         env:
@@ -1883,6 +2042,7 @@ jobs:
           PR: ${{ inputs.pr_number }}
           R: ${{ github.repository }}
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN   # see the App-credential block
           if [[ ! -f .standards/scripts/pr-checks.py ]]; then
             echo "result=skipped" >> "$GITHUB_OUTPUT"; exit 0
           fi
@@ -1905,6 +2065,7 @@ jobs:
       # a review branch.
       - name: Read the previous report
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN   # see the App-credential block
           if [[ -s results/prev-report/prev-comment.json ]]; then
             cp results/prev-report/prev-comment.json prev-comment.json
           else
@@ -1919,6 +2080,7 @@ jobs:
       # the artifact as a review branch.
       - name: Earlier blockers
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN   # see the App-credential block
           if [[ -f results/review-scope/prior-blockers.json ]]; then
             cp results/review-scope/prior-blockers.json prior-blockers.json
           else
@@ -1950,6 +2112,7 @@ jobs:
           RESULT_PR_CHECKS: ${{ steps.prchecks.outputs.result }}
           PREV_COMMENT_FILE: prev-comment.md
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN   # see the App-credential block
           set -uo pipefail
           PREV_COMMENT_URL=$(cat prev-comment-url.txt 2>/dev/null || true)
           export PREV_COMMENT_URL
@@ -2091,6 +2254,7 @@ jobs:
       - name: Preview links in the run summary (no comment posted)
         if: steps.verdict.outputs.post_comment == 'false'
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN   # see the App-credential block
           if [[ -s preview-links.md ]]; then
             { echo "### 🔍 Preview pages"; echo; cat preview-links.md; } >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -2105,6 +2269,7 @@ jobs:
           DESCRIPTION: ${{ steps.verdict.outputs.description }}
           LABELS: ${{ steps.verdict.outputs.labels }}
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN   # see the App-credential block
           set -euo pipefail
           if [[ -n "${LABELS:-}" ]]; then
             # gh api, not `gh pr edit --add-label`: pr edit trips on the
@@ -2160,6 +2325,7 @@ jobs:
           STATE: ${{ steps.verdict.outputs.state }}
           WITHHELD: ${{ steps.verdict.outputs.approval_withheld }}
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN   # see the App-credential block
           set -euo pipefail
           MARK='<!-- docs-review:approval -->'
           approval_failed() {

@@ -118,6 +118,63 @@ describe('Assert pr_number is empty or a number', () => {
   })
 })
 
+describe('the plugin checkout App token', () => {
+  const smMint = steps.find((s) => s.id === 'plugin_token_sm')
+  const report = steps.find((s) => s.name === "Report the plugin token's source")
+
+  it('gates the Secrets Manager mint on the fetch outcome, not the env context', () => {
+    // redpanda-labs and redpanda-solutions have no fallback, so a gate that
+    // silently skips here is a 404 at the plugin checkout.
+    expect(smMint.if).toBe("steps.app_secret.outcome == 'success'")
+    expect(smMint['continue-on-error']).toBe(true)
+  })
+
+  it('reports the source after both mints and before the checkout', () => {
+    const checkout = steps.find((s) => s.uses && s.uses.startsWith('actions/checkout') && s.with && s.with.path === '.docs-team-standards-plugin')
+    const fallback = steps.find((s) => s.id === 'plugin_token')
+    expect(steps.indexOf(report)).toBeGreaterThan(steps.indexOf(fallback))
+    expect(steps.indexOf(report)).toBeLessThan(steps.indexOf(checkout))
+    expect(report.if).toBeUndefined()
+  })
+
+  it.each([
+    ['Secrets Manager', { SM_TOKEN: 'true', FALLBACK_TOKEN: 'false', SM_MINT: 'success', FALLBACK_MINT: 'skipped' }, /plugin token from Secrets Manager/],
+    ['the fallback', { SM_TOKEN: 'false', FALLBACK_TOKEN: 'true', SM_MINT: 'failure', FALLBACK_MINT: 'success' }, /plugin token from the plugin_app_id fallback \(Secrets Manager mint: failure\)/],
+    ['github.token', { SM_TOKEN: 'false', FALLBACK_TOKEN: 'false', SM_MINT: 'skipped', FALLBACK_MINT: 'skipped' }, /plugin token from github\.token/],
+  ])('names %s as the source', (_label, env, expected) => {
+    const r = execRun(report, { env })
+    expect(r.status).toBe(0)
+    expect(r.all).toMatch(expected)
+  })
+})
+
+describe('the ADP gateway bearer', () => {
+  const mint = steps.find((s) => s.id === 'mint')
+  const mintIndex = steps.indexOf(mint)
+  const BEARER = 'AWS_BEARER_TOKEN_BEDROCK'
+
+  it('is a step output of the mint, never written to $GITHUB_ENV', () => {
+    expect(mint.run).toMatch(/echo "token=\$token" >> "\$GITHUB_OUTPUT"/)
+    for (const s of steps) {
+      expect(s.run || '').not.toMatch(new RegExp(`${BEARER}=[^\\n]*GITHUB_ENV`))
+    }
+  })
+
+  it('reaches only the steps that call the model', () => {
+    // The plugin checkout, setup-node and the npm install (package lifecycle
+    // scripts) run after the mint and must not see it.
+    const given = steps.filter((s) => s.env && Object.prototype.hasOwnProperty.call(s.env, BEARER))
+    expect(given.map((s) => s.name)).toEqual(['Assert the plugin actually loaded', 'Run skill (1 retry, findings-only)'])
+    for (const s of given) {
+      expect(s.env[BEARER]).toBe('${{ steps.mint.outputs.token }}')
+      expect(steps.indexOf(s)).toBeGreaterThan(mintIndex)
+    }
+    const install = steps.find((s) => s.name === 'Install Claude Code CLI and stage the plugin')
+    expect(steps.indexOf(install)).toBeGreaterThan(mintIndex)
+    expect(install.env || {}).not.toHaveProperty(BEARER)
+  })
+})
+
 /**
  * The run step retries once. An attempt counts as done only when the CLI
  * exits 0 AND writes verdict.json: the v26.1.20 release-notes run exited 0
