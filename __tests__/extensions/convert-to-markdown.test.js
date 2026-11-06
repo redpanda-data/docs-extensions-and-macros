@@ -555,3 +555,164 @@ describe('generateFrontmatter page-introduced-in', () => {
     expect(markdown).toContain('Reads rows.')
   })
 })
+
+// Platform blocks and tab groups carry their meaning in HTML classes and
+// widgets, so the Markdown twin needs explicit markers for an agent to know
+// which platform a passage applies to and where a tab group ends.
+describe('platform blocks and tab groups in the Markdown twin', () => {
+  const render = async (body) => {
+    const handlers = {}
+    const noop = () => {}
+    const context = { on: (event, fn) => { handlers[event] = fn }, getLogger: () => ({ info: noop, debug: noop, warn: noop, error: noop }) }
+    require('../../extensions/convert-to-markdown').register.call(context)
+    const page = {
+      contents: Buffer.from(`<html><body><article class="doc"><h1>Page</h1>${body}</article></body></html>`),
+      asciidoc: { doctitle: 'Page', attributes: {} },
+      src: { component: 'solutions', version: 'master', path: 'modules/demo/pages/page.adoc' },
+      pub: { url: '/solutions/demo/page/' },
+    }
+    await handlers.pagesComposed({ playbook: { site: { url: 'https://docs.redpanda.com' } }, contentCatalog: { getPages: () => [page] } })
+    return page.markdownContents.toString()
+  }
+
+  const platformBlock = (classes, title, inner) =>
+    `<div class="openblock platform ${classes}">` +
+    (title ? `<div class="title">${title}</div>` : '') +
+    `<div class="content"><div class="paragraph"><p>${inner}</p></div></div></div>`
+
+  test('wraps a platform block in markers and keeps its title as a label', async () => {
+    const md = await render(platformBlock('platform-cloud', 'On Redpanda Cloud', 'Skip this command.'))
+    expect(md).toContain('<!-- platform: cloud -->\n\n**On Redpanda Cloud:**\n\nSkip this command.\n\n<!-- /platform -->')
+  })
+
+  test('lists every platform a block applies to', async () => {
+    const md = await render(platformBlock('platform-local platform-kubernetes', 'On the local broker or Kubernetes', 'Run <code>make up</code>.'))
+    expect(md).toContain('<!-- platform: local kubernetes -->\n\n**On the local broker or Kubernetes:**\n\nRun `make up`.\n\n<!-- /platform -->')
+  })
+
+  test('omits the label when the block has no title', async () => {
+    const md = await render(platformBlock('platform-local', '', 'Local only.'))
+    expect(md).toContain('<!-- platform: local -->\n\nLocal only.\n\n<!-- /platform -->')
+    expect(md).not.toContain('**')
+  })
+
+  test('indents a platform block nested in a list item', async () => {
+    const md = await render(
+      '<div class="olist arabic"><ol class="arabic"><li><p>Start the stack.</p>' +
+      platformBlock('platform-kubernetes', 'On Kubernetes', 'It is already running.') +
+      '</li></ol></div>'
+    )
+    expect(md).toMatch(/1\. +Start the stack\.\n\n {4}<!-- platform: kubernetes -->\n\n {4}\*\*On Kubernetes:\*\*\n\n {4}It is already running\.\n\n {4}<!-- \/platform -->/)
+  })
+
+  const collapsible = (title, inner) =>
+    `<details><summary class="title">${title}</summary><div class="content">${inner}</div></details>`
+
+  test('wraps a collapsible block in markers and keeps its summary as a label', async () => {
+    const md = await render(
+      collapsible('What <code>make up</code> does', '<div class="paragraph"><p>It starts the stack.</p></div><div class="olist arabic"><ol class="arabic"><li><p>Pulls images.</p></li></ol></div>') +
+      '<div class="paragraph"><p>After the block.</p></div>'
+    )
+    expect(md).toContain('<!-- details: What make up does -->\n\n**What `make up` does**\n\nIt starts the stack.\n\n1.  Pulls images.\n\n<!-- /details -->\n\nAfter the block.')
+    expect(md).not.toMatch(/^What `make up` does$/m)
+  })
+
+  test('marks a collapsible block nested in a list item and keeps comments free of "--"', async () => {
+    const md = await render(
+      '<div class="olist arabic"><ol class="arabic"><li><p>Start the stack.</p>' +
+      collapsible('Use --profile', '<div class="paragraph"><p>Details here.</p></div>') +
+      '</li></ol></div>'
+    )
+    expect(md).toMatch(/1\. +Start the stack\.\n\n {4}<!-- details: Use -profile -->\n\n {4}\*\*Use --profile\*\*\n\n {4}Details here\.\n\n {4}<!-- \/details -->/)
+  })
+
+  test('marks a collapsible block nested in another', async () => {
+    const md = await render(collapsible('Outer', '<div class="paragraph"><p>A.</p></div>' + collapsible('Inner', '<div class="paragraph"><p>B.</p></div>')))
+    expect(md).toContain('<!-- details: Outer -->\n\n**Outer**\n\nA.\n\n<!-- details: Inner -->\n\n**Inner**\n\nB.\n\n<!-- /details -->\n\n<!-- /details -->')
+  })
+
+  test('closes a tab group after its last tab', async () => {
+    const md = await render(
+      '<h2>Set up</h2>' +
+      '<div class="openblock tabs"><div class="content"><div class="ulist tablist"><ul>' +
+      '<li id="_tabs_1_local" class="tab"><p>Local</p></li>' +
+      '<li id="_tabs_1_cloud" class="tab"><p>Cloud</p></li>' +
+      '</ul></div>' +
+      '<div id="_tabs_1_local--panel" class="tabpanel"><div class="paragraph"><p>Use Docker.</p></div></div>' +
+      '<div id="_tabs_1_cloud--panel" class="tabpanel"><div class="paragraph"><p>Use a cluster.</p></div></div>' +
+      '</div></div>' +
+      '<div class="paragraph"><p>After the tabs.</p></div>'
+    )
+    expect(md).toContain('### Local\n\nUse Docker.\n\n<!-- tab: Cloud -->\n\n### Cloud\n\nUse a cluster.\n\n<!-- /tabs -->\n\nAfter the tabs.')
+  })
+
+  const tabGroup = (id, tabs) =>
+    '<div class="openblock tabs"><div class="content"><div class="ulist tablist"><ul>' +
+    tabs.map(([name]) => `<li id="_tabs_${id}_${name.toLowerCase()}" class="tab"><p>${name}</p></li>`).join('') +
+    '</ul></div>' +
+    tabs.map(([name, html]) => `<div id="_tabs_${id}_${name.toLowerCase()}--panel" class="tabpanel">${html}</div>`).join('') +
+    '</div></div>'
+
+  test('opens a tab group and names each tab before its heading', async () => {
+    const md = await render(
+      '<h2>Set up</h2>' +
+      tabGroup(1, [['Local', '<div class="paragraph"><p>Use Docker.</p></div>'], ['Kubernetes', '<div class="paragraph"><p>Use kind.</p></div>']])
+    )
+    expect(md).toContain('<!-- tabs -->\n\n<!-- tab: Local -->\n\n### Local\n\nUse Docker.\n\n<!-- tab: Kubernetes -->\n\n### Kubernetes\n\nUse kind.\n\n<!-- /tabs -->')
+  })
+
+  test('marks a nested tab group inside its parent tab', async () => {
+    const inner = tabGroup(2, [['AWS', '<div class="paragraph"><p>Use EKS.</p></div>'], ['GCP', '<div class="paragraph"><p>Use GKE.</p></div>']])
+    const md = await render(
+      '<h2>Set up</h2>' +
+      tabGroup(1, [['Local', '<div class="paragraph"><p>Use Docker.</p></div>'], ['Cloud', '<div class="paragraph"><p>Pick a provider.</p></div>' + inner]])
+    )
+    expect(md).toContain('<!-- tab: Cloud -->\n\n### Cloud\n\nPick a provider.\n\n<!-- tabs -->\n\n<!-- tab: AWS -->\n\n#### AWS\n\nUse EKS.\n\n<!-- tab: GCP -->\n\n#### GCP\n\nUse GKE.\n\n<!-- /tabs -->\n\n<!-- /tabs -->')
+    expect(md.match(/<!-- tabs -->/g)).toHaveLength(2)
+    expect(md.match(/<!-- \/tabs -->/g)).toHaveLength(2)
+  })
+})
+
+// Inline constructs whose meaning the HTML carries in markup a reader of the
+// Markdown twin would otherwise lose.
+describe('links, downloads, and videos in the Markdown twin', () => {
+  const render = async (body) => {
+    const handlers = {}
+    const noop = () => {}
+    const context = { on: (event, fn) => { handlers[event] = fn }, getLogger: () => ({ info: noop, debug: noop, warn: noop, error: noop }) }
+    require('../../extensions/convert-to-markdown').register.call(context)
+    const page = {
+      contents: Buffer.from(`<html><body><article class="doc"><h1>Page</h1>${body}</article></body></html>`),
+      asciidoc: { doctitle: 'Page', attributes: {} },
+      src: { component: 'solutions', version: 'master', path: 'modules/demo/pages/page.adoc' },
+      pub: { url: '/solutions/demo/page/' },
+    }
+    await handlers.pagesComposed({ playbook: { site: { url: 'https://docs.redpanda.com' } }, contentCatalog: { getPages: () => [page] } })
+    return page.markdownContents.toString()
+  }
+
+  test('keeps an autolinked URL in inline code as literal text', async () => {
+    const md = await render('<div class="paragraph"><p>Run <code>curl -s <a href="http://localhost:8090/healthz" class="bare">http://localhost:8090/healthz</a></code> and wait. See <a href="https://example.com">the site</a>.</p></div>')
+    expect(md).toContain('Run `curl -s http://localhost:8090/healthz` and wait.')
+    expect(md).toContain('[the site](https://example.com)')
+  })
+
+  test('says where a Solutions download comes from when the HTML has no link', async () => {
+    const md = await render('<div class="paragraph"><p><span class="solution-download">Download the complete example</span> (sign in required). Unzip it.</p></div>')
+    expect(md).toContain('Download the complete example (sign in required). Unzip it.\n\nThe files are available from the download control on this page: https://docs.redpanda.com/solutions/demo/page/.')
+  })
+
+  test('links a Solutions download when the HTML has an href', async () => {
+    const md = await render('<div class="paragraph"><p><a class="solution-download" href="/solutions/demo/download.zip">Download the complete example</a>. Unzip it.</p></div>')
+    expect(md).toContain('[Download the complete example](https://docs.redpanda.com/solutions/demo/download.zip)')
+    expect(md).not.toContain('download control')
+  })
+
+  test('links a video to its source instead of the fallback text', async () => {
+    const withTitle = await render('<div class="videoblock"><div class="title">The leaderboard during the burst</div><div class="content"><video src="../_images/burst.mp4" controls>Your browser does not support the video tag.</video></div></div>')
+    expect(withTitle).toContain('[The leaderboard during the burst](https://docs.redpanda.com/solutions/demo/_images/burst.mp4)')
+    expect(withTitle).not.toContain('does not support the video tag')
+    const untitled = await render('<div class="videoblock"><div class="content"><video src="burst.mp4" controls>Your browser does not support the video tag.</video></div></div>')
+    expect(untitled).toContain('[burst.mp4](https://docs.redpanda.com/solutions/demo/page/burst.mp4)')
+  })
+})
