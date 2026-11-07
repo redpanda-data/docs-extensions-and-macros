@@ -1168,6 +1168,11 @@ Generated from `doc-tools lint-strings --list-rules`. Each rule links the sectio
 |AsciiDoc conditional that is not a well-formed env-cloud block
 |The same Connect string renders on the self-managed docs, the Cloud docs and in the Connect binaries, so a malformed env-cloud block shows text to the wrong audience or hides it from both. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#connect-fields-governed-in-the-connect-repo[Standard]
 
+|`unexplained-placeholder`
+|warning
+|Editable code-block placeholder that nothing near the block explains
+|The docs UI turns a <name> in a code block into a field the reader types into, so a reader left to guess what goes there copies a config that does not work. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#explaining-placeholders[Standard]
+
 |`connect-xref-module`
 |warning
 |xref without a module, or to a module the Connect docs do not have

@@ -24,6 +24,7 @@ const STANDARD = Object.freeze({
   connect: strings('connect-fields-governed-in-the-connect-repo'),
   api: strings('api-fields-and-operations-proto-published-as-markdown'),
   styleFormatting: `${BASE}style-guide.md#formatting-conventions`,
+  placeholders: `${BASE}style-guide.md#explaining-placeholders`,
   doNotUseWords: `${BASE}terminology.md#do-not-use-word-list`
 })
 
