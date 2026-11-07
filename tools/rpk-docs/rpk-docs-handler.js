@@ -12,6 +12,7 @@ const { downloadRpkBinary, RPK_RELEASE_TAG_RE, RPK_CDN_BASE } = require('../../c
 const { generateRpkDiff, printDiffReport, generateWhatsNewSection, flattenToMap } = require('./report-delta')
 const { loadAndValidateOverrides, ValidationResult } = require('./validate-overrides')
 const { validateDirectory, formatResults } = require('./validate-output')
+const { runOutputCheck } = require('./check-output')
 const { gitAuthEnv, redactCredentials } = require('../../cli-utils/git-credential-env')
 
 /**
@@ -1892,7 +1893,8 @@ async function handleRpkDocsGeneration(options = {}) {
     dataDir: customDataDir,
     preserveFrom, // Path to existing docs to preserve cloud conditionals and includes from
     printSummary = false, // Print PR summary to console
-    showInfo = false // Include info-level validation messages
+    showInfo = false, // Include info-level validation messages
+    checkOutput = false // true, or a report file path: check every generated description
   } = options
 
   // Normalize ref/sourceRef
@@ -2150,6 +2152,10 @@ async function handleRpkDocsGeneration(options = {}) {
         showInfo
       })
 
+      const outputCheck = checkOutput
+        ? runOutputCheck(tree, overridesData, typeof checkOutput === 'string' ? checkOutput : null)
+        : null
+
       // Generate diff if requested (rpk-version diff; not used in --plugin
       // mode, which produces its own plugin-scoped diff)
       let diffData = null
@@ -2218,6 +2224,7 @@ async function handleRpkDocsGeneration(options = {}) {
         pluginVersion: plugin ? pluginVersions[plugin] : undefined,
         diffData: plugin ? pluginDiffData : diffData,
         validationResult,
+        outputCheck,
         prSummary
       }
     }
@@ -2538,6 +2545,10 @@ async function handleRpkDocsGeneration(options = {}) {
       showInfo
     })
 
+    const outputCheck = checkOutput
+      ? runOutputCheck(tree, overridesData, typeof checkOutput === 'string' ? checkOutput : null)
+      : null
+
     // Generate PR summary
     const prSummary = generatePRSummary({
       rpkVersion,
@@ -2572,6 +2583,7 @@ async function handleRpkDocsGeneration(options = {}) {
       diffData,
       sourcePath,
       validationResult,
+      outputCheck,
       prSummary
     }
   } catch (err) {

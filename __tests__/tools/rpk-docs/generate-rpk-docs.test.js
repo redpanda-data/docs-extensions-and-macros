@@ -652,6 +652,32 @@ Specify a time range.`
       expect(store[0]).not.toContain('\\ \\')
     })
 
+    test('keeps consecutive rpk commands as separate commands', () => {
+      // rpk cluster partitions move-status help: two examples, not one
+      // command continued onto a second line.
+      const input = 'Examples:\n\n    rpk cluster partitions move-status\n    rpk cluster partitions move-status foo bar kafka_internal/tx'
+      const store = []
+      convertIndentedCodeBlocksToAsciiDoc(input, store)
+
+      expect(store).toEqual(['\n[,bash]\n----\nrpk cluster partitions move-status\nrpk cluster partitions move-status foo bar kafka_internal/tx\n----\n'])
+    })
+
+    test('an rpk line after a backslash is still a continuation', () => {
+      const input = 'Example:\n\n  rpk topic produce \\\n  rpk-input.txt'
+      const store = []
+      convertIndentedCodeBlocksToAsciiDoc(input, store)
+
+      expect(store[0]).toContain('rpk topic produce \\\nrpk-input.txt')
+    })
+
+    test('flag lines still join to their command when the help left out the backslash', () => {
+      const input = 'Example:\n\n  rpk transform deploy --file a.wasm \\\n    --output-topic t2\n    --output-topic t3'
+      const store = []
+      convertIndentedCodeBlocksToAsciiDoc(input, store)
+
+      expect(store[0]).toContain('rpk transform deploy --file a.wasm \\\n--output-topic t2 \\\n--output-topic t3')
+    })
+
     test('detects indented YAML block', () => {
       const input = `Result:\n\n  - job_name: test\n    static_configs:\n      - targets: [localhost]\n        labels:\n          group: one`
       const store = []
@@ -703,6 +729,27 @@ Specify a time range.`
       const result = formatDescription(input)
       expect(result).toContain('`--format=json`')
       expect(result).not.toContain('`--format`=json')
+    })
+
+    test('a flag family glob is one span, as a passthrough', () => {
+      // rpk ai trigger help. Two plain spans holding * render the text
+      // between them in bold, and the old pattern left the * outside.
+      const result = formatDescription('The kind (--teams-* or\n--cron-*) is fixed at creation.')
+      expect(result).toBe('The kind (`+--teams-*+` or\n`+--cron-*+`) is fixed at creation.')
+    })
+
+    test('does not wrap rpk inside a dotted plugin prefix', () => {
+      // rpk plugin help: .rpk.ac- published as .`rpk`.ac-
+      const result = formatDescription('All plugins are prefixed with either .rpk- or .rpk.ac-. When rpk starts up, it searches.')
+      expect(result).toContain('.rpk.ac-.')
+      expect(result).toContain('When `rpk` starts up')
+    })
+
+    test('does not wrap the rpk in a dotted config key', () => {
+      // rpk redpanda admin config print --host in the v26.1.12 tree
+      const result = formatDescription('An index into rpk.admin_api.addresses to select hosts, as with rpk.')
+      expect(result).toContain('into rpk.admin_api.addresses to')
+      expect(result).toContain('as with `rpk`.')
     })
 
     test('handles complex flag=value patterns', () => {

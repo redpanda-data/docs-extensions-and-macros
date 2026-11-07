@@ -1477,6 +1477,9 @@ automation
  * # Use custom overrides file
  * npx doc-tools generate rpk-docs --ref dev --overrides custom-overrides.json
  *
+ * # Check every generated description and write violations to a report
+ * npx doc-tools generate rpk-docs --from-json docs-data/rpk-v26.2.2.json --check-output report.txt
+ *
  * @requirements
  * - Go must be installed (https://go.dev/)
  * - Git must be installed (for cloning source)
@@ -1516,6 +1519,7 @@ automation
   .option('--print-summary', 'Print PR summary (for GitHub Actions)')
   .option('--summary-file <path>', 'Write PR summary to file (for GitHub Actions)')
   .option('--show-info', 'Include info-level validation messages')
+  .option('--check-output [report-file]', 'Check every generated command and flag description: the text matches its source and each code span covers a whole token. Exits 1 on any violation, and writes one line per violation to report-file when given')
   .action(async (options) => {
     try {
       const { handleRpkDocsGeneration } = require('../tools/rpk-docs/rpk-docs-handler.js')
@@ -1552,7 +1556,8 @@ automation
         dataDir: options.dataDir,
         preserveFrom: options.preserveFrom,
         printSummary: options.printSummary,
-        showInfo: options.showInfo
+        showInfo: options.showInfo,
+        checkOutput: options.checkOutput
       })
 
       if (result.success) {
@@ -1571,6 +1576,11 @@ automation
         // Exit with warning if validation errors found
         if (result.validationResult?.summary?.totalErrors > 0) {
           console.error(`\n⚠ Validation found ${result.validationResult.summary.totalErrors} error(s)`)
+          process.exit(1)
+        }
+
+        if (result.outputCheck && !result.outputCheck.passed) {
+          console.error(`\n⚠ Output check found ${result.outputCheck.lines.length} problem(s)`)
           process.exit(1)
         }
 
