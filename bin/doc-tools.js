@@ -1609,6 +1609,7 @@ automation
   .option('--print-summary', 'Print PR summary (for GitHub Actions)')
   .option('--summary-file <path>', 'Write PR summary to file (for GitHub Actions)')
   .option('--show-info', 'Include info-level validation messages')
+  .option('--target-branch <branch>', 'Docs branch the output is for. On beta, v/*, and v-WIP/* the rpk ai docs, which main owns, are left untouched. Defaults to GITHUB_BASE_REF, then the checked-out branch.')
   .action(async (options) => {
     try {
       const { handleRpkDocsGeneration } = require('../tools/rpk-docs/rpk-docs-handler.js')
@@ -1645,7 +1646,8 @@ automation
         dataDir: options.dataDir,
         preserveFrom: options.preserveFrom,
         printSummary: options.printSummary,
-        showInfo: options.showInfo
+        showInfo: options.showInfo,
+        targetBranch: options.targetBranch
       })
 
       if (result.success) {
@@ -3128,22 +3130,28 @@ validation
  *
  * # PR mode: only declarations whose span intersects the diff
  * npx doc-tools lint-strings --repo ~/redpanda --diff origin/dev
+ *
+ * # List every rule with its reason and the standard it enforces
+ * npx doc-tools lint-strings --list-rules --surface rpk
  */
 programCli
   .command('lint-strings')
   .description('Lint user-facing doc strings embedded in engineering source code (properties, metrics, ...)')
-  .requiredOption('--repo <path>', 'Path to an existing engineering checkout (for example, a local redpanda clone). Nothing is cloned.')
+  .option('--repo <path>', 'Path to an existing engineering checkout (for example, a local redpanda clone). Nothing is cloned. Required unless --list-rules is set.')
   // Read off the registry rather than restated here: a hardcoded list silently
   // went stale the moment a surface was added.
   .option('--surface <list>', `Comma-separated surfaces to lint (default: all registered). Registered: ${Object.keys(require('../tools/lint-strings').SURFACES).join(', ')}`)
-  .option('--diff <base>', 'Declaration-anchored diff mode: lint only declarations whose full span intersects lines changed in <base>...HEAD')
+  .option('--diff <base>', 'Declaration-anchored diff mode: lint only declarations whose full span intersects lines changed in <base>...HEAD, and report a finding a rule can place on a source line only when that line changed')
   .option('--format <format>', 'Output format: human or json', 'human')
   .option('--skip-rules <list>', 'Comma-separated rule ids to skip')
   .option('--only-rules <list>', 'Comma-separated rule ids to run exclusively')
   .option('--reviewed <file>', 'Diff mode: skip declarations whose fingerprint is listed in <file> (already reviewed on an earlier push)')
   .option('--reviewer-comments <file>', 'Diff mode: skip declarations whose text a human reviewer wrote in one of the comment bodies in <file> (a JSON array of strings)')
   .option('--strict', 'Exit 1 when any error-severity finding exists (default: always exit 0 - suggest, never block)')
-  .action((options) => {
+  .option('--list-rules', 'Print every rule (id, surfaces, severity, description, why, standard) and exit. Honors --surface and --format.')
+  .action((options, command) => {
+    // --repo stays required for a lint run; only --list-rules runs without it.
+    if (!options.listRules && !options.repo) command.error("error: required option '--repo <path>' not specified")
     const { runCli } = require('../tools/lint-strings')
     runCli(options)
   })
@@ -3208,6 +3216,43 @@ programCli
       return
     }
     console.log(JSON.stringify(report, null, 2))
+  })
+
+/**
+ * declared-changes
+ *
+ * @description
+ * Read the user-facing change a PR author declares in the PR description:
+ * the UX Changes section, the User impact and why section, and Release Notes
+ * sub-sections other than Bug Fixes. Prints whether anything is declared,
+ * which sections declare it, and a hash of the text, and writes the text to
+ * a file for the doc-strings review to read. A PR whose diff changes no doc
+ * string still reaches the review's published-content check this way.
+ *
+ * @example
+ * npx doc-tools declared-changes --body-file pr-body.md --output pr-notes.md
+ *
+ * @exit 0 always: `{"declared":false}` means nothing is declared, including
+ * when the body file cannot be read.
+ */
+programCli
+  .command('declared-changes')
+  .description('Read the user-facing change a PR description declares (UX Changes, User impact and why, and non-bug-fix Release Notes) and print it as JSON')
+  .requiredOption('--body-file <file>', 'File holding the PR description')
+  .option('--output <file>', 'Write the declared text here when anything is declared')
+  .action((options) => {
+    const { declaredChanges } = require('../tools/declared-changes')
+    let body
+    try {
+      body = fs.readFileSync(options.bodyFile, 'utf8')
+    } catch (err) {
+      console.error(`Could not read ${options.bodyFile}; nothing declared: ${err.message}`)
+      console.log(JSON.stringify({ declared: false, sections: [], hash: null }))
+      return
+    }
+    const result = declaredChanges(body)
+    if (result.declared && options.output) fs.writeFileSync(options.output, result.text)
+    console.log(JSON.stringify({ declared: result.declared, sections: result.sections, hash: result.hash }))
   })
 
 /**
