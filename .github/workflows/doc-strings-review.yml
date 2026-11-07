@@ -957,7 +957,7 @@ jobs:
       # must be inline JSON: claude-code-action merges inline --mcp-config
       # values with its own, but a file path replaces them.
       - name: Build the docs MCP config
-        if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0')
+        if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0' || steps.notes.outputs.declared == '1')
         env:
           CLIENT_SECRET_ID: ${{ inputs.adp_client_secret_id }}
           DOCS_MCP_URL: https://docs.redpanda.com/mcp

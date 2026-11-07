@@ -16,6 +16,7 @@ const path = require('path')
 const { spawnSync } = require('child_process')
 
 const YAML = require('yaml')
+const { resolveMcpConfig } = require('../mcp-config')
 
 const WORKFLOW_PATH = path.join(__dirname, '..', '..', '..', '.github', 'workflows', 'doc-strings-review.yml')
 const REVIEW_STEP = 'Claude review with suggestions'
@@ -90,7 +91,7 @@ function splitToolList (value) {
  * gh; the inputs are files in the working directory instead.
  */
 function extractClaudeSettings (claudeArgs) {
-  const mcpConfig = JSON.parse(quotedArg(claudeArgs, '--mcp-config'))
+  const mcpConfig = resolveMcpConfig(quotedArg(claudeArgs, '--mcp-config'))
   if (!mcpConfig.mcpServers || !mcpConfig.mcpServers[MCP_SERVER]) {
     throw new Error(`--mcp-config in the workflow has no "${MCP_SERVER}" server`)
   }
