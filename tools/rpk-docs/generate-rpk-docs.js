@@ -1388,13 +1388,18 @@ function applyTextTransformationsToExamples(text, customTransformations) {
 }
 
 /**
- * Apply one replacement rule, skipping any match that crosses a span
- * boundary, or that starts inside a code span and would add backticks there.
- * Rules run in sequence, so a span one rule creates ('trace list -o json' ->
- * `trace list -o json`) is still bare text to the next rule, which would
- * otherwise nest a span inside it (`-o json`). A rule that only rewords
- * (/root/.config -> ~/.config) still applies inside a span, and a match that
- * covers a whole span (like "`rpk foo`") still applies.
+ * Apply one replacement rule, skipping a match that would add backticks
+ * inside a code span or across a span boundary. Rules run in sequence, so a
+ * span one rule creates ('trace list -o json' -> `trace list -o json`) is
+ * still bare text to the next rule, which would otherwise nest a span inside
+ * it (`-o json`). Rules whose replacement adds no backticks (path or
+ * whitespace fixes) apply anywhere. A match that starts on a span's closing
+ * backtick counts as outside it, and a match that covers a whole span (like
+ * "`rpk foo`") still applies.
+ *
+ * The replacement is expanded here rather than by String.replace on the
+ * single match, because lookbehinds and anchors need the full text. Only
+ * $$, $&, $1..$99 and $<name> are supported; $` and $' are not.
  * @param {string} text
  * @param {RegExp} regex
  * @param {string} replacement - Replacement string ($&, $1..$99, $<name>, $$)
@@ -1406,9 +1411,13 @@ function replaceOutsideCodeSpans(text, regex, replacement) {
     const whole = args.pop()
     const offset = args.pop()
     const [match, ...groups] = args
-    const ticksBefore = (whole.slice(0, offset).match(/`/g) || []).length
-    const ticksIn = (match.match(/`/g) || []).length
-    if (ticksIn % 2 === 1) return match
+    const countTicks = (str) => (str.match(/`/g) || []).length
+    let inSpan = countTicks(whole.slice(0, offset)) % 2 === 1
+    let ticksIn = countTicks(match)
+    if (inSpan && match.startsWith('`')) {
+      inSpan = false
+      ticksIn -= 1
+    }
     const expanded = replacement.replace(/\$(\$|&|<([^>]*)>|(\d\d?))/g, (token, kind, name, num) => {
       if (kind === '$') return '$'
       if (kind === '&') return match
@@ -1421,7 +1430,9 @@ function replaceOutsideCodeSpans(text, regex, replacement) {
       }
       return n >= 1 && n <= groups.length ? (groups[n - 1] ?? '') : token
     })
-    return ticksBefore % 2 === 1 && expanded.includes('`') ? match : expanded
+    const addsTicks = countTicks(expanded) > countTicks(match)
+    if (addsTicks && (inSpan || ticksIn % 2 === 1)) return match
+    return expanded
   })
 }
 
@@ -1530,7 +1541,7 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   // Protect each whole, as a passthrough span so AsciiDoc leaves its quotes
   // alone; otherwise double-quote rules in the overrides turn each key and
   // value into its own code span, and the result is no longer JSON.
-  preProcessed = preProcessed.replace(/'(?:\{"|\[["{])[^'\n]*[}\]]'/g, (match) => {
+  preProcessed = preProcessed.replace(/'(?:\{\s*"|\[\s*["{])[^'\n]*[}\]]'/g, (match) => {
     const placeholder = `__INLINE_CODE_${inlineCode.length}__`
     inlineCode.push(`\`+${match}+\``)
     return placeholder
@@ -1878,10 +1889,13 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   // (like the rpai -> rpk ai binary-name rewrite) must reach them the same
   // way they reach code blocks, or the internal binary name survives in
   // published spans like `rpai auth token`.
-  inlineCode.forEach((code, i) => {
-    const transformed = applyTextTransformations(code, customTransformations, { code: true })
+  // Restore in descending order: a later span can contain an earlier one's
+  // placeholder (a rule wrapped a span around it), and restoring the outer
+  // span first brings the inner placeholder back before its turn.
+  for (let i = inlineCode.length - 1; i >= 0; i--) {
+    const transformed = applyTextTransformations(inlineCode[i], customTransformations, { code: true })
     result = result.replace(`__INLINE_CODE_${i}__`, () => transformed)
-  })
+  }
 
   // Restore xrefs
   xrefs.forEach((xref, i) => {
@@ -2779,7 +2793,17 @@ async function generateRpkDocs(options = {}) {
   let filesDeleted = 0
   const writtenFiles = new Set()
 
+  const formatDescriptionRaw = formatDescription
   for (const { path: commandPath, command } of commands) {
+    // Name the command in a formatDescription error so CI logs show which one failed
+    const formatDescription = (...args) => {
+      try {
+        return formatDescriptionRaw(...args)
+      } catch (err) {
+        err.message = `${commandPath}: ${err.message}`
+        throw err
+      }
+    }
     // Skip the root `rpk` command: its reference is the section's hand-written
     // index.adoc landing page, which generation must not overwrite. The nav
     // builder skips it for the same reason (see updateNavFile).
