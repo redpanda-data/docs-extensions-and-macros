@@ -20,28 +20,48 @@ This page lists the changes in each Redpanda release from version {earliest-trac
 // One section per release, newest first. Heading is the version and release date on one
 // line: v<version> (<YYYY-MM-DD>). The date is authored — the release captain writes it
 // (see the standard); there is no timezone label.
+// Source line: the published release body's hash, directly under the heading.
+// It does not render. See the standard and the sm-release-notes skill.
+// - When you scaffold a page: skip this line with the example section. The
+//   curated section carries its own source line.
+// - When you write a section by hand: replace v[X.Y.Z] and the [hash ...]
+//   placeholder. Compute the hash with the skill's command.
+// - Delete the line in two cases: the release is unpublished (no release
+//   yet, or a body that lists no changes), or the section comes from a
+//   changelog that differs from the published body.
+// Never merge the page with a placeholder still in place.
 == v[X.Y.Z] ([YYYY-MM-DD])
+// release-notes-source: v[X.Y.Z] sha256=[hash of the published release body]
 
 // Categories in this order: Features, then Bug fixes, then Improvements. Omit a category
 // with no entries. Each entry is a complete sentence in present tense, with a body —
 // never a headline-only entry.
 // Within a category, group entries by area so same-area entries are adjacent, with
 // areas in alphabetical order and source order kept within an area. See release-notes.md.
-// Entries are an AsciiDoc definition list: the product area is the term, the
-// entry is the description (`Cloud Topics:: Timequeries no longer …`), matching
-// ADP. This is a scoped exception to the no-definition-lists rule for
-// release-notes pages. See release-notes.md.
+// Entries are an AsciiDoc definition list: the product area is the term, once
+// per category, and the area's entries are a bulleted list under it
+// (`Cloud Topics::` then `* Timequeries no longer …`). An area with one entry
+// still gets a one-item list. Keep each bullet on one line, and leave a blank
+// line between areas. This is a scoped exception to the no-definition-lists
+// and no-single-item-lists rules for release-notes pages. See release-notes.md.
 === Features
 
-[Area]:: [A new capability, in present tense and with no "now" (it has no prior behavior to contrast): "X supports …".]
+[Area]::
+* [A new capability, in present tense and with no "now" (it has no prior behavior to contrast): "X supports …".]
 
 === Bug fixes
 
-[Area]:: [A defect corrected, as a present-tense outcome: "X no longer …" / "X now …". Not "Fixed a bug where …".]
+[Area]::
+* [A defect corrected, as a present-tense outcome: "X no longer …" / "X now …". Not "Fixed a bug where …".]
+* [Another entry in the same area, in source order.]
+
+[Next area, alphabetically]::
+* [An entry in that area.]
 
 === Improvements
 
-[Area]:: [Better behavior for an existing capability, in present tense.]
+[Area]::
+* [Better behavior for an existing capability, in present tense.]
 
 // Footer: link releases before the floor to the public GitHub releases page, which
 // keeps hosting historical Redpanda releases.
