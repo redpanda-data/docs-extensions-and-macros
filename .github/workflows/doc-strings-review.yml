@@ -887,9 +887,11 @@ jobs:
       # quota per IP, and GitHub-hosted runners share IPs, so the review's
       # doc-impact lookups ran out. A trusted key (x-client-key, see
       # docs-site internal-docs/mcp-service-passthrough.md) skips that quota.
-      # It rides in the ADP client secret as the DOCS_MCP_KEY JSON key, so
-      # parse-json-secrets names it after the secret id the same way the mint
-      # step derives its names. No key (plain-secret callers, gateway off, or
+      # It rides in the ADP client secret under a JSON key that carries the
+      # secret name's prefix, DOCS_DOC_STRINGS_CLIENT_DOCS_MCP_KEY for the
+      # default secret id: parse-json-secrets adds no prefix of its own, so the
+      # env var is named after the JSON key, and this step derives the name
+      # from adp_client_secret_id the way the mint step does. No key (plain-secret callers, gateway off, or
       # a secret without that key) builds today's anonymous config with no
       # header. The config goes to GITHUB_ENV rather than a step output
       # because the runner drops outputs that contain a masked value, and it
