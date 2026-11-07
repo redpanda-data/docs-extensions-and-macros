@@ -1549,6 +1549,17 @@ automation
  * - Supports overrides.json for description improvements
  * - Generates versioned JSON files for downstream consumers (tooltips, etc.)
  * - Generates diffs between versions for release notes
+ * - Converts docs.redpanda.com URLs in rpk help text into xrefs
+ *
+ * Links: rpk help text links to docs.redpanda.com with absolute URLs. When the
+ * command runs inside a docs checkout (or is given --docs-root), every URL that
+ * matches a page of that checkout, directly or through a page alias, is
+ * rewritten as an xref before the page is written, so the committed pages keep
+ * one link form across regenerations. URLs that point at another component
+ * (Redpanda Connect, for example) are converted only when that component's
+ * checkout is passed with --lender; they then become component-qualified xrefs
+ * such as xref:connect:guides:bloblang/about.adoc[]. Every URL left as written
+ * is listed in the output and in the validation report, with the reason.
  *
  * @why
  * Building from source provides accurate platform detection by analyzing Go build tags
@@ -1570,6 +1581,9 @@ automation
  * # Use custom overrides file
  * npx doc-tools generate rpk-docs --ref dev --overrides custom-overrides.json
  *
+ * # Also convert links to Redpanda Connect pages (rp-connect-docs checked out beside docs)
+ * npx doc-tools generate rpk-docs --from-json docs-data/rpk-v26.2.2.json --lender ../rp-connect-docs
+ *
  * @requirements
  * - Go must be installed (https://go.dev/)
  * - Git must be installed (for cloning source)
@@ -1580,6 +1594,8 @@ automation
  *   is a published GA or RC tag: the rpk binary is downloaded from
  *   https://rpk.redpanda.com and checksum-verified. Go, Git and the token are
  *   only used as a fallback when the CDN has no build for that tag.
+ * - To convert links: a docs checkout with Antora installed (npm install in
+ *   redpanda-data/docs), plus a checkout of each --lender component
  */
 automation
   .command('rpk-docs')
@@ -1609,6 +1625,8 @@ automation
   .option('--print-summary', 'Print PR summary (for GitHub Actions)')
   .option('--summary-file <path>', 'Write PR summary to file (for GitHub Actions)')
   .option('--show-info', 'Include info-level validation messages')
+  .option('--docs-root <dir>', 'Docs checkout whose pages docs.redpanda.com URLs are converted into xrefs against (default: the current repo when it holds antora.yml)')
+  .option('--lender <path...>', 'Other component checkouts read into the same catalog, so URLs that point at their pages become component-qualified xrefs (for example ../rp-connect-docs)')
   .option('--target-branch <branch>', 'Docs branch the output is for. On beta, v/*, and v-WIP/* the rpk ai docs, which main owns, are left untouched. Defaults to GITHUB_BASE_REF, then the checked-out branch.')
   .action(async (options) => {
     try {
@@ -1647,6 +1665,8 @@ automation
         preserveFrom: options.preserveFrom,
         printSummary: options.printSummary,
         showInfo: options.showInfo,
+        docsRoot: options.docsRoot,
+        lenders: (options.lender || []).map((dir) => path.resolve(dir)),
         targetBranch: options.targetBranch
       })
 
@@ -2378,7 +2398,10 @@ automation
  * runs inside a docs checkout (or is given --docs-root), every URL that matches a page of that
  * checkout, directly or through a page alias, is rewritten as an xref so the committed page
  * keeps one link form across regenerations. URLs that match no page are left as written and
- * listed in the output.
+ * listed in the output. URLs that point at another component (Redpanda Connect, Cloud) are
+ * converted only when that component's checkout is passed with --lender; they then become
+ * component-qualified xrefs (connect:module:page, version-pinned when the URL names a version
+ * that is not the component's latest).
  *
  * @why
  * Kubernetes CRDs define complex APIs for deploying and managing Redpanda. The API schema
@@ -2404,6 +2427,9 @@ automation
  * # Generate from any custom branch
  * npx doc-tools generate crd-spec --branch dev
  *
+ * # Also convert links to Redpanda Connect pages
+ * npx doc-tools generate crd-spec --tag operator/v2.2.6-25.3.1 --lender ../rp-connect-docs
+ *
  * # Use custom templates and output location
  * npx doc-tools generate crd-spec \
  *   --tag operator/v2.2.6-25.3.1 \
@@ -2414,7 +2440,8 @@ automation
  * - For GitHub URLs: Git and internet connection
  * - crd-ref-docs tool (automatically installed if missing)
  * - Go toolchain for running crd-ref-docs
- * - To convert links: a docs checkout with Antora installed (npm install in redpanda-data/docs)
+ * - To convert links: a docs checkout with Antora installed (npm install in redpanda-data/docs),
+ *   plus a checkout of each --lender component
  */
 automation
   .command('crd-spec')
@@ -2426,6 +2453,7 @@ automation
   .option('--templates-dir <dir>', 'Asciidoctor templates dir', '.github/crd-config/templates/asciidoctor/operator')
   .option('--output <file>', 'Where to write the generated AsciiDoc file', 'modules/reference/pages/k-crd.adoc')
   .option('--docs-root <dir>', 'Docs checkout whose pages docs.redpanda.com URLs are converted into xrefs against (default: the current repo when run inside redpanda-data/docs)')
+  .option('--lender <path...>', 'Other component checkouts read into the same catalog, so URLs that point at their pages become component-qualified xrefs (for example ../rp-connect-docs)')
   .action(async (opts) => {
     verifyCrdDependencies()
 
@@ -2542,17 +2570,22 @@ automation
     // left as written and listed; the url-to-xref extension still converts
     // cross-component URLs at site build time and warns about broken ones.
     const docsRoot = opts.docsRoot || (inDocs ? repoRoot : null)
+    const lenders = (opts.lender || []).map((dir) => path.resolve(dir))
+    if (!docsRoot && lenders.length) {
+      console.error('Error: --lender needs a docs checkout to convert against: run inside redpanda-data/docs or pass --docs-root')
+      process.exit(1)
+    }
     if (docsRoot) {
-      const { buildDocsResolverContext, convertDocsLinksInFile, formatDocsLinkReport } = require('../cli-utils/docs-links-to-xrefs.js')
+      const { buildDocsResolverContext, describeResolverContext, convertDocsLinksInFile, formatDocsLinkReport } = require('../cli-utils/docs-links-to-xrefs.js')
       let linkContext
       try {
-        linkContext = await buildDocsResolverContext(docsRoot)
+        linkContext = await buildDocsResolverContext(docsRoot, { lenders })
       } catch (err) {
         console.error(`Error: Cannot map docs URLs to xrefs: ${err.message}`)
         process.exit(1)
       }
-      console.log(`Mapping docs URLs against ${linkContext.pageCount} pages of the ${linkContext.component} component in ${docsRoot}`)
-      console.log(formatDocsLinkReport(convertDocsLinksInFile(opts.output, linkContext), opts.output))
+      console.log(describeResolverContext(linkContext, docsRoot))
+      console.log(formatDocsLinkReport(convertDocsLinksInFile(opts.output, linkContext), opts.output, linkContext))
     } else {
       console.warn('⚠️ No docs checkout to map against (pass --docs-root); docs.redpanda.com URLs are left as written.')
     }
