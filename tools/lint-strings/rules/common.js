@@ -273,6 +273,7 @@ const COMMON_RULES = [
     why: 'A declaration with no string publishes as a blank entry, so readers get a name and nothing about what it does.',
     standard: STANDARD.reviewingADiff,
     severity: 'error',
+    tier: 'unclear',
     check: (decl) => {
       if (decl.string == null || decl.string.trim() === '') {
         return [{ message: 'Description is empty or missing. This ships as a blank entry on docs.redpanda.com.' }]
@@ -286,6 +287,7 @@ const COMMON_RULES = [
     why: 'Published strings are sentences in sentence case, so one that opens in lowercase reads as a fragment or a typo on the page.',
     standard: STANDARD.qualityBar,
     severity: 'warning',
+    tier: 'style',
     check: (decl) => {
       const text = (decl.string || '').trim()
       if (!text) return []
@@ -310,6 +312,7 @@ const COMMON_RULES = [
     why: 'A description that only restates the name tells readers nothing they could not already read from the name.',
     standard: STANDARD.qualityBar,
     severity: 'warning',
+    tier: 'unclear',
     check: (decl) => {
       const text = (decl.string || '').trim()
       if (!text || !decl.name) return []
@@ -325,6 +328,7 @@ const COMMON_RULES = [
     why: 'A string this short cannot say what the setting does, its unit, or what changes when you set it, so readers are left guessing.',
     standard: STANDARD.qualityBar,
     severity: 'warning',
+    tier: 'unclear',
     check: (decl) => {
       const text = (decl.string || '').trim()
       if (!text) return [] // empty-description owns the empty case
@@ -340,6 +344,7 @@ const COMMON_RULES = [
     why: 'Internal terms such as NTP, seastar or nullopt mean nothing to the operators who read the reference page.',
     standard: STANDARD.qualityBar,
     severity: 'warning',
+    tier: 'unclear',
     check: (decl) => {
       const text = decl.string || ''
       if (!text) return []
@@ -362,6 +367,7 @@ const COMMON_RULES = [
     why: 'The docs style avoids em dashes, and this string is published as written, so a fix made in the generated page is undone at the next regeneration.',
     standard: STANDARD.styleFormatting,
     severity: 'warning',
+    tier: 'style',
     check: (decl) => {
       const text = decl.string || ''
       if (!text.includes('\u2014')) return []
@@ -385,6 +391,7 @@ const COMMON_RULES = [
     why: 'The docs word list replaces e.g. and i.e. with plain English, and this string is published as written, so the abbreviation reaches the page.',
     standard: STANDARD.doNotUseWords,
     severity: 'warning',
+    tier: 'style',
     check: (decl) => {
       const text = decl.string || ''
       if (!text) return []
@@ -415,6 +422,7 @@ const COMMON_RULES = [
     why: 'A sentence this long usually carries more than one idea, so readers have to read it twice to follow it.',
     standard: STANDARD.qualityBar,
     severity: 'warning',
+    tier: 'style',
     check: (decl) => {
       // The standard asks for one idea per sentence. A sentence this long
       // usually chains clauses a reader has to parse twice.
@@ -433,6 +441,7 @@ const COMMON_RULES = [
     why: 'An odd number of backticks leaves an inline code span open, so the rest of the string renders as broken monospace.',
     standard: STANDARD.qualityBar,
     severity: 'error',
+    tier: 'unclear',
     check: (decl) => {
       const text = decl.string || ''
       const count = (text.match(/`/g) || []).length
@@ -448,6 +457,7 @@ const COMMON_RULES = [
     why: 'Without inline code, a property name, flag or path reads as ordinary prose, so readers cannot tell it is a value to type exactly.',
     standard: STANDARD.qualityBar,
     severity: 'warning',
+    tier: 'style',
     check: (decl) => {
       // A plain-text string (convention.plain_text), such as a connect
       // ShortDescription, cannot hold inline code: backticks show literally.

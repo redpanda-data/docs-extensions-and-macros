@@ -144,7 +144,9 @@ describe('properties convention rules', () => {
     // claimed "a typical default setting is 86400000" against a real default
     // of null.
     const rule = properties.rules.find((r) => r.name === 'sentinel-default-unexplained')
-    expect(rule.severity).toBe('info')
+    // A warning, so an unexplained sentinel is posted on the PR (unclear),
+    // where an info finding would only reach the job summary.
+    expect(rule.severity).toBe('warning')
     for (const value of [30, 'gzip', true, false, 1048576]) {
       expect(rule.check(decl({ string: 'Does things.', meta: { has_default: true, default: value } }))).toHaveLength(0)
     }

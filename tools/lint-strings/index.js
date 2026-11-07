@@ -6,7 +6,7 @@ const os = require('os')
 const path = require('path')
 const { spawnSync } = require('child_process')
 
-const { runRules, mergeResults } = require('./engine')
+const { runRules, mergeResults, issueTier } = require('./engine')
 const { getDiffLines, classifyDiff, spanIntersects, SURFACE_ROUTES } = require('./diff')
 const { COMMON_RULES } = require('./rules/common')
 const { VERBATIM_ASCIIDOC_RULES } = require('./rules/verbatim-asciidoc')
@@ -63,6 +63,11 @@ function rulesFor (surface) {
  * @param {string[]} [options.reviewerPassages] - Diff mode: passages from
  *   human review comments. A changed line found in one counts as written by
  *   a reviewer, and a declaration whose changed lines all are is skipped
+ * @param {Set<string>} [options.closedKeys] - Diff mode: declaration keys
+ *   (see declKey) a review on this PR already closed. A touched declaration
+ *   with one of these keys whose text changed since is never reviewed again;
+ *   it is reported in summary.closedChangedDeclarations for the
+ *   published-content check alone
  * @param {Function} [options.log] - Progress logger (stderr by default)
  * @returns {Object} { findings, summary, unsupported_surfaces }
  */
@@ -75,6 +80,7 @@ function lintStrings (options) {
     onlyRules = null,
     reviewedFingerprints = null,
     reviewerPassages = null,
+    closedKeys = null,
     log = (msg) => process.stderr.write(`${msg}\n`)
   } = options
 
@@ -98,6 +104,8 @@ function lintStrings (options) {
   const pending = []
   let alreadyReviewed = 0
   const reviewerWritten = []
+  const closed = closedKeys || new Set()
+  const closedChanged = []
   const headLines = new Map()
   let removal = { rawFiles: [], declarations: [] }
   const skipped = []
@@ -135,6 +143,7 @@ function lintStrings (options) {
         ? everything.filter((d) => touchedFiles.has(d.file))
         : surface.extract({ repo: repoPath, files: touchedFiles, log })
       headBySurface[surfaceName] = head
+      assignKeys(surface, everything || head)
       const declarations = []
       for (const decl of head) {
         if (!touches(decl, files.get(decl.file))) continue
@@ -142,6 +151,14 @@ function lintStrings (options) {
         decl.fingerprint = fingerprint(decl)
         if (reviewed.has(decl.fingerprint)) {
           alreadyReviewed++
+          continue
+        }
+        // Reviewed on an earlier push of this PR and edited since (the
+        // author's fix, a committed suggestion, text from the base branch).
+        // A declaration gets one review per PR, so it is not reviewed again;
+        // the published-content check still sees it.
+        if (closed.has(decl.key)) {
+          closedChanged.push(pendingEntry(decl))
           continue
         }
         if (reviewerPassages && reviewerPassages.length) {
@@ -158,7 +175,7 @@ function lintStrings (options) {
         declarations.push(decl)
         if (decl.meta && decl.meta.unverifiable) unverifiable++
         const detail = surface.reviewContext ? surface.reviewContext(decl) : null
-        pending.push({ ...pendingEntry(decl), ...(detail ? { detail } : {}), context: pageContext(decl, everything || head) })
+        pending.push({ ...pendingEntry(decl), ...(detail ? { detail } : {}), context: pageContext(decl, everything || head, surface) })
       }
       // Findings a rule can place on a source line are kept only when that
       // line changed, so a PR is not asked to fix what it did not touch.
@@ -202,6 +219,8 @@ function lintStrings (options) {
     merged.summary.alreadyReviewed = alreadyReviewed
     merged.summary.reviewerWritten = reviewerWritten.length
     merged.summary.reviewerWrittenDeclarations = reviewerWritten
+    merged.summary.closedChanged = closedChanged.length
+    merged.summary.closedChangedDeclarations = closedChanged
   }
   merged.summary.removedDeclarations = removal.declarations.map(pendingEntry)
   // Declarations whose text has gaps the extractor could not evaluate
@@ -253,9 +272,10 @@ const CONTEXT_STRING_LIMIT = 600
  *   that this string names, plus (metrics) its neighbors in the same group.
  *
  * Drawn from declarations already extracted for the diff, so it costs no
- * extra extraction. Deterministic, capped, and order-stable.
+ * extra extraction. Deterministic, capped, and order-stable. With the
+ * surface module, each entry carries its declaration key (see declKey).
  */
-function pageContext (decl, all) {
+function pageContext (decl, all, surface = null) {
   const others = all.filter((d) => d !== decl && d.string != null)
   const byDistance = (d) => Math.abs((d.line_start || 0) - (decl.line_start || 0))
   const sameFile = others.filter((d) => d.file === decl.file)
@@ -285,6 +305,10 @@ function pageContext (decl, all) {
     kind: (d.meta && d.meta.kind) || d.surface,
     file: d.file,
     line_start: d.line_start,
+    line_end: d.line_end,
+    // So a review can raise one issue on a string this change made wrong,
+    // keyed to that string rather than to the changed one.
+    ...(surface ? { key: d.key || declKey(surface, d) } : {}),
     string: d.string.length > CONTEXT_STRING_LIMIT ? `${d.string.slice(0, CONTEXT_STRING_LIMIT)}...` : d.string
   }))
 }
@@ -300,6 +324,43 @@ function fingerprint (decl) {
     .update(JSON.stringify([decl.surface, decl.name, decl.string == null ? null : decl.string]))
     .digest('hex')
     .slice(0, 16)
+}
+
+/**
+ * Stable identity for one declaration across every version of its text: the
+ * file it lives in, its surface and its contextual identity (identityOf), but
+ * not the string. A PR review closes a declaration's key once it has
+ * reviewed it, so the author's fix, a committed suggestion or a later edit
+ * of the same declaration is never reviewed again. The bare name is not
+ * enough: names repeat across files and components (two connect components
+ * each with a `tls` field), so the file and the surface's identity are part
+ * of the key. A declaration that moves to another file gets a new key.
+ */
+function declKey (surface, decl) {
+  return crypto.createHash('sha256')
+    .update(JSON.stringify([decl.file, decl.surface, identityOf(surface, decl)]))
+    .digest('hex')
+    .slice(0, 16)
+}
+
+/**
+ * Give every declaration its key (decl.key). Declarations of one file that
+ * share an identity (the same flag on two rpk commands in one file, two
+ * metrics with one name, unnamed declarations) are told apart by their
+ * order in the file: the first keeps the plain key, so a file with no
+ * repeats keys as before, and the n-th mixes in n. A span is never folded
+ * into another's key.
+ */
+function assignKeys (surface, decls) {
+  const seen = new Map()
+  const ordered = decls.map((d, i) => ({ d, i })).sort((a, b) =>
+    String(a.d.file).localeCompare(String(b.d.file)) || (a.d.line_start || 0) - (b.d.line_start || 0) || a.i - b.i)
+  for (const { d } of ordered) {
+    const plain = declKey(surface, d)
+    const n = seen.get(plain) || 0
+    seen.set(plain, n + 1)
+    d.key = n === 0 ? plain : crypto.createHash('sha256').update(JSON.stringify([plain, n])).digest('hex').slice(0, 16)
+  }
 }
 
 function removalFingerprint (surfaceName, identity) {
@@ -326,7 +387,8 @@ function pendingEntry (decl) {
     file: decl.file,
     line_start: decl.line_start,
     line_end: decl.line_end,
-    fingerprint: decl.fingerprint
+    fingerprint: decl.fingerprint,
+    ...(decl.key ? { key: decl.key } : {})
   }
 }
 
@@ -446,7 +508,8 @@ function collectRemovals ({ repoPath, diffBase, removed, surfaces, requested, he
           line_end: decl.line_end,
           string: decl.string,
           removed_lines: count,
-          fingerprint: removalFingerprint(surfaceName, identityOf(surface, decl))
+          fingerprint: removalFingerprint(surfaceName, identityOf(surface, decl)),
+          key: declKey(surface, { ...decl, surface: surfaceName })
         })
       }
     } catch (err) {
@@ -489,6 +552,9 @@ function formatHuman (result) {
   lines.push(`Declarations flagged: ${summary.flaggedDeclarations}`)
   if (summary.alreadyReviewed) {
     lines.push(`Already reviewed on an earlier push (skipped): ${summary.alreadyReviewed}`)
+  }
+  if (summary.closedChanged) {
+    lines.push(`Reviewed on an earlier push and edited since (not reviewed again): ${summary.closedChanged}`)
   }
   if (summary.reviewerWritten) {
     lines.push(`Text a human reviewer suggested on the PR (skipped): ${summary.reviewerWritten}`)
@@ -537,7 +603,7 @@ function formatHuman (result) {
  *
  * @param {Object} [options]
  * @param {string[]} [options.surfaces] - Only rules that run on these surfaces
- * @returns {Array<{id, surfaces, severity, description, why, standard}>}
+ * @returns {Array<{id, surfaces, severity, tier, description, why, standard}>}
  */
 function listRules ({ surfaces = null } = {}) {
   const names = surfaces && surfaces.length > 0 ? surfaces : Object.keys(SURFACES)
@@ -552,6 +618,8 @@ function listRules ({ surfaces = null } = {}) {
           id: rule.name,
           surfaces: [],
           severity: rule.severity,
+          // The tier a finding of this rule lands in (see issueTier).
+          tier: issueTier(rule, rule.severity),
           description: rule.description,
           why: rule.why,
           standard: rule.standard
@@ -567,7 +635,7 @@ function listRules ({ surfaces = null } = {}) {
 function formatRulesHuman (rules) {
   const lines = []
   for (const rule of rules) {
-    lines.push(`${rule.id} (${rule.severity})`)
+    lines.push(`${rule.id} (${rule.severity}, ${rule.tier})`)
     lines.push(`  Surfaces: ${rule.surfaces.join(', ')}`)
     lines.push(`  Checks: ${rule.description}`)
     lines.push(`  Why: ${rule.why}`)
@@ -597,10 +665,11 @@ function formatRulesAsciidoc (rules) {
   surfaceNames.sort((a, b) => order.indexOf(a) - order.indexOf(b))
   let doc = '*Rules:*\n\n'
   doc += 'Generated from `doc-tools lint-strings --list-rules`. Each rule links the section of the docs team standard it enforces.\n\n'
+  doc += 'The tier decides where the doc-strings PR review puts a finding: `wrong` and `unclear` findings are posted on the pull request, and `style` findings go to the job summary only. An error-severity finding is never below `unclear`, and an info-severity finding is always `style`.\n\n'
   for (const name of surfaceNames) {
-    doc += `.${name}\n[cols="2,1,3,4",options="header"]\n|===\n|Rule |Severity |Checks |Why\n\n`
+    doc += `.${name}\n[cols="2,1,1,3,4",options="header"]\n|===\n|Rule |Severity |Tier |Checks |Why\n\n`
     for (const rule of rules.filter((r) => r.surfaces.includes(name))) {
-      doc += `|\`${rule.id}\`\n|${rule.severity}\n|${cell(rule.description)}\n|${cell(rule.why)} ${rule.standard}[Standard]\n\n`
+      doc += `|\`${rule.id}\`\n|${rule.severity}\n|${rule.tier}\n|${cell(rule.description)}\n|${cell(rule.why)} ${rule.standard}[Standard]\n\n`
     }
     doc += '|===\n\n'
   }
@@ -608,8 +677,9 @@ function formatRulesAsciidoc (rules) {
 }
 
 /**
- * Read a --reviewed file: fingerprints separated by whitespace or commas.
- * Anything that is not a 16-hex-digit fingerprint is ignored, and a missing
+ * Read a --reviewed or --closed file: fingerprints or declaration keys
+ * separated by whitespace or commas (both are 16 hex digits).
+ * Anything that is not a 16-hex-digit token is ignored, and a missing
  * file is an empty set, so a first run and a corrupted cache both mean
  * "review everything" rather than an error.
  */
@@ -749,7 +819,8 @@ function runCli (options) {
       skipRules: options.skipRules ? String(options.skipRules).split(',').map((s) => s.trim()).filter(Boolean) : [],
       onlyRules: options.onlyRules ? String(options.onlyRules).split(',').map((s) => s.trim()).filter(Boolean) : null,
       reviewedFingerprints: options.reviewed ? readFingerprints(options.reviewed) : null,
-      reviewerPassages: options.reviewerComments ? readReviewerComments(options.reviewerComments) : null
+      reviewerPassages: options.reviewerComments ? readReviewerComments(options.reviewerComments) : null,
+      closedKeys: options.closed ? readFingerprints(options.closed) : null
     })
   } catch (err) {
     console.error(`Error: ${err.message}`)
@@ -768,7 +839,7 @@ function runCli (options) {
   process.exitCode = options.strict && result.summary.errors > 0 ? 1 : 0
 }
 
-module.exports = { lintStrings, formatHuman, listRules, formatRulesHuman, formatRulesAsciidoc, runCli, SURFACES, rulesFor, fingerprint, readFingerprints, reviewerPassagesFrom, readReviewerComments, pageContext }
+module.exports = { lintStrings, formatHuman, listRules, formatRulesHuman, formatRulesAsciidoc, runCli, SURFACES, rulesFor, fingerprint, declKey, readFingerprints, reviewerPassagesFrom, readReviewerComments, pageContext }
 
 // Direct usage: node tools/lint-strings --repo <path> [--surface a,b]
 //   [--diff <base>] [--format json|human] [--strict]
@@ -785,6 +856,7 @@ if (require.main === module) {
     else if (arg === '--skip-rules') options.skipRules = args[++i]
     else if (arg === '--only-rules') options.onlyRules = args[++i]
     else if (arg === '--reviewed') options.reviewed = args[++i]
+    else if (arg === '--closed') options.closed = args[++i]
     else if (arg === '--reviewer-comments') {
       // A present flag with no operand must not act like an absent one, or
       // `--reviewer-comments --strict` would read --strict as the file and
@@ -800,7 +872,7 @@ if (require.main === module) {
     else if (arg === '--list-rules') options.listRules = true
     else {
       console.error(`Unknown argument: ${arg}`)
-      console.error('Usage: node tools/lint-strings --repo <path> [--surface a,b] [--diff <base>] [--format json|human] [--skip-rules a,b] [--only-rules a,b] [--reviewed <file>] [--reviewer-comments <file>] [--strict]\n       node tools/lint-strings --list-rules [--surface a,b] [--format json|human]')
+      console.error('Usage: node tools/lint-strings --repo <path> [--surface a,b] [--diff <base>] [--format json|human] [--skip-rules a,b] [--only-rules a,b] [--reviewed <file>] [--closed <file>] [--reviewer-comments <file>] [--strict]\n       node tools/lint-strings --list-rules [--surface a,b] [--format json|human]')
       process.exit(2)
     }
   }

@@ -3146,6 +3146,7 @@ programCli
   .option('--skip-rules <list>', 'Comma-separated rule ids to skip')
   .option('--only-rules <list>', 'Comma-separated rule ids to run exclusively')
   .option('--reviewed <file>', 'Diff mode: skip declarations whose fingerprint is listed in <file> (already reviewed on an earlier push)')
+  .option('--closed <file>', 'Diff mode: declaration keys a review on this PR already closed (one per line). A touched declaration with one of these keys is not reviewed again and is reported under summary.closedChangedDeclarations')
   .option('--reviewer-comments <file>', 'Diff mode: skip declarations whose text a human reviewer wrote in one of the comment bodies in <file> (a JSON array of strings)')
   .option('--strict', 'Exit 1 when any error-severity finding exists (default: always exit 0 - suggest, never block)')
   .option('--list-rules', 'Print every rule (id, surfaces, severity, description, why, standard) and exit. Honors --surface and --format.')
@@ -3253,6 +3254,52 @@ programCli
     const result = declaredChanges(body)
     if (result.declared && options.output) fs.writeFileSync(options.output, result.text)
     console.log(JSON.stringify({ declared: result.declared, sections: result.sections, hash: result.hash }))
+  })
+
+/**
+ * build-review
+ *
+ * @description
+ * Builds the one PR review the doc-strings review workflow posts per run,
+ * from the findings.json its model writes and the lint report it ran on:
+ * one inline comment per issue, style findings kept for the job summary,
+ * declarations already reviewed on the PR never commented on again, lines
+ * mapped from the merge commit to the PR head and checked against the PR's
+ * hunks, and every suggestion re-linted before it is posted. Writes
+ * review.json, review-fallback.json (every comment in the body, for a 422),
+ * keys.txt and summary.md, and prints what it decided as one JSON line. A
+ * missing or unreadable findings.json exits 1 and closes nothing.
+ *
+ * @why
+ * The model only writes findings.json. How many comments a run posts, where
+ * they anchor, and which declarations it closes are decided here,
+ * mechanically, and the eval runs the same code the workflow does.
+ *
+ * @example
+ * # What the doc-strings review runs after its Claude step
+ * npx doc-tools build-review --findings findings.json --lint lint-findings.json \
+ *   --closed closed.txt --base "$BASE" --head-sha "$HEAD_SHA" \
+ *   --self-check-base "$BASE" --out-dir "$RUNNER_TEMP/review"
+ */
+programCli
+  .command('build-review')
+  .description('Build the doc-strings PR review (one comment per issue) from the review model\'s findings.json')
+  .requiredOption('--findings <file>', 'findings.json the review model wrote (absent means no issues)')
+  .requiredOption('--lint <file>', 'lint-findings.json the review ran on (lint-strings --diff --format json)')
+  .option('--repo <path>', 'Checkout the lint ran on', '.')
+  .option('--closed <file>', 'Declaration keys already closed on the PR (its markers and the cached keys)')
+  .option('--base <ref>', 'Take the PR\'s hunks from git diff <base>...<head-ref>, the commits the lint ran on')
+  .option('--pr-files <file>', 'Take the hunks from gh api --paginate repos/OWNER/REPO/pulls/N/files output instead of --base')
+  .option('--head-ref <ref>', 'Commit holding the PR head (default: HEAD^2 on a merge commit, otherwise HEAD)')
+  .option('--head-sha <sha>', 'PR head SHA, sent as the review\'s commit_id')
+  .option('--committable <bool>', 'Carry rewrites in suggestion blocks (true) or text blocks (false)', 'true')
+  .option('--style-comments <bool>', 'Also post style-tier findings inline', 'false')
+  .option('--self-check-base <ref>', 'Apply every suggestion to a scratch worktree and re-lint against this base; a suggestion that adds a warning loses its block')
+  .option('--surface <list>', 'Surfaces for the self-check lint (default: all)')
+  .option('--out-dir <dir>', 'Where to write review.json, review-fallback.json, keys.txt and summary.md', '.')
+  .action((options) => {
+    const { runCli } = require('../tools/doc-strings-review')
+    process.exit(runCli(options))
   })
 
 /**
