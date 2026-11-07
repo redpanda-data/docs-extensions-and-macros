@@ -789,6 +789,35 @@ function decodeHtmlEntities(text) {
 }
 
 /**
+ * Whether lines[i] is a wrapped continuation of a list item: indented to
+ * the item's text column, with only same-indent lines between it and the
+ * item's bullet. Help text wraps bullets this way
+ *
+ *   * Without a scope flag, it fails over the whole Shadow Link. Besides
+ *     command again resumes from that phase.
+ *
+ * so a continuation line can start with a word ("rpk", "command") that
+ * would otherwise read as an indented command example.
+ * @param {string[]} lines - All lines
+ * @param {number} i - Index of the line to test
+ * @returns {boolean}
+ */
+function isListItemContinuation(lines, i) {
+  const indent = lines[i].search(/\S/)
+  if (indent < 1) return false
+  // A lead-in ending in a colon introduces an example, even inside a list item
+  if (i > 0 && /:\s*$/.test(lines[i - 1])) return false
+  for (let k = i - 1; k >= 0; k--) {
+    const prev = lines[k]
+    if (prev.trim() === '') return false
+    const bullet = prev.match(/^\s*(?:[-*]|\d+[.)])\s+/)
+    if (bullet) return bullet[0].length === indent
+    if (prev.search(/\S/) !== indent) return false
+  }
+  return false
+}
+
+/**
  * Convert indented code examples and YAML/config blocks to protected placeholders
  * Detects patterns like:
  *   --flag value --other "arg"    (command examples)
@@ -885,7 +914,7 @@ function convertIndentedCodeBlocksToAsciiDoc(text, codeBlockStore = []) {
     // e.g. "  --job-name test --labels ..."
     // e.g. "  rpk cluster info"
     // e.g. "  $ echo 'command'"
-    if (/^[ ]{2,}(--|rpk\s|\$\s)/.test(line)) {
+    if (/^[ ]{2,}(--|rpk\s|\$\s)/.test(line) && !isListItemContinuation(lines, i)) {
       // Collect all consecutive indented lines that look like command continuation
       // Strip trailing backslashes as we'll add them during join
       // Also strip leading "$ " shell prompt if present
@@ -1378,6 +1407,25 @@ function applyTextTransformationsToExamples(text, customTransformations) {
   ).join('\n')
 }
 
+// Indented lines that read as a command to run (STEP 1c of formatDescription)
+const INDENTED_COMMAND_RE = /^[ \t]+((?:rpk|source|command|echo|export|brew|curl|wget|cat|mkdir|chmod|sudo)\s+.+?)$/
+
+/**
+ * Wrap indented single-line commands in backticks, except lines that
+ * continue a list item (see STEP 1c in formatDescription).
+ * @param {string} text - Description text
+ * @returns {string} Text with indented commands backticked
+ */
+function convertStandaloneIndentedCommands(text) {
+  const lines = text.split('\n')
+  return lines.map((line, i) => {
+    const match = line.match(INDENTED_COMMAND_RE)
+    if (!match || match[1].startsWith('__EARLY_CODE_BLOCK_')) return line
+    if (isListItemContinuation(lines, i)) return line
+    return `\`${match[1]}\``
+  }).join('\n')
+}
+
 /**
  * Format description by adding backticks around flags and code
  * @param {string} desc - Description text
@@ -1431,19 +1479,16 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   // Convert to:
   // `rpk cluster partitions balancer-status`
   // `rpk cluster license set --path /home/file.license`
-  preProcessed = preProcessed.replace(/^[ \t]+(rpk\s+.+?)$/gm, (match, command) => {
-    // Skip if this line is a placeholder (already converted to code block)
-    if (command.startsWith('__EARLY_CODE_BLOCK_')) return match
-    return `\`${command}\``
-  })
-
-  // Also convert indented non-rpk shell commands (starting with common commands)
-  // These are shell snippets that should be code, not prose
-  preProcessed = preProcessed.replace(/^[ \t]+((?:source|command|echo|export|brew|curl|wget|cat|mkdir|chmod|sudo)\s+.+?)$/gm, (match, command) => {
-    // Skip if this line is a placeholder (already converted to code block)
-    if (command.startsWith('__EARLY_CODE_BLOCK_')) return match
-    return `\`${command}\``
-  })
+  //
+  // Also converts indented non-rpk shell commands (starting with common
+  // commands): these are shell snippets that should be code, not prose.
+  //
+  // An indented line that continues a list item is prose, even when its
+  // first word is "rpk" or "command". Converting it turned the list
+  // continuation "  command again resumes from that phase. 'rpk shadow
+  // status' reports the link" into one code span (rpk shadow failover,
+  // v26.3.1-rc2).
+  preProcessed = convertStandaloneIndentedCommands(preProcessed)
 
   // === STEP 2: Protect code blocks, xrefs, and inline code ===
   // Protect code blocks FIRST (before any transformations)
@@ -1614,6 +1659,10 @@ function formatDescription(desc, customTransformations = null, options = {}) {
     // Also handles '--flag/-f', '--flag help', and similar patterns
     .replace(/'(--[a-z][-a-z0-9]*(?:\/-[a-z])?(?:\s+\w+)?)'/gi, '$1')
     .replace(/'(-[a-z])'/gi, '$1')
+    // Single-quoted constants are code: state and enum names such as
+    // 'FAILED_OVER' or 'ACTIVE' (rpk shadow failover). Uppercase only, so
+    // quoted prose words keep their quotes.
+    .replace(/(?<![\w'`])'([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*)'(?![\w'`])/g, (match, name) => name.length > 1 ? `\`${name}\`` : match)
     // Drop a dangling example lead-in with nothing after it (upstream help
     // strings sometimes end mid-example, which would render as "for example,.")
     .replace(/[,;]?\s*\be\.g\.[\s,]*$/i, '')
@@ -1648,13 +1697,19 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   // below only ever matches "rpk <word>", so without this pass it wraps
   // `rpk` alone and splits the command in half. Matching against the real
   // tree means prose that merely resembles a command is never wrapped.
+  // A path may wrap onto the next line of help text ("with rpk shadow\n
+  // config generate"); the wrapped path joins into one span on one line,
+  // or only `rpk` would be wrapped.
   if (knownCommandPaths.size > 0) {
-    result = result.replace(/(?<![`\w])rpk((?: [a-z][-a-z0-9]*)+)/g, (match, rest) => {
-      const tokens = rest.trim().split(' ')
-      for (let n = tokens.length; n >= 2; n--) {
-        const path = `rpk ${tokens.slice(0, n).join(' ')}`
+    result = result.replace(/(?<![`\w])rpk((?:(?: |\n[ \t]*)[a-z][-a-z0-9]*)+)/g, (match) => {
+      // [rpk, sep, token, sep, token, ...]
+      const parts = match.split(/( |\n[ \t]*)/)
+      const tokens = parts.filter((_, idx) => idx % 2 === 0)
+      for (let n = tokens.length - 1; n >= 2; n--) {
+        const path = tokens.slice(0, n + 1).join(' ')
         if (knownCommandPaths.has(path)) {
-          return `\`${path}\`` + match.slice(path.length)
+          const consumed = parts.slice(0, 2 * n + 1).join('')
+          return `\`${path}\`` + match.slice(consumed.length)
         }
       }
       return match
@@ -1833,6 +1888,13 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   // Clean up double backticks (moved AFTER restoration to catch nested backticks)
   result = result.replace(/``+/g, '`')
 
+  // A dotfile name is code as a whole: filename rules that match from the
+  // first letter leave the leading dot outside the span (".`bootstrap.yaml`"
+  // on rpk redpanda start). Only a dot that starts a word moves inside, so a
+  // sentence-final period before a span is untouched, and only before a
+  // file name (a span with an extension).
+  result = result.replace(/(^|[\s(["'])\.`([^`\s]+\.[A-Za-z0-9]+)`/gm, '$1`.$2`')
+
   // Final pass: escape {word} (no hyphens) inside any backtick spans that were created
   // dynamically during processing (after the initial inline-code protection step).
   // Skip `+...+` passthrough spans — they already prevent attribute substitution.
@@ -1860,15 +1922,25 @@ function formatDescription(desc, customTransformations = null, options = {}) {
 
 /**
  * Format usage string - convert [PLACEHOLDER] to <placeholder>
+ *
+ * rpk's own commands write every positional argument as [UPPERCASE],
+ * required or not, so those become <lowercase>. Plugin commands follow
+ * cobra's convention instead: <name> is required and [NAME] is optional.
+ * For them, [NAME] keeps its brackets and is lowercased, the way an
+ * optional argument such as `rpk generate [template]` already renders.
  * @param {string} usage - Usage string from rpk
+ * @param {Object} [options]
+ * @param {boolean} [options.plugin] - The usage belongs to a plugin command
  * @returns {string} Formatted usage string
  */
-function formatUsage(usage) {
+function formatUsage(usage, { plugin = false } = {}) {
   if (!usage) return ''
   // Convert [UPPERCASE-PLACEHOLDER] to <lowercase-placeholder>
   // But keep [flags] as-is since that's the standard convention
   return usage.replace(/\[([A-Z][-A-Z0-9_]*(?:\.\.\.)?)\]/g, (match, placeholder) => {
-    return '<' + placeholder.toLowerCase() + '>'
+    return plugin
+      ? '[' + placeholder.toLowerCase() + ']'
+      : '<' + placeholder.toLowerCase() + '>'
   })
 }
 
@@ -2437,6 +2509,14 @@ const KNOWN_PLUGINS = ['ai', 'check', 'connect', 'k8s', 'oxla']
 const PLUGIN_SHIM_COMMANDS = new Set(['install', 'uninstall', 'upgrade'])
 
 /**
+ * Managed plugins that run from their root command and have no subcommands:
+ * rpk check runs every check from `rpk check` itself, so its subtree is
+ * only ever the shim, installed or not. rpk marks the flags such a plugin
+ * reports with from_plugin, which is what shows it installed.
+ */
+const ROOT_ONLY_PLUGINS = new Set(['check'])
+
+/**
  * Check whether a command path belongs to a protected plugin's subtree
  * (including the plugin's own top-level command).
  * @param {string} commandPath - Full command path, e.g. 'rpk k8s multicluster'
@@ -2469,8 +2549,11 @@ function detectProtectedPlugins(commands, explicitProtected = []) {
     const subNames = commands
       .filter(c => c.path.startsWith(`rpk ${pl} `))
       .map(c => c.path.split(' ')[2])
-    const hasTopLevel = commands.some(c => c.path === `rpk ${pl}`)
-    if (!hasTopLevel) return true
+    const top = commands.find(c => c.path === `rpk ${pl}`)
+    if (!top) return true
+    if (ROOT_ONLY_PLUGINS.has(pl)) {
+      return !((top.command && top.command.flags) || []).some(f => f.from_plugin === true)
+    }
     return subNames.length === 0 || subNames.every(n => PLUGIN_SHIM_COMMANDS.has(n))
   })
   return [...new Set([...explicitProtected, ...autoProtected])]
@@ -2645,6 +2728,7 @@ async function generateRpkDocs(options = {}) {
     // rpk k8s before its GA plugin publishes). Their pages and nav entries are
     // preserved instead of treated as stale, because their absence from the
     // command tree reflects the generation environment, not the product.
+    // Also main-only plugins (rpk ai) on a version-branch run.
     protectedPlugins = []
   } = options
 
@@ -2925,7 +3009,7 @@ async function generateRpkDocs(options = {}) {
       name: command.name,
       description: formattedDescription,
       shortDesc: ensurePeriod(capToTwoSentences(formatDescription(mainDescription, textTransformations, { skipTableConversion: true, skipListConversion: true }))),
-      usage: formatUsage(command.usage),
+      usage: formatUsage(command.usage, { plugin: pathParts.length >= 3 && KNOWN_PLUGINS.includes(pathParts[1]) }),
       aliases: (mergedCommand.aliases || command.aliases || [])
         .filter(alias => !commandOverride.excludeAliases?.includes(alias))
         .map(alias => {
@@ -2957,8 +3041,11 @@ async function generateRpkDocs(options = {}) {
         name: flag.shorthand ? `-${flag.shorthand}, --${flag.name}` : `--${flag.name}`,
         type: flag.type || '-',
         description: ensurePeriod(formatDescription(flag.description || '', textTransformations)),
-        deprecated: flag.deprecated,
-        deprecatedMessage: flag.deprecatedMessage,
+        // --print-tree gives pflag's deprecation message as the deprecated
+        // value itself; overrides give deprecated: true plus a message
+        deprecated: Boolean(flag.deprecated),
+        deprecatedMessage: flag.deprecatedMessage ||
+          (typeof flag.deprecated === 'string' ? flag.deprecated : undefined),
         cloudOnly: flag.cloudOnly,
         selfHostedOnly: flag.selfHostedOnly,
         validValues: flag.validValues,
@@ -3175,7 +3262,7 @@ async function generateRpkDocs(options = {}) {
   for (const dir of rpkSubdirs(cloudSecretDir)) scanDirs.add(dir)
   for (const dir of [...scanDirs]) {
     if (protectedDirNames.has(path.basename(dir))) {
-      console.log(`  Preserving ${path.basename(dir)}/ (plugin commands absent from this run's tree)`)
+      console.log(`  Preserving ${path.basename(dir)}/ (protected plugin, not regenerated this run)`)
       scanDirs.delete(dir)
     }
   }
@@ -3306,6 +3393,7 @@ module.exports = {
   shouldUsePartialDir,
   updateNavFile,
   KNOWN_PLUGINS,
+  ROOT_ONLY_PLUGINS,
   detectProtectedPlugins,
   getCommandMetadata,
   processContentArray,

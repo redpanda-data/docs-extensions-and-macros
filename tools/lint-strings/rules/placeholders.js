@@ -31,6 +31,7 @@
  * .adoc pages.
  */
 
+const { STANDARD } = require('../standards')
 const SKIP_LANGS = new Set(['xml', 'html', 'rust', 'coffeescript', 'text', 'bloblang', 'blobl'])
 const EDITABLE = /&lt;.[^&A-Z]+&gt;/g
 // Asciidoctor's callout markers at the end of a line (<1>, <.>, // <1>,
@@ -287,6 +288,8 @@ function unexplainedPlaceholders (text) {
 const PLACEHOLDER_RULE = {
   name: 'unexplained-placeholder',
   description: 'Editable code-block placeholder that nothing near the block explains',
+  why: 'The docs UI turns a <name> in a code block into a field the reader types into, so a reader left to guess what goes there copies a config that does not work.',
+  standard: STANDARD.placeholders,
   severity: 'warning',
   check: (decl) => {
     const text = decl.string || ''
