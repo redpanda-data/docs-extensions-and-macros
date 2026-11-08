@@ -220,6 +220,20 @@ describe('checkSources: every finding class', () => {
     expect(result.findings[0].movedTo).toEqual([{ start: 8, end: 8 }])
   })
 
+  test('a client call that rejects is unreachable, not a crash', async () => {
+    const root = makeRepo({ 'modules/ROOT/pages/p.adoc': '// source: redpanda-data/a:x.go:1\nClaim.\n// source: redpanda-data/b:y.go:1\nClaim.\n' })
+    const client = {
+      authenticated: true,
+      getFile: ({ repo }) => repo === 'a'
+        ? new Promise((resolve) => setTimeout(() => resolve({ status: 'ok', text: 'q\n' }), 50))
+        : Promise.reject(new Error('body read failed')),
+      getPull: async () => ({}),
+      headUrl: async () => ({})
+    }
+    const result = await checkSources({ files: ['modules/ROOT/pages/p.adoc'], root, client })
+    expect(result.findings.map((f) => [f.rule, f.message])).toEqual([['unreachable', expect.stringMatching(/body read failed/)]])
+  })
+
   test('unreachable is a warning, not a pass and not an error', async () => {
     const { rules, result } = await check('// source: redpanda-data/streaming-enterprise:src/config.go:5 "return 1073741824"\nClaim.\n', { files: FILES, unreachableRepos: ['streaming-enterprise'] })
     expect(rules).toEqual(['unreachable'])
@@ -414,6 +428,13 @@ describe('createGitHubClient (stubbed fetch)', () => {
     const offline = createGitHubClient({ token: 't', fetchImpl: fakeFetch([]), sleep: async () => {} })
     const got = await offline.getFile({ owner: 'redpanda-data', repo: 'r', ref: null, path: 'a' })
     expect(got).toEqual({ status: 'unreachable', reason: 'redpanda-data/r:a: getaddrinfo ENOTFOUND api.github.com' })
+  })
+
+  test('a body that fails to read is unreachable', async () => {
+    const broken = (url) => ({ ok: true, status: 200, headers: { get: () => 'application/json' }, text: async () => { throw new Error('socket hang up') }, json: async () => { throw new Error('socket hang up') } })
+    const client = createGitHubClient({ token: 't', fetchImpl: async (url) => broken(url) })
+    expect(await client.getFile({ owner: 'redpanda-data', repo: 'r', ref: null, path: 'a' })).toEqual({ status: 'unreachable', reason: 'redpanda-data/r:a: failed to read response body: socket hang up' })
+    expect(await client.getPull({ owner: 'redpanda-data', repo: 'r', number: 1 })).toEqual({ status: 'unreachable', reason: 'redpanda-data/r#1: failed to read response body: socket hang up' })
   })
 
   test('PR state: merged_at wins over closed (read through /issues, which answers for PRs too)', async () => {

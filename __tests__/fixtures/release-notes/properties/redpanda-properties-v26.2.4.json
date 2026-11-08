@@ -1,0 +1,8 @@
+{
+  "definitions": {},
+  "properties": {
+    "cloud_storage_segment_max_upload_interval_sec": {},
+    "retention.ms": {},
+    "rack": {}
+  }
+}

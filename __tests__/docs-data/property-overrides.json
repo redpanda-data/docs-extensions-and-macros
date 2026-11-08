@@ -117,7 +117,6 @@
       ]
     },
     "api_doc_dir": {
-      "description": "Path to the API specifications directory. This directory contains API documentation for both the HTTP Proxy API and Schema Registry API.",
       "config_scope": "broker",
       "category": "pandaproxy"
     },
@@ -220,7 +219,8 @@
       "description": "The name of the Azure container to use with Tiered Storage. If `null`, the property is disabled. The container must belong to `cloud_storage_azure_storage_account`.",
       "links": {
         "`cloud_storage_azure_storage_account`": "#cloud_storage_azure_storage_account"
-      }
+      },
+      "upstream_ref": "redpanda-data/streaming-enterprise#549"
     },
     "cloud_storage_azure_hierarchical_namespace_enabled": {
       "description": "Force Redpanda to use or not use an Azure Data Lake Storage (ADLS) Gen2 hierarchical namespace-compliant client in `cloud_storage_azure_storage_account`. \n\nWhen this property is not set, `cloud_storage_azure_shared_key` must be set, and each broker checks at startup if a hierarchical namespace is enabled. \n\nWhen set to `true`, this property disables the check and assumes a hierarchical namespace is enabled. \n\nWhen set to `false`, this property disables the check and assumes a hierarchical namespace is not enabled. \n\nThis setting should be used only in emergencies where Redpanda fails to detect the correct a hierarchical namespace status.",
@@ -252,16 +252,17 @@
       ]
     },
     "cloud_storage_bucket": {
-      "description": "AWS or GCP bucket that should be used to store data.",
+      "description": "Name of the AWS or GCP bucket that Redpanda uses to store object storage data. Must be set when object storage is enabled: if `null`, Redpanda cannot configure object storage. For Azure, set `cloud_storage_azure_container` instead.",
       "admonitions": [
         {
           "type": "warning",
           "text": "Modifying this property after writing data to a bucket could cause data loss."
         }
-      ]
+      ],
+      "upstream_ref": "redpanda-data/streaming-enterprise#406"
     },
     "cloud_storage_cache_directory": {
-      "description": "Directory for archival cache. Set when the `cloud_storage_enabled` cluster property is enabled. If not specified, Redpanda uses a default path within the data directory.",
+      "description": "Directory for the object storage cache. Set this when the `cloud_storage_enabled` cluster property is enabled. If not set, Redpanda uses `cloud_storage_cache` inside the directory given by `data_directory`.",
       "example": [
         "[,yaml]",
         "----",
@@ -275,7 +276,8 @@
       "category": "redpanda",
       "see_also": [
         "xref:reference:properties/object-storage-properties.adoc#cloud_storage_enabled[`cloud_storage_enabled`]"
-      ]
+      ],
+      "upstream_ref": "redpanda-data/streaming-enterprise#406"
     },
     "cloud_storage_cache_max_objects": {
       "links": {
@@ -314,9 +316,6 @@
     },
     "cloud_storage_cache_trim_walk_concurrency": {
       "description": "The maximum number of concurrent tasks launched for traversing the directory structure during cache trimming. A higher number allows cache trimming to run faster but can cause latency spikes due to increased pressure on I/O subsystem and syscall threads."
-    },
-    "cloud_storage_chunk_prefetch": {
-      "description": "Number of chunks to prefetch ahead of every downloaded chunk. Prefetching additional chunks can enhance read performance by reducing wait times for sequential data access. A value of `0` disables prefetching, relying solely on on-demand downloads. Adjusting this property allows for tuning the balance between improved read performance and increased network and storage I/O."
     },
     "cloud_storage_client_lease_timeout_ms": {
       "description": "The maximum time Redpanda holds a connection to object storage before closing it. After this timeout, any active connection is immediately closed and must be re-established for subsequent operations.",
@@ -361,27 +360,21 @@
     "cloud_storage_disable_archiver_manager": {
       "config_scope": "cluster"
     },
-    "cloud_storage_disable_chunk_reads": {
-      "description": "Disable chunk reads and switch back to legacy mode where full segments are downloaded. When set to `true`, this option disables the more efficient chunk-based reads, causing Redpanda to download entire segments. This legacy behavior might be useful in specific scenarios where chunk-based fetching is not optimal."
-    },
     "cloud_storage_disable_read_replica_loop_for_tests": {
-      "description": "Begins the read replica sync loop in topic partitions with Tiered Storage enabled. The property exists to simplify testing and shouldn't be set in production."
+      "description": "Prevents the read replica sync loop from starting in topic partitions with Tiered Storage enabled. This property exists to simplify testing and must not be set in production.",
+      "upstream_ref": "redpanda-data/streaming-enterprise#406"
     },
     "cloud_storage_disable_remote_labels_for_tests": {
-      "description": "If `true`, Redpanda disables remote labels and falls back on the hash-based object naming scheme for new topics.",
+      "description": "If `true`, Redpanda disables remote labels and falls back on the hash-based object naming scheme for new topics. This property exists to simplify testing and must not be set in production.",
       "config_scope": "cluster",
-      "admonitions": [
-        {
-          "type": "caution",
-          "text": "This property exists to simplify testing and shouldn't be set in production."
-        }
-      ]
+      "upstream_ref": "redpanda-data/streaming-enterprise#406"
     },
     "cloud_storage_disable_upload_consistency_checks": {
       "description": "Disable all upload consistency checks to allow Redpanda to upload logs with gaps and replicate metadata with consistency violations. Do not change the default value unless requested by Redpanda Support."
     },
     "cloud_storage_disable_upload_loop_for_tests": {
-      "description": "Begins the upload loop in topic partitions with Tiered Storage enabled. The property exists to simplify testing and shouldn't be set in production."
+      "description": "Prevents the upload loop from starting in topic partitions with Tiered Storage enabled. This property exists to simplify testing and must not be set in production.",
+      "upstream_ref": "redpanda-data/streaming-enterprise#406"
     },
     "cloud_storage_enable_compacted_topic_reupload": {
       "description": "Enable re-uploading data for compacted topics.\nWhen set to `true`, Redpanda can re-upload data for compacted topics to object storage, ensuring that the most current state of compacted topics is available in the cloud. Disabling this property (`false`) may reduce storage and network overhead but at the risk of not having the latest compacted data state in object storage."
@@ -426,7 +419,8 @@
       "links": {
         "housekeeping run": "self-managed-only: xref:manage:tiered-storage.adoc#object-storage-housekeeping"
       },
-      "version": "v25.3.11"
+      "version": "v25.3.11",
+      "upstream_ref": "redpanda-data/streaming-enterprise#549"
     },
     "cloud_storage_graceful_transfer_timeout_ms": {
       "description": "Time limit on waiting for uploads to complete before a leadership transfer.  If this is `null`, leadership transfers proceed without waiting."
@@ -444,7 +438,6 @@
       "description": "The timeout, in milliseconds, used to detect the idle state of the object storage API. If the average object storage request rate is below this threshold for a configured amount of time, the object storage is considered idle and the housekeeping jobs are started."
     },
     "cloud_storage_inventory_hash_path_directory": {
-      "description": "Directory to store inventory report hashes for use by cloud storage scrubber. If not specified, Redpanda uses a default path within the data directory.",
       "example": [
         "[,yaml]",
         "----",
@@ -464,17 +457,20 @@
       "description": "Minimum interval, in seconds, between partition manifest uploads. Actual time between uploads may be greater than this interval. If this is `null`, metadata is updated after each segment upload."
     },
     "cloud_storage_manifest_upload_timeout_ms": {
-      "description": "Manifest upload timeout, in milliseconds."
+      "description": "Maximum time, in milliseconds, that Redpanda spends on each manifest upload to or download from object storage, including retries. Redpanda also uses this value as the deadline for replicating archival metadata updates to the partition's replicas. Increase this value for object storage with high or variable latency.",
+      "upstream_ref": "redpanda-data/streaming-enterprise#549"
     },
     "cloud_storage_materialized_manifest_ttl_ms": {
-      "description": "The interval, in milliseconds, determines how long the materialized manifest can stay in the cache under contention. This setting is used for performance tuning. When the spillover manifest is materialized and stored in the cache, and the cache needs to evict it, it uses this value as a timeout. The cursor that uses the spillover manifest uses this value as a TTL interval, after which it stops referencing the manifest making it available for eviction. This only affects spillover manifests under contention.",
-      "config_scope": "cluster"
+      "description": "The interval, in milliseconds, that determines how long the materialized manifest can stay in the cache under contention. This setting is used for performance tuning. When the spillover manifest is materialized and stored in the cache, and the cache needs to evict it, it uses this value as a timeout. The cursor that uses the spillover manifest uses this value as a TTL interval, after which it stops referencing the manifest, making it available for eviction. This only affects spillover manifests under contention.",
+      "config_scope": "cluster",
+      "upstream_ref": "redpanda-data/streaming-enterprise#549"
     },
     "cloud_storage_max_connection_idle_time_ms": {
       "description": "Defines the maximum duration an HTTPS connection to object storage can stay idle, in milliseconds, before being terminated.\nThis setting reduces resource utilization by closing inactive connections. Adjust this property to balance keeping connections ready for subsequent requests and freeing resources associated with idle connections."
     },
     "cloud_storage_max_segment_readers_per_shard": {
-      "description": "Maximum concurrent I/O cursors of materialized remote segments per CPU core.  If unset, the value of `topic_partitions_per_shard` is used, where one segment reader per partition is used if the shard is at its maximum partition capacity.  These readers are cached across Kafka consume requests and store a readahead buffer."
+      "description": "Maximum concurrent I/O cursors of materialized remote segments per CPU core. If unset, Redpanda uses the value of `topic_partitions_per_shard`, which allows one segment reader per partition when the shard is at its maximum partition capacity. These readers are cached across Kafka consume requests and store a readahead buffer.",
+      "upstream_ref": "redpanda-data/streaming-enterprise#549"
     },
     "cloud_storage_max_segments_pending_deletion_per_partition": {
       "description": "The per-partition limit for the number of segments pending deletion from the cloud. Segments can be deleted due to retention or compaction. If this limit is breached and deletion fails, then segments are orphaned in the cloud and must be removed manually. Applies only to the in-memory manifest; spillover manifests are not affected by this limit."
@@ -496,9 +492,6 @@
     },
     "cloud_storage_prefetch_segments_max": {
       "version": "v26.1.1"
-    },
-    "cloud_storage_readreplica_manifest_sync_timeout_ms": {
-      "description": "Timeout to check if new data is available for partitions in object storage for read replicas."
     },
     "cloud_storage_recovery_topic_validation_depth": {
       "links": {
@@ -836,7 +829,6 @@
       "config_scope": "cluster"
     },
     "controller_log_accummulation_rps_capacity_topic_operations": {
-      "description": "Maximum capacity of rate limit accumulation in controller topic operations limit.",
       "config_scope": "cluster"
     },
     "controller_log_learner_recovery_rate_enabled": {
@@ -1020,7 +1012,6 @@
     "developer_mode": {
       "config_scope": "broker",
       "category": "redpanda",
-      "description": "Enable developer mode, which skips most of the checks performed at startup.",
       "admonitions": [
         {
           "type": "caution",
@@ -1039,7 +1030,6 @@
       "description": "The percentage of total disk capacity that Redpanda will avoid using. This applies both when cloud cache and log data share a disk, as well \nas when cloud cache uses a dedicated disk. \n\nIt is recommended to not run disks near capacity to avoid blocking I/O due to low disk space, as well as avoiding performance issues associated with SSD garbage collection."
     },
     "election_timeout_ms": {
-      "description": "Raft election timeout expressed in milliseconds.",
       "config_scope": "cluster"
     },
     "emergency_disable_data_transforms": {
@@ -1187,7 +1177,6 @@
       "config_scope": "cluster"
     },
     "iceberg_backlog_controller_p_coeff": {
-      "description": "Proportional coefficient for the Iceberg backlog controller. Number of shares assigned to the datalake scheduling group will be proportional to the backlog size error. A negative value means larger and faster changes in the number of shares in the datalake scheduling group.",
       "config_scope": "cluster"
     },
     "iceberg_catalog_base_location": {
@@ -1266,7 +1255,6 @@
       ]
     },
     "iceberg_rest_catalog_authentication_mode": {
-      "description": "The authentication mode for client requests made to the Iceberg catalog. Choose from: `none`, `bearer`, `oauth2`, `aws_sigv4`, and `gcp`. In `bearer` mode, the token specified in `iceberg_rest_catalog_token` is used unconditionally, and no attempts are made to refresh the token. In `oauth2` mode, the credentials specified in `iceberg_rest_catalog_client_id` and `iceberg_rest_catalog_client_secret` are used to obtain a bearer token from the URI defined by `iceberg_rest_catalog_oauth2_server_uri`. In `aws_sigv4` mode, the same AWS credentials used for cloud storage (see `cloud_storage_region`, `cloud_storage_access_key`, `cloud_storage_secret_key`, and `cloud_storage_credentials_source`) are used to sign requests to AWS Glue catalog with SigV4. In `gcp` mode, GCP VM instance metadata credentials are used to authenticate with the Iceberg REST catalog.",
       "config_scope": "cluster"
     },
     "iceberg_rest_catalog_aws_access_key": {
@@ -1326,7 +1314,6 @@
     },
     "iceberg_rest_catalog_endpoint": {
       "config_scope": "cluster",
-      "description": "URL of Iceberg REST catalog endpoint.",
       "links": {
         "`iceberg_catalog_type`": "#iceberg_catalog_type"
       },
@@ -1444,7 +1431,6 @@
       "config_scope": "cluster"
     },
     "kafka_api": {
-      "description": "IP address and port of the Kafka API endpoint that handles requests. Supports multiple listeners with different configurations.",
       "example": [
         ".Basic example",
         "[,yaml]",
@@ -1914,8 +1900,7 @@
     },
     "mode_mutability": {
       "config_scope": "broker",
-      "category": "schema-registry",
-      "description": "Enable modifications to the read-only `mode` of the Schema Registry. When set to `true`, the entire Schema Registry or its subjects can be switched to `READONLY` or `READWRITE`. This property is useful for preventing unwanted changes to the entire Schema Registry or specific subjects."
+      "category": "schema-registry"
     },
     "nested_group_behavior": {
       "version": "v26.1.1"
@@ -2092,7 +2077,6 @@
       "config_scope": "cluster"
     },
     "pp_sr_smp_max_non_local_requests": {
-      "description": "Maximum number of cross-core (inter-shard communication) requests pending in HTTP Proxy and Schema Registry's Seastar SMP group. For more details, see the Seastar `smp_service_group` documentation at https://docs.seastar.io/master/.",
       "config_scope": "cluster"
     },
     "produce_ack_level": {
@@ -2141,7 +2125,6 @@
       "config_scope": "cluster"
     },
     "raft_smp_max_non_local_requests": {
-      "description": "Maximum number of cross-core (inter-shard communication) requests pending in Raft's Seastar SMP group. For details, see the Seastar `smp_service_group` documentation at https://docs.seastar.io/master/.",
       "config_scope": "cluster"
     },
     "reclaim_stable_window": {
@@ -2971,7 +2954,6 @@
       "config_scope": "cluster"
     },
     "transaction_coordinator_cleanup_policy": {
-      "description": "Cleanup policy for a transaction coordinator topic.",
       "config_scope": "cluster",
       "accepted_values": [
         "none",

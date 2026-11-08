@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "5.56.0",
+  "version": "5.62.0",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -95,9 +95,11 @@
     "./extensions/property-page-index": "./extensions/property-page-index.js",
     "./extensions/render-property-descriptions": "./extensions/render-property-descriptions.js",
     "./extensions/kapa-source-groups": "./extensions/kapa-source-groups.js",
+    "./extensions/xref-index": "./extensions/xref-index.js",
     "./docs-data/kapa-source-groups.json": "./docs-data/kapa-source-groups.json",
     "./macros/iceberg-explorer": "./macros/iceberg-explorer.js",
-    "./macros/iceberg-explorer.js": "./macros/iceberg-explorer.js"
+    "./macros/iceberg-explorer.js": "./macros/iceberg-explorer.js",
+    "./vendor/dts/manifest.json": "./vendor/dts/manifest.json"
   },
   "files": [
     "extensions",
@@ -110,7 +112,8 @@
     "docker-compose",
     "mcp",
     "docs-data/*.schema.json",
-    "docs-data/kapa-source-groups.json"
+    "docs-data/kapa-source-groups.json",
+    "vendor/dts"
   ],
   "license": "ISC",
   "engines": {
