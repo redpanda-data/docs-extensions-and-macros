@@ -1431,6 +1431,13 @@
       "config_scope": "cluster"
     },
     "kafka_api": {
+      "description": "IP address and port of the Kafka API endpoint that handles requests. Supports multiple listeners with different configurations. Each listener's optional `authentication_method` field sets how clients authenticate on that listener: `none` (no authentication), `sasl` (SASL authentication), or `mtls_identity` (the client's principal is derived from its TLS certificate using the `kafka_mtls_principal_mapping_rules` cluster property). A listener that uses `mtls_identity` needs a `kafka_api_tls` entry with the same `name` that enables TLS and sets `require_client_auth: true`. If `authentication_method` is not set, the listener uses `sasl` when `enable_sasl` is `true` and `kafka_enable_authorization` is `null`, and `none` otherwise. Values are case-sensitive, and an unrecognized value is treated as `none`.",
+      "links": {
+        "`kafka_mtls_principal_mapping_rules`": "#kafka_mtls_principal_mapping_rules",
+        "`kafka_api_tls`": "#kafka_api_tls",
+        "`enable_sasl`": "#enable_sasl",
+        "`kafka_enable_authorization`": "#kafka_enable_authorization"
+      },
       "example": [
         ".Basic example",
         "[,yaml]",
