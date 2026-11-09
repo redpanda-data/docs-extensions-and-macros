@@ -555,3 +555,42 @@ describe('generateFrontmatter page-introduced-in', () => {
     expect(markdown).toContain('Reads rows.')
   })
 })
+
+// A Solutions page puts its "Last verified" line in a badge inside the
+// component bar, which the converter removes. The Markdown twin keeps the
+// badge's full sentence under the title instead.
+describe('Solutions Verified badge', () => {
+  async function twinOf(articleInner) {
+    const handlers = {}
+    const noop = () => {}
+    const context = { on: (event, fn) => { handlers[event] = fn }, getLogger: () => ({ info: noop, debug: noop, warn: noop, error: noop }) }
+    require('../../extensions/convert-to-markdown').register.call(context)
+    const twin = {
+      contents: Buffer.from(`<html><body><article class="doc sol-doc">${articleInner}</article></body></html>`),
+      asciidoc: { doctitle: 'Start the environment', attributes: {} },
+      src: { component: 'solutions', version: '', path: 'modules/demo/pages/start-environment.adoc' },
+      pub: { url: '/solutions/demo/start-environment/' },
+    }
+    await handlers.pagesComposed({ playbook: { site: { url: 'https://docs.redpanda.com' } }, contentCatalog: { getPages: () => [twin] } })
+    return twin.markdownContents.toString()
+  }
+  const BAR = '<div class="component-indicator-sticky sol-indicator"><div class="component-indicator"><span class="component-indicator-pill">Solutions</span></div>'
+    + '<span class="status-badge status-badge--verified"><span class="status-badge__parts" aria-hidden="true"><span>Verified November 9, 2026</span><span class="status-badge__sep">·</span><span>Redpanda v26.2.2</span></span>'
+    + '<span class="status-badge__sr-text">Last verified November 9, 2026 against Redpanda v26.2.2 on Docker Compose, Kubernetes, and Redpanda Cloud.</span></span></div>'
+
+  test('writes the sentence under the title, once, and drops the rest of the bar', async () => {
+    // The real order: the bar, then the eyebrow (back link and step count), then the title.
+    const md = await twinOf(`${BAR}<header class="sol-step-header"><div class="sol-eyebrow"><a class="sol-eyebrow-link" href="../">Demo</a> / <span class="sol-eyebrow-label">Step 1 of 9</span></div><h1 class="page sol-title">Start the environment</h1></header><p>One command brings up the stack.</p>`)
+    expect(md).toContain('# Start the environment\n\nLast verified November 9, 2026 against Redpanda v26.2.2 on Docker Compose, Kubernetes, and Redpanda Cloud.\n\nOne command brings up the stack.')
+    expect(md.match(/Last verified/g)).toHaveLength(1)
+    expect(md).not.toContain('Verified November 9, 2026 ·')
+    expect(md).not.toMatch(/^Solutions$/m)
+  })
+
+  test('leaves a page without the badge unchanged', async () => {
+    const md = await twinOf('<div class="component-indicator-sticky"><span class="component-indicator-pill">Connect</span></div><h1>sap_hana</h1><p>Reads rows.</p>')
+    expect(md).toMatch(/^# sap_hana\n/)
+    expect(md).toContain('Reads rows.')
+    expect(md).not.toContain('Last verified')
+  })
+})

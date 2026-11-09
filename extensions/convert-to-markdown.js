@@ -494,6 +494,23 @@ module.exports.register = function () {
       replacement: () => '',
     })
 
+    // Solutions pages carry their "Last verified" line as a badge in the
+    // component bar, which the rule above removes with the rest of the bar.
+    // Keep it for readers of the Markdown: write the badge's full sentence
+    // (its screen-reader text) under the page title, where it used to sit.
+    td.addRule('solution-verified-line', {
+      filter: (node) => {
+        if (node.nodeName !== 'H1' || !node.ownerDocument) return false
+        return Boolean(node.ownerDocument.querySelector('.status-badge--verified .status-badge__sr-text'))
+      },
+      replacement: (content, node) => {
+        const sr = node.ownerDocument.querySelector('.status-badge--verified .status-badge__sr-text')
+        const line = (sr?.textContent || '').replace(/\s+/g, ' ').trim()
+        const title = `# ${content.trim()}`
+        return line ? `\n\n${title}\n\n${line}\n\n` : `\n\n${title}\n\n`
+      },
+    })
+
     // Keep critical content blocks only
     td.keep(['div.openblock.tabs', 'article.doc'])
     return td
