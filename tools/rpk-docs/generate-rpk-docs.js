@@ -1892,9 +1892,17 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   // Restore in descending order: a later span can contain an earlier one's
   // placeholder (a rule wrapped a span around it), and restoring the outer
   // span first brings the inner placeholder back before its turn.
+  // An inner span restored inside an outer one is spliced in without its own
+  // backticks, so one span survives: `a `+b+`` would otherwise leave three
+  // backticks after the double-backtick cleanup below, and a stray literal
+  // backtick in the published span.
   for (let i = inlineCode.length - 1; i >= 0; i--) {
     const transformed = applyTextTransformations(inlineCode[i], customTransformations, { code: true })
-    result = result.replace(`__INLINE_CODE_${i}__`, () => transformed)
+    result = result.replace(`__INLINE_CODE_${i}__`, (match, offset, whole) => {
+      const insideSpan = ((whole.slice(0, offset).match(/`/g) || []).length % 2) === 1
+      const delimited = transformed.length > 1 && transformed.startsWith('`') && transformed.endsWith('`')
+      return insideSpan && delimited ? transformed.slice(1, -1) : transformed
+    })
   }
 
   // Restore xrefs
