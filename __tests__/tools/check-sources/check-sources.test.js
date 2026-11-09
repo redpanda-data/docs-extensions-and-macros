@@ -111,6 +111,14 @@ describe('parseSourceComment', () => {
     expect(parseSourceComment(' DOC-2496').ref).toMatchObject({ kind: 'jira', key: 'DOC-2496' })
     expect(parseSourceComment(' CORE11-42').ref).toMatchObject({ kind: 'jira', key: 'CORE11-42' })
     expect(parseSourceComment(' https://docs.redpanda.com/current/get-started/').ref).toMatchObject({ kind: 'url' })
+    // A fragment is part of the URL, not a symbol ref with `https` as the repo.
+    expect(parseSourceComment(' https://kafka.apache.org/documentation/#brokerconfigs_log.segment.bytes').ref)
+      .toMatchObject({ kind: 'url', url: 'https://kafka.apache.org/documentation/#brokerconfigs_log.segment.bytes' })
+    expect(parseSourceComment(' https://github.com/redpanda-data/connect/blob/main/go.mod#L10').ref).toMatchObject({ kind: 'url' })
+    const quoted = parseSourceComment(' https://kafka.apache.org/documentation/#brokerconfigs_log.segment.bytes "1073741824"')
+    expect(quoted.error).toBeUndefined()
+    expect(quoted.ref).toMatchObject({ kind: 'url' })
+    expect(quoted.quote).toBe('1073741824')
   })
 
   test.each([

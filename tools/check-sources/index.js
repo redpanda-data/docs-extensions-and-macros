@@ -135,6 +135,18 @@ function parseSourceComment (rest) {
 }
 
 function parseRef (refText) {
+  // A URL first: a fragment (`#brokerconfigs_...`, a permalink's `#L10`) would
+  // otherwise match the symbol pattern, with `https` as the repo.
+  if (/^https:\/\//i.test(refText)) {
+    try {
+      const url = new URL(refText)
+      if (!url.hostname.includes('.')) return { error: `not a valid https URL: ${refText}` }
+      return { kind: 'url', text: refText, url: url.toString() }
+    } catch {
+      return { error: `not a valid https URL: ${refText}` }
+    }
+  }
+  if (/^http:\/\//i.test(refText)) return { error: `URLs must use https: ${refText}` }
   let m = SYMBOL_REF_RE.exec(refText)
   if (m) {
     const [, owner = OWNER, repo, gitRef, filePath, symbol] = m
@@ -158,16 +170,6 @@ function parseRef (refText) {
     return { kind: 'pr', text: refText, owner, repo, number: Number(number) }
   }
   if (JIRA_RE.test(refText)) return { kind: 'jira', text: refText, key: refText }
-  if (/^https:\/\//.test(refText)) {
-    try {
-      const url = new URL(refText)
-      if (!url.hostname.includes('.')) return { error: `not a valid https URL: ${refText}` }
-      return { kind: 'url', text: refText, url: url.toString() }
-    } catch {
-      return { error: `not a valid https URL: ${refText}` }
-    }
-  }
-  if (/^http:\/\//.test(refText)) return { error: `URLs must use https: ${refText}` }
   return {
     error: `unrecognized ref ${JSON.stringify(refText)}: expected <repo>[@<ref>]:<path>#<symbol>, redpanda-data/<repo>[@<ref>]:<path>:<line>[-<line>], redpanda-data/<repo>#<pr>, a Jira key, or an https:// URL`
   }
