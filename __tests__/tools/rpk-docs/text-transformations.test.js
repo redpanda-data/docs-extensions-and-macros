@@ -247,8 +247,8 @@ describe('rules that add no backticks apply inside code spans (DOC-2686)', () =>
 
   test('a span wrapped around a JSON argument does not leak a placeholder', () => {
     const out = formatDescription('Run "rpk ai trace list --args \'{"a":"bc"}\'" now.', { replacements: [quotedRpk] })
-    expect(out).not.toMatch(/__INLINE_CODE_\d+__/)
-    expect(out).toContain('{"a":"bc"}')
+    // One span, with the JSON passthrough inside it: not three backticks.
+    expect(out).toBe("Run `rpk ai trace list --args +'{\"a\":\"bc\"}'+` now.")
   })
 
   test('keeps a single-quoted JSON argument with spaces whole', () => {
