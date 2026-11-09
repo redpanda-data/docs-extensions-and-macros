@@ -556,41 +556,55 @@ describe('generateFrontmatter page-introduced-in', () => {
   })
 })
 
-// A Solutions page puts its "Last verified" line in a badge inside the
-// component bar, which the converter removes. The Markdown twin keeps the
-// badge's full sentence under the title instead.
-describe('Solutions Verified badge', () => {
-  async function twinOf(articleInner) {
-    const handlers = {}
-    const noop = () => {}
-    const context = { on: (event, fn) => { handlers[event] = fn }, getLogger: () => ({ info: noop, debug: noop, warn: noop, error: noop }) }
-    require('../../extensions/convert-to-markdown').register.call(context)
-    const twin = {
-      contents: Buffer.from(`<html><body><article class="doc sol-doc">${articleInner}</article></body></html>`),
-      asciidoc: { doctitle: 'Start the environment', attributes: {} },
-      src: { component: 'solutions', version: '', path: 'modules/demo/pages/start-environment.adoc' },
-      pub: { url: '/solutions/demo/start-environment/' },
-    }
-    await handlers.pagesComposed({ playbook: { site: { url: 'https://docs.redpanda.com' } }, contentCatalog: { getPages: () => [twin] } })
-    return twin.markdownContents.toString()
-  }
-  const BAR = '<div class="component-indicator-sticky sol-indicator"><div class="component-indicator"><span class="component-indicator-pill">Solutions</span></div>'
-    + '<span class="status-badge status-badge--verified"><span class="status-badge__parts" aria-hidden="true"><span>Verified November 9, 2026</span><span class="status-badge__sep">·</span><span>Redpanda v26.2.2</span></span>'
-    + '<span class="status-badge__sr-text">Last verified November 9, 2026 against Redpanda v26.2.2 on Docker Compose, Kubernetes, and Redpanda Cloud.</span></span></div>'
+// Everything the UI's component bar shows as a badge reaches the Markdown
+// twin's front matter, so a reader of the Markdown gets the same page facts.
+describe('component bar facts in the front matter', () => {
+  const { generateFrontmatter } = require('../../extensions/convert-to-markdown')
+  const yamlOf = (attributes, siteUrl) => require('js-yaml').load(generateFrontmatter({ asciidoc: { doctitle: 'x', attributes } }, siteUrl).trim().replace(/^---\n/, '').replace(/\n---$/, ''))
 
-  test('writes the sentence under the title, once, and drops the rest of the bar', async () => {
-    // The real order: the bar, then the eyebrow (back link and step count), then the title.
-    const md = await twinOf(`${BAR}<header class="sol-step-header"><div class="sol-eyebrow"><a class="sol-eyebrow-link" href="../">Demo</a> / <span class="sol-eyebrow-label">Step 1 of 9</span></div><h1 class="page sol-title">Start the environment</h1></header><p>One command brings up the stack.</p>`)
-    expect(md).toContain('# Start the environment\n\nLast verified November 9, 2026 against Redpanda v26.2.2 on Docker Compose, Kubernetes, and Redpanda Cloud.\n\nOne command brings up the stack.')
-    expect(md.match(/Last verified/g)).toHaveLength(1)
-    expect(md).not.toContain('Verified November 9, 2026 ·')
-    expect(md).not.toMatch(/^Solutions$/m)
+  test('release status badges and their texts', () => {
+    const fm = yamlOf({
+      'page-beta': '', 'page-beta-text': 'In beta until 26.3.',
+      'page-preview': '', 'page-preview-text': 'Not covered by Enterprise Support.',
+      'page-limited-availability': '', 'page-limited-availability-text': 'Ask your account team.',
+    })
+    expect(fm['page-beta']).toBe(true)
+    expect(fm['page-beta-text']).toBe('In beta until 26.3.')
+    expect(fm['page-preview']).toBe(true)
+    expect(fm['page-preview-text']).toBe('Not covered by Enterprise Support.')
+    expect(fm['page-limited-availability']).toBe(true)
+    expect(fm['page-limited-availability-text']).toBe('Ask your account team.')
   })
 
-  test('leaves a page without the badge unchanged', async () => {
-    const md = await twinOf('<div class="component-indicator-sticky"><span class="component-indicator-pill">Connect</span></div><h1>sap_hana</h1><p>Reads rows.</p>')
-    expect(md).toMatch(/^# sap_hana\n/)
-    expect(md).toContain('Reads rows.')
-    expect(md).not.toContain('Last verified')
+  test('a badge text never travels without its badge', () => {
+    const fm = yamlOf({ 'page-beta-text': 'x', 'page-preview-text': 'y', 'page-cloud-available-url': '/redpanda-cloud/x/' })
+    expect(fm).not.toHaveProperty('page-beta-text')
+    expect(fm).not.toHaveProperty('page-preview-text')
+    expect(fm).not.toHaveProperty('page-cloud-available-url')
+  })
+
+  test('availability links become full URLs on the site', () => {
+    const fm = yamlOf({ 'page-cloud-available': '', 'page-cloud-available-url': '/redpanda-cloud/develop/connect/components/inputs/sap_hana/' }, 'https://docs.redpanda.com')
+    expect(fm['page-cloud-available']).toBe(true)
+    expect(fm['page-cloud-available-url']).toBe('https://docs.redpanda.com/redpanda-cloud/develop/connect/components/inputs/sap_hana/')
+    const sm = yamlOf({ 'page-self-managed-available': '', 'page-self-managed-available-url': '/connect/components/inputs/sap_hana/' })
+    expect(sm['page-self-managed-available-url']).toBe('/connect/components/inputs/sap_hana/', 'no site URL: left as it is')
+  })
+
+  test('platform-only flags', () => {
+    const fm = yamlOf({ 'page-byoc-only': '', 'page-cloud-only': '', 'page-cloud-only-text': 'Fully managed only.', 'page-self-managed-only': '' })
+    expect(fm['page-byoc-only']).toBe(true)
+    expect(fm['page-cloud-only']).toBe(true)
+    expect(fm['page-cloud-only-text']).toBe('Fully managed only.')
+    expect(fm['page-self-managed-only']).toBe(true)
+  })
+
+  test('the context switcher becomes a list, and bad JSON is left out', () => {
+    const fm = yamlOf({ 'page-context-switcher': '[{"name": "Version 2.x", "to": "24.3@console:config:x.adoc"}, {"name": "Version 3.x", "to": "current@console:config:x.adoc"}]' })
+    expect(fm['page-context-switcher']).toEqual([
+      { name: 'Version 2.x', to: '24.3@console:config:x.adoc' },
+      { name: 'Version 3.x', to: 'current@console:config:x.adoc' },
+    ])
+    expect(yamlOf({ 'page-context-switcher': 'not json' })).not.toHaveProperty('page-context-switcher')
   })
 })

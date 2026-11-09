@@ -122,7 +122,7 @@ function decodeHtmlEntities (str) {
  * @param {Object} page - The page object with asciidoc attributes
  * @returns {string} YAML frontmatter string or empty string if no attributes
  */
-function generateFrontmatter(page) {
+function generateFrontmatter(page, siteUrl) {
   const frontmatter = {}
 
   // Add title (decode HTML entities from AsciiDoc processing)
@@ -173,6 +173,25 @@ function generateFrontmatter(page) {
     // self-managed pages; the UI shows them as a "Since" badge.
     'page-introduced-in',
     'page-introduced-in-product',
+    // The rest of what the UI's component bar shows as badges, so a reader of
+    // the Markdown gets the same page facts: release status, where else the
+    // page applies, and the other contexts of the same page.
+    'page-preview',
+    'page-preview-text',
+    'page-limited-availability',
+    'page-limited-availability-text',
+    'page-byoc',
+    'page-byoc-text',
+    'page-byoc-only',
+    'page-cloud',
+    'page-cloud-only',
+    'page-cloud-only-text',
+    'page-self-managed-only',
+    'page-cloud-available',
+    'page-cloud-available-url',
+    'page-self-managed-available',
+    'page-self-managed-available-url',
+    'page-context-switcher',
     // Component-specific version attributes (from antora.yml)
     'latest-redpanda-tag', // Redpanda docker tag (e.g., v25.3.5)
     'latest-console-tag',
@@ -205,8 +224,42 @@ function generateFrontmatter(page) {
     // Only include attributes in our allowlist or learning objectives
     if (!allowedAttributes.includes(key) && !isLearningObjective) return
 
-    // Only include page-beta-text if page-beta is true
-    if (key === 'page-beta-text' && !attrs['page-beta']) {
+    // A badge's text only travels with its badge: page-beta-text needs
+    // page-beta, page-preview-text needs page-preview, and so on.
+    const textOf = {
+      'page-beta-text': 'page-beta',
+      'page-preview-text': 'page-preview',
+      'page-limited-availability-text': 'page-limited-availability',
+      'page-byoc-text': 'page-byoc',
+      'page-cloud-only-text': 'page-cloud-only',
+      'page-cloud-available-url': 'page-cloud-available',
+      'page-self-managed-available-url': 'page-self-managed-available',
+    }
+    if (textOf[key] && attrs[textOf[key]] === undefined) {
+      return
+    }
+
+    // The availability links are site-root paths; the twin is read off the
+    // site, so write them as full URLs, as the body's links are.
+    if (key === 'page-cloud-available-url' || key === 'page-self-managed-available-url') {
+      const url = String(value).trim()
+      if (!url) return
+      try {
+        frontmatter[key] = siteUrl && url.startsWith('/') ? new URL(url, siteUrl).toString() : url
+      } catch (err) {
+        frontmatter[key] = url
+      }
+      return
+    }
+
+    // The context switcher travels as JSON ([{ name, to }]); the twin wants a list.
+    if (key === 'page-context-switcher') {
+      try {
+        const parsed = JSON.parse(value)
+        if (Array.isArray(parsed) && parsed.length) frontmatter[key] = parsed
+      } catch (err) {
+        // Not JSON: leave it out rather than write a string nobody can use.
+      }
       return
     }
 
@@ -492,23 +545,6 @@ module.exports.register = function () {
         )
       },
       replacement: () => '',
-    })
-
-    // Solutions pages carry their "Last verified" line as a badge in the
-    // component bar, which the rule above removes with the rest of the bar.
-    // Keep it for readers of the Markdown: write the badge's full sentence
-    // (its screen-reader text) under the page title, where it used to sit.
-    td.addRule('solution-verified-line', {
-      filter: (node) => {
-        if (node.nodeName !== 'H1' || !node.ownerDocument) return false
-        return Boolean(node.ownerDocument.querySelector('.status-badge--verified .status-badge__sr-text'))
-      },
-      replacement: (content, node) => {
-        const sr = node.ownerDocument.querySelector('.status-badge--verified .status-badge__sr-text')
-        const line = (sr?.textContent || '').replace(/\s+/g, ' ').trim()
-        const title = `# ${content.trim()}`
-        return line ? `\n\n${title}\n\n${line}\n\n` : `\n\n${title}\n\n`
-      },
     })
 
     // Keep critical content blocks only
@@ -835,7 +871,7 @@ module.exports.register = function () {
           } else {
             // Regular pages: full treatment with frontmatter and directive
             // Generate YAML frontmatter from AsciiDoc attributes
-            const frontmatter = generateFrontmatter(page)
+            const frontmatter = generateFrontmatter(page, siteUrl)
             if (frontmatter) {
               logger.debug(`Generated frontmatter for ${page.src?.path}`)
             }
