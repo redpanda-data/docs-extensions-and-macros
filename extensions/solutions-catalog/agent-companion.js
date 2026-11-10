@@ -344,6 +344,12 @@ function prose (lines, ctx, { tables = false } = {}) {
   // reader can't tell which platform the passage is for.
   let blockTitle = null
   let platformAttr = false
+  // A synced platform tab set ([tabs,sync-group-id=platform], then `======`)
+  // is read, not dropped like other delimited blocks: each `Label::` line
+  // becomes an `**On Label:**` lead-in, so an agent sees every deployment's
+  // passage and can follow the one for the user's.
+  let platformTabsNext = false
+  let platformTabs = null
   const dropLeadIn = () => {
     let k = out.length - 1
     while (k >= 0 && !out[k].trim()) k--
@@ -368,6 +374,14 @@ function prose (lines, ctx, { tables = false } = {}) {
     if (fileList) { if (line) continue; fileList = false }
     if (/^\.Files for this step\b/.test(line)) { fileList = true; continue }
     if (tables && TABLE_RX.test(line)) { rows = []; continue }
+    if (/^\[tabs\b[^\]]*\bsync-group-id=platform\b[^\]]*\]$/.test(line)) { platformTabsNext = true; continue }
+    if (platformTabsNext && /^={4,}$/.test(line)) { platformTabs = line; platformTabsNext = false; continue }
+    platformTabsNext = false
+    if (platformTabs) {
+      if (line === platformTabs) { platformTabs = null; continue }
+      const label = line.match(/^(\S.*?)::$/)
+      if (label) { out.push('', `**On ${label[1]}:**`, ''); blockTitle = null; platformAttr = false; continue }
+    }
     if (isDelimiter(line)) { dropLeadIn(); skip = line; cols = null; continue }
     if (tables) {
       const c = line.match(/^\[.*\bcols=(?:"([^"]*)"|([^,\]]+)).*\]$/)
