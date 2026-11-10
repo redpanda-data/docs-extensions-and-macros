@@ -7,8 +7,12 @@
 # repo whose workflows call doc-strings-review.yml, found by code search at
 # run time, and breaks the rate down by repo, surface, and month.
 #
-# Read-only: it writes the report to the run's summary page and uploads the
-# per-suggestion rows as an artifact. It posts, comments, and changes nothing.
+# It writes the report to the run's summary page, uploads the per-suggestion
+# rows as an artifact, and posts a short version to $SLACK_CHANNEL as the
+# vbotbuildovich app, with the slack_vbot_token from Secrets Manager (the same
+# way docs-site's afdocs-trend.yml posts). Until devprod-infra grants that
+# secret to this repo, the post is skipped with a notice and the report still
+# runs. It comments on and changes nothing in the repos it reads.
 name: doc-strings-acceptance-report
 
 on:
@@ -24,6 +28,10 @@ on:
 permissions:
   contents: read
   id-token: write
+
+env:
+  # The app (vbotbuildovich) must be a member of this channel.
+  SLACK_CHANNEL: '#docs-agent-traffic'
 
 concurrency:
   group: doc-strings-acceptance-report
@@ -60,7 +68,7 @@ jobs:
           SINCE: ${{ github.event.inputs.since }}
         run: |
           set -euo pipefail
-          ARGS=(--summary "$GITHUB_STEP_SUMMARY" --json "$RUNNER_TEMP/acceptance-rows.json")
+          ARGS=(--summary "$GITHUB_STEP_SUMMARY" --json "$RUNNER_TEMP/acceptance-rows.json" --slack "$RUNNER_TEMP/slack.json" --slack-channel "$SLACK_CHANNEL")
           if [ -n "$SINCE" ]; then
             [[ "$SINCE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || { echo "::error::since must be YYYY-MM-DD, got '$SINCE'"; exit 1; }
             ARGS+=(--since "$SINCE")
@@ -72,3 +80,33 @@ jobs:
           name: doc-strings-acceptance-rows
           path: ${{ runner.temp }}/acceptance-rows.json
           retention-days: 90
+
+      # A separate fetch, so a missing grant skips the post instead of
+      # failing the report.
+      - name: Fetch the Slack token
+        id: slack_token
+        continue-on-error: true
+        uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            ,sdlc/prod/github/slack_vbot_token
+          parse-json-secrets: true
+
+      # chat.postMessage answers HTTP 200 with ok:false on every API error, so
+      # the step checks ok and fails on anything else.
+      - name: Post to Slack
+        run: |
+          set -euo pipefail
+          if [ -z "${SLACK_VBOT_TOKEN:-}" ]; then
+            echo "::notice::Slack post skipped: this repo cannot read sdlc/prod/github/slack_vbot_token yet (a devprod-infra grant)."
+            exit 0
+          fi
+          curl -sS --max-time 30 -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer ${SLACK_VBOT_TOKEN}" \
+            -H 'Content-Type: application/json; charset=utf-8' \
+            --data @"$RUNNER_TEMP/slack.json" > "$RUNNER_TEMP/slack-response.json"
+          if ! jq -e '.ok == true' "$RUNNER_TEMP/slack-response.json" > /dev/null; then
+            echo "::error::Slack rejected the post: $(jq -r '.error // "no error field"' "$RUNNER_TEMP/slack-response.json")"
+            exit 1
+          fi
+          echo "Posted the report to $SLACK_CHANNEL"

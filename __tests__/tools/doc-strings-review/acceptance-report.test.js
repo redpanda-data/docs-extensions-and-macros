@@ -1,6 +1,6 @@
 'use strict'
 
-const { extractSuggestion, similarity, classify, perDeclaration, formatMarkdown } = require('../../../tools/doc-strings-review/acceptance-report')
+const { extractSuggestion, similarity, classify, perDeclaration, formatMarkdown, formatSlack } = require('../../../tools/doc-strings-review/acceptance-report')
 
 // Shaped like the real cases from streaming-enterprise (PR 1414 and others):
 // a configuration.cc declaration, the lines a suggestion was posted against,
@@ -108,5 +108,34 @@ describe('formatMarkdown', () => {
     expect(md).toMatch(/## By surface[\s\S]*\| properties \|/)
     expect(md).toMatch(/\| connect \| 1 \| - \|/)
     expect(md).toMatch(/\[streaming-enterprise#1\]\(u2\)/)
+  })
+})
+
+describe('formatSlack', () => {
+  const rows = [
+    { repo: 'redpanda-data/streaming-enterprise', pr: 1, path: 'src/v/config/configuration.cc', surface: 'properties', decl: 'a', created: '2026-10-01T00:00:00Z', outcome: 'taken', replies: 0, url: 'u1' },
+    { repo: 'redpanda-data/streaming-enterprise', pr: 1, path: 'src/v/config/configuration.cc', surface: 'properties', decl: 'b', created: '2026-10-01T00:00:00Z', outcome: 'declined', replies: 0, url: 'u2' },
+    { repo: 'redpanda-data/connect', pr: 2, path: 'internal/impl/x.go', surface: 'connect', decl: 'c', created: '2026-11-01T00:00:00Z', outcome: 'open', replies: 0, url: 'u3' }
+  ]
+
+  it('builds a digest-style payload: title, headline, repo and surface lines, a footer link', () => {
+    const p = formatSlack(rows, { since: '2026-09-01', until: '2026-11-10', runUrl: 'https://github.com/o/r/actions/runs/1' })
+    expect(p.text).toBe('Doc-strings review suggestions taken, 2026-09-01 to 2026-11-10: 50% taken or adapted')
+    expect(p.blocks[0].text.text).toMatch(/^\*Doc-strings review suggestions taken, 2026-09-01 to 2026-11-10\*\n\n\*50%\* of 2 suggestions/)
+    expect(p.blocks[1].text.text).toMatch(/• streaming-enterprise: 50% of 2/)
+    expect(p.blocks[1].text.text).toMatch(/• connect: no merged PRs yet/)
+    expect(p.blocks[2].text.text).toMatch(/• properties: 50% of 2/)
+    expect(p.blocks[3].elements[0].text).toMatch(/<https:\/\/github.com\/o\/r\/actions\/runs\/1\|Full report>$/)
+  })
+
+  it('carries the channel for chat.postMessage when given one', () => {
+    expect(formatSlack(rows, { since: 's', until: 'u', channel: '#docs-agent-traffic' }).channel).toBe('#docs-agent-traffic')
+    expect(formatSlack(rows, { since: 's', until: 'u' }).channel).toBeUndefined()
+  })
+
+  it('escapes Slack control characters in names', () => {
+    const p = formatSlack([{ ...rows[0], repo: 'redpanda-data/a<b>&c' }], { since: 's', until: 'u' })
+    expect(p.blocks[1].text.text).toMatch(/a&lt;b&gt;&amp;c/)
+    expect(p.blocks[3].elements[0].text).not.toMatch(/Full report/)
   })
 })

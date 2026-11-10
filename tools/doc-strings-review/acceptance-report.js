@@ -28,6 +28,7 @@
  * Usage: node tools/doc-strings-review/acceptance-report.js
  *          [--since YYYY-MM-DD] [--repos owner/a,owner/b]
  *          [--summary <file.md>] [--json <file.json>]
+ *          [--slack <payload.json> [--slack-channel <#channel>]]
  * Needs `gh` and GH_TOKEN with read access to every calling repo.
  */
 
@@ -187,6 +188,59 @@ function formatMarkdown (rows, { since, until }) {
   return out.join('\n')
 }
 
+// Slack mrkdwn treats these three as control characters, even inside a link.
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+/**
+ * The Slack chat.postMessage body (channel from --slack-channel), laid out like the weekly docs digest
+ * (docs-site netlify/functions/lib/docs-digest.mjs): a bold title line,
+ * mrkdwn sections, a context footer with the run link.
+ */
+function formatSlack (rows, { since, until, runUrl = '', channel }) {
+  const merged = rows.filter((r) => MERGED.includes(r.outcome))
+  const c = count(merged)
+  const used = c.taken + c.adapted
+  const rate = (g) => {
+    const k = count(g)
+    const m = MERGED.reduce((s, x) => s + k[x], 0)
+    return { m, used: k.taken + k.adapted, line: m ? `${pct(k.taken + k.adapted, m)} of ${m}` : 'no merged PRs yet' }
+  }
+  const groupLines = (keyOf) => {
+    const groups = new Map()
+    for (const r of rows) {
+      const k = keyOf(r)
+      if (!groups.has(k)) groups.set(k, [])
+      groups.get(k).push(r)
+    }
+    return [...groups.entries()]
+      .map(([k, g]) => [k, rate(g)])
+      .sort((a, b) => b[1].m - a[1].m)
+      .map(([k, r]) => `• ${esc(k)}: ${r.line}`)
+      .join('\n')
+  }
+  const title = `Doc-strings review suggestions taken, ${since} to ${until}`
+  const headline = merged.length
+    ? `*${pct(used, merged.length)}* of ${merged.length} suggestions on merged PRs were taken or adapted (${pct(c.taken, merged.length)} as written). ${pct(c.declined, merged.length)} were declined.`
+    : 'No suggestions on merged PRs in this window.'
+  return {
+    ...(channel ? { channel } : {}),
+    text: `${title}: ${merged.length ? `${pct(used, merged.length)} taken or adapted` : 'nothing merged'}`,
+    blocks: [
+      { type: 'section', text: { type: 'mrkdwn', text: `*${esc(title)}*\n\n${headline}` } },
+      { type: 'section', text: { type: 'mrkdwn', text: `*By repo*\n${groupLines((r) => r.repo.replace(/^redpanda-data\//, ''))}` } },
+      { type: 'section', text: { type: 'mrkdwn', text: `*By surface*\n${groupLines((r) => r.surface || 'other')}` } },
+      {
+        type: 'context',
+        elements: [{
+          type: 'mrkdwn',
+          text: 'Judged from the merged code: taken or adapted means the merged string is the suggestion, or closer to it than to the original. Open PRs are left out.' +
+            (runUrl ? ` <${esc(runUrl)}|Full report>` : '')
+        }]
+      }
+    ]
+  }
+}
+
 // -------------------- GitHub --------------------
 
 function ghJson (args) {
@@ -270,6 +324,8 @@ function parseArgs (argv) {
     else if (a === '--repos') opts.repos = argv[++i].split(',').map((s) => s.trim()).filter(Boolean)
     else if (a === '--summary') opts.summary = argv[++i]
     else if (a === '--json') opts.json = argv[++i]
+    else if (a === '--slack') opts.slack = argv[++i]
+    else if (a === '--slack-channel') opts.slackChannel = argv[++i]
     else throw new Error(`Unknown argument: ${a}`)
   }
   return opts
@@ -287,6 +343,12 @@ function main (argv) {
   if (opts.summary) fs.writeFileSync(opts.summary, md + '\n', { flag: 'a' })
   else process.stdout.write(md + '\n')
   if (opts.json) fs.writeFileSync(opts.json, JSON.stringify(rows, null, 2))
+  if (opts.slack) {
+    const runUrl = process.env.GITHUB_RUN_ID
+      ? `${process.env.GITHUB_SERVER_URL || 'https://github.com'}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
+      : ''
+    fs.writeFileSync(opts.slack, JSON.stringify(formatSlack(rows, { since, until, runUrl, channel: opts.slackChannel })))
+  }
 }
 
 if (require.main === module) {
@@ -298,4 +360,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { extractSuggestion, similarity, classify, count, perDeclaration, formatMarkdown, MERGED }
+module.exports = { extractSuggestion, similarity, classify, count, perDeclaration, formatMarkdown, formatSlack, MERGED }
