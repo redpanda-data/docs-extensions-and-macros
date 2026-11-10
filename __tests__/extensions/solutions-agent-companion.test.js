@@ -307,6 +307,71 @@ describe('agent companion: parsing', () => {
     expect(out).toBe('The stack is small.\n\nAfter.')
   })
 
+  test('a platform block keeps its title as a label, in either attribute order', () => {
+    const out = prose([
+      'Before.',
+      '',
+      '[.platform.platform-local.platform-kubernetes]',
+      '.On the local broker or Kubernetes',
+      '--',
+      'Run it locally.',
+      '--',
+      '',
+      '.On Redpanda Cloud',
+      '[.platform.platform-cloud]',
+      '--',
+      'Skip it.',
+      '--',
+    ], {})
+    expect(out).toBe('Before.\n\n**On the local broker or Kubernetes:**\n\nRun it locally.\n\n**On Redpanda Cloud:**\n\nSkip it.')
+  })
+
+  test('a titled block that is not a platform block still drops its title', () => {
+    expect(prose(['.A sidebar title', '--', 'Text.', '--'], {})).toBe('Text.')
+    expect(prose(['[.platform.platform-cloud]', '--', 'Untitled.', '--'], {})).toBe('Untitled.')
+  })
+
+  test('a synced platform tab set labels each tab and keeps its prose', () => {
+    const out = prose([
+      '. Start the stack:',
+      '+',
+      '[tabs,sync-group-id=platform]',
+      '======',
+      'Docker Compose::',
+      '+',
+      '[.platform.platform-local]',
+      '--',
+      'Run `make up`.',
+      '+',
+      '[source,bash]',
+      '----',
+      'make up',
+      '----',
+      '--',
+      'Kubernetes::',
+      '+',
+      '[.platform.platform-kubernetes]',
+      '--',
+      'Run `make k8s-up`.',
+      '--',
+      'Redpanda Cloud::',
+      '+',
+      '[.platform.platform-cloud]',
+      '--',
+      'You have no command to run here.',
+      '--',
+      '======',
+      '',
+      'After.',
+    ], {})
+    expect(out).toBe('1. Start the stack:\n\n**On Docker Compose:**\n\nRun `make up`.\n\n**On Kubernetes:**\n\nRun `make k8s-up`.\n\n**On Redpanda Cloud:**\n\nYou have no command to run here.\n\nAfter.')
+    expect(findLeaks(out)).toEqual([])
+  })
+
+  test('a tab set that is not the platform set is still dropped', () => {
+    expect(prose(['Before.', '[tabs]', '======', 'Linux::', '+', 'a', '======', 'After.'], {})).toBe('Before.\nAfter.')
+  })
+
   test('verify script claims fold their continuation lines and stop at the next non-comment', () => {
     const script = ['# 1. First claim', '#    continues here.', 'check_one', '# 2. Second claim.', '#   (tail)', '', '# not a claim'].join('\n')
     expect(verifyChecks(script)).toEqual(['First claim continues here.', 'Second claim. (tail)'])
