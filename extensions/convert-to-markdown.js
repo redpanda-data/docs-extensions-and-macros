@@ -815,6 +815,32 @@ module.exports.register = function () {
             const tabList = contentDiv.querySelectorAll('li.tab')
             if (!tabList.length) return ''
 
+            // Platform tabs (Docker Compose | Kubernetes | Redpanda Cloud, the
+            // Solutions pages' synced platform choice) are one choice inside a
+            // step, not sections: write each tab as a labeled paragraph named
+            // for its platform, so a numbered list stays whole and an agent can
+            // tell which content is for which deployment and follow one.
+            const PLATFORM_TAB_LABELS = ['Docker Compose', 'Kubernetes', 'Redpanda Cloud']
+            const titles = Array.from(tabList).map((tab) => tab.querySelector('p')?.textContent.trim() || tab.textContent.trim())
+            if (titles.every((t) => PLATFORM_TAB_LABELS.includes(t))) {
+              let out = `<!-- platform tabs: ${titles.join(' | ')}. Follow the one for your deployment. -->\n\n`
+              Array.from(tabList).forEach((tab, idx) => {
+                let panelId = tab.getAttribute('aria-controls')
+                if (!panelId && tab.id) panelId = tab.id + '--panel'
+                const panel = group.querySelector(`#${panelId}`)
+                if (!panel) return
+                let md = ''
+                try {
+                  const converter = isInner ? nestedTurndown : turndownInstance
+                  md = converter.turndown(panel.innerHTML || '')
+                } catch (e) {
+                  logger.warn(`Turndown failed in platform tab: ${e.message}`)
+                }
+                out += `**On ${titles[idx]}:**\n\n${md.trim()}\n\n`
+              })
+              return out.trim() + '\n\n<!-- /platform tabs -->'
+            }
+
             const nearestLevel =
               parentHeadingLevel != null
                 ? parentHeadingLevel + 1
