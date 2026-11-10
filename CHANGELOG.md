@@ -1,5 +1,23 @@
 # Changelog
 
+## [5.63.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.62.0...v5.63.0) (2026-11-10)
+
+
+### Features
+
+* **check-sources:** version-aware symbol citations ([#433](https://github.com/redpanda-data/docs-extensions-and-macros/issues/433)) ([f067a4c](https://github.com/redpanda-data/docs-extensions-and-macros/commit/f067a4ce83c73e2c34302650cbb3deee1aedb0ee))
+
+
+### Bug fixes
+
+* **property-docs:** update redpanda-beta-tag on prerelease branches ([#501](https://github.com/redpanda-data/docs-extensions-and-macros/issues/501)) ([1f54d6c](https://github.com/redpanda-data/docs-extensions-and-macros/commit/1f54d6c3ae592e587116699d0378e66cbda5113a))
+
+
+### Reusable workflows and CI
+
+* **docs-pr-review:** pin claude-skill to [#486](https://github.com/redpanda-data/docs-extensions-and-macros/issues/486)'s merge SHA ([#495](https://github.com/redpanda-data/docs-extensions-and-macros/issues/495)) ([56964c2](https://github.com/redpanda-data/docs-extensions-and-macros/commit/56964c265add4efda545d013772ffde217e8da78))
+* re-pin the docs review to d-e-m[#495](https://github.com/redpanda-data/docs-extensions-and-macros/issues/495) ([#498](https://github.com/redpanda-data/docs-extensions-and-macros/issues/498)) ([c4e0454](https://github.com/redpanda-data/docs-extensions-and-macros/commit/c4e0454df22121d81069d2d09fc89eaa8ec8daf7))
+
 ## [5.62.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.61.1...v5.62.0) (2026-11-06)
 
 
