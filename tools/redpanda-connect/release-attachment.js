@@ -17,6 +17,9 @@ const { getGitHubApiToken } = require('../../cli-utils/github-token')
 
 const PLATFORM_FLAGS = ['cloudSupported', 'requiresCgo', 'cloudOnly']
 
+// `undocumented` is a list of components, not a component group.
+const arrayKeys = (data) => Object.keys(data).filter((k) => k !== 'undocumented' && Array.isArray(data[k]))
+
 function attachmentPath (version) {
   return `modules/components/attachments/connect-${version}.json`
 }
@@ -33,8 +36,12 @@ function validateAttachment (data, version) {
   if (!Array.isArray(data.inputs) || data.inputs.length === 0) {
     throw new Error(`${attachmentPath(version)} has no inputs`)
   }
-  if (!data.inputs.every((c) => typeof c.cloudSupported === 'boolean' && typeof c.requiresCgo === 'boolean')) {
-    throw new Error(`${attachmentPath(version)} has inputs without cloudSupported and requiresCgo flags`)
+  // Every component group and config carries the flags. Only the Bloblang
+  // groups carry none, by design.
+  const flagged = (c) => c && typeof c.cloudSupported === 'boolean' && typeof c.requiresCgo === 'boolean'
+  const unflagged = arrayKeys(data).filter((k) => !k.startsWith('bloblang-') && !data[k].every(flagged))
+  if (unflagged.length > 0) {
+    throw new Error(`${attachmentPath(version)} has ${unflagged.join(', ')} without cloudSupported and requiresCgo flags`)
   }
   return data
 }
@@ -86,8 +93,6 @@ function clearAttachmentCache () {
   cache.clear()
 }
 
-// `undocumented` is a list of components, not a component group.
-const arrayKeys = (data) => Object.keys(data).filter((k) => k !== 'undocumented' && Array.isArray(data[k]))
 const isExtra = (c) => c && (c.requiresCgo === true || c.cloudOnly === true)
 
 /**

@@ -124,6 +124,16 @@ describe('loadReleaseAttachment', () => {
     const unflagged = releaseAttachment.ossIndexFromAttachment(readFixture());
     expect(() => releaseAttachment.validateAttachment(unflagged, VERSION)).toThrow(/without cloudSupported and requiresCgo/);
   });
+
+  test('rejects an attachment whose inputs are flagged but another group is not', () => {
+    const data = readFixture();
+    for (const c of data.outputs) delete c.cloudSupported;
+    expect(() => releaseAttachment.validateAttachment(data, VERSION)).toThrow(/has outputs without cloudSupported and requiresCgo/);
+    const config = readFixture();
+    delete config.config[0].requiresCgo;
+    expect(() => releaseAttachment.validateAttachment(config, VERSION)).toThrow(/has config without/);
+    expect(releaseAttachment.validateAttachment(readFixture(), VERSION).version).toBe(VERSION);
+  });
 });
 
 describe('platform data from the attachment', () => {
