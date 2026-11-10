@@ -729,6 +729,10 @@ function resolveTarget (target, pageUrl) {
 }
 
 /** The nearest enclosing tab group, or null. */
+// The tab labels of a Solutions page's synced platform tab set, as the pages
+// write them (redpanda-solutions CONTRIBUTING.md, "Platforms in the pages").
+const PLATFORM_TAB_LABELS = ['Docker Compose', 'Kubernetes', 'Redpanda Cloud']
+
 function closestTabGroup (node) {
   for (let el = node.parentNode; el; el = el.parentNode) {
     const classAttr = (el.getAttribute && el.getAttribute('class')) || ''
@@ -923,6 +927,30 @@ function createTurndownForPage ({ pageUrl, logger }) {
             (tab) => closestTabGroup(tab) === group
           )
           if (!tabList.length) return ''
+
+          // Platform tabs (Docker Compose | Kubernetes | Redpanda Cloud, the
+          // Solutions pages' synced platform choice) are one choice inside a
+          // step, not sections: write each tab as a labeled paragraph named
+          // for its platform, so a numbered list stays whole and an agent can
+          // tell which content is for which deployment and follow one.
+          const titles = tabList.map((tab) => tab.querySelector('p')?.textContent.trim() || tab.textContent.trim())
+          if (titles.length && titles.every((t) => PLATFORM_TAB_LABELS.includes(t))) {
+            let out = `<!-- platform tabs: ${titles.join(' | ')}. Follow the one for your deployment. -->\n\n`
+            tabList.forEach((tab, idx) => {
+              let panelId = tab.getAttribute('aria-controls')
+              if (!panelId && tab.id) panelId = tab.id + '--panel'
+              const panel = group.querySelector(`#${panelId}`)
+              if (!panel) return
+              let md = ''
+              try {
+                md = convert(panel.cloneNode(true))
+              } catch (e) {
+                logger.warn(`Turndown failed in platform tab: ${e.message}`)
+              }
+              out += `**On ${titles[idx]}:**\n\n${md.trim()}\n\n`
+            })
+            return out.trim() + '\n\n<!-- /platform tabs -->'
+          }
 
           const nearestLevel =
             parentHeadingLevel != null ? parentHeadingLevel + 1 : findNearestHeadingLevel(group) + 1
