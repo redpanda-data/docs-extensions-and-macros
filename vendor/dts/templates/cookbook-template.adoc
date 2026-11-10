@@ -1,0 +1,51 @@
+// Cookbook Template
+// Use for pages that collect reusable patterns organized by use case.
+// Reader question: "Show me examples"
+
+= [Topic] Patterns
+:description: [One sentence describing what patterns this cookbook contains.]
+:page-topic-type: cookbook
+:learning-objective-1: Find reusable patterns for [scenario type]
+:learning-objective-2: Look up integration patterns for [technology]
+:learning-objective-3: Identify patterns for [use case category]
+
+// Intro: 1 sentence + xrefs, ~20-30 words. Provide context and link to related content.
+[One sentence describing what scenarios these patterns cover, with xrefs to related how-to or concepts pages.]
+
+Use this cookbook to:
+
+* [ ] {learning-objective-1}
+* [ ] {learning-objective-2}
+* [ ] {learning-objective-3}
+
+== [Pattern category 1]
+
+=== [Pattern name]
+
+[Brief description of when to use this pattern]
+
+[,yaml]
+----
+# Complete, working example
+----
+
+**When to use**: [Scenario description]
+
+**Key points**:
+* [Important detail 1]
+* [Important detail 2]
+
+== Pattern index
+
+[cols="1,2,1"]
+|===
+| Pattern | Use case | Section
+
+| [Pattern name]
+| [When to use]
+| <<pattern-anchor>>
+|===
+
+== Next steps
+
+* xref:create-x.adoc[]

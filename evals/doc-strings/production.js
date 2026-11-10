@@ -183,11 +183,20 @@ function hideFromGitStatus (repoDir, names) {
   fs.appendFileSync(path.join(info, 'exclude'), names.map((n) => `/${n}\n`).join(''))
 }
 
-/** The production prompt with its Actions expressions filled in. */
+/**
+ * The production prompt with its Actions expressions filled in, as Actions
+ * would for a caller passing these inputs. committableSuggestions mirrors the
+ * workflow input of the same name (default true). withoutStandards is the
+ * must-read sabotage, see stripStandardsInstructions.
+ */
 function renderPrompt (prompt, vars, { withoutStandards = false } = {}) {
+  const committable = vars.committableSuggestions !== false
   const filled = prompt
     .replace(/\$\{\{\s*github\.repository\s*\}\}/g, vars.repository)
     .replace(/\$\{\{\s*github\.event\.pull_request\.number\s*\}\}/g, String(vars.prNumber))
+    // Spacing-tolerant, and '' inside the quoted text is an Actions-escaped
+    // apostrophe.
+    .replace(/\$\{\{\s*!inputs\.committable_suggestions\s*&&\s*'((?:[^']|'')*)'\s*\|\|\s*''\s*\}\}/g, (_, text) => (committable ? '' : text.replace(/''/g, "'")))
   const left = filled.match(/\$\{\{[^}]*\}\}/g)
   if (left) throw new Error(`unfilled Actions expression(s) in the production prompt: ${[...new Set(left)].join(', ')}`)
   return withoutStandards ? stripStandardsInstructions(filled) : filled
@@ -422,6 +431,18 @@ function checkMustRead (calls, cwd, files = MUST_READ) {
 }
 
 /**
+ * The comments as the executors read them. With committable suggestions off
+ * the review writes the rewrite in a ```text block; it is handed on under the
+ * ```suggestion tag the executors parse. Only the last ```text fence in a
+ * comment is the rewrite. An earlier one quotes the current string, which
+ * the review may do in either mode.
+ */
+function normalizeComments (comments, committableSuggestions = true) {
+  if (committableSuggestions) return comments
+  return comments.map((c) => ({ ...c, body: c.body.replace(/```text\b(?![\s\S]*```text\b)/, '```suggestion') }))
+}
+
+/**
  * Write the workflow's pre-review files into the fixture repo and run the
  * production review step there.
  *
@@ -430,15 +451,16 @@ function checkMustRead (calls, cwd, files = MUST_READ) {
  * @param {object} o.lint        lint-strings JSON, as the workflow's lint step writes it
  * @param {string|null} o.diff   source diff, or null to leave pr-diff.patch absent
  * @param {string} [o.model]
+ * @param {boolean} [o.committableSuggestions]  false renders the prompt's off-mode line and normalizes ```text rewrites
  * @param {boolean} [o.withoutStandards]  sabotage: strip every sentence naming a staged standard
  * @returns {{ output, comments, files, calls, mustRead, stderr, status, timedOut, ms, failed }}
  */
-function runReview ({ repoDir, lint, diff, model = PRODUCTION_MODEL, timeoutMs = 600000, withoutStandards = false, promptEdits = [] }) {
+function runReview ({ repoDir, lint, diff, model = PRODUCTION_MODEL, committableSuggestions = true, timeoutMs = 600000, withoutStandards = false, promptEdits = [] }) {
   const step = loadStep()
   const args = parseClaudeArgs(step.with.claude_args || '')
   // A repository that doesn't exist, so a model that looks the PR up with
   // `gh pr view` gets an error rather than a real, unrelated PR.
-  const prompt = renderPrompt(editPrompt(step.with.prompt, promptEdits), { repository: 'example-org/doc-strings-eval-fixture', prNumber: 1 }, { withoutStandards })
+  const prompt = renderPrompt(editPrompt(step.with.prompt, promptEdits), { repository: 'example-org/doc-strings-eval-fixture', prNumber: 1, committableSuggestions }, { withoutStandards })
 
   fs.writeFileSync(path.join(repoDir, 'lint-findings.json'), JSON.stringify(lint, null, 2))
   if (diff != null) {
@@ -498,7 +520,21 @@ function runReview ({ repoDir, lint, diff, model = PRODUCTION_MODEL, timeoutMs =
 
   // The executors parse model text. Present each recorded comment the way they
   // already read one: its span header, then its body with any suggestion block.
-  const output = comments.map((c) => `FILE ${c.path} LINES ${c.startLine || c.line || 0}-${c.line || c.startLine || 0}\n${c.body}`).join('\n\n')
+  // With committable suggestions off, the rewrite arrives in a ```text block;
+  // count both forms so the run can assert which one the review used, then
+  // hand the executors the rewrite under the tag they parse.
+  const blockCounts = { suggestion: 0, text: 0 }
+  for (const c of comments) {
+    blockCounts.suggestion += (c.body.match(/```suggestion\b/g) || []).length
+    blockCounts.text += (c.body.match(/```text\b/g) || []).length
+  }
+  // Both the output text and the comments get the same rewrite: the
+  // executors check placement and footers on the comments, and with the raw
+  // ```text bodies every off-mode case would fail on a correct review.
+  const checked = normalizeComments(comments, committableSuggestions)
+  const output = checked.map((c) =>
+    `FILE ${c.path} LINES ${c.startLine || c.line || 0}-${c.line || c.startLine || 0}\n${c.body}`
+  ).join('\n\n')
   return {
     prompt,
     output,
@@ -507,7 +543,9 @@ function runReview ({ repoDir, lint, diff, model = PRODUCTION_MODEL, timeoutMs =
     stream: r.stdout || '',
     calls: stream.calls,
     mustRead,
-    comments,
+    comments: checked,
+    rawComments: comments,
+    blockCounts,
     files,
     stderr: r.stderr || '',
     status: r.status,
@@ -522,6 +560,7 @@ module.exports = {
   loadStep,
   parseClaudeArgs,
   renderPrompt,
+  normalizeComments,
   stripStandardsInstructions,
   assertOneUnit,
   parseStream,

@@ -1,0 +1,44 @@
+# Checks: an objectives lead-in that doesn't match the topic type
+extends: script
+message: "Use the lead-in for this topic type above the learning objectives."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/content-architecture.md#displaying-learning-objectives
+level: warning
+scope: raw
+script: |
+  text := import("text")
+  matches := []
+  want := {
+    "overview": "After reading this page, you will be able to:",
+    "concepts": "After reading this page, you will be able to:",
+    "concept": "After reading this page, you will be able to:",
+    "tutorial": "After reading this page, you will be able to:",
+    "how-to": "After reading this page, you will be able to:",
+    "best-practices": "After reading this page, you will be able to:",
+    "reference": "Use this reference to:",
+    "cookbook": "Use this cookbook to:",
+    "troubleshooting": "Use this page to:",
+    "lab": "After completing this lab, you will be able to:"
+  }
+  topic := ""
+  lead := ""
+  leadpos := 0
+  leadlen := 0
+  pos := 0
+  for l in text.split(scope, "\n") {
+    t := text.trim_space(l)
+    m := text.re_find(`^:page-topic-type:\s*(\S+)\s*$`, t)
+    if m != undefined { topic = m[0][1].text }
+    if text.re_match(`^\*\s+(\[ \]\s+)?\{learning-objective-\d+\}`, t) {
+      expected := want[topic]
+      if expected != undefined && lead != expected {
+        matches = append(matches, {begin: leadpos, end: leadpos + leadlen})
+      }
+      break
+    }
+    if t != "" {
+      lead = t
+      leadpos = pos
+      leadlen = len(l)
+    }
+    pos += len(l) + 1
+  }

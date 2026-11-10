@@ -1,0 +1,8 @@
+# Checks: 'should' where 'must' is meant
+extends: existence
+message: "Use 'must' for a requirement. Keep '%s' only for a genuine recommendation."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/terminology.md#do-not-use-word-list
+level: warning
+ignorecase: true
+tokens:
+  - '\bshould\b'

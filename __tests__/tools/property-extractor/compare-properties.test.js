@@ -111,3 +111,59 @@ describe('changedDescriptions compares by value, not by reference', () => {
     expect(report.changedDescriptions).toEqual([]);
   });
 });
+
+describe('properties missing from the new tag', () => {
+  const oldData = {
+    properties: {
+      kept: { name: 'kept', type: 'string', description: 'Kept', config_scope: 'cluster' },
+      tagged_then_deleted: { name: 'tagged_then_deleted', type: 'string', description: 'Old flag', is_deprecated: true, visibility: 'deprecated', config_scope: 'cluster' },
+      // A v26.1.x backport that the new line does not have yet, as
+      // log_eviction_exempt_topics was for v26.1.14 -> v26.2.1 (#231).
+      backport_only: { name: 'backport_only', type: 'array', description: 'Backported', is_deprecated: false, visibility: 'user', config_scope: 'cluster' },
+      development_thing: { name: 'development_thing', type: 'string', description: 'Dev' },
+    },
+  };
+  const newData = {
+    properties: {
+      kept: { name: 'kept', type: 'string', description: 'Kept', config_scope: 'cluster' },
+    },
+  };
+  const names = (list) => list.map((p) => p.name).sort();
+
+  test('on 26.1+, only a property deprecated in the old tag is reported as removed-deprecated', () => {
+    const report = compareProperties(oldData, newData, 'v26.1.14', 'v26.2.1');
+    expect(names(report.removedDeprecatedProperties)).toEqual(['tagged_then_deleted']);
+    expect(names(report.removedProperties)).toEqual(['backport_only']);
+  });
+
+  test('before 26.1, every missing property is reported as removed, as before', () => {
+    const report = compareProperties(oldData, newData, 'v25.2.1', 'v25.3.1');
+    expect(report.removedDeprecatedProperties).toEqual([]);
+    expect(names(report.removedProperties)).toEqual(['backport_only', 'tagged_then_deleted']);
+  });
+
+  describe('the merged new-version attachment', () => {
+    let tmpDir;
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compare-properties-removed-'));
+      jest.spyOn(console, 'log').mockImplementation(() => {});
+    });
+    afterEach(() => {
+      jest.restoreAllMocks();
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    test('restores the deprecated property with its scope and never injects the backport', () => {
+      const oldPath = path.join(tmpDir, 'old.json');
+      const newPath = path.join(tmpDir, 'new.json');
+      fs.writeFileSync(oldPath, JSON.stringify(oldData));
+      fs.writeFileSync(newPath, JSON.stringify(newData));
+      comparePropertyFiles(oldPath, newPath, 'v26.1.14', 'v26.2.1', tmpDir, 'changes.json');
+      const merged = JSON.parse(fs.readFileSync(newPath, 'utf8')).properties;
+      expect(Object.keys(merged).sort()).toEqual(['kept', 'tagged_then_deleted']);
+      expect(merged.tagged_then_deleted).toMatchObject({ removed_deprecated: true, is_deprecated: true, config_scope: 'cluster' });
+      const changes = JSON.parse(fs.readFileSync(path.join(tmpDir, 'changes.json'), 'utf8'));
+      expect(JSON.stringify(changes)).toContain('backport_only');
+    });
+  });
+});

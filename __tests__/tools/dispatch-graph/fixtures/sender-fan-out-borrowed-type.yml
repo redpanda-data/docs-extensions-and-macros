@@ -1,0 +1,14 @@
+# Two dispatches in one run block: the first states its type in a JSON body,
+# the second (a fan-out) pipes its body in from elsewhere. The block's one JSON
+# event_type belongs to the first, so the fan-out must not borrow it.
+name: Two dispatches
+on:
+  schedule:
+    - cron: '0 9 * * *'
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          gh api repos/redpanda-data/docs/dispatches --input - <<< '{"event_type": "literal-request"}'
+          jq -n --arg t "$TYPE" '{event_type: $t}' | gh api "repos/redpanda-data/$REPO/dispatches" --input -
