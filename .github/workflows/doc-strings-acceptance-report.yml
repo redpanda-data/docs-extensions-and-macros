@@ -1,0 +1,74 @@
+---
+# Weekly report of how often doc-strings review suggestions are taken.
+#
+# GitHub records no "suggestion applied" state, so the report judges each
+# suggestion by the merged code (tools/doc-strings-review/acceptance-report.js):
+# taken, adapted, declined, rewritten, unclear, or removed. It covers every
+# repo whose workflows call doc-strings-review.yml, found by code search at
+# run time, and breaks the rate down by repo, surface, and month.
+#
+# Read-only: it writes the report to the run's summary page and uploads the
+# per-suggestion rows as an artifact. It posts, comments, and changes nothing.
+name: doc-strings-acceptance-report
+
+on:
+  schedule:
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+    inputs:
+      since:
+        description: 'Report suggestions posted on or after this date (YYYY-MM-DD). Default: 90 days ago.'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: doc-strings-acceptance-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The calling repos are private; the org bot token can read their PRs
+      # and contents. Same pattern as publish-rp-util-schema.yaml.
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.RP_AWS_CRED_REGION }}
+          role-to-assume: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
+
+      - uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            ,sdlc/prod/github/actions_bot_token
+          parse-json-secrets: true
+
+      - name: Build the report
+        env:
+          GH_TOKEN: ${{ env.ACTIONS_BOT_TOKEN }}
+          SINCE: ${{ github.event.inputs.since }}
+        run: |
+          set -euo pipefail
+          ARGS=(--summary "$GITHUB_STEP_SUMMARY" --json "$RUNNER_TEMP/acceptance-rows.json")
+          if [ -n "$SINCE" ]; then
+            [[ "$SINCE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || { echo "::error::since must be YYYY-MM-DD, got '$SINCE'"; exit 1; }
+            ARGS+=(--since "$SINCE")
+          fi
+          node tools/doc-strings-review/acceptance-report.js "${ARGS[@]}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: doc-strings-acceptance-rows
+          path: ${{ runner.temp }}/acceptance-rows.json
+          retention-days: 90
