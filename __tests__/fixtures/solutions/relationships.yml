@@ -1,0 +1,26 @@
+# One entry per status. The approved and rejected docs must exist in the test
+# catalog; the pending entry is ignored by the build regardless.
+version: 1
+relationships:
+  - solution: leaderboard
+    doc: streaming:develop:consumer-offsets.adoc
+    status: approved
+    source: editor
+    confidence: 0.95
+    reason: The leaderboard consumer group is the worked example for offsets.
+    reviewedBy: jake
+    reviewedAt: 2026-09-12
+  - solution: leaderboard
+    doc: streaming:develop:nothing-to-do-with-it.adoc
+    status: rejected
+    source: ml
+    confidence: 0.61
+    reason: Shares categories but the page is about a different feature.
+    reviewedBy: jake
+    reviewedAt: 2026-09-12
+  - solution: leaderboard
+    doc: streaming:develop:pending-suggestion.adoc
+    status: pending
+    source: ml
+    confidence: 0.72
+    reason: Embedding similarity 0.72 on the Architecture section.

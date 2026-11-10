@@ -1,0 +1,21 @@
+# Fixture for the solutions-catalog extension. Mirrors the descriptor the
+# redpanda-data/solutions repo will carry at docs/antora.yml.
+name: solutions
+title: Solutions
+version: ~
+start_page: ROOT:index.adoc
+asciidoc:
+  attributes:
+    component-metadata:
+      title: "Solutions"
+      description: "Runnable, end-to-end reference implementations built on Redpanda."
+      color: "#B45309"
+      order: 5
+      icon: "rocket"
+    solutions-personas:
+      - id: application-developer
+        name: Application developer
+        description: Builds services that produce and consume events.
+      - id: platform-engineer
+        name: Platform engineer
+        description: Runs and scales the streaming platform.

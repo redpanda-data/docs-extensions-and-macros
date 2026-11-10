@@ -2,15 +2,35 @@
 
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
 
+// Components with no nav.adoc by design. `api` and `labs` are the historical
+// defaults; `solutions` derives its navigation from page-solution-steps (see
+// solutions-catalog) and is always skipped, whatever the config says.
+const DEFAULT_SKIP_COMPONENTS = ['api', 'labs'];
+const ALWAYS_SKIP_COMPONENTS = ['solutions'];
+
+/**
+ * Resolve the `skip_components` option. Antora camelCases playbook keys, so
+ * both `skipComponents` and `skip_components` are accepted.
+ */
+function resolveSkipComponents(config = {}) {
+  const raw = config.skipComponents !== undefined ? config.skipComponents : config.skip_components;
+  let list;
+  if (raw === undefined || raw === null) list = DEFAULT_SKIP_COMPONENTS;
+  else if (Array.isArray(raw)) list = raw;
+  else list = String(raw).split(',');
+  return new Set([...list.map((c) => String(c).trim()).filter(Boolean), ...ALWAYS_SKIP_COMPONENTS]);
+}
+
 module.exports.register = function ({ config }) {
   raiseListenerLimit(this)
   const { addToNavigation, unlistedPagesHeading = 'Unlisted Pages' } = config;
   const logger = this.getLogger('unlisted-pages-extension');
+  const skipComponents = resolveSkipComponents(config);
 
   this.on('navigationBuilt', ({ siteCatalog, contentCatalog }) => {
     contentCatalog.getComponents().forEach(({ versions }) => {
       versions.forEach(({ name: component, version, navigation: nav, url: defaultUrl }) => {
-        if (component === 'api' || component === 'labs') return;
+        if (skipComponents.has(component)) return;
         if (!nav) return;
 
         const navEntriesByUrl = getNavEntriesByUrl(nav);
@@ -71,3 +91,7 @@ function removePageFromNav(navItems, urlToRemove) {
     }
   }
 }
+
+module.exports.resolveSkipComponents = resolveSkipComponents
+module.exports.DEFAULT_SKIP_COMPONENTS = DEFAULT_SKIP_COMPONENTS
+module.exports.ALWAYS_SKIP_COMPONENTS = ALWAYS_SKIP_COMPONENTS

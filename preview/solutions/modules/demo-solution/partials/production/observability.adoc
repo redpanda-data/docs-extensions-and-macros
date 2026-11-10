@@ -1,0 +1,9 @@
+// Production topic: Observability. No headings or anchors here; _all.adoc adds them.
+// tag::summary[]
+Alert on consumer lag per group and on the producer's error rate, not only on broker health.
+// end::summary[]
+// tag::detail[]
+In this solution: This demo prints `PASS (1/1)` when the leaderboard matches the events it produced.
+
+In production: Alert on consumer lag per group and on the producer's error rate, not only on broker health. See xref:preview:ROOT:test.adoc[].
+// end::detail[]

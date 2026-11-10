@@ -1,0 +1,9 @@
+// Production topic: Partitions. No headings or anchors here; _all.adoc adds them.
+// tag::summary[]
+Size each topic's partition count for peak throughput and for the largest consumer group you plan to run.
+// end::summary[]
+// tag::detail[]
+In this solution: This demo uses three partitions, enough to show that one player's events stay ordered on one partition.
+
+In production: Size each topic's partition count for peak throughput and for the largest consumer group you plan to run. See xref:preview:ROOT:test.adoc[].
+// end::detail[]
