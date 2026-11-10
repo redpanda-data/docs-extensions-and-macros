@@ -555,3 +555,56 @@ describe('generateFrontmatter page-introduced-in', () => {
     expect(markdown).toContain('Reads rows.')
   })
 })
+
+// Everything the UI's component bar shows as a badge reaches the Markdown
+// twin's front matter, so a reader of the Markdown gets the same page facts.
+describe('component bar facts in the front matter', () => {
+  const { generateFrontmatter } = require('../../extensions/convert-to-markdown')
+  const yamlOf = (attributes, siteUrl) => require('js-yaml').load(generateFrontmatter({ asciidoc: { doctitle: 'x', attributes } }, siteUrl).trim().replace(/^---\n/, '').replace(/\n---$/, ''))
+
+  test('release status badges and their texts', () => {
+    const fm = yamlOf({
+      'page-beta': '', 'page-beta-text': 'In beta until 26.3.',
+      'page-preview': '', 'page-preview-text': 'Not covered by Enterprise Support.',
+      'page-limited-availability': '', 'page-limited-availability-text': 'Ask your account team.',
+    })
+    expect(fm['page-beta']).toBe(true)
+    expect(fm['page-beta-text']).toBe('In beta until 26.3.')
+    expect(fm['page-preview']).toBe(true)
+    expect(fm['page-preview-text']).toBe('Not covered by Enterprise Support.')
+    expect(fm['page-limited-availability']).toBe(true)
+    expect(fm['page-limited-availability-text']).toBe('Ask your account team.')
+  })
+
+  test('a badge text never travels without its badge', () => {
+    const fm = yamlOf({ 'page-beta-text': 'x', 'page-preview-text': 'y', 'page-cloud-available-url': '/redpanda-cloud/x/' })
+    expect(fm).not.toHaveProperty('page-beta-text')
+    expect(fm).not.toHaveProperty('page-preview-text')
+    expect(fm).not.toHaveProperty('page-cloud-available-url')
+  })
+
+  test('availability links become full URLs on the site', () => {
+    const fm = yamlOf({ 'page-cloud-available': '', 'page-cloud-available-url': '/redpanda-cloud/develop/connect/components/inputs/sap_hana/' }, 'https://docs.redpanda.com')
+    expect(fm['page-cloud-available']).toBe(true)
+    expect(fm['page-cloud-available-url']).toBe('https://docs.redpanda.com/redpanda-cloud/develop/connect/components/inputs/sap_hana/')
+    const sm = yamlOf({ 'page-self-managed-available': '', 'page-self-managed-available-url': '/connect/components/inputs/sap_hana/' })
+    expect(sm['page-self-managed-available-url']).toBe('/connect/components/inputs/sap_hana/', 'no site URL: left as it is')
+  })
+
+  test('platform-only flags', () => {
+    const fm = yamlOf({ 'page-byoc-only': '', 'page-cloud-only': '', 'page-cloud-only-text': 'Fully managed only.', 'page-self-managed-only': '' })
+    expect(fm['page-byoc-only']).toBe(true)
+    expect(fm['page-cloud-only']).toBe(true)
+    expect(fm['page-cloud-only-text']).toBe('Fully managed only.')
+    expect(fm['page-self-managed-only']).toBe(true)
+  })
+
+  test('the context switcher becomes a list, and bad JSON is left out', () => {
+    const fm = yamlOf({ 'page-context-switcher': '[{"name": "Version 2.x", "to": "24.3@console:config:x.adoc"}, {"name": "Version 3.x", "to": "current@console:config:x.adoc"}]' })
+    expect(fm['page-context-switcher']).toEqual([
+      { name: 'Version 2.x', to: '24.3@console:config:x.adoc' },
+      { name: 'Version 3.x', to: 'current@console:config:x.adoc' },
+    ])
+    expect(yamlOf({ 'page-context-switcher': 'not json' })).not.toHaveProperty('page-context-switcher')
+  })
+})
