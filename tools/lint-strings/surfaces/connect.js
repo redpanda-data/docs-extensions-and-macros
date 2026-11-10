@@ -9,6 +9,7 @@ const { splitTopLevelArgs, findBalancedClose, collectGoFiles } = require('../go-
 const { GoIndex, statementEnd, straightLineReturn, stripStrings, renderResult, isResolved, unresolvedParts } = require('../go-index')
 const { parseLiteralFields } = require('./rpk')
 const { CONDITIONAL_RULE } = require('../rules/verbatim-asciidoc')
+const { PLACEHOLDER_RULE } = require('../rules/placeholders')
 const { STANDARD } = require('../standards')
 
 /**
@@ -1717,6 +1718,10 @@ const RULES = [
   // conditional is the supported way to vary a paragraph between the two.
   // The rule checks the form; see rules/verbatim-asciidoc.js.
   CONDITIONAL_RULE,
+  // Descriptions carry [source,yaml] examples, which the docs UI makes
+  // editable, and the page is generated, so the explanation has to be in the
+  // same string. See rules/placeholders.js.
+  PLACEHOLDER_RULE,
   {
     name: 'connect-xref-module',
     description: 'xref without a module, or to a module the Connect docs do not have',
