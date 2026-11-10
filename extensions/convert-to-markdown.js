@@ -734,7 +734,6 @@ module.exports.solutionDownloadNote = solutionDownloadNote
 module.exports.solutionOutcomeMarkdown = solutionOutcomeMarkdown
 module.exports.createSolutionOutcomeRules = createSolutionOutcomeRules
 module.exports.createEnterpriseFeatureRules = createEnterpriseFeatureRules
-module.exports.generateFrontmatter = generateFrontmatter
 module.exports.formatStatusMarker = formatStatusMarker
 module.exports.ENTERPRISE_MARKER = ENTERPRISE_MARKER
 module.exports.readGeneratedMarker = readGeneratedMarker

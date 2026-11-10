@@ -1105,6 +1105,72 @@ describe('doc-strings-review workflow: doc-impact dispatch merges gating finding
     expect(names).not.toContain('p9')
   })
 
+  test('when the cap drops model findings, the ticket names only the findings it carries', () => {
+    const model = { findings: Array.from({ length: 10 }, (_, i) => finding(`p${i}`)), proposed_ticket: { title: 'model title p9', body: 'model body p9' } }
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify(gating) })
+    const t = payload(r).proposed_ticket
+    expect(t.title).toMatch(/^Update docs for manual_finalization, p0, .*p8 and 1 more$/)
+    expect(t.title).not.toMatch(/p9/)
+    expect(t.body).not.toMatch(/p9/)
+    expect(t.body).toMatch(/1 more finding\(s\) are not listed here/)
+    expect(t.body).toMatch(/Enterprise gating changes in this PR/)
+  })
+
+  test('a finding in both reports (same name and change kind) takes one slot, the gating one', () => {
+    const model = { findings: [finding('manual_finalization'), finding('cloud_storage_cache_size')], proposed_ticket: { title: 'model', body: 'model body' } }
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify(gating) })
+    const impact = payload(r)
+    expect(impact.findings.map((f) => [f.name, f.surface])).toEqual([['manual_finalization', 'enterprise-feature'], ['cloud_storage_cache_size', 'properties']])
+    expect(impact.proposed_ticket.title).toBe('model')
+  })
+
+  test('a model finding that shares only a name with a gating finding is kept', () => {
+    // audit_enabled gated and its default changed are two changes, two findings.
+    const model = { findings: [{ ...finding('manual_finalization'), change_kind: 'default-changed' }], proposed_ticket: { title: 'model', body: 'model body' } }
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify(gating) })
+    expect(payload(r).findings.map((f) => [f.name, f.change_kind])).toEqual([['manual_finalization', 'x'], ['manual_finalization', 'default-changed']])
+  })
+
+  test('the dispatch records the gating findings it sent, read from the dispatched report', () => {
+    const state = fs.mkdtempSync(path.join(os.tmpdir(), 'review-state-'))
+    const first = dispatch({ 'enterprise-impact.json': JSON.stringify(gating) }, { STATE_DIR: state, REVIEW_OUTCOME: 'skipped' })
+    expect(fs.existsSync(path.join(first.dir, 'gh-argv'))).toBe(true)
+    expect(first.outputs.gating_recorded).toBe('true')
+    expect(fs.readFileSync(path.join(state, 'dispatched-gating.txt'), 'utf8')).toBe('manual_finalization x\n')
+  })
+
+  test('two gating changes to one name are both dispatched and both recorded', () => {
+    // An enum value and a property gate can share a name. Deduping on the
+    // name alone dropped one from the dispatch but still recorded it as sent.
+    const state = fs.mkdtempSync(path.join(os.tmpdir(), 'review-state-'))
+    const two = { ...gating, findings: [finding('audit_enabled', 'enterprise-feature'), { ...finding('audit_enabled', 'enterprise-property'), change_kind: 'y' }] }
+    const model = { findings: [finding('cloud_storage_cache_size')], proposed_ticket: { title: 'model', body: 'model body' } }
+    const r = dispatch({ 'doc-impact.json': JSON.stringify(model), 'enterprise-impact.json': JSON.stringify(two) }, { STATE_DIR: state })
+    expect(payload(r).findings.map((f) => `${f.name} ${f.change_kind}`)).toEqual(['audit_enabled x', 'audit_enabled y', 'cloud_storage_cache_size x'])
+    expect(fs.readFileSync(path.join(state, 'dispatched-gating.txt'), 'utf8')).toBe('audit_enabled x\naudit_enabled y\n')
+  })
+
+  test('the Detect step leaves out the findings the state records as sent', () => {
+    const detect = stepNamed('Detect enterprise gating changes')
+    expect(detect.env.STATE_DIR).toBe('${{ runner.temp }}/doc-strings-review-state')
+    const state = fs.mkdtempSync(path.join(os.tmpdir(), 'review-state-'))
+    const runEnv = { BASE: 'abc123', PKG: RESOLVED_PKG, LINT_JSON: '{"findings":[]}' }
+    const none = execRun(detect, { env: { ...runEnv, RUNNER_TEMP: fs.mkdtempSync(path.join(os.tmpdir(), 'runner-temp-')), STATE_DIR: state }, stubs: { npx: NPX_STUB } })
+    expect(none.status).toBe(0)
+    expect(fs.readFileSync(path.join(none.dir, 'npx-argv'), 'utf8')).not.toMatch(/--exclude/)
+    fs.writeFileSync(path.join(state, 'dispatched-gating.txt'), 'manual_finalization enterprise-feature-added\n')
+    const some = execRun(detect, { env: { ...runEnv, RUNNER_TEMP: fs.mkdtempSync(path.join(os.tmpdir(), 'runner-temp-')), STATE_DIR: state }, stubs: { npx: NPX_STUB } })
+    const argv = fs.readFileSync(path.join(some.dir, 'npx-argv'), 'utf8')
+    expect(argv).toMatch(/^--exclude$/m)
+    expect(argv).toContain(path.join(state, 'dispatched-gating.txt'))
+  })
+
+  test('the review state is saved after the dispatch, also on a gating-only run', () => {
+    const order = job.steps.map((s) => s.name)
+    expect(order.indexOf('Save the review state')).toBeGreaterThan(order.indexOf('Dispatch doc-impact'))
+    expect(stepNamed('Save the review state').if).toMatch(/steps\.dispatch\.outputs\.gating_recorded == 'true'/)
+  })
+
   test.each([
     ['skipped (a gating-only run)', 'skipped'],
     ['not run at all', '']
