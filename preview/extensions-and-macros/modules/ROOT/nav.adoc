@@ -2,6 +2,7 @@
 * xref:preview:ROOT:enterprise-kubernetes-test.adoc[]
 * xref:preview:ROOT:docker-labs.adoc[]
 * xref:preview:ROOT:url-to-xref-test.adoc[]
+* xref:preview:ROOT:rpk-links-test.adoc[]
 * xref:preview:ROOT:faq-test.adoc[]
 * xref:preview:ROOT:faq-blocks-test.adoc[]
 * xref:preview:ROOT:iceberg-explorer-test.adoc[]
