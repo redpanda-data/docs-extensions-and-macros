@@ -761,6 +761,13 @@ describe('component bar facts in the front matter', () => {
     expect(sm['page-self-managed-available-url']).toBe('/connect/components/inputs/sap_hana/', 'no site URL: left as it is')
   })
 
+  test('the GPU qualifiers travel with page-cloud-available', () => {
+    const fm = yamlOf({ 'page-cloud-available': '', 'page-cloud-gpu-only': 'true' })
+    expect(fm['page-cloud-gpu-only']).toBe(true)
+    expect(yamlOf({ 'page-cloud-available': '', 'page-cloud-no-gpu': 'true' })['page-cloud-no-gpu']).toBe(true)
+    expect(yamlOf({ 'page-cloud-gpu-only': 'true', 'page-cloud-no-gpu': 'true' })).not.toHaveProperty('page-cloud-gpu-only')
+  })
+
   test('platform-only flags', () => {
     const fm = yamlOf({ 'page-byoc-only': '', 'page-cloud-only': '', 'page-cloud-only-text': 'Fully managed only.', 'page-self-managed-only': '' })
     expect(fm['page-byoc-only']).toBe(true)
