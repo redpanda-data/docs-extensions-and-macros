@@ -761,11 +761,12 @@ describe('component bar facts in the front matter', () => {
     expect(sm['page-self-managed-available-url']).toBe('/connect/components/inputs/sap_hana/', 'no site URL: left as it is')
   })
 
-  test('the GPU qualifiers travel with page-cloud-available', () => {
-    const fm = yamlOf({ 'page-cloud-available': '', 'page-cloud-gpu-only': 'true' })
-    expect(fm['page-cloud-gpu-only']).toBe(true)
-    expect(yamlOf({ 'page-cloud-available': '', 'page-cloud-no-gpu': 'true' })['page-cloud-no-gpu']).toBe(true)
-    expect(yamlOf({ 'page-cloud-gpu-only': 'true', 'page-cloud-no-gpu': 'true' })).not.toHaveProperty('page-cloud-gpu-only')
+  test('the GPU flags are booleans, on Cloud pages too', () => {
+    // A Self-Managed page has page-cloud-available beside them; a Cloud page does not.
+    expect(yamlOf({ 'page-cloud-available': '', 'page-cloud-gpu-only': 'true' })['page-cloud-gpu-only']).toBe(true)
+    const cloud = yamlOf({ 'page-self-managed-available': '', 'page-cloud-gpu-only': 'true', 'page-cloud-no-gpu': 'true' })
+    expect(cloud['page-cloud-gpu-only']).toBe(true)
+    expect(cloud['page-cloud-no-gpu']).toBe(true)
   })
 
   test('platform-only flags', () => {

@@ -1503,7 +1503,7 @@ The extension exports these attributes to YAML frontmatter:
 - `page-preview`, `page-preview-text`, `page-limited-availability`, `page-limited-availability-text`: Release-status badges, each text written only when its badge is set
 - `page-byoc`, `page-byoc-text`, `page-byoc-only`, `page-cloud`, `page-cloud-only`, `page-cloud-only-text`, `page-self-managed-only`: Deployment badges, each text written only when its badge is set
 - `page-cloud-available`, `page-cloud-available-url`, `page-self-managed-available`, `page-self-managed-available-url`: Where else the page applies, with the URLs written as full site URLs
-- `page-cloud-gpu-only`, `page-cloud-no-gpu`: Qualifiers on `page-cloud-available` for Connect components that run in Cloud only on GPU clusters, or only without one
+- `page-cloud-gpu-only`, `page-cloud-no-gpu`: For Connect components, whether the type runs in Cloud only in GPU pipelines, or only outside them, on both the Cloud and the Self-Managed page
 - `page-context-switcher`: The page's other contexts, as a list of `{ name, to }`
 
 === Generated content provenance

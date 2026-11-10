@@ -186,8 +186,8 @@ function generateFrontmatter(page, siteUrl) {
     'page-self-managed-only',
     'page-cloud-available',
     'page-cloud-available-url',
-    // Qualifiers on page-cloud-available: the component runs in Cloud only on
-    // GPU clusters, or only on clusters without a GPU.
+    // Where in Cloud the component runs: only in GPU pipelines, or not in GPU
+    // pipelines. Set on both the Cloud and the Self-Managed page.
     'page-cloud-gpu-only',
     'page-cloud-no-gpu',
     'page-self-managed-available',
@@ -235,8 +235,6 @@ function generateFrontmatter(page, siteUrl) {
       'page-cloud-only-text': 'page-cloud-only',
       'page-cloud-available-url': 'page-cloud-available',
       'page-self-managed-available-url': 'page-self-managed-available',
-      'page-cloud-gpu-only': 'page-cloud-available',
-      'page-cloud-no-gpu': 'page-cloud-available',
     }
     if (textOf[key] && attrs[textOf[key]] === undefined) {
       return
