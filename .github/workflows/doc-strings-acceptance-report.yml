@@ -31,7 +31,7 @@ permissions:
 
 env:
   # The app (vbotbuildovich) must be a member of this channel.
-  SLACK_CHANNEL: '#docs-agent-traffic'
+  SLACK_CHANNEL: '#docs-automation-reports'
 
 concurrency:
   group: doc-strings-acceptance-report
