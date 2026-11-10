@@ -5,6 +5,24 @@ const path = require('path')
 const handlebars = require('handlebars')
 const helpers = require('./helpers')
 
+/**
+ * The default to print in a flag's row, or undefined to print none. Follows
+ * cobra's --help: zero values ("", 0, false, [], 0s) are not shown. A
+ * required flag's default is never used, and a description that already
+ * states its default is left alone.
+ */
+function flagDefaultToShow (flag) {
+  if (!flag || flag.required === true) return undefined
+  let value = flag.default
+  // Plugin flags scraped from --help keep cobra's quotes ("ask").
+  if (typeof value === 'string' && /^".*"$/.test(value)) value = value.slice(1, -1)
+  if (value === undefined || value === null || value === '' || value === false || value === 0) return undefined
+  if (Array.isArray(value) && value.length === 0) return undefined
+  if (typeof value === 'string' && /^(0|0s|\[\]|false|<nil>)$/.test(value)) return undefined
+  if (/\(default\b|\bdefault:/i.test(flag.description || '')) return undefined
+  return helpers.formatDefault(value, flag.type)
+}
+
 // Register Handlebars helpers
 Object.entries(helpers).forEach(([name, fn]) => {
   if (typeof fn === 'function') {
@@ -3148,6 +3166,9 @@ async function generateRpkDocs(options = {}) {
         name: flag.shorthand ? `-${flag.shorthand}, --${flag.name}` : `--${flag.name}`,
         type: flag.type || '-',
         description: ensurePeriod(formatDescription(flag.description || '', textTransformations)),
+        // rpk --help prints these, so the reference does too.
+        required: flag.required === true,
+        defaultValue: flagDefaultToShow(flag),
         // --print-tree gives pflag's deprecation message as the deprecated
         // value itself; overrides give deprecated: true plus a message
         deprecated: Boolean(flag.deprecated),
@@ -3499,6 +3520,7 @@ module.exports = {
   decodeHtmlEntities,
   parseDescriptionSections,
   ensurePeriod,
+  flagDefaultToShow,
   dashify,
   capToTwoSentences,
   flattenCommands,
