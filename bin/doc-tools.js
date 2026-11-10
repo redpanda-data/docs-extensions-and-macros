@@ -2698,7 +2698,11 @@ automation
         console.log(`Updating to specified Connect version: ${version}`)
       } else {
         console.log('Fetching latest Connect version from GitHub...')
-        version = await GetLatestConnectTag()
+        const octokit = require('../cli-utils/octokit-client')
+        const tag = await GetLatestConnectTag(octokit, 'redpanda-data', 'connect')
+        // The fetcher logs and returns null on failure; never write that into antora.yml.
+        if (!tag) throw new Error('could not fetch the latest Connect release from GitHub')
+        version = String(tag).replace(/^v/, '')
         console.log(`Latest Connect version: ${version}`)
       }
 
