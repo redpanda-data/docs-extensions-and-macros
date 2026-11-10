@@ -35,7 +35,7 @@ const {
 // Import other utilities
 const { determineDocsBranch } = require('../cli-utils/self-managed-docs-branch.js')
 const fetchFromGithub = require('../tools/fetch-from-github.js')
-const { getAntoraValue, setAntoraValue } = require('../cli-utils/antora-utils')
+const { getAntoraValue, setAntoraValue, setRedpandaTagAttributes } = require('../cli-utils/antora-utils')
 
 // --------------------------------------------------------------------
 // Main CLI Definition
@@ -1484,12 +1484,9 @@ automation
     }
 
     if (!options.diff && !tagsAreSame) {
-      const tagSuccess = setAntoraValue('asciidoc.attributes.latest-redpanda-tag', newTag)
-      if (tagSuccess) console.log(`Done: Updated Antora latest-redpanda-tag to: ${newTag}`)
-
-      const versionWithoutV = newTag.startsWith('v') ? newTag.slice(1) : newTag
-      const versionSuccess = setAntoraValue('asciidoc.attributes.full-version', versionWithoutV)
-      if (versionSuccess) console.log(`Done: Updated Antora full-version to: ${versionWithoutV}`)
+      for (const name of setRedpandaTagAttributes(newTag)) {
+        console.log(`Done: Updated Antora ${name} for ${newTag}`)
+      }
 
       try {
         const jsonDir = path.resolve(outputDir, 'attachments')
