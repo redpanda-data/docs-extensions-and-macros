@@ -84,6 +84,40 @@ const CASES = [
     expectRules: ['starts-lowercase', 'rpk-terminal-period']
   },
   {
+    id: 'connect-xref-module',
+    kind: 'rewrite',
+    description: 'Connect field description with a module-less xref, which breaks on the Cloud page; the link must stay and gain a module',
+    layout: 'connect-input',
+    edits: [{
+      find: 'f = f.Description("Only things whose name starts with this prefix are read.")',
+      replace: 'f = f.Description("Only things whose name starts with this prefix are read. To filter on other attributes, use a xref:bloblang/about.adoc[Bloblang] mapping.")'
+    }],
+    target: 'prefix',
+    targetKind: 'field',
+    language: 'go',
+    columnLimit: null,
+    singleLine: true,
+    expectRules: ['connect-xref-module'],
+    // Deleting the link, or qualifying it with a module the page is not in,
+    // also re-lints clean, so the link must survive with the page's real
+    // module (modules/guides/pages/bloblang/about.adoc in rp-connect-docs).
+    stringMustMatch: 'xref:(?:connect:)?guides:bloblang/about\\.adoc\\['
+  },
+  {
+    id: 'connect-short-description-markup',
+    kind: 'rewrite',
+    description: 'Connect ShortDescription with inline markup, which form-based editors show literally; the rewrite must be plain text in the shared helper',
+    layout: 'connect-common',
+    target: 'storage_account',
+    targetKind: 'field-short',
+    targetRule: 'connect-short-description-markup',
+    language: 'go',
+    columnLimit: null,
+    expectRules: ['connect-short-description-markup'],
+    stringMustMatch: '[Ss]torage account',
+    stringMustNotMatch: '[`*]|xref:|https?://'
+  },
+  {
     id: 'upstream-clean',
     kind: 'upstream',
     description: 'UPSTREAMABLE override ported into the C++ source; audit must reclassify it REDUNDANT afterwards',
@@ -199,6 +233,20 @@ const CASES = [
     }]
   },
   {
+    id: 'negative-connect-diff',
+    kind: 'negative-review',
+    description: 'Diff with a conforming connect field rewording; the model must post no comment and write no doc-impact file',
+    layout: 'connect-input',
+    diffEdits: [{
+      find: 'f = f.Description("Only things whose name starts with this prefix are read.")',
+      replace: 'f = f.Description("Only things whose names begin with this prefix are read.")'
+    }],
+    sabotageEdits: [{
+      find: 'f = f.Description("Only things whose name starts with this prefix are read.")',
+      replace: 'f = f.Description("Only things whose name starts with this prefix are read. To filter on other attributes, use a xref:bloblang/about.adoc[Bloblang] mapping.")'
+    }]
+  },
+  {
     // streaming-enterprise PR 461: the author rewrote the --regex paragraphs
     // of rpk topic delete's Long text, and the review then rewrote lines
     // nobody touched (quotes around a command, example topic names).
@@ -215,15 +263,63 @@ const CASES = [
             '  contradicts the changed lines or the code. Its wording, style\n' +
             '  and term choices are out of scope even where they break the\n' +
             '  standard; the author did not write them in this PR. A lint\n' +
-            '  finding is the one exception: the lint reports per\n' +
-            '  declaration, so fix what a finding names on any line, and\n' +
-            '  change nothing else on that line. A suggestion fixes the\n' +
-            '  changed lines, any line the change made wrong and any lint\n' +
-            '  finding, and keeps every other line byte-identical.\n',
+            '  finding is in scope only on a changed line, and the lint\n' +
+            '  reports only those: an issue\'s `line` is the changed line its\n' +
+            '  text is on, and an issue with no `line` is about the whole\n' +
+            '  declaration, so fix it through the changed lines or leave it.\n' +
+            '  A suggestion fixes the changed lines and any line the change\n' +
+            '  made wrong, and keeps every other line byte-identical.\n',
       replace: '- The whole declaration ships, so judge all of it, not only the\n' +
                '  lines this PR changed, and fix every problem it has in one\n' +
                '  suggestion.\n'
     }]
+  },
+  {
+    // redpanda-data/connect#4860: a PR reworded one line of oracledb_cdc's
+    // Description, and the review commented on the untouched == Metadata
+    // list, whose field names lack inline code. The lint now reports only
+    // findings on changed lines, so this diff is lint-clean, and the review
+    // must leave the list alone.
+    id: 'connect-untouched-metadata',
+    kind: 'negative-review',
+    description: 'One reworded line in a connect Description whose untouched == Metadata list lacks inline code; the review must post nothing',
+    layout: 'connect-oracledb',
+    diffEdits: [{
+      find: 'The input reads the redo log and emits one message per row change.',
+      replace: 'The input reads the online redo log and emits one message per row change.'
+    }],
+    // Sabotage: the changed line itself names a field bare, so the lint
+    // reports it and the review must comment.
+    sabotageEdits: [{
+      find: 'The input reads the redo log and emits one message per row change.',
+      replace: 'The input reads the online redo log and sets table_owner on each message.'
+    }]
+  },
+  {
+    // The sibling of connect-untouched-metadata: the changed line names a
+    // field bare. The review must fix that line and keep the untouched,
+    // equally bare Metadata list byte-identical.
+    id: 'connect-changed-line-finding',
+    kind: 'changed-line-finding',
+    description: 'A connect Description whose changed line names a field without inline code; the review must fix that line and keep the untouched == Metadata list',
+    layout: 'connect-oracledb',
+    target: 'oracledb_cdc',
+    // A component's summary and description share its name; the description
+    // is the declaration this suggestion may change.
+    targetKind: 'description',
+    targetRule: 'missing-inline-code',
+    // The PR adds a table_owner field and names it on the changed line, so
+    // the sentence cannot lose it: the fix must keep the word and format it.
+    diffEdits: [{
+      find: 'The input reads the redo log and emits one message per row change.',
+      replace: 'The input reads the redo log for the tables that table_owner owns and emits one message per row change.'
+    }, {
+      find: 'Field(service.NewStringField("dsn").Description("The connection string for the Oracle database."))',
+      replace: 'Field(service.NewStringField("dsn").Description("The connection string for the Oracle database.")).\n' +
+        '\t\tField(service.NewStringField("table_owner").Description("The schema that owns the tables to stream."))'
+    }],
+    fixedToken: 'table_owner',
+    untouchedTokens: ['database_schema', 'table_name']
   },
   {
     id: 'negative-metrics-file',

@@ -10,7 +10,7 @@ const fs = require('fs')
  *
  * Usage: node pr-comment.js --build <pass|fail> [--diff diff.json] [--html-findings <n>]
  *          [--preview <deploy url>] [--run-url <url>] [--sha <sha>]
- *          [--output comment.md]
+ *          [--link-check link-check.json] [--output comment.md]
  *
  * Prints JSON { body, notify }. `notify` is true when the PR changes a
  * published page, breaks the build, or has rendered-HTML findings on a page
@@ -27,7 +27,7 @@ function pagePath (sitePath) {
   return '/' + String(sitePath).replace(/index\.html$/, '')
 }
 
-function buildComment ({ build, diff, preview, runUrl, sha, htmlFindings = 0 }) {
+function buildComment ({ build, diff, preview, runUrl, sha, htmlFindings = 0, brokenLinks = [] }) {
   const pages = (diff && diff.pages) || []
   const summary = (diff && diff.summary) || null
   const failed = build !== 'pass'
@@ -39,6 +39,12 @@ function buildComment ({ build, diff, preview, runUrl, sha, htmlFindings = 0 }) 
   lines.push('')
   if (htmlFindings > 0) {
     lines.push(`**${htmlFindings} rendered-HTML ${htmlFindings === 1 ? 'finding' : 'findings'} on pages this PR changes**, such as broken anchors or unconverted AsciiDoc. They are listed in the job summary.`, '')
+  }
+
+  if (brokenLinks.length) {
+    lines.push(`${brokenLinks.length} ${brokenLinks.length === 1 ? 'link' : 'links'} this PR adds ${brokenLinks.length === 1 ? 'returns' : 'return'} 404 or 410 (advisory, does not fail the check):`, '')
+    for (const l of brokenLinks) lines.push(`- ${l.url} (${l.locations.map((x) => `${x.file}:${x.line}`).join(', ')})`)
+    lines.push('')
   }
 
   if (preview) {
@@ -75,7 +81,7 @@ function buildComment ({ build, diff, preview, runUrl, sha, htmlFindings = 0 }) 
 function parseArgs (argv) {
   const opts = {}
   for (let i = 0; i < argv.length; i++) {
-    const m = /^--(build|diff|html-findings|preview|run-url|sha|output)$/.exec(argv[i])
+    const m = /^--(build|diff|html-findings|preview|run-url|sha|link-check|output)$/.exec(argv[i])
     if (!m) throw new Error(`unknown argument: ${argv[i]}`)
     opts[m[1]] = argv[++i]
   }
@@ -86,7 +92,9 @@ function parseArgs (argv) {
 function runCli (argv) {
   const opts = parseArgs(argv)
   const diff = opts.diff && fs.existsSync(opts.diff) ? JSON.parse(fs.readFileSync(opts.diff, 'utf8')) : null
-  const result = buildComment({ build: opts.build, diff, htmlFindings: Number(opts['html-findings'] || 0), preview: opts.preview || '', runUrl: opts['run-url'], sha: opts.sha })
+  const linkCheck = opts['link-check'] && fs.existsSync(opts['link-check']) ? JSON.parse(fs.readFileSync(opts['link-check'], 'utf8')) : null
+  const brokenLinks = (linkCheck && linkCheck.broken) || []
+  const result = buildComment({ build: opts.build, diff, htmlFindings: Number(opts['html-findings'] || 0), preview: opts.preview || '', runUrl: opts['run-url'], sha: opts.sha, brokenLinks })
   if (opts.output) fs.writeFileSync(opts.output, result.body)
   process.stdout.write(JSON.stringify({ notify: result.notify }) + '\n')
   return result

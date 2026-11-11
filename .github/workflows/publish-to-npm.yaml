@@ -129,10 +129,32 @@ jobs:
       # with the tag input. npm-publish skips a version npm already has, so a
       # recovery run for a version that did publish is a no-op.
       - uses: JS-DevTools/npm-publish@v4
+      # The registry can take minutes to serve a version after the publish
+      # returns. The docs repositories install the latest version as soon as
+      # they are dispatched, so a dispatch sent now reinstalls the previous
+      # release and opens no PR. Wait until npm serves this version, so
+      # dispatch only runs once there is something to install.
+      - name: Wait until npm serves the version
+        id: served
+        env:
+          VERSION: ${{ inputs.tag || needs.release-please.outputs.version }}
+        run: |
+          set -euo pipefail
+          version="${VERSION#v}"
+          name=$(jq -r .name package.json)
+          for attempt in $(seq 1 40); do
+            if [ "$(npm view "$name@$version" version 2>/dev/null || true)" = "$version" ]; then
+              echo "npm serves $name@$version (attempt $attempt)."
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::npm still does not serve $name@$version after 10 minutes. Re-run this job, then dispatch runs."
+          exit 1
 
   dispatch:
-    # Runs only after a publish, so the docs repositories are told to update
-    # when there is a new version to update to.
+    # Runs only after a publish that npm already serves, so the docs
+    # repositories are told to update when there is a new version to install.
     needs: publish
     strategy:
       # Each repository's dispatch is independent: one failing must not

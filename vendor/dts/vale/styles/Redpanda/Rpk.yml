@@ -1,0 +1,11 @@
+# Checks: bare rpk in running text
+extends: existence
+message: "In running text, format '%s' as inline code (`rpk`), lowercase."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/terminology.md#redpanda-specific-word-list
+level: error
+# Bare `rpk` is fine in headings and nav entries (nav.adoc is switched off
+# in .vale.ini), and code blocks are never linted. Only running text counts.
+scope: [paragraph, list, table.cell]
+ignorecase: true
+tokens:
+  - '\brpk\b'

@@ -1,0 +1,57 @@
+= Property values test
+:description: Exercises the propval macro: every field, both formats, and each placeholder case.
+
+Each line below states what it must render. The values come from this
+component's `redpanda-properties-v26.2.1.json` fixture, the same data the
+`prop:` macro validates this page against.
+
+== Defaults, human-readable and raw
+
+* prop:retention.ms[] defaults to propval:retention.ms[default]. Must read
+  "1 week": the fixture's `default_human_readable`, which is also the
+  parenthetical in the reference table's Default cell.
+* The exact value is `propval:retention.ms[default,format=raw]`. Must read
+  `604800000` in inline code.
+* prop:cloud_storage_cache_size[] defaults to
+  propval:cloud_storage_cache_size[default]. Must read "20 GiB".
+* prop:log_segment_size[] defaults to propval:log_segment_size[default]. Must
+  read "134217728": the data gives this property no unit, so no unit is
+  guessed.
+* prop:cloud_storage_enabled[] defaults to
+  propval:cloud_storage_enabled[default]. Must read "false".
+* prop:write_caching_default[] defaults to
+  propval:write_caching_default[default]. Must read "true".
+* prop:cloud_storage_max_partition_readers_per_shard[] defaults to
+  propval:cloud_storage_max_partition_readers_per_shard[default]. Must read
+  "null", as the reference table renders it.
+
+== Other fields
+
+* Type of prop:log_segment_size[]: propval:log_segment_size[type]. Must read
+  "integer".
+* Minimum of prop:log_segment_size[]: propval:log_segment_size[min]. Must read
+  "0".
+* Changing prop:cloud_storage_enabled[] requires a restart:
+  propval:cloud_storage_enabled[restart]. Must read "yes".
+* Raw form: propval:cloud_storage_enabled[restart,format=raw]. Must read
+  "true".
+* Changing prop:iceberg_enabled[] requires a restart:
+  propval:iceberg_enabled[restart]. Must read "no".
+* prop:fips_mode[] scope, nullable: propval:fips_mode[scope],
+  propval:fips_mode[nullable]. Must read "broker, no".
+
+== Placeholders
+
+Each of these must render a visible placeholder in the
+`property-value-unknown` style, and the build log must name the property, the
+field, and the dataset.
+
+* propval:log_segment_size[max]. Must read "<unknown max>": the property has
+  no maximum.
+* propval:log_segment_sizee[default]. Must read "<unknown default>": the
+  property name is misspelled.
+* propval:log_segment_size[colour]. Must read "<unknown colour>": not a field
+  propval supports.
+
+The Cloud rules are shown on the
+xref:macro-fixtures-cloud::index.adoc#property-values-on-cloud[Cloud fixtures page].

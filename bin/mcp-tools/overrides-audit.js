@@ -9,7 +9,7 @@ const { findRepoRoot, getDocToolsCommand, MAX_EXEC_BUFFER_SIZE, DEFAULT_COMMAND_
  * Audit docs-side override entries against extracted source strings
  * @param {Object} args - Arguments
  * @param {string} args.overrides - Path to the overrides JSON file (for example "docs-data/property-overrides.json")
- * @param {string} [args.extracted] - Path to the extracted source JSON (property extractor raw output; required for the properties surface)
+ * @param {string} [args.extracted] - Path to the extracted source JSON (property extractor raw output for properties; the newest docs-data/rpk-v<version>.json snapshot for rpk)
  * @param {string} [args.repo] - Redpanda checkout to extract raw source strings from (alternative to args.extracted, properties surface only)
  * @param {string} [args.surface] - Override surface: 'properties' or 'rpk'
  * @param {string} [args.output] - Also write the JSON result to this file (relative to repo root)
@@ -90,7 +90,7 @@ function auditOverrides(args = {}) {
       stdout: err.stdout || '',
       stderr: err.stderr || '',
       exitCode: err.status,
-      suggestion: 'Check that the overrides file exists and that --extracted points to the property extractor\'s raw JSON output (without overrides applied)'
+      suggestion: 'Check that the overrides file exists and that --extracted points to the property extractor\'s raw JSON output (properties) or the newest docs-data/rpk-v<version>.json snapshot (rpk)'
     };
   }
 }

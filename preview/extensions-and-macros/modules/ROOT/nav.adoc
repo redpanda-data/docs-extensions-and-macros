@@ -2,6 +2,7 @@
 * xref:preview:ROOT:enterprise-kubernetes-test.adoc[]
 * xref:preview:ROOT:docker-labs.adoc[]
 * xref:preview:ROOT:url-to-xref-test.adoc[]
+* xref:preview:ROOT:rpk-links-test.adoc[]
 * xref:preview:ROOT:faq-test.adoc[]
 * xref:preview:ROOT:faq-blocks-test.adoc[]
 * xref:preview:ROOT:iceberg-explorer-test.adoc[]
@@ -11,4 +12,5 @@
 ** xref:ROOT:macros-showcase.adoc[Property and enterprise macros]
 ** xref:ROOT:macros-showcase-kubernetes.adoc[On Kubernetes pages]
 ** xref:ROOT:release-status-test.adoc[Release status gating]
+** xref:ROOT:property-values-test.adoc[Property values (propval)]
 ** xref:reference:properties/cluster-properties.adoc[Declared reference page]

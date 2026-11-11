@@ -5,7 +5,7 @@
  * announces, and shapes them as doc-impact findings.
  *
  * The doc-strings review derives its published-content impact from the doc
- * strings a PR changes. Two kinds of change carry no doc string at all and
+ * strings a PR changes. Some changes carry no doc string at all and
  * still change what the licensing docs say:
  *
  *   - a value added to (or removed from) `enum class license_required_feature`
@@ -18,7 +18,10 @@
  *     license-gated, so the licensing tables and the disable page change;
  *   - a changed restricted value of an enterprise<> property in
  *     src/v/config/configuration.cc: which values need a license changes,
- *     with no change to the header or to any doc string.
+ *     with no change to the header or to any doc string;
+ *   - a changed `community_core_limit` in src/v/features/enterprise_features.h:
+ *     the number of cores a Community Edition cluster may run changes, and the
+ *     registry entry for `cluster_cores_over_limit` states that number.
  *
  * streaming-enterprise PR 579 (2026-10-07) was the first miss: it added
  * `manual_finalization` to the enum and changed license enforcement, touched
@@ -107,6 +110,32 @@ function enumChanges (lines) {
     added: [...added].filter((n) => !removed.has(n)).sort(),
     removed: [...removed].filter((n) => !added.has(n)).sort()
   }
+}
+
+// The Community Edition core limit: `inline constexpr uint32_t
+// community_core_limit = 50;`. Uses of the name (`limit <=
+// community_core_limit`) are not declarations and never match.
+const CORE_LIMIT_DECL = /\bconstexpr\b[^=;]*\bcommunity_core_limit\s*=\s*([^;]+?)\s*;/
+
+/**
+ * The Community Edition core limit before and after, from the added and
+ * removed declaration lines of enterprise_features.h, or null when it did not
+ * change. A side with no declaration line is null.
+ * @returns {{before: string|null, after: string|null}|null}
+ */
+function coreLimitChange (lines) {
+  let before = null
+  let after = null
+  for (const line of lines) {
+    const sign = line[0]
+    if (sign !== '+' && sign !== '-') continue
+    const m = CORE_LIMIT_DECL.exec(stripComments(line.slice(1), { inBlock: false }))
+    if (!m) continue
+    if (sign === '+') after = m[1]
+    else before = m[1]
+  }
+  if (before === after) return null
+  return { before, after }
 }
 
 // One declaration can span lines (clang-format wraps a long template
@@ -331,6 +360,21 @@ function detectGatingChanges (diffText, { enterpriseNames = [] } = {}) {
           summary: `\`${name}\` was removed from \`license_required_feature\` in \`${ENUM_HEADER}\`. The release that contains this change no longer reports it as an enterprise feature. The enterprise features registry entry that points at it (${REGISTRY_URL}) needs a new source pointer or a note, never deletion: a published external name stays in the registry.`
         })
       }
+      const limit = coreLimitChange(file.lines)
+      if (limit) {
+        const what = limit.before === null
+          ? `was set to ${limit.after}`
+          : limit.after === null
+            ? `(${limit.before}) was removed`
+            : `changed from ${limit.before} to ${limit.after}`
+        findings.push({
+          surface: 'enterprise-feature',
+          name: 'community_core_limit',
+          change_kind: 'community-core-limit-changed',
+          affected_pages: [LICENSING_OVERVIEW],
+          summary: `The Community Edition core limit, \`community_core_limit\` in \`${ENUM_HEADER}\`, ${what}. It is the number of cores (Redpanda shards, summed over every broker) a cluster may run without an enterprise license before \`cluster_cores_over_limit\` is reported. The enterprise features registry entry for \`cluster_cores_over_limit\` (${REGISTRY_URL}) states the limit in its name, description and expiration text, and any page that states the Community Edition core limit needs the new number.${limit.after === null ? ' If the limit moved rather than went away, find where it is defined now.' : ''}`
+        })
+      }
     } else if (file.path === CONFIG_HEADER) {
       const { added, removed, deleted } = enterprisePropertyChanges(file.lines)
       for (const name of added) {
@@ -436,5 +480,6 @@ module.exports = {
   enterprisePropertyChanges,
   enterprisePropertyNames,
   restrictedValueChanges,
+  coreLimitChange,
   splitFiles
 }
