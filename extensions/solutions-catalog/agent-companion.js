@@ -339,6 +339,17 @@ function prose (lines, ctx, { tables = false } = {}) {
   // reader of this module asks for; older pages titled a list inside the last
   // section `.Files for this step`, and only that list is dropped.
   let fileList = false
+  // A platform open block ([.platform.platform-cloud] plus `.On Redpanda
+  // Cloud`, in either order, then `--`) keeps its title as a label, or the
+  // reader can't tell which platform the passage is for.
+  let blockTitle = null
+  let platformAttr = false
+  // A synced platform tab set ([tabs,sync-group-id=platform], then `======`)
+  // is read, not dropped like other delimited blocks: each `Label::` line
+  // becomes an `**On Label:**` lead-in, so an agent sees every deployment's
+  // passage and can follow the one for the user's.
+  let platformTabsNext = false
+  let platformTabs = null
   const dropLeadIn = () => {
     let k = out.length - 1
     while (k >= 0 && !out[k].trim()) k--
@@ -363,6 +374,14 @@ function prose (lines, ctx, { tables = false } = {}) {
     if (fileList) { if (line) continue; fileList = false }
     if (/^\.Files for this step\b/.test(line)) { fileList = true; continue }
     if (tables && TABLE_RX.test(line)) { rows = []; continue }
+    if (/^\[tabs\b[^\]]*\bsync-group-id=platform\b[^\]]*\]$/.test(line)) { platformTabsNext = true; continue }
+    if (platformTabsNext && /^={4,}$/.test(line)) { platformTabs = line; platformTabsNext = false; continue }
+    platformTabsNext = false
+    if (platformTabs) {
+      if (line === platformTabs) { platformTabs = null; continue }
+      const label = line.match(/^(\S.*?)::$/)
+      if (label) { out.push('', `**On ${label[1]}:**`, ''); blockTitle = null; platformAttr = false; continue }
+    }
     if (isDelimiter(line)) { dropLeadIn(); skip = line; cols = null; continue }
     if (tables) {
       const c = line.match(/^\[.*\bcols=(?:"([^"]*)"|([^,\]]+)).*\]$/)
@@ -370,6 +389,11 @@ function prose (lines, ctx, { tables = false } = {}) {
     }
     if (/^(image|video|include)::/.test(line)) { dropLeadIn(); continue }
     if (/^(ifn?def|endif|ifeval)::/.test(line)) continue
+    if (line === '--' && blockTitle && platformAttr) out.push('', `**${blockTitle.replace(/:$/, '')}:**`, '')
+    if (/^\[\.platform\b.*\]$/.test(line)) { platformAttr = true; continue }
+    if (/^\.\S/.test(line) && !/^\.{2,}/.test(line)) { blockTitle = line.slice(1).trim(); continue }
+    blockTitle = null
+    platformAttr = false
     if (/^\[.*\]$/.test(line) || /^\.\S/.test(line) || /^\/\//.test(line) || line === '+' || line === '--') continue
     if (/^:[\w-]+:/.test(line) || /^={3,} /.test(line)) continue
     out.push(line.replace(/^(NOTE|TIP|IMPORTANT|WARNING|CAUTION): /, (_, k) => `**${k[0]}${k.slice(1).toLowerCase()}:** `))
