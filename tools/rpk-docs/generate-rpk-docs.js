@@ -8,8 +8,9 @@ const helpers = require('./helpers')
 /**
  * The default to print in a flag's row, or undefined to print none. Follows
  * cobra's --help: zero values ("", 0, false, [], 0s) are not shown. A
- * required flag's default is never used, and a description that already
- * states its default is left alone.
+ * required flag's default is never used, a description that already
+ * states its default is left alone, and a path under a home directory is
+ * not shown.
  */
 function flagDefaultToShow (flag) {
   if (!flag || flag.required === true) return undefined
@@ -19,7 +20,10 @@ function flagDefaultToShow (flag) {
   if (value === undefined || value === null || value === '' || value === false || value === 0) return undefined
   if (Array.isArray(value) && value.length === 0) return undefined
   if (typeof value === 'string' && /^(0|0s|\[\]|false|<nil>)$/.test(value)) return undefined
-  if (/\(default\b|\bdefault:/i.test(flag.description || '')) return undefined
+  if (/\(default\b|\bdefault:|\bdefaults? (?:to|is)\b/i.test(flag.description || '')) return undefined
+  // A path under a home directory comes from the machine that saved the
+  // snapshot (rpk plugin install --dir gave /root/.local/bin), not from rpk.
+  if (typeof value === 'string' && /^(?:~|\/root|\/home\/[^/]+|\/Users\/[^/]+|[A-Za-z]:\\Users\\[^\\]+)(?:[/\\]|$)/.test(value)) return undefined
   return helpers.formatDefault(value, flag.type)
 }
 

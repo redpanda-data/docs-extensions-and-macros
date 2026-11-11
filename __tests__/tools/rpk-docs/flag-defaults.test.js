@@ -31,6 +31,15 @@ describe('flagDefaultToShow', () => {
   test('leaves a description that already states its default', () => {
     expect(flagDefaultToShow({ type: 'string', default: 'x', description: 'Mode (default x)' })).toBeUndefined()
     expect(flagDefaultToShow({ type: 'string', default: 'x', description: 'Mode. Default: x' })).toBeUndefined()
+    expect(flagDefaultToShow({ type: 'int32', default: -1, description: 'Partitions; -1 defaults to the cluster setting' })).toBeUndefined()
+    expect(flagDefaultToShow({ type: 'string', default: 'x', description: 'Mode. The default is x' })).toBeUndefined()
+  })
+
+  test('hides a path under the home directory of the machine that saved the snapshot', () => {
+    expect(flagDefaultToShow({ type: 'string', default: '/root/.local/bin', description: 'Destination directory' })).toBeUndefined()
+    expect(flagDefaultToShow({ type: 'string', default: '/home/runner/.config/rpk', description: 'Directory' })).toBeUndefined()
+    expect(flagDefaultToShow({ type: 'string', default: '/Users/jake/.local/bin', description: 'Directory' })).toBeUndefined()
+    expect(flagDefaultToShow({ type: 'string', default: '/etc/redpanda/redpanda.yaml', description: 'Config file' })).toBe('/etc/redpanda/redpanda.yaml')
   })
 })
 
