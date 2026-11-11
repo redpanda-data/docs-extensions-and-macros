@@ -1,0 +1,12 @@
+# Checks: pages with no :page-topic-type:
+extends: occurrence
+message: "Add a :page-topic-type: attribute to the page header."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/content-architecture.md#page-metadata
+level: warning
+scope: raw
+min: 1
+# A stub whose header includes the real page carries its metadata through
+# that include, so a header include:: with tag=single-source (single-sourced
+# pages) or tag=meta (generated reference stubs) counts. Any other include,
+# such as a partial in the header, does not.
+token: '(?m)^:page-topic-type:|\A(?:[^\n]+\n)*include::[^\n]*\btag=(?:single-source|meta)\b'

@@ -65,6 +65,39 @@ describe('parseSenders: expression resolution', () => {
     expect(senders[0].raw).toMatch(/secrets\.TARGET/)
   })
 
+  test('a literal owner with a variable repo is a fan-out sender; a variable owner is plain unresolved', () => {
+    const senders = parseSenders(read('sender-fan-out.yml'), where('sender-fan-out.yml'))
+    expect(senders).toHaveLength(2)
+    const [fan, plain] = senders
+    expect(fan).toMatchObject({ targetRepo: null, eventType: 'fan-out-request', unresolved: true, fanOutOwner: 'redpanda-data' })
+    expect(fan.payload).toEqual({})
+    expect(plain).toMatchObject({ targetRepo: null, eventType: 'other-request', unresolved: true })
+    expect(plain.fanOutOwner).toBeUndefined()
+    expect(edges(senders)).toEqual([])
+  })
+
+  test('a fan-out does not borrow an event type that belongs to another dispatch in the block', () => {
+    const senders = parseSenders(read('sender-fan-out-borrowed-type.yml'), where('sender-fan-out-borrowed-type.yml'))
+    expect(senders).toHaveLength(2)
+    const [literal, fan] = senders
+    expect(literal).toMatchObject({ targetRepo: 'redpanda-data/docs', eventType: 'literal-request', unresolved: false })
+    expect(fan).toMatchObject({ eventType: null, unresolved: true })
+    expect(fan.fanOutOwner).toBeUndefined()
+  })
+
+  test('two dispatches on one line also keep a fan-out from borrowing the block type', () => {
+    const text = [
+      'on: push', 'jobs:', '  j:', '    runs-on: x', '    steps:', '      - run: |',
+      `          printf '%s' '{"event_type":"literal-request"}' > body.json`,
+      `          jq -n --arg t "$TYPE" '{event_type: $t}' | gh api "repos/redpanda-data/$REPO/dispatches" --input -; gh api repos/redpanda-data/docs/dispatches --input - < body.json`,
+    ].join('\n')
+    const senders = parseSenders(text, where('one-line.yml'))
+    const fan = senders.find((s) => /\$REPO/.test(s.raw || ''))
+    expect(fan).toBeDefined()
+    expect(fan.eventType).toBeNull()
+    expect(fan.fanOutOwner).toBeUndefined()
+  })
+
   test('repository defaults to the sending repo when omitted', () => {
     const text = [
       'on: push', 'jobs:', '  j:', '    runs-on: x', '    steps:',

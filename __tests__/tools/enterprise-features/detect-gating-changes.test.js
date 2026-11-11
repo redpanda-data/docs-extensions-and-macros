@@ -119,6 +119,90 @@ describe('detectGatingChanges: license_required_feature enum', () => {
   })
 })
 
+describe('detectGatingChanges: Community Edition core limit', () => {
+  // The limit is a constant in the enum header, outside the enum, so the
+  // weekly registry check and the enum scan never see it change.
+  const limitDiff = (hunkLines) => [
+    `diff --git a/${ENUM_HEADER} b/${ENUM_HEADER}`,
+    `--- a/${ENUM_HEADER}`,
+    `+++ b/${ENUM_HEADER}`,
+    '@@ -128,6 +128,6 @@ class enterprise_feature_report {',
+    ...hunkLines,
+    ''
+  ].join('\n')
+  const kinds = (diff) => detectGatingChanges(diff).map((f) => [f.change_kind, f.name])
+
+  test('a changed limit yields one finding that names the old and new values', () => {
+    const findings = detectGatingChanges(limitDiff([
+      ' /// shard, summed over every member broker.',
+      '-inline constexpr uint32_t community_core_limit = 50;',
+      '+inline constexpr uint32_t community_core_limit = 64;'
+    ]))
+    expect(findings).toEqual([expect.objectContaining({
+      surface: 'enterprise-feature',
+      name: 'community_core_limit',
+      change_kind: 'community-core-limit-changed'
+    })])
+    expect(findings[0].affected_pages).toHaveLength(1)
+    expect(findings[0].summary).toMatch(/changed from 50 to 64/)
+    expect(findings[0].summary).toMatch(/cluster_cores_over_limit/)
+    expect(findings[0].summary).toMatch(/enterprise-features\.yml/)
+  })
+
+  test('the PR that introduced the limit (streaming-enterprise 928) reports the feature and the limit', () => {
+    // The shape of the PR: a new enum member and, further down, the constant.
+    const diff = [
+      `diff --git a/${ENUM_HEADER} b/${ENUM_HEADER}`,
+      `--- a/${ENUM_HEADER}`,
+      `+++ b/${ENUM_HEADER}`,
+      '@@ -37,6 +42,9 @@ enum class license_required_feature {',
+      '     manual_finalization,',
+      '+    cluster_cores_over_limit,',
+      ' };',
+      '@@ -116,6 +128,52 @@ class enterprise_feature_report {',
+      ' };',
+      '+inline constexpr uint32_t community_core_limit = 50;',
+      '+uint32_t get_community_core_limit();',
+      ''
+    ].join('\n')
+    const findings = detectGatingChanges(diff)
+    expect(findings.map((f) => [f.change_kind, f.name])).toEqual([
+      ['enterprise-feature-added', 'cluster_cores_over_limit'],
+      ['community-core-limit-changed', 'community_core_limit']
+    ])
+    expect(findings[1].summary).toMatch(/was set to 50/)
+  })
+
+  test('a removed limit is reported, with a prompt to check whether it moved', () => {
+    const findings = detectGatingChanges(limitDiff(['-inline constexpr uint32_t community_core_limit = 50;']))
+    expect(findings.map((f) => f.change_kind)).toEqual(['community-core-limit-changed'])
+    expect(findings[0].summary).toMatch(/\(50\) was removed/)
+    expect(findings[0].summary).toMatch(/moved/)
+  })
+
+  test('reformatting the declaration without changing the value is not reported', () => {
+    expect(kinds(limitDiff([
+      '-inline constexpr uint32_t community_core_limit = 50;',
+      '+inline constexpr std::uint32_t community_core_limit = 50; // shards'
+    ]))).toEqual([])
+  })
+
+  test('a use of the name is not a declaration', () => {
+    expect(kinds(limitDiff([
+      '-        && limit <= community_core_limit,',
+      '+        && limit < community_core_limit,',
+      '-/// count at or below community_core_limit fails an assertion and aborts the',
+      '+/// count below community_core_limit fails an assertion and aborts the'
+    ]))).toEqual([])
+  })
+
+  test('a limit declared in another file is not read', () => {
+    const diff = limitDiff(['-inline constexpr uint32_t community_core_limit = 50;', '+inline constexpr uint32_t community_core_limit = 64;'])
+      .split(ENUM_HEADER).join('src/v/features/enterprise_features.cc')
+    expect(kinds(diff)).toEqual([])
+  })
+})
+
 describe('detectGatingChanges: config::enterprise<> wrappers', () => {
   test('the commit that gated features_auto_finalization yields one gate-added finding', () => {
     const findings = detectGatingChanges(fixture('se-property-gate-added.patch'))
@@ -455,5 +539,109 @@ describe('buildDocImpact', () => {
     }
     expect(t.title).toMatch(/feat_9 and 2 more$/)
     expect(t.body).toMatch(/^- 2 more gating change\(s\) are not listed here/m)
+  })
+})
+
+describe('detectGatingChanges: edge cases from review', () => {
+  const { splitFiles } = require('../../../tools/enterprise-features/detect-gating-changes')
+  const headerDiff = (hunkLines) => [
+    `diff --git a/${CONFIG_HEADER} b/${CONFIG_HEADER}`,
+    `--- a/${CONFIG_HEADER}`,
+    `+++ b/${CONFIG_HEADER}`,
+    '@@ -700,7 +700,7 @@ struct configuration final : public config_store {',
+    ...hunkLines,
+    ''
+  ].join('\n')
+
+  test('an enum member with an explicit value is detected', () => {
+    const diff = enumDiff(['     core_balancing_continuous = 11,', '+    manual_finalization = 12,', ' };'])
+    expect(detectGatingChanges(diff).map((f) => [f.change_kind, f.name])).toEqual([['enterprise-feature-added', 'manual_finalization']])
+  })
+
+  test('a hunk line that starts with --- or +++ is content, not a file header', () => {
+    const diff = [
+      `diff --git a/${CONFIG_SOURCE} b/${CONFIG_SOURCE}`,
+      `--- a/${CONFIG_SOURCE}`,
+      `+++ b/${CONFIG_SOURCE}`,
+      '@@ -1,3 +1,3 @@',
+      '---x;',
+      '+++x;',
+      ''
+    ].join('\n')
+    expect(splitFiles(diff)[0].lines).toEqual(['@@ -1,3 +1,3 @@', '---x;', '+++x;', ''])
+  })
+
+  test('a restricted value changed on a one-line initializer is reported', () => {
+    const diff = [
+      `diff --git a/${CONFIG_SOURCE} b/${CONFIG_SOURCE}`,
+      `--- a/${CONFIG_SOURCE}`,
+      `+++ b/${CONFIG_SOURCE}`,
+      '@@ -3440,4 +3440,4 @@ configuration::configuration()',
+      '   , audit_enabled(',
+      '-      *this, false, "audit_enabled",',
+      '+      *this, true, "audit_enabled",',
+      '       "Enables or disables audit logging on ALL nodes of the cluster.",',
+      ''
+    ].join('\n')
+    expect(detectGatingChanges(diff, { enterpriseNames: ['audit_enabled'] }).map((f) => [f.change_kind, f.name]))
+      .toEqual([['enterprise-restricted-value-changed', 'audit_enabled']])
+  })
+
+  test('a wrapped property deleted outright is a removal, not an ungating', () => {
+    const diff = headerDiff([
+      '     property<bool> features_auto_enable;',
+      '-    enterprise<property<bool>> features_auto_finalization;',
+      '     property<bool> fetch_reads_debounce;'
+    ])
+    const findings = detectGatingChanges(diff)
+    expect(findings.map((f) => [f.change_kind, f.name])).toEqual([['enterprise-property-removed', 'features_auto_finalization']])
+    expect(findings[0].summary).toMatch(/no longer exists/)
+  })
+
+  test('a wrapped property that moves and loses its wrapper is still an ungating', () => {
+    const diff = [
+      `diff --git a/${CONFIG_HEADER} b/${CONFIG_HEADER}`,
+      `--- a/${CONFIG_HEADER}`,
+      `+++ b/${CONFIG_HEADER}`,
+      '@@ -700,3 +700,2 @@ struct configuration final : public config_store {',
+      '-    enterprise<property<bool>> features_auto_finalization;',
+      '     property<bool> fetch_reads_debounce;',
+      '@@ -900,2 +899,3 @@ struct configuration final : public config_store {',
+      '     property<bool> zzz;',
+      '+    property<bool> features_auto_finalization;',
+      ''
+    ].join('\n')
+    expect(detectGatingChanges(diff).map((f) => [f.change_kind, f.name])).toEqual([['enterprise-gate-removed', 'features_auto_finalization']])
+  })
+})
+
+describe('withoutSent', () => {
+  const { withoutSent } = require('../../../tools/enterprise-features/detect-gating-changes')
+  const f = (name, kind = 'enterprise-feature-added') => ({ surface: 'enterprise-feature', name, change_kind: kind, affected_pages: [], summary: 's' })
+
+  test('the ticket is rebuilt from the findings not yet sent', () => {
+    // Push 1 sent manual_finalization; push 2 adds new_feature.
+    const report = buildDocImpact(withoutSent([f('manual_finalization'), f('new_feature')], 'manual_finalization enterprise-feature-added\n'))
+    expect(report.findings.map((x) => x.name)).toEqual(['new_feature'])
+    expect(report.proposed_ticket.title).toBe('Update enterprise feature docs for new_feature')
+    expect(report.proposed_ticket.body).not.toMatch(/manual_finalization/)
+  })
+
+  test('the key is name and change kind, so a second change to a sent name still goes out', () => {
+    const left = withoutSent([f('audit_enabled', 'enterprise-gate-added'), f('audit_enabled', 'enterprise-restricted-value-changed')], 'audit_enabled enterprise-gate-added\n')
+    expect(left.map((x) => x.change_kind)).toEqual(['enterprise-restricted-value-changed'])
+  })
+
+  test('sent findings are filtered before the cap, so an eleventh still goes out', () => {
+    const many = Array.from({ length: 11 }, (_, i) => f(`f${i}`))
+    const sent = many.slice(0, 10).map((x) => `${x.name} ${x.change_kind}`).join('\n')
+    const report = buildDocImpact(withoutSent(many, sent))
+    expect(report.findings.map((x) => x.name)).toEqual(['f10'])
+    expect(report.proposed_ticket.title).not.toMatch(/more$/)
+  })
+
+  test('an empty or missing state keeps every finding', () => {
+    expect(withoutSent([f('a')], '')).toHaveLength(1)
+    expect(withoutSent([f('a')], undefined)).toHaveLength(1)
   })
 })

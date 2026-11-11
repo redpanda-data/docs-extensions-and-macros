@@ -63,7 +63,8 @@ function createMasterDiff(intermediateResults, finalDiffPath, outputPath) {
     removedFields: releases.reduce((sum, r) => sum + (r.summary.removedFields || 0), 0),
     deprecatedComponents: releases.reduce((sum, r) => sum + (r.summary.deprecatedComponents || 0), 0),
     deprecatedFields: releases.reduce((sum, r) => sum + (r.summary.deprecatedFields || 0), 0),
-    changedDefaults: releases.reduce((sum, r) => sum + (r.summary.changedDefaults || 0), 0)
+    changedDefaults: releases.reduce((sum, r) => sum + (r.summary.changedDefaults || 0), 0),
+    documentedDefaults: releases.reduce((sum, r) => sum + (r.summary.documentedDefaults || 0), 0)
   };
 
   const masterDiff = {

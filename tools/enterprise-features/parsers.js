@@ -100,9 +100,11 @@ function parseDisableTable (source) {
       const xrefMatch = nameCell.match(/xref:[^[]+\[([^\]]+)\]/)
       const feature = (xrefMatch ? xrefMatch[1] : nameCell.split('\n')[0]).trim()
       // Capture only set-targets ("Set `prop` to ..." and "config set prop"),
-      // not backticked values such as `node_add`.
+      // not backticked values such as `node_add`. Broker config keys are
+      // dotted (rpk redpanda config set redpanda.fips_mode), so the property
+      // is the last segment.
       const properties = [...new Set(
-        [...actionCell.matchAll(/[Ss]et\s+`([a-z][a-z0-9_]+)`|config set ([a-z][a-z0-9_]+)/g)]
+        [...actionCell.matchAll(/[Ss]et\s+`([a-z][a-z0-9_]+)`|config set (?:[a-z][a-z0-9_]*\.)*([a-z][a-z0-9_]+)/g)]
           .map((m) => m[1] || m[2])
           .filter(Boolean)
       )]

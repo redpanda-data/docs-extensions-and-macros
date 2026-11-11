@@ -160,6 +160,19 @@ describe('connect extractor over a multi-package repo', () => {
   })
 })
 
+describe('connect-xref-module hint', () => {
+  const rule = require('../../../tools/lint-strings/surfaces/connect').rules.find((r) => r.name === 'connect-xref-module')
+  const hint = (target) => rule.check({ string: `See xref:${target}[the page].` })[0].message
+  test.each([
+    ['outputs/kafka.adoc', 'xref:components:outputs/kafka.adoc['],
+    ['rate_limits/local.adoc', 'xref:components:rate_limits/local.adoc['],
+    ['bloblang/about.adoc', 'xref:guides:bloblang/about.adoc['],
+    ['configuration/interpolation.adoc', 'path segment after /connect/']
+  ])('a module-less xref to %s names the fix', (target, expected) => {
+    expect(hint(target)).toContain(expected)
+  })
+})
+
 describe('connect parameter expansion and variadic helpers', () => {
   test('a variadic string parameter binds to the call arguments', () => {
     const files = new Map([
