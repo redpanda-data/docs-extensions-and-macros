@@ -330,7 +330,7 @@ describe('algolia-indexer taxonomy facets', () => {
     }
   })
 
-  test('keeps categories as the legacy list and adds topics, technologies, and deployment', () => {
+  test('keeps categories as the legacy list and adds topics, technologies, and deployments', () => {
     const record = indexWith(docPage(), component, { taxonomy })
     expect(record.categories).toEqual(['Iceberg', 'Data Replication', 'Deployment', 'High Availability'])
     expect(record.topics).toEqual(['Iceberg Topics', 'Replication', 'High Availability'])
@@ -338,7 +338,9 @@ describe('algolia-indexer taxonomy facets', () => {
     expect(record.technologies).toEqual(['Apache Iceberg'])
     expect(record.technologyIds).toEqual(['apache-iceberg'])
     expect(record.useCases).toEqual([])
-    expect(record.deployment).toEqual(['Kubernetes', 'Redpanda Self-Managed'])
+    expect(record.deployments).toEqual(['Kubernetes', 'Redpanda Self-Managed'])
+    // Not `deployment`: labs records hold the env-* string there.
+    expect(record).not.toHaveProperty('deployment')
     expect(record.deploymentIds).toEqual(['kubernetes', 'redpanda-self-managed'])
   })
 
@@ -359,7 +361,7 @@ describe('algolia-indexer taxonomy facets', () => {
   test('without a taxonomy, records are unchanged', () => {
     const record = indexWith(docPage(), component)
     expect(record.categories).toEqual(['Iceberg', 'Data Replication', 'Deployment', 'High Availability'])
-    for (const key of ['topics', 'topicIds', 'useCases', 'technologies', 'deployment']) expect(record).not.toHaveProperty(key)
+    for (const key of ['topics', 'topicIds', 'useCases', 'technologies', 'deployment', 'deployments']) expect(record).not.toHaveProperty(key)
   })
 
   test('labs records keep their string deployment and get no taxonomy fields', () => {

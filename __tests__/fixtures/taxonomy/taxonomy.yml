@@ -42,6 +42,14 @@ schemes:
         related: []
         deprecated: false
         replacedBy: []
+      - id: schema-registry
+        prefLabel: Schema Registry
+        altLabels: []
+        definition: Storing and evolving schemas for topic data.
+        broader: null
+        related: []
+        deprecated: false
+        replacedBy: []
       - id: iceberg-topics
         prefLabel: Iceberg Topics
         altLabels: []
@@ -136,6 +144,22 @@ schemes:
         related: []
         deprecated: false
         replacedBy: []
+      - id: schema-management
+        prefLabel: Schema management
+        altLabels: []
+        definition: Governing the schemas producers and consumers share.
+        broader: null
+        related: []
+        deprecated: false
+        replacedBy: []
+      - id: data-lakehouse
+        prefLabel: Data lakehouse
+        altLabels: []
+        definition: Landing streams in open tables for analytics.
+        broader: null
+        related: []
+        deprecated: false
+        replacedBy: []
       - id: disaster-recovery
         prefLabel: Disaster recovery
         altLabels: []
@@ -180,6 +204,24 @@ schemes:
         prefLabel: Apache Iceberg
         altLabels: []
         definition: The open table format for analytic datasets.
+        broader: null
+        related: []
+        deprecated: false
+        replacedBy: []
+        kind: format
+      - id: avro
+        prefLabel: Avro
+        altLabels: []
+        definition: A row-oriented binary serialization format.
+        broader: null
+        related: []
+        deprecated: false
+        replacedBy: []
+        kind: format
+      - id: protobuf
+        prefLabel: Protobuf
+        altLabels: []
+        definition: Protocol Buffers, a binary serialization format.
         broader: null
         related: []
         deprecated: false

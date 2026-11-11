@@ -64,7 +64,12 @@ function validateMapping (mapping) {
   return null
 }
 
-module.exports.register = function ({ config = {} } = {}) {
+// No default for the parameter itself: Antora (generator-context.js) calls a
+// register function whose .length is 0 with no arguments, and a defaulted
+// parameter does not count toward .length, so `({ config = {} } = {})` never
+// receives the playbook entry's settings. A destructured parameter without a
+// default has .length 1, and Antora then passes { config, playbook }.
+module.exports.register = function ({ config = {} }) {
   const logger = this.getLogger('kapa-source-groups-extension')
 
   // Three listeners on a generator context that already carries 30+ extensions,
