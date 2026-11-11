@@ -7,8 +7,15 @@ description: >
   split the doc-strings review runs in production; twin/review copy:
   docs-team-standards PR #2912, DOC-2496). Claude runs
   findings-only: read-only gh allowlist, no posting rights (the workflow
-  posts under its own identity), and the plugin's github-mutation-guard
-  hook backstops any mutating gh call.
+  posts under its own identity), and a gh shim on PATH that refuses any
+  mutating gh call, and any non-GitHub host in a URL, -R/--repo value,
+  GH_HOST or GH_REPO, before it reaches the real binary.
+
+  A caller with no PR under review (the docs update-release-notes
+  workflow, which curates a release before any PR exists) leaves
+  pr_number empty. The action then skips the PR checkout and the
+  base-branch CLAUDE.md step, and runs the skill against the caller's
+  workspace as it is, so files the caller downloaded first stay in place.
 
   Model auth is the ADP AI Gateway as the docs-pr-review agent
   (sdlc/prod/github/docs_pr_review_client, the adp_client_secret_id
@@ -25,11 +32,23 @@ inputs:
     description: Directory (relative to workspace) the skill writes findings/verdict into
     required: true
   repo:
-    description: owner/repo of the PR under review
-    required: true
+    description: >
+      owner/repo of the PR under review. Required when pr_number is set.
+      Unused when pr_number is empty.
+    required: false
+    default: ''
   pr_number:
-    description: PR number under review (its head is checked out for file reads)
-    required: true
+    description: >
+      PR number under review. Its head is checked out for file reads, and
+      the base branch's CLAUDE.md files are loaded. Leave empty when there
+      is no PR under review: both steps are skipped, and the skill reads
+      the caller's workspace. A non-empty value must be digits only.
+      With no PR, the caller is responsible for what the workspace
+      contains. Nothing is removed except .claude and .mcp.json, so a
+      CLAUDE.md or CLAUDE.local.md that the caller leaves there loads as
+      trusted rules.
+    required: false
+    default: ''
   plugin_ref:
     description: >
       Commit SHA of redpanda-data/docs-team-standards to check out as the
@@ -43,11 +62,16 @@ inputs:
       plugin checkout. docs-team-standards is PRIVATE: github.token is scoped
       to the calling repository, so in every caller other than
       docs-team-standards itself actions/checkout of the plugin 404s without
-      this. Leave empty only when the caller IS docs-team-standards.
+      an App token. The action reads the App credential from Secrets Manager
+      first (sdlc/prod/github/docs_automation_app) and uses this input only
+      when that fails, so it can stay empty once the org secret is gone.
     required: false
     default: ''
   plugin_app_private_key:
-    description: Private key for plugin_app_id (DOCS_APP_PRIVATE_KEY). Pass from secrets.
+    description: >
+      Private key for plugin_app_id (DOCS_APP_PRIVATE_KEY). Pass from
+      secrets. The fallback for the Secrets Manager credential, like
+      plugin_app_id.
     required: false
     default: ''
   aws_region:
@@ -153,12 +177,36 @@ runs:
           exit 1
         fi
 
+    # pr_number lands in a git ref and an API path, so a non-empty value must
+    # be a plain number. Empty is valid: it means no PR is under review. A PR
+    # also needs repo, the repository the PR is in.
+    - name: Assert pr_number is empty or a number
+      shell: bash
+      env:
+        PR_NUMBER: ${{ inputs.pr_number }}
+        REPO: ${{ inputs.repo }}
+      run: |
+        if [[ -n "$PR_NUMBER" && ! "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+          echo "::error::pr_number must be empty or digits only (got '${PR_NUMBER}')"
+          exit 1
+        fi
+        if [[ -n "$PR_NUMBER" && -z "$REPO" ]]; then
+          echo "::error::repo is required when pr_number is set"
+          exit 1
+        fi
+        if [[ -z "$PR_NUMBER" ]]; then
+          echo "::notice::no PR under review: skipping the PR checkout and the base-branch CLAUDE.md step"
+        fi
+
     # PR head, so the skill can Read/Grep the changed files. Same-repo
     # branches only (fork PRs are excluded by the caller workflow).
     # persist-credentials: false — github.token must not be left in the
     # checkout's git config, where Claude's allowlisted git commands and any
     # script in the PR head could use it as an authenticated Git path.
+    # Skipped with no PR: a checkout into the workspace root would delete the
+    # files the caller staged there for the skill.
     - uses: actions/checkout@v4
+      if: inputs.pr_number != ''
       with:
         repository: ${{ inputs.repo }}
         ref: refs/pull/${{ inputs.pr_number }}/head
@@ -170,7 +218,8 @@ runs:
     # register MCP servers — so a same-repo PR could add a hook that reads
     # GH_TOKEN or the gateway bearer from this step's environment. Remove
     # them from the workspace before any claude invocation; the skills
-    # come from the pinned plugin checkout, not from the PR.
+    # come from the pinned plugin checkout, not from the PR. This also runs
+    # with no PR, because the caller's workspace can hold the same files.
     - name: Remove project-level Claude config from the PR head
       shell: bash
       run: |
@@ -195,7 +244,9 @@ runs:
     # has none, and nothing would restore over it.
     # Consequence: a PR that edits CLAUDE.md is reviewed under the OLD rules;
     # the new ones apply to the next PR after it merges.
+    # Skipped with no PR: there is no base branch, and no PR head to replace.
     - name: Load this repo's CLAUDE.md/CLAUDE.local.md files from the base branch
+      if: inputs.pr_number != ''
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
@@ -240,225 +291,29 @@ runs:
     # scoped to that one repo with Contents: read — the narrowest credential
     # that can clone it. Minted here, consumed only by the checkout step,
     # never exported to the environment Claude runs in.
-    - name: Mint a read-only token for the plugin checkout
-      id: plugin_token
-      if: inputs.plugin_app_id != ''
-      uses: actions/create-github-app-token@v2
-      with:
-        app-id: ${{ inputs.plugin_app_id }}
-        private-key: ${{ inputs.plugin_app_private_key }}
-        owner: redpanda-data
-        repositories: docs-team-standards
-        permission-contents: read
-
-    - uses: actions/checkout@v4
-      with:
-        repository: redpanda-data/docs-team-standards
-        ref: ${{ inputs.plugin_ref }}
-        path: .docs-team-standards-plugin
-        token: ${{ steps.plugin_token.outputs.token || github.token }}
-        persist-credentials: false
-
-    - uses: actions/setup-node@v4
-      with:
-        node-version: 22
-
-    - name: Install Claude Code CLI and stage the plugin
-      shell: bash
-      run: |
-        set -euo pipefail
-        npm install -g "@anthropic-ai/claude-code@${{ inputs.cli_version }}"
-        # --plugin-dir trap: the repo root ships .claude-plugin/marketplace.json,
-        # so pointing --plugin-dir at it registers a MARKETPLACE, not a plugin,
-        # and does so silently. Move the marketplace manifest aside so the
-        # checkout loads as the plugin itself.
-        rm -f .docs-team-standards-plugin/.claude-plugin/marketplace.json
-        # Frontmatter grants WIDEN the sandbox: in -p mode a command's
-        # `allowed-tools:` (and an agent's `tools:`) is honoured on top of
-        # --allowedTools, and commands/pr-review.md grants bare `Bash` — which
-        # would void the read-only gh shim and the no-mutating-git rule for
-        # the whole run (verified on CLI 2.1.258: a frontmatter
-        # `Bash(touch:*)` ran under `--allowedTools Read`). Those grants are
-        # a local convenience for humans; in CI the --allowedTools list is
-        # the ONLY grant. Strip them from the staged plugin copy. Skills carry
-        # the same key: overrides-review and docs-gate grant Bash, and
-        # sm-release-notes grants Write, Edit, and Bash.
-        # At any depth, not just the root plugin's folders: the nested
-        # plugins/docs-eng-essentials copy carries its own grants (docs-gate
-        # grants Bash). --plugin-dir does not load it today, but the strip
-        # must not depend on that.
-        #
-        # The guard below checks the same files the strip touches: every
-        # command file, SKILL.md and agent file, at any depth. Those are the
-        # only files whose frontmatter the CLI reads as a grant. It used to
-        # scan every .md, so one reference doc with a line starting
-        # `allowed-tools:` (a frontmatter example, say) would have
-        # hard-failed every Claude job in every calling repo, for a line
-        # that grants nothing.
-        P=.docs-team-standards-plugin
-        mapfile -d '' GRANT_FILES < <(find "$P" -path '*/.git' -prune -o -type f \
-          \( -name 'SKILL.md' -o -path '*/commands/*.md' -o -path '*/agents/*.md' \) -print0)
-        if (( ${#GRANT_FILES[@]} == 0 )); then
-          echo "::error::no command, skill or agent files found in the staged plugin — refusing to run"
-          exit 1
-        fi
-        # The strip handles one-line values only. A list form (`tools:` or
-        # `allowed-tools:` with the items on the following lines) would keep
-        # its items, so any empty-value key is refused outright. No file
-        # uses that form today. This runs BEFORE the strip: the sed below
-        # deletes the `allowed-tools:` key line itself, which would leave
-        # the list items behind and hide the empty key from this check.
-        if grep -nE '^(tools|allowed-tools):[[:space:]]*$' "${GRANT_FILES[@]}"; then
-          echo "::error::a plugin frontmatter grant uses the multi-line list form, which the strip cannot handle — refusing to run"
-          exit 1
-        fi
-        find "$P" -path '*/.git' -prune -o \( -name 'SKILL.md' -o -path '*/commands/*.md' \) \
-          -type f -exec sed -i '/^allowed-tools:/d' {} +
-        find "$P" -path '*/.git' -prune -o -path '*/agents/*.md' -type f -exec perl -pi -e \
-          'if (/^tools:/) { s/\b(Bash|WebFetch|Write|Edit|NotebookEdit)\b//g; s/,([ \t]*,)+/,/g; s/:[ \t]*,/: /; s/,[ \t]*$//; }' {} +
-        if grep -n '^allowed-tools:' "${GRANT_FILES[@]}" || \
-           grep -nE '^tools:.*\b(Bash|WebFetch|Write|Edit|NotebookEdit)\b' "${GRANT_FILES[@]}"; then
-          echo "::error::a plugin frontmatter grant survived stripping — refusing to run with a widened sandbox"
-          exit 1
-        fi
-        # Clean-room user config: nothing on the runner's home dir can add
-        # settings, hooks, or MCP servers to the review.
-        mkdir -p "$RUNNER_TEMP/claude-config"
-        echo "CLAUDE_CONFIG_DIR=$RUNNER_TEMP/claude-config" >> "$GITHUB_ENV"
-
-    # Read-only `gh`: a shim ahead of the real binary on PATH for the claude
-    # steps. --allowedTools patterns are PREFIX matches, so
-    # `Bash(gh api repos/*)` also admits `gh api repos/o/r/issues/1/comments
-    # -f body=...` (a POST). The job token is read-only today, but that
-    # protection lives in the caller; this shim makes the action itself
-    # unable to mutate GitHub regardless of the token it is handed. Allowed:
-    # pr view/diff/list/checks, issue view/list, repo view, run view/list,
-    # search, and `gh api` with GET only (no -X/--method other than GET, no
-    # -f/-F/--field/--raw-field/--input, no graphql — mutations ride the
-    # query body). Everything else is refused with a clear stderr message so
-    # a skill that hits it fails fast instead of silently doing nothing.
-    - name: Install the read-only gh shim
-      shell: bash
-      run: |
-        set -euo pipefail
-        SHIM_DIR="$RUNNER_TEMP/gh-readonly"
-        mkdir -p "$SHIM_DIR"
-        REAL_GH="$(command -v gh)"
-        cat > "$SHIM_DIR/gh" <<EOF
-        #!/usr/bin/env bash
-        # Read-only gh shim installed by the claude-skill action.
-        REAL_GH="$REAL_GH"
-        EOF
-        cat >> "$SHIM_DIR/gh" <<'EOF'
-        deny() { echo "gh (read-only shim): refused: gh $*" >&2; exit 1; }
-        # GitHub hosts only, for EVERY subcommand. gh follows a full URL
-        # wherever it points: `gh api https://host/...` sends a GET there,
-        # and `gh pr view https://host/o/r/pull/1`, `-R host/o/r` and
-        # `--repo host/o/r` send GraphQL POSTs (all observed against
-        # example.com, gh 2.50). With no other outbound HTTP in the
-        # sandbox, that would be an exfiltration channel: data rides in
-        # the path or query string whether or not a token goes with it.
-        # github.com URLs stay allowed, because pr-review takes a PR URL.
-        gh_host_ok() {
-          local h="${1,,}"
-          [[ "$h" == "github.com" || "$h" == "api.github.com" || "$h" == "www.github.com" ]]
-        }
-        check_url() {   # $1 = an argument containing ://
-          local rest="${1#*://}" auth host
-          auth="${rest%%[/?#]*}"
-          host="${auth##*@}"; host="${host%%:*}"
-          [[ "$auth" != *@* && "$host" =~ ^[A-Za-z0-9.-]+$ ]] && gh_host_ok "$host" || deny "$@"
-        }
-        check_repo() {  # $1 = a --repo/-R value; HOST/OWNER/REPO names a host
-          local v="$1"
-          [[ "$v" == *://* ]] && { check_url "$v"; return; }
-          if [[ "$v" == */*/* ]]; then gh_host_ok "${v%%/*}" || deny --repo "$v"; fi
-        }
-        prev=""
-        for a in "$@"; do
-          case "$a" in
-            *://*) check_url "$a" ;;
-            --repo=*) check_repo "${a#--repo=}" ;;
-            -R?*) check_repo "${a#-R}" ;;
-          esac
-          case "$prev" in --repo|-R) check_repo "$a" ;; esac
-          prev="$a"
-        done
-        sub="${1:-}"; [[ $# -gt 0 ]] && shift
-        case "$sub" in
-          --version|--help|-h|help) exec "$REAL_GH" "$sub" "$@" ;;
-          pr)     case "${1:-}" in view|diff|list|checks|status) ;; *) deny pr "$@" ;; esac ;;
-          issue)  case "${1:-}" in view|list) ;; *) deny issue "$@" ;; esac ;;
-          repo)   case "${1:-}" in view) ;; *) deny repo "$@" ;; esac ;;
-          run)    case "${1:-}" in view|list) ;; *) deny run "$@" ;; esac ;;
-          search) ;;
-          api)
-            args=("$@"); i=0
-            while (( i < ${#args[@]} )); do
-              a="${args[$i]}"
-              case "$a" in
-                graphql) deny api "$@" ;;
-                # A foreign host would turn a GET into an exfiltration
-                # channel for GH_TOKEN (sent as the Authorization header).
-                # Full-URL endpoints are checked above, for every subcommand.
-                --hostname|--hostname=*) deny api "$@" ;;
-                --method)
-                  m="${args[$((i+1))]:-}"; [[ "$m" =~ ^[Gg][Ee][Tt]$ ]] || deny api "$@"; i=$((i+1)) ;;
-                --method=*)
-                  m="${a#--method=}"; [[ "$m" =~ ^[Gg][Ee][Tt]$ ]] || deny api "$@" ;;
-                --field|--raw-field|--input|--field=*|--raw-field=*|--input=*) deny api "$@" ;;
-                --*) ;;
-                # Short flags parse the way gh (pflag) does: one word can be a
-                # cluster with the value attached, so -fbody=x, -Fbody=x,
-                # -iF body=x and -XPOST all reach gh as fields or a method.
-                # Walk the cluster: -i and -h take no value, -H/-q/-t/-p
-                # consume the rest of it, and anything unrecognised is refused.
-                -?*)
-                  j=1
-                  while (( j < ${#a} )); do
-                    case "${a:$j:1}" in
-                      i|h) j=$((j+1)) ;;
-                      X)
-                        m="${a:$((j+1))}"
-                        if [[ -z "$m" ]]; then m="${args[$((i+1))]:-}"; i=$((i+1)); fi
-                        m="${m#=}"
-                        [[ "$m" =~ ^[Gg][Ee][Tt]$ ]] || deny api "$@"
-                        break ;;
-                      H|q|t|p) break ;;
-                      *) deny api "$@" ;;
-                    esac
-                  done ;;
-              esac
-              i=$((i+1))
-            done ;;
-          *) deny "$sub" "$@" ;;
-        esac
-        exec "$REAL_GH" "$sub" "$@"
-        EOF
-        chmod +x "$SHIM_DIR/gh"
-        echo "GH_READONLY_SHIM=$SHIM_DIR" >> "$GITHUB_ENV"
-        # Self-test: a refused mutation must not reach the real binary. This
-        # step has no GH_TOKEN, so the real `gh` would itself fail on auth —
-        # an exit-code check alone can't tell that apart from a correct
-        # refusal (a broken/removed deny() would still "pass"). Grep for the
-        # shim's own message instead: only deny() prints "refused:".
-        REFUSAL1=$(PATH="$SHIM_DIR:$PATH" gh api repos/x/y/issues/1/comments -f body=hi 2>&1 1>/dev/null || true)
-        [[ "$REFUSAL1" == *"refused:"* ]] || { echo "::error::gh shim failed to refuse a POST (got: $REFUSAL1)"; exit 1; }
-        REFUSAL2=$(PATH="$SHIM_DIR:$PATH" gh pr comment 1 --body hi 2>&1 1>/dev/null || true)
-        [[ "$REFUSAL2" == *"refused:"* ]] || { echo "::error::gh shim failed to refuse pr comment (got: $REFUSAL2)"; exit 1; }
-        REFUSAL3=$(PATH="$SHIM_DIR:$PATH" gh api repos/x/y/issues/1/comments -fbody=hi 2>&1 1>/dev/null || true)
-        [[ "$REFUSAL3" == *"refused:"* ]] || { echo "::error::gh shim failed to refuse an attached-value field (got: $REFUSAL3)"; exit 1; }
-        # Foreign hosts: the three above only cover mutation.
-        for probe in "api https://example.com/x?d=1" "pr view https://example.com/o/r/pull/1" "pr view 1 -R example.com/o/r" "issue view 1 --repo=example.com/o/r"; do
-          # shellcheck disable=SC2086 # word-split the probe on purpose
-          R4=$(PATH="$SHIM_DIR:$PATH" gh $probe 2>&1 1>/dev/null || true)
-          [[ "$R4" == *"refused:"* ]] || { echo "::error::gh shim failed to refuse a foreign host: gh $probe (got: $R4)"; exit 1; }
-        done
-        # ...and must not over-block the github.com URL pr-review is given.
-        OK1=$(PATH="$SHIM_DIR:$PATH" gh pr view https://github.com/o/r/pull/1 2>&1 1>/dev/null || true)
-        [[ "$OK1" != *"refused:"* ]] || { echo "::error::gh shim refused a github.com PR URL (got: $OK1)"; exit 1; }
-        echo "gh read-only shim installed at $SHIM_DIR"
-
+    #
+    # MIRROR (gate and aggregate in docs-pr-review-reusable.yml): the App
+    # credential comes from Secrets Manager, sdlc/prod/github/docs_automation_app
+    # (devprod-infra#938, DEVPROD-5300), and falls back to the
+    # plugin_app_* inputs (the DOCS_APP_ID org variable and
+    # DOCS_APP_PRIVATE_KEY org secret) when the role or the secret is
+    # missing. Both fetch steps are continue-on-error, so a repo without the
+    # grant, or a run before the secret's value is set, uses the inputs as
+    # before. docs-team-standards needs no App: github.token clones itself.
+    # The fetch lands every key under the DOCSAPP alias (the secret also
+    # carries DOC_TEAM_LOGINS, which nothing here reads; the workflow uses
+    # vars.DOC_TEAM_LOGINS). A failed Secrets Manager mint falls back to
+    # the inputs.
+    #
+    # One OIDC role serves both credentials this action needs: the App
+    # credential here and the ADP client credential below, so it is assumed
+    # once, before either fetch. The fetches stay separate steps: one
+    # get-secrets call fails whole when either secret isn't granted, and a
+    # repo can have one grant without the other (docs-team-standards skips
+    # the App fetch entirely). A single scrub after both mints empties every
+    # DOCSAPP variable, the ADP client credential and the AWS credentials,
+    # before the plugin checkout, the npm install and everything after it.
+    #
     # ── ADP gateway auth (DEVPROD-4735 pattern) ────────────────────────────
     # Every step in this chain is continue-on-error and gated on the previous
     # one's outcome, so a caller that has not been granted the credential (or
@@ -473,7 +328,73 @@ runs:
       uses: aws-actions/configure-aws-credentials@v6
       with:
         aws-region: ${{ inputs.aws_region }}
+        # 3, not the default 12: with no OIDC token (a Dependabot run, say)
+        # the default backoff stalls the job for a minute or more before
+        # continue-on-error moves on. A transient STS failure still retries.
+        retry-max-attempts: 3
         role-to-assume: arn:aws:iam::${{ inputs.aws_cred_account_id }}:role/${{ inputs.aws_role_name_prefix }}${{ github.event.repository.name }}
+
+    - name: Fetch the App credential
+      id: app_secret
+      if: steps.aws_credentials.outcome == 'success' && github.repository != 'redpanda-data/docs-team-standards'
+      continue-on-error: true
+      uses: aws-actions/aws-secretsmanager-get-secrets@v3
+      with:
+        secret-ids: |
+          DOCSAPP,sdlc/prod/github/docs_automation_app
+        parse-json-secrets: true
+
+    - name: Mint a read-only token for the plugin checkout (Secrets Manager)
+      id: plugin_token_sm
+      # Gated on the fetch's outcome, not on env.DOCSAPP_*: the env context
+      # in a composite action's step `if` is a less-trodden path, and if it
+      # resolved empty this step would skip silently. In repos with no
+      # fallback (redpanda-labs, redpanda-solutions) that is a 404 at the
+      # plugin checkout. A secret with the wrong key names leaves app-id
+      # empty, this continue-on-error mint fails, and the fallback runs.
+      if: steps.app_secret.outcome == 'success'
+      # A bad or stale key falls through to the fallback mint below
+      # instead of failing the job. The ID and the key always come as a
+      # pair, never one from each source.
+      continue-on-error: true
+      uses: actions/create-github-app-token@v2
+      with:
+        app-id: ${{ env.DOCSAPP_DOCS_APP_ID }}
+        private-key: ${{ env.DOCSAPP_DOCS_APP_PRIVATE_KEY }}
+        owner: redpanda-data
+        repositories: docs-team-standards
+        permission-contents: read
+
+    - name: Mint a read-only token for the plugin checkout
+      id: plugin_token
+      if: steps.plugin_token_sm.outputs.token == '' && inputs.plugin_app_id != ''
+      uses: actions/create-github-app-token@v2
+      with:
+        app-id: ${{ inputs.plugin_app_id }}
+        private-key: ${{ inputs.plugin_app_private_key }}
+        owner: redpanda-data
+        repositories: docs-team-standards
+        permission-contents: read
+
+    # Every step above is continue-on-error or if-gated, so a Secrets Manager
+    # path that never fires looks exactly like one that works. This notice is
+    # the evidence that retiring the DOCS_APP_* org credentials needs: grep
+    # the run logs for "plugin token from".
+    - name: Report the plugin token's source
+      shell: bash
+      env:
+        SM_MINT: ${{ steps.plugin_token_sm.outcome }}
+        FALLBACK_MINT: ${{ steps.plugin_token.outcome }}
+        SM_TOKEN: ${{ steps.plugin_token_sm.outputs.token != '' }}
+        FALLBACK_TOKEN: ${{ steps.plugin_token.outputs.token != '' }}
+      run: |
+        if [[ "$SM_TOKEN" == "true" ]]; then
+          echo "::notice::plugin token from Secrets Manager"
+        elif [[ "$FALLBACK_TOKEN" == "true" ]]; then
+          echo "::notice::plugin token from the plugin_app_id fallback (Secrets Manager mint: $SM_MINT)"
+        else
+          echo "::notice::plugin token from github.token (Secrets Manager mint: $SM_MINT, fallback mint: $FALLBACK_MINT)"
+        fi
 
     - name: Fetch the ADP client credential
       id: adpsecrets
@@ -563,7 +484,7 @@ runs:
         token=$(jq -r '.access_token // empty' "$RUNNER_TEMP/adp_token.json" 2>/dev/null || true)
         rm -f "$RUNNER_TEMP/adp_token.json"
         # Every failure path here exits 1 with a warning, and the step is
-        # continue-on-error, so no bearer is exported and the run step below
+        # continue-on-error, so no bearer is output and the run step below
         # turns that into claude_failed=true while the aggregate posts "human
         # review required". Never a red X for a broken environment, and never
         # an infra failure dressed up as a review verdict.
@@ -576,28 +497,270 @@ runs:
           exit 1 ;;
         esac
         echo "::add-mask::$token"
-        echo "AWS_BEARER_TOKEN_BEDROCK=$token" >> "$GITHUB_ENV"
+        # A step output, not $GITHUB_ENV: an env var would reach every later
+        # step, including the plugin checkout, setup-node and the npm install
+        # (package lifecycle scripts run there). Only the two steps that call
+        # the model (the plugin-load probe and the review) read it, through
+        # their own env.
+        echo "token=$token" >> "$GITHUB_OUTPUT"
 
-    - name: Scrub the long-lived client credential
+    - name: Scrub the long-lived credentials
       if: always()
       shell: bash
       env:
+        ASSUMED: ${{ steps.aws_credentials.outcome }}
         CLIENT_SECRET_ID: ${{ inputs.adp_client_secret_id }}
       run: |
         set -euo pipefail
-        # AWS_BEARER_TOKEN_BEDROCK deliberately survives: it is the model
-        # auth, short-lived, and usable only against the gateway. The
-        # long-lived client credential that can mint fresh tokens must not
-        # be readable from the review's environment.
+        # The gateway bearer is not in the environment at all: it is the mint
+        # step's output, passed only to the probe and the review. The
+        # long-lived credentials that can mint fresh tokens (the App private
+        # key and the ADP client credential) must not be readable from the
+        # review's environment, or from the npm install before it.
         #
-        # The prefix is derived exactly as the mint step derives it. Hardcoded
-        # names would silently stop scrubbing the moment a caller pointed
-        # adp_client_secret_id at a differently-named secret, leaving the
-        # minting credential live in the environment Claude runs in.
-        prefix=$(printf '%s' "$CLIENT_SECRET_ID" | awk -F/ '{print toupper($NF)}' | tr -c 'A-Za-z0-9_\n' '_')
-        for v in "${prefix}_ID" "${prefix}_SECRET" AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+        # DOCSAPP is the alias on the App fetch: a JSON secret lands as
+        # DOCSAPP_<KEY>, and a value that isn't valid JSON lands whole as
+        # DOCSAPP. This clears both, whatever the keys are named.
+        for v in $(compgen -e | grep -E '^DOCSAPP(_|$)' || true); do
           echo "$v=" >> "$GITHUB_ENV"
         done
+        # The ADP prefix is derived exactly as the mint step derives it.
+        # Hardcoded names would silently stop scrubbing the moment a caller
+        # pointed adp_client_secret_id at a differently-named secret, leaving
+        # the minting credential live in the environment Claude runs in.
+        prefix=$(printf '%s' "$CLIENT_SECRET_ID" | awk -F/ '{print toupper($NF)}' | tr -c 'A-Za-z0-9_\n' '_')
+        for v in "${prefix}_ID" "${prefix}_SECRET"; do
+          echo "$v=" >> "$GITHUB_ENV"
+        done
+        # The AWS credentials are cleared whenever the assume step ran:
+        # configure-aws-credentials exports them before it validates them, so
+        # a failed assume can still leave them set.
+        if [[ "$ASSUMED" != "skipped" ]]; then
+          for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+            echo "$v=" >> "$GITHUB_ENV"
+          done
+        fi
+
+    - uses: actions/checkout@v4
+      with:
+        repository: redpanda-data/docs-team-standards
+        ref: ${{ inputs.plugin_ref }}
+        path: .docs-team-standards-plugin
+        token: ${{ steps.plugin_token_sm.outputs.token || steps.plugin_token.outputs.token || github.token }}
+        persist-credentials: false
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
+    - name: Install Claude Code CLI and stage the plugin
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Nothing after the credential scrub needs OIDC, and npm runs
+        # package lifecycle scripts: see the run step.
+        unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
+        npm install -g "@anthropic-ai/claude-code@${{ inputs.cli_version }}"
+        # --plugin-dir trap: the repo root ships .claude-plugin/marketplace.json,
+        # so pointing --plugin-dir at it registers a MARKETPLACE, not a plugin,
+        # and does so silently. Move the marketplace manifest aside so the
+        # checkout loads as the plugin itself.
+        rm -f .docs-team-standards-plugin/.claude-plugin/marketplace.json
+        # Frontmatter grants WIDEN the sandbox: in -p mode a command's
+        # `allowed-tools:` (and an agent's `tools:`) is honoured on top of
+        # --allowedTools, and commands/pr-review.md grants bare `Bash` — which
+        # would void the read-only gh shim and the no-mutating-git rule for
+        # the whole run (verified on CLI 2.1.258: a frontmatter
+        # `Bash(touch:*)` ran under `--allowedTools Read`). Those grants are
+        # a local convenience for humans; in CI the --allowedTools list is
+        # the ONLY grant. Strip them from the staged plugin copy. Skills carry
+        # the same key: overrides-review and docs-gate grant Bash, and
+        # sm-release-notes grants Write, Edit, and Bash.
+        # At any depth, not just the root plugin's folders: the nested
+        # plugins/docs-eng-essentials copy carries its own grants (docs-gate
+        # grants Bash). --plugin-dir does not load it today, but the strip
+        # must not depend on that.
+        #
+        # The guard below checks the same files the strip touches: every
+        # command file, SKILL.md and agent file, at any depth. Those are the
+        # only files whose frontmatter the CLI reads as a grant. It used to
+        # scan every .md, so one reference doc with a line starting
+        # `allowed-tools:` (a frontmatter example, say) would have
+        # hard-failed every Claude job in every calling repo, for a line
+        # that grants nothing.
+        P=.docs-team-standards-plugin
+        mapfile -d '' GRANT_FILES < <(find "$P" -path '*/.git' -prune -o -type f \
+          \( -name 'SKILL.md' -o -path '*/commands/*.md' -o -path '*/agents/*.md' \) -print0)
+        if (( ${#GRANT_FILES[@]} == 0 )); then
+          echo "::error::no command, skill or agent files found in the staged plugin — refusing to run"
+          exit 1
+        fi
+        # The strip handles one-line values only. A list form (`tools:` or
+        # `allowed-tools:` with the items on the following lines) would keep
+        # its items, so any empty-value key is refused outright. No file
+        # uses that form today. This runs BEFORE the strip: the sed below
+        # deletes the `allowed-tools:` key line itself, which would leave
+        # the list items behind and hide the empty key from this check.
+        if grep -nE '^(tools|allowed-tools):[[:space:]]*$' "${GRANT_FILES[@]}"; then
+          echo "::error::a plugin frontmatter grant uses the multi-line list form, which the strip cannot handle — refusing to run"
+          exit 1
+        fi
+        find "$P" -path '*/.git' -prune -o \( -name 'SKILL.md' -o -path '*/commands/*.md' \) \
+          -type f -exec sed -i '/^allowed-tools:/d' {} +
+        find "$P" -path '*/.git' -prune -o -path '*/agents/*.md' -type f -exec perl -pi -e \
+          'if (/^tools:/) { s/\b(Bash|WebFetch|Write|Edit|NotebookEdit)\b//g; s/,([ \t]*,)+/,/g; s/:[ \t]*,/: /; s/,[ \t]*$//; }' {} +
+        if grep -n '^allowed-tools:' "${GRANT_FILES[@]}" || \
+           grep -nE '^tools:.*\b(Bash|WebFetch|Write|Edit|NotebookEdit)\b' "${GRANT_FILES[@]}"; then
+          echo "::error::a plugin frontmatter grant survived stripping — refusing to run with a widened sandbox"
+          exit 1
+        fi
+        # Clean-room user config: nothing on the runner's home dir can add
+        # settings, hooks, or MCP servers to the review.
+        mkdir -p "$RUNNER_TEMP/claude-config"
+        echo "CLAUDE_CONFIG_DIR=$RUNNER_TEMP/claude-config" >> "$GITHUB_ENV"
+
+    # Read-only `gh`: a shim ahead of the real binary on PATH for the claude
+    # steps. --allowedTools patterns are PREFIX matches, so
+    # `Bash(gh api repos/*)` also admits `gh api repos/o/r/issues/1/comments
+    # -f body=...` (a POST). The job token is read-only today, but that
+    # protection lives in the caller; this shim makes the action itself
+    # unable to mutate GitHub regardless of the token it is handed. Allowed:
+    # pr view/diff/list/checks, issue view/list, repo view, run view/list,
+    # search, and `gh api` with GET only (no -X/--method other than GET, no
+    # -f/-F/--field/--raw-field/--input, no graphql — mutations ride the
+    # query body). Everything else is refused with a clear stderr message so
+    # a skill that hits it fails fast instead of silently doing nothing.
+    - name: Install the read-only gh shim
+      shell: bash
+      run: |
+        set -euo pipefail
+        unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN   # see the run step
+        SHIM_DIR="$RUNNER_TEMP/gh-readonly"
+        mkdir -p "$SHIM_DIR"
+        REAL_GH="$(command -v gh)"
+        cat > "$SHIM_DIR/gh" <<EOF
+        #!/usr/bin/env bash
+        # Read-only gh shim installed by the claude-skill action.
+        REAL_GH="$REAL_GH"
+        EOF
+        cat >> "$SHIM_DIR/gh" <<'EOF'
+        deny() { echo "gh (read-only shim): refused: gh $*" >&2; exit 1; }
+        # GitHub hosts only, for EVERY subcommand. gh follows a full URL
+        # wherever it points: `gh api https://host/...` sends a GET there,
+        # and `gh pr view https://host/o/r/pull/1`, `-R host/o/r` and
+        # `--repo host/o/r` send GraphQL POSTs (all observed against
+        # example.com, gh 2.50). With no other outbound HTTP in the
+        # sandbox, that would be an exfiltration channel: data rides in
+        # the path or query string whether or not a token goes with it.
+        # github.com URLs stay allowed, because pr-review takes a PR URL.
+        gh_host_ok() {
+          local h="${1,,}"
+          [[ "$h" == "github.com" || "$h" == "api.github.com" || "$h" == "www.github.com" ]]
+        }
+        check_url() {   # $1 = an argument containing ://
+          local rest="${1#*://}" auth host
+          auth="${rest%%[/?#]*}"
+          host="${auth##*@}"; host="${host%%:*}"
+          [[ "$auth" != *@* && "$host" =~ ^[A-Za-z0-9.-]+$ ]] && gh_host_ok "$host" || deny "$@"
+        }
+        check_repo() {  # $1 = a --repo/-R value; HOST/OWNER/REPO names a host
+          local v="$1"
+          [[ "$v" == *://* ]] && { check_url "$v"; return; }
+          if [[ "$v" == */*/* ]]; then gh_host_ok "${v%%/*}" || deny --repo "$v"; fi
+        }
+        # GH_HOST, and GH_REPO's HOST/ part, pick the host for every call
+        # that names none, so an inherited value would route gh off GitHub
+        # with no URL or -R in the arguments for the checks below to see.
+        if [[ -n "${GH_HOST:-}" ]]; then gh_host_ok "$GH_HOST" || deny "(GH_HOST=$GH_HOST)" "$@"; fi
+        if [[ -n "${GH_REPO:-}" ]]; then check_repo "$GH_REPO"; fi
+        prev=""
+        for a in "$@"; do
+          case "$a" in
+            *://*) check_url "$a" ;;
+            --repo=*) check_repo "${a#--repo=}" ;;
+            -R?*) check_repo "${a#-R}" ;;
+          esac
+          case "$prev" in --repo|-R) check_repo "$a" ;; esac
+          prev="$a"
+        done
+        sub="${1:-}"; [[ $# -gt 0 ]] && shift
+        case "$sub" in
+          --version|--help|-h|help) exec "$REAL_GH" "$sub" "$@" ;;
+          pr)     case "${1:-}" in view|diff|list|checks|status) ;; *) deny pr "$@" ;; esac ;;
+          issue)  case "${1:-}" in view|list) ;; *) deny issue "$@" ;; esac ;;
+          repo)   case "${1:-}" in view) ;; *) deny repo "$@" ;; esac ;;
+          run)    case "${1:-}" in view|list) ;; *) deny run "$@" ;; esac ;;
+          search) ;;
+          api)
+            args=("$@"); i=0
+            while (( i < ${#args[@]} )); do
+              a="${args[$i]}"
+              case "$a" in
+                graphql) deny api "$@" ;;
+                # A foreign host would turn a GET into an exfiltration
+                # channel for GH_TOKEN (sent as the Authorization header).
+                # Full-URL endpoints are checked above, for every subcommand.
+                --hostname|--hostname=*) deny api "$@" ;;
+                --method)
+                  m="${args[$((i+1))]:-}"; [[ "$m" =~ ^[Gg][Ee][Tt]$ ]] || deny api "$@"; i=$((i+1)) ;;
+                --method=*)
+                  m="${a#--method=}"; [[ "$m" =~ ^[Gg][Ee][Tt]$ ]] || deny api "$@" ;;
+                --field|--raw-field|--input|--field=*|--raw-field=*|--input=*) deny api "$@" ;;
+                --*) ;;
+                # Short flags parse the way gh (pflag) does: one word can be a
+                # cluster with the value attached, so -fbody=x, -Fbody=x,
+                # -iF body=x and -XPOST all reach gh as fields or a method.
+                # Walk the cluster: -i and -h take no value, -H/-q/-t/-p
+                # consume the rest of it, and anything unrecognised is refused.
+                -?*)
+                  j=1
+                  while (( j < ${#a} )); do
+                    case "${a:$j:1}" in
+                      i|h) j=$((j+1)) ;;
+                      X)
+                        m="${a:$((j+1))}"
+                        if [[ -z "$m" ]]; then m="${args[$((i+1))]:-}"; i=$((i+1)); fi
+                        m="${m#=}"
+                        [[ "$m" =~ ^[Gg][Ee][Tt]$ ]] || deny api "$@"
+                        break ;;
+                      H|q|t|p) break ;;
+                      *) deny api "$@" ;;
+                    esac
+                  done ;;
+              esac
+              i=$((i+1))
+            done ;;
+          *) deny "$sub" "$@" ;;
+        esac
+        exec "$REAL_GH" "$sub" "$@"
+        EOF
+        chmod +x "$SHIM_DIR/gh"
+        echo "GH_READONLY_SHIM=$SHIM_DIR" >> "$GITHUB_ENV"
+        # Self-test: a refused mutation must not reach the real binary. This
+        # step has no GH_TOKEN, so the real `gh` would itself fail on auth —
+        # an exit-code check alone can't tell that apart from a correct
+        # refusal (a broken/removed deny() would still "pass"). Grep for the
+        # shim's own message instead: only deny() prints "refused:".
+        REFUSAL1=$(PATH="$SHIM_DIR:$PATH" gh api repos/x/y/issues/1/comments -f body=hi 2>&1 1>/dev/null || true)
+        [[ "$REFUSAL1" == *"refused:"* ]] || { echo "::error::gh shim failed to refuse a POST (got: $REFUSAL1)"; exit 1; }
+        REFUSAL2=$(PATH="$SHIM_DIR:$PATH" gh pr comment 1 --body hi 2>&1 1>/dev/null || true)
+        [[ "$REFUSAL2" == *"refused:"* ]] || { echo "::error::gh shim failed to refuse pr comment (got: $REFUSAL2)"; exit 1; }
+        REFUSAL3=$(PATH="$SHIM_DIR:$PATH" gh api repos/x/y/issues/1/comments -fbody=hi 2>&1 1>/dev/null || true)
+        [[ "$REFUSAL3" == *"refused:"* ]] || { echo "::error::gh shim failed to refuse an attached-value field (got: $REFUSAL3)"; exit 1; }
+        # Foreign hosts: the three above only cover mutation.
+        for probe in "api https://example.com/x?d=1" "pr view https://example.com/o/r/pull/1" "pr view 1 -R example.com/o/r" "issue view 1 --repo=example.com/o/r"; do
+          # shellcheck disable=SC2086 # word-split the probe on purpose
+          R4=$(PATH="$SHIM_DIR:$PATH" gh $probe 2>&1 1>/dev/null || true)
+          [[ "$R4" == *"refused:"* ]] || { echo "::error::gh shim failed to refuse a foreign host: gh $probe (got: $R4)"; exit 1; }
+        done
+        for env in "GH_HOST=example.com" "GH_REPO=example.com/o/r"; do
+          R5=$(env "$env" PATH="$SHIM_DIR:$PATH" gh pr view 1 2>&1 1>/dev/null || true)
+          [[ "$R5" == *"refused:"* ]] || { echo "::error::gh shim failed to refuse a foreign host from $env (got: $R5)"; exit 1; }
+        done
+        # ...and must not over-block the github.com URL pr-review is given.
+        OK1=$(PATH="$SHIM_DIR:$PATH" gh pr view https://github.com/o/r/pull/1 2>&1 1>/dev/null || true)
+        [[ "$OK1" != *"refused:"* ]] || { echo "::error::gh shim refused a github.com PR URL (got: $OK1)"; exit 1; }
+        echo "gh read-only shim installed at $SHIM_DIR"
 
     - name: Assert the plugin actually loaded
       shell: bash
@@ -605,6 +768,7 @@ runs:
         # `claude -p` makes one model call even though the check below does
         # not depend on it, so it runs after the mint, under the same gateway
         # env as the review itself.
+        AWS_BEARER_TOKEN_BEDROCK: ${{ steps.mint.outputs.token }}
         CLAUDE_CODE_USE_BEDROCK: '1'
         CLAUDE_CODE_SKIP_BEDROCK_AUTH: '1'
         ANTHROPIC_BEDROCK_BASE_URL: ${{ inputs.adp_gateway_base_url }}
@@ -674,6 +838,7 @@ runs:
         # Bedrock mode against the gateway; the bearer minted above is the
         # only model credential. SKIP_BEDROCK_AUTH stops Claude Code from
         # attempting client-side SigV4 signing instead of sending the bearer.
+        AWS_BEARER_TOKEN_BEDROCK: ${{ steps.mint.outputs.token }}
         CLAUDE_CODE_USE_BEDROCK: '1'
         CLAUDE_CODE_SKIP_BEDROCK_AUTH: '1'
         ANTHROPIC_BEDROCK_BASE_URL: ${{ inputs.adp_gateway_base_url }}
@@ -774,6 +939,16 @@ runs:
           echo "claude_failed=true" >> "$GITHUB_OUTPUT"
           exit 0
         }
+        # An attempt that exited 0 with no verdict finished: what it wrote, it
+        # wrote on purpose (the release-notes report.md, the screenshot pass's
+        # findings.md about an old plugin pin). Report it as unavailable, but
+        # keep its files. clear_output is for attempts that died partway.
+        no_verdict() {
+          echo "::warning::Claude ran but wrote no verdict.json — treating as unavailable"
+          echo "claude_failed=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        }
+        give_up() { if (( $1 == 200 )); then no_verdict; else soft_fail; fi; }
 
         run_claude() {
           clear_output
@@ -786,27 +961,55 @@ runs:
             --max-turns 100 > "$OUTPUT_DIR/claude-run.json"
         }
 
-        if run_claude; then
+        # Logs how the last attempt ended, from the CLI's own record. Only
+        # these fields: the result text can quote the run's inputs, which
+        # can be private, and job logs are wider-read than artifacts.
+        log_run() {
+          # An attempt killed by its timeout leaves an empty file, and jq
+          # prints nothing for empty input.
+          [[ -s "$OUTPUT_DIR/claude-run.json" ]] || { echo "Claude run: no readable claude-run.json"; return; }
+          jq -r '"Claude run: subtype=\(.subtype // "?") is_error=\(if has("is_error") then .is_error else "?" end) turns=\(.num_turns // "?") duration_ms=\(.duration_ms // "?")"' \
+            "$OUTPUT_DIR/claude-run.json" 2>/dev/null || echo "Claude run: no readable claude-run.json"
+        }
+
+        # An attempt succeeds only when the CLI exits 0 AND writes
+        # verdict.json. A clean exit with no verdict is an attempt that
+        # stopped early (the v26.1.20 release-notes run: 7 of 20 minutes,
+        # exit 0, nothing written), so it gets the same one retry as a
+        # failed exit. Exit 200 marks that case for the warning below.
+        attempt() {
+          run_claude || return $?
+          [[ -f "$OUTPUT_DIR/verdict.json" ]] || return 200
+        }
+
+        if attempt; then
           :
         else
           rc=$?
+          log_run
+          if (( rc == 200 )); then
+            why="exited 0 but wrote no verdict.json"
+          else
+            why="failed (exit $rc)"
+          fi
           if (( $(remaining) >= MIN_RETRY_SECS )); then
-            echo "::warning::Claude run failed (exit $rc), retrying once with $(remaining)s left"
-            if ! run_claude; then
-              # Soft-fail: the aggregate job turns a missing verdict.json into
+            echo "::warning::Claude run $why, retrying once with $(remaining)s left"
+            if attempt; then
+              :
+            else
+              rc=$?
+              log_run
+              # The aggregate job turns a missing verdict.json into
               # "automated review unavailable — human review required". Never
               # let an infra failure masquerade as a review verdict.
-              soft_fail
+              give_up "$rc"
             fi
           else
-            echo "::warning::Claude run failed (exit $rc) and under ${MIN_RETRY_SECS}s of the ${TIMEOUT_MIN}m budget remain — not retrying"
-            soft_fail
+            echo "::warning::Claude run $why and under ${MIN_RETRY_SECS}s of the ${TIMEOUT_MIN}m budget remain — not retrying"
+            give_up "$rc"
           fi
         fi
 
-        if [[ ! -f "$OUTPUT_DIR/verdict.json" ]]; then
-          echo "::warning::Claude ran but wrote no verdict.json — treating as unavailable"
-          echo "claude_failed=true" >> "$GITHUB_OUTPUT"
-        else
-          echo "claude_failed=false" >> "$GITHUB_OUTPUT"
-        fi
+        # Every path that reaches here has a verdict.json from an attempt
+        # that finished.
+        echo "claude_failed=false" >> "$GITHUB_OUTPUT"

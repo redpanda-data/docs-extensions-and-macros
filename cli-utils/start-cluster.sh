@@ -81,7 +81,7 @@ fi
 # Remove globally conflicting containers (dynamic list + legacy minio)
 ###############################################################################
 services=$(docker compose -p "$PROJECT_NAME" config --services 2>/dev/null || true)
-services+=" minio"   # ensure legacy /minio container is handled
+services+=$'\n'minio   # ensure legacy /minio container is handled (IFS is newline-tab, so a space would not split)
 
 for svc in $services; do
   if docker ps -a --format '{{.Names}}' | grep -wq "$svc"; then

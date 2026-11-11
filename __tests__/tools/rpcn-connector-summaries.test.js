@@ -900,7 +900,41 @@ describe('buildChangedDefaultsTable - whats-new changed default links', () => {
 
     expect(table).toContain('|`pass:c[${!count("items")}-${!timestamp_unix_nano()}]`\n|`pass:c[${!timestamp_unix_nano()}-${!uuid_v4()}]`\n');
     expect(table).toContain('|`pass:c[""]`\n|`pass:c[a\\|b]`\n');
-    expect(table).toContain('|none\n|`pass:c[5]`\n');
+    // A missing default reads as "no default", never as the value none.
+    expect(table).toContain('|_no default_\n|`pass:c[5]`\n');
+  });
+
+  test('renders a declared null default as null, not as no default', () => {
+    const table = buildChangedDefaultsTable([
+      { component: 'inputs:postgres_cdc', field: 'unchanged_toast_value', oldDefault: null, newDefault: '__x__', description: 'A.' },
+      { component: 'inputs:y', field: 'b', oldDefault: undefined, newDefault: null, description: 'B.' }
+    ], cap);
+
+    expect(table).toContain('|`pass:c[null]`\n|`pass:c[__x__]`\n');
+    expect(table).toContain('|_no default_\n|`pass:c[null]`\n');
+  });
+
+  test('keeps a null default and the string "null" in separate rows', () => {
+    const table = buildChangedDefaultsTable([
+      { component: 'inputs:a', field: 'f', oldDefault: null, newDefault: 'x', description: 'A.' },
+      { component: 'inputs:b', field: 'f', oldDefault: 'null', newDefault: 'x', description: 'A.' },
+      { component: 'inputs:c', field: 'g', oldDefault: { a: 1 }, newDefault: 'x', description: 'A.' },
+      { component: 'inputs:d', field: 'g', oldDefault: { b: 2 }, newDefault: 'x', description: 'A.' }
+    ], cap);
+
+    expect(table.match(/^\|`pass:c\[null\]`$/gm)).toHaveLength(2);
+    expect(table).toContain('`pass:c[{"a":1}]`');
+    expect(table).toContain('`pass:c[{"b":2}]`');
+  });
+
+  test('shows a type change as JSON on both sides so it does not read as no change', () => {
+    const table = buildChangedDefaultsTable([
+      { component: 'inputs:a', field: 'n', oldDefault: '5', newDefault: 5, description: 'A.' },
+      { component: 'inputs:b', field: 'm', oldDefault: 'null', newDefault: null, description: 'B.' }
+    ], cap);
+
+    expect(table).toContain('|`pass:c["5"]`\n|`pass:c[5]`\n');
+    expect(table).toContain('|`pass:c["null"]`\n|`pass:c[null]`\n');
   });
 });
 

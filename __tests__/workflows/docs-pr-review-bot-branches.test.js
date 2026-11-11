@@ -1,6 +1,7 @@
 'use strict'
 
 const fs = require('fs')
+const os = require('os')
 const path = require('path')
 const YAML = require('yaml')
 const { execRun } = require('./helpers/exec-run')
@@ -9,8 +10,8 @@ const { execRun } = require('./helpers/exec-run')
  * The docs PR review skips bot-authored PRs, except a bot PR whose head
  * branch matches review_bot_branch_patterns: the Slack docs drafter opens
  * its PRs as vbotbuildovich on slack-draft/<thread> branches, and those are
- * reviewed like a human PR, SME gate included. These tests execute the
- * gate step's run: body with gh stubbed and check which way each PR goes.
+ * reviewed like a human PR. These tests execute the gate step's run: body
+ * with gh stubbed and check which way each PR goes.
  */
 
 const ROOT = path.join(__dirname, '..', '..')
@@ -52,9 +53,10 @@ JSON
 esac
 `
 
-function runGate (prJson, { patterns = DEFAULT_PATTERNS, smeGate = 'true', botPolicy = 'skip' } = {}) {
+function runGate (prJson, { patterns = DEFAULT_PATTERNS, botPolicy = 'skip' } = {}) {
   return execRun(GATE, {
     env: {
+      RUNNER_TEMP: fs.mkdtempSync(path.join(os.tmpdir(), 'gate-runner-')),
       // Workflow- and job-level env the gate reads (REVIEW_STATUS_CONTEXT).
       ...(workflow.env || {}),
       ...(gateJob.env || {}),
@@ -62,10 +64,8 @@ function runGate (prJson, { patterns = DEFAULT_PATTERNS, smeGate = 'true', botPo
       PR: '7',
       R: 'redpanda-data/docs',
       EVENT_NAME: 'pull_request_target',
-      EVENT_ACTION: 'ready_for_review',
-      DOC_TEAM: 'writer1,writer2',
       PLUGIN_REF: 'b'.repeat(40),
-      SME_GATE: smeGate,
+      PIN_OK: 'true',
       BOT_PR_POLICY: botPolicy,
       BOT_LOGINS: 'vbotbuildovich',
       REVIEW_BOT_BRANCHES: patterns,
@@ -83,47 +83,42 @@ describe('docs PR review gate: bot PRs on review_bot_branch_patterns branches', 
     expect(DEFAULT_PATTERNS).toBe('slack-draft/*')
   })
 
-  test('a ready drafter PR is gated like a human PR: it waits for an SME', () => {
+  test('a ready drafter PR is reviewed like a human PR', () => {
     const r = runGate(pr())
     expect(r.status).toBe(0)
     expect(r.all).toMatch(/matches review_bot_branch_patterns 'slack-draft\/\*': reviewed like a human PR/)
     expect(r.all).not.toMatch(/bot_pr_policy=skip/)
-    expect(r.outputs.run_review).toBe('false')
-    // It reached the SME gate and held it with a pending status, which a
-    // skipped PR never gets.
-    expect(r.read('gh.log')).toMatch(/statuses\/a{40}.*state=pending/)
+    expect(r.outputs.proceed).toBe('true')
   })
 
-  test('a ready drafter PR in a repo without an SME step is reviewed', () => {
-    const r = runGate(pr(), { smeGate: 'false' })
-    expect(r.status).toBe(0)
-    expect(r.outputs.run_review).toBe('true')
-    expect(r.outputs.sme_mode).toBe('repo-not-gated')
+  test('a pattern with stray whitespace still matches', () => {
+    const r = runGate(pr(), { patterns: '  slack-draft/* \r' })
+    expect(r.outputs.proceed).toBe('true')
   })
 
   test('a drafter PR still in draft is not reviewed', () => {
     const r = runGate(pr({ draft: true }))
-    expect(r.outputs.run_review).toBe('false')
+    expect(r.outputs.proceed).toBe('false')
     expect(r.all).toMatch(/is a draft/)
     expect(r.read('gh.log') || '').not.toMatch(/statuses/)
   })
 
   test('other bot PRs are still skipped', () => {
     const r = runGate(pr({ branch: 'auto-docs/update-property-docs' }))
-    expect(r.outputs.run_review).toBe('false')
+    expect(r.outputs.proceed).toBe('false')
     expect(r.all).toMatch(/bot-authored \(@vbotbuildovich\) and bot_pr_policy=skip/)
     expect(r.read('gh.log') || '').not.toMatch(/statuses/)
   })
 
   test('control: with no patterns the drafter PR is skipped as a bot PR', () => {
     const r = runGate(pr(), { patterns: '' })
-    expect(r.outputs.run_review).toBe('false')
+    expect(r.outputs.proceed).toBe('false')
     expect(r.all).toMatch(/bot_pr_policy=skip/)
   })
 
   test('a human PR on a slack-draft branch is unaffected', () => {
-    const r = runGate(pr({ login: 'writer3' }), { smeGate: 'false' })
-    expect(r.outputs.run_review).toBe('true')
+    const r = runGate(pr({ login: 'writer3' }))
+    expect(r.outputs.proceed).toBe('true')
     expect(r.all).not.toMatch(/review_bot_branch_patterns/)
   })
 })

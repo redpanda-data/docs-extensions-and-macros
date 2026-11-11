@@ -91,6 +91,58 @@ function getFlagsMap(command) {
   return new Map(flags.map(f => [f.name, f]))
 }
 
+// cobra's --help prints pflag's short names for some types ("strings" for
+// stringSlice, "int" for int64), while --print-tree prints the full name.
+// Only plugin flags are ever scraped from --help, and rpk marks the plugin
+// flags it puts in the tree with from_plugin, so the two forms are compared
+// as one only when one side is from the tree and the other was scraped.
+const FLAG_TYPE_ALIASES = {
+  stringSlice: 'strings',
+  intSlice: 'ints',
+  uintSlice: 'uints',
+  boolSlice: 'bools',
+  int64: 'int',
+  uint64: 'uint',
+  float64: 'float'
+}
+
+function comparableFlagType(type) {
+  return FLAG_TYPE_ALIASES[type] || type
+}
+
+function flagTypesMatch(oldFlag, newFlag) {
+  if (oldFlag.type === newFlag.type) return true
+  if ((oldFlag.from_plugin === true) === (newFlag.from_plugin === true)) return false
+  return comparableFlagType(oldFlag.type) === comparableFlagType(newFlag.type)
+}
+
+const SLICE_FLAG_TYPE = /(Slice|Array)$|^(strings|ints|uints|bools)$/
+const NUMERIC_FLAG_TYPE = /^(u?int(8|16|32|64)?|float(32|64)?|count)$/
+
+// Plugin flags scraped from --help have string defaults ("true", "3",
+// "\"text\"") and none at all when the default is the type's zero value,
+// because cobra leaves those out of --help. --print-tree defaults are typed
+// and always present. Bring both to one form, with a zero value the same as
+// no default, so a plugin that starts publishing its flags in the tree does
+// not show every default as changed. Brackets are stripped only from slice
+// defaults, so a string default "[prod]" still differs from "prod".
+function comparableFlagDefault(value, type) {
+  if (value === undefined || value === null || value === '') return null
+  if (Array.isArray(value)) return value.length === 0 ? null : value.map(String).join(',')
+  if (typeof value !== 'string' && typeof value !== 'boolean' && typeof value !== 'number') return value
+  let v = String(value)
+  if (v.length >= 2 && v.startsWith('"') && v.endsWith('"')) v = v.slice(1, -1)
+  if (v === '') return null
+  if (SLICE_FLAG_TYPE.test(type || '') && v.startsWith('[') && v.endsWith(']')) {
+    v = v.slice(1, -1)
+    if (v === '') return null
+  }
+  if (type === 'bool' && v === 'false') return null
+  if (NUMERIC_FLAG_TYPE.test(type || '') && v.trim() !== '' && Number(v) === 0) return null
+  if (type === 'duration' && (v === '0' || v === '0s')) return null
+  return v
+}
+
 /**
  * Compare two flags and find differences
  * @param {Object} oldFlag - Old flag object
@@ -105,11 +157,11 @@ function compareFlags(oldFlag, newFlag) {
 
   const changes = {}
 
-  if (oldFlag.type !== newFlag.type) {
+  if (!flagTypesMatch(oldFlag, newFlag)) {
     changes.type = { old: oldFlag.type, new: newFlag.type }
   }
 
-  if (!deepEqual(oldFlag.default, newFlag.default)) {
+  if (!deepEqual(comparableFlagDefault(oldFlag.default, oldFlag.type), comparableFlagDefault(newFlag.default, newFlag.type))) {
     changes.default = { old: oldFlag.default, new: newFlag.default }
   }
 
@@ -117,7 +169,10 @@ function compareFlags(oldFlag, newFlag) {
     changes.description = { old: oldFlag.description, new: newFlag.description }
   }
 
-  if (oldFlag.required !== newFlag.required) {
+  // Flags scraped from --help never say whether they are required, so a
+  // missing value on either side is unknown, not a change.
+  if (oldFlag.required !== undefined && newFlag.required !== undefined &&
+      oldFlag.required !== newFlag.required) {
     changes.required = { old: oldFlag.required, new: newFlag.required }
   }
 
