@@ -184,6 +184,83 @@ function solutionDownloadNote(page, siteUrl) {
     'Copying the files from these pages also works, but if the user wants to run the reference system as tested, point them to the download.'
 }
 
+/**
+ * The outcome diagram of a solution overview, for its twin: the image with the
+ * overview's alt text, then the SVG's `<desc>` as a plain paragraph, because a
+ * Markdown reader often cannot see an SVG. Read from the `outcome` of the
+ * `page-solution` record, which the solutions-catalog extension resolves from
+ * the content catalog. Empty on step pages, outside the solutions component,
+ * and when the record has no outcome (no :page-solution-outcome-image:, or an
+ * image that does not resolve).
+ */
+function solutionOutcomeMarkdown(page, siteUrl) {
+  if (page.src?.component !== SOLUTIONS_COMPONENT) return ''
+  const attrs = page.asciidoc?.attributes || {}
+  if (attrs['page-solution-step-id']) return ''
+  const raw = attrs['page-solution']
+  if (!raw) return ''
+  let record
+  try {
+    record = typeof raw === 'string' ? JSON.parse(raw) : raw
+  } catch {
+    return ''
+  }
+  const outcome = record && record.outcome
+  if (!outcome || !outcome.image) return ''
+  let url = outcome.image
+  try {
+    if (siteUrl) url = new URL(outcome.image, siteUrl).toString()
+  } catch {}
+  // With a description, the image text is the SVG's short <title>: the alt
+  // and the <desc> usually say the same thing at length, and the paragraph
+  // after the image already carries it.
+  const imageText = (outcome.description && outcome.title) || outcome.alt || ''
+  const alt = String(imageText).replace(/\s+/g, ' ').replace(/([[\]\\])/g, '\\$1').trim()
+  const image = `![${alt}](${url.replace(/\(/g, '%28').replace(/\)/g, '%29').replace(/\s/g, '%20')})`
+  return outcome.description ? `${image}\n\n${markdownText(outcome.description)}` : image
+}
+
+/**
+ * Plain text as a one-line Markdown paragraph: whitespace collapsed, and the
+ * characters that would otherwise become markup escaped (`<` so a decoded
+ * `&lt;b&gt;` is not read as a tag, emphasis and code markers, link brackets,
+ * and a leading heading, quote, or list marker).
+ */
+function markdownText(text) {
+  return String(text)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/([\\<*_`[\]])/g, '\\$1')
+    .replace(/^([#>+-])/, '\\$1')
+    .replace(/^(\d+)([.)])(?=\s|$)/, '$1\\$2')
+}
+
+/** True when the element's class list holds `name` as a whole token. */
+function hasClassToken(node, name) {
+  const classAttr = node?.getAttribute?.('class') || ''
+  return classAttr.split(/\s+/).includes(name)
+}
+
+/**
+ * Turndown rules that put a solution overview's outcome diagram right after
+ * the hero (title, description, actions), where the page draws it. The
+ * rendered figure is dropped either way: its inline SVG would otherwise reach
+ * the twin as loose labels. `outcomeMarkdown` is solutionOutcomeMarkdown's
+ * result; empty means the hero is followed by nothing extra.
+ */
+function createSolutionOutcomeRules(outcomeMarkdown) {
+  return {
+    figure: {
+      filter: (node) => hasClassToken(node, 'sol-outcome'),
+      replacement: () => '',
+    },
+    hero: {
+      filter: (node) => node.nodeName === 'HEADER' && hasClassToken(node, 'sol-hero'),
+      replacement: (content) => `\n\n${content.trim()}\n\n${outcomeMarkdown ? `${outcomeMarkdown}\n\n` : ''}`,
+    },
+  }
+}
+
 function buildSolutionMetadata(page) {
   if (page.src?.component !== SOLUTIONS_COMPONENT) return null
   const attrs = page.asciidoc?.attributes || {}
@@ -654,8 +731,9 @@ module.exports.generateFrontmatter = generateFrontmatter
 module.exports.isUnwantedNode = isUnwantedNode
 module.exports.buildSolutionMetadata = buildSolutionMetadata
 module.exports.solutionDownloadNote = solutionDownloadNote
+module.exports.solutionOutcomeMarkdown = solutionOutcomeMarkdown
+module.exports.createSolutionOutcomeRules = createSolutionOutcomeRules
 module.exports.createEnterpriseFeatureRules = createEnterpriseFeatureRules
-module.exports.generateFrontmatter = generateFrontmatter
 module.exports.formatStatusMarker = formatStatusMarker
 module.exports.ENTERPRISE_MARKER = ENTERPRISE_MARKER
 module.exports.readGeneratedMarker = readGeneratedMarker
@@ -720,6 +798,10 @@ module.exports.register = function () {
         return 2
       }
 
+      const outcomeRules = createSolutionOutcomeRules(solutionOutcomeMarkdown(page, playbook?.site?.url || ''))
+      turndownInstance.addRule('solution-outcome-figure', outcomeRules.figure)
+      turndownInstance.addRule('solution-hero', outcomeRules.hero)
+
       // Asciidoctor tab conversion
       turndownInstance.addRule('asciidoctor-tabs', {
         filter: (node) => {
@@ -732,6 +814,32 @@ module.exports.register = function () {
             const contentDiv = group.querySelector('.content') || group
             const tabList = contentDiv.querySelectorAll('li.tab')
             if (!tabList.length) return ''
+
+            // Platform tabs (Docker Compose | Kubernetes | Redpanda Cloud, the
+            // Solutions pages' synced platform choice) are one choice inside a
+            // step, not sections: write each tab as a labeled paragraph named
+            // for its platform, so a numbered list stays whole and an agent can
+            // tell which content is for which deployment and follow one.
+            const PLATFORM_TAB_LABELS = ['Docker Compose', 'Kubernetes', 'Redpanda Cloud']
+            const titles = Array.from(tabList).map((tab) => tab.querySelector('p')?.textContent.trim() || tab.textContent.trim())
+            if (titles.every((t) => PLATFORM_TAB_LABELS.includes(t))) {
+              let out = `<!-- platform tabs: ${titles.join(' | ')}. Follow the one for your deployment. -->\n\n`
+              Array.from(tabList).forEach((tab, idx) => {
+                let panelId = tab.getAttribute('aria-controls')
+                if (!panelId && tab.id) panelId = tab.id + '--panel'
+                const panel = group.querySelector(`#${panelId}`)
+                if (!panel) return
+                let md = ''
+                try {
+                  const converter = isInner ? nestedTurndown : turndownInstance
+                  md = converter.turndown(panel.innerHTML || '')
+                } catch (e) {
+                  logger.warn(`Turndown failed in platform tab: ${e.message}`)
+                }
+                out += `**On ${titles[idx]}:**\n\n${md.trim()}\n\n`
+              })
+              return out.trim() + '\n\n<!-- /platform tabs -->'
+            }
 
             const nearestLevel =
               parentHeadingLevel != null

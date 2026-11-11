@@ -201,7 +201,13 @@ function makeCatalog ({ pages = [], attachments = [], partials = [], components 
     getComponent: (name) => components.find((c) => c.name === name),
     getFiles: () => files,
     findBy: (criteria) => files.filter((f) => matches(f, criteria)),
-    resolveResource: (spec, _ctx, defaultFamily = 'page') => {
+    resolveResource: (spec, ctx = {}, defaultFamily = 'page') => {
+      // `image$name` resolves against the context's component and module.
+      const local = String(spec).match(/^([a-z]+)\$([^:]+)$/)
+      if (local) {
+        const [, family, relative] = local
+        return files.find((f) => f.src.family === family && f.src.component === ctx.component && f.src.module === (ctx.module || 'ROOT') && f.src.relative === relative)
+      }
       const m = String(spec).match(/^(?:([^@:]+)@)?([^:]+):([^:]*):(.+)$/)
       if (!m) return undefined
       const [, , component, module, relative] = m
@@ -588,7 +594,7 @@ describe('solutions-catalog: metadata fatals (documentsConverted)', () => {
     ['deprecated without superseded-by', { 'page-solution-status': 'deprecated' }, /page-solution-superseded-by is required when status is deprecated/],
     ['overview layout', { 'page-layout': 'default' }, /pages\/index\.adoc must set :page-layout: solution/],
     ['related doc not fully qualified', { 'page-solution-related-docs': 'consumer-offsets.adoc' }, /must be a fully qualified page ID/],
-    ['related doc unresolved', { 'page-solution-related-docs': 'streaming:develop:nope.adoc' }, /does not resolve to a page/],
+    ['related doc in the component unresolved', { 'page-solution-related-docs': 'solutions:ROOT:nope.adoc' }, /does not resolve to a page/],
     ['related solution unknown', { 'page-solution-related-solutions': 'ghost' }, /page-solution-related-solutions entry "ghost" is not a solution/],
     ['related solution is itself', { 'page-solution-related-solutions': 'leaderboard' }, /must not list the solution itself/],
     ['steps missing', { 'page-solution-steps': undefined }, /page-solution-steps is required/],
@@ -602,6 +608,14 @@ describe('solutions-catalog: metadata fatals (documentsConverted)', () => {
     // undefined attrs must actually be absent, not the string "undefined"
     for (const [k, v] of Object.entries(attrs)) if (v === undefined) delete solution.pages[0].asciidoc.attributes[k]
     await expect(run({ solutions: [solution] })).rejects.toThrow(rx)
+  })
+
+  test('an unresolved Product Docs related doc warns by default and is fatal with strict', async () => {
+    const solution = () => makeSolution('leaderboard', { attrs: { 'page-solution-related-docs': 'streaming:develop:nope.adoc' } })
+    const result = await run({ solutions: [solution()] })
+    expect(result.logger.warn.mock.calls.map((c) => c[0]).join('\n')).toMatch(/leaderboard: page-solution-related-docs entry "streaming:develop:nope\.adoc" does not resolve to a page/)
+    await expect(run({ solutions: [solution()], config: { strict: true } })).rejects.toThrow(/streaming:develop:nope\.adoc" does not resolve to a page/)
+    await expect(run({ solutions: [solution()], env: { SOLUTIONS_STRICT: 'true' } })).rejects.toThrow(/does not resolve to a page/)
   })
 
   test('step layout must be solution-step', async () => {
@@ -1475,6 +1489,8 @@ describe('solutions-catalog: verification manifest', () => {
       kubernetes_environment: { kind: 'v0.32.0', kubernetes: 'v1.35.0', redpanda_operator: 'v26.2.3', redpanda: 'v26.2.2' },
       cloud_verify_script: 'PASS (9/9)',
       cloud_environment: 'not an object',
+      cloud_verify_skipped: ['compaction on game.leaderboard (Serverless rejects segment.ms on a topic)'],
+      kubernetes_verify_skipped: 'not a list',
       self_managed_verify_script: 'ignored',
     }
     const { verified } = collect.parseVerification({ contents: Buffer.from(JSON.stringify(manifest)) })
@@ -1484,7 +1500,7 @@ describe('solutions-catalog: verification manifest', () => {
         runAt: '2026-10-13T18:00:00Z',
         environment: { kind: 'v0.32.0', kubernetes: 'v1.35.0', redpanda_operator: 'v26.2.3', redpanda: 'v26.2.2' },
       },
-      cloud: { verifyScript: 'PASS (9/9)' },
+      cloud: { verifyScript: 'PASS (9/9)', skipped: ['compaction on game.leaderboard (Serverless rejects segment.ms on a topic)'] },
     })
   })
 
@@ -1806,10 +1822,12 @@ describe('solutions-catalog: pure helpers', () => {
   })
 
   test('resolveConfig accepts camelCase and snake_case, with defaults and env', () => {
-    expect(extension.resolveConfig({}, {})).toEqual({ maxRelated: 3, minScore: 0.6, networkChecks: 'auto', includeDrafts: false, draftDownloads: false, publicRepo: false, agentCompanion: true })
-    expect(extension.resolveConfig({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: 'true', publicRepo: true }, {})).toEqual({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: true, draftDownloads: false, publicRepo: true, agentCompanion: true })
-    expect(extension.resolveConfig({ max_related: '2', network_checks: 'false', public_repo: 'true' }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' })).toEqual({ maxRelated: 2, minScore: 0.6, networkChecks: false, includeDrafts: true, draftDownloads: false, publicRepo: true, agentCompanion: true })
+    expect(extension.resolveConfig({}, {})).toEqual({ maxRelated: 3, minScore: 0.6, networkChecks: 'auto', includeDrafts: false, draftDownloads: false, publicRepo: false, agentCompanion: true, strict: false })
+    expect(extension.resolveConfig({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: 'true', publicRepo: true }, {})).toEqual({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: true, draftDownloads: false, publicRepo: true, agentCompanion: true, strict: false })
+    expect(extension.resolveConfig({ max_related: '2', network_checks: 'false', public_repo: 'true' }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' })).toEqual({ maxRelated: 2, minScore: 0.6, networkChecks: false, includeDrafts: true, draftDownloads: false, publicRepo: true, agentCompanion: true, strict: false })
     expect(extension.resolveConfig({ include_drafts: false }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' }).includeDrafts).toBe(false)
+    expect(extension.resolveConfig({}, { SOLUTIONS_STRICT: 'true' }).strict).toBe(true)
+    expect(extension.resolveConfig({ strict: false }, { SOLUTIONS_STRICT: 'true' }).strict).toBe(false)
     expect(extension.resolveConfig({ max_related: 'lots' }, {}).maxRelated).toBe(3)
   })
 
@@ -2064,7 +2082,14 @@ describe('solutions-catalog: link fragments', () => {
   test('same-page fragments and other pages in the build are checked too', async () => {
     await expect(run({ solutions: [withLink('#nowhere')] })).rejects.toThrow(/links to \/solutions\/leaderboard\/build-leaderboard\/#nowhere/)
     await expect(run({ solutions: [withLink('#verify')] })).resolves.toBeTruthy()
-    await expect(run({ solutions: [withLink('/streaming/26.2/develop/consumer-offsets/#gone')] })).rejects.toThrow(/links to \/streaming\/26.2\/develop\/consumer-offsets\/#gone/)
+  })
+
+  test('a fragment into a Product Docs page warns by default and is fatal with strict', async () => {
+    const link = '/streaming/26.2/develop/consumer-offsets/#gone'
+    const result = await run({ solutions: [withLink(link)] })
+    expect(warnings(result)).toMatch(/links to \/streaming\/26.2\/develop\/consumer-offsets\/#gone, but that page has no id "gone"/)
+    await expect(run({ solutions: [withLink(link)], config: { strict: true } })).rejects.toThrow(/links to \/streaming\/26.2\/develop\/consumer-offsets\/#gone/)
+    await expect(run({ solutions: [withLink(link)], env: { SOLUTIONS_STRICT: 'true' } })).rejects.toThrow(/#gone/)
   })
 
   test('links that do not land on a page in this build are not checked', async () => {
@@ -2077,7 +2102,7 @@ describe('solutions-catalog: link fragments', () => {
     const target = { pub: { url: '/t/' }, contents: Buffer.from('<h2 id="metrics">Metrics</h2><a id="anchor"></a>') }
     const page = { pub: { url: '/p/' }, contents: Buffer.from('<a href="../t/#metrics">a</a><a href="../t/#anchor">b</a><a href="../t/#_metrics">c</a>') }
     const found = validate.brokenFragments(page, (u) => (u === '/t/' ? target : null))
-    expect(found).toEqual([{ href: '../t/#_metrics', fragment: '_metrics', target: '/t/', suggestion: 'metrics' }])
+    expect(found).toEqual([{ href: '../t/#_metrics', fragment: '_metrics', target: '/t/', component: null, suggestion: 'metrics' }])
   })
 })
 
@@ -2492,5 +2517,138 @@ describe('solutions-catalog: draft_downloads (preview only)', () => {
     const noDrafts = await run({ solutions: [makeSolution('leaderboard'), sandbox()], config: { draft_downloads: true } })
     expect(recordOf(noDrafts, 'sandbox')).toBeUndefined()
     expect(warningsOf(noDrafts)).not.toMatch(/draft_downloads is on/)
+  })
+})
+
+// The outcome diagram under the overview hero travels in the record as
+// { image, alt, description }, for the twin and for later catalog use.
+describe('solutions-catalog: outcome diagram', () => {
+  const SVG = [
+    '<?xml version="1.0"?>',
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 332" role="img" aria-labelledby="t d">',
+    '  <title id="t">What the leaderboard solution delivers</title>',
+    '  <desc id="d">Game events flow into Redpanda,\n    and each feature reads in its own group. The results: a live board &amp; a feed.</desc>',
+    '  <text>Loose label</text>',
+    '</svg>',
+  ].join('\n')
+  const makeImage = ({ module = 'leaderboard', relative = 'outcome.svg', text = SVG } = {}) => ({
+    src: { component: 'solutions', version: '', module, relative, family: 'image' },
+    out: { path: `solutions/${module}/_images/${relative}` },
+    pub: { url: `/solutions/${module}/_images/${relative}` },
+    contents: Buffer.from(text),
+  })
+  const OUTCOME_ATTRS = { 'page-solution-outcome-image': 'outcome.svg', 'page-solution-outcome-alt': 'Game events become a live board.' }
+  const warnings = (logger) => logger.warn.mock.calls.map((c) => c[0]).join('\n')
+
+  test('the record and solutions.json carry the image URL, the alt, and the SVG desc', async () => {
+    const solution = makeSolution('leaderboard', { attrs: OUTCOME_ATTRS })
+    solution.attachments.push(makeImage())
+    const result = await run({ solutions: [solution] })
+    const expected = {
+      image: '/solutions/leaderboard/_images/outcome.svg',
+      alt: 'Game events become a live board.',
+      title: 'What the leaderboard solution delivers',
+      description: 'Game events flow into Redpanda, and each feature reads in its own group. The results: a live board & a feed.',
+    }
+    expect(json(solution.pages[0], 'page-solution').outcome).toEqual(expected)
+    expect(addedFile(result.siteCatalog, 'solutions.json').solutions[0].outcome).toEqual(expected)
+    const attribute = JSON.parse(result.catalog.getComponents()[0].versions[0].asciidoc.attributes['solutions-catalog'])
+    expect(attribute.solutions[0].outcome).toEqual(expected)
+    expect(warnings(result.logger)).not.toMatch(/outcome/)
+  })
+
+  test('no attribute: no outcome key, and a warning for a published solution', async () => {
+    const solution = makeSolution('leaderboard')
+    const result = await run({ solutions: [solution] })
+    expect(json(solution.pages[0], 'page-solution')).not.toHaveProperty('outcome')
+    expect(addedFile(result.siteCatalog, 'solutions.json').solutions[0]).not.toHaveProperty('outcome')
+    expect(warnings(result.logger)).toMatch(/leaderboard: the overview sets no page-solution-outcome-image/)
+  })
+
+  test('an image that does not resolve: no outcome key, and a warning for a published solution', async () => {
+    const solution = makeSolution('leaderboard', { attrs: { ...OUTCOME_ATTRS, 'page-solution-outcome-image': 'missing.svg' } })
+    // an image of that name in another module does not count
+    solution.attachments.push(makeImage({ module: 'other', relative: 'missing.svg' }))
+    const result = await run({ solutions: [solution] })
+    expect(json(solution.pages[0], 'page-solution')).not.toHaveProperty('outcome')
+    expect(warnings(result.logger)).toMatch(/leaderboard: page-solution-outcome-image "missing\.svg" is not in the module's images\//)
+  })
+
+  test('a draft with no diagram, or a broken one, builds silently', async () => {
+    const draftAttrs = { 'page-solution-status': 'draft' }
+    const none = makeSolution('leaderboard', { attrs: draftAttrs })
+    const broken = makeSolution('sandbox', { attrs: { ...draftAttrs, ...OUTCOME_ATTRS, 'page-solution-outcome-image': 'missing.svg' } })
+    const result = await run({ solutions: [none, broken], env: { SOLUTIONS_INCLUDE_DRAFTS: 'true' } })
+    for (const s of [none, broken]) expect(json(s.pages[0], 'page-solution')).not.toHaveProperty('outcome')
+    expect(warnings(result.logger)).not.toMatch(/outcome/)
+  })
+
+  test('an SVG with no desc keeps the image and warns for a published solution', async () => {
+    const solution = makeSolution('leaderboard', { attrs: OUTCOME_ATTRS })
+    solution.attachments.push(makeImage({ text: '<svg><title>T</title></svg>' }))
+    const result = await run({ solutions: [solution] })
+    expect(json(solution.pages[0], 'page-solution').outcome).toEqual({ image: '/solutions/leaderboard/_images/outcome.svg', alt: 'Game events become a live board.', title: 'T' })
+    expect(warnings(result.logger)).toMatch(/outcome\.svg has no <desc>/)
+  })
+
+  test('a published solution with no alt attribute warns that the page diagram has no accessible name', async () => {
+    const solution = makeSolution('leaderboard', { attrs: { 'page-solution-outcome-image': 'outcome.svg' } })
+    solution.attachments.push(makeImage())
+    const result = await run({ solutions: [solution] })
+    // The catalog still falls back to the SVG <title>.
+    expect(json(solution.pages[0], 'page-solution').outcome.alt).toBe('What the leaderboard solution delivers')
+    expect(warnings(result.logger)).toMatch(/leaderboard: the overview sets no page-solution-outcome-alt, so the outcome diagram outcome\.svg has no accessible name on the page/)
+    expect(warnings(result.logger)).not.toMatch(/has no <desc>/)
+  })
+
+  test('a draft with no alt attribute builds silently', async () => {
+    const solution = makeSolution('leaderboard', { attrs: { 'page-solution-status': 'draft', 'page-solution-outcome-image': 'outcome.svg' } })
+    solution.attachments.push(makeImage())
+    const result = await run({ solutions: [solution], env: { SOLUTIONS_INCLUDE_DRAFTS: 'true' } })
+    expect(json(solution.pages[0], 'page-solution').outcome.image).toBe('/solutions/leaderboard/_images/outcome.svg')
+    expect(warnings(result.logger)).not.toMatch(/outcome/)
+  })
+
+  test('a raster image warns that it carries no text, never that it lacks a <desc>', async () => {
+    const solution = makeSolution('leaderboard', { attrs: { ...OUTCOME_ATTRS, 'page-solution-outcome-image': 'outcome.png' } })
+    solution.attachments.push(makeImage({ relative: 'outcome.png', text: 'not an svg <desc>ignored</desc>' }))
+    const result = await run({ solutions: [solution] })
+    expect(json(solution.pages[0], 'page-solution').outcome).toEqual({ image: '/solutions/leaderboard/_images/outcome.png', alt: 'Game events become a live board.' })
+    const text = warnings(result.logger)
+    expect(text).toMatch(/leaderboard: the outcome diagram outcome\.png is not an SVG, so the Markdown twin and the catalog get no text description/)
+    expect(text).not.toMatch(/has no <desc>/)
+    expect(text.match(/outcome\.png/g)).toHaveLength(1)
+  })
+
+  test('svgText reads only the root SVG\'s own title and desc, never a child group\'s', () => {
+    expect(collect.svgText('<svg><g><title>Node A</title></g></svg>', 'title')).toBe('')
+    expect(collect.svgText('<svg><rect/><title>late</title></svg>', 'title')).toBe('')
+    expect(collect.svgText('<svg><g><desc>child</desc></g><desc>never root</desc></svg>', 'desc')).toBe('')
+    // A comment or the other element before it is still a leading child.
+    expect(collect.svgText('<svg viewBox="0 0 1 1">\n  <!-- c -->\n  <title>Root</title>\n  <desc>D</desc><g><title>Node A</title></g></svg>', 'desc')).toBe('D')
+    expect(collect.svgText('<?xml version="1.0"?>\n<svg><title>Root</title><g><title>Node A</title></g></svg>', 'title')).toBe('Root')
+    // A leading comment ends at its own -->, so it never reaches a child group's title.
+    expect(collect.svgText('<svg><!-- generated --><g><!-- node --><title>Node A</title></g></svg>', 'title')).toBe('')
+    // A self-closing <title/> is an empty leading child, not the start of one that runs on.
+    expect(collect.svgText('<svg><title/><desc>D</desc><g><title>Node</title></g></svg>', 'title')).toBe('')
+    expect(collect.svgText('<svg><title/><desc>D</desc><g><title>Node</title></g></svg>', 'desc')).toBe('D')
+    // Markup with no <svg> root has no title.
+    expect(collect.svgText('<title>x</title>', 'title')).toBe('')
+  })
+
+  test('svgText reads the first title or desc as plain text', () => {
+    expect(collect.svgText(SVG, 'desc')).toBe('Game events flow into Redpanda, and each feature reads in its own group. The results: a live board & a feed.')
+    expect(collect.svgText(SVG, 'title')).toBe('What the leaderboard solution delivers')
+    expect(collect.svgText('<svg><desc><![CDATA[a < b]]> and <tspan>c</tspan></desc><desc>second</desc></svg>', 'desc')).toBe('a < b and c')
+    // <description> is not <desc>
+    expect(collect.svgText('<svg><description>x</description></svg>', 'desc')).toBe('')
+    expect(collect.svgText('', 'desc')).toBe('')
+  })
+
+  test('resolveOutcome falls back to the SVG title when the alt attribute is absent', () => {
+    const image = makeImage()
+    const catalog = makeCatalog({ attachments: [image] })
+    const record = { module: 'leaderboard', componentVersion: '', outcomeImage: 'outcome.svg', outcomeAlt: '' }
+    expect(collect.resolveOutcome(record, catalog).outcome.alt).toBe('What the leaderboard solution delivers')
   })
 })
