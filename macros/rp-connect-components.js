@@ -928,6 +928,16 @@ module.exports.register = function (registry, context) {
             }
           };
 
+          // Escape closes an open filter dropdown and returns focus to its toggle
+          document.addEventListener('keydown', function(event) {
+            if (event.key !== 'Escape') return;
+            document.querySelectorAll('.dropdown-checkbox-menu.show').forEach(menu => {
+              window.closeDropdown(menu);
+              const toggle = menu.parentNode.querySelector('.dropdown-checkbox-toggle');
+              if (toggle) toggle.focus();
+            });
+          });
+
           window.updateDropdownText = function(filterId, allSelectedText, someSelectedText) {
             const menu = document.getElementById(filterId + 'Menu');
             const toggle = document.getElementById(filterId + 'Toggle');
@@ -1219,9 +1229,11 @@ module.exports.register = function (registry, context) {
              .badge-group-badges and the legend modal's .badge-legend-item),
              not a bare .badge -- the site-wide .badge class from docs-ui's
              metadata.css (border-radius: 10px) is what badge:[] macro output
-             uses on the same page, and a bare rule here overrode it. */
-          .badge-group-badges .badge,
-          .badge-legend-item .badge {
+             uses on the same page, and a bare rule here overrode it.
+             :where() keeps the specificity of a bare .badge, so the
+             .badge-type, .badge-support, .badge-cloud and .badge-enterprise
+             rules below still win by source order. */
+          :where(.badge-group-badges, .badge-legend-item) .badge {
             display: inline-block;
             border-radius: 6px;
             text-decoration: none;
@@ -1532,8 +1544,7 @@ module.exports.register = function (registry, context) {
             color: #f15d61;
           }
 
-          html[data-theme="dark"] .badge-group-badges .badge,
-          html[data-theme="dark"] .badge-legend-item .badge {
+          html[data-theme="dark"] :where(.badge-group-badges, .badge-legend-item) .badge {
             background: rgba(255, 255, 255, 0.07);
             border-color: rgba(255, 255, 255, 0.15);
             color: #d0d5dd;

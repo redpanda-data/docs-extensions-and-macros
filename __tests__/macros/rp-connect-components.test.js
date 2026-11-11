@@ -146,6 +146,8 @@ describe('component_table macro rendering', () => {
     expect(html).toMatch(/^\s*if \(modal && modal\.classList\.contains\('show'\) && event\.target === modal\) \{/m)
     // Escape-to-close (live, not commented out)
     expect(html).toMatch(/^\s*if \(event\.key === 'Escape'\) \{/m)
+    // Escape also closes an open filter dropdown, whether or not the modal is open
+    expect(html).toMatch(/if \(event\.key !== 'Escape'\) return;\s*\n\s*document\.querySelectorAll\('\.dropdown-checkbox-menu\.show'\)/)
     // Focus trap
     expect(html).toContain('getBadgeLegendFocusableElements')
     expect(html).toContain("if (event.key === 'Tab')")
@@ -467,17 +469,22 @@ describe('badge CSS scoping', () => {
   test('the .badge rule is scoped, not a bare selector', () => {
     const html = renderComponentTable()
     const styleBlock = html.match(/<style>([\s\S]*?)<\/style>/)[1]
-    expect(styleBlock).toMatch(/\.badge-group-badges \.badge,\s*\n\s*\.badge-legend-item \.badge \{/)
-    // A bare rule starts its line with only whitespace before ".badge {" --
-    // ".badge-legend-item .badge {" above does not, since something real
-    // precedes it on the same line.
+    // :where() keeps a bare .badge's specificity, so .badge-type and the
+    // other badge rules after it still win by source order.
+    expect(styleBlock).toContain(':where(.badge-group-badges, .badge-legend-item) .badge {')
+    // A bare rule starts its line with only whitespace before ".badge {".
     expect(styleBlock).not.toMatch(/^[ \t]*\.badge[ \t]*\{/m)
   })
 
   test('the dark-mode .badge rule is scoped the same way', () => {
     const styleBlock = renderComponentTable().match(/<style>([\s\S]*?)<\/style>/)[1]
     expect(styleBlock).not.toMatch(/html\[data-theme="dark"\] \.badge[ \t]*[{,]/)
-    expect(styleBlock).toMatch(/html\[data-theme="dark"\] \.badge-group-badges \.badge,/)
+    expect(styleBlock).toContain('html[data-theme="dark"] :where(.badge-group-badges, .badge-legend-item) .badge {')
+    // The Cloud and Enterprise dark colors come after it, at the same
+    // specificity, so they still apply.
+    const generic = styleBlock.indexOf('html[data-theme="dark"] :where(')
+    expect(styleBlock.indexOf('html[data-theme="dark"] .badge-cloud {')).toBeGreaterThan(generic)
+    expect(styleBlock.indexOf('html[data-theme="dark"] .badge-enterprise {')).toBeGreaterThan(generic)
   })
 
   test('icons are decorative to screen readers', () => {
