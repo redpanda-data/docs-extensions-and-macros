@@ -1,0 +1,4 @@
+= About Redpanda Connect
+:page-aliases: streaming:about.adoc
+
+Text.

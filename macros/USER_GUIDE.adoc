@@ -25,6 +25,7 @@ asciidoc:
   extensions:
     - '@redpanda-data/docs-extensions-and-macros/macros/glossary'
     - '@redpanda-data/docs-extensions-and-macros/macros/config-ref'
+    - '@redpanda-data/docs-extensions-and-macros/macros/prop'
     - '@redpanda-data/docs-extensions-and-macros/macros/helm-ref'
 ----
 
@@ -62,6 +63,33 @@ config_ref:cleanup.policy,false[]
 * `property` - Configuration property name (required)
 * `isLink` - Whether to create a link (true/false, required)
 * `path` - Document path for link (required if isLink is true)
+
+=== prop and propval - Property names and values
+
+Mark a configuration property's name, and render its values from the property data:
+
+[,asciidoc]
+----
+Set prop:log_segment_ms[], which defaults to propval:log_segment_ms[default].
+The minimum is propval:log_segment_ms[min].
+----
+
+With Redpanda 26.2 data, that renders "defaults to 2 weeks" and "The minimum is 1 minute".
+
+*Syntax:* `prop:name[]` and `propval:name[field,format=raw]`
+
+* `name` - Property name (required)
+* `field` - `default` (when omitted), `type`, `unit`, `min`, `max`, `restart`, `nullable`, `values`, `scope`, `introduced`, `visibility`, `restored`, `aliases`, or `cloud-access`
+* `format=raw` - The exact value (`1209600000`) instead of the human-readable one (`2 weeks`)
+
+Register `@redpanda-data/docs-extensions-and-macros/macros/prop`, which provides both macros. If a value can't be verified for the page's version, the page shows `<unknown default>` and the build log says why. See link:REFERENCE.adoc#propval[the macros reference] for every field and failure case.
+
+To find hand-written values in a repo and check them against the data:
+
+[,bash]
+----
+npx doc-tools generate migrate-property-values --docs-dir . --report-dir ./propval-report
+----
 
 === helm_ref - Helm value references
 

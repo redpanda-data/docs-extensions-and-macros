@@ -16,6 +16,7 @@ const path = require('path')
 const { spawnSync } = require('child_process')
 
 const evalLib = require('../lib')
+const { declaredChanges } = require('../../../tools/declared-changes')
 const lib = require('./lib')
 
 const HERE = __dirname
@@ -322,12 +323,17 @@ function runItem (item, ctx) {
   const findings = JSON.parse(inputs.findings)
   const decls = (findings.summary && findings.summary.totalDeclarations) || 0
   const removals = (findings.summary && findings.summary.removedSurfaceLines) || 0
-  if (decls === 0 && removals === 0) {
+  // The workflow also opens the review for a change the PR description
+  // declares (see "Read the user-facing change the author declared"), and
+  // hands the model the same pr-notes.md. Items carry no base branch; they
+  // are PRs into the default branch, the only base the workflow reads.
+  const notes = declaredChanges(item.body)
+  if (decls === 0 && removals === 0 && !notes.declared) {
     // The workflow skips the model entirely here, so the pass never runs.
     // Not scored: a no_change item would earn an abstention the pass never
     // made, and a needs_docs item could never be flagged.
     ev.status = 'GATE_CLOSED'
-    ev.notes.push('lint gate closed (no declarations or removals): the workflow would not run the pass, so the item is not scored')
+    ev.notes.push('gate closed (no declarations, no removals, nothing declared in the description): the workflow would not run the pass, so the item is not scored')
     return ev
   }
 
@@ -350,6 +356,7 @@ function runItem (item, ctx) {
     fs.writeFileSync(path.join(work, 'pr-diff.patch'), inputs.diff)
     fs.writeFileSync(path.join(work, 'lint-findings.json'), inputs.findings)
     fs.writeFileSync(path.join(work, 'pr-view.json'), JSON.stringify({ title: item.title, body: item.body, url: item.pr_url || null }, null, 2) + '\n')
+    if (notes.declared) fs.writeFileSync(path.join(work, 'pr-notes.md'), notes.text)
     const prompt = lib.buildPrompt(prompts, item)
     fs.writeFileSync(path.join(caseDir, 'prompt.txt'), prompt)
     fs.copyFileSync(path.join(work, 'pr-diff.patch'), path.join(caseDir, 'pr-diff.patch'))

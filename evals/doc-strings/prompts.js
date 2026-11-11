@@ -3,14 +3,15 @@
 /**
  * Prompt templates for the doc-strings evals.
  *
- * Each template mirrors the essence of a production prompt:
- * - rewrite: the Claude step of doc-strings-review.yml (redpanda /
- *   redpanda-operator PR review with GitHub suggestion blocks).
- * - upstreamPort: the Claude step of upstream-doc-strings.yml, which is not
- *   built yet - this prompt is the contract it will have to meet (docs repo's
- *   override-upstreaming workflow).
- * - negativeReview / negativeAudit: the same review posture pointed at fully
- *   conforming input - the false-positive guard.
+ * Only for behaviors whose production prompt does NOT live in this repo.
+ * The doc-strings review's own cases (rewrite, prose-review, negative-review)
+ * run the production prompt straight from doc-strings-review.yml through
+ * production.js; a template here would be a second copy that drifts, which
+ * is exactly how the old review templates ended up sharing no rule sentence
+ * with the shipped prompt.
+ * - upstreamPort: the docs repo's upstream-doc-strings.yml contract.
+ * - negativeAudit: a findings audit over a fully conforming metrics file,
+ *   the false-positive guard.
  *
  * The one deliberate difference from production: a strict OUTPUT CONTRACT
  * section, because the harness executes the output mechanically instead of
@@ -58,50 +59,6 @@ Per-surface contract:
   env-cloud, and the text inside must read as a whole paragraph in both
   outputs. Other attributes, glossterm:, prop: and include:: do not belong
   in any source string.`
-
-/**
- * Rewrite prompt (behaviors A1-A4): one deterministic lint finding, model
- * must produce a GitHub suggestion block replacing the full declaration span.
- */
-function rewrite ({ finding, columnLimit, language }) {
-  const cpp = language === 'cpp'
-  return `You are reviewing user-facing doc strings only. The JSON below holds one
-deterministic finding from doc-tools lint-strings: surface, name, file,
-line_start/line_end, the current string, the exact declaration_text of the
-span, and the rule violations.
-
-\`\`\`json
-${JSON.stringify(finding, null, 2)}
-\`\`\`
-
-${SURFACE_CONTRACT}
-
-Produce a GitHub suggestion block that replaces the FULL declaration span
-(lines ${finding.line_start}..${finding.line_end} of ${finding.file}, shown
-verbatim in declaration_text). Requirements:
-- Fix every rule violation listed in the finding.
-- The rewritten description must state effect${cpp ? ' and units where the declaration shows them, and what a sentinel default (null, 0, -1, empty) means when the declaration has one; do not restate a concrete default, the page renders it from structured data' : ' and follow cobra conventions'}; never restate the name.
-${cpp
-    ? `- Re-wrap the description as clang-format-style adjacent string literals;
-  every line of the suggestion must stay within ${columnLimit} columns.
-- Keep every non-description argument and all surrounding syntax
-  byte-identical: same name argument, same metadata, same default, same
-  commas, braces, and indentation.`
-    : `- Change ONLY the usage/help string literal; everything else on the line
-  (function call, flag name, shorthand, default value, variable) must stay
-  byte-identical.`}
-- Do not review code logic and do not touch any other declaration.
-
-OUTPUT CONTRACT (machine-parsed): reply with exactly one fenced block tagged
-"suggestion" containing the complete replacement for lines
-${finding.line_start}..${finding.line_end} - nothing else, no other fenced
-blocks:
-
-\`\`\`suggestion
-<replacement lines>
-\`\`\`
-`
-}
 
 /**
  * Upstream-port prompt (behaviors B1-B2): mirror of the docs repo's
@@ -156,84 +113,6 @@ replacement for that span - nothing else:
 }
 
 /**
- * Negative control: PR review over a fully conforming diff. The model gets
- * the same review posture as production but must decide for itself that
- * nothing warrants a suggestion or a doc-impact finding.
- */
-function negativeReview ({ diff }) {
-  return `You are reviewing user-facing doc strings only, in suggest-only posture.
-The unified diff below is a pull request against a redpanda checkout; it
-touches doc strings that are published verbatim to docs.redpanda.com.
-
-${SURFACE_CONTRACT}
-
-Review every doc string changed in the diff against the contract:
-- For each declaration whose NEW string violates the contract, output a line
-  "FILE <path> LINES <start>-<end>" followed by one fenced block tagged
-  "suggestion" with the corrected declaration span.
-- Do not flag subjective polish: a string that already states effect and
-  units, explains any sentinel default, and satisfies the per-surface
-  contract, gets NO suggestion. Never ask for a concrete default to be
-  restated. Never bikeshed phrasing.
-- PUBLISHED-CONTENT IMPACT: HIGH-IMPACT means the diff changes a default,
-  unit, or observable behavior that published docs state, or removes or
-  renames a user-facing surface, or adds a brand-new user-facing surface. A
-  wording-only clarification of a description is NOT high-impact. If (and
-  only if) high-impact entries exist, also output one fenced block tagged
-  "json" of the form {"doc_impact": [{"surface", "name", "change_kind",
-  "summary"}]}. When there are none, output no json block at all.
-
-OUTPUT CONTRACT (machine-parsed): if there are no violations and no
-high-impact entries, reply with exactly:
-NO_SUGGESTIONS
-
-The diff:
-\`\`\`diff
-${diff}
-\`\`\`
-`
-}
-
-/**
- * Prose-quality prompt (behavior D): the diff-review shape of negativeReview
- * carrying the PRODUCTION prose-quality contract verbatim. The fragment is
- * extracted from doc-strings-review.yml by the runner, so the eval always
- * tests the exact wording the workflow ships: rewording the workflow
- * automatically retests the new text, and deleting the fragment turns the
- * case into a HARNESS_ERROR instead of a silent pass.
- */
-function proseReview ({ diff, workflowFragment, terminology }) {
-  return `You are reviewing user-facing doc strings only, in suggest-only posture.
-The unified diff below is a pull request against a redpanda checkout; it
-touches doc strings that are published verbatim to docs.redpanda.com.
-
-The writing standard below is the content of embedded-reference-strings.md
-for this review (it is present and non-empty):
-
-${SURFACE_CONTRACT}
-
-The production review's prose-quality contract, applied to declarations
-whose new string has no mechanical defect:
-
-${workflowFragment}
-${terminology ? `\nterminology.md is present; its content:\n\n${terminology}\n` : ''}
-
-For each declaration whose NEW string violates the contract, output a line
-"FILE <path> LINES <start>-<end>" followed by one fenced block tagged
-"suggestion" with the corrected declaration span.
-
-OUTPUT CONTRACT (machine-parsed): if there are no violations, reply with
-exactly:
-NO_SUGGESTIONS
-
-The diff:
-\`\`\`diff
-${diff}
-\`\`\`
-`
-}
-
-/**
  * Negative control: findings audit over a fully conforming metrics file.
  * The model must claim zero findings, as a machine-parsed JSON verdict.
  */
@@ -265,4 +144,4 @@ If every string conforms, "findings" must be an empty array.
 `
 }
 
-module.exports = { SURFACE_CONTRACT, rewrite, upstreamPort, proseReview, negativeReview, negativeAudit }
+module.exports = { SURFACE_CONTRACT, upstreamPort, negativeAudit }
