@@ -32,12 +32,15 @@
  * Needs `gh` and GH_TOKEN with read access to every calling repo.
  */
 
+const crypto = require('crypto')
 const fs = require('fs')
 const { spawnSync } = require('child_process')
 const { routeFile } = require('../lint-strings/diff')
 
 const MARKER = /doc-strings-review:fp=[0-9a-f]{16}/
 const SUGGESTION = /```suggestion[^\n]*\n([\s\S]*?)```/
+// With committable_suggestions: false the review posts the same rewrite in a ```text block.
+const TEXT_SUGGESTION = /```text[^\n]*\n([\s\S]*?)```/
 const MERGED = ['taken', 'adapted', 'declined', 'rewritten', 'unclear', 'removed']
 const ORDER = [...MERGED, 'open', 'closed', 'unknown']
 // The workflow every caller references; the code search query matches it.
@@ -48,9 +51,9 @@ const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim()
 const nonEmptyLines = (s) => String(s || '').split('\n').map(norm).filter(Boolean)
 const words = (s) => norm(s).split(' ').filter(Boolean)
 
-/** The body of the first ```suggestion block, or null. */
+/** The body of the first ```suggestion block (else the first ```text block), or null. */
 function extractSuggestion (body) {
-  const m = SUGGESTION.exec(body || '')
+  const m = SUGGESTION.exec(body || '') || TEXT_SUGGESTION.exec(body || '')
   return m ? m[1] : null
 }
 
@@ -305,7 +308,9 @@ function rowsFor (repo, since) {
       pr: num,
       path: c.path,
       surface: routeFile(c.path),
-      decl: firstQuoted.slice(0, 80),
+      // A digest, not the text: the rows are uploaded as an artifact in this
+      // public repo, and the line comes from a private caller's PR.
+      decl: crypto.createHash('sha256').update(firstQuoted).digest('hex').slice(0, 16),
       created: c.created_at,
       outcome,
       replies: replies.get(c.id) || 0,

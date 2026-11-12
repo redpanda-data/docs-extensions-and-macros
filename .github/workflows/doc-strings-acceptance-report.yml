@@ -39,6 +39,9 @@ concurrency:
 
 jobs:
   report:
+    # Only main: a dispatch on another branch would run that branch's script
+    # with the org bot token.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -34,6 +34,11 @@ describe('extractSuggestion', () => {
     expect(extractSuggestion(body)).toBe('new line\n')
     expect(extractSuggestion('No block here.')).toBeNull()
   })
+
+  it('falls back to a text block when committable suggestions are off', () => {
+    expect(extractSuggestion('Rewrite:\n```text\nnew line\n```\n<!-- doc-strings-review:fp=0123456789abcdef -->')).toBe('new line\n')
+    expect(extractSuggestion('```text\nother\n```\n```suggestion\nnew line\n```')).toBe('new line\n')
+  })
 })
 
 describe('similarity', () => {
