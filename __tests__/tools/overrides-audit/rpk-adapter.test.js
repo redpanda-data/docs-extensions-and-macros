@@ -455,6 +455,104 @@ describe('overrides-audit rpk adapter (prose classification)', () => {
     })
   })
 
+  describe('source locations (--locations)', () => {
+    // locate-strings analyzer output: one entry per resolved command.
+    const locatorOutput = [
+      { path: 'rpk widget create', description: { file: 'pkg/cli/widget/create.go', line: 31 }, flags: [{ flag: 'size', file: 'pkg/cli/widget/create.go', line: 58 }] },
+      { path: 'rpk widget delete', flags: [] }
+    ]
+    const overrides = {
+      'rpk widget create': {
+        description: 'Create one or more widgets.',
+        flags: {
+          size: { description: 'Widget size in units.' },
+          dry: { description: 'Validate the request without creating anything.' }
+        },
+        seeAlso: ['rpk widget delete']
+      },
+      'rpk widget delete': { description: 'Delete one or more widgets.' },
+      // Redundant: never rewritten, so it never gets a location.
+      'rpk widget': { description: 'Manage widgets.' }
+    }
+
+    function auditWithLocations (locations) {
+      const result = runAudit({
+        overrides: writeFixture('rpk-overrides.json', overridesWith(overrides)),
+        extracted: writeFixture('rpk-v1.2.3.json', snapshot),
+        locations: locations === undefined ? undefined : writeFixture('locations.json', locations),
+        surface: 'rpk'
+      })
+      return { result, byKey: Object.fromEntries(result.manifest.map((row) => [`${row.name}|${row.field}`, row])) }
+    }
+
+    test('UPSTREAMABLE rows get source_file and source_line from the analyzer output', () => {
+      const { result, byKey } = auditWithLocations(locatorOutput)
+      expect(result.locations_file).toMatch(/locations\.json$/)
+      const desc = byKey['rpk widget create|description']
+      expect(desc.class).toBe(CLASSES.UPSTREAMABLE)
+      expect(desc.source_file).toBe('pkg/cli/widget/create.go')
+      expect(desc.source_line).toBe(31)
+      expect(desc.note).not.toMatch(/No source location/)
+      const flag = byKey['rpk widget create --size|flags.description']
+      expect(flag.class).toBe(CLASSES.UPSTREAMABLE)
+      expect(flag.source_line).toBe(58)
+    })
+
+    test('a string the analyzer did not resolve gets no location and a note saying so', () => {
+      const { byKey } = auditWithLocations(locatorOutput)
+      for (const key of ['rpk widget delete|description', 'rpk widget create --dry|flags.description']) {
+        expect(byKey[key].class).toBe(CLASSES.UPSTREAMABLE)
+        expect(byKey[key].source_file).toBeUndefined()
+        expect(byKey[key].note).toMatch(/No source location/)
+      }
+    })
+
+    test('only UPSTREAMABLE rows carry a location', () => {
+      const { byKey } = auditWithLocations(locatorOutput)
+      expect(byKey['rpk widget|description'].class).toBe(CLASSES.REDUNDANT)
+      expect(byKey['rpk widget|description'].source_file).toBeUndefined()
+      expect(byKey['rpk widget create|seeAlso'].source_file).toBeUndefined()
+    })
+
+    test('a map keyed by command path works the same as the analyzer array', () => {
+      const map = { 'rpk widget create': { description: { file: 'pkg/cli/widget/create.go', line: 31 }, flags: {} } }
+      const { byKey } = auditWithLocations(map)
+      expect(byKey['rpk widget create|description'].source_line).toBe(31)
+      expect(byKey['rpk widget create --size|flags.description'].note).toMatch(/No source location/)
+    })
+
+    test('an empty analyzer result (Go encodes it as null) marks every candidate unlocated', () => {
+      const { byKey } = auditWithLocations(null)
+      expect(byKey['rpk widget create|description'].source_file).toBeUndefined()
+      expect(byKey['rpk widget create|description'].note).toMatch(/No source location/)
+    })
+
+    test('without --locations no row gets a location or the unlocated note, and locations_file is null', () => {
+      const { result, byKey } = auditWithLocations(undefined)
+      expect(result.locations_file).toBeNull()
+      for (const row of result.manifest) {
+        expect(row.source_file).toBeUndefined()
+        expect(row.note || '').not.toMatch(/No source location/)
+      }
+      expect(byKey['rpk widget create|description'].class).toBe(CLASSES.UPSTREAMABLE)
+      expect(formatHumanReport(result)).toContain('Locations: (locator did not run)')
+    })
+
+    test('--locations is rpk only', () => {
+      expect(() => runAudit({
+        overrides: writeFixture('o.json', {}),
+        extracted: writeFixture('e.json', {}),
+        locations: writeFixture('l.json', []),
+        surface: 'properties'
+      })).toThrow(/rpk surface only/)
+    })
+
+    test('the bare-tree refusal says how to audit a raw --print-tree dump', () => {
+      expect(() => rpk.rawTreeOf(rawTree, 'dump.json')).toThrow(/--repo <src\/go\/rpk>/)
+      expect(() => rpk.rawTreeOf(rawTree, 'dump.json')).toThrow(/jq '\{raw_tree: \.\}' dump\.json/)
+    })
+  })
+
   describe('helpers', () => {
     test('findCommandNode walks the tree by full command name', () => {
       expect(rpk.findCommandNode(rawTree, 'rpk widget create').name).toBe('create')

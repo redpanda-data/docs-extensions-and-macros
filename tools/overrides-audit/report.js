@@ -162,8 +162,39 @@ function buildAmbiguousDigest (candidates) {
   return parts.join('\n\n')
 }
 
+/**
+ * Build the markdown section listing rpk candidates the agent triage layer
+ * judged UPSTREAM_OVERRIDE but that have no source location (no
+ * source_file): the locate-strings analyzer did not resolve their string in
+ * src/go/rpk, so no automated rewrite can act on them. Property rows always
+ * carry a location from the extractor, so this is empty for them.
+ *
+ * Separate from buildAmbiguousDigest: the agent was confident about these;
+ * they are only out of the automation's reach.
+ *
+ * @param {Object[]} candidates - Triaged rows (from triage.js's triageCandidate).
+ * @returns {string} Markdown section, always non-empty.
+ */
+function buildUnlocatableSection (candidates) {
+  const rows = (candidates || []).filter((c) => c.agent_verdict === 'UPSTREAM_OVERRIDE' && triageSucceeded(c) && !c.source_file)
+  if (rows.length === 0) return nothingThisRun('upstream candidates without a source location')
+
+  const parts = [
+    `${rows.length} candidate${rows.length === 1 ? '' : 's'} worth upstreaming, but the source-string locator found no file and line for ${rows.length === 1 ? 'it' : 'them'}. ` +
+    'Either the text is not in src/go/rpk (a managed plugin such as ai, connect, k8s or byoc), or the string is built in a way the locator does not resolve (a computed Long, or a flag registered through a helper). Open the source PR by hand.'
+  ]
+  for (const row of rows) {
+    const blocks = [heading(row.name), row.agent_reason]
+    if (row.upstream_candidate_text !== undefined) blocks.push(quotedBlock('Override text:', row.upstream_candidate_text))
+    if (row.source_text !== undefined) blocks.push(quotedBlock('Source text:', row.source_text))
+    parts.push(blocks.join('\n\n'))
+  }
+  return parts.join('\n\n')
+}
+
 module.exports = {
   buildUpstreamSection,
   buildRetirementSection,
-  buildAmbiguousDigest
+  buildAmbiguousDigest,
+  buildUnlocatableSection
 }

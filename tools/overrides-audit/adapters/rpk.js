@@ -129,7 +129,8 @@ function rawTreeOf (snapshot, snapshotPath) {
     `rpk snapshot ${snapshotPath} has no "raw_tree". The audit needs the pre-override tree the binary printed; ` +
     'the "tree" key is the override-merged view and would classify every override REDUNDANT. ' +
     'A bare { name, commands } tree is refused too, because `jq .tree` of a snapshot has that shape. ' +
-    'Pass the newest docs-data/rpk-v<version>.json written by `doc-tools generate rpk-docs`.'
+    'Pass the newest docs-data/rpk-v<version>.json written by `doc-tools generate rpk-docs`, or --repo <src/go/rpk> to build rpk and read its --print-tree output. ' +
+    'For a raw `rpk --print-tree` dump you made yourself, wrap it first: jq \'{raw_tree: .}\' dump.json.'
   )
 }
 
@@ -352,7 +353,7 @@ function detectBlockMarkup (text) {
  */
 function proseRow (fields) {
   const row = { name: fields.name, field: fields.field, class: fields.class }
-  for (const key of ['upstream_candidate_text', 'upstream_ref', 'content_hash', 'source_text', 'rendered_text', 'differs_in', 'note']) {
+  for (const key of ['upstream_candidate_text', 'upstream_ref', 'content_hash', 'source_file', 'source_line', 'source_text', 'rendered_text', 'differs_in', 'note']) {
     if (fields[key] !== undefined) row[key] = fields[key]
   }
   return row
@@ -428,12 +429,65 @@ function classifyProse ({ name, field, overrideText, candidateText, upstreamRef,
   })
 }
 
+// Appended to an UPSTREAMABLE row's note when the locator ran but did not
+// resolve the string. The upstreaming workflow cannot rewrite such a row, so
+// it reports it for a person instead.
+const NO_LOCATION_NOTE = ' No source location: the locate-strings analyzer did not resolve this string in src/go/rpk (a managed plugin such as ai, connect, k8s or byoc, whose text is not in src/go/rpk, or a construct the analyzer does not resolve exactly, such as a computed Long or a flag registered through a helper). Upstream it by hand.'
+
+/**
+ * Index locator output by command path. Accepts the analyzer's JSON array
+ * (locateRpkSourceStrings(), or `go run . --repo <src/go/rpk>` in
+ * tools/rpk-docs/scripts/locate-strings) or a map already keyed by path.
+ *
+ * @param {Array|Object|null} doc - Parsed locations file.
+ * @param {string} locationsPath - For the error message.
+ * @returns {Object} Map keyed by command path.
+ */
+function indexLocations (doc, locationsPath) {
+  if (doc === null) return {}
+  if (Array.isArray(doc)) {
+    const byPath = {}
+    for (const entry of doc) {
+      if (!entry || typeof entry.path !== 'string') continue
+      const flags = {}
+      for (const f of entry.flags || []) flags[f.flag] = { file: f.file, line: f.line }
+      byPath[entry.path] = { description: entry.description || undefined, flags }
+    }
+    return byPath
+  }
+  if (typeof doc === 'object') return doc
+  throw new Error(`rpk source-string locations ${locationsPath} is neither the locate-strings JSON array nor a map keyed by command path`)
+}
+
+/**
+ * Attach the source location of an UPSTREAMABLE row's string, when the
+ * locator ran. Rows of other classes are never rewritten, so they get none.
+ *
+ * @param {Object} row - Manifest row from classifyProse.
+ * @param {Object|null} locations - indexLocations() output, or null when
+ *   the locator did not run.
+ * @param {string} commandName - Command path.
+ * @param {string} [flagName] - Flag name for a flags.description row.
+ * @returns {Object} The row.
+ */
+function attachLocation (row, locations, commandName, flagName) {
+  if (!locations || row.class !== CLASSES.UPSTREAMABLE) return row
+  const entry = locations[commandName]
+  const location = entry && (flagName === undefined ? entry.description : entry.flags && entry.flags[flagName])
+  if (location && typeof location.file === 'string' && Number.isInteger(location.line)) {
+    // Rebuild through proseRow to keep the key order stable.
+    return proseRow({ ...row, source_file: location.file, source_line: location.line })
+  }
+  row.note += NO_LOCATION_NOTE
+  return row
+}
+
 /**
  * Classify every unit of one command entry.
  *
  * @param {string} commandName - Command entry key.
  * @param {Object} entry - The override entry, as written (unresolved).
- * @param {Object} ctx - { rawTree, resolvedOverrides, tt }.
+ * @param {Object} ctx - { rawTree, resolvedOverrides, tt, protectedPlugins, deadDefinitions, locations }.
  * @returns {Object[]} Manifest rows.
  */
 function classifyCommandEntry (commandName, entry, ctx) {
@@ -515,7 +569,7 @@ function classifyCommandEntry (commandName, entry, ctx) {
       if (row.class === CLASSES.UPSTREAMABLE && omitted.length > 0) {
         row.note += ` The candidate leaves out raw help sections ${omitted.join(', ')}; add them back before setting Long, or rpk --help loses them.`
       }
-      rows.push(row)
+      rows.push(attachLocation(row, ctx.locations, commandName))
       continue
     }
 
@@ -577,7 +631,7 @@ function classifyCommandEntry (commandName, entry, ctx) {
           }
           const without = renderCommand(node, withoutField(ctx.resolvedOverrides, commandName, 'flags', flagName), commandName, ctx.tt)
           const pick = (rendered) => (rendered.flags.find(([n]) => n === flagName) || [])[1] || ''
-          rows.push(classifyProse({
+          rows.push(attachLocation(classifyProse({
             name: unitName,
             field: 'flags.description',
             overrideText: flagValue,
@@ -587,7 +641,7 @@ function classifyCommandEntry (commandName, entry, ctx) {
             equal: pick(withAll) === pick(without),
             sourceText: pick(without),
             renderedText: pick(withAll)
-          }))
+          }), ctx.locations, commandName, flagName))
         }
       }
       continue
@@ -677,20 +731,24 @@ function crossCheck (rawTree, overridesDoc, manifest, protectedPlugins = []) {
 /**
  * Run the audit for the rpk surface.
  *
- * @param {Object} args - { overridesPath, extractedPath }.
- * @returns {Object} { surface, manifest, summary, cross_check }.
+ * @param {Object} args - { overridesPath, extractedPath, locationsPath }.
+ *   locationsPath, when given, is locate-strings analyzer output; each
+ *   UPSTREAMABLE row then carries source_file/source_line (relative to
+ *   src/go/rpk), or a note saying it has none.
+ * @returns {Object} { surface, manifest, summary, cross_check, locations_file }.
  */
-function audit ({ overridesPath, extractedPath }) {
+function audit ({ overridesPath, extractedPath, locationsPath }) {
   const overridesDoc = loadJson(overridesPath, 'rpk overrides')
   const commands = overridesDoc.commands
   if (!commands || typeof commands !== 'object') {
     throw new Error(`rpk overrides file ${overridesPath} has no top-level "commands" object`)
   }
   if (!extractedPath) {
-    throw new Error('The rpk surface needs --extracted <path>: the newest docs-data/rpk-v<version>.json snapshot (its raw_tree is the pre-override help text)')
+    throw new Error('The rpk surface needs --extracted <path>: the newest docs-data/rpk-v<version>.json snapshot (its raw_tree is the pre-override help text), or --repo <src/go/rpk> to build rpk and read its --print-tree output')
   }
   const snapshot = loadJson(extractedPath, 'rpk snapshot')
   const rawTree = rawTreeOf(snapshot, extractedPath)
+  const locations = locationsPath ? indexLocations(loadJson(locationsPath, 'rpk source-string locations'), locationsPath) : null
 
   // The generator resolves $refs once per run and wraps known multi-word
   // command paths as a unit when formatting; do the same so both sides of
@@ -715,7 +773,7 @@ function audit ({ overridesPath, extractedPath }) {
     .filter(([defName, flags]) => flags && typeof flags === 'object' && !Object.keys(flags).some((flagName) => reachedByRef(defName, flagName)))
     .map(([defName]) => defName))
 
-  const ctx = { rawTree, resolvedOverrides, tt, protectedPlugins, deadDefinitions }
+  const ctx = { rawTree, resolvedOverrides, tt, protectedPlugins, deadDefinitions, locations }
   const manifest = []
 
   for (const [commandName, entry] of Object.entries(commands)) {
@@ -782,6 +840,7 @@ function audit ({ overridesPath, extractedPath }) {
     surface: 'rpk',
     overrides_file: overridesPath,
     extracted_file: extractedPath,
+    locations_file: locationsPath || null,
     snapshot_version: snapshot.rpk_version || null,
     manifest,
     summary: classify.summarize(manifest),
