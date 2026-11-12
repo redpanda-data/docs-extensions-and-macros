@@ -919,17 +919,26 @@ function convertIndentedCodeBlocksToAsciiDoc(text, codeBlockStore = []) {
       // Strip trailing backslashes as we'll add them during join
       // Also strip leading "$ " shell prompt if present
       const codeLines = [line.trim().replace(/^\$\s+/, '').replace(/\s*\\$/, '')]
+      // A line that starts with rpk or a prompt is the next command, unless
+      // the line before it ends in a backslash. Joining it would publish two
+      // examples as one broken command (rpk a \ rpk b).
+      const startsCommand = []
+      let continued = /\\\s*$/.test(line)
       let j = i + 1
       while (j < lines.length && /^[ ]{2,}\S/.test(lines[j]) && !/^[ ]{2,}-\s+[A-Z]/.test(lines[j])) {
         // Continue if indented and not a markdown list item (dash followed by capital letter = prose)
-        codeLines.push(lines[j].trim().replace(/\s*\\$/, ''))
+        const newCommand = !continued && /^[ ]{2,}(rpk\s|\$\s)/.test(lines[j])
+        startsCommand[codeLines.length] = newCommand
+        const codeLine = lines[j].trim().replace(/\s*\\$/, '')
+        codeLines.push(newCommand ? codeLine.replace(/^\$\s+/, '') : codeLine)
+        continued = /\\\s*$/.test(lines[j])
         j++
       }
 
-      // Create code block - join with backslash continuation if multi-line
-      const joinedCode = codeLines.length > 1
-        ? codeLines.join(' \\\n')
-        : codeLines[0]
+      // Create code block - join continuation lines with a backslash
+      const joinedCode = codeLines
+        .map((codeLine, k) => k === 0 ? codeLine : (startsCommand[k] ? '\n' : ' \\\n') + codeLine)
+        .join('')
       const codeBlock = `\n[,bash]\n----\n${joinedCode}\n----\n`
       const placeholder = `__EARLY_CODE_BLOCK_${codeBlockStore.length}__`
       codeBlockStore.push(codeBlock)
@@ -1852,8 +1861,11 @@ function formatDescription(desc, customTransformations = null, options = {}) {
     if (i % 2 === 0) {
       // Outside backticks - apply flag wrapping
       // Include =value when present (e.g., --format=json, --var=KEY=VALUE),
-      // and every segment of a dotted name (--local-config.a.b=false)
-      return part.replace(/(?<!rpk\s)(--[a-z][-a-z0-9]*(?:\.[a-z][-a-z0-9]*)*(?:=[^\s,;.)\]]+)?)/gi, '`$1`')
+      // and every segment of a dotted name (--local-config.a.b=false).
+      // A flag family glob (--teams-*) is one span too, as a passthrough:
+      // two plain spans holding * render the text between them in bold.
+      return part.replace(/(?<!rpk\s)(--[a-z][-a-z0-9]*(?:\.[a-z][-a-z0-9]*)*(?:=[^\s,;.)\]]+)?)(?<=-)(\*)|(?<!rpk\s)(--[a-z][-a-z0-9]*(?:\.[a-z][-a-z0-9]*)*(?:=[^\s,;.)\]]+)?)/gi,
+        (match, globFlag, star, flag) => globFlag ? `\`+${globFlag}*+\`` : `\`${flag}\``)
     } else {
       // Inside backticks - don't modify
       return part
@@ -1910,8 +1922,10 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   result = result.replace(/(?<![`\w/])(_redpanda(?:\.[a-z_]+)+)(?!`)/g, '`$1`')
 
   // Add backticks around standalone "rpk" (at end of phrase, before punctuation)
-  // Also exclude rpk inside paths (preceded by /)
-  result = result.replace(/(?<![`\w/])rpk(?=[\s]*[.,;:!?)'"}\]]|[\s]*$)/g, '`rpk`')
+  // Also exclude rpk inside paths (preceded by /) and inside a dotted name
+  // (preceded by .), like the .rpk.ac- plugin prefix. The punctuation must
+  // end the token: rpk.admin_api is a config key, not the binary.
+  result = result.replace(/(?<![`\w/.])rpk(?=\s*[.,;:!?)'"}\]]+(?:\s|$)|\s*$)/g, '`rpk`')
 
   // Convert GitHub issue/PR references to clickable links
   // Pattern: #NNNN (4+ digits) when not inside backticks or code

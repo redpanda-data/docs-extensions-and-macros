@@ -2346,6 +2346,9 @@ Write PR summary to file (for GitHub Actions)
 `--show-info`::
 Include info-level validation messages
 
+`--check-output [report-file]`::
+Check every generated command and flag description: the text matches its source and each code span covers a whole token. Exits 1 on any violation, and writes one line per violation to report-file when given
+
 `--docs-root <dir>`::
 Docs checkout whose pages docs.redpanda.com URLs are converted into xrefs against (default: the current repo when it holds antora.yml)
 
@@ -2376,6 +2379,9 @@ npx doc-tools generate rpk-docs --ref v26.2.0 --diff v26.1.9
 
 # Use custom overrides file
 npx doc-tools generate rpk-docs --ref dev --overrides custom-overrides.json
+
+# Check every generated description and write violations to a report
+npx doc-tools generate rpk-docs --from-json docs-data/rpk-v26.2.2.json --check-output report.txt
 
 # Also convert links to Redpanda Connect pages (rp-connect-docs checked out beside docs)
 npx doc-tools generate rpk-docs --from-json docs-data/rpk-v26.2.2.json --lender ../rp-connect-docs

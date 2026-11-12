@@ -1578,6 +1578,9 @@ automation
  * # Use custom overrides file
  * npx doc-tools generate rpk-docs --ref dev --overrides custom-overrides.json
  *
+ * # Check every generated description and write violations to a report
+ * npx doc-tools generate rpk-docs --from-json docs-data/rpk-v26.2.2.json --check-output report.txt
+ *
  * # Also convert links to Redpanda Connect pages (rp-connect-docs checked out beside docs)
  * npx doc-tools generate rpk-docs --from-json docs-data/rpk-v26.2.2.json --lender ../rp-connect-docs
  *
@@ -1622,6 +1625,7 @@ automation
   .option('--print-summary', 'Print PR summary (for GitHub Actions)')
   .option('--summary-file <path>', 'Write PR summary to file (for GitHub Actions)')
   .option('--show-info', 'Include info-level validation messages')
+  .option('--check-output [report-file]', 'Check every generated command and flag description: the text matches its source and each code span covers a whole token. Exits 1 on any violation, and writes one line per violation to report-file when given')
   .option('--docs-root <dir>', 'Docs checkout whose pages docs.redpanda.com URLs are converted into xrefs against (default: the current repo when it holds antora.yml)')
   .option('--lender <path...>', 'Other component checkouts read into the same catalog, so URLs that point at their pages become component-qualified xrefs (for example ../rp-connect-docs)')
   .option('--target-branch <branch>', 'Docs branch the output is for. On beta, v/*, and v-WIP/* the rpk ai docs, which main owns, are left untouched. Defaults to GITHUB_BASE_REF, then the checked-out branch.')
@@ -1662,6 +1666,7 @@ automation
         preserveFrom: options.preserveFrom,
         printSummary: options.printSummary,
         showInfo: options.showInfo,
+        checkOutput: options.checkOutput,
         docsRoot: options.docsRoot,
         lenders: (options.lender || []).map((dir) => path.resolve(dir)),
         targetBranch: options.targetBranch
@@ -1683,6 +1688,11 @@ automation
         // Exit with warning if validation errors found
         if (result.validationResult?.summary?.totalErrors > 0) {
           console.error(`\n⚠ Validation found ${result.validationResult.summary.totalErrors} error(s)`)
+          process.exit(1)
+        }
+
+        if (result.outputCheck && !result.outputCheck.passed) {
+          console.error(`\n⚠ Output check found ${result.outputCheck.lines.length} problem(s)`)
           process.exit(1)
         }
 
