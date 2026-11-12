@@ -439,6 +439,31 @@ describe('tabs', () => {
     expect(body).toMatch(/^2\.\s+Check it\./m)
   })
 
+  const platformWithNested = tabSet('q', [
+    ['Docker Compose', `<p>Pick your OS.</p>${tabSet('n', [['Linux', '<p>a</p>'], ['macOS', '<p>b</p>']])}`],
+    ['Kubernetes', '<p>Run it.</p>'],
+  ])
+
+  test('gives a tab set nested in a platform tab headings one below the surrounding heading', () => {
+    const md = convert(`<h1>T</h1><h2>S</h2><h3>Sub</h3>${platformWithNested}`)
+    expect(bodyOf(md)).toBe(
+      '## S\n\n### Sub\n\n' +
+      '<!-- platform tabs: Docker Compose | Kubernetes. Follow the one for your deployment. -->\n\n' +
+      '**On Docker Compose:**\n\nPick your OS.\n\n#### Linux\n\na\n\n#### macOS\n\nb\n\n' +
+      '**On Kubernetes:**\n\nRun it.\n\n' +
+      '<!-- /platform tabs -->'
+    )
+  })
+
+  test('keeps a tab set nested in a platform tab inside its numbered step', () => {
+    const md = convert(`<h1>T</h1><h2>S</h2><div class="olist arabic"><ol class="arabic"><li><p>Start it.</p>${platformWithNested}</li><li><p>Check it.</p></li></ol></div>`)
+    const body = bodyOf(md)
+    expect(body).toMatch(/^1\.\s+Start it\./m)
+    expect(body).toMatch(/^ +### Linux$/m)
+    expect(body).toMatch(/^2\.\s+Check it\./m)
+    expect(body.indexOf('### Linux')).toBeLessThan(body.indexOf('Check it.'))
+  })
+
   test('keeps headings for a tab set that is not the platform set', () => {
     const md = convert(`<h1>T</h1><h2>S</h2>${tabSet('o', [['Linux', '<p>a</p>'], ['macOS', '<p>b</p>']])}`)
     expect(bodyOf(md)).toBe('## S\n\n### Linux\n\na\n\n### macOS\n\nb')
