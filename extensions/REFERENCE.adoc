@@ -1550,7 +1550,7 @@ The extension replaces Turndown's defaults where Asciidoctor's HTML would otherw
 |A blockquote led by the type and any custom title.
 
 |Tabs
-|One heading per tab, one level below the surrounding heading.
+|One heading per tab, one level below the surrounding heading. The exception is a Solutions platform tab set, where each tab is labeled Docker Compose, Kubernetes, or Redpanda Cloud. Each of its tabs becomes an `+**On <platform>:**+` paragraph, and the set is wrapped in `+<!-- platform tabs: ... -->+` and `+<!-- /platform tabs -->+` comments, so a numbered step stays whole. A tab set nested in a platform tab gets headings one level below the heading around the platform set.
 
 |Literal and plain listing blocks (`<pre>` without `<code>`)
 |A fenced code block. Turndown only fences `<pre><code>`, so these were escaped as prose.

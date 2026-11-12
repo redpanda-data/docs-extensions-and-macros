@@ -39,7 +39,7 @@ function convert (body, pageOverrides) {
 
 /** The body after the front matter, H1, directive and source comment. */
 function bodyOf (markdown) {
-  return markdown.split('-->\n\n')[1]
+  return markdown.slice(markdown.indexOf('-->\n\n') + 5)
 }
 
 describe('export structure', () => {
@@ -403,6 +403,70 @@ describe('tabs', () => {
     const l1 = tabs('a', 'L1', `<p>one</p>${l2}`)
     const md = convert(`<h1>T</h1><h2>Section</h2>${l1}`)
     expect(bodyOf(md)).toBe('## Section\n\n### L1\n\none\n\n#### L2\n\ntwo\n\n##### L3\n\nthree')
+  })
+
+  const tabSet = (id, items) =>
+    `<div class="openblock tabs"><div class="content"><ul class="tablist">` +
+    items.map(([title], i) => `<li class="tab" id="${id}-${i}" aria-controls="${id}-${i}--panel"><p>${title}</p></li>`).join('') +
+    `</ul>` +
+    items.map(([, body], i) => `<div class="tabpanel" id="${id}-${i}--panel">${body}</div>`).join('') +
+    `</div></div>`
+
+  const platformSet = tabSet('p', [
+    ['Docker Compose', '<p>Run <code>make up</code>.</p>'],
+    ['Kubernetes', '<p>Run <code>make k8s-up</code>.</p>'],
+    ['Redpanda Cloud', '<p>You have no command to run here.</p>'],
+  ])
+
+  test('labels each platform tab so an agent can pick its deployment', () => {
+    const md = convert(`<h1>T</h1><h2>Build it</h2>${platformSet}`)
+    expect(bodyOf(md)).toBe(
+      '## Build it\n\n' +
+      '<!-- platform tabs: Docker Compose | Kubernetes | Redpanda Cloud. Follow the one for your deployment. -->\n\n' +
+      '**On Docker Compose:**\n\nRun `make up`.\n\n' +
+      '**On Kubernetes:**\n\nRun `make k8s-up`.\n\n' +
+      '**On Redpanda Cloud:**\n\nYou have no command to run here.\n\n' +
+      '<!-- /platform tabs -->'
+    )
+  })
+
+  test('keeps headings out of a numbered step that holds platform tabs', () => {
+    const md = convert(`<h1>T</h1><div class="olist arabic"><ol class="arabic"><li><p>Start it.</p>${platformSet}</li><li><p>Check it.</p></li></ol></div>`)
+    const body = bodyOf(md)
+    expect(body).not.toMatch(/^#/m)
+    expect(body).toMatch(/^1\.\s+Start it\./m)
+    expect(body).toMatch(/\*\*On Kubernetes:\*\*/)
+    expect(body).toMatch(/^2\.\s+Check it\./m)
+  })
+
+  const platformWithNested = tabSet('q', [
+    ['Docker Compose', `<p>Pick your OS.</p>${tabSet('n', [['Linux', '<p>a</p>'], ['macOS', '<p>b</p>']])}`],
+    ['Kubernetes', '<p>Run it.</p>'],
+  ])
+
+  test('gives a tab set nested in a platform tab headings one below the surrounding heading', () => {
+    const md = convert(`<h1>T</h1><h2>S</h2><h3>Sub</h3>${platformWithNested}`)
+    expect(bodyOf(md)).toBe(
+      '## S\n\n### Sub\n\n' +
+      '<!-- platform tabs: Docker Compose | Kubernetes. Follow the one for your deployment. -->\n\n' +
+      '**On Docker Compose:**\n\nPick your OS.\n\n#### Linux\n\na\n\n#### macOS\n\nb\n\n' +
+      '**On Kubernetes:**\n\nRun it.\n\n' +
+      '<!-- /platform tabs -->'
+    )
+  })
+
+  test('keeps a tab set nested in a platform tab inside its numbered step', () => {
+    const md = convert(`<h1>T</h1><h2>S</h2><div class="olist arabic"><ol class="arabic"><li><p>Start it.</p>${platformWithNested}</li><li><p>Check it.</p></li></ol></div>`)
+    const body = bodyOf(md)
+    expect(body).toMatch(/^1\.\s+Start it\./m)
+    expect(body).toMatch(/^ +### Linux$/m)
+    expect(body).toMatch(/^2\.\s+Check it\./m)
+    expect(body.indexOf('### Linux')).toBeLessThan(body.indexOf('Check it.'))
+  })
+
+  test('keeps headings for a tab set that is not the platform set', () => {
+    const md = convert(`<h1>T</h1><h2>S</h2>${tabSet('o', [['Linux', '<p>a</p>'], ['macOS', '<p>b</p>']])}`)
+    expect(bodyOf(md)).toBe('## S\n\n### Linux\n\na\n\n### macOS\n\nb')
   })
 })
 

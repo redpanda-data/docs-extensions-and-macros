@@ -728,6 +728,10 @@ function resolveTarget (target, pageUrl) {
   }
 }
 
+// The tab labels of a Solutions page's synced platform tab set, as the pages
+// write them (redpanda-solutions CONTRIBUTING.md, "Platforms in the pages").
+const PLATFORM_TAB_LABELS = ['Docker Compose', 'Kubernetes', 'Redpanda Cloud']
+
 /** The nearest enclosing tab group, or null. */
 function closestTabGroup (node) {
   for (let el = node.parentNode; el; el = el.parentNode) {
@@ -923,6 +927,41 @@ function createTurndownForPage ({ pageUrl, logger }) {
             (tab) => closestTabGroup(tab) === group
           )
           if (!tabList.length) return ''
+
+          // Platform tabs (Docker Compose | Kubernetes | Redpanda Cloud, the
+          // Solutions pages' synced platform choice) are one choice inside a
+          // step, not sections: write each tab as a labeled paragraph named
+          // for its platform, so a numbered list stays whole and an agent can
+          // tell which content is for which deployment and follow one.
+          const titles = tabList.map((tab) => tab.querySelector('p')?.textContent.trim() || tab.textContent.trim())
+          if (titles.length && titles.every((t) => PLATFORM_TAB_LABELS.includes(t))) {
+            // Platform tabs add no heading, so a tab set nested in one sits
+            // one level below the heading around the platform set.
+            const contextLevel = parentHeadingLevel != null ? parentHeadingLevel : findNearestHeadingLevel(group)
+            let out = `<!-- platform tabs: ${titles.join(' | ')}. Follow the one for your deployment. -->\n\n`
+            tabList.forEach((tab, idx) => {
+              let panelId = tab.getAttribute('aria-controls')
+              if (!panelId && tab.id) panelId = tab.id + '--panel'
+              const panel = group.querySelector(`#${panelId}`)
+              if (!panel) return
+              // Nested groups as in the heading branch below: converted with
+              // the page's heading context, stripped from a copy of the panel.
+              const nestedMd = Array.from(panel.querySelectorAll('.openblock.tabs'))
+                .filter((nested) => closestTabGroup(nested) === group)
+                .map((nested) => processTabGroup(nested, contextLevel))
+                .join('\n\n')
+              const panelWithoutNested = panel.cloneNode(true)
+              panelWithoutNested.querySelectorAll('.openblock.tabs').forEach((nested) => nested.remove())
+              let md = ''
+              try {
+                md = convert(panelWithoutNested)
+              } catch (e) {
+                logger.warn(`Turndown failed in platform tab: ${e.message}`)
+              }
+              out += `**On ${titles[idx]}:**\n\n${[md.trim(), nestedMd.trim()].filter(Boolean).join('\n\n')}\n\n`
+            })
+            return out.trim() + '\n\n<!-- /platform tabs -->'
+          }
 
           const nearestLevel =
             parentHeadingLevel != null ? parentHeadingLevel + 1 : findNearestHeadingLevel(group) + 1
