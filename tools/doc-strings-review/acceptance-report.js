@@ -39,8 +39,10 @@ const { routeFile } = require('../lint-strings/diff')
 
 const MARKER = /doc-strings-review:fp=[0-9a-f]{16}/
 const SUGGESTION = /```suggestion[^\n]*\n([\s\S]*?)```/
-// With committable_suggestions: false the review posts the same rewrite in a ```text block.
-const TEXT_SUGGESTION = /```text[^\n]*\n([\s\S]*?)```/
+// With committable_suggestions: false the review posts the same rewrite in a
+// ```text block. Only the last one is the rewrite: an earlier one quotes the
+// current string (as in evals/doc-strings/production.js).
+const TEXT_SUGGESTION = /```text[^\n]*\n([\s\S]*?)```/g
 const MERGED = ['taken', 'adapted', 'declined', 'rewritten', 'unclear', 'removed']
 const ORDER = [...MERGED, 'open', 'closed', 'unknown']
 // The workflow every caller references; the code search query matches it.
@@ -51,9 +53,9 @@ const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim()
 const nonEmptyLines = (s) => String(s || '').split('\n').map(norm).filter(Boolean)
 const words = (s) => norm(s).split(' ').filter(Boolean)
 
-/** The body of the first ```suggestion block (else the first ```text block), or null. */
+/** The body of the first ```suggestion block (else the last ```text block), or null. */
 function extractSuggestion (body) {
-  const m = SUGGESTION.exec(body || '') || TEXT_SUGGESTION.exec(body || '')
+  const m = SUGGESTION.exec(body || '') || [...String(body || '').matchAll(TEXT_SUGGESTION)].pop()
   return m ? m[1] : null
 }
 
