@@ -3774,6 +3774,11 @@ const overridesGroup = new Command('overrides').description('Audit docs-side ove
  *   --extracted docs-data/rpk-v26.2.2.json \
  *   --format human
  *
+ * # Audit rpk overrides against rpk built from source, with source locations
+ * npx doc-tools overrides audit --surface rpk \
+ *   --overrides docs-data/rpk-overrides.json \
+ *   --repo ../streaming-enterprise/src/go/rpk
+ *
  * @requirements
  * For properties, the --extracted file must be the property extractor's RAW
  * output (its --output file, without overrides applied). The enhanced output
@@ -3781,7 +3786,8 @@ const overridesGroup = new Command('overrides').description('Audit docs-side ove
  * overrides applied, so auditing against them classifies everything
  * REDUNDANT. For rpk, --extracted is the newest docs-data/rpk-v<version>.json
  * snapshot: the audit reads its raw_tree (what the binary printed) and
- * refuses a file that only carries the override-merged tree.
+ * refuses a file that only carries the override-merged tree. For rpk,
+ * --repo needs Go and a streaming-enterprise src/go/rpk checkout.
  */
 overridesGroup
   .command('audit')
@@ -3790,7 +3796,8 @@ overridesGroup
   .option('--extracted <path>', 'Path to the extracted source JSON: the property extractor raw output (properties surface) or the newest docs-data/rpk-v<version>.json snapshot (rpk surface, compared against its raw_tree)')
   .addOption(new Option('--surface <surface>', 'Override surface to audit').choices(['properties', 'rpk']).default('properties'))
   .addOption(new Option('--format <format>', 'Output format').choices(['json', 'human']).default('json'))
-  .option('--repo <path>', 'Redpanda checkout to extract raw source strings from (properties surface only; alternative to --extracted)')
+  .option('--repo <path>', 'Alternative to --extracted. Properties: a redpanda checkout to extract raw source strings from. rpk: a streaming-enterprise src/go/rpk directory; without --extracted, the audit builds rpk there and reads its --print-tree output, and unless --locations is given it also locates each string so UPSTREAMABLE rows carry source_file/source_line. Run it on Linux, where the docs snapshot comes from')
+  .option('--locations <path>', 'rpk only: output of the locate-strings analyzer (tools/rpk-docs/scripts/locate-strings) to take source_file/source_line from, instead of running it through --repo')
   .option('--output <path>', 'Also write the JSON result to this file')
   .action((options) => {
     const { runAudit, formatHumanReport } = require('../tools/overrides-audit')
@@ -3881,10 +3888,10 @@ overridesGroup
   .command('report')
   .description('Build a plain-English markdown report section from triaged candidates')
   .requiredOption('--candidates <path>', 'Path to a JSON array of triaged candidate rows')
-  .addOption(new Option('--section <section>', 'Which report section to build').choices(['upstream', 'retirement', 'ambiguous']).makeOptionMandatory())
+  .addOption(new Option('--section <section>', 'Which report section to build').choices(['upstream', 'retirement', 'ambiguous', 'unlocatable']).makeOptionMandatory())
   .action((options) => {
-    const { buildUpstreamSection, buildRetirementSection, buildAmbiguousDigest } = require('../tools/overrides-audit/report')
-    const BUILDERS = { upstream: buildUpstreamSection, retirement: buildRetirementSection, ambiguous: buildAmbiguousDigest }
+    const { buildUpstreamSection, buildRetirementSection, buildAmbiguousDigest, buildUnlocatableSection } = require('../tools/overrides-audit/report')
+    const BUILDERS = { upstream: buildUpstreamSection, retirement: buildRetirementSection, ambiguous: buildAmbiguousDigest, unlocatable: buildUnlocatableSection }
     try {
       const candidates = JSON.parse(fs.readFileSync(path.resolve(options.candidates), 'utf8'))
       console.log(BUILDERS[options.section](candidates))

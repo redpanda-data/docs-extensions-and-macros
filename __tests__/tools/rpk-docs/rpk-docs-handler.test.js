@@ -5,8 +5,8 @@ const path = require('path')
 const os = require('os')
 const crypto = require('crypto')
 
-// Only the prepareSourceFromRef, downloadRpkRelease and acquireRpkBinary
-// tests below use this; every other spawnSync call in this module
+// Only the prepareSourceFromRef, downloadRpkRelease, acquireRpkBinary,
+// fetchRpkTreeFromSource and locateRpkSourceStrings tests below use this; every other spawnSync call in this module
 // (docker-based builds) is exercised by no test here, so auto-mocking
 // child_process at the module boundary doesn't change behavior for the rest
 // of the suite. Must be mocked before the handler module below is required:
@@ -28,7 +28,9 @@ const {
   getRequiredGoVersion,
   prepareSourceFromRef,
   downloadRpkRelease,
-  acquireRpkBinary
+  acquireRpkBinary,
+  fetchRpkTreeFromSource,
+  locateRpkSourceStrings
 } = require('../../../tools/rpk-docs/rpk-docs-handler.js')
 
 describe('rpk Docs Handler', () => {
@@ -550,6 +552,109 @@ describe('rpk Docs Handler', () => {
     test('handles two-part go version (no patch)', () => {
       fs.writeFileSync(path.join(tempDir, 'go.mod'), 'module example.com/rpk\n\ngo 1.26\n')
       expect(getRequiredGoVersion(tempDir)).toBe('1.26')
+    })
+  })
+
+  describe('fetchRpkTreeFromSource (Go preflight and logging)', () => {
+    let tempDir
+
+    beforeEach(() => {
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-from-source-test-'))
+      fs.mkdirSync(path.join(tempDir, 'cmd', 'rpk'), { recursive: true })
+      fs.writeFileSync(path.join(tempDir, 'cmd', 'rpk', 'main.go'), 'package main\n')
+      fs.writeFileSync(path.join(tempDir, 'go.mod'), 'module example.com/rpk\n\ngo 1.27.1\n')
+      spawnSync.mockReset()
+    })
+
+    afterEach(() => {
+      fs.rmSync(tempDir, { recursive: true, force: true })
+    })
+
+    // Told apart by arguments and options, not call order.
+    const isBareVersionCheck = (cmd, args, opts) => cmd === 'go' && args[0] === 'version' && !opts.cwd
+    const isToolchainVersionCheck = (cmd, args, opts) => cmd === 'go' && args[0] === 'version' && opts.cwd === tempDir
+    const isPrintTreeRun = (cmd, args) => cmd === 'go' && args[0] === 'run'
+    const tree = '{"name":"rpk","commands":[]}'
+
+    test('progress goes to the logger it is given, not stdout', () => {
+      spawnSync.mockImplementation((cmd, args, opts) => {
+        if (isBareVersionCheck(cmd, args, opts)) return { status: 0, stdout: 'go version go1.27.1 linux/amd64\n', stderr: '' }
+        if (isPrintTreeRun(cmd, args)) return { status: 0, stdout: tree, stderr: '' }
+        throw new Error(`unexpected spawnSync call: ${cmd} ${args.join(' ')}`)
+      })
+      const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {})
+      const lines = []
+      try {
+        expect(fetchRpkTreeFromSource(tempDir, (msg) => lines.push(msg)).name).toBe('rpk')
+        expect(logSpy).not.toHaveBeenCalled()
+      } finally {
+        logSpy.mockRestore()
+      }
+      expect(lines.some((l) => l.includes('Building and running rpk from source'))).toBe(true)
+      expect(lines.some((l) => l.includes('go1.27.1'))).toBe(true)
+    })
+
+    test('a sufficient installed Go never runs the toolchain check', () => {
+      spawnSync.mockImplementation((cmd, args, opts) => {
+        if (isBareVersionCheck(cmd, args, opts)) return { status: 0, stdout: 'go version go1.27.1 linux/amd64\n', stderr: '' }
+        if (isPrintTreeRun(cmd, args)) return { status: 0, stdout: tree, stderr: '' }
+        throw new Error(`unexpected spawnSync call: ${cmd} ${args.join(' ')}`)
+      })
+      fetchRpkTreeFromSource(tempDir, () => {})
+      expect(spawnSync.mock.calls.filter(([cmd, args, opts]) => isToolchainVersionCheck(cmd, args, opts))).toHaveLength(0)
+    })
+
+    test('an older installed Go proceeds when the go.mod toolchain resolves', () => {
+      spawnSync.mockImplementation((cmd, args, opts) => {
+        if (isBareVersionCheck(cmd, args, opts)) return { status: 0, stdout: 'go version go1.26.4 linux/amd64\n', stderr: '' }
+        if (isToolchainVersionCheck(cmd, args, opts)) return { status: 0, stdout: 'go version go1.27.1 linux/amd64\n', stderr: '' }
+        if (isPrintTreeRun(cmd, args)) return { status: 0, stdout: tree, stderr: '' }
+        throw new Error(`unexpected spawnSync call: ${cmd} ${args.join(' ')}`)
+      })
+      expect(fetchRpkTreeFromSource(tempDir, () => {}).name).toBe('rpk')
+    })
+
+    test('an older Go whose toolchain download fails reports the version mismatch, not "not found"', () => {
+      spawnSync.mockImplementation((cmd, args, opts) => {
+        if (isBareVersionCheck(cmd, args, opts)) return { status: 0, stdout: 'go version go1.26.4 linux/amd64\n', stderr: '' }
+        if (isToolchainVersionCheck(cmd, args, opts)) return { status: 1, stdout: '', stderr: 'go: downloading go1.27.1\ndial tcp: i/o timeout\n' }
+        throw new Error(`unexpected spawnSync call: ${cmd} ${args.join(' ')}`)
+      })
+      expect(() => fetchRpkTreeFromSource(tempDir, () => {})).toThrow(/Go version mismatch: installed 1\.26\.4, required >= 1\.27\.1[\s\S]*toolchain download also failed/)
+    })
+
+    test('Go missing reports "not found"', () => {
+      spawnSync.mockImplementation((cmd, args, opts) => {
+        if (isBareVersionCheck(cmd, args, opts)) return { status: 1, stdout: '', stderr: 'command not found: go' }
+        throw new Error(`unexpected spawnSync call: ${cmd} ${args.join(' ')}`)
+      })
+      expect(() => fetchRpkTreeFromSource(tempDir, () => {})).toThrow(/was not found/)
+    })
+  })
+
+  describe('locateRpkSourceStrings', () => {
+    beforeEach(() => spawnSync.mockReset())
+
+    test('runs the analyzer in its own directory and returns its entries', () => {
+      const entries = [{ path: 'rpk topic create', description: { file: 'pkg/cli/topic/create.go', line: 40 }, flags: [] }]
+      spawnSync.mockReturnValue({ status: 0, stdout: JSON.stringify(entries), stderr: 'resolved 1 command node(s)\n' })
+      const lines = []
+      expect(locateRpkSourceStrings('/src/go/rpk', (msg) => lines.push(msg))).toEqual(entries)
+      const [cmd, args, opts] = spawnSync.mock.calls[0]
+      expect(cmd).toBe('go')
+      expect(args).toEqual(['run', '.', '--repo', path.resolve('/src/go/rpk')])
+      expect(opts.cwd).toMatch(/tools[\\/]rpk-docs[\\/]scripts[\\/]locate-strings$/)
+      expect(lines).toEqual(['locate-strings: resolved 1 command node(s)'])
+    })
+
+    test('treats a null result (Go encodes an empty slice as null) as empty', () => {
+      spawnSync.mockReturnValue({ status: 0, stdout: 'null\n', stderr: '' })
+      expect(locateRpkSourceStrings('/src/go/rpk', () => {})).toEqual([])
+    })
+
+    test('throws with the analyzer stderr on failure', () => {
+      spawnSync.mockReturnValue({ status: 1, stdout: '', stderr: 'could not find a cobra.Command literal with Use == "rpk"\n' })
+      expect(() => locateRpkSourceStrings('/src/go/rpk', () => {})).toThrow(/Use == "rpk"/)
     })
   })
 

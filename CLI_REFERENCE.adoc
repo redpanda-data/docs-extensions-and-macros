@@ -3257,7 +3257,10 @@ Override surface to audit (choices: "properties", "rpk", default: "properties")
 Output format (choices: "json", "human", default: "json")
 
 `--repo <path>`::
-Redpanda checkout to extract raw source strings from (properties surface only; alternative to --extracted)
+Alternative to --extracted. Properties: a redpanda checkout to extract raw source strings from. rpk: a streaming-enterprise src/go/rpk directory; without --extracted, the audit builds rpk there and reads its --print-tree output, and unless --locations is given it also locates each string so UPSTREAMABLE rows carry source_file/source_line. Run it on Linux, where the docs snapshot comes from
+
+`--locations <path>`::
+rpk only: output of the locate-strings analyzer (tools/rpk-docs/scripts/locate-strings) to take source_file/source_line from, instead of running it through --repo
 
 `--output <path>`::
 Also write the JSON result to this file
@@ -3323,7 +3326,7 @@ doc-tools overrides report [options]
 Path to a JSON array of triaged candidate rows
 
 `--section <section>`::
-Which report section to build (choices: "upstream", "retirement", "ambiguous")
+Which report section to build (choices: "upstream", "retirement", "ambiguous", "unlocatable")
 
 `-h, --help`::
 display help for command
