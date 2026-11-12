@@ -59,7 +59,7 @@ Inline and block macros for documentation:
 * `config_ref` - Link to configuration properties
 * `helm_ref` - Link to Helm values
 * `components_by_category` - Display Redpanda Connect components
-* `component_table` - Searchable component table
+* `component_table` - Searchable, filterable catalog of component cards
 
 === Documentation automation (MCP server)
 
