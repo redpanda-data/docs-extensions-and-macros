@@ -230,7 +230,7 @@ Shortcuts let you insert complex documentation elements with simple commands. As
 
 See [macros/README.adoc](macros/README.adoc) for more details.
 
-The `glossterm` macro adds tooltips that explain technical terms when users hover over them. The `config_ref` macro creates links to configuration property documentation. The `helm_ref` macro creates links to Helm chart configuration values. The `components_by_category` macro shows all Redpanda Connect connectors organized by category. The `component_table` macro creates a searchable table of connectors.
+The `glossterm` macro adds tooltips that explain technical terms when users hover over them. The `config_ref` macro creates links to configuration property documentation. The `helm_ref` macro creates links to Helm chart configuration values. The `components_by_category` macro shows all Redpanda Connect connectors organized by category. The `component_table` macro creates a searchable catalog of connector cards.
 
 ## AI assistant integration (MCP server)
 

@@ -68,7 +68,7 @@ IMPORTANT: Macros must be registered under the `asciidoc.extensions` key in your
 
 * **iceberg-explorer** - Emit a mount point that docs-ui hydrates into the interactive Iceberg Mode Explorer
 * **components_by_category** - Display Redpanda Connect components grouped by category
-* **component_table** - Generate searchable component tables
+* **component_table** - Generate a searchable, filterable catalog of component cards
 * **component_type_dropdown** - Create dropdown for component types
 
 See link:REFERENCE.adoc[Reference documentation] for complete details on each macro.
