@@ -576,6 +576,23 @@ async function main () {
     await page.waitFor(`!document.getElementById('componentCatalogSolutions').hidden`, 'the solutions links from the URL')
     assert(await page.evaluate(`${visibleCards}.length`) === tagged, '?usecase= in the URL applies the filter on load')
 
+    // A connector's own page: component_type_dropdown::[] adds a Use cases line
+    // whose chips open the catalog page (connect:components:about.adoc)
+    // already filtered to that use case
+    await page.navigate(`${base}/connect/components/inputs/postgres_cdc/`)
+    await page.waitFor(`!!document.querySelector('.connector-use-cases')`, 'the Use cases line on postgres_cdc')
+    const chip = await page.evaluate(`(() => { const a = document.querySelector('.connector-use-cases a.badge-use-case'); return a && { text: a.textContent.trim(), href: a.href } })()`)
+    assert(chip && chip.text === 'Change data capture' && /\/connect\/components\/about\/\?usecase=change-data-capture$/.test(chip.href), `the postgres_cdc page links its use case to the filtered catalog (${chip && chip.href})`)
+    await page.navigate(chip.href)
+    await page.waitFor(`document.querySelectorAll('#componentCardsContainer .component-card').length > 0`, 'the catalog from the chip')
+    assert(await page.evaluate(toggleText) === 'Change data capture', 'following the chip opens the catalog filtered to Change data capture')
+    assert(await page.evaluate(`${visibleCards}.every(c => (c.dataset.useCases || '').split(',').includes('change-data-capture'))`), 'every card the chip leads to has change-data-capture')
+    if (shots) {
+      await page.navigate(`${base}/connect/components/inputs/postgres_cdc/`)
+      await page.waitFor(`!!document.querySelector('.connector-use-cases')`, 'the Use cases line again')
+      await page.screenshot(path.join(shots, '5-connector-page.png'))
+    }
+
     // No use-case data: no Use case filter, and the other filters still sit evenly
     await page.navigate(`${origin}/without/site${PAGE}`)
     await page.waitFor(`document.querySelectorAll('#componentCardsContainer .component-card').length > 0`, 'the cards without use cases')
