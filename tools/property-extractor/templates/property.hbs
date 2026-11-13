@@ -17,7 +17,7 @@
 {{#if version}}
 
 ifndef::env-cloud[]
-*Introduced in {{version}}*
+badge::[label=Since {{version}}]
 endif::[]
 {{/if}}
 {{#if description}}
@@ -73,26 +73,22 @@ endif::[]
 {{#if is_enterprise}}
 
 ifndef::env-cloud[]
-.Enterprise license required
-[NOTE]
-====
 {{#if enterprise_constructor}}
 {{#if (eq enterprise_constructor "simple")}}
-Some values of this property require an Enterprise license.
+badge::[label=Enterprise] Some values of this property require an Enterprise license.
 {{else if (eq enterprise_constructor "restricted_only")}}
-The following values require an Enterprise license: {{#each enterprise_restricted_value}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}}
+badge::[label=Enterprise] The following values require an Enterprise license: {{#each enterprise_restricted_value}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}}
 {{else if (eq enterprise_constructor "restricted_with_sanctioned")}}
-*License-based defaults:*
+badge::[label=Enterprise] *License-based defaults:*
 
 * *Community:* {{#each enterprise_sanctioned_value}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}} (if no Enterprise license is present)
 * *Enterprise:* {{#each enterprise_restricted_value}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}} (if an Enterprise license is present)
 {{/if}}
 {{else}}
-Enterprise license required: `{{enterprise_value}}`
+badge::[label=Enterprise] Enterprise license required: `{{enterprise_value}}`
 {{/if}}
 
-For license details, see xref:get-started:licensing/index.adoc[Redpanda Licensing].
-====
+For license details, see xref:get-started:licensing/overview.adoc[Redpanda Licenses and Enterprise Features].
 endif::[]
 {{/if}}
 {{#if cloud_byoc_only}}
@@ -114,7 +110,7 @@ endif::[]
 | Accepted values
 |
 ifndef::env-cloud[]
-{{#each enum}}`{{this}}`{{#if (isEnterpriseEnum this ../x-enum-metadata)}} (Enterprise){{else}}{{#if ../is_enterprise}}{{#if (includes ../enterprise_restricted_value this)}} (Enterprise){{/if}}{{/if}}{{/if}}{{#unless @last}}, {{/unless}}{{/each}}
+{{#each enum}}`{{this}}`{{#if (isEnterpriseEnum this ../x-enum-metadata)}} badge::[label=Enterprise]{{else}}{{#if ../is_enterprise}}{{#if (includes ../enterprise_restricted_value this)}} badge::[label=Enterprise]{{/if}}{{/if}}{{/if}}{{#unless @last}}, {{/unless}}{{/each}}
 endif::[]
 ifdef::env-cloud[]
 {{#each enum}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}}
@@ -123,7 +119,7 @@ endif::[]
 | Accepted values
 |
 ifndef::env-cloud[]
-{{#each items.enum}}`{{this}}`{{#if (isEnterpriseEnum this ../items.x-enum-metadata)}} (Enterprise){{/if}}{{#unless @last}}, {{/unless}}{{/each}}
+{{#each items.enum}}`{{this}}`{{#if (isEnterpriseEnum this ../items.x-enum-metadata)}} badge::[label=Enterprise]{{/if}}{{#unless @last}}, {{/unless}}{{/each}}
 endif::[]
 ifdef::env-cloud[]
 {{#each items.enum}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}}

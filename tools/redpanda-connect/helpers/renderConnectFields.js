@@ -74,7 +74,7 @@ module.exports = function renderConnectFields(children, prefix = '') {
     let desc = escapePlaceholderBraces(child.description || '');
     if (child.is_beta) {
       // Remove any leading "BETA:" label (case-insensitive, trims leading whitespace)
-      desc = 'badge::[label=Beta, size=large, tooltip={page-beta-text}]\n\n' + desc.replace(/^\s*BETA:\s*/i, '');
+      desc = 'badge::[label=Beta, tooltip={page-beta-text}]\n\n' + desc.replace(/^\s*BETA:\s*/i, '');
     }
 
     // --- Interpolation support notice ---
@@ -97,7 +97,7 @@ module.exports = function renderConnectFields(children, prefix = '') {
       block += `include::connect:components:partial$secret_warning.adoc[]\n\n`;
     }
     if (child.version) {
-      block += `ifndef::env-cloud[]\nRequires version ${child.version} or later.\nendif::[]\n\n`;
+      block += `ifndef::env-cloud[]\nbadge::[label=Since ${child.version}]\nendif::[]\n\n`;
     }
 
     block += `*Type*: \`${displayType}\`\n\n`;

@@ -3,8 +3,8 @@
 /**
  * Handlebars helper to check if an enum value is marked as enterprise.
  *
- * Usage: {{#if (isEnterpriseEnum enumValue x-enum-metadata)}}(Enterprise){{/if}}
- * Usage in template: {{#each enum}}`{{this}}`{{#if (isEnterpriseEnum this ../x-enum-metadata)}} (Enterprise){{/if}}{{/each}}
+ * Usage: {{#if (isEnterpriseEnum enumValue x-enum-metadata)}} badge::[label=Enterprise]{{/if}}
+ * Usage in template: {{#each enum}}`{{this}}`{{#if (isEnterpriseEnum this ../x-enum-metadata)}} badge::[label=Enterprise]{{/if}}{{/each}}
  *
  * @param {string} enumValue - The enum value to check
  * @param {Object} metadata - The x-enum-metadata object mapping values to {is_enterprise: boolean}

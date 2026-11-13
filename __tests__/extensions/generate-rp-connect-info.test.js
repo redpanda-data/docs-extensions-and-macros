@@ -403,6 +403,11 @@ describe('generate-rp-connect-info extractDescription', () => {
     expect(extractDescription(src)).toBe('Does something useful with streams.')
   })
 
+  test('drops badge macros such as the Since badge', () => {
+    expect(ext.cleanDescription('Does something useful. badge::[label=Since 4.53.0]')).toBe('Does something useful.')
+    expect(ext.cleanDescription('badge::[label=Beta, tooltip={page-beta-text}] Reads streams.')).toBe('Reads streams.')
+  })
+
   test('keeps decimals inside the first sentence when truncating', () => {
     const long = 'Supports Kafka 2.8 and later, including clusters that run with tiered storage, transactions, and idempotent producers enabled. More text follows here and keeps going.'
     expect(long.length).toBeGreaterThan(150)
