@@ -728,6 +728,8 @@ Nothing is selected at first, so every card shows. Selecting use cases keeps the
 
 Cards with use cases also show them as chips in a *Use case* badge group.
 
+The search box has its own row. The dropdown filters sit below it in equal-width columns, at least 180px each, balanced so rows stay full: four filters show four across, two by two, or one per row, depending on the width of the panel.
+
 === Registration
 
 ```yaml

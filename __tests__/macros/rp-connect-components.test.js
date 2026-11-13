@@ -792,3 +792,33 @@ describe('component_table use cases', () => {
     })
   })
 })
+
+describe('component_table filter layout', () => {
+  const { filterLayoutCss } = require('../../macros/rp-connect-components.js')
+  // [container min-width, columns] per rule, in order
+  const bands = (count) => filterLayoutCss(count).split('\n').map((rule) => {
+    const width = Number(rule.match(/min-width: (\d+)px/)[1])
+    const cols = rule.includes('flex-basis: 100%') ? 1 : Number(rule.match(/\/ (\d+) - 0\.1px/)[1])
+    return [width, cols]
+  })
+
+  test('balances four filters as 1, then 2x2, then 4 across', () => {
+    expect(bands(4)).toEqual([[0, 1], [376, 2], [572, 2], [768, 4]])
+  })
+
+  test('lays out three filters as 1 per row, then 2 with the third filling its row, then 3 across', () => {
+    expect(bands(3)).toEqual([[0, 1], [376, 2], [572, 3]])
+  })
+
+  test('balances five filters as 3+2 where four do not fit', () => {
+    expect(bands(5)).toEqual([[0, 1], [376, 2], [572, 3], [768, 3], [964, 5]])
+  })
+
+  test('puts search on its own row and the panel above the cards', () => {
+    const html = renderComponentTable()
+    expect(html).toContain('<div class="table-filters component-catalog-filters">')
+    expect(html).toContain('<div class="table-filters-search">')
+    expect(html).toMatch(/\.table-filters\.component-catalog-filters > \.table-filters-search \{[^}]*flex: 1 1 100%/)
+    expect(html).toMatch(/\.table-filters\.component-catalog-filters \{[^}]*z-index: 2/)
+  })
+})

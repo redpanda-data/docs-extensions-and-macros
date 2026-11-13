@@ -153,6 +153,36 @@ function solutionsMarkup (solutions, ids, labels, escape) {
     '<ul class="catalog-solutions-list">' + items.join('') + '</ul>'
 }
 
+// Filter layout: each dropdown filter is at least this wide, with this gap
+const FILTER_MIN_WIDTH_PX = 180
+const FILTER_GAP_PX = 16
+
+/**
+ * Container queries that lay the dropdown filters out in balanced rows: as
+ * many columns as fit at FILTER_MIN_WIDTH_PX, then evened out so no row is
+ * left with a gap (4 filters go 4, 2x2, then 1 per row; 3 go 3, then 1 per
+ * row). A filter in a short last row (5 filters in 3 columns) stretches to
+ * fill it. Exported for unit testing.
+ *
+ * @param {number} count - the number of dropdown filters
+ * @returns {string} CSS
+ */
+function filterLayoutCss (count) {
+  const rules = []
+  for (let fit = 1; fit <= count; fit++) {
+    const minWidth = fit === 1 ? 0 : fit * FILTER_MIN_WIDTH_PX + (fit - 1) * FILTER_GAP_PX
+    const columns = Math.ceil(count / Math.ceil(count / fit))
+    const basis = columns === 1
+      ? '100%'
+      : `calc((100% - ${(columns - 1) * FILTER_GAP_PX}px) / ${columns} - 0.1px)`
+    const rule = `.table-filters.component-catalog-filters > .filter-group { flex-basis: ${basis}; }`
+    // A browser without container queries keeps the flex-basis fallback
+    rules.push(`@container catalog-filters (min-width: ${minWidth}px) { ${rule} }`)
+  }
+  return rules.join('\n')
+}
+
+module.exports.filterLayoutCss = filterLayoutCss
 module.exports.matchSolutions = matchSolutions
 module.exports.solutionsMarkup = solutionsMarkup
 module.exports.SOLUTIONS_CATALOG_PATH = SOLUTIONS_CATALOG_PATH
@@ -1169,8 +1199,8 @@ module.exports.register = function (registry, context) {
             }
           })();
         </script>
-        <div class="table-filters">
-          <div style="display: flex; align-items: center; gap: 0.5rem; flex: 1;">
+        <div class="table-filters component-catalog-filters">
+          <div class="table-filters-search">
             <input class="table-search" type="text" id="componentTableSearch" placeholder="Search for components..." style="flex: 1;">
             <button type="button" class="badge-legend-button" title="View badge legend" aria-label="View badge legend">
               <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
@@ -1273,9 +1303,56 @@ module.exports.register = function (registry, context) {
           `;
       }
 
+      const filterCount = 1 + (useCaseOptions.length ? 1 : 0) + (isCloud ? 0 : 1) + (showAllInfo ? 2 : 0);
+
       tableHtml += `</div>
         <!-- CSS styles for card layout and modal -->
         <style>
+          /* Filter panel: search on its own row, then the dropdown filters in
+             balanced, equal-width columns (see filterLayoutCss). Selectors
+             carry three classes to win over the UI bundle's .doc rules,
+             including its column layout below 768px. */
+          .table-filters.component-catalog-filters {
+            container: catalog-filters / inline-size;
+            /* Above the cards and the solutions list, so an open dropdown
+               overlays them (the container is its own stacking context) */
+            position: relative;
+            z-index: 2;
+            display: flex;
+            flex-direction: row;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            gap: ${FILTER_GAP_PX}px;
+          }
+
+          .table-filters.component-catalog-filters > .table-filters-search {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            flex: 1 1 100%;
+            min-width: 0;
+          }
+
+          .table-filters.component-catalog-filters .table-search {
+            flex: 1 1 auto;
+            min-width: 0;
+            max-width: none;
+            margin: 0;
+          }
+
+          .table-filters.component-catalog-filters > .filter-group {
+            flex: 1 1 ${FILTER_MIN_WIDTH_PX}px;
+            min-width: 0;
+            max-width: none;
+            margin: 0;
+          }
+
+          .table-filters.component-catalog-filters .dropdown-checkbox-wrapper {
+            min-width: 0;
+          }
+
+          ${filterLayoutCss(filterCount)}
+
           .component-cards-container {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
