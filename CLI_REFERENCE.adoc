@@ -30,6 +30,7 @@ display help for command
 * `install-test-dependencies` - Install packages for doc test workflows
 * `get-redpanda-version` - Print the latest Redpanda version
 * `get-console-version` - Print the latest Console version
+* `get-connect-version` - Print the latest Redpanda Connect version
 * `get-antora-value` - Read a value from antora.yml by dot-path (e.g., asciidoc.attributes.latest-redpanda-tag)
 * `set-antora-value` - Set a value in antora.yml by dot-path (e.g., asciidoc.attributes.latest-rpk-version)
 * `link-readme` - Symlink a README.adoc into docs/modules/<module>/pages/
@@ -200,6 +201,44 @@ npx doc-tools get-console-version --from-antora
 # Use in Docker Compose documentation
 CONSOLE_VERSION=$(npx doc-tools get-console-version)
 echo "image: redpandadata/console:$CONSOLE_VERSION"
+----
+
+*Requirements:*
+
+- Internet connection to access GitHub API
+- GitHub API rate limits apply (60 requests/hour unauthenticated)
+
+== get-connect-version
+
+Fetches the latest Redpanda Connect release from GitHub and prints only its version, without the leading "v" (for example "4.110.0"). That is the form `generate update-connect-version` writes to the latest-connect-version attribute.
+
+*Why use it:*
+
+Redpanda Connect is released separately from Redpanda core. Scripts and agents that need the current Connect version, for example to pin an image tag or compare against antora.yml, can read it from this command instead of calling the GitHub API themselves.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools get-connect-version [options]
+----
+
+*Options:*
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Get the latest Connect version
+npx doc-tools get-connect-version
+# Output: 4.110.0
+
+# Use in scripts
+CONNECT_VERSION=$(npx doc-tools get-connect-version)
+echo "image: redpandadata/connect:$CONNECT_VERSION"
 ----
 
 *Requirements:*

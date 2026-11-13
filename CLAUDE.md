@@ -173,6 +173,9 @@ npx doc-tools get-redpanda-version
 
 # Find the latest Redpanda Console version
 npx doc-tools get-console-version
+
+# Find the latest Redpanda Connect version
+npx doc-tools get-connect-version
 ```
 
 ### Download files from GitHub
