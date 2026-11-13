@@ -55,11 +55,40 @@ jobs:
           echo "::notice::$msg"
           printf '## Doc-impact eval (advisory)\n\n%s\n' "$msg" >> "$GITHUB_STEP_SUMMARY"
 
+  # The committed item set can be empty: items from private repositories
+  # (now streaming-enterprise and redpanda-operator) never go in this public
+  # repository, so they are run locally with --items. With no items the
+  # harness exits 2, so skip the replay and say why instead.
+  items:
+    name: Count items
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      count: ${{ steps.count.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: evals/doc-strings/doc-impact/items.json
+          sparse-checkout-cone-mode: false
+      - name: Count the committed items
+        id: count
+        run: |
+          count=$(jq 'length' evals/doc-strings/doc-impact/items.json)
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          if [ "$count" = 0 ]; then
+            msg="evals/doc-strings/doc-impact/items.json has no items, so there is nothing to replay. Items from private repositories run locally with --items <private-dir>/items.json (see the doc-impact section of evals/doc-strings/README.adoc)."
+            echo "::notice::$msg"
+            printf '## Doc-impact eval (advisory)\n\n%s\n' "$msg" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   eval:
     name: Replay (${{ matrix.side }})
+    needs: items
     # A fork gets no secrets and no OIDC role, so the credential steps could
     # not run. fork-notice says so instead of leaving a red check.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: needs.items.outputs.count != '0' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
