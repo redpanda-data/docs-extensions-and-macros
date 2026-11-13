@@ -573,6 +573,48 @@ describe('combined status markers in Markdown', () => {
     const html = '<p><span class="enterprise-feature">Tiered Storage</span> <em>note</em></p>'
     expect(createTurndown().turndown(html)).toBe(`Tiered Storage ${ENTERPRISE_MARKER} _note_`)
   })
+
+  // The badge macro emits docs-ui meaning badges with no parentheses in the
+  // label, so the class carries the meaning into the Markdown.
+  describe('rp-badge meaning badges', () => {
+    const { buildBadgeHtml } = require('../../macros/badge')
+    const { badgeMeaning } = require('../../extensions/convert-to-markdown')
+
+    test.each([
+      ['beta', 'Shadowing (beta)'],
+      ['enterprise', 'Shadowing (enterprise)'],
+      ['deprecated', 'Shadowing (deprecated)'],
+      ['Since 25.1', 'Shadowing (since v25.1)'],
+      ['limited', 'Shadowing (limited availability)'],
+      ['BYOC', 'Shadowing (BYOC)'],
+      ['self-managed', 'Shadowing (self-managed)'],
+    ])('a %s badge keeps its meaning', (label, expected) => {
+      expect(createTurndown().turndown(`<p>Shadowing ${buildBadgeHtml({ label })}</p>`)).toBe(expected)
+    })
+
+    test('a beta enterprise feature gets one combined marker from rp-badge markup', () => {
+      const html = `<p><span class="enterprise-feature">Stretch Clusters</span> ${buildBadgeHtml({ label: 'beta' })}</p>`
+      expect(createTurndown().turndown(html)).toBe('Stretch Clusters (enterprise, beta)')
+    })
+
+    test('rp-badge--sm is a size, not a meaning', () => {
+      const html = '<p>X <span class="rp-badge rp-badge--sm rp-badge--new">New</span></p>'
+      expect(createTurndown().turndown(html)).toBe('X (new)')
+    })
+
+    test('a linked use-case badge keeps its link', () => {
+      const html = '<p>See <a class="rp-badge rp-badge--use-case" href="catalog.html?usecase=cdc">Change data capture</a></p>'
+      expect(createTurndown().turndown(html)).toBe('See [Change data capture](catalog.html?usecase=cdc)')
+    })
+
+    test('badgeMeaning reads the class, legacy beta included', () => {
+      const domino = require('@mixmark-io/domino')
+      const el = (html) => domino.createDocument(html).body.firstChild
+      expect(badgeMeaning(el('<span class="rp-badge rp-badge--eol">End of life</span>'))).toBe('eol')
+      expect(badgeMeaning(el('<span class="badge badge--beta">(beta)</span>'))).toBe('beta')
+      expect(badgeMeaning(el('<span class="badge badge--large">x</span>'))).toBe(null)
+    })
+  })
 })
 
 describe('generated content provenance', () => {
