@@ -18,6 +18,51 @@ antora:
   - '@redpanda-data/docs-extensions-and-macros/asciidoc-extensions/add-line-numbers-highlights'
 ```
 
+== badge
+
+Marks a meaning inline, such as Beta, Enterprise, or the version a feature arrived in. It renders the docs UI meaning badge, so every page and every generated reference shows each meaning the same way.
+
+=== Usage
+
+```asciidoc
+badge::[label=beta]
+badge::[label=Since v25.1]
+badge::[label=deprecated, tooltip="Use the new flag instead."]
+badge::[label=enterprise, size=sm]
+```
+
+The label picks the meaning and the exact text shown:
+
+[cols="1,1,1"]
+|===
+| `label` | Class | Text
+
+| `beta` | `rp-badge--beta` | Beta
+| `preview` | `rp-badge--preview` | Preview
+| `limited`, `limited availability` | `rp-badge--limited` | Limited availability
+| `deprecated` | `rp-badge--deprecated` | Deprecated
+| `eol`, `end of life` | `rp-badge--eol` | End of life
+| `eol soon`, `end of life soon` | `rp-badge--eol-soon` | End of life soon
+| `new` | `rp-badge--new` | New
+| `since <version>` | `rp-badge--since` | Since v<version>
+| `enterprise` | `rp-badge--enterprise` | Enterprise
+| `cloud`, `byoc`, `serverless`, `dedicated` | `rp-badge--cloud` | Cloud, BYOC, Serverless, Dedicated
+| `self-managed` | `rp-badge--self-managed` | Self-Managed
+| `certified` | `rp-badge--certified` | Certified
+| `community` | `rp-badge--community` | Community
+| anything else | `rp-badge--neutral` | the label as written
+|===
+
+Each meaning has a standard tooltip, rendered as `data-tooltip`; a `tooltip` attribute replaces it. `size=sm` adds `rp-badge--sm` for dense contexts. Labels never carry parentheses. The older `badge badge--*` classes stay on the same element for pages built with an older UI bundle, and the `convert-to-markdown` extension writes each badge as a parenthetical, such as `(beta)` or `(since v25.1)`.
+
+=== Registration
+
+```yaml
+asciidoc:
+  extensions:
+  - '@redpanda-data/docs-extensions-and-macros/macros/badge'
+```
+
 == config_ref
 
 IMPORTANT: `config_ref` is deprecated. The `prop` macro supersedes all of its functionality: it validates names against the published property reference, discovers the target page dynamically instead of taking a manual path, powers hover tooltips, and its `helm-path=auto` attribute replaces `config_ref`'s Kubernetes prefixing with a per-property correct Helm values path (`config_ref` prefixed every property with `storage.tiered.config.`, mislabeling non-tiered properties). Migrate call sites with `doc-tools generate migrate-property-refs --config-refs`. The macro stays registered only because older versioned docs, which are frozen, still contain it; generated content emits `prop` (the extractor rewrites any `config_ref` it finds).
@@ -105,7 +150,7 @@ enterprise-feature-role::
 CSS class applied to the wrapping span. The default is `enterprise-feature`. Style this class in the UI bundle to give enterprise terms a consistent visual treatment.
 
 enterprise-tooltip::
-Controls the tooltip attribute: `title` (default), `true` (renders `data-enterprise-tooltip` for UI-driven tooltips), any attribute name starting with `data-`, or `false` to disable tooltips.
+Controls the tooltip attribute: `data-tooltip` (default, the attribute the docs UI turns into a tooltip on hover, keyboard focus, and tap), `title`, `true` (renders `data-enterprise-tooltip`), any attribute name starting with `data-`, or `false` to disable tooltips. The default tooltip text is "Requires an Enterprise Edition license." unless the registry entry or the `tooltip` attribute gives one.
 
 enterprise-links::
 Set to `false` to render the term without a link.
@@ -162,7 +207,7 @@ Add `beta: true` to a registry entry to mark the feature as beta. The macro then
 
 Add `beta-tooltip` to give the badge hover text.
 
-Do not write a `badge:` macro call into `feature-suffix` to achieve this. The badge is emitted as an inline passthrough, so it renders whether or not the consuming playbook registers the `badge` macro, and it degrades to the text `(beta)` in Markdown. A hand-written macro call renders as literal source text in any build that does not register that macro.
+Do not write a `badge:` macro call into `feature-suffix` to achieve this. The badge is emitted as an inline passthrough, so it renders whether or not the consuming playbook registers the `badge` macro, and the `convert-to-markdown` extension keeps it as `(beta)` in Markdown. A hand-written macro call renders as literal source text in any build that does not register that macro.
 
 === Markdown output
 

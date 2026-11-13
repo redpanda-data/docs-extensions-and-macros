@@ -56,9 +56,11 @@
  *                              (default: get-started:licensing/overview.adoc).
  *   enterprise-feature-role    CSS class applied to the wrapping span
  *                              (default: enterprise-feature).
- *   enterprise-tooltip         'title' (default), 'true' (renders
- *                              data-enterprise-tooltip), any attribute name
- *                              starting with 'data-', or 'false' to disable.
+ *   enterprise-tooltip         'data-tooltip' (default, the attribute the
+ *                              docs UI turns into a tooltip), 'title',
+ *                              'true' (renders data-enterprise-tooltip), any
+ *                              attribute name starting with 'data-', or
+ *                              'false' to disable.
  *   enterprise-links           'true' (default) to render the term as a link.
  *
  * Example use in a playbook:
@@ -93,6 +95,9 @@ function warnOnce (contentCatalog, key, message) {
 
 const DEFAULT_LICENSING_PAGE = 'get-started:licensing/overview.adoc'
 const DEFAULT_ROLE = 'enterprise-feature'
+// The attribute every docs UI tooltip reads. Meaning elements never use the
+// native title attribute, which shows only on mouse hover.
+const DEFAULT_TOOLTIP_ATTRIBUTE = 'data-tooltip'
 const BETA_LABEL = 'beta'
 const UNRELEASED_LABEL = 'unreleased'
 // The badge macro supplies the default hover text for these labels, so the same
@@ -515,11 +520,12 @@ function resolveEntryXref (entry, document) {
  */
 function resolveTooltipAttribute (raw) {
   if (raw === 'false') return undefined
-  if (raw === undefined || raw === 'title') return 'title'
+  if (raw === undefined || raw === '') return DEFAULT_TOOLTIP_ATTRIBUTE
+  if (raw === 'title') return 'title'
   if (raw === 'true') return 'data-enterprise-tooltip'
   if (raw.startsWith('data-')) return raw
-  logger.warn(`enterprise-tooltip attribute '${raw}' must be 'title', 'true', 'false', or start with 'data-'. Falling back to 'title'.`)
-  return 'title'
+  logger.warn(`enterprise-tooltip attribute '${raw}' must be 'title', 'true', 'false', or start with 'data-'. Falling back to '${DEFAULT_TOOLTIP_ATTRIBUTE}'.`)
+  return DEFAULT_TOOLTIP_ATTRIBUTE
 }
 
 /**
@@ -540,7 +546,7 @@ function resolveTooltipAttribute (raw) {
  */
 function buildEnterpriseContent ({ feature, text, xref, url, tooltip, licensingPage, role, tooltipAttr, links }) {
   const display = text || feature
-  const tooltipText = tooltip || `${feature} requires an Enterprise Edition license.`
+  const tooltipText = tooltip || DEFAULT_TOOLTIPS.enterprise
   // All four, matching badge.js. Escaping only the quote kept the attribute
   // intact but let < and > through from a registry tooltip field, which any
   // consumer that re-parses the page then reads as markup -- the docs UI
