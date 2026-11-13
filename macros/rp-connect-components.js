@@ -109,49 +109,6 @@ const { isCloudAvailable, typeFromRelative, useCasesByConnector } = require('../
 // page fetches the published file instead, only once a use case is selected.
 const SOLUTIONS_CATALOG_PATH = 'assets/data/solutions.json'
 
-// The use-case chips on a connector's own page (component_type_dropdown). The
-// catalog's styles load only on the catalog page, so these ship with the block.
-const USE_CASE_TAG_ICON = '<svg class="connector-use-case-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M2 2.75C2 2.34 2.34 2 2.75 2h4.69c.2 0 .39.08.53.22l5.81 5.81a.75.75 0 0 1 0 1.06l-4.69 4.69a.75.75 0 0 1-1.06 0L2.22 7.97A.75.75 0 0 1 2 7.44V2.75zM5 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"/></svg>'
-const CONNECTOR_FACTS_CSS = `
-.doc .metadata-block.connector-facts { position: relative; margin: 1.25rem 0 1.5rem; padding: 0; border: 1px solid #ece7e5; border-radius: 12px; background: linear-gradient(135deg, #fffaf8 0%, #ffffff 60%); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 16px -8px rgba(226, 64, 27, 0.18); overflow: hidden; }
-.doc .metadata-block.connector-facts::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: linear-gradient(180deg, #e2401b, #f2a33a); }
-.doc .metadata-block.connector-facts .metadata-content { padding: 0; }
-.connector-fact { display: flex; gap: 0.875rem; padding: 1rem 1.25rem 1rem 1.5rem; }
-.connector-fact + .connector-fact { border-top: 1px solid #f0ebe9; }
-.connector-fact-icon { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; border-radius: 8px; background: #fdf0ec; color: #c2370f; }
-/* The same lock as the enterprise: macro (docs-ui --enterprise-lock-icon), so both mark Enterprise alike */
-.connector-fact-lock { display: block; width: 16px; height: 16px; background-color: currentColor; -webkit-mask: var(--enterprise-lock-icon) no-repeat center / contain; mask: var(--enterprise-lock-icon) no-repeat center / contain; }
-.connector-fact-body { flex: 1 1 auto; min-width: 0; }
-.doc .connector-facts .connector-fact-title { display: block; margin: 0.25rem 0 0.25rem; font-size: 0.9375rem; font-weight: 700; color: #111827; letter-spacing: -0.005em; }
-.doc .connector-facts p.connector-fact-text { margin: 0 0 0.75rem; font-size: 0.875rem; line-height: 1.5; color: #4b5563; }
-.doc .connector-facts p.connector-fact-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin: 0; }
-.doc .connector-facts a.connector-fact-button { display: inline-flex; align-items: center; padding: 0.4375rem 0.875rem; border: 1px solid #d6d3d1; border-radius: 8px; background: #fff; color: #1f2937; font-size: 0.8125rem; font-weight: 600; text-decoration: none; transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease; }
-.doc .connector-facts a.connector-fact-button:hover { border-color: #a8a29e; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08); }
-.doc .connector-facts a.connector-fact-button--primary { border-color: #c2370f; background: #c2370f; color: #fff; }
-.doc .connector-facts a.connector-fact-button--primary:hover { border-color: #a32d0c; background: #a32d0c; }
-.doc .connector-facts a.connector-fact-link { font-size: 0.8125rem; font-weight: 600; color: #a32d0c; }
-.doc .connector-facts a:focus-visible { outline: 2px solid #e2401b; outline-offset: 2px; }
-.connector-fact--use-cases .connector-use-cases { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.875rem; }
-.doc .connector-facts .connector-fact--use-cases .connector-use-cases-label { display: inline; margin: 0; }
-.connector-use-cases-chips { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-.doc .connector-facts a.connector-use-case { display: inline-flex; align-items: center; gap: 0.375rem; padding: 0.3125rem 0.75rem; border: 1px solid #f6c9bb; border-radius: 999px; background: #fdf0ec; color: #a32d0c; font-size: 0.8125rem; font-weight: 600; line-height: 1.2; text-decoration: none; transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease; }
-.doc .connector-facts a.connector-use-case:hover { background: #fbe1d8; border-color: #e2401b; box-shadow: 0 1px 2px rgba(226, 64, 27, 0.18); }
-.connector-use-case-arrow { display: inline-block; width: 0; overflow: hidden; opacity: 0; transform: translateX(-4px); transition: width 0.15s ease, opacity 0.15s ease, transform 0.15s ease; }
-.doc .connector-facts a.connector-use-case:hover .connector-use-case-arrow, .doc .connector-facts a.connector-use-case:focus-visible .connector-use-case-arrow { width: 0.875em; opacity: 1; transform: none; }
-html[data-theme="dark"] .doc .metadata-block.connector-facts { border-color: rgba(255, 255, 255, 0.1); background: linear-gradient(135deg, rgba(226, 64, 27, 0.08) 0%, rgba(255, 255, 255, 0.02) 60%); box-shadow: none; }
-html[data-theme="dark"] .connector-fact + .connector-fact { border-top-color: rgba(255, 255, 255, 0.08); }
-html[data-theme="dark"] .connector-fact-icon { background: rgba(226, 64, 27, 0.18); color: #ffb59e; }
-html[data-theme="dark"] .doc .connector-facts .connector-fact-title { color: #f3f4f6; }
-html[data-theme="dark"] .doc .connector-facts p.connector-fact-text { color: #c7cbd1; }
-html[data-theme="dark"] .doc .connector-facts a.connector-fact-button { border-color: rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.04); color: #f3f4f6; }
-html[data-theme="dark"] .doc .connector-facts a.connector-fact-button--primary { border-color: #c2370f; background: #c2370f; color: #fff; }
-html[data-theme="dark"] .doc .connector-facts a.connector-fact-link { color: #ffb59e; }
-html[data-theme="dark"] .doc .connector-facts a.connector-use-case { background: rgba(226, 64, 27, 0.14); border-color: rgba(241, 93, 97, 0.4); color: #ffb59e; }
-html[data-theme="dark"] .doc .connector-facts a.connector-use-case:hover { background: rgba(226, 64, 27, 0.24); border-color: #f15d61; }
-@media (max-width: 480px) { .connector-fact { padding: 0.875rem 1rem 0.875rem 1.25rem; } .connector-fact-icon { display: none; } }
-@media (prefers-reduced-motion: reduce) { .doc .connector-facts a, .connector-use-case-arrow { transition: none; } }
-`
-
 // A use case is offered in the filter only when at least this many cards in
 // the current view have it: an option that narrows the catalog to one or two
 // cards reads as noise, and a tag that rare says more about tagging than use.
@@ -299,6 +256,70 @@ function filterLayoutCss (count) {
 function forTemplateLiteral (html) {
   return String(html).replace(/\\/g, '&#92;').replace(/`/g, '&#96;').replace(/\$\{/g, '&#36;{')
 }
+
+// Tooltip texts for the meaning badges, from the docs-wide meaning system
+const MEANING_TOOLTIPS = {
+  certified: 'Supported and tested by Redpanda.',
+  community: 'Community-supported.',
+  cloud: 'Available in Redpanda Cloud.',
+  enterprise: 'Requires an Enterprise Edition license.'
+}
+
+/**
+ * One meaning badge, styled by docs-ui (.rp-badge, .rp-badge--NAME). The label
+ * carries the meaning; data-tooltip adds detail through docs-ui's tippy setup.
+ * A meaning badge never has a native title attribute.
+ *
+ * @param {string} name - the meaning (neutral, certified, community, cloud, enterprise, use-case)
+ * @param {string} label - the visible text
+ * @param {Object} [options]
+ * @param {string} [options.tooltip] - the tooltip text (the label when empty: every badge has one)
+ * @param {string} [options.href] - makes the badge a link
+ * @param {boolean} [options.small=true] - the dense size (rp-badge--sm), for cards
+ */
+function meaningBadge (name, label, { tooltip, href, small = true } = {}) {
+  const cls = `rp-badge${small ? ' rp-badge--sm' : ''} rp-badge--${name}`
+  // Every badge has a tooltip: with none given, the label stands in
+  const tip = ` data-tooltip="${escapeHtml(tooltip || label)}"`
+  return href
+    ? `<a class="${cls}" href="${escapeHtml(href)}"${tip}>${escapeHtml(label)}</a>`
+    : `<span class="${cls}"${tip}>${escapeHtml(label)}</span>`
+}
+
+// What each component type does, as its badge tooltip
+const TYPE_TOOLTIPS = {
+  input: 'Reads data into a pipeline.',
+  output: 'Writes data out of a pipeline.',
+  processor: 'Transforms data in a pipeline.',
+  cache: 'Stores data that other components look up.',
+  buffer: 'Holds messages between the input and the processors.',
+  metric: 'Exports metrics about a pipeline.',
+  scanner: 'Splits a stream of bytes into messages.',
+  rate_limit: 'Limits how often components access a resource.',
+  tracer: 'Sends traces of messages through a pipeline.'
+}
+
+/** A component type's badge tooltip, for any type */
+function typeTooltip (type) {
+  return TYPE_TOOLTIPS[String(type || '').toLowerCase()] || `Component type: ${typeLabel(type)}.`
+}
+
+/** A component type's label, the same on cards, in the filter, and in the legend: rate_limit -> Rate Limit */
+function typeLabel (type) {
+  return String(type || '').split('_').filter(Boolean).map(w => w[0].toUpperCase() + w.slice(1)).join(' ')
+}
+
+/** A component name that wraps only after an underscore, never mid-word */
+function breakableName (name) {
+  return escapeHtml(name).replace(/_/g, '_<wbr>')
+}
+
+module.exports.meaningBadge = meaningBadge
+module.exports.typeLabel = typeLabel
+module.exports.typeTooltip = typeTooltip
+module.exports.TYPE_TOOLTIPS = TYPE_TOOLTIPS
+module.exports.breakableName = breakableName
+module.exports.MEANING_TOOLTIPS = MEANING_TOOLTIPS
 
 module.exports.filterLayoutCss = filterLayoutCss
 module.exports.matchSolutions = matchSolutions
@@ -902,17 +923,15 @@ module.exports.register = function (registry, context) {
     const href = (id) => `${base.endsWith('/') ? base : base + '/'}?usecase=${encodeURIComponent(id)}`;
     const mergedNote = details.types.size > 1 ? " Applies to at least one of this component's types." : '';
     const chips = own.map(({ id, label, definition }) =>
-      `<a class="connector-use-case" href="${escapeHtml(href(id))}" title="${escapeHtml((definition || `Use case: ${label}`) + mergedNote)}">` +
-      `<span>${escapeHtml(label)}</span><span class="connector-use-case-arrow" aria-hidden="true">&rarr;</span></a>`
+      meaningBadge('use-case', label, { href: href(id), tooltip: (definition || `Use case: ${label}`) + mergedNote, small: false })
     ).join('');
+    // Its own meaning on the section: the tag icon and neutral tile, inside an Enterprise card too
     return `
-            <section class="connector-fact connector-fact--use-cases">
-              <span class="connector-fact-icon" aria-hidden="true">${USE_CASE_TAG_ICON}</span>
-              <div class="connector-fact-body">
-                <div class="connector-use-cases" role="group" aria-labelledby="connectorUseCasesLabel">
-                  <span class="connector-use-cases-label connector-fact-title" id="connectorUseCasesLabel">Use cases</span>
-                  <span class="connector-use-cases-chips">${chips}</span>
-                </div>
+            <section class="rp-notice-section rp-notice--use-case connector-use-cases">
+              <span class="rp-notice-icon" aria-hidden="true"></span>
+              <div class="rp-notice-body" role="group" aria-labelledby="connectorUseCasesLabel">
+                <span class="rp-notice-title" id="connectorUseCasesLabel">Use cases</span>
+                <p class="rp-notice-actions">${chips}</p>
               </div>
             </section>`;
   }
@@ -935,7 +954,7 @@ module.exports.register = function (registry, context) {
           .map(useCase => {
             const { label, definition } = useCaseInfo[useCase];
             const tooltip = [definition || `Use case: ${label}`, mergedNote].filter(Boolean).join(' ');
-            return `<span class="badge badge-use-case" title="${escapeHtml(tooltip)}">${escapeHtml(label)}</span>`;
+            return meaningBadge('use-case', label, { tooltip });
           })
           .join(' ');
         const useCaseSearchTerms = useCases
@@ -969,11 +988,7 @@ module.exports.register = function (registry, context) {
                 url = redpandaConnectUrl || redpandaCloudUrl;
               }
               // Always show the type badge, with or without a link
-              if (url) {
-                badges.push(`<a href="${escapeHtml(url)}" class="badge badge-type" title="Component type: ${escapeHtml(capitalize(type))}">${escapeHtml(capitalize(type))}</a>`);
-              } else {
-                badges.push(`<span class="badge badge-type" title="Component type: ${escapeHtml(capitalize(type))}">${escapeHtml(capitalize(type))}</span>`);
-              }
+              badges.push(meaningBadge('neutral', typeLabel(type), { tooltip: typeTooltip(type), href: url || undefined }));
             });
             const uniqueBadges = [...new Set(badges)];
             return uniqueBadges.join(' ');
@@ -1005,10 +1020,9 @@ module.exports.register = function (registry, context) {
         // Generate support level badges with tooltips
         const supportBadges = Object.entries(supportLevels)
           .map(([supportLevel]) => {
-            const tooltip = supportLevel.toLowerCase() === 'certified'
-              ? 'Certified: Fully supported and tested by Redpanda'
-              : 'Community: Community-supported connector';
-            return `<span class="badge badge-support badge-support-${escapeHtml(supportLevel.toLowerCase())}" title="${tooltip}">${escapeHtml(capitalize(supportLevel))}</span>`;
+            const level = supportLevel.toLowerCase();
+            const meaning = level === 'certified' || level === 'community' ? level : 'neutral';
+            return meaningBadge(meaning, capitalize(supportLevel), { tooltip: MEANING_TOOLTIPS[meaning] || `Support level: ${capitalize(supportLevel)}.` });
           })
           .join(' ');
 
@@ -1020,11 +1034,12 @@ module.exports.register = function (registry, context) {
           const certifiedDrivers = sqlDrivers.certified.map(d => d.commercialName).join(', ');
           const communityDrivers = sqlDrivers.community.map(d => d.commercialName).join(', ');
 
+          // The badge says the level; the drivers follow as text, which wraps
           if (certifiedDrivers) {
-            sqlDriverBadges += `<span class="badge badge-support badge-support-certified" title="Certified drivers: ${escapeHtml(certifiedDrivers)}">Certified: ${escapeHtml(certifiedDrivers)}</span>`;
+            sqlDriverBadges += `<span class="catalog-drivers">${meaningBadge('certified', 'Certified', { tooltip: `${MEANING_TOOLTIPS.certified} Certified drivers: ${certifiedDrivers}` })} <span class="catalog-drivers-list">${escapeHtml(certifiedDrivers)}</span></span>`;
           }
           if (communityDrivers) {
-            sqlDriverBadges += `<span class="badge badge-support badge-support-community" title="Community drivers: ${escapeHtml(communityDrivers)}">Community: ${escapeHtml(communityDrivers)}</span>`;
+            sqlDriverBadges += `<span class="catalog-drivers">${meaningBadge('community', 'Community', { tooltip: `${MEANING_TOOLTIPS.community} Community drivers: ${communityDrivers}` })} <span class="catalog-drivers-list">${escapeHtml(communityDrivers)}</span></span>`;
           }
         }
         // Say which Cloud pipelines when every Cloud-available type agrees:
@@ -1033,23 +1048,21 @@ module.exports.register = function (registry, context) {
           .flatMap(commercialNames => Object.values(commercialNames))
           .filter(({ isCloudSupported }) => isCloudSupported);
         const pipelineNote = cloudEntries.length && cloudEntries.every(e => e.gpuOnly)
-          ? ' (GPU pipelines only)'
+          ? ' GPU pipelines only.'
           : cloudEntries.length && cloudEntries.every(e => e.noGpu)
-            ? ' (not in GPU pipelines)'
+            ? ' Not in GPU pipelines.'
             : '';
 
         // Cloud support badge with tooltip, linked to the first Cloud-supported
         // type's Cloud page so the self-managed catalog still reaches Cloud docs
         const firstCloudUrl = (cloudEntries.find(({ urls = {} }) => urls.redpandaCloudUrl) || { urls: {} }).urls.redpandaCloudUrl;
         const cloudBadge = isCloudConnectorSupported && showAllInfo
-          ? firstCloudUrl
-            ? `<a href="${escapeHtml(firstCloudUrl)}" class="badge badge-cloud" title="Available in Redpanda Cloud${pipelineNote}">Cloud${pipelineNote}</a>`
-            : `<span class="badge badge-cloud" title="Available in Redpanda Cloud${pipelineNote}">Cloud${pipelineNote}</span>`
+          ? meaningBadge('cloud', 'Cloud', { tooltip: MEANING_TOOLTIPS.cloud + pipelineNote, href: firstCloudUrl || undefined })
           : '';
 
         // Enterprise license badge with tooltip
         const enterpriseBadge = isLicensed === 'Yes' && showAllInfo
-          ? `<span class="badge badge-enterprise" title="Requires an Enterprise license">Enterprise</span>`
+          ? meaningBadge('enterprise', 'Enterprise', { tooltip: MEANING_TOOLTIPS.enterprise })
           : '';
 
         // Collect all unique commercial names for search
@@ -1092,9 +1105,9 @@ module.exports.register = function (registry, context) {
                   // Same degradation as the type badge below: with no page to link
                   // to, the title is plain text rather than an anchor to nowhere.
                   ? `<a href="${escapeHtml(firstUrl)}" class="card-title-link">
-                  <h3 class="card-title"><code>${escapeHtml(connector)}</code></h3>
+                  <h3 class="card-title"><code>${breakableName(connector)}</code></h3>
                 </a>`
-                  : `<h3 class="card-title"><code>${escapeHtml(connector)}</code></h3>`}
+                  : `<h3 class="card-title"><code>${breakableName(connector)}</code></h3>`}
                 ${details.description
                   // No invented copy: a description comes from the component's own
                   // page, and a card without one simply has no description.
@@ -1224,7 +1237,7 @@ module.exports.register = function (registry, context) {
           .map(value => `
             <label class="dropdown-checkbox-option">
               <input type="checkbox" value="${escapeHtml(value)}" checked>
-              <span>${escapeHtml(capitalize(value).replace("_", " "))}</span>
+              <span>${escapeHtml(typeLabel(value))}</span>
             </label>`)
           .join('');
 
@@ -1596,13 +1609,15 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
 
           .component-cards-container {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            /* min(): a column never outgrows a narrow container (390px phones) */
+            grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
             gap: 1rem;
             margin-top: 1rem;
             padding-bottom: 2rem;
           }
 
           .component-card {
+            min-width: 0;
             border: 1px solid #e0e0e0;
             border-radius: 8px;
             background: white;
@@ -1675,7 +1690,9 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
             color: #333;
           }
 
+          /* Long names wrap after an underscore (<wbr>), and mid-word only if one part still does not fit */
           .component-card .card-title code {
+            overflow-wrap: break-word;
             background: transparent;
             padding: 0;
             font-size: inherit;
@@ -1717,164 +1734,20 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
             align-items: center;
           }
 
-          /* Scoped to this macro's two badge containers (the card's
-             .badge-group-badges and the legend modal's .badge-legend-item),
-             not a bare .badge -- the site-wide .badge class from docs-ui's
-             metadata.css (border-radius: 10px) is what badge:[] macro output
-             uses on the same page, and a bare rule here overrode it.
-             :where() keeps the specificity of a bare .badge, so the
-             .badge-type, .badge-support, .badge-cloud and .badge-enterprise
-             rules below still win by source order. */
-          :where(.badge-group-badges, .badge-legend-item) .badge {
-            display: inline-block;
-            border-radius: 6px;
-            text-decoration: none;
-            cursor: help;
-            transition: all 0.2s ease;
-            line-height: 1.4;
+          /* Badge colors and shape come from docs-ui (.rp-badge); only layout here */
+          .badge-group-badges .rp-badge {
+            flex: none;
           }
 
-          .badge-type {
-            white-space: nowrap;
-          }
-
-          .badge-support {
-            white-space: normal;
-            word-break: break-word;
-          }
-
-          .badge-cloud,
-          .badge-enterprise {
-            white-space: nowrap;
-          }
-
-          /* PRIMARY: Type badges - Subtle colors for easy scanning */
-          .badge-type {
-            padding: 0.35rem 0.75rem;
+          /* A SQL connector's drivers: the level badge, then the drivers as text that wraps */
+          .catalog-drivers {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            flex: 1 1 auto;
+            gap: 0.25rem 0.5rem;
+            min-width: 0;
             font-size: 0.75rem;
-            font-weight: 600;
-            border: 1px solid;
-            cursor: pointer;
-            letter-spacing: 0.01em;
-            border-radius: 4px;
-          }
-
-          /* Input - Soft blue */
-          .badge-type[title*="Input"] {
-            background: #eff6ff;
-            color: #1e40af;
-            border-color: #bfdbfe;
-          }
-
-          .badge-type[title*="Input"]:hover {
-            background: #dbeafe;
-          }
-
-          /* Output - Soft green */
-          .badge-type[title*="Output"] {
-            background: #f0fdf4;
-            color: #166534;
-            border-color: #bbf7d0;
-          }
-
-          .badge-type[title*="Output"]:hover {
-            background: #dcfce7;
-          }
-
-          /* Processor - Soft purple */
-          .badge-type[title*="Processor"] {
-            background: #faf5ff;
-            color: #7c3aed;
-            border-color: #e9d5ff;
-          }
-
-          .badge-type[title*="Processor"]:hover {
-            background: #f3e8ff;
-          }
-
-          /* Others - Soft amber */
-          .badge-type:not([title*="Input"]):not([title*="Output"]):not([title*="Processor"]) {
-            background: #fefce8;
-            color: #a16207;
-            border-color: #fde68a;
-          }
-
-          .badge-type:not([title*="Input"]):not([title*="Output"]):not([title*="Processor"]):hover {
-            background: #fef9c3;
-          }
-
-          /* SECONDARY: Support badges - Subtle outline style */
-          .badge-support {
-            padding: 0.4rem 0.75rem;
-            font-size: 0.75rem;
-            font-weight: 500;
-            background: transparent;
-            border: 1px solid;
-            border-radius: 4px;
-            display: inline-block;
-            word-wrap: break-word;
-            max-width: 100%;
-          }
-
-          .badge-support-certified {
-            color: #047857;
-            border-color: #6ee7b7;
-          }
-
-          .badge-support-certified:hover {
-            background: #ecfdf5;
-          }
-
-          .badge-support-community {
-            color: #7c2d12;
-            border-color: #fdba74;
-          }
-
-          .badge-support-community:hover {
-            background: #fff7ed;
-          }
-
-          /* TERTIARY: Status badges - Very subtle */
-          .badge-cloud,
-          .badge-enterprise {
-            padding: 0.25rem 0.6rem;
-            font-size: 0.65rem;
-            font-weight: 500;
-            border: 1px solid;
-            border-radius: 4px;
-          }
-
-          .badge-cloud {
-            background: #f0f9ff;
-            color: #0c4a6e;
-            border-color: #bae6fd;
-          }
-
-          .badge-cloud:hover {
-            background: #e0f2fe;
-          }
-
-          .badge-enterprise {
-            background: #fdf4ff;
-            color: #86198f;
-            border-color: #f0abfc;
-          }
-
-          .badge-enterprise:hover {
-            background: #fae8ff;
-          }
-
-          /* Use case chips: neutral, the same size as the Availability badges */
-          /* Same look as the use-case chips on connector pages */
-          .badge-use-case {
-            padding: 0.2rem 0.6rem;
-            font-size: 0.68rem;
-            font-weight: 600;
-            border: 1px solid #f6c9bb;
-            border-radius: 999px;
-            background: #fdf0ec;
-            color: #a32d0c;
-            white-space: nowrap;
           }
 
           .catalog-visually-hidden {
@@ -1943,12 +1816,6 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
             border-bottom-color: rgba(255, 255, 255, 0.1);
           }
 
-          html[data-theme="dark"] .badge-use-case {
-            background: rgba(226, 64, 27, 0.14);
-            border-color: rgba(241, 93, 97, 0.4);
-            color: #ffb59e;
-          }
-
           /* At least 4.5:1 on the dark card background */
           html[data-theme="dark"] .badge-group-label {
             color: #9ca3af;
@@ -1995,7 +1862,8 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
           .badge-legend-modal {
             display: none;
             position: fixed !important;
-            z-index: 10000 !important;
+            /* Below tippy (9999), so a legend badge's tooltip shows over the legend */
+            z-index: 9000 !important;
             left: 0 !important;
             top: 0 !important;
             width: 100% !important;
@@ -2020,7 +1888,7 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
             animation: slideIn 0.3s ease;
             position: relative;
-            z-index: 10001;
+            z-index: 9001;
           }
 
           .badge-legend-header {
@@ -2083,7 +1951,7 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
             margin-bottom: 0;
           }
 
-          .badge-legend-item .badge {
+          .badge-legend-item .rp-badge {
             flex-shrink: 0;
             margin-top: 0.15rem;
           }
@@ -2143,31 +2011,6 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
 
           html[data-theme="dark"] .component-card .card-title-link:hover {
             color: #f15d61;
-          }
-
-          html[data-theme="dark"] :where(.badge-group-badges, .badge-legend-item) .badge {
-            background: rgba(255, 255, 255, 0.07);
-            border-color: rgba(255, 255, 255, 0.15);
-            color: #d0d5dd;
-          }
-
-          /* .badge-input/.badge-output/.badge-processor/.badge-self-managed
-             removed here: none of them are ever emitted by this macro (badge
-             markup only ever carries class="badge badge-type", with the type
-             itself in the title/text, never as its own class), and none had a
-             light-mode rule either -- these were always fully dead, not a
-             dark-mode-only regression. */
-
-          html[data-theme="dark"] .badge-enterprise {
-            background: rgba(202, 138, 4, 0.2);
-            border-color: rgba(250, 197, 21, 0.3);
-            color: #fde047;
-          }
-
-          html[data-theme="dark"] .badge-cloud {
-            background: rgba(5, 150, 105, 0.2);
-            border-color: rgba(110, 231, 183, 0.3);
-            color: #6ee7b7;
           }
 
           html[data-theme="dark"] .badge-legend-button {
@@ -2243,7 +2086,7 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
 
           @media (max-width: 768px) {
             .component-cards-container {
-              grid-template-columns: 1fr;
+              grid-template-columns: minmax(0, 1fr);
             }
 
             .badge-legend-content {
@@ -2283,50 +2126,50 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
               <div class="badge-legend-section">
                 <h4>Component Types</h4>
                 <div class="badge-legend-item">
-                  <span class="badge badge-type" title="Component type: Input">Input</span>
+                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('input'))}">Input</span>
                   <p>Receives data from external sources into the pipeline</p>
                 </div>
                 <div class="badge-legend-item">
-                  <span class="badge badge-type" title="Component type: Output">Output</span>
+                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('output'))}">Output</span>
                   <p>Sends data from the pipeline to external destinations</p>
                 </div>
                 <div class="badge-legend-item">
-                  <span class="badge badge-type" title="Component type: Processor">Processor</span>
+                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('processor'))}">Processor</span>
                   <p>Transforms or filters data as it flows through the pipeline</p>
                 </div>
                 <div class="badge-legend-item">
-                  <span class="badge badge-type" title="Component type: Cache">Cache</span>
+                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('cache'))}">Cache</span>
                   <p>Stores data temporarily for faster access</p>
                 </div>
                 <div class="badge-legend-item">
-                  <span class="badge badge-type" title="Component type: Buffer">Buffer</span>
+                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('buffer'))}">Buffer</span>
                   <p>Temporarily holds messages to manage throughput</p>
                 </div>
                 <div class="badge-legend-item">
-                  <span class="badge badge-type" title="Component type: Metric">Metric</span>
+                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('metric'))}">Metric</span>
                   <p>Collects and exports metrics about pipeline performance</p>
                 </div>
                 <div class="badge-legend-item">
-                  <span class="badge badge-type" title="Component type: Scanner">Scanner</span>
+                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('scanner'))}">Scanner</span>
                   <p>Scans and processes messages based on patterns</p>
                 </div>
                 <div class="badge-legend-item">
-                  <span class="badge badge-type" title="Component type: Rate Limit">Rate Limit</span>
+                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('rate_limit'))}">Rate Limit</span>
                   <p>Controls the rate of message processing</p>
                 </div>
                 <div class="badge-legend-item">
-                  <span class="badge badge-type" title="Component type: Tracer">Tracer</span>
+                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('tracer'))}">Tracer</span>
                   <p>Tracks and traces message flow through the pipeline</p>
                 </div>
               </div>
               <div class="badge-legend-section">
                 <h4>Support Levels</h4>
                 <div class="badge-legend-item">
-                  <span class="badge badge-support badge-support-certified">Certified</span>
+                  <span class="rp-badge rp-badge--sm rp-badge--certified" data-tooltip="${MEANING_TOOLTIPS.certified}">Certified</span>
                   <p>Fully supported and tested by Redpanda with guaranteed reliability</p>
                 </div>
                 <div class="badge-legend-item">
-                  <span class="badge badge-support badge-support-community">Community</span>
+                  <span class="rp-badge rp-badge--sm rp-badge--community" data-tooltip="${MEANING_TOOLTIPS.community}">Community</span>
                   <p>Community-supported connector with best-effort maintenance</p>
                 </div>
               </div>
@@ -2334,21 +2177,21 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
               <div class="badge-legend-section">
                 <h4>Use cases</h4>${useCaseOptions.map(({ label, definition }) => forTemplateLiteral(`
                 <div class="badge-legend-item">
-                  <span class="badge badge-use-case">${escapeHtml(label)}</span>
+                  ${meaningBadge('use-case', label, { tooltip: definition || `Use case: ${label}` })}
                   <p>${escapeHtml(definition || label)}</p>
                 </div>`)).join('')}
               </div>
               ` : ''}
               ${showAllInfo ? `
               <div class="badge-legend-section">
-                <h4>Additional Features</h4>
+                <h4>Availability</h4>
                 <div class="badge-legend-item">
-                  <span class="badge badge-cloud">Cloud</span>
+                  <span class="rp-badge rp-badge--sm rp-badge--cloud" data-tooltip="${MEANING_TOOLTIPS.cloud}">Cloud</span>
                   <p>Available in Redpanda Cloud managed service</p>
                 </div>
                 <div class="badge-legend-item">
-                  <span class="badge badge-enterprise">Enterprise</span>
-                  <p>Requires an Enterprise license to use</p>
+                  <span class="rp-badge rp-badge--sm rp-badge--enterprise" data-tooltip="${MEANING_TOOLTIPS.enterprise}">Enterprise</span>
+                  <p>Requires an Enterprise Edition license</p>
                 </div>
               </div>
               ` : ''}
@@ -2356,17 +2199,18 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
           </div>
         </div>\`;
 
-            // Inject modal into document body when DOM is ready
-            if (document.readyState === 'loading') {
-              document.addEventListener('DOMContentLoaded', function() {
-                const modalContainer = document.createElement('div');
-                modalContainer.innerHTML = modalHTML;
-                document.body.appendChild(modalContainer.firstElementChild);
-              });
-            } else {
+            // Inject the modal now (this script runs inside the body), so it is
+            // in the page before docs-ui gives every [data-tooltip] a tooltip
+            // on DOMContentLoaded and the legend badges get theirs too
+            const injectModal = function() {
               const modalContainer = document.createElement('div');
               modalContainer.innerHTML = modalHTML;
               document.body.appendChild(modalContainer.firstElementChild);
+            };
+            if (document.body) {
+              injectModal();
+            } else {
+              document.addEventListener('DOMContentLoaded', injectModal);
             }
             } catch (error) {
               console.error('[Component Catalog] Error loading badge legend modal:', error);
@@ -2722,15 +2566,15 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
         const requiresEnterprise = componentRows.some(row => row.is_licensed.toLowerCase() === 'yes');
         if (requiresEnterprise) {
           enterpriseLicenseInfo = `
-            <section class="connector-fact connector-fact--license" aria-labelledby="connectorLicenseTitle">
-              <span class="connector-fact-icon" aria-hidden="true"><span class="connector-fact-lock"></span></span>
-              <div class="connector-fact-body">
-                <p class="connector-fact-title" id="connectorLicenseTitle">Enterprise license required</p>
-                <p class="connector-fact-text">This component runs with a Redpanda Enterprise Edition license. Try it free for 30 days, or upgrade when you're ready.</p>
-                <p class="connector-fact-actions">
-                  <a class="connector-fact-button connector-fact-button--primary" href="http://redpanda.com/try-enterprise" target="_blank" rel="noopener">Get a 30-day trial key</a>
-                  <a class="connector-fact-button" href="https://www.redpanda.com/upgrade" target="_blank" rel="noopener">Upgrade</a>
-                  <a class="connector-fact-link" href="https://docs.redpanda.com/redpanda-connect/get-started/licensing/" target="_blank" rel="noopener">About licensing</a>
+            <section class="rp-notice-section" aria-labelledby="connectorLicenseTitle">
+              <span class="rp-notice-icon" aria-hidden="true"></span>
+              <div class="rp-notice-body">
+                <p class="rp-notice-title" id="connectorLicenseTitle">Enterprise license required</p>
+                <p class="rp-notice-text">This component runs with a Redpanda Enterprise Edition license. Try it free for 30 days, or upgrade when you're ready.</p>
+                <p class="rp-notice-actions">
+                  <a class="rp-button rp-button--primary" href="http://redpanda.com/try-enterprise" target="_blank" rel="noopener">Get a 30-day trial key</a>
+                  <a class="rp-button" href="https://www.redpanda.com/upgrade" target="_blank" rel="noopener">Upgrade</a>
+                  <a class="rp-notice-link" href="https://docs.redpanda.com/redpanda-connect/get-started/licensing/" target="_blank" rel="noopener">About licensing</a>
                 </p>
               </div>
             </section>`;
@@ -2748,13 +2592,12 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
       if (!enterpriseLicenseInfo && !useCasesInfo) {
         return self.createBlock(parent, 'pass', '');
       }
+      // Styled by docs-ui (.rp-notice): an Enterprise card when the component
+      // needs a license, otherwise a neutral one holding only the use cases
       return self.createBlock(parent, 'pass', `
-        <div class="metadata-block connector-facts">
-          <div class="metadata-content">
+        <div class="rp-notice rp-notice--${enterpriseLicenseInfo ? 'enterprise' : 'use-case'} connector-facts">
           ${enterpriseLicenseInfo}${useCasesInfo}
-          </div>
-        </div>
-        <style>${CONNECTOR_FACTS_CSS}</style>`);
+        </div>`);
     });
   });
 

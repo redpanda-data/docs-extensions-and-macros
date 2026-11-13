@@ -48,30 +48,30 @@ const doc = (attrs) => ({ getDocument: () => ({ getAttributes: () => attrs }) })
 const cloudBadgeOf = (html, connector) => {
   const start = html.indexOf(`data-name="${connector} `)
   const card = html.slice(start).split(/<div class="component-card"|<script/)[0]
-  return (card.match(/<(span|a) [^>]*class="badge badge-cloud"[^>]*>[^<]*<\/\1>/) || [])[0]
+  return (card.match(/<(span|a) [^>]*class="rp-badge rp-badge--sm rp-badge--cloud"[^>]*>[^<]*<\/\1>/) || [])[0]
 }
 
 describe('component_table Cloud availability', () => {
   it('lists GPU-only components in the Cloud table', () => {
     const html = register({ csvData: { data: ROWS } }).component_table(doc({ 'env-cloud': '' }), '', {})
-    expect(html).toContain('<code>ollama_chat</code>')
+    expect(html).toContain('<code>ollama_<wbr>chat</code>')
     expect(html).toContain('<code>kafka</code>')
-    expect(html).not.toContain('<code>amqp_1</code>')
+    expect(html).not.toContain('<code>amqp_<wbr>1</code>')
   })
 
-  it('says which Cloud pipelines a component runs in, on the card Cloud badge', () => {
+  it('says which Cloud pipelines a component runs in, in the card Cloud badge tooltip', () => {
     const html = register({ csvData: { data: ROWS } }).component_table(doc({}), '', { all: 'all' })
-    expect(cloudBadgeOf(html, 'ollama_chat')).toBe('<a href="/cloud/connect/components/processors/ollama_chat/" class="badge badge-cloud" title="Available in Redpanda Cloud (GPU pipelines only)">Cloud (GPU pipelines only)</a>')
-    expect(cloudBadgeOf(html, 'jira')).toBe('<a href="/cloud/connect/components/inputs/jira/" class="badge badge-cloud" title="Available in Redpanda Cloud (not in GPU pipelines)">Cloud (not in GPU pipelines)</a>')
+    expect(cloudBadgeOf(html, 'ollama_chat')).toBe('<a class="rp-badge rp-badge--sm rp-badge--cloud" href="/cloud/connect/components/processors/ollama_chat/" data-tooltip="Available in Redpanda Cloud. GPU pipelines only.">Cloud</a>')
+    expect(cloudBadgeOf(html, 'jira')).toBe('<a class="rp-badge rp-badge--sm rp-badge--cloud" href="/cloud/connect/components/inputs/jira/" data-tooltip="Available in Redpanda Cloud. Not in GPU pipelines.">Cloud</a>')
     // Negative control: a component in both pipeline kinds keeps the plain badge.
-    expect(cloudBadgeOf(html, 'kafka')).toBe('<a href="/cloud/connect/components/inputs/kafka/" class="badge badge-cloud" title="Available in Redpanda Cloud">Cloud</a>')
+    expect(cloudBadgeOf(html, 'kafka')).toBe('<a class="rp-badge rp-badge--sm rp-badge--cloud" href="/cloud/connect/components/inputs/kafka/" data-tooltip="Available in Redpanda Cloud.">Cloud</a>')
     expect(cloudBadgeOf(html, 'amqp_1')).toBeUndefined()
   })
 
   it('keeps the Cloud badge as plain text when no Cloud page exists', () => {
     const rows = [row('jira', 'input', 'y', 'n', { redpandaCloudUrl: '' })]
     const html = register({ csvData: { data: rows } }).component_table(doc({}), '', { all: 'all' })
-    expect(cloudBadgeOf(html, 'jira')).toBe('<span class="badge badge-cloud" title="Available in Redpanda Cloud (not in GPU pipelines)">Cloud (not in GPU pipelines)</span>')
+    expect(cloudBadgeOf(html, 'jira')).toBe('<span class="rp-badge rp-badge--sm rp-badge--cloud" data-tooltip="Available in Redpanda Cloud. Not in GPU pipelines.">Cloud</span>')
   })
 })
 

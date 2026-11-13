@@ -129,8 +129,9 @@ describe('component_table macro rendering', () => {
   test('emits exactly one catalog style block', () => {
     expect(html.match(/<style>/g)).toHaveLength(1)
     expect(html.match(/<\/style>/g)).toHaveLength(1)
-    // The surviving block is the one with the high-priority z-index and dark theme rules
-    expect(html).toContain('z-index: 10000 !important;')
+    // The surviving block is the one with the legend's z-index (below tippy's
+    // 9999, so legend badge tooltips show over it) and dark theme rules
+    expect(html).toContain('z-index: 9000 !important;')
     expect(html).toContain('html[data-theme="dark"] .component-card')
     expect(html).not.toContain('z-index: 1000;')
   })
@@ -221,22 +222,23 @@ describe('escaping of every CSV-derived value', () => {
     expect(html).not.toContain('<script>x</script>')
   })
 
-  test('escapes the SQL driver commercial name in the badge title and text', () => {
+  test('escapes the SQL driver commercial name in the badge tooltip and the driver list', () => {
     const card = cardFor(html, 'sql_insert')
-    expect(card).toContain('title="Community drivers: Drv&lt;img src=x onerror=alert(1)&gt; &amp; &quot;co&quot;"')
-    expect(card).toContain('>Community: Drv&lt;img src=x onerror=alert(1)&gt; &amp; &quot;co&quot;<')
+    expect(card).toContain('data-tooltip="Community-supported. Community drivers: Drv&lt;img src=x onerror=alert(1)&gt; &amp; &quot;co&quot;"')
+    expect(card).toContain('<span class="catalog-drivers-list">Drv&lt;img src=x onerror=alert(1)&gt; &amp; &quot;co&quot;</span>')
   })
 
-  test('escapes the CSV type in the badge text and title', () => {
+  test('escapes the CSV type in the badge text and tooltip', () => {
     const card = cardFor(html, 'hostile')
-    expect(card).toContain('title="Component type: In&lt;b&gt;put&lt;/b&gt;"')
+    expect(card).toContain('data-tooltip="Component type: In&lt;b&gt;put&lt;/b&gt;."')
     expect(card).toContain('>In&lt;b&gt;put&lt;/b&gt;</a>')
   })
 
-  test('escapes the CSV support level in the badge class attribute', () => {
+  test('escapes the CSV support level in the badge text, and never puts it in a class', () => {
     const card = cardFor(html, 'hostile')
-    expect(card).toContain('badge-support badge-support-cert&lt;script&gt;x&lt;/script&gt;')
-    expect(card).toContain('>Cert&lt;script&gt;x&lt;/script&gt;</span>')
+    // An unknown level is neutral: only certified and community have a meaning class
+    expect(card).toContain('<span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="Support level: Cert&lt;script&gt;x&lt;/script&gt;.">Cert&lt;script&gt;x&lt;/script&gt;</span>')
+    expect(card).not.toContain('rp-badge--cert&lt;')
   })
 
   test('escapes filter checkbox values built from CSV columns', () => {
@@ -246,8 +248,8 @@ describe('escaping of every CSV-derived value', () => {
 
   test('escapes the connector URL in the type badge href', () => {
     const card = cardFor(html, 'hostile')
-    expect(card).not.toMatch(/<a href="[^"]*" onmouseover="alert\(1\)"/)
-    expect(card).toContain('<a href="/connect/components/inputs/hostile/&quot; onmouseover=&quot;alert(1)&quot; x=&quot;" class="badge badge-type"')
+    expect(card).not.toMatch(/href="[^"]*" onmouseover="alert\(1\)"/)
+    expect(card).toContain('<a class="rp-badge rp-badge--sm rp-badge--neutral" href="/connect/components/inputs/hostile/&quot; onmouseover=&quot;alert(1)&quot; x=&quot;" data-tooltip="Component type: In&lt;b&gt;put&lt;/b&gt;."')
   })
 
   test('escapes the connector URL in the card title link href', () => {
@@ -318,10 +320,10 @@ describe('cards a reader can actually reach', () => {
     expect(cardFor(html, 'sql_driver_trino')).toBe('')
   })
 
-  test('still lists the drivers as badges on the sql_ component card', () => {
+  test('still lists the drivers on the sql_ component card, after the level badge', () => {
     const card = cardFor(html, 'sql_insert')
-    expect(card).toContain('>Certified: PostgreSQL<')
-    expect(card).toContain('>Community: Trino<')
+    expect(card).toContain('<span class="rp-badge rp-badge--sm rp-badge--certified" data-tooltip="Supported and tested by Redpanda. Certified drivers: PostgreSQL">Certified</span> <span class="catalog-drivers-list">PostgreSQL</span>')
+    expect(card).toContain('<span class="rp-badge rp-badge--sm rp-badge--community" data-tooltip="Community-supported. Community drivers: Trino">Community</span> <span class="catalog-drivers-list">Trino</span>')
   })
 
   test('the type filter offers no sql_driver option', () => {
@@ -332,7 +334,7 @@ describe('cards a reader can actually reach', () => {
     const card = cardFor(html, 'a2a_message')
     expect(card).not.toContain('href=""')
     expect(card).not.toContain('card-title-link')
-    expect(card).toContain('<h3 class="card-title"><code>a2a_message</code></h3>')
+    expect(card).toContain('<h3 class="card-title"><code>a2a_<wbr>message</code></h3>')
   })
 
   test('a connector with a page still links its title', () => {
@@ -409,9 +411,9 @@ describe('the cloud view', () => {
     // The legend modal and the stylesheet still mention both classes; the cards
     // are what must not carry them in the cloud view.
     const card = cardFor(html, 'kafka')
-    expect(card).not.toContain('badge-cloud')
-    expect(card).not.toContain('badge-enterprise')
-    expect(card).toContain('badge-support')
+    expect(card).not.toContain('rp-badge--cloud')
+    expect(card).not.toContain('rp-badge--enterprise')
+    expect(card).toContain('rp-badge--certified')
   })
 
   test('lists only the types available in Cloud, in the badges and the type filter', () => {
@@ -462,29 +464,17 @@ describe('emitted inline scripts', () => {
   })
 })
 
-describe('badge CSS scoping', () => {
-  // A bare `.badge { ... }` rule collided with docs-ui's site-wide .badge
-  // class (used by the unrelated badge:[] macro on the same page). It must
-  // only ever be scoped to this macro's own two badge containers.
-  test('the .badge rule is scoped, not a bare selector', () => {
-    const html = renderComponentTable()
-    const styleBlock = html.match(/<style>([\s\S]*?)<\/style>/)[1]
-    // :where() keeps a bare .badge's specificity, so .badge-type and the
-    // other badge rules after it still win by source order.
-    expect(styleBlock).toContain(':where(.badge-group-badges, .badge-legend-item) .badge {')
-    // A bare rule starts its line with only whitespace before ".badge {".
-    expect(styleBlock).not.toMatch(/^[ \t]*\.badge[ \t]*\{/m)
-  })
-
-  test('the dark-mode .badge rule is scoped the same way', () => {
+describe('badge CSS', () => {
+  // Badge colors, shape, and dark mode come from docs-ui (.rp-badge and the
+  // --meaning-* tokens). The catalog's stylesheet keeps only layout, so it
+  // must not restyle a badge or the site-wide .badge class.
+  test('the stylesheet sets no badge colors of its own', () => {
     const styleBlock = renderComponentTable().match(/<style>([\s\S]*?)<\/style>/)[1]
-    expect(styleBlock).not.toMatch(/html\[data-theme="dark"\] \.badge[ \t]*[{,]/)
-    expect(styleBlock).toContain('html[data-theme="dark"] :where(.badge-group-badges, .badge-legend-item) .badge {')
-    // The Cloud and Enterprise dark colors come after it, at the same
-    // specificity, so they still apply.
-    const generic = styleBlock.indexOf('html[data-theme="dark"] :where(')
-    expect(styleBlock.indexOf('html[data-theme="dark"] .badge-cloud {')).toBeGreaterThan(generic)
-    expect(styleBlock.indexOf('html[data-theme="dark"] .badge-enterprise {')).toBeGreaterThan(generic)
+    expect(styleBlock).not.toMatch(/^[ \t]*\.badge[ \t]*\{/m)
+    expect(styleBlock).not.toMatch(/\.badge-(type|support|cloud|enterprise|use-case)\b/)
+    expect(styleBlock).not.toMatch(/html\[data-theme="dark"\][^{]*\.(rp-)?badge(?![\w-])/)
+    const badgeRules = [...styleBlock.matchAll(/([^{}]*\.rp-badge[^{}]*)\{([^}]*)\}/g)]
+    for (const [, , body] of badgeRules) expect(body).not.toMatch(/(^|[^-])(color|background|border)[a-z-]*:/)
   })
 
   test('icons are decorative to screen readers', () => {
@@ -741,10 +731,10 @@ describe('component_table use cases', () => {
     expect(kafka).toContain('data-use-cases="stream-processing,change-data-capture"')
     expect(kafka).toContain('<span class="badge-group-label">Use case</span>')
     // Definitions as tooltips; a merged input/output card says the use case is per type
-    expect(kafka).toContain(`title="Transforming events as they flow. Applies to at least one of this component&#39;s types."`.replace('&#39;', "'"))
+    expect(kafka).toContain(`data-tooltip="Transforming events as they flow. Applies to at least one of this component&#39;s types."`.replace('&#39;', "'"))
     const postgres = cardFor(html, 'postgres_cdc')
     expect(postgres).toContain('data-search="postgres_cdc change data capture change-data-capture cdc stream processing stream-processing"')
-    expect(postgres).toContain('title="Streaming row-level changes from a database.">Change data capture</span>')
+    expect(postgres).toContain('<span class="rp-badge rp-badge--sm rp-badge--use-case" data-tooltip="Streaming row-level changes from a database.">Change data capture</span>')
     expect(postgres).not.toContain('Applies to at least one')
     const stdout = cardFor(html, 'stdout')
     expect(stdout).not.toContain('data-use-cases')
@@ -754,7 +744,7 @@ describe('component_table use cases', () => {
   test('keeps a rare use case searchable but shows no chip for it', () => {
     const iceberg = cardFor(render(), 'iceberg')
     expect(iceberg).toContain('data-search="iceberg data lakehouse data-lakehouse"')
-    expect(iceberg).not.toContain('badge-use-case')
+    expect(iceberg).not.toContain('rp-badge--use-case')
   })
 
   test('renders a status region, an empty state with Clear filters, and the solutions panel without aria-live', () => {
@@ -778,7 +768,7 @@ describe('component_table use cases', () => {
   test('adds a Use cases section with definitions to the badge legend', () => {
     const html = render()
     const legend = html.slice(html.indexOf('<h4>Use cases</h4>'), html.indexOf('</div>\n              </div>', html.indexOf('<h4>Use cases</h4>')))
-    expect(legend).toContain('<span class="badge badge-use-case">Change data capture</span>')
+    expect(legend).toContain('<span class="rp-badge rp-badge--sm rp-badge--use-case" data-tooltip="Streaming row-level changes from a database.">Change data capture</span>')
     expect(legend).toContain('<p>Streaming row-level changes from a database.</p>')
     expect(legend).not.toContain('Data lakehouse')
   })
@@ -797,7 +787,7 @@ describe('component_table use cases', () => {
       const html = renderComponentTable({ csvData })
       expect(html).not.toContain('id="useCaseFilterToggle"')
       expect(html).not.toContain('id="componentCatalogSolutions"')
-      expect(html).not.toContain('class="badge badge-use-case"')
+      expect(html).not.toContain('rp-badge--use-case')
       expect(html).not.toContain('<h4>Use cases</h4>')
       expect(html).not.toContain('window.updateCatalogSolutions = function')
     }
@@ -913,13 +903,15 @@ describe('component_table use cases', () => {
 
     test('links each offered use case to the catalog filtered to it', () => {
       const html = renderDropdown({ name: 'kafka' })
-      expect(html).toContain('<div class="connector-use-cases" role="group" aria-labelledby="connectorUseCasesLabel">')
-      expect(html).toContain('<span class="connector-use-cases-label connector-fact-title" id="connectorUseCasesLabel">Use cases</span>')
-      expect(html).toContain('<a class="connector-use-case" href="../../about/?usecase=stream-processing" title="Transforming events as they flow. Applies to at least one of this component\'s types."><span>Stream processing</span><span class="connector-use-case-arrow" aria-hidden="true">&rarr;</span></a>')
-      expect(html).toContain('<div class="metadata-block connector-facts">')
-      expect(html).toContain('<section class="connector-fact connector-fact--use-cases">')
-      expect(html).toMatch(/<span class="connector-fact-icon" aria-hidden="true"><svg/)
-      expect(html).toContain('<style>')
+      // A neutral notice when the component needs no license, styled by docs-ui with no inline CSS
+      expect(html).toContain('<div class="rp-notice rp-notice--use-case connector-facts">')
+      expect(html).toContain('<section class="rp-notice-section rp-notice--use-case connector-use-cases">')
+      expect(html).toContain('<span class="rp-notice-icon" aria-hidden="true"></span>')
+      expect(html).toContain('<div class="rp-notice-body" role="group" aria-labelledby="connectorUseCasesLabel">')
+      expect(html).toContain('<span class="rp-notice-title" id="connectorUseCasesLabel">Use cases</span>')
+      expect(html).toContain('<a class="rp-badge rp-badge--use-case" href="../../about/?usecase=stream-processing" data-tooltip="Transforming events as they flow. Applies to at least one of this component\'s types.">Stream processing</a>')
+      expect(html).not.toContain('<style')
+      expect(html).not.toContain(' title=')
       expect(html).toContain('href="../../about/?usecase=change-data-capture"')
     })
 
@@ -928,6 +920,149 @@ describe('component_table use cases', () => {
       expect(renderDropdown({ name: 'kafka', docAttributes: { 'env-cloud': '' } })).not.toContain('connector-use-cases')
       expect(renderDropdown({ name: 'kafka', catalogPage: null })).not.toContain('connector-use-cases')
     })
+  })
+})
+
+describe('meaning badges', () => {
+  const { meaningBadge, typeLabel, breakableName } = require('../../macros/rp-connect-components.js')
+  const row = (connector, type, extra = {}) => ({
+    connector,
+    commercial_name: connector,
+    type,
+    support_level: 'certified',
+    is_cloud_supported: 'y',
+    is_licensed: 'No',
+    redpandaConnectUrl: `/connect/components/${type}s/${connector}/`,
+    redpandaCloudUrl: `/cloud/connect/components/${type}s/${connector}/`,
+    description: '',
+    use_cases: ['change-data-capture'],
+    ...extra
+  })
+  const CDC = { id: 'change-data-capture', label: 'Change data capture', definition: 'Streaming row-level changes from a database.', altLabels: [] }
+  const ROWS = [
+    row('postgres_cdc', 'input', { is_licensed: 'Yes' }),
+    row('mysql_cdc', 'input', { support_level: 'community' }),
+    row('local', 'rate_limit'),
+    row('sql_insert', 'output'),
+    row('sql_driver_trino', 'sql_driver', { commercial_name: 'Trino', support_level: 'community', use_cases: [] })
+  ]
+  const csvData = { data: ROWS, useCases: [CDC] }
+
+  function renderDropdown (name) {
+    jest.resetModules()
+    const macro = require('../../macros/rp-connect-components.js')
+    const { registry, processors } = createCapturingRegistry()
+    macro.register(registry, {
+      config: { attributes: { csvData, commercialNamesMap: {} } },
+      file: { src: {}, pub: { url: '/connect/components/inputs/postgres_cdc/' } },
+      contentCatalog: { resolvePage: () => ({ pub: { url: '/connect/components/about/' } }) }
+    })
+    const parent = { getDocument: () => ({ getAttributes: () => ({ doctitle: name, type: 'input', 'page-component-title': 'Connect' }) }) }
+    return processors.component_type_dropdown(parent, '', {}).source
+  }
+
+  // Every element whose class marks a meaning: .rp-badge, .rp-notice and its parts, .rp-button
+  const meaningElements = (html) => [...html.matchAll(/<[a-z]+\b[^>]*\bclass="[^"]*\brp-(badge|notice|button)[^"]*"[^>]*>/g)].map((m) => m[0])
+
+  test('every badge has a non-empty data-tooltip, and no meaning element has a native title', () => {
+    const pages = [
+      renderComponentTable({ csvData }),
+      renderComponentTable({ csvData, attributes: {}, docAttributes: { 'env-cloud': '' } }),
+      renderDropdown('postgres_cdc'),
+      renderDropdown('mysql_cdc')
+    ]
+    for (const html of pages) {
+      const elements = meaningElements(html)
+      expect(elements.length).toBeGreaterThan(0)
+      for (const el of elements) expect(el).not.toMatch(/\stitle=/)
+      const badges = elements.filter((el) => /\brp-badge\b/.test(el))
+      expect(badges.length).toBeGreaterThan(0)
+      for (const el of badges) expect(el).toMatch(/\sdata-tooltip="[^"]+"/)
+    }
+    // Negative control: the tooltip check fails on a badge without one
+    expect('<span class="rp-badge rp-badge--neutral">Input</span>').not.toMatch(/\sdata-tooltip="[^"]+"/)
+    // Negative control: the check finds a title when one is there
+    expect(meaningElements('<span class="rp-badge rp-badge--cloud" title="x">Cloud</span>')[0]).toMatch(/\stitle=/)
+  })
+
+  test('cards mark each meaning with its rp-badge class, small size, and a tooltip', () => {
+    const html = renderComponentTable({ csvData })
+    const postgres = cardFor(html, 'postgres_cdc')
+    expect(postgres).toContain('<a class="rp-badge rp-badge--sm rp-badge--neutral" href="/connect/components/inputs/postgres_cdc/" data-tooltip="Reads data into a pipeline.">Input</a>')
+    expect(postgres).toContain('<span class="rp-badge rp-badge--sm rp-badge--certified" data-tooltip="Supported and tested by Redpanda.">Certified</span>')
+    expect(postgres).toContain('<a class="rp-badge rp-badge--sm rp-badge--cloud" href="/cloud/connect/components/inputs/postgres_cdc/" data-tooltip="Available in Redpanda Cloud.">Cloud</a>')
+    expect(postgres).toContain('<span class="rp-badge rp-badge--sm rp-badge--enterprise" data-tooltip="Requires an Enterprise Edition license.">Enterprise</span>')
+    expect(postgres).toContain('<span class="rp-badge rp-badge--sm rp-badge--use-case" data-tooltip="Streaming row-level changes from a database.">Change data capture</span>')
+    expect(cardFor(html, 'mysql_cdc')).toContain('<span class="rp-badge rp-badge--sm rp-badge--community" data-tooltip="Community-supported.">Community</span>')
+    // No old catalog badge classes, and no label in parentheses
+    const cards = html.slice(html.indexOf('id="componentCardsContainer"'), html.indexOf('<script', html.indexOf('id="componentCardsContainer"')))
+    expect(cards).not.toMatch(/class="badge[ "]/)
+    expect(cards).not.toMatch(/class="rp-badge[^"]*"[^>]*>[^<]*\(/)
+  })
+
+  test('a type reads the same on cards, in the filter, and in the legend', () => {
+    expect(typeLabel('rate_limit')).toBe('Rate Limit')
+    expect(typeLabel('input')).toBe('Input')
+    const html = renderComponentTable({ csvData })
+    expect(cardFor(html, 'local')).toContain('>Rate Limit</a>')
+    expect(html).toContain('<span>Rate Limit</span>')
+    expect(html).toContain('<span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="Limits how often components access a resource.">Rate Limit</span>')
+    expect(html).not.toMatch(/Rate_limit|Rate limit/)
+  })
+
+  test('the legend uses the same badges and lists Enterprise where cards can show it', () => {
+    const html = renderComponentTable({ csvData })
+    const legend = html.slice(html.indexOf('id="badgeLegendModal"'))
+    for (const badge of ['rp-badge--neutral">Input', 'rp-badge--certified">Certified', 'rp-badge--community">Community', 'rp-badge--use-case">Change data capture', 'rp-badge--cloud">Cloud', 'rp-badge--enterprise">Enterprise']) {
+      expect(legend).toMatch(new RegExp(`<span class="rp-badge rp-badge--sm ${badge.replace('">', '" data-tooltip="[^"]+">')}</span>`))
+    }
+    expect(legend).toContain('<h4>Availability</h4>')
+    // The Cloud view shows no Enterprise or Cloud badge on its cards, so its legend lists neither
+    const cloud = renderComponentTable({ csvData, attributes: {}, docAttributes: { 'env-cloud': '' } })
+    expect(cloud.slice(cloud.indexOf('id="badgeLegendModal"'))).not.toContain('rp-badge--enterprise')
+  })
+
+  test('long names wrap only after an underscore, and columns never outgrow the container', () => {
+    expect(breakableName('gcp_vertex_ai_embeddings')).toBe('gcp_<wbr>vertex_<wbr>ai_<wbr>embeddings')
+    expect(breakableName('<b>')).toBe('&lt;b&gt;')
+    const html = renderComponentTable({ csvData })
+    expect(html).toContain('<code>postgres_<wbr>cdc</code>')
+    expect(html).toContain('grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));')
+    expect(html).toContain('grid-template-columns: minmax(0, 1fr);')
+    expect(html).not.toMatch(/grid-template-columns: 1fr;/)
+  })
+
+  test('meaningBadge escapes its label, tooltip, and link', () => {
+    expect(meaningBadge('cloud', '<i>', { tooltip: '"x"', href: '"><script>' }))
+      .toBe('<a class="rp-badge rp-badge--sm rp-badge--cloud" href="&quot;&gt;&lt;script&gt;" data-tooltip="&quot;x&quot;">&lt;i&gt;</a>')
+    // With no tooltip given, the label stands in: no badge goes without one
+    expect(meaningBadge('use-case', 'A', { small: false })).toBe('<span class="rp-badge rp-badge--use-case" data-tooltip="A">A</span>')
+  })
+
+  test('each component type has its own tooltip, and an unknown type still gets one', () => {
+    const { typeTooltip } = require('../../macros/rp-connect-components.js')
+    expect(typeTooltip('input')).toBe('Reads data into a pipeline.')
+    expect(typeTooltip('output')).toBe('Writes data out of a pipeline.')
+    expect(typeTooltip('processor')).toBe('Transforms data in a pipeline.')
+    for (const type of ['cache', 'buffer', 'metric', 'scanner', 'rate_limit', 'tracer']) expect(typeTooltip(type)).toMatch(/^[A-Z].+\.$/)
+    expect(typeTooltip('new_kind')).toBe('Component type: New Kind.')
+  })
+
+  test('the connector card is an Enterprise notice with docs-ui buttons, and no inline CSS', () => {
+    const html = renderDropdown('postgres_cdc')
+    expect(html).toContain('<div class="rp-notice rp-notice--enterprise connector-facts">')
+    expect(html).toContain('<section class="rp-notice-section" aria-labelledby="connectorLicenseTitle">')
+    expect(html).toContain('<p class="rp-notice-title" id="connectorLicenseTitle">Enterprise license required</p>')
+    expect(html).toContain('<p class="rp-notice-text">This component runs with a Redpanda Enterprise Edition license. Try it free for 30 days, or upgrade when you\'re ready.</p>')
+    expect(html).toContain('<a class="rp-button rp-button--primary" href="http://redpanda.com/try-enterprise" target="_blank" rel="noopener">Get a 30-day trial key</a>')
+    expect(html).toContain('<a class="rp-button" href="https://www.redpanda.com/upgrade" target="_blank" rel="noopener">Upgrade</a>')
+    expect(html).toContain('<a class="rp-notice-link" href="https://docs.redpanda.com/redpanda-connect/get-started/licensing/" target="_blank" rel="noopener">About licensing</a>')
+    // The use cases follow in their own section, as use-case badge links
+    expect(html.indexOf('connectorLicenseTitle')).toBeLessThan(html.indexOf('connectorUseCasesLabel'))
+    expect(html).toContain('<a class="rp-badge rp-badge--use-case" href="../../about/?usecase=change-data-capture" data-tooltip="Streaming row-level changes from a database.">Change data capture</a>')
+    expect(html).not.toMatch(/<style|connector-fact-|metadata-block/)
+    // Without a license, the card is not orange
+    expect(renderDropdown('mysql_cdc')).toContain('<div class="rp-notice rp-notice--use-case connector-facts">')
   })
 })
 
