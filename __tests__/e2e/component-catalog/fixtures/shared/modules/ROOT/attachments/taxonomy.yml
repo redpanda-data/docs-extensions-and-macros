@@ -1,0 +1,60 @@
+# The use-case scheme of the docs taxonomy (redpanda-data/docs
+# shared/modules/ROOT/attachments/taxonomy.yml), including the five use cases
+# redpanda-data/docs#2456 adds. The catalog reads only this scheme. `related`
+# is left out: it points at concepts in other schemes.
+schema-version: 1
+schemes:
+  - id: use-case
+    concepts:
+      - id: change-data-capture
+        prefLabel: "Change data capture"
+        altLabels: ["CDC"]
+        definition: "Capturing row-level changes from a database's transaction log and streaming them as events, so that other systems stay in sync without polling the database."
+      - id: data-fan-out
+        prefLabel: "Data fan-out"
+        definition: "Delivering one stream of events to many independent consumers or destinations, each reading at its own pace without affecting the others."
+      - id: data-lakehouse
+        prefLabel: "Data lakehouse"
+        definition: "Landing streaming data in open table formats on object storage, so that analytics engines can query it together with historical data. Loading data into a warehouse's own managed tables is Data warehousing."
+      - id: data-warehousing
+        prefLabel: "Data warehousing"
+        altLabels: ["Data warehouse"]
+        definition: "Loading streaming data into a cloud data warehouse, such as Snowflake or Google BigQuery, where it lands in the warehouse's own managed tables for SQL analytics. Landing data in open table formats on object storage, where any engine can query it, is Data lakehouse."
+      - id: disaster-recovery
+        prefLabel: "Disaster recovery"
+        definition: "Recovering from the loss of a whole cluster, region, or data center, with standby clusters, cross-cluster replication such as Shadowing, failover and failback runbooks, and restores from object storage. Surviving the failure of brokers within one cluster is the topic High Availability."
+      - id: event-driven-microservices
+        prefLabel: "Event-driven microservices"
+        definition: "Services that communicate by producing and consuming events instead of calling each other directly, so that each one can change, scale, and fail independently."
+      - id: kafka-migration
+        prefLabel: "Kafka migration"
+        definition: "Moving producers, consumers, topics, schemas, and consumer offsets from an Apache Kafka cluster to Redpanda, including the cutover, with little or no downtime."
+      - id: real-time-analytics
+        prefLabel: "Real-time analytics"
+        definition: "Computing metrics, aggregates, or dashboards from events within seconds of their arrival, instead of in periodic batches."
+      - id: schema-management
+        prefLabel: "Schema management"
+        definition: "Governing the shape of data across producers and consumers, by registering schemas, evolving them under compatibility rules, and keeping serialization consistent between systems. For the Redpanda feature itself, see the topic Schema Registry."
+      - id: stream-processing
+        prefLabel: "Stream processing"
+        definition: "Transforming, filtering, enriching, joining, or aggregating events continuously as they flow, with Redpanda Connect, data transforms, or an external stream processor."
+      - id: ai-pipelines
+        prefLabel: "AI pipelines"
+        altLabels: ["LLM pipelines", "Embeddings", "Retrieval-augmented generation", "RAG"]
+        definition: "Feeding streams of events to and from AI models, such as generating embeddings, calling a language model on each record, or keeping a vector store current for retrieval."
+      - id: log-and-observability-pipelines
+        prefLabel: "Log and observability pipelines"
+        altLabels: ["Observability", "Log pipelines", "Telemetry pipelines"]
+        definition: "Collecting logs, metrics, and traces from many sources, shaping them in flight, and routing them to the systems that store and query them."
+      - id: iot-ingestion
+        prefLabel: "IoT ingestion"
+        altLabels: ["IoT", "Internet of Things", "Device telemetry"]
+        definition: "Receiving readings and events from large fleets of devices, often over lightweight protocols such as MQTT, and turning them into streams that other systems can use."
+      - id: object-storage-archiving
+        prefLabel: "Object storage and archiving"
+        altLabels: ["Archiving", "Data archiving", "Object storage"]
+        definition: "Writing streams to object storage such as Amazon S3, Google Cloud Storage, or Azure Blob Storage, as files for long-term retention, replay, or batch processing."
+      - id: search-indexing
+        prefLabel: "Search indexing"
+        altLabels: ["Search", "Full-text search"]
+        definition: "Keeping a search index, such as Elasticsearch or OpenSearch, current with a stream of events, so that new and changed records are searchable within seconds."

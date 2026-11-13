@@ -1,0 +1,4 @@
+= snowflake_streaming
+:description: Fixture page for the snowflake_streaming component.
+
+Fixture page.

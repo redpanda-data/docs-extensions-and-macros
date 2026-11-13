@@ -120,9 +120,33 @@ function catalogEntriesToCsvRows (entries) {
         version: e.version || '',
         categories: Array.isArray(e.categories) ? e.categories : [],
         cgo_only: yn(e.cgo_only),
-        summary: e.summary || ''
+        summary: e.summary || '',
+        // Absent (undefined) when this release's catalog has no use_cases
+        // field, so the info.csv column can stand in for it.
+        ...(Array.isArray(e.use_cases) ? { use_cases: e.use_cases } : {})
       }
     })
+}
+
+// The use-case IDs of one raw row: info.csv's `use_cases` column holds IDs
+// separated by `;`, and catalog.json's `use_cases` is an array of IDs.
+// Blank and missing both mean none.
+function parseUseCases (value) {
+  const list = Array.isArray(value) ? value : String(value == null ? '' : value).split(';')
+  return [...new Set(list.map((id) => String(id == null ? '' : id).trim()).filter(Boolean))]
+}
+
+// Connector name -> the union of the use-case IDs of all its types (translated
+// rows, one per type), in first-seen order. SQL drivers are not components.
+function useCasesByConnector (rows) {
+  const out = new Map()
+  for (const row of rows || []) {
+    if (!row || !row.connector || String(row.type || '').toLowerCase() === 'sql_driver') continue
+    if (!out.has(row.connector)) out.set(row.connector, [])
+    const ids = out.get(row.connector)
+    for (const id of Array.isArray(row.use_cases) ? row.use_cases : []) if (!ids.includes(id)) ids.push(id)
+  }
+  return out
 }
 
 // Cloud availability of a translated row. Cloud has two pipeline flavors:
@@ -153,6 +177,8 @@ module.exports = {
   normalizeType,
   typeFromRelative,
   catalogEntriesToCsvRows,
+  parseUseCases,
+  useCasesByConnector,
   isCloudAvailable,
   gpuFlags
 }

@@ -1,0 +1,4 @@
+= mongodb_cdc
+:description: Fixture page for the mongodb_cdc component.
+
+Fixture page.

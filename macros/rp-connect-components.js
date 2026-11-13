@@ -100,7 +100,233 @@ const EMOJI_ICONS = {
 }
 
 const logger = require('@antora/logger')('rp-connect-components-macro')
-const { isCloudAvailable, typeFromRelative } = require('../extensions/util/connect-catalog')
+const { isCloudAvailable, typeFromRelative, useCasesByConnector } = require('../extensions/util/connect-catalog')
+
+// Where the solutions-catalog extension publishes the Redpanda Solutions
+// catalog, relative to the site root. The macro cannot read the
+// `solutions-catalog` component attribute: that extension sets it at
+// documentsConverted, after every page (and so this macro) has converted. The
+// page fetches the published file instead, only once a use case is selected.
+const SOLUTIONS_CATALOG_PATH = 'assets/data/solutions.json'
+
+// A use case is offered in the filter only when at least this many cards in
+// the current view have it: an option that narrows the catalog to one or two
+// cards reads as noise, and a tag that rare says more about tagging than use.
+const USE_CASE_MIN_CARDS = 3
+
+/**
+ * The solutions in a solutions.json catalog that have any of the selected use
+ * cases, in catalog order. A solution matches on a taxonomy concept ID
+ * (`concepts.useCases[].id`, from the solutions-catalog extension with the
+ * taxonomy), or on an authored `useCases` value that is the use case's ID,
+ * label, or one of its taxonomy altLabels, ignoring case (catalogs built
+ * without the taxonomy carry only the authored labels). Deprecated solutions
+ * are left out. Runs in the browser (injected with toString) and in unit
+ * tests, so it uses no outside names.
+ *
+ * @param {Object|null} catalog - the parsed solutions.json
+ * @param {Array<string>} ids - selected use-case IDs
+ * @param {Object<string,{label: string, altLabels: Array<string>}>} [info] -
+ *   use-case ID -> its label and altLabels
+ * @returns {Array<Object>}
+ */
+function matchSolutions (catalog, ids, info) {
+  const list = catalog && Array.isArray(catalog.solutions) ? catalog.solutions : []
+  const wanted = (ids || []).filter(Boolean)
+  if (!wanted.length) return []
+  const key = function (value) { return String(value == null ? '' : value).trim().toLowerCase() }
+  const names = {}
+  wanted.forEach(function (id) {
+    const entry = (info && info[id]) || {}
+    names[id] = [id, entry.label].concat(Array.isArray(entry.altLabels) ? entry.altLabels : []).filter(Boolean).map(key)
+  })
+  return list.filter(function (solution) {
+    if (!solution || !solution.url || !solution.title || solution.status === 'deprecated') return false
+    const concepts = (solution.concepts && Array.isArray(solution.concepts.useCases)) ? solution.concepts.useCases : []
+    const conceptIds = concepts.map(function (c) { return c && c.id })
+    const authored = (Array.isArray(solution.useCases) ? solution.useCases : []).map(key)
+    return wanted.some(function (id) {
+      return conceptIds.indexOf(id) !== -1 || authored.some(function (value) { return names[id].indexOf(value) !== -1 })
+    })
+  })
+}
+
+/**
+ * One quiet line under the filters when a use case is selected and Redpanda
+ * Solutions cover it: the catalog is about components, so solutions are a
+ * hint, never a block of links competing with the cards. With one match it
+ * links that solution by title; with more it links the Solutions landing page
+ * filtered to the use cases (its `?use-case=` parameter takes the label).
+ * Every value goes through `escape` (the shared escapeHtml). Runs in the
+ * browser (injected with toString) and in unit tests.
+ *
+ * @param {Array<Object>} solutions - from matchSolutions
+ * @param {Array<string>} ids - selected use-case IDs
+ * @param {Object<string,{label: string}>} info - use-case ID -> its label
+ * @param {Function} escape
+ * @returns {string} HTML, empty when there are no solutions
+ */
+function solutionsMarkup (solutions, ids, info, escape) {
+  if (!solutions || !solutions.length) return ''
+  const names = ids.map(function (id) {
+    const entry = info && info[id]
+    return (entry && (typeof entry === 'string' ? entry : entry.label)) || id
+  })
+  const topic = names.join(' or ')
+  if (solutions.length === 1) {
+    return '<p class="catalog-solutions-hint">Redpanda Solution for ' + escape(topic) + ': ' +
+      '<a href="' + escape(solutions[0].url) + '">' + escape(solutions[0].title) + '</a></p>'
+  }
+  // The landing page is the root of the solutions component: the first path
+  // segment of a solution's URL (/solutions/cdc-to-lakehouse/ -> /solutions/)
+  const home = (String(solutions[0].url).match(/^(?:[a-z]+:\/\/[^/]+)?\/[^/]+\//i) || [''])[0]
+  const query = names.map(function (name) { return 'use-case=' + encodeURIComponent(name) }).join('&')
+  const text = 'See ' + solutions.length + ' Redpanda Solutions for ' + escape(topic)
+  return '<p class="catalog-solutions-hint">' + (home
+    ? '<a href="' + escape(home + '?' + query) + '">' + text + '</a>'
+    : text) + '</p>'
+}
+
+/**
+ * The sentence the catalog's status region announces after a filter change.
+ * Runs in the browser (injected with toString) and in unit tests.
+ *
+ * @param {{shown: number, total: number, search: string, useCases: Array<string>, filtered: boolean, solutions: (number|null)}} state
+ *   `useCases` are the selected labels, `filtered` says whether any other
+ *   filter narrows the cards, and `solutions` is the number of related
+ *   solutions (null when none are known)
+ * @returns {string}
+ */
+function catalogStatusText (state) {
+  const parts = []
+  if (state.search) parts.push('"' + state.search + '"')
+  if (state.useCases && state.useCases.length) parts.push(state.useCases.join(' or '))
+  let text
+  if (!parts.length && !state.filtered) {
+    text = 'Showing all ' + state.total + ' components.'
+  } else {
+    const what = parts.length ? parts.join(' and ') : 'these filters'
+    text = state.shown === 0
+      ? 'No components match ' + what + '.'
+      : state.shown + (state.shown === 1 ? ' component matches ' : ' components match ') + what + '.'
+  }
+  if (state.solutions) text += ' ' + state.solutions + (state.solutions === 1 ? ' related solution.' : ' related solutions.')
+  return text
+}
+
+// Filter layout: each dropdown filter is at least this wide, with this gap
+const FILTER_MIN_WIDTH_PX = 180
+const FILTER_GAP_PX = 16
+// A lone filter (the Cloud catalog's Type) stops at this width
+const FILTER_SINGLE_MAX_WIDTH_PX = 360
+
+/**
+ * Container queries that lay the dropdown filters out in balanced rows: as
+ * many columns as fit at FILTER_MIN_WIDTH_PX, then evened out so no row is
+ * left with a gap (4 filters go 4, 2x2, then 1 per row; 3 go 3, then 1 per
+ * row). A filter in a short last row (5 filters in 3 columns) stretches to
+ * fill it. A single filter keeps a dropdown's width instead of spanning the
+ * panel. Exported for unit testing.
+ *
+ * @param {number} count - the number of dropdown filters
+ * @returns {string} CSS
+ */
+function filterLayoutCss (count) {
+  if (count <= 1) {
+    return `@container catalog-filters (min-width: 0px) { .table-filters.component-catalog-filters > .filter-group { flex: 0 1 min(100%, ${FILTER_SINGLE_MAX_WIDTH_PX}px); } }`
+  }
+  const rules = []
+  for (let fit = 1; fit <= count; fit++) {
+    const minWidth = fit === 1 ? 0 : fit * FILTER_MIN_WIDTH_PX + (fit - 1) * FILTER_GAP_PX
+    const columns = Math.ceil(count / Math.ceil(count / fit))
+    const basis = columns === 1
+      ? '100%'
+      : `calc((100% - ${(columns - 1) * FILTER_GAP_PX}px) / ${columns} - 0.1px)`
+    const rule = `.table-filters.component-catalog-filters > .filter-group { flex-basis: ${basis}; }`
+    // A browser without container queries keeps the flex-basis fallback
+    rules.push(`@container catalog-filters (min-width: ${minWidth}px) { ${rule} }`)
+  }
+  return rules.join('\n')
+}
+
+/**
+ * Escaped HTML made safe to sit inside a JavaScript template literal (the
+ * badge legend modal is built from one in the page script).
+ */
+function forTemplateLiteral (html) {
+  return String(html).replace(/\\/g, '&#92;').replace(/`/g, '&#96;').replace(/\$\{/g, '&#36;{')
+}
+
+// Tooltip texts for the meaning badges, from the docs-wide meaning system
+const MEANING_TOOLTIPS = {
+  certified: 'Supported and tested by Redpanda.',
+  community: 'Community-supported.',
+  cloud: 'Available in Redpanda Cloud.',
+  enterprise: 'Requires an Enterprise Edition license.'
+}
+
+/**
+ * One meaning badge, styled by docs-ui (.rp-badge, .rp-badge--NAME). The label
+ * carries the meaning; data-tooltip adds detail through docs-ui's tippy setup.
+ * A meaning badge never has a native title attribute.
+ *
+ * @param {string} name - the meaning (neutral, certified, community, cloud, enterprise, use-case)
+ * @param {string} label - the visible text
+ * @param {Object} [options]
+ * @param {string} [options.tooltip] - the tooltip text (the label when empty: every badge has one)
+ * @param {string} [options.href] - makes the badge a link
+ * @param {boolean} [options.small=true] - the dense size (rp-badge--sm), for cards
+ */
+function meaningBadge (name, label, { tooltip, href, small = true } = {}) {
+  const cls = `rp-badge${small ? ' rp-badge--sm' : ''} rp-badge--${name}`
+  // Every badge has a tooltip: with none given, the label stands in
+  const tip = ` data-tooltip="${escapeHtml(tooltip || label)}"`
+  return href
+    ? `<a class="${cls}" href="${escapeHtml(href)}"${tip}>${escapeHtml(label)}</a>`
+    : `<span class="${cls}"${tip}>${escapeHtml(label)}</span>`
+}
+
+// What each component type does, as its badge tooltip
+const TYPE_TOOLTIPS = {
+  input: 'Reads data into a pipeline.',
+  output: 'Writes data out of a pipeline.',
+  processor: 'Transforms data in a pipeline.',
+  cache: 'Stores data that other components look up.',
+  buffer: 'Holds messages between the input and the processors.',
+  metric: 'Exports metrics about a pipeline.',
+  scanner: 'Splits a stream of bytes into messages.',
+  rate_limit: 'Limits how often components access a resource.',
+  tracer: 'Sends traces of messages through a pipeline.'
+}
+
+/** A component type's badge tooltip, for any type */
+function typeTooltip (type) {
+  return TYPE_TOOLTIPS[String(type || '').toLowerCase()] || `Component type: ${typeLabel(type)}.`
+}
+
+/** A component type's label, the same on cards, in the filter, and in the legend: rate_limit -> Rate Limit */
+function typeLabel (type) {
+  return String(type || '').split('_').filter(Boolean).map(w => w[0].toUpperCase() + w.slice(1)).join(' ')
+}
+
+/** A component name that wraps only after an underscore, never mid-word */
+function breakableName (name) {
+  return escapeHtml(name).replace(/_/g, '_<wbr>')
+}
+
+module.exports.meaningBadge = meaningBadge
+module.exports.typeLabel = typeLabel
+module.exports.typeTooltip = typeTooltip
+module.exports.TYPE_TOOLTIPS = TYPE_TOOLTIPS
+module.exports.breakableName = breakableName
+module.exports.MEANING_TOOLTIPS = MEANING_TOOLTIPS
+
+module.exports.filterLayoutCss = filterLayoutCss
+module.exports.matchSolutions = matchSolutions
+module.exports.solutionsMarkup = solutionsMarkup
+module.exports.catalogStatusText = catalogStatusText
+module.exports.USE_CASE_MIN_CARDS = USE_CASE_MIN_CARDS
+module.exports.SOLUTIONS_CATALOG_PATH = SOLUTIONS_CATALOG_PATH
 
 /**
  * Registers macros for use in Redpanda Connect contexts in the Redpanda documentation.
@@ -108,7 +334,9 @@ const { isCloudAvailable, typeFromRelative } = require('../extensions/util/conne
   * @param {Object} context - The Antora context that provides access to configuration data, such as parsed CSV content.
 */
 module.exports.register = function (registry, context) {
-  function filterComponentTable() {
+  // `event` is set when a reader changed a filter (and not on page load), which
+  // is when the status region announces the result.
+  function filterComponentTable(event) {
     const nameInputElement = document.getElementById('componentTableSearch');
     const nameInput = nameInputElement ? nameInputElement.value.trim().toLowerCase() : '';
     const typeFilter = Array.from(document.querySelectorAll('#typeFilterMenu input[type="checkbox"]:checked')).map(checkbox => checkbox.value);
@@ -127,6 +355,12 @@ module.exports.register = function (registry, context) {
     const enterpriseFilter = enterpriseFilterElement
       ? Array.from(enterpriseFilterElement.querySelectorAll('input[type="checkbox"]:checked')).map(checkbox => checkbox.value)
       : [];
+    // Use case filter (optional): nothing checked means no filter, since most
+    // components have no use case
+    const useCaseFilterElement = document.querySelector('#useCaseFilterMenu');
+    const useCaseFilter = useCaseFilterElement
+      ? Array.from(useCaseFilterElement.querySelectorAll('input[type="checkbox"]:checked')).map(checkbox => checkbox.value)
+      : [];
     const params = getQueryParams();
     const enterpriseSupportFilter = params.support === 'enterprise';  // Check if 'support=enterprise' is in the URL
     const cloudSupportFilterFromUrl = params.support === 'cloud';  // Check if 'support=cloud' is in the URL
@@ -134,13 +368,16 @@ module.exports.register = function (registry, context) {
     if (!container) return; // Exit early if container doesn't exist
     const cards = container.querySelectorAll('.component-card');
     if (!cards || cards.length === 0) return; // Exit early if no cards found
+    let shownCount = 0;
     for (let i = 0; i < cards.length; i++) {
       const card = cards[i];
-      const nameText = (card.dataset.name || '').toLowerCase();
+      // data-search adds the card's use-case labels, IDs, and altLabels to its names
+      const nameText = (card.dataset.search || card.dataset.name || '').toLowerCase();
       const typeText = (card.dataset.types || '').toLowerCase().split(',').map(item => item.trim());
       const supportText = (card.dataset.support || '').toLowerCase();
       const enterpriseSupportText = (card.dataset.licensed || '').toLowerCase();  // Yes or No
       const cloudSupportText = (card.dataset.cloud || '').toLowerCase();  // Yes or No
+      const useCaseText = (card.dataset.useCases || '').split(',').filter(Boolean);
       // Check cloud support filter
       let cloudSupportMatch = true;
       if (cloudSupportFilter.length > 0 && !cloudSupportFilter.includes('')) {
@@ -169,10 +406,12 @@ module.exports.register = function (registry, context) {
          (!enterpriseSupportFilter || supportText.includes('enterprise') || enterpriseSupportText === 'yes') && // Filter by enterprise support if 'support=enterprise' is in the URL
          (!cloudSupportFilterFromUrl || supportText.includes('cloud') || cloudSupportText === 'yes') &&  // Filter by cloud support if 'support=cloud' is in the URL
          cloudSupportMatch &&  // Filter by cloud support dropdown
-         enterpriseLicenseMatch  // Filter by enterprise license dropdown
+         enterpriseLicenseMatch &&  // Filter by enterprise license dropdown
+         (useCaseFilter.length === 0 || useCaseFilter.some(value => useCaseText.includes(value)))  // Filter by use case if any is checked
         );
 
       if (showCard) {
+        shownCount++;
         card.classList.remove('hidden');
         card.removeAttribute('style');
       } else {
@@ -193,6 +432,59 @@ module.exports.register = function (registry, context) {
     const enterpriseMenu = document.getElementById('enterpriseFilterMenu');
     if (enterpriseMenu) {
       updateDropdownText('enterpriseFilter', 'All Options Selected', 'Options Selected');
+    }
+    if (useCaseFilterElement) {
+      // Not updateDropdownText: here nothing checked is the unfiltered state
+      const useCaseToggleText = document.querySelector('#useCaseFilterToggle .dropdown-text');
+      if (useCaseToggleText) {
+        const checked = useCaseFilterElement.querySelectorAll('input[type="checkbox"]:checked');
+        useCaseToggleText.textContent = checked.length === 0
+          ? 'Any use case'
+          : checked.length === 1
+            ? checked[0].nextElementSibling.textContent
+            : checked.length + ' use cases';
+        // The full value as a tooltip when the toggle cuts it off
+        const useCaseToggle = document.getElementById('useCaseFilterToggle');
+        // The text's full width, from an unconstrained hidden copy beside it
+        const probe = useCaseToggleText.cloneNode(true);
+        probe.removeAttribute('id');
+        probe.style.cssText = 'position:absolute;visibility:hidden;width:auto;max-width:none;flex:none;overflow:visible;';
+        useCaseToggleText.parentNode.appendChild(probe);
+        const fullWidth = probe.getBoundingClientRect().width;
+        probe.remove();
+        if (fullWidth > useCaseToggleText.getBoundingClientRect().width + 0.01) {
+          useCaseToggle.setAttribute('title', useCaseToggleText.textContent);
+        } else {
+          useCaseToggle.removeAttribute('title');
+        }
+      }
+    }
+    // Empty state
+    const emptyState = document.getElementById('componentCatalogEmpty');
+    if (emptyState) emptyState.hidden = shownCount !== 0;
+    // Status: what the filters left, then the related solutions once known
+    const narrowed = ['typeFilterMenu', 'supportFilterMenu', 'cloudSupportFilterMenu', 'enterpriseFilterMenu']
+      .some(id => !!document.querySelector('#' + id + ' input[type="checkbox"]:not(:checked)'));
+    const statusState = {
+      shown: shownCount,
+      total: cards.length,
+      search: nameInputElement ? nameInputElement.value.trim() : '',
+      useCases: useCaseFilterElement
+        ? Array.from(useCaseFilterElement.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.nextElementSibling.textContent)
+        : [],
+      filtered: narrowed,
+      solutions: null
+    };
+    const setStatus = function (state) {
+      const status = document.getElementById('componentCatalogStatus');
+      if (status && event && typeof window.catalogStatusText === 'function') status.textContent = window.catalogStatusText(state);
+    };
+    if (useCaseFilterElement && typeof window.updateCatalogSolutions === 'function') {
+      window.updateCatalogSolutions(useCaseFilter, function (solutionCount) {
+        setStatus(Object.assign({}, statusState, { solutions: solutionCount || null }));
+      });
+    } else {
+      setStatus(statusState);
     }
     // Update URL parameters based on current filter selections
     updateURLParameters();
@@ -215,6 +507,7 @@ module.exports.register = function (registry, context) {
     const enterpriseFilter = enterpriseFilterElement
       ? Array.from(enterpriseFilterElement.querySelectorAll('input[type="checkbox"]:checked')).map(checkbox => checkbox.value)
       : [];
+    const useCaseFilter = Array.from(document.querySelectorAll('#useCaseFilterMenu input[type="checkbox"]:checked')).map(checkbox => checkbox.value);
     // Add parameters to URL if they have values
     if (nameInput) params.set('search', nameInput);
     if (typeFilter.length > 0) params.set('type', typeFilter.join(','));
@@ -225,6 +518,7 @@ module.exports.register = function (registry, context) {
     if (enterpriseFilter.length > 0 && !enterpriseFilter.includes('')) {
       params.set('enterprise', enterpriseFilter.join(','));
     }
+    if (useCaseFilter.length > 0) params.set('usecase', useCaseFilter.join(','));
     // Update the URL without refreshing the page
     const newURL = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
     window.history.replaceState({}, '', newURL);
@@ -273,6 +567,12 @@ module.exports.register = function (registry, context) {
    * own `uiRootPath` from that same value, so this returns exactly what the UI
    * uses for bundle assets, at any page depth.
    */
+  /** Path from the page being converted to the site root (see resolveUiRootPath). */
+  function resolveSiteRootPath () {
+    const rootPath = context?.file?.pub?.rootPath;
+    return typeof rootPath === 'string' && rootPath ? rootPath : '';
+  }
+
   function resolveUiRootPath () {
     // Antora's default ui.output_dir, which every Redpanda playbook uses.
     const uiOutputDir = '_';
@@ -338,6 +638,8 @@ module.exports.register = function (registry, context) {
    * @returns {object} - The processed connectors data structure.
    */
   function processConnectors(parsedData) {
+    // A connector's use cases are the union across its types
+    const useCases = useCasesByConnector(parsedData.data);
     return parsedData.data.reduce((connectors, row) => {
       const { connector, commercial_name, type, support_level, is_licensed, redpandaConnectUrl, redpandaCloudUrl, description } = row;
       // Available in standard or GPU Cloud pipelines
@@ -349,7 +651,8 @@ module.exports.register = function (registry, context) {
           types: new Map(),
           isLicensed: is_licensed,
           isCloudConnectorSupported: false,
-          description: description || '' // Add description from CSV
+          description: description || '', // Add description from CSV
+          useCases: useCases.get(connector) || []
         };
       } else if (!connectors[connector].description && description) {
         // Each row is one type's page: take the first type that has a description
@@ -551,7 +854,8 @@ module.exports.register = function (registry, context) {
    *   - Enterprise licensing badge
    *   - Cloud support badge
    */
-  function generateConnectorsHTMLCards(connectors, sqlDrivers, isCloud, showAllInfo, commercialNamesMap, uiRootPath) {
+  /** The [connector, details] entries that get a card in this view. */
+  function shownConnectorEntries(connectors, isCloud) {
     return Object.entries(connectors)
       .filter(([_, details]) => {
         // SQL drivers are not components. They are listed as driver badges on the
@@ -563,9 +867,98 @@ module.exports.register = function (registry, context) {
         if (isSqlDriverOnly) return false;
         // If isCloud is true, filter out rows that do not support cloud
         return !isCloud || details.isCloudConnectorSupported;
-      })
+      });
+  }
+
+  /**
+   * The use cases of a catalog view: `info` has every use case
+   * generate-rp-connect-info resolved (csvData.useCases), by ID, and
+   * `options` the ones the filter offers, in taxonomy order: those at least
+   * USE_CASE_MIN_CARDS cards in this view have.
+   */
+  function useCaseView(csvData, connectors, isCloud) {
+    const all = (Array.isArray(csvData.useCases) ? csvData.useCases : []).filter(useCase => useCase && useCase.id && useCase.label);
+    const info = Object.fromEntries(all.map(useCase => [useCase.id, {
+      label: useCase.label,
+      definition: useCase.definition || '',
+      altLabels: Array.isArray(useCase.altLabels) ? useCase.altLabels : []
+    }]));
+    const counts = new Map();
+    for (const [, details] of shownConnectorEntries(connectors, isCloud)) {
+      for (const id of details.useCases || []) counts.set(id, (counts.get(id) || 0) + 1);
+    }
+    const options = all
+      .filter(useCase => (counts.get(useCase.id) || 0) >= USE_CASE_MIN_CARDS)
+      .map(useCase => ({ id: useCase.id, ...info[useCase.id] }));
+    return { info, options };
+  }
+
+  // The Self-Managed component catalog (the page with component_table::[]),
+  // which the use-case chips on connector pages link to
+  const CATALOG_PAGE = 'connect:components:about.adoc';
+
+  /**
+   * The "Use cases" line on a Self-Managed connector page: one chip per use
+   * case the catalog's filter offers for this connector, each linking to the
+   * catalog filtered to it (?usecase=<id>). Empty when the connector has none,
+   * or when the catalog page is not in this build, so a chip never links to a
+   * filter that does not exist.
+   */
+  function connectorUseCasesHtml(csvData, name, attributes) {
+    if (!context.contentCatalog || !context.file || !context.file.pub) return '';
+    const connectors = processConnectors(csvData);
+    const details = connectors[Object.keys(connectors).find(c => c.trim().toLowerCase() === name.trim().toLowerCase())];
+    if (!details || !details.useCases.length) return '';
+    const { options } = useCaseView(csvData, connectors, false);
+    const own = options.filter(({ id }) => details.useCases.includes(id));
+    if (!own.length) return '';
+    let catalog;
+    try {
+      catalog = context.contentCatalog.resolvePage(CATALOG_PAGE, context.file.src);
+    } catch (e) {
+      catalog = null;
+    }
+    if (!catalog || !catalog.pub || !catalog.pub.url) return '';
+    const base = path.relative(context.file.pub.url, catalog.pub.url) || '.';
+    const href = (id) => `${base.endsWith('/') ? base : base + '/'}?usecase=${encodeURIComponent(id)}`;
+    const mergedNote = details.types.size > 1 ? " Applies to at least one of this component's types." : '';
+    const chips = own.map(({ id, label, definition }) =>
+      meaningBadge('use-case', label, { href: href(id), tooltip: (definition || `Use case: ${label}`) + mergedNote, small: false })
+    ).join('');
+    // Its own meaning on the section: the tag icon and neutral tile, inside an Enterprise card too
+    return `
+            <section class="rp-notice-section rp-notice--use-case connector-use-cases">
+              <span class="rp-notice-icon" aria-hidden="true"></span>
+              <div class="rp-notice-body" role="group" aria-labelledby="connectorUseCasesLabel">
+                <span class="rp-notice-title" id="connectorUseCasesLabel">Use cases</span>
+                <p class="rp-notice-actions">${chips}</p>
+              </div>
+            </section>`;
+  }
+
+  /**
+   * @param {Object<string,{label: string, definition: string, altLabels: Array<string>}>} useCaseInfo -
+   *   every use case generate-rp-connect-info resolved, by ID (cards are searchable by all of them)
+   * @param {Set<string>} offeredUseCases - the IDs the Use case filter offers (cards show chips for these)
+   */
+  function generateConnectorsHTMLCards(connectors, sqlDrivers, isCloud, showAllInfo, commercialNamesMap, uiRootPath, useCaseInfo = {}, offeredUseCases = new Set()) {
+    return shownConnectorEntries(connectors, isCloud)
       .map(([connector, details], id) => {
         const { types, isCloudConnectorSupported, isLicensed } = details;
+        // Use cases resolved against the taxonomy; chips only for the ones the filter offers
+        const useCases = (details.useCases || []).filter(useCase => useCaseInfo[useCase]);
+        const chipUseCases = useCases.filter(useCase => offeredUseCases.has(useCase));
+        // A merged card (an input and an output, say) gets the union of its types' use cases
+        const mergedNote = types.size > 1 ? "Applies to at least one of this component's types." : '';
+        const useCaseBadges = chipUseCases
+          .map(useCase => {
+            const { label, definition } = useCaseInfo[useCase];
+            const tooltip = [definition || `Use case: ${label}`, mergedNote].filter(Boolean).join(' ');
+            return meaningBadge('use-case', label, { tooltip });
+          })
+          .join(' ');
+        const useCaseSearchTerms = useCases
+          .flatMap(useCase => [useCaseInfo[useCase].label, useCase, ...(useCaseInfo[useCase].altLabels || [])]);
 
         // The Cloud view lists only the types available in Cloud, in the badges
         // and in the type filter (http_server is an input in Cloud, not an output).
@@ -595,11 +988,7 @@ module.exports.register = function (registry, context) {
                 url = redpandaConnectUrl || redpandaCloudUrl;
               }
               // Always show the type badge, with or without a link
-              if (url) {
-                badges.push(`<a href="${escapeHtml(url)}" class="badge badge-type" title="Component type: ${escapeHtml(capitalize(type))}">${escapeHtml(capitalize(type))}</a>`);
-              } else {
-                badges.push(`<span class="badge badge-type" title="Component type: ${escapeHtml(capitalize(type))}">${escapeHtml(capitalize(type))}</span>`);
-              }
+              badges.push(meaningBadge('neutral', typeLabel(type), { tooltip: typeTooltip(type), href: url || undefined }));
             });
             const uniqueBadges = [...new Set(badges)];
             return uniqueBadges.join(' ');
@@ -631,10 +1020,9 @@ module.exports.register = function (registry, context) {
         // Generate support level badges with tooltips
         const supportBadges = Object.entries(supportLevels)
           .map(([supportLevel]) => {
-            const tooltip = supportLevel.toLowerCase() === 'certified'
-              ? 'Certified: Fully supported and tested by Redpanda'
-              : 'Community: Community-supported connector';
-            return `<span class="badge badge-support badge-support-${escapeHtml(supportLevel.toLowerCase())}" title="${tooltip}">${escapeHtml(capitalize(supportLevel))}</span>`;
+            const level = supportLevel.toLowerCase();
+            const meaning = level === 'certified' || level === 'community' ? level : 'neutral';
+            return meaningBadge(meaning, capitalize(supportLevel), { tooltip: MEANING_TOOLTIPS[meaning] || `Support level: ${capitalize(supportLevel)}.` });
           })
           .join(' ');
 
@@ -646,11 +1034,12 @@ module.exports.register = function (registry, context) {
           const certifiedDrivers = sqlDrivers.certified.map(d => d.commercialName).join(', ');
           const communityDrivers = sqlDrivers.community.map(d => d.commercialName).join(', ');
 
+          // The badge says the level; the drivers follow as text, which wraps
           if (certifiedDrivers) {
-            sqlDriverBadges += `<span class="badge badge-support badge-support-certified" title="Certified drivers: ${escapeHtml(certifiedDrivers)}">Certified: ${escapeHtml(certifiedDrivers)}</span>`;
+            sqlDriverBadges += `<span class="catalog-drivers">${meaningBadge('certified', 'Certified', { tooltip: `${MEANING_TOOLTIPS.certified} Certified drivers: ${certifiedDrivers}` })} <span class="catalog-drivers-list">${escapeHtml(certifiedDrivers)}</span></span>`;
           }
           if (communityDrivers) {
-            sqlDriverBadges += `<span class="badge badge-support badge-support-community" title="Community drivers: ${escapeHtml(communityDrivers)}">Community: ${escapeHtml(communityDrivers)}</span>`;
+            sqlDriverBadges += `<span class="catalog-drivers">${meaningBadge('community', 'Community', { tooltip: `${MEANING_TOOLTIPS.community} Community drivers: ${communityDrivers}` })} <span class="catalog-drivers-list">${escapeHtml(communityDrivers)}</span></span>`;
           }
         }
         // Say which Cloud pipelines when every Cloud-available type agrees:
@@ -659,23 +1048,21 @@ module.exports.register = function (registry, context) {
           .flatMap(commercialNames => Object.values(commercialNames))
           .filter(({ isCloudSupported }) => isCloudSupported);
         const pipelineNote = cloudEntries.length && cloudEntries.every(e => e.gpuOnly)
-          ? ' (GPU pipelines only)'
+          ? ' GPU pipelines only.'
           : cloudEntries.length && cloudEntries.every(e => e.noGpu)
-            ? ' (not in GPU pipelines)'
+            ? ' Not in GPU pipelines.'
             : '';
 
         // Cloud support badge with tooltip, linked to the first Cloud-supported
         // type's Cloud page so the self-managed catalog still reaches Cloud docs
         const firstCloudUrl = (cloudEntries.find(({ urls = {} }) => urls.redpandaCloudUrl) || { urls: {} }).urls.redpandaCloudUrl;
         const cloudBadge = isCloudConnectorSupported && showAllInfo
-          ? firstCloudUrl
-            ? `<a href="${escapeHtml(firstCloudUrl)}" class="badge badge-cloud" title="Available in Redpanda Cloud${pipelineNote}">Cloud${pipelineNote}</a>`
-            : `<span class="badge badge-cloud" title="Available in Redpanda Cloud${pipelineNote}">Cloud${pipelineNote}</span>`
+          ? meaningBadge('cloud', 'Cloud', { tooltip: MEANING_TOOLTIPS.cloud + pipelineNote, href: firstCloudUrl || undefined })
           : '';
 
         // Enterprise license badge with tooltip
         const enterpriseBadge = isLicensed === 'Yes' && showAllInfo
-          ? `<span class="badge badge-enterprise" title="Requires an Enterprise license">Enterprise</span>`
+          ? meaningBadge('enterprise', 'Enterprise', { tooltip: MEANING_TOOLTIPS.enterprise })
           : '';
 
         // Collect all unique commercial names for search
@@ -706,19 +1093,21 @@ module.exports.register = function (registry, context) {
           <div class="component-card"
                id="component-${id}"
                data-name="${escapeHtml(`${connector.toLowerCase()} ${Array.from(allCommercialNames).join(' ').toLowerCase()}`)}"
+               data-search="${escapeHtml([connector, ...allCommercialNames, ...useCaseSearchTerms].join(' ').toLowerCase())}"
                data-types="${escapeHtml(typesDataAttr.toLowerCase())}"
                data-support="${escapeHtml(supportDataAttr.toLowerCase())}"
                data-licensed="${escapeHtml(isLicensed.toLowerCase())}"
-               data-cloud="${isCloudConnectorSupported ? 'yes' : 'no'}">
+               data-cloud="${isCloudConnectorSupported ? 'yes' : 'no'}"${useCases.length ? `
+               data-use-cases="${escapeHtml(useCases.join(','))}"` : ''}>
             <div class="card-header">
               <div class="card-header-content">
                 ${firstUrl
                   // Same degradation as the type badge below: with no page to link
                   // to, the title is plain text rather than an anchor to nowhere.
                   ? `<a href="${escapeHtml(firstUrl)}" class="card-title-link">
-                  <h3 class="card-title"><code>${escapeHtml(connector)}</code></h3>
+                  <h3 class="card-title"><code>${breakableName(connector)}</code></h3>
                 </a>`
-                  : `<h3 class="card-title"><code>${escapeHtml(connector)}</code></h3>`}
+                  : `<h3 class="card-title"><code>${breakableName(connector)}</code></h3>`}
                 ${details.description
                   // No invented copy: a description comes from the component's own
                   // page, and a card without one simply has no description.
@@ -755,6 +1144,13 @@ module.exports.register = function (registry, context) {
                   <div class="badge-group-badges">
                     ${cloudBadge}
                     ${enterpriseBadge}
+                  </div>
+                </div>` : ''}
+                ${useCaseBadges ? `
+                <div class="badge-group">
+                  <span class="badge-group-label">Use case</span>
+                  <div class="badge-group-badges">
+                    ${useCaseBadges}
                   </div>
                 </div>` : ''}
               </div>
@@ -841,9 +1237,44 @@ module.exports.register = function (registry, context) {
           .map(value => `
             <label class="dropdown-checkbox-option">
               <input type="checkbox" value="${escapeHtml(value)}" checked>
-              <span>${escapeHtml(capitalize(value).replace("_", " "))}</span>
+              <span>${escapeHtml(typeLabel(value))}</span>
             </label>`)
           .join('');
+
+      // Use cases: the ones generate-rp-connect-info resolved against the docs
+      // taxonomy (csvData.useCases, in taxonomy order). The filter offers one
+      // only when at least USE_CASE_MIN_CARDS cards in this view have it. No
+      // data, no filter.
+      const connectors = processConnectors(csvData);
+      const { info: useCaseInfo, options: useCaseOptions } = useCaseView(csvData, connectors, isCloud);
+      const offeredUseCases = new Set(useCaseOptions.map(({ id }) => id));
+      const solutionsUrl = `${resolveSiteRootPath() || ''}/${SOLUTIONS_CATALOG_PATH}`;
+
+      // One dropdown filter. The toggle discloses a group of checkboxes (not
+      // an ARIA menu, which promises arrow-key navigation the checkboxes do
+      // not have), and it is named by the label plus its current value.
+      const filterGroupHtml = ({ id, label, labelId = `${id}Label`, value, options }) => `
+          <div class="filter-group">
+            <label for="${id}Toggle" id="${labelId}">${label}:</label>
+            <div class="dropdown-checkbox-wrapper">
+              <button type="button" class="dropdown-checkbox-toggle" id="${id}Toggle" aria-expanded="false" aria-controls="${id}Menu" aria-labelledby="${labelId} ${id}Value">
+                <span class="dropdown-text" id="${id}Value">${value}</span>
+                <span class="dropdown-arrow" aria-hidden="true">▼</span>
+              </button>
+              <div class="dropdown-checkbox-menu" id="${id}Menu" role="group" aria-labelledby="${labelId}">
+                ${options}
+              </div>
+            </div>
+          </div>`;
+      const yesNoOptions = `
+                <label class="dropdown-checkbox-option">
+                  <input type="checkbox" value="yes" checked>
+                  <span>Yes</span>
+                </label>
+                <label class="dropdown-checkbox-option">
+                  <input type="checkbox" value="no" checked>
+                  <span>No</span>
+                </label>`;
 
       let tableHtml = `
         <script>
@@ -862,6 +1293,67 @@ module.exports.register = function (registry, context) {
 
               window.filterComponentTable = ${filterComponentTable.toString()};
           window.updateURLParameters = ${updateURLParameters.toString()};
+          window.catalogStatusText = ${catalogStatusText.toString()};
+
+          // Clear filters: every checkbox filter back to its unfiltered state,
+          // the search emptied, focus back in the search box
+          window.clearCatalogFilters = function() {
+            const search = document.getElementById('componentTableSearch');
+            if (search) search.value = '';
+            ['typeFilterMenu', 'supportFilterMenu', 'cloudSupportFilterMenu', 'enterpriseFilterMenu'].forEach(function(id) {
+              document.querySelectorAll('#' + id + ' input[type="checkbox"]').forEach(function(cb) { cb.checked = true; });
+            });
+            document.querySelectorAll('#useCaseFilterMenu input[type="checkbox"]').forEach(function(cb) { cb.checked = false; });
+            window.filterComponentTable({ type: 'clear' });
+            if (search) search.focus();
+          };
+          ${useCaseOptions.length ? `
+          // Solutions for the selected use cases, from the solutions catalog the
+          // solutions-catalog extension publishes. Fetched once, on first use; a
+          // build without it (or a failed fetch) shows nothing.
+          (function() {
+            const escapeHtml = ${escapeHtml.toString()};
+            const matchSolutions = ${matchSolutions.toString()};
+            const solutionsMarkup = ${solutionsMarkup.toString()};
+            let catalogPromise = null;
+            let latest = 0;
+            const loadCatalog = function(url) {
+              if (!catalogPromise) {
+                catalogPromise = fetch(url, { headers: { Accept: 'application/json' } })
+                  .then(response => (response.ok ? response.json() : null))
+                  .catch(() => null);
+              }
+              return catalogPromise;
+            };
+            let rendered = '';
+            // Shows the solutions for these use-case IDs, then calls done with
+            // how many there are (0 when none or no catalog)
+            window.updateCatalogSolutions = function(ids, done) {
+              const finish = typeof done === 'function' ? done : function() {};
+              const panel = document.getElementById('componentCatalogSolutions');
+              if (!panel) return finish(0);
+              const request = ++latest;
+              const show = function(html) {
+                // Same list as before: leave the DOM (and a reader's place in it) alone
+                if (html === rendered) return;
+                rendered = html;
+                panel.innerHTML = html;
+                panel.hidden = !html;
+              };
+              if (!ids || !ids.length) {
+                show('');
+                return finish(0);
+              }
+              let info = {};
+              try { info = JSON.parse(panel.dataset.useCases || '{}'); } catch (e) {}
+              loadCatalog(panel.dataset.solutionsUrl).then(function(catalog) {
+                if (request !== latest) return; // a newer selection won
+                const matches = matchSolutions(catalog, ids, info);
+                show(solutionsMarkup(matches, ids, info, escapeHtml));
+                finish(matches.length);
+              });
+            };
+          })();` : ''}
 
           // Helper to close a specific dropdown
           window.closeDropdown = function(menu) {
@@ -1016,101 +1508,116 @@ module.exports.register = function (registry, context) {
             }
           })();
         </script>
-        <div class="table-filters">
-          <div style="display: flex; align-items: center; gap: 0.5rem; flex: 1;">
-            <input class="table-search" type="text" id="componentTableSearch" placeholder="Search for components..." style="flex: 1;">
+        <div class="table-filters component-catalog-filters">
+          <div class="table-filters-search">
+            <input class="table-search" type="text" id="componentTableSearch" placeholder="Search for components..." aria-label="Search components" style="flex: 1;">
             <button type="button" class="badge-legend-button" title="View badge legend" aria-label="View badge legend">
               <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
                 <path d="M10 0C4.48 0 0 4.48 0 10s4.48 10 10 10 10-4.48 10-10S15.52 0 10 0zm1 15H9v-2h2v2zm0-4H9V5h2v6z"/>
               </svg>
             </button>
           </div>
-          <div class="filter-group">
-            <label for="typeFilterToggle">Type:</label>
-            <div class="dropdown-checkbox-wrapper">
-              <button type="button" class="dropdown-checkbox-toggle" id="typeFilterToggle" aria-expanded="false" aria-haspopup="true" aria-controls="typeFilterMenu">
-                <span class="dropdown-text">All Types Selected</span>
-                <span class="dropdown-arrow">▼</span>
-              </button>
-              <div class="dropdown-checkbox-menu" id="typeFilterMenu" role="menu" aria-labelledby="typeFilterToggle">
-                ${createDropdownCheckboxOptions(types, 'typeFilter')}
-              </div>
-            </div>
-          </div>
+${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected', options: createDropdownCheckboxOptions(types, 'typeFilter') })}
       `;
 
+      if (useCaseOptions.length) {
+        tableHtml += filterGroupHtml({
+          id: 'useCaseFilter',
+          label: 'Use case',
+          value: 'Any use case',
+          options: `
+                <button type="button" class="dropdown-checkbox-clear" id="useCaseFilterClear">Clear</button>${useCaseOptions.map(({ id, label, definition }) => `
+                <label class="dropdown-checkbox-option"${definition ? ` title="${escapeHtml(definition)}"` : ''}>
+                  <input type="checkbox" value="${escapeHtml(id)}">
+                  <span>${escapeHtml(label)}</span>
+                </label>`).join('')}`
+        });
+      }
+
       if (!isCloud) {
-        tableHtml += `
-          <div class="filter-group">
-            <label for="supportFilterToggle" id="labelForSupportFilter">Support:</label>
-            <div class="dropdown-checkbox-wrapper">
-              <button type="button" class="dropdown-checkbox-toggle" id="supportFilterToggle"  aria-expanded="false" aria-haspopup="true" aria-controls="supportFilterMenu">
-                <span class="dropdown-text">All Support Levels Selected</span>
-                <span class="dropdown-arrow">▼</span>
-              </button>
-              <div class="dropdown-checkbox-menu" id="supportFilterMenu" role="menu" aria-labelledby="supportFilterToggle">
-                ${createDropdownCheckboxOptions(uniqueSupportLevel, 'supportFilter')}
-              </div>
-            </div>
-          </div>
-        `;
+        tableHtml += filterGroupHtml({ id: 'supportFilter', label: 'Support', labelId: 'labelForSupportFilter', value: 'All Support Levels Selected', options: createDropdownCheckboxOptions(uniqueSupportLevel, 'supportFilter') });
       }
 
       if (showAllInfo) {
-        tableHtml += `
-          <div class="filter-group">
-            <label for="cloudSupportFilterToggle">Available in Cloud:</label>
-            <div class="dropdown-checkbox-wrapper">
-              <button type="button" class="dropdown-checkbox-toggle" id="cloudSupportFilterToggle"  aria-expanded="false" aria-haspopup="true" aria-controls="cloudSupportFilterMenu">
-                <span class="dropdown-text">All Options Selected</span>
-                <span class="dropdown-arrow">▼</span>
-              </button>
-              <div class="dropdown-checkbox-menu" id="cloudSupportFilterMenu" role="menu" aria-labelledby="cloudSupportFilterToggle">
-                <label class="dropdown-checkbox-option">
-                  <input type="checkbox" value="yes" checked>
-                  <span>Yes</span>
-                </label>
-                <label class="dropdown-checkbox-option">
-                  <input type="checkbox" value="no" checked>
-                  <span>No</span>
-                </label>
-              </div>
-            </div>
-          </div>
-          <div class="filter-group">
-            <label for="enterpriseFilterToggle">Enterprise License:</label>
-            <div class="dropdown-checkbox-wrapper">
-              <button type="button" class="dropdown-checkbox-toggle" id="enterpriseFilterToggle"  aria-expanded="false" aria-haspopup="true" aria-controls="enterpriseFilterMenu">
-                <span class="dropdown-text">All Options Selected</span>
-                <span class="dropdown-arrow">▼</span>
-              </button>
-              <div class="dropdown-checkbox-menu" id="enterpriseFilterMenu" role="menu" aria-labelledby="enterpriseFilterToggle">
-                <label class="dropdown-checkbox-option">
-                  <input type="checkbox" value="yes" checked>
-                  <span>Yes</span>
-                </label>
-                <label class="dropdown-checkbox-option">
-                  <input type="checkbox" value="no" checked>
-                  <span>No</span>
-                </label>
-              </div>
-            </div>
-          </div>
-          `;
+        tableHtml += filterGroupHtml({ id: 'cloudSupportFilter', label: 'Available in Cloud', value: 'All Options Selected', options: yesNoOptions });
+        tableHtml += filterGroupHtml({ id: 'enterpriseFilter', label: 'Enterprise License', value: 'All Options Selected', options: yesNoOptions });
       }
+
+      const filterCount = 1 + (useCaseOptions.length ? 1 : 0) + (isCloud ? 0 : 1) + (showAllInfo ? 2 : 0);
 
       tableHtml += `</div>
         <!-- CSS styles for card layout and modal -->
         <style>
+          /* Filter panel: search on its own row, then the dropdown filters in
+             balanced, equal-width columns (see filterLayoutCss). Selectors
+             carry three classes to win over the UI bundle's .doc rules,
+             including its column layout below 768px. */
+          .table-filters.component-catalog-filters {
+            container: catalog-filters / inline-size;
+            /* Above the cards and the solutions list, so an open dropdown
+               overlays them (the container is its own stacking context) */
+            position: relative;
+            z-index: 2;
+            display: flex;
+            flex-direction: row;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            gap: ${FILTER_GAP_PX}px;
+          }
+
+          .table-filters.component-catalog-filters > .table-filters-search {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            flex: 1 1 100%;
+            min-width: 0;
+          }
+
+          .table-filters.component-catalog-filters .table-search {
+            flex: 1 1 auto;
+            min-width: 0;
+            max-width: none;
+            margin: 0;
+          }
+
+          .table-filters.component-catalog-filters > .filter-group {
+            flex: 1 1 ${FILTER_MIN_WIDTH_PX}px;
+            min-width: 0;
+            max-width: none;
+            margin: 0;
+          }
+
+          .table-filters.component-catalog-filters .dropdown-checkbox-wrapper {
+            min-width: 0;
+          }
+
+          /* A long option label ("Change data capture") wraps in a narrow
+             menu: keep the second line aligned with the first, not under the
+             checkbox. */
+          .table-filters.component-catalog-filters .dropdown-checkbox-option {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.5rem;
+          }
+
+          .table-filters.component-catalog-filters .dropdown-checkbox-option > input {
+            flex: 0 0 auto;
+            margin-top: 0.2em;
+          }
+
+          ${filterLayoutCss(filterCount)}
+
           .component-cards-container {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            /* min(): a column never outgrows a narrow container (390px phones) */
+            grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
             gap: 1rem;
             margin-top: 1rem;
             padding-bottom: 2rem;
           }
 
           .component-card {
+            min-width: 0;
             border: 1px solid #e0e0e0;
             border-radius: 8px;
             background: white;
@@ -1183,7 +1690,9 @@ module.exports.register = function (registry, context) {
             color: #333;
           }
 
+          /* Long names wrap after an underscore (<wbr>), and mid-word only if one part still does not fit */
           .component-card .card-title code {
+            overflow-wrap: break-word;
             background: transparent;
             padding: 0;
             font-size: inherit;
@@ -1225,151 +1734,110 @@ module.exports.register = function (registry, context) {
             align-items: center;
           }
 
-          /* Scoped to this macro's two badge containers (the card's
-             .badge-group-badges and the legend modal's .badge-legend-item),
-             not a bare .badge -- the site-wide .badge class from docs-ui's
-             metadata.css (border-radius: 10px) is what badge:[] macro output
-             uses on the same page, and a bare rule here overrode it.
-             :where() keeps the specificity of a bare .badge, so the
-             .badge-type, .badge-support, .badge-cloud and .badge-enterprise
-             rules below still win by source order. */
-          :where(.badge-group-badges, .badge-legend-item) .badge {
-            display: inline-block;
-            border-radius: 6px;
-            text-decoration: none;
-            cursor: help;
-            transition: all 0.2s ease;
-            line-height: 1.4;
+          /* Badge colors and shape come from docs-ui (.rp-badge); only layout here */
+          .badge-group-badges .rp-badge {
+            flex: none;
           }
 
-          .badge-type {
-            white-space: nowrap;
-          }
-
-          .badge-support {
-            white-space: normal;
-            word-break: break-word;
-          }
-
-          .badge-cloud,
-          .badge-enterprise {
-            white-space: nowrap;
-          }
-
-          /* PRIMARY: Type badges - Subtle colors for easy scanning */
-          .badge-type {
-            padding: 0.35rem 0.75rem;
+          /* A SQL connector's drivers: the level badge, then the drivers as text that wraps */
+          .catalog-drivers {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            flex: 1 1 auto;
+            gap: 0.25rem 0.5rem;
+            min-width: 0;
             font-size: 0.75rem;
-            font-weight: 600;
-            border: 1px solid;
+          }
+
+          .catalog-visually-hidden {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+          }
+
+          .catalog-empty {
+            margin-top: 1rem;
+            padding: 1rem;
+            border: 1px dashed #d1d5db;
+            border-radius: 8px;
+            text-align: center;
+          }
+
+          .catalog-empty[hidden] {
+            display: none;
+          }
+
+          .catalog-empty p {
+            margin: 0 0 0.75rem 0;
+          }
+
+          .catalog-empty-clear,
+          .dropdown-checkbox-clear {
             cursor: pointer;
-            letter-spacing: 0.01em;
+            font: inherit;
             border-radius: 4px;
           }
 
-          /* Input - Soft blue */
-          .badge-type[title*="Input"] {
-            background: #eff6ff;
-            color: #1e40af;
-            border-color: #bfdbfe;
+          .catalog-empty-clear {
+            padding: 0.4rem 0.9rem;
+            border: 1px solid #d1d5db;
+            background: #fff;
+            color: #1f2937;
           }
 
-          .badge-type[title*="Input"]:hover {
-            background: #dbeafe;
-          }
-
-          /* Output - Soft green */
-          .badge-type[title*="Output"] {
-            background: #f0fdf4;
-            color: #166534;
-            border-color: #bbf7d0;
-          }
-
-          .badge-type[title*="Output"]:hover {
-            background: #dcfce7;
-          }
-
-          /* Processor - Soft purple */
-          .badge-type[title*="Processor"] {
-            background: #faf5ff;
-            color: #7c3aed;
-            border-color: #e9d5ff;
-          }
-
-          .badge-type[title*="Processor"]:hover {
-            background: #f3e8ff;
-          }
-
-          /* Others - Soft amber */
-          .badge-type:not([title*="Input"]):not([title*="Output"]):not([title*="Processor"]) {
-            background: #fefce8;
-            color: #a16207;
-            border-color: #fde68a;
-          }
-
-          .badge-type:not([title*="Input"]):not([title*="Output"]):not([title*="Processor"]):hover {
-            background: #fef9c3;
-          }
-
-          /* SECONDARY: Support badges - Subtle outline style */
-          .badge-support {
-            padding: 0.4rem 0.75rem;
-            font-size: 0.75rem;
-            font-weight: 500;
+          /* Clear, at the top of the Use case menu */
+          .dropdown-checkbox-menu .dropdown-checkbox-clear {
+            display: block;
+            width: 100%;
+            padding: 0.5rem 0.75rem;
+            border: 0;
+            border-bottom: 1px solid #e5e7eb;
             background: transparent;
-            border: 1px solid;
-            border-radius: 4px;
-            display: inline-block;
-            word-wrap: break-word;
-            max-width: 100%;
+            color: #1d4ed8;
+            text-align: left;
+            font-size: 0.875rem;
           }
 
-          .badge-support-certified {
-            color: #047857;
-            border-color: #6ee7b7;
+          html[data-theme="dark"] .catalog-empty-clear {
+            background: rgba(255, 255, 255, 0.07);
+            border-color: rgba(255, 255, 255, 0.2);
+            color: #fff;
           }
 
-          .badge-support-certified:hover {
-            background: #ecfdf5;
+          html[data-theme="dark"] .dropdown-checkbox-menu .dropdown-checkbox-clear {
+            color: #93c5fd;
+            border-bottom-color: rgba(255, 255, 255, 0.1);
           }
 
-          .badge-support-community {
-            color: #7c2d12;
-            border-color: #fdba74;
+          /* At least 4.5:1 on the dark card background */
+          html[data-theme="dark"] .badge-group-label {
+            color: #9ca3af;
           }
 
-          .badge-support-community:hover {
-            background: #fff7ed;
+          /* A quiet hint, not a panel: solutions are secondary to the cards */
+          .catalog-solutions {
+            margin: 0.75rem 0 0 0;
+            font-size: 0.875rem;
+            color: #4b5563;
           }
 
-          /* TERTIARY: Status badges - Very subtle */
-          .badge-cloud,
-          .badge-enterprise {
-            padding: 0.25rem 0.6rem;
-            font-size: 0.65rem;
-            font-weight: 500;
-            border: 1px solid;
-            border-radius: 4px;
+          .catalog-solutions .catalog-solutions-hint {
+            margin: 0;
           }
 
-          .badge-cloud {
-            background: #f0f9ff;
-            color: #0c4a6e;
-            border-color: #bae6fd;
+          .catalog-solutions[hidden] {
+            display: none;
           }
 
-          .badge-cloud:hover {
-            background: #e0f2fe;
-          }
-
-          .badge-enterprise {
-            background: #fdf4ff;
-            color: #86198f;
-            border-color: #f0abfc;
-          }
-
-          .badge-enterprise:hover {
-            background: #fae8ff;
+          html[data-theme="dark"] .catalog-solutions {
+            color: #d0d5dd;
           }
 
           .badge-legend-button {
@@ -1394,7 +1862,8 @@ module.exports.register = function (registry, context) {
           .badge-legend-modal {
             display: none;
             position: fixed !important;
-            z-index: 10000 !important;
+            /* Below tippy (9999), so a legend badge's tooltip shows over the legend */
+            z-index: 9000 !important;
             left: 0 !important;
             top: 0 !important;
             width: 100% !important;
@@ -1419,7 +1888,7 @@ module.exports.register = function (registry, context) {
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
             animation: slideIn 0.3s ease;
             position: relative;
-            z-index: 10001;
+            z-index: 9001;
           }
 
           .badge-legend-header {
@@ -1482,7 +1951,7 @@ module.exports.register = function (registry, context) {
             margin-bottom: 0;
           }
 
-          .badge-legend-item .badge {
+          .badge-legend-item .rp-badge {
             flex-shrink: 0;
             margin-top: 0.15rem;
           }
@@ -1542,31 +2011,6 @@ module.exports.register = function (registry, context) {
 
           html[data-theme="dark"] .component-card .card-title-link:hover {
             color: #f15d61;
-          }
-
-          html[data-theme="dark"] :where(.badge-group-badges, .badge-legend-item) .badge {
-            background: rgba(255, 255, 255, 0.07);
-            border-color: rgba(255, 255, 255, 0.15);
-            color: #d0d5dd;
-          }
-
-          /* .badge-input/.badge-output/.badge-processor/.badge-self-managed
-             removed here: none of them are ever emitted by this macro (badge
-             markup only ever carries class="badge badge-type", with the type
-             itself in the title/text, never as its own class), and none had a
-             light-mode rule either -- these were always fully dead, not a
-             dark-mode-only regression. */
-
-          html[data-theme="dark"] .badge-enterprise {
-            background: rgba(202, 138, 4, 0.2);
-            border-color: rgba(250, 197, 21, 0.3);
-            color: #fde047;
-          }
-
-          html[data-theme="dark"] .badge-cloud {
-            background: rgba(5, 150, 105, 0.2);
-            border-color: rgba(110, 231, 183, 0.3);
-            color: #6ee7b7;
           }
 
           html[data-theme="dark"] .badge-legend-button {
@@ -1642,7 +2086,7 @@ module.exports.register = function (registry, context) {
 
           @media (max-width: 768px) {
             .component-cards-container {
-              grid-template-columns: 1fr;
+              grid-template-columns: minmax(0, 1fr);
             }
 
             .badge-legend-content {
@@ -1656,8 +2100,16 @@ module.exports.register = function (registry, context) {
             }
           }
         </style>
+        <div class="catalog-visually-hidden" id="componentCatalogStatus" role="status" aria-live="polite"></div>
+        ${useCaseOptions.length ? `<div class="catalog-solutions" id="componentCatalogSolutions" hidden
+             data-solutions-url="${escapeHtml(solutionsUrl)}"
+             data-use-cases="${escapeHtml(JSON.stringify(Object.fromEntries(useCaseOptions.map(({ id, label, altLabels }) => [id, { label, altLabels }]))))}"></div>` : ''}
+        <div class="catalog-empty" id="componentCatalogEmpty" hidden>
+          <p>No components match these filters.</p>
+          <button type="button" class="catalog-empty-clear" id="componentCatalogClear">Clear filters</button>
+        </div>
         <div class="component-cards-container" id="componentCardsContainer">
-          ${generateConnectorsHTMLCards(processConnectors(csvData), sqlDriversData, isCloud, showAllInfo, commercialNamesMap, uiRootPath)}
+          ${generateConnectorsHTMLCards(connectors, sqlDriversData, isCloud, showAllInfo, commercialNamesMap, uiRootPath, useCaseInfo, offeredUseCases)}
         </div>
         <script>
           // Badge legend modal functions
@@ -1674,63 +2126,72 @@ module.exports.register = function (registry, context) {
               <div class="badge-legend-section">
                 <h4>Component Types</h4>
                 <div class="badge-legend-item">
-                  <span class="badge badge-type" title="Component type: Input">Input</span>
+                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('input'))}">Input</span>
                   <p>Receives data from external sources into the pipeline</p>
                 </div>
                 <div class="badge-legend-item">
-                  <span class="badge badge-type" title="Component type: Output">Output</span>
+                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('output'))}">Output</span>
                   <p>Sends data from the pipeline to external destinations</p>
                 </div>
                 <div class="badge-legend-item">
-                  <span class="badge badge-type" title="Component type: Processor">Processor</span>
+                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('processor'))}">Processor</span>
                   <p>Transforms or filters data as it flows through the pipeline</p>
                 </div>
                 <div class="badge-legend-item">
-                  <span class="badge badge-type" title="Component type: Cache">Cache</span>
+                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('cache'))}">Cache</span>
                   <p>Stores data temporarily for faster access</p>
                 </div>
                 <div class="badge-legend-item">
-                  <span class="badge badge-type" title="Component type: Buffer">Buffer</span>
+                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('buffer'))}">Buffer</span>
                   <p>Temporarily holds messages to manage throughput</p>
                 </div>
                 <div class="badge-legend-item">
-                  <span class="badge badge-type" title="Component type: Metric">Metric</span>
+                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('metric'))}">Metric</span>
                   <p>Collects and exports metrics about pipeline performance</p>
                 </div>
                 <div class="badge-legend-item">
-                  <span class="badge badge-type" title="Component type: Scanner">Scanner</span>
+                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('scanner'))}">Scanner</span>
                   <p>Scans and processes messages based on patterns</p>
                 </div>
                 <div class="badge-legend-item">
-                  <span class="badge badge-type" title="Component type: Rate Limit">Rate Limit</span>
+                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('rate_limit'))}">Rate Limit</span>
                   <p>Controls the rate of message processing</p>
                 </div>
                 <div class="badge-legend-item">
-                  <span class="badge badge-type" title="Component type: Tracer">Tracer</span>
+                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('tracer'))}">Tracer</span>
                   <p>Tracks and traces message flow through the pipeline</p>
                 </div>
               </div>
               <div class="badge-legend-section">
                 <h4>Support Levels</h4>
                 <div class="badge-legend-item">
-                  <span class="badge badge-support badge-support-certified">Certified</span>
+                  <span class="rp-badge rp-badge--sm rp-badge--certified" data-tooltip="${MEANING_TOOLTIPS.certified}">Certified</span>
                   <p>Fully supported and tested by Redpanda with guaranteed reliability</p>
                 </div>
                 <div class="badge-legend-item">
-                  <span class="badge badge-support badge-support-community">Community</span>
+                  <span class="rp-badge rp-badge--sm rp-badge--community" data-tooltip="${MEANING_TOOLTIPS.community}">Community</span>
                   <p>Community-supported connector with best-effort maintenance</p>
                 </div>
               </div>
+              ${useCaseOptions.length ? `
+              <div class="badge-legend-section">
+                <h4>Use cases</h4>${useCaseOptions.map(({ label, definition }) => forTemplateLiteral(`
+                <div class="badge-legend-item">
+                  ${meaningBadge('use-case', label, { tooltip: definition || `Use case: ${label}` })}
+                  <p>${escapeHtml(definition || label)}</p>
+                </div>`)).join('')}
+              </div>
+              ` : ''}
               ${showAllInfo ? `
               <div class="badge-legend-section">
-                <h4>Additional Features</h4>
+                <h4>Availability</h4>
                 <div class="badge-legend-item">
-                  <span class="badge badge-cloud">Cloud</span>
+                  <span class="rp-badge rp-badge--sm rp-badge--cloud" data-tooltip="${MEANING_TOOLTIPS.cloud}">Cloud</span>
                   <p>Available in Redpanda Cloud managed service</p>
                 </div>
                 <div class="badge-legend-item">
-                  <span class="badge badge-enterprise">Enterprise</span>
-                  <p>Requires an Enterprise license to use</p>
+                  <span class="rp-badge rp-badge--sm rp-badge--enterprise" data-tooltip="${MEANING_TOOLTIPS.enterprise}">Enterprise</span>
+                  <p>Requires an Enterprise Edition license</p>
                 </div>
               </div>
               ` : ''}
@@ -1738,17 +2199,18 @@ module.exports.register = function (registry, context) {
           </div>
         </div>\`;
 
-            // Inject modal into document body when DOM is ready
-            if (document.readyState === 'loading') {
-              document.addEventListener('DOMContentLoaded', function() {
-                const modalContainer = document.createElement('div');
-                modalContainer.innerHTML = modalHTML;
-                document.body.appendChild(modalContainer.firstElementChild);
-              });
-            } else {
+            // Inject the modal now (this script runs inside the body), so it is
+            // in the page before docs-ui gives every [data-tooltip] a tooltip
+            // on DOMContentLoaded and the legend badges get theirs too
+            const injectModal = function() {
               const modalContainer = document.createElement('div');
               modalContainer.innerHTML = modalHTML;
               document.body.appendChild(modalContainer.firstElementChild);
+            };
+            if (document.body) {
+              injectModal();
+            } else {
+              document.addEventListener('DOMContentLoaded', injectModal);
             }
             } catch (error) {
               console.error('[Component Catalog] Error loading badge legend modal:', error);
@@ -1889,6 +2351,14 @@ module.exports.register = function (registry, context) {
                 });
               }
 
+              const useCaseFilterMenu = document.getElementById('useCaseFilterMenu');
+              if (params.usecase && useCaseFilterMenu) {
+                const useCases = params.usecase.split(',');
+                useCaseFilterMenu.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                  cb.checked = useCases.includes(cb.value);
+                });
+              }
+
               if (params.enterprise && enterpriseFilterMenu) {
                 const enterpriseOptions = params.enterprise.split(',');
                 // First uncheck all checkboxes
@@ -1947,6 +2417,24 @@ module.exports.register = function (registry, context) {
                   if (enterpriseFilterToggle) {
                     enterpriseFilterToggle.addEventListener('click', () => window.toggleDropdownCheckbox('enterpriseFilter'));
                   }
+
+                  const useCaseFilterToggle = document.getElementById('useCaseFilterToggle');
+                  if (useCaseFilterToggle) {
+                    useCaseFilterToggle.addEventListener('click', () => window.toggleDropdownCheckbox('useCaseFilter'));
+                  }
+
+                  // Clear at the top of the Use case menu
+                  const useCaseFilterClear = document.getElementById('useCaseFilterClear');
+                  if (useCaseFilterClear) {
+                    useCaseFilterClear.addEventListener('click', () => {
+                      document.querySelectorAll('#useCaseFilterMenu input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+                      window.filterComponentTable({ type: 'clear' });
+                    });
+                  }
+
+                  // Clear filters in the empty state
+                  const catalogClear = document.getElementById('componentCatalogClear');
+                  if (catalogClear) catalogClear.addEventListener('click', window.clearCatalogFilters);
 
                   const componentTypeToggle = document.getElementById('componentTypeDropdownToggle');
                   if (componentTypeToggle) {
@@ -2071,13 +2559,25 @@ module.exports.register = function (registry, context) {
             </div>
           </div>`);
       }
+      const isCloudPage = attributes['env-cloud'] !== undefined;
       // Check if the component requires an Enterprise license (based on support level)
       let enterpriseLicenseInfo = '';
       if (component !== 'Cloud') {
         const requiresEnterprise = componentRows.some(row => row.is_licensed.toLowerCase() === 'yes');
         if (requiresEnterprise) {
           enterpriseLicenseInfo = `
-            <p><strong>License</strong>: This component requires an <a href="https://docs.redpanda.com/redpanda-connect/get-started/licensing/" target="_blank">enterprise license</a>. You can either <a href="https://www.redpanda.com/upgrade" target="_blank">upgrade to an Enterprise Edition license</a>, or <a href="http://redpanda.com/try-enterprise" target="_blank" rel="noopener">generate a trial license key</a> that's valid for 30 days.</p>`;
+            <section class="rp-notice-section" aria-labelledby="connectorLicenseTitle">
+              <span class="rp-notice-icon" aria-hidden="true"></span>
+              <div class="rp-notice-body">
+                <p class="rp-notice-title" id="connectorLicenseTitle">Enterprise license required</p>
+                <p class="rp-notice-text">This component runs with a Redpanda Enterprise Edition license. Try it free for 30 days, or upgrade when you're ready.</p>
+                <p class="rp-notice-actions">
+                  <a class="rp-button rp-button--primary" href="http://redpanda.com/try-enterprise" target="_blank" rel="noopener">Get a 30-day trial key</a>
+                  <a class="rp-button" href="https://www.redpanda.com/upgrade" target="_blank" rel="noopener">Upgrade</a>
+                  <a class="rp-notice-link" href="https://docs.redpanda.com/redpanda-connect/get-started/licensing/" target="_blank" rel="noopener">About licensing</a>
+                </p>
+              </div>
+            </section>`;
         }
       }
       // The Type dropdown and availability info are rendered server-side in the sticky bar by the
@@ -2088,14 +2588,15 @@ module.exports.register = function (registry, context) {
       // generate-rp-connect-info extension sets them on page.asciidoc.attributes on the
       // documentsConverted event instead. Only the license notice belongs in the page body,
       // where it must stay visible.
-      if (!enterpriseLicenseInfo) {
+      const useCasesInfo = isCloudPage ? '' : connectorUseCasesHtml(csvData, name, attributes);
+      if (!enterpriseLicenseInfo && !useCasesInfo) {
         return self.createBlock(parent, 'pass', '');
       }
+      // Styled by docs-ui (.rp-notice): an Enterprise card when the component
+      // needs a license, otherwise a neutral one holding only the use cases
       return self.createBlock(parent, 'pass', `
-        <div class="metadata-block">
-          <div class="metadata-content">
-          ${enterpriseLicenseInfo}
-          </div>
+        <div class="rp-notice rp-notice--${enterpriseLicenseInfo ? 'enterprise' : 'use-case'} connector-facts">
+          ${enterpriseLicenseInfo}${useCasesInfo}
         </div>`);
     });
   });
