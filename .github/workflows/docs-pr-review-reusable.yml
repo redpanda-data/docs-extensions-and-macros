@@ -23,7 +23,9 @@
 #   - draft PRs — marking a PR "ready for review" is the review-now button
 #   - PRs out of scope per the config (repo not included, ADP, auto-docs)
 #   - bot-authored PRs (GitHub Apps, plus the `bot_logins` service accounts,
-#     e.g. vbotbuildovich) unless the caller sets bot_pr_policy: review
+#     e.g. vbotbuildovich) unless the caller sets bot_pr_policy: review.
+#     A bot PR whose head branch matches review_bot_branch_patterns (the
+#     Slack drafter's slack-draft/* PRs) is reviewed like a human PR instead
 #   - PRs matching a caller's skip_branch_patterns / skip_title_patterns
 #   - fork PRs (derived in the gate from the PR object, not trusted
 #     from the caller's `if`, which cannot see head.repo on a
@@ -120,6 +122,16 @@ on:
           auto-docs / dependency-bump PRs across the docs repos).
         type: string
         default: 'vbotbuildovich'
+      review_bot_branch_patterns:
+        description: >-
+          Newline-separated shell globs. A bot-authored PR whose head branch
+          matches any of them is reviewed like a human PR, whatever
+          bot_pr_policy says. The default covers the Slack docs
+          drafter (docs-site slack-docs-draft), which opens its draft PRs as
+          vbotbuildovich on slack-draft/<thread> branches from facts in a
+          Slack thread; a writer marks them ready for review.
+        type: string
+        default: 'slack-draft/*'
       skip_branch_patterns:
         description: >-
           Newline-separated shell globs; a PR whose head branch matches any
@@ -460,6 +472,7 @@ jobs:
           IS_REQUEST: ${{ steps.request.outputs.is_request }}
           BOT_PR_POLICY: ${{ inputs.bot_pr_policy }}
           BOT_LOGINS: ${{ inputs.bot_logins }}
+          REVIEW_BOT_BRANCHES: ${{ inputs.review_bot_branch_patterns }}
           SKIP_BRANCHES: ${{ inputs.skip_branch_patterns }}
           SKIP_TITLES: ${{ inputs.skip_title_patterns }}
         run: |
@@ -527,6 +540,21 @@ jobs:
             for b in "${BOTS[@]}"; do
               [[ "${b// /}" == "$AUTHOR" ]] && IS_BOT=true
             done
+          fi
+          # A bot PR on a review_bot_branch_patterns branch carries content a
+          # person asked for (the Slack drafter), so it is reviewed like a
+          # human PR. Fork PRs never reach this point.
+          if [[ "$IS_BOT" == "true" ]]; then
+            while IFS= read -r pat; do
+              pat="${pat#"${pat%%[![:space:]]*}"}"; pat="${pat%"${pat##*[![:space:]]}"}"
+              [[ -z "$pat" ]] && continue
+              # shellcheck disable=SC2053  # unquoted on purpose: glob match
+              if [[ "$BRANCH" == $pat ]]; then
+                IS_BOT=false
+                echo "PR #$PR is bot-authored (@$AUTHOR) on '$BRANCH', which matches review_bot_branch_patterns '$pat': reviewed like a human PR."
+                break
+              fi
+            done <<< "${REVIEW_BOT_BRANCHES:-}"
           fi
           if [[ "$IS_BOT" == "true" && "$BOT_PR_POLICY" != "review" ]]; then
             skip "PR #$PR is bot-authored (@$AUTHOR) and bot_pr_policy=skip — not reviewed; run the deterministic checks by hand."
