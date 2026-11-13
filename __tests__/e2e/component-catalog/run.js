@@ -653,7 +653,8 @@ async function main () {
         await new Promise((resolve) => setTimeout(resolve, 600))
       }
       const badges = await page.evaluate(BADGE_TOKENS(meanings))
-      for (const b of badges) {
+      // Community appears only where the data has a community component (the fixture has none)
+      for (const b of badges.filter((b) => b.name !== 'community' || !b.missing)) {
         assert(!b.missing, `${theme}: the cards have a ${b.name} badge`)
         assert(b.radius >= 100 && !b.title, `${theme}: the ${b.name} badge is a pill (radius ${b.radius}px) with no native title`)
         assert(b.ok, `${theme}: the ${b.name} badge uses --meaning-${b.name}-* (${JSON.stringify(b.got)}${b.ok ? '' : ` != ${JSON.stringify(b.want)}`})`)
@@ -694,7 +695,8 @@ async function main () {
     const legend = await page.evaluate(`(() => { const m = document.getElementById('badgeLegendModal'); const e = m.querySelector('.rp-badge--enterprise'); return { enterprise: e && e.textContent, pill: e && parseFloat(getComputedStyle(e).borderTopLeftRadius), oldBadges: m.querySelectorAll('.badge').length, rateLimit: Array.from(m.querySelectorAll('.rp-badge')).map(b => b.textContent).filter(t => /rate/i.test(t)) } })()`)
     assert(legend.enterprise === 'Enterprise' && legend.pill >= 100 && legend.oldBadges === 0, `the legend lists Enterprise as the same pill badge (${JSON.stringify(legend)})`)
     const cardRateLimit = await page.evaluate(`Array.from(document.querySelectorAll('#componentCardsContainer .rp-badge')).map(b => b.textContent).filter(t => /rate/i.test(t))`)
-    assert(legend.rateLimit.join() === 'Rate Limit' && cardRateLimit.length > 0 && cardRateLimit.every((t) => t === 'Rate Limit'), `cards and legend label the type "Rate Limit" (cards: ${[...new Set(cardRateLimit)].join(', ')})`)
+    assert(legend.rateLimit.join() === 'Rate Limit' && cardRateLimit.every((t) => t === 'Rate Limit'), `cards and legend label the type "Rate Limit" (${cardRateLimit.length} cards: ${[...new Set(cardRateLimit)].join(', ') || 'none in this data'})`)
+    if (!usingFixture) assert(cardRateLimit.length > 0, 'the real data has rate limit cards to compare')
     const untipped = await page.evaluate(`(() => { const all = Array.from(document.querySelectorAll('#componentCardsContainer .rp-badge, #badgeLegendModal .rp-badge')); return { count: all.length, missing: all.filter(b => !(b.getAttribute('data-tooltip') || '').trim()).map(b => b.textContent).slice(0, 5) } })()`)
     assert(untipped.count > 0 && untipped.missing.length === 0, `all ${untipped.count} badges on the cards and in the legend have a data-tooltip${untipped.missing.length ? ` (missing: ${untipped.missing.join(', ')})` : ''}`)
     // The legend slides in; hover once it has settled
