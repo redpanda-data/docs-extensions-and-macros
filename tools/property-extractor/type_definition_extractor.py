@@ -75,6 +75,26 @@ class TypeDefinitionExtractor:
 
         return self.definitions
 
+    def _register_definition(self, qualified_name, definition):
+        """
+        Store a definition unless the name is already taken.
+
+        The first definition of a name wins, so the result depends only on the
+        (sorted) header order, not on which header the scan reaches last.
+
+        Returns:
+            bool: True if the definition was stored
+        """
+        existing = self.definitions.get(qualified_name)
+        if existing is not None:
+            logger.debug(
+                f"Duplicate type definition '{qualified_name}' in "
+                f"{definition.get('defined_in')}: keeping the one from {existing.get('defined_in')}"
+            )
+            return False
+        self.definitions[qualified_name] = definition
+        return True
+
     def _scan_directory(self, directory, relative_path):
         """
         Recursively scan a directory for C++ header files and extract definitions.
@@ -83,7 +103,10 @@ class TypeDefinitionExtractor:
             directory (Path): Directory to scan
             relative_path (str): Relative path for source references
         """
-        for header_file in directory.rglob('*.h'):
+        # Sort so every run reads headers in the same order. rglob order follows
+        # the filesystem, which differs between checkouts, and the first
+        # definition of a name wins (see _register_definition).
+        for header_file in sorted(directory.rglob('*.h')):
             try:
                 self._extract_from_file(header_file, relative_path)
             except Exception as e:
@@ -171,8 +194,8 @@ class TypeDefinitionExtractor:
                     definition["enum"] = [string_mappings.get(v, v) for v in values]
                     logger.debug(f"Found {len(string_mappings)} string mappings for enum: {qualified_name}")
 
-                self.definitions[qualified_name] = definition
-                self.enum_cache[qualified_name] = definition["enum"]
+                if self._register_definition(qualified_name, definition):
+                    self.enum_cache[qualified_name] = definition["enum"]
 
                 logger.debug(f"Found enum: {qualified_name} with {len(values)} values")
 
@@ -356,7 +379,7 @@ class TypeDefinitionExtractor:
                         definition["minimum"] = 0
                         definition["maximum"] = 18446744073709551615
 
-                self.definitions[qualified_name] = definition
+                self._register_definition(qualified_name, definition)
                 logger.debug(f"Found type alias: {qualified_name} = {alias_type} → {json_type}")
 
     def _resolve_alias_type(self, alias_type):
@@ -424,8 +447,8 @@ class TypeDefinitionExtractor:
                     "defined_in": str(file_path.relative_to(self.source_path))
                 }
 
-                self.definitions[qualified_name] = definition
-                self.struct_cache[qualified_name] = properties
+                if self._register_definition(qualified_name, definition):
+                    self.struct_cache[qualified_name] = properties
 
                 logger.debug(f"Found struct: {qualified_name} with {len(properties)} fields")
 
