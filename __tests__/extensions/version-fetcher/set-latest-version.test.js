@@ -300,6 +300,14 @@ describe('operator and Helm chart versions per docs version', () => {
     expect(helmChartLookups).toEqual(['v26.2.4'])
   })
 
+  it('passes the Helm chart index to every chart lookup', () => {
+    const helmChartIndex = ['26.2.6', '26.1.14']
+    const { helmChartIndexPassed } = runExtension(scenario({ versions: ['26.2', '26.1'], helmChartIndex }))
+
+    expect(helmChartIndexPassed.length).toBeGreaterThan(0)
+    for (const passed of helmChartIndexPassed) expect(passed).toEqual(helmChartIndex)
+  })
+
   it('pins 25.1 to its own operator and chart, not the newest chart', () => {
     // On release/v25.1.x the chart lives at a different path and its newest
     // published version (25.1.3) trails the operator (v25.1.4).

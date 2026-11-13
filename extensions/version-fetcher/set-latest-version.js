@@ -7,6 +7,7 @@ module.exports.register = function ({ config }) {
   const GetLatestRedpandaVersion = require('./get-latest-redpanda-version');
   const GetLatestDockerTag = require('./fetch-latest-docker-tag');
   const GetLatestHelmChartVersionFromOperator = require('./get-latest-redpanda-helm-version-from-operator');
+  const FetchHelmChartIndex = require('./fetch-helm-chart-index');
   const GetLatestConnectVersion = require('./get-latest-connect');
   const { latestStablePerLine, releaseLineOf, isOlderReleaseLine } = require('./release-lines');
   const logger = this.getLogger('set-latest-version-extension');
@@ -20,11 +21,11 @@ module.exports.register = function ({ config }) {
   const token = getGitHubApiToken();
 
   if (!token) {
-    // Unauthenticated requests still work for the public repos this
-    // extension queries (connect, redpanda-operator), but the Redpanda
-    // version now comes from the private streaming-enterprise repo, whose
-    // API 404s without a token -- the latest-redpanda-* attributes are then
-    // left unset and pages fall back to their antora.yml values.
+    // Unauthenticated requests still work for the public connect repo and
+    // the public Helm chart index, but the Redpanda version comes from the
+    // private streaming-enterprise repo, whose API 404s without a token, so
+    // the latest-redpanda-* attributes are then left unset and pages fall
+    // back to their antora.yml values.
     logger.warn('GitHub token not set (REDPANDA_GITHUB_TOKEN, GITHUB_TOKEN, GH_TOKEN, or GIT_CREDENTIALS). The Redpanda version lookup against the private streaming-enterprise repo will fail and leave latest-redpanda-* attributes unset; other lookups proceed unauthenticated.');
   }
 
@@ -49,6 +50,7 @@ module.exports.register = function ({ config }) {
         latestConsoleResult,
         latestOperatorResult,
         latestConnectResult,
+        helmChartIndexResult,
       ] = await Promise.allSettled([
         // streaming-enterprise, not the frozen public 'redpanda' repo: the public
         // repo still answers API calls but stopped receiving releases on
@@ -65,7 +67,12 @@ module.exports.register = function ({ config }) {
         // first page as newer tags are pushed.
         GetLatestDockerTag(dockerNamespace, 'redpanda-operator', logger, { maxPages: 3 }),
         GetLatestConnectVersion(github, owner, 'connect', logger),
+        // Published chart versions from the public Helm repository. The
+        // chart source lives in redpanda-operator, which is private, so
+        // without this the chart lookups need a token that can read it.
+        FetchHelmChartIndex({ logger }),
       ]);
+      const chartVersions = helmChartIndexResult.status === 'fulfilled' ? helmChartIndexResult.value : null;
       
       // Get the Helm chart version after we have the operator version (for both stable and beta)
       let latestHelmChartResult = { status: 'rejected', reason: 'Operator result not fulfilled' };
@@ -78,7 +85,8 @@ module.exports.register = function ({ config }) {
             'redpanda-operator',
             latestOperatorResult.value?.latestStableRelease,
             latestOperatorResult.value?.latestBetaRelease,
-            logger
+            logger,
+            { chartVersions }
           );
           
           latestHelmChartResult = { 
@@ -125,7 +133,7 @@ module.exports.register = function ({ config }) {
       await Promise.all([...lineVersions].map(async ([line, resolved]) => {
         if (!resolved.operator) return;
         try {
-          const chart = await GetLatestHelmChartVersionFromOperator(github, owner, 'redpanda-operator', resolved.operator, null, logger);
+          const chart = await GetLatestHelmChartVersionFromOperator(github, owner, 'redpanda-operator', resolved.operator, null, logger, { chartVersions });
           resolved.helmChart = chart?.latestStableRelease || null;
         } catch (error) {
           logger.warn(`Helm chart lookup for the ${line} line failed: ${error.message || error}`);
