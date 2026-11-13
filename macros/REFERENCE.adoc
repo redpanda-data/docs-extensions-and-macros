@@ -718,6 +718,16 @@ The types are fetched from the `flatComponentsData` that's generated in the Comp
 component_table::[]
 ```
 
+=== Use case filter
+
+The catalog has a *Use case* filter when at least one component in the view has a use case. Use cases come from the Connect repository: the last column of `internal/plugins/info.csv`, `use_cases`, lists use-case IDs separated by `;`, and `catalog.json` carries the same IDs as a `use_cases` array. The `generate-rp-connect-info` extension reads the catalog's field, or the `info.csv` column when the catalog has none. A connector's use cases are the union across its types.
+
+Each ID must be a concept in the use-case scheme of the docs taxonomy (`shared/modules/ROOT/attachments/taxonomy.yml`), and the filter shows the concept's `prefLabel`. The build logs a warning for an unknown ID, naming the component and the ID, and drops it. A build without the taxonomy, or of a Connect release without the column, has no Use case filter.
+
+Nothing is selected at first, so every card shows. Selecting use cases keeps the cards that have any of them, adds `?usecase=<id>` to the URL, and shows a *Solutions for <use case>* list above the cards. That list comes from `assets/data/solutions.json`, which the `solutions-catalog` extension publishes. The page fetches it when a use case is first selected and matches solutions on taxonomy IDs, not labels. Deprecated solutions are left out. When the build has no solutions catalog, or no solution matches, the list does not appear.
+
+Cards with use cases also show them as chips in a *Use case* badge group.
+
 === Registration
 
 ```yaml

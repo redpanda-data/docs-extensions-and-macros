@@ -1,0 +1,34 @@
+{
+  "generatedAt": "2026-11-13T00:00:00.000Z",
+  "siteUrl": "",
+  "solutions": [
+    {
+      "id": "cdc-to-lakehouse",
+      "title": "CDC to lakehouse",
+      "url": "/solutions/cdc-to-lakehouse/",
+      "status": "published",
+      "useCases": ["Change data capture", "Data lakehouse"],
+      "concepts": {
+        "useCases": [
+          { "value": "Change data capture", "id": "change-data-capture", "label": "Change data capture" },
+          { "value": "Data lakehouse", "id": "data-lakehouse", "label": "Data lakehouse" }
+        ]
+      }
+    },
+    {
+      "id": "sports-data-fanout",
+      "title": "Sports data fan-out",
+      "url": "/solutions/sports-data-fanout/",
+      "status": "published",
+      "useCases": ["Data fan-out"],
+      "concepts": { "useCases": [{ "value": "Data fan-out", "id": "data-fan-out", "label": "Data fan-out" }] }
+    },
+    {
+      "id": "retired-cdc",
+      "title": "Retired CDC solution",
+      "url": "/solutions/retired-cdc/",
+      "status": "deprecated",
+      "useCases": ["change-data-capture"]
+    }
+  ]
+}

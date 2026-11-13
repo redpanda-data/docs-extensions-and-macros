@@ -100,7 +100,62 @@ const EMOJI_ICONS = {
 }
 
 const logger = require('@antora/logger')('rp-connect-components-macro')
-const { isCloudAvailable, typeFromRelative } = require('../extensions/util/connect-catalog')
+const { isCloudAvailable, typeFromRelative, useCasesByConnector } = require('../extensions/util/connect-catalog')
+
+// Where the solutions-catalog extension publishes the Redpanda Solutions
+// catalog, relative to the site root. The macro cannot read the
+// `solutions-catalog` component attribute: that extension sets it at
+// documentsConverted, after every page (and so this macro) has converted. The
+// page fetches the published file instead, only once a use case is selected.
+const SOLUTIONS_CATALOG_PATH = 'assets/data/solutions.json'
+
+/**
+ * The solutions in a solutions.json catalog that have any of these use-case
+ * IDs, in catalog order. Matches on taxonomy concept IDs (`concepts.useCases`,
+ * and authored `useCases` values that are IDs), never on labels. Deprecated
+ * solutions are left out. Runs in the browser (injected with toString) and in
+ * unit tests, so it uses no outside names.
+ *
+ * @param {Object|null} catalog - the parsed solutions.json
+ * @param {Array<string>} ids - selected use-case IDs
+ * @returns {Array<Object>}
+ */
+function matchSolutions (catalog, ids) {
+  const list = catalog && Array.isArray(catalog.solutions) ? catalog.solutions : []
+  const wanted = (ids || []).filter(Boolean)
+  if (!wanted.length) return []
+  return list.filter(function (solution) {
+    if (!solution || !solution.url || !solution.title || solution.status === 'deprecated') return false
+    const concepts = (solution.concepts && Array.isArray(solution.concepts.useCases)) ? solution.concepts.useCases : []
+    const own = concepts.map(function (c) { return c && c.id }).concat(Array.isArray(solution.useCases) ? solution.useCases : [])
+    return wanted.some(function (id) { return own.indexOf(id) !== -1 })
+  })
+}
+
+/**
+ * The "Solutions for <use case>" block above the cards: a heading and one link
+ * per solution. Every value goes through `escape` (the shared escapeHtml).
+ * Runs in the browser (injected with toString) and in unit tests.
+ *
+ * @param {Array<Object>} solutions - from matchSolutions
+ * @param {Array<string>} ids - selected use-case IDs
+ * @param {Object<string,string>} labels - use-case ID -> label
+ * @param {Function} escape
+ * @returns {string} HTML, empty when there are no solutions
+ */
+function solutionsMarkup (solutions, ids, labels, escape) {
+  if (!solutions || !solutions.length) return ''
+  const names = ids.map(function (id) { return (labels && labels[id]) || id })
+  const items = solutions.map(function (solution) {
+    return '<li><a href="' + escape(solution.url) + '">' + escape(solution.title) + '</a></li>'
+  })
+  return '<h3 class="catalog-solutions-title">Solutions for ' + escape(names.join(' or ')) + '</h3>' +
+    '<ul class="catalog-solutions-list">' + items.join('') + '</ul>'
+}
+
+module.exports.matchSolutions = matchSolutions
+module.exports.solutionsMarkup = solutionsMarkup
+module.exports.SOLUTIONS_CATALOG_PATH = SOLUTIONS_CATALOG_PATH
 
 /**
  * Registers macros for use in Redpanda Connect contexts in the Redpanda documentation.
@@ -127,6 +182,12 @@ module.exports.register = function (registry, context) {
     const enterpriseFilter = enterpriseFilterElement
       ? Array.from(enterpriseFilterElement.querySelectorAll('input[type="checkbox"]:checked')).map(checkbox => checkbox.value)
       : [];
+    // Use case filter (optional): nothing checked means no filter, since most
+    // components have no use case
+    const useCaseFilterElement = document.querySelector('#useCaseFilterMenu');
+    const useCaseFilter = useCaseFilterElement
+      ? Array.from(useCaseFilterElement.querySelectorAll('input[type="checkbox"]:checked')).map(checkbox => checkbox.value)
+      : [];
     const params = getQueryParams();
     const enterpriseSupportFilter = params.support === 'enterprise';  // Check if 'support=enterprise' is in the URL
     const cloudSupportFilterFromUrl = params.support === 'cloud';  // Check if 'support=cloud' is in the URL
@@ -141,6 +202,7 @@ module.exports.register = function (registry, context) {
       const supportText = (card.dataset.support || '').toLowerCase();
       const enterpriseSupportText = (card.dataset.licensed || '').toLowerCase();  // Yes or No
       const cloudSupportText = (card.dataset.cloud || '').toLowerCase();  // Yes or No
+      const useCaseText = (card.dataset.useCases || '').split(',').filter(Boolean);
       // Check cloud support filter
       let cloudSupportMatch = true;
       if (cloudSupportFilter.length > 0 && !cloudSupportFilter.includes('')) {
@@ -169,7 +231,8 @@ module.exports.register = function (registry, context) {
          (!enterpriseSupportFilter || supportText.includes('enterprise') || enterpriseSupportText === 'yes') && // Filter by enterprise support if 'support=enterprise' is in the URL
          (!cloudSupportFilterFromUrl || supportText.includes('cloud') || cloudSupportText === 'yes') &&  // Filter by cloud support if 'support=cloud' is in the URL
          cloudSupportMatch &&  // Filter by cloud support dropdown
-         enterpriseLicenseMatch  // Filter by enterprise license dropdown
+         enterpriseLicenseMatch &&  // Filter by enterprise license dropdown
+         (useCaseFilter.length === 0 || useCaseFilter.some(value => useCaseText.includes(value)))  // Filter by use case if any is checked
         );
 
       if (showCard) {
@@ -194,6 +257,19 @@ module.exports.register = function (registry, context) {
     if (enterpriseMenu) {
       updateDropdownText('enterpriseFilter', 'All Options Selected', 'Options Selected');
     }
+    if (useCaseFilterElement) {
+      // Not updateDropdownText: here nothing checked is the unfiltered state
+      const useCaseToggleText = document.querySelector('#useCaseFilterToggle .dropdown-text');
+      if (useCaseToggleText) {
+        const checked = useCaseFilterElement.querySelectorAll('input[type="checkbox"]:checked');
+        useCaseToggleText.textContent = checked.length === 0
+          ? 'All Use Cases'
+          : checked.length === 1
+            ? checked[0].nextElementSibling.textContent
+            : checked.length + ' Use Cases Selected';
+      }
+      if (typeof window.updateCatalogSolutions === 'function') window.updateCatalogSolutions(useCaseFilter);
+    }
     // Update URL parameters based on current filter selections
     updateURLParameters();
   }
@@ -215,6 +291,7 @@ module.exports.register = function (registry, context) {
     const enterpriseFilter = enterpriseFilterElement
       ? Array.from(enterpriseFilterElement.querySelectorAll('input[type="checkbox"]:checked')).map(checkbox => checkbox.value)
       : [];
+    const useCaseFilter = Array.from(document.querySelectorAll('#useCaseFilterMenu input[type="checkbox"]:checked')).map(checkbox => checkbox.value);
     // Add parameters to URL if they have values
     if (nameInput) params.set('search', nameInput);
     if (typeFilter.length > 0) params.set('type', typeFilter.join(','));
@@ -225,6 +302,7 @@ module.exports.register = function (registry, context) {
     if (enterpriseFilter.length > 0 && !enterpriseFilter.includes('')) {
       params.set('enterprise', enterpriseFilter.join(','));
     }
+    if (useCaseFilter.length > 0) params.set('usecase', useCaseFilter.join(','));
     // Update the URL without refreshing the page
     const newURL = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
     window.history.replaceState({}, '', newURL);
@@ -273,6 +351,12 @@ module.exports.register = function (registry, context) {
    * own `uiRootPath` from that same value, so this returns exactly what the UI
    * uses for bundle assets, at any page depth.
    */
+  /** Path from the page being converted to the site root (see resolveUiRootPath). */
+  function resolveSiteRootPath () {
+    const rootPath = context?.file?.pub?.rootPath;
+    return typeof rootPath === 'string' && rootPath ? rootPath : '';
+  }
+
   function resolveUiRootPath () {
     // Antora's default ui.output_dir, which every Redpanda playbook uses.
     const uiOutputDir = '_';
@@ -338,6 +422,8 @@ module.exports.register = function (registry, context) {
    * @returns {object} - The processed connectors data structure.
    */
   function processConnectors(parsedData) {
+    // A connector's use cases are the union across its types
+    const useCases = useCasesByConnector(parsedData.data);
     return parsedData.data.reduce((connectors, row) => {
       const { connector, commercial_name, type, support_level, is_licensed, redpandaConnectUrl, redpandaCloudUrl, description } = row;
       // Available in standard or GPU Cloud pipelines
@@ -349,7 +435,8 @@ module.exports.register = function (registry, context) {
           types: new Map(),
           isLicensed: is_licensed,
           isCloudConnectorSupported: false,
-          description: description || '' // Add description from CSV
+          description: description || '', // Add description from CSV
+          useCases: useCases.get(connector) || []
         };
       } else if (!connectors[connector].description && description) {
         // Each row is one type's page: take the first type that has a description
@@ -551,7 +638,8 @@ module.exports.register = function (registry, context) {
    *   - Enterprise licensing badge
    *   - Cloud support badge
    */
-  function generateConnectorsHTMLCards(connectors, sqlDrivers, isCloud, showAllInfo, commercialNamesMap, uiRootPath) {
+  /** The [connector, details] entries that get a card in this view. */
+  function shownConnectorEntries(connectors, isCloud) {
     return Object.entries(connectors)
       .filter(([_, details]) => {
         // SQL drivers are not components. They are listed as driver badges on the
@@ -563,9 +651,18 @@ module.exports.register = function (registry, context) {
         if (isSqlDriverOnly) return false;
         // If isCloud is true, filter out rows that do not support cloud
         return !isCloud || details.isCloudConnectorSupported;
-      })
+      });
+  }
+
+  function generateConnectorsHTMLCards(connectors, sqlDrivers, isCloud, showAllInfo, commercialNamesMap, uiRootPath, useCaseLabels = {}) {
+    return shownConnectorEntries(connectors, isCloud)
       .map(([connector, details], id) => {
         const { types, isCloudConnectorSupported, isLicensed } = details;
+        // Only use cases the filter offers (resolved against the taxonomy)
+        const useCases = (details.useCases || []).filter(useCase => useCaseLabels[useCase]);
+        const useCaseBadges = useCases
+          .map(useCase => `<span class="badge badge-use-case" title="Use case: ${escapeHtml(useCaseLabels[useCase])}">${escapeHtml(useCaseLabels[useCase])}</span>`)
+          .join(' ');
 
         // The Cloud view lists only the types available in Cloud, in the badges
         // and in the type filter (http_server is an input in Cloud, not an output).
@@ -709,7 +806,8 @@ module.exports.register = function (registry, context) {
                data-types="${escapeHtml(typesDataAttr.toLowerCase())}"
                data-support="${escapeHtml(supportDataAttr.toLowerCase())}"
                data-licensed="${escapeHtml(isLicensed.toLowerCase())}"
-               data-cloud="${isCloudConnectorSupported ? 'yes' : 'no'}">
+               data-cloud="${isCloudConnectorSupported ? 'yes' : 'no'}"${useCases.length ? `
+               data-use-cases="${escapeHtml(useCases.join(','))}"` : ''}>
             <div class="card-header">
               <div class="card-header-content">
                 ${firstUrl
@@ -755,6 +853,13 @@ module.exports.register = function (registry, context) {
                   <div class="badge-group-badges">
                     ${cloudBadge}
                     ${enterpriseBadge}
+                  </div>
+                </div>` : ''}
+                ${useCaseBadges ? `
+                <div class="badge-group">
+                  <span class="badge-group-label">Use case</span>
+                  <div class="badge-group-badges">
+                    ${useCaseBadges}
                   </div>
                 </div>` : ''}
               </div>
@@ -845,6 +950,16 @@ module.exports.register = function (registry, context) {
             </label>`)
           .join('');
 
+      // Use cases: the ones generate-rp-connect-info resolved against the docs
+      // taxonomy (csvData.useCases, in taxonomy order), offered only when a
+      // card in this view has one. No data, no filter.
+      const connectors = processConnectors(csvData);
+      const shownUseCaseIds = new Set(shownConnectorEntries(connectors, isCloud).flatMap(([, details]) => details.useCases));
+      const useCaseOptions = (Array.isArray(csvData.useCases) ? csvData.useCases : [])
+        .filter(useCase => useCase && useCase.id && useCase.label && shownUseCaseIds.has(useCase.id));
+      const useCaseLabels = Object.fromEntries(useCaseOptions.map(({ id, label }) => [id, label]));
+      const solutionsUrl = `${resolveSiteRootPath() || ''}/${SOLUTIONS_CATALOG_PATH}`;
+
       let tableHtml = `
         <script>
           // Wrap everything to avoid breaking page scripts
@@ -862,6 +977,44 @@ module.exports.register = function (registry, context) {
 
               window.filterComponentTable = ${filterComponentTable.toString()};
           window.updateURLParameters = ${updateURLParameters.toString()};
+          ${useCaseOptions.length ? `
+          // Solutions for the selected use cases, from the solutions catalog the
+          // solutions-catalog extension publishes. Fetched once, on first use; a
+          // build without it (or a failed fetch) shows nothing.
+          (function() {
+            const escapeHtml = ${escapeHtml.toString()};
+            const matchSolutions = ${matchSolutions.toString()};
+            const solutionsMarkup = ${solutionsMarkup.toString()};
+            let catalogPromise = null;
+            let latest = 0;
+            const loadCatalog = function(url) {
+              if (!catalogPromise) {
+                catalogPromise = fetch(url, { headers: { Accept: 'application/json' } })
+                  .then(response => (response.ok ? response.json() : null))
+                  .catch(() => null);
+              }
+              return catalogPromise;
+            };
+            window.updateCatalogSolutions = function(ids) {
+              const panel = document.getElementById('componentCatalogSolutions');
+              if (!panel) return;
+              const request = ++latest;
+              const clear = function() {
+                panel.hidden = true;
+                panel.innerHTML = '';
+              };
+              if (!ids || !ids.length) return clear();
+              let labels = {};
+              try { labels = JSON.parse(panel.dataset.useCaseLabels || '{}'); } catch (e) {}
+              loadCatalog(panel.dataset.solutionsUrl).then(function(catalog) {
+                if (request !== latest) return; // a newer selection won
+                const html = solutionsMarkup(matchSolutions(catalog, ids), ids, labels, escapeHtml);
+                if (!html) return clear();
+                panel.innerHTML = html;
+                panel.hidden = false;
+              });
+            };
+          })();` : ''}
 
           // Helper to close a specific dropdown
           window.closeDropdown = function(menu) {
@@ -1038,6 +1191,27 @@ module.exports.register = function (registry, context) {
             </div>
           </div>
       `;
+
+      if (useCaseOptions.length) {
+        tableHtml += `
+          <div class="filter-group">
+            <label for="useCaseFilterToggle">Use case:</label>
+            <div class="dropdown-checkbox-wrapper">
+              <button type="button" class="dropdown-checkbox-toggle" id="useCaseFilterToggle" aria-expanded="false" aria-haspopup="true" aria-controls="useCaseFilterMenu">
+                <span class="dropdown-text">All Use Cases</span>
+                <span class="dropdown-arrow">▼</span>
+              </button>
+              <div class="dropdown-checkbox-menu" id="useCaseFilterMenu" role="menu" aria-labelledby="useCaseFilterToggle">
+                ${useCaseOptions.map(({ id, label }) => `
+                <label class="dropdown-checkbox-option">
+                  <input type="checkbox" value="${escapeHtml(id)}">
+                  <span>${escapeHtml(label)}</span>
+                </label>`).join('')}
+              </div>
+            </div>
+          </div>
+        `;
+      }
 
       if (!isCloud) {
         tableHtml += `
@@ -1372,6 +1546,45 @@ module.exports.register = function (registry, context) {
             background: #fae8ff;
           }
 
+          /* Use case chips: neutral, the same size as the Availability badges */
+          .badge-use-case {
+            padding: 0.25rem 0.6rem;
+            font-size: 0.65rem;
+            font-weight: 500;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            background: #f9fafb;
+            color: #374151;
+            white-space: nowrap;
+          }
+
+          .catalog-solutions {
+            margin-top: 1rem;
+            padding: 0.75rem 1rem;
+            border: 1px solid #e0e0e0;
+            border-left: 4px solid #e2401b;
+            border-radius: 8px;
+          }
+
+          .catalog-solutions[hidden] {
+            display: none;
+          }
+
+          .catalog-solutions .catalog-solutions-title {
+            margin: 0 0 0.5rem 0;
+            font-size: 1rem;
+          }
+
+          .catalog-solutions .catalog-solutions-list {
+            margin: 0;
+            padding-left: 1.25rem;
+          }
+
+          html[data-theme="dark"] .catalog-solutions {
+            border-color: rgba(255, 255, 255, 0.15);
+            border-left-color: #f15d61;
+          }
+
           .badge-legend-button {
             background: #f5f5f5;
             border: 1px solid #e0e0e0;
@@ -1656,8 +1869,11 @@ module.exports.register = function (registry, context) {
             }
           }
         </style>
+        ${useCaseOptions.length ? `<div class="catalog-solutions" id="componentCatalogSolutions" aria-live="polite" hidden
+             data-solutions-url="${escapeHtml(solutionsUrl)}"
+             data-use-case-labels="${escapeHtml(JSON.stringify(useCaseLabels))}"></div>` : ''}
         <div class="component-cards-container" id="componentCardsContainer">
-          ${generateConnectorsHTMLCards(processConnectors(csvData), sqlDriversData, isCloud, showAllInfo, commercialNamesMap, uiRootPath)}
+          ${generateConnectorsHTMLCards(connectors, sqlDriversData, isCloud, showAllInfo, commercialNamesMap, uiRootPath, useCaseLabels)}
         </div>
         <script>
           // Badge legend modal functions
@@ -1889,6 +2105,14 @@ module.exports.register = function (registry, context) {
                 });
               }
 
+              const useCaseFilterMenu = document.getElementById('useCaseFilterMenu');
+              if (params.usecase && useCaseFilterMenu) {
+                const useCases = params.usecase.split(',');
+                useCaseFilterMenu.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                  cb.checked = useCases.includes(cb.value);
+                });
+              }
+
               if (params.enterprise && enterpriseFilterMenu) {
                 const enterpriseOptions = params.enterprise.split(',');
                 // First uncheck all checkboxes
@@ -1946,6 +2170,11 @@ module.exports.register = function (registry, context) {
                   const enterpriseFilterToggle = document.getElementById('enterpriseFilterToggle');
                   if (enterpriseFilterToggle) {
                     enterpriseFilterToggle.addEventListener('click', () => window.toggleDropdownCheckbox('enterpriseFilter'));
+                  }
+
+                  const useCaseFilterToggle = document.getElementById('useCaseFilterToggle');
+                  if (useCaseFilterToggle) {
+                    useCaseFilterToggle.addEventListener('click', () => window.toggleDropdownCheckbox('useCaseFilter'));
                   }
 
                   const componentTypeToggle = document.getElementById('componentTypeDropdownToggle');

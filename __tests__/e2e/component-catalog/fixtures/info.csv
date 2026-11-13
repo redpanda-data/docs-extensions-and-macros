@@ -1,0 +1,8 @@
+name,type,commercial_name,support,deprecated,cloud,cloud_with_gpu,cloud_unsupported_reason,use_cases
+iceberg,output,Apache Iceberg,certified,n,y,y,,data-lakehouse
+kafka,input,Apache Kafka,certified,n,y,y,,
+kafka,output,Apache Kafka,certified,n,y,y,,
+mysql_cdc,input,MySQL CDC,enterprise,n,y,y,,change-data-capture
+postgres_cdc,input,PostgreSQL CDC,enterprise,n,y,y,,change-data-capture;stream-processing
+schema_registry_decode,processor,Schema Registry,certified,n,y,y,,schema-management
+stdout,output,stdout,certified,n,n,n,,

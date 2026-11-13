@@ -5,6 +5,7 @@ const fs = require('fs')
 const path = require('path')
 const Papa = require('papaparse')
 const catalogUtil = require('./util/connect-catalog')
+const { getTaxonomy } = require('../extension-utils/taxonomy')
 
 // Default configuration - can be overridden via playbook config
 const DEFAULTS = {
@@ -115,9 +116,9 @@ module.exports.register = function ({ config }) {
   let translatedRows = null
 
   // Use 'on' and return the promise so Antora waits for async completion
-  this.on('contentClassified', ({ contentCatalog, playbook }) => {
+  this.on('contentClassified', ({ contentCatalog, playbook, siteCatalog }) => {
     assertConnectReferencePresent(contentCatalog, { connectSources: connectSourcesOf(playbook) })
-    return processContent(contentCatalog)
+    return processContent(contentCatalog, siteCatalog)
   })
 
   // Set sticky-bar page attributes (type context switcher and availability badges) so the UI
@@ -131,7 +132,7 @@ module.exports.register = function ({ config }) {
     setStickyBarPageAttributes(contentCatalog, translatedRows, logger)
   })
 
-  async function processContent (contentCatalog) {
+  async function processContent (contentCatalog, siteCatalog) {
     const redpandaConnect = contentCatalog.getComponents().find(component => component.name === 'connect')
     const redpandaCloud = contentCatalog.getComponents().find(component => component.name === 'cloud-data-platform')
     const preview = contentCatalog.getComponents().find(component => component.name === 'preview')
@@ -149,6 +150,12 @@ module.exports.register = function ({ config }) {
       const enrichedData = translateCsvData(parsedData, pages, logger)
       parsedData.data = enrichedData
       translatedRows = enrichedData
+      // The use cases the catalog's Use case filter offers, as { id, label }.
+      // Only resolved when some row has use cases, so a build of an older
+      // Connect release does not look for the taxonomy at all.
+      parsedData.useCases = enrichedData.some((row) => row.use_cases.length)
+        ? resolveUseCases(enrichedData, getTaxonomy({ contentCatalog, siteCatalog, logger }), logger)
+        : []
 
       // Set csvData on all relevant components
       const componentsToEnrich = [redpandaConnect, redpandaCloud, preview].filter(Boolean)
@@ -212,6 +219,18 @@ module.exports.register = function ({ config }) {
       logger.warn(`Could not fetch info.csv for the SQL driver rows, so the SQL driver support list is empty: ${error.message}`)
     }
     if (!catalogRows) return csvRows
+    // A catalog.json without a use_cases field (a Connect release older than
+    // the field) takes each component's use cases from info.csv instead.
+    const csvUseCases = new Map()
+    for (const row of csvRows) {
+      if (row.use_cases === undefined) continue
+      csvUseCases.set(`${String(row.name || '').trim()}:${String(row.type || '').trim()}`, row.use_cases)
+    }
+    if (csvUseCases.size) {
+      for (const row of catalogRows) {
+        if (row.use_cases === undefined) row.use_cases = csvUseCases.get(`${row.name}:${row.type}`) || ''
+      }
+    }
     const isDriver = (row) => String(row.type || '').trim().toLowerCase() === 'sql_driver'
     return [...catalogRows, ...csvRows.filter(isDriver)]
   }
@@ -419,6 +438,8 @@ module.exports.register = function ({ config }) {
         categories: Array.isArray(trimmedRow.categories) ? trimmedRow.categories : undefined,
         commercial_names: Array.isArray(trimmedRow.commercial_names) ? trimmedRow.commercial_names : undefined,
         cgo_only: trimmedRow.cgo_only === 'y' ? 'y' : 'n',
+        // Raw IDs here; resolveUseCases checks them against the taxonomy
+        use_cases: catalogUtil.parseUseCases(trimmedRow.use_cases),
         redpandaConnectUrl,
         redpandaCloudUrl,
         description
@@ -623,6 +644,57 @@ module.exports.register = function ({ config }) {
   }
 }
 
+const USE_CASE_SCHEME = 'use-case'
+
+/**
+ * Checks each row's use-case IDs against the use-case scheme of the docs
+ * taxonomy (shared/modules/ROOT/attachments/taxonomy.yml). A known ID stays; a
+ * deprecated one becomes its replacement; anything else is dropped with a
+ * warning that names the component and the ID. Without the taxonomy there are
+ * no labels to show, so every row loses its use cases and the catalog has no
+ * Use case filter. Mutates `row.use_cases`. Exported for unit testing.
+ *
+ * @param {Array<Object>} rows - translated rows, `use_cases` holding raw IDs
+ * @param {Object|null} taxonomy - from extension-utils/taxonomy getTaxonomy
+ * @param {Object} logger
+ * @returns {Array<{id: string, label: string}>} the use cases any component
+ *   has, in taxonomy order, labeled with the concept's prefLabel
+ */
+function resolveUseCases (rows, taxonomy, logger) {
+  if (!taxonomy) {
+    logger.warn('Redpanda Connect use cases are ignored: the docs taxonomy (shared/modules/ROOT/attachments/taxonomy.yml) is not in this build, so the component catalog has no Use case filter')
+    for (const row of rows) row.use_cases = []
+    return []
+  }
+  const warned = new Set()
+  const warnOnce = (key, message) => {
+    if (warned.has(key)) return
+    warned.add(key)
+    logger.warn(message)
+  }
+  const used = new Set()
+  for (const row of rows) {
+    const ids = []
+    for (const value of row.use_cases) {
+      const hit = taxonomy.resolve(value, { schemes: [USE_CASE_SCHEME], prefer: 'id' })
+      // IDs only: a label that happens to match is still not the contract
+      if (!hit || hit.via !== 'id') {
+        warnOnce(`${row.connector}:${value}`, `Unknown use case "${value}" on Redpanda Connect component ${row.connector}, dropped: use-case IDs must come from the use-case scheme of the docs taxonomy`)
+        continue
+      }
+      if (hit.deprecated) {
+        warnOnce(`${row.connector}:${value}`, `Use case "${value}" on Redpanda Connect component ${row.connector} is deprecated${hit.ids.length ? `, so ${hit.ids.join(', ')} is used instead` : ' and has no replacement, dropped'}`)
+      }
+      for (const id of hit.ids) if (!ids.includes(id)) ids.push(id)
+    }
+    row.use_cases = ids
+    if (String(row.type || '').toLowerCase() !== 'sql_driver') ids.forEach((id) => used.add(id))
+  }
+  return taxonomy.conceptIds(USE_CASE_SCHEME)
+    .filter((id) => used.has(id))
+    .map((id) => ({ id, label: taxonomy.label(id) }))
+}
+
 const DESCRIPTION_MAX_LENGTH = 150
 
 /**
@@ -819,5 +891,6 @@ function parseHeaderAttributes (contents) {
   return attributes
 }
 
+module.exports.resolveUseCases = resolveUseCases
 module.exports.extractDescription = extractDescription
 module.exports.cleanDescription = cleanDescription

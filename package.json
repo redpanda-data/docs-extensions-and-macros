@@ -26,6 +26,7 @@
     "test": "jest",
     "test:unit": "jest --config jest.unit.config.js",
     "test:e2e": "jest __tests__/e2e/",
+    "test:catalog-e2e": "node __tests__/e2e/component-catalog/run.js",
     "test:mcp": "jest __tests__/mcp/",
     "test:mcp:integration": "jest __tests__/mcp/integration.test.js",
     "test:mcp:contract": "jest __tests__/mcp/cli-contract.test.js",

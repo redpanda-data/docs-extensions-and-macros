@@ -39,11 +39,11 @@ const CSV_FIXTURE = [
 // two levels down gets (for example /preview/component-catalog/); the real
 // /connect/components/about/ page is one level deeper. Passing an absolute path
 // here would hide any depth bug, so the default is a genuine Antora value.
-function renderComponentTable ({ attributes = { all: 'all' }, docAttributes, csv = CSV_FIXTURE, rootPath = '../..', file } = {}) {
+function renderComponentTable ({ attributes = { all: 'all' }, docAttributes, csv = CSV_FIXTURE, rootPath = '../..', file, csvData: data } = {}) {
   jest.resetModules()
   const macro = require('../../macros/rp-connect-components.js')
   const { registry, processors } = createCapturingRegistry()
-  const csvData = Papa.parse(csv, { header: true, skipEmptyLines: true })
+  const csvData = data || Papa.parse(csv, { header: true, skipEmptyLines: true })
   const context = {
     config: { attributes: { csvData, commercialNamesMap: {} } },
     file: file === undefined ? { pub: { rootPath } } : file
@@ -655,6 +655,140 @@ describe('rp-connect-components macro', () => {
         { component: 'connect', module: 'components' }
       )
       expect(whatsNewUrl).toBe('../../../get-started/whats-new')
+    })
+  })
+})
+
+describe('component_table use cases', () => {
+  const { escapeHtml } = require('../../extension-utils/html-utils')
+  const { matchSolutions, solutionsMarkup } = require('../../macros/rp-connect-components.js')
+
+  // Translated rows as generate-rp-connect-info hands them over: use_cases is
+  // an array of taxonomy IDs, and csvData.useCases labels the ones in use.
+  const row = (connector, type, useCases, extra = {}) => ({
+    connector,
+    commercial_name: connector,
+    type,
+    support_level: 'certified',
+    is_cloud_supported: 'y',
+    is_licensed: 'No',
+    redpandaConnectUrl: `/connect/components/${type}s/${connector}/`,
+    redpandaCloudUrl: '',
+    description: '',
+    use_cases: useCases,
+    ...extra
+  })
+  const data = (rows, useCases) => ({ data: rows, useCases })
+  const USE_CASES = [
+    { id: 'change-data-capture', label: 'Change data capture' },
+    { id: 'stream-processing', label: 'Stream processing' }
+  ]
+  const ROWS = [
+    row('postgres_cdc', 'input', ['change-data-capture']),
+    row('kafka', 'input', ['stream-processing']),
+    row('kafka', 'output', ['change-data-capture']),
+    row('stdout', 'output', [])
+  ]
+
+  test('renders a Use case filter with the taxonomy labels, nothing checked', () => {
+    const html = renderComponentTable({ csvData: data(ROWS, USE_CASES) })
+    expect(html).toContain('<label for="useCaseFilterToggle">Use case:</label>')
+    expect(html).toMatch(/id="useCaseFilterToggle" aria-expanded="false" aria-haspopup="true" aria-controls="useCaseFilterMenu"/)
+    expect(html).toContain('<span class="dropdown-text">All Use Cases</span>')
+    const menu = html.slice(html.indexOf('id="useCaseFilterMenu"'), html.indexOf('</div>', html.indexOf('id="useCaseFilterMenu"')))
+    expect(menu).toContain('<input type="checkbox" value="change-data-capture">')
+    expect(menu).toContain('<span>Change data capture</span>')
+    expect(menu).toContain('<span>Stream processing</span>')
+    expect(menu).not.toContain('checked')
+  })
+
+  test('puts the union of a connector\'s use cases on its card, as data and chips', () => {
+    const html = renderComponentTable({ csvData: data(ROWS, USE_CASES) })
+    const kafka = cardFor(html, 'kafka')
+    expect(kafka).toContain('data-use-cases="stream-processing,change-data-capture"')
+    expect(kafka).toContain('<span class="badge-group-label">Use case</span>')
+    expect(kafka).toContain('<span class="badge badge-use-case" title="Use case: Stream processing">Stream processing</span>')
+    const stdout = cardFor(html, 'stdout')
+    expect(stdout).not.toContain('data-use-cases')
+    expect(stdout).not.toContain('Use case')
+  })
+
+  test('renders the solutions panel with the catalog URL from the site root', () => {
+    const html = renderComponentTable({ csvData: data(ROWS, USE_CASES), rootPath: '../..' })
+    expect(html).toContain('id="componentCatalogSolutions"')
+    expect(html).toContain('data-solutions-url="../../assets/data/solutions.json"')
+    expect(html).toContain('window.updateCatalogSolutions = function')
+  })
+
+  test('hides the filter and the panel when no component has a use case', () => {
+    for (const csvData of [data(ROWS.map((r) => ({ ...r, use_cases: [] })), []), data(ROWS, undefined)]) {
+      const html = renderComponentTable({ csvData })
+      expect(html).not.toContain('id="useCaseFilterToggle"')
+      expect(html).not.toContain('id="componentCatalogSolutions"')
+      expect(html).not.toContain('class="badge badge-use-case"')
+      expect(html).not.toContain('window.updateCatalogSolutions = function')
+    }
+  })
+
+  test('offers only the use cases of cards shown in the Cloud view', () => {
+    const rows = [row('postgres_cdc', 'input', ['change-data-capture']), row('local_only', 'input', ['stream-processing'], { is_cloud_supported: 'n' })]
+    const html = renderComponentTable({ csvData: data(rows, USE_CASES), attributes: {}, docAttributes: { 'env-cloud': '' } })
+    expect(html).toContain('value="change-data-capture"')
+    expect(html).not.toContain('value="stream-processing"')
+  })
+
+  test('escapes hostile IDs and labels everywhere they appear', () => {
+    const hostile = { id: 'x"><script>alert(1)</script>', label: '<img src=x onerror=alert(1)> & "Co"' }
+    const html = renderComponentTable({ csvData: data([row('evil', 'input', [hostile.id])], [hostile]) })
+    expect(html).not.toContain('<script>alert(1)</script>')
+    expect(html).not.toContain('<img src=x')
+    expect(html).toContain(`value="${escapeHtml(hostile.id)}"`)
+    expect(html).toContain(`<span>${escapeHtml(hostile.label)}</span>`)
+    expect(html).toContain(`data-use-cases="${escapeHtml(hostile.id)}"`)
+    expect(html).toContain(`data-use-case-labels="${escapeHtml(JSON.stringify({ [hostile.id]: hostile.label }))}"`)
+  })
+
+  describe('solutions for a use case', () => {
+    // Shaped like assets/data/solutions.json from the solutions-catalog extension
+    const CATALOG = {
+      solutions: [
+        { id: 'cdc-to-lakehouse', title: 'CDC to lakehouse', url: '/solutions/cdc-to-lakehouse/', status: 'published', useCases: ['Change data capture'], concepts: { useCases: [{ value: 'Change data capture', id: 'change-data-capture', label: 'Change data capture' }] } },
+        { id: 'authored-id', title: 'Authored by ID', url: '/solutions/authored-id/', status: 'published', useCases: ['change-data-capture'] },
+        { id: 'label-only', title: 'Label only', url: '/solutions/label-only/', status: 'published', useCases: ['Change data capture'] },
+        { id: 'old', title: 'Old', url: '/solutions/old/', status: 'deprecated', useCases: ['change-data-capture'] },
+        { id: 'fanout', title: 'Fan-out', url: '/solutions/fanout/', status: 'published', concepts: { useCases: [{ id: 'data-fan-out' }] } }
+      ]
+    }
+
+    test('matches on taxonomy IDs, not labels, and leaves out deprecated solutions', () => {
+      expect(matchSolutions(CATALOG, ['change-data-capture']).map((s) => s.id)).toEqual(['cdc-to-lakehouse', 'authored-id'])
+      expect(matchSolutions(CATALOG, ['stream-processing'])).toEqual([])
+      expect(matchSolutions(CATALOG, [])).toEqual([])
+    })
+
+    test('has nothing to show without a catalog', () => {
+      for (const catalog of [null, undefined, {}, { solutions: 'nope' }]) {
+        expect(matchSolutions(catalog, ['change-data-capture'])).toEqual([])
+      }
+      expect(solutionsMarkup([], ['change-data-capture'], {}, escapeHtml)).toBe('')
+    })
+
+    test('renders a heading with the use case label and one link per solution', () => {
+      const html = solutionsMarkup(matchSolutions(CATALOG, ['change-data-capture']), ['change-data-capture'], { 'change-data-capture': 'Change data capture' }, escapeHtml)
+      expect(html).toBe(
+        '<h3 class="catalog-solutions-title">Solutions for Change data capture</h3>' +
+        '<ul class="catalog-solutions-list">' +
+        '<li><a href="/solutions/cdc-to-lakehouse/">CDC to lakehouse</a></li>' +
+        '<li><a href="/solutions/authored-id/">Authored by ID</a></li>' +
+        '</ul>'
+      )
+    })
+
+    test('escapes solution titles and URLs', () => {
+      const html = solutionsMarkup([{ title: '<b>x</b>', url: '"><script>alert(1)</script>' }], ['a'], { a: '<i>A</i>' }, escapeHtml)
+      expect(html).not.toMatch(/<script>|<b>|<i>/)
+      expect(html).toContain('&lt;b&gt;x&lt;/b&gt;')
+      expect(html).toContain('Solutions for &lt;i&gt;A&lt;/i&gt;')
     })
   })
 })
