@@ -942,6 +942,52 @@ jobs:
             rm -f "$tmp2"
             echo "::notice::terminology reference unavailable; term checks skipped."
           fi
+      # The docs MCP server gives anonymous callers a small daily tool-call
+      # quota per IP, and GitHub-hosted runners share IPs, so the review's
+      # doc-impact lookups ran out. A trusted key (x-client-key, see
+      # docs-site internal-docs/mcp-service-passthrough.md) skips that quota.
+      # It rides in the ADP client secret under a JSON key that carries the
+      # secret name's prefix, DOCS_DOC_STRINGS_CLIENT_DOCS_MCP_KEY for the
+      # default secret id: parse-json-secrets adds no prefix of its own, so the
+      # env var is named after the JSON key, and this step derives the name
+      # from adp_client_secret_id the way the mint step does. No key (plain-secret callers, gateway off, or
+      # a secret without that key) builds today's anonymous config with no
+      # header. The config goes to GITHUB_ENV rather than a step output
+      # because the runner drops outputs that contain a masked value, and it
+      # must be inline JSON: claude-code-action merges inline --mcp-config
+      # values with its own, but a file path replaces them.
+      - name: Build the docs MCP config
+        if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0' || steps.notes.outputs.declared == '1')
+        env:
+          CLIENT_SECRET_ID: ${{ inputs.adp_client_secret_id }}
+          DOCS_MCP_URL: https://docs.redpanda.com/mcp
+        run: |
+          set -euo pipefail
+          prefix=$(printf '%s' "$CLIENT_SECRET_ID" | awk -F/ '{print toupper($NF)}' | tr -c 'A-Za-z0-9_\n' '_')
+          key_var="${prefix}_DOCS_MCP_KEY"
+          key="${!key_var:-}"
+          if [ -n "$key" ]; then
+            echo "::add-mask::$key"
+            # The config is single-quoted inside claude_args and written as
+            # one GITHUB_ENV line, so refuse anything that could break out of
+            # either. Generated keys are hex. A case pattern, not grep, which
+            # would pass a multi-line value line by line.
+            case "$key" in
+              *[!A-Za-z0-9._~+/=:-]*)
+                echo "::warning::$key_var has characters a client key cannot contain; using the anonymous docs MCP quota."
+                key="" ;;
+            esac
+          fi
+          if [ -n "$key" ]; then
+            config=$(jq -cn --arg url "$DOCS_MCP_URL" --arg key "$key" \
+              '{mcpServers: {"redpanda-docs": {type: "http", url: $url, headers: {"x-client-key": $key}}}}')
+            echo "Docs MCP calls will send the trusted client key."
+          else
+            config=$(jq -cn --arg url "$DOCS_MCP_URL" \
+              '{mcpServers: {"redpanda-docs": {type: "http", url: $url}}}')
+            echo "No docs MCP client key; using the anonymous quota."
+          fi
+          echo "DOCS_MCP_CONFIG=$config" >> "$GITHUB_ENV"
       # The next step hands untrusted PR content to a model. Nothing it does
       # not need may exist while it runs, so blank the OIDC-fetched bot token
       # and the AWS session credentials from the job env, and do not write the
@@ -961,9 +1007,11 @@ jobs:
           # gateway. The long-lived client credential that can mint fresh
           # tokens must not be readable from the review's environment. Its
           # env names come from the secret id the same way the mint step
-          # derives them, so a renamed secret is still scrubbed.
+          # derives them, so a renamed secret is still scrubbed. The docs MCP
+          # key is blanked too: the review reaches it only through the
+          # DOCS_MCP_CONFIG its --mcp-config needs.
           prefix=$(printf '%s' "$CLIENT_SECRET_ID" | awk -F/ '{print toupper($NF)}' | tr -c 'A-Za-z0-9_\n' '_')
-          for v in ACTIONS_BOT_TOKEN "${prefix}_ID" "${prefix}_SECRET" AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_DEFAULT_REGION AWS_REGION; do
+          for v in ACTIONS_BOT_TOKEN "${prefix}_ID" "${prefix}_SECRET" "${prefix}_DOCS_MCP_KEY" AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_DEFAULT_REGION AWS_REGION; do
             echo "$v=" >> "$GITHUB_ENV"
           done
       - name: Claude review with suggestions
@@ -1008,7 +1056,7 @@ jobs:
             --model ${{ inputs.use_adp_gateway && inputs.gateway_model || 'sonnet' }}
             --max-turns 40
             --disallowed-tools "WebFetch,WebSearch,Edit,MultiEdit,NotebookEdit,Bash(git *)"
-            --mcp-config '{"mcpServers":{"redpanda-docs":{"type":"http","url":"https://docs.redpanda.com/mcp"}}}'
+            --mcp-config '${{ env.DOCS_MCP_CONFIG }}'
             --allowed-tools "
               mcp__github_inline_comment__create_inline_comment,
               mcp__redpanda-docs__search_api_reference,
@@ -1382,11 +1430,13 @@ jobs:
         working-directory: ${{ runner.temp }}
         env:
           AWS_BEARER_TOKEN_BEDROCK: ''
+          # Holds the docs MCP client key, which the extractor never needs.
+          DOCS_MCP_CONFIG: ''
           PKG: ${{ steps.pkg.outputs.pkg }}
           EXECUTION_FILE: ${{ steps.review.outputs.execution_file }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
-          # Same server the review step's --mcp-config names.
+          # Same server the "Build the docs MCP config" step names.
           DOCS_MCP_URL: https://docs.redpanda.com/mcp
           OUT_DIR: ${{ runner.temp }}/doc-impact-mcp
         run: |
