@@ -662,6 +662,46 @@ function inlineCode (text) {
   return delimiter + extraSpace + content + extraSpace + delimiter
 }
 
+/**
+ * The property catalog as a Markdown list, one item per property card,
+ * deprecated ones included and marked:
+ *
+ *   - `name` (type): Cluster, Restart required. Summary. Default: `x`.
+ *     Set with `rpk ...`. [Full reference](url)
+ *
+ * An Enterprise values badge carries its tooltip, which names the values.
+ * A reference page's filter bar (property_catalog::[mode=filter]) exports as
+ * nothing.
+ */
+function propertyCatalogMarkdown (root, pageUrl) {
+  // The filter bar on a reference page is controls only; the entries it
+  // filters are the page itself, and the export keeps all of them.
+  if ((root.getAttribute('class') || '').split(/\s+/).includes('prop-catalog--filter')) return ''
+  const cards = Array.from(root.querySelectorAll('li.prop-card'))
+  if (!cards.length) return '\n\n' + escapeText((root.textContent || '').trim()) + '\n\n'
+  const text = (el) => (el ? (el.textContent || '').replace(/\s+/g, ' ').trim() : '')
+  const items = cards.map((card) => {
+    const badges = Array.from(card.querySelectorAll('.rp-badge')).map((badge) => {
+      const label = text(badge)
+      const classes = badge.getAttribute('class') || ''
+      const tooltip = badge.getAttribute('data-tooltip')
+      return classes.includes('rp-badge--enterprise') && label !== 'Enterprise' && tooltip ? `${label} (${tooltip.replace(/\.$/, '')})` : label
+    })
+    const parts = [`${inlineCode(text(card.querySelector('.prop-card-name')))} (${text(card.querySelector('.prop-card-type'))})`]
+    let line = parts[0] + (badges.length ? `: ${escapeText(badges.join(', '))}.` : '.')
+    const summary = text(card.querySelector('.prop-card-desc'))
+    if (summary) line += ` ${escapeText(summary)}`
+    const def = card.querySelector('.prop-card-default code')
+    if (def) line += ` Default: ${inlineCode(text(def))}.`
+    const command = card.querySelector('.prop-card-command-text')
+    if (command) line += ` Set with ${inlineCode(text(command))}.`
+    const link = card.querySelector('a.prop-card-link')
+    if (link && link.getAttribute('href')) line += ` [Full reference](${resolveTarget(link.getAttribute('href'), pageUrl).replace(/([()])/g, '\\$1')})`
+    return `- ${line}`
+  })
+  return `\n\n${items.join('\n')}\n\n`
+}
+
 /** Fenced code block whose fence is longer than any backtick run inside. */
 function fencedCodeBlock (code, language = '') {
   let fenceSize = 3
@@ -1217,6 +1257,13 @@ function createTurndownForPage ({ pageUrl, logger }) {
     turndownInstance.addRule('description-details', {
       filter: 'dd',
       replacement: (content) => `\n\n${content.trim()}\n\n`,
+    })
+
+    // The property catalog (property_catalog::[]) is filter controls, a
+    // script, and a grid of cards. The export keeps only the cards, as a list.
+    turndownInstance.addRule('property-catalog', {
+      filter: (node) => node.nodeName === 'DIV' && (node.getAttribute('class') || '').split(/\s+/).includes('prop-catalog'),
+      replacement: (_, node) => propertyCatalogMarkdown(node, pageUrl),
     })
   }
 

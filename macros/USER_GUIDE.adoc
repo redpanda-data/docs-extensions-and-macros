@@ -91,6 +91,24 @@ To find hand-written values in a repo and check them against the data:
 npx doc-tools generate migrate-property-values --docs-dir . --report-dir ./propval-report
 ----
 
+=== property_catalog - All properties and reference page filters
+
+List every configuration property as searchable, filterable cards, each with its badges, summary, default, a link to its reference entry, and the `rpk` command that sets it:
+
+[,asciidoc]
+----
+property_catalog::[]
+----
+
+On a property reference page, add a filter bar for the page's own entries:
+
+[,asciidoc]
+----
+property_catalog::[mode=filter]
+----
+
+Register `@redpanda-data/docs-extensions-and-macros/macros/property-catalog` and the `property-page-index` extension. The data is the same property JSON `prop:` uses for the page's version. See link:REFERENCE.adoc#property-catalog[the macros reference] for the groups, the Enterprise values rules, the filters, and the URL parameters.
+
 === helm_ref - Helm value references
 
 Link to Helm chart values:

@@ -850,3 +850,30 @@ describe('component bar facts in the front matter', () => {
     expect(yamlOf({ 'page-context-switcher': 'not json' })).not.toHaveProperty('page-context-switcher')
   })
 })
+
+describe('property catalog', () => {
+  const { cardModel, catalogHtml, filterBarHtml } = require('../../macros/property-catalog')
+  const entries = [
+    { name: 'retention_bytes', type: 'integer', config_scope: 'cluster', category: 'other', needs_restart: false, default: null, description: 'Default maximum number of bytes per partition. More text.' },
+    { name: 'cloud_storage_enabled', type: 'boolean', config_scope: 'cluster', category: 'other', needs_restart: true, default: false, is_enterprise: true, enterprise_constructor: 'restricted_only', enterprise_restricted_value: ['true'], description: 'Enable object storage.' },
+    { name: 'dashboard_dir', type: 'string', config_scope: 'broker', category: 'other', needs_restart: true, is_deprecated: true, description: 'No longer used.' },
+  ]
+  const cards = entries.map((e, i) => cardModel(e, { href: i === 0 ? '../cluster-properties/#retention_bytes' : undefined }))
+
+  test('renders the cards as a list, not the controls', () => {
+    const body = bodyOf(convert(`<h1 class="page">All properties</h1>${catalogHtml(cards)}`))
+    const items = body.split('\n').filter((l) => l.startsWith('- '))
+    expect(items).toEqual([
+      '- `retention_bytes` (integer): Cluster. Default maximum number of bytes per partition. Default: `null`. Set with `rpk cluster config set retention_bytes <value>`. [Full reference](https://docs.example.com/streaming/current/manage/cluster-properties/#retention_bytes)',
+      '- `cloud_storage_enabled` (boolean): Object storage, Restart required, Enterprise values (The value true requires an Enterprise Edition license). Enable object storage. Default: `false`. Set with `rpk cluster config set cloud_storage_enabled <value>`.',
+      '- `dashboard_dir` (string): Broker, Restart required, Deprecated. No longer used.',
+    ])
+    expect(body).not.toMatch(/Search properties|Clear filters|All selected|prop-catalog/)
+  })
+
+  test('a reference page\'s filter bar exports as nothing', () => {
+    const bar = filterBarHtml(cards.map((c) => ({ ...c, anchor: c.name })))
+    const body = bodyOf(convert(`<h1 class="page">Cluster</h1>${bar}<div class="sect2"><h3 id="retention_bytes">retention_bytes</h3><p>Entry.</p></div>`))
+    expect(body).toBe('### retention_bytes\n\nEntry.')
+  })
+})
