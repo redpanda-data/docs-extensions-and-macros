@@ -81,7 +81,7 @@ describe('component_type_dropdown type', () => {
   it('renders the license notice on a page with no :type:, using the page directory', () => {
     const html = register({ csvData: { data: licensed } }).component_type_dropdown(
       doc({ doctitle: 'jira', 'page-relative-src-path': 'inputs/jira.adoc', 'page-component-title': 'Connect' }), '', {})
-    expect(html).toContain('enterprise license')
+    expect(html).toContain('Enterprise license required')
   })
 
   it('renders nothing on a page outside the type directories', () => {
