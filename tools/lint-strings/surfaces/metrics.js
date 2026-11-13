@@ -355,6 +355,7 @@ const RULES = [
     why: 'Metric help is a label that also becomes the Prometheus HELP text, and the metrics convention is no terminal period, so a period makes it read unlike every other metric.',
     standard: STANDARD.metrics,
     severity: 'warning',
+    tier: 'style',
     check: (decl) => {
       const text = (decl.string || '').trim()
       if (!text) return []
@@ -370,6 +371,7 @@ const RULES = [
     why: 'The help text is built from a constant or an expression, so the lint cannot see what readers will get and someone has to check the published text by hand.',
     standard: STANDARD.metrics,
     severity: 'info',
+    tier: 'style',
     runOnUnverifiable: true,
     check: (decl) => {
       if (decl.meta && decl.meta.unverifiable) {

@@ -33,27 +33,41 @@ describe('doc-strings evals: production review extraction', () => {
     expect(production.renderPrompt(prompt, { repository: 'r/r', prNumber: 1 })).toBe('A  B')
   })
 
-  test('committable suggestions render the way a caller input would', () => {
+  test('the block type is the post step\'s choice, so the prompt reads the same either way', () => {
     const on = production.renderPrompt(step.with.prompt, { repository: 'r/r', prNumber: 1 })
     const off = production.renderPrompt(step.with.prompt, { repository: 'r/r', prNumber: 1, committableSuggestions: false })
-    expect(on).not.toMatch(/COMMITTABLE SUGGESTIONS ARE OFF/)
-    expect(off).toMatch(/COMMITTABLE SUGGESTIONS ARE OFF/)
-    expect(off).not.toMatch(/\$\{\{/)
+    expect(off).toBe(on)
   })
 
   test('an expression the eval does not know is an error, not a blank', () => {
     expect(() => production.renderPrompt('x ${{ secrets.TOKEN }}', { repository: 'a', prNumber: 1 })).toThrow(/unfilled/)
   })
 
-  test('the step allows the inline-comment tool the stand-in provides', () => {
+  test('the step gives the model no way to post, only findings.json to write', () => {
     const args = production.parseClaudeArgs(step.with.claude_args)
-    expect(args.allowed).toContain('mcp__github_inline_comment__create_inline_comment')
+    expect(args.allowed).not.toContain(production.COMMENT_TOOL)
     // The workspace-scoped file rules: the harness stages its inputs at the
     // fixture root and reads both output files back from there.
     expect(args.allowed).toContain('Read(./**)')
     expect(args.allowed).toContain('Edit(./doc-impact.json)')
-    expect(args.allowed).toContain('Edit(./review-summary.md)')
+    expect(args.allowed).toContain('Edit(./findings.json)')
     expect(args.maxTurns).toMatch(/^\d+$/)
+  })
+
+  test('a baseline can load the review step from another commit, and a legacy step is told apart by its comment tool', () => {
+    const head = production.loadStep('HEAD')
+    expect(head.with.prompt.length).toBeGreaterThan(1000)
+    expect(() => production.loadStep('no-such-ref-anywhere')).toThrow(/cannot read the workflow/)
+  })
+
+  test('a findings.json write with issues is where suggestions are committed; an empty one is not', () => {
+    const w = (content, name = 'Write') => ({ name, input: { file_path: '/x/findings.json', content } })
+    expect(production.isSuggestionWrite(w(JSON.stringify({ issues: [{ problem: 'p' }] })))).toBe(true)
+    expect(production.isSuggestionWrite(w(JSON.stringify({ checked: ['a'], issues: [] })))).toBe(false)
+    expect(production.isSuggestionWrite(w('not json'))).toBe(true)
+    expect(production.isSuggestionWrite({ name: 'Edit', input: { file_path: 'findings.json', new_string: '{"problem": "p"}' } })).toBe(true)
+    expect(production.isSuggestionWrite({ name: 'Write', input: { file_path: 'doc-impact.json', content: '{}' } })).toBe(false)
+    expect(production.isSuggestionWrite({ name: production.COMMENT_TOOL, input: {} })).toBe(true)
   })
 
   test('the files the eval writes are the files the prompt names', () => {
@@ -114,45 +128,55 @@ describe('doc-strings evals: inline-comment stand-in', () => {
 })
 
 describe('doc-strings evals: the suggestion comment must target the declaration', () => {
-  const target = { file: 'src/v/config/configuration.cc', lineStart: 10, lineEnd: 12, fingerprint: '0123456789abcdef' }
-  const footer = '<sub>doc-strings-review:fp=0123456789abcdef</sub>'
-  const body = (extra = footer) => '```suggestion\n"New text.",\n```\n' + extra
+  const KEY = '0123456789abcdef'
+  const target = { file: 'src/v/config/configuration.cc', lineStart: 10, lineEnd: 12, key: KEY }
+  const marker = `<!-- doc-strings-review:key=${KEY} issue=prose -->`
+  const body = (extra = marker) => '```suggestion\n"New text.",\n```\n' + extra
   const good = { path: 'src/v/config/configuration.cc', startLine: 10, line: 12, body: body() }
 
-  test('the right file, range and footer pass, and the recorded range is returned', () => {
+  test('the right file, a range inside the declaration and the key marker pass, and the recorded range is returned', () => {
     const r = lib.checkSuggestionComment([good], target)
     expect(r.problems).toEqual([])
     expect([r.start, r.end]).toEqual([10, 12])
+    // A minimal span inside the declaration is fine.
+    expect(lib.checkSuggestionComment([{ ...good, startLine: 11, line: 11 }], target).problems).toEqual([])
   })
 
   test.each([
     ['a wrong path', { ...good, path: 'src/v/config/other.cc' }, /posted on src\/v\/config\/other\.cc/],
-    ['a wrong line range', { ...good, startLine: 11, line: 13 }, /lines 11-13, expected 10-12/],
+    ['a range outside the declaration', { ...good, startLine: 11, line: 13 }, /lines 11-13, outside the declaration's 10-12/],
     ['no line at all', { path: good.path, body: good.body }, /no line/],
-    ['no fingerprint footer', { ...good, body: body('') }, /lacks the footer/]
+    ['no key marker', { ...good, body: body('') }, /lacks the key marker/]
   ])('%s fails', (_label, comment, why) => {
     const r = lib.checkSuggestionComment([comment], target)
     expect(r.problems.join('; ')).toMatch(why)
   })
 
-  test('zero or two suggestion comments fail', () => {
-    expect(lib.checkSuggestionComment([], target).problems.join()).toMatch(/found 0/)
-    expect(lib.checkSuggestionComment([good, good], target).problems.join()).toMatch(/found 2/)
+  test('a legacy run is checked for its fingerprint footer instead', () => {
+    const legacy = { file: target.file, lineStart: 10, lineEnd: 12, fingerprint: 'fedcba9876543210' }
+    expect(lib.checkSuggestionComment([good], legacy).problems.join()).toMatch(/lacks the footer/)
+  })
+
+  test('no suggestion fails; two non-overlapping ones apply together, bottom-up', () => {
+    expect(lib.checkSuggestionComment([], target).problems.join()).toMatch(/found none/)
+    const two = lib.checkSuggestionComment([{ ...good, startLine: 10, line: 10 }, { ...good, startLine: 12, line: 12, body: '```suggestion\nC1\nC2\n```\n' + marker }], target)
+    expect(two.problems).toEqual([])
+    const out = lib.applySuggestions('a\nb\nc\nd', [{ start: 1, end: 1, replacement: 'A' }, { start: 3, end: 3, replacement: 'C1\nC2' }])
+    expect(out).toEqual({ text: 'A\nb\nC1\nC2\nd', delta: 1 })
+    expect(() => lib.applySuggestions('a\nb\nc', [{ start: 1, end: 2, replacement: 'x' }, { start: 2, end: 3, replacement: 'y' }])).toThrow(/overlap/)
   })
 
   test('with committable suggestions off, a ```text rewrite is checked like a suggestion', () => {
     // The review posts ```text in the off mode; runReview hands the executors
     // the same comments under the tag they parse.
     const offComment = { ...good, body: good.body.replace('```suggestion', '```text') }
-    expect(lib.checkSuggestionComment([offComment], target).problems.join()).toMatch(/found 0/)
+    expect(lib.checkSuggestionComment([offComment], target).problems.join()).toMatch(/found none/)
     const checked = production.normalizeComments([offComment], false)
     expect(lib.checkSuggestionComment(checked, target).problems).toEqual([])
     expect(production.normalizeComments([offComment], true)).toEqual([offComment])
   })
 
   test('with committable suggestions off, only the last ```text fence is the rewrite', () => {
-    // A review may quote the current string in a ```text block before the
-    // rewrite; converting that quote too would fail "exactly one suggestion".
     const rewrite = good.body.replace('```suggestion', '```text')
     const quoted = { ...good, body: 'Current:\n```text\nold string\n```\n\n' + rewrite }
     const [checked] = production.normalizeComments([quoted], false)
@@ -242,6 +266,13 @@ describe('doc-strings evals: unchanged-lines check', () => {
       { path: 'other.go', body: '```suggestion\nunrelated\n```', line: 15 }
     ], decl, keep)
     expect(r).toEqual({ pass: true, judged: 0, dropped: [] })
+  })
+
+  test('with line numbers, a suggestion is judged only on the unchanged lines inside its own range', () => {
+    const numbered = [{ line: 11, text: 'An untouched line.' }, { line: 19, text: 'Another untouched line.' }]
+    // Posted on 11-12 only: line 19 is GitHub's to keep, not the block's.
+    expect(lib.linesKept([comment('```suggestion\nAn untouched line.\nA changed line, fixed.\n```', 12, 11)], decl, numbered)).toEqual({ pass: true, judged: 1, dropped: [] })
+    expect(lib.linesKept([comment('```suggestion\nAn untouched line, improved.\nA changed line.\n```', 12, 11)], decl, numbered).dropped).toEqual(['An untouched line.'])
   })
 
   test('changedLines reads post-image line numbers from git', () => {
@@ -499,7 +530,7 @@ describe('doc-strings evals: the must-read check', () => {
       expect(full).toContain(name)
       expect(stripped).not.toContain(name)
     }
-    for (const kept of ['INLINE SUGGESTIONS', 'PROSE QUALITY', 'PUBLISHED-CONTENT IMPACT', 'lint-findings.json', 'pr-diff.patch', 'here for the published-content check alone.']) {
+    for (const kept of ['FINDINGS:', 'PROSE QUALITY', 'PUBLISHED-CONTENT IMPACT', 'lint-findings.json', 'pr-diff.patch', 'here for the published-content check alone.']) {
       expect(stripped).toContain(kept)
     }
     expect(stripped).not.toMatch(/If it is\s+absent or empty/)

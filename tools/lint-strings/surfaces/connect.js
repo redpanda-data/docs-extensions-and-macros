@@ -1598,6 +1598,7 @@ function extract ({ repo, files = null, external = true, overlay = null }) {
     skipped.push(...result.skipped)
   }
   attachComponentFields(declarations)
+  attachParentFields(declarations)
   Object.defineProperty(declarations, 'skipped', { value: skipped, enumerable: false })
   return declarations
 }
@@ -1625,6 +1626,26 @@ function attachComponentFields (declarations) {
     const fields = new Set()
     for (const key of keys) for (const name of byComponent.get(key) || []) fields.add(name)
     if (fields.size > 0) Object.defineProperty(decl.meta, 'component_fields', { value: fields, enumerable: false })
+  }
+}
+
+/**
+ * Give each field nested in an object field the dotted path of the object
+ * fields around it (meta.parent, "tls" or "auth.sasl"), so `enabled` under
+ * `tls` and `enabled` under `sasl` in one file are two declarations with two
+ * keys (see identity). An object field holds its children's lines: its span
+ * runs from the constructor to the end of its chain.
+ */
+function attachParentFields (declarations) {
+  const objects = declarations.filter((d) => d.meta && d.meta.kind === 'field' && d.name && /Object/.test(d.meta.ctor || ''))
+  for (const decl of declarations) {
+    if (!decl.meta || decl.meta.kind !== 'field') continue
+    const around = objects.filter((o) => o !== decl && o.file === decl.file &&
+      o.line_start <= decl.line_start && o.line_end >= decl.line_end &&
+      (o.line_start < decl.line_start || o.line_end > decl.line_end))
+    if (around.length === 0) continue
+    around.sort((a, b) => (b.line_end - b.line_start) - (a.line_end - a.line_start) || a.line_start - b.line_start)
+    decl.meta.parent = around.map((o) => o.name).join('.')
   }
 }
 
@@ -1694,6 +1715,7 @@ const RULES = [
     why: 'A field with no .Description() ships as an undocumented field on the connector reference page.',
     standard: STANDARD.reviewingADiff,
     severity: 'warning',
+    tier: 'unclear',
     check: (decl) => {
       if (decl.meta.kind !== 'field' || !decl.meta.missing_description) return []
       return [{ message: `Field ${decl.name ? `"${decl.name}" ` : ''}(${decl.meta.ctor}) has no .Description(). It ships as an undocumented field on the connector page.` }]
@@ -1706,6 +1728,7 @@ const RULES = [
     description: 'ShortDescription is plain text in form-based editors',
     // Error, not warning: the markup renders literally in the form UI.
     severity: 'error',
+    tier: 'unclear',
     check: (decl) => {
       if (decl.meta.kind !== 'field-short' || !decl.string) return []
       const found = [...new Set(MARKUP_PATTERNS.filter(([re]) => re.test(decl.string)).map(([, what]) => what))]
@@ -1728,6 +1751,7 @@ const RULES = [
     why: 'Cloud includes the same partial into a different module, so an xref with no module, or to a module the Connect docs do not have, breaks the link.',
     standard: STANDARD.connect,
     severity: 'warning',
+    tier: 'unclear',
     check: (decl) => {
       if (!decl.string || (decl.convention && decl.convention.verbatim_asciidoc === false)) return []
       const issues = []
@@ -1752,6 +1776,7 @@ const RULES = [
     why: 'The generator renders Cloud and cgo availability from data, and availability prose shows on both the self-managed and the Cloud page, so it contradicts the generated notes on one of them.',
     standard: STANDARD.connect,
     severity: 'warning',
+    tier: 'unclear',
     check: (decl) => {
       if (!decl.string) return []
       const m = decl.string.match(AVAILABILITY_PROSE)
@@ -1765,6 +1790,7 @@ const RULES = [
     why: 'rpk connect help prints Usage as a one-line label, so a second line breaks the help output.',
     standard: STANDARD.qualityBar,
     severity: 'warning',
+    tier: 'unclear',
     check: (decl) => {
       if (decl.meta.kind !== 'cli-usage' && decl.meta.kind !== 'cli-flag') return []
       if (!decl.string || !decl.string.includes('\n')) return []
@@ -1778,14 +1804,16 @@ const RULES = [
 ]
 
 /**
- * Where a declaration lives, for removal matching. Field names (`url`,
- * `topic`, `enabled`) repeat across components, and a component name repeats
- * across its input and output, so the key is the file, the kind and the name.
- * Same-file repeats (nested object fields) are handled by counting in the
+ * Where a declaration lives, for removal matching and its review key. Field
+ * names (`url`, `topic`, `enabled`) repeat across components, and a
+ * component name repeats across its input and output, so the key is the
+ * file, the kind and the name, with a nested field named by its dotted path
+ * (`tls.enabled`). Other same-file repeats are handled by counting in the
  * caller.
  */
 function identity (decl) {
-  return [decl.file, (decl.meta && decl.meta.kind) || null, decl.name]
+  const parent = decl.meta && decl.meta.parent
+  return [decl.file, (decl.meta && decl.meta.kind) || null, parent && decl.name ? `${parent}.${decl.name}` : decl.name]
 }
 
 const DETAIL_KEYS = ['kind', 'part', 'ctor', 'field', 'option', 'components', 'components_total', 'components_via', 'call_site', 'template', 'unresolved', 'config_template']
