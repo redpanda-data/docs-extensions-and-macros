@@ -1,5 +1,31 @@
 # Changelog
 
+## [5.64.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.63.0...v5.64.0) (2026-11-12)
+
+
+### Features
+
+* **check-metadata:** report recommendation changes in the PR check ([#431](https://github.com/redpanda-data/docs-extensions-and-macros/issues/431)) ([f437aa3](https://github.com/redpanda-data/docs-extensions-and-macros/commit/f437aa33b6fdd3cda14d23e1d4103bea5d85043a))
+* **enterprise-gating:** report changes to the Community Edition core limit ([#476](https://github.com/redpanda-data/docs-extensions-and-macros/issues/476)) ([9bf416a](https://github.com/redpanda-data/docs-extensions-and-macros/commit/9bf416a43e0e7212dce3e5331db19c99b364a60e))
+* improve component catalog UX ([#169](https://github.com/redpanda-data/docs-extensions-and-macros/issues/169)) ([b708436](https://github.com/redpanda-data/docs-extensions-and-macros/commit/b708436b9c2b89e7877006d1e73a203806aabb9b))
+* **lint-strings:** warn on unexplained code-block placeholders in connect descriptions ([#469](https://github.com/redpanda-data/docs-extensions-and-macros/issues/469)) ([5ceb125](https://github.com/redpanda-data/docs-extensions-and-macros/commit/5ceb12537322d70e35dfda1ce3a48922dfbb4ead))
+* **overrides-audit:** classify rpk override prose against the raw snapshot ([#410](https://github.com/redpanda-data/docs-extensions-and-macros/issues/410)) ([ca9ba0f](https://github.com/redpanda-data/docs-extensions-and-macros/commit/ca9ba0f9952fab1757e7c3410a0f2b76a860f753))
+* **overrides-audit:** locate rpk source strings and self-extract rpk with --repo ([#507](https://github.com/redpanda-data/docs-extensions-and-macros/issues/507)) ([051c82b](https://github.com/redpanda-data/docs-extensions-and-macros/commit/051c82bb2b1d6f49bbe10d6b05023f4885f695e7))
+* **rpcn-docs:** read Cloud and cgo flags from the release docs asset ([#460](https://github.com/redpanda-data/docs-extensions-and-macros/issues/460)) ([5b80883](https://github.com/redpanda-data/docs-extensions-and-macros/commit/5b80883558d6b8ce63e527b014d5717975e236a9))
+* **rpk-docs:** check generated descriptions for lost text and broken code spans ([#471](https://github.com/redpanda-data/docs-extensions-and-macros/issues/471)) ([45fe058](https://github.com/redpanda-data/docs-extensions-and-macros/commit/45fe058c965e8f912f05f6e4d109aa58f5186a15))
+* **rpk-docs:** convert docs URLs to xrefs, with lender checkouts ([#466](https://github.com/redpanda-data/docs-extensions-and-macros/issues/466)) ([47d31f5](https://github.com/redpanda-data/docs-extensions-and-macros/commit/47d31f561076004a64ec501ce85552ba31d7f421))
+* **rpk-docs:** print flag defaults and required flags ([#503](https://github.com/redpanda-data/docs-extensions-and-macros/issues/503)) ([c281f37](https://github.com/redpanda-data/docs-extensions-and-macros/commit/c281f37c959e13ec97df45e241f364aee4f14b83))
+
+
+### Bug fixes
+
+* **check-metadata:** drop noise from candidate terms ([#428](https://github.com/redpanda-data/docs-extensions-and-macros/issues/428)) ([4f3e60e](https://github.com/redpanda-data/docs-extensions-and-macros/commit/4f3e60e84e9e0c172e90e139d03cd5a6611815da))
+* **convert-to-markdown:** keep formatting in table cells and put front matter first ([#416](https://github.com/redpanda-data/docs-extensions-and-macros/issues/416)) ([3543073](https://github.com/redpanda-data/docs-extensions-and-macros/commit/354307331e3072b6e26c8e676bb9b7e2a6d1693f))
+* **doc-tools:** update-connect-version fetches with a client and never writes null ([#493](https://github.com/redpanda-data/docs-extensions-and-macros/issues/493)) ([37d7db6](https://github.com/redpanda-data/docs-extensions-and-macros/commit/37d7db6a7510e4de58d3354ed99136b362ca345c))
+* label platform tabs in the Markdown export ([#505](https://github.com/redpanda-data/docs-extensions-and-macros/issues/505)) ([ae844df](https://github.com/redpanda-data/docs-extensions-and-macros/commit/ae844df3f0bd17859ea4e50eccfd4ba4e0efe074))
+* **markdown:** put every component bar badge in the Markdown front matter ([#500](https://github.com/redpanda-data/docs-extensions-and-macros/issues/500)) ([5de2ab2](https://github.com/redpanda-data/docs-extensions-and-macros/commit/5de2ab2eee9e8d406149156af7cab063b983e9e1))
+* **rpk-docs:** fix four rpk ai description formatting bugs (DOC-2686) ([#447](https://github.com/redpanda-data/docs-extensions-and-macros/issues/447)) ([0a3b863](https://github.com/redpanda-data/docs-extensions-and-macros/commit/0a3b863e2e73e2c0cc2f2694b03c29a625572fc5))
+
 ## [5.63.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.62.0...v5.63.0) (2026-11-10)
 
 
