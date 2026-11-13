@@ -109,14 +109,30 @@ const { isCloudAvailable, typeFromRelative, useCasesByConnector } = require('../
 // page fetches the published file instead, only once a use case is selected.
 const SOLUTIONS_CATALOG_PATH = 'assets/data/solutions.json'
 
+// The use-case chips on a connector's own page (component_type_dropdown). The
+// catalog's styles load only on the catalog page, so these ship with the block.
+const USE_CASE_TAG_ICON = '<svg class="connector-use-case-icon" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false"><path fill="currentColor" d="M2 2.75C2 2.34 2.34 2 2.75 2h4.69c.2 0 .39.08.53.22l5.81 5.81a.75.75 0 0 1 0 1.06l-4.69 4.69a.75.75 0 0 1-1.06 0L2.22 7.97A.75.75 0 0 1 2 7.44V2.75zM5 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"/></svg>'
+const CONNECTOR_USE_CASES_CSS = `
+.connector-use-cases { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin: 0.875rem 0 0; padding-top: 0.875rem; border-top: 1px solid rgba(15, 23, 42, 0.08); }
+.connector-use-cases-label { font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #6b7280; }
+.connector-use-cases-chips { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.doc .connector-use-cases a.connector-use-case { display: inline-flex; align-items: center; gap: 0.375rem; padding: 0.3125rem 0.75rem; border: 1px solid #f6c9bb; border-radius: 999px; background: #fdf0ec; color: #a32d0c; font-size: 0.8125rem; font-weight: 600; line-height: 1.2; text-decoration: none; transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease; }
+.doc .connector-use-cases a.connector-use-case:hover { background: #fbe1d8; border-color: #e2401b; box-shadow: 0 1px 2px rgba(226, 64, 27, 0.18); }
+.doc .connector-use-cases a.connector-use-case:focus-visible { outline: 2px solid #e2401b; outline-offset: 2px; }
+.connector-use-case-icon { flex: 0 0 auto; opacity: 0.85; }
+.connector-use-case-arrow { display: inline-block; width: 0; overflow: hidden; opacity: 0; transform: translateX(-4px); transition: width 0.15s ease, opacity 0.15s ease, transform 0.15s ease; }
+.doc .connector-use-cases a.connector-use-case:hover .connector-use-case-arrow, .doc .connector-use-cases a.connector-use-case:focus-visible .connector-use-case-arrow { width: 0.875em; opacity: 1; transform: none; }
+html[data-theme="dark"] .connector-use-cases { border-top-color: rgba(255, 255, 255, 0.1); }
+html[data-theme="dark"] .connector-use-cases-label { color: #9ca3af; }
+html[data-theme="dark"] .doc .connector-use-cases a.connector-use-case { background: rgba(226, 64, 27, 0.14); border-color: rgba(241, 93, 97, 0.4); color: #ffb59e; }
+html[data-theme="dark"] .doc .connector-use-cases a.connector-use-case:hover { background: rgba(226, 64, 27, 0.24); border-color: #f15d61; }
+@media (prefers-reduced-motion: reduce) { .doc .connector-use-cases a.connector-use-case, .connector-use-case-arrow { transition: none; } }
+`
+
 // A use case is offered in the filter only when at least this many cards in
 // the current view have it: an option that narrows the catalog to one or two
 // cards reads as noise, and a tag that rare says more about tagging than use.
 const USE_CASE_MIN_CARDS = 3
-
-// The Solutions list above the cards shows at most this many links, then a
-// "See all" link to the Solutions landing page filtered to the use cases.
-const SOLUTIONS_LIST_CAP = 6
 
 /**
  * The solutions in a solutions.json catalog that have any of the selected use
@@ -156,45 +172,39 @@ function matchSolutions (catalog, ids, info) {
 }
 
 /**
- * The Redpanda Solutions block above the cards: a heading, a one-line lead,
- * the selected use cases as chips, up to `cap` links, and, past the cap, a
- * "See all" link to the Solutions landing page filtered to those use cases
- * (its `?use-case=` parameter takes the use case's label). Every value goes
- * through `escape` (the shared escapeHtml). Runs in the browser (injected
- * with toString) and in unit tests.
+ * One quiet line under the filters when a use case is selected and Redpanda
+ * Solutions cover it: the catalog is about components, so solutions are a
+ * hint, never a block of links competing with the cards. With one match it
+ * links that solution by title; with more it links the Solutions landing page
+ * filtered to the use cases (its `?use-case=` parameter takes the label).
+ * Every value goes through `escape` (the shared escapeHtml). Runs in the
+ * browser (injected with toString) and in unit tests.
  *
  * @param {Array<Object>} solutions - from matchSolutions
  * @param {Array<string>} ids - selected use-case IDs
  * @param {Object<string,{label: string}>} info - use-case ID -> its label
  * @param {Function} escape
- * @param {number} [cap]
  * @returns {string} HTML, empty when there are no solutions
  */
-function solutionsMarkup (solutions, ids, info, escape, cap) {
+function solutionsMarkup (solutions, ids, info, escape) {
   if (!solutions || !solutions.length) return ''
-  const max = cap || 6
   const names = ids.map(function (id) {
     const entry = info && info[id]
     return (entry && (typeof entry === 'string' ? entry : entry.label)) || id
   })
-  const chips = names.map(function (name) { return '<span class="badge badge-use-case">' + escape(name) + '</span>' })
-  const items = solutions.slice(0, max).map(function (solution) {
-    return '<li><a href="' + escape(solution.url) + '">' + escape(solution.title) + '</a></li>'
-  })
-  let more = ''
-  if (solutions.length > max) {
-    // The landing page is the root of the solutions component: the first
-    // path segment of a solution's URL (/solutions/cdc-to-lakehouse/ -> /solutions/)
-    const home = (String(solutions[0].url).match(/^(?:[a-z]+:\/\/[^/]+)?\/[^/]+\//i) || [''])[0]
-    if (home) {
-      const query = names.map(function (name) { return 'use-case=' + encodeURIComponent(name) }).join('&')
-      more = '<p class="catalog-solutions-more"><a href="' + escape(home + '?' + query) + '">See all ' + solutions.length + ' solutions</a></p>'
-    }
+  const topic = names.join(' or ')
+  if (solutions.length === 1) {
+    return '<p class="catalog-solutions-hint">Redpanda Solution for ' + escape(topic) + ': ' +
+      '<a href="' + escape(solutions[0].url) + '">' + escape(solutions[0].title) + '</a></p>'
   }
-  return '<h3 class="catalog-solutions-title">Redpanda Solutions</h3>' +
-    '<p class="catalog-solutions-lead">Runnable reference architectures for ' + escape(names.join(' or ')) + '</p>' +
-    '<div class="catalog-solutions-chips">' + chips.join(' ') + '</div>' +
-    '<ul class="catalog-solutions-list">' + items.join('') + '</ul>' + more
+  // The landing page is the root of the solutions component: the first path
+  // segment of a solution's URL (/solutions/cdc-to-lakehouse/ -> /solutions/)
+  const home = (String(solutions[0].url).match(/^(?:[a-z]+:\/\/[^/]+)?\/[^/]+\//i) || [''])[0]
+  const query = names.map(function (name) { return 'use-case=' + encodeURIComponent(name) }).join('&')
+  const text = 'See ' + solutions.length + ' Redpanda Solutions for ' + escape(topic)
+  return '<p class="catalog-solutions-hint">' + (home
+    ? '<a href="' + escape(home + '?' + query) + '">' + text + '</a>'
+    : text) + '</p>'
 }
 
 /**
@@ -272,7 +282,6 @@ module.exports.matchSolutions = matchSolutions
 module.exports.solutionsMarkup = solutionsMarkup
 module.exports.catalogStatusText = catalogStatusText
 module.exports.USE_CASE_MIN_CARDS = USE_CASE_MIN_CARDS
-module.exports.SOLUTIONS_LIST_CAP = SOLUTIONS_LIST_CAP
 module.exports.SOLUTIONS_CATALOG_PATH = SOLUTIONS_CATALOG_PATH
 
 /**
@@ -870,10 +879,15 @@ module.exports.register = function (registry, context) {
     const href = (id) => `${base.endsWith('/') ? base : base + '/'}?usecase=${encodeURIComponent(id)}`;
     const mergedNote = details.types.size > 1 ? " Applies to at least one of this component's types." : '';
     const chips = own.map(({ id, label, definition }) =>
-      `<a class="badge badge-use-case" href="${escapeHtml(href(id))}" title="${escapeHtml((definition || `Use case: ${label}`) + mergedNote)}">${escapeHtml(label)}</a>`
-    ).join(' ');
+      `<a class="connector-use-case" href="${escapeHtml(href(id))}" title="${escapeHtml((definition || `Use case: ${label}`) + mergedNote)}">` +
+      `${USE_CASE_TAG_ICON}<span>${escapeHtml(label)}</span><span class="connector-use-case-arrow" aria-hidden="true">&rarr;</span></a>`
+    ).join('');
     return `
-            <p class="connector-use-cases"><strong>Use cases</strong>: ${chips}</p>`;
+            <div class="connector-use-cases" role="group" aria-labelledby="connectorUseCasesLabel">
+              <span class="connector-use-cases-label" id="connectorUseCasesLabel">Use cases</span>
+              <span class="connector-use-cases-chips">${chips}</span>
+            </div>
+            <style>${CONNECTOR_USE_CASES_CSS}</style>`;
   }
 
   /**
@@ -1295,7 +1309,7 @@ module.exports.register = function (registry, context) {
               loadCatalog(panel.dataset.solutionsUrl).then(function(catalog) {
                 if (request !== latest) return; // a newer selection won
                 const matches = matchSolutions(catalog, ids, info);
-                show(solutionsMarkup(matches, ids, info, escapeHtml, ${SOLUTIONS_LIST_CAP}));
+                show(solutionsMarkup(matches, ids, info, escapeHtml));
                 finish(matches.length);
               });
             };
@@ -1824,14 +1838,15 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
           }
 
           /* Use case chips: neutral, the same size as the Availability badges */
+          /* Same look as the use-case chips on connector pages */
           .badge-use-case {
-            padding: 0.25rem 0.6rem;
-            font-size: 0.65rem;
-            font-weight: 500;
-            border: 1px solid #d1d5db;
-            border-radius: 4px;
-            background: #f9fafb;
-            color: #374151;
+            padding: 0.2rem 0.6rem;
+            font-size: 0.68rem;
+            font-weight: 600;
+            border: 1px solid #f6c9bb;
+            border-radius: 999px;
+            background: #fdf0ec;
+            color: #a32d0c;
             white-space: nowrap;
           }
 
@@ -1890,23 +1905,6 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
             font-size: 0.875rem;
           }
 
-          .catalog-solutions .catalog-solutions-lead {
-            margin: 0 0 0.5rem 0;
-            color: #4b5563;
-          }
-
-          .catalog-solutions .catalog-solutions-chips {
-            margin-bottom: 0.5rem;
-          }
-
-          .catalog-solutions .catalog-solutions-more {
-            margin: 0.5rem 0 0 0;
-          }
-
-          html[data-theme="dark"] .catalog-solutions .catalog-solutions-lead {
-            color: #d0d5dd;
-          }
-
           html[data-theme="dark"] .catalog-empty-clear {
             background: rgba(255, 255, 255, 0.07);
             border-color: rgba(255, 255, 255, 0.2);
@@ -1919,9 +1917,9 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
           }
 
           html[data-theme="dark"] .badge-use-case {
-            background: rgba(255, 255, 255, 0.07);
-            border-color: rgba(255, 255, 255, 0.15);
-            color: #d0d5dd;
+            background: rgba(226, 64, 27, 0.14);
+            border-color: rgba(241, 93, 97, 0.4);
+            color: #ffb59e;
           }
 
           /* At least 4.5:1 on the dark card background */
@@ -1929,31 +1927,23 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
             color: #9ca3af;
           }
 
+          /* A quiet hint, not a panel: solutions are secondary to the cards */
           .catalog-solutions {
-            margin-top: 1rem;
-            padding: 0.75rem 1rem;
-            border: 1px solid #e0e0e0;
-            border-left: 4px solid #e2401b;
-            border-radius: 8px;
+            margin: 0.75rem 0 0 0;
+            font-size: 0.875rem;
+            color: #4b5563;
+          }
+
+          .catalog-solutions .catalog-solutions-hint {
+            margin: 0;
           }
 
           .catalog-solutions[hidden] {
             display: none;
           }
 
-          .catalog-solutions .catalog-solutions-title {
-            margin: 0 0 0.5rem 0;
-            font-size: 1rem;
-          }
-
-          .catalog-solutions .catalog-solutions-list {
-            margin: 0;
-            padding-left: 1.25rem;
-          }
-
           html[data-theme="dark"] .catalog-solutions {
-            border-color: rgba(255, 255, 255, 0.15);
-            border-left-color: #f15d61;
+            color: #d0d5dd;
           }
 
           .badge-legend-button {

@@ -501,26 +501,21 @@ async function main () {
     const truncation = await page.evaluate(`(() => { const t = document.querySelector('#useCaseFilterToggle .dropdown-text'); const c = document.createElement('span'); c.textContent = t.textContent; c.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;'; t.parentNode.appendChild(c); const full = c.getBoundingClientRect().width; c.remove(); return { text: full, box: t.getBoundingClientRect().width, cut: full > t.getBoundingClientRect().width + 0.01, title: document.getElementById('useCaseFilterToggle').getAttribute('title') } })()`)
     assert(truncation.cut ? truncation.title === USE_CASE_LABEL : truncation.title === null, `a cut-off value is in the toggle's title (${JSON.stringify(truncation)})`)
     assert(await page.evaluate(`new URLSearchParams(location.search).get('usecase')`) === USE_CASE, 'the URL carries ?usecase=')
-    const heading = await page.evaluate(`document.querySelector('#componentCatalogSolutions .catalog-solutions-title').textContent`)
-    assert(heading === 'Redpanda Solutions', `the heading reads "${heading}"`)
-    const lead = await page.evaluate(`document.querySelector('#componentCatalogSolutions .catalog-solutions-lead').textContent`)
-    assert(lead === `Runnable reference architectures for ${USE_CASE_LABEL}`, `the lead reads "${lead}"`)
-    assert(await page.evaluate(`Array.from(document.querySelectorAll('#componentCatalogSolutions .catalog-solutions-chips .badge-use-case')).map(c => c.textContent).join()`) === USE_CASE_LABEL, 'the selected use case shows as a chip')
-    const links = await page.evaluate(`Array.from(document.querySelectorAll('#componentCatalogSolutions li a')).map(a => [a.textContent, a.getAttribute('href')])`)
-    assert(JSON.stringify(links) === JSON.stringify([
-      ['CDC to lakehouse', '/solutions/cdc-to-lakehouse/'],
-      ['Postgres CDC to Iceberg', '/solutions/postgres-cdc-to-iceberg/'],
-      ['MongoDB CDC replay', '/solutions/mongodb-cdc-replay/']
-    ]), `solutions match by concept ID, by label (the DEM#320 shape), and by altLabel, without the deprecated one: ${JSON.stringify(links)}`)
+    // Solutions are one quiet line, not a block competing with the cards. Three
+    // match: by concept ID, by label (the DEM#320 shape), and by altLabel; the
+    // deprecated one is left out
+    const hint = await page.evaluate(`(() => { const p = document.querySelector('#componentCatalogSolutions .catalog-solutions-hint'); const a = p && p.querySelector('a'); return p && { text: p.textContent, href: a && a.getAttribute('href'), links: p.querySelectorAll('a').length } })()`)
+    assert(hint && hint.text === `See 3 Redpanda Solutions for ${USE_CASE_LABEL}` && hint.links === 1 && hint.href === `/solutions/?use-case=${encodeURIComponent(USE_CASE_LABEL)}`, `one line links the filtered Solutions landing page: ${JSON.stringify(hint)}`)
+    assert(await page.evaluate(`!document.querySelector('#componentCatalogSolutions h3, #componentCatalogSolutions ul, #componentCatalogSolutions .badge')`), 'no heading, list, or chips: the hint stays secondary to the cards')
     await page.waitFor(`${status}.includes('related solution')`, 'the status region to count the solutions')
     const pickedStatus = await page.evaluate(status)
     assert(pickedStatus === `${tagged} components match ${USE_CASE_LABEL}. 3 related solutions.`, `the status region reads "${pickedStatus}"`)
     if (shots) await page.screenshot(path.join(shots, '2-filtered.png'))
 
     // The panel is not rebuilt when the list does not change
-    await page.evaluate(`window.__panelMarker = document.querySelector('#componentCatalogSolutions li'); window.filterComponentTable({ type: 'test' })`)
+    await page.evaluate(`window.__panelMarker = document.querySelector('#componentCatalogSolutions .catalog-solutions-hint'); window.filterComponentTable({ type: 'test' })`)
     await page.waitFor(`${status}.includes('related solution')`, 'the status after a no-op change')
-    assert(await page.evaluate(`document.querySelector('#componentCatalogSolutions li') === window.__panelMarker`), 'an unchanged solutions list is not re-rendered')
+    assert(await page.evaluate(`document.querySelector('#componentCatalogSolutions .catalog-solutions-hint') === window.__panelMarker`), 'an unchanged solutions hint is not re-rendered')
 
     // Escape closes the menu and returns focus to its toggle
     await page.pressKey('Escape', 'Escape', 27)
@@ -581,8 +576,9 @@ async function main () {
     // already filtered to that use case
     await page.navigate(`${base}/connect/components/inputs/postgres_cdc/`)
     await page.waitFor(`!!document.querySelector('.connector-use-cases')`, 'the Use cases line on postgres_cdc')
-    const chip = await page.evaluate(`(() => { const a = document.querySelector('.connector-use-cases a.badge-use-case'); return a && { text: a.textContent.trim(), href: a.href } })()`)
+    const chip = await page.evaluate(`(() => { const a = document.querySelector('.connector-use-cases a.connector-use-case'); const style = a && getComputedStyle(a); return a && { text: a.querySelector('span').textContent.trim(), href: a.href, radius: style.borderRadius, decoration: style.textDecorationLine } })()`)
     assert(chip && chip.text === 'Change data capture' && /\/connect\/components\/about\/\?usecase=change-data-capture$/.test(chip.href), `the postgres_cdc page links its use case to the filtered catalog (${chip && chip.href})`)
+    assert(chip.decoration === 'none' && parseFloat(chip.radius) >= 100, `the chip renders as a pill, not a plain link (${JSON.stringify(chip)})`)
     await page.navigate(chip.href)
     await page.waitFor(`document.querySelectorAll('#componentCardsContainer .component-card').length > 0`, 'the catalog from the chip')
     assert(await page.evaluate(toggleText) === 'Change data capture', 'following the chip opens the catalog filtered to Change data capture')

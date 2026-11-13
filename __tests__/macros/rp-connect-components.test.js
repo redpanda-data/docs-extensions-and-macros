@@ -872,32 +872,26 @@ describe('component_table use cases', () => {
       expect(solutionsMarkup([], ['change-data-capture'], INFO, escapeHtml)).toBe('')
     })
 
-    test('renders the Redpanda Solutions heading, lead, chips, and links', () => {
-      const html = solutionsMarkup(matchSolutions(CATALOG, ['change-data-capture'], INFO).slice(0, 2), ['change-data-capture'], INFO, escapeHtml, 6)
-      expect(html).toBe(
-        '<h3 class="catalog-solutions-title">Redpanda Solutions</h3>' +
-        '<p class="catalog-solutions-lead">Runnable reference architectures for Change data capture</p>' +
-        '<div class="catalog-solutions-chips"><span class="badge badge-use-case">Change data capture</span></div>' +
-        '<ul class="catalog-solutions-list">' +
-        '<li><a href="/solutions/cdc-to-lakehouse/">CDC to lakehouse</a></li>' +
-        '<li><a href="/solutions/authored-id/">Authored by ID</a></li>' +
-        '</ul>'
-      )
+    test('one match: a quiet line that links the solution by title', () => {
+      const html = solutionsMarkup(matchSolutions(CATALOG, ['change-data-capture'], INFO).slice(0, 1), ['change-data-capture'], INFO, escapeHtml)
+      expect(html).toBe('<p class="catalog-solutions-hint">Redpanda Solution for Change data capture: <a href="/solutions/cdc-to-lakehouse/">CDC to lakehouse</a></p>')
     })
 
-    test('caps the list and links to the Solutions landing page filtered by use case', () => {
+    test('several matches: one line that links the Solutions landing page filtered by use case', () => {
       const many = Array.from({ length: 8 }, (_, i) => ({ title: `S${i}`, url: `/solutions/s${i}/` }))
-      const html = solutionsMarkup(many, ['change-data-capture'], INFO, escapeHtml, 6)
-      expect(html.match(/<li>/g)).toHaveLength(6)
-      expect(html).toContain('<p class="catalog-solutions-more"><a href="/solutions/?use-case=Change%20data%20capture">See all 8 solutions</a></p>')
-      expect(solutionsMarkup(many.slice(0, 6), ['change-data-capture'], INFO, escapeHtml, 6)).not.toContain('See all')
+      const html = solutionsMarkup(many, ['change-data-capture'], INFO, escapeHtml)
+      expect(html).toBe('<p class="catalog-solutions-hint"><a href="/solutions/?use-case=Change%20data%20capture">See 8 Redpanda Solutions for Change data capture</a></p>')
+      expect(html).not.toMatch(/<h3|<ul|<li|badge/)
     })
 
     test('escapes solution titles, URLs, and labels', () => {
-      const html = solutionsMarkup([{ title: '<b>x</b>', url: '"><script>alert(1)</script>' }], ['a'], { a: { label: '<i>A</i>' } }, escapeHtml)
-      expect(html).not.toMatch(/<script>|<b>|<i>/)
-      expect(html).toContain('&lt;b&gt;x&lt;/b&gt;')
-      expect(html).toContain('Runnable reference architectures for &lt;i&gt;A&lt;/i&gt;')
+      const one = solutionsMarkup([{ title: '<b>x</b>', url: '"><script>alert(1)</script>' }], ['a'], { a: { label: '<i>A</i>' } }, escapeHtml)
+      expect(one).not.toMatch(/<script>|<b>|<i>/)
+      expect(one).toContain('&lt;b&gt;x&lt;/b&gt;')
+      expect(one).toContain('Redpanda Solution for &lt;i&gt;A&lt;/i&gt;')
+      const two = solutionsMarkup([{ title: 'a', url: '/solutions/a/' }, { title: 'b', url: '/solutions/b/' }], ['a'], { a: { label: '<i>A</i>' } }, escapeHtml)
+      expect(two).not.toMatch(/<i>/)
+      expect(two).toContain('for &lt;i&gt;A&lt;/i&gt;')
     })
   })
 
@@ -919,8 +913,10 @@ describe('component_table use cases', () => {
 
     test('links each offered use case to the catalog filtered to it', () => {
       const html = renderDropdown({ name: 'kafka' })
-      expect(html).toContain('<p class="connector-use-cases"><strong>Use cases</strong>: ')
-      expect(html).toContain('<a class="badge badge-use-case" href="../../about/?usecase=stream-processing" title="Transforming events as they flow. Applies to at least one of this component\'s types.">Stream processing</a>')
+      expect(html).toContain('<div class="connector-use-cases" role="group" aria-labelledby="connectorUseCasesLabel">')
+      expect(html).toContain('<span class="connector-use-cases-label" id="connectorUseCasesLabel">Use cases</span>')
+      expect(html).toMatch(/<a class="connector-use-case" href="\.\.\/\.\.\/about\/\?usecase=stream-processing" title="Transforming events as they flow\. Applies to at least one of this component's types\."><svg[^>]*aria-hidden="true"[^>]*>.*?<\/svg><span>Stream processing<\/span><span class="connector-use-case-arrow" aria-hidden="true">&rarr;<\/span><\/a>/)
+      expect(html).toContain('<style>')
       expect(html).toContain('href="../../about/?usecase=change-data-capture"')
     })
 

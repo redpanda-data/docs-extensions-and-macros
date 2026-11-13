@@ -131,7 +131,7 @@ component_table::[]
 
 Generates a searchable catalog of component cards, with filters and a badge legend. Use `component_table::[all]` to also show Cloud availability and Enterprise licensing.
 
-When Connect's `info.csv` tags components with use cases (the `use_cases` column), the catalog adds a *Use case* filter, and search finds components by use case. Selecting a use case also lists the Redpanda Solutions for it, when the build publishes the solutions catalog. See link:REFERENCE.adoc#use-case-filter[the macros reference] for the data source and the rules.
+When Connect's `info.csv` tags components with use cases (the `use_cases` column), the catalog adds a *Use case* filter, and search finds components by use case. Selecting a use case also adds one line that points to the Redpanda Solutions for it, when the build publishes the solutions catalog. See link:REFERENCE.adoc#use-case-filter[the macros reference] for the data source and the rules.
 
 === component_type_dropdown - Type switcher
 
