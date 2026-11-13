@@ -1351,6 +1351,20 @@ module.exports.register = function (registry, context) {
             min-width: 0;
           }
 
+          /* A long option label ("Change data capture") wraps in a narrow
+             menu: keep the second line aligned with the first, not under the
+             checkbox. */
+          .table-filters.component-catalog-filters .dropdown-checkbox-option {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.5rem;
+          }
+
+          .table-filters.component-catalog-filters .dropdown-checkbox-option > input {
+            flex: 0 0 auto;
+            margin-top: 0.2em;
+          }
+
           ${filterLayoutCss(filterCount)}
 
           .component-cards-container {
