@@ -111,22 +111,44 @@ const SOLUTIONS_CATALOG_PATH = 'assets/data/solutions.json'
 
 // The use-case chips on a connector's own page (component_type_dropdown). The
 // catalog's styles load only on the catalog page, so these ship with the block.
-const USE_CASE_TAG_ICON = '<svg class="connector-use-case-icon" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false"><path fill="currentColor" d="M2 2.75C2 2.34 2.34 2 2.75 2h4.69c.2 0 .39.08.53.22l5.81 5.81a.75.75 0 0 1 0 1.06l-4.69 4.69a.75.75 0 0 1-1.06 0L2.22 7.97A.75.75 0 0 1 2 7.44V2.75zM5 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"/></svg>'
-const CONNECTOR_USE_CASES_CSS = `
-.connector-use-cases { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin: 0.875rem 0 0; padding-top: 0.875rem; border-top: 1px solid rgba(15, 23, 42, 0.08); }
-.connector-use-cases-label { font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #6b7280; }
+const USE_CASE_TAG_ICON = '<svg class="connector-use-case-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M2 2.75C2 2.34 2.34 2 2.75 2h4.69c.2 0 .39.08.53.22l5.81 5.81a.75.75 0 0 1 0 1.06l-4.69 4.69a.75.75 0 0 1-1.06 0L2.22 7.97A.75.75 0 0 1 2 7.44V2.75zM5 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"/></svg>'
+const LICENSE_KEY_ICON = '<svg viewBox="0 0 16 16" width="16" height="16" focusable="false"><path fill="currentColor" d="M10.5 1a4.5 4.5 0 0 0-4.29 5.85L1.22 11.84a.75.75 0 0 0-.22.53v2.88c0 .41.34.75.75.75h2.5c.41 0 .75-.34.75-.75V14h1.25c.41 0 .75-.34.75-.75V12h1.25c.2 0 .39-.08.53-.22l.88-.88A4.5 4.5 0 1 0 10.5 1zm1 4.75a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5z"/></svg>'
+const CONNECTOR_FACTS_CSS = `
+.doc .metadata-block.connector-facts { position: relative; margin: 1.25rem 0 1.5rem; padding: 0; border: 1px solid #ece7e5; border-radius: 12px; background: linear-gradient(135deg, #fffaf8 0%, #ffffff 60%); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 16px -8px rgba(226, 64, 27, 0.18); overflow: hidden; }
+.doc .metadata-block.connector-facts::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: linear-gradient(180deg, #e2401b, #f2a33a); }
+.doc .metadata-block.connector-facts .metadata-content { padding: 0; }
+.connector-fact { display: flex; gap: 0.875rem; padding: 1rem 1.25rem 1rem 1.5rem; }
+.connector-fact + .connector-fact { border-top: 1px solid #f0ebe9; }
+.connector-fact-icon { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; border-radius: 8px; background: #fdf0ec; color: #c2370f; }
+.connector-fact-body { flex: 1 1 auto; min-width: 0; }
+.doc .connector-facts .connector-fact-title { display: block; margin: 0.25rem 0 0.25rem; font-size: 0.9375rem; font-weight: 700; color: #111827; letter-spacing: -0.005em; }
+.doc .connector-facts p.connector-fact-text { margin: 0 0 0.75rem; font-size: 0.875rem; line-height: 1.5; color: #4b5563; }
+.doc .connector-facts p.connector-fact-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin: 0; }
+.doc .connector-facts a.connector-fact-button { display: inline-flex; align-items: center; padding: 0.4375rem 0.875rem; border: 1px solid #d6d3d1; border-radius: 8px; background: #fff; color: #1f2937; font-size: 0.8125rem; font-weight: 600; text-decoration: none; transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease; }
+.doc .connector-facts a.connector-fact-button:hover { border-color: #a8a29e; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08); }
+.doc .connector-facts a.connector-fact-button--primary { border-color: #c2370f; background: #c2370f; color: #fff; }
+.doc .connector-facts a.connector-fact-button--primary:hover { border-color: #a32d0c; background: #a32d0c; }
+.doc .connector-facts a.connector-fact-link { font-size: 0.8125rem; font-weight: 600; color: #a32d0c; }
+.doc .connector-facts a:focus-visible { outline: 2px solid #e2401b; outline-offset: 2px; }
+.connector-fact--use-cases .connector-use-cases { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.875rem; }
+.doc .connector-facts .connector-fact--use-cases .connector-use-cases-label { display: inline; margin: 0; }
 .connector-use-cases-chips { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-.doc .connector-use-cases a.connector-use-case { display: inline-flex; align-items: center; gap: 0.375rem; padding: 0.3125rem 0.75rem; border: 1px solid #f6c9bb; border-radius: 999px; background: #fdf0ec; color: #a32d0c; font-size: 0.8125rem; font-weight: 600; line-height: 1.2; text-decoration: none; transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease; }
-.doc .connector-use-cases a.connector-use-case:hover { background: #fbe1d8; border-color: #e2401b; box-shadow: 0 1px 2px rgba(226, 64, 27, 0.18); }
-.doc .connector-use-cases a.connector-use-case:focus-visible { outline: 2px solid #e2401b; outline-offset: 2px; }
-.connector-use-case-icon { flex: 0 0 auto; opacity: 0.85; }
+.doc .connector-facts a.connector-use-case { display: inline-flex; align-items: center; gap: 0.375rem; padding: 0.3125rem 0.75rem; border: 1px solid #f6c9bb; border-radius: 999px; background: #fdf0ec; color: #a32d0c; font-size: 0.8125rem; font-weight: 600; line-height: 1.2; text-decoration: none; transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease; }
+.doc .connector-facts a.connector-use-case:hover { background: #fbe1d8; border-color: #e2401b; box-shadow: 0 1px 2px rgba(226, 64, 27, 0.18); }
 .connector-use-case-arrow { display: inline-block; width: 0; overflow: hidden; opacity: 0; transform: translateX(-4px); transition: width 0.15s ease, opacity 0.15s ease, transform 0.15s ease; }
-.doc .connector-use-cases a.connector-use-case:hover .connector-use-case-arrow, .doc .connector-use-cases a.connector-use-case:focus-visible .connector-use-case-arrow { width: 0.875em; opacity: 1; transform: none; }
-html[data-theme="dark"] .connector-use-cases { border-top-color: rgba(255, 255, 255, 0.1); }
-html[data-theme="dark"] .connector-use-cases-label { color: #9ca3af; }
-html[data-theme="dark"] .doc .connector-use-cases a.connector-use-case { background: rgba(226, 64, 27, 0.14); border-color: rgba(241, 93, 97, 0.4); color: #ffb59e; }
-html[data-theme="dark"] .doc .connector-use-cases a.connector-use-case:hover { background: rgba(226, 64, 27, 0.24); border-color: #f15d61; }
-@media (prefers-reduced-motion: reduce) { .doc .connector-use-cases a.connector-use-case, .connector-use-case-arrow { transition: none; } }
+.doc .connector-facts a.connector-use-case:hover .connector-use-case-arrow, .doc .connector-facts a.connector-use-case:focus-visible .connector-use-case-arrow { width: 0.875em; opacity: 1; transform: none; }
+html[data-theme="dark"] .doc .metadata-block.connector-facts { border-color: rgba(255, 255, 255, 0.1); background: linear-gradient(135deg, rgba(226, 64, 27, 0.08) 0%, rgba(255, 255, 255, 0.02) 60%); box-shadow: none; }
+html[data-theme="dark"] .connector-fact + .connector-fact { border-top-color: rgba(255, 255, 255, 0.08); }
+html[data-theme="dark"] .connector-fact-icon { background: rgba(226, 64, 27, 0.18); color: #ffb59e; }
+html[data-theme="dark"] .doc .connector-facts .connector-fact-title { color: #f3f4f6; }
+html[data-theme="dark"] .doc .connector-facts p.connector-fact-text { color: #c7cbd1; }
+html[data-theme="dark"] .doc .connector-facts a.connector-fact-button { border-color: rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.04); color: #f3f4f6; }
+html[data-theme="dark"] .doc .connector-facts a.connector-fact-button--primary { border-color: #c2370f; background: #c2370f; color: #fff; }
+html[data-theme="dark"] .doc .connector-facts a.connector-fact-link { color: #ffb59e; }
+html[data-theme="dark"] .doc .connector-facts a.connector-use-case { background: rgba(226, 64, 27, 0.14); border-color: rgba(241, 93, 97, 0.4); color: #ffb59e; }
+html[data-theme="dark"] .doc .connector-facts a.connector-use-case:hover { background: rgba(226, 64, 27, 0.24); border-color: #f15d61; }
+@media (max-width: 480px) { .connector-fact { padding: 0.875rem 1rem 0.875rem 1.25rem; } .connector-fact-icon { display: none; } }
+@media (prefers-reduced-motion: reduce) { .doc .connector-facts a, .connector-use-case-arrow { transition: none; } }
 `
 
 // A use case is offered in the filter only when at least this many cards in
@@ -880,14 +902,18 @@ module.exports.register = function (registry, context) {
     const mergedNote = details.types.size > 1 ? " Applies to at least one of this component's types." : '';
     const chips = own.map(({ id, label, definition }) =>
       `<a class="connector-use-case" href="${escapeHtml(href(id))}" title="${escapeHtml((definition || `Use case: ${label}`) + mergedNote)}">` +
-      `${USE_CASE_TAG_ICON}<span>${escapeHtml(label)}</span><span class="connector-use-case-arrow" aria-hidden="true">&rarr;</span></a>`
+      `<span>${escapeHtml(label)}</span><span class="connector-use-case-arrow" aria-hidden="true">&rarr;</span></a>`
     ).join('');
     return `
-            <div class="connector-use-cases" role="group" aria-labelledby="connectorUseCasesLabel">
-              <span class="connector-use-cases-label" id="connectorUseCasesLabel">Use cases</span>
-              <span class="connector-use-cases-chips">${chips}</span>
-            </div>
-            <style>${CONNECTOR_USE_CASES_CSS}</style>`;
+            <section class="connector-fact connector-fact--use-cases">
+              <span class="connector-fact-icon" aria-hidden="true">${USE_CASE_TAG_ICON}</span>
+              <div class="connector-fact-body">
+                <div class="connector-use-cases" role="group" aria-labelledby="connectorUseCasesLabel">
+                  <span class="connector-use-cases-label connector-fact-title" id="connectorUseCasesLabel">Use cases</span>
+                  <span class="connector-use-cases-chips">${chips}</span>
+                </div>
+              </div>
+            </section>`;
   }
 
   /**
@@ -2695,7 +2721,18 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
         const requiresEnterprise = componentRows.some(row => row.is_licensed.toLowerCase() === 'yes');
         if (requiresEnterprise) {
           enterpriseLicenseInfo = `
-            <p><strong>License</strong>: This component requires an <a href="https://docs.redpanda.com/redpanda-connect/get-started/licensing/" target="_blank">enterprise license</a>. You can either <a href="https://www.redpanda.com/upgrade" target="_blank">upgrade to an Enterprise Edition license</a>, or <a href="http://redpanda.com/try-enterprise" target="_blank" rel="noopener">generate a trial license key</a> that's valid for 30 days.</p>`;
+            <section class="connector-fact connector-fact--license" aria-labelledby="connectorLicenseTitle">
+              <span class="connector-fact-icon" aria-hidden="true">${LICENSE_KEY_ICON}</span>
+              <div class="connector-fact-body">
+                <p class="connector-fact-title" id="connectorLicenseTitle">Enterprise license required</p>
+                <p class="connector-fact-text">This component runs with a Redpanda Enterprise Edition license. Try it free for 30 days, or upgrade when you're ready.</p>
+                <p class="connector-fact-actions">
+                  <a class="connector-fact-button connector-fact-button--primary" href="http://redpanda.com/try-enterprise" target="_blank" rel="noopener">Get a 30-day trial key</a>
+                  <a class="connector-fact-button" href="https://www.redpanda.com/upgrade" target="_blank" rel="noopener">Upgrade</a>
+                  <a class="connector-fact-link" href="https://docs.redpanda.com/redpanda-connect/get-started/licensing/" target="_blank" rel="noopener">About licensing</a>
+                </p>
+              </div>
+            </section>`;
         }
       }
       // The Type dropdown and availability info are rendered server-side in the sticky bar by the
@@ -2711,11 +2748,12 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
         return self.createBlock(parent, 'pass', '');
       }
       return self.createBlock(parent, 'pass', `
-        <div class="metadata-block">
+        <div class="metadata-block connector-facts">
           <div class="metadata-content">
           ${enterpriseLicenseInfo}${useCasesInfo}
           </div>
-        </div>`);
+        </div>
+        <style>${CONNECTOR_FACTS_CSS}</style>`);
     });
   });
 

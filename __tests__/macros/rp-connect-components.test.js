@@ -914,8 +914,11 @@ describe('component_table use cases', () => {
     test('links each offered use case to the catalog filtered to it', () => {
       const html = renderDropdown({ name: 'kafka' })
       expect(html).toContain('<div class="connector-use-cases" role="group" aria-labelledby="connectorUseCasesLabel">')
-      expect(html).toContain('<span class="connector-use-cases-label" id="connectorUseCasesLabel">Use cases</span>')
-      expect(html).toMatch(/<a class="connector-use-case" href="\.\.\/\.\.\/about\/\?usecase=stream-processing" title="Transforming events as they flow\. Applies to at least one of this component's types\."><svg[^>]*aria-hidden="true"[^>]*>.*?<\/svg><span>Stream processing<\/span><span class="connector-use-case-arrow" aria-hidden="true">&rarr;<\/span><\/a>/)
+      expect(html).toContain('<span class="connector-use-cases-label connector-fact-title" id="connectorUseCasesLabel">Use cases</span>')
+      expect(html).toContain('<a class="connector-use-case" href="../../about/?usecase=stream-processing" title="Transforming events as they flow. Applies to at least one of this component\'s types."><span>Stream processing</span><span class="connector-use-case-arrow" aria-hidden="true">&rarr;</span></a>')
+      expect(html).toContain('<div class="metadata-block connector-facts">')
+      expect(html).toContain('<section class="connector-fact connector-fact--use-cases">')
+      expect(html).toMatch(/<span class="connector-fact-icon" aria-hidden="true"><svg/)
       expect(html).toContain('<style>')
       expect(html).toContain('href="../../about/?usecase=change-data-capture"')
     })
