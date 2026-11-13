@@ -277,6 +277,19 @@ async function openPage (browser) {
       await send('Input.dispatchMouseEvent', { type, x: box.x, y: box.y, button: 'left', clickCount: 1 })
     }
   }
+  // A real mouse move onto the center of the element, then off the page content
+  const hover = async (selector) => {
+    const box = await evaluate(`(() => {
+      const el = document.querySelector(${JSON.stringify(selector)});
+      if (!el) return null;
+      el.scrollIntoView({ block: 'center' });
+      const r = el.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    })()`)
+    if (!box) throw new Error(`no element matches ${selector}`)
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x, y: box.y })
+  }
+  const mouseAway = () => send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1 })
   const pressKey = async (key, code, keyCode) => {
     await send('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode: keyCode })
     await send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: keyCode })
@@ -303,7 +316,7 @@ async function openPage (browser) {
     const node = nodes[0] || {}
     return { name: node.name && node.name.value, role: node.role && node.role.value }
   }
-  return { evaluate, waitFor, navigate, click, pressKey, typeText, accessible, screenshot, setViewport, errors }
+  return { evaluate, waitFor, navigate, click, hover, mouseAway, pressKey, typeText, accessible, screenshot, setViewport, errors }
 }
 
 // The filter panel's layout: the search row, then the dropdown filters as
@@ -343,6 +356,63 @@ async function checkFilterLayout (page, what, expectedColumns) {
   if (expectedColumns) assert(shape === expectedColumns, `${what}: filters sit ${shape}, expected ${expectedColumns}`)
   return layout
 }
+
+// Each meaning badge on the cards against its docs-ui tokens: a pill whose
+// color, background, and border are the resolved --meaning-NAME-* values
+const BADGE_TOKENS = (names) => `(() => {
+  const probe = document.createElement('span');
+  document.body.appendChild(probe);
+  const resolve = (prop, token) => { probe.style.cssText = ''; probe.style[prop] = 'var(' + token + ')'; return getComputedStyle(probe)[prop] };
+  const out = ${JSON.stringify(names)}.map(name => {
+    const el = document.querySelector('#componentCardsContainer .component-card .rp-badge--' + name);
+    if (!el) return { name, missing: true };
+    const s = getComputedStyle(el);
+    const want = { color: resolve('color', '--meaning-' + name + '-fg'), backgroundColor: resolve('backgroundColor', '--meaning-' + name + '-bg'), borderTopColor: resolve('borderTopColor', '--meaning-' + name + '-border') };
+    const got = { color: s.color, backgroundColor: s.backgroundColor, borderTopColor: s.borderTopColor };
+    return { name, radius: parseFloat(s.borderTopLeftRadius), title: el.hasAttribute('title'), want, got, ok: Object.keys(want).every(k => want[k] === got[k]) };
+  });
+  probe.remove();
+  return out;
+})()`
+
+// The visible tippy tooltip's text, or null
+const VISIBLE_TOOLTIP = `(() => { const box = document.querySelector('[data-tippy-root] .tippy-box[data-state="visible"]'); return box ? box.textContent : null })()`
+
+// Horizontal overflow and the card grid at the current width, and any card
+// title that wraps mid-word (a line that does not end after an underscore)
+const NARROW_LAYOUT = `(() => {
+  const c = document.getElementById('componentCardsContainer');
+  const cr = c.getBoundingClientRect();
+  const cards = Array.from(c.querySelectorAll('.component-card')).filter(el => getComputedStyle(el).display !== 'none');
+  const midWord = [];
+  const wrapped = new Set();
+  for (const code of c.querySelectorAll('.card-title code')) {
+    const walker = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
+    let prev = null;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      for (let i = 0; i < node.data.length; i++) {
+        const range = document.createRange();
+        range.setStart(node, i);
+        range.setEnd(node, i + 1);
+        const top = range.getBoundingClientRect().top;
+        if (prev && top > prev.top + 2) {
+          wrapped.add(code.textContent);
+          if (prev.ch !== '_') midWord.push(code.textContent);
+        }
+        prev = { top, ch: node.data[i] };
+      }
+    }
+  }
+  return {
+    viewport: window.innerWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+    container: Math.round(cr.width),
+    columns: getComputedStyle(c).gridTemplateColumns,
+    cardsInside: cards.every(el => el.getBoundingClientRect().right <= cr.right + 0.5 && el.scrollWidth <= el.clientWidth + 1),
+    midWord: [...new Set(midWord)],
+    wrapped: wrapped.size
+  };
+})()`
 
 function assert (condition, message) {
   if (!condition) throw new Error(`assertion failed: ${message}`)
@@ -506,7 +576,7 @@ async function main () {
     // deprecated one is left out
     const hint = await page.evaluate(`(() => { const p = document.querySelector('#componentCatalogSolutions .catalog-solutions-hint'); const a = p && p.querySelector('a'); return p && { text: p.textContent, href: a && a.getAttribute('href'), links: p.querySelectorAll('a').length } })()`)
     assert(hint && hint.text === `See 3 Redpanda Solutions for ${USE_CASE_LABEL}` && hint.links === 1 && hint.href === `/solutions/?use-case=${encodeURIComponent(USE_CASE_LABEL)}`, `one line links the filtered Solutions landing page: ${JSON.stringify(hint)}`)
-    assert(await page.evaluate(`!document.querySelector('#componentCatalogSolutions h3, #componentCatalogSolutions ul, #componentCatalogSolutions .badge')`), 'no heading, list, or chips: the hint stays secondary to the cards')
+    assert(await page.evaluate(`!document.querySelector('#componentCatalogSolutions h3, #componentCatalogSolutions ul, #componentCatalogSolutions .rp-badge')`), 'no heading, list, or chips: the hint stays secondary to the cards')
     await page.waitFor(`${status}.includes('related solution')`, 'the status region to count the solutions')
     const pickedStatus = await page.evaluate(status)
     assert(pickedStatus === `${tagged} components match ${USE_CASE_LABEL}. 3 related solutions.`, `the status region reads "${pickedStatus}"`)
@@ -571,28 +641,138 @@ async function main () {
     await page.waitFor(`!document.getElementById('componentCatalogSolutions').hidden`, 'the solutions links from the URL')
     assert(await page.evaluate(`${visibleCards}.length`) === tagged, '?usecase= in the URL applies the filter on load')
 
+
+    // Meaning badges: docs-ui pills in the token colors, light and dark, with
+    // tippy tooltips (never a native title) on hover and on keyboard focus
+    await page.navigate(base + PAGE)
+    await page.waitFor(`document.querySelectorAll('#componentCardsContainer .component-card').length > 0`, 'the cards for the badge checks')
+    const meanings = ['neutral', 'certified', 'community', 'cloud', 'enterprise', 'use-case']
+    for (const theme of ['light', 'dark']) {
+      if (theme === 'dark') {
+        await page.evaluate(`document.documentElement.setAttribute('data-theme', 'dark')`)
+        await new Promise((resolve) => setTimeout(resolve, 600))
+      }
+      const badges = await page.evaluate(BADGE_TOKENS(meanings))
+      for (const b of badges) {
+        assert(!b.missing, `${theme}: the cards have a ${b.name} badge`)
+        assert(b.radius >= 100 && !b.title, `${theme}: the ${b.name} badge is a pill (radius ${b.radius}px) with no native title`)
+        assert(b.ok, `${theme}: the ${b.name} badge uses --meaning-${b.name}-* (${JSON.stringify(b.got)}${b.ok ? '' : ` != ${JSON.stringify(b.want)}`})`)
+      }
+      // Neutral, community, and use case share the neutral grey by design
+      const colored = badges.filter((b) => ['certified', 'cloud', 'enterprise', 'neutral'].includes(b.name))
+      assert(new Set(colored.map((b) => b.got.color)).size === 4, `${theme}: certified, cloud, enterprise, and neutral each have their own color (${colored.map((b) => b.got.color).join(', ')})`)
+    }
+    await page.evaluate(`document.documentElement.removeAttribute('data-theme')`)
+    assert(await page.evaluate(`document.querySelectorAll('#componentCardsContainer [class*="rp-badge"][title], #componentCardsContainer .badge').length`) === 0, 'no card badge has a title attribute or the old .badge class')
+    const enterpriseBadge = '#componentCardsContainer .component-card .rp-badge--enterprise'
+    await page.waitFor(`!!document.querySelector('${enterpriseBadge}')._tippy`, 'docs-ui to give the badges their tooltips')
+    await page.hover(enterpriseBadge)
+    await page.waitFor(`${VISIBLE_TOOLTIP} === 'Requires an Enterprise Edition license.'`, 'the Enterprise tooltip on hover')
+    const described = await page.evaluate(`(() => { const el = document.querySelector('${enterpriseBadge}'); const id = el.getAttribute('aria-describedby'); return { id, tippy: !!(id && document.getElementById(id) && document.getElementById(id).closest('[data-tippy-root]')), title: el.getAttribute('title') } })()`)
+    assert(described.tippy && described.title === null, `hovering the Enterprise badge shows its tippy tooltip, linked by aria-describedby, with no native title (${JSON.stringify(described)})`)
+    await page.mouseAway()
+    await page.waitFor(`${VISIBLE_TOOLTIP} === null`, 'the tooltip to hide when the mouse leaves')
+    // Keyboard: Tab from the card's last type badge to its first support badge
+    const tabTarget = await page.evaluate(`(() => {
+      const typeLinks = (c) => c.querySelectorAll('.badge-group:first-child .badge-group-badges a.rp-badge');
+      const card = Array.from(document.querySelectorAll('#componentCardsContainer .component-card')).find(c => typeLinks(c).length && c.querySelector('.rp-badge--certified') && !c.querySelector('.catalog-drivers'));
+      const types = typeLinks(card);
+      const support = card.querySelector('.rp-badge--certified');
+      support.id = 'e2eSupportBadge';
+      types[types.length - 1].focus();
+      return { tabindex: support.getAttribute('tabindex'), from: document.activeElement.textContent };
+    })()`)
+    await page.pressKey('Tab', 'Tab', 9)
+    await page.waitFor(`document.activeElement && document.activeElement.id === 'e2eSupportBadge'`, 'Tab to reach the support badge')
+    await page.waitFor(`${VISIBLE_TOOLTIP} === 'Supported and tested by Redpanda.'`, 'the Certified tooltip on keyboard focus')
+    assert(tabTarget.tabindex === '0', `Tab from the ${tabTarget.from} badge focuses the Certified badge (tabindex ${tabTarget.tabindex}) and shows its tooltip`)
+    await page.evaluate(`document.activeElement.blur()`)
+
+    // The legend uses the same badges, and lists Enterprise
+    await page.click('.badge-legend-button')
+    await page.waitFor(`document.getElementById('badgeLegendModal') && document.getElementById('badgeLegendModal').classList.contains('show')`, 'the badge legend')
+    const legend = await page.evaluate(`(() => { const m = document.getElementById('badgeLegendModal'); const e = m.querySelector('.rp-badge--enterprise'); return { enterprise: e && e.textContent, pill: e && parseFloat(getComputedStyle(e).borderTopLeftRadius), oldBadges: m.querySelectorAll('.badge').length, rateLimit: Array.from(m.querySelectorAll('.rp-badge')).map(b => b.textContent).filter(t => /rate/i.test(t)) } })()`)
+    assert(legend.enterprise === 'Enterprise' && legend.pill >= 100 && legend.oldBadges === 0, `the legend lists Enterprise as the same pill badge (${JSON.stringify(legend)})`)
+    const cardRateLimit = await page.evaluate(`Array.from(document.querySelectorAll('#componentCardsContainer .rp-badge')).map(b => b.textContent).filter(t => /rate/i.test(t))`)
+    assert(legend.rateLimit.join() === 'Rate Limit' && cardRateLimit.length > 0 && cardRateLimit.every((t) => t === 'Rate Limit'), `cards and legend label the type "Rate Limit" (cards: ${[...new Set(cardRateLimit)].join(', ')})`)
+    const untipped = await page.evaluate(`(() => { const all = Array.from(document.querySelectorAll('#componentCardsContainer .rp-badge, #badgeLegendModal .rp-badge')); return { count: all.length, missing: all.filter(b => !(b.getAttribute('data-tooltip') || '').trim()).map(b => b.textContent).slice(0, 5) } })()`)
+    assert(untipped.count > 0 && untipped.missing.length === 0, `all ${untipped.count} badges on the cards and in the legend have a data-tooltip${untipped.missing.length ? ` (missing: ${untipped.missing.join(', ')})` : ''}`)
+    // The legend slides in; hover once it has settled
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await page.hover('#badgeLegendModal .rp-badge--enterprise')
+    await page.waitFor(`${VISIBLE_TOOLTIP} === 'Requires an Enterprise Edition license.'`, 'a legend badge tooltip on hover')
+    const legendTip = await page.evaluate(`(() => { const box = document.querySelector('[data-tippy-root] .tippy-box[data-state="visible"]'); const r = box.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return box.contains(hit) })()`)
+    assert(legendTip, 'a legend badge shows its tippy tooltip on hover, on top of the legend')
+    await page.mouseAway()
+    if (shots) await page.screenshot(path.join(shots, 'legend-light-1280.png'))
+    await page.pressKey('Escape', 'Escape', 27)
+    await page.waitFor(`!document.getElementById('badgeLegendModal').classList.contains('show')`, 'the legend to close')
+
+    // Catalog screenshots, light and dark, at 1280 and 390, with the cards in view
+    const showCards = `(() => { const card = document.querySelector('#componentCardsContainer .component-card .rp-badge--enterprise').closest('.component-card'); window.scrollTo(0, card.getBoundingClientRect().top + window.scrollY - 80) })()`
+    for (const width of [1280, 390]) {
+      await page.setViewport(width)
+      await page.navigate(base + PAGE)
+      await page.waitFor(`document.querySelectorAll('#componentCardsContainer .component-card').length > 0`, `the cards at ${width}px`)
+      if (width === 390) {
+        const narrowCards = await page.evaluate(NARROW_LAYOUT)
+        assert(narrowCards.scrollWidth <= narrowCards.viewport && narrowCards.cardsInside, `390px: no horizontal overflow; every card fits the ${narrowCards.container}px container (columns ${narrowCards.columns}, page ${narrowCards.scrollWidth}px)`)
+        assert(parseFloat(narrowCards.columns) <= narrowCards.container, `390px: the grid column (${narrowCards.columns}) is no wider than the container (${narrowCards.container}px)`)
+        assert(narrowCards.midWord.length === 0, `390px: long names wrap after an underscore, never mid-word (${narrowCards.wrapped} names wrap)${narrowCards.midWord.length ? ` (${narrowCards.midWord.join(', ')})` : ''}`)
+      }
+      for (const theme of ['light', 'dark']) {
+        if (theme === 'dark') await page.evaluate(`document.documentElement.setAttribute('data-theme', 'dark')`)
+        await page.evaluate(showCards)
+        await new Promise((resolve) => setTimeout(resolve, 600))
+        if (shots) await page.screenshot(path.join(shots, `catalog-${theme}-${width}.png`))
+      }
+      await page.evaluate(`document.documentElement.removeAttribute('data-theme')`)
+    }
+    await page.setViewport(1280)
+
     // A connector's own page: component_type_dropdown::[] adds a Use cases line
     // whose chips open the catalog page (connect:components:about.adoc)
     // already filtered to that use case
     await page.navigate(`${base}/connect/components/inputs/postgres_cdc/`)
     await page.waitFor(`!!document.querySelector('.connector-use-cases')`, 'the Use cases line on postgres_cdc')
-    const chip = await page.evaluate(`(() => { const a = document.querySelector('.connector-use-cases a.connector-use-case'); const style = a && getComputedStyle(a); return a && { text: a.querySelector('span').textContent.trim(), href: a.href, radius: style.borderRadius, decoration: style.textDecorationLine } })()`)
+    const chip = await page.evaluate(`(() => { const a = document.querySelector('.connector-use-cases a.rp-badge--use-case'); const style = a && getComputedStyle(a); return a && { text: a.textContent.trim(), href: a.href, radius: style.borderRadius, decoration: style.textDecorationLine } })()`)
     assert(chip && chip.text === 'Change data capture' && /\/connect\/components\/about\/\?usecase=change-data-capture$/.test(chip.href), `the postgres_cdc page links its use case to the filtered catalog (${chip && chip.href})`)
     assert(chip.decoration === 'none' && parseFloat(chip.radius) >= 100, `the chip renders as a pill, not a plain link (${JSON.stringify(chip)})`)
     await page.navigate(chip.href)
     await page.waitFor(`document.querySelectorAll('#componentCardsContainer .component-card').length > 0`, 'the catalog from the chip')
     assert(await page.evaluate(toggleText) === 'Change data capture', 'following the chip opens the catalog filtered to Change data capture')
     assert(await page.evaluate(`${visibleCards}.every(c => (c.dataset.useCases || '').split(',').includes('change-data-capture'))`), 'every card the chip leads to has change-data-capture')
+    // The connector card: docs-ui's Enterprise notice, with no inline styles
+    await page.navigate(`${base}/connect/components/inputs/postgres_cdc/`)
+    await page.waitFor(`!!document.querySelector('.connector-use-cases')`, 'the Use cases line again')
+    const notice = await page.evaluate(`(() => {
+      const n = document.querySelector('.rp-notice');
+      const primary = n && n.querySelector('.rp-button--primary');
+      const s = n && getComputedStyle(n);
+      return n && { classes: n.className, radius: s.borderTopLeftRadius, sections: n.querySelectorAll(':scope > .rp-notice-section').length, primary: primary && primary.textContent, primaryBg: primary && getComputedStyle(primary).backgroundColor, inlineStyle: !!document.querySelector('.doc style'), titles: n.querySelectorAll('[title]').length }
+    })()`)
+    assert(notice && /rp-notice--enterprise/.test(notice.classes) && notice.radius === '12px' && notice.sections === 2 && notice.primary.startsWith('Get a 30-day trial key') && notice.primaryBg !== 'rgba(0, 0, 0, 0)' && !notice.inlineStyle && notice.titles === 0, `postgres_cdc shows the Enterprise notice card styled by docs-ui (${JSON.stringify(notice)})`)
+    await page.waitFor(`!!document.querySelector('.connector-use-cases a.rp-badge--use-case')._tippy`, 'docs-ui to give the chip its tooltip')
+    await page.hover('.connector-use-cases a.rp-badge--use-case')
+    const chipTip = await page.waitFor(`(${VISIBLE_TOOLTIP} || '').startsWith(document.querySelector('.connector-use-cases a.rp-badge--use-case').getAttribute('data-tooltip'))`, 'the use-case chip tooltip on hover', 5000).then(() => null, async (e) => `${e.message}: ${JSON.stringify(await page.evaluate(`Array.from(document.querySelectorAll('[data-tippy-root] .tippy-box')).map(b => [b.dataset.state, b.textContent])`))} ${await page.evaluate(`document.querySelector('.connector-use-cases a.rp-badge--use-case').outerHTML`)}`)
+    if (chipTip) throw new Error(chipTip)
+    assert(true, 'the use-case chip shows its definition in a tippy tooltip on hover')
+    assert(await page.evaluate(`Array.from(document.querySelectorAll('.rp-notice .rp-badge')).every(b => (b.getAttribute('data-tooltip') || '').trim())`), 'every badge in the connector card has a data-tooltip')
+    await page.mouseAway()
+    await page.waitFor(`${VISIBLE_TOOLTIP} === null`, 'the chip tooltip to hide')
     if (shots) {
-      await page.navigate(`${base}/connect/components/inputs/postgres_cdc/`)
-      await page.waitFor(`!!document.querySelector('.connector-use-cases')`, 'the Use cases line again')
-      await page.screenshot(path.join(shots, '5-connector-page.png'))
+      await page.evaluate(`document.querySelector('.rp-notice').scrollIntoView({ block: 'center' })`)
+      await page.screenshot(path.join(shots, 'connector-light.png'))
+      await page.evaluate(`document.documentElement.setAttribute('data-theme', 'dark')`)
+      await new Promise((resolve) => setTimeout(resolve, 600))
+      await page.screenshot(path.join(shots, 'connector-dark.png'))
+      await page.evaluate(`document.documentElement.removeAttribute('data-theme')`)
     }
 
     // No use-case data: no Use case filter, and the other filters still sit evenly
     await page.navigate(`${origin}/without/site${PAGE}`)
     await page.waitFor(`document.querySelectorAll('#componentCardsContainer .component-card').length > 0`, 'the cards without use cases')
-    assert(await page.evaluate(`!document.getElementById('useCaseFilterToggle') && !document.getElementById('componentCatalogSolutions') && !document.querySelector('.badge-use-case')`), 'without use_cases there is no Use case filter, solutions list, or chip')
+    assert(await page.evaluate(`!document.getElementById('useCaseFilterToggle') && !document.getElementById('componentCatalogSolutions') && !document.querySelector('.rp-badge--use-case')`), 'without use_cases there is no Use case filter, solutions list, or chip')
     assert(await page.evaluate(`!!document.getElementById('componentCatalogStatus')`), 'the status region is there without use cases too')
     await checkFilterLayout(page, 'no use cases, 1280px')
     if (shots) await page.screenshot(path.join(shots, 'layout-no-use-cases.png'))
