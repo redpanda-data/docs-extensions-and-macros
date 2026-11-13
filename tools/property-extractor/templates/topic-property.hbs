@@ -16,7 +16,7 @@
 === {{name}}
 {{#if version}}
 
-*Introduced in {{version}}*
+badge::[label=Since {{version}}, product=Redpanda]
 {{/if}}
 {{#if description}}
 
@@ -71,13 +71,9 @@ endif::[]
 {{#if is_enterprise}}
 
 ifndef::env-cloud[]
-.Enterprise license required
-[NOTE]
-====
-*Enterprise license required:* `{{enterprise_value}}`
+badge::[label=Enterprise] Enterprise license required: `{{enterprise_value}}`
 
-For license details, see xref:get-started:licensing/index.adoc[Redpanda Licensing].
-====
+For license details, see xref:get-started:licensing/overview.adoc[Redpanda Licenses and Enterprise Features].
 endif::[]
 {{/if}}
 {{#if cloud_byoc_only}}
@@ -99,7 +95,7 @@ endif::[]
 | Accepted Values
 |
 ifndef::env-cloud[]
-{{#each enum}}`{{this}}`{{#if (isEnterpriseEnum this ../x-enum-metadata)}} (Enterprise){{/if}}{{#unless @last}}, {{/unless}}{{/each}}
+{{#each enum}}`{{this}}`{{#if (isEnterpriseEnum this ../x-enum-metadata)}} badge::[label=Enterprise]{{/if}}{{#unless @last}}, {{/unless}}{{/each}}
 endif::[]
 ifdef::env-cloud[]
 {{#each enum}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}}
@@ -107,7 +103,7 @@ endif::[]
 {{else}}{{#if items.enum}}
 | Accepted Values
 |ifndef::env-cloud[]
-{{#each items.enum}}`{{this}}`{{#if (isEnterpriseEnum this ../items.x-enum-metadata)}} (Enterprise){{/if}}{{#unless @last}}, {{/unless}}{{/each}}
+{{#each items.enum}}`{{this}}`{{#if (isEnterpriseEnum this ../items.x-enum-metadata)}} badge::[label=Enterprise]{{/if}}{{#unless @last}}, {{/unless}}{{/each}}
 endif::[]
 ifdef::env-cloud[]
 {{#each items.enum}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}}

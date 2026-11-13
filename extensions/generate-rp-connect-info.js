@@ -651,6 +651,8 @@ function cleanDescription (text, attributes = {}) {
     .replace(/<<([^,>]+)(?:,\s*([^>]+))?>>/g, (_, anchor, label) => (label || anchor).trim())
     // Remove "Introduced in version X.X.X" suffix, keeping the sentence's period
     .replace(/\.\s*Introduced in version[\s\d.]+\.?$/i, '.')
+    // Drop badge macros (badge::[label=Since 4.53.0]): a card shows prose only
+    .replace(/\s*badge::?[^\s[]*\[[^\]]*\]/g, '')
     // Substitute attribute references when the value is known ({max-batch} ->
     // 100msgs); only drop the ones this page's attributes don't define.
     .replace(/\{([a-zA-Z][\w-]*)\}/g, (match, name) =>

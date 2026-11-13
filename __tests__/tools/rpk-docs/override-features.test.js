@@ -715,7 +715,7 @@ Original fields content that should be replaced.`,
       })
 
       const content = fs.readFileSync(path.join(tempDir, 'rpk-test-cmd.adoc'), 'utf8')
-      expect(content).toContain('*[Deprecated: use --attempts]*')
+      expect(content).toContain('badge::[label=Deprecated] use --attempts ')
     }, 30000)
 
     test('escapes pipes in a flag deprecation message so the cell stays whole', async () => {
@@ -742,7 +742,7 @@ Original fields content that should be replaced.`,
       })
 
       const content = fs.readFileSync(path.join(tempDir, 'rpk-test-cmd.adoc'), 'utf8')
-      expect(content).toContain('*[Deprecated: use --format a{vbar}b]*')
+      expect(content).toContain('badge::[label=Deprecated] use --format a{vbar}b ')
     }, 30000)
   })
 

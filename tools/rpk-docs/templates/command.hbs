@@ -103,7 +103,7 @@ NOTE: This command is only available on macOS.
 
 {{/if}}
 {{#if introducedInVersion}}
-NOTE: This command was introduced in{{#if pluginName}} {{pluginName}}{{/if}} version {{introducedInVersion}}.
+badge::[label=Since {{introducedInVersion}}, product=rpk{{#if pluginName}} {{pluginName}}{{/if}}]
 
 {{/if}}
 {{#if minVersion}}
@@ -439,7 +439,7 @@ ifdef::env-cloud[]
 {{#if selfHostedOnly}}
 ifndef::env-cloud[]
 {{/if}}
-|{{name}} |{{type}} |{{#if deprecated}}*[Deprecated{{#if deprecatedMessage}}: {{escapePipes deprecatedMessage}}{{/if}}]* {{/if}}{{{escapePipes description}}}{{#if required}} *Required.*{{/if}}{{#if defaultValue}} Default: `{{{escapePipes defaultValue}}}`.{{/if}}{{#if validValues}} Valid values: {{#each validValues}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}}.{{/if}}{{#if introducedInVersion}} _(New in {{introducedInVersion}})_{{/if}}
+|{{name}} |{{type}} |{{#if deprecated}}badge::[label=Deprecated]{{#if deprecatedMessage}} {{escapePipes deprecatedMessage}}{{/if}} {{/if}}{{{escapePipes description}}}{{#if required}} *Required.*{{/if}}{{#if defaultValue}} Default: `{{{escapePipes defaultValue}}}`.{{/if}}{{#if validValues}} Valid values: {{#each validValues}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}}.{{/if}}{{#if introducedInVersion}} badge::[label=Since {{introducedInVersion}}, product=rpk]{{/if}}
 {{#if cloudOnly}}
 endif::[]
 {{/if}}
