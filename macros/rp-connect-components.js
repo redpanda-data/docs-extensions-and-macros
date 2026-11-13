@@ -112,7 +112,6 @@ const SOLUTIONS_CATALOG_PATH = 'assets/data/solutions.json'
 // The use-case chips on a connector's own page (component_type_dropdown). The
 // catalog's styles load only on the catalog page, so these ship with the block.
 const USE_CASE_TAG_ICON = '<svg class="connector-use-case-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M2 2.75C2 2.34 2.34 2 2.75 2h4.69c.2 0 .39.08.53.22l5.81 5.81a.75.75 0 0 1 0 1.06l-4.69 4.69a.75.75 0 0 1-1.06 0L2.22 7.97A.75.75 0 0 1 2 7.44V2.75zM5 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"/></svg>'
-const LICENSE_KEY_ICON = '<svg viewBox="0 0 16 16" width="16" height="16" focusable="false"><path fill="currentColor" d="M10.5 1a4.5 4.5 0 0 0-4.29 5.85L1.22 11.84a.75.75 0 0 0-.22.53v2.88c0 .41.34.75.75.75h2.5c.41 0 .75-.34.75-.75V14h1.25c.41 0 .75-.34.75-.75V12h1.25c.2 0 .39-.08.53-.22l.88-.88A4.5 4.5 0 1 0 10.5 1zm1 4.75a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5z"/></svg>'
 const CONNECTOR_FACTS_CSS = `
 .doc .metadata-block.connector-facts { position: relative; margin: 1.25rem 0 1.5rem; padding: 0; border: 1px solid #ece7e5; border-radius: 12px; background: linear-gradient(135deg, #fffaf8 0%, #ffffff 60%); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 16px -8px rgba(226, 64, 27, 0.18); overflow: hidden; }
 .doc .metadata-block.connector-facts::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: linear-gradient(180deg, #e2401b, #f2a33a); }
@@ -120,6 +119,8 @@ const CONNECTOR_FACTS_CSS = `
 .connector-fact { display: flex; gap: 0.875rem; padding: 1rem 1.25rem 1rem 1.5rem; }
 .connector-fact + .connector-fact { border-top: 1px solid #f0ebe9; }
 .connector-fact-icon { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; border-radius: 8px; background: #fdf0ec; color: #c2370f; }
+/* The same lock as the enterprise: macro (docs-ui --enterprise-lock-icon), so both mark Enterprise alike */
+.connector-fact-lock { display: block; width: 16px; height: 16px; background-color: currentColor; -webkit-mask: var(--enterprise-lock-icon) no-repeat center / contain; mask: var(--enterprise-lock-icon) no-repeat center / contain; }
 .connector-fact-body { flex: 1 1 auto; min-width: 0; }
 .doc .connector-facts .connector-fact-title { display: block; margin: 0.25rem 0 0.25rem; font-size: 0.9375rem; font-weight: 700; color: #111827; letter-spacing: -0.005em; }
 .doc .connector-facts p.connector-fact-text { margin: 0 0 0.75rem; font-size: 0.875rem; line-height: 1.5; color: #4b5563; }
@@ -2722,7 +2723,7 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
         if (requiresEnterprise) {
           enterpriseLicenseInfo = `
             <section class="connector-fact connector-fact--license" aria-labelledby="connectorLicenseTitle">
-              <span class="connector-fact-icon" aria-hidden="true">${LICENSE_KEY_ICON}</span>
+              <span class="connector-fact-icon" aria-hidden="true"><span class="connector-fact-lock"></span></span>
               <div class="connector-fact-body">
                 <p class="connector-fact-title" id="connectorLicenseTitle">Enterprise license required</p>
                 <p class="connector-fact-text">This component runs with a Redpanda Enterprise Edition license. Try it free for 30 days, or upgrade when you're ready.</p>
