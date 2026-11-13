@@ -62,7 +62,7 @@ describe('badge macro', () => {
   })
 
   test('renders through Asciidoctor in both macro forms', () => {
-    expect(convert('A badge::[label=Since v25.1] here.')).toContain('<span class="rp-badge rp-badge--since badge badge--since">Since v25.1</span>')
+    expect(convert('A badge::[label=Since v25.1] here.')).toContain('<span class="rp-badge rp-badge--since badge badge--since" data-tooltip="Introduced in v25.1.">Since v25.1</span>')
     expect(convert('A badge:x[label=deprecated] here.')).toContain('rp-badge--deprecated')
   })
 })

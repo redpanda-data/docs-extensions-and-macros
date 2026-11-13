@@ -97,7 +97,7 @@ module.exports = function renderConnectFields(children, prefix = '') {
       block += `include::connect:components:partial$secret_warning.adoc[]\n\n`;
     }
     if (child.version) {
-      block += `ifndef::env-cloud[]\nbadge::[label=Since ${child.version}]\nendif::[]\n\n`;
+      block += `ifndef::env-cloud[]\nbadge::[label=Since ${child.version}, product=Redpanda Connect]\nendif::[]\n\n`;
     }
 
     block += `*Type*: \`${displayType}\`\n\n`;

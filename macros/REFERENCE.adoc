@@ -26,7 +26,7 @@ Marks a meaning inline, such as Beta, Enterprise, or the version a feature arriv
 
 ```asciidoc
 badge::[label=beta]
-badge::[label=Since v25.1]
+badge::[label=Since v25.1, product=Redpanda]
 badge::[label=deprecated, tooltip="Use the new flag instead."]
 badge::[label=enterprise, size=sm]
 ```
@@ -53,7 +53,7 @@ The label picks the meaning and the exact text shown:
 | anything else | `rp-badge--neutral` | the label as written
 |===
 
-Each meaning has a standard tooltip, rendered as `data-tooltip`; a `tooltip` attribute replaces it. `size=sm` adds `rp-badge--sm` for dense contexts. Labels never carry parentheses. The older `badge badge--*` classes stay on the same element for pages built with an older UI bundle, and the `convert-to-markdown` extension writes each badge as a parenthetical, such as `(beta)` or `(since v25.1)`.
+Every badge has a tooltip, rendered as `data-tooltip`. Each meaning has standard text, a Since badge reads "Introduced in <product> v<version>." with the product from a `product` attribute (`badge::[label=Since 25.1, product=Redpanda]`), and any other badge falls back to its label. A `tooltip` attribute replaces the default. `size=sm` adds `rp-badge--sm` for dense contexts. Labels never carry parentheses. The older `badge badge--*` classes stay on the same element for pages built with an older UI bundle, and the `convert-to-markdown` extension writes each badge as a parenthetical, such as `(beta)` or `(since v25.1)`.
 
 === Registration
 

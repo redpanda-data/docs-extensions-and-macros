@@ -646,10 +646,10 @@ features:
     // so label=constructor shipped 'function Object() { [native code] }' as hover
     // text. Escaping made it harmless but not sane.
     test.each(['constructor', '__proto__', 'toString', 'valueOf', 'ga'])(
-      'the label %s gets no default tooltip', (label) => {
+      'the label %s gets its own label as tooltip, never Object internals', (label) => {
         const { buildBadgeHtml } = require('../../macros/badge')
         const html = buildBadgeHtml({ label })
-        expect(html).not.toContain('data-tooltip')
+        expect(html).toContain(`data-tooltip="${label}"`)
         expect(html).not.toContain('native code')
       })
 

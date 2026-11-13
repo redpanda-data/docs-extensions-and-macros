@@ -42,7 +42,12 @@ const DEFAULT_TOOLTIPS = {
   limited: 'Limited availability: open to selected customers.',
   deprecated: 'Deprecated: still available, but planned for removal.',
   eol: 'No longer supported.',
+  'eol-soon': 'Support ends soon.',
+  new: 'New in this release.',
   cloud: 'Available in Redpanda Cloud.',
+  byoc: 'Available on Redpanda Cloud BYOC clusters.',
+  serverless: 'Available on Redpanda Cloud Serverless clusters.',
+  dedicated: 'Available on Redpanda Cloud Dedicated clusters.',
   'self-managed': 'Available in Self-Managed Redpanda.',
   certified: 'Supported and tested by Redpanda.',
   community: 'Community-supported.',
@@ -66,11 +71,12 @@ function resolveMeaning (text) {
   // are already lowercase, so a bare lookup would resolve to Object internals.
   if (Object.prototype.hasOwnProperty.call(MEANINGS, key)) {
     const meaning = MEANINGS[key];
-    return { name: meaning.name, label: meaning.label, legacy: meaning.legacy || meaning.name, tooltipKey: key === 'unreleased' ? key : meaning.name };
+    const tooltipKey = Object.prototype.hasOwnProperty.call(DEFAULT_TOOLTIPS, meaning.legacy) ? meaning.legacy : meaning.name;
+    return { name: meaning.name, label: meaning.label, legacy: meaning.legacy || meaning.name, tooltipKey };
   }
   const since = SINCE_PATTERN.exec(raw);
   if (since) {
-    return { name: 'since', label: `Since v${since[1].trim()}`, legacy: 'since', tooltipKey: 'since' };
+    return { name: 'since', label: `Since v${since[1].trim()}`, legacy: 'since', tooltipKey: 'since', version: since[1].trim() };
   }
   return { name: 'neutral', label: raw, legacy: key.replace(/\s+/g, '-'), tooltipKey: key };
 }
@@ -95,9 +101,11 @@ function resolveMeaning (text) {
  * @param {string} [opts.size] - `sm` (or `small`) for dense contexts. `large` is
  *   accepted for older content and keeps the legacy `badge--large` class.
  * @param {string} [opts.tooltip] - Tooltip text, rendered as `data-tooltip`.
- * @returns {string} Badge HTML.
+ * @param {string} [opts.product] - Product a Since badge names in its default
+ *   tooltip ("Introduced in Redpanda v25.1.").
+ * @returns {string} Badge HTML. Every badge has a non-empty `data-tooltip`.
  */
-function buildBadgeHtml ({ label, size, tooltip } = {}) {
+function buildBadgeHtml ({ label, size, tooltip, product } = {}) {
   const meaning = resolveMeaning(label || 'label');
   const classes = ['rp-badge', `rp-badge--${meaning.name}`];
   if (size === 'sm' || size === 'small') classes.push('rp-badge--sm');
@@ -107,7 +115,13 @@ function buildBadgeHtml ({ label, size, tooltip } = {}) {
   const defaultTooltip = Object.prototype.hasOwnProperty.call(DEFAULT_TOOLTIPS, meaning.tooltipKey)
     ? DEFAULT_TOOLTIPS[meaning.tooltipKey]
     : undefined;
-  const hoverText = tooltip || defaultTooltip;
+  // Every badge explains itself: the help cursor promises a tooltip. A Since
+  // badge names its version (and product when known), and a neutral badge
+  // with no standard text falls back to its own label.
+  const sinceTooltip = meaning.name === 'since'
+    ? `Introduced in ${product ? `${String(product).trim()} ` : ''}v${meaning.version}.`
+    : undefined;
+  const hoverText = (tooltip && String(tooltip).trim()) || sinceTooltip || defaultTooltip || meaning.label;
   // Escape before interpolating: these values reach the macro from .adoc source
   // and from registry fields, and an unescaped quote would end the attribute
   // early, turning the rest of the text into stray attributes.
@@ -124,7 +138,7 @@ module.exports.register = function (registry) {
     const self = this;
     self.named('badge');
     self.process((parent, target, attrs) =>
-      buildBadgeHtml({ label: attrs.label, size: attrs.size, tooltip: attrs.tooltip })
+      buildBadgeHtml({ label: attrs.label, size: attrs.size, tooltip: attrs.tooltip, product: attrs.product })
     );
   });
 };
