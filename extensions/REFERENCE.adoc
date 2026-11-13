@@ -623,6 +623,15 @@ Behavior details:
 * A URL that carries a query string is left as a raw link, because an xref cannot express one and dropping it would change the link (for example `?platform=kubernetes`, which the UI reads to preselect a tab). These are reported at info level, not as warnings.
 * Builds that publish the latest version under its real version number instead of a symbolic segment (such as this repository's preview build) still resolve `/current/...` URLs, so the same content works in both.
 
+=== Converting generated pages before commit
+
+The `generate crd-spec` and `generate rpk-docs` commands apply the same mapping to the pages they write, so the committed source carries xrefs instead of URLs that flip back and forth on every regeneration (see `cli-utils/docs-links-to-xrefs.js`). They build a content catalog from the docs checkout they run in, or from `--docs-root`:
+
+* Targets in the checkout's own component and version are written as `module:page` xrefs, the form the docs repositories use for same-component links. A target in another version of that component is pinned, as `26.2@streaming:module:page`, because an unversioned xref resolves to the version of the page it is on.
+* By default, a URL that points at another component, such as `/redpanda-connect/...`, stays raw, because a single-repository catalog lacks those pages. Pass the checkouts of those components with `--lender` (for example `--lender ../rp-connect-docs`) to read them into the same catalog. A URL that matches one of their pages then becomes a component-qualified xref, such as `xref:connect:guides:bloblang/about.adoc[]`, with the same version handling and anchor check as at build time: a URL pinned to a version that is not the component's latest becomes `version@component:module:page`, and a lender checkout of an older version of the local component (a docs version branch) makes `/26.1/...` URLs resolve to that version.
+* Each lender must be a different component, or a different version of one; two checkouts of the same component version are refused.
+* Every URL left as written is listed in the run output with the reason: its component was not loaded, no loaded page matches it (a likely broken link), its anchor is missing, it carries a query string, or its path is outside the catalog (`/api/`, `/mcp`). The rpk validation report lists only the docs URLs still raw after conversion, with the same reasons.
+
 === Environment variables
 
 This extension does not require any environment variables.
@@ -647,6 +656,109 @@ Register the `url-to-xref` extension in the Antora playbook under the `antora.ex
 antora:
   extensions:
     - require: '@redpanda-data/docs-extensions-and-macros/extensions/url-to-xref'
+----
+
+== Xref index
+
+This extension publishes one JSON file that lists every published page in the site with its resource ID, title, URL and section anchors, plus the aliases that still resolve and the partials and examples that can be included with their tag regions. Editor tooling, such as the docs language server, downloads it to complete and check `xref:` and `include::` targets in components that are not checked out locally. The file holds no page or partial bodies.
+
+Behavior details:
+
+* Anchors are read from the converted HTML, so they are the ids Asciidoctor produced: conditionals are resolved, included partials are expanded, and generated ids follow each page's own `idprefix` and `idseparator`.
+* Only published pages are listed. The index is built at `beforePublish`, so a page is left out when its output is removed before then:
+** by `unpublish-pages`, whatever order the two extensions are registered in.
+** by `generate-fields-only-pages` (field-only pages), whatever the order.
+** by `add-pages-to-root` or `convert-llms-to-txt`, only when they are registered before `xref-index`. Register `xref-index` after them.
+* An alias is listed only when its target page is published.
+* Partials and examples are listed by path with their tag names only. Their contents are never written.
+* Ids that nobody links to are skipped: the ones the `@asciidoctor/tabs` extension generates for tabs and tab panels, ids inside inline SVG, and Asciidoctor's own `preamble`, `toc`, `footnotes` and footnote ids. Ids inside other passthrough HTML are still listed.
+* On a page with `sectnums`, section titles are recorded without their number.
+
+=== File format
+
+The file is minified JSON. Keys inside `pages`, `aliases`, `partials` and `examples` are sorted, so builds of the same content produce the same file.
+
+[source,json]
+----
+{
+  "schema": 1,
+  "site": "https://docs.redpanda.com",
+  "components": {
+    "streaming": {
+      "title": "Streaming",
+      "latest": "26.2",
+      "versions": [
+        {
+          "version": "26.2",
+          "pages": {
+            "manage:security/tls.adoc": {
+              "title": "Configure TLS",
+              "url": "/streaming/current/manage/security/tls/",
+              "sections": [
+                { "id": "_enable_tls", "title": "Enable TLS", "level": 1 },
+                { "id": "rotate", "title": "Rotate certificates", "level": 2 }
+              ],
+              "ids": ["cert-table"]
+            }
+          },
+          "aliases": {
+            "manage:security/old-tls.adoc": "26.2@streaming:manage:security/tls.adoc"
+          },
+          "partials": { "ROOT:tls-table.adoc": ["table"] },
+          "examples": { "ROOT:config.yaml": ["broker"] }
+        },
+        { "version": "26.3", "displayVersion": "26.3 Beta", "prerelease": true, "pages": {}, "aliases": {} }
+      ]
+    }
+  }
+}
+----
+
+schema::
+Integer. Incremented on any change a consumer must handle. Additive fields do not change it.
+
+components.<name>.latest::
+The version that unversioned xrefs resolve to. An empty string for an unversioned component.
+
+versions[].version::
+The component version as Antora knows it. An unversioned component (`version: ~`) has the empty string. The full resource ID of a file is `<version>@<component>:<key>`, or `<component>:<key>` for an unversioned component.
+
+versions[].displayVersion, versions[].prerelease::
+Present only when they differ from the version, or when the version is a prerelease.
+
+pages::
+Keyed by `module:relative`, for example `manage:security/tls.adoc`. `title` is the plain-text document title and `url` the site-relative URL. `sections` lists headings with an id in document order: `level` is 1 for `==`, 2 for `===`, and so on, and `title` is plain text. `ids` lists every other element id on the page (block and inline anchors), without titles. A page with no anchors has neither key.
+
+aliases::
+Keyed by `module:relative` of the alias in this component version. The value is the full resource ID of the published target page, which can be in another component or version.
+
+partials, examples::
+Keyed by `module:relative`. The value is the sorted list of `tag::name[]` regions in the file, empty when it has none. Absent when `includes` is `false`.
+
+=== Environment variables
+
+This extension does not require any environment variables.
+
+=== Configuration options
+
+output_path (optional)::
+Path of the file in the site output. Default: `assets/data/xref-index.json`, served at `<site.url>/assets/data/xref-index.json`.
+
+exclude_components (optional)::
+Component names to leave out entirely, with their pages, aliases, partials and examples. Default: none.
+
+includes (optional)::
+Whether to list partials and examples. Default: `true`.
+
+=== Registration
+
+Register the `xref-index` extension in the Antora playbook under the `antora.extensions` key, after `add-pages-to-root` and `convert-llms-to-txt`, like so:
+
+[source,yaml]
+----
+antora:
+  extensions:
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/xref-index'
 ----
 
 == External link checker
@@ -839,7 +951,7 @@ The metadata rules live in `extension-utils/metadata-check.js` (`checkPageMetada
 
 Suggestions live in `extension-utils/metadata-suggest.js` (`suggestForPage`), which `doc-tools check-metadata --suggest` runs. It matches every live concept's labels against a page's title, description, path, headings, and body, deterministically and with no model, and returns up to a few concepts per facet that the page does not carry yet, each with a score and the evidence for it. It honors the facet cardinalities in the taxonomy, `implies`, and `broader`, and never suggests a deprecated concept. Another tool that tags content against the taxonomy should call it rather than match labels itself, so every tagger agrees.
 
-`extension-utils/metadata-candidates.js` finds the other side: frequent, distinctive terms on a page that no concept's label matches (`pageCandidates`), and the same across a repository with the pages each is on (`aggregateCandidates`). `doc-tools check-metadata --suggest` lists them per page and `--candidates-only` aggregates them. They are evidence for proposing a new concept or altLabel, deterministic like the suggestions.
+`extension-utils/metadata-candidates.js` finds the other side: frequent, distinctive terms on a page that no concept's label matches (`pageCandidates`), and the same across a repository with the pages each is on (`aggregateCandidates`). `doc-tools check-metadata --suggest` lists them per page and `--candidates-only` aggregates them. They are evidence for proposing a new concept or altLabel, deterministic like the suggestions. Stop words, language keywords, Kubernetes object kinds, the product's own name, and terms that only appear on sales or licensing lines are never candidates.
 
 
 This extension collects Asciidoc attributes from the https://github.com/redpanda-data/docs-site[`shared` component] or a local YAML file and makes them available to all component versions. Having global attributes is useful for consistent configuration of local and production builds.
@@ -1327,7 +1439,7 @@ The `convert-to-markdown` extension converts all HTML pages to markdown format a
 - Converts all HTML pages to GitHub-Flavored Markdown
 - Exports as `.md` files (e.g., `/page.html` → `/page.md`)
 - Adds YAML frontmatter with page metadata
-- Decodes HTML entities in titles
+- Decodes HTML entities in titles and attribute values
 - Supports content negotiation via `Accept: text/markdown` header
 - Stores markdown in `page.markdownContents` for other extensions
 
@@ -1342,22 +1454,57 @@ antora:
   - require: '@redpanda-data/docs-extensions-and-macros/extensions/convert-to-markdown'
 ----
 
+=== Output structure
+
+Each export opens with the frontmatter, then the page title, the llms.txt directive, and an HTML comment naming the export's own URL:
+
+[,markdown]
+----
+---
+title: Get started with Redpanda
+description: Quick start guide for Redpanda
+page-component-name: streaming
+page-topic-type: tutorial
+personas: developer
+page-git-created-date: "2024-01-15"
+page-git-modified-date: "2024-03-29"
+---
+
+# Get started with Redpanda
+
+> For the complete documentation index, see [llms.txt](https://docs.redpanda.com/llms.txt). Component-specific: [streaming-full.txt](https://docs.redpanda.com/streaming-full.txt)
+
+<!-- Source: https://docs.redpanda.com/streaming/current/get-started/quick-start.md -->
+
+Your markdown content here...
+----
+
+The frontmatter comes first so Markdown tooling reads it as metadata rather than body text. The aggregate exports (`llms-full.txt` and `<component>-full.txt`) strip the frontmatter, directive and source comment from each page, because they carry their own per-page title and URL.
+
+Field-only pages (see `generate-fields-only-pages`) get the body alone.
+
 === Frontmatter attributes
 
 The extension exports these attributes to YAML frontmatter:
 
-- `page-title`: Page title
-- `page-description`: Page description
-- `page-component-name`, `page-component-version`: Component info
-- `page-git-created-date`, `page-git-modified-date`: Git dates (if git-dates extension enabled)
-- `page-categories`: Categories
+- `title`, `navtitle`: Page titles
+- `description`: Page description
+- `page-component-name`, `page-component-title`, `page-component-version`, `page-version`: Component info
+- `page-relative-src-path`, `page-edit-url`, `docname`: Source location
 - `page-topic-type`: Topic type (tutorial, how-to, concept, reference)
-- `page-personas`: Target audience
+- `personas`, `learning-objective-*`: Audience and objectives
+- `page-git-created-date`, `page-git-modified-date`: Git dates (if git-dates extension enabled)
+- `page-beta`, `release-status`, `page-is-nearing-eol`, `page-is-past-eol`, `page-eol-date`, `support-status`: Lifecycle status
+- `latest-redpanda-tag`, `latest-console-tag`, `latest-operator-version`, `latest-connect-version`: Component versions from `antora.yml`
 - `page-generated-content`: Always present: `none`, `partial` (the page includes generated files) or `all` (the page itself was generated)
 - `page-autogenerated`, `page-generated-by`, `page-generated-from`: Set when the page itself was written by a generator: the tool that wrote it, and the source it names (`page-generated-from` only when the marker names one)
 - `page-generated-sources`: One entry per include whose file was written by a generator: the include target, the generator, its version when the marker carries one, and the source it names
 - `page-introduced-in`, `page-introduced-in-product`: Release that introduced the page's feature, as a bare `X.Y.Z`, and the product it belongs to (generated Connect reference pages, self-managed only)
-- Custom attributes from allowlist
+- `page-preview`, `page-preview-text`, `page-limited-availability`, `page-limited-availability-text`: Release-status badges, each text written only when its badge is set
+- `page-byoc`, `page-byoc-text`, `page-byoc-only`, `page-cloud`, `page-cloud-only`, `page-cloud-only-text`, `page-self-managed-only`: Deployment badges, each text written only when its badge is set
+- `page-cloud-available`, `page-cloud-available-url`, `page-self-managed-available`, `page-self-managed-available-url`: Where else the page applies, with the URLs written as full site URLs
+- `page-cloud-gpu-only`, `page-cloud-no-gpu`: For Connect components, whether the type runs in Cloud only in GPU pipelines, or only outside them, on both the Cloud and the Self-Managed page
+- `page-context-switcher`: The page's other contexts, as a list of `{ name, to }`
 
 === Generated content provenance
 
@@ -1385,28 +1532,48 @@ Older files that carry only `// This content is autogenerated. Do not edit manua
 
 Include detection is best effort. Each `include::` target at the start of a line is resolved as a partial in the page's context (falling back to pages and examples), so a page-relative include such as `include::shared.adoc[]` is looked up as `partial$shared.adoc`. Includes inside comment blocks or inactive `ifdef` branches are counted, targets with an attribute reference are skipped, and nested includes (a hand-written partial that includes a generated one) are not followed.
 
-=== Example output
+=== How HTML constructs are converted
 
-[,yaml]
-----
----
-title: "Get started with Redpanda"
-description: "Quick start guide for Redpanda"
-component: ROOT
-version: current
-created: 2024-01-15
-modified: 2024-03-29
-categories:
-  - Getting Started
-topic-type: tutorial
-personas:
-  - developer
----
+The extension replaces Turndown's defaults where Asciidoctor's HTML would otherwise lose information:
 
-# Get started with Redpanda
+[cols="1,2"]
+|===
+|Construct |Markdown
 
-Your markdown content here...
-----
+|Table cells
+|Converted as Markdown, so lists, links, code spans and emphasis inside a cell survive. Block content in a cell is joined onto one line with `<br>`, a code block becomes one code span per line, and pipes are escaped. A table without a declared header row gets an empty header row rather than promoting its first data row.
+
+|Callout lists (`<div class="colist">`)
+|A numbered list. Asciidoctor renders them as a two-column table, which would otherwise become a Markdown table with the first callout as its header.
+
+|Admonitions
+|A blockquote led by the type and any custom title.
+
+|Tabs
+|One heading per tab, one level below the surrounding heading. The exception is a Solutions platform tab set, where each tab is labeled Docker Compose, Kubernetes, or Redpanda Cloud. Each of its tabs becomes an `+**On <platform>:**+` paragraph, and the set is wrapped in `+<!-- platform tabs: ... -->+` and `+<!-- /platform tabs -->+` comments, so a numbered step stays whole. A tab set nested in a platform tab gets headings one level below the heading around the platform set.
+
+|Literal and plain listing blocks (`<pre>` without `<code>`)
+|A fenced code block. Turndown only fences `<pre><code>`, so these were escaped as prose.
+
+|Inline code
+|Emitted from the element's text, so a URL that Asciidoctor auto-linked inside monospace does not become a Markdown link inside a code span.
+
+|Links with no text
+|A heading anchor (`<a class="anchor">`) or any other text-less in-page link is removed; it otherwise appears as `[](#id)` in front of every heading. A text-less link elsewhere, such as an icon link, keeps its destination as an autolink.
+
+|Tables with an admonition or a table in a cell
+|The outer table is kept. The admonition becomes a blockquote inside the cell; an inner table becomes text rows separated by ` / `.
+
+|Links and images
+|Relative targets are resolved against the page's HTML URL, so they work when the Markdown is read away from the site.
+
+|Description lists
+|The term in bold, followed by its description.
+|===
+
+=== Escaping
+
+Turndown escapes every `+_+` and `+*+`, which turns `+get_orders+` into `+get\_orders+` and `+RPK_ environment variable+` into `+RPK\_+`. The extension escapes an emphasis delimiter only when it could change meaning: a run that could open emphasis under CommonMark's flanking rules, a run that ends a text node (the next node may start with a delimiter Turndown emits for `+<em>+`), or a run that opens the text as a list marker or thematic break. An underscore between two alphanumerics, or a delimiter followed by whitespace in the middle of the text, is left alone. The extension also stops Turndown escaping a line-start character (`+-+`, `{plus}`, `+#+`, `+>+`) that merely continues a line after an inline element, so `+<a>Raft</a>-based+` no longer exports as `+[Raft](…)\-based+`. Blank-line collapsing and trailing-space trimming skip fenced code blocks, and a two-space hard break is kept. Emphasis that touches a letter or digit (`+<em>file</em>name+`) uses `+*+`, because an intraword `+_+` cannot close it. Headings keep underscores unescaped.
 
 == Generate llms.txt exports
 

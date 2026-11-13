@@ -256,14 +256,14 @@ components_by_category::processors[]
 
 === component_table - Component table
 
-Generate searchable component table:
+Generate a searchable component catalog:
 
 [,asciidoc]
 ----
 component_table::[]
 ----
 
-Generates a searchable table of all components with filters.
+Generates a searchable catalog of component cards, with filters and a badge legend. Use `component_table::[all]` to also show Cloud availability and Enterprise licensing.
 
 === component_type_dropdown - Type switcher
 

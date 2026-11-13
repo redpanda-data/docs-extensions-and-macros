@@ -7,6 +7,8 @@ on:
       - 'cli-utils/**'
       - 'tools/generate-cli-docs.js'
       - 'tools/redpanda-connect/rpcn-connector-docs-handler.js'
+      # The lint-strings Rules section is generated from the rule objects.
+      - 'tools/lint-strings/**'
   workflow_dispatch:
 
 permissions:

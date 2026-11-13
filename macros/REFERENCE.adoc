@@ -1761,7 +1761,7 @@ asciidoc:
 
 == component_table
 
-This macro generates a searchable table of all Redpanda Connect components with filters for support and type.
+This macro generates a searchable catalog of all Redpanda Connect components, one card per connector, with filters for type and support level and a badge legend. With `component_table::[all]`, the cards also show Cloud availability and Enterprise licensing, with filters for both.
 
 The types are fetched from the `flatComponentsData` that's generated in the Component category aggregator extension.
 

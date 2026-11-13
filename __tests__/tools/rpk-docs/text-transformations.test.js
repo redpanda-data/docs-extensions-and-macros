@@ -160,6 +160,112 @@ describe('applyToCode rules in inline code spans', () => {
   })
 })
 
+describe('flag and JSON argument formatting (DOC-2686)', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+  // The rule in redpanda-data/docs rpk-overrides.json that turned JSON keys
+  // and values into separate code spans
+  const transforms = {
+    replacements: [
+      { pattern: '"([a-z][-a-z0-9]+(?: [a-z][-a-z0-9]+){0,2})"', replacement: '`$1`', flags: 'g', description: 'Convert double-quoted subcommand names to backticks (1-3 word commands only)' }
+    ]
+  }
+
+  test('wraps every segment of a dotted flag with its value', () => {
+    const out = formatDescription('(true when set; pass --local-config.grounding-policy.enabled=false to disable)', transforms)
+    expect(out).toContain('`--local-config.grounding-policy.enabled=false`')
+  })
+
+  test('keeps a sentence period out of a flag span', () => {
+    expect(formatDescription('Set --brokers. Then run.', transforms)).toBe('Set `--brokers`. Then run.')
+  })
+
+  test('keeps a single-quoted JSON argument whole, as a passthrough span', () => {
+    const out = formatDescription('Pass --args \'{"topic":"oncall"}\' to fill the prompt.', transforms)
+    expect(out).toContain("`+'{\"topic\":\"oncall\"}'+`")
+    expect(out).not.toContain('`topic`')
+  })
+
+  test('still converts double-quoted names outside JSON', () => {
+    expect(formatDescription('Use a "subcommand name" here.', transforms)).toContain('`subcommand name`')
+  })
+})
+
+describe('flags inside single-quoted commands (DOC-2686)', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+  // Rules from redpanda-data/docs rpk-overrides.json. The first turns the
+  // quoted command into a span; the second then nested a flag span inside it.
+  const quotedCommand = { pattern: "'([a-z][a-z0-9_ -]*)'", replacement: '`$1`', flags: 'g', description: 'Convert single-quoted commands/tools to backticks' }
+  const flagWithFormat = { pattern: '(?<![`\\w-])(-{1,2}[a-zA-Z][a-z-]*) (json/yaml|json|yaml|text|wide|csv)(?![/a-zA-Z])', replacement: '`$1 $2`', flags: 'g', description: 'Wrap bare flag with adjacent format/value word as inline code before auto-backtick step splits them' }
+  const quotedSpan = { pattern: '"`([^`"]+)`"', replacement: '`$1`', flags: 'g', description: 'Remove double quotes around a code span' }
+  const transforms = { replacements: [quotedCommand, flagWithFormat, quotedSpan] }
+
+  test('rpk ai trace get: no placeholders and no lost text', () => {
+    const src = "trace link, which also supplies the start time. --start-time (the trace's\n" +
+      "start, from 'trace list -o json') makes the read faster.\n" +
+      '-o json and -o yaml print the GetTraceResponse.'
+    expect(formatDescription(src, transforms)).toBe(
+      "trace link, which also supplies the start time. `--start-time` (the trace's\n" +
+      'start, from `trace list -o json`) makes the read faster.\n' +
+      '`-o json` and `-o yaml` print the GetTraceResponse.'
+    )
+  })
+
+  test('a flag inside a single-quoted command stays in one span', () => {
+    expect(formatDescription("Run 'cluster info -o yaml' first, then -o json.", transforms))
+      .toBe('Run `cluster info -o yaml` first, then `-o json`.')
+  })
+
+  test('a rule that matches a whole span still applies', () => {
+    expect(formatDescription('Run "\'topic list\'" first.', transforms)).toBe('Run `topic list` first.')
+  })
+
+  test('a rule that only rewords still applies inside a span an earlier rule made', () => {
+    // rpk --config in the v26.1.12 tree: the quoted-path rule makes a span,
+    // then the home-dir rule must still normalize the path inside it.
+    const quotedPath = { pattern: '"(\\/[^"]+)"', replacement: '`$1`', flags: 'g', description: 'Convert double-quoted absolute paths to backticks' }
+    const homeDir = { pattern: '(?:/root|/home/[A-Za-z0-9._-]+|/Users/[A-Za-z0-9._-]+)/\\.config/rpk/rpk\\.yaml', replacement: '~/.config/rpk/rpk.yaml', flags: 'g', description: 'Normalize the user-dependent config path' }
+    expect(formatDescription('Default search paths are "/root/.config/rpk/rpk.yaml" and more.', { replacements: [quotedPath, homeDir] }))
+      .toBe('Default search paths are `~/.config/rpk/rpk.yaml` and more.')
+  })
+
+  test('throws instead of publishing an unrestored placeholder', () => {
+    const leak = { replacements: [{ pattern: 'XYZ', replacement: '__INLINE_CODE_99__', flags: 'g' }] }
+    expect(() => formatDescription('Some XYZ text.', leak)).toThrow(/__INLINE_CODE_99__/)
+  })
+})
+
+describe('rules that add no backticks apply inside code spans (DOC-2686)', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+  // Rules from redpanda-data/docs rpk-overrides.json, in their live order
+  const quotedCommand = { pattern: "'([a-z][a-z0-9_ -]*)'", replacement: '`$1`', flags: 'g', description: 'Convert single-quoted commands/tools to backticks' }
+  const quotedRpk = { pattern: '"(rpk\\s+[^"]+)"', replacement: '`$1`', flags: 'g', description: 'Convert double-quoted rpk commands (with arguments and flags) to inline code' }
+  const quotedPath = { pattern: '"(\\/[^"]+)"', replacement: '`$1`', flags: 'g', description: 'Convert double-quoted absolute paths to backticks' }
+  const listBlankLine = { pattern: '([^\n])\n([-*] )', replacement: '$1\n\n$2', flags: 'g', description: 'Ensure blank line before bullet lists' }
+  const configPath = { pattern: '(?:/root|/home/[A-Za-z0-9._-]+|/Users/[A-Za-z0-9._-]+)/\\.config/rpk/rpk\\.yaml', replacement: '~/.config/rpk/rpk.yaml', flags: 'g', description: 'Normalize the user-dependent os.UserConfigDir() path' }
+
+  test('normalizes the --config path after it is wrapped in a span', () => {
+    const out = formatDescription('Redpanda or rpk config file; default search paths are "/root/.config/rpk/rpk.yaml", $PWD/redpanda.yaml', { replacements: [quotedPath, configPath] })
+    expect(out).toContain('`~/.config/rpk/rpk.yaml`')
+    expect(out).not.toContain('/root/')
+  })
+
+  test('adds the blank line before a list that follows a code span', () => {
+    const out = formatDescription("Run 'cluster info'\n- foo\n- bar", { replacements: [quotedCommand, listBlankLine] })
+    expect(out).toMatch(/`cluster info`\n\n/)
+  })
+
+  test('a span wrapped around a JSON argument does not leak a placeholder', () => {
+    const out = formatDescription('Run "rpk ai trace list --args \'{"a":"bc"}\'" now.', { replacements: [quotedRpk] })
+    // One span, with the JSON passthrough inside it: not three backticks.
+    expect(out).toBe("Run `rpk ai trace list --args +'{\"a\":\"bc\"}'+` now.")
+  })
+
+  test('keeps a single-quoted JSON argument with spaces whole', () => {
+    const out = formatDescription('Pass --args \'{ "topic": "oncall" }\' to fill the prompt.', null)
+    expect(out).toContain("`+'{ \"topic\": \"oncall\" }'+`")
+  })
+})
+
 describe('known command path formatting', () => {
   const { formatDescription, registerKnownCommandPaths } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
 
@@ -251,5 +357,105 @@ describe('applyTextTransformationsToExamples', () => {
     const input = 'Send a task:\n  rpai agent a2a send hello'
     const out = applyTextTransformationsToExamples(input, transforms)
     expect(out).toContain('  rpk ai agent a2a send hello')
+  })
+})
+
+describe('indented lines inside list items (rpk shadow failover)', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  // Upstream help text from rpk shadow failover (v26.3.1-rc2)
+  const src = [
+    '* Without a scope flag, it fails over the whole Shadow Link. Besides failing',
+    "  over its topics, the link stops after it reaches the 'FAILED_OVER' state. A",
+    "  phase that misses it leaves the link in the 'FAILOVER_FAULTED' state, and running the",
+    "  command again resumes from that phase. 'rpk shadow status' reports the link",
+    '  state.',
+    '',
+    "Use --wait to block until the failover reaches 'FAILED_OVER'."
+  ].join('\n')
+  const quotedRpk = { replacements: [{ pattern: "'(rpk\\s+[^']+)'", replacement: '`$1`', flags: 'g' }] }
+
+  test('a continuation line that starts with a shell word stays prose', () => {
+    const out = formatDescription(src, quotedRpk)
+    expect(out).not.toContain('`command again')
+    expect(out).toContain('  command again resumes from that phase. `rpk shadow status` reports the link')
+  })
+
+  test('single-quoted constants become code', () => {
+    const out = formatDescription(src, null)
+    expect(out).toContain('the `FAILED_OVER` state')
+    expect(out).toContain('the `FAILOVER_FAULTED` state')
+    expect(out).toContain('reaches `FAILED_OVER`.')
+    expect(out).not.toContain("'FAILED_OVER'")
+  })
+
+  test('quoted lowercase prose and single capitals keep their quotes', () => {
+    const out = formatDescription("Answer 'yes' or 'Y' to the prompt.", null)
+    expect(out).toBe("Answer 'yes' or 'Y' to the prompt.")
+  })
+
+  test('a continuation line that starts with rpk stays prose, not a code block', () => {
+    const out = formatDescription('* With --all, it fails over every topic. Afterwards\n  rpk shadow status reports the link state.', null)
+    expect(out).not.toContain('----')
+    expect(out).toContain('  `rpk` shadow status reports the link state.')
+  })
+
+  test('indented commands outside list items are still code', () => {
+    expect(formatDescription('Prose line\n\n  echo "hello world"', null)).toBe('Prose line\n\n`echo "hello world"`')
+    expect(formatDescription('Run:\n  rpk topic list', null)).toContain('[,bash]\n----\nrpk topic list\n----')
+  })
+
+  test('an example introduced by a colon inside a list item is still code', () => {
+    const out = formatDescription('* To list topics, run:\n  rpk topic list', null)
+    expect(out).toContain('[,bash]\n----\nrpk topic list\n----')
+  })
+})
+
+describe('known command paths wrapped across lines (rpk shadow create)', () => {
+  const { formatDescription, registerKnownCommandPaths } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  beforeEach(() => registerKnownCommandPaths(['rpk', 'rpk shadow', 'rpk shadow config', 'rpk shadow config generate', 'rpk cloud', 'rpk cloud login']))
+  afterEach(() => registerKnownCommandPaths([]))
+
+  test('a path split by a line wrap becomes one span', () => {
+    const out = formatDescription('Before you create a Shadow Link, generate a configuration file with rpk shadow\nconfig generate and update it with your source cluster details.', null)
+    expect(out).toContain('with `rpk shadow config generate` and update it')
+    expect(out).not.toContain('`rpk` shadow')
+  })
+
+  test('a wrap inside an indented list item joins too', () => {
+    const out = formatDescription('* Generate one with rpk\n  shadow config generate first.', null)
+    expect(out).toContain('`rpk shadow config generate` first.')
+  })
+
+  test('never crosses a blank line', () => {
+    const out = formatDescription('Run rpk shadow\n\nconfig generate is a phrase here.', null)
+    expect(out).not.toContain('`rpk shadow config generate`')
+  })
+
+  test('a line ending in a full path keeps the next line separate', () => {
+    const out = formatDescription('See rpk cloud login\nfor details.', null)
+    expect(out).toBe('See `rpk cloud login`\nfor details.')
+  })
+})
+
+describe('dotfile names (rpk redpanda start)', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+  // The docs repo's .yaml filename rule matches from the first letter
+  const yamlRule = { replacements: [{ pattern: "(?<![`\"'\\w/])([a-z][-a-z0-9_]*\\.ya?ml)(?![`\\w])", replacement: '`$1`', flags: 'gi' }] }
+
+  test('the leading dot of a dotfile stays inside the code span', () => {
+    const out = formatDescription('These apply when the cluster is first\nbootstrapped and no .bootstrap.yaml is present; on later starts they are ignored.', yamlRule)
+    expect(out).toContain('no `.bootstrap.yaml` is present')
+    expect(out).not.toContain('.`bootstrap.yaml`')
+  })
+
+  test('a dot before a span that is not a file name is untouched', () => {
+    expect(formatDescription('a .`rpk` prefix', null)).toBe('a .`rpk` prefix')
+  })
+
+  test('a sentence-final period before a code span is untouched', () => {
+    const out = formatDescription('Edit the file.`redpanda.yaml` holds the config.', yamlRule)
+    expect(out).toContain('file.`redpanda.yaml`')
   })
 })

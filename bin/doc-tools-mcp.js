@@ -506,11 +506,11 @@ const tools = [
         },
         extracted: {
           type: 'string',
-          description: 'Path to the extracted source JSON: the property extractor\'s RAW --output file, without overrides applied (required for the properties surface, alternative to "repo")'
+          description: 'Path to the extracted source JSON. Properties: the property extractor\'s RAW --output file, without overrides applied (alternative to "repo"). rpk: the newest docs-data/rpk-v<version>.json snapshot; the audit compares against its raw_tree (pre-override help text)'
         },
         repo: {
           type: 'string',
-          description: 'Redpanda checkout to extract raw source strings from (properties surface only, alternative to "extracted")'
+          description: 'Alternative to "extracted". Properties: a redpanda checkout to extract raw source strings from. rpk: a streaming-enterprise src/go/rpk directory to build rpk in and read --print-tree from; UPSTREAMABLE rows also get source_file/source_line'
         },
         surface: {
           type: 'string',

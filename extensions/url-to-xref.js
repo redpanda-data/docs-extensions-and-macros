@@ -52,6 +52,10 @@ const { raiseListenerLimit } = require('./util/raise-listener-limit')
  *   cli-utils/docs-links-to-xrefs.js, which converts generated pages before
  *   they are committed): targets in that component are written as
  *   module:page xrefs, the form the docs repos use for same-component links.
+ *   With a localVersion as well, a same-component target is unversioned only
+ *   when it is in that version, since an unversioned xref resolves to the
+ *   version of the page it is on; any other version is pinned, the latest
+ *   included.
  */
 
 // Rewrites for URL shapes that predate the current docs.redpanda.com site
@@ -350,6 +354,23 @@ function candidatePaths (normalizedPath, { components, latestVersionSegment }) {
   return candidates
 }
 
+/**
+ * Names the component a docs URL path points at, by the same rules
+ * candidatePaths applies: unprefixed and /docs/ paths belong to the legacy
+ * unprefixed component, and pre-rename slugs map to their current name.
+ * Returns undefined for the site root. Used to explain a URL that matched no
+ * page: its component may simply not be in the catalog.
+ */
+function targetComponentOf (urlPath) {
+  const normalized = normalizeUrlPath(urlPath)
+  if (/^\/docs(\/|$)/.test(normalized) || /^\/(?:current|beta|v?\d+\.\d+(?:\.\d+)?)(\/|$)/.test(normalized)) {
+    return LEGACY_UNPREFIXED_COMPONENT
+  }
+  const slug = normalized.split('/')[1]
+  if (!slug) return undefined
+  return LEGACY_SLUG_REWRITES[slug] || slug
+}
+
 function resolveUrlPath (urlPath, resolverContext) {
   for (const candidate of candidatePaths(normalizeUrlPath(urlPath), resolverContext)) {
     const entry = resolverContext.urls.get(candidate)
@@ -358,13 +379,21 @@ function resolveUrlPath (urlPath, resolverContext) {
   return undefined
 }
 
-function entryToXref (entry, fragment, label, localComponent) {
-  const versionPrefix = entry.latest || !entry.version ? '' : `${entry.version}@`
+function entryToXref (entry, fragment, label, { localComponent, localVersion } = {}) {
+  const inLocalComponent = Boolean(localComponent) && entry.component === localComponent
+  // An xref without a version resolves to the latest version of another
+  // component, but to the page's own version within its component. So when
+  // the content belongs to a known component version, a target in that
+  // component drops its version only when it is that same version.
+  const unversioned = inLocalComponent && localVersion !== undefined
+    ? entry.version === localVersion
+    : entry.latest
+  const versionPrefix = unversioned || !entry.version ? '' : `${entry.version}@`
   // Content that is itself part of a component (a page a generator writes into
   // the docs repo) names a target in that component by module and page only,
   // the way the docs repos write xrefs by hand. A version-pinned xref still
   // has to name its component.
-  const componentPrefix = !versionPrefix && localComponent && entry.component === localComponent ? '' : `${entry.component}:`
+  const componentPrefix = !versionPrefix && inLocalComponent ? '' : `${entry.component}:`
   return `xref:${versionPrefix}${componentPrefix}${entry.module}:${entry.relative}${fragment || ''}[${label || ''}]`
 }
 
@@ -584,7 +613,7 @@ function convertContent (content, resolverContext) {
       withoutLinkText.push(match.url)
       continue
     }
-    result += content.slice(cursor, match.start) + entryToXref(entry, url.hash, label, resolverContext.localComponent)
+    result += content.slice(cursor, match.start) + entryToXref(entry, url.hash, label, resolverContext)
     cursor = match.end
     converted++
   }
@@ -595,6 +624,7 @@ function convertContent (content, resolverContext) {
 module.exports.buildUrlMap = buildUrlMap
 module.exports.convertContent = convertContent
 module.exports.normalizeUrlPath = normalizeUrlPath
+module.exports.targetComponentOf = targetComponentOf
 // For the value macros, which convert docs URLs in rpk descriptions at
 // conversion time, after this extension has run (extension-utils/rpk-links.js).
 module.exports.DEFAULT_IGNORE = DEFAULT_IGNORE

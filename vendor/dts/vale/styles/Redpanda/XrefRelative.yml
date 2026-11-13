@@ -1,0 +1,9 @@
+# Checks: relative xrefs
+extends: existence
+message: "Don't use relative xrefs ('%s'). Use the full resource ID: xref:module:path/page.adoc[]."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#internal-links-xref
+level: error
+scope: raw
+nonword: true
+tokens:
+  - '(?m)(?<!^//[^\n]*)xref:\.\.?/[^\[\s]*'

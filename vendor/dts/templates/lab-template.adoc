@@ -1,0 +1,67 @@
+// Lab Template
+// Use for pages that provide complete, runnable environments for exploration.
+// Reader question: "I want to try this out"
+
+= [Lab title]
+:description: [One sentence describing what this lab demonstrates.]
+:page-layout: lab
+:page-topic-type: lab
+:learning-objective-1: Run [specific environment or demo]
+:learning-objective-2: Explore [specific capability]
+:learning-objective-3: Experiment with [specific feature]
+
+// Intro: 1-2 sentences, ~25-40 words. State what you'll explore and what you'll learn.
+[What does this lab let you explore, and what will you learn from it?]
+
+After completing this lab, you will be able to:
+
+* [ ] {learning-objective-1}
+* [ ] {learning-objective-2}
+* [ ] {learning-objective-3}
+
+== What you'll explore
+
+* [Exploration area 1]
+* [Exploration area 2]
+
+== Prerequisites
+
+* [Tool 1] installed
+* [Resource requirement]
+
+== Get the lab files
+
+[,bash]
+----
+git clone https://github.com/redpanda-data/redpanda-labs.git
+cd redpanda-labs/[lab-directory]
+----
+
+== Start the environment
+
+[,bash]
+----
+docker compose up -d
+----
+
+== Explore the lab
+
+=== [Exploration area 1]
+
+[Brief description of what to explore]
+
+[,bash]
+----
+# Commands to run
+----
+
+== Clean up
+
+[,bash]
+----
+docker compose down -v
+----
+
+== Next steps
+
+* xref:related-tutorial.adoc[]

@@ -217,9 +217,37 @@ function getPrereleaseFromAntora() {
   }
 }
 
+/**
+ * Record the Redpanda tag that property docs were generated at.
+ *
+ * Sets latest-redpanda-tag and full-version. On a prerelease component
+ * version (the beta branch) it also sets redpanda-beta-tag and
+ * redpanda-beta-version when the tag is itself a prerelease, such as an RC.
+ * The beta build and the overrides re-render workflow read
+ * redpanda-beta-tag. Leaving it at the previous RC makes the re-render
+ * regenerate the docs at that RC and undo the run.
+ *
+ * @param {string} newTag  The tag, such as v26.3.1-rc4.
+ * @returns {string[]}  The attribute names that were updated.
+ */
+function setRedpandaTagAttributes(newTag) {
+  const version = newTag.startsWith('v') ? newTag.slice(1) : newTag;
+  const updates = [
+    ['latest-redpanda-tag', newTag],
+    ['full-version', version],
+  ];
+  if (newTag.includes('-') && getPrereleaseFromAntora()) {
+    updates.push(['redpanda-beta-tag', newTag], ['redpanda-beta-version', version]);
+  }
+  return updates
+    .filter(([name, value]) => setAntoraValue(`asciidoc.attributes.${name}`, value))
+    .map(([name]) => name);
+}
+
 module.exports = {
   loadAntoraConfig,
   getAntoraValue,
   setAntoraValue,
-  getPrereleaseFromAntora
+  getPrereleaseFromAntora,
+  setRedpandaTagAttributes
 };
