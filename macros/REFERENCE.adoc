@@ -488,6 +488,113 @@ asciidoc:
     - '@redpanda-data/docs-extensions-and-macros/macros/prop'
 ----
 
+[[property-catalog]]
+== property_catalog
+
+A searchable, filterable list of every Redpanda configuration property, and, with `mode=filter`, a filter bar for the entries on one property reference page.
+
+=== Usage
+
+[,asciidoc]
+----
+= All Properties
+
+property_catalog::[]
+----
+
+On a reference page that includes a generated property partial, place the bar above the first section:
+
+[,asciidoc]
+----
+= Topic Configuration Properties
+:page-property-source: topic-properties
+
+property_catalog::[mode=filter]
+
+== Retention and compaction properties
+
+include::reference:partial$properties/topic-properties.adoc[tags=category-retention-compaction;!deprecated;!exclude-from-docs]
+----
+
+=== Data
+
+The macro reads the `redpanda-properties-<tag>.json` attachment the prop macro would use for the page, through the same function (`loadPropertiesFor`), so each docs version lists its own release's properties. See <<prop-version-selection>>. A Cloud component (`env-cloud`) uses the newest GA streaming file.
+
+Fields used: `name`, `type`, `description`, `default` (and `default_human_readable`, through `extension-utils/property-values.js`), `config_scope`, `category`, `needs_restart`, `is_deprecated`, `exclude_from_docs`, `is_enterprise`, `enterprise_constructor`, `enterprise_value`, `enterprise_restricted_value`, `enterprise_sanctioned_value`, `x-enum-metadata` (and `items.x-enum-metadata`), and on Cloud `cloud_supported`, `cloud_editable`, and `cloud_byoc_only`.
+
+Self-managed builds list every property except those marked `exclude_from_docs`. Cloud builds list cluster properties with `cloud_supported: true` and every topic property, and no broker properties, because Cloud readers cannot edit `redpanda.yaml`.
+
+=== Groups and sections
+
+Cards are grouped the way the reference pages are: Cluster, Object storage, Broker, and Topic. The group is the page the property generator writes the property to, from `propertyPageFor` in `tools/property-extractor/property-page.js`, which the generator and the macro both import. Object storage is a name rule there (`cloud_storage`, `s3_`, `azure_`, and so on), not a JSON field.
+
+The Section filter offers the topic and broker pages' sections, which are the JSON `category` values those pages' includes select by tag (for example *Topic: Tiered Storage* or *Broker: HTTP Proxy client*). Cluster properties have no sections, because every cluster property's category is `other`.
+
+A filter value is offered only when it matches at least one property a reader sees by default, and a filter only when it has two or more values left. A filter with one value would match everything or nothing.
+
+=== Cards
+
+Each card shows:
+
+* The signature, `<name>: <type>`.
+* Badges, each `<span class="rp-badge rp-badge--sm rp-badge--NAME" data-tooltip="...">`: the group (neutral), Restart required (neutral), Enterprise or Enterprise values (enterprise), Deprecated (deprecated), and on Cloud, Cloud editable or Read-only and BYOC only.
+* The description's first sentence, as plain text, cut near 200 characters.
+* The default value. Cloud cards leave it out, as the Cloud reference pages do.
+* A link to the property's entry on its reference page, found through the prop macro's page index. Properties no reference page renders (deprecated ones) have no link.
+* The command that sets the property, with the site's copy button: `rpk cluster config set <name> <value>` for cluster properties, `rpk redpanda config set <section>.<name> <value>` for broker properties (the `redpanda.yaml` section from the category), and `rpk topic alter-config <topic> --set <name>=<value>` for topic properties. Cloud cards for properties Cloud manages have no command.
+
+[[property-catalog-enterprise]]
+=== Enterprise values
+
+The marking follows the property reference templates (`tools/property-extractor/templates`). A property gets an *Enterprise values* badge whose tooltip names the values when any of these apply:
+
+* An enum value, or an `items` enum value, has `is_enterprise: true` in `x-enum-metadata`. This is the `isEnterpriseEnum` helper behind the "(Enterprise)" suffix on accepted values.
+* The property has `is_enterprise: true` and an `enterprise_constructor`: its `enterprise_restricted_value` list. For `restricted_with_sanctioned`, the tooltip also names the license-free default from `enterprise_sanctioned_value`. The `simple` constructor names no values, so its tooltip says some values need a license.
+* The property has `is_enterprise: true`, no constructor, and an `enterprise_value` list.
+
+A property with `is_enterprise: true` and none of those gets an *Enterprise* badge. Cloud builds show neither, as the Cloud reference pages show no license notes.
+
+=== Filters, search, and URL
+
+Search matches every word against the name and the full description. The filters are Group, Section, Type, Restart required, Enterprise, and Deprecated, plus Cloud editable and BYOC only on Cloud builds. Deprecated properties are hidden until the reader checks *Deprecated*, because the reference pages leave them out.
+
+Each filter toggle is a disclosure button named by its label and value, controlling a group of checkboxes. Escape closes it and returns focus to the toggle.
+
+The state is in the URL (`?q=`, `?group=`, `?section=`, `?type=`, `?restart=`, `?enterprise=`, `?deprecated=`, `?editable=`, `?byoc=`, each a comma-separated list of checked values) and is applied on load. After each change, one visually hidden `role="status"` region announces the count. When nothing matches, an empty state offers *Clear filters*.
+
+All cards are in the HTML at build time, so the docs UI's tooltip script sees every badge and the page works without JavaScript. The script only shows and hides cards, and touches only the cards that change. Filtering 688 cards takes under 1ms of script and about 2ms with layout in the e2e test.
+
+[[property-catalog-filter]]
+=== Filter bar on a reference page
+
+With `mode=filter`, the macro renders the same controls over the entries the page already renders. It finds them through the prop macro's page index (the entries whose page is this page), so it needs no list of its own. It offers search plus only the filters that divide that page's entries: Restart required and Enterprise where they apply, Deprecated if the page renders deprecated entries, Section on the topic page, and Cloud editable and BYOC only on Cloud builds.
+
+Filtering is display only. A filtered-out entry gets `hidden="until-found"`, so find in page still reaches it (and finding one clears the filters), and a section whose entries are all hidden is hidden too. Nothing is removed from the HTML, so the Markdown export and search indexing see every entry. The export leaves the bar out.
+
+A deep link always shows its target: when a page loads with an anchor and the URL's filters would hide that entry, the filters are cleared from the page and the URL.
+
+=== Markdown output
+
+The `convert-to-markdown` extension renders the catalog as a list, one item per property with its badges, summary, default, command, and reference link.
+
+=== Registration
+
+[,yaml]
+----
+asciidoc:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/macros/property-catalog'
+antora:
+  extensions:
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/property-page-index'
+----
+
+Register `property-page-index` too, so the page index is built before conversion starts, as for the prop macro.
+
+=== Testing
+
+`npm run test:property-catalog-e2e` builds the preview's property catalog page and the reference pages with the real v26.2.6 property data in `__tests__/e2e/property-catalog/fixtures`, and drives them in headless Chrome. Set `CATALOG_E2E_UI_BUNDLE` to test against a UI bundle other than the latest docs-ui release, and `CATALOG_E2E_SCREENSHOTS` to save screenshots.
+
 == glossterm
 
 The `glossterm` inline macro provides a way to define and reference glossary terms in your AsciiDoc documents.

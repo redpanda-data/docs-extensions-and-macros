@@ -1,0 +1,6 @@
+= Property Catalog Preview
+:description: Preview of the property_catalog block macro, a searchable list of every Redpanda configuration property.
+
+This page shows the property catalog for the property data this component publishes. Search by name or description, narrow the list with the filters, and copy the `rpk` command that sets a property.
+
+property_catalog::[]

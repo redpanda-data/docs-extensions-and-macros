@@ -43,3 +43,6 @@ macro-showcase.log
 
 # Doc-strings eval harness output (real model runs; never committed)
 evals/doc-strings/results/
+
+# E2E fixtures are real content trees too; keep them tracked despite modules/
+!__tests__/e2e/**
