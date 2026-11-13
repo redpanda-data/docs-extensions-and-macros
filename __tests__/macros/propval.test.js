@@ -348,6 +348,97 @@ describe('propval macro', () => {
     })
   })
 
+  describe('shared fields and text values', () => {
+    const cloud = () => catalogOf([attachment('streaming', '26.2', 'v26.2.4')], { 'cloud-data-platform': { 'env-cloud': true } })
+    const onCloud = (input, opts = {}) => convert(input, { catalog: cloud(), component: 'cloud-data-platform', version: '', ...opts })
+
+    test.each([
+      ['propval:cloud_storage_enabled[enterprise]', 'yes'],
+      ['propval:cloud_storage_enabled[is_enterprise,format=raw]', 'true'],
+      ['propval:log_segment_ms[deprecated]', 'no'],
+      ['propval:cloud_storage_enabled[secret]', 'no'],
+      ['propval:log_segment_ms[category]', 'other'],
+      ['propval:cleanup.policy[options]', 'none, delete, compact, compact,delete'],
+    ])('%s renders %s', (input, expected) => {
+      expect(valueOf(convert(input, { catalog: streaming() }))).toBe(expected)
+    })
+
+    test('since is introduced: the shared alias reaches the same field', () => {
+      warnings()
+      expect(convert('propval:log_segment_ms[since]', { catalog: streaming() })).toContain('data-field="introduced">&lt;unknown introduced&gt;')
+    })
+
+    test('a one-paragraph description renders inline, with its AsciiDoc markup', () => {
+      const html = convert('propval:log_segment_ms[description]', { catalog: streaming() })
+      expect(html).toContain('<span class="property-value" data-property="log_segment_ms" data-field="description">Default lifetime of log segments. If <code>null</code>, the property is disabled')
+    })
+
+    test('a one-line example renders inline as the reference renders it', () => {
+      expect(convert('propval:enable_transactions[example]', { catalog: streaming() })).toContain('data-field="examples"><code>false</code></span>')
+    })
+
+    test('a description longer than one paragraph warns, names the block form, and renders the placeholder', () => {
+      const warn = warnings()
+      expect(valueOf(convert('propval:cleanup.policy[description]', { catalog: streaming() }))).toBe('<unknown description>')
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('Use the block form on a line of its own: propval::cleanup.policy[description].'))
+    })
+
+    test('the block form parses the description into the page', () => {
+      const html = convert('propval::cleanup.policy[description]', { catalog: streaming() })
+      expect(html).toContain('<div class="openblock property-value property-value-description">')
+      expect(html).toContain('<li>\n<p><code>none</code> - No cleanup runs.')
+    })
+
+    test('the block form parses an example with a listing', () => {
+      const html = convert('propval::kafka_api[examples]', { catalog: streaming() })
+      expect(html).toContain('<div class="title">Basic example</div>')
+      expect(html).toContain('<code class="language-yaml" data-lang="yaml">redpanda:')
+    })
+
+    test('the block form of a short field is a paragraph with the value', () => {
+      expect(convert('propval::log_segment_ms[default]', { catalog: streaming() })).toContain('<p><span class="property-value" data-property="log_segment_ms" data-field="default">2 weeks</span></p>')
+    })
+
+    test('see-also has the items for the page\'s surface only', () => {
+      const html = convert('propval:write_caching_default[see-also]', { catalog: streaming() })
+      expect(html).toContain('href="reference:properties/topic-properties.html#write-caching"><code>write.caching</code></a>, <a href="develop:manage-topics/config-topics.html#configure-write-caching">Write caching</a>')
+      expect(valueOf(convert('propval:log_segment_ms[see-also]', { catalog: streaming() }))).toBe('segment.ms')
+      warnings()
+      // log_segment_ms has only a self_managed_only item.
+      expect(valueOf(onCloud('propval:log_segment_ms[see-also]'))).toBe('<unknown see-also>')
+    })
+
+    test('the block form of see-also is a list', () => {
+      const html = convert('propval::cleanup.policy[see_also]', { catalog: streaming() })
+      expect(html).toContain('<div class="openblock property-value property-value-see-also">')
+      expect((html.match(/<li>/g) || []).length).toBe(3)
+    })
+
+    test('enterprise is hidden on Cloud, where the reference shows no license note', () => {
+      const warn = warnings()
+      expect(valueOf(convert('propval:http_authentication[enterprise]', { catalog: streaming() }))).toBe('yes')
+      expect(valueOf(onCloud('propval:http_authentication[enterprise]'))).toBe('<unknown enterprise>')
+      expect(warn.mock.calls[0][0]).toContain("the property reference does not state 'enterprise' for Cloud")
+    })
+
+    test('the block form inside a sentence is an error in error mode', () => {
+      const warn = warnings()
+      expect(valueOf(convert('See propval::cleanup.policy[description] here.', { catalog: streaming() }))).toBe('<unknown description>')
+      expect(warn.mock.calls[0][0]).toContain('propval:: is the block form')
+      expect(() => convert('See propval::cleanup.policy[description] here.', { catalog: streaming(), attributes: { 'property-validate': 'error' } })).toThrow(/block form/)
+    })
+
+    test('needs-block fails the build in error mode', () => {
+      expect(() => convert('propval:cleanup.policy[description]', { catalog: streaming(), attributes: { 'property-validate': 'error' } })).toThrow(/block form/)
+    })
+
+    test('an unknown field in the block form warns with the supported fields', () => {
+      const warn = warnings()
+      expect(convert('propval::log_segment_ms[colour]', { catalog: streaming() })).toContain('property-value-unknown')
+      expect(warn.mock.calls[0][0]).toContain("propval::log_segment_ms[colour] in modules/manage/pages/example.adoc: 'colour' is not a field propval: supports. Supported fields: default, type,")
+    })
+  })
+
   describe('agreement with the property reference', () => {
     // Render the reference generator's own template for each sample property
     // and check propval: produces exactly its Default cell: the code value for

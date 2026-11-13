@@ -223,7 +223,7 @@ Registered together with the `enterprise` inline macro.
 
 This inline macro references a Redpanda configuration property in prose. The property renders as a marked `<code>` element (`property-ref` class plus a `data-property-name` attribute) that the docs UI decorates with a hover-documentation tooltip. Marking is opt-in: only properties referenced through this macro get tooltips, so ambiguous words such as `admin` or `rack` in unrelated contexts (Helm values, feature settings) are never decorated by mistake.
 
-The macro checks that a property is actually available to the audience reading the page, and links it only where a page documents it. It validates against the published property data: a `redpanda-properties-<tag>.json` attachment in the `reference` module, the same data the tooltips fetch at runtime. See <<prop-availability>> for which properties each doc set may reference and <<prop-version-selection>> for which file a given page uses. To migrate existing plain-backtick property mentions, use `doc-tools generate migrate-property-refs`. To render a property's value (its default, minimum, unit, and so on) rather than its name, use <<propval>>.
+The macro checks that a property is actually available to the audience reading the page, and links it only where a page documents it. It validates against the published property data: a `redpanda-properties-<tag>.json` attachment in the `reference` module, the same data the tooltips fetch at runtime. See <<prop-availability>> for which properties each doc set may reference and <<prop-version-selection>> for which file a given page uses. To migrate existing plain-backtick property mentions, use `doc-tools generate migrate-property-refs`. To render a property's value (its default, minimum, unit, and so on) rather than its name, use <<propval>>. For `rpk` flag and Connect field values, see <<rpkval>> and <<connectval>>; for a linked `rpk` command, see <<rpkcmd>>.
 
 === Usage
 
@@ -345,12 +345,13 @@ The exact default is `propval:log_segment_ms[default,format=raw]`.
 
 Rendered against `redpanda-properties-v26.2.4.json`, those lines read: "defaults to 2 weeks", "The minimum is 1 minute", "requires a restart: yes", and "The exact default is `1209600000`".
 
-`propval:` is registered by the `prop` macro's extension, so a playbook that registers `macros/prop` has both. It shares every data decision with `prop:` rather than copying them: the same dataset for the page's version (<<prop-version-selection>>), the same `property-validate` modes, the same Cloud availability gate (<<prop-availability>>), and the same refusal to use a neighbouring release's data when a version has none.
+`propval:` is registered by the `prop` macro's extension, so a playbook that registers `macros/prop` has both, along with <<rpkval>>, <<connectval>> and <<rpkcmd>>. It shares every data decision with `prop:` rather than copying them: the same dataset for the page's version (<<prop-version-selection>>), the same `property-validate` modes, the same Cloud availability gate (<<prop-availability>>), and the same refusal to use a neighbouring release's data when a version has none.
 
 === Usage
 
-The target is the property name. The first positional attribute (or `field=`) names the field, and defaults to `default`.
+The target is the property name. The first positional attribute (or `field=`) names the field, and defaults to `default`. Every value macro shares one set of field names (<<value-fields>>), so `introduced`, `values` and `description` mean the same thing in `propval:`, `rpkval:` and `connectval:`.
 
+[[propval-fields]]
 [cols="1,2,2"]
 |===
 | Field | Source in the property JSON | Example (v26.2.4)
@@ -406,14 +407,51 @@ The target is the property name. The first positional attribute (or `field=`) na
 | `cloud-access`
 | `cloud_editable` and `cloud_readonly`, for cluster properties only
 | `editable`, `read-only`, or `not available`
+
+| `description`
+| `description`, as AsciiDoc. Inline only when it is one paragraph; otherwise use the block form, `propval::`
+| `log_segment_ms`: "Default lifetime of log segments. ..."
+
+| `examples` (alias `example`)
+| `example`, as AsciiDoc. Inline only when it is one paragraph, such as `` `true` ``; a YAML example needs `propval::`
+| `admin_api_require_auth`: `true`
+
+| `see-also` (aliases `see_also`, `seeAlso`)
+| `see_also`, the reference's Related topics row, with only the items for this surface (`cloud_only` and `self_managed_only`)
+| `log_segment_ms`: a link to `segment.ms`
+
+| `deprecated` (alias `is_deprecated`)
+| `is_deprecated`
+| `yes` or `no`
+
+| `enterprise` (alias `is_enterprise`)
+| `is_enterprise`. Hidden on Cloud, where the reference shows no license note
+| `yes` or `no`
+
+| `secret` (alias `is_secret`)
+| `is_secret`
+| `yes` or `no`
+
+| `category`
+| `category`, the include tag the reference pages filter on
+| `tiered-storage`, `schema-registry`
 |===
 
-The JSON key names and table labels also work as field names: `minimum`, `maximum`, `needs_restart`, `units`, `enum`, `config_scope`, `version`, `gets_restored`.
+The JSON key names and table labels also work as field names: `minimum`, `maximum`, `needs_restart`, `units`, `enum`, `config_scope`, `version`, `gets_restored`. So do the aliases every value macro shares, such as `since` for `introduced` and `options` for `values`. A field name `propval:` does not support is a warning (an error with `property-validate: error`) that lists the fields it does.
 
 format::
 `human` (default) or `raw`. `raw` gives the exact value: the code value in the reference table for `default`, the plain number for `min` and `max`, `true` or `false` for the yes-or-no fields, and a JSON array for `values` and `aliases`.
 
 The output is a `<span>` with the stable class `property-value` and `data-property` and `data-field` attributes. It is plain text with no tooltip; mark the name with `prop:` for that. The macro works inside backticks, so `` `propval:x[default,format=raw]` `` renders as inline code. Don't put `values` inside backticks: it already renders each value as inline code, and backticks would nest one code element inside another.
+
+A description, an example or a Related topics list that is longer than one paragraph has no inline form. Write the block form on a line of its own, which parses the text into the page (<<value-text>>):
+
+[,asciidoc]
+----
+propval::cleanup.policy[description]
+----
+
+It renders an open block with the roles `property-value` and `property-value-<field>`. Any other field in the block form renders as a paragraph of its own.
 
 === Formatting
 
@@ -441,6 +479,8 @@ A value has no safe fallback, so whenever the build cannot verify one, `propval:
 With `property-validate` set to `error`, an unknown property, an unsupported field, a field the property does not have, a property not available on Cloud, or a field the Cloud reference does not show fails the build. The last two appear only in the Cloud build, so cloud-docs needs `property-validate: error` to catch single-sourced prose that would render a placeholder. With `off`, the placeholder is still rendered and still reported, because `off` means "do not check names", and a silent `<unknown default>` would reach readers unnoticed.
 
 === Migrating hand-written values
+
+To run these checks together with the rpk and Connect checks, and fail CI on them, use <<check-reference-values>>.
 
 `doc-tools generate migrate-property-values` finds hand-written values next to a property mention ("defaults to X", "the default is X", "default: X", "minimum X", "is X by default") and checks each against the data for the repo's own version, selected exactly as `prop:` selects it. It writes a JSON and a Markdown report. Each finding is one of:
 
@@ -487,6 +527,1019 @@ asciidoc:
   extensions:
     - '@redpanda-data/docs-extensions-and-macros/macros/prop'
 ----
+
+== rpkval
+
+This inline macro renders one value of an `rpk` flag from the published rpk data, so a sentence such as "the default is -1" comes from the same data as the generated `rpk` reference instead of being typed by hand.
+
+[,asciidoc]
+----
+The default is rpkval:[rpk topic create --partitions].
+Use `rpkval:[rpk topic create --partitions,shorthand]` for short.
+The window defaults to rpkval:[rpk ai auditlog list --since].
+Every command accepts rpkval:[rpk --config-opt,shorthand] (rpkval:[rpk --config-opt,type]).
+----
+
+Rendered against `rpk-v26.2.2.json`, those lines read: "The default is -1", "Use `-p` for short", "defaults to 24h", and "accepts -X (stringArray)". For property values, use <<propval>>; for Connect fields, <<connectval>>; to name and link the command itself, <<rpkcmd>>.
+
+=== Usage
+
+[,asciidoc]
+----
+rpkval:[<rpk command> --<flag>,<field>,format=human|raw]
+----
+
+The brackets start with the command line as you type it: the command path, then the flag's long name with its dashes. The leading `rpk` is optional, and whitespace is collapsed. Each word of the path matches a command name, then an alias, so `rpkval:[rpk cluster status --format]` reads the `--format` flag of `rpk cluster info`. Dots in a flag name are allowed (`--openai-config.base-url`). For a global flag such as `--config-opt`, write `rpk` and the flag: `rpkval:[rpk --config-opt,type]`.
+
+Write the command path and one flag only:
+
+* An argument (`rpkval:[rpk topic create my-topic --partitions]`) is an `unknown-command` error that says to write the path without arguments.
+* No flag, a value after the flag (`--partitions 3`), or a second flag is an `unknown-flag` error.
+* A shorthand (`-p`) is a `shorthand-target` error whose message names the long flag: name the long flag and use the `shorthand` field.
+
+The field comes next, `default` when it is omitted. `format=` may follow it.
+
+The flag is looked up on that command, then in the global flags. It is never taken from a parent command: the data does not say which flags are persistent, so a parent's local flag would be a guess. A flag defined on a parent (`--schema-context` on `rpk registry`) is an `unknown-flag` error whose message names the command to write instead.
+
+The first form of the macro is still accepted, and renders the same: the flag as the target and the command in `command=`, as in `rpkval:partitions[command=rpk topic create]` or `rpkval:partitions[shorthand,command=rpk topic create]`. Leave `command=` out for a global flag (`rpkval:config-opt[type]`). `check-reference-values --write` writes the bracket form, with the field it checked: `rpkval:[rpk topic create --partitions,default]`, or `rpkval:[rpk --verbose,default]` for a global flag.
+
+With no flag, the brackets name a command, and the field is one of the command's own: `rpkval:[rpk topic create,usage]` renders `rpk topic create [TOPICS...] [flags]`. A flag field with no flag (`rpkval:[rpk topic create]` asks for `default`) is an `unknown-flag` error, and a command field with a flag is an `unsupported-field` error; both messages say which to write.
+
+[[rpkval-fields]]
+[cols="1,1,2,2"]
+|===
+| Field | Of | Source in the rpk data | Example (v26.2.2)
+
+| `default`
+| flag
+| The flag's `default`, as `rpk <command> --help` prints it inside `(default ...)`, without the quotes help puts around strings
+| `rpk topic create --partitions`: `-1`; `rpk debug bundle --timeout`: `1m0s`; `rpk topic create --topic-config`: `[]`
+
+| `type`
+| flag
+| `type`, as the reference's Type column prints it
+| `int32`, `stringArray`, `duration`
+
+| `shorthand` (alias `short`)
+| flag
+| `shorthand`, with its dash
+| `-p`
+
+| `required` (inverse alias `optional`)
+| flag
+| `required`. `optional` gives the opposite
+| `yes` or `no`
+
+| `description`
+| flag, command
+| `description`, the help text, rendered as AsciiDoc (<<value-text>>). A command's description is usually more than one paragraph, so it needs `rpkval::`
+| `rpk topic create --partitions`: "Number of partitions for the topic. ..."
+
+| `introduced` (aliases `since`, `version`, `introducedInVersion`)
+| flag, command
+| `introducedInVersion`. For a plugin command, the plugin's version
+| `rpk ai docs search`: `0.2.92`
+
+| `usage`
+| command
+| `usage`
+| `rpk topic create [TOPICS...] [flags]`
+
+| `examples` (alias `example`)
+| command
+| `examples`, rendered literally: prose as paragraphs, indented commands as literal blocks. Needs `rpkval::`
+| `rpk security acl list`
+
+| `aliases`
+| command
+| `aliases`, comma-separated
+| `rpk cluster info`: `status, metadata`
+
+| `platforms`
+| command
+| `platforms`, comma-separated
+| `linux, darwin`
+
+| `self-hosted-only` (alias `selfHostedOnly`)
+| command
+| `selfHostedOnly`. An absent key means no
+| `rpk cluster brokers`: `yes`
+|===
+
+The `deprecated` field is gone for flags: no flag in the rpk data carries a deprecation (`deprecated_commands` covers commands only), so it could only ever say `no`. `rpkval:[... --flag,deprecated]` still renders, as `<unknown deprecated>`, with a `dropped-field` warning that says why, and never fails the build.
+
+format::
+`human` (default) or `raw`. It changes `required` and `self-hosted-only` to `true` or `false`, and `aliases` and `platforms` to a JSON array. Any other value warns and renders the human form.
+
+The output is a `<span class="rpk-value">` with `data-rpk-command`, `data-rpk-flag` (for a flag) and `data-field` attributes. `data-field` is the canonical field, or `optional` when that is what the call asked for. A flag scraped from a plugin's `--help` also carries `data-source="help"`. The macro works inside backticks.
+
+Help text longer than one paragraph has no inline form. Write the block form on a line of its own:
+
+[,asciidoc]
+----
+rpkval::[rpk topic create,description]
+rpkval::[rpk security acl list,examples]
+----
+
+It renders an open block with the roles `rpk-value` and `rpk-value-<field>`. A description is parsed as AsciiDoc, as the rpk reference renders it: code, links, and `----` listings render as they do there, with its links rewritten for the page it renders on. Examples render literally (<<value-text>>).
+
+=== Formatting
+
+`rpkval:` renders what pflag stores as the flag's default, which is what `--help` prints. It never humanizes: durations stay as Go writes them (`10s`, `1m0s`), and slices render as pflag prints them (`[]`, `[a,b]`). An empty string renders `""`, and booleans and numbers render as stored. It never parses a default out of a description.
+
+=== Which rpk data a page reads
+
+The data is an `rpk-<version>.json` attachment in a `reference` module. The docs rpk workflows publish the newest snapshot of `docs-data/rpk-v<version>.json` there. Selection follows `prop:` exactly (<<prop-version-selection>>):
+
+[cols="1,2,2"]
+|===
+| Page | Dataset | When there is none
+
+| `streaming` on main (26.2)
+| Its own `rpk-v26.2.x.json`: the page's version first, then the newest in the 26.2 series
+| A placeholder and the series warning
+
+| `streaming` beta (26.3, a prerelease)
+| Its own 26.3 files only. It never borrows 26.2 data
+| A placeholder and the series warning
+
+| `streaming` older versions
+| Their own file
+| A placeholder until one is published
+
+| cloud-docs (`env-cloud`) and adp-docs (`env-adp`)
+| The newest GA `streaming` file, then `ROOT`. The surface is Cloud
+| A placeholder, and a prerelease-only or no-data warning
+
+| Any other component
+| None, never inferred
+| A placeholder and the no-data warning
+|===
+
+`env-adp` borrows rpk data only: `prop:` and `propval:` still borrow on `env-cloud` alone.
+
+=== Cloud
+
+On a page whose surface is Cloud:
+
+* A command or flag marked `selfHostedOnly` anywhere on its path is `unavailable`, because it is self-managed only.
+* The `default` of a command whose reference description is scoped to self-managed (`descriptionScope: self-hosted`, such as `rpk shadow delete`) is `cloud-hidden`, because the behavior may differ in Cloud. Its other fields still render.
+* The `description` of such a command is `cloud-hidden` too, because the reference shows it only outside `env-cloud`. On a self-managed page, the description of a command scoped to Cloud (`descriptionScope: cloud`) is `unavailable`.
+* `platforms` and `linux_only_commands` are not gated: they describe the operating system, not the deployment.
+
+On a self-managed page, a flag marked `cloudOnly` is `unavailable`, mirroring the `ifdef::env-cloud[]` the reference puts around it.
+
+=== Failures and validation modes
+
+Whenever no verified value exists, `rpkval:` renders `<unknown FIELD>` (class `rpk-value rpk-value-unknown`) and logs why, naming the macro call, the field, the dataset, and the file. It never renders a guessed value.
+
+rpk-validate::
+`warn` (default) logs each problem. `error` fails the build on `unknown-command`, `unknown-flag`, `shorthand-target`, `deprecated-command`, `missing-field`, `unsupported-field`, `cloud-hidden`, `unavailable`, `needs-block` (help text longer than one paragraph in the inline form) and `block-form-inline` (`rpkval::` inside a sentence). `off` silences warnings for values that render; a placeholder is still reported, because a value has no safe fallback.
+
+These render a placeholder and warn, and never fail the build: the data gaps `no-data`, `imprecise`, `description-default` (an empty default whose description states the real one, such as `rpk debug bundle --output`), `complex-default` and `plugin-unknown`, and `dropped-field` (`deprecated` on a flag).
+
+`deprecated-command` covers a command that is a key of `deprecated_commands`, or whose ancestor is. It is checked before `unknown-command`, because deprecated commands are not in the tree. When the entry's `replacement` names one command, the message names it and the call to write (`rpkval:[rpk redpanda admin --verbose,type]` says to write `rpkval:[rpk cluster --verbose,type]`). See <<old-names>> for when it cannot.
+
+A command written with an alias reads its command's value (`rpkval:[rpk cluster status --format]` reads `rpk cluster info`) and logs an `alias` warning with the call to write, in the form you wrote. It never fails the build, even in `error` mode, because the value is right; `off` silences it.
+
+=== Plugin flags until DOC-2689
+
+`rpk ai`, `rpk check`, `rpk connect`, `rpk k8s` and `rpk oxla` are plugins, and until they publish their own command trees (DOC-2689), the generator scrapes their flags from `--help`. A scraped flag's default is the string help printed, with its quotes, and a flag with no default means help said nothing, not that there is none. So for a scraped flag, `rpkval:` strips one pair of quotes from the default, adds `data-source="help"`, and renders `plugin-unknown` (warn only) when the default or `required` is absent.
+
+A flag is scraped when its command is under one of those plugins, the snapshot's `plugin_flag_sources` does not record that plugin as `tree`, and the flag carries no `from_plugin: true` marker. Both markers are what the generator writes once the plugin trees land, so no change here is needed when they do.
+
+=== Checking prose with check-reference-values
+
+`doc-tools check-reference-values` finds hand-written flag defaults that `rpkval:` could render, and `rpk` commands and flags the data does not have. It reads both forms of `rpkval:`, and `rpkcmd:`, as macros, never as hand-written values. See <<check-reference-values>>.
+
+=== Registration
+
+Registered by the `prop` macro's extension, so a playbook that registers `macros/prop` has `prop:`, `propval:`, `rpkval:`, `connectval:` and `rpkcmd:`:
+
+[,yaml]
+----
+asciidoc:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/macros/prop'
+----
+
+[[rpkcmd]]
+== rpkcmd
+
+This inline macro renders an `rpk` command as inline code, written as you type it, and links it to the command's generated reference page. The command is checked against the same rpk data as <<rpkval>>, and the page is found in the build, so the link follows the component that renders the page.
+
+[,asciidoc]
+----
+Create the topic with rpkcmd:[rpk topic create].
+Set the partition count with rpkcmd:[rpk topic create --partitions].
+Check the brokers with rpkcmd:[cluster status].
+Then rpkcmd:[rpk topic create,text=create a topic] for each tenant.
+----
+
+Rendered in `streaming` 26.2, the first three lines show `rpk topic create`, `rpk topic create --partitions` and `rpk cluster status` as code, linked to the `rpk topic create` page (twice) and the `rpk cluster info` page, because `status` is an alias of `info`. The last line links the words "create a topic".
+
+=== Usage
+
+[,asciidoc]
+----
+rpkcmd:[<rpk command> [--<flag>],text=<link text>]
+----
+
+The brackets hold the command exactly as you type it, aliases included, then at most one flag, long (`--partitions`) or shorthand (`-p`). The leading `rpk` is optional; the output always starts with `rpk`. For a global flag, write `rpk` and the flag: `rpkcmd:[rpk --profile]` links the `rpk` page.
+
+Write the command path and at most one flag. An argument (`rpkcmd:[rpk topic create my-topic]`) is `unknown-command`, and a value after the flag (`--partitions 3`) or a second flag is `unknown-flag`. The command and flag resolve exactly as in `rpkval:`: names then aliases, deprecated commands before unknown ones, the command's own flags then the global flags, and never a parent's flag (`rpkcmd:[rpk registry mode set --schema-context]` is `unknown-flag`, and the message says to write `rpkcmd:[rpk registry --schema-context]`).
+
+text::
+Optional. The link text, instead of the command as code.
+
+The output is the generated page's link around `<code class="rpk-command">`, with `data-rpk-command` (the canonical command, `rpk cluster info` for `rpk cluster status`) and, with a flag, `data-rpk-flag` (the long name). Don't wrap the macro in backticks: it already renders code, and backticks nest a second code element around the link.
+
+The generated `rpk` pages have no anchor per flag (the Flags section is a table with no IDs), so a flag links its command's page.
+
+[[rpkcmd-page]]
+=== Which page it links
+
+The page path comes from the command, as the `rpk` docs generator writes it: `rpk` is `rpk/rpk.adoc`, a top-level command with subcommands and every command below it are in `rpk/rpk-<top>/rpk-<path>.adoc` (`rpk/rpk-cluster/rpk-cluster-partitions-move-cancel.adoc`), and a top-level command without subcommands is `rpk/rpk-<name>.adoc` (`rpk/rpk-version.adoc`), all in the `reference` module. The macro then looks for that page in the content catalog, in this order:
+
+. The rendering page's own component and version.
+. The `streaming` component: the rendering page's version when the page is in `streaming`, else the latest version. A `streaming` page never links another `streaming` version.
+. Any other component that has the page, the one with the most pages in that page's directory first, then the one with the most `rpk` reference pages. A `streaming` page that names `rpk cloud login` links cloud-docs, which publishes most of the `rpk-cloud/` pages, not adp-docs, which has more `rpk` pages but only that one `rpk cloud` page.
+
+The rendering page is the one Antora converts, so a cloud-docs stub that includes a `streaming` page links cloud-docs pages, and an rp-connect-docs page links `streaming`. No repo or component is listed in the macro: a page that exists in the build is linked, and one that doesn't is not.
+
+The command is checked against the rpk data the page reads for `rpkval:` (<<rpkval>>). A component that is not a Redpanda release and borrows no rpk data, such as rp-connect-docs, checks against the data of the latest `streaming` version. A `streaming` version with no rpk data of its own never borrows another release's: its commands render as plain code with the series warning.
+
+=== Cloud
+
+A Cloud page (`env-cloud` on its component version) links only its own component's pages. When Cloud has no page for the command, the macro renders plain code and warns, and never links Cloud readers to self-managed docs. Put such a sentence in an `ifndef::env-cloud[]` block, or link it differently in Cloud.
+
+=== Failures and validation modes
+
+Whenever the command can't be linked, `rpkcmd:` renders the command as plain code (`<code>`), or the `text=` value as plain text, with no link and no `rpk-command` class, and logs why, naming the macro call, the dataset and the file.
+
+rpk-validate::
+The same attribute as `rpkval:`. `warn` (default) logs each problem. `error` fails the build on `unknown-command`, `unknown-flag` and `deprecated-command`. `off` silences every `rpkcmd:` warning, because plain code still reads correctly.
+
+An alias renders as written and links its command's page, and logs an `alias` warning with the call to write: `rpkcmd:[rpk cluster status]` says "rpk cluster status is an alias of rpk cluster info; write rpkcmd:[rpk cluster info]", keeping the flag and `text=`. It never fails the build. A deprecated command still renders plain code, and its warning names the replacement and the call to write when the data names one (<<old-names>>).
+
+These never fail the build: `no-data` (no rpk data for the page) and `no-page` (no component in the build has the page, or a Cloud page has none of its own).
+
+=== Checking links with check-reference-values
+
+`doc-tools check-reference-values` checks hand-written xrefs to `rpk` reference pages, reports the broken and mislabeled ones, and with `--write` replaces each exact one with `rpkcmd:[...]`. See <<check-reference-values>>.
+
+=== Registration
+
+Registered by the `prop` macro's extension (see <<rpkval>>).
+
+== connectval
+
+This inline macro renders one value of a Redpanda Connect component or config field from the published Connect data, formatted exactly as the generated component reference prints it.
+
+[,asciidoc]
+----
+The chunk size defaults to `connectval:[inputs/postgres_cdc.incremental_snapshot.chunk_size]`.
+Valid strategies: connectval:[outputs/iceberg.merge_strategy,values].
+The default for `pipeline.threads` is connectval:[config.pipeline.threads,default].
+The `kafka_franz` input is connectval:[inputs/kafka_franz,status].
+----
+
+Rendered against `connect-4.114.0.json`, those lines read: "defaults to `1024`", "Valid strategies: `merge-on-read`, `copy-on-write`", "The default for `pipeline.threads` is -1", and "The `kafka_franz` input is deprecated".
+
+=== Usage
+
+[,asciidoc]
+----
+connectval:[<type>/<name>.<field.path>,<field>,format=human|raw]
+connectval:[<type>/<name>,<field>]
+connectval:[config.<field.path>,<field>]
+----
+
+The brackets start with the component and the field path together: `inputs/kafka_franz.consumer_group`, `outputs/iceberg.commit.cleanup_on_failure`. Component names have no dots, so the first dot after the type ends the name. Address an array of objects without an index (`sasl.mechanism`): the data stores one element's fields. `config.` addresses the root fields of a pipeline config (`config.pipeline.threads`, `config.http.enabled`). A component with no field path reads a field of the component itself, such as its `status`.
+
+The type is written as rp-connect-docs paths and xrefs write it, `inputs/kafka_franz`, `rate_limits/local`, and may be plural, singular, or hyphenated (`rate-limits`, `rate_limit`). It is always explicit, so `kafka`, `http_client` and `file` are never ambiguous.
+
+The field comes next, `default` when it is omitted. Every value macro shares one set of field names (<<value-fields>>).
+
+The first form of the macro is still accepted, and renders the same: the field path as the target and the component in `component=`, as in `connectval:client_id[default,component=inputs/redpanda]` or `connectval:pipeline.threads[component=config]`. `check-reference-values --write` writes the bracket form, with the field it checked: `connectval:[inputs/aws_dynamodb_cdc.checkpoint_table,default]`, or `connectval:[config.pipeline.threads,default]` for a root field.
+
+[[connectval-fields]]
+[cols="1,1,2,2"]
+|===
+| Field | Of | Source in the Connect data | Example (4.114.0)
+
+| `default`
+| field
+| `default`, as the reference's `*Default*:` line prints it inline
+| `redpanda` input `client_id`: `redpanda-connect`; `postgres_cdc` input `incremental_snapshot.chunk_size`: `1024`
+
+| `type`
+| field
+| The reference's `*Type*:` text
+| `string`, `array<string>`, `object`, `array<array<string>>`
+
+| `values` (aliases `options`, `annotated_options`, `enum`, `accepted-values`)
+| field
+| `options`, else the first value of each `annotated_options` pair, each as inline code
+| `merge-on-read`, `copy-on-write`
+
+| `description`
+| field, component
+| `description`, as AsciiDoc (or Markdown, by `docs_format`). Inline only when it is one paragraph; otherwise use `connectval::`
+| `kafka_franz` input `consumer_group`: a paragraph, a list and a paragraph
+
+| `summary` (alias `short_description`)
+| field, component
+| A field's `short_description`, or a component's `summary`
+| `kafka_franz` input `consumer_group`: "An optional consumer group to consume as. ..."
+
+| `examples` (alias `example`)
+| field
+| `examples`. Inline, each value as inline code, when every example is a single value; the block form is a YAML listing, one example per document
+| `kafka_franz` input `topics`
+
+| `deprecated` (alias `is_deprecated`)
+| field, component
+| A field's `is_deprecated`, or a component's `status` of `deprecated`
+| `yes` or `no`
+
+| `introduced` (aliases `since`, `version`)
+| field, component
+| `version`. Hidden on Cloud, where the reference shows no "Requires version"
+| `4.21.0`
+
+| `required` (inverse alias `optional`)
+| field
+| Whether the config linter requires the field: not optional, not deprecated, no default, a scalar with no child fields, and not a component (benthos `internal/docs/format_yaml.go`)
+| `redpanda` input `seed_brokers`: `no` (it is a list); `generate` input `mapping`: `yes`
+
+| `advanced` (alias `is_advanced`)
+| field
+| `is_advanced`
+| `yes` or `no`
+
+| `secret` (alias `is_secret`)
+| field
+| `is_secret`
+| `yes` or `no`
+
+| `interpolated` (alias `is_interpolated`)
+| field
+| `interpolated`: the field takes interpolation functions
+| `yes` or `no`
+
+| `status`
+| component
+| `status`
+| `stable`, `beta`, `experimental`, `deprecated`
+
+| `category` (alias `categories`)
+| component
+| `categories`, comma-separated
+| `Services`, `AWS`
+|===
+
+format::
+`human` (default) or `raw`. It changes the yes-or-no fields to `true` or `false`, and `values` and `category` to a JSON array.
+
+Don't wrap `values` in backticks: it already renders each value as inline code. The output is a `<span class="connect-value">` with `data-connect-component`, `data-connect-field` (for a field) and `data-field` attributes. `data-field` is the canonical field (`values` for a call that asked for `options`), or `optional` when that is what the call asked for.
+
+A description or an example longer than one paragraph has no inline form. Write the block form on a line of its own, which parses the text into the page:
+
+[,asciidoc]
+----
+connectval::[inputs/kafka_franz.consumer_group,description]
+----
+
+It renders an open block with the roles `connect-value` and `connect-value-<field>`. The strings were written for the component's own page, so off that page their links are rewritten (<<value-text>>).
+
+=== Formatting
+
+Connect renders what the reference prints, through `formatConnectDefault` and `connectDisplayType` in `tools/redpanda-connect/helpers/formatConnectDefault.js`, which `renderConnectFields` also calls. `[]` and `{}` render as written, a string that is already quoted renders as stored, an empty string renders `""`, and numbers and booleans render as stored. A default the reference prints as a YAML block (any other object or list) is `complex-default`: link the reference instead. An empty default whose description names the real one (`gcp_spanner_cdc` `metadata_table`) is `description-default`.
+
+A deprecated field still renders, and the macro warns `deprecated-field`, because the Connect reference does not list deprecated fields.
+
+=== Which Connect data a page reads
+
+Connect versions are Connect's own (4.x), so the page's component and version never select the data. Every page reads the newest `connect-<version>.json` in the `components` module of the component named `connect` (rp-connect-docs). When more than one exists, the newest wins and the macro warns once. With no `connect` component in the build, every value is a placeholder and the warning says to add the rp-connect-docs content source to the playbook.
+
+=== Cloud
+
+The surface is Cloud when the page's own component version sets `env-cloud`, so a cloud-docs page that includes rp-connect-docs text is gated. On a Cloud page:
+
+* A component that is not available in Cloud is `unavailable`. Availability comes from the translated `csvData` rows that `generate-rp-connect-info` sets on the `connect` component (GPU-only components count as available), else from the component's `cloudSupported` in the JSON. The message names the source. When neither says, the value renders and the macro warns `cloud-unknown` once.
+* `introduced` is `cloud-hidden`, for a field or a component.
+* The root config (`config.` or `component=config`) is never gated.
+* A link in a description to a page Cloud does not have renders as its label, unlinked, with a warning (<<value-text>>).
+
+=== Failures and validation modes
+
+A missing value renders `<unknown FIELD>` (class `connect-value connect-value-unknown`) and logs why.
+
+connect-validate::
+`warn` (default) logs each problem. `error` fails the build on `unknown-type`, `unknown-component`, `unknown-field`, `missing-field`, `unsupported-field`, `cloud-hidden`, `unavailable`, `needs-block` (a string longer than one paragraph in the inline form) and `block-form-inline` (`connectval::` inside a sentence). `off` silences warnings for values that render; a placeholder is still reported.
+
+These never fail the build: `no-data`, `imprecise`, `description-default`, `complex-default`, `deprecated-field` and `cloud-unknown`.
+
+A former component name, one the connect docs alias to another component's page (`connectval:[inputs/kafka_migrator.topics,type]`), reads that component and warns with the call to write. A deprecated component, or field, reads its own value and warns with the replacement the data names, unless the call asks for `status` or `deprecated`. Neither fails the build. See <<old-names>>.
+
+=== Checking prose with check-reference-values
+
+`doc-tools check-reference-values` finds hand-written field defaults that `connectval:` could render, YAML comments that state a stale default, and components and fields the data does not have. See <<check-reference-values>>.
+
+=== Registration
+
+Registered by the `prop` macro's extension (see <<rpkval>>).
+
+[[connect]]
+== connect
+
+This inline macro renders a Redpanda Connect component, or one of its fields, as inline code, linked to its generated reference page, and a field to its anchor on that page. The component and field are checked against the Connect data `connectval:` reads, and the page is found in the build, so the link follows the component that renders the page.
+
+[,asciidoc]
+----
+Read from Kafka with the connect:[inputs/kafka_franz].
+Set connect:[inputs/kafka_franz.consumer_group] to share the load.
+The connect:[outputs/amqp_1.metadata] field filters the headers.
+Use connect:[inputs/generate,`generate`] for test data.
+----
+
+Rendered in `connect`, the first line shows "`kafka_franz` input", linked to `components:inputs/kafka_franz.adoc`, the second `consumer_group`, linked to `#consumer_group` on the same page, and the third `metadata`, linked to `#metadata-2` on the `amqp_1` output page. The last line links its own text.
+
+=== Usage
+
+[,asciidoc]
+----
+connect:[<type>/<name>]
+connect:[<type>/<name>.<field.path>]
+connect:[<type>/<name>[.<field.path>],<link text>]
+----
+
+The brackets start with the component as `connectval:` takes it (<<connectval>>): the type is always written, as rp-connect-docs paths write it (`inputs`, `rate_limits`) or singular or hyphenated, because 71 names exist in more than one type. A field path follows the name, without `[]`. Root config fields (`config.`) have no reference page to link.
+
+The default text is the component name as code and its type (`+`kafka_franz` input+`, `+`local` rate limit+`), or the field path as code. The second attribute, or `text=`, replaces it, and is rendered as written: `+connect:[inputs/generate,`generate`]+`.
+
+The output is the page's link around `<code class="connect-component">`, with `data-connect-component` (`inputs/kafka_franz`) and, for a field, `data-connect-field`. Don't wrap the macro in backticks.
+
+Only this short form exists. Asciidoctor matches an inline macro name anywhere in a word, so a `connect:<target>[]` form would match inside `xref:connect:components:inputs/kafka.adoc[]`.
+
+[[connect-page]]
+=== Which page and anchor it links
+
+The page is `components:<type>/<name>.adoc`, found in the content catalog, page aliases included, in this order:
+
+. The rendering page's own component and version. The `connect` component finds its own pages here, and Cloud finds its stubs: the page that includes the connect page (`include::connect:components:inputs/postgres_cdc.adoc[tag=single-source]`), or else the page that declares the connect path (`components:inputs/kafka_franz.adoc`) as a page alias. When the two disagree, the include wins, because it is what the stub renders: a stub that includes another component's connect page is not the page for the path it aliases. A stub converted before the link keeps its includes, because the macros record them before Antora converts each page. A name the reference keeps as a page alias, such as `inputs/pg_stream` on the `postgres_cdc` page, links that page.
+. The `connect` component's latest version, except from a Cloud page.
+
+A field links the id Asciidoctor generates for its heading on the published page (`+=== `batching.byte_size`+` is `batching-byte_size`). The ids are the ones docs.redpanda.com generates, with no prefix and `-` as the separator; a build that keeps Asciidoctor's own defaults (`_batching_byte_size`) needs `idprefix: ''` and `idseparator: '-'`, as `local-macro-showcase-playbook.yml` sets them. When a section earlier on the page already has that id, the field gets the next free one, as Asciidoctor numbers them: the `amqp_1` output's description has a Metadata section, so its `metadata` field is `metadata-2`, and the `jira` input's `fields` field is `fields-2`, after the page's Fields heading. The earlier sections come from the connect page's own source and the partials it includes, read from the build when it has them and from the Connect data when it does not. A field the reference does not list (a deprecated one, or one below it) links the page with no anchor, with a warning.
+
+=== Cloud
+
+A Cloud page (`env-cloud` on its component version) links only its own component's pages. When Cloud has no page for the component, the macro renders plain code and warns, and never links Cloud readers to self-managed docs. Put such a sentence in an `ifndef::env-cloud[]` block.
+
+=== Failures and validation modes
+
+Whenever the component can't be linked, `connect:` renders plain code with no link and no `connect-component` class, and logs why, naming the call, the dataset and the file.
+
+connect-validate::
+The same attribute as `connectval:`. `warn` (default) logs each problem. `error` fails the build on `unknown-type`, `unknown-component` and `unknown-field`. `off` silences every `connect:` warning.
+
+A former name renders as written, links the component its page path now goes to, and warns with the current name: `connect:[outputs/kafka_migrator]` renders "`kafka_migrator` output", links the `redpanda_migrator` page, and says to write `connect:[outputs/redpanda_migrator]`. A field after it is checked against the current component. A deprecated component links its own page, which still documents it and carries the deprecation notice, and warns with its replacement; one whose path the connect docs alias to its replacement (`inputs/pg_stream`) links that page, on any component that has no page of its own for it. A deprecated field links its component's page with no anchor, as before, and the warning names the field to write when the data names one. None of these fail the build. See <<old-names>>.
+
+These never fail the build: `no-data` (no Connect data) and `no-page` (no page in the build, or a Cloud page has none of its own).
+
+=== Registration
+
+Registered by the `prop` macro's extension (see <<rpkval>>).
+
+[[blobl]]
+== blobl
+
+This inline macro renders a Bloblang function or method call as inline code, exactly as written, linked to its entry in the Bloblang reference.
+
+[,asciidoc]
+----
+Stamp each message with blobl:[now()].
+Upper-case the field with blobl:[.uppercase()].
+blobl:[counter(min)] sets the first value.
+Check for a substring with blobl:[.contains(),category=String Manipulation].
+----
+
+Rendered in `connect`, those link `guides:bloblang/functions.adoc#now`, `guides:bloblang/methods.adoc#uppercase`, `guides:bloblang/functions.adoc#counter` and `guides:bloblang/methods.adoc#contains-2`.
+
+=== Usage
+
+[,asciidoc]
+----
+blobl:[<function>()]
+blobl:[.<method>()]
+blobl:[<function>(<parameter>)]
+blobl:[<call>,<link text>,category=<category>]
+----
+
+A leading dot makes a method, and parentheses without one a function. A bare name (`blobl:[now]`) works when only one kind has it; `bytes` is both, so it needs the parentheses or the dot. A name inside the parentheses is a parameter, which has no anchor of its own (each parameter table sits under a numbered `parameters-N` heading), so it links its function or method.
+
+The methods page lists each method under its category heading. `contains`, `length` and `slice` are in two categories, each with its own description, and the second copy on the page has a numbered id (`contains-2`). `category=` picks one, by its name in any case or spacing (`String Manipulation`, `string_manipulation`); without it, the first copy on the page. The order of the categories is the order of the published `bloblang/methods.adoc` partial when the build has it, otherwise General first, Deprecated last and the rest alphabetical, which is that partial's order.
+
+The second attribute, or `text=`, replaces the text, as in `connect:`. The output is the page's link around `<code class="bloblang-call">`, with `data-bloblang-function` or `data-bloblang-method`.
+
+=== Which page it links
+
+The functions page is `guides:bloblang/functions.adoc` and the methods page `guides:bloblang/methods.adoc`, found as `connect:` finds a component page (<<connect-page>>): Cloud's stubs alias those paths.
+
+=== Cloud
+
+The Cloud functions page leaves out the impure functions (`count`, `env`, `file`, `file_rel` and `hostname`). The data has no Cloud flag for functions, so `impure` is the gate: on a Cloud page, `blobl:` renders an impure function as plain code and warns. Methods are the same on both.
+
+=== Failures and validation modes
+
+connect-validate::
+`error` fails the build on `unknown-function`, `unknown-method`, `unknown-parameter`, `ambiguous-name`, `hidden` (`nothing()` and `var()`, which the reference does not document) and `unknown-category`. `no-data`, `no-page` and an impure function on Cloud never fail the build.
+
+A deprecated function or method (`meta()`, `.format_timestamp()`) links its entry, which the reference still lists under Deprecated, and warns. The Connect data names no replacement for any of them, so the warning names none.
+
+=== Registration
+
+Registered by the `prop` macro's extension (see <<rpkval>>).
+
+[[bloblval]]
+== bloblval
+
+This inline macro renders one value of a Bloblang function, method or parameter from the Bloblang lists of the Connect data `connectval:` reads, as the Bloblang reference prints it.
+
+[,asciidoc]
+----
+`counter()` starts at bloblval:[counter(min),default].
+The `old` argument is a bloblval:[.replace_all(old),type].
+`counter()` is bloblval:[counter(),status].
+bloblval::[counter(),examples]
+----
+
+Rendered against `connect-4.115.1.json`, those read "starts at 1", "is a string", "is experimental", and the function's examples as a Bloblang listing.
+
+=== Usage
+
+[,asciidoc]
+----
+bloblval:[<call>,<field>,category=<category>,format=human|raw]
+bloblval::[<call>,<field>]
+----
+
+The call is written as for `blobl:` (<<blobl>>); a parameter's name in the parentheses reads a field of that parameter. The field comes next, `default` when it is omitted, named as every value macro names it (<<value-fields>>). For a method in two categories, the description and examples are the category copy's: `category=` picks one, and the default is the first copy on the page.
+
+[[bloblval-fields]]
+[cols="1,1,2,2"]
+|===
+| Field | Of | Source in the Connect data | Example (4.115.1)
+
+| `default`
+| parameter
+| `default`, as JSON, as the reference prints it
+| `counter(min)`: `1`; `.format_timestamp(format)`: `"2006-01-02T15:04:05.999999999Z07:00"`
+
+| `type`
+| parameter
+| `type`
+| `string`, `query expression`
+
+| `description`
+| function, method, parameter
+| `description`, or for a method the category copy's `Description`, as AsciiDoc (or Markdown, by `docs_format`)
+| `.uppercase()`: "Converts all letters in a string to uppercase. ..."
+
+| `required` (inverse alias `optional`)
+| parameter
+| Neither `is_optional` nor a `default`, the parameters the reference does not mark `(optional)`
+| `.contains(value)`: `yes`; `counter(min)`: `no`
+
+| `examples` (alias `example`)
+| function, method
+| `examples`, or the category copy's `Examples`: each summary, then a `bloblang` listing of the mapping and its inputs and outputs. Block form only
+| `counter()`
+
+| `introduced` (aliases `since`, `version`)
+| function, method
+| `version`. Hidden on Cloud, where the reference shows no "Introduced in version"
+| `counter()`: `4.22.0`
+
+| `deprecated` (alias `is_deprecated`)
+| function, method
+| `status` of `deprecated`
+| `yes` or `no`
+
+| `status`
+| function, method
+| `status`
+| `stable`, `beta`, `experimental`, `deprecated`
+
+| `category` (alias `categories`)
+| function, method
+| A function's `category`, or a method's categories, comma-separated
+| `now()`: `Environment`; `.contains()`: `Object & Array Manipulation, String Manipulation`
+
+| `impure` (alias `is_impure`)
+| function, method
+| `impure`: the function reads its environment, and the Cloud reference leaves it out
+| `env()`: `yes`
+|===
+
+format::
+`human` (default) or `raw`, which changes the yes-or-no fields to `true` or `false` and `category` to a JSON array.
+
+The output is a `<span class="bloblang-value">` with `data-bloblang` (the call as written) and `data-field`. The block form renders an open block with the roles `bloblang-value` and `bloblang-value-<field>`, as `connectval::` does (<<value-text>>).
+
+A default the data gets wrong is not shown. `random_int(seed)` is `{"Value":0}`, a Go struct, and the maximum of `counter()` and `random_int()` lost precision in a float round-trip (`9223372036854776000`, where the reference prints `9223372036854775807` and `9223372036854775806`). An object default is `complex-default`, and an integer JavaScript cannot hold exactly is `imprecise`: both render `<unknown default>` with a warning and never fail the build. State those values by hand until Connect fixes the data.
+
+=== Cloud
+
+On a Cloud page an impure function is `unavailable`, because the Cloud reference leaves it out, and `introduced` is `cloud-hidden`.
+
+=== Failures and validation modes
+
+connect-validate::
+`error` fails the build on `unknown-function`, `unknown-method`, `unknown-parameter`, `ambiguous-name`, `hidden`, `unknown-category`, `missing-field`, `unsupported-field`, `cloud-hidden`, `unavailable`, `needs-block` and `block-form-inline`. `no-data`, `imprecise` and `complex-default` never do, and neither does the `deprecated-entry` warning for a deprecated function or method, which says the data names no replacement.
+
+=== Registration
+
+Registered by the `prop` macro's extension (see <<rpkval>>).
+
+[[value-fields]]
+== Fields of the value macros
+
+`propval:`, `rpkval:`, `connectval:` and `bloblval:` share one set of field names: a field means the same thing in every macro that has it, and its aliases (the JSON key names, and older spellings) work everywhere the field exists. The first rows are the shared fields; the rest belong to one source. A cell names where a macro has the field: `yes`, or a flag or command for `rpkval:`, a config field or component for `connectval:`, a function, method or parameter for `bloblval:`. An inverted alias gives the opposite value: `optional` is `yes` where `required` is `no`.
+
+A field name a macro does not support is a warning (an error in `error` mode) that lists the fields it does. A test in this repository fails when this table and the macros disagree.
+
+[[value-fields-table]]
+[cols="2,3,1,2,2,2"]
+|===
+| Field | Aliases | propval | rpkval | connectval | bloblval
+
+| `default`
+|
+| yes
+| flag
+| field
+| parameter
+
+| `type`
+|
+| yes
+| flag
+| field
+| parameter
+
+| `description`
+| `desc`
+| yes
+| flag, command
+| field, component
+| function, method, parameter
+
+| `summary`
+| `short_description`
+|
+|
+| field, component
+|
+
+| `values`
+| `accepted-values`, `annotated_options`, `enum`, `options`
+| yes
+|
+| field
+|
+
+| `introduced`
+| `introducedInVersion`, `since`, `version`
+| yes
+| flag, command
+| field, component
+| function, method
+
+| `deprecated`
+| `is_deprecated`
+| yes
+|
+| field, component
+| function, method
+
+| `status`
+|
+|
+|
+| component
+| function, method
+
+| `required`
+| `optional` (inverted)
+|
+| flag
+| field
+| parameter
+
+| `examples`
+| `example`
+| yes
+| command
+| field
+| function, method
+
+| `advanced`
+| `is_advanced`
+|
+|
+| field
+|
+
+| `secret`
+| `is_secret`
+| yes
+|
+| field
+|
+
+| `enterprise`
+| `is_enterprise`
+| yes
+|
+|
+|
+
+| `category`
+| `categories`
+| yes
+|
+| component
+| function, method
+
+| `aliases`
+|
+| yes
+| command
+|
+|
+
+| `see-also`
+| `seeAlso`, `see_also`
+| yes
+|
+|
+|
+
+| `cloud-access`
+| `cloud`
+| yes
+|
+|
+|
+
+| `unit`
+| `units`
+| yes
+|
+|
+|
+
+| `min`
+| `minimum`
+| yes
+|
+|
+|
+
+| `max`
+| `maximum`
+| yes
+|
+|
+|
+
+| `restart`
+| `needs_restart`, `requires-restart`
+| yes
+|
+|
+|
+
+| `nullable`
+|
+| yes
+|
+|
+|
+
+| `scope`
+| `config_scope`
+| yes
+|
+|
+|
+
+| `visibility`
+|
+| yes
+|
+|
+|
+
+| `restored`
+| `gets_restored`
+| yes
+|
+|
+|
+
+| `shorthand`
+| `short`
+|
+| flag
+|
+|
+
+| `usage`
+|
+|
+| command
+|
+|
+
+| `platforms`
+|
+|
+| command
+|
+|
+
+| `self-hosted-only`
+| `selfHostedOnly`
+|
+| command
+|
+|
+
+| `interpolated`
+| `is_interpolated`
+|
+|
+| field
+|
+
+| `impure`
+| `is_impure`
+|
+|
+|
+| function, method
+|===
+
+[[value-text]]
+=== Descriptions and other text values
+
+`description`, `summary`, `examples` and `see-also` are text, rendered from its source format:
+
+[cols="1,2"]
+|===
+| Source | Rendered as
+
+| Property strings, and Connect strings while the data says `docs_format: asciidoc`
+| AsciiDoc: `code`, emphasis, links, lists, admonitions, listings, tables, and `ifdef::env-cloud[]` conditionals, which apply with the page's attributes
+
+| Connect strings once the data says `docs_format: markdown`
+| Markdown, converted to AsciiDoc first: paragraphs, emphasis, code spans, links, lists, fenced code, headings, block quotes and pipe tables
+
+| rpk descriptions
+| AsciiDoc, as the rpk reference renders them: the data carries the `docs-data/rpk-overrides.json` text. A `{name}` placeholder the page does not define as an attribute, such as `+agents/{agent}/triggers/{trigger}+`, keeps its braces
+
+| rpk examples
+| Literally, as cobra prints them: paragraphs, with each indented run, and each listing between `----` lines, as a literal block. Backticks and asterisks render as written
+|===
+
+The inline form renders a text value only when it is one paragraph. Anything longer (a blank line, a list, a listing, a heading, a conditional) renders `<unknown FIELD>` with a `needs-block` warning that names the block form: the same macro with two colons, on a line of its own, such as `propval::cleanup.policy[description]`, `rpkval::[rpk topic create,description]` or `connectval::[inputs/kafka_franz.consumer_group,description]`. The block form parses the text into the page. A heading in the text renders as a discrete heading, because a section cannot open inside a block. Written inside a sentence, the block form is a `block-form-inline` error.
+
+A Connect string was written for its component's page in `connect:components`, so a link in it is relative to that page. When the string renders anywhere else, its links are rewritten:
+
+* `<<signal_table_name,...>>`, an anchor on the component's page, links that page's anchor.
+* An xref with no component, such as `xref:components:inputs/broker.adoc[]` or `xref:guides:bloblang/about.adoc[]`, keeps pointing at the connect component. On another page in `connect`, a bare page gets its `components` module. On a Cloud page, the link stays relative to the Cloud component, where the Cloud stubs alias the connect paths (`components:inputs/broker.adoc`). On any other page it is qualified with `connect:`.
+* A target the rendering page's build has no page for renders as its label, unlinked, with a warning. A Cloud reader is never linked to the self-managed docs.
+
+A Bloblang string was written for the functions or methods page in `connect:guides`, so `bloblval:` rewrites its links the same way, with that page in place of the component's page and `guides` in place of `components`: `<<round,...>>` in a method description links `guides:bloblang/methods.adoc#round`.
+
+An rpk description was written for its command's reference page in the component the rpk data came from (`streaming`, for a Cloud or Agentic Data Plane page too), so its links are relative to that page. `rpkval:` and `rpkval::` rewrite them for the page that renders the description:
+
+* An xref to a command's page, such as `xref:reference:rpk/rpk-cloud/rpk-cloud-mcp-install.adoc[]`, links the page `rpkcmd:` would link for that command (<<rpkcmd>>), fragment included: the page's own component first, so a Cloud page links its Cloud stub and an Agentic Data Plane page its own `rpk` page, then `streaming`, then any other component with the page. A Cloud page links only Cloud pages.
+* `xref:./rpk-redpanda-tune-list.adoc[]` names a page beside the command's page, and is resolved there first. `<<disk_irq,...>>` is an anchor on the command's page, and links it, unless the description renders on that page.
+* Any other xref with no component, such as `xref:manage:security/authorization/acl.adoc[]`, stays as written when the rendering page's component version has the page, and is otherwise qualified with the data's component and version (`26.2@streaming:manage:...`). On a Cloud page it is never qualified.
+* An xref that names a component, such as `xref:connect:streaming:about.adoc[]`, stays as written.
+* A target the rendering page's build has no page for renders as its label, unlinked, with a warning, as for Connect strings. An unlinked target with an empty label renders as the command in backticks, or as the page title or file name.
+* A docs URL, such as `+https://docs.redpanda.com/current/manage/disaster-recovery/whole-cluster-restore/+` in the `rpk cluster storage restore start` help, maps to a page the way the `url-to-xref` extension maps one, from the content catalog: `/current/` and version segments, legacy paths such as `/redpanda-connect/`, component start pages, page aliases, and a fragment only when the anchor is on the target page. That extension runs before Antora converts pages, so it never sees macro output. A trailing sentence period is not part of the URL. Then:
+** A command's page links as an xref to it does, above.
+** Any other page links the rendering component's own page: the same page in the rendering version when the target is in the rendering component, or a page whose page alias is the target's path (the Cloud Connect pages alias `guides:bloblang/about.adoc` and the other rp-connect-docs paths). A page of the same path that declares no such alias is not the same page. Otherwise, except on a Cloud page, the link names the target's component, as `url-to-xref` writes it (`xref:connect:guides:bloblang/about.adoc[]`).
+** A Cloud page links only Cloud pages, never the self-managed docs in `streaming` or `connect`: with no Cloud page for the target, the link text renders as plain text, with a warning that names the URL.
+** The link keeps the URL's label. With no label, the text is the heading the fragment names, or the page title.
+** A URL the build does not publish stays as written, with no warning beyond what the build already gives: a page that is not in the build, a fragment that is not on the page, a query string, and the paths `url-to-xref` ignores, `/api/` (the Admin API reference in the `rpk cluster connections list` help) and `/mcp`.
+
+Property descriptions and examples link with module-qualified xrefs that resolve wherever the property reference itself renders, so they are not rewritten.
+
+[[old-names]]
+== Aliases, former names and deprecated names
+
+The build never changes what you wrote. A macro that names something by an alias, a former name or a deprecated name renders it as written and says, in a warning, what to write instead. `check-reference-values` reports the same calls and prose spans, and its `--write` rewrites the ones it safely can (<<check-reference-values>>).
+
+[cols="1,2,2"]
+|===
+| Name | What the macros do | Where the data says what to write
+
+| An `rpk` command alias (`rpk cluster status`, `rpk sec acl ls`)
+| `rpkcmd:` and `rpkval:` render it as written and link or read the main command. `alias` warning, never an error.
+| The command's `aliases` in the rpk data. The rpk data has no flag aliases.
+
+| A deprecated `rpk` command (`rpk redpanda admin`)
+| Plain code with no link (`rpkcmd:`) or `<unknown FIELD>` (`rpkval:`), as before. `deprecated-command` warning.
+| The `replacement` of its own `deprecated_commands` entry, when it names one command (as an xref to its page or a backticked `rpk ...`). An ancestor's replacement replaces the ancestor: `rpk redpanda admin brokers` has none of its own.
+
+| A former Connect component name (`outputs/kafka_migrator`)
+| `connect:` and `connectval:` render it as written and link or read the current component. Warning, never an error.
+| A page alias: the connect page that declares `components:<type>/<name>.adoc` (`redpanda_migrator` declares `kafka_migrator`), when the data has no component by the written name.
+
+| A deprecated Connect component (`kafka_franz`)
+| Links its own page and reads its own values, as before. Warning.
+| A page alias of its path (`pg_stream` to `postgres_cdc`), or the one component its description links in the paragraphs that say it is deprecated ("Use the `redpanda` input instead"). None when it names two (`parquet`).
+
+| A deprecated Connect field
+| Links its component's page with no anchor, and reads its value. Warning.
+| The one field its description names: "Deprecated: use `X` instead", "DEPRECATED: Use avro.raw_json instead", "Deprecated in favor of `address`", beside the field first. None when it names two (`regexp_topics`).
+
+| A deprecated Bloblang function or method (`meta()`)
+| Links its entry and reads its values. Warning.
+| Nothing: the data has no replacement field, and the descriptions name none.
+|===
+
+A replacement is a proposal, and it can be rewritten only when it fits the call: `rpkcmd:[rpk redpanda admin --hosts]` names `rpk cluster`, which has no `--hosts`, so the warning says to find the equivalent by hand. The same goes for a Connect field the replacement component does not have, and for a replacement of another type (the `jira` processor is deprecated for the `jira` input), where the sentence needs rewording.
+
+[[check-reference-values]]
+== Checking prose: check-reference-values
+
+`npx doc-tools check-reference-values` runs three checks over a docs checkout and writes one JSON and one Markdown report. Each kind selects its data exactly as its macro does, from the repo and any `--lender` checkouts, unless `--data-file` names it.
+
+properties:: The `generate migrate-property-values` scan, unchanged. See <<propval>>.
+rpk:: Every `rpk` invocation in a shell listing block and every backticked `rpk ...` span in prose is parsed as `rpk` parses it. An unknown subcommand is `unknown-command`, with a suggestion (`movement-cancel` suggests `move-cancel`); a flag no command on the path defines is `unknown-flag`; a deprecated command is a warning that carries its replacement. A flag default stated in prose ("`--limit` defaults to 50") or in a Default table column is compared with what `rpkval:` renders for the nearest command on the page that defines the flag. `rpkcmd:[...]` and both forms of `rpkval:` count as macros, never as hand-written values: a flag in `rpkcmd:[rpk topic create --partitions]` is a mention of that command's flag, and `rpkcmd:[rpk topic create]` names the command later flag mentions belong to.
+rpk links:: Every hand-written xref to a page under `reference:rpk/` in prose and tables is resolved as the scanned component renders it, by Antora's rules (a target with no component is the page's own component and version, a component with no version is its latest) and through the `page-aliases` the `rpk` pages declare. The scan reads the `rpk` pages of the repo and every `--lender`:
++
+* `broken-link` (reference error): the page does not exist there, or the target has no `.adoc` extension and no fragment, which Asciidoctor renders as a link to an anchor on the same page. The note says what `rpkcmd:` would link instead, or that Cloud has no page for the command.
+* `link-label-mismatch` (reference warning): the label's leading `rpk ...` names another command than the page documents (the label `rpk profile` on a link to the `rpk profile create` page). A label of just `rpk` names the tool and is not checked.
+* `exact`: the label is the command in backticks, with at most one known flag, the target is the page `rpkcmd:` would link (<<rpkcmd-page>>), and the xref has no fragment and no pinned version. `--write` replaces it with `rpkcmd:[...]`, in prose or a table cell, when the build has an `rpk-<version>.json` attachment for `rpkcmd:` to link with. Without one, `rpkcmd:` would render plain code, so the finding is proposed only, even when `--data-file` names the data the scan checks against.
+* `link-target-not-loaded` (unverifiable): the target is in a component or version the scan did not read. Pass that checkout with `--lender`.
++
+On a self-managed scan, a line inside `ifdef::env-cloud[]` renders only where Cloud includes the file, so its links are checked as the one `--lender` that sets `env-cloud` renders them, and not checked without one. Nav files listed in `antora.yml`, the generated `rpk` pages and partials, stub pages, and xrefs shown as code are not checked. The report counts the links in `linksBroken`, `linksMislabeled`, `linksReplaceable` and `linksNotLoaded`.
+connect links:: Every hand-written xref to a Connect component page (`components:<type>/<name>.adoc`), a field anchor on one, or the Bloblang functions or methods page is judged on every component that renders the file: the scanned component for a page, or for a partial one of its pages includes, and each `--lender` that includes the file, such as a cloud-docs stub that includes an rp-connect-docs page. An xref with no component resolves in the rendering component, page aliases included, so the same xref can work in `connect` and break in Cloud. A line in `ifndef::env-cloud[]` is judged off Cloud only, and one in `ifdef::env-cloud[]` on Cloud only. An include with `tag=` or `tags=` renders only the lines in those tag regions, and an include line inside an `env-cloud` conditional renders only on the surfaces the conditional keeps. A Cloud stub's path that Cloud now aliases to the type's about page (a component Cloud removed) is not the component's page. An xref to a Cloud stub by its own path (`xref:develop:connect/components/inputs/postgres_cdc.adoc[]`) is judged as a link to the component whose connect page the stub includes, or else the one whose path it aliases. The anchors are the ones `connect:` and `blobl:` compute (<<connect-page>>, <<blobl>>), plus the page's own section ids.
++
+* `broken-link` (reference error): the page does not exist on a rendering component, or the anchor is not on the page there: a field the reference does not list, an impure function on Cloud, a hidden function, or a numbered `parameters-N` heading. A field anchor that is off by its number names the right one.
+* `link-label-mismatch` (reference warning): the label's backticked name is another component, field, function or method than the target, or calls it another type (`+`redis` cache+` on the `redis` rate limit page). A name the target page declares as a page alias (`pg_stream` on `postgres_cdc`) is the same component.
+* `exact`: the label is just the name (`+`kafka_franz`+`, `+`kafka_franz` input+`, `+`write_mode`+`, `+`now()`+`, `+`fold` method+`, `+method `catch`+`), and on every rendering component the target is the page and anchor the macro links. `--write` replaces it with `connect:[...]` or `blobl:[...]`, keeping the label as the link text when the macro's own would differ, and adding `category=` for a second method copy. Without a `connect-<version>.json` attachment in the build, the finding is proposed only.
+* `link-target-not-loaded` (unverifiable): no page in the scan renders the line (a partial only a component outside the scan includes), or the target component is not in the scan. Pass that checkout with `--lender`. A scan of rp-connect-docs with no Cloud `--lender` reports every link in a partial or a page's `single-source` tag region this way, because Cloud may render it. Pass the cloud-docs checkout to check them.
++
+Nav files, generated pages, stub pages and xrefs shown as code are not checked, and the SQL reference (`modules/reference/pages/sql/`), whose backticked SQL functions share Bloblang names, is never read for Bloblang links. The report counts the links in `linksBroken`, `linksMislabeled`, `linksReplaceable` and `linksNotLoaded`.
+unlinked mentions:: The docs link a term on its first mention in a document, so the first mention on a page of something a link macro links, written with no link, is an `unlinked-mention` finding:
++
+* `rpk-command`: a backticked `rpk` command in prose or a table cell, with or without flags (`+`rpk topic create`+`, `+`rpk cluster info --detailed`+`), that resolves to a command with a reference page for the scanned component, found as `rpkcmd:` finds it (<<rpkcmd-page>>). A Cloud page reports only the commands Cloud has a page for. A span with an argument (`+`rpk topic consume hello-world`+`) is an example to run, not a mention, but a placeholder (`+`rpk topic consume <topic_name>`+`) is not an argument, and a span the data does not resolve is a reference finding instead.
+* `connect-component`: a Connect component named with its type, `+`kafka_franz` input+`, or with no backticks when the name has an underscore, `kafka_franz input`. The type must be the component's.
+* `bloblang-function` and `bloblang-method`: `+`now()`+`, `+`.uppercase()`+`, `+`count` function+` or `+`index` method+`, in Connect content only: rp-connect-docs, and pages in a `connect` directory elsewhere, never the SQL reference, whose `+`count()`+` is SQL. A name the data has as the other kind, or not at all, is not a mention.
++
+A page is judged as it renders: its own lines, with each `include::` replaced by the lines it includes, in order. Includes are followed into nested includes, the lines a `tag=` or `tags=` selects (`!` negations too; a wildcard includes every line), a target built from attributes when each is set at that point, and other components the scan has as a `--lender` (a cloud-docs stub's `include::streaming:...`). An include of a component the scan did not load is not followed. `ifdef::` and `ifndef::` keep or drop lines by the attributes set at that point: the component's `antora.yml` attributes (`env-cloud` on Cloud), then the attribute entries of the page and what it includes, so a partial's `ifndef::env-kubernetes[]` lines are not on a page that sets `:env-kubernetes: true`. `ifeval::` keeps its lines, and an attribute only the playbook or Antora sets (`page-*`) reads as unset.
++
+Only the first mention of a target on a page is reported, and none when the page links the target anywhere, before or after: an xref to its page (any fragment, a Cloud stub's path, or a page alias), or `rpkcmd:`, `connect:` or `blobl:`. A mention in a partial is reported at the partial's own file and line, where a writer fixes it, when it is the first unlinked mention on at least one page that includes the partial; the finding's `pages` and note name those pages. When every page that shows it links the target or mentions it first, it is not reported. A partial no loaded page includes, or a line no loaded page shows, is judged on its own file: its first mention, in a file that links the target nowhere. So a scan without the cloud-docs checkout judges the lines only Cloud shows as a file, and a cloud-docs page that includes `streaming:` content is judged without that content unless the docs checkout is a `--lender`. A mention is never read in a block, a heading, a block title, a description list term, a table header row (`%header`, `options="header"`, or the implicit header: a first row on one line followed by a blank line), a link label or a macro (`xref:`, `link:`, a URL, `+{attr}[label]+`, `<<id,label>>`), and never in nav files, release, upgrade or migration notes, generated pages, the target's own page or its partials, or a line under `// value-check: ignore`, after which the next mention is the first. Each finding names the page the macro would link and proposes the macro: `rpkcmd:[rpk topic create]` when the span is the command and at most one flag, and `connect:[...]` or `blobl:[...]` with the mention's text as the label when it is not what the macro renders (`+connect:[processors/mapping,`mapping` Processor]+`). The report counts them in `unlinkedMentions` and `unlinkedMentionsByKind`.
+old names:: The macros and prose spans that use an alias, a former name or a deprecated name (<<old-names>>): `rpkcmd:`, `rpkval:` (both forms), `connect:`, `connectval:` (both forms), `blobl:` and `bloblval:` calls, backticked `rpk` commands, backticked Connect components with their type (`+`kafka_franz` output+`), and, in Connect content, backticked Bloblang calls (`+`meta()`+`). Shell blocks and YAML are examples to run, so an alias there is not reported, and deprecated names there stay the reference warnings above.
++
+* `alias` (a new status, a warning): an `rpk` alias (reason `alias`) or a former Connect component name (reason `renamed-component`).
+* `deprecated-command`, `deprecated-component`, `deprecated-field`, `deprecated-function` and `deprecated-method` (reference warnings), with the replacement the data names.
++
+Each finding has the text written, the main or replacement name, and `proposed`, the call or span with the name changed and everything else kept: `rpkcmd:[rpk cluster info --detailed,text=the check]` for `rpkcmd:[rpk cluster status --detailed,text=the check]`, `+`rpk cluster info`+` for `+`rpk cluster metadata`+`. It is `writable` when `--write` may apply it: the data names one replacement, the replacement has the flag or field written with it and, for Connect, is the same type, and none of these holds:
++
+* the line talks about the name ("alias", "deprecated", "replaced", "instead", "migrate", "renamed", "formerly", "legacy", "no longer", "in favor of"), so a rewrite would change what it says ("`rpk cluster info` and `rpk cluster metadata` instead require ...");
+* the main or replacement name is already written within six lines, so the old one may be listed on purpose (a table with a row for each of `rpk cluster info` and `rpk cluster metadata`);
+* the page uses the old name elsewhere, such as in an example (a sentence about the `kafka_franz` output above YAML that configures it);
+* the file is release, upgrade or migration notes, which record the names of their time.
++
+The note says which. The report lists the `alias` findings under "Aliases and former names" and counts them in `aliases`; the counts `deprecatedNames`, `namesWritable` and `namesApplied` cover both classes, in macros and spans.
+connect:: Every pipeline config in a YAML listing block or an examples file is walked from its root keys. An unknown component is `unknown-component`, an unknown field is `unknown-field`, and deprecated components and fields are warnings. A YAML comment that states a default ("# Optional (default: "benthos")") is example output that `matches` or is `stale`. A callout ("<3> ... The default is `1024`.") or a sentence that states a field's default is compared with what `connectval:` renders. A `connect:[...]` link names the component and field a stated default belongs to, and `bloblval:` and `connect:` values are macros, never hand-written values.
+
+Statuses are propval's, plus `reference` for a thing the data does not have. `--fail-on mismatch` (the default) fails on mismatches, reference errors, and stale rpk and Connect examples; `any` also fails on exact, equivalent and unset values, on reference warnings (deprecated names among them) and on `alias` findings, which catches every hand-written value a macro could render and every name the docs no longer use. An alias renders correctly, so it never fails at the default level, as a deprecated name never does. Unlinked mentions never fail at these levels: `links` fails on everything `any` does and on unlinked mentions. Plugin flags scraped from `--help` never fail, and neither do findings in release notes, upgrade notes or Connect migration guides. A `// value-check: ignore` comment line suppresses the findings on the next line, or in the block it sits directly above. Exit 0 means nothing failed, 1 that something did, and 2 that the check could not run.
+
+`--write` applies only exact matches in the same sentence (or a Connect callout) that name one target, never in a table, block or YAML, never a scraped plugin flag or an empty default, and never in a file that may be single-sourced into Cloud where the macro would render a placeholder. An exact `rpk` or Connect xref is replaced in prose or a table cell: `rpkcmd:`, `connect:` and `blobl:` link the same page from the page's own component, and on Cloud render plain code where the xref would be broken. Each replacement is kept only when the line renders the same visible text before and after, through the real macros.
+
+`--write` also rewrites each writable alias or deprecated name to its proposal (see old names above). The line may then render differently, but only where the name renders: the render check accepts the rewrite when the line renders as before with the old call's or span's rendering replaced by the new one's, that rendering has no placeholder, and, for an alias, every link goes where it went before. A rewrite that fails the check is reverted and its note ends `render-changed`.
+
+Turning a mention into a link changes the page, so `--write` leaves unlinked mentions as written unless `--write-links` is given as well; `--write-links` without `--write` is a setup error (exit 2). With both, each reported mention that has a proposed macro becomes that macro, under the same render check, so its text stays exactly as written. A mention that is not reported, because each page that shows it already links the target or mentions it first, is never written. A mention whose span has a flag value, a placeholder, or a second flag, is reported and never written: link the command page by hand.
+
+[,bash]
+----
+npx doc-tools check-reference-values --docs-dir . --data-file docs-data/rpk-v26.2.2.json --lender ../rp-connect-docs
+npx doc-tools check-reference-values --docs-dir ../cloud-docs --lender ../docs ../rp-connect-docs --data-file ../docs/docs-data/rpk-v26.2.2.json
+npx doc-tools check-reference-values --docs-dir ../rp-connect-docs --lender ../docs ../cloud-docs --data-file ../docs/docs-data/rpk-v26.2.2.json --write --write-links
+----
+
+See `CLI_REFERENCE.adoc` for every option.
 
 == glossterm
 

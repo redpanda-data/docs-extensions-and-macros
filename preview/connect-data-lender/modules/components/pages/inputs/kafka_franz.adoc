@@ -1,0 +1,158 @@
+= kafka_franz
+// Stand-in page for the showcase build: the headings the generated page has,
+// so connect: and blobl: links land on real anchors. Generated from
+// connect-4.114.0.json in this component.
+
+The kafka_franz input.
+
+== Fields
+
+=== `auto_replay_nacks`
+
+=== `batching`
+
+=== `batching.byte_size`
+
+=== `batching.check`
+
+=== `batching.count`
+
+=== `batching.period`
+
+=== `batching.processors[]`
+
+=== `checkpoint_limit`
+
+=== `client_id`
+
+=== `commit_period`
+
+=== `conn_idle_timeout`
+
+=== `consumer_group`
+
+=== `fetch_max_bytes`
+
+=== `fetch_max_partition_bytes`
+
+=== `fetch_max_wait`
+
+=== `fetch_min_bytes`
+
+=== `heartbeat_interval`
+
+=== `instance_id`
+
+=== `metadata_max_age`
+
+=== `multi_header`
+
+=== `rack_id`
+
+=== `rebalance_timeout`
+
+=== `regexp_topics_exclude[]`
+
+=== `regexp_topics_include[]`
+
+=== `request_timeout_overhead`
+
+=== `sasl[]`
+
+=== `sasl[].aws`
+
+=== `sasl[].aws.credentials`
+
+=== `sasl[].aws.credentials.from_ec2_role`
+
+=== `sasl[].aws.credentials.id`
+
+=== `sasl[].aws.credentials.profile`
+
+=== `sasl[].aws.credentials.role`
+
+=== `sasl[].aws.credentials.role_external_id`
+
+=== `sasl[].aws.credentials.secret`
+
+=== `sasl[].aws.credentials.token`
+
+=== `sasl[].aws.endpoint`
+
+=== `sasl[].aws.region`
+
+=== `sasl[].aws.tcp`
+
+=== `sasl[].aws.tcp.connect_timeout`
+
+=== `sasl[].aws.tcp.keep_alive`
+
+=== `sasl[].aws.tcp.keep_alive.count`
+
+=== `sasl[].aws.tcp.keep_alive.idle`
+
+=== `sasl[].aws.tcp.keep_alive.interval`
+
+=== `sasl[].aws.tcp.tcp_user_timeout`
+
+=== `sasl[].extensions`
+
+=== `sasl[].mechanism`
+
+=== `sasl[].password`
+
+=== `sasl[].token`
+
+=== `sasl[].username`
+
+=== `seed_brokers[]`
+
+=== `session_timeout`
+
+=== `start_offset`
+
+=== `tcp`
+
+=== `tcp.connect_timeout`
+
+=== `tcp.keep_alive`
+
+=== `tcp.keep_alive.count`
+
+=== `tcp.keep_alive.idle`
+
+=== `tcp.keep_alive.interval`
+
+=== `tcp.tcp_user_timeout`
+
+=== `timely_nacks_maximum_wait`
+
+=== `tls`
+
+=== `tls.client_certs[]`
+
+=== `tls.client_certs[].cert`
+
+=== `tls.client_certs[].cert_file`
+
+=== `tls.client_certs[].key`
+
+=== `tls.client_certs[].key_file`
+
+=== `tls.client_certs[].password`
+
+=== `tls.enable_renegotiation`
+
+=== `tls.enabled`
+
+=== `tls.root_cas`
+
+=== `tls.root_cas_file`
+
+=== `tls.skip_cert_verify`
+
+=== `topic_lag_refresh_period`
+
+=== `topics[]`
+
+=== `transaction_isolation_level`

@@ -1,0 +1,82 @@
+= Bloblang Functions
+// Stand-in page for the showcase build: the headings the generated page has,
+// so connect: and blobl: links land on real anchors. Generated from
+// connect-4.114.0.json in this component.
+
+== batch_index
+
+== batch_size
+
+== bytes
+
+== content
+
+== count
+
+== counter
+
+== deleted
+
+== env
+
+== error
+
+== error_source_label
+
+== error_source_name
+
+== error_source_path
+
+== errored
+
+== fake
+
+== file
+
+== file_rel
+
+== hostname
+
+== json
+
+== ksuid
+
+== meta
+
+== metadata
+
+== nanoid
+
+== now
+
+== pi
+
+== random_int
+
+== range
+
+== root_meta
+
+== snowflake_id
+
+== throw
+
+== timestamp_unix
+
+== timestamp_unix_micro
+
+== timestamp_unix_milli
+
+== timestamp_unix_nano
+
+== tracing_id
+
+== tracing_span
+
+== ulid
+
+== uuid_v4
+
+== uuid_v7
+
+== with_schema_registry_header
