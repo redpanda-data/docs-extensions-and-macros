@@ -1,0 +1,4 @@
+= ollama_embeddings
+:description: Fixture page for the ollama_embeddings component.
+
+Fixture page.

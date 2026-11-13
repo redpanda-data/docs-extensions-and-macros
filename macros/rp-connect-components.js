@@ -109,65 +109,142 @@ const { isCloudAvailable, typeFromRelative, useCasesByConnector } = require('../
 // page fetches the published file instead, only once a use case is selected.
 const SOLUTIONS_CATALOG_PATH = 'assets/data/solutions.json'
 
+// A use case is offered in the filter only when at least this many cards in
+// the current view have it: an option that narrows the catalog to one or two
+// cards reads as noise, and a tag that rare says more about tagging than use.
+const USE_CASE_MIN_CARDS = 3
+
+// The Solutions list above the cards shows at most this many links, then a
+// "See all" link to the Solutions landing page filtered to the use cases.
+const SOLUTIONS_LIST_CAP = 6
+
 /**
- * The solutions in a solutions.json catalog that have any of these use-case
- * IDs, in catalog order. Matches on taxonomy concept IDs (`concepts.useCases`,
- * and authored `useCases` values that are IDs), never on labels. Deprecated
- * solutions are left out. Runs in the browser (injected with toString) and in
- * unit tests, so it uses no outside names.
+ * The solutions in a solutions.json catalog that have any of the selected use
+ * cases, in catalog order. A solution matches on a taxonomy concept ID
+ * (`concepts.useCases[].id`, from the solutions-catalog extension with the
+ * taxonomy), or on an authored `useCases` value that is the use case's ID,
+ * label, or one of its taxonomy altLabels, ignoring case (catalogs built
+ * without the taxonomy carry only the authored labels). Deprecated solutions
+ * are left out. Runs in the browser (injected with toString) and in unit
+ * tests, so it uses no outside names.
  *
  * @param {Object|null} catalog - the parsed solutions.json
  * @param {Array<string>} ids - selected use-case IDs
+ * @param {Object<string,{label: string, altLabels: Array<string>}>} [info] -
+ *   use-case ID -> its label and altLabels
  * @returns {Array<Object>}
  */
-function matchSolutions (catalog, ids) {
+function matchSolutions (catalog, ids, info) {
   const list = catalog && Array.isArray(catalog.solutions) ? catalog.solutions : []
   const wanted = (ids || []).filter(Boolean)
   if (!wanted.length) return []
+  const key = function (value) { return String(value == null ? '' : value).trim().toLowerCase() }
+  const names = {}
+  wanted.forEach(function (id) {
+    const entry = (info && info[id]) || {}
+    names[id] = [id, entry.label].concat(Array.isArray(entry.altLabels) ? entry.altLabels : []).filter(Boolean).map(key)
+  })
   return list.filter(function (solution) {
     if (!solution || !solution.url || !solution.title || solution.status === 'deprecated') return false
     const concepts = (solution.concepts && Array.isArray(solution.concepts.useCases)) ? solution.concepts.useCases : []
-    const own = concepts.map(function (c) { return c && c.id }).concat(Array.isArray(solution.useCases) ? solution.useCases : [])
-    return wanted.some(function (id) { return own.indexOf(id) !== -1 })
+    const conceptIds = concepts.map(function (c) { return c && c.id })
+    const authored = (Array.isArray(solution.useCases) ? solution.useCases : []).map(key)
+    return wanted.some(function (id) {
+      return conceptIds.indexOf(id) !== -1 || authored.some(function (value) { return names[id].indexOf(value) !== -1 })
+    })
   })
 }
 
 /**
- * The "Solutions for <use case>" block above the cards: a heading and one link
- * per solution. Every value goes through `escape` (the shared escapeHtml).
- * Runs in the browser (injected with toString) and in unit tests.
+ * The Redpanda Solutions block above the cards: a heading, a one-line lead,
+ * the selected use cases as chips, up to `cap` links, and, past the cap, a
+ * "See all" link to the Solutions landing page filtered to those use cases
+ * (its `?use-case=` parameter takes the use case's label). Every value goes
+ * through `escape` (the shared escapeHtml). Runs in the browser (injected
+ * with toString) and in unit tests.
  *
  * @param {Array<Object>} solutions - from matchSolutions
  * @param {Array<string>} ids - selected use-case IDs
- * @param {Object<string,string>} labels - use-case ID -> label
+ * @param {Object<string,{label: string}>} info - use-case ID -> its label
  * @param {Function} escape
+ * @param {number} [cap]
  * @returns {string} HTML, empty when there are no solutions
  */
-function solutionsMarkup (solutions, ids, labels, escape) {
+function solutionsMarkup (solutions, ids, info, escape, cap) {
   if (!solutions || !solutions.length) return ''
-  const names = ids.map(function (id) { return (labels && labels[id]) || id })
-  const items = solutions.map(function (solution) {
+  const max = cap || 6
+  const names = ids.map(function (id) {
+    const entry = info && info[id]
+    return (entry && (typeof entry === 'string' ? entry : entry.label)) || id
+  })
+  const chips = names.map(function (name) { return '<span class="badge badge-use-case">' + escape(name) + '</span>' })
+  const items = solutions.slice(0, max).map(function (solution) {
     return '<li><a href="' + escape(solution.url) + '">' + escape(solution.title) + '</a></li>'
   })
-  return '<h3 class="catalog-solutions-title">Solutions for ' + escape(names.join(' or ')) + '</h3>' +
-    '<ul class="catalog-solutions-list">' + items.join('') + '</ul>'
+  let more = ''
+  if (solutions.length > max) {
+    // The landing page is the root of the solutions component: the first
+    // path segment of a solution's URL (/solutions/cdc-to-lakehouse/ -> /solutions/)
+    const home = (String(solutions[0].url).match(/^(?:[a-z]+:\/\/[^/]+)?\/[^/]+\//i) || [''])[0]
+    if (home) {
+      const query = names.map(function (name) { return 'use-case=' + encodeURIComponent(name) }).join('&')
+      more = '<p class="catalog-solutions-more"><a href="' + escape(home + '?' + query) + '">See all ' + solutions.length + ' solutions</a></p>'
+    }
+  }
+  return '<h3 class="catalog-solutions-title">Redpanda Solutions</h3>' +
+    '<p class="catalog-solutions-lead">Runnable reference architectures for ' + escape(names.join(' or ')) + '</p>' +
+    '<div class="catalog-solutions-chips">' + chips.join(' ') + '</div>' +
+    '<ul class="catalog-solutions-list">' + items.join('') + '</ul>' + more
+}
+
+/**
+ * The sentence the catalog's status region announces after a filter change.
+ * Runs in the browser (injected with toString) and in unit tests.
+ *
+ * @param {{shown: number, total: number, search: string, useCases: Array<string>, filtered: boolean, solutions: (number|null)}} state
+ *   `useCases` are the selected labels, `filtered` says whether any other
+ *   filter narrows the cards, and `solutions` is the number of related
+ *   solutions (null when none are known)
+ * @returns {string}
+ */
+function catalogStatusText (state) {
+  const parts = []
+  if (state.search) parts.push('"' + state.search + '"')
+  if (state.useCases && state.useCases.length) parts.push(state.useCases.join(' or '))
+  let text
+  if (!parts.length && !state.filtered) {
+    text = 'Showing all ' + state.total + ' components.'
+  } else {
+    const what = parts.length ? parts.join(' and ') : 'these filters'
+    text = state.shown === 0
+      ? 'No components match ' + what + '.'
+      : state.shown + (state.shown === 1 ? ' component matches ' : ' components match ') + what + '.'
+  }
+  if (state.solutions) text += ' ' + state.solutions + (state.solutions === 1 ? ' related solution.' : ' related solutions.')
+  return text
 }
 
 // Filter layout: each dropdown filter is at least this wide, with this gap
 const FILTER_MIN_WIDTH_PX = 180
 const FILTER_GAP_PX = 16
+// A lone filter (the Cloud catalog's Type) stops at this width
+const FILTER_SINGLE_MAX_WIDTH_PX = 360
 
 /**
  * Container queries that lay the dropdown filters out in balanced rows: as
  * many columns as fit at FILTER_MIN_WIDTH_PX, then evened out so no row is
  * left with a gap (4 filters go 4, 2x2, then 1 per row; 3 go 3, then 1 per
  * row). A filter in a short last row (5 filters in 3 columns) stretches to
- * fill it. Exported for unit testing.
+ * fill it. A single filter keeps a dropdown's width instead of spanning the
+ * panel. Exported for unit testing.
  *
  * @param {number} count - the number of dropdown filters
  * @returns {string} CSS
  */
 function filterLayoutCss (count) {
+  if (count <= 1) {
+    return `@container catalog-filters (min-width: 0px) { .table-filters.component-catalog-filters > .filter-group { flex: 0 1 min(100%, ${FILTER_SINGLE_MAX_WIDTH_PX}px); } }`
+  }
   const rules = []
   for (let fit = 1; fit <= count; fit++) {
     const minWidth = fit === 1 ? 0 : fit * FILTER_MIN_WIDTH_PX + (fit - 1) * FILTER_GAP_PX
@@ -182,9 +259,20 @@ function filterLayoutCss (count) {
   return rules.join('\n')
 }
 
+/**
+ * Escaped HTML made safe to sit inside a JavaScript template literal (the
+ * badge legend modal is built from one in the page script).
+ */
+function forTemplateLiteral (html) {
+  return String(html).replace(/\\/g, '&#92;').replace(/`/g, '&#96;').replace(/\$\{/g, '&#36;{')
+}
+
 module.exports.filterLayoutCss = filterLayoutCss
 module.exports.matchSolutions = matchSolutions
 module.exports.solutionsMarkup = solutionsMarkup
+module.exports.catalogStatusText = catalogStatusText
+module.exports.USE_CASE_MIN_CARDS = USE_CASE_MIN_CARDS
+module.exports.SOLUTIONS_LIST_CAP = SOLUTIONS_LIST_CAP
 module.exports.SOLUTIONS_CATALOG_PATH = SOLUTIONS_CATALOG_PATH
 
 /**
@@ -193,7 +281,9 @@ module.exports.SOLUTIONS_CATALOG_PATH = SOLUTIONS_CATALOG_PATH
   * @param {Object} context - The Antora context that provides access to configuration data, such as parsed CSV content.
 */
 module.exports.register = function (registry, context) {
-  function filterComponentTable() {
+  // `event` is set when a reader changed a filter (and not on page load), which
+  // is when the status region announces the result.
+  function filterComponentTable(event) {
     const nameInputElement = document.getElementById('componentTableSearch');
     const nameInput = nameInputElement ? nameInputElement.value.trim().toLowerCase() : '';
     const typeFilter = Array.from(document.querySelectorAll('#typeFilterMenu input[type="checkbox"]:checked')).map(checkbox => checkbox.value);
@@ -225,9 +315,11 @@ module.exports.register = function (registry, context) {
     if (!container) return; // Exit early if container doesn't exist
     const cards = container.querySelectorAll('.component-card');
     if (!cards || cards.length === 0) return; // Exit early if no cards found
+    let shownCount = 0;
     for (let i = 0; i < cards.length; i++) {
       const card = cards[i];
-      const nameText = (card.dataset.name || '').toLowerCase();
+      // data-search adds the card's use-case labels, IDs, and altLabels to its names
+      const nameText = (card.dataset.search || card.dataset.name || '').toLowerCase();
       const typeText = (card.dataset.types || '').toLowerCase().split(',').map(item => item.trim());
       const supportText = (card.dataset.support || '').toLowerCase();
       const enterpriseSupportText = (card.dataset.licensed || '').toLowerCase();  // Yes or No
@@ -266,6 +358,7 @@ module.exports.register = function (registry, context) {
         );
 
       if (showCard) {
+        shownCount++;
         card.classList.remove('hidden');
         card.removeAttribute('style');
       } else {
@@ -293,12 +386,52 @@ module.exports.register = function (registry, context) {
       if (useCaseToggleText) {
         const checked = useCaseFilterElement.querySelectorAll('input[type="checkbox"]:checked');
         useCaseToggleText.textContent = checked.length === 0
-          ? 'All Use Cases'
+          ? 'Any use case'
           : checked.length === 1
             ? checked[0].nextElementSibling.textContent
-            : checked.length + ' Use Cases Selected';
+            : checked.length + ' use cases';
+        // The full value as a tooltip when the toggle cuts it off
+        const useCaseToggle = document.getElementById('useCaseFilterToggle');
+        // The text's full width, from an unconstrained hidden copy beside it
+        const probe = useCaseToggleText.cloneNode(true);
+        probe.removeAttribute('id');
+        probe.style.cssText = 'position:absolute;visibility:hidden;width:auto;max-width:none;flex:none;overflow:visible;';
+        useCaseToggleText.parentNode.appendChild(probe);
+        const fullWidth = probe.getBoundingClientRect().width;
+        probe.remove();
+        if (fullWidth > useCaseToggleText.getBoundingClientRect().width + 0.01) {
+          useCaseToggle.setAttribute('title', useCaseToggleText.textContent);
+        } else {
+          useCaseToggle.removeAttribute('title');
+        }
       }
-      if (typeof window.updateCatalogSolutions === 'function') window.updateCatalogSolutions(useCaseFilter);
+    }
+    // Empty state
+    const emptyState = document.getElementById('componentCatalogEmpty');
+    if (emptyState) emptyState.hidden = shownCount !== 0;
+    // Status: what the filters left, then the related solutions once known
+    const narrowed = ['typeFilterMenu', 'supportFilterMenu', 'cloudSupportFilterMenu', 'enterpriseFilterMenu']
+      .some(id => !!document.querySelector('#' + id + ' input[type="checkbox"]:not(:checked)'));
+    const statusState = {
+      shown: shownCount,
+      total: cards.length,
+      search: nameInputElement ? nameInputElement.value.trim() : '',
+      useCases: useCaseFilterElement
+        ? Array.from(useCaseFilterElement.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.nextElementSibling.textContent)
+        : [],
+      filtered: narrowed,
+      solutions: null
+    };
+    const setStatus = function (state) {
+      const status = document.getElementById('componentCatalogStatus');
+      if (status && event && typeof window.catalogStatusText === 'function') status.textContent = window.catalogStatusText(state);
+    };
+    if (useCaseFilterElement && typeof window.updateCatalogSolutions === 'function') {
+      window.updateCatalogSolutions(useCaseFilter, function (solutionCount) {
+        setStatus(Object.assign({}, statusState, { solutions: solutionCount || null }));
+      });
+    } else {
+      setStatus(statusState);
     }
     // Update URL parameters based on current filter selections
     updateURLParameters();
@@ -684,15 +817,88 @@ module.exports.register = function (registry, context) {
       });
   }
 
-  function generateConnectorsHTMLCards(connectors, sqlDrivers, isCloud, showAllInfo, commercialNamesMap, uiRootPath, useCaseLabels = {}) {
+  /**
+   * The use cases of a catalog view: `info` has every use case
+   * generate-rp-connect-info resolved (csvData.useCases), by ID, and
+   * `options` the ones the filter offers, in taxonomy order: those at least
+   * USE_CASE_MIN_CARDS cards in this view have.
+   */
+  function useCaseView(csvData, connectors, isCloud) {
+    const all = (Array.isArray(csvData.useCases) ? csvData.useCases : []).filter(useCase => useCase && useCase.id && useCase.label);
+    const info = Object.fromEntries(all.map(useCase => [useCase.id, {
+      label: useCase.label,
+      definition: useCase.definition || '',
+      altLabels: Array.isArray(useCase.altLabels) ? useCase.altLabels : []
+    }]));
+    const counts = new Map();
+    for (const [, details] of shownConnectorEntries(connectors, isCloud)) {
+      for (const id of details.useCases || []) counts.set(id, (counts.get(id) || 0) + 1);
+    }
+    const options = all
+      .filter(useCase => (counts.get(useCase.id) || 0) >= USE_CASE_MIN_CARDS)
+      .map(useCase => ({ id: useCase.id, ...info[useCase.id] }));
+    return { info, options };
+  }
+
+  // The Self-Managed component catalog (the page with component_table::[]),
+  // which the use-case chips on connector pages link to
+  const CATALOG_PAGE = 'connect:components:about.adoc';
+
+  /**
+   * The "Use cases" line on a Self-Managed connector page: one chip per use
+   * case the catalog's filter offers for this connector, each linking to the
+   * catalog filtered to it (?usecase=<id>). Empty when the connector has none,
+   * or when the catalog page is not in this build, so a chip never links to a
+   * filter that does not exist.
+   */
+  function connectorUseCasesHtml(csvData, name, attributes) {
+    if (!context.contentCatalog || !context.file || !context.file.pub) return '';
+    const connectors = processConnectors(csvData);
+    const details = connectors[Object.keys(connectors).find(c => c.trim().toLowerCase() === name.trim().toLowerCase())];
+    if (!details || !details.useCases.length) return '';
+    const { options } = useCaseView(csvData, connectors, false);
+    const own = options.filter(({ id }) => details.useCases.includes(id));
+    if (!own.length) return '';
+    let catalog;
+    try {
+      catalog = context.contentCatalog.resolvePage(CATALOG_PAGE, context.file.src);
+    } catch (e) {
+      catalog = null;
+    }
+    if (!catalog || !catalog.pub || !catalog.pub.url) return '';
+    const base = path.relative(context.file.pub.url, catalog.pub.url) || '.';
+    const href = (id) => `${base.endsWith('/') ? base : base + '/'}?usecase=${encodeURIComponent(id)}`;
+    const mergedNote = details.types.size > 1 ? " Applies to at least one of this component's types." : '';
+    const chips = own.map(({ id, label, definition }) =>
+      `<a class="badge badge-use-case" href="${escapeHtml(href(id))}" title="${escapeHtml((definition || `Use case: ${label}`) + mergedNote)}">${escapeHtml(label)}</a>`
+    ).join(' ');
+    return `
+            <p class="connector-use-cases"><strong>Use cases</strong>: ${chips}</p>`;
+  }
+
+  /**
+   * @param {Object<string,{label: string, definition: string, altLabels: Array<string>}>} useCaseInfo -
+   *   every use case generate-rp-connect-info resolved, by ID (cards are searchable by all of them)
+   * @param {Set<string>} offeredUseCases - the IDs the Use case filter offers (cards show chips for these)
+   */
+  function generateConnectorsHTMLCards(connectors, sqlDrivers, isCloud, showAllInfo, commercialNamesMap, uiRootPath, useCaseInfo = {}, offeredUseCases = new Set()) {
     return shownConnectorEntries(connectors, isCloud)
       .map(([connector, details], id) => {
         const { types, isCloudConnectorSupported, isLicensed } = details;
-        // Only use cases the filter offers (resolved against the taxonomy)
-        const useCases = (details.useCases || []).filter(useCase => useCaseLabels[useCase]);
-        const useCaseBadges = useCases
-          .map(useCase => `<span class="badge badge-use-case" title="Use case: ${escapeHtml(useCaseLabels[useCase])}">${escapeHtml(useCaseLabels[useCase])}</span>`)
+        // Use cases resolved against the taxonomy; chips only for the ones the filter offers
+        const useCases = (details.useCases || []).filter(useCase => useCaseInfo[useCase]);
+        const chipUseCases = useCases.filter(useCase => offeredUseCases.has(useCase));
+        // A merged card (an input and an output, say) gets the union of its types' use cases
+        const mergedNote = types.size > 1 ? "Applies to at least one of this component's types." : '';
+        const useCaseBadges = chipUseCases
+          .map(useCase => {
+            const { label, definition } = useCaseInfo[useCase];
+            const tooltip = [definition || `Use case: ${label}`, mergedNote].filter(Boolean).join(' ');
+            return `<span class="badge badge-use-case" title="${escapeHtml(tooltip)}">${escapeHtml(label)}</span>`;
+          })
           .join(' ');
+        const useCaseSearchTerms = useCases
+          .flatMap(useCase => [useCaseInfo[useCase].label, useCase, ...(useCaseInfo[useCase].altLabels || [])]);
 
         // The Cloud view lists only the types available in Cloud, in the badges
         // and in the type filter (http_server is an input in Cloud, not an output).
@@ -833,6 +1039,7 @@ module.exports.register = function (registry, context) {
           <div class="component-card"
                id="component-${id}"
                data-name="${escapeHtml(`${connector.toLowerCase()} ${Array.from(allCommercialNames).join(' ').toLowerCase()}`)}"
+               data-search="${escapeHtml([connector, ...allCommercialNames, ...useCaseSearchTerms].join(' ').toLowerCase())}"
                data-types="${escapeHtml(typesDataAttr.toLowerCase())}"
                data-support="${escapeHtml(supportDataAttr.toLowerCase())}"
                data-licensed="${escapeHtml(isLicensed.toLowerCase())}"
@@ -981,14 +1188,39 @@ module.exports.register = function (registry, context) {
           .join('');
 
       // Use cases: the ones generate-rp-connect-info resolved against the docs
-      // taxonomy (csvData.useCases, in taxonomy order), offered only when a
-      // card in this view has one. No data, no filter.
+      // taxonomy (csvData.useCases, in taxonomy order). The filter offers one
+      // only when at least USE_CASE_MIN_CARDS cards in this view have it. No
+      // data, no filter.
       const connectors = processConnectors(csvData);
-      const shownUseCaseIds = new Set(shownConnectorEntries(connectors, isCloud).flatMap(([, details]) => details.useCases));
-      const useCaseOptions = (Array.isArray(csvData.useCases) ? csvData.useCases : [])
-        .filter(useCase => useCase && useCase.id && useCase.label && shownUseCaseIds.has(useCase.id));
-      const useCaseLabels = Object.fromEntries(useCaseOptions.map(({ id, label }) => [id, label]));
+      const { info: useCaseInfo, options: useCaseOptions } = useCaseView(csvData, connectors, isCloud);
+      const offeredUseCases = new Set(useCaseOptions.map(({ id }) => id));
       const solutionsUrl = `${resolveSiteRootPath() || ''}/${SOLUTIONS_CATALOG_PATH}`;
+
+      // One dropdown filter. The toggle discloses a group of checkboxes (not
+      // an ARIA menu, which promises arrow-key navigation the checkboxes do
+      // not have), and it is named by the label plus its current value.
+      const filterGroupHtml = ({ id, label, labelId = `${id}Label`, value, options }) => `
+          <div class="filter-group">
+            <label for="${id}Toggle" id="${labelId}">${label}:</label>
+            <div class="dropdown-checkbox-wrapper">
+              <button type="button" class="dropdown-checkbox-toggle" id="${id}Toggle" aria-expanded="false" aria-controls="${id}Menu" aria-labelledby="${labelId} ${id}Value">
+                <span class="dropdown-text" id="${id}Value">${value}</span>
+                <span class="dropdown-arrow" aria-hidden="true">▼</span>
+              </button>
+              <div class="dropdown-checkbox-menu" id="${id}Menu" role="group" aria-labelledby="${labelId}">
+                ${options}
+              </div>
+            </div>
+          </div>`;
+      const yesNoOptions = `
+                <label class="dropdown-checkbox-option">
+                  <input type="checkbox" value="yes" checked>
+                  <span>Yes</span>
+                </label>
+                <label class="dropdown-checkbox-option">
+                  <input type="checkbox" value="no" checked>
+                  <span>No</span>
+                </label>`;
 
       let tableHtml = `
         <script>
@@ -1007,6 +1239,20 @@ module.exports.register = function (registry, context) {
 
               window.filterComponentTable = ${filterComponentTable.toString()};
           window.updateURLParameters = ${updateURLParameters.toString()};
+          window.catalogStatusText = ${catalogStatusText.toString()};
+
+          // Clear filters: every checkbox filter back to its unfiltered state,
+          // the search emptied, focus back in the search box
+          window.clearCatalogFilters = function() {
+            const search = document.getElementById('componentTableSearch');
+            if (search) search.value = '';
+            ['typeFilterMenu', 'supportFilterMenu', 'cloudSupportFilterMenu', 'enterpriseFilterMenu'].forEach(function(id) {
+              document.querySelectorAll('#' + id + ' input[type="checkbox"]').forEach(function(cb) { cb.checked = true; });
+            });
+            document.querySelectorAll('#useCaseFilterMenu input[type="checkbox"]').forEach(function(cb) { cb.checked = false; });
+            window.filterComponentTable({ type: 'clear' });
+            if (search) search.focus();
+          };
           ${useCaseOptions.length ? `
           // Solutions for the selected use cases, from the solutions catalog the
           // solutions-catalog extension publishes. Fetched once, on first use; a
@@ -1025,23 +1271,32 @@ module.exports.register = function (registry, context) {
               }
               return catalogPromise;
             };
-            window.updateCatalogSolutions = function(ids) {
+            let rendered = '';
+            // Shows the solutions for these use-case IDs, then calls done with
+            // how many there are (0 when none or no catalog)
+            window.updateCatalogSolutions = function(ids, done) {
+              const finish = typeof done === 'function' ? done : function() {};
               const panel = document.getElementById('componentCatalogSolutions');
-              if (!panel) return;
+              if (!panel) return finish(0);
               const request = ++latest;
-              const clear = function() {
-                panel.hidden = true;
-                panel.innerHTML = '';
+              const show = function(html) {
+                // Same list as before: leave the DOM (and a reader's place in it) alone
+                if (html === rendered) return;
+                rendered = html;
+                panel.innerHTML = html;
+                panel.hidden = !html;
               };
-              if (!ids || !ids.length) return clear();
-              let labels = {};
-              try { labels = JSON.parse(panel.dataset.useCaseLabels || '{}'); } catch (e) {}
+              if (!ids || !ids.length) {
+                show('');
+                return finish(0);
+              }
+              let info = {};
+              try { info = JSON.parse(panel.dataset.useCases || '{}'); } catch (e) {}
               loadCatalog(panel.dataset.solutionsUrl).then(function(catalog) {
                 if (request !== latest) return; // a newer selection won
-                const html = solutionsMarkup(matchSolutions(catalog, ids), ids, labels, escapeHtml);
-                if (!html) return clear();
-                panel.innerHTML = html;
-                panel.hidden = false;
+                const matches = matchSolutions(catalog, ids, info);
+                show(solutionsMarkup(matches, ids, info, escapeHtml, ${SOLUTIONS_LIST_CAP}));
+                finish(matches.length);
               });
             };
           })();` : ''}
@@ -1201,106 +1456,37 @@ module.exports.register = function (registry, context) {
         </script>
         <div class="table-filters component-catalog-filters">
           <div class="table-filters-search">
-            <input class="table-search" type="text" id="componentTableSearch" placeholder="Search for components..." style="flex: 1;">
+            <input class="table-search" type="text" id="componentTableSearch" placeholder="Search for components..." aria-label="Search components" style="flex: 1;">
             <button type="button" class="badge-legend-button" title="View badge legend" aria-label="View badge legend">
               <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
                 <path d="M10 0C4.48 0 0 4.48 0 10s4.48 10 10 10 10-4.48 10-10S15.52 0 10 0zm1 15H9v-2h2v2zm0-4H9V5h2v6z"/>
               </svg>
             </button>
           </div>
-          <div class="filter-group">
-            <label for="typeFilterToggle">Type:</label>
-            <div class="dropdown-checkbox-wrapper">
-              <button type="button" class="dropdown-checkbox-toggle" id="typeFilterToggle" aria-expanded="false" aria-haspopup="true" aria-controls="typeFilterMenu">
-                <span class="dropdown-text">All Types Selected</span>
-                <span class="dropdown-arrow">▼</span>
-              </button>
-              <div class="dropdown-checkbox-menu" id="typeFilterMenu" role="menu" aria-labelledby="typeFilterToggle">
-                ${createDropdownCheckboxOptions(types, 'typeFilter')}
-              </div>
-            </div>
-          </div>
+${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected', options: createDropdownCheckboxOptions(types, 'typeFilter') })}
       `;
 
       if (useCaseOptions.length) {
-        tableHtml += `
-          <div class="filter-group">
-            <label for="useCaseFilterToggle">Use case:</label>
-            <div class="dropdown-checkbox-wrapper">
-              <button type="button" class="dropdown-checkbox-toggle" id="useCaseFilterToggle" aria-expanded="false" aria-haspopup="true" aria-controls="useCaseFilterMenu">
-                <span class="dropdown-text">All Use Cases</span>
-                <span class="dropdown-arrow">▼</span>
-              </button>
-              <div class="dropdown-checkbox-menu" id="useCaseFilterMenu" role="menu" aria-labelledby="useCaseFilterToggle">
-                ${useCaseOptions.map(({ id, label }) => `
-                <label class="dropdown-checkbox-option">
+        tableHtml += filterGroupHtml({
+          id: 'useCaseFilter',
+          label: 'Use case',
+          value: 'Any use case',
+          options: `
+                <button type="button" class="dropdown-checkbox-clear" id="useCaseFilterClear">Clear</button>${useCaseOptions.map(({ id, label, definition }) => `
+                <label class="dropdown-checkbox-option"${definition ? ` title="${escapeHtml(definition)}"` : ''}>
                   <input type="checkbox" value="${escapeHtml(id)}">
                   <span>${escapeHtml(label)}</span>
-                </label>`).join('')}
-              </div>
-            </div>
-          </div>
-        `;
+                </label>`).join('')}`
+        });
       }
 
       if (!isCloud) {
-        tableHtml += `
-          <div class="filter-group">
-            <label for="supportFilterToggle" id="labelForSupportFilter">Support:</label>
-            <div class="dropdown-checkbox-wrapper">
-              <button type="button" class="dropdown-checkbox-toggle" id="supportFilterToggle"  aria-expanded="false" aria-haspopup="true" aria-controls="supportFilterMenu">
-                <span class="dropdown-text">All Support Levels Selected</span>
-                <span class="dropdown-arrow">▼</span>
-              </button>
-              <div class="dropdown-checkbox-menu" id="supportFilterMenu" role="menu" aria-labelledby="supportFilterToggle">
-                ${createDropdownCheckboxOptions(uniqueSupportLevel, 'supportFilter')}
-              </div>
-            </div>
-          </div>
-        `;
+        tableHtml += filterGroupHtml({ id: 'supportFilter', label: 'Support', labelId: 'labelForSupportFilter', value: 'All Support Levels Selected', options: createDropdownCheckboxOptions(uniqueSupportLevel, 'supportFilter') });
       }
 
       if (showAllInfo) {
-        tableHtml += `
-          <div class="filter-group">
-            <label for="cloudSupportFilterToggle">Available in Cloud:</label>
-            <div class="dropdown-checkbox-wrapper">
-              <button type="button" class="dropdown-checkbox-toggle" id="cloudSupportFilterToggle"  aria-expanded="false" aria-haspopup="true" aria-controls="cloudSupportFilterMenu">
-                <span class="dropdown-text">All Options Selected</span>
-                <span class="dropdown-arrow">▼</span>
-              </button>
-              <div class="dropdown-checkbox-menu" id="cloudSupportFilterMenu" role="menu" aria-labelledby="cloudSupportFilterToggle">
-                <label class="dropdown-checkbox-option">
-                  <input type="checkbox" value="yes" checked>
-                  <span>Yes</span>
-                </label>
-                <label class="dropdown-checkbox-option">
-                  <input type="checkbox" value="no" checked>
-                  <span>No</span>
-                </label>
-              </div>
-            </div>
-          </div>
-          <div class="filter-group">
-            <label for="enterpriseFilterToggle">Enterprise License:</label>
-            <div class="dropdown-checkbox-wrapper">
-              <button type="button" class="dropdown-checkbox-toggle" id="enterpriseFilterToggle"  aria-expanded="false" aria-haspopup="true" aria-controls="enterpriseFilterMenu">
-                <span class="dropdown-text">All Options Selected</span>
-                <span class="dropdown-arrow">▼</span>
-              </button>
-              <div class="dropdown-checkbox-menu" id="enterpriseFilterMenu" role="menu" aria-labelledby="enterpriseFilterToggle">
-                <label class="dropdown-checkbox-option">
-                  <input type="checkbox" value="yes" checked>
-                  <span>Yes</span>
-                </label>
-                <label class="dropdown-checkbox-option">
-                  <input type="checkbox" value="no" checked>
-                  <span>No</span>
-                </label>
-              </div>
-            </div>
-          </div>
-          `;
+        tableHtml += filterGroupHtml({ id: 'cloudSupportFilter', label: 'Available in Cloud', value: 'All Options Selected', options: yesNoOptions });
+        tableHtml += filterGroupHtml({ id: 'enterpriseFilter', label: 'Enterprise License', value: 'All Options Selected', options: yesNoOptions });
       }
 
       const filterCount = 1 + (useCaseOptions.length ? 1 : 0) + (isCloud ? 0 : 1) + (showAllInfo ? 2 : 0);
@@ -1649,6 +1835,100 @@ module.exports.register = function (registry, context) {
             white-space: nowrap;
           }
 
+          .catalog-visually-hidden {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+          }
+
+          .catalog-empty {
+            margin-top: 1rem;
+            padding: 1rem;
+            border: 1px dashed #d1d5db;
+            border-radius: 8px;
+            text-align: center;
+          }
+
+          .catalog-empty[hidden] {
+            display: none;
+          }
+
+          .catalog-empty p {
+            margin: 0 0 0.75rem 0;
+          }
+
+          .catalog-empty-clear,
+          .dropdown-checkbox-clear {
+            cursor: pointer;
+            font: inherit;
+            border-radius: 4px;
+          }
+
+          .catalog-empty-clear {
+            padding: 0.4rem 0.9rem;
+            border: 1px solid #d1d5db;
+            background: #fff;
+            color: #1f2937;
+          }
+
+          /* Clear, at the top of the Use case menu */
+          .dropdown-checkbox-menu .dropdown-checkbox-clear {
+            display: block;
+            width: 100%;
+            padding: 0.5rem 0.75rem;
+            border: 0;
+            border-bottom: 1px solid #e5e7eb;
+            background: transparent;
+            color: #1d4ed8;
+            text-align: left;
+            font-size: 0.875rem;
+          }
+
+          .catalog-solutions .catalog-solutions-lead {
+            margin: 0 0 0.5rem 0;
+            color: #4b5563;
+          }
+
+          .catalog-solutions .catalog-solutions-chips {
+            margin-bottom: 0.5rem;
+          }
+
+          .catalog-solutions .catalog-solutions-more {
+            margin: 0.5rem 0 0 0;
+          }
+
+          html[data-theme="dark"] .catalog-solutions .catalog-solutions-lead {
+            color: #d0d5dd;
+          }
+
+          html[data-theme="dark"] .catalog-empty-clear {
+            background: rgba(255, 255, 255, 0.07);
+            border-color: rgba(255, 255, 255, 0.2);
+            color: #fff;
+          }
+
+          html[data-theme="dark"] .dropdown-checkbox-menu .dropdown-checkbox-clear {
+            color: #93c5fd;
+            border-bottom-color: rgba(255, 255, 255, 0.1);
+          }
+
+          html[data-theme="dark"] .badge-use-case {
+            background: rgba(255, 255, 255, 0.07);
+            border-color: rgba(255, 255, 255, 0.15);
+            color: #d0d5dd;
+          }
+
+          /* At least 4.5:1 on the dark card background */
+          html[data-theme="dark"] .badge-group-label {
+            color: #9ca3af;
+          }
+
           .catalog-solutions {
             margin-top: 1rem;
             padding: 0.75rem 1rem;
@@ -1960,11 +2240,16 @@ module.exports.register = function (registry, context) {
             }
           }
         </style>
-        ${useCaseOptions.length ? `<div class="catalog-solutions" id="componentCatalogSolutions" aria-live="polite" hidden
+        <div class="catalog-visually-hidden" id="componentCatalogStatus" role="status" aria-live="polite"></div>
+        ${useCaseOptions.length ? `<div class="catalog-solutions" id="componentCatalogSolutions" hidden
              data-solutions-url="${escapeHtml(solutionsUrl)}"
-             data-use-case-labels="${escapeHtml(JSON.stringify(useCaseLabels))}"></div>` : ''}
+             data-use-cases="${escapeHtml(JSON.stringify(Object.fromEntries(useCaseOptions.map(({ id, label, altLabels }) => [id, { label, altLabels }]))))}"></div>` : ''}
+        <div class="catalog-empty" id="componentCatalogEmpty" hidden>
+          <p>No components match these filters.</p>
+          <button type="button" class="catalog-empty-clear" id="componentCatalogClear">Clear filters</button>
+        </div>
         <div class="component-cards-container" id="componentCardsContainer">
-          ${generateConnectorsHTMLCards(connectors, sqlDriversData, isCloud, showAllInfo, commercialNamesMap, uiRootPath, useCaseLabels)}
+          ${generateConnectorsHTMLCards(connectors, sqlDriversData, isCloud, showAllInfo, commercialNamesMap, uiRootPath, useCaseInfo, offeredUseCases)}
         </div>
         <script>
           // Badge legend modal functions
@@ -2028,6 +2313,15 @@ module.exports.register = function (registry, context) {
                   <p>Community-supported connector with best-effort maintenance</p>
                 </div>
               </div>
+              ${useCaseOptions.length ? `
+              <div class="badge-legend-section">
+                <h4>Use cases</h4>${useCaseOptions.map(({ label, definition }) => forTemplateLiteral(`
+                <div class="badge-legend-item">
+                  <span class="badge badge-use-case">${escapeHtml(label)}</span>
+                  <p>${escapeHtml(definition || label)}</p>
+                </div>`)).join('')}
+              </div>
+              ` : ''}
               ${showAllInfo ? `
               <div class="badge-legend-section">
                 <h4>Additional Features</h4>
@@ -2268,6 +2562,19 @@ module.exports.register = function (registry, context) {
                     useCaseFilterToggle.addEventListener('click', () => window.toggleDropdownCheckbox('useCaseFilter'));
                   }
 
+                  // Clear at the top of the Use case menu
+                  const useCaseFilterClear = document.getElementById('useCaseFilterClear');
+                  if (useCaseFilterClear) {
+                    useCaseFilterClear.addEventListener('click', () => {
+                      document.querySelectorAll('#useCaseFilterMenu input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+                      window.filterComponentTable({ type: 'clear' });
+                    });
+                  }
+
+                  // Clear filters in the empty state
+                  const catalogClear = document.getElementById('componentCatalogClear');
+                  if (catalogClear) catalogClear.addEventListener('click', window.clearCatalogFilters);
+
                   const componentTypeToggle = document.getElementById('componentTypeDropdownToggle');
                   if (componentTypeToggle) {
                     componentTypeToggle.addEventListener('click', window.toggleComponentTypeDropdown);
@@ -2391,6 +2698,7 @@ module.exports.register = function (registry, context) {
             </div>
           </div>`);
       }
+      const isCloudPage = attributes['env-cloud'] !== undefined;
       // Check if the component requires an Enterprise license (based on support level)
       let enterpriseLicenseInfo = '';
       if (component !== 'Cloud') {
@@ -2408,13 +2716,14 @@ module.exports.register = function (registry, context) {
       // generate-rp-connect-info extension sets them on page.asciidoc.attributes on the
       // documentsConverted event instead. Only the license notice belongs in the page body,
       // where it must stay visible.
-      if (!enterpriseLicenseInfo) {
+      const useCasesInfo = isCloudPage ? '' : connectorUseCasesHtml(csvData, name, attributes);
+      if (!enterpriseLicenseInfo && !useCasesInfo) {
         return self.createBlock(parent, 'pass', '');
       }
       return self.createBlock(parent, 'pass', `
         <div class="metadata-block">
           <div class="metadata-content">
-          ${enterpriseLicenseInfo}
+          ${enterpriseLicenseInfo}${useCasesInfo}
           </div>
         </div>`);
     });

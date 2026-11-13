@@ -491,6 +491,8 @@ describe('use cases', () => {
     '    concepts:',
     '      - id: change-data-capture',
     '        prefLabel: Change data capture',
+    '        altLabels: [CDC]',
+    '        definition: Streaming row-level changes from a database.',
     '      - id: data-lakehouse',
     '        prefLabel: Data lakehouse',
     '      - id: stream-processing',
@@ -528,9 +530,9 @@ describe('use cases', () => {
     })
     // Labels from the taxonomy prefLabel, in taxonomy order
     expect(csvData.useCases).toEqual([
-      { id: 'change-data-capture', label: 'Change data capture' },
-      { id: 'data-lakehouse', label: 'Data lakehouse' },
-      { id: 'stream-processing', label: 'Stream processing' }
+      { id: 'change-data-capture', label: 'Change data capture', definition: 'Streaming row-level changes from a database.', altLabels: ['CDC'] },
+      { id: 'data-lakehouse', label: 'Data lakehouse', definition: '', altLabels: [] },
+      { id: 'stream-processing', label: 'Stream processing', definition: '', altLabels: [] }
     ])
   })
 

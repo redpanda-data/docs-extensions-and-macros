@@ -1,0 +1,4 @@
+= schema_registry_decode
+:description: Fixture page for the schema_registry_decode component.
+
+Fixture page.

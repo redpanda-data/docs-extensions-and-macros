@@ -718,17 +718,28 @@ The types are fetched from the `flatComponentsData` that's generated in the Comp
 component_table::[]
 ```
 
+[[use-case-filter]]
 === Use case filter
 
-The catalog has a *Use case* filter when at least one component in the view has a use case. Use cases come from the Connect repository: the last column of `internal/plugins/info.csv`, `use_cases`, lists use-case IDs separated by `;`, and `catalog.json` carries the same IDs as a `use_cases` array. The `generate-rp-connect-info` extension reads the catalog's field, or the `info.csv` column when the catalog has none. A connector's use cases are the union across its types.
+Use cases come from the Connect repository. The last column of `internal/plugins/info.csv`, `use_cases`, lists use-case IDs separated by `;`, and `catalog.json` carries the same IDs as a `use_cases` array. The `generate-rp-connect-info` extension reads the catalog's field, or the `info.csv` column when the catalog has none. A connector's use cases are the union across its types, so a chip on a card that merges an input and an output says it applies to at least one of them.
 
-Each ID must be a concept in the use-case scheme of the docs taxonomy (`shared/modules/ROOT/attachments/taxonomy.yml`), and the filter shows the concept's `prefLabel`. The build logs a warning for an unknown ID, naming the component and the ID, and drops it. A build without the taxonomy, or of a Connect release without the column, has no Use case filter.
+Each ID must be a concept in the use-case scheme of the docs taxonomy (`shared/modules/ROOT/attachments/taxonomy.yml`). The filter and the chips show the concept's `prefLabel`, and its `definition` is the tooltip and the text of the *Use cases* section of the badge legend. The build logs a warning for an unknown ID, naming the component and the ID, and drops it. A build without the taxonomy, or of a Connect release without the column, has no Use case filter.
 
-Nothing is selected at first, so every card shows. Selecting use cases keeps the cards that have any of them, adds `?usecase=<id>` to the URL, and shows a *Solutions for <use case>* list above the cards. That list comes from `assets/data/solutions.json`, which the `solutions-catalog` extension publishes. The page fetches it when a use case is first selected and matches solutions on taxonomy IDs, not labels. Deprecated solutions are left out. When the build has no solutions catalog, or no solution matches, the list does not appear.
+The filter offers a use case only when at least three cards in the current view have it. Rarer use cases get no chip, but search still finds them.
 
-Cards with use cases also show them as chips in a *Use case* badge group.
+Nothing is selected at first, and the toggle reads *Any use case*. Selecting use cases keeps the cards that have any of them and adds `?usecase=<id>` to the URL. *Clear*, at the top of the menu, removes the selection.
 
-The search box has its own row. The dropdown filters sit below it in equal-width columns, at least 180px each, balanced so rows stay full: four filters show four across, two by two, or one per row, depending on the width of the panel.
+Search matches a card's name, its commercial names, and its use cases by label, ID, and taxonomy altLabel, so "cdc" and "warehouse" find the components tagged Change data capture and Data warehousing.
+
+After each change, a visually hidden status region (`role="status"`) announces the result, for example "11 components match Change data capture. 1 related solution." When nothing matches, the page says so and offers a *Clear filters* button.
+
+When use cases are selected, a *Redpanda Solutions* block above the cards lists the matching solutions, up to six, with a *See all* link to the Solutions landing page filtered to those use cases (`?use-case=<label>`) when there are more. The list comes from `assets/data/solutions.json`, which the `solutions-catalog` extension publishes. The page fetches it when a use case is first selected. A solution matches on a taxonomy concept ID (`concepts.useCases`), or on an authored `useCases` value that is the use case's ID, label, or altLabel, ignoring case. Deprecated solutions are left out. When the build has no solutions catalog, or no solution matches, the block does not appear.
+
+Each filter toggle is a disclosure button: it is named by its label and current value, and it shows or hides a group of checkboxes.
+
+On a Self-Managed connector page, `component_type_dropdown::[]` adds a *Use cases* line with a chip for each use case the catalog offers for that connector, linking to the catalog (`connect:components:about.adoc`) filtered to it. The line is left out on Cloud pages and when the catalog page is not in the build.
+
+The search box has its own row. The dropdown filters sit under it in equal-width columns of at least 180px, with the columns balanced so each row stays full. Four filters appear as one row of four, two rows of two, or four rows of one, depending on the panel width. Five wrap as three and two. A single filter keeps the width of a dropdown.
 
 === Registration
 

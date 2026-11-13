@@ -1,0 +1,4 @@
+= mysql_cdc
+:description: Fixture page for the mysql_cdc component.
+
+Fixture page.

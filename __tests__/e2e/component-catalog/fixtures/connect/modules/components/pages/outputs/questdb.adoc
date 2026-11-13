@@ -1,0 +1,4 @@
+= questdb
+:description: Fixture page for the questdb component.
+
+Fixture page.

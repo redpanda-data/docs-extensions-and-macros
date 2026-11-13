@@ -150,7 +150,8 @@ module.exports.register = function ({ config }) {
       const enrichedData = translateCsvData(parsedData, pages, logger)
       parsedData.data = enrichedData
       translatedRows = enrichedData
-      // The use cases the catalog's Use case filter offers, as { id, label }.
+      // The use cases the catalog's Use case filter offers, as
+      // { id, label, definition, altLabels }.
       // Only resolved when some row has use cases, so a build of an older
       // Connect release does not look for the taxonomy at all.
       parsedData.useCases = enrichedData.some((row) => row.use_cases.length)
@@ -657,8 +658,10 @@ const USE_CASE_SCHEME = 'use-case'
  * @param {Array<Object>} rows - translated rows, `use_cases` holding raw IDs
  * @param {Object|null} taxonomy - from extension-utils/taxonomy getTaxonomy
  * @param {Object} logger
- * @returns {Array<{id: string, label: string}>} the use cases any component
- *   has, in taxonomy order, labeled with the concept's prefLabel
+ * @returns {Array<{id: string, label: string, definition: string, altLabels: Array<string>}>}
+ *   the use cases any component has, in taxonomy order: the concept's
+ *   prefLabel, definition (option and chip tooltips, the badge legend), and
+ *   altLabels (search, and matching Solutions that author labels)
  */
 function resolveUseCases (rows, taxonomy, logger) {
   if (!taxonomy) {
@@ -692,7 +695,10 @@ function resolveUseCases (rows, taxonomy, logger) {
   }
   return taxonomy.conceptIds(USE_CASE_SCHEME)
     .filter((id) => used.has(id))
-    .map((id) => ({ id, label: taxonomy.label(id) }))
+    .map((id) => {
+      const concept = taxonomy.get(id)
+      return { id, label: concept.prefLabel, definition: concept.definition || '', altLabels: [...(concept.altLabels || [])] }
+    })
 }
 
 const DESCRIPTION_MAX_LENGTH = 150

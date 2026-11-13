@@ -660,11 +660,12 @@ describe('rp-connect-components macro', () => {
 })
 
 describe('component_table use cases', () => {
+  const vm = require('vm')
   const { escapeHtml } = require('../../extension-utils/html-utils')
-  const { matchSolutions, solutionsMarkup } = require('../../macros/rp-connect-components.js')
+  const { matchSolutions, solutionsMarkup, catalogStatusText, USE_CASE_MIN_CARDS } = require('../../macros/rp-connect-components.js')
 
   // Translated rows as generate-rp-connect-info hands them over: use_cases is
-  // an array of taxonomy IDs, and csvData.useCases labels the ones in use.
+  // an array of taxonomy IDs, and csvData.useCases describes the ones in use.
   const row = (connector, type, useCases, extra = {}) => ({
     connector,
     commercial_name: connector,
@@ -679,104 +680,204 @@ describe('component_table use cases', () => {
     ...extra
   })
   const data = (rows, useCases) => ({ data: rows, useCases })
-  const USE_CASES = [
-    { id: 'change-data-capture', label: 'Change data capture' },
-    { id: 'stream-processing', label: 'Stream processing' }
-  ]
+  const CDC = { id: 'change-data-capture', label: 'Change data capture', definition: 'Streaming row-level changes from a database.', altLabels: ['CDC'] }
+  const STREAM = { id: 'stream-processing', label: 'Stream processing', definition: 'Transforming events as they flow.', altLabels: [] }
+  const LAKE = { id: 'data-lakehouse', label: 'Data lakehouse', definition: 'Open table formats on object storage.', altLabels: [] }
+  const USE_CASES = [CDC, LAKE, STREAM]
+  // CDC on 3 cards and stream processing on 3 (offered); lakehouse on 1 (not offered)
   const ROWS = [
-    row('postgres_cdc', 'input', ['change-data-capture']),
+    row('postgres_cdc', 'input', ['change-data-capture', 'stream-processing']),
+    row('mysql_cdc', 'input', ['change-data-capture']),
     row('kafka', 'input', ['stream-processing']),
     row('kafka', 'output', ['change-data-capture']),
+    row('workflow', 'processor', ['stream-processing']),
+    row('iceberg', 'output', ['data-lakehouse']),
     row('stdout', 'output', [])
   ]
+  const render = (opts = {}) => renderComponentTable({ csvData: data(ROWS, USE_CASES), ...opts })
+  const menuOf = (html, id) => {
+    const at = html.indexOf(`id="${id}Menu"`)
+    return html.slice(at, html.indexOf('</div>', at))
+  }
 
-  test('renders a Use case filter with the taxonomy labels, nothing checked', () => {
-    const html = renderComponentTable({ csvData: data(ROWS, USE_CASES) })
-    expect(html).toContain('<label for="useCaseFilterToggle">Use case:</label>')
-    expect(html).toMatch(/id="useCaseFilterToggle" aria-expanded="false" aria-haspopup="true" aria-controls="useCaseFilterMenu"/)
-    expect(html).toContain('<span class="dropdown-text">All Use Cases</span>')
-    const menu = html.slice(html.indexOf('id="useCaseFilterMenu"'), html.indexOf('</div>', html.indexOf('id="useCaseFilterMenu"')))
-    expect(menu).toContain('<input type="checkbox" value="change-data-capture">')
+  test('offers a use case only when at least 3 cards in the view have it', () => {
+    expect(USE_CASE_MIN_CARDS).toBe(3)
+    const menu = menuOf(render(), 'useCaseFilter')
+    expect(menu).toContain('value="change-data-capture"')
+    expect(menu).toContain('value="stream-processing"')
+    expect(menu).not.toContain('value="data-lakehouse"')
+  })
+
+  test('renders the Use case filter as a labelled disclosure, with Any use case, Clear, and definitions', () => {
+    const html = render()
+    expect(html).toContain('<label for="useCaseFilterToggle" id="useCaseFilterLabel">Use case:</label>')
+    expect(html).toContain('id="useCaseFilterToggle" aria-expanded="false" aria-controls="useCaseFilterMenu" aria-labelledby="useCaseFilterLabel useCaseFilterValue"')
+    expect(html).toContain('<span class="dropdown-text" id="useCaseFilterValue">Any use case</span>')
+    expect(html).toContain('<div class="dropdown-checkbox-menu" id="useCaseFilterMenu" role="group" aria-labelledby="useCaseFilterLabel">')
+    const menu = menuOf(html, 'useCaseFilter')
+    // Clear comes first, then the options, none checked
+    expect(menu.indexOf('id="useCaseFilterClear"')).toBeLessThan(menu.indexOf('value="change-data-capture"'))
+    expect(menu).toContain('<label class="dropdown-checkbox-option" title="Streaming row-level changes from a database.">')
     expect(menu).toContain('<span>Change data capture</span>')
-    expect(menu).toContain('<span>Stream processing</span>')
     expect(menu).not.toContain('checked')
   })
 
-  test('puts the union of a connector\'s use cases on its card, as data and chips', () => {
-    const html = renderComponentTable({ csvData: data(ROWS, USE_CASES) })
+  test('uses the disclosure pattern on every filter, with the arrow hidden from assistive tech', () => {
+    const html = render()
+    expect(html).not.toContain('role="menu"')
+    expect(html).not.toContain('aria-haspopup')
+    for (const id of ['typeFilter', 'supportFilter', 'cloudSupportFilter', 'enterpriseFilter', 'useCaseFilter']) {
+      expect(html).toContain(`id="${id}Menu" role="group"`)
+      expect(html).toMatch(new RegExp(`id="${id}Toggle"[^>]*aria-labelledby="[A-Za-z]+ ${id}Value"`))
+    }
+    expect(html).toContain('id="labelForSupportFilter"')
+    expect(html.match(/<span class="dropdown-arrow">/g)).toBeNull()
+    expect(html).toContain('<span class="dropdown-arrow" aria-hidden="true">')
+  })
+
+  test('puts the union of a connector\'s use cases on its card, as data, search terms, and chips', () => {
+    const html = render()
     const kafka = cardFor(html, 'kafka')
     expect(kafka).toContain('data-use-cases="stream-processing,change-data-capture"')
     expect(kafka).toContain('<span class="badge-group-label">Use case</span>')
-    expect(kafka).toContain('<span class="badge badge-use-case" title="Use case: Stream processing">Stream processing</span>')
+    // Definitions as tooltips; a merged input/output card says the use case is per type
+    expect(kafka).toContain(`title="Transforming events as they flow. Applies to at least one of this component&#39;s types."`.replace('&#39;', "'"))
+    const postgres = cardFor(html, 'postgres_cdc')
+    expect(postgres).toContain('data-search="postgres_cdc change data capture change-data-capture cdc stream processing stream-processing"')
+    expect(postgres).toContain('title="Streaming row-level changes from a database.">Change data capture</span>')
+    expect(postgres).not.toContain('Applies to at least one')
     const stdout = cardFor(html, 'stdout')
     expect(stdout).not.toContain('data-use-cases')
-    expect(stdout).not.toContain('Use case')
+    expect(stdout).not.toContain('badge-group-label">Use case')
   })
 
-  test('renders the solutions panel with the catalog URL from the site root', () => {
-    const html = renderComponentTable({ csvData: data(ROWS, USE_CASES), rootPath: '../..' })
-    expect(html).toContain('id="componentCatalogSolutions"')
-    expect(html).toContain('data-solutions-url="../../assets/data/solutions.json"')
+  test('keeps a rare use case searchable but shows no chip for it', () => {
+    const iceberg = cardFor(render(), 'iceberg')
+    expect(iceberg).toContain('data-search="iceberg data lakehouse data-lakehouse"')
+    expect(iceberg).not.toContain('badge-use-case')
+  })
+
+  test('renders a status region, an empty state with Clear filters, and the solutions panel without aria-live', () => {
+    const html = render({ rootPath: '../..' })
+    expect(html).toContain('<div class="catalog-visually-hidden" id="componentCatalogStatus" role="status" aria-live="polite"></div>')
+    expect(html).toContain('<div class="catalog-empty" id="componentCatalogEmpty" hidden>')
+    expect(html).toContain('<p>No components match these filters.</p>')
+    expect(html).toContain('<button type="button" class="catalog-empty-clear" id="componentCatalogClear">Clear filters</button>')
+    const panel = html.slice(html.indexOf('id="componentCatalogSolutions"') - 40, html.indexOf('></div>', html.indexOf('id="componentCatalogSolutions"')))
+    expect(panel).not.toContain('aria-live')
+    expect(panel).toContain('data-solutions-url="../../assets/data/solutions.json"')
     expect(html).toContain('window.updateCatalogSolutions = function')
   })
 
-  test('hides the filter and the panel when no component has a use case', () => {
+  test('always renders the status region, even with no use-case data', () => {
+    const html = renderComponentTable()
+    expect(html).toContain('id="componentCatalogStatus" role="status"')
+    expect(html).toContain('id="componentCatalogEmpty"')
+  })
+
+  test('adds a Use cases section with definitions to the badge legend', () => {
+    const html = render()
+    const legend = html.slice(html.indexOf('<h4>Use cases</h4>'), html.indexOf('</div>\n              </div>', html.indexOf('<h4>Use cases</h4>')))
+    expect(legend).toContain('<span class="badge badge-use-case">Change data capture</span>')
+    expect(legend).toContain('<p>Streaming row-level changes from a database.</p>')
+    expect(legend).not.toContain('Data lakehouse')
+  })
+
+  test('every inline script block parses with use-case data, including hostile definitions', () => {
+    const hostile = { ...CDC, definition: 'Uses `backticks`, ${injection}, and \\ backslashes' }
+    const html = renderComponentTable({ csvData: data(ROWS, [hostile, STREAM]) })
+    const blocks = [...html.matchAll(/<script(?<attrs>[^>]*)>(?<body>[\s\S]*?)<\/script>/g)].map((m) => m.groups.body)
+    for (const block of blocks) expect(() => new vm.Script(block)).not.toThrow()
+    // Inside the legend's template literal, the definition cannot interpolate
+    expect(html).toContain('Uses &#96;backticks&#96;, &#36;{injection}, and &#92; backslashes')
+  })
+
+  test('hides the filter, panel, chips, and legend section when no component has a use case', () => {
     for (const csvData of [data(ROWS.map((r) => ({ ...r, use_cases: [] })), []), data(ROWS, undefined)]) {
       const html = renderComponentTable({ csvData })
       expect(html).not.toContain('id="useCaseFilterToggle"')
       expect(html).not.toContain('id="componentCatalogSolutions"')
       expect(html).not.toContain('class="badge badge-use-case"')
+      expect(html).not.toContain('<h4>Use cases</h4>')
       expect(html).not.toContain('window.updateCatalogSolutions = function')
     }
   })
 
-  test('offers only the use cases of cards shown in the Cloud view', () => {
-    const rows = [row('postgres_cdc', 'input', ['change-data-capture']), row('local_only', 'input', ['stream-processing'], { is_cloud_supported: 'n' })]
+  test('counts only the cards shown in the Cloud view toward the threshold', () => {
+    const rows = ROWS.map((r) => (r.connector === 'workflow' ? { ...r, is_cloud_supported: 'n' } : r))
     const html = renderComponentTable({ csvData: data(rows, USE_CASES), attributes: {}, docAttributes: { 'env-cloud': '' } })
-    expect(html).toContain('value="change-data-capture"')
-    expect(html).not.toContain('value="stream-processing"')
+    const menu = menuOf(html, 'useCaseFilter')
+    expect(menu).toContain('value="change-data-capture"')
+    expect(menu).not.toContain('value="stream-processing"')
   })
 
-  test('escapes hostile IDs and labels everywhere they appear', () => {
-    const hostile = { id: 'x"><script>alert(1)</script>', label: '<img src=x onerror=alert(1)> & "Co"' }
-    const html = renderComponentTable({ csvData: data([row('evil', 'input', [hostile.id])], [hostile]) })
+  test('escapes hostile IDs, labels, and definitions everywhere they appear', () => {
+    const hostile = { id: 'x"><script>alert(1)</script>', label: '<img src=x onerror=alert(1)> & "Co"', definition: '"><b>def</b>', altLabels: ['<i>alt</i>'] }
+    const rows = ['a', 'b', 'c'].map((n) => row(`evil_${n}`, 'input', [hostile.id]))
+    const html = renderComponentTable({ csvData: data(rows, [hostile]) })
     expect(html).not.toContain('<script>alert(1)</script>')
     expect(html).not.toContain('<img src=x')
+    expect(html).not.toContain('<b>def</b>')
+    expect(html).not.toContain('<i>alt</i>')
     expect(html).toContain(`value="${escapeHtml(hostile.id)}"`)
     expect(html).toContain(`<span>${escapeHtml(hostile.label)}</span>`)
     expect(html).toContain(`data-use-cases="${escapeHtml(hostile.id)}"`)
-    expect(html).toContain(`data-use-case-labels="${escapeHtml(JSON.stringify({ [hostile.id]: hostile.label }))}"`)
+    expect(html).toContain(`data-use-cases="${escapeHtml(JSON.stringify({ [hostile.id]: { label: hostile.label, altLabels: hostile.altLabels } }))}"`)
+  })
+
+  describe('status sentence', () => {
+    test('says what matches and how many related solutions there are', () => {
+      expect(catalogStatusText({ shown: 11, total: 40, search: '', useCases: ['Change data capture'], filtered: false, solutions: 1 }))
+        .toBe('11 components match Change data capture. 1 related solution.')
+      expect(catalogStatusText({ shown: 1, total: 40, search: 'kafka', useCases: ['Change data capture', 'Stream processing'], filtered: false, solutions: 2 }))
+        .toBe('1 component matches "kafka" and Change data capture or Stream processing. 2 related solutions.')
+      expect(catalogStatusText({ shown: 30, total: 40, search: '', useCases: [], filtered: true, solutions: null }))
+        .toBe('30 components match these filters.')
+      expect(catalogStatusText({ shown: 0, total: 40, search: 'zzz', useCases: [], filtered: false, solutions: null }))
+        .toBe('No components match "zzz".')
+      expect(catalogStatusText({ shown: 40, total: 40, search: '', useCases: [], filtered: false, solutions: null }))
+        .toBe('Showing all 40 components.')
+    })
   })
 
   describe('solutions for a use case', () => {
-    // Shaped like assets/data/solutions.json from the solutions-catalog extension
+    const INFO = { 'change-data-capture': { label: 'Change data capture', altLabels: ['CDC'] } }
+    // Shaped like assets/data/solutions.json from the solutions-catalog
+    // extension: with the taxonomy (concepts) and without (DEM#320: labels only)
     const CATALOG = {
       solutions: [
         { id: 'cdc-to-lakehouse', title: 'CDC to lakehouse', url: '/solutions/cdc-to-lakehouse/', status: 'published', useCases: ['Change data capture'], concepts: { useCases: [{ value: 'Change data capture', id: 'change-data-capture', label: 'Change data capture' }] } },
         { id: 'authored-id', title: 'Authored by ID', url: '/solutions/authored-id/', status: 'published', useCases: ['change-data-capture'] },
-        { id: 'label-only', title: 'Label only', url: '/solutions/label-only/', status: 'published', useCases: ['Change data capture'] },
-        { id: 'old', title: 'Old', url: '/solutions/old/', status: 'deprecated', useCases: ['change-data-capture'] },
-        { id: 'fanout', title: 'Fan-out', url: '/solutions/fanout/', status: 'published', concepts: { useCases: [{ id: 'data-fan-out' }] } }
+        { id: 'label-only', title: 'Label only', url: '/solutions/label-only/', status: 'published', useCases: ['change DATA capture '] },
+        { id: 'alt-label', title: 'Alt label', url: '/solutions/alt-label/', status: 'published', useCases: ['cdc'] },
+        { id: 'old', title: 'Old', url: '/solutions/old/', status: 'deprecated', useCases: ['Change data capture'] },
+        { id: 'fanout', title: 'Fan-out', url: '/solutions/fanout/', status: 'published', useCases: ['Data fan-out'], concepts: { useCases: [{ id: 'data-fan-out' }] } }
       ]
     }
 
-    test('matches on taxonomy IDs, not labels, and leaves out deprecated solutions', () => {
+    test('matches concept IDs, and authored labels, IDs, and altLabels ignoring case; leaves out deprecated solutions', () => {
+      expect(matchSolutions(CATALOG, ['change-data-capture'], INFO).map((s) => s.id)).toEqual(['cdc-to-lakehouse', 'authored-id', 'label-only', 'alt-label'])
+      expect(matchSolutions(CATALOG, ['stream-processing'], INFO)).toEqual([])
+      expect(matchSolutions(CATALOG, [], INFO)).toEqual([])
+    })
+
+    test('without use-case details, matches concept IDs and authored IDs only', () => {
       expect(matchSolutions(CATALOG, ['change-data-capture']).map((s) => s.id)).toEqual(['cdc-to-lakehouse', 'authored-id'])
-      expect(matchSolutions(CATALOG, ['stream-processing'])).toEqual([])
-      expect(matchSolutions(CATALOG, [])).toEqual([])
     })
 
     test('has nothing to show without a catalog', () => {
       for (const catalog of [null, undefined, {}, { solutions: 'nope' }]) {
-        expect(matchSolutions(catalog, ['change-data-capture'])).toEqual([])
+        expect(matchSolutions(catalog, ['change-data-capture'], INFO)).toEqual([])
       }
-      expect(solutionsMarkup([], ['change-data-capture'], {}, escapeHtml)).toBe('')
+      expect(solutionsMarkup([], ['change-data-capture'], INFO, escapeHtml)).toBe('')
     })
 
-    test('renders a heading with the use case label and one link per solution', () => {
-      const html = solutionsMarkup(matchSolutions(CATALOG, ['change-data-capture']), ['change-data-capture'], { 'change-data-capture': 'Change data capture' }, escapeHtml)
+    test('renders the Redpanda Solutions heading, lead, chips, and links', () => {
+      const html = solutionsMarkup(matchSolutions(CATALOG, ['change-data-capture'], INFO).slice(0, 2), ['change-data-capture'], INFO, escapeHtml, 6)
       expect(html).toBe(
-        '<h3 class="catalog-solutions-title">Solutions for Change data capture</h3>' +
+        '<h3 class="catalog-solutions-title">Redpanda Solutions</h3>' +
+        '<p class="catalog-solutions-lead">Runnable reference architectures for Change data capture</p>' +
+        '<div class="catalog-solutions-chips"><span class="badge badge-use-case">Change data capture</span></div>' +
         '<ul class="catalog-solutions-list">' +
         '<li><a href="/solutions/cdc-to-lakehouse/">CDC to lakehouse</a></li>' +
         '<li><a href="/solutions/authored-id/">Authored by ID</a></li>' +
@@ -784,11 +885,49 @@ describe('component_table use cases', () => {
       )
     })
 
-    test('escapes solution titles and URLs', () => {
-      const html = solutionsMarkup([{ title: '<b>x</b>', url: '"><script>alert(1)</script>' }], ['a'], { a: '<i>A</i>' }, escapeHtml)
+    test('caps the list and links to the Solutions landing page filtered by use case', () => {
+      const many = Array.from({ length: 8 }, (_, i) => ({ title: `S${i}`, url: `/solutions/s${i}/` }))
+      const html = solutionsMarkup(many, ['change-data-capture'], INFO, escapeHtml, 6)
+      expect(html.match(/<li>/g)).toHaveLength(6)
+      expect(html).toContain('<p class="catalog-solutions-more"><a href="/solutions/?use-case=Change%20data%20capture">See all 8 solutions</a></p>')
+      expect(solutionsMarkup(many.slice(0, 6), ['change-data-capture'], INFO, escapeHtml, 6)).not.toContain('See all')
+    })
+
+    test('escapes solution titles, URLs, and labels', () => {
+      const html = solutionsMarkup([{ title: '<b>x</b>', url: '"><script>alert(1)</script>' }], ['a'], { a: { label: '<i>A</i>' } }, escapeHtml)
       expect(html).not.toMatch(/<script>|<b>|<i>/)
       expect(html).toContain('&lt;b&gt;x&lt;/b&gt;')
-      expect(html).toContain('Solutions for &lt;i&gt;A&lt;/i&gt;')
+      expect(html).toContain('Runnable reference architectures for &lt;i&gt;A&lt;/i&gt;')
+    })
+  })
+
+  describe('use cases on a connector page', () => {
+    // component_type_dropdown, with the content catalog Antora passes to extensions
+    function renderDropdown ({ name, docAttributes = {}, catalogPage = { pub: { url: '/connect/components/about/' } } } = {}) {
+      jest.resetModules()
+      const macro = require('../../macros/rp-connect-components.js')
+      const { registry, processors } = createCapturingRegistry()
+      const context = {
+        config: { attributes: { csvData: data(ROWS, USE_CASES), commercialNamesMap: {} } },
+        file: { src: {}, pub: { url: '/connect/components/inputs/kafka/' } },
+        contentCatalog: { resolvePage: (spec) => (spec === 'connect:components:about.adoc' ? catalogPage : undefined) }
+      }
+      macro.register(registry, context)
+      const parent = { getDocument: () => ({ getAttributes: () => ({ doctitle: name, type: 'input', ...docAttributes }) }) }
+      return processors.component_type_dropdown(parent, '', {}).source
+    }
+
+    test('links each offered use case to the catalog filtered to it', () => {
+      const html = renderDropdown({ name: 'kafka' })
+      expect(html).toContain('<p class="connector-use-cases"><strong>Use cases</strong>: ')
+      expect(html).toContain('<a class="badge badge-use-case" href="../../about/?usecase=stream-processing" title="Transforming events as they flow. Applies to at least one of this component\'s types.">Stream processing</a>')
+      expect(html).toContain('href="../../about/?usecase=change-data-capture"')
+    })
+
+    test('shows nothing for a rare use case, on Cloud pages, or without the catalog page', () => {
+      expect(renderDropdown({ name: 'iceberg' })).not.toContain('connector-use-cases')
+      expect(renderDropdown({ name: 'kafka', docAttributes: { 'env-cloud': '' } })).not.toContain('connector-use-cases')
+      expect(renderDropdown({ name: 'kafka', catalogPage: null })).not.toContain('connector-use-cases')
     })
   })
 })

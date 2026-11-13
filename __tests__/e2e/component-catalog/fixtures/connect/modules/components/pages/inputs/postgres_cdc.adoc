@@ -1,0 +1,4 @@
+= postgres_cdc
+:description: Fixture page for the postgres_cdc component.
+
+Fixture page.
