@@ -1,0 +1,9 @@
+# Checks: just, and easy or easily, which are usually filler
+extends: existence
+message: "'%s' is usually filler. Remove it, or say what you mean ('only', 'slightly')."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/plain-english.md#words
+level: warning
+ignorecase: true
+tokens:
+  - '(?<!\bnot\s)\bjust\b(?!-in-time)'
+  - '\beas(?:y|ily|ier|iest)\b'
