@@ -165,7 +165,9 @@ function collectReferences (adocFile, modulesDir, root) {
  * @param {string[]} [options.files] - Changed-files scope (repo-relative paths, for
  *   example from `gh pr diff --name-only`). When set, only .adoc files in the
  *   list and .adoc files that reference an image in the list are linted, and
- *   listed images nothing references are reported. When omitted, every .adoc
+ *   listed images nothing references are reported. Image file facts (size,
+ *   format, width) are checked only for images in the list, so an unchanged
+ *   image on a changed page is not reported. When omitted, every .adoc
  *   under modules/ is linted.
  * @param {number} [options.maxAltLength]
  * @param {number} [options.maxBytes]
@@ -260,6 +262,12 @@ function lintScreenshots (options) {
     // so a shared image on five pages is one finding, not five.
     if (seenImages.has(ref.resolved)) continue
     seenImages.add(ref.resolved)
+    // In --files mode, check the file facts (size, format, width) only for
+    // images the PR adds or changes. A changed page that still uses an old,
+    // untouched image must not fail on that image: the problem predates the
+    // PR, and the PR can't fix it without editing an image it never touched.
+    // Alt text stays checked, because it lives in the page the PR changed.
+    if (scoped && !changedImages.has(ref.resolved)) continue
 
     const size = fs.statSync(ref.resolved).size
     if (size > opts.maxBytes) {
