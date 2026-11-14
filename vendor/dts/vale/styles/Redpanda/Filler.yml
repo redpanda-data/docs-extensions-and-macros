@@ -1,0 +1,14 @@
+# Checks: filler such as simply, of course, note that, and worth noting
+extends: existence
+message: "Remove the filler '%s', or state the fact it stands in for."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/plain-english.md#words
+level: error
+ignorecase: true
+tokens:
+  - '\bsimply\b'
+  - '\bof course\b'
+  - '\bnote that\b'
+  - '\b(?:it is |it''s )?worth noting\b'
+  - '\bneedless to say\b'
+  - '\bobviously\b'
+  - '\bbasically\b'

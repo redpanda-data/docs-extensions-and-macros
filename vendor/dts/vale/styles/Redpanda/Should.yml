@@ -1,6 +1,6 @@
-# Checks: 'should' where 'must' is meant
+# Checks: 'should' that states a requirement (keep it for a recommendation or the reader's goal; judge each hit, never swap the word)
 extends: existence
-message: "Use 'must' for a requirement. Keep '%s' only for a genuine recommendation."
+message: "If this '%s' states a requirement, use 'must'. Keep it for a recommendation or what the reader wants."
 link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/terminology.md#do-not-use-word-list
 level: warning
 ignorecase: true
