@@ -287,6 +287,35 @@ describe('lintScreenshots - changed-files scope (--files)', () => {
     expect(result.summary.references).toBe(1)
   })
 
+  test('an unchanged oversized image on a changed page is not reported', () => {
+    // Regression: docs#2388 edited a page that uses a 152KB image added in
+    // 2025, and the scoped run failed the PR on image-too-large for a file
+    // the PR never touched.
+    const root = makeRepo({
+      'modules/m/pages/page.adoc': 'image::old-big.png[Old diagram]\nimage::new-big.png[New diagram]\n',
+      'modules/m/images/old-big.png': pngBytes({ bytes: 200 * 1024, width: 4000 }),
+      'modules/m/images/new-big.png': pngBytes({ bytes: 200 * 1024 })
+    })
+    const pageOnly = lintScreenshots({ root, files: ['modules/m/pages/page.adoc'] })
+    expect(pageOnly.findings).toEqual([])
+    const withNewImage = lintScreenshots({ root, files: ['modules/m/pages/page.adoc', 'modules/m/images/new-big.png'] })
+    expect(withNewImage.findings).toEqual([expect.objectContaining({
+      rule: 'image-too-large', severity: 'error', image: 'new-big.png'
+    })])
+    // A whole-repo run still reports both.
+    const repoRun = lintScreenshots({ root })
+    expect(byRule(repoRun, 'image-too-large')).toHaveLength(2)
+  })
+
+  test('a changed page still gets alt-text checks on unchanged images', () => {
+    const root = makeRepo({
+      'modules/m/pages/page.adoc': 'image::old.png[]\n',
+      'modules/m/images/old.png': pngBytes()
+    })
+    const result = lintScreenshots({ root, files: ['modules/m/pages/page.adoc'] })
+    expect(rules(result)).toEqual(['alt-missing'])
+  })
+
   test('a deleted image nothing references is not reported as orphaned', () => {
     const root = repo()
     const result = lintScreenshots({ root, files: ['modules/m/images/never-existed.png'] })
