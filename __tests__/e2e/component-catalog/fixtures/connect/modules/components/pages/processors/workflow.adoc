@@ -1,0 +1,4 @@
+= workflow
+:description: Fixture page for the workflow component.
+
+Fixture page.

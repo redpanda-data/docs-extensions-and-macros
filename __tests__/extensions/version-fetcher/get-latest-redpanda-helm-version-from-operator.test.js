@@ -294,4 +294,32 @@ version: 5.10.0-beta1
       expect(mockGithub.git.listMatchingRefs).not.toHaveBeenCalled();
     });
   });
+  describe('published versions from the Helm repository index', () => {
+    const chartVersions = ['26.2.6', '26.2.5', '26.1.14', '25.3.13', '26.3.1-beta1', '5.10.7']
+
+    it('takes the newest stable version of the line without calling GitHub', async () => {
+      const result = await getLatestHelmVersion(mockGithub, 'redpanda-data', 'redpanda-operator', 'v26.2.4', null, null, { chartVersions })
+
+      expect(result.latestStableRelease).toBe('26.2.6')
+      expect(mockGithub.git.listMatchingRefs).not.toHaveBeenCalled()
+      expect(mockGithub.repos.getContent).not.toHaveBeenCalled()
+    })
+
+    it('takes a beta version only from the beta lookup', async () => {
+      const result = await getLatestHelmVersion(mockGithub, 'redpanda-data', 'redpanda-operator', 'v26.1.12', 'v26.3.1-beta.2', null, { chartVersions })
+
+      expect(result.latestStableRelease).toBe('26.1.14')
+      expect(result.latestBetaRelease).toBe('26.3.1-beta1')
+      expect(mockGithub.repos.getContent).not.toHaveBeenCalled()
+    })
+
+    it('falls back to GitHub when the index has no version for the line', async () => {
+      mockGithub.git.listMatchingRefs.mockResolvedValue({ data: [{ ref: 'refs/tags/charts/redpanda/v25.1.9' }] })
+
+      const result = await getLatestHelmVersion(mockGithub, 'redpanda-data', 'redpanda-operator', 'v25.1.4', null, null, { chartVersions })
+
+      expect(result.latestStableRelease).toBe('25.1.9')
+      expect(mockGithub.git.listMatchingRefs).toHaveBeenCalled()
+    })
+  })
 });

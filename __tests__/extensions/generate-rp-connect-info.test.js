@@ -481,3 +481,129 @@ describe('card descriptions in a real build', () => {
     expect(byName.file).toBe('Consumes data from files on disk.')
   })
 })
+
+describe('use cases', () => {
+  // The use-case scheme of the docs taxonomy, with one deprecated concept
+  const TAXONOMY = [
+    'schema-version: 1',
+    'schemes:',
+    '  - id: use-case',
+    '    concepts:',
+    '      - id: change-data-capture',
+    '        prefLabel: Change data capture',
+    '        altLabels: [CDC]',
+    '        definition: Streaming row-level changes from a database.',
+    '      - id: data-lakehouse',
+    '        prefLabel: Data lakehouse',
+    '      - id: stream-processing',
+    '        prefLabel: Stream processing',
+    '      - id: old-cdc',
+    '        prefLabel: Old CDC',
+    '        deprecated: true',
+    '        replacedBy: [change-data-capture]'
+  ].join('\n')
+  const taxonomyFile = () => ({
+    src: { component: 'shared', module: 'ROOT', family: 'attachment', relative: 'taxonomy.yml' },
+    contents: Buffer.from(TAXONOMY)
+  })
+  const HEADER = 'name,type,commercial_name,support,deprecated,cloud,cloud_with_gpu,cloud_unsupported_reason,use_cases'
+  const writeCsv = (lines) => {
+    const file = path.join(tmp, 'use-cases.csv')
+    fs.writeFileSync(file, lines.join('\n'))
+    return file
+  }
+  const byKey = (csvData) => Object.fromEntries(csvData.data.map((r) => [`${r.connector}:${r.type}`, r.use_cases]))
+  const warnings = (logs) => logs.filter(([l]) => l === 'warn').map(([, m]) => m)
+
+  it('parses one ID, several IDs, and a blank value from the use_cases column', async () => {
+    const csv = writeCsv([
+      HEADER,
+      'postgres_cdc,input,postgres_cdc,certified,n,y,y,,change-data-capture',
+      'iceberg,output,iceberg,certified,n,y,y,,data-lakehouse;stream-processing',
+      'stdout,output,stdout,certified,n,n,n,,'
+    ])
+    const { csvData } = await run([...referencePartials({ url: CONNECT_URL }), taxonomyFile()], { csvpath: csv })
+    expect(byKey(csvData)).toEqual({
+      'postgres_cdc:input': ['change-data-capture'],
+      'iceberg:output': ['data-lakehouse', 'stream-processing'],
+      'stdout:output': []
+    })
+    // Labels from the taxonomy prefLabel, in taxonomy order
+    expect(csvData.useCases).toEqual([
+      { id: 'change-data-capture', label: 'Change data capture', definition: 'Streaming row-level changes from a database.', altLabels: ['CDC'] },
+      { id: 'data-lakehouse', label: 'Data lakehouse', definition: '', altLabels: [] },
+      { id: 'stream-processing', label: 'Stream processing', definition: '', altLabels: [] }
+    ])
+  })
+
+  it('drops an unknown ID with a warning that names the component and the ID', async () => {
+    const csv = writeCsv([
+      HEADER,
+      'kafka,input,kafka,certified,n,y,y,,stream-processing;not-a-use-case',
+      'kafka,output,kafka,certified,n,y,y,,Stream processing'
+    ])
+    const { csvData, logs } = await run([...referencePartials({ url: CONNECT_URL }), taxonomyFile()], { csvpath: csv })
+    expect(byKey(csvData)).toEqual({ 'kafka:input': ['stream-processing'], 'kafka:output': [] })
+    const w = warnings(logs)
+    expect(w.some((m) => /kafka/.test(m) && /"not-a-use-case"/.test(m))).toBe(true)
+    // A label is not an ID
+    expect(w.some((m) => /kafka/.test(m) && /"Stream processing"/.test(m))).toBe(true)
+  })
+
+  it('maps a deprecated ID to its replacement, with a warning', async () => {
+    const csv = writeCsv([HEADER, 'mysql_cdc,input,mysql_cdc,certified,n,y,y,,old-cdc'])
+    const { csvData, logs } = await run([...referencePartials({ url: CONNECT_URL }), taxonomyFile()], { csvpath: csv })
+    expect(byKey(csvData)['mysql_cdc:input']).toEqual(['change-data-capture'])
+    expect(warnings(logs).some((m) => /mysql_cdc/.test(m) && /deprecated/.test(m))).toBe(true)
+  })
+
+  it('has no use cases and no warnings when the column is missing (older Connect releases)', async () => {
+    const { csvData, logs } = await run([...referencePartials({ url: CONNECT_URL }), taxonomyFile()], { csvpath: csvFile })
+    expect(csvData.data.every((r) => Array.isArray(r.use_cases) && r.use_cases.length === 0)).toBe(true)
+    expect(csvData.useCases).toEqual([])
+    expect(warnings(logs).some((m) => /use case/i.test(m))).toBe(false)
+  })
+
+  it('ignores use cases, with one warning, when the build has no taxonomy', async () => {
+    const csv = writeCsv([HEADER, 'postgres_cdc,input,postgres_cdc,certified,n,y,y,,change-data-capture'])
+    const { csvData, logs } = await run([...referencePartials({ url: CONNECT_URL })], { csvpath: csv })
+    expect(csvData.useCases).toEqual([])
+    expect(byKey(csvData)['postgres_cdc:input']).toEqual([])
+    expect(warnings(logs).filter((m) => /use cases are ignored/.test(m))).toHaveLength(1)
+  })
+
+  it('reads use_cases from catalog.json, and from info.csv when the catalog has no such field', async () => {
+    const csv = writeCsv([
+      HEADER,
+      'postgres_cdc,input,postgres_cdc,certified,n,y,y,,stream-processing',
+      'iceberg,output,iceberg,certified,n,y,y,,data-lakehouse'
+    ])
+    const files = [
+      ...referencePartials({ url: CONNECT_URL }),
+      taxonomyFile(),
+      connectPartial('platforms/catalog.json', { url: CONNECT_URL }, JSON.stringify([
+        // The catalog's own field wins over the info.csv column
+        { type: 'input', name: 'postgres_cdc', status: 'stable', cloud: true, support: 'certified', use_cases: ['change-data-capture'] },
+        // No field: info.csv supplies it
+        { type: 'output', name: 'iceberg', status: 'stable', cloud: true, support: 'certified' }
+      ]))
+    ]
+    const { csvData } = await run(files, { csvpath: csv })
+    expect(byKey(csvData)).toEqual({ 'postgres_cdc:input': ['change-data-capture'], 'iceberg:output': ['data-lakehouse'] })
+  })
+
+  it('takes the union of a connector\'s use cases across its types', async () => {
+    const csv = writeCsv([
+      HEADER,
+      'kafka,input,kafka,certified,n,y,y,,change-data-capture',
+      'kafka,output,kafka,certified,n,y,y,,stream-processing;change-data-capture',
+      'sql_driver_postgres,sql_driver,PostgreSQL,certified,n,y,y,,data-lakehouse'
+    ])
+    const { csvData } = await run([...referencePartials({ url: CONNECT_URL }), taxonomyFile()], { csvpath: csv })
+    const union = catalogUtil.useCasesByConnector(csvData.data)
+    expect(union.get('kafka')).toEqual(['change-data-capture', 'stream-processing'])
+    // SQL drivers are not components, so their use cases are not offered
+    expect(union.has('sql_driver_postgres')).toBe(false)
+    expect(csvData.useCases.map((u) => u.id)).toEqual(['change-data-capture', 'stream-processing'])
+  })
+})

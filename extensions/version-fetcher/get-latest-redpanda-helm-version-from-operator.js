@@ -2,9 +2,16 @@
  * Fetches the latest Helm chart version for an operator release line from the
  * redpanda-operator repository.
  *
- * A stable chart version comes from the newest stable `charts/redpanda/v<major>.<minor>.*`
- * tag, because a tag marks a chart that was actually published (what
- * `helm search repo` reports). A release branch's Chart.yaml can be bumped
+ * A chart version comes first from the public Helm repository index
+ * (charts.redpanda.com), when the caller passes its versions in
+ * `options.chartVersions`. The index lists the charts that were actually
+ * published (what `helm search repo` reports) and needs no token. The
+ * redpanda-operator repository is private, so the GitHub lookups below are
+ * fallbacks that only work with a token that can read it.
+ *
+ * On GitHub, a stable chart version comes from the newest stable
+ * `charts/redpanda/v<major>.<minor>.*` tag, because a tag marks a chart that
+ * was actually published. A release branch's Chart.yaml can be bumped
  * ahead of the published chart, so it is only the fallback, and the only
  * source for beta versions.
  *
@@ -19,14 +26,31 @@
  * @param {string} stableDockerTag - The stable docker tag in format v<major>.<minor>.<patch>.
  * @param {string} betaDockerTag - Optional beta docker tag in format v<major>.<minor>.<patch>-beta.
  * @param {Object} logger - Optional Antora logger instance for logging
+ * @param {Object} [options]
+ * @param {string[]|null} [options.chartVersions] - Published chart versions from the Helm repository index
  * @returns {Promise<{ latestStableRelease: string|null, latestBetaRelease: string|null }>}
  */
-module.exports = async (github, owner, repo, stableDockerTag, betaDockerTag, logger = null) => {
+module.exports = async (github, owner, repo, stableDockerTag, betaDockerTag, logger = null, { chartVersions = null } = {}) => {
   const yaml = require('js-yaml');
   const semver = require('semver');
   const chartPaths = ['charts/redpanda/chart/Chart.yaml', 'charts/redpanda/Chart.yaml'];
   const warn = (message) => (logger ? logger.warn(message) : console.warn(message));
   const logError = (message) => (logger ? logger.error(message) : console.error(message));
+
+  // Returns the newest published chart version of a release line from the
+  // Helm repository index (stable or prerelease), or null when the index was
+  // not passed or lists no such version.
+  const getChartVersionFromIndex = (major, minor, prerelease) => {
+    if (!Array.isArray(chartVersions)) return null;
+    let newest = null;
+    for (const raw of chartVersions) {
+      const version = semver.valid(raw);
+      if (!version || Boolean(semver.prerelease(version)) !== prerelease) continue;
+      if (semver.major(version) !== Number(major) || semver.minor(version) !== Number(minor)) continue;
+      if (!newest || semver.gt(version, newest)) newest = version;
+    }
+    return newest;
+  };
 
   // Returns the newest stable published chart version of a release line, or
   // null when the line has no stable chart tag or the lookup fails.
@@ -93,6 +117,9 @@ module.exports = async (github, owner, repo, stableDockerTag, betaDockerTag, log
 
       const [, major, minor] = versionMatch;
       const isBeta = /-beta/.test(dockerTag);
+
+      const fromIndex = getChartVersionFromIndex(major, minor, isBeta);
+      if (fromIndex) return fromIndex;
 
       if (!isBeta) {
         const published = await getChartVersionFromTags(major, minor);
