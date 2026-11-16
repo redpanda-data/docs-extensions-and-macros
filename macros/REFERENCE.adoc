@@ -331,6 +331,7 @@ asciidoc:
     - '@redpanda-data/docs-extensions-and-macros/macros/prop'
 ----
 
+[[propval]]
 == propval
 
 This inline macro renders one value from the property data as plain text, so a sentence such as "defaults to 2 weeks" is generated from the same data as the property reference instead of typed by hand. Hand-typed values drift when a release changes a default, and nothing catches it.
@@ -528,6 +529,7 @@ asciidoc:
     - '@redpanda-data/docs-extensions-and-macros/macros/prop'
 ----
 
+[[rpkval]]
 == rpkval
 
 This inline macro renders one value of an `rpk` flag from the published rpk data, so a sentence such as "the default is -1" comes from the same data as the generated `rpk` reference instead of being typed by hand.
@@ -792,6 +794,7 @@ These never fail the build: `no-data` (no rpk data for the page) and `no-page` (
 
 Registered by the `prop` macro's extension (see <<rpkval>>).
 
+[[connectval]]
 == connectval
 
 This inline macro renders one value of a Redpanda Connect component or config field from the published Connect data, formatted exactly as the generated component reference prints it.
