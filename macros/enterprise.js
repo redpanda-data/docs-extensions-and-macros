@@ -10,7 +10,10 @@
  *   enterprise:Iceberg Topics[tooltip=Iceberg Topics requires an Enterprise Edition license and object storage.]
  *
  * The feature name renders as a uniquely styled term with a tooltip that
- * explains the feature requires an Enterprise Edition license. The term
+ * explains the feature requires an Enterprise Edition license. The term also
+ * carries the words "(Enterprise)" as visually hidden text, so agents, search
+ * indexers, and screen readers, which never see the lock or the color, still
+ * read that the feature is Enterprise. The term
  * links to the feature's documentation when an xref attribute is given,
  * and otherwise to the licensing page, so readers can always reach an
  * explanation of what having (or not having) a license means.
@@ -95,6 +98,10 @@ function warnOnce (contentCatalog, key, message) {
 
 const DEFAULT_LICENSING_PAGE = 'get-started:licensing/overview.adoc'
 const DEFAULT_ROLE = 'enterprise-feature'
+// Text that carries the Enterprise meaning without CSS. visually-hidden is the
+// docs UI's screen-reader-only class; without it the words simply show.
+const ENTERPRISE_MARKER_CLASS = 'enterprise-feature-marker'
+const ENTERPRISE_TEXT_MARKER = `<span class="${ENTERPRISE_MARKER_CLASS} visually-hidden"> (Enterprise)</span>`
 // The attribute every docs UI tooltip reads. Meaning elements never use the
 // native title attribute, which shows only on mouse hover.
 const DEFAULT_TOOLTIP_ATTRIBUTE = 'data-tooltip'
@@ -558,7 +565,10 @@ function buildEnterpriseContent ({ feature, text, xref, url, tooltip, licensingP
   if (links) {
     inner = xref ? `xref:${xref}[${display}]` : (url ? `link:${url}[${display}]` : `xref:${licensingPage}[${display}]`)
   }
-  return `<span class="${role}"${tooltipHtml}>${inner}</span>`
+  // The lock and the color are CSS, which an agent reading the HTML, a search
+  // indexer, and a screen reader never see. The marker says it in text, hidden
+  // only visually, so every reader of the page gets the meaning.
+  return `<span class="${role}"${tooltipHtml}>${inner}${ENTERPRISE_TEXT_MARKER}</span>`
 }
 
 /**

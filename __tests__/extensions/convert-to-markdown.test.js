@@ -542,6 +542,14 @@ describe('enterprise feature marker in Markdown', () => {
     const md = convert('<h1>T</h1><p>Use <span class="enterprise-feature">Tiered Storage</span>.</p>')
     expect(bodyOf(md)).toBe(`Use Tiered Storage ${ENTERPRISE_MARKER}.`)
   })
+
+  test('drops the macro\'s hidden text marker so the term is marked once', () => {
+    const hidden = '<span class="enterprise-feature-marker visually-hidden"> (Enterprise)</span>'
+    const md = convert(`<h1>T</h1><p>Use <span class="enterprise-feature" data-tooltip="x">Tiered Storage${hidden}</span>.</p>`)
+    expect(bodyOf(md)).toBe(`Use Tiered Storage ${ENTERPRISE_MARKER}.`)
+    const beta = convert(`<h1>T</h1><p><span class="enterprise-feature">Stretch Clusters${hidden}</span> <span class="rp-badge rp-badge--beta">Beta</span></p>`)
+    expect(bodyOf(beta)).toBe('Stretch Clusters (enterprise, beta)')
+  })
 })
 
 describe('combined status markers in Markdown', () => {

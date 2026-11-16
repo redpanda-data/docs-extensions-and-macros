@@ -372,6 +372,8 @@ function generateFrontmatter(page, siteUrl) {
 // macro lets a playbook override it via the enterprise-feature-role document
 // attribute, so match on a substring rather than the exact value.
 const ENTERPRISE_FEATURE_CLASS = 'enterprise-feature'
+// The hidden text marker inside that span (macros/enterprise.js).
+const ENTERPRISE_MARKER_CLASS = 'enterprise-feature-marker'
 
 // Status words collected into the single trailing parenthetical.
 const ENTERPRISE_STATUS = 'enterprise'
@@ -484,8 +486,15 @@ function createEnterpriseFeatureRules () {
   // Scoped per call so each converter tracks its own deferred markers.
   const deferredToBadge = new WeakSet()
 
+  // The macro's hidden "(Enterprise)" text. The Markdown output has its own
+  // marker, merged with any badge after the term, so this one is dropped.
+  const enterpriseMarker = {
+    filter: (node) => hasClass(node, ENTERPRISE_MARKER_CLASS),
+    replacement: () => '',
+  }
+
   const enterpriseFeature = {
-    filter: (node) => hasClass(node, ENTERPRISE_FEATURE_CLASS),
+    filter: (node) => hasClass(node, ENTERPRISE_FEATURE_CLASS) && !hasClass(node, ENTERPRISE_MARKER_CLASS),
     replacement: (content, node) => {
       const inner = (content || '').trim()
       // An empty span carries no feature to mark.
@@ -521,7 +530,7 @@ function createEnterpriseFeatureRules () {
     },
   }
 
-  return { enterpriseFeature, betaBadge }
+  return { enterpriseMarker, enterpriseFeature, betaBadge }
 }
 
 module.exports.createEnterpriseFeatureRules = createEnterpriseFeatureRules
@@ -1111,6 +1120,7 @@ function createTurndownForPage ({ pageUrl, logger }) {
 
     // Keep the enterprise-license signal, which is otherwise CSS-only.
     const enterpriseRules = createEnterpriseFeatureRules()
+    turndownInstance.addRule('enterprise-feature-marker', enterpriseRules.enterpriseMarker)
     turndownInstance.addRule('enterprise-feature', enterpriseRules.enterpriseFeature)
     turndownInstance.addRule('beta-badge', enterpriseRules.betaBadge)
 

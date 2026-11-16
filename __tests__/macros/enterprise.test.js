@@ -422,7 +422,8 @@ features:
       const html = buildEnterpriseContent({ ...defaults, feature: 'Continuous Data Balancing' })
       expect(html).toBe(
         '<span class="enterprise-feature" title="Requires an Enterprise Edition license.">' +
-        'xref:get-started:licensing/overview.adoc[Continuous Data Balancing]</span>'
+        'xref:get-started:licensing/overview.adoc[Continuous Data Balancing]' +
+        '<span class="enterprise-feature-marker visually-hidden"> (Enterprise)</span></span>'
       )
     })
 
@@ -477,7 +478,17 @@ features:
     test('renders plain text without a link when links are disabled', () => {
       const html = buildEnterpriseContent({ ...defaults, feature: 'Shadowing', links: false })
       expect(html).not.toContain('xref:')
-      expect(html).toContain('>Shadowing</span>')
+      expect(html).toContain('>Shadowing<span class="enterprise-feature-marker visually-hidden"> (Enterprise)</span></span>')
+    })
+
+    test('says Enterprise in text, not only through the CSS lock and color', () => {
+      // Agents, search indexers, and screen readers read the text, not the style.
+      const linked = buildEnterpriseContent({ ...defaults, feature: 'Shadowing' })
+      const plain = buildEnterpriseContent({ ...defaults, feature: 'Shadowing', links: false })
+      for (const html of [linked, plain]) {
+        const text = html.replace(/<[^>]+>/g, '').replace(/xref:[^[]*\[([^\]]*)\]/g, '$1')
+        expect(text).toBe('Shadowing (Enterprise)')
+      }
     })
 
     test('omits the tooltip when disabled', () => {
