@@ -17,14 +17,24 @@ const CATEGORIES = [
 ];
 const CATEGORY_TITLES = CATEGORIES.map(([, title]) => title);
 
-// Prefixes that look like a ticket key (`ABC-123`) but name a public standard
-// or advisory, so they stay.
+// Prefixes that look like a ticket key (`ABC-123`) but name a public standard,
+// protocol, or advisory, so they stay.
 const PUBLIC_KEY_PREFIXES = new Set([
-  'CVE', 'GHSA', 'KIP', 'RFC', 'ISO', 'UTF', 'SHA', 'TLS', 'AES', 'RSA', 'MD', 'IEEE', 'PKCS', 'FIPS', 'HTTP',
+  'CVE', 'GHSA', 'KIP', 'KEP', 'RFC', 'ISO', 'IEEE', 'FIPS', 'PKCS', 'UTF', 'SHA', 'MD', 'AES', 'RSA', 'ECDSA', 'ECDH',
+  'HMAC', 'ED', 'TLS', 'SSL', 'DNS', 'HTTP', 'TCP', 'UDP', 'OAUTH', 'SCRAM', 'ARM', 'AMD', 'X',
 ]);
 const TICKET_KEY_RE = /\b([A-Z][A-Z0-9]{1,9})-\d+\b/g;
-const ISSUE_REF_RE = /(?:[\w.-]+\/)?[\w.-]*#\d+\b/g;
-const PRIVATE_URL_RE = /https?:\/\/github\.com\/redpanda-data\/[^\s)\]>]*/g;
+
+// A link a reader outside the company cannot open: the redpanda-data GitHub
+// organization in any of its URL forms, and the issue tracker, chat, and CI
+// hosts. The scheme is optional, because a bare host is still a link.
+const PRIVATE_LINK = String.raw`(?:https?:\/\/|git@)?(?:(?:[\w-]+\.)?github(?:usercontent)?\.com[/:](?:repos\/)?redpanda-data\/|[\w-]+\.atlassian\.net\b|[\w-]+\.slack\.com\b|buildkite\.com\b)[^\s)\]>` + '`' + String.raw`]*`;
+const PRIVATE_LINK_RE = new RegExp(PRIVATE_LINK, 'g');
+
+// An issue or pull request reference: a bare `#123`, a repository reference
+// such as `repo#123` or `org/repo#123` (repository names are lower case, which
+// keeps `PKCS#12` and `C#7`), or the words "PR 123" and "issue 123".
+const ISSUE_REF_STRICT_RE = new RegExp(String.raw`(?<![\w#/.-])#\d+\b|(?<![\w/.-])(?:[a-z0-9][\w.-]*\/)?[a-z][a-z0-9._-]*#\d+\b|\b(?:PRs?|[Pp]ull requests?|[Ii]ssues?)\s+#?\d{2,}\b`, 'g');
 
 /**
  * Applies a transform to the parts of a line that are outside `code spans`.
@@ -38,32 +48,33 @@ function outsideCode(text, fn) {
 }
 
 /**
- * Removes references that a reader cannot follow: links into the redpanda-data
- * GitHub organization, issue and pull request numbers, and ticket keys. A
- * removed reference that sat alone in parentheses takes the parentheses with
- * it. Text inside code spans is left alone.
+ * Removes references that a reader cannot follow: private links, issue and
+ * pull request references, and ticket keys. A removed reference that sat
+ * alone in parentheses takes the parentheses with it. Only the text next to a
+ * removal is tidied; the rest of the prose is returned as written. Text
+ * inside code spans is left alone, except that a private link is removed
+ * there too.
  *
  * @param {string} text - Markdown or AsciiDoc prose.
  * @return {string} The prose with private references removed.
  */
 function stripPrivateReferences(text) {
-  return outsideCode(text, (part) => {
-    let out = part
-      // A Markdown link into the organization keeps its text, unless the text
-      // is only another reference.
-      .replace(/\[([^\]]*)\]\((https?:\/\/github\.com\/redpanda-data\/[^)]*)\)/g, '$1')
-      .replace(PRIVATE_URL_RE, '')
-      .replace(ISSUE_REF_RE, '')
-      .replace(TICKET_KEY_RE, (match, prefix) => (PUBLIC_KEY_PREFIXES.has(prefix) ? match : ''));
-    // Tidy what the removals leave behind.
-    out = out
-      .replace(/\(\s*[,;]?\s*\)/g, '')
-      .replace(/\[\s*\]/g, '')
-      .replace(/[ \t]{2,}/g, ' ')
-      .replace(/\s+([,.;:)])/g, '$1')
-      .replace(/\(\s+/g, '(');
-    return out;
-  });
+  const GONE = '\u0000';
+  const marked = String(text)
+    // A Markdown link to a private target keeps its text.
+    .replace(new RegExp(String.raw`\[([^\]]*)\]\(\s*` + PRIVATE_LINK + String.raw`\s*\)`, 'g'), `$1${GONE}`)
+    .replace(PRIVATE_LINK_RE, GONE);
+  const stripped = outsideCode(marked, (part) => part
+    .replace(ISSUE_REF_STRICT_RE, GONE)
+    .replace(TICKET_KEY_RE, (match, prefix) => (PUBLIC_KEY_PREFIXES.has(prefix) ? match : GONE)));
+  if (!stripped.includes(GONE)) return stripped;
+  return stripped
+    // The reference was the whole parenthesis or bracket, or a list inside one.
+    .replace(/[ \t]*[([][\s,;]*\u0000(?:[\s,;]*(?:and\s+)?\u0000)*[\s,;]*[)\]]/g, '')
+    // A dash or colon that only introduced the reference.
+    .replace(/[ \t]+(?:-|–|—|:)[ \t]*\u0000(?=\s*(?:[.,;]|$))/gm, '')
+    .replace(/[ \t]*\u0000/g, '')
+    .replace(/[ \t]+$/gm, '');
 }
 
 /**
@@ -116,6 +127,7 @@ function parseChangieBody(body) {
   let entry = null;
   let paragraph = null;
   let inFence = false;
+  let fenceIndent = '';
 
   const closeParagraph = () => {
     if (entry && paragraph && paragraph.lines.length) {
@@ -126,7 +138,7 @@ function parseChangieBody(body) {
 
   for (const raw of String(body || '').replace(/\r\n?/g, '\n').split('\n')) {
     if (inFence) {
-      if (/^\s*```/.test(raw)) { paragraph.lines.push('----'); inFence = false; closeParagraph(); } else paragraph.lines.push(raw.replace(/^ {0,4}/, ''));
+      if (/^\s*```\s*$/.test(raw)) { paragraph.lines.push('----'); inFence = false; closeParagraph(); } else paragraph.lines.push(raw.startsWith(fenceIndent) ? raw.slice(fenceIndent.length) : raw.trimStart());
       continue;
     }
     const heading = raw.match(/^#{2,3}\s+(.+?)\s*$/);
@@ -150,17 +162,20 @@ function parseChangieBody(body) {
       continue;
     }
     if (!entry) continue;
-    const fence = raw.match(/^\s*```\s*(\w*)\s*$/);
+    const fence = raw.match(/^(\s*)```\s*([\w+-]*).*$/);
     if (fence) {
       closeParagraph();
-      paragraph = { code: true, lines: [fence[1] ? `[,${fence[1]}]` : '[,bash]', '----'] };
+      fenceIndent = fence[1];
+      paragraph = { code: true, lines: [fence[2] ? `[,${fence[2]}]` : '[,bash]', '----'] };
       inFence = true;
       continue;
     }
     if (/^\s*$/.test(raw)) { closeParagraph(); entry.sawBlank = true; continue; }
     if (!paragraph) {
-      // A line directly under the lead, with no blank line, continues the lead.
-      if (!entry.details.length && !entry.sawBlank) { entry.lead += ` ${raw.trim()}`; continue; }
+      // A line directly under the lead, with no blank line, continues the
+      // lead, unless it starts a list.
+      const startsList = /^\s*(?:[-*]|\d+\.)\s+\S/.test(raw);
+      if (!entry.details.length && !entry.sawBlank && !startsList) { entry.lead += ` ${raw.trim()}`; continue; }
       paragraph = { code: false, lines: [] };
     }
     paragraph.lines.push(raw);
@@ -233,6 +248,8 @@ module.exports = {
   CATEGORY_TITLES,
   PUBLIC_KEY_PREFIXES,
   TICKET_KEY_RE,
+  PRIVATE_LINK_RE,
+  ISSUE_REF_STRICT_RE,
   outsideCode,
   stripPrivateReferences,
   markdownInlineToAsciiDoc,

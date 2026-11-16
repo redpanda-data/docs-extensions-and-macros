@@ -1,5 +1,5 @@
-// All text here is synthetic. The operator repository is private, so no real
-// changelog entry belongs in this public repository.
+// All text here is invented. No changelog entry, issue number, or ticket key
+// from a private repository belongs in this public repository.
 
 const { parseTag } = require('../../tools/k8s-release-notes/projects');
 const {
@@ -22,7 +22,7 @@ const {
   declaredUpgradeNotes,
   changesToMarkdown,
 } = require('../../tools/k8s-release-notes/changes');
-const { hashSource } = require('../../tools/k8s-release-notes/section');
+const { hashSource, findMarkup, countEntries } = require('../../tools/k8s-release-notes/section');
 const {
   buildCandidate,
   waitForChart,
@@ -34,7 +34,7 @@ const BODY = [
   '### Added',
   '* Widget CRD: new `spec.mode` field. Set `{name}` to pick a mode.',
   '### Fixed',
-  '* The operator no longer drops the `app` label (K8S-123). Same fix as #42, which covered widgets#7.',
+  '* The operator no longer drops the `app` label (ABC-123). Same fix as #42, which covered widgets#7.',
   '',
   '  The helper mutated its input, so every later',
   '  pool got the first pool\'s label. See',
@@ -98,22 +98,22 @@ describe('parseTag', () => {
     expect(parseTag('charts/console/v3.9.0').project.chart).toBe('console');
   });
 
-  test.each(['operator/v26.2.1-beta.3', 'gotohelm/v1.1.0', 'charts/connectors/v0.1.0', 'v26.2.6', ''])(
+  test.each(['operator/v26.2.1-beta.3', 'tools/v1.1.0', 'charts/other/v0.1.0', 'v26.2.6', ''])(
     'returns null for %p', (tag) => expect(parseTag(tag)).toBeNull(),
   );
 });
 
 describe('stripPrivateReferences', () => {
   test('removes issue numbers, ticket keys, and private links, and tidies up', () => {
-    expect(stripPrivateReferences('Fixed a crash (K8S-123) in the hook.')).toBe('Fixed a crash in the hook.');
-    expect(stripPrivateReferences('caused by the redpanda#31057 wedge')).toBe('caused by the wedge');
+    expect(stripPrivateReferences('Fixed a crash (ABC-123) in the hook.')).toBe('Fixed a crash in the hook.');
+    expect(stripPrivateReferences('caused by the widgets#99 wedge')).toBe('caused by the wedge');
     expect(stripPrivateReferences('See [the fix](https://github.com/redpanda-data/x/pull/9).')).toBe('See the fix.');
     expect(stripPrivateReferences('See https://github.com/redpanda-data/x/issues/9 for more.')).toBe('See for more.');
   });
 
   test('keeps public identifiers and code spans', () => {
     expect(stripPrivateReferences('Fixes CVE-2026-1111 and follows KIP-848.')).toBe('Fixes CVE-2026-1111 and follows KIP-848.');
-    expect(stripPrivateReferences('Set `K8S-123` or `#42`.')).toBe('Set `K8S-123` or `#42`.');
+    expect(stripPrivateReferences('Set `ABC-123` or `#42`.')).toBe('Set `ABC-123` or `#42`.');
   });
 });
 
@@ -184,9 +184,9 @@ describe('findLeaks', () => {
   test.each([
     ['a private link', 'See https://github.com/redpanda-data/redpanda-operator/pull/1.', 'private link'],
     ['a private link in code', 'Run `kubectl kustomize github.com/redpanda-data/redpanda-operator//x`.', 'private link'],
-    ['an issue number', 'Same fix as #1511.', 'issue or pull request number'],
-    ['a cross-repo issue number', 'Caused by redpanda#31057.', 'issue or pull request number'],
-    ['a ticket key', 'Tracked in K8S-843.', 'ticket key'],
+    ['an issue number', 'Same fix as #42.', 'issue or pull request number'],
+    ['a cross-repo issue number', 'Caused by widgets#99.', 'issue or pull request number'],
+    ['a ticket key', 'Tracked in ABC-843.', 'ticket key'],
     ['an author handle', 'Fixed by @someone.', 'author handle'],
     ['a compare link', '*Full Changelog*: v1...v2', 'compare link'],
   ])('flags %s', (_name, text, kind) => {
@@ -196,7 +196,7 @@ describe('findLeaks', () => {
   test('ignores comments, listings, code spans, and public identifiers', () => {
     const text = [
       '// release-notes-source: operator/v1.2.3 sha256=abc',
-      'Fixes CVE-2026-1111. Set `#42` or `K8S-1`. Mail ops@example.com.',
+      'Fixes CVE-2026-1111. Set `#42` or `ABC-1`. Mail ops@example.com.',
       '----',
       'helm upgrade x --set a=#1',
       '----',
@@ -221,7 +221,7 @@ describe('assembleSection', () => {
     expect(assemble()).toBe([
       '[#v1-2-3]',
       '== v1.2.3 (2026-01-02)',
-      `// release-notes-source: operator/v1.2.3 sha256=${hashBody(BODY)}`,
+      `// release-notes-source: operator/v1.2.3 sha256=${hashBody(BODY)} upgrade-notes=curated`,
       '',
       'Adds a mode field to the Widget resource and fixes a label bug.',
       '',
@@ -271,7 +271,7 @@ describe('assembleSection', () => {
 
   test('rejects a version mismatch, a leak, and an invented identifier', () => {
     expect(() => assemble(CURATED.replace('v1.2.3', 'v1.2.4'))).toThrow(/does not match the requested tag/);
-    expect(() => assemble(CURATED.replace('every pool.', 'every pool (K8S-123).'))).toThrow(/private systems: ticket key "K8S-123"/);
+    expect(() => assemble(CURATED.replace('every pool.', 'every pool (ABC-123).'))).toThrow(/private systems: ticket key "ABC-123"/);
     expect(() => assemble(CURATED.replace('`spec.mode`', '`spec.other`'))).toThrow(/not in the release body: `spec.other`/);
   });
 });
@@ -394,7 +394,7 @@ describe('structured entries (changes.json)', () => {
   const DECLARED = doc([
     entry({ kind: 'Added', body: 'Widget CRD: new `spec.mode` field.\n\nSet it to pick a mode.\n* not an entry' }),
     entry({
-      upgrade: { effects: ['restart-brokers'], note: 'Brokers restart once on upgrade (K8S-123).', action: 'Set `image.tag` first.' },
+      upgrade: { effects: ['restart-brokers'], note: 'Brokers restart once on upgrade.', action: 'Set `image.tag` first.' },
     }),
     entry({ kind: 'Changed', body: 'CI: forward the cache key.', audience: 'internal', upgrade: null }),
   ]);
@@ -449,12 +449,13 @@ describe('structured entries (changes.json)', () => {
   test('fully declared: the callout is the declared notes, whatever curation wrote', () => {
     const result = publish(DECLARED, `// upgrade-notes: declared\n${CURATED}`);
     expect(callout(result.section)).toEqual([NOTE]);
-    expect(result.section).toContain(`sha256=${hashSource(BODY, DECLARED)}`);
-    expect(result.section).not.toContain('upgrade-notes');
+    expect(result.section).toContain(`sha256=${hashSource(BODY, DECLARED)} upgrade-notes=declared`);
+    expect(result.section).not.toContain('// upgrade-notes:');
   });
 
   test('fully declared with no effects: no callout', () => {
-    expect(publish(doc([entry({})]), CURATED).section).not.toContain('[IMPORTANT]');
+    const curated = CURATED.replace(/=== New features[^]*$/, '');
+    expect(publish(doc([entry({})]), curated).section).not.toContain('[IMPORTANT]');
   });
 
   test('partly declared: declared notes first, then curated ones that are new', () => {
@@ -479,5 +480,152 @@ describe('structured entries (changes.json)', () => {
     });
     expect(changed.action).toBe('replaced');
     expect(hashSource(BODY)).toBe(hashBody(BODY));
+  });
+});
+
+describe('checks added after review', () => {
+  test('stripPrivateReferences keeps public terms and leaves untouched prose alone', () => {
+    expect(stripPrivateReferences('Uses PKCS#12, DNS-01, KEP-1234 and C#7 (see note), well , spaced ( odd ).'))
+      .toBe('Uses PKCS#12, DNS-01, KEP-1234 and C#7 (see note), well , spaced ( odd ).');
+    expect(stripPrivateReferences('Bump the tool to v3.14.0 - https://github.com/redpanda-data/tool/releases/tag/v3.14.0'))
+      .toBe('Bump the tool to v3.14.0');
+    expect(stripPrivateReferences('Fixed in PR 1234 and issue 567 (#12, org/repo#3).')).toBe('Fixed in and.');
+    expect(stripPrivateReferences('Clone git@github.com:redpanda-data/x.git or see acme.atlassian.net/browse/A-1.'))
+      .toBe('Clone or see');
+    expect(stripPrivateReferences('Run `kubectl kustomize github.com/redpanda-data/x//y` now.')).toBe('Run `kubectl kustomize` now.');
+    expect(stripPrivateReferences('The top 5 issues are fixed.')).toBe('The top 5 issues are fixed.');
+  });
+
+  test.each([
+    ['a private link in a listing', '----\ncurl https://raw.githubusercontent.com/redpanda-data/x/main/y\n----', 'private link'],
+    ['a bare organization link', 'See github.com/redpanda-data/x.', 'private link'],
+    ['an issue tracker link', 'See https://acme.atlassian.net/browse/A-1.', 'private link'],
+    ['a chat link', 'Ask in https://acme.slack.com/archives/C1.', 'private link'],
+    ['a pull request in words', 'Fixed in PR 1234.', 'issue or pull request number'],
+  ])('findLeaks flags %s', (_name, text, kind) => {
+    expect(findLeaks(text).map((f) => f.kind)).toContain(kind);
+  });
+
+  test('findLeaks keeps public terms that look like references', () => {
+    expect(findLeaks('Uses PKCS#12 and DNS-01 with C#7, per KEP-1234.')).toEqual([]);
+  });
+
+  test.each([
+    ['an include', 'include::partial$secret.adoc[]', 'block macro'],
+    ['an image', 'image::https://example.com/x.png[]', 'block macro'],
+    ['an inline link macro', 'See link:https://example.com[this].', 'inline macro'],
+    ['an xref', 'See xref:manage:secret.adoc[this].', 'inline macro'],
+    ['a passthrough', 'Text +++<script>x</script>+++ here.', 'passthrough'],
+    ['an attribute entry', ':page-role: home', 'attribute entry'],
+    ['a block attribute', '[source,subs="attributes"]', 'block attribute'],
+    ['a block title', '.Before you upgrade', 'block title'],
+    ['a sidebar', '****', 'block type'],
+    ['a table', '|===', 'block type'],
+    ['a cross reference', 'See <<other,this>>.', 'cross reference or anchor'],
+    ['an unclosed example block', '.Details\n[%collapsible]\n====\ntext', 'unclosed block'],
+    ['an unclosed listing', '----\ncode', 'unclosed block'],
+  ])('findMarkup flags %s', (_name, text, kind) => {
+    expect(findMarkup(text).map((f) => f.kind)).toContain(kind);
+  });
+
+  test('findMarkup accepts what the section format uses', () => {
+    const text = '* An entry with `code` and *bold*.\n+\n.Details\n[%collapsible]\n====\nMore.\n\n[,yaml]\n----\ninclude::not-scanned[]\n----\n====\n* Next.\n+\n--\nOpen block.\n--';
+    expect(findMarkup(text)).toEqual([]);
+  });
+
+  test('findUnsupported checks links, listing lines, and version suffixes', () => {
+    const source = 'Based on 25.3.1. See https://docs.example.com/a. Run:\n```\nkubectl get pods -n redpanda\n```';
+    expect(findUnsupported('A 25.3.1-based build. See https://docs.example.com/a.\n----\nkubectl get pods -n redpanda\n----', source, '1.2.3')).toEqual([]);
+    expect(findUnsupported('Uses 25.3.1-rc1. See https://evil.example.com/x.\n----\nkubectl delete pods --all\n----', source, '1.2.3'))
+      .toEqual(['listing line "kubectl delete pods --all"', '25.3.1-rc1', 'https://evil.example.com/x']);
+  });
+
+  test('a line that starts with // inside a listing is kept', () => {
+    const curated = `${CURATED}+\n[,js]\n----\n// keep me\n----\n`;
+    expect(() => assemble(curated)).toThrow(/listing line "\/\/ keep me"/);
+    expect(assemble(curated, { sourceBody: `${BODY}\n// keep me\n` })).toContain('// keep me');
+  });
+
+  test('assembleSection rejects markup, a wrong date, and reports the mode', () => {
+    expect(() => assemble(CURATED.replace('every pool.', 'every pool. See link:https://example.com[x].'))).toThrow(/markup that release notes do not allow: inline macro/);
+    expect(() => assemble(CURATED, { date: '2026-01-03' })).toThrow(/release date is 2026-01-03/);
+    expect(assemble(CURATED, { date: '2026-01-02' })).toContain('upgrade-notes=curated');
+  });
+
+  test('countEntries counts top-level entries only', () => {
+    expect(countEntries(['* One.', '+', '.Details', '[%collapsible]', '====', '* not an entry', '====', '* Two.', '----', '* code', '----'])).toBe(2);
+  });
+
+  const entry = (over) => ({
+    kind: 'Fixed', body: 'The operator keeps the `app` label.', audience: 'public',
+    upgrade: { effects: [], note: null, action: null }, ...over,
+  });
+  const doc = (entries) => JSON.stringify({ schema: 1, tag: 'operator/v1.2.3', project: 'operator', version: 'v1.2.3', entries });
+  const publish = (changes, curated) => publishSection({
+    tag: 'operator/v1.2.3', curated, sourceBody: BODY, changes, pageContent: PAGE, chartEntry: { version: '1.2.3', appVersion: null },
+  });
+  const ONLY_FIXES = CURATED.replace(/=== New features[^]*$/, '');
+
+  test('an upgrade note that cannot be published as written fails', () => {
+    const withNote = (note) => doc([entry({ upgrade: { effects: ['restart-brokers'], note, action: null } })]);
+    expect(() => publish(withNote('Brokers restart (ABC-123).'), ONLY_FIXES)).toThrow(/cannot be published as written \(ticket key "ABC-123"\)/);
+    expect(() => publish(withNote('See https://example.com/x.'), ONLY_FIXES)).toThrow(/cannot be published as written \(link/);
+    expect(() => publish(withNote('Read include::x[] first.'), ONLY_FIXES)).not.toThrow();
+    expect(() => publish(withNote('+++<b>x</b>+++ restarts.'), ONLY_FIXES)).toThrow(/passthrough/);
+    expect(() => buildCandidate({ tag: 'operator/v1.2.3', date: '2026-01-02', body: '', changes: withNote('See #12.') })).toThrow(/issue or pull request number/);
+  });
+
+  test('text from an internal entry cannot come back through curation', () => {
+    const changes = doc([entry({}), entry({ kind: 'Changed', body: 'Internal: set `SECRET_FLAG` in CI.', audience: 'internal', upgrade: null })]);
+    const body = `${BODY}\n* Internal: set \`SECRET_FLAG\` in CI.\n`;
+    const curated = ONLY_FIXES.replace('every pool.', 'every pool. Set `SECRET_FLAG`.');
+    expect(() => publishSection({
+      tag: 'operator/v1.2.3', curated, sourceBody: body, changes, pageContent: PAGE, chartEntry: { version: '1.2.3', appVersion: null },
+    })).toThrow(/not in the published changelog entries: `SECRET_FLAG`/);
+  });
+
+  test('curation may not drop or merge an entry declared public', () => {
+    const changes = doc([entry({}), entry({ body: 'The operator keeps the `app` label on restart.' })]);
+    expect(() => publish(changes, ONLY_FIXES)).toThrow(/"=== Bug fixes" has 1 entries, but 2 changelog entries of that kind are declared public/);
+    const undeclared = doc([entry({}), entry({ audience: null, upgrade: null })]);
+    expect(publish(undeclared, ONLY_FIXES).status).toBe('ok');
+  });
+
+  test('a release whose entries are all internal has nothing to publish', () => {
+    const changes = doc([entry({ audience: 'internal', upgrade: null })]);
+    expect(buildCandidate({ tag: 'operator/v1.2.3', date: '2026-01-02', body: '', changes })).toMatchObject({ status: 'empty' });
+  });
+
+  test('partly declared: a curated item that differs only in punctuation is not repeated', () => {
+    const changes = doc([
+      entry({ upgrade: { effects: ['default-changed'], note: 'The default mode changes.', action: null } }),
+      entry({ kind: 'Added', body: 'Widget CRD: new `spec.mode` field.', audience: null, upgrade: null }),
+    ]);
+    const curated = CURATED.replace('* Brokers restart once.', '* The default mode changes\n* Brokers restart once.');
+    expect(publish(changes, curated).section.split('====')[1].trim().split('\n')).toEqual(['* The default mode changes.', '* Brokers restart once.']);
+  });
+
+  test('page: an anchored heading after the sections stays out of the last section', () => {
+    const page = `= T\n\n${SUMMARY_START}\n${SUMMARY_END}\n\n[#older]\n== Older versions\n\nFooter.\n`;
+    const section = '[#v1-2-3]\n== v1.2.3 (2026-01-02)\n// release-notes-source: operator/v1.2.3 sha256=' + hashBody('x') + ' upgrade-notes=declared\n\nSummary.\n\n=== Bug fixes\n\n* A fix.\n';
+    const first = updatePage(page, section, hashBody('x'));
+    expect(first.content.endsWith('* A fix.\n\n[#older]\n== Older versions\n\nFooter.\n')).toBe(true);
+    expect(updatePage(first.content, section, hashBody('x')).status).toBe('skipped');
+    const again = updatePage(first.content, section.replace('Summary.', 'New.'), hashBody('y'));
+    expect(again.content.match(/\[#older\]/g)).toHaveLength(1);
+  });
+
+  test('page: a section with no summary paragraph gets an empty highlights cell', () => {
+    const page = `= T\n\n${SUMMARY_START}\n${SUMMARY_END}\n`;
+    const section = '== v1.2.3 (2026-01-02)\n\n=== Bug fixes\n\n* A fix.\n';
+    expect(updatePage(page, section, 'x').content).toContain('2026-01-02\n|\n|No');
+  });
+
+  test('parseChangieBody keeps fence indentation and unusual info strings', () => {
+    const body = '### Fixed\n* Lead.\n\n  ```yaml title="x"\n  a:\n    b: 1\n  ```\n* Next.\n  - sub one\n  - sub two\n';
+    const [first, second] = parseChangieBody(body).sections[0].entries;
+    expect(first.details[0]).toEqual(['[,yaml]', '----', 'a:', '  b: 1', '----']);
+    expect(second.lead).toBe('Next.');
+    expect(second.details[0]).toEqual(['** sub one', '** sub two']);
   });
 });

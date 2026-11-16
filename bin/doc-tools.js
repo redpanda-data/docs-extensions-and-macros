@@ -2417,7 +2417,14 @@ automation
  * declared on each one. Entries declared internal are left out. The upgrade
  * notes the entries declare become "Before you upgrade" exactly as written.
  * When every entry declares its upgrade effects, nothing else is added to
- * that list. A release without changes.json works as before.
+ * that list. The curated section is then checked against the published
+ * entries only, and may not have fewer entries of a kind than are declared
+ * public. If every entry is internal, phase 1 prints nothing and exits 0. A
+ * release without changes.json works as before.
+ *
+ * Phase 2 also rejects markup that release notes do not need (includes,
+ * macros, passthroughs, attribute entries), links and listing lines that the
+ * source does not have, and a block that is never closed.
  *
  * --lint checks a whole page for text that points into private systems and
  * exits 1 if it finds any.
@@ -2451,7 +2458,8 @@ automation
   .description('Generate release notes for the Redpanda Operator and Helm charts from a changelog release body')
   .option('--tag <tag>', 'GA release tag, such as operator/v26.2.6 or charts/redpanda/v26.2.6')
   .option('--body <file>', 'Phase 1: release body markdown to build a candidate from (relative to repo root, must stay inside the repository)')
-  .option('--date <date>', 'Phase 1: release date as YYYY-MM-DD')
+  .option('--date <date>', 'Release date as YYYY-MM-DD. Required in phase 1. In phase 2, the curated section must carry it')
+  .option('--public-body <file>', 'Phase 1 with --changes: also write the published entries as Markdown to this file (relative to repo root, must stay inside the repository). Give the curation step this file in place of the release body, which still has the entries declared internal')
   .option('--section-only', 'Phase 1: print the candidate section')
   .option('--section-file <file>', 'Phase 2: the curated section to check and insert (relative to repo root, must stay inside the repository)')
   .option('--source-body <file>', 'Phase 2: the release body the curated section came from (relative to repo root, must stay inside the repository)')
@@ -2496,9 +2504,10 @@ automation
       if (hasBody === hasSection) {
         throw new Error('Provide exactly one of --body (phase 1) or --section-file (phase 2).')
       }
+      // Status lines go to stderr: phase 1 prints the candidate on stdout.
       const parsedTag = parseTag(options.tag)
       if (!parsedTag) {
-        console.log(`${LOG_TAG} Skipped: not a GA tag of a published project: ${options.tag}`)
+        console.error(`${LOG_TAG} Skipped: not a GA tag of a published project: ${options.tag}`)
         return
       }
 
@@ -2511,8 +2520,18 @@ automation
           body: fs.readFileSync(readInside(options.body, '--body'), 'utf8'),
           changes: options.changes ? fs.readFileSync(readInside(options.changes, '--changes'), 'utf8') : undefined,
         })
+        if (result.status === 'empty') {
+          // Nothing to publish. The candidate is empty and the exit code is 0,
+          // so the caller can tell this from a failure.
+          console.error(`${LOG_TAG} Nothing to publish: ${result.reason}.`)
+          return
+        }
         for (const kind of result.unknownKinds) {
           console.warn(`${LOG_TAG} WARN: skipped unknown changelog kind "${kind}".`)
+        }
+        if (options.publicBody) {
+          if (!result.publicBody) throw new Error('--public-body needs --changes.')
+          fs.writeFileSync(resolveInsideRepo(repoRoot, options.publicBody, '--public-body'), result.publicBody, 'utf8')
         }
         process.stdout.write(result.section)
         return
@@ -2533,6 +2552,7 @@ automation
         curated: fs.readFileSync(readInside(options.sectionFile, '--section-file'), 'utf8'),
         sourceBody: fs.readFileSync(readInside(options.sourceBody, '--source-body'), 'utf8'),
         changes: options.changes ? fs.readFileSync(readInside(options.changes, '--changes'), 'utf8') : undefined,
+        date: options.date,
         pageContent: fs.readFileSync(pagePath, 'utf8'),
         chartEntry,
       })

@@ -12,7 +12,8 @@
 // `upgrade: null`. A release with any such entry is only partly declared, and
 // the curation step may still add upgrade notes for those entries.
 
-const { CATEGORIES, stripPrivateReferences, markdownInlineToAsciiDoc } = require('./changie');
+const { CATEGORIES, markdownInlineToAsciiDoc } = require('./changie');
+const { findLeaks, findMarkup } = require('./section');
 
 const SCHEMA = 1;
 const KINDS = CATEGORIES.map(([kind]) => kind);
@@ -26,7 +27,7 @@ const EFFECTS = [
   'telemetry-changed',
 ];
 
-const clean = (text) => markdownInlineToAsciiDoc(stripPrivateReferences(text)).replace(/\s+/g, ' ').trim();
+const TITLES = Object.fromEntries(CATEGORIES);
 
 /**
  * Parses and validates a `changes.json` document.
@@ -104,22 +105,49 @@ function isFullyDeclared(changes) {
 
 /**
  * Builds the "Before you upgrade" items the engineers declared: each entry's
- * upgrade note, followed by its upgrade action if it has one.
+ * upgrade note, followed by its upgrade action if it has one. These lines are
+ * published as written, with no curation step in between, so a note that
+ * points into private systems or carries markup is an error, not something to
+ * repair quietly.
  *
  * @param {{entries: Array}} changes - A parsed document.
  * @return {string[]} One `* ` line per entry with upgrade effects, in
- *   changelog order, with private references removed.
+ *   changelog order.
+ * @throws {Error} If a note or action has a private reference, or markup
+ *   beyond code spans and emphasis.
  */
 function declaredUpgradeNotes(changes) {
   const lines = [];
   for (const entry of publishedEntries(changes)) {
     if (!entry.upgrade || !entry.upgrade.effects.length) continue;
-    const parts = [clean(entry.upgrade.note)];
-    if (entry.upgrade.action) parts.push(clean(entry.upgrade.action));
-    const line = `* ${parts.filter(Boolean).join(' ')}`;
+    const parts = [entry.upgrade.note, entry.upgrade.action].filter(Boolean).map((text) => text.replace(/\s+/g, ' ').trim());
+    for (const part of parts) {
+      const problems = [...findLeaks(part), ...findMarkup(part)];
+      if (/https?:\/\//.test(part)) problems.push({ kind: 'link', match: part.match(/https?:\/\/\S+/)[0] });
+      if (problems.length) {
+        throw new Error(`An upgrade note in changes.json cannot be published as written (${problems.map((f) => `${f.kind} "${f.match}"`).join('; ')}): ${JSON.stringify(part)}. Fix the entry in the source repository.`);
+      }
+    }
+    const line = `* ${parts.map(markdownInlineToAsciiDoc).join(' ')}`;
     if (!lines.includes(line)) lines.push(line);
   }
   return lines;
+}
+
+/**
+ * Counts, per page category, the entries their engineers declared public.
+ * Curation may not drop or merge those.
+ *
+ * @param {{entries: Array}} changes - A parsed document.
+ * @return {Object<string, number>} Category title to count.
+ */
+function declaredPublicCounts(changes) {
+  const counts = {};
+  for (const entry of changes.entries) {
+    if (entry.audience !== 'public') continue;
+    counts[TITLES[entry.kind]] = (counts[TITLES[entry.kind]] || 0) + 1;
+  }
+  return counts;
 }
 
 /**
@@ -166,6 +194,7 @@ module.exports = {
   publishedEntries,
   isFullyDeclared,
   declaredUpgradeNotes,
+  declaredPublicCounts,
   changesToMarkdown,
   changesText,
 };

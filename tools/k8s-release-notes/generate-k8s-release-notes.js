@@ -15,6 +15,8 @@ const {
   parseChanges,
   isFullyDeclared,
   declaredUpgradeNotes,
+  declaredPublicCounts,
+  publishedEntries,
   changesToMarkdown,
   changesText,
 } = require('./changes');
@@ -32,7 +34,11 @@ const LOG_TAG = '[k8s-release-notes]';
  * @param {string} [options.changes] - The release's `changes.json` text. When
  *   given, the candidate is built from it: entries declared internal are left
  *   out, and the declared upgrade notes are listed under "Before you upgrade".
- * @return {{status: 'ok'|'skipped', reason?: string, section?: string, unknownKinds?: string[]}}
+ * @return {{status: 'ok'|'skipped'|'empty', reason?: string, section?: string, unknownKinds?: string[], publicBody?: string}}
+ *   `empty` when the structured entries are all declared internal: the
+ *   release has nothing to publish. `publicBody` is the published entries as
+ *   Markdown, which is what the curation step may read in place of the raw
+ *   release body.
  */
 function buildCandidate({ tag, date, body, changes }) {
   const parsed = parseTag(tag);
@@ -42,9 +48,13 @@ function buildCandidate({ tag, date, body, changes }) {
     return { status: 'ok', section: renderCandidate({ version: parsed.version, date, sections }), unknownKinds };
   }
   const doc = parseChanges(changes, tag);
-  const { sections, unknownKinds } = parseChangieBody(changesToMarkdown(doc));
+  if (!publishedEntries(doc).length) {
+    return { status: 'empty', reason: `every changelog entry of ${tag} is declared internal` };
+  }
+  const publicBody = changesToMarkdown(doc);
+  const { sections, unknownKinds } = parseChangieBody(publicBody);
   const upgrade = { lines: declaredUpgradeNotes(doc), complete: isFullyDeclared(doc) };
-  return { status: 'ok', section: renderCandidate({ version: parsed.version, date, sections, upgrade }), unknownKinds };
+  return { status: 'ok', section: renderCandidate({ version: parsed.version, date, sections, upgrade }), unknownKinds, publicBody };
 }
 
 /**
@@ -87,11 +97,14 @@ async function waitForChart({ chart, version, fetchEntries, waitSeconds = 0, int
  *   chart's entry in the Helm index. Null means the version cannot be installed
  *   yet, which is an error: the section carries a command that pins it.
  * @param {string} [options.changes] - The release's `changes.json` text. When
- *   given, the upgrade notes its entries declare are written as declared.
+ *   given, the upgrade notes its entries declare are written as declared, and
+ *   the curated section is checked against the published entries only.
+ * @param {string} [options.date] - The release date. When given, the curated
+ *   heading must carry it.
  * @return {{status: 'ok'|'skipped', action?: string, reason?: string, section?: string, content?: string}}
  * @throws {Error} If the curated section fails a check or the chart is not published.
  */
-function publishSection({ tag, curated, sourceBody, pageContent, chartEntry, changes }) {
+function publishSection({ tag, curated, sourceBody, pageContent, chartEntry, changes, date }) {
   const parsed = parseTag(tag);
   if (!parsed) return { status: 'skipped', reason: `not a GA tag of a published project: ${tag}` };
   if (!chartEntry) {
@@ -100,7 +113,12 @@ function publishSection({ tag, curated, sourceBody, pageContent, chartEntry, cha
   let declared;
   if (changes != null) {
     const doc = parseChanges(changes, tag);
-    declared = { lines: declaredUpgradeNotes(doc), complete: isFullyDeclared(doc), text: changesText(doc) };
+    declared = {
+      lines: declaredUpgradeNotes(doc),
+      complete: isFullyDeclared(doc),
+      text: changesText(doc),
+      publicCounts: declaredPublicCounts(doc),
+    };
   }
   const sourceHash = hashSource(sourceBody, changes);
   const section = assembleSection({
@@ -110,6 +128,7 @@ function publishSection({ tag, curated, sourceBody, pageContent, chartEntry, cha
     project: parsed.project,
     sourceBody,
     appVersion: chartEntry.appVersion,
+    date,
     declared,
     sourceHash,
   });

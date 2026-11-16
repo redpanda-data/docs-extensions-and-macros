@@ -59,7 +59,7 @@ const TAG_RE = /^(operator|charts\/redpanda|charts\/console)\/v(\d+\.\d+\.\d+)$/
 /**
  * Splits a release tag into its project and version. Only GA tags of the
  * published projects resolve; a prerelease (`operator/v26.2.1-beta.3`) or a
- * project with no customer-facing page (`gotohelm/v1.1.0`) returns null, which
+ * project with no customer-facing page returns null, which
  * callers treat as a clean no-op.
  *
  * @param {string} tag - A tag such as `operator/v26.2.6` or `charts/redpanda/v26.2.6`.

@@ -8,7 +8,10 @@ const { UPGRADE_TITLE, sectionId } = require('./section');
 const SUMMARY_START = '// release-summary:start';
 const SUMMARY_END = '// release-summary:end';
 const VERSION_HEADING_RE = /^==\s+v(\d+\.\d+\.\d+)\s+\((\d{4}-\d{2}-\d{2})\)\s*$/;
-const SOURCE_RE = /^\/\/ release-notes-source: (\S+) sha256=([0-9a-f]{64})\s*$/;
+const SOURCE_RE = /^\/\/ release-notes-source: (\S+) sha256=([0-9a-f]{64})(?: upgrade-notes=\w+)?\s*$/;
+const ANCHOR_RE = /^\[#[\w-]+\]\s*$/;
+
+// Pages are read and written with LF line endings.
 
 /**
  * Splits a page into the text before its version sections, the sections, and
@@ -24,7 +27,7 @@ function splitPage(pageContent) {
   lines.forEach((line, i) => {
     const m = line.match(VERSION_HEADING_RE);
     if (!m) return;
-    const anchored = i > 0 && /^\[#[\w-]+\]\s*$/.test(lines[i - 1]);
+    const anchored = i > 0 && ANCHOR_RE.test(lines[i - 1]);
     starts.push({ index: anchored ? i - 1 : i, heading: i, version: m[1], date: m[2] });
   });
   if (!starts.length) {
@@ -33,11 +36,13 @@ function splitPage(pageContent) {
     const from = Math.max(lines.indexOf(SUMMARY_END), 0);
     let cut = lines.findIndex((l, i) => i > from && /^==\s/.test(l));
     if (cut === -1) cut = lines.length;
+    // An anchor line belongs to the heading under it.
+    else if (cut > 0 && ANCHOR_RE.test(lines[cut - 1])) cut -= 1;
     return { head: lines.slice(0, cut), sections: [], tail: lines.slice(cut) };
   }
   let end = lines.length;
   for (let i = starts[starts.length - 1].heading + 1; i < lines.length; i++) {
-    if (/^==\s/.test(lines[i])) { end = i; break; }
+    if (/^==\s/.test(lines[i])) { end = ANCHOR_RE.test(lines[i - 1]) ? i - 1 : i; break; }
   }
   const sections = starts.map((s, n) => {
     const stop = n + 1 < starts.length ? starts[n + 1].index : end;
@@ -79,7 +84,10 @@ function renderSummary(sections) {
       const body = s.lines.slice(s.lines.findIndex((l) => VERSION_HEADING_RE.test(l)) + 1);
       const first = body.findIndex((l) => l.trim() && !/^\/\//.test(l));
       const summary = [];
-      for (let i = first; i !== -1 && i < body.length && body[i].trim(); i++) summary.push(body[i].trim());
+      // A section with no summary paragraph gets an empty cell, not its first
+      // heading or block.
+      const isParagraph = first !== -1 && !/^(=+\s|[*.[|]|-{4,}|={4,})/.test(body[first]);
+      for (let i = first; isParagraph && i < body.length && body[i].trim(); i++) summary.push(body[i].trim());
       const hasUpgrade = s.lines.includes(`.${UPGRADE_TITLE}`);
       out.push(
         `|<<${id},v${s.version}>> +`,
