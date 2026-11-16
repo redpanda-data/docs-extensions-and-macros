@@ -3,6 +3,7 @@ const renderYamlList = require('./renderYamlList');
 const handlebars = require('handlebars');
 const { connectFieldName } = require('./flattenConnectFields');
 const { escapePlaceholderBraces } = require('./renderConnectDescription');
+const { connectDisplayType, inlineConnectDefault } = require('./formatConnectDefault');
 
 /**
  * Renders the children of a configuration object into AsciiDoc.
@@ -28,34 +29,7 @@ module.exports = function renderConnectFields(children, prefix = '') {
   sorted.forEach(child => {
     if (child.is_deprecated || !child.name) return;
 
-    // Normalize types
-    let displayType;
-    const isArrayTitle = typeof child.name === 'string' && child.name.endsWith('[]');
-    if (isArrayTitle) {
-      displayType = 'array<object>';
-    } else if (child.kind === 'map') {
-      // Maps always render as `object`, regardless of value type.
-      displayType = 'object';
-    } else if (child.kind === 'array' || child.kind === 'list' || child.kind === '2darray') {
-      // Arrays render as `array<element>` when the element type is known,
-      // for example `array<string>`. 2D arrays nest the element type, for
-      // example `array<array<string>>`. Unknown element types render as
-      // plain `array`. A `type` of `array` (used by some overrides to force
-      // the old plain-array display) is treated as unknown so the field
-      // renders as `array` rather than the degenerate `array<array>`.
-      const elementType = (typeof child.type === 'string' && child.type !== '' && child.type !== 'unknown' && child.type !== 'array')
-        ? child.type
-        : null;
-      if (elementType) {
-        displayType = child.kind === '2darray'
-          ? `array<array<${elementType}>>`
-          : `array<${elementType}>`;
-      } else {
-        displayType = 'array';
-      }
-    } else {
-      displayType = child.type;
-    }
+    const displayType = connectDisplayType(child);
 
     let block = '';
     // Only append [] if kind is array and name does not already end with [].
@@ -102,23 +76,15 @@ module.exports = function renderConnectFields(children, prefix = '') {
 
     block += `*Type*: \`${displayType}\`\n\n`;
 
-    // Default value
+    // Default value. The inline text comes from formatConnectDefault's
+    // helper, which the connectval: macro shares, so the two never disagree.
     if (child.default !== undefined) {
-      // Empty array
-      if (Array.isArray(child.default) && child.default.length === 0) {
-        block += `*Default*: \`[]\`\n\n`;
-      }
-      // Empty object
-      else if (
-        child.default !== null &&
-        typeof child.default === 'object' &&
-        !Array.isArray(child.default) &&
-        Object.keys(child.default).length === 0
-      ) {
-        block += `*Default*: \`{}\`\n\n`;
+      const inline = inlineConnectDefault(child.default);
+      if (inline !== undefined) {
+        block += `*Default*: \`${inline}\`\n\n`;
       }
       // Complex object/array
-      else if (typeof child.default === 'object') {
+      else {
         const defYaml = yaml.stringify(child.default, {
           defaultStringType: 'QUOTE_DOUBLE',
           defaultKeyType: 'PLAIN',
@@ -126,17 +92,6 @@ module.exports = function renderConnectFields(children, prefix = '') {
           simpleKeys: false
         }).trim();
         block += `*Default*:\n[source,yaml]\n----\n${defYaml}\n----\n\n`;
-      }
-      // Primitive
-      else {
-        const display = typeof child.default === 'string'
-          ? (child.default.startsWith('"') && child.default.endsWith('"')
-              ? child.default
-              : child.default === ''
-              ? '""'
-              : child.default)
-          : String(child.default);
-        block += `*Default*: \`${display}\`\n\n`;
       }
     }
 

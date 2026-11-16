@@ -1,0 +1,18 @@
+= generate
+// Stand-in page for the showcase build: the headings the generated page has,
+// so connect: and blobl: links land on real anchors. Generated from
+// connect-4.114.0.json in this component.
+
+The generate input.
+
+== Fields
+
+=== `auto_replay_nacks`
+
+=== `batch_size`
+
+=== `count`
+
+=== `interval`
+
+=== `mapping`

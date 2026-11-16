@@ -546,7 +546,9 @@ An operator or Helm chart release supports its own Redpanda version and one mino
 
 The release lines come from the fetched operator tags, so no version map needs updating when a line ships. The extension reads up to three pages (300 tags) of the operator's Docker Hub tags, newest pushes first.
 
-The chart version of a line is the newest stable `charts/redpanda/v<major>.<minor>.*` tag in the redpanda-operator repository, which marks a published chart (what `helm search repo` reports). A release branch's `Chart.yaml` can be ahead of the published chart, so the extension reads it only when the line has no chart tag, trying each path the chart has used in order: `charts/redpanda/chart/Chart.yaml`, then `charts/redpanda/Chart.yaml` (the layout of `release/v25.1.x`).
+The chart version of a line is the newest version of the line in the public Helm repository index (`\https://charts.redpanda.com/index.yaml`), which lists the published charts (what `helm search repo` reports). The index needs no token. For a beta operator release, the extension takes the newest prerelease chart of the line from the index.
+
+The redpanda-operator repository is private, so the extension asks it only when the index has no version for the line, and only a token that can read the repository gets an answer. It then takes the newest stable `charts/redpanda/v<major>.<minor>.*` tag. A release branch's `Chart.yaml` can be ahead of the published chart, so the extension reads it only when the line has no chart tag, trying each path the chart has used in order: `charts/redpanda/chart/Chart.yaml`, then `charts/redpanda/Chart.yaml` (the layout of `release/v25.1.x`).
 
 ==== Seed a fallback in antora.yml
 
