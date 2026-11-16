@@ -191,14 +191,24 @@ function parseChangieBody(body) {
  * @param {string} options.version - The bare `X.Y.Z` version.
  * @param {string} options.date - The release date as `YYYY-MM-DD`.
  * @param {Array} options.sections - Sections from parseChangieBody.
+ * @param {{lines: string[], complete: boolean}} [options.upgrade] - The
+ *   upgrade notes the entries declare, when the release has structured
+ *   entries. `complete` says whether every entry declares its upgrade effects.
  * @return {string} The candidate section, ending in one newline.
  */
-function renderCandidate({ version, date, sections }) {
+function renderCandidate({ version, date, sections, upgrade }) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) {
     throw new Error(`Invalid date: ${JSON.stringify(date)}. Expected YYYY-MM-DD.`);
   }
   if (!sections.length) throw new Error('The release body has no changelog entries.');
   const lines = [`== v${version} (${date})`, ''];
+  if (upgrade) {
+    // Tells the curation step who owns the upgrade notes. `declared`: the
+    // list below is complete, add nothing. `partial`: some entries predate
+    // the declared fields, so their upgrade effects may still be added.
+    lines.push(`// upgrade-notes: ${upgrade.complete ? 'declared' : 'partial'}`, '');
+    if (upgrade.lines.length) lines.push('=== Before you upgrade', '', ...upgrade.lines, '');
+  }
   for (const section of sections) {
     lines.push(`=== ${section.title}`, '');
     for (const entry of section.entries) {

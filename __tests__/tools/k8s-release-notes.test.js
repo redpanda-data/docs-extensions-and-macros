@@ -17,6 +17,13 @@ const {
 } = require('../../tools/k8s-release-notes/section');
 const { splitPage, updatePage, SUMMARY_START, SUMMARY_END } = require('../../tools/k8s-release-notes/page');
 const {
+  parseChanges,
+  isFullyDeclared,
+  declaredUpgradeNotes,
+  changesToMarkdown,
+} = require('../../tools/k8s-release-notes/changes');
+const { hashSource } = require('../../tools/k8s-release-notes/section');
+const {
   buildCandidate,
   waitForChart,
   publishSection,
@@ -375,5 +382,102 @@ describe('orchestration', () => {
 
   test('waitForChart gives up when there is no wait', async () => {
     expect(await waitForChart({ chart: 'operator', version: '1.2.3', fetchEntries: async () => [] })).toBeNull();
+  });
+});
+
+describe('structured entries (changes.json)', () => {
+  const entry = (over) => ({
+    kind: 'Fixed', body: 'The operator keeps the `app` label.', audience: 'public',
+    upgrade: { effects: [], note: null, action: null }, ...over,
+  });
+  const doc = (entries) => JSON.stringify({ schema: 1, tag: 'operator/v1.2.3', project: 'operator', version: 'v1.2.3', entries });
+  const DECLARED = doc([
+    entry({ kind: 'Added', body: 'Widget CRD: new `spec.mode` field.\n\nSet it to pick a mode.\n* not an entry' }),
+    entry({
+      upgrade: { effects: ['restart-brokers'], note: 'Brokers restart once on upgrade (K8S-123).', action: 'Set `image.tag` first.' },
+    }),
+    entry({ kind: 'Changed', body: 'CI: forward the cache key.', audience: 'internal', upgrade: null }),
+  ]);
+  const PARTIAL = doc([
+    entry({ upgrade: { effects: ['default-changed'], note: 'The default mode changes.', action: null } }),
+    entry({ kind: 'Added', body: 'Widget CRD: new `spec.mode` field.', audience: null, upgrade: null }),
+  ]);
+  const NOTE = '* Brokers restart once on upgrade. Set `image.tag` first.';
+
+  test('parseChanges validates the document', () => {
+    expect(parseChanges(DECLARED, 'operator/v1.2.3').entries).toHaveLength(3);
+    expect(() => parseChanges('{', 'operator/v1.2.3')).toThrow(/not valid JSON/);
+    expect(() => parseChanges(DECLARED.replace('"schema":1', '"schema":2'), 'operator/v1.2.3')).toThrow(/schema 2/);
+    expect(() => parseChanges(DECLARED, 'operator/v9.9.9')).toThrow(/is for "operator\/v1.2.3"/);
+    expect(() => parseChanges(doc([entry({ kind: 'Security' })]), 'operator/v1.2.3')).toThrow(/unknown kind/);
+    expect(() => parseChanges(doc([entry({ audience: 'everyone' })]), 'operator/v1.2.3')).toThrow(/unknown audience/);
+    expect(() => parseChanges(doc([entry({ upgrade: { effects: ['reboot'], note: 'x', action: null } })]), 'operator/v1.2.3'))
+      .toThrow(/unknown upgrade effects/);
+    expect(() => parseChanges(doc([entry({ upgrade: { effects: ['restart-brokers'], note: null, action: null } })]), 'operator/v1.2.3'))
+      .toThrow(/no upgrade note/);
+    expect(() => parseChanges(doc([entry({ upgrade: { effects: [], note: 'x', action: null } })]), 'operator/v1.2.3'))
+      .toThrow(/declares no upgrade effects/);
+  });
+
+  test('internal entries are left out and upgrade notes come from the entries', () => {
+    const parsed = parseChanges(DECLARED, 'operator/v1.2.3');
+    expect(isFullyDeclared(parsed)).toBe(true);
+    expect(declaredUpgradeNotes(parsed)).toEqual([NOTE]);
+    const markdown = changesToMarkdown(parsed);
+    expect(markdown).not.toContain('CI: forward');
+    expect(markdown).toContain('### Added\n* Widget CRD: new `spec.mode` field.\n\n  Set it to pick a mode.\n  * not an entry\n### Fixed');
+    expect(isFullyDeclared(parseChanges(PARTIAL, 'operator/v1.2.3'))).toBe(false);
+  });
+
+  test('the candidate lists declared notes and says who owns the list', () => {
+    const declared = buildCandidate({ tag: 'operator/v1.2.3', date: '2026-01-02', body: '', changes: DECLARED }).section;
+    expect(declared.startsWith(`== v1.2.3 (2026-01-02)\n\n// upgrade-notes: declared\n\n=== Before you upgrade\n\n${NOTE}\n\n=== New features`)).toBe(true);
+    expect(declared).not.toContain('CI: forward');
+    expect(declared.match(/^\* /gm)).toHaveLength(3);
+    const partial = buildCandidate({ tag: 'operator/v1.2.3', date: '2026-01-02', body: '', changes: PARTIAL }).section;
+    expect(partial).toContain('// upgrade-notes: partial');
+    const none = buildCandidate({ tag: 'operator/v1.2.3', date: '2026-01-02', body: '', changes: doc([entry({})]) }).section;
+    expect(none).toContain('// upgrade-notes: declared');
+    expect(none).not.toContain('Before you upgrade');
+  });
+
+  const publish = (changes, curated) => publishSection({
+    tag: 'operator/v1.2.3', curated, sourceBody: BODY, changes, pageContent: PAGE, chartEntry: { version: '1.2.3', appVersion: null },
+  });
+  const callout = (section) => section.split('====')[1].trim().split('\n');
+
+  test('fully declared: the callout is the declared notes, whatever curation wrote', () => {
+    const result = publish(DECLARED, `// upgrade-notes: declared\n${CURATED}`);
+    expect(callout(result.section)).toEqual([NOTE]);
+    expect(result.section).toContain(`sha256=${hashSource(BODY, DECLARED)}`);
+    expect(result.section).not.toContain('upgrade-notes');
+  });
+
+  test('fully declared with no effects: no callout', () => {
+    expect(publish(doc([entry({})]), CURATED).section).not.toContain('[IMPORTANT]');
+  });
+
+  test('partly declared: declared notes first, then curated ones that are new', () => {
+    const curated = CURATED.replace('* Brokers restart once.', '* The default mode changes.\n* Brokers restart once.');
+    expect(callout(publish(PARTIAL, curated).section)).toEqual(['* The default mode changes.', '* Brokers restart once.']);
+  });
+
+  test('identifiers in a curated section may come from the entries', () => {
+    const curated = CURATED.replace('every pool.', 'every pool. Set `image.tag` first.');
+    expect(() => publish(undefined, curated)).toThrow(/not in the release body: `image.tag`/);
+    expect(publish(DECLARED, curated).status).toBe('ok');
+  });
+
+  test('a changed changes.json rebuilds the section', () => {
+    const first = publish(DECLARED, CURATED);
+    const again = publishSection({
+      tag: 'operator/v1.2.3', curated: CURATED, sourceBody: BODY, changes: DECLARED, pageContent: first.content, chartEntry: { version: '1.2.3', appVersion: null },
+    });
+    expect(again.status).toBe('skipped');
+    const changed = publishSection({
+      tag: 'operator/v1.2.3', curated: CURATED, sourceBody: BODY, changes: PARTIAL, pageContent: first.content, chartEntry: { version: '1.2.3', appVersion: null },
+    });
+    expect(changed.action).toBe('replaced');
+    expect(hashSource(BODY)).toBe(hashBody(BODY));
   });
 });

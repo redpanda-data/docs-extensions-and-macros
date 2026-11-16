@@ -34,6 +34,20 @@ function hashBody(body) {
 }
 
 /**
+ * Hashes everything a section is built from: the release body and, when the
+ * release has structured entries, that document too. A change to either one
+ * rebuilds the section.
+ *
+ * @param {string} body - The raw release body.
+ * @param {string} [changesText] - The raw `changes.json` text, if any.
+ * @return {string} The SHA-256 hex digest. With no structured entries it is
+ *   the hash of the body alone.
+ */
+function hashSource(body, changesText) {
+  return changesText == null ? hashBody(body) : hashBody(`${body}\n${changesText}`);
+}
+
+/**
  * Returns the anchor ID of a version's section.
  *
  * @param {string} version - The bare `X.Y.Z` version.
@@ -51,7 +65,8 @@ function sectionId(version) {
  * @throws {Error} If the section does not follow the curated format.
  */
 function parseCurated(curated) {
-  const lines = String(curated).replace(/\r\n?/g, '\n').split('\n');
+  // Comment lines carry instructions for the curation step, not content.
+  const lines = String(curated).replace(/\r\n?/g, '\n').split('\n').filter((l) => !/^\/\//.test(l));
   const headings = lines.filter((l) => /^==\s/.test(l));
   if (headings.length !== 1) {
     throw new Error(`A curated section needs exactly one "== vX.Y.Z (YYYY-MM-DD)" heading; found ${headings.length}.`);
@@ -175,11 +190,18 @@ function findUnsupported(curated, sourceBody, version) {
  * @param {Object} options.project - The project entry from projects.js.
  * @param {string} options.sourceBody - The raw release body the section came from.
  * @param {string} [options.appVersion] - The application version the chart deploys by default.
+ * @param {{lines: string[], complete: boolean, text: string}} [options.declared] - The
+ *   upgrade notes the release's structured entries declare, whether they are
+ *   complete, and the entries' text. Declared notes are written as given.
+ *   When they are complete, the curated section's own upgrade items are
+ *   dropped. Otherwise its items follow the declared ones.
+ * @param {string} [options.sourceHash] - The hash recorded on the source line.
+ *   Defaults to the hash of the release body.
  * @return {string} The section, ending in one newline.
  * @throws {Error} If the curated text is malformed, names a different version,
  *   points into private systems, or contains identifiers the source lacks.
  */
-function assembleSection({ curated, tag, version, project, sourceBody, appVersion }) {
+function assembleSection({ curated, tag, version, project, sourceBody, appVersion, declared, sourceHash }) {
   const parsed = parseCurated(curated);
   if (parsed.version !== version) {
     throw new Error(`Curated section heading (v${parsed.version}) does not match the requested tag (${tag}).`);
@@ -188,7 +210,8 @@ function assembleSection({ curated, tag, version, project, sourceBody, appVersio
   if (leaks.length) {
     throw new Error(`Curated section points into private systems: ${leaks.map((f) => `${f.kind} "${f.match}" (line ${f.line})`).join('; ')}.`);
   }
-  const invented = findUnsupported(curated, sourceBody, version);
+  const sourceText = declared ? `${sourceBody}\n${declared.text}` : sourceBody;
+  const invented = findUnsupported(curated, sourceText, version);
   if (invented.length) {
     throw new Error(`Curated section contains identifiers or versions that are not in the release body: ${invented.join(', ')}.`);
   }
@@ -197,13 +220,18 @@ function assembleSection({ curated, tag, version, project, sourceBody, appVersio
   const lines = [
     `[#${id}]`,
     `== v${version} (${parsed.date})`,
-    `// release-notes-source: ${tag} sha256=${hashBody(sourceBody)}`,
+    `// release-notes-source: ${tag} sha256=${sourceHash || hashBody(sourceBody)}`,
     '',
     parsed.summary,
     '',
   ];
-  if (parsed.upgrade.length) {
-    lines.push(`.${UPGRADE_TITLE}`, '[IMPORTANT]', '====', ...parsed.upgrade, '====', '');
+  let upgrade = parsed.upgrade;
+  if (declared) {
+    const extra = declared.complete ? [] : parsed.upgrade.filter((line) => !declared.lines.includes(line));
+    upgrade = [...declared.lines, ...extra];
+  }
+  if (upgrade.length) {
+    lines.push(`.${UPGRADE_TITLE}`, '[IMPORTANT]', '====', ...upgrade, '====', '');
   }
   lines.push('.Install or upgrade to this version', '[,bash]', '----', ...project.command(version), '----', '');
   const after = [];
@@ -220,6 +248,7 @@ function assembleSection({ curated, tag, version, project, sourceBody, appVersio
 module.exports = {
   UPGRADE_TITLE,
   hashBody,
+  hashSource,
   sectionId,
   parseCurated,
   findLeaks,

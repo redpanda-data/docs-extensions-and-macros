@@ -2794,7 +2794,7 @@ npx doc-tools generate redpanda-release-notes \
 
 === generate k8s-release-notes
 
-Builds release notes for the Redpanda Operator and the Helm charts from the operator repository's changelog (the body of each GitHub Release there). The tag picks the project and the target page: `operator/vX.Y.Z`, `charts/redpanda/vX.Y.Z`, or `charts/console/vX.Y.Z`. Any other tag, including a prerelease, is a no-op. Phase 1 (--body --section-only) prints a candidate section: Markdown converted to AsciiDoc, hard-wrapped paragraphs joined, and issue numbers, ticket keys, and links into the redpanda-data GitHub organization removed. Phase 2 (--section-file --source-body) takes the curated section and checks it: its headings, that nothing in it points into private systems, and that every code span and version number in it also appears in the release body. It then adds the anchor, the source hash line, the "Before you upgrade" callout, and a pinned upgrade command, puts the section into the page in version order, and rebuilds the summary table at the top of the page. The chart version must be listed in the public Helm index, so the command works. A page that already holds the version from the same body is left alone; a changed body replaces the section. --lint checks a whole page for text that points into private systems and exits 1 if it finds any.
+Builds release notes for the Redpanda Operator and the Helm charts from the operator repository's changelog (the body of each GitHub Release there). The tag picks the project and the target page: `operator/vX.Y.Z`, `charts/redpanda/vX.Y.Z`, or `charts/console/vX.Y.Z`. Any other tag, including a prerelease, is a no-op. Phase 1 (--body --section-only) prints a candidate section: Markdown converted to AsciiDoc, hard-wrapped paragraphs joined, and issue numbers, ticket keys, and links into the redpanda-data GitHub organization removed. Phase 2 (--section-file --source-body) takes the curated section and checks it: its headings, that nothing in it points into private systems, and that every code span and version number in it also appears in the release body. It then adds the anchor, the source hash line, the "Before you upgrade" callout, and a pinned upgrade command, puts the section into the page in version order, and rebuilds the summary table at the top of the page. The chart version must be listed in the public Helm index, so the command works. A page that already holds the version from the same body is left alone; a changed body replaces the section. --changes gives both phases the release's changes.json: its changelog entries as data, with the audience and upgrade effects the engineers declared on each one. Entries declared internal are left out. The upgrade notes the entries declare become "Before you upgrade" exactly as written. When every entry declares its upgrade effects, nothing else is added to that list. A release without changes.json works as before. --lint checks a whole page for text that points into private systems and exits 1 if it finds any.
 
 *Why use it:*
 
@@ -2826,6 +2826,9 @@ Phase 2: the curated section to check and insert (relative to repo root, must st
 
 `--source-body <file>`::
 Phase 2: the release body the curated section came from (relative to repo root, must stay inside the repository)
+
+`--changes <file>`::
+Both phases: the release's changes.json, its changelog entries as data (relative to repo root, must stay inside the repository). Entries declared internal are left out, and the upgrade notes the entries declare are used as written
 
 `--page <file>`::
 Target page (relative to repo root, must stay inside the repository). Default: the page for the tag's project

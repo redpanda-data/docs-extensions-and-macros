@@ -2412,6 +2412,13 @@ automation
  * A page that already holds the version from the same body is left alone; a
  * changed body replaces the section.
  *
+ * --changes gives both phases the release's changes.json: its changelog
+ * entries as data, with the audience and upgrade effects the engineers
+ * declared on each one. Entries declared internal are left out. The upgrade
+ * notes the entries declare become "Before you upgrade" exactly as written.
+ * When every entry declares its upgrade effects, nothing else is added to
+ * that list. A release without changes.json works as before.
+ *
  * --lint checks a whole page for text that points into private systems and
  * exits 1 if it finds any.
  *
@@ -2448,6 +2455,7 @@ automation
   .option('--section-only', 'Phase 1: print the candidate section')
   .option('--section-file <file>', 'Phase 2: the curated section to check and insert (relative to repo root, must stay inside the repository)')
   .option('--source-body <file>', 'Phase 2: the release body the curated section came from (relative to repo root, must stay inside the repository)')
+  .option('--changes <file>', 'Both phases: the release\'s changes.json, its changelog entries as data (relative to repo root, must stay inside the repository). Entries declared internal are left out, and the upgrade notes the entries declare are used as written')
   .option('--page <file>', 'Target page (relative to repo root, must stay inside the repository). Default: the page for the tag\'s project')
   .option('--index-url <url>', 'Helm repository index to check the chart version against', 'https://charts.redpanda.com/index.yaml')
   .option('--wait <seconds>', 'Phase 2: keep retrying this long for the chart version to appear in the Helm index', '0')
@@ -2501,6 +2509,7 @@ automation
           tag: options.tag,
           date: options.date,
           body: fs.readFileSync(readInside(options.body, '--body'), 'utf8'),
+          changes: options.changes ? fs.readFileSync(readInside(options.changes, '--changes'), 'utf8') : undefined,
         })
         for (const kind of result.unknownKinds) {
           console.warn(`${LOG_TAG} WARN: skipped unknown changelog kind "${kind}".`)
@@ -2523,6 +2532,7 @@ automation
         tag: options.tag,
         curated: fs.readFileSync(readInside(options.sectionFile, '--section-file'), 'utf8'),
         sourceBody: fs.readFileSync(readInside(options.sourceBody, '--source-body'), 'utf8'),
+        changes: options.changes ? fs.readFileSync(readInside(options.changes, '--changes'), 'utf8') : undefined,
         pageContent: fs.readFileSync(pagePath, 'utf8'),
         chartEntry,
       })
