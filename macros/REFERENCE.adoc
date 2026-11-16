@@ -912,7 +912,7 @@ The first form of the macro is still accepted, and renders the same: the field p
 
 | `introduced` (aliases `since`, `version`)
 | field, component
-| `version`. Hidden on Cloud, where the reference shows no "Requires version"
+| `version`. Hidden on Cloud, where the reference shows no Since badge
 | `4.21.0`
 
 | `required` (inverse alias `optional`)
