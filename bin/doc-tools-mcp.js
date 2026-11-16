@@ -264,7 +264,7 @@ const tools = [
         },
         tag: {
           type: 'string',
-          description: 'Git tag for released content when using GitHub URL (for example "25.1.2" or "v25.1.2"). Auto-prepends "v" if not present. For redpanda-operator repository, also auto-prepends "operator/".'
+          description: 'Git tag for released content when using GitHub URL (for example "25.1.2" or "v25.1.2"). Auto-prepends "v" if not present. For the operator-enterprise repository, also auto-prepends "operator/".'
         },
         branch: {
           type: 'string',
@@ -341,7 +341,7 @@ const tools = [
       properties: {
         tag: {
           type: 'string',
-          description: 'Operator release tag (for example "operator/v25.1.2", "25.1.2", or "v25.1.2"). Auto-prepends "operator/" for redpanda-operator repository.'
+          description: 'Operator release tag (for example "operator/v25.1.2", "25.1.2", or "v25.1.2"). Auto-prepends "operator/" for the operator-enterprise repository.'
         },
         branch: {
           type: 'string',
