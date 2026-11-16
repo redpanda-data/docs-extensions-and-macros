@@ -298,6 +298,65 @@ features:
     expect(partial).toContain('| fips')
   })
 
+  test('a manual entry that claims an unnamed property gate needs a human', () => {
+    const registry = REGISTRY + `  - name: Fetch Read Coalescing
+    scope: redpanda
+    description: |
+      Shares reads.
+    source:
+      kind: manual
+      value: Gated by an enterprise-wrapped cluster property.
+`
+    const { findings } = runChecks({ registryYaml: registry, configurationHeader: CONFIGURATION_HEADER })
+    expect(findings.filter((f) => f.check === 'manual-property')).toEqual([
+      expect.objectContaining({ level: 'needs-human', message: expect.stringContaining("'Fetch Read Coalescing'") }),
+    ])
+  })
+
+  test('a manual entry whose gating property is a plain property is an error', () => {
+    const registry = REGISTRY + `  - name: Plain Gate
+    scope: redpanda
+    description: |
+      Plain.
+    source:
+      kind: manual
+      value: Enforced at topic creation.
+    gating-property: not_enterprise
+`
+    const { findings } = runChecks({ registryYaml: registry, configurationHeader: CONFIGURATION_HEADER })
+    expect(findings.filter((f) => f.check === 'manual-property')).toEqual([
+      expect.objectContaining({ level: 'error', message: expect.stringContaining("'not_enterprise'") }),
+    ])
+  })
+
+  test('manual entries with a wrapped gate, no property claim, or another scope pass', () => {
+    const registry = REGISTRY + `  - name: Wrapped Gate
+    scope: redpanda
+    description: |
+      Wrapped.
+    source:
+      kind: manual
+      value: Enforced on the property.
+    gating-property: audit_enabled
+  - name: Cloud Topics
+    scope: redpanda
+    description: |
+      Topics.
+    source:
+      kind: manual
+      value: License-enforced at creation.
+  - name: Console Thing
+    scope: console
+    description: |
+      Console.
+    source:
+      kind: manual
+      value: Enforced by the Console license service on a property.
+`
+    const { findings } = runChecks({ registryYaml: registry, configurationHeader: CONFIGURATION_HEADER })
+    expect(findings.filter((f) => f.check === 'manual-property')).toEqual([])
+  })
+
   test('runChecks skips missing sources with info findings only', () => {
     const { findings } = runChecks({ registryYaml: REGISTRY })
     expect(findings.filter((f) => f.level === 'error' || f.level === 'needs-human')).toEqual([])

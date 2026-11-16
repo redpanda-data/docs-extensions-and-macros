@@ -117,6 +117,18 @@ function checkCoreProperties (features, enterpriseProperties, allPropertyNames) 
         findings.push(finding('error', 'core-property', `'${feature.name}' points at property '${value}', which is not an enterprise-wrapped property in configuration.h.`))
       }
     }
+    // A manual entry skips the enum and property checks, so a claim about a
+    // property gate in its justification goes unverified. Hold it to the
+    // same standard: a named gating property must be enterprise-wrapped,
+    // and a claimed but unnamed one must be named.
+    if (feature.scope === 'redpanda' && feature.source && feature.source.kind === 'manual') {
+      const gate = feature['gating-property']
+      if (gate && !enterpriseProperties.includes(gate)) {
+        findings.push(finding('error', 'manual-property', `'${feature.name}' is a manual entry whose gating property '${gate}' is not an enterprise-wrapped property in configuration.h, so nothing in core requires a license for it. Confirm the feature is an Enterprise feature, or remove the entry.`))
+      } else if (!gate && /\bpropert(y|ies)\b/i.test(String(feature.source.value))) {
+        findings.push(finding('needs-human', 'manual-property', `'${feature.name}' is a manual entry whose justification says a property gates it but names none. Use source kind core-property with the property name so the check can verify it.`))
+      }
+    }
     if (feature['gating-property'] && allPropertyNames && !allPropertyNames.includes(feature['gating-property'])) {
       findings.push(finding('error', 'gating-property', `'${feature.name}' names gating property '${feature['gating-property']}', which does not exist in the property reference.`))
     }
