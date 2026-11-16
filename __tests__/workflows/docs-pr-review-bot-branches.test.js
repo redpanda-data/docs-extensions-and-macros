@@ -21,19 +21,15 @@ const GATE = gateJob.steps.find((s) => s.id === 'eval')
 const DEFAULT_PATTERNS = (workflow.on.workflow_call.inputs.review_bot_branch_patterns || {}).default
 
 const SHA = 'a'.repeat(40)
-const pr = ({ login = 'vbotbuildovich', type = 'User', branch = 'slack-draft/1761-123', draft = false, labels = [] } = {}) => ({
+const pr = ({ login = 'vbotbuildovich', type = 'User', branch = 'slack-draft/1761-123', draft = false } = {}) => ({
   head: { sha: SHA, ref: branch, repo: { full_name: 'redpanda-data/docs' } },
   user: { login, type },
   draft,
-  title: 'docs: draft from Slack',
-  labels: labels.map((name) => ({ name })),
-  requested_reviewers: []
+  title: 'docs: draft from Slack'
 })
 
-// Answers the calls the gate makes, logging each one. Statuses are
-// remembered so the exactly-once claim reads back the status it wrote:
-// the completed-review count is 0, and the latest docs-review status is
-// whatever this run last set.
+// Answers the calls the eval step makes, logging each one: the PR fetch,
+// the completed-review count (always 0), and any pending status it posts.
 const ghStub = (prJson) => `#!/bin/bash
 echo "$*" >> "$HOME/gh.log"
 case "$2" in
