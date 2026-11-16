@@ -556,18 +556,9 @@ function warnNoPropertyData (contentCatalog, component, version) {
  */
 function reportUnknownProperty ({ name, mode, registry, filePath }) {
   if (mode === 'off') return
-  const fragment = name.trim().toLowerCase()
-  const commonPrefix = (a, b) => {
-    let i = 0
-    while (i < a.length && i < b.length && a[i] === b[i]) i++
-    return i
-  }
-  const candidates = Object.keys(registry.properties)
-    .map((candidate) => ({ candidate, shared: commonPrefix(candidate.toLowerCase(), fragment) }))
-    .filter((scored) => scored.shared >= Math.min(6, fragment.length))
-    .sort((a, b) => b.shared - a.shared)
-    .slice(0, 3)
-    .map((scored) => scored.candidate)
+  // The same suggestions rpkcmd:, connect: and blobl: give: prefix matches,
+  // then names within a small edit distance, so a dropped letter is caught too.
+  const candidates = datasets.suggest(name.trim(), Object.keys(registry.properties))
   const hint = candidates.length ? ` Did you mean: ${candidates.join(', ')}?` : ''
   const where = filePath ? ` in ${filePath}` : ''
   const message = `prop:${name}[]${where}: '${name}' is not in the property data this page validates against (${describeDataset(registry)}). ` +
@@ -599,6 +590,23 @@ function reportUnavailableProperty ({ name, component, registry, mode, filePath 
     `prop:${name}[]${where}: '${name}' is not available in the ${which} component, so it renders as plain code -- no link, and no tooltip. ` +
     `${describeDataset(registry)} marks it cloud_supported: false, meaning Redpanda has the property but this audience cannot set it. ` +
     'If that is wrong, fix cloud_supported in the property extractor; if it is right, reword the sentence and drop the macro.'
+  )
+}
+
+/**
+ * Report a mention of a deprecated property. Like a deprecated rpk command or
+ * Connect component, it renders as written and never fails the build, but it
+ * always warns: the property data names no replacement, so the writer decides
+ * whether the sentence still belongs on the page.
+ */
+function reportDeprecatedProperty ({ name, registry, mode, filePath, linkRequested }) {
+  if (mode === 'off') return
+  const where = filePath ? ` in ${filePath}` : ''
+  const call = linkRequested ? `prop:${name}[link=true]` : `prop:${name}[]`
+  logger.warn(
+    `${call}${where}: '${name}' is deprecated in ${describeDataset(registry)}. It renders as written` +
+    (linkRequested ? ', without a link, because the reference pages leave deprecated properties out' : '') +
+    '. Remove the mention or say that the property is deprecated, and name the property that replaces it if there is one.'
   )
 }
 
@@ -725,6 +733,11 @@ function propInlineMacro (config) {
         reportUnavailableProperty({ name, component, registry, mode, filePath })
         return plain()
       }
+      // A deprecated property still renders as written, like a deprecated rpk
+      // command or Connect component, but every mention warns: with or without
+      // link=true, a page that recommends it is out of date.
+      const deprecated = entry.is_deprecated === true
+      if (deprecated) reportDeprecatedProperty({ name, registry, mode, filePath, linkRequested })
 
       // Discover the page in THIS component that documents the property. A page
       // is never borrowed from another component, and never guessed from the
@@ -738,7 +751,9 @@ function propInlineMacro (config) {
         if (found) {
           discoveredPage = found.page
           discoveredUrl = found.url
-        } else if (linkRequested) {
+        } else if (linkRequested && !deprecated) {
+          // A deprecated property is never on a reference page; its own
+          // warning above already says so, so it does not warn twice.
           reportUnpublishedProperty({ name, registry, mode, filePath })
         }
       }
@@ -797,6 +812,11 @@ function buildPropvalContent ({ name, field, text, html, unknown = false }) {
  * @returns {{ok: true, text: string, html?: string, rich?: object, registry: object, field: string} |
  *           {ok: false, kind: string, message: string, registry?: object, field: string}}
  */
+function suggestionHint (name, registry) {
+  const candidates = datasets.suggest(String(name).trim(), Object.keys(registry.properties))
+  return candidates.length ? ` Did you mean: ${candidates.join(', ')}?` : ''
+}
+
 function resolvePropertyValue ({ registry, name, field: requested, format, component, filePath, block = false }) {
   const field = propertyValues.normalizeField(requested)
   const call = `propval${block ? '::' : ':'}${name}[${requested}]${filePath ? ` in ${filePath}` : ''}`
@@ -808,7 +828,7 @@ function resolvePropertyValue ({ registry, name, field: requested, format, compo
   }
   const entry = Object.prototype.hasOwnProperty.call(registry.properties, name) ? registry.properties[name] : undefined
   if (!entry || typeof entry !== 'object') {
-    return { ok: false, kind: 'unknown-property', field, registry, message: `${call}: '${name}' is not in the property data this page validates against (${describeDataset(registry)}). Either the name is misspelled or the property does not exist in that release.` }
+    return { ok: false, kind: 'unknown-property', field, registry, message: `${call}: '${name}' is not in the property data this page validates against (${describeDataset(registry)}). Either the name is misspelled or the property does not exist in that release.${suggestionHint(name, registry)}` }
   }
   if (!isAvailable(registry, entry)) {
     return { ok: false, kind: 'unavailable', field, registry, message: `${call}: '${name}' is not available in the ${component || 'this'} component: ${describeDataset(registry)} marks it cloud_supported: false, so no value is shown to readers who cannot set it.` }
@@ -863,7 +883,17 @@ function propvalCall (config, parent, target, attributes, { block = false } = {}
     // The same once-per-component-version diagnostic prop: emits.
     if (!warnSeriesMissing(contentCatalog, component, version)) warnNoPropertyData(contentCatalog, component, version)
   }
-  return { mode, name, result: resolvePropertyValue({ registry, name, field: requested, format, component, filePath, block }) }
+  const result = resolvePropertyValue({ registry, name, field: requested, format, component, filePath, block })
+  // A value read from a deprecated property still renders, as connectval:
+  // does for a deprecated component or field, but warns unless the call asks
+  // whether it is deprecated.
+  if (result.ok && mode !== 'off' && result.field !== 'deprecated') {
+    const entry = registry.properties[name]
+    if (entry && entry.is_deprecated === true) {
+      logger.warn(`${result.call}: '${name}' is deprecated in ${describeDataset(registry)}. The value renders, but a page that states it is out of date. Remove the sentence or say that the property is deprecated, and name the property that replaces it if there is one.`)
+    }
+  }
+  return { mode, name, result }
 }
 
 // A placeholder is reported even in off mode: off means "do not check

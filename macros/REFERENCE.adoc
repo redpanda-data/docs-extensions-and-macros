@@ -297,7 +297,7 @@ When no dataset covers the component at all, the macro warns once per component 
 
 === Linking
 
-`link=true` links the property to its reference page, but only when a page *in the same component* documents it. Nothing is linked across components, and no target is guessed from the property's `config_scope`: a link the build cannot verify is a broken link. An available property that no page renders -- a deprecated property, or one held back by include tags -- keeps its tooltip and renders unlinked; `link=true` warns in that case. Use `page=` to set a target explicitly for one mention.
+`link=true` links the property to its reference page, but only when a page *in the same component* documents it. Nothing is linked across components, and no target is guessed from the property's `config_scope`: a link the build cannot verify is a broken link. An available property that no page renders, such as one held back by include tags, keeps its tooltip and renders unlinked; `link=true` warns in that case. A deprecated property is never on a reference page either, and every mention of one warns, with or without `link=true` (<<old-names>>). Use `page=` to set a target explicitly for one mention.
 
 [[prop-property-source]]
 ==== Declaring which page is the reference
@@ -1469,6 +1469,10 @@ The build never changes what you wrote. A macro that names something by an alias
 | A deprecated Connect field
 | Links its component's page with no anchor, and reads its value. Warning.
 | The one field its description names: "Deprecated: use `X` instead", "DEPRECATED: Use avro.raw_json instead", "Deprecated in favor of `address`", beside the field first. None when it names two (`regexp_topics`).
+
+| A deprecated configuration property (`cloud_topics_enabled`)
+| `prop:` renders it as written with its tooltip and no link, because the reference pages leave deprecated properties out. `propval:` reads its value. A warning on every mention, never an error. `propval:...[deprecated]` does not warn.
+| Nothing: the property data marks `is_deprecated` and names no replacement.
 
 | A deprecated Bloblang function or method (`meta()`)
 | Links its entry and reads its values. Warning.
