@@ -205,7 +205,7 @@ function assembleSection({ curated, tag, version, project, sourceBody, appVersio
   if (parsed.upgrade.length) {
     lines.push(`.${UPGRADE_TITLE}`, '[IMPORTANT]', '====', ...parsed.upgrade, '====', '');
   }
-  lines.push('.Upgrade to this version', '[,bash]', '----', ...project.command(version), '----', '');
+  lines.push('.Install or upgrade to this version', '[,bash]', '----', ...project.command(version), '----', '');
   const after = [];
   if (project.appVersionLine && appVersion) after.push(project.appVersionLine(appVersion));
   after.push(project.after);
