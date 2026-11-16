@@ -71,7 +71,8 @@ function sectionSourceHash(section) {
 function renderSummary(sections) {
   const out = [SUMMARY_START];
   if (sections.length) {
-    out.push('[cols="1,1,4,1"]', '|===', '|Version |Released |Highlights |Read before upgrading', '');
+    // Three columns, with the date under the version, so the table fits a phone.
+    out.push('[cols="2,7,2"]', '|===', '|Version |Highlights |Upgrade notes', '');
     for (const s of sections) {
       const id = sectionId(s.version);
       // The summary is the first paragraph after the heading and source line.
@@ -81,8 +82,8 @@ function renderSummary(sections) {
       for (let i = first; i !== -1 && i < body.length && body[i].trim(); i++) summary.push(body[i].trim());
       const hasUpgrade = s.lines.includes(`.${UPGRADE_TITLE}`);
       out.push(
-        `|<<${id},v${s.version}>>`,
-        `|${s.date}`,
+        `|<<${id},v${s.version}>> +`,
+        s.date,
         `|${summary.join(' ').replace(/\|/g, '\\|')}`,
         `|${hasUpgrade ? `<<${id},Yes>>` : 'No'}`,
         '',

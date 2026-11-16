@@ -294,12 +294,12 @@ describe('updatePage', () => {
       'Intro.',
       '',
       SUMMARY_START,
-      '[cols="1,1,4,1"]',
+      '[cols="2,7,2"]',
       '|===',
-      '|Version |Released |Highlights |Read before upgrading',
+      '|Version |Highlights |Upgrade notes',
       '',
-      '|<<v1-2-3,v1.2.3>>',
-      '|2026-01-02',
+      '|<<v1-2-3,v1.2.3>> +',
+      '2026-01-02',
       '|First \\| release.',
       '|<<v1-2-3,Yes>>',
       '',
@@ -321,7 +321,7 @@ describe('updatePage', () => {
       content = updatePage(content, section(v, '2026-01-02', `Release ${v}.`), hashBody(v)).content;
     }
     expect(splitPage(content).sections.map((s) => s.version)).toEqual(['1.10.0', '1.2.10', '1.2.3']);
-    expect(content.match(/^\|<<v[\d-]+,v[\d.]+>>$/gm)).toEqual(['|<<v1-10-0,v1.10.0>>', '|<<v1-2-10,v1.2.10>>', '|<<v1-2-3,v1.2.3>>']);
+    expect(content.match(/^\|<<v[\d-]+,v[\d.]+>> \+$/gm)).toEqual(['|<<v1-10-0,v1.10.0>> +', '|<<v1-2-10,v1.2.10>> +', '|<<v1-2-3,v1.2.3>> +']);
     expect(content.endsWith('== Older versions\n\nFooter.\n')).toBe(true);
   });
 
