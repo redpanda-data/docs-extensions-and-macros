@@ -16,6 +16,7 @@ const {
   isFullyDeclared,
   declaredUpgradeNotes,
   declaredPublicCounts,
+  declaredPublicFlags,
   publishedEntries,
   changesToMarkdown,
   changesText,
@@ -53,7 +54,7 @@ function buildCandidate({ tag, date, body, changes }) {
   }
   const publicBody = changesToMarkdown(doc);
   const { sections, unknownKinds } = parseChangieBody(publicBody);
-  const upgrade = { lines: declaredUpgradeNotes(doc), complete: isFullyDeclared(doc) };
+  const upgrade = { lines: declaredUpgradeNotes(doc), complete: isFullyDeclared(doc), declaredPublic: declaredPublicFlags(doc) };
   return { status: 'ok', section: renderCandidate({ version: parsed.version, date, sections, upgrade }), unknownKinds, publicBody };
 }
 

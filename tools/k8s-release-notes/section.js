@@ -71,10 +71,11 @@ function sectionId(version) {
  * @throws {Error} If the section does not follow the curated format.
  */
 function parseCurated(curated) {
-  // The candidate's `// upgrade-notes:` line is an instruction for the
-  // curation step, not content. Other `//` lines are left alone: inside a
-  // listing they are part of the code.
-  const lines = String(curated).replace(/\r\n?/g, '\n').split('\n').filter((l) => !/^\/\/ upgrade-notes:/.test(l));
+  // The candidate's `// upgrade-notes:` and `// declared-public` lines are
+  // instructions for the curation step, not content. Other `//` lines are
+  // left alone: inside a listing they are part of the code.
+  const lines = String(curated).replace(/\r\n?/g, '\n').split('\n')
+    .filter((l) => !/^\/\/ (upgrade-notes:|declared-public\s*$)/.test(l));
   const headings = lines.filter((l) => /^==\s/.test(l));
   if (headings.length !== 1) {
     throw new Error(`A curated section needs exactly one "== vX.Y.Z (YYYY-MM-DD)" heading; found ${headings.length}.`);

@@ -206,9 +206,12 @@ function parseChangieBody(body) {
  * @param {string} options.version - The bare `X.Y.Z` version.
  * @param {string} options.date - The release date as `YYYY-MM-DD`.
  * @param {Array} options.sections - Sections from parseChangieBody.
- * @param {{lines: string[], complete: boolean}} [options.upgrade] - The
- *   upgrade notes the entries declare, when the release has structured
- *   entries. `complete` says whether every entry declares its upgrade effects.
+ * @param {{lines: string[], complete: boolean, declaredPublic: Object<string, boolean[]>}} [options.upgrade] - When
+ *   the release has structured entries: the upgrade notes the entries
+ *   declare, whether every entry declares its upgrade effects (`complete`),
+ *   and, per category title, which entries their engineers declared public.
+ *   Those entries get a `// declared-public` line above them, so the curation
+ *   step knows it may not drop or merge them.
  * @return {string} The candidate section, ending in one newline.
  */
 function renderCandidate({ version, date, sections, upgrade }) {
@@ -226,17 +229,19 @@ function renderCandidate({ version, date, sections, upgrade }) {
   }
   for (const section of sections) {
     lines.push(`=== ${section.title}`, '');
-    for (const entry of section.entries) {
+    const marks = (upgrade && upgrade.declaredPublic && upgrade.declaredPublic[section.title]) || [];
+    section.entries.forEach((entry, i) => {
+      if (marks[i]) lines.push('// declared-public');
       lines.push(`* ${entry.lead}`);
       if (entry.details.length) {
         lines.push('+', '--');
-        entry.details.forEach((para, i) => {
-          if (i) lines.push('');
+        entry.details.forEach((para, n) => {
+          if (n) lines.push('');
           lines.push(...para);
         });
         lines.push('--');
       }
-    }
+    });
     lines.push('');
   }
   while (lines[lines.length - 1] === '') lines.pop();

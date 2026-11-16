@@ -431,11 +431,14 @@ describe('structured entries (changes.json)', () => {
 
   test('the candidate lists declared notes and says who owns the list', () => {
     const declared = buildCandidate({ tag: 'operator/v1.2.3', date: '2026-01-02', body: '', changes: DECLARED }).section;
-    expect(declared.startsWith(`== v1.2.3 (2026-01-02)\n\n// upgrade-notes: declared\n\n=== Before you upgrade\n\n${NOTE}\n\n=== New features`)).toBe(true);
+    expect(declared.startsWith(`== v1.2.3 (2026-01-02)\n\n// upgrade-notes: declared\n\n=== Before you upgrade\n\n${NOTE}\n\n=== New features\n\n// declared-public\n* Widget CRD`)).toBe(true);
     expect(declared).not.toContain('CI: forward');
     expect(declared.match(/^\* /gm)).toHaveLength(3);
     const partial = buildCandidate({ tag: 'operator/v1.2.3', date: '2026-01-02', body: '', changes: PARTIAL }).section;
     expect(partial).toContain('// upgrade-notes: partial');
+    // Only the entry its engineer declared public is marked.
+    expect(partial).toContain('=== New features\n\n* Widget CRD');
+    expect(partial).toContain('=== Bug fixes\n\n// declared-public\n* The operator keeps');
     const none = buildCandidate({ tag: 'operator/v1.2.3', date: '2026-01-02', body: '', changes: doc([entry({})]) }).section;
     expect(none).toContain('// upgrade-notes: declared');
     expect(none).not.toContain('Before you upgrade');
@@ -451,6 +454,8 @@ describe('structured entries (changes.json)', () => {
     expect(callout(result.section)).toEqual([NOTE]);
     expect(result.section).toContain(`sha256=${hashSource(BODY, DECLARED)} upgrade-notes=declared`);
     expect(result.section).not.toContain('// upgrade-notes:');
+    const marked = publish(DECLARED, CURATED.replace(/^\* /gm, '// declared-public\n* '));
+    expect(marked.section).not.toContain('declared-public');
   });
 
   test('fully declared with no effects: no callout', () => {

@@ -151,6 +151,21 @@ function declaredPublicCounts(changes) {
 }
 
 /**
+ * Says, per page category and in changelog order, which published entries
+ * their engineers declared public. The candidate marks those entries.
+ *
+ * @param {{entries: Array}} changes - A parsed document.
+ * @return {Object<string, boolean[]>} Category title to one flag per entry.
+ */
+function declaredPublicFlags(changes) {
+  const flags = {};
+  for (const entry of publishedEntries(changes)) {
+    (flags[TITLES[entry.kind]] = flags[TITLES[entry.kind]] || []).push(entry.audience === 'public');
+  }
+  return flags;
+}
+
+/**
  * Renders the published entries the way the changelog tool renders a release
  * body, so one parser reads both.
  *
@@ -195,6 +210,7 @@ module.exports = {
   isFullyDeclared,
   declaredUpgradeNotes,
   declaredPublicCounts,
+  declaredPublicFlags,
   changesToMarkdown,
   changesText,
 };
