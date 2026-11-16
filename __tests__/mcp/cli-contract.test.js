@@ -134,7 +134,7 @@ describe('CLI Contract Tests', () => {
       {
         name: 'bundle-openapi',
         requiredFlags: ['--tag'],
-        optionalFlags: ['--repo', '--surface', '--out-admin', '--out-connect', '--admin-major', '--use-admin-major-version', '--quiet']
+        optionalFlags: ['--repo', '--surface', '--out-admin', '--out-connect', '--out-schema-registry', '--out-http-proxy', '--admin-major', '--use-admin-major-version', '--quiet']
       }
     ];
 

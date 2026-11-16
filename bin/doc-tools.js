@@ -2618,6 +2618,11 @@ automation
  * generates separate complete OpenAPI files for each API surface. The resulting specifications
  * can be used for API documentation, client SDK generation, or API testing tools.
  *
+ * The Schema Registry and HTTP Proxy APIs have no protos. For the schema-registry and
+ * http-proxy surfaces, the command stitches the Swagger 2.0 JSON fragments in
+ * src/v/pandaproxy/api/api-doc/ into one spec, the same way the broker builds the document
+ * it serves at GET /v1. These surfaces do not need Buf or a bundler.
+ *
  * @why
  * Redpanda's API documentation is defined as OpenAPI fragments alongside the C++ implementation
  * code. This keeps API docs close to code and ensures they stay in sync, but it means the
@@ -2650,6 +2655,12 @@ automation
  *   --surface admin \
  *   --use-admin-major-version
  *
+ * # Stitch the Schema Registry API spec
+ * npx doc-tools generate bundle-openapi \
+ *   --tag v26.3.1 \
+ *   --surface schema-registry \
+ *   --out-schema-registry schema-registry/schema-registry.json
+ *
  * # Full workflow: generate API specs for new release
  * VERSION=$(npx doc-tools get-redpanda-version)
  * npx doc-tools generate bundle-openapi --tag $VERSION --surface both
@@ -2658,20 +2669,22 @@ automation
  * - Git to clone the streaming-enterprise repository
  * - A GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order) with
  *   access to redpanda-data/streaming-enterprise, which is private
- * - Buf tool (automatically installed via npm)
- * - Redocly CLI or vacuum for OpenAPI bundling (automatically detected)
+ * - Buf tool (automatically installed via npm), for the admin and connect surfaces only
+ * - Redocly CLI or vacuum for OpenAPI bundling (automatically detected), for the admin and connect surfaces only
  * - Internet connection to clone repository
  * - Sufficient disk space for repository clone (~2GB)
  */
 automation
   .command('bundle-openapi')
-  .description('Bundle Redpanda OpenAPI fragments for admin and connect APIs. Requires either --tag or --branch.')
+  .description('Bundle Redpanda OpenAPI fragments for the admin and connect APIs, or stitch the Swagger specs for the Schema Registry and HTTP Proxy APIs. Requires either --tag or --branch.')
   .option('-t, --tag <tag>', 'Git tag for released content')
   .option('-b, --branch <branch>', 'Branch name for in-progress content')
   .option('--repo <url>', 'Repository URL. The default is a private repo, so requires a GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order)', 'https://github.com/redpanda-data/streaming-enterprise.git')
-  .addOption(new Option('-s, --surface <surface>', 'Which API surfaces to bundle').choices(['admin', 'connect', 'both']).makeOptionMandatory())
+  .addOption(new Option('-s, --surface <surface>', 'Which API surfaces to bundle ("both" means admin and connect)').choices(['admin', 'connect', 'schema-registry', 'http-proxy', 'both']).makeOptionMandatory())
   .option('--out-admin <path>', 'Output path for admin API', 'admin/redpanda-admin-api.yaml')
   .option('--out-connect <path>', 'Output path for connect API', 'connect/redpanda-connect-api.yaml')
+  .option('--out-schema-registry <path>', 'Output path for Schema Registry API', 'schema-registry/schema-registry.json')
+  .option('--out-http-proxy <path>', 'Output path for HTTP Proxy API', 'http-proxy/http-proxy.json')
   .option('--admin-major <string>', 'Admin API major version', 'v2.0.0')
   .option('--use-admin-major-version', 'Use admin major version for info.version instead of git tag', false)
   .option('--quiet', 'Suppress logs', false)
@@ -2687,13 +2700,18 @@ automation
 
     const gitRef = options.tag || options.branch
     requireCmd('git', 'Install Git: https://git-scm.com/downloads')
-    requireCmd('buf', 'buf should be automatically available after npm install')
 
-    try {
-      const { detectBundler } = require('../tools/bundle-openapi.js')
-      detectBundler(true)
-    } catch (err) {
-      fail(err.message)
+    // Only the proto surfaces need buf and a bundler
+    const { PROTO_SURFACES } = require('../tools/bundle-openapi.js')
+    if (options.surface === 'both' || PROTO_SURFACES.includes(options.surface)) {
+      requireCmd('buf', 'buf should be automatically available after npm install')
+
+      try {
+        const { detectBundler } = require('../tools/bundle-openapi.js')
+        detectBundler(true)
+      } catch (err) {
+        fail(err.message)
+      }
     }
 
     try {
@@ -2704,6 +2722,8 @@ automation
         surface: options.surface,
         outAdmin: options.outAdmin,
         outConnect: options.outConnect,
+        outSchemaRegistry: options.outSchemaRegistry,
+        outHttpProxy: options.outHttpProxy,
         adminMajor: options.adminMajor,
         useAdminMajorVersion: options.useAdminMajorVersion,
         quiet: options.quiet
