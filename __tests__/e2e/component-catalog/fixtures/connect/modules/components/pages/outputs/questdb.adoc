@@ -1,4 +1,7 @@
 = questdb
 :description: Fixture page for the questdb component.
+:status: experimental
 
 Fixture page.
+
+component_type_dropdown::[]

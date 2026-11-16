@@ -707,8 +707,13 @@ describe('component_table use cases', () => {
     const menu = menuOf(html, 'useCaseFilter')
     // Clear comes first, then the options, none checked
     expect(menu.indexOf('id="useCaseFilterClear"')).toBeLessThan(menu.indexOf('value="change-data-capture"'))
-    expect(menu).toContain('<label class="dropdown-checkbox-option" title="Streaming row-level changes from a database.">')
-    expect(menu).toContain('<span>Change data capture</span>')
+    // The definition is a tooltip (no native title) and a hidden description the checkbox points to
+    expect(menu).not.toMatch(/\stitle=/)
+    expect(menu).toContain('<label class="dropdown-checkbox-option" data-tooltip="Streaming row-level changes from a database." data-tooltip-nofocus>')
+    expect(menu).toContain('<input type="checkbox" value="change-data-capture" aria-describedby="useCaseFilterDesc-change-data-capture">')
+    expect(menu).toContain('<span class="catalog-visually-hidden" id="useCaseFilterDesc-change-data-capture">Streaming row-level changes from a database.</span>')
+    // Outside the label, so it is not part of the checkbox's name
+    expect(menu).toMatch(/<span>Change data capture<\/span>\s*<\/label>\s*<span class="catalog-visually-hidden" id="useCaseFilterDesc-change-data-capture">/)
     expect(menu).not.toContain('checked')
   })
 
@@ -778,8 +783,8 @@ describe('component_table use cases', () => {
     const html = renderComponentTable({ csvData: data(ROWS, [hostile, STREAM]) })
     const blocks = [...html.matchAll(/<script(?<attrs>[^>]*)>(?<body>[\s\S]*?)<\/script>/g)].map((m) => m.groups.body)
     for (const block of blocks) expect(() => new vm.Script(block)).not.toThrow()
-    // Inside the legend's template literal, the definition cannot interpolate
-    expect(html).toContain('Uses &#96;backticks&#96;, &#36;{injection}, and &#92; backslashes')
+    // The legend is page HTML, not a script string: the definition is plain escaped text
+    expect(html).toContain('<p>Uses `backticks`, ${injection}, and \\ backslashes</p>')
   })
 
   test('hides the filter, panel, chips, and legend section when no component has a use case', () => {
@@ -1020,6 +1025,15 @@ describe('meaning badges', () => {
     // The Cloud view shows no Enterprise or Cloud badge on its cards, so its legend lists neither
     const cloud = renderComponentTable({ csvData, attributes: {}, docAttributes: { 'env-cloud': '' } })
     expect(cloud.slice(cloud.indexOf('id="badgeLegendModal"'))).not.toContain('rp-badge--enterprise')
+  })
+
+  test('the legend is page HTML, not a string a script builds', () => {
+    const html = renderComponentTable({ csvData })
+    const scripts = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]).join('\n')
+    // Outside every script, so its text is in the HTML readers, indexers, and the Markdown export get
+    expect(html.replace(/<script[^>]*>[\s\S]*?<\/script>/g, '')).toContain('<div id="badgeLegendModal" class="badge-legend-modal" role="dialog"')
+    expect(scripts).not.toContain('badge-legend-item')
+    expect(scripts).not.toContain('innerHTML = modalHTML')
   })
 
   test('long names wrap only after an underscore, and columns never outgrow the container', () => {

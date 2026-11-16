@@ -249,14 +249,6 @@ function filterLayoutCss (count) {
   return rules.join('\n')
 }
 
-/**
- * Escaped HTML made safe to sit inside a JavaScript template literal (the
- * badge legend modal is built from one in the page script).
- */
-function forTemplateLiteral (html) {
-  return String(html).replace(/\\/g, '&#92;').replace(/`/g, '&#96;').replace(/\$\{/g, '&#36;{')
-}
-
 // Tooltip texts for the meaning badges, from the docs-wide meaning system
 const MEANING_TOOLTIPS = {
   certified: 'Supported and tested by Redpanda.',
@@ -284,6 +276,25 @@ function meaningBadge (name, label, { tooltip, href, small = true } = {}) {
   return href
     ? `<a class="${cls}" href="${escapeHtml(href)}"${tip}>${escapeHtml(label)}</a>`
     : `<span class="${cls}"${tip}>${escapeHtml(label)}</span>`
+}
+
+// A connector's release status as a badge, for the statuses whose page has
+// no other text for them (connect's page template writes a Deprecated
+// warning itself, and nothing for beta or experimental). Connect's
+// "experimental" has no meaning of its own in the docs-wide system: it is
+// shown with the Preview look, the closest meaning (not yet stable and may
+// change, with no support commitment), but labeled Experimental, the word
+// Connect uses. Beta has the standard Beta tooltip; the Experimental one
+// follows connect's wording for its experimental Bloblang functions.
+const STATUS_BADGES = {
+  beta: { name: 'beta', label: 'Beta', tooltip: 'Beta: available to try, and may change before general availability.' },
+  experimental: { name: 'preview', label: 'Experimental', tooltip: 'Experimental: breaking changes could be made outside of major version releases.' }
+}
+
+/** The status badge for a connector page, or '' for a stable, deprecated, or unknown status */
+function statusBadge (status, { small = false } = {}) {
+  const badge = STATUS_BADGES[String(status || '').trim().toLowerCase()]
+  return badge ? meaningBadge(badge.name, badge.label, { tooltip: badge.tooltip, small }) : ''
 }
 
 // What each component type does, as its badge tooltip
@@ -320,6 +331,8 @@ module.exports.typeTooltip = typeTooltip
 module.exports.TYPE_TOOLTIPS = TYPE_TOOLTIPS
 module.exports.breakableName = breakableName
 module.exports.MEANING_TOOLTIPS = MEANING_TOOLTIPS
+module.exports.statusBadge = statusBadge
+module.exports.STATUS_BADGES = STATUS_BADGES
 
 module.exports.filterLayoutCss = filterLayoutCss
 module.exports.matchSolutions = matchSolutions
@@ -1047,11 +1060,12 @@ module.exports.register = function (registry, context) {
         const cloudEntries = Array.from(types.values())
           .flatMap(commercialNames => Object.values(commercialNames))
           .filter(({ isCloudSupported }) => isCloudSupported);
-        const pipelineNote = cloudEntries.length && cloudEntries.every(e => e.gpuOnly)
-          ? ' GPU pipelines only.'
+        const pipelineText = cloudEntries.length && cloudEntries.every(e => e.gpuOnly)
+          ? 'GPU pipelines only'
           : cloudEntries.length && cloudEntries.every(e => e.noGpu)
-            ? ' Not in GPU pipelines.'
+            ? 'Not in GPU pipelines'
             : '';
+        const pipelineNote = pipelineText ? ` ${pipelineText}.` : '';
 
         // Cloud support badge with tooltip, linked to the first Cloud-supported
         // type's Cloud page so the self-managed catalog still reaches Cloud docs
@@ -1059,6 +1073,17 @@ module.exports.register = function (registry, context) {
         const cloudBadge = isCloudConnectorSupported && showAllInfo
           ? meaningBadge('cloud', 'Cloud', { tooltip: MEANING_TOOLTIPS.cloud + pipelineNote, href: firstCloudUrl || undefined })
           : '';
+
+        // The pipeline qualifier as text, not only in the tooltip. The Cloud
+        // view has no Cloud badge (every card there is in Cloud), so the
+        // qualifier stands alone; elsewhere it follows the Cloud badge.
+        const pipelineNoteHtml = pipelineText && (cloudBadge || cloudView)
+          ? `<span class="catalog-pipeline-note">${escapeHtml(pipelineText)}</span>`
+          : '';
+        // Laid out like a SQL connector's drivers: the badge, then the text
+        const cloudAvailability = pipelineNoteHtml && cloudBadge
+          ? `<span class="catalog-drivers">${cloudBadge} ${pipelineNoteHtml}</span>`
+          : pipelineNoteHtml || cloudBadge;
 
         // Enterprise license badge with tooltip
         const enterpriseBadge = isLicensed === 'Yes' && showAllInfo
@@ -1138,11 +1163,11 @@ module.exports.register = function (registry, context) {
                     ${sqlDriverBadges || supportBadges}
                   </div>
                 </div>` : ''}
-                ${(cloudBadge || enterpriseBadge) ? `
+                ${(cloudAvailability || enterpriseBadge) ? `
                 <div class="badge-group">
                   <span class="badge-group-label">Availability</span>
                   <div class="badge-group-badges">
-                    ${cloudBadge}
+                    ${cloudAvailability}
                     ${enterpriseBadge}
                   </div>
                 </div>` : ''}
@@ -1526,11 +1551,24 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
           label: 'Use case',
           value: 'Any use case',
           options: `
-                <button type="button" class="dropdown-checkbox-clear" id="useCaseFilterClear">Clear</button>${useCaseOptions.map(({ id, label, definition }) => `
-                <label class="dropdown-checkbox-option"${definition ? ` title="${escapeHtml(definition)}"` : ''}>
+                <button type="button" class="dropdown-checkbox-clear" id="useCaseFilterClear">Clear</button>${useCaseOptions.map(({ id, label, definition }) => {
+                  // The definition is a tooltip on hover and tap, and real text
+                  // for assistive technology: a visually hidden description the
+                  // checkbox points to. It sits outside the label, so it is not
+                  // read again as part of the checkbox's name. No extra tab stop
+                  // (data-tooltip-nofocus): the checkbox already takes focus.
+                  const descId = `useCaseFilterDesc-${String(id).replace(/[^A-Za-z0-9_-]/g, '-')}`;
+                  return definition ? `
+                <label class="dropdown-checkbox-option" data-tooltip="${escapeHtml(definition)}" data-tooltip-nofocus>
+                  <input type="checkbox" value="${escapeHtml(id)}" aria-describedby="${descId}">
+                  <span>${escapeHtml(label)}</span>
+                </label>
+                <span class="catalog-visually-hidden" id="${descId}">${escapeHtml(definition)}</span>` : `
+                <label class="dropdown-checkbox-option">
                   <input type="checkbox" value="${escapeHtml(id)}">
                   <span>${escapeHtml(label)}</span>
-                </label>`).join('')}`
+                </label>`;
+                }).join('')}`
         });
       }
 
@@ -1747,6 +1785,11 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
             flex: 1 1 auto;
             gap: 0.25rem 0.5rem;
             min-width: 0;
+            font-size: 0.75rem;
+          }
+
+          /* Which Cloud pipelines run the component, as text */
+          .catalog-pipeline-note {
             font-size: 0.75rem;
           }
 
@@ -2111,12 +2154,9 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
         <div class="component-cards-container" id="componentCardsContainer">
           ${generateConnectorsHTMLCards(connectors, sqlDriversData, isCloud, showAllInfo, commercialNamesMap, uiRootPath, useCaseInfo, offeredUseCases)}
         </div>
-        <script>
-          // Badge legend modal functions
-          (function() {
-            try {
-              // Create modal HTML
-              const modalHTML = \`<div id="badgeLegendModal" class="badge-legend-modal" role="dialog" aria-labelledby="badgeLegendTitle" aria-modal="true">
+        <!-- The badge legend: in the page HTML, so its text is there for
+             readers, indexers, and the Markdown export; hidden until opened -->
+        <div id="badgeLegendModal" class="badge-legend-modal" role="dialog" aria-labelledby="badgeLegendTitle" aria-modal="true">
           <div class="badge-legend-content">
             <div class="badge-legend-header">
               <h3 id="badgeLegendTitle">Component Badge Legend</h3>
@@ -2175,11 +2215,11 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
               </div>
               ${useCaseOptions.length ? `
               <div class="badge-legend-section">
-                <h4>Use cases</h4>${useCaseOptions.map(({ label, definition }) => forTemplateLiteral(`
+                <h4>Use cases</h4>${useCaseOptions.map(({ label, definition }) => `
                 <div class="badge-legend-item">
                   ${meaningBadge('use-case', label, { tooltip: definition || `Use case: ${label}` })}
                   <p>${escapeHtml(definition || label)}</p>
-                </div>`)).join('')}
+                </div>`).join('')}
               </div>
               ` : ''}
               ${showAllInfo ? `
@@ -2197,24 +2237,14 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
               ` : ''}
             </div>
           </div>
-        </div>\`;
-
-            // Inject the modal now (this script runs inside the body), so it is
-            // in the page before docs-ui gives every [data-tooltip] a tooltip
-            // on DOMContentLoaded and the legend badges get theirs too
-            const injectModal = function() {
-              const modalContainer = document.createElement('div');
-              modalContainer.innerHTML = modalHTML;
-              document.body.appendChild(modalContainer.firstElementChild);
-            };
-            if (document.body) {
-              injectModal();
-            } else {
-              document.addEventListener('DOMContentLoaded', injectModal);
-            }
-            } catch (error) {
-              console.error('[Component Catalog] Error loading badge legend modal:', error);
-            }
+        </div>
+        <script>
+          // Move the legend to the end of the body, so position: fixed covers
+          // the viewport whatever the article's layout. This runs before
+          // docs-ui gives every [data-tooltip] a tooltip on DOMContentLoaded.
+          (function() {
+            const modal = document.getElementById('badgeLegendModal');
+            if (modal && document.body) document.body.appendChild(modal);
           })();
         </script>
 
@@ -2589,12 +2619,21 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
       // documentsConverted event instead. Only the license notice belongs in the page body,
       // where it must stay visible.
       const useCasesInfo = isCloudPage ? '' : connectorUseCasesHtml(csvData, name, attributes);
+      // Beta or experimental, as a badge with its word in the page text. The
+      // status comes from the catalog row for this page's type (catalog.json,
+      // from the same connect ref as the page), then from the page's own
+      // generated :status: attribute, which info.csv builds rely on.
+      const ownRow = componentRows.find(row => String(row.type || '').trim().toLowerCase() === String(type).trim().toLowerCase());
+      const status = (ownRow && ownRow.status) || attributes['status'] || '';
+      const badge = statusBadge(status);
+      const statusInfo = badge ? `
+        <div class="paragraph connector-status"><p>${badge}</p></div>` : '';
       if (!enterpriseLicenseInfo && !useCasesInfo) {
-        return self.createBlock(parent, 'pass', '');
+        return self.createBlock(parent, 'pass', statusInfo);
       }
       // Styled by docs-ui (.rp-notice): an Enterprise card when the component
       // needs a license, otherwise a neutral one holding only the use cases
-      return self.createBlock(parent, 'pass', `
+      return self.createBlock(parent, 'pass', `${statusInfo}
         <div class="rp-notice rp-notice--${enterpriseLicenseInfo ? 'enterprise' : 'use-case'} connector-facts">
           ${enterpriseLicenseInfo}${useCasesInfo}
         </div>`);

@@ -314,7 +314,7 @@ async function openPage (browser) {
     if (!nodeId) throw new Error(`no element matches ${selector}`)
     const { nodes } = await send('Accessibility.getPartialAXTree', { nodeId, fetchRelatives: false })
     const node = nodes[0] || {}
-    return { name: node.name && node.name.value, role: node.role && node.role.value }
+    return { name: node.name && node.name.value, role: node.role && node.role.value, description: node.description && node.description.value }
   }
   return { evaluate, waitFor, navigate, click, hover, mouseAway, pressKey, typeText, accessible, screenshot, setViewport, errors }
 }
@@ -437,6 +437,8 @@ async function main () {
     const site = path.join(work, 'with', 'site')
     const pageFile = path.join(site, PAGE, 'index.html')
     assert(fs.existsSync(pageFile), `the build wrote ${PAGE}`)
+    const builtHtml = fs.readFileSync(pageFile, 'utf8').replace(/<script[^>]*>[\s\S]*?<\/script>/g, '')
+    assert(builtHtml.includes('id="badgeLegendModal"') && builtHtml.includes('Component Badge Legend'), 'the badge legend is in the built page HTML, outside any script')
     assert(fs.existsSync(path.join(site, 'assets', 'data', 'solutions.json')), 'the build published assets/data/solutions.json')
     // CATALOG_E2E_KEEP_SITE=<dir>: keep a copy of the built site, for manual
     // review of the page with the same data the test used
@@ -548,8 +550,10 @@ async function main () {
     const menuAx = await page.accessible('#useCaseFilterMenu')
     assert(menuAx.role === 'group' && menuAx.name === 'Use case:', `the open options are a group named by the label (${menuAx.role}, "${menuAx.name}")`)
     assert(await page.evaluate(`document.querySelector('#useCaseFilterMenu > :first-child').id`) === 'useCaseFilterClear', 'Clear is the first item in the menu')
-    const optionTitle = await page.evaluate(`document.querySelector('#useCaseFilterMenu input[value="${USE_CASE}"]').closest('label').title`)
-    assert(optionTitle.length > 20, `the option's tooltip is the taxonomy definition ("${optionTitle.slice(0, 50)}...")`)
+    const option = await page.evaluate(`(() => { const label = document.querySelector('#useCaseFilterMenu input[value="${USE_CASE}"]').closest('label'); return { tooltip: label.getAttribute('data-tooltip') || '', title: label.getAttribute('title'), tabindex: label.getAttribute('tabindex') } })()`)
+    assert(option.tooltip.length > 20 && option.title === null && option.tabindex === null, `the option's tooltip is the taxonomy definition in data-tooltip, with no native title and no extra tab stop ("${option.tooltip.slice(0, 50)}...")`)
+    const optionAx = await page.accessible(`#useCaseFilterMenu input[value="${USE_CASE}"]`)
+    assert(optionAx.name === USE_CASE_LABEL && optionAx.description === option.tooltip, `the checkbox is named "${optionAx.name}" and described by the definition as text ("${(optionAx.description || '').slice(0, 50)}...")`)
     // The open menu overlays what is below it
     const overlay = await page.evaluate(`(() => {
       const menu = document.getElementById('useCaseFilterMenu');
@@ -665,6 +669,10 @@ async function main () {
     }
     await page.evaluate(`document.documentElement.removeAttribute('data-theme')`)
     assert(await page.evaluate(`document.querySelectorAll('#componentCardsContainer [class*="rp-badge"][title], #componentCardsContainer .badge').length`) === 0, 'no card badge has a title attribute or the old .badge class')
+    // The Cloud pipeline qualifier is card text, not only the Cloud badge tooltip
+    const gpuCards = await page.evaluate(`Array.from(document.querySelectorAll('#componentCardsContainer .component-card')).filter(c => /GPU pipelines only/.test(c.innerText)).map(c => c.querySelector('.card-title code').textContent)`)
+    if (usingFixture) assert(gpuCards.join() === 'ollama_embeddings', `the GPU-only card says "GPU pipelines only" as text (${gpuCards.join(', ')})`)
+    else assert(gpuCards.length > 0, `GPU-only cards say "GPU pipelines only" as text (${gpuCards.length})`)
     const enterpriseBadge = '#componentCardsContainer .component-card .rp-badge--enterprise'
     await page.waitFor(`!!document.querySelector('${enterpriseBadge}')._tippy`, 'docs-ui to give the badges their tooltips')
     await page.hover(enterpriseBadge)
@@ -770,6 +778,18 @@ async function main () {
       await page.screenshot(path.join(shots, 'connector-dark.png'))
       await page.evaluate(`document.documentElement.removeAttribute('data-theme')`)
     }
+
+    // A connector's status: connect's page template writes nothing for
+    // experimental, so the macro adds the word as a badge in the page text
+    await page.navigate(`${base}/connect/components/outputs/questdb/`)
+    await page.waitFor(`!!document.querySelector('.connector-status .rp-badge')`, 'the status badge on questdb')
+    const statusBadge = await page.evaluate(`(() => { const b = document.querySelector('.connector-status .rp-badge'); const s = getComputedStyle(b); return { classes: b.className, text: b.textContent, tooltip: b.getAttribute('data-tooltip'), title: b.getAttribute('title'), radius: parseFloat(s.borderTopLeftRadius), inText: document.querySelector('article.doc').innerText.includes('Experimental') } })()`)
+    assert(/rp-badge--preview/.test(statusBadge.classes) && statusBadge.text === 'Experimental' && statusBadge.inText && statusBadge.title === null && statusBadge.radius >= 100 && /^Experimental: /.test(statusBadge.tooltip), `questdb (:status: experimental) says Experimental in the page text, as a pill badge with a tooltip (${JSON.stringify(statusBadge)})`)
+    if (shots) await page.screenshot(path.join(shots, 'connector-status-light.png'))
+    // Negative control: a page with no status has no status badge
+    await page.navigate(`${base}/connect/components/inputs/postgres_cdc/`)
+    await page.waitFor(`!!document.querySelector('.rp-notice')`, 'postgres_cdc again')
+    assert(await page.evaluate(`!document.querySelector('.connector-status')`), 'postgres_cdc, with no status, has no status badge')
 
     // No use-case data: no Use case filter, and the other filters still sit evenly
     await page.navigate(`${origin}/without/site${PAGE}`)
