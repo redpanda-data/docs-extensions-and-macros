@@ -1,0 +1,6 @@
+# A stand-in for the connect component (rp-connect-docs): generate-rp-connect-info
+# only builds the catalog when a component named connect is in the build, and
+# links each card to that component's connector page.
+name: connect
+title: Connect
+version: ~
