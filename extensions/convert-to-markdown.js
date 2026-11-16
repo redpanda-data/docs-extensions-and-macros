@@ -1092,10 +1092,22 @@ function createTurndownForPage ({ pageUrl, logger }) {
         const contentCell = node.querySelector('td.content')
         if (!iconCell || !contentCell) return ''
 
+        // The type comes from the block's own class (admonitionblock warning),
+        // which Asciidoctor emits with or without font icons. With font icons
+        // the cell holds <i class="fa icon-warning">; without them it holds
+        // <div class="title">Warning</div>, which is a label, not a custom title.
         const iconEl = iconCell.querySelector('i')
-        const classAttr = iconEl?.className || ''
-        const match = classAttr.match(/icon-([a-z]+)/i)
-        const type = match ? match[1].toUpperCase() : 'NOTE'
+        const ADMONITION_TYPES = ['note', 'tip', 'important', 'caution', 'warning']
+        const block = node.parentNode
+        const blockClasses = ((block && block.getAttribute && block.getAttribute('class')) || '').split(/\s+/)
+        const iconMatch = (iconEl?.className || '').match(/icon-([a-z]+)/i)
+        const labelText = iconCell.textContent.trim().toLowerCase()
+        const type = (
+          (blockClasses.includes('admonitionblock') && blockClasses.find((c) => ADMONITION_TYPES.includes(c))) ||
+          (iconMatch && iconMatch[1]) ||
+          (ADMONITION_TYPES.includes(labelText) ? labelText : null) ||
+          'note'
+        ).toUpperCase()
 
         const titleEl =
           // Only the admonition's own title, not one of a block nested in it.

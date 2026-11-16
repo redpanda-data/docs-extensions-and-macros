@@ -252,6 +252,30 @@ describe('tables', () => {
     )
     expect(bodyOf(md)).toBe('> 📝 **NOTE**\n>\n> Use `rpk`.')
   })
+
+  test('reads the type of a font-icon admonition', () => {
+    const md = convert(
+      '<h1>T</h1><div class="admonitionblock warning"><table><tr><td class="icon"><i class="fa icon-warning" title="Warning"></i></td>' +
+      '<td class="content">Data loss.</td></tr></table></div>'
+    )
+    expect(bodyOf(md)).toBe('> ⚠️ **WARNING**\n>\n> Data loss.')
+  })
+
+  test('reads the type of an admonition built without font icons', () => {
+    const md = convert(
+      '<h1>T</h1><div class="admonitionblock warning"><table><tr><td class="icon"><div class="title">Warning</div></td>' +
+      '<td class="content">Data loss.</td></tr></table></div>'
+    )
+    expect(bodyOf(md)).toBe('> ⚠️ **WARNING**\n>\n> Data loss.')
+  })
+
+  test('keeps the custom title of an admonition built without font icons', () => {
+    const md = convert(
+      '<h1>T</h1><div class="admonitionblock tip"><table><tr><td class="icon"><div class="title">Tip</div></td>' +
+      '<td class="content"><div class="title">Faster restarts</div><div class="paragraph"><p>Body</p></div></td></tr></table></div>'
+    )
+    expect(bodyOf(md).split('\n')[0]).toBe('> 💡 **TIP: Faster restarts**')
+  })
 })
 
 describe('escaping', () => {
