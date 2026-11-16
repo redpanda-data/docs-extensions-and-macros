@@ -859,7 +859,7 @@ describe('buildGraph on its own', () => {
 describe('the default repo set', () => {
   test('names the audited senders and receivers with a role each', () => {
     const repos = DEFAULT_REPOS.map((r) => r.repo)
-    for (const r of ['redpanda-data/streaming-enterprise', 'redpanda-data/redpanda', 'redpanda-data/cloudv2', 'redpanda-data/redpanda-operator',
+    for (const r of ['redpanda-data/streaming-enterprise', 'redpanda-data/redpanda', 'redpanda-data/cloudv2', 'redpanda-data/operator-enterprise',
       'redpanda-data/connect', 'redpanda-data/helm-charts', 'redpanda-data/redpanda-check', 'redpanda-data/docs', 'redpanda-data/cloud-docs',
       'redpanda-data/rp-connect-docs', 'redpanda-data/api-docs', 'redpanda-data/adp-docs', 'redpanda-data/docs-site', 'redpanda-data/docs-ui',
       'redpanda-data/docs-extensions-and-macros', 'redpanda-data/docs-team-standards']) {
