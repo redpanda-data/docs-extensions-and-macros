@@ -682,7 +682,8 @@ function propertyCatalogMarkdown (root, pageUrl) {
   const text = (el) => (el ? (el.textContent || '').replace(/\s+/g, ' ').trim() : '')
   const items = cards.map((card) => {
     const badges = Array.from(card.querySelectorAll('.rp-badge')).map((badge) => {
-      const label = text(badge)
+      // The badge's own words, not the visually hidden tooltip text it carries
+      const label = text(badge.querySelector('.prop-badge-label') || badge)
       const classes = badge.getAttribute('class') || ''
       const tooltip = badge.getAttribute('data-tooltip')
       return classes.includes('rp-badge--enterprise') && label !== 'Enterprise' && tooltip ? `${label} (${tooltip.replace(/\.$/, '')})` : label

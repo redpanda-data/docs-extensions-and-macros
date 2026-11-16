@@ -534,14 +534,19 @@ A filter value is offered only when it matches at least one property a reader se
 
 === Cards
 
-Each card shows:
+The cards are rows in one bordered list. Each row shows:
 
-* The signature, `<name>: <type>`.
-* Badges, each `<span class="rp-badge rp-badge--sm rp-badge--NAME" data-tooltip="...">`: the group (neutral), Restart required (neutral), Enterprise or Enterprise values (enterprise), Deprecated (deprecated), and on Cloud, Cloud editable or Read-only and BYOC only.
+* The signature, `<name>: <type>`, as a heading one level below the section the catalog sits in (`h2` at the top of a page), so screen reader users can move from property to property by heading. The name links to the property's entry on its reference page, found through the prop macro's page index. Properties no reference page renders (deprecated ones) have a plain name. A `<wbr>` after each `_` and `.` lets long names wrap; it adds no text, and the link (or, without one, the heading) has an `aria-label` with the exact name, because `<wbr>` would otherwise split the accessible name.
+* Badges, each `<span class="rp-badge rp-badge--sm rp-badge--NAME" data-tooltip="...">`, in this order: the group (neutral), Restart required (neutral, with a restart icon), Enterprise or Enterprise values (enterprise), Deprecated (deprecated), and on Cloud, Cloud editable or Read-only and BYOC only. The label is in a `.prop-badge-label` span, followed by the tooltip text in a visually hidden span. The list has `data-tooltip-nofocus`, so the badges are not tab stops; assistive technology reads the hidden text instead, and hover and tap still open the tooltip.
 * The description's first sentence, as plain text, cut near 200 characters.
+* For broker and topic properties, the reference page section.
 * The default value. Cloud cards leave it out, as the Cloud reference pages do.
-* A link to the property's entry on its reference page, found through the prop macro's page index. Properties no reference page renders (deprecated ones) have no link.
-* The command that sets the property, with the site's copy button: `rpk cluster config set <name> <value>` for cluster properties, `rpk redpanda config set <section>.<name> <value>` for broker properties (the `redpanda.yaml` section from the category), and `rpk topic alter-config <topic> --set <name>=<value>` for topic properties. Cloud cards for properties Cloud manages have no command.
+* For Enterprise values that name the values, *Needs a license* and those values.
+* The command that sets the property, syntax-colored, with the site's copy button: `rpk cluster config set <name> <value>` for cluster properties, `rpk redpanda config set <section>.<name> <value>` for broker properties (the `redpanda.yaml` section from the category), and `rpk topic alter-config <topic> --set <name>=<value>` for topic properties. Its text is exactly the command, which the copy button and the Markdown export read. Cloud cards for properties Cloud manages have no command, and say *Redpanda Cloud manages this property.*
+
+A 4px bar on the row's left edge marks one meaning: Deprecated (red), else Enterprise (the Enterprise gradient), else BYOC only (sky). In forced colors (Windows High Contrast) the bar is a system-color border, and pressed chips use `Highlight` with a 2px border.
+
+On Cloud builds a line above the list says that Redpanda Cloud is a managed deployment of Redpanda Enterprise Edition, as the licensing overview states.
 
 [[property-catalog-enterprise]]
 === Enterprise values
@@ -556,22 +561,34 @@ A property with `is_enterprise: true` and none of those gets an *Enterprise* bad
 
 === Filters, search, and URL
 
-Search matches every word against the name and the full description. The filters are Group, Section, Type, Restart required, Enterprise, and Deprecated, plus Cloud editable and BYOC only on Cloud builds. Deprecated properties are hidden until the reader checks *Deprecated*, because the reference pages leave them out.
+Search matches every word against the name, the broker `redpanda.yaml` path (for example `pandaproxy_client.sasl_mechanism`), the badge words (Restart required, Enterprise values, BYOC only, and so on), and the full description. `.`, `_`, and `-` count as one separator in both the search and the text, so `segment_bytes` finds `segment.bytes`. While a search is on, results are ranked: an exact name, then names that start with the search, then names that contain it, then description matches, each alphabetical. The filters are Group, Section, Type, Restart required, Enterprise, and Deprecated, plus Cloud editable and BYOC only on Cloud builds. Deprecated properties are hidden until the reader asks for them, because the reference pages leave them out.
 
-Each filter toggle is a disclosure button named by its label and value, controlling a group of checkboxes. Escape closes it and returns focus to the toggle.
+The bar has three parts:
 
-The state is in the URL (`?q=`, `?group=`, `?section=`, `?type=`, `?restart=`, `?enterprise=`, `?deprecated=`, `?editable=`, `?byoc=`, each a comma-separated list of checked values) and is applied on load. After each change, one visually hidden `role="status"` region announces the count. When nothing matches, an empty state offers *Clear filters*.
+* The search box. `/` focuses it while focus is in the catalog or on nothing (elsewhere `/` stays the browser's, for Firefox Quick Find), Cmd+K belongs to the chat panel, and Escape clears it.
+* Chips. Group is a row of chips, one per reference page plus *All*, each with a live count of the matches it would show. Pressing a chip while *All* is pressed narrows to that page; pressing more adds pages. *Cluster* includes the object storage properties, which are cluster properties too, and *Object storage* is a narrower chip after it: pressed inside *Cluster*, it narrows to object storage. On a reference page the Section chips follow the page's order and headings, with Other last. Quick chips set the most used filters in one press: *Restart required*, *Enterprise* (both license kinds), *Include deprecated*, and on Cloud *Cloud editable* and *BYOC only*. A chip appears only when its filter does. Chips are toggle buttons (`aria-pressed`), and a pressed chip shows a check icon as well as its color.
+* *More filters*, a panel of compact dropdowns for every filter but Group. Each dropdown toggle is a disclosure button named by its label and value (for example "Type: All"), controlling a group of checkboxes. The More button counts the filters in it that are not at their defaults, and the panel opens by itself on load when the URL sets one that no pressed chip shows. A dropdown closes when focus leaves it. Escape closes an open dropdown (returning focus to its toggle only when focus was in it), or, inside the panel, closes the panel. On a stuck bar the open panel scrolls within what leaves 40% of the viewport for the results, and on a window too short for that the bar stops sticking while the panel is open.
 
-All cards are in the HTML at build time, so the docs UI's tooltip script sees every badge and the page works without JavaScript. The script only shows and hides cards, and touches only the cards that change. Filtering 688 cards takes under 1ms of script and about 2ms with layout in the e2e test.
+Chips and dropdowns change the same checkboxes, so the two always agree. Colors follow the meaning system: Enterprise, Deprecated, and Cloud chips use their meaning tokens; scope, Restart required, and type have no hue; the product accent (`--component-*`) marks UI state only. Controls are 8px rounded rectangles and meaning badges are pills, so a selected filter never reads as a badge.
+
+Under the bar, the count reads "674 properties", or "412 of 674 properties" once anything narrows it (the total counts deprecated properties only when they are included). Each active filter shows as a tag that removes it, and *Clear all* appears with two or more.
+
+From 1025px wide, the site's own breakpoint, the bar sticks under the site header (below it the site's layout gives the content its own scroll container, where sticky cannot work). Below 1025px, once the bar has scrolled away and anything is filtered, a pill at the bottom of the screen reads "Filtered: N of M" and leads back to the bar. The page script measures the header, and sets `scroll-padding-top` on the page so anchor jumps land below the bar and the "On this page" scroll-spy stays in step.
+
+The state is in the URL (`?q=`, `?group=`, `?section=`, `?type=`, `?restart=`, `?enterprise=`, `?deprecated=`, `?editable=`, `?byoc=`, each a comma-separated list of checked values) and is applied on load and again on Back and Forward, so the URL and the view always agree. After each change, one visually hidden `role="status"` region announces the count. The count is not hidden from assistive technology, so a reader who opens a filtered link learns the list is filtered. When nothing matches, an empty state names the cause (the search, the filters, or both) and offers *Clear search* or *Clear filters*, and, when the search matches only deprecated properties, a button that shows them.
+
+All cards are in the HTML at build time, so the docs UI's tooltip script sees every badge and the page works without JavaScript. The script shows and hides cards, touching only the cards that change, and reorders them only when the search changes. Cards do not use `content-visibility`, so every card stays in the accessibility tree. The e2e test holds filtering 688 cards, with layout, under its 50ms budget.
 
 [[property-catalog-filter]]
 === Filter bar on a reference page
 
 With `mode=filter`, the macro renders the same controls over the entries the page already renders. It finds them through the prop macro's page index (the entries whose page is this page), so it needs no list of its own. It offers search plus only the filters that divide that page's entries: Restart required and Enterprise where they apply, Deprecated if the page renders deprecated entries, Section on the topic page, and Cloud editable and BYOC only on Cloud builds.
 
-Filtering is display only. A filtered-out entry gets `hidden="until-found"`, so find in page still reaches it (and finding one clears the filters), and a section whose entries are all hidden is hidden too. Nothing is removed from the HTML, so the Markdown export and search indexing see every entry. The export leaves the bar out.
+The bar is one row from 1025px: the search box, the quick chips, the topic page's Section dropdown, *More filters* when it would hold anything, and the count. The tags row under it shows only while something is filtered. The bar sticks under the site header while the reader scrolls the page. Asciidoctor puts it in the preamble, so the page script moves it to just after the preamble when nothing follows it there, which keeps its place on the page; otherwise it does not stick.
 
-A deep link always shows its target: when a page loads with an anchor and the URL's filters would hide that entry, the filters are cleared from the page and the URL.
+Filtering is display only. A filtered-out entry gets `hidden="until-found"`, so find in page still reaches it, and a section whose entries are all hidden is hidden too. The "On this page" entries for hidden entries and sections hide with them. Nothing is removed from the HTML, so the Markdown export and search indexing see every entry. The export leaves the bar out.
+
+A deep link, a jump to an anchor, or find in page always shows its target: when the filters would hide that entry, it is shown on its own and the filters stay. A note in the results row says "Showing <name>, which your filters hide." with *Hide it again* and *Clear filters*, and the status region announces it.
 
 === Markdown output
 

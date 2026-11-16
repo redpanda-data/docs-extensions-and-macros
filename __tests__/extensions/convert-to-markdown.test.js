@@ -871,6 +871,21 @@ describe('property catalog', () => {
     expect(body).not.toMatch(/Search properties|Clear filters|All selected|prop-catalog/)
   })
 
+  test('the row markup (linked name with <wbr>, colored command, license values) exports the same line', () => {
+    const rows = [
+      cardModel({ name: 'sasl_mechanisms', type: 'array', config_scope: 'cluster', category: 'other', default: ['SCRAM'], is_enterprise: true, enterprise_constructor: 'restricted_only', enterprise_restricted_value: ['GSSAPI', 'OAUTHBEARER'], description: 'A list of supported SASL mechanisms.' }, { href: '../cluster-properties/#sasl_mechanisms' }),
+      cardModel({ name: 'retention.ms', type: 'integer', config_scope: 'topic', category: 'retention-compaction', default: 604800000, description: 'How long to keep data.' }, { href: '../topic-properties/#retention-ms' }),
+    ]
+    const html = catalogHtml(rows)
+    expect(html).toContain('<a class="prop-card-link" href="../topic-properties/#retention-ms" aria-label="retention.ms"><code class="prop-card-name">retention.<wbr>ms</code></a>')
+    expect(html).toContain('<span class="prop-card-fact-label">Needs a license</span> <code>GSSAPI</code>')
+    const items = bodyOf(convert(`<h1 class="page">All properties</h1>${html}`)).split('\n').filter((l) => l.startsWith('- '))
+    expect(items).toEqual([
+      '- `sasl_mechanisms` (array): Cluster, Enterprise values (The values GSSAPI or OAUTHBEARER require an Enterprise Edition license). A list of supported SASL mechanisms. Default: `[SCRAM]`. Set with `rpk cluster config set sasl_mechanisms <value>`. [Full reference](https://docs.example.com/streaming/current/manage/cluster-properties/#sasl_mechanisms)',
+      '- `retention.ms` (integer): Topic. How long to keep data. Default: `604800000`. Set with `rpk topic alter-config <topic> --set retention.ms=<value>`. [Full reference](https://docs.example.com/streaming/current/manage/topic-properties/#retention-ms)',
+    ])
+  })
+
   test('a reference page\'s filter bar exports as nothing', () => {
     const bar = filterBarHtml(cards.map((c) => ({ ...c, anchor: c.name })))
     const body = bodyOf(convert(`<h1 class="page">Cluster</h1>${bar}<div class="sect2"><h3 id="retention_bytes">retention_bytes</h3><p>Entry.</p></div>`))
