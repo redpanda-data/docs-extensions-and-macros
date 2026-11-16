@@ -44,3 +44,83 @@ enterprise_features::redpanda[]
   available in Cloud.
 * propval:fips_mode[scope] must read "broker": broker properties are not
   gated.
+
+[[reference-values-on-cloud]]
+== rpk and Connect values on Cloud
+
+`rpkval:` borrows the GA rpk data from `streaming-ga-lender`, and
+`connectval:` reads the `connect` component's data, both gated for Cloud.
+Build with `local-macro-showcase-playbook.yml` to see these values: the full
+test playbook pulls the real docs repo, which publishes no rpk attachment yet.
+
+* rpkval:[rpk cluster brokers --verbose] must read "<unknown default>"
+  and log unavailable: `rpk cluster brokers` is self-managed only.
+* rpkval:[rpk shadow delete --force] must read "<unknown default>" and
+  log cloud-hidden, because the reference scopes that command's description
+  to self-managed; rpkval:[rpk shadow delete --force,type] must read
+  "bool".
+* connectval:max_buffer[default,component=inputs/stdin] must read "<unknown default>",
+  and the log must name `connect-4.114.0.json cloudSupported` as the source:
+  the `stdin` input is not available in Cloud.
+* connectval:client_id[introduced,component=inputs/redpanda] must read
+  "<unknown introduced>": the Connect reference shows "Requires version" only
+  outside Cloud.
+
+[[rpk-commands-on-cloud]]
+== rpk command links on Cloud
+
+`rpkcmd:` links only this component's own `rpk` pages. This component has a
+stub page for `rpk topic create` that includes the `streaming-ga-lender` page,
+as the cloud-docs stubs do, and no page for `rpk cluster info`.
+
+* rpkcmd:[rpk topic create] must link this component's stub page, not the
+  `streaming` page.
+* rpkcmd:[rpk cluster info] must render as plain code with no link, and the
+  log must say this component has no page for it and that a Cloud page links
+  only Cloud pages.
+
+The block form below must render the `rpk cloud mcp stdio` description with
+its link to `rpk cloud mcp install` going to this component's stand-in page:
+a link in an rpk description goes to the page `rpkcmd:` would link.
+
+rpkval::[rpk cloud mcp stdio,description]
+
+The block forms below render rpk help that links docs.redpanda.com URLs. This
+component has no page for either target, and a Cloud page links only Cloud
+pages.
+
+rpkval::[rpk connect test,description]
+
+* You should see "Unit Testing" on the last line as plain text with no link, and a log warning that names the `/redpanda-connect/configuration/unit_testing` URL.
+
+rpkval::[rpk cluster storage restore start,description]
+
+* You should see `<unknown description>` and a log warning that the command is self-managed only, so its whole-cluster-restore URL never reaches a Cloud page.
+
+[[connect-links-on-cloud]]
+== Connect links on Cloud
+
+`connect:` and `blobl:` link only this component's own pages. This component
+has a stub page for the `kafka_franz` input that declares
+`components:inputs/kafka_franz.adoc` as a page alias, as the cloud-docs stubs
+do, a stub for the `postgres_cdc` input that declares no such alias, and no
+stub for the `generate` input or the Bloblang pages.
+
+* connect:[inputs/kafka_franz] must link this component's stub page, not the
+  `connect` page.
+* connect:[inputs/postgres_cdc] and connect:[inputs/postgres_cdc.dsn]
+** You should see both linked to this component's `postgres_cdc` stub page,
+   the second to its `dsn` field, with no log warning about either.
+** The stub declares no `components:` page alias, like the cloud-docs
+   `postgres_cdc` stub, whose only alias is
+   `develop:connect/components/inputs/pg_stream.adoc`. The macros find it by
+   the connect page it includes,
+   `include::connect:components:inputs/postgres_cdc.adoc[tag=single-source]`.
+* connect:[inputs/generate] must render as plain code with no link, and the
+  log must say this component has no page for it and that a Cloud page links
+  only Cloud pages.
+* blobl:[env()] must render as plain code with no link: `env()` is impure,
+  and the Cloud Bloblang reference leaves impure functions out.
+* bloblval:[env(name),type] must read "<unknown type>" and log unavailable,
+  for the same reason.
+

@@ -310,6 +310,10 @@ describe('migrate-property-values', () => {
   })
 
   describe('what is skipped', () => {
+    test('a value written as propval: in either form is the macro, not a hand-written value', () => {
+      expect(scan('propval::log_segment_ms[description]\n\nSet prop:log_segment_ms[], which defaults to propval:log_segment_ms[default].')).toEqual([])
+    })
+
     test('listing, literal, comment, passthrough and fenced blocks', () => {
       const content = [
         '----', '`log_segment_ms` defaults to 1 day.', '----',

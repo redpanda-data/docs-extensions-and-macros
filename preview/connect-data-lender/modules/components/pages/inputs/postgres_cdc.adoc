@@ -1,0 +1,116 @@
+= postgres_cdc
+// Stand-in page for the showcase build: the headings the generated page has,
+// so connect: and blobl: links land on real anchors. Generated from
+// connect-4.114.0.json in this component. The tag region is what the
+// macro-fixtures-cloud stub includes, as cloud-docs stubs include the
+// generated page.
+
+// tag::single-source[]
+The postgres_cdc input.
+
+== Fields
+
+=== `auto_replay_nacks`
+
+=== `aws`
+
+=== `aws.enabled`
+
+=== `aws.endpoint`
+
+=== `aws.id`
+
+=== `aws.region`
+
+=== `aws.role`
+
+=== `aws.role_external_id`
+
+=== `aws.roles[]`
+
+=== `aws.roles[].role`
+
+=== `aws.roles[].role_external_id`
+
+=== `aws.secret`
+
+=== `aws.token`
+
+=== `batching`
+
+=== `batching.byte_size`
+
+=== `batching.check`
+
+=== `batching.count`
+
+=== `batching.period`
+
+=== `batching.processors[]`
+
+=== `checkpoint_limit`
+
+=== `dsn`
+
+=== `heartbeat_interval`
+
+=== `include_transaction_markers`
+
+=== `incremental_snapshot`
+
+=== `incremental_snapshot.checkpoint_cache`
+
+=== `incremental_snapshot.checkpoint_cache_key`
+
+=== `incremental_snapshot.chunk_size`
+
+=== `incremental_snapshot.enabled`
+
+=== `incremental_snapshot.heartbeat_interval`
+
+=== `incremental_snapshot.retry_cooldown`
+
+=== `max_parallel_snapshot_tables`
+
+=== `pg_standby_timeout`
+
+=== `pg_wal_monitor_interval`
+
+=== `schema`
+
+=== `signal_table_name`
+
+=== `slot_name`
+
+=== `snapshot_batch_size`
+
+=== `stream_snapshot`
+
+=== `tables[]`
+
+=== `temporary_slot`
+
+=== `tls`
+
+=== `tls.client_certs[]`
+
+=== `tls.client_certs[].cert`
+
+=== `tls.client_certs[].cert_file`
+
+=== `tls.client_certs[].key`
+
+=== `tls.client_certs[].key_file`
+
+=== `tls.client_certs[].password`
+
+=== `tls.enable_renegotiation`
+
+=== `tls.root_cas`
+
+=== `tls.root_cas_file`
+
+=== `tls.skip_cert_verify`
+
+=== `unchanged_toast_value`
+// end::single-source[]
