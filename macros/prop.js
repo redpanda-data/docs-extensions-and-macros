@@ -118,6 +118,7 @@ const { escapeHtml } = require('../extension-utils/html-utils')
 const propertyValues = require('../extension-utils/property-values')
 const valueDescriptions = require('../extension-utils/value-descriptions')
 const datasets = require('../extension-utils/attachment-datasets')
+const { deprecationAcknowledged } = require('../extension-utils/deprecation-ack')
 const { noteIncludes } = require('../extension-utils/connect-links')
 const { rpkvalInlineMacro, rpkvalBlockMacro } = require('./rpkval')
 const { connectvalInlineMacro, connectvalBlockMacro } = require('./connectval')
@@ -737,7 +738,7 @@ function propInlineMacro (config) {
       // command or Connect component, but every mention warns: with or without
       // link=true, a page that recommends it is out of date.
       const deprecated = entry.is_deprecated === true
-      if (deprecated) reportDeprecatedProperty({ name, registry, mode, filePath, linkRequested })
+      if (deprecated && !deprecationAcknowledged(attributes)) reportDeprecatedProperty({ name, registry, mode, filePath, linkRequested })
 
       // Discover the page in THIS component that documents the property. A page
       // is never borrowed from another component, and never guessed from the
@@ -887,7 +888,7 @@ function propvalCall (config, parent, target, attributes, { block = false } = {}
   // A value read from a deprecated property still renders, as connectval:
   // does for a deprecated component or field, but warns unless the call asks
   // whether it is deprecated.
-  if (result.ok && mode !== 'off' && result.field !== 'deprecated') {
+  if (result.ok && mode !== 'off' && result.field !== 'deprecated' && !deprecationAcknowledged(attributes)) {
     const entry = registry.properties[name]
     if (entry && entry.is_deprecated === true) {
       logger.warn(`${result.call}: '${name}' is deprecated in ${describeDataset(registry)}. The value renders, but a page that states it is out of date. Remove the sentence or say that the property is deprecated, and name the property that replaces it if there is one.`)

@@ -175,6 +175,24 @@ function parseAfterFiller (text) {
   return { parsed, skip }
 }
 
+// A reference macro call with deprecated=ok among its attributes.
+const ACK_CALL_RX = /\b(?:prop|propval|rpkcmd|rpkval|connect|connectval|blobl|bloblval):{1,2}[^\s[]*\[[^\]\n]*\]/g
+
+/**
+ * The macro calls on each line that acknowledge, with deprecated=ok, that they
+ * name something deprecated on purpose (see extension-utils/deprecation-ack.js).
+ *
+ * @returns {Map<number, string[]>} 1-based line number to the calls on it.
+ */
+function acknowledgedCalls (content) {
+  const out = new Map()
+  content.split('\n').forEach((line, i) => {
+    const calls = (line.match(ACK_CALL_RX) || []).filter((call) => /[[,]\s*deprecated\s*=\s*ok\s*[,\]]/i.test(call))
+    if (calls.length) out.set(i + 1, calls)
+  })
+  return out
+}
+
 /**
  * Lines a `// value-check: ignore` comment suppresses: the line directly
  * after it, or every line of the delimited block it sits directly before
@@ -216,6 +234,7 @@ const RELEASES_RX = /(?:^|\/)releases\//
 const MACRO_VALUE_RX = /^`?\+?(?:rpkval|rpkcmd|propval|prop|connectval|bloblval|connect|blobl):/
 
 module.exports = {
+  acknowledgedCalls,
   norm,
   walkFiles,
   isStubPage,

@@ -34,3 +34,11 @@ Each row exercises the same scenario with every link macro.
 * prop: propval:cloud_storage_max_partition_readers_per_shard[type]
 * Connect: connectval:[inputs/kafka.addresses,type]
 * Bloblang: bloblval:[meta(),description]
+
+== Deprecated name, acknowledged with deprecated=ok
+
+* prop: prop:cloud_storage_max_partition_readers_per_shard[deprecated=ok]
+* rpk: rpkcmd:[rpk redpanda admin,deprecated=ok]
+* Connect: connect:[inputs/kafka,deprecated=ok]
+* Bloblang: blobl:[meta(),deprecated=ok]
+* Connect value: connectval:[inputs/kafka.addresses,type,deprecated=ok]

@@ -151,6 +151,15 @@ describe('doc-tools check-reference-values', () => {
     expect(run(dir, ['--data-file', rpkData(dir), '--annotations', 'gitlab']).code).toBe(2)
   })
 
+  test('a deprecated name in a macro call with deprecated=ok is not reported, and other calls still are', () => {
+    const dir = repo({ 'modules/x/pages/d.adoc': ['= D', '', 'Use rpkcmd:[rpk redpanda admin].', '', 'It replaced rpkcmd:[rpk redpanda admin,deprecated=ok].', ''].join('\n') })
+    const r = run(dir, ['--data-file', rpkData(dir)])
+    const deprecations = r.report.kinds.rpk.findings.filter((f) => /deprecat/.test(f.reason || ''))
+    expect(deprecations.map((f) => f.line)).toEqual([3])
+    expect(r.report.acknowledged).toBe(1)
+    expect(r.stdout + r.stderr).toContain('1 deprecated name(s) acknowledged with deprecated=ok')
+  })
+
   test('--write --fail-on any counts only the findings that remain', () => {
     const dir = repo({ 'modules/x/pages/e.adoc': EXACT })
     fs.mkdirSync(path.join(dir, 'modules/reference/attachments'), { recursive: true })

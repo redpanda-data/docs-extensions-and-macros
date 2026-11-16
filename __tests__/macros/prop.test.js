@@ -302,6 +302,22 @@ describe('prop macro', () => {
         warn.mockRestore()
       })
 
+      test('deprecated=ok renders the same, with no deprecation warning, for prop: and propval:', () => {
+        const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
+        const catalog = () => fakeCatalog({ json: DEPRECATED_JSON })
+        const expected = convert('prop:cloud_topics_enabled[]', { catalog: catalog() })
+        expect(convert('prop:cloud_topics_enabled[deprecated=ok]', { catalog: catalog() })).toBe(expected)
+        expect(convert('prop:cloud_topics_enabled[link=true,deprecated=ok]', { catalog: catalog() })).not.toContain('href')
+        warn.mockClear()
+        convert('prop:cloud_topics_enabled[deprecated=ok]', { catalog: catalog() })
+        convert('prop:cloud_topics_enabled[link=true,deprecated=ok]', { catalog: catalog() })
+        convert('propval:cloud_topics_enabled[scope,deprecated=ok]', { catalog: catalog() })
+        expect(deprecationWarnings(warn)).toHaveLength(0)
+        convert('prop:cloud_topics_enabled[deprecated=yes]', { catalog: catalog() })
+        expect(deprecationWarnings(warn)).toHaveLength(1)
+        warn.mockRestore()
+      })
+
       test('a current property does not warn', () => {
         const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
         convert('prop:admin[]', { catalog: fakeCatalog({ json: DEPRECATED_JSON }) })
