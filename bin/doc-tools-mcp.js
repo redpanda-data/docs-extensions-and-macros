@@ -510,7 +510,7 @@ const tools = [
         },
         repo: {
           type: 'string',
-          description: 'Redpanda checkout to extract raw source strings from (properties surface only, alternative to "extracted")'
+          description: 'Alternative to "extracted". Properties: a redpanda checkout to extract raw source strings from. rpk: a streaming-enterprise src/go/rpk directory to build rpk in and read --print-tree from; UPSTREAMABLE rows also get source_file/source_line'
         },
         surface: {
           type: 'string',

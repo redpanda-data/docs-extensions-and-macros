@@ -581,9 +581,11 @@ An item file keeps its frozen inputs and recordings beside it, in
 This repository is public. An item carries its PR's title and
 description, its fixture carries the PR's source diff, and its recording
 carries docs answers to questions about that diff, so items from a private
-repository such as streaming-enterprise never go in
+repository such as streaming-enterprise or redpanda-operator never go in
 `doc-impact/items.json`. Keep them in a private location of their own and
-run them with `--items <private-dir>/items.json`.
+run them with `--items <private-dir>/items.json`. When `doc-impact/items.json`
+holds no items, the doc-impact eval workflow skips the replay and says so in
+the job summary.
 
 ==== Seeding items from past PRs
 

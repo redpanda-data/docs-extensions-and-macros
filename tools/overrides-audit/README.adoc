@@ -34,7 +34,20 @@ npx doc-tools overrides audit --surface rpk \
   --overrides docs-data/rpk-overrides.json \
   --extracted docs-data/rpk-v26.2.2.json \
   --format human
+
+# rpk surface, built from source, with source locations
+npx doc-tools overrides audit --surface rpk \
+  --overrides docs-data/rpk-overrides.json \
+  --repo <streaming-enterprise>/src/go/rpk
 ----
+
+For rpk, `--repo` takes a streaming-enterprise `src/go/rpk` directory instead of a snapshot. The audit runs `go run cmd/rpk/main.go --print-tree` there, which prints the tree before any override, and audits against that. Progress logs go to stderr, so stdout stays valid JSON. It needs Go, and it should run on Linux: the docs snapshot comes from Linux, and on macOS the Linux-only commands (`rpk redpanda`, `rpk iotune`) are missing. A source build installs no managed plugins (`ai`, `connect`, `k8s`), so unless the machine has them installed, their overrides are REVIEW as not compared.
+
+=== Source locations (rpk)
+
+`rpk --print-tree` has no file or line, so the rpk surface gets them from a static analyzer, `tools/rpk-docs/scripts/locate-strings`. It parses `src/go/rpk` with `go/parser` (it never builds or runs rpk), starts at the `cobra.Command` with `Use: "rpk"`, and follows the `AddCommand` call graph to rebuild each command path. It reads only the files in the `linux/amd64` build (`--goos`, `--goarch` to change that). For each command it records the line of the `Long` string literal (or `Short` when `Long` is absent or empty), and for each flag the line of the usage string in a pflag registration call (`String`, `StringVarP`, `BoolP`, `Var`, and so on). It leaves out anything it cannot resolve exactly: a `Long` that is not a string literal, a flag registered on two lines or through a helper method, children added in a loop. Calls such as `MarkHidden` or `MarkDeprecated` are never read as registrations.
+
+With `--repo` the audit runs the analyzer too, unless `--locations <file>` gives its output (`go run . --repo <src/go/rpk>` in the analyzer directory) instead. `--locations` also works with `--extracted`. Each UPSTREAMABLE row then carries `source_file` (relative to `src/go/rpk`) and `source_line`, or a note saying the analyzer found no location; the upstreaming workflow reports those with `doc-tools overrides report --section unlocatable`. A locator failure is a warning: rows carry no location and the result's `locations_file` is `null`.
 
 To produce a raw extraction from a local Redpanda checkout:
 
@@ -128,11 +141,11 @@ The audit carries `upstream_ref` from the override entry into the manifest row f
 
 == Output
 
-JSON (default): `{ surface, overrides_file, extracted_file, manifest, summary, cross_check }`.
+JSON (default): `{ surface, overrides_file, extracted_file, manifest, summary, cross_check }`. rpk adds `snapshot_version` and `locations_file` (the locator output used, or `null`).
 
 * `manifest`: one row per classified field: `{ name, field, class, upstream_candidate_text?, upstream_ref?, content_hash?, source_file?, source_line?, note }`.
 ** `content_hash` is a stable 16-hex-char digest of `(name, normalized override description)`. The docs-repo upstreaming workflow keeps a manifest of already-PRed hashes, so re-runs skip candidates whose hash is unchanged and re-draft when the override text moved.
-** `source_line` is populated only when the extracted JSON carries `line_start` (pending the extractor line-span patch); today it is absent.
+** `source_line` is populated only when the extracted JSON carries `line_start` (pending the extractor line-span patch); today it is absent. For rpk, `source_file` and `source_line` come from the locator (see <<Source locations (rpk)>>) and are set on UPSTREAMABLE rows only.
 * `summary`: total, counts per class, and counts per (field, class).
 * `cross_check` (properties): reuses `tools/property-extractor/compare-properties.js` -- the override descriptions are overlaid on the extracted properties and diffed. Every raw-equal description must have classified `REDUNDANT`; `violations` lists classifier bugs (expected empty). For rpk, see <<rpk cross-check>>.
 * `snapshot_version` (rpk only): the `rpk_version` of the snapshot audited.

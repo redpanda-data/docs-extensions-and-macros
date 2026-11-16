@@ -47,6 +47,7 @@ display help for command
 * `check-sources` - Check that `// Source:` comments in AsciiDoc pages cite GitHub lines, PRs, Jira keys, or URLs that exist and still contain the quoted text; free-form comments are counted as unchecked notes
 * `check-build-log` - Check an Antora JSON build log: fail on error or fatal records or too few pages, print a Markdown summary
 * `check-metadata` - Check page-categories and solution facet values in AsciiDoc page headers against the docs taxonomy
+* `check-reference-values` - Check prose, shell blocks and YAML against the property, rpk and Connect data: report hand-written values the value macros could render, and unknown or deprecated commands, flags, components and fields
 * `check-rendered-html` - Scan rendered Antora HTML for unconverted AsciiDoc (literal backticks, xref:, include::, attributes, tables, empty sections) and broken anchors and links
 * `connect-docs-diff` - Diff two generated Connect docs trees and map each changed partial or example to its published page
 * `preview-string` - Render one embedded doc string (property, rpk command/flag, metric, helm key, CRD field, connect field) as it will publish
@@ -1556,7 +1557,7 @@ npx doc-tools check-build-log build.ndjson --blocking-sources redpanda-data/rp-c
 
 == check-metadata
 
-Check the taxonomy metadata in AsciiDoc page headers against the docs taxonomy (taxonomy.yml in the docs repository). On every page, `:page-categories:` values must resolve to a concept: an unknown value, a deprecated value, or two values that are the same concept warn, and each message names the replacement. On a solution overview (`:page-layout: solution`), `:page-solution-use-cases:`, `:page-solution-industries:`, `:page-solution-technologies:`, and `:page-solution-platforms:` must resolve within their own facet, and an unknown value or a duplicate concept is an error. `:page-topic-type:` is checked against the content types, as a warning. --strict turns every warning into an error. The taxonomy comes from --taxonomy (a path or URL), else the docs checkout at the current directory, else $REDPANDA_DOCS_PATH, else the published file. The build runs the same rules (extension-utils/metadata-check.js), so the two never disagree. --fix first rewrites `:page-categories:` in place: each value becomes its concept's preferred label, a deprecated value becomes its replacements, and a replacement that is a task is dropped (the task comes from the module). Values that need a judgment call (no replacement, or a content type) are left as they are and still warn. --suggest also lists, for each page, the topics, use cases, technologies, and industries its text names that its header does not carry yet, so authors and agents choose values from the taxonomy instead of inventing them. Matching is deterministic, with no model: every live concept's prefLabel and altLabels are matched case-insensitively on whole words against the title, `:description:`, the page path (module and directories), section headings, and body, code included and included partials followed. Words split on anything that is not a letter or digit, so the code literal `postgres_cdc` names PostgreSQL (altLabel Postgres) and Change data capture (altLabel CDC). A two-letter label such as Go matches only in its exact case and never as the first word of a sentence. Hits are weighted title 8, path 6, description 5, heading 1.5 each (up to 3), and body 1 + log2(n) (at most 3). A suggestion never names a deprecated concept, never takes a facet past its cardinality, and skips what the page carries or what that implies; on a solution overview a technology that a topic implies (Iceberg Topics implies Apache Iceberg) is suggested in page-solution-technologies. Each suggestion has a score, a reason, and evidence (the matched term, where, and the line). --min-score defaults to 5 for Product Docs pages and 3 for solution overviews; --limit (per facet) to 3 and 6. Each suggestion also has the line it belongs on (its attribute's entry in the header, else the page's first line) and whether the page has no page-categories yet, and the JSON lists the pages without page-categories under `suggest.uncategorized`, with how many suggestions each got. Suggestions are under `suggest` in the JSON, apart from `findings`, and never change the exit code, with --strict or without. The reusable check-metadata workflow reports them as notices and in the job summary. --suggest also lists candidates: frequent, distinctive terms on a page that no concept's label or altLabel matches, in any scheme, for proposing new concepts or altLabels. They are repeated capitalized terms in prose (Amazon S3, Debezium) and component identifiers (`aws_s3` output, xrefs to Connect component pages), each with a count, the lines, and a likely facet from a cue word after it (a connector, database, format, or product word). Terms in the terminology lists (--terminology, default the docs glossary in the checkout), common English, and words the page also writes in lowercase are dropped. --candidates-only skips the check and the suggestions and aggregates candidates across the pages: one entry per term, with the pages it is on, leaving out terms on more than a fifth of the pages (boilerplate). Exit 0 without errors, 1 with errors, 2 when the check could not run.
+Check the taxonomy metadata in AsciiDoc page headers against the docs taxonomy (taxonomy.yml in the docs repository). On every page, `:page-categories:` values must resolve to a concept: an unknown value, a deprecated value, or two values that are the same concept warn, and each message names the replacement. On a solution overview (`:page-layout: solution`), `:page-solution-use-cases:`, `:page-solution-industries:`, `:page-solution-technologies:`, and `:page-solution-platforms:` must resolve within their own facet, and an unknown value or a duplicate concept is an error. `:page-topic-type:` is checked against the content types, as a warning. --strict turns every warning into an error. The taxonomy comes from --taxonomy (a path or URL), else the docs checkout at the current directory, else $REDPANDA_DOCS_PATH, else the published file. The build runs the same rules (extension-utils/metadata-check.js), so the two never disagree. --fix first rewrites `:page-categories:` in place: each value becomes its concept's preferred label, a deprecated value becomes its replacements, and a replacement that is a task is dropped (the task comes from the module). Values that need a judgment call (no replacement, or a content type) are left as they are and still warn. --suggest also lists, for each page, the topics, use cases, technologies, and industries its text names that its header does not carry yet, so authors and agents choose values from the taxonomy instead of inventing them. Matching is deterministic, with no model: every live concept's prefLabel and altLabels are matched case-insensitively on whole words against the title, `:description:`, the page path (module and directories), section headings, and body, code included and included partials followed. Words split on anything that is not a letter or digit, so the code literal `postgres_cdc` names PostgreSQL (altLabel Postgres) and Change data capture (altLabel CDC). A two-letter label such as Go matches only in its exact case and never as the first word of a sentence. Hits are weighted title 8, path 6, description 5, heading 1.5 each (up to 3), and body 1 + log2(n) (at most 3). A suggestion never names a deprecated concept, never takes a facet past its cardinality, and skips what the page carries or what that implies; on a solution overview a technology that a topic implies (Iceberg Topics implies Apache Iceberg) is suggested in page-solution-technologies. Each suggestion has a score, a reason, and evidence (the matched term, where, and the line). --min-score defaults to 5 for Product Docs pages and 3 for solution overviews; --limit (per facet) to 3 and 6. Each suggestion also has the line it belongs on (its attribute's entry in the header, else the page's first line) and whether the page has no page-categories yet, and the JSON lists the pages without page-categories under `suggest.uncategorized`, with how many suggestions each got. Suggestions are under `suggest` in the JSON, apart from `findings`, and never change the exit code, with --strict or without. The reusable check-metadata workflow reports them as notices and in the job summary. --suggest also lists candidates: frequent, distinctive terms on a page that no concept's label or altLabel matches, in any scheme, for proposing new concepts or altLabels. They are repeated capitalized terms in prose (Amazon S3, Debezium) and component identifiers (`aws_s3` output, xrefs to Connect component pages), each with a count, the lines, and a likely facet from a cue word after it (a connector, database, format, or product word). Terms in the terminology lists (--terminology, default the docs glossary in the checkout or $REDPANDA_DOCS_PATH) are dropped, and so are stop words and common English, language keywords (NULL, GROUP BY), Kubernetes object kinds (Pods, PersistentVolumeClaim), terms only ever on sales or licensing lines (Redpanda Sales, Enterprise Edition), and words the page also writes in lowercase. The product's own name is stripped from the front of a term (Redpanda Terraform counts as Terraform) and alone is no term. Connect component xrefs count for inputs, outputs, and caches only. --candidates-only skips the check and the suggestions and aggregates candidates across the pages: one entry per term, with the pages it is on, leaving out terms on more than a fifth of the pages (boilerplate). Exit 0 without errors, 1 with errors, 2 when the check could not run.
 
 *Why use it:*
 
@@ -1638,6 +1639,82 @@ npx doc-tools check-metadata --changed origin/main --suggest --suggest-empty-onl
 # Terms across a repository that no concept covers, filtered by the style guide's word lists
 npx doc-tools check-metadata --candidates-only --terminology shared/modules/terms/partials,../docs-team-standards/resources/writing-style/terminology.md --format json modules
 ----
+
+== check-reference-values
+
+Check a docs checkout for reference values and references that the propval:, rpkval:, connectval:, bloblval:, rpkcmd:, connect: and blobl: macros could render from the published data, and for references to things the data does not have. Three kinds run together, each selecting its dataset exactly as its macro does (from the repo and any --lender checkouts), unless --data-file names one: properties runs the migrate-property-values scan unchanged; rpk parses every rpk invocation in shell blocks and backticked prose (unknown-command, unknown-flag and deprecated-command, with "did you mean" suggestions) and compares flag defaults stated in prose and in Default table columns with the rpk data, and checks each hand-written xref to an rpk reference page as the scanned component renders it (broken-link when the page does not exist there, link-label-mismatch when the label names another command, and exact when the label is the command in backticks and rpkcmd: would link the same page); connect walks every pipeline config in YAML blocks and examples files (unknown-component, unknown-field, deprecated components and fields), compares YAML comments that state a default ("# Optional (default: ...)") and callouts and sentences that state one with the Connect data, and checks each hand-written xref to a Connect component page, field anchor or Bloblang page on every component that renders the file (broken-link, link-label-mismatch, and exact when the label is just the name and connect: or blobl: would link the same page and anchor). Statuses are propval's (exact, equivalent, mismatch, unset, unverifiable, example output) plus reference. Plugin flags scraped from --help never fail, and neither do findings in release notes, upgrade notes or Connect migration guides. A `// value-check: ignore` comment line suppresses findings on the next line or in the next block. Writes one JSON and one Markdown report. --write applies only exact matches in the same sentence (or a Connect callout) that name one target, never in a table, block or YAML, and only when the line renders the same visible text before and after through the real macros; an exact rpk xref, in prose or a table cell, becomes rpkcmd:[...], and an exact Connect xref connect:[...] or blobl:[...]. It also reports unlinked mentions: the first mention on a page, as it renders with its includes, of an rpk command in inline code (`rpk topic create`), a Connect component named with its type (`kafka_franz` input, kafka_franz input) or, in Connect content, a Bloblang call (`now()`, `.uppercase()`, `uppercase` method), when the page links it nowhere and rpkcmd:, connect: or blobl: would link it. A mention in a partial is reported at the partial when one page that includes it shows it that way, and a partial no loaded page includes is judged on its own. Never in blocks, headings, titles, table header rows, link labels, nav files, release, upgrade or migration notes, generated pages or the target's own page. They fail only at --fail-on links, and --write turns them into links only with --write-links, keeping the text as written. It also reports old names in macros and prose spans: an rpk command written with an alias (`rpk cluster status` for rpk cluster info) or a Connect component written with the name its page now aliases (outputs/kafka_migrator) is an alias warning, and a deprecated rpk command, Connect component or field, or Bloblang function or method is a deprecated reference warning that names the replacement the data names. Both fail only at --fail-on any or links. --write rewrites one to the main or replacement name, keeping the rest of the call, when the data names one replacement that has the same flag or field (and, for Connect, is the same type), the line is not about the name, the main name is not already written nearby, and the page does not use the old name elsewhere, such as in an example; the line must then render as before except where the name renders. Exit 0 when no finding is at or above --fail-on, 1 when one is, 2 when the check could not run (including --write-links without --write).
+
+*Why use it:*
+
+Hand-typed defaults, flags and field names drift from the product with every release, and nothing notices until a reader runs the command. The value macros fix that for new prose; this finds the prose that needs them, and the references that are already wrong, in a form CI can fail on.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools check-reference-values [options]
+----
+
+*Options:*
+
+`--docs-dir <path>`::
+Root of the repo being scanned (antora.yml and modules/) (default: ".")
+
+`--lender <path...>`::
+Other component checkouts read into the same catalog, so data is selected exactly as the macros select it (for example ../docs ../rp-connect-docs)
+
+`--kinds <list>`::
+Comma-separated kinds to run: properties, rpk, connect (default: all; a named kind with no data is a setup error)
+
+`--data-file <path...>`::
+Dataset files that bypass selection, recognized by name: redpanda-properties-v<tag>.json, rpk-v<version>.json (the docs-data snapshot works), connect-<version>.json
+
+`--files <path...>`::
+Scan only these files, relative to --docs-dir
+
+`--report-dir <path>`::
+Where to write reference-values-report.json and reference-values-report.md (default: ".")
+
+`--write`::
+Apply auto-safe exact replacements with the value macros, and rewrite writable aliases and deprecated names to the main or replacement name
+
+`--write-links`::
+With --write, also turn unlinked mentions into rpkcmd:, connect: and blobl: links, keeping the text as written
+
+`--fail-on <level>`::
+none, mismatch (mismatches, reference errors, stale rpk and Connect examples), any (also exact, equivalent, unset, reference warnings such as deprecated names, and aliases) or links (also unlinked mentions) (default: "mismatch")
+
+`--annotations <format>`::
+Also print GitHub workflow annotations: github
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# docs: rpk from the generator snapshot until the attachment is published
+npx doc-tools check-reference-values --docs-dir . --data-file docs-data/rpk-v26.2.2.json --lender ../rp-connect-docs --report-dir ./reference-values
+
+# cloud-docs borrows property and rpk data from docs, Connect data from rp-connect-docs
+npx doc-tools check-reference-values --docs-dir ../cloud-docs --lender ../docs ../rp-connect-docs --data-file ../docs/docs-data/rpk-v26.2.2.json
+
+# Only the files a pull request changed, with GitHub annotations
+npx doc-tools check-reference-values --files $(git diff --name-only origin/main -- '*.adoc') --annotations github
+
+# Apply the auto-safe exact matches, then fail on anything left
+npx doc-tools check-reference-values --write --fail-on mismatch
+
+# Also link the first unlinked mention of each command, component and call
+npx doc-tools check-reference-values --write --write-links --data-file docs-data/rpk-v26.2.2.json --lender ../rp-connect-docs
+----
+
+*Requirements:*
+
+- An Antora component checkout (antora.yml and modules/)
+- The data: redpanda-properties-<tag>.json and rpk-<version>.json attachments
+  in a reference module, connect-<version>.json in rp-connect-docs, or --data-file
 
 == check-rendered-html
 
@@ -2122,7 +2199,7 @@ npx doc-tools generate migrate-property-refs --properties modules/reference/atta
 
 === generate migrate-property-values
 
-Report hand-written property values in prose ("defaults to 128 MiB", "the minimum is 1 minute") next to a property mention, check each against the property data for the repo's own version (selected exactly as the prop: macro selects it), and propose a propval: replacement. Mismatches are likely doc errors. Also reads example command output in listing blocks (rpk topic describe, rpk cluster config get and export, Admin API cluster_config, kafka-configs --describe, Key/Value/Source records) and reports a row that asserts the default, such as SOURCE DEFAULT_CONFIG, but shows another value as stale example output, listed apart from prose findings. Dry run by default, writing a JSON and a Markdown report; --write applies only exact matches stated in the same sentence as their property, never a mismatch, a table cell or example output. Skips prose inside code blocks and generated content.
+Report hand-written property values in prose ("defaults to 128 MiB", "the minimum is 1 minute") next to a property mention, check each against the property data for the repo's own version (selected exactly as the prop: macro selects it), and propose a propval: replacement. Mismatches are likely doc errors. Also reads example command output in listing blocks (rpk topic describe, rpk cluster config get and export, Admin API cluster_config, kafka-configs --describe, Key/Value/Source records) and reports a row that asserts the default, such as SOURCE DEFAULT_CONFIG, but shows another value as stale example output, listed apart from prose findings. Dry run by default, writing a JSON and a Markdown report; --write applies only exact matches stated in the same sentence as their property, never a mismatch, a table cell or example output. Skips prose inside code blocks and generated content. `check-reference-values` runs these property checks together with rpk and Connect checks, and can fail CI.
 
 *Usage:*
 
@@ -2346,6 +2423,9 @@ Write PR summary to file (for GitHub Actions)
 `--show-info`::
 Include info-level validation messages
 
+`--check-output [report-file]`::
+Check every generated command and flag description: the text matches its source and each code span covers a whole token. Exits 1 on any violation, and writes one line per violation to report-file when given
+
 `--docs-root <dir>`::
 Docs checkout whose pages docs.redpanda.com URLs are converted into xrefs against (default: the current repo when it holds antora.yml)
 
@@ -2376,6 +2456,9 @@ npx doc-tools generate rpk-docs --ref v26.2.0 --diff v26.1.9
 
 # Use custom overrides file
 npx doc-tools generate rpk-docs --ref dev --overrides custom-overrides.json
+
+# Check every generated description and write violations to a report
+npx doc-tools generate rpk-docs --from-json docs-data/rpk-v26.2.2.json --check-output report.txt
 
 # Also convert links to Redpanda Connect pages (rp-connect-docs checked out beside docs)
 npx doc-tools generate rpk-docs --from-json docs-data/rpk-v26.2.2.json --lender ../rp-connect-docs
@@ -3251,7 +3334,10 @@ Override surface to audit (choices: "properties", "rpk", default: "properties")
 Output format (choices: "json", "human", default: "json")
 
 `--repo <path>`::
-Redpanda checkout to extract raw source strings from (properties surface only; alternative to --extracted)
+Alternative to --extracted. Properties: a redpanda checkout to extract raw source strings from. rpk: a streaming-enterprise src/go/rpk directory; without --extracted, the audit builds rpk there and reads its --print-tree output, and unless --locations is given it also locates each string so UPSTREAMABLE rows carry source_file/source_line. Run it on Linux, where the docs snapshot comes from
+
+`--locations <path>`::
+rpk only: output of the locate-strings analyzer (tools/rpk-docs/scripts/locate-strings) to take source_file/source_line from, instead of running it through --repo
 
 `--output <path>`::
 Also write the JSON result to this file
@@ -3317,7 +3403,7 @@ doc-tools overrides report [options]
 Path to a JSON array of triaged candidate rows
 
 `--section <section>`::
-Which report section to build (choices: "upstream", "retirement", "ambiguous")
+Which report section to build (choices: "upstream", "retirement", "ambiguous", "unlocatable")
 
 `-h, --help`::
 display help for command

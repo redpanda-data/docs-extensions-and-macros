@@ -10,7 +10,7 @@
 //
 // Usage: node set-latest-version-harness.js '<scenario JSON>'
 // Prints a JSON result: { versionAttributes, latestAttributes, attributesByVersion,
-// errors, warnings, requires, helmChartLookups }
+// errors, warnings, requires, helmChartLookups, helmChartIndexPassed }
 //
 // The component has one version (26.2) unless the scenario lists `versions`,
 // in which case `latestVersion` names the component's latest. Set
@@ -52,9 +52,14 @@ const config = { ...defaults, ...scenario };
 
 mock(path.join(extDir, 'get-latest-redpanda-version.js'), async () => config.redpanda);
 mock(path.join(extDir, 'fetch-latest-docker-tag.js'), async (namespace, repo) => config.dockerTags[repo] || null);
+// The Helm chart index is a network fetch; answer it from the scenario
+// (`helmChartIndex`, default null) and record what the chart lookups receive.
+mock(path.join(extDir, 'fetch-helm-chart-index.js'), async () => config.helmChartIndex ?? null);
 const helmChartLookups = [];
-mock(path.join(extDir, 'get-latest-redpanda-helm-version-from-operator.js'), async (github, owner, repo, stableTag) => {
+const helmChartIndexPassed = [];
+mock(path.join(extDir, 'get-latest-redpanda-helm-version-from-operator.js'), async (github, owner, repo, stableTag, betaTag, logger, options) => {
   helmChartLookups.push(stableTag);
+  helmChartIndexPassed.push(options?.chartVersions ?? null);
   if (!config.helmChartByTag) return config.helmChart;
   return { latestStableRelease: config.helmChartByTag[stableTag] || null, latestBetaRelease: null };
 });
@@ -115,6 +120,7 @@ const contentCatalog = { getComponents: async () => [component] };
     warnings,
     requires,
     helmChartLookups,
+    helmChartIndexPassed,
   }));
 })().catch((error) => {
   console.error(error);

@@ -5,6 +5,28 @@ const path = require('path')
 const handlebars = require('handlebars')
 const helpers = require('./helpers')
 
+/**
+ * The default to print in a flag's row, or undefined to print none. Follows
+ * cobra's --help: zero values ("", 0, false, [], 0s) are not shown. A
+ * required flag's default is never used, a description that already
+ * states its default is left alone, and a path under a home directory is
+ * not shown.
+ */
+function flagDefaultToShow (flag) {
+  if (!flag || flag.required === true) return undefined
+  let value = flag.default
+  // Plugin flags scraped from --help keep cobra's quotes ("ask").
+  if (typeof value === 'string' && /^".*"$/.test(value)) value = value.slice(1, -1)
+  if (value === undefined || value === null || value === '' || value === false || value === 0) return undefined
+  if (Array.isArray(value) && value.length === 0) return undefined
+  if (typeof value === 'string' && /^(0|0s|\[\]|false|<nil>)$/.test(value)) return undefined
+  if (/\(default\b|\bdefault:|\bdefaults? (?:to|is)\b/i.test(flag.description || '')) return undefined
+  // A path under a home directory comes from the machine that saved the
+  // snapshot (rpk plugin install --dir gave /root/.local/bin), not from rpk.
+  if (typeof value === 'string' && /^(?:~|\/root|\/home\/[^/]+|\/Users\/[^/]+|[A-Za-z]:\\Users\\[^\\]+)(?:[/\\]|$)/.test(value)) return undefined
+  return helpers.formatDefault(value, flag.type)
+}
+
 // Register Handlebars helpers
 Object.entries(helpers).forEach(([name, fn]) => {
   if (typeof fn === 'function') {
@@ -919,17 +941,26 @@ function convertIndentedCodeBlocksToAsciiDoc(text, codeBlockStore = []) {
       // Strip trailing backslashes as we'll add them during join
       // Also strip leading "$ " shell prompt if present
       const codeLines = [line.trim().replace(/^\$\s+/, '').replace(/\s*\\$/, '')]
+      // A line that starts with rpk or a prompt is the next command, unless
+      // the line before it ends in a backslash. Joining it would publish two
+      // examples as one broken command (rpk a \ rpk b).
+      const startsCommand = []
+      let continued = /\\\s*$/.test(line)
       let j = i + 1
       while (j < lines.length && /^[ ]{2,}\S/.test(lines[j]) && !/^[ ]{2,}-\s+[A-Z]/.test(lines[j])) {
         // Continue if indented and not a markdown list item (dash followed by capital letter = prose)
-        codeLines.push(lines[j].trim().replace(/\s*\\$/, ''))
+        const newCommand = !continued && /^[ ]{2,}(rpk\s|\$\s)/.test(lines[j])
+        startsCommand[codeLines.length] = newCommand
+        const codeLine = lines[j].trim().replace(/\s*\\$/, '')
+        codeLines.push(newCommand ? codeLine.replace(/^\$\s+/, '') : codeLine)
+        continued = /\\\s*$/.test(lines[j])
         j++
       }
 
-      // Create code block - join with backslash continuation if multi-line
-      const joinedCode = codeLines.length > 1
-        ? codeLines.join(' \\\n')
-        : codeLines[0]
+      // Create code block - join continuation lines with a backslash
+      const joinedCode = codeLines
+        .map((codeLine, k) => k === 0 ? codeLine : (startsCommand[k] ? '\n' : ' \\\n') + codeLine)
+        .join('')
       const codeBlock = `\n[,bash]\n----\n${joinedCode}\n----\n`
       const placeholder = `__EARLY_CODE_BLOCK_${codeBlockStore.length}__`
       codeBlockStore.push(codeBlock)
@@ -1852,8 +1883,11 @@ function formatDescription(desc, customTransformations = null, options = {}) {
     if (i % 2 === 0) {
       // Outside backticks - apply flag wrapping
       // Include =value when present (e.g., --format=json, --var=KEY=VALUE),
-      // and every segment of a dotted name (--local-config.a.b=false)
-      return part.replace(/(?<!rpk\s)(--[a-z][-a-z0-9]*(?:\.[a-z][-a-z0-9]*)*(?:=[^\s,;.)\]]+)?)/gi, '`$1`')
+      // and every segment of a dotted name (--local-config.a.b=false).
+      // A flag family glob (--teams-*) is one span too, as a passthrough:
+      // two plain spans holding * render the text between them in bold.
+      return part.replace(/(?<!rpk\s)(--[a-z][-a-z0-9]*(?:\.[a-z][-a-z0-9]*)*(?:=[^\s,;.)\]]+)?)(?<=-)(\*)|(?<!rpk\s)(--[a-z][-a-z0-9]*(?:\.[a-z][-a-z0-9]*)*(?:=[^\s,;.)\]]+)?)/gi,
+        (match, globFlag, star, flag) => globFlag ? `\`+${globFlag}*+\`` : `\`${flag}\``)
     } else {
       // Inside backticks - don't modify
       return part
@@ -1910,8 +1944,10 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   result = result.replace(/(?<![`\w/])(_redpanda(?:\.[a-z_]+)+)(?!`)/g, '`$1`')
 
   // Add backticks around standalone "rpk" (at end of phrase, before punctuation)
-  // Also exclude rpk inside paths (preceded by /)
-  result = result.replace(/(?<![`\w/])rpk(?=[\s]*[.,;:!?)'"}\]]|[\s]*$)/g, '`rpk`')
+  // Also exclude rpk inside paths (preceded by /) and inside a dotted name
+  // (preceded by .), like the .rpk.ac- plugin prefix. The punctuation must
+  // end the token: rpk.admin_api is a config key, not the binary.
+  result = result.replace(/(?<![`\w/.])rpk(?=\s*[.,;:!?)'"}\]]+(?:\s|$)|\s*$)/g, '`rpk`')
 
   // Convert GitHub issue/PR references to clickable links
   // Pattern: #NNNN (4+ digits) when not inside backticks or code
@@ -2583,20 +2619,8 @@ function findTopLevelWithSubcommands(tree) {
   return result
 }
 
-/**
- * Known rpk plugins that are managed separately from rpk core (they have
- * install/uninstall/upgrade shim commands, and their real command tree only
- * appears when the plugin binary is installed in the generation environment).
- * Shared with rpk-docs-handler.js, which iterates this list to install each
- * plugin before running --print-tree.
- */
-const KNOWN_PLUGINS = ['ai', 'check', 'connect', 'k8s', 'oxla']
-
-/**
- * Subcommands that rpk core ships as a built-in shim for managed plugins,
- * present even when the plugin binary itself is not installed.
- */
-const PLUGIN_SHIM_COMMANDS = new Set(['install', 'uninstall', 'upgrade'])
+// KNOWN_PLUGINS and PLUGIN_SHIM_COMMANDS: see known-plugins.js.
+const { KNOWN_PLUGINS, PLUGIN_SHIM_COMMANDS } = require('./known-plugins')
 
 /**
  * Managed plugins that run from their root command and have no subcommands:
@@ -3148,6 +3172,9 @@ async function generateRpkDocs(options = {}) {
         name: flag.shorthand ? `-${flag.shorthand}, --${flag.name}` : `--${flag.name}`,
         type: flag.type || '-',
         description: ensurePeriod(formatDescription(flag.description || '', textTransformations)),
+        // rpk --help prints these, so the reference does too.
+        required: flag.required === true,
+        defaultValue: flagDefaultToShow(flag),
         // --print-tree gives pflag's deprecation message as the deprecated
         // value itself; overrides give deprecated: true plus a message
         deprecated: Boolean(flag.deprecated),
@@ -3499,6 +3526,7 @@ module.exports = {
   decodeHtmlEntities,
   parseDescriptionSections,
   ensurePeriod,
+  flagDefaultToShow,
   dashify,
   capToTwoSentences,
   flattenCommands,
@@ -3511,6 +3539,7 @@ module.exports = {
   updateNavFile,
   KNOWN_PLUGINS,
   ROOT_ONLY_PLUGINS,
+  PLUGIN_SHIM_COMMANDS,
   detectProtectedPlugins,
   getCommandMetadata,
   processContentArray,
