@@ -5,7 +5,7 @@
  * Helm repository index at charts.redpanda.com.
  *
  * The index needs no GitHub token, so it works on every Antora site. The
- * redpanda-operator repository, which holds the chart source and its tags, is
+ * operator-enterprise repository, which holds the chart source and its tags, is
  * private, so the GitHub lookups only work with a token that can read it.
  *
  * @param {Object} [options]

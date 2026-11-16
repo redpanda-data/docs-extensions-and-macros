@@ -68,7 +68,7 @@ module.exports.register = function ({ config }) {
         GetLatestDockerTag(dockerNamespace, 'redpanda-operator', logger, { maxPages: 3 }),
         GetLatestConnectVersion(github, owner, 'connect', logger),
         // Published chart versions from the public Helm repository. The
-        // chart source lives in redpanda-operator, which is private, so
+        // chart source lives in operator-enterprise, which is private, so
         // without this the chart lookups need a token that can read it.
         FetchHelmChartIndex({ logger }),
       ]);
@@ -82,7 +82,7 @@ module.exports.register = function ({ config }) {
           const helmChartVersions = await GetLatestHelmChartVersionFromOperator(
             github,
             owner,
-            'redpanda-operator',
+            'operator-enterprise',
             latestOperatorResult.value?.latestStableRelease,
             latestOperatorResult.value?.latestBetaRelease,
             logger,
@@ -133,7 +133,7 @@ module.exports.register = function ({ config }) {
       await Promise.all([...lineVersions].map(async ([line, resolved]) => {
         if (!resolved.operator) return;
         try {
-          const chart = await GetLatestHelmChartVersionFromOperator(github, owner, 'redpanda-operator', resolved.operator, null, logger, { chartVersions });
+          const chart = await GetLatestHelmChartVersionFromOperator(github, owner, 'operator-enterprise', resolved.operator, null, logger, { chartVersions });
           resolved.helmChart = chart?.latestStableRelease || null;
         } catch (error) {
           logger.warn(`Helm chart lookup for the ${line} line failed: ${error.message || error}`);
