@@ -8,7 +8,7 @@ IFS=$'\n\t'
 # lets the metrics settle, runs the generator, and tears the cluster down.
 # Anything after the fifth positional argument is passed through to the
 # generator (for metrics mode: tools/metrics/metrics.py, for example
-# --output-dir and --skip-pages).
+# --output-dir and --write-pages).
 #
 # Timing knobs, all in seconds and all overridable from the environment so a
 # CI job can tune them without an interactive prompt:
