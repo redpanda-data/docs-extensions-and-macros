@@ -112,6 +112,13 @@ describe('every emitted rp-badge has a non-empty data-tooltip', () => {
   function render (source) {
     const registry = asciidoctor.Extensions.create()
     badgeMacro.register(registry)
+    // Every Redpanda playbook registers block macros. A badge::[] line on its
+    // own must still render as the inline macro, not be dropped as an unknown
+    // block macro.
+    registry.blockMacro(function () {
+      this.named('unrelated')
+      this.process((parent) => this.createBlock(parent, 'paragraph', 'x'))
+    })
     return asciidoctor.convert(source, { extension_registry: registry, safe: 'safe', attributes: { 'page-beta-text': 'Beta text.' } })
   }
 

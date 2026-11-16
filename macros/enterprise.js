@@ -99,7 +99,8 @@ function warnOnce (contentCatalog, key, message) {
 const DEFAULT_LICENSING_PAGE = 'get-started:licensing/overview.adoc'
 const DEFAULT_ROLE = 'enterprise-feature'
 // Text that carries the Enterprise meaning without CSS. visually-hidden is the
-// docs UI's screen-reader-only class; without it the words simply show.
+// docs UI's screen-reader-only class, defined globally in its site.css (through
+// header.css and home.css); without it the words simply show.
 const ENTERPRISE_MARKER_CLASS = 'enterprise-feature-marker'
 const ENTERPRISE_TEXT_MARKER = `<span class="${ENTERPRISE_MARKER_CLASS} visually-hidden"> (Enterprise)</span>`
 // The attribute every docs UI tooltip reads. Meaning elements never use the

@@ -634,6 +634,12 @@ function resolvePageTarget (page) {
   return page.includes(':') ? page : `reference:${page}`
 }
 
+// The enterprise: macro's hidden text marker (macros/enterprise.js), repeated
+// here rather than imported because enterprise.js already requires this file.
+// The Markdown export reads the marker class to write "(enterprise)".
+const ENTERPRISE_PROPERTY_CLASS = 'is-enterprise-property'
+const ENTERPRISE_TEXT_MARKER = '<span class="enterprise-feature-marker visually-hidden"> (Enterprise)</span>'
+
 /**
  * Build the AsciiDoc content emitted for one macro instance. Exported for
  * unit testing.
@@ -652,17 +658,11 @@ function resolvePageTarget (page) {
  * @param {boolean} [opts.plain] - Render unmarked code (no tooltip, no link)
  *   because the build could not verify the property for this component.
  * @param {boolean} [opts.enterprise] - The property needs an Enterprise license.
- *   Adds the is-enterprise-property class and, after the name, the same
- *   visually hidden " (Enterprise)" text the enterprise: macro emits, so the
- *   meaning is in the HTML text and not only in the docs UI's lock icon.
+ *   Adds the is-enterprise-property class and, after the code element, the
+ *   same visually hidden " (Enterprise)" text the enterprise: macro emits, so
+ *   the meaning is in the HTML text and not only in the docs UI's lock icon.
  * @returns {string}
  */
-// The enterprise: macro's hidden text marker (macros/enterprise.js), repeated
-// here rather than imported because enterprise.js already requires this file.
-// The Markdown export reads the marker class to write "(enterprise)".
-const ENTERPRISE_PROPERTY_CLASS = 'is-enterprise-property'
-const ENTERPRISE_TEXT_MARKER = '<span class="enterprise-feature-marker visually-hidden"> (Enterprise)</span>'
-
 function buildPropContent ({ name, text, link, page, scope, role, helmPath = false, docUrl, plain = false, enterprise = false }) {
   const display = text || (helmPath && helmValuesPath(name, scope)) || name
   if (plain) return `<code>${display}</code>`
@@ -676,7 +676,9 @@ function buildPropContent ({ name, text, link, page, scope, role, helmPath = fal
   const docAttr = docUrl ? ` data-doc-url="${escapeHtml(docUrl)}"` : ''
   const classes = enterprise ? `${role} ${ENTERPRISE_PROPERTY_CLASS}` : role
   const marker = enterprise ? ENTERPRISE_TEXT_MARKER : ''
-  return `<code class="${escapeHtml(classes)}" data-property-name="${escapeHtml(name)}"${docAttr}>${inner}${marker}</code>`
+  // The marker follows the <code>, never sits inside it: the code text must
+  // stay the exact property name a reader copies into a config file.
+  return `<code class="${escapeHtml(classes)}" data-property-name="${escapeHtml(name)}"${docAttr}>${inner}</code>${marker}`
 }
 
 function propInlineMacro (config) {

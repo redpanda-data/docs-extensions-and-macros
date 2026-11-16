@@ -63,7 +63,7 @@ test playbook pulls the real docs repo, which publishes no rpk attachment yet.
   and the log must name `connect-4.114.0.json cloudSupported` as the source:
   the `stdin` input is not available in Cloud.
 * connectval:client_id[introduced,component=inputs/redpanda] must read
-  "<unknown introduced>": the Connect reference shows "Requires version" only
+  "<unknown introduced>": the Connect reference shows the Since badge only
   outside Cloud.
 
 [[rpk-commands-on-cloud]]

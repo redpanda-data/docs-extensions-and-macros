@@ -27,6 +27,7 @@ Marks a meaning inline, such as Beta, Enterprise, or the version a feature arriv
 ```asciidoc
 badge::[label=beta]
 badge::[label=Since v25.1, product=Redpanda]
+badge::[label=Since rpk connect 4.2.0, product=rpk connect]
 badge::[label=deprecated, tooltip="Use the new flag instead."]
 badge::[label=enterprise, size=sm]
 ```
@@ -45,6 +46,7 @@ The label picks the meaning and the exact text shown:
 | `eol soon`, `end of life soon` | `rp-badge--eol-soon` | End of life soon
 | `new` | `rp-badge--new` | New
 | `since <version>` | `rp-badge--since` | Since v<version>
+| `since <product> <version>` | `rp-badge--since` | Since <product> v<version>
 | `enterprise` | `rp-badge--enterprise` | Enterprise
 | `cloud`, `byoc`, `serverless`, `dedicated` | `rp-badge--cloud` | Cloud, BYOC, Serverless, Dedicated
 | `self-managed` | `rp-badge--self-managed` | Self-Managed
@@ -53,7 +55,7 @@ The label picks the meaning and the exact text shown:
 | anything else | `rp-badge--neutral` | the label as written
 |===
 
-Every badge has a tooltip, rendered as `data-tooltip`. Each meaning has standard text, a Since badge reads "Introduced in <product> v<version>." with the product from a `product` attribute (`badge::[label=Since 25.1, product=Redpanda]`), and any other badge falls back to its label. A `tooltip` attribute replaces the default. `size=sm` adds `rp-badge--sm` for dense contexts. Labels never carry parentheses. The older `badge badge--*` classes stay on the same element for pages built with an older UI bundle, and the `convert-to-markdown` extension writes each badge as a parenthetical, such as `(beta)` or `(since v25.1)`.
+Every badge has a tooltip, rendered as `data-tooltip`. Each meaning has standard text, a Since badge reads "Introduced in <product> v<version>." with the product from a `product` attribute (`badge::[label=Since 25.1, product=Redpanda]`) or, when there is none, from a product named in the label (`badge::[label=Since rpk connect 4.2.0]`). When both are present, the `product` attribute wins. Any other badge falls back to its label. A `tooltip` attribute replaces the default. `size=sm` adds `rp-badge--sm` for dense contexts. Labels never carry parentheses. The older `badge badge--*` classes stay on the same element for pages built with an older UI bundle, and the `convert-to-markdown` extension writes each badge as a parenthetical, such as `(beta)`, `(since v25.1)`, or `(since rpk connect v4.2.0)`.
 
 === Registration
 
@@ -136,7 +138,7 @@ text::
 Optional display text override. Use it when the sentence needs different casing or phrasing than the feature name.
 
 tooltip::
-Optional tooltip text override. Overrides the registry entry's `tooltip`. The default is `<feature> requires an Enterprise Edition license.`
+Optional tooltip text override. Overrides the registry entry's `tooltip`. The default is `Requires an Enterprise Edition license.`
 
 === Configuration options
 
@@ -266,7 +268,7 @@ Registered together with the `enterprise` inline macro.
 
 == prop
 
-This inline macro references a Redpanda configuration property in prose. The property renders as a marked `<code>` element (`property-ref` class plus a `data-property-name` attribute) that the docs UI decorates with a hover-documentation tooltip. Marking is opt-in: only properties referenced through this macro get tooltips, so ambiguous words such as `admin` or `rack` in unrelated contexts (Helm values, feature settings) are never decorated by mistake.
+This inline macro references a Redpanda configuration property in prose. The property renders as a marked `<code>` element (`property-ref` class plus a `data-property-name` attribute) that the docs UI decorates with a hover-documentation tooltip. A property that needs an Enterprise license (`is_enterprise` in the property data) also gets the `is-enterprise-property` class on the `<code>` element, followed by the same visually hidden " (Enterprise)" text the `enterprise` macro emits, placed after the `<code>` element so the code text stays the exact property name. The `convert-to-markdown` extension writes it as an `(enterprise)` marker after the name, for example `+`audit_enabled` (enterprise)+`. Cloud pages (`env-cloud` set) get neither, because Redpanda Cloud has no Enterprise license. Marking is opt-in: only properties referenced through this macro get tooltips, so ambiguous words such as `admin` or `rack` in unrelated contexts (Helm values, feature settings) are never decorated by mistake.
 
 The macro checks that a property is actually available to the audience reading the page, and links it only where a page documents it. It validates against the published property data: a `redpanda-properties-<tag>.json` attachment in the `reference` module, the same data the tooltips fetch at runtime. See <<prop-availability>> for which properties each doc set may reference and <<prop-version-selection>> for which file a given page uses. To migrate existing plain-backtick property mentions, use `doc-tools generate migrate-property-refs`. To render a property's value (its default, minimum, unit, and so on) rather than its name, use <<propval>>. For `rpk` flag and Connect field values, see <<rpkval>> and <<connectval>>; for a linked `rpk` command, see <<rpkcmd>>.
 

@@ -503,20 +503,20 @@ describe('prop macro', () => {
     })
     const marker = '<span class="enterprise-feature-marker visually-hidden"> (Enterprise)</span>'
 
-    test('buildPropContent puts the hidden Enterprise text after the name, inside the code', () => {
+    test('buildPropContent puts the hidden Enterprise text after the code, not inside it', () => {
       const html = buildPropContent({ name: 'audit_enabled', role: 'property-ref', enterprise: true })
-      expect(html).toBe(`<code class="property-ref is-enterprise-property" data-property-name="audit_enabled">audit_enabled${marker}</code>`)
+      expect(html).toBe(`<code class="property-ref is-enterprise-property" data-property-name="audit_enabled">audit_enabled</code>${marker}`)
     })
 
     test('an Enterprise property says Enterprise in the HTML text', () => {
       const html = convert('Set prop:audit_enabled[].', { catalog: fakeCatalog({ json }) })
       expect(html).toContain(`class="property-ref is-enterprise-property"`)
-      expect(html).toContain(`>audit_enabled${marker}</code>`)
+      expect(html).toContain(`>audit_enabled</code>${marker}`)
     })
 
-    test('a linked Enterprise property keeps the marker outside the link, inside the code', () => {
+    test('a linked Enterprise property keeps the marker outside the link and the code', () => {
       const html = convert('prop:audit_enabled[link=true,page=properties/cluster-properties]', { catalog: fakeCatalog({ json }) })
-      expect(html).toMatch(/<code class="property-ref is-enterprise-property"[^>]*><a [^>]*>audit_enabled<\/a><span class="enterprise-feature-marker visually-hidden"> \(Enterprise\)<\/span><\/code>/)
+      expect(html).toMatch(/<code class="property-ref is-enterprise-property"[^>]*><a [^>]*>audit_enabled<\/a><\/code><span class="enterprise-feature-marker visually-hidden"> \(Enterprise\)<\/span>/)
     })
 
     test('a property without is_enterprise gets no marker', () => {

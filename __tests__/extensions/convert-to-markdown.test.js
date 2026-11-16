@@ -354,7 +354,7 @@ describe('inline code', () => {
     const { buildPropContent } = require('../../macros/prop')
     const ref = buildPropContent({ name: 'audit_enabled', role: 'property-ref', enterprise: true })
     expect(bodyOf(convert(`<h1>T</h1><p>Set ${ref} to true.</p>`))).toBe('Set `audit_enabled` (enterprise) to true.')
-    const linked = '<code class="property-ref is-enterprise-property" data-property-name="audit_enabled"><a href="x.html#audit_enabled">audit_enabled</a><span class="enterprise-feature-marker visually-hidden"> (Enterprise)</span></code>'
+    const linked = '<code class="property-ref is-enterprise-property" data-property-name="audit_enabled"><a href="x.html#audit_enabled">audit_enabled</a></code><span class="enterprise-feature-marker visually-hidden"> (Enterprise)</span>'
     expect(bodyOf(convert(`<h1>T</h1><p>Set ${linked}.</p>`))).toBe('Set `audit_enabled` (enterprise).')
   })
 
