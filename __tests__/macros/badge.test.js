@@ -61,6 +61,15 @@ describe('badge macro', () => {
     expect(resolveMeaning('Kafka API')).toEqual({ name: 'neutral', label: 'Kafka API', legacy: 'kafka-api', tooltipKey: 'kafka api' })
   })
 
+  test('a Since label that names a product keeps the product in the text', () => {
+    const html = buildBadgeHtml({ label: 'Since rpk connect 4.2', product: 'rpk connect' })
+    expect(html).toContain('>Since rpk connect v4.2</span>')
+    expect(html).toContain('data-tooltip="Introduced in rpk connect v4.2."')
+    expect(buildBadgeHtml({ label: 'Since rpk ai v0.3.1' })).toContain('data-tooltip="Introduced in rpk ai v0.3.1."')
+    expect(resolveMeaning('Since 25.1')).toMatchObject({ name: 'since', label: 'Since v25.1', version: '25.1' })
+    expect(resolveMeaning('Since 25.1').product).toBeUndefined()
+  })
+
   test('renders through Asciidoctor in both macro forms', () => {
     expect(convert('A badge::[label=Since v25.1] here.')).toContain('<span class="rp-badge rp-badge--since badge badge--since" data-tooltip="Introduced in v25.1.">Since v25.1</span>')
     expect(convert('A badge:x[label=deprecated] here.')).toContain('rp-badge--deprecated')

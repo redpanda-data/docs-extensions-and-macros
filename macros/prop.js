@@ -875,9 +875,19 @@ function resolvePageTarget (page) {
  * @param {string} opts.role - CSS class for the code element.
  * @param {boolean} [opts.plain] - Render unmarked code (no tooltip, no link)
  *   because the build could not verify the property for this component.
+ * @param {boolean} [opts.enterprise] - The property needs an Enterprise license.
+ *   Adds the is-enterprise-property class and, after the name, the same
+ *   visually hidden " (Enterprise)" text the enterprise: macro emits, so the
+ *   meaning is in the HTML text and not only in the docs UI's lock icon.
  * @returns {string}
  */
-function buildPropContent ({ name, text, link, page, scope, role, helmPath = false, docUrl, plain = false }) {
+// The enterprise: macro's hidden text marker (macros/enterprise.js), repeated
+// here rather than imported because enterprise.js already requires this file.
+// The Markdown export reads the marker class to write "(enterprise)".
+const ENTERPRISE_PROPERTY_CLASS = 'is-enterprise-property'
+const ENTERPRISE_TEXT_MARKER = '<span class="enterprise-feature-marker visually-hidden"> (Enterprise)</span>'
+
+function buildPropContent ({ name, text, link, page, scope, role, helmPath = false, docUrl, plain = false, enterprise = false }) {
   const display = text || (helmPath && helmValuesPath(name, scope)) || name
   if (plain) return `<code>${display}</code>`
   const inner = link && page
@@ -888,7 +898,9 @@ function buildPropContent ({ name, text, link, page, scope, role, helmPath = fal
   // key: an unescaped quote in any of them ends the attribute early and the
   // remainder becomes stray attributes on every marked property in the build.
   const docAttr = docUrl ? ` data-doc-url="${escapeHtml(docUrl)}"` : ''
-  return `<code class="${escapeHtml(role)}" data-property-name="${escapeHtml(name)}"${docAttr}>${inner}</code>`
+  const classes = enterprise ? `${role} ${ENTERPRISE_PROPERTY_CLASS}` : role
+  const marker = enterprise ? ENTERPRISE_TEXT_MARKER : ''
+  return `<code class="${escapeHtml(classes)}" data-property-name="${escapeHtml(name)}"${docAttr}>${inner}${marker}</code>`
 }
 
 function propInlineMacro (config) {
@@ -976,6 +988,9 @@ function propInlineMacro (config) {
         role: document.getAttribute('property-ref-role', DEFAULT_ROLE),
         helmPath: helmPathRequested(attributes, document),
         docUrl: discoveredUrl ? `${discoveredUrl}#${propertyAnchor(name)}` : undefined,
+        // Cloud has no Enterprise Edition license, so a Cloud page never marks
+        // one, exactly as the enterprise: macro renders plain text there.
+        enterprise: entry.is_enterprise === true && !isAttributeSet(document.getAttribute('env-cloud')),
       })
       // Only request macro substitution when an xref actually needs resolving.
       // Applying it unconditionally let a text= value containing another macro

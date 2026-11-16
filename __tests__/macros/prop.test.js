@@ -494,6 +494,51 @@ describe('prop macro', () => {
     })
   })
 
+  describe('Enterprise properties', () => {
+    const json = JSON.stringify({
+      properties: {
+        audit_enabled: { name: 'audit_enabled', config_scope: 'cluster', cloud_supported: true, is_enterprise: true },
+        iceberg_enabled: { name: 'iceberg_enabled', config_scope: 'cluster', cloud_supported: true, is_enterprise: false },
+      },
+    })
+    const marker = '<span class="enterprise-feature-marker visually-hidden"> (Enterprise)</span>'
+
+    test('buildPropContent puts the hidden Enterprise text after the name, inside the code', () => {
+      const html = buildPropContent({ name: 'audit_enabled', role: 'property-ref', enterprise: true })
+      expect(html).toBe(`<code class="property-ref is-enterprise-property" data-property-name="audit_enabled">audit_enabled${marker}</code>`)
+    })
+
+    test('an Enterprise property says Enterprise in the HTML text', () => {
+      const html = convert('Set prop:audit_enabled[].', { catalog: fakeCatalog({ json }) })
+      expect(html).toContain(`class="property-ref is-enterprise-property"`)
+      expect(html).toContain(`>audit_enabled${marker}</code>`)
+    })
+
+    test('a linked Enterprise property keeps the marker outside the link, inside the code', () => {
+      const html = convert('prop:audit_enabled[link=true,page=properties/cluster-properties]', { catalog: fakeCatalog({ json }) })
+      expect(html).toMatch(/<code class="property-ref is-enterprise-property"[^>]*><a [^>]*>audit_enabled<\/a><span class="enterprise-feature-marker visually-hidden"> \(Enterprise\)<\/span><\/code>/)
+    })
+
+    test('a property without is_enterprise gets no marker', () => {
+      const html = convert('prop:iceberg_enabled[]', { catalog: fakeCatalog({ json }) })
+      expect(html).not.toContain('enterprise-feature-marker')
+      expect(html).not.toContain('is-enterprise-property')
+    })
+
+    test('a Cloud page never marks Enterprise, like the enterprise: macro', () => {
+      const catalog = catalogOf([propertiesAttachment('streaming', 'current', 'v26.2.1', json)], CLOUD)
+      const html = convert('prop:audit_enabled[]', { catalog, component: 'cloud-data-platform', version: '', attributes: { 'env-cloud': '' } })
+      expect(html).toContain('data-property-name="audit_enabled"')
+      expect(html).not.toContain('enterprise-feature-marker')
+      expect(html).not.toContain('is-enterprise-property')
+    })
+
+    test('env-cloud: false is not a Cloud page', () => {
+      const html = convert('prop:audit_enabled[]', { catalog: fakeCatalog({ json }), attributes: { 'env-cloud': 'false' } })
+      expect(html).toContain(marker)
+    })
+  })
+
   describe('cloud availability', () => {
     // cloud_supported is the single gate: the published data has no property
     // that is editable or read-only in Cloud without also being supported, so

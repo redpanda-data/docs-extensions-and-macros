@@ -56,6 +56,10 @@ const DEFAULT_TOOLTIPS = {
 
 // "since 25.1", "Since v25.1", "since: v25.1" all become "Since v25.1".
 const SINCE_PATTERN = /^since:?\s+v?(\S.*)$/i;
+// A product before the version stays in the label: "Since rpk connect 4.2"
+// becomes "Since rpk connect v4.2". Use it when the version is not the page's
+// own product, such as a plugin's version on an rpk plugin page.
+const SINCE_PRODUCT_PATTERN = /^since:?\s+(\S.*?)\s+v?(\d\S*)$/i;
 
 /**
  * Resolve a requested label to its meaning, its exact label, and the legacy
@@ -73,6 +77,12 @@ function resolveMeaning (text) {
     const meaning = MEANINGS[key];
     const tooltipKey = Object.prototype.hasOwnProperty.call(DEFAULT_TOOLTIPS, meaning.legacy) ? meaning.legacy : meaning.name;
     return { name: meaning.name, label: meaning.label, legacy: meaning.legacy || meaning.name, tooltipKey };
+  }
+  const sinceProduct = SINCE_PRODUCT_PATTERN.exec(raw);
+  if (sinceProduct) {
+    const product = sinceProduct[1].trim();
+    const version = sinceProduct[2].trim();
+    return { name: 'since', label: `Since ${product} v${version}`, legacy: 'since', tooltipKey: 'since', version, product };
   }
   const since = SINCE_PATTERN.exec(raw);
   if (since) {
@@ -118,8 +128,9 @@ function buildBadgeHtml ({ label, size, tooltip, product } = {}) {
   // Every badge explains itself: the help cursor promises a tooltip. A Since
   // badge names its version (and product when known), and a neutral badge
   // with no standard text falls back to its own label.
+  const sinceProductName = (product && String(product).trim()) || meaning.product;
   const sinceTooltip = meaning.name === 'since'
-    ? `Introduced in ${product ? `${String(product).trim()} ` : ''}v${meaning.version}.`
+    ? `Introduced in ${sinceProductName ? `${sinceProductName} ` : ''}v${meaning.version}.`
     : undefined;
   const hoverText = (tooltip && String(tooltip).trim()) || sinceTooltip || defaultTooltip || meaning.label;
   // Escape before interpolating: these values reach the macro from .adoc source

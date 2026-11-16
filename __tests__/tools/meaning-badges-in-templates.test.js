@@ -56,10 +56,22 @@ describe('rpk command.hbs', () => {
 
   test('marks deprecated flags, introduced commands, and new flags with badges', () => {
     expect(src).toContain('badge::[label=Deprecated]')
-    expect(src).toContain('badge::[label=Since {{introducedInVersion}}')
+    expect(src).toContain('badge::[label=Since {{#if pluginName}}rpk {{pluginName}} {{/if}}{{introducedInVersion}}')
     expect(src).not.toContain('*[Deprecated')
     expect(src).not.toContain('(New in')
     expect(src).not.toContain('NOTE: This command was introduced in')
+  })
+
+  test('a plugin page names the plugin in the Since label, a core rpk page does not', () => {
+    const badges = src.match(/badge::\[label=Since .*?\{\{\/if\}\}\]/g)
+    expect(badges).toHaveLength(2)
+    for (const badge of badges) {
+      const render = handlebars.compile(badge)
+      expect(render({ pluginName: 'connect', introducedInVersion: '4.2.0' }))
+        .toBe('badge::[label=Since rpk connect 4.2.0, product=rpk connect]')
+      expect(render({ introducedInVersion: 'v25.1.1' }))
+        .toBe('badge::[label=Since v25.1.1, product=rpk]')
+    }
   })
 
   test('keeps the deprecated-command warning as an admonition', () => {

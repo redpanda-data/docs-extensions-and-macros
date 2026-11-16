@@ -349,6 +349,19 @@ describe('inline code', () => {
     const md = convert('<h1>T</h1><p>Type <code>a ` b</code>.</p>')
     expect(bodyOf(md)).toBe('Type ``a ` b``.')
   })
+
+  test('an Enterprise property-ref keeps its marker outside the code span', () => {
+    const { buildPropContent } = require('../../macros/prop')
+    const ref = buildPropContent({ name: 'audit_enabled', role: 'property-ref', enterprise: true })
+    expect(bodyOf(convert(`<h1>T</h1><p>Set ${ref} to true.</p>`))).toBe('Set `audit_enabled` (enterprise) to true.')
+    const linked = '<code class="property-ref is-enterprise-property" data-property-name="audit_enabled"><a href="x.html#audit_enabled">audit_enabled</a><span class="enterprise-feature-marker visually-hidden"> (Enterprise)</span></code>'
+    expect(bodyOf(convert(`<h1>T</h1><p>Set ${linked}.</p>`))).toBe('Set `audit_enabled` (enterprise).')
+  })
+
+  test('a property-ref without the marker gets no Enterprise word', () => {
+    const md = convert('<h1>T</h1><p>Set <code class="property-ref" data-property-name="x">x</code>.</p>')
+    expect(bodyOf(md)).toBe('Set `x`.')
+  })
 })
 
 describe('links and images', () => {

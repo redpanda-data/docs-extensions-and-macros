@@ -435,6 +435,28 @@ function badgeStatusWord (node) {
     .join(' ')
 }
 
+/**
+ * The text of an inline <code>, without any enterprise marker span inside it,
+ * and whether one was there.
+ *
+ * @param {Node} node - The code element.
+ * @returns {{text: string, enterprise: boolean}}
+ */
+function codeTextWithoutMarker (node) {
+  let enterprise = false
+  const walk = (current) => {
+    let out = ''
+    for (const child of Array.from(current.childNodes || [])) {
+      if (child.nodeType === 3) out += child.textContent || ''
+      else if (hasClass(child, ENTERPRISE_MARKER_CLASS)) enterprise = true
+      else out += walk(child)
+    }
+    return out
+  }
+  const text = walk(node)
+  return { text, enterprise }
+}
+
 function hasClass (node, className) {
   if (!node || node.nodeName !== 'SPAN') return false
   const classAttr = node.getAttribute?.('class') || node.className || ''
@@ -537,6 +559,7 @@ module.exports.createEnterpriseFeatureRules = createEnterpriseFeatureRules
 module.exports.generateFrontmatter = generateFrontmatter
 module.exports.formatStatusMarker = formatStatusMarker
 module.exports.badgeMeaning = badgeMeaning
+module.exports.codeTextWithoutMarker = codeTextWithoutMarker
 module.exports.ENTERPRISE_MARKER = ENTERPRISE_MARKER
 module.exports.readGeneratedMarker = readGeneratedMarker
 module.exports.findIncludeTargets = findIncludeTargets
@@ -1211,9 +1234,16 @@ function createTurndownForPage ({ pageUrl, logger }) {
 
     // Inline code is emitted from its text. Asciidoctor auto-links URLs inside
     // monospace, and a Markdown link cannot live inside a code span.
+    // A prop: mention of an Enterprise property carries the enterprise:
+    // macro's hidden "(Enterprise)" marker inside the <code>. The marker is
+    // not code, so it leaves the span and becomes the Markdown marker after it.
     turndownInstance.addRule('inline-code', {
       filter: (node) => node.nodeName === 'CODE' && !(node.parentNode && node.parentNode.nodeName === 'PRE'),
-      replacement: (_, node) => inlineCode(node.textContent || ''),
+      replacement: (_, node) => {
+        const { text, enterprise } = codeTextWithoutMarker(node)
+        const code = inlineCode(text)
+        return enterprise && code ? `${code} ${ENTERPRISE_MARKER}` : code
+      },
     })
 
     // Links: empty anchors (the `<a class="anchor">` Antora puts in every
