@@ -183,7 +183,9 @@ That renders both names as code, the second linked to its entry on the metrics r
 * Write the metric name as the endpoint prints it. A histogram series name (`_bucket`, `_count`, `_sum`) renders as written, and reads and links its metric.
 * `link=true` links the reference page in the page's own component that has a heading for the metric. A cloud-docs page links the Cloud page. When Cloud has no page for a metric, or the metric is internal or not available on Cloud, the macro renders plain code and warns instead of linking self-managed docs.
 * Don't wrap `metric:` in backticks: it already renders code.
-* `metricval:` fields include `type`, `unit`, `labels`, `endpoint`, `buckets`, `description`, `usage` and `availability`. For a label's values, name the label: `metricval:redpanda_kafka_request_latency_seconds[values,label=redpanda_request]`.
+* The generator writes these `metricval:` fields, so they render for a metric that has them: `type`, `endpoint`, `description`, `labels`, `unit` and `buckets`. Most metrics have no `unit`, and only a histogram has `buckets`.
+* Every other field, such as `usage`, `category` and `availability`, comes from the overrides file `docs-data/metric-overrides.json`. Until that file has the field for a metric, the macro renders a placeholder such as `<unknown usage>` and warns.
+* For a label's values, name the label: `metricval:redpanda_kafka_request_latency_seconds[values,label=redpanda_request]`. The complete list of values also comes from the overrides file. The macro never renders the values that one scrape saw, so this call renders `<unknown values>` until the list is there.
 * Text longer than one paragraph needs the block form, on a line of its own: `metricval::redpanda_cluster_brokers[description]`.
 * A deprecated metric warns on every mention. On a page that names it on purpose, add `deprecated=ok`.
 
