@@ -1,0 +1,119 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://docs.redpanda.com/schemas/redpanda-metrics.schema.json",
+  "title": "Redpanda metrics dataset",
+  "description": "One release's metric families, written by doc-tools generate metrics-docs as redpanda-metrics-<version>.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "redpanda_version", "generated_from", "counts", "metrics", "excluded"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "redpanda_version": { "type": "string", "minLength": 1 },
+    "generated_from": {
+      "type": "object",
+      "description": "What the dataset was built from.",
+      "additionalProperties": false,
+      "properties": {
+        "sources": { "type": "integer", "minimum": 1, "description": "Number of brokers or files scraped per endpoint." },
+        "source_ref": { "type": "string", "description": "Git ref of the source inventory, when one was used." }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["public", "internal", "observed", "source_only", "excluded"],
+      "properties": {
+        "public": { "type": "integer", "minimum": 0 },
+        "internal": { "type": "integer", "minimum": 0 },
+        "observed": { "type": "integer", "minimum": 0 },
+        "source_only": { "type": "integer", "minimum": 0 },
+        "excluded": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "description": "Metric family name -> metric.",
+      "propertyNames": { "pattern": "^[A-Za-z_:][A-Za-z0-9_:<>]*$" },
+      "additionalProperties": { "$ref": "#/definitions/metric" }
+    },
+    "excluded": {
+      "type": "array",
+      "description": "Families the source defines that are left out on purpose, each with a reason.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "endpoint", "reason"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "endpoint": { "$ref": "#/definitions/endpoint" },
+          "reason": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "endpoint": {
+      "enum": ["public", "internal"],
+      "description": "public is /public_metrics, internal is /metrics."
+    },
+    "provenance": {
+      "enum": ["scraped", "source", "derived", "override", "curated"],
+      "description": "scraped: read from a running broker. source: read from the Redpanda source. derived: computed from another field. override: from the overrides file. curated: an entry that exists only in the overrides file."
+    },
+    "label": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "observed_values": {
+          "type": "array",
+          "description": "Values seen in the scrape, when there are few enough to be a set a reader can learn. Not a complete list.",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      }
+    },
+    "histogram": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["buckets", "series"],
+      "properties": {
+        "buckets": {
+          "type": "array",
+          "description": "Upper bounds of the buckets, as the le label prints them, ascending, +Inf last.",
+          "items": { "type": "string" }
+        },
+        "series": {
+          "type": "array",
+          "description": "Suffixes of the series the family exposes.",
+          "items": { "enum": ["_bucket", "_count", "_sum"] },
+          "uniqueItems": true
+        }
+      }
+    },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "endpoint", "type", "unit", "description", "source_description", "labels", "histogram", "observed", "provenance"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "endpoint": { "$ref": "#/definitions/endpoint" },
+        "type": { "enum": ["counter", "gauge", "histogram", "summary", "untyped", null] },
+        "unit": { "type": ["string", "null"] },
+        "description": { "type": "string", "description": "Text for readers." },
+        "source_description": { "type": "string", "description": "The HELP text exactly as Redpanda defines it." },
+        "labels": { "type": "array", "items": { "$ref": "#/definitions/label" } },
+        "histogram": { "oneOf": [{ "type": "null" }, { "$ref": "#/definitions/histogram" }] },
+        "observed": { "type": "boolean", "description": "false when the family comes from the source inventory and was not in the scrape." },
+        "defined_in": { "type": "string", "description": "Source file that registers the family." },
+        "provenance": {
+          "type": "object",
+          "description": "Field name -> where its value came from.",
+          "additionalProperties": { "$ref": "#/definitions/provenance" }
+        }
+      }
+    }
+  }
+}
