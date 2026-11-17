@@ -923,6 +923,7 @@ automation
   .option('--settle-timeout <seconds>', 'Stop waiting for new metric families after this many seconds (default: METRICS_SETTLE_MAX or 300)')
   .option('--source-repo <path>', 'Local clone of the Redpanda source that has the tag or branch. The run then lists every metric family the source registers. A metric the scrape misses is still documented, from source and without labels, and is listed in metrics-gaps.json in the output directory')
   .option('--overrides <path>', 'Metric overrides to merge into redpanda-metrics-<tag>.json (docs-data/metric-overrides.json): reader text, sections, usage, and the labels of a metric the cluster did not export')
+  .option('--retire-overrides', 'With --overrides, delete from that file every part that no longer changes anything: text that now matches Redpanda, and labels that stood in for a metric the cluster now exports')
   .option('--strict', 'With --source-repo, fail and write nothing when the scrape misses a metric that has no written reason in docker-compose/metrics/expected-absent.json')
   .option('--inventory <path>', 'Source inventory from tools/metrics/extract_source.py. Adds the defining file to each metric in redpanda-metrics-<tag>.json, and the families the source registers that the scrape did not see')
   .option('--dataset-dir <dir>', 'Write redpanda-metrics-<tag>.json here instead of the output directory. In a docs repository, pass modules/reference/attachments, where the metric macros read it. Used only when --tag is a release tag such as v26.2.7')
@@ -969,6 +970,7 @@ automation
     if (options.inventory) newArgs.push('--inventory', path.resolve(options.inventory))
     if (options.datasetDir) newArgs.push('--dataset-dir', path.resolve(options.datasetDir))
     if (options.overrides) newArgs.push('--overrides', path.resolve(options.overrides))
+    if (options.retireOverrides) newArgs.push('--retire-overrides')
     runClusterDocs('metrics', newTag, options, newArgs, timing)
 
     if (oldTag) {

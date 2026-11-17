@@ -24,7 +24,7 @@ KINDS = ("not_scraped", "not_in_source", "type_mismatch", "empty_help", "unresol
 # Added later, so an older gaps file may not have it.
 OPTIONAL_KINDS = ("stale_requirements", "stale_overrides", "override_disagrees")
 # Listed for the reader and not counted: a writer has completed these.
-INFO_KINDS = ("covered_by_override",)
+INFO_KINDS = ("covered_by_override", "redundant_overrides", "retired_overrides")
 
 
 def load(path):
@@ -61,6 +61,9 @@ def render(gaps):
                      "or is completed by an override. Nothing needs a person.")
         if covered_lines:
             lines += [""] + covered_lines
+        cleanup = override_cleanup(gaps)
+        if cleanup:
+            lines += [""] + cleanup
         return "\n".join(lines).rstrip("\n") + "\n"
 
     lines += [
@@ -162,7 +165,26 @@ def render(gaps):
         lines.append("")
     if covered_lines:
         lines += covered_lines
+    lines += override_cleanup(gaps)
     return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def override_cleanup(gaps):
+    """Lines about overrides that were deleted, or that can be."""
+    lines = []
+    for kind, title, intro in (
+        ("retired_overrides", "Overrides retired by this run",
+         "These parts of `docs-data/metric-overrides.json` no longer changed anything, so this run deleted them. "
+         "Nothing to do but check the diff."),
+        ("redundant_overrides", "Overrides that can be retired",
+         "These parts of `docs-data/metric-overrides.json` no longer change anything. "
+         "Run `doc-tools generate metrics-docs` with `--retire-overrides` to delete them."),
+    ):
+        if gaps[kind]:
+            lines += ["### %s (%d)" % (title, len(gaps[kind])), "", intro, ""]
+            lines += ["- `%s.%s`: %s" % (g["name"], g["field"], g["reason"]) for g in gaps[kind]]
+            lines.append("")
+    return lines
 
 
 def main(argv=None):

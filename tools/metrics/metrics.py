@@ -326,21 +326,53 @@ def apply_overrides(dataset, overrides):
     export, the override's labels are the labels, which is what lets the
     reference be complete before the cluster setup catches up.
 
+    An override is a stopgap or enrichment. The stopgap parts are compared
+    with what the tooling produced by itself, before the override is applied,
+    and every part that no longer changes anything is listed as redundant so
+    it can be deleted (see retire_overrides).
+
     Returns {"stale": names not in the dataset, "covered": unscraped metrics
     whose labels an override gives, "disagrees": exported metrics whose
-    override names a label the scrape does not have}.
+    override names a label the scrape does not have, "redundant": [{name,
+    field, reason}]}.
     """
-    result = {"stale": [], "covered": [], "disagrees": []}
+    result = {"stale": [], "covered": [], "disagrees": [], "redundant": []}
+
+    def redundant(name, field, reason):
+        result["redundant"].append({"name": name, "field": field, "reason": reason})
+
     for name in sorted(overrides):
         override = overrides[name]
         entry = dataset["metrics"].get(name)
         if entry is None:
             result["stale"].append(name)
             continue
+        # What the tooling says without the override.
+        if isinstance(override.get("description"), str) and \
+                " ".join(override["description"].split()) == " ".join(entry["source_description"].split()):
+            redundant(name, "description", "the help string in Redpanda now says the same")
+        if "unit" in override and override["unit"] == entry["unit"]:
+            redundant(name, "unit", "the tooling gives the same unit")
+        if "requires" in override and override["requires"] == [
+                {key: value for key, value in item.items() if key != "evidence"} for item in entry.get("requires", [])]:
+            redundant(name, "requires", "the tooling gives the same requirements")
         for field in OVERRIDE_FIELDS:
-            if field in override:
-                entry[field] = override[field]
-                entry["provenance"][field] = "override"
+            if field not in override:
+                continue
+            value = override[field]
+            if field == "description" and isinstance(value, list):
+                # Paragraphs, some for one audience only.
+                shared, cloud, self_managed = split_audiences(value)
+                if shared:
+                    entry["description"] = "\n\n".join(shared)
+                    entry["provenance"]["description"] = "override"
+                if cloud:
+                    entry["description_cloud_only"] = cloud
+                if self_managed:
+                    entry["description_self_managed_only"] = self_managed
+                continue
+            entry[field] = value
+            entry["provenance"][field] = "override"
         if "labels" not in override:
             continue
         wanted = [{key: label[key] for key in ("name", "description", "values") if key in label}
@@ -355,9 +387,68 @@ def apply_overrides(dataset, overrides):
         if unknown:
             result["disagrees"].append({"name": name, "endpoint": entry["endpoint"], "labels_not_scraped": unknown})
         for label in wanted:
-            if label["name"] in scraped:
+            if label["name"] not in scraped:
+                redundant(name, f"labels[{label['name']}]", "the cluster exports this metric without that label")
+            elif len(label) == 1:
+                # Only a name: it stood in for the scrape, which now has it.
+                redundant(name, f"labels[{label['name']}]", "the cluster now exports this label")
+            else:
                 scraped[label["name"]].update({key: value for key, value in label.items() if key != "name"})
+        if not wanted:
+            redundant(name, "labels", "the cluster now exports this metric")
     return result
+
+
+AUDIENCE_PREFIXES = (("cloud-only:", 1), ("self-managed-only:", 2))
+
+
+def split_audiences(paragraphs):
+    """Split description paragraphs into (for everyone, Cloud only, Self-Managed only)."""
+    groups = ([], [], [])
+    for paragraph in paragraphs:
+        text = str(paragraph).strip()
+        for prefix, index in AUDIENCE_PREFIXES:
+            if text.startswith(prefix):
+                groups[index].append(text[len(prefix):].strip())
+                break
+        else:
+            groups[0].append(text)
+    return groups
+
+
+def retire_overrides(path, redundant):
+    """Delete the redundant parts of the overrides file, and say what went.
+
+    An override that stood in for something the tooling now produces has done
+    its job. Enrichment is never touched: a section, use cases, usage text,
+    Cloud availability, related properties and topics, audience paragraphs,
+    and the description or values of a label.
+    """
+    with open(path, encoding="utf-8") as f:
+        document = json.load(f)
+    metrics = document["metrics"]
+    for item in redundant:
+        override = metrics.get(item["name"])
+        if override is None:
+            continue
+        field = item["field"]
+        if field.startswith("labels["):
+            label_name = field[len("labels["):-1]
+            override["labels"] = [label for label in override.get("labels", []) if label.get("name") != label_name]
+        else:
+            override.pop(field, None)
+        if field == "description":
+            # The note about where the fix was sent goes with the text it describes.
+            override.pop("upstream_ref", None)
+        if not override.get("labels") and "labels" in override:
+            del override["labels"]
+        if not [key for key in override if key != "_comment"]:
+            del metrics[item["name"]]
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(document, f, indent=2)
+        f.write("\n")
+
+
 
 
 def count_missing(inventory, public_texts, internal_texts, expected_absent):
@@ -379,7 +470,7 @@ def check_completeness(inventory, public_texts, internal_texts, expected_absent)
     """
     gaps = {"count": 0, "not_scraped": [], "not_in_source": [], "type_mismatch": [], "empty_help": [],
             "unresolved": [], "stale_requirements": [], "stale_overrides": [], "override_disagrees": [],
-            "covered_by_override": []}
+            "covered_by_override": [], "redundant_overrides": [], "retired_overrides": []}
     for endpoint, texts in (("public", public_texts), ("internal", internal_texts)):
         source = inventory[endpoint]
         result = metrics_reconcile.reconcile_endpoint(
@@ -457,6 +548,9 @@ def parse_args(argv):
                         help="JSON of what writers add to the generated data (docs-data/metric-overrides.json): reader "
                              "text, sections, usage, and the labels of a metric the cluster did not export. An override "
                              "that gives the labels of such a metric covers its gap")
+    parser.add_argument("--retire-overrides", action="store_true",
+                        help="With --overrides, delete from that file every part that no longer changes anything: text "
+                             "that now matches Redpanda, and labels that stood in for a metric the cluster now exports")
     parser.add_argument("--strict", action="store_true",
                         help="With --inventory, fail (exit 4) and write nothing when the scrape does not match the "
                              "inventory. Without this flag the gaps are reported in metrics-gaps.json and the output is "
@@ -613,10 +707,23 @@ def main(argv=None):
         logging.warning(
             f"The override for '{item['name']}' names labels the cluster does not export: "
             f"{', '.join(item['labels_not_scraped'])}. The scrape is right, so the override needs an update.")
+    if overridden["redundant"] and args.retire_overrides:
+        retire_overrides(args.overrides, overridden["redundant"])
+        for item in overridden["redundant"]:
+            logging.info(f"Retired the override {item['name']}.{item['field']}: {item['reason']}.")
+        # A label the override wrongly named is gone from the file now, so it
+        # is no longer something a person has to fix.
+        overridden["disagrees"] = []
+    elif overridden["redundant"]:
+        logging.warning(
+            f"{len(overridden['redundant'])} parts of {args.overrides} no longer change anything. "
+            "Run with --retire-overrides to delete them.")
     if gaps is not None:
         gaps["stale_requirements"] = stale_requirements
         gaps["stale_overrides"] = overridden["stale"]
         gaps["override_disagrees"] = overridden["disagrees"]
+        key = "retired_overrides" if args.retire_overrides else "redundant_overrides"
+        gaps[key] = overridden["redundant"]
         # A metric the cluster did not export is complete once a writer has
         # given its labels. It stays listed, because nothing has confirmed
         # those labels against a running broker yet.

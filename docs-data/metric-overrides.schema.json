@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://docs.redpanda.com/schemas/metric-overrides.schema.json",
   "title": "Metric overrides",
-  "description": "What writers add to the generated metrics data: reader text, sections, usage guidance, and the facts a scrape could not give for a metric the metrics cluster did not export. doc-tools generate metrics-docs --overrides merges this file into redpanda-metrics-<tag>.json.",
+  "description": "What writers add to the generated metrics data. An override is a stopgap or enrichment. A stopgap stands in for something the tooling should produce: a better description than the help string in Redpanda, or the labels of a metric the metrics cluster did not export. The release run deletes a stopgap as soon as the tooling produces the same thing. Enrichment is what no tool can produce: text for one audience, Cloud availability, links, sections and usage guidance. doc-tools generate metrics-docs --overrides merges this file into redpanda-metrics-<tag>.json.",
   "type": "object",
   "additionalProperties": false,
   "required": ["metrics"],
@@ -22,11 +22,18 @@
       "additionalProperties": false,
       "properties": {
         "_comment": { "type": "string", "description": "A note for other writers. Not copied into the data." },
-        "description": { "type": "string", "minLength": 1, "description": "Text for readers. Replaces the help string from Redpanda, which stays in the data as source_description. A wrong help string is better fixed in the Redpanda source." },
-        "unit": { "type": ["string", "null"], "description": "Unit of the value, when the name does not say it." },
+        "description": {
+          "description": "Text for readers. A stopgap: it replaces the help string from Redpanda, which stays in the data as source_description, and it is deleted when the help string in a release says the same. Fix the help string in the Redpanda source and name that change in upstream_ref. An array of paragraphs when one belongs to a single docs build: an entry may start with 'cloud-only:' or 'self-managed-only:'. Audience paragraphs are enrichment and are never deleted.",
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+          ]
+        },
+        "upstream_ref": { "type": "string", "minLength": 1, "description": "The issue or pull request against the Redpanda source that will make the description override redundant, as 'redpanda-data/streaming-enterprise#12345' or a URL. Set it so the override has a way out. Deleted together with the description." },
+        "unit": { "type": ["string", "null"], "description": "Unit of the value, when the name does not say it. A stopgap: deleted when the tooling gives the same unit." },
         "labels": {
           "type": "array",
-          "description": "For a metric the cluster exported: a description and the complete values of labels it has. For a metric the cluster did not export: its labels, read from the source file the gap report names. Giving this list, even an empty one, is what covers that gap.",
+          "description": "For a metric the cluster exported: a description and the complete values of labels it has, which is enrichment and stays. For a metric the cluster did not export: its labels, read from the source file the gap report names. Giving this list, even an empty one, covers that gap. That part is a stopgap: once the cluster exports the metric, a label entry with only a name is deleted, and so is an entry for a label the cluster does not have.",
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -65,7 +72,7 @@
         },
         "requires": {
           "type": "array",
-          "description": "What a cluster needs before it exports the metric. Replaces the list from the tooling. Use it for a metric the tooling does not know about yet.",
+          "description": "What a cluster needs before it exports the metric. A stopgap for a metric the tooling does not know about yet: it replaces the list from the tooling, and is deleted when the tooling gives the same list.",
           "minItems": 1,
           "items": {
             "oneOf": [

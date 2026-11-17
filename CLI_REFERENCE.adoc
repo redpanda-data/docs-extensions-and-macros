@@ -1947,6 +1947,9 @@ Local clone of the Redpanda source that has the tag or branch. The run then list
 `--overrides <path>`::
 Metric overrides to merge into redpanda-metrics-<tag>.json (docs-data/metric-overrides.json): reader text, sections, usage, and the labels of a metric the cluster did not export
 
+`--retire-overrides`::
+With --overrides, delete from that file every part that no longer changes anything: text that now matches Redpanda, and labels that stood in for a metric the cluster now exports
+
 `--strict`::
 With --source-repo, fail and write nothing when the scrape misses a metric that has no written reason in docker-compose/metrics/expected-absent.json
 

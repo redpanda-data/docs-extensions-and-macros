@@ -224,6 +224,91 @@ describeIfPython('metric overrides', () => {
     expect(result.report.stdout).toMatch(/Overrides that match no metric \(1\)/)
   })
 
+  describe('retiring overrides that no longer change anything', () => {
+    const OVERRIDES = {
+      // The text now matches the help string in Redpanda, apart from spacing.
+      redpanda_cluster_brokers: { description: 'Number of configured   brokers in the cluster', upstream_ref: 'redpanda-data/streaming-enterprise#1', labels: [] },
+      redpanda_kafka_request_bytes_total: {
+        unit: 'bytes',
+        category: 'Topic metrics',
+        labels: [
+          { name: 'redpanda_topic' },
+          { name: 'not_a_label' },
+          { name: 'redpanda_request', description: 'The kind of request.' }
+        ],
+        description: ['Bytes produced and consumed.', 'cloud-only: In Serverless, this counts your traffic only.']
+      },
+      // Still a real stopgap: the cluster does not export this metric.
+      redpanda_new_feature_lag: { labels: [{ name: 'link' }], description: 'Lag of the new feature.' },
+      redpanda_other_feature_total: { labels: [] }
+    }
+    let result
+    let after
+
+    const runRetiring = (overrides, extra) => {
+      const first = run(overrides, extra)
+      // run() writes the overrides file into the run directory it just made.
+      const file = path.join(workDir, `run-${counter}`, 'overrides.json')
+      return { result: first, after: JSON.parse(read(file)).metrics }
+    }
+
+    beforeAll(() => {
+      ({ result, after } = runRetiring(OVERRIDES, ['--retire-overrides']))
+    })
+
+    it('deletes text that now matches Redpanda, and its upstream reference', () => {
+      expect(after.redpanda_cluster_brokers).toBeUndefined()
+    })
+
+    it('deletes a unit the tooling gives, a label that stood in for the scrape and a label the cluster does not have', () => {
+      expect(after.redpanda_kafka_request_bytes_total.unit).toBeUndefined()
+      expect(after.redpanda_kafka_request_bytes_total.labels).toEqual([{ name: 'redpanda_request', description: 'The kind of request.' }])
+    })
+
+    it('never deletes enrichment: a section, audience paragraphs or a label description', () => {
+      expect(after.redpanda_kafka_request_bytes_total.category).toBe('Topic metrics')
+      expect(after.redpanda_kafka_request_bytes_total.description).toEqual(OVERRIDES.redpanda_kafka_request_bytes_total.description)
+    })
+
+    it('keeps a stopgap that is still doing its job', () => {
+      expect(after.redpanda_new_feature_lag).toEqual(OVERRIDES.redpanda_new_feature_lag)
+      expect(after.redpanda_other_feature_total).toEqual({ labels: [] })
+    })
+
+    it('leaves a file that still matches the schema', () => {
+      const validate = new Ajv({ allErrors: true }).compile(OVERRIDES_SCHEMA)
+      expect(validate({ metrics: after })).toBe(true)
+    })
+
+    it('lists what it retired, and a wrongly named label is no longer an open gap', () => {
+      expect(result.gaps.retired_overrides.map((item) => `${item.name}.${item.field}`).sort()).toEqual([
+        'redpanda_cluster_brokers.description',
+        'redpanda_cluster_brokers.labels',
+        'redpanda_kafka_request_bytes_total.labels[not_a_label]',
+        'redpanda_kafka_request_bytes_total.labels[redpanda_topic]',
+        'redpanda_kafka_request_bytes_total.unit'
+      ])
+      expect(result.gaps.override_disagrees).toEqual([])
+      expect(result.gaps.count).toBe(0)
+      expect(result.report.stdout).toMatch(/Overrides retired by this run \(5\)/)
+    })
+
+    it('puts audience paragraphs in the data', () => {
+      const entry = result.dataset.metrics.redpanda_kafka_request_bytes_total
+      expect(entry.description).toBe('Bytes produced and consumed.')
+      expect(entry.description_cloud_only).toEqual(['In Serverless, this counts your traffic only.'])
+    })
+
+    it('only reports, and changes nothing, without --retire-overrides', () => {
+      const dry = runRetiring(OVERRIDES, [])
+      expect(dry.after).toEqual(OVERRIDES)
+      expect(dry.result.gaps.redundant_overrides).toHaveLength(5)
+      expect(dry.result.gaps.retired_overrides).toEqual([])
+      expect(dry.result.log).toMatch(/5 parts of .* no longer change anything/)
+      expect(dry.result.report.stdout).toMatch(/Overrides that can be retired \(5\)/)
+    })
+  })
+
   it('fails on an overrides file with the wrong shape', () => {
     expect(run('{"metrics": []}').status).toBe(1)
     expect(run({ redpanda_cluster_brokers: { labels: [{ description: 'no name' }] } }).status).toBe(1)

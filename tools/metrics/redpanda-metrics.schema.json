@@ -169,6 +169,8 @@
         "histogram": { "oneOf": [{ "type": "null" }, { "$ref": "#/definitions/histogram" }] },
         "observed": { "type": "boolean", "description": "false when the family comes from the source inventory and was not in the scrape." },
         "defined_in": { "type": "string", "description": "Source file that registers the family." },
+        "description_cloud_only": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Extra description paragraphs for Cloud docs only. From the overrides file." },
+        "description_self_managed_only": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Extra description paragraphs for Self-Managed docs only. From the overrides file." },
         "category": { "type": "string", "minLength": 1, "description": "Section on the reference page." },
         "use_cases": {
           "type": "array",
