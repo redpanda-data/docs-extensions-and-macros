@@ -17,15 +17,6 @@ const { findLeaks, findMarkup } = require('./section');
 
 const SCHEMA = 1;
 const KINDS = CATEGORIES.map(([kind]) => kind);
-const EFFECTS = [
-  'restart-brokers',
-  'restart-operator',
-  'default-changed',
-  'field-rejected',
-  'field-ignored',
-  'permission-required',
-  'telemetry-changed',
-];
 
 const TITLES = Object.fromEntries(CATEGORIES);
 
@@ -34,7 +25,7 @@ const TITLES = Object.fromEntries(CATEGORIES);
  *
  * @param {string} text - The JSON text.
  * @param {string} tag - The release tag the document must be for.
- * @return {{tag: string, entries: Array<{kind: string, body: string, audience: string|null, upgrade: {effects: string[], note: string|null, action: string|null}|null}>}}
+ * @return {{tag: string, entries: Array<{kind: string, body: string, audience: string|null, upgrade: {note: string|null, action: string|null}|null}>}}
  * @throws {Error} If the document is not valid JSON, has another schema
  *   version, is for another tag, or has a malformed entry.
  */
@@ -61,20 +52,16 @@ function parseChanges(text, tag) {
     }
     let upgrade = null;
     if (entry.upgrade != null) {
-      const { effects, note, action } = entry.upgrade;
-      if (!Array.isArray(effects) || effects.some((e) => !EFFECTS.includes(e))) {
-        throw new Error(`${where} has unknown upgrade effects: ${JSON.stringify(effects)}.`);
-      }
+      if (typeof entry.upgrade !== 'object' || Array.isArray(entry.upgrade)) throw new Error(`${where} upgrade must be an object.`);
+      const { note, action } = entry.upgrade;
       const text = (value, name) => {
         if (value == null) return null;
         if (typeof value !== 'string') throw new Error(`${where} upgrade.${name} must be a string.`);
         return value.trim() || null;
       };
-      upgrade = { effects, note: text(note, 'note'), action: text(action, 'action') };
-      if (effects.length && !upgrade.note) throw new Error(`${where} declares upgrade effects with no upgrade note.`);
-      if (!effects.length && (upgrade.note || upgrade.action)) {
-        throw new Error(`${where} has an upgrade note or action but declares no upgrade effects.`);
-      }
+      // A null note is a declared "none": the entry has no upgrade effect.
+      upgrade = { note: text(note, 'note'), action: text(action, 'action') };
+      if (upgrade.action && !upgrade.note) throw new Error(`${where} has an upgrade action but no upgrade note.`);
     }
     return { kind: entry.kind, body: entry.body, audience, upgrade };
   });
@@ -111,7 +98,7 @@ function isFullyDeclared(changes) {
  * repair quietly.
  *
  * @param {{entries: Array}} changes - A parsed document.
- * @return {string[]} One `* ` line per entry with upgrade effects, in
+ * @return {string[]} One `* ` line per entry with an upgrade note, in
  *   changelog order.
  * @throws {Error} If a note or action has a private reference, or markup
  *   beyond code spans and emphasis.
@@ -119,7 +106,7 @@ function isFullyDeclared(changes) {
 function declaredUpgradeNotes(changes) {
   const lines = [];
   for (const entry of publishedEntries(changes)) {
-    if (!entry.upgrade || !entry.upgrade.effects.length) continue;
+    if (!entry.upgrade || !entry.upgrade.note) continue;
     const parts = [entry.upgrade.note, entry.upgrade.action].filter(Boolean).map((text) => text.replace(/\s+/g, ' ').trim());
     for (const part of parts) {
       const problems = [...findLeaks(part), ...findMarkup(part)];
@@ -204,7 +191,6 @@ function changesText(changes) {
 
 module.exports = {
   SCHEMA,
-  EFFECTS,
   parseChanges,
   publishedEntries,
   isFullyDeclared,

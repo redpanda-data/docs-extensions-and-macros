@@ -408,18 +408,18 @@ describe('orchestration', () => {
 describe('structured entries (changes.json)', () => {
   const entry = (over) => ({
     kind: 'Fixed', body: 'The operator keeps the `app` label.', audience: 'public',
-    upgrade: { effects: [], note: null, action: null }, ...over,
+    upgrade: { note: null, action: null }, ...over,
   });
   const doc = (entries) => JSON.stringify({ schema: 1, tag: 'operator/v1.2.3', project: 'operator', version: 'v1.2.3', entries });
   const DECLARED = doc([
     entry({ kind: 'Added', body: 'Widget CRD: new `spec.mode` field.\n\nSet it to pick a mode.\n* not an entry' }),
     entry({
-      upgrade: { effects: ['restart-brokers'], note: 'Brokers restart once on upgrade.', action: 'Set `image.tag` first.' },
+      upgrade: { note: 'Brokers restart once on upgrade.', action: 'Set `image.tag` first.' },
     }),
     entry({ kind: 'Changed', body: 'CI: forward the cache key.', audience: 'internal', upgrade: null }),
   ]);
   const PARTIAL = doc([
-    entry({ upgrade: { effects: ['default-changed'], note: 'The default mode changes.', action: null } }),
+    entry({ upgrade: { note: 'The default mode changes.', action: null } }),
     entry({ kind: 'Added', body: 'Widget CRD: new `spec.mode` field.', audience: null, upgrade: null }),
   ]);
   const NOTE = '* Brokers restart once on upgrade. Set `image.tag` first.';
@@ -431,12 +431,10 @@ describe('structured entries (changes.json)', () => {
     expect(() => parseChanges(DECLARED, 'operator/v9.9.9')).toThrow(/is for "operator\/v1.2.3"/);
     expect(() => parseChanges(doc([entry({ kind: 'Security' })]), 'operator/v1.2.3')).toThrow(/unknown kind/);
     expect(() => parseChanges(doc([entry({ audience: 'everyone' })]), 'operator/v1.2.3')).toThrow(/unknown audience/);
-    expect(() => parseChanges(doc([entry({ upgrade: { effects: ['reboot'], note: 'x', action: null } })]), 'operator/v1.2.3'))
-      .toThrow(/unknown upgrade effects/);
-    expect(() => parseChanges(doc([entry({ upgrade: { effects: ['restart-brokers'], note: null, action: null } })]), 'operator/v1.2.3'))
-      .toThrow(/no upgrade note/);
-    expect(() => parseChanges(doc([entry({ upgrade: { effects: [], note: 'x', action: null } })]), 'operator/v1.2.3'))
-      .toThrow(/declares no upgrade effects/);
+    expect(() => parseChanges(doc([entry({ upgrade: { note: null, action: 'Set `image.tag` first.' } })]), 'operator/v1.2.3'))
+      .toThrow(/upgrade action but no upgrade note/);
+    expect(() => parseChanges(doc([entry({ upgrade: ['restart-brokers'] })]), 'operator/v1.2.3'))
+      .toThrow(/upgrade must be an object/);
   });
 
   test('internal entries are left out and upgrade notes come from the entries', () => {
@@ -583,7 +581,7 @@ describe('checks added after review', () => {
 
   const entry = (over) => ({
     kind: 'Fixed', body: 'The operator keeps the `app` label.', audience: 'public',
-    upgrade: { effects: [], note: null, action: null }, ...over,
+    upgrade: { note: null, action: null }, ...over,
   });
   const doc = (entries) => JSON.stringify({ schema: 1, tag: 'operator/v1.2.3', project: 'operator', version: 'v1.2.3', entries });
   const publish = (changes, curated) => publishSection({
@@ -592,7 +590,7 @@ describe('checks added after review', () => {
   const ONLY_FIXES = CURATED.replace(/=== New features[^]*$/, '');
 
   test('an upgrade note that cannot be published as written fails', () => {
-    const withNote = (note) => doc([entry({ upgrade: { effects: ['restart-brokers'], note, action: null } })]);
+    const withNote = (note) => doc([entry({ upgrade: { note, action: null } })]);
     expect(() => publish(withNote('Brokers restart (ABC-123).'), ONLY_FIXES)).toThrow(/cannot be published as written \(ticket key "ABC-123"\)/);
     expect(() => publish(withNote('See https://example.com/x.'), ONLY_FIXES)).toThrow(/cannot be published as written \(link/);
     expect(() => publish(withNote('Read include::x[] first.'), ONLY_FIXES)).not.toThrow();
@@ -623,7 +621,7 @@ describe('checks added after review', () => {
 
   test('partly declared: a curated item that differs only in punctuation is not repeated', () => {
     const changes = doc([
-      entry({ upgrade: { effects: ['default-changed'], note: 'The default mode changes.', action: null } }),
+      entry({ upgrade: { note: 'The default mode changes.', action: null } }),
       entry({ kind: 'Added', body: 'Widget CRD: new `spec.mode` field.', audience: null, upgrade: null }),
     ]);
     const curated = CURATED.replace('* Brokers restart once.', '* The default mode changes\n* Brokers restart once.');
