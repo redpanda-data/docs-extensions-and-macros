@@ -3901,6 +3901,11 @@ const overridesGroup = new Command('overrides').description('Audit docs-side ove
  *   --overrides docs-data/rpk-overrides.json \
  *   --repo ../streaming-enterprise/src/go/rpk
  *
+ * # Audit metric overrides against the help strings in a Redpanda checkout
+ * npx doc-tools overrides audit --surface metrics \
+ *   --overrides docs-data/metric-overrides.json \
+ *   --repo ../streaming-enterprise
+ *
  * @requirements
  * For properties, the --extracted file must be the property extractor's RAW
  * output (its --output file, without overrides applied). The enhanced output
@@ -3909,16 +3914,20 @@ const overridesGroup = new Command('overrides').description('Audit docs-side ove
  * REDUNDANT. For rpk, --extracted is the newest docs-data/rpk-v<version>.json
  * snapshot: the audit reads its raw_tree (what the binary printed) and
  * refuses a file that only carries the override-merged tree. For rpk,
- * --repo needs Go and a streaming-enterprise src/go/rpk checkout.
+ * --repo needs Go and a streaming-enterprise src/go/rpk checkout. For
+ * metrics, --extracted is the output of tools/metrics/extract_source.py, and
+ * --repo needs python3 and git: the extractor reads the checkout at HEAD, or
+ * at --ref, and never the working tree.
  */
 overridesGroup
   .command('audit')
   .description('Classify each override field as redundant, upstreamable, or keep against extracted source strings')
   .requiredOption('--overrides <path>', 'Path to the overrides JSON file (for example docs-data/property-overrides.json)')
-  .option('--extracted <path>', 'Path to the extracted source JSON: the property extractor raw output (properties surface) or the newest docs-data/rpk-v<version>.json snapshot (rpk surface, compared against its raw_tree)')
-  .addOption(new Option('--surface <surface>', 'Override surface to audit').choices(['properties', 'rpk']).default('properties'))
+  .option('--extracted <path>', 'Path to the extracted source JSON: the property extractor raw output (properties surface), the newest docs-data/rpk-v<version>.json snapshot (rpk surface, compared against its raw_tree), or the output of tools/metrics/extract_source.py (metrics surface)')
+  .addOption(new Option('--surface <surface>', 'Override surface to audit').choices(['properties', 'rpk', 'metrics']).default('properties'))
   .addOption(new Option('--format <format>', 'Output format').choices(['json', 'human']).default('json'))
-  .option('--repo <path>', 'Alternative to --extracted. Properties: a redpanda checkout to extract raw source strings from. rpk: a streaming-enterprise src/go/rpk directory; without --extracted, the audit builds rpk there and reads its --print-tree output, and unless --locations is given it also locates each string so UPSTREAMABLE rows carry source_file/source_line. Run it on Linux, where the docs snapshot comes from')
+  .option('--repo <path>', 'Alternative to --extracted. Properties: a redpanda checkout to extract raw source strings from. rpk: a streaming-enterprise src/go/rpk directory; without --extracted, the audit builds rpk there and reads its --print-tree output, and unless --locations is given it also locates each string so UPSTREAMABLE rows carry source_file/source_line. Run it on Linux, where the docs snapshot comes from. Metrics: a streaming-enterprise checkout; the audit lists the metric families it registers at HEAD, or at --ref')
+  .option('--ref <ref>', 'metrics only: the git ref --repo is read at, instead of HEAD')
   .option('--locations <path>', 'rpk only: output of the locate-strings analyzer (tools/rpk-docs/scripts/locate-strings) to take source_file/source_line from, instead of running it through --repo')
   .option('--output <path>', 'Also write the JSON result to this file')
   .action((options) => {

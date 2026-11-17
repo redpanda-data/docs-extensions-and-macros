@@ -12,7 +12,7 @@
  *   node tools/overrides-audit/index.js \
  *     --overrides docs-data/property-overrides.json \
  *     --extracted tools/property-extractor/gen/properties-output.json \
- *     [--surface properties|rpk] [--format json|human] [--output <file>]
+ *     [--surface properties|rpk|metrics] [--format json|human] [--output <file>]
  *
  *   node tools/overrides-audit/index.js --surface rpk \
  *     --overrides docs-data/rpk-overrides.json \
@@ -24,6 +24,11 @@
  * it also runs the locate-strings analyzer, so UPSTREAMABLE rows carry
  * source_file/source_line. --locations takes analyzer output produced
  * earlier, with --extracted or --repo.
+ *
+ * For metrics, --extracted takes the output of tools/metrics/extract_source.py.
+ * --repo takes a streaming-enterprise checkout instead: the audit runs the
+ * extractor there at HEAD, or at --ref. The extractor reads the git ref, not
+ * the working tree.
  *
  * Also exposed as `doc-tools overrides audit` and the `audit_overrides`
  * MCP tool. See README.adoc in this directory for the classification rules
@@ -37,13 +42,14 @@ const path = require('path')
 
 const ADAPTERS = {
   properties: () => require('./adapters/properties'),
-  rpk: () => require('./adapters/rpk')
+  rpk: () => require('./adapters/rpk'),
+  metrics: () => require('./adapters/metrics')
 }
 
 /**
  * Run the audit and return the result object.
  *
- * @param {Object} options - { overrides, extracted, repo, locations, surface, format, output }.
+ * @param {Object} options - { overrides, extracted, repo, ref, locations, surface, format, output }.
  * @returns {Object} Audit result ({ surface, manifest, summary, ... }).
  */
 function runAudit (options) {
@@ -71,9 +77,25 @@ function runAudit (options) {
     fs.writeFileSync(extractedPath, JSON.stringify(json))
   }
 
+  if (options.ref && surface !== 'metrics') {
+    throw new Error('--ref applies to the metrics surface only')
+  }
+  if (surface === 'metrics' && !extractedPath) {
+    if (!options.repo) {
+      throw new Error('Provide --extracted <path> (the output of tools/metrics/extract_source.py) or --repo <path> (a streaming-enterprise checkout to list the metric families of)')
+    }
+    // The extractor reads a git ref and never the working tree. Progress goes
+    // to stderr so stdout stays valid JSON.
+    const os = require('os')
+    const { extractInventory } = require('./adapters/metrics')
+    const inventory = extractInventory(path.resolve(options.repo), options.ref || 'HEAD', (msg) => console.error(msg))
+    extractedPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'overrides-audit-')), 'inventory.json')
+    fs.writeFileSync(extractedPath, JSON.stringify(inventory))
+  }
+
   let locationsPath = options.locations ? path.resolve(options.locations) : undefined
   if (locationsPath && surface !== 'rpk') {
-    throw new Error('--locations applies to the rpk surface only; property rows already carry source_file/source_line from the extractor')
+    throw new Error('--locations applies to the rpk surface only; property and metric rows already carry source_file/source_line from their extractor')
   }
   if (surface === 'rpk' && options.repo) {
     // --repo is the src/go/rpk directory itself, already at the commit the
@@ -125,6 +147,7 @@ function formatHumanReport (result) {
   lines.push(`Overrides audit — surface: ${result.surface}`)
   lines.push(`Overrides: ${result.overrides_file}`)
   lines.push(`Extracted: ${result.extracted_file || '(none)'}`)
+  if (result.source_ref !== undefined) lines.push(`Source ref: ${result.source_ref}`)
   if (result.locations_file !== undefined) lines.push(`Locations: ${result.locations_file || '(locator did not run)'}`)
   lines.push('='.repeat(64))
   lines.push('')
@@ -207,10 +230,11 @@ function main (argv) {
     .name('overrides-audit')
     .description('Classify docs-side override fields against extracted source strings')
     .requiredOption('--overrides <path>', 'Path to the overrides JSON file (for example docs-data/property-overrides.json)')
-    .option('--extracted <path>', 'Path to the extracted source JSON: the property extractor raw output (properties surface) or the newest docs-data/rpk-v<version>.json snapshot, whose raw_tree is the pre-override help text (rpk surface)')
-    .option('--repo <path>', 'Alternative to --extracted: a redpanda checkout (properties) or a streaming-enterprise src/go/rpk directory (rpk; also locates source strings)')
+    .option('--extracted <path>', 'Path to the extracted source JSON: the property extractor raw output (properties surface), the newest docs-data/rpk-v<version>.json snapshot, whose raw_tree is the pre-override help text (rpk surface), or the output of tools/metrics/extract_source.py (metrics surface)')
+    .option('--repo <path>', 'Alternative to --extracted: a redpanda checkout (properties, metrics) or a streaming-enterprise src/go/rpk directory (rpk; also locates source strings)')
+    .option('--ref <ref>', 'metrics only: the git ref --repo is read at (default HEAD)')
     .option('--locations <path>', 'rpk only: locate-strings analyzer output to attach source_file/source_line from')
-    .option('--surface <surface>', 'Override surface: properties or rpk', 'properties')
+    .option('--surface <surface>', 'Override surface: properties, rpk or metrics', 'properties')
     .option('--format <format>', 'Output format: json or human', 'json')
     .option('--output <path>', 'Also write the JSON result to this file')
     .action((options) => {

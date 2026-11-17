@@ -83,7 +83,7 @@ describe('overrides-audit adapters', () => {
     })
 
     test('rejects unknown surfaces', () => {
-      expect(() => runAudit({ overrides: 'x.json', surface: 'metrics' })).toThrow(/Unknown surface/)
+      expect(() => runAudit({ overrides: 'x.json', surface: 'helm' })).toThrow(/Unknown surface/)
     })
   })
 
@@ -158,7 +158,7 @@ describe('overrides-audit adapters', () => {
     // is no Connect overrides file to audit.
     test('connect is rejected as an unknown surface', () => {
       expect(() => runAudit({ overrides: writeFixture('connect-overrides.json', { inputs: [] }), surface: 'connect' }))
-        .toThrow("Unknown surface 'connect'. Valid surfaces: properties, rpk")
+        .toThrow("Unknown surface 'connect'. Valid surfaces: properties, rpk, metrics")
     })
   })
 })
