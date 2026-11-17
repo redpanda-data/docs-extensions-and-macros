@@ -819,9 +819,15 @@ def replicated_families(repo):
     src = repo.show("src/v/redpanda/application.cc") or ""
     m = re.search(r"replicate_metric_families\s*\(", src)
     if not m:
+        sys.stderr.write("note: no copied Seastar families found in the source at this ref; "
+                         "using the built-in list of %d\n" % len(SEASTAR_REPLICATED))
         return list(SEASTAR_REPLICATED)
     block = src[m.end():match_bracket(src, m.end() - 1)]
-    return re.findall(r'\{\s*"([a-z0-9_]+)"\s*,\s*metrics::public_metrics_handle\s*\}', block)
+    found = re.findall(r'\{\s*"([a-z0-9_]+)"\s*,\s*metrics::public_metrics_handle\s*\}', block)
+    if not found:
+        sys.stderr.write("note: the source copies Seastar families to the public endpoint at this ref, "
+                         "but none could be read; no copied families are listed\n")
+    return found
 
 
 def load_seastar(path):
