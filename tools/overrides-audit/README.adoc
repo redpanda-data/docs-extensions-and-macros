@@ -216,7 +216,7 @@ JSON (default): `{ surface, overrides_file, extracted_file, manifest, summary, c
 
 |`description`
 |`REDUNDANT`
-|The text for every audience equals the help string after normalization. The release run deletes it (`doc-tools generate metrics-docs --retire-overrides`).
+|The text for every audience equals the help string after normalization. One terminal period is not a difference: a help string takes none, so an override would otherwise never match the string it was upstreamed as. The release run makes the same comparison and deletes the text (`doc-tools generate metrics-docs --retire-overrides`).
 
 |`description`
 |`UPSTREAMABLE`
@@ -228,7 +228,7 @@ JSON (default): `{ surface, overrides_file, extracted_file, manifest, summary, c
 
 |`description`
 |`KEEP`
-|Nothing to upstream: the description is only audience paragraphs, it differs from the help string only by a terminal period or docs markup, or it is marked `retirement_pending`.
+|Nothing to upstream: the description is only audience paragraphs, it differs from the help string only by docs markup, or it is marked `retirement_pending`.
 
 |`description`
 |`REVIEW`

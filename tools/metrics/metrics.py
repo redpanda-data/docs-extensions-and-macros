@@ -350,7 +350,7 @@ def apply_overrides(dataset, overrides):
         # What the tooling says without the override. Audience paragraphs
         # are enrichment, so only the text for everyone is compared.
         shared_text = shared_description(override.get("description"))
-        if shared_text and " ".join(shared_text.split()) == " ".join(entry["source_description"].split()):
+        if shared_text and same_help_text(shared_text, entry["source_description"]):
             redundant(name, "description", "the help string in Redpanda now says the same")
         if "unit" in override and override["unit"] == entry["unit"]:
             redundant(name, "unit", "the tooling gives the same unit")
@@ -415,6 +415,17 @@ def split_audiences(paragraphs):
         else:
             groups[0].append(text)
     return groups
+
+
+def same_help_text(text, help_text):
+    """Whether an override says what the help string says.
+
+    Spacing does not count. Nor does one terminal period: a help string takes
+    none, so an override that was sent upstream would otherwise never match.
+    """
+    def plain(value):
+        return re.sub(r"(?<!\.)\.$", "", " ".join(str(value).split()))
+    return plain(text) == plain(help_text)
 
 
 def shared_description(description):

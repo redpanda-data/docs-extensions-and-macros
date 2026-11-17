@@ -101,11 +101,16 @@ describe('overrides audit, metrics surface', () => {
       expect(stripTerminalPeriod('No period')).toBe('No period')
     })
 
-    test('text that differs only by the terminal period has nothing to upstream', () => {
+    test('text that differs only by the terminal period is REDUNDANT, so an upstreamed override can retire', () => {
       const row = descriptionRow('redpanda_widget_active', 'Number of active widgets.')
-      expect(row.class).toBe(CLASSES.KEEP)
+      expect(row.class).toBe(CLASSES.REDUNDANT)
       expect(row.upstream_candidate_text).toBeUndefined()
       expect(row.note).toMatch(/terminal period/)
+    })
+
+    test('control: a period in the middle is a difference', () => {
+      const row = descriptionRow('redpanda_widget_active', 'Number of active. widgets')
+      expect(row.class).toBe(CLASSES.UPSTREAMABLE)
     })
 
     test('docs markup is stripped from the candidate, and the override is kept until it ships', () => {

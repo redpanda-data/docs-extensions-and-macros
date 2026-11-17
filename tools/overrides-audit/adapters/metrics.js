@@ -11,8 +11,9 @@
  *   with cloud-only: or self-managed-only: are enrichment. They are never
  *   upstreamed and never retired.
  * - A help string takes no terminal period, so the candidate text has none,
- *   and an override that differs from source only by that period has nothing
- *   to upstream.
+ *   and an override that differs from source only by that period is
+ *   REDUNDANT. Otherwise an override would never match the string it was
+ *   upstreamed as.
  * - A family whose help is built at run time, or that has no help string in
  *   the Redpanda source, has no string to rewrite. It is REVIEW.
  * - One registration can export several families (redpanda_x and
@@ -160,10 +161,14 @@ function classifyMetricDescription (name, override, family) {
 
   if (result.upstream_candidate_text !== undefined) {
     const candidate = stripTerminalPeriod(result.upstream_candidate_text)
-    if (classify.normalizeText(candidate) === result.source_text) {
+    if (classify.normalizeText(candidate) === stripTerminalPeriod(result.source_text)) {
+      // The release run (tools/metrics/metrics.py) makes the same comparison.
+      const markupFree = result.class === CLASSES.UPSTREAMABLE
       delete result.upstream_candidate_text
-      result.class = CLASSES.KEEP
-      result.note = 'Differs from the help string only by a terminal period or docs markup. A help string takes neither, so there is nothing to upstream.'
+      result.class = markupFree ? CLASSES.REDUNDANT : CLASSES.KEEP
+      result.note = markupFree
+        ? 'Differs from the help string only by a terminal period, which a help string does not take. The release run retires it.'
+        : 'Differs from the help string only by docs markup. Nothing to upstream.'
     } else {
       result.upstream_candidate_text = candidate
       if (result.class === CLASSES.UPSTREAMABLE) {

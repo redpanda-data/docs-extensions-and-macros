@@ -406,7 +406,11 @@ describeIfPython('metric overrides', () => {
     const OVERRIDES = {
       redpanda_cluster_brokers: { description: ['Number of configured brokers in the cluster', 'cloud-only: Cloud sets this for you.'], upstream_ref: 'redpanda-data/streaming-enterprise#4' },
       // Control: the text for everyone differs, so nothing is redundant.
-      redpanda_kafka_request_bytes_total: { description: ['Bytes produced and consumed.', 'cloud-only: In Serverless, this counts your traffic only.'] }
+      redpanda_kafka_request_bytes_total: { description: ['Bytes produced and consumed.', 'cloud-only: In Serverless, this counts your traffic only.'] },
+      // A help string takes no terminal period, so the period is no difference.
+      vectorized_raft_leader_for: { description: 'Leader.' },
+      // Control: a period elsewhere is a difference.
+      redpanda_new_feature_lag: { description: 'From. source' }
     }
 
     it('retires the text for everyone and keeps the audience paragraph', () => {
@@ -414,8 +418,11 @@ describeIfPython('metric overrides', () => {
       const after = JSON.parse(read(path.join(workDir, `run-${counter}`, 'overrides.json'))).metrics
       expect(after.redpanda_cluster_brokers).toEqual({ description: ['cloud-only: Cloud sets this for you.'] })
       expect(after.redpanda_kafka_request_bytes_total).toEqual(OVERRIDES.redpanda_kafka_request_bytes_total)
+      expect(after.vectorized_raft_leader_for).toBeUndefined()
+      expect(after.redpanda_new_feature_lag).toEqual(OVERRIDES.redpanda_new_feature_lag)
       expect(result.gaps.retired_overrides).toEqual([
-        { name: 'redpanda_cluster_brokers', field: 'description', reason: 'the help string in Redpanda now says the same' }
+        { name: 'redpanda_cluster_brokers', field: 'description', reason: 'the help string in Redpanda now says the same' },
+        { name: 'vectorized_raft_leader_for', field: 'description', reason: 'the help string in Redpanda now says the same' }
       ])
     })
   })
