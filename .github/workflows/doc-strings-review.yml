@@ -22,9 +22,9 @@
 # in a reviewed pull request. Do not move the prompt to docs-team-standards,
 # and never fetch a prompt, a skill, or a resource at run time from a branch
 # of a repository other than the one under review: that would change every
-# caller's review the moment someone merged elsewhere. A fetch pinned to a commit SHA is allowed. The
-# writing standard and terminology fetch below predates this rule; do not add
-# to it.
+# caller's review the moment someone merged elsewhere. A fetch pinned to a
+# commit SHA is allowed: the writing standard and terminology fetch below
+# reads docs-team-standards at STANDARDS_REF.
 # See CLAUDE.md, "Automation prompts stay in this repository".
 #
 # Each string is reviewed once. lint-strings fingerprints every declaration
@@ -911,6 +911,12 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ env.ACTIONS_BOT_TOKEN || secrets.actions_bot_token }}
+          # The docs-team-standards commit both files are read at. Pinned so a
+          # merge there never changes a caller's review: the standard moves
+          # only when this SHA does, in a pull request here, and reaches a
+          # caller only when it bumps its pin of this workflow. Must be a full
+          # commit SHA, never a branch or tag.
+          STANDARDS_REF: df7c6a86695625216882efca562689b36230c386
         run: |
           set -euo pipefail
           # Stage in a temp file and promote only a non-empty result. Writing
@@ -923,8 +929,10 @@ jobs:
           # step correct on its own.)
           rm -f embedded-reference-strings.md terminology.md
           [ -n "${GH_TOKEN:-}" ] || { echo "::notice::No bot token; lint-only review."; exit 0; }
+          # An empty or malformed ref would fall back to the default branch.
+          [[ "${STANDARDS_REF:-}" =~ ^[0-9a-f]{40}$ ]] || { echo "::warning::STANDARDS_REF is not a commit SHA; lint-only review."; exit 0; }
           tmp=$(mktemp)
-          if gh api repos/redpanda-data/docs-team-standards/contents/resources/writing-style/embedded-reference-strings.md \
+          if gh api "repos/redpanda-data/docs-team-standards/contents/resources/writing-style/embedded-reference-strings.md?ref=$STANDARDS_REF" \
             --jq .content | base64 -d > "$tmp" && [ -s "$tmp" ]; then
             mv "$tmp" embedded-reference-strings.md
           else
@@ -935,7 +943,7 @@ jobs:
           # everything here: an absent file means term checks are skipped,
           # never a failed job.
           tmp2=$(mktemp)
-          if gh api repos/redpanda-data/docs-team-standards/contents/resources/writing-style/terminology.md \
+          if gh api "repos/redpanda-data/docs-team-standards/contents/resources/writing-style/terminology.md?ref=$STANDARDS_REF" \
             --jq .content | base64 -d > "$tmp2" && [ -s "$tmp2" ]; then
             mv "$tmp2" terminology.md
           else

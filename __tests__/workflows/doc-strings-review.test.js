@@ -857,10 +857,11 @@ describe('doc-strings-review workflow: diff base (executed)', () => {
 describe('doc-strings-review workflow: writing-standard fetch (executed)', () => {
   const step = stepNamed('Fetch the writing standard')
   const STANDARD = 'embedded-reference-strings.md'
+  const REF = step.env.STANDARDS_REF
 
   test('a failed fetch leaves NO file, not a zero-byte authoritative standard', () => {
     const r = execRun(step, {
-      env: { GH_TOKEN: 'bot' },
+      env: { GH_TOKEN: 'bot', STANDARDS_REF: REF },
       stubs: { gh: '#!/bin/bash\necho "gh: Not Found (HTTP 404)" >&2\nexit 1\n' }
     })
     expect(r.size(STANDARD)).toBe(-1)
@@ -869,7 +870,7 @@ describe('doc-strings-review workflow: writing-standard fetch (executed)', () =>
 
   test('an empty-but-successful response is also discarded', () => {
     const r = execRun(step, {
-      env: { GH_TOKEN: 'bot' },
+      env: { GH_TOKEN: 'bot', STANDARDS_REF: REF },
       stubs: { gh: '#!/bin/bash\nexit 0\n' }
     })
     expect(r.size(STANDARD)).toBe(-1)
@@ -877,7 +878,7 @@ describe('doc-strings-review workflow: writing-standard fetch (executed)', () =>
 
   test('a stale file from an earlier step cannot survive a failed fetch', () => {
     const r = execRun(step, {
-      env: { GH_TOKEN: 'bot' },
+      env: { GH_TOKEN: 'bot', STANDARDS_REF: REF },
       files: { [STANDARD]: 'stale contents from a previous run' },
       stubs: { gh: '#!/bin/bash\nexit 1\n' }
     })
@@ -887,7 +888,7 @@ describe('doc-strings-review workflow: writing-standard fetch (executed)', () =>
   test('a successful fetch promotes the decoded standard', () => {
     const b64 = Buffer.from('# Embedded reference strings\n').toString('base64')
     const r = execRun(step, {
-      env: { GH_TOKEN: 'bot' },
+      env: { GH_TOKEN: 'bot', STANDARDS_REF: REF },
       stubs: { gh: `#!/bin/bash\nprintf '%s' '${b64}'\n` }
     })
     expect(r.read(STANDARD)).toBe('# Embedded reference strings\n')
@@ -900,6 +901,29 @@ describe('doc-strings-review workflow: writing-standard fetch (executed)', () =>
     })
     expect(r.status).toBe(0)
     expect(r.size(STANDARD)).toBe(-1)
+  })
+
+  test('both files are read at a pinned docs-team-standards commit', () => {
+    expect(REF).toMatch(/^[0-9a-f]{40}$/)
+    const r = execRun(step, {
+      env: { GH_TOKEN: 'bot', STANDARDS_REF: REF },
+      stubs: { gh: '#!/bin/bash\nprintf \'%s\\n\' "$2" >> "$HOME/gh-urls"\nexit 1\n' }
+    })
+    const urls = r.read('gh-urls').trim().split('\n')
+    expect(urls).toHaveLength(2)
+    for (const u of urls) expect(u).toMatch(new RegExp(`^repos/redpanda-data/docs-team-standards/contents/.+\\?ref=${REF}$`))
+  })
+
+  test('a ref that is not a commit SHA fetches nothing', () => {
+    for (const bad of ['', 'main', 'df7c6a8']) {
+      const r = execRun(step, {
+        env: { GH_TOKEN: 'bot', STANDARDS_REF: bad },
+        stubs: { gh: '#!/bin/bash\necho SHOULD_NOT_RUN >&2\nexit 1\n' }
+      })
+      expect(r.status).toBe(0)
+      expect(r.all).not.toMatch(/SHOULD_NOT_RUN/)
+      expect(r.size(STANDARD)).toBe(-1)
+    }
   })
 })
 

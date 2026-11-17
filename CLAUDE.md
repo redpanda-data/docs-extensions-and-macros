@@ -14,7 +14,7 @@ The reason is change control. Engineering repos call these workflows pinned to a
 
 This holds even when the motive is evaluation. Evaluate these prompts here, beside the workflow, with a harness modeled on docs-team-standards' (`claude -p`, regex patterns, an LLM judge, the production model pinned) that reads the prompt from the workflow file itself, so the eval and the pinned prompt always move together.
 
-Known exception, not a precedent: the review currently fetches `resources/writing-style/embedded-reference-strings.md` and `resources/writing-style/terminology.md` from docs-team-standards at run time, unpinned. That predates this note. Do not extend it to more files.
+The review fetches `resources/writing-style/embedded-reference-strings.md` and `resources/writing-style/terminology.md` from docs-team-standards at the commit SHA in the fetch step's `STANDARDS_REF`. To pick up a change to either file, move that SHA in a pull request here.
 
 ## Documentation for this repository
 
