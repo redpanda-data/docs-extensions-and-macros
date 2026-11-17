@@ -308,7 +308,8 @@ function normalizeSearch (text) {
  */
 function cardModel (entry, { cloud = false, href, attribute } = {}) {
   const scope = ['cluster', 'broker', 'topic'].includes(entry.config_scope) ? entry.config_scope : 'cluster'
-  const group = propertyPageFor({ ...entry, config_scope: scope })
+  // The generator puts an object-storage scope on the Object storage page
+  const group = propertyPageFor({ ...entry, config_scope: entry.config_scope === 'object-storage' ? 'object-storage' : scope })
   const category = String(entry.category || 'other')
   const enterprise = cloud ? null : enterpriseInfo(entry)
   const badges = [{ meaning: 'neutral', label: GROUP_LABELS[group], tooltip: GROUP_TOOLTIPS[group], icon: group }]

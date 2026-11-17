@@ -203,6 +203,9 @@ describe('cards', () => {
     const labels = (entry, opts) => catalog.cardModel(entry, opts).badges.map((b) => b.label)
     expect(labels(DATA.cloud_storage_enabled)).toEqual(['Object storage', 'Restart required', 'Enterprise values'])
     expect(labels(DATA.dashboard_dir)).toEqual(['Broker', 'Restart required', 'Deprecated'])
+    // The generator's own object-storage scope keeps its group, whatever the name
+    expect(catalog.cardModel({ name: 'x', config_scope: 'object-storage' }).group).toBe('object-storage')
+    expect(catalog.cardModel({ name: 'x', config_scope: 'other' }).group).toBe('cluster')
     const html = catalog.cardHtml(catalog.cardModel(DATA.cloud_storage_enabled))
     expect(html).toContain('<span class="rp-badge rp-badge--sm rp-badge--neutral prop-badge--restart" data-tooltip="')
     expect(html.indexOf('>Object storage<')).toBeLessThan(html.indexOf('>Restart required<'))

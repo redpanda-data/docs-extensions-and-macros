@@ -173,18 +173,26 @@ async function launchChrome (binary, profileDir) {
     '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profileDir}`,
     '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--window-size=1280,900', 'about:blank'
   ], { stdio: ['ignore', 'ignore', 'pipe'] })
-  const wsUrl = await new Promise((resolve, reject) => {
-    let stderr = ''
-    const timer = setTimeout(() => reject(new Error(`Chrome did not start:\n${stderr}`)), 20000)
-    chrome.stderr.on('data', (chunk) => {
-      stderr += chunk
-      const m = stderr.match(/DevTools listening on (ws:\/\/\S+)/)
-      if (m) { clearTimeout(timer); resolve(m[1]) }
+  let ws
+  try {
+    const wsUrl = await new Promise((resolve, reject) => {
+      let stderr = ''
+      const timer = setTimeout(() => reject(new Error(`Chrome did not start:\n${stderr}`)), 20000)
+      chrome.stderr.on('data', (chunk) => {
+        stderr += chunk
+        const m = stderr.match(/DevTools listening on (ws:\/\/\S+)/)
+        if (m) { clearTimeout(timer); resolve(m[1]) }
+      })
+      chrome.on('exit', (code) => reject(new Error(`Chrome exited with ${code}:\n${stderr}`)))
     })
-    chrome.on('exit', (code) => reject(new Error(`Chrome exited with ${code}:\n${stderr}`)))
-  })
-  const ws = new WebSocket(wsUrl)
-  await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject })
+    ws = new WebSocket(wsUrl)
+    await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject })
+  } catch (err) {
+    // Nothing owns the process yet, so stop it here before the error leaves
+    try { if (ws) ws.close() } catch (e) {}
+    if (chrome.exitCode === null) chrome.kill()
+    throw err
+  }
   let nextId = 0
   const pending = new Map()
   const listeners = []
@@ -1154,7 +1162,7 @@ async function main () {
     const topicHtml = fs.readFileSync(path.join(site, TOPIC_PAGE, 'index.html'), 'utf8')
     const topicMd = convertPageHtml({ html: topicHtml, page: { asciidoc: { doctitle: 'Topic Configuration Properties', attributes: {} }, pub: { url: TOPIC_PAGE }, src: { component: 'preview', path: 'topic-properties.adoc' } }, siteUrl: 'http://localhost' })
     const mdHeadings = topicMd.split('\n').filter((l) => /^### /.test(l)).length
-    assert(mdHeadings === topicEntries.length && !/Filter this page|Clear filters/.test(topicMd), `the topic page's Markdown export has all ${mdHeadings} entries and no filter controls`)
+    assert(mdHeadings === topicEntries.length && !/Filter the properties on this page|Clear filters/.test(topicMd), `the topic page's Markdown export has all ${mdHeadings} entries and no filter controls`)
     // 390px on the reference page
     await page.setViewport(390, 844)
     await page.navigate(`${base}${TOPIC_PAGE}?q=retention`)

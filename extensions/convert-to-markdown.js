@@ -678,7 +678,12 @@ function propertyCatalogMarkdown (root, pageUrl) {
   // filters are the page itself, and the export keeps all of them.
   if ((root.getAttribute('class') || '').split(/\s+/).includes('prop-catalog--filter')) return ''
   const cards = Array.from(root.querySelectorAll('li.prop-card'))
-  if (!cards.length) return '\n\n' + escapeText((root.textContent || '').trim()) + '\n\n'
+  if (!cards.length) {
+    // Only the no-data block is plain text. An empty catalog still carries
+    // its styles, scripts, and controls, which are not content.
+    const noData = (root.getAttribute('class') || '').split(/\s+/).includes('prop-catalog--no-data')
+    return '\n\n' + (noData ? escapeText((root.textContent || '').trim()) : 'No properties are listed.') + '\n\n'
+  }
   const text = (el) => (el ? (el.textContent || '').replace(/\s+/g, ' ').trim() : '')
   const items = cards.map((card) => {
     const badges = Array.from(card.querySelectorAll('.rp-badge')).map((badge) => {

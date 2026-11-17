@@ -886,6 +886,15 @@ describe('property catalog', () => {
     ])
   })
 
+  test('an empty catalog exports a short message, not its styles, scripts, or controls', () => {
+    expect(bodyOf(convert(`<h1 class="page">All properties</h1>${catalogHtml([])}`))).toBe('No properties are listed.')
+  })
+
+  test('the no-data block exports its message', () => {
+    const html = '<div class="prop-catalog prop-catalog--no-data"><p>The property list is not available in this build.</p></div>'
+    expect(bodyOf(convert(`<h1 class="page">All properties</h1>${html}`))).toBe('The property list is not available in this build.')
+  })
+
   test('a reference page\'s filter bar exports as nothing', () => {
     const bar = filterBarHtml(cards.map((c) => ({ ...c, anchor: c.name })))
     const body = bodyOf(convert(`<h1 class="page">Cluster</h1>${bar}<div class="sect2"><h3 id="retention_bytes">retention_bytes</h3><p>Entry.</p></div>`))
