@@ -1,0 +1,122 @@
+{
+  "$comment": "What a cluster needs before it exports each group of metrics. doc-tools generate metrics-docs copies these into the dataset as each metric's requires list, and the docs print them. evidence is measured when the metrics were absent without the state and present with it on a real cluster, and source when it was read from the Redpanda source and not measured. When you add a property or an action to the metrics cluster so that it exports a new metric, add what that metric needs here.",
+  "requirements": [
+    {
+      "id": "health-monitor",
+      "metrics": ["redpanda_cluster_health_*", "vectorized_cluster_health_*"],
+      "requires": [{ "property": "health_monitor_metrics_enabled", "value": true }],
+      "evidence": "measured"
+    },
+    {
+      "id": "schema-id-validation",
+      "metrics": ["*_cluster_partition_schema_id_validation_records_failed"],
+      "requires": [{ "property": "enable_schema_id_validation", "value": "redpanda" }],
+      "evidence": "measured"
+    },
+    {
+      "id": "object-storage-scrubbing",
+      "metrics": ["redpanda_cloud_storage_anomalies"],
+      "requires": [{ "property": "cloud_storage_enable_scrubbing", "value": true }],
+      "evidence": "measured"
+    },
+    {
+      "id": "development-metrics",
+      "metrics": ["vectorized_internal_rpc_latency"],
+      "requires": [{ "property": "enable_development_metrics", "value": true }],
+      "evidence": "measured"
+    },
+    {
+      "id": "per-entity-quotas",
+      "metrics": ["*_kafka_quotas_client_quota_*_by_entity"],
+      "requires": [
+        { "property": "kafka_per_entity_quota_metrics", "value": true },
+        { "condition": "A client that has a client quota has been throttled. The series are removed again after the client has been idle." }
+      ],
+      "evidence": "measured"
+    },
+    {
+      "id": "cloud-topic",
+      "metrics": ["vectorized_cloud_topics_reconciler_pending_offset_lag"],
+      "requires": [{ "condition": "A topic with `redpanda.storage.mode` set to `cloud` exists." }],
+      "evidence": "measured"
+    },
+    {
+      "id": "cluster-metadata-upload",
+      "metrics": ["redpanda_cluster_latest_cluster_metadata_manifest_age"],
+      "requires": [{ "condition": "Reported by the controller leader, once cluster metadata uploads to object storage are running." }],
+      "evidence": "source"
+    },
+    {
+      "id": "cloud-instance",
+      "metrics": [
+        "*_instance_disk_bytes", "*_instance_memory_bytes", "*_instance_network_bytes_per_sec",
+        "*_instance_read_iops", "*_instance_vcpus", "*_instance_write_iops"
+      ],
+      "requires": [{ "condition": "The broker runs on a cloud instance type that Redpanda recognizes." }],
+      "evidence": "measured"
+    },
+    {
+      "id": "oidc",
+      "metrics": ["*_security_idp_*"],
+      "requires": [{ "condition": "OIDC authentication is on: `OAUTHBEARER` is in the `sasl_mechanisms` cluster property, and `oidc_discovery_url` is set." }],
+      "evidence": "measured"
+    },
+    {
+      "id": "tls",
+      "metrics": ["redpanda_tls_*", "vectorized_tls_*"],
+      "requires": [{ "condition": "TLS is enabled on a listener, or the broker connects to an HTTPS service such as an OIDC provider." }],
+      "evidence": "measured"
+    },
+    {
+      "id": "credential-refresh",
+      "metrics": ["vectorized_cloud_roles__auth_refresh_*"],
+      "requires": [{ "condition": "Object storage credentials come from a cloud metadata service: `cloud_storage_credentials_source` is not `config_file`." }],
+      "evidence": "measured"
+    },
+    {
+      "id": "shadow-link",
+      "metrics": ["redpanda_shadow_link_*"],
+      "requires": [
+        { "property": "enable_shadow_linking", "value": true },
+        { "condition": "The cluster has a shadow link." }
+      ],
+      "evidence": "measured"
+    },
+    {
+      "id": "shadow-link-topic",
+      "metrics": ["redpanda_shadow_link_shadow_lag"],
+      "requires": [{ "condition": "The shadow link has at least one shadow topic." }],
+      "evidence": "source"
+    },
+    {
+      "id": "shadow-link-schema-registry",
+      "metrics": ["*_shadow_link_schema_registry_*"],
+      "requires": [
+        { "property": "enable_shadow_linking", "value": true },
+        { "condition": "The cluster has a shadow link that syncs Schema Registry through the source cluster's API." }
+      ],
+      "evidence": "measured"
+    },
+    {
+      "id": "consumer-group",
+      "metrics": ["redpanda_kafka_consumer_group_*", "vectorized_kafka_group_offset"],
+      "requires": [{ "condition": "A consumer group has committed an offset." }],
+      "evidence": "measured"
+    },
+    {
+      "id": "consumer-group-metrics-property",
+      "metrics": ["redpanda_kafka_consumer_group_*"],
+      "requires": [{ "condition": "The `enable_consumer_group_metrics` cluster property includes the metric's group: `group`, `partition` or `consumer_lag`." }],
+      "evidence": "source"
+    },
+    {
+      "id": "data-transforms",
+      "metrics": ["redpanda_transform_*", "redpanda_wasm_engine_*", "*_data_transforms_logger_events_*"],
+      "requires": [
+        { "property": "data_transforms_enabled", "value": true },
+        { "condition": "A data transform is deployed." }
+      ],
+      "evidence": "measured"
+    }
+  ]
+}

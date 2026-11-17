@@ -1,0 +1,59 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://docs.redpanda.com/schemas/metrics-requirements.schema.json",
+  "title": "Metric requirements",
+  "description": "What a cluster needs before it exports each group of metrics.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["requirements"],
+  "properties": {
+    "$comment": { "type": "string" },
+    "requirements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "metrics", "requires", "evidence"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+          "metrics": {
+            "type": "array",
+            "description": "Metric family names, or patterns with * for any run of characters.",
+            "items": { "type": "string", "pattern": "^[A-Za-z0-9_:*]+$" },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "requires": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["property", "value"],
+                  "properties": {
+                    "property": { "type": "string", "minLength": 1, "description": "Name of a cluster configuration property." },
+                    "value": { "description": "The value the property must have." }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["condition"],
+                  "properties": {
+                    "condition": { "type": "string", "minLength": 1, "description": "A state the cluster must be in, as one plain sentence. AsciiDoc inline markup is allowed." }
+                  }
+                }
+              ]
+            }
+          },
+          "evidence": {
+            "enum": ["measured", "source"],
+            "description": "measured: the metrics were absent without this state and present with it on a real cluster. source: read from the Redpanda source, not measured."
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,4 +1,5 @@
 import argparse
+import fnmatch
 import os
 import sys
 import re
@@ -250,6 +251,48 @@ def ensure_directory_exists(directory):
     if not os.path.exists(directory):
         os.makedirs(directory)
 
+def load_requirements(path):
+    """The requirements list from a requirements file, checked for shape."""
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    requirements = data.get("requirements") if isinstance(data, dict) else None
+    if not isinstance(requirements, list):
+        raise ValueError("it has no requirements list")
+    for requirement in requirements:
+        if not (isinstance(requirement, dict) and requirement.get("id")
+                and isinstance(requirement.get("metrics"), list) and isinstance(requirement.get("requires"), list)
+                and requirement.get("evidence") in ("measured", "source")):
+            raise ValueError("each requirement needs an id, a metrics list, a requires list and evidence")
+        for item in requirement["requires"]:
+            if not (isinstance(item, dict) and (item.get("property") or item.get("condition"))):
+                raise ValueError(f"requirement {requirement['id']} has an item with no property and no condition")
+    return requirements
+
+
+def apply_requirements(dataset, requirements):
+    """Give each metric the list of what a cluster needs before it exports it.
+
+    Returns the ids of requirements that match no metric in the dataset, which
+    means the metric was renamed or removed and the entry is out of date.
+    """
+    stale = []
+    for requirement in requirements:
+        matched = False
+        for name, entry in dataset["metrics"].items():
+            if not any(fnmatch.fnmatchcase(name, pattern) for pattern in requirement["metrics"]):
+                continue
+            matched = True
+            requires = entry.setdefault("requires", [])
+            for item in requirement["requires"]:
+                merged = dict(item, evidence=requirement["evidence"])
+                if merged not in requires:
+                    requires.append(merged)
+            entry["provenance"]["requires"] = "requirements"
+        if not matched:
+            stale.append(requirement["id"])
+    return stale
+
+
 def count_missing(inventory, public_texts, internal_texts, expected_absent):
     """How many source families are not in the scrape and have no written reason."""
     missing = 0
@@ -267,7 +310,8 @@ def check_completeness(inventory, public_texts, internal_texts, expected_absent)
     message says what to do, because the person reading it is usually looking
     at a new metric for the first time.
     """
-    gaps = {"count": 0, "not_scraped": [], "not_in_source": [], "type_mismatch": [], "empty_help": [], "unresolved": []}
+    gaps = {"count": 0, "not_scraped": [], "not_in_source": [], "type_mismatch": [], "empty_help": [],
+            "unresolved": [], "stale_requirements": []}
     for endpoint, texts in (("public", public_texts), ("internal", internal_texts)):
         source = inventory[endpoint]
         result = metrics_reconcile.reconcile_endpoint(
@@ -338,6 +382,9 @@ def parse_args(argv):
                         help="With --inventory, only compare the scrape with the inventory: print how many families are "
                              "missing, write nothing, and exit 0 when none are. The cluster script polls with this "
                              "until the cluster exports everything")
+    parser.add_argument("--requirements", metavar="PATH",
+                        help="JSON that says what a cluster needs before it exports each group of metrics "
+                             "(docker-compose/metrics/requirements.json). Copied into the dataset as each metric's requires list")
     parser.add_argument("--strict", action="store_true",
                         help="With --inventory, fail (exit 4) and write nothing when the scrape does not match the "
                              "inventory. Without this flag the gaps are reported in metrics-gaps.json and the output is "
@@ -424,6 +471,13 @@ def main(argv=None):
         missing = count_missing(inventory, public_texts, internal_texts, expected_absent)
         print(f"{missing} metric families in source are not exported yet")
         return 0 if missing == 0 else EXIT_INCOMPLETE
+    requirements = []
+    if args.requirements:
+        try:
+            requirements = load_requirements(args.requirements)
+        except (OSError, ValueError) as e:
+            logging.error(f"Cannot read the requirements file {args.requirements}: {e}. Exiting.")
+            return EXIT_FAILURE
     gaps = None
     if inventory:
         gaps = check_completeness(inventory, public_texts, internal_texts, expected_absent)
@@ -463,6 +517,14 @@ def main(argv=None):
             families["counts"]["source_only"] -= 1
             families["counts"]["excluded"] += 1
         families["excluded"].sort(key=lambda item: item["name"])
+    stale_requirements = apply_requirements(families, requirements)
+    for requirement_id in stale_requirements:
+        logging.warning(
+            f"The requirement '{requirement_id}' in {args.requirements} matches no metric. "
+            "Its metrics were renamed or removed, so the entry needs an update.")
+    if gaps is not None:
+        gaps["stale_requirements"] = stale_requirements
+        gaps["count"] += len(stale_requirements)
     dataset_dir = output_dir
     if args.dataset_dir:
         if RELEASE_TAG_RE.match(tag_modified):

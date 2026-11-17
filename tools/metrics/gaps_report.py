@@ -21,6 +21,8 @@ import json
 import sys
 
 KINDS = ("not_scraped", "not_in_source", "type_mismatch", "empty_help", "unresolved")
+# Added later, so an older gaps file may not have it.
+OPTIONAL_KINDS = ("stale_requirements",)
 
 
 def load(path):
@@ -28,12 +30,15 @@ def load(path):
         gaps = json.load(handle)
     if not isinstance(gaps, dict) or any(not isinstance(gaps.get(kind), list) for kind in KINDS):
         raise ValueError("it is not a metrics-gaps.json file")
+    for kind in OPTIONAL_KINDS:
+        if not isinstance(gaps.get(kind), list):
+            gaps[kind] = []
     return gaps
 
 
 def render(gaps):
     """Markdown for the pull request body."""
-    total = sum(len(gaps[kind]) for kind in KINDS)
+    total = sum(len(gaps[kind]) for kind in KINDS + OPTIONAL_KINDS)
     lines = ["## Metrics check against source", ""]
     if not total:
         lines.append("Every metric the Redpanda source registers was exported by the cluster, "
@@ -102,6 +107,16 @@ def render(gaps):
         ]
         lines += ["- `%s:%s`: %s" % (g.get("file"), g.get("line"), g.get("reason")) for g in gaps["unresolved"]]
         lines.append("")
+    if gaps["stale_requirements"]:
+        lines += [
+            "### Requirements that match no metric (%d)" % len(gaps["stale_requirements"]),
+            "",
+            "These entries in `docker-compose/metrics/requirements.json` name metrics that are not in this "
+            "release. The metrics were renamed or removed, so the entries need an update.",
+            "",
+        ]
+        lines += ["- `%s`" % requirement for requirement in gaps["stale_requirements"]]
+        lines.append("")
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
@@ -116,7 +131,7 @@ def main(argv=None):
         sys.stderr.write("error: cannot read %s: %s\n" % (args.gaps_file, error))
         return 2
     sys.stdout.write(render(gaps))
-    open_gaps = sum(len(gaps[kind]) for kind in KINDS)
+    open_gaps = sum(len(gaps[kind]) for kind in KINDS + OPTIONAL_KINDS)
     return 1 if open_gaps and not args.no_fail else 0
 
 

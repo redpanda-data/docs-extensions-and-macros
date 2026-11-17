@@ -463,6 +463,8 @@ fi
 if [[ "$MODE" == "metrics" ]]; then
   ADMIN_URL_ARGS=()
   for url in "${ADMIN_URLS[@]}"; do ADMIN_URL_ARGS+=(--admin-url "$url"); done
+  # What a cluster needs before it exports each metric goes into the dataset.
+  ADMIN_URL_ARGS+=(--requirements "$METRICS_DIR/requirements.json")
   if [[ -n "$METRICS_INVENTORY_FILE" ]]; then
     ADMIN_URL_ARGS+=(--inventory "$METRICS_INVENTORY_FILE" --expected-absent "$METRICS_DIR/expected-absent.json")
     # METRICS_STRICT=1 fails the run on any gap. By default the gaps go to
