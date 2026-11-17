@@ -11,7 +11,17 @@ HELP text, and prints JSON on stdout:
    "unresolved": [...]}
 
 Usage:
-  extract_source.py --repo <clone> --ref <tag> [--seastar-json <file>]
+  extract_source.py --repo <clone> --ref <tag> [--seastar-json <file>] [--debug]
+
+Each registration the script cannot resolve is listed in "unresolved" and
+gets one line on stderr. The JSON is still printed in full.
+
+--debug adds the source expression of a description built at run time
+(help_expr) and of an unresolved registration (expr). Do not publish output
+made with --debug.
+
+Exit codes: 0 every registration resolved, 2 bad input (repository, ref,
+source tree or --seastar-json), 3 one or more registrations unresolved.
 
 Standard library only; Python 3.9+.
 """
@@ -33,54 +43,54 @@ import sys
 # the nearest preceding assignment when the argument is a variable.
 # Groups are final, already-sanitised names.
 GROUP_RULES = [
-    # default upstream uses "cloud_roles::auth_refresh"; named upstreams add the upstream key (credential_manager.cc)
+    # src/v/cloud_roles/probe.cc: group cloud_roles__auth_refresh, or the same with an upstream key
     ("src/v/cloud_roles/probe.cc", r"auth_refresh",
      ["cloud_roles__auth_refresh", "cloud_roles__<upstream>_auth_refresh"]),
-    # sformat("{}:sasl", name) where name is the Kafka server config name "kafka_rpc" (kafka/server/server.cc)
+    # src/v/kafka/server/sasl_probe.h: group kafka_rpc_sasl
     ("src/v/kafka/server/sasl_probe.h", r"\{\}:sasl", ["kafka_rpc_sasl"]),
-    # kafka::server's net::server_configuration is named "kafka_rpc" (application_services.cc)
+    # src/v/kafka/server/server.cc: group kafka_rpc
     ("src/v/kafka/server/server.cc", r"cfg\.name", ["kafka_rpc"]),
-    # net::server is instantiated for "kafka_rpc" and "internal_rpc" (application_services.cc, application_bootstrap.cc)
+    # src/v/net/server.cc: groups kafka_rpc and internal_rpc
     ("src/v/net/server.cc", r"cfg\.name", ["kafka_rpc", "internal_rpc"]),
-    # server_probe::setup_metrics(mgs, proto) with proto = server config name
+    # src/v/net/probes.cc: groups kafka_rpc and internal_rpc
     ("src/v/net/probes.cc", r"\bproto\b", ["kafka_rpc", "internal_rpc"]),
-    # client_probe::setup_metrics(name, ...) is only called with "rpc_client" (rpc/transport.cc)
+    # src/v/net/probes.cc: group rpc_client
     ("src/v/net/probes.cc", r"sstring\(\s*name\s*\)", ["rpc_client"]),
-    # "{}:backlog:controller" with labels from archival/upload_controller.cc and storage/compaction_controller.cc
+    # src/v/storage/backlog_controller.cc: one group per backlog controller
     ("src/v/storage/backlog_controller.cc", r"backlog:controller",
      ["archival_upload_backlog_controller", "storage_compaction_backlog_controller"]),
-    # probe config group_name is link_probe::shadow_link_group = "shadow_link" (cluster_link/link.cc)
+    # src/v/cluster_link/replication/replication_probe.cc: group shadow_link
     ("src/v/cluster_link/replication/replication_probe.cc", r"group_name", ["shadow_link"]),
-    # probe config group_name is link_probe::shadow_link_group = "shadow_link" (cluster_link/service.cc)
+    # src/v/kafka/client/direct_consumer/direct_consumer_probe.cc: group shadow_link
     ("src/v/kafka/client/direct_consumer/direct_consumer_probe.cc", r"group_name", ["shadow_link"]),
-    # link_probe::shadow_link_group is defined in cluster_link/link_probe.h as "shadow_link"
+    # src/v/cluster_link/schema_registry_sync/probe.cc: group shadow_link
     ("src/v/cluster_link/schema_registry_sync/probe.cc", r"shadow_link_group", ["shadow_link"]),
-    # pandaproxy server probes get the public group name "rest_proxy" (rest/proxy.cc) or "schema_registry" (schema_registry/service.cc)
+    # src/v/pandaproxy/probe.cc: groups rest_proxy and schema_registry
     ("src/v/pandaproxy/probe.cc", r"^group_name$", ["rest_proxy", "schema_registry"]),
 ]
 
-# Receivers typed metrics::metric_groups_base& that are called with both the
-# internal and the public groups. (file, receiver variable) -> endpoints.
+# Receivers that register on more than one endpoint.
+# (file, receiver variable) -> endpoints.
 ENDPOINT_RULES = {
-    # lambda add_group(metrics) is called with _metrics and _public_metrics (authorizer.cc setup_metrics)
+    # src/v/security/authorizer.cc: internal and public
     ("src/v/security/authorizer.cc", "metrics"): ["internal", "public"],
-    # setup_metrics(metric_groups) is called with _public_metrics and _metrics
+    # src/v/cluster/node_status_backend.cc: internal and public
     ("src/v/cluster/node_status_backend.cc", "metric_groups"): ["internal", "public"],
-    # probe::setup_metrics(metrics) is called with _metrics and _public_metrics
+    # src/v/cluster/partition_balancer_state.cc: internal and public
     ("src/v/cluster/partition_balancer_state.cc", "metrics"): ["internal", "public"],
-    # setup_metrics_for(metrics) is called with _metrics and _public_metrics
+    # src/v/features/feature_table.cc: internal and public
     ("src/v/features/feature_table.cc", "metrics"): ["internal", "public"],
 }
 
 # Per-family endpoint pins: (file, group, metric name) -> endpoints.
 FAMILY_ENDPOINT_RULES = {
-    # buffer_usage_ratio is appended to the internal defs only; the public group gets setup_common only
+    # src/v/security/audit/probes.cc: security_audit_buffer_usage_ratio is internal only
     ("src/v/security/audit/probes.cc", "security_audit", "buffer_usage_ratio"): ["internal"],
 }
 
 # Definitions built in one file and registered in another: file -> groups and endpoints.
 MAKE_RULES = {
-    # client_probe::defs() returns definitions that net/probes.cc client_probe::setup_metrics registers as "rpc_client"
+    # src/v/rpc/transport.cc: group rpc_client, internal
     "src/v/rpc/transport.cc": {"groups": ["rpc_client"], "endpoints": ["internal"]},
 }
 
@@ -90,21 +100,20 @@ _DISKSTATS_FIELDS = ["reads", "reads_merged", "sectors_read", "reads_ms", "write
                      "sectors_discarded", "discards_ms", "flushes", "flushes_ms"]
 _DISKSTATS_BYTES = ["bytes_read", "bytes_written", "bytes_discarded"]
 
-# Metric names built at runtime: (file, raw name expression) -> names and HELP template.
+# Metric names built at runtime: (file, raw name expression) -> names.
+# The HELP text of these families is built at run time too.
 NAME_RULES = {
-    # loop over diskstats_fields (host_metrics_watcher.cc), prefix "" or "underlying_"
+    # src/v/metrics/host_metrics_watcher.cc: group host_diskstats, one family per diskstats field
     ("src/v/metrics/host_metrics_watcher.cc", "name"): {
-        "names": [p + f for p in ("", "underlying_") for f in _DISKSTATS_FIELDS],
-        "help_expr": 'fmt::format("Host diskstat {}", name)'},
-    # bytes variants of the sectors_* fields, same prefixes
+        "names": [p + f for p in ("", "underlying_") for f in _DISKSTATS_FIELDS]},
+    # src/v/metrics/host_metrics_watcher.cc: group host_diskstats, the byte families
     ("src/v/metrics/host_metrics_watcher.cc", "bytes_name"): {
-        "names": [p + f for p in ("", "underlying_") for f in _DISKSTATS_BYTES],
-        "help_expr": 'fmt::format("Host diskstat {} (converted to bytes)", name)'},
+        "names": [p + f for p in ("", "underlying_") for f in _DISKSTATS_BYTES]},
 }
 
-# Seastar families copied to /public_metrics by application.cc
-# (seastar::metrics::replicate_metric_families). The source is re-read and
-# compared at run time; a warning goes to stderr if it differs.
+# Seastar families copied to /public_metrics. The list is read from
+# src/v/redpanda/application.cc at the ref. This constant is used only when
+# that file has no such list.
 SEASTAR_REPLICATED = [
     "io_queue_total_read_ops", "io_queue_total_write_ops", "memory_allocated_memory",
     "memory_free_memory", "io_queue_consumption", "io_queue_total_bytes",
@@ -224,6 +233,10 @@ PREFIX = {"internal": "vectorized", "public": "redpanda"}
 # =============================================================================
 
 
+class InputError(Exception):
+    """Bad input. main() prints the message and exits with code 2."""
+
+
 class Repo:
     def __init__(self, path, ref):
         self.path = path
@@ -234,7 +247,22 @@ class Repo:
         r = subprocess.run(["git", "-C", self.path] + list(args),
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                            universal_newlines=True)
+        self.err = r.stderr.strip()
         return r.returncode, r.stdout
+
+    def check(self):
+        """Raise InputError unless the repository, the ref and the source tree are usable."""
+        if not os.path.isdir(self.path):
+            raise InputError("repository path %s does not exist" % self.path)
+        rc, _ = self._git("rev-parse", "--git-dir")
+        if rc != 0:
+            raise InputError("%s is not a git repository" % self.path)
+        rc, _ = self._git("rev-parse", "--verify", "--quiet", self.ref + "^{commit}")
+        if rc != 0:
+            raise InputError("ref %s not found in %s" % (self.ref, self.path))
+        if self.show("src/v/metrics/metrics.h") is None:
+            raise InputError("%s at %s is not a Redpanda source tree: src/v/metrics/metrics.h not found"
+                             % (self.path, self.ref))
 
     def show(self, path):
         if path not in self._cache:
@@ -244,6 +272,8 @@ class Repo:
 
     def grep_files(self, pattern, pathspec="src/v"):
         rc, out = self._git("grep", "-l", "-E", pattern, self.ref, "--", pathspec)
+        if rc > 1:
+            raise InputError("git grep failed in %s: %s" % (self.path, self.err))
         files = []
         for line in out.splitlines():
             if line.startswith(self.ref + ":"):
@@ -466,10 +496,11 @@ class Resolver:
 # extraction
 # =============================================================================
 
+MAKE_KINDS = ("gauge|counter|histogram|total_bytes|current_bytes|total_operations|"
+              "queue_length|derive|absolute|summary")
 MAKE_RE = re.compile(
     r"(?<![A-Za-z0-9_])((?:(?:sm|ss::metrics|seastar::metrics)::)?)"
-    r"make_(gauge|counter|histogram|total_bytes|current_bytes|total_operations|"
-    r"queue_length|derive|absolute|summary)\s*(?:<[^>(]*>)?\s*\(")
+    r"make_(" + MAKE_KINDS + r")\s*(?:<[^>(]*>)?\s*\(")
 ADD_GROUP_RE = re.compile(r"([A-Za-z0-9_.\->\[\]()]*?)\s*(?:\.|->)\s*add_group\s*\(")
 LAMBDA_RE = re.compile(r"(?:\bauto\b\s*&{0,2}|\bconst\s+auto\b\s*&{0,2})\s*([A-Za-z_]\w*)\s*=\s*\[")
 DESC_RE = re.compile(r"^(?:(?:sm|ss::metrics|seastar::metrics)::)?description\s*\((.*)\)$", re.S)
@@ -479,6 +510,17 @@ GROUP_TYPES = {"public_metric_groups": "public", "public_metrics_group_service":
 DECL_RE = (r"(public_metric_groups|internal_metric_groups|all_metrics_groups|metric_groups_base|"
            r"public_metrics_group_service|(?<![\w_])metric_groups)\s*>?\s*[&*]?\s*")
 INCLUDE_RE = re.compile(r'^\s*#\s*include\s+"([^"]+\.h)"', re.M)
+
+
+def decl_kind(text, m):
+    """Endpoint kind of a group declaration matched by DECL_RE."""
+    if m.group(1) == "metric_groups":
+        j = m.end()
+        while j < len(text) and text[j].isspace():
+            j += 1
+        if j < len(text) and text[j] in "{(" and "public_metrics_handle" in text[j:match_bracket(text, j)]:
+            return "public"
+    return GROUP_TYPES[m.group(1)]
 
 
 def lambda_spans(s):
@@ -577,6 +619,7 @@ class FileScan:
         return self.raw.count("\n", 0, pos) + 1
 
     def endpoint(self, g):
+        """Return (endpoints, level). endpoints is None when the receiver cannot be typed."""
         recv = g["recv"] or ""
         rn = re.split(r"\.|->", recv.replace(".emplace()", "").replace("->emplace()", ""))[-1] or recv
         key = (self.path, rn)
@@ -589,6 +632,21 @@ class FileScan:
             return ["public"], "clean"
         if "internal" in low:
             return ["internal"], "clean"
+        # a group created in place by emplace(..., <handle>) and reached through the result
+        root = re.match(r"[A-Za-z_]\w*", recv)
+        if root:
+            name = re.escape(root.group(0))
+            func = max(self.s.rfind("\n}", 0, g["start"]), 0)  # start of the enclosing function
+            made = [m for m in re.finditer(
+                r"\bauto\s*&{0,2}\s*(?:\[\s*" + name + r"\b[^\]]*\]|" + name + r")\s*=\s*[^;{}]*?"
+                r"\b(?:try_)?emplace\w*\s*\(", self.s) if func <= m.start() < g["start"]]
+            if made:
+                op = made[-1].end() - 1
+                handle = self.s[op:match_bracket(self.s, op)]
+                if "public_metrics_handle" in handle:
+                    return ["public"], "clean"
+                if "default_handle" in handle:
+                    return ["internal"], "clean"
         alias = [m for m in re.finditer(r"\bauto\s*&\s*" + re.escape(rn) + r"\s*=\s*([\w.>\-]+?)\s*(?:\.|->)\s*emplace\(\)",
                                          self.s) if m.start() < g["start"]]
         if alias:
@@ -596,12 +654,12 @@ class FileScan:
         decl = [m for m in re.finditer(DECL_RE + re.escape(rn) + r"\b", self.s) if m.start() < g["start"]]
         kind = None
         if decl:
-            kind = GROUP_TYPES[decl[-1].group(1)]
+            kind = decl_kind(self.s, decl[-1])
         else:
             for t in [self.s] + self.ctx:
                 m = re.search(DECL_RE + re.escape(rn) + r"\b", t)
                 if m:
-                    kind = GROUP_TYPES[m.group(1)]
+                    kind = decl_kind(t, m)
                     break
         if kind == "both":
             return ["internal", "public"], "clean"
@@ -609,7 +667,7 @@ class FileScan:
             return [kind], "clean"
         if kind == "base":
             return ["internal", "public"], "heuristic"
-        return ["internal"], "heuristic"
+        return None, "unresolved"
 
     def group_names(self, g):
         if not g["args"]:
@@ -661,7 +719,7 @@ def describe(scan, args, pos):
 
 
 def extract(repo):
-    files = repo.grep_files(r"make_(gauge|counter|histogram|total_bytes|current_bytes|total_operations)[ (<]")
+    files = repo.grep_files(r"make_(" + MAKE_KINDS + r")[ (<]")
     files = [f for f in files if not re.search(r"(/tests?/|_test\.cc$|/bench)", f)]
     sites, unresolved = [], []
     for path in files:
@@ -684,7 +742,7 @@ def extract(repo):
             nrule = NAME_RULES.get((path, raw_name))
             if nrule:
                 names = list(nrule["names"])
-                help_rt, help_text, help_expr = True, None, nrule["help_expr"]
+                help_rt, help_text, help_expr = True, None, None
                 levels.add("rule")
             else:
                 vals, heur, _ = scan.res.values(args[0], m.start()) if args else (None, False, "")
@@ -696,6 +754,7 @@ def extract(repo):
                 continue
             # ---- groups and endpoints
             targets = []  # (group, endpoints)
+            failure = None  # first reason this site could not be resolved
             enclosing = [g for g in scan.groups if g["op"] < m.start() < g["cl"]]
             if path in MAKE_RULES:
                 r = MAKE_RULES[path]
@@ -724,17 +783,22 @@ def extract(repo):
                 for g in chosen:
                     gnames, glevel = scan.group_names(g)
                     if not gnames:
-                        unresolved.append(dict(site, reason="group not resolvable",
-                                               expr=norm(g["args"][0]) if g["args"] else ""))
+                        failure = failure or dict(site, reason="group not resolvable",
+                                                  expr=norm(g["args"][0]) if g["args"] else "")
                         continue
                     eps, elevel = scan.endpoint(g)
+                    if not eps:
+                        failure = failure or dict(site, reason="endpoint not resolvable",
+                                                  expr=norm(g["recv"] or ""))
+                        continue
                     levels.add(glevel)
                     levels.add(elevel)
                     for gn in gnames:
                         targets.append((gn, eps))
-            if not targets:
-                unresolved.append(dict(site, reason="no add_group found for this definition", expr=raw_name))
-                continue
+            if not targets and not failure:
+                failure = dict(site, reason="no add_group found for this definition", expr=raw_name)
+            if failure:
+                unresolved.append(failure)
             for gn, eps in targets:
                 for nm in names:
                     pin = FAMILY_ENDPOINT_RULES.get((path, gn, nm))
@@ -750,16 +814,14 @@ def extract(repo):
     return sites, unresolved
 
 
-def check_replicated(repo):
+def replicated_families(repo):
+    """Seastar families copied to /public_metrics at this ref."""
     src = repo.show("src/v/redpanda/application.cc") or ""
     m = re.search(r"replicate_metric_families\s*\(", src)
     if not m:
-        return
+        return list(SEASTAR_REPLICATED)
     block = src[m.end():match_bracket(src, m.end() - 1)]
-    found = re.findall(r'\{\s*"([a-z0-9_]+)"\s*,\s*metrics::public_metrics_handle\s*\}', block)
-    if sorted(found) != sorted(SEASTAR_REPLICATED):
-        sys.stderr.write("warning: application.cc replicate_metric_families list differs from "
-                         "SEASTAR_REPLICATED: %s\n" % sorted(set(found) ^ set(SEASTAR_REPLICATED)))
+    return re.findall(r'\{\s*"([a-z0-9_]+)"\s*,\s*metrics::public_metrics_handle\s*\}', block)
 
 
 def load_seastar(path):
@@ -780,7 +842,7 @@ def load_seastar(path):
     return out
 
 
-def build(sites, seastar):
+def build(sites, seastar, replicated):
     out = {"public": {}, "internal": {}}
     for st in sites:
         full = "%s_%s_%s" % (PREFIX[st["endpoint"]], st["group"], st["name"])
@@ -811,7 +873,7 @@ def build(sites, seastar):
             entry["condition"] = f["condition"]
         out["internal"].setdefault(full, entry)
         by_short[full[len("vectorized_"):]] = entry
-    for short in SEASTAR_REPLICATED:
+    for short in replicated:
         base = by_short.get(short)
         entry = {"type": base["type"] if base else "gauge", "help": None, "help_runtime": False,
                  "defined_in": "src/v/redpanda/application.cc", "group": base["group"] if base else None,
@@ -825,20 +887,40 @@ def main(argv=None):
     ap.add_argument("--repo", required=True, help="path to a streaming-enterprise clone")
     ap.add_argument("--ref", required=True, help="git ref (tag) to read")
     ap.add_argument("--seastar-json", help="optional JSON list/dict of Seastar built-in families")
+    ap.add_argument("--debug", action="store_true",
+                    help="add source expressions (help_expr, unresolved expr) to the output; do not publish it")
     a = ap.parse_args(argv)
     repo = Repo(a.repo, a.ref)
-    if repo.show("src/v/metrics/metrics.h") is None:
-        sys.exit("error: %s:src/v/metrics/metrics.h not found in %s" % (a.ref, a.repo))
-    check_replicated(repo)
-    sites, unresolved = extract(repo)
-    out = build(sites, load_seastar(a.seastar_json))
+    try:
+        repo.check()
+        try:
+            seastar = load_seastar(a.seastar_json)
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+            raise InputError("cannot read --seastar-json %s: %s" % (a.seastar_json, error))
+        sites, unresolved = extract(repo)
+        replicated = replicated_families(repo)
+    except InputError as error:
+        sys.stderr.write("error: %s\n" % error)
+        return 2
+    out = build(sites, seastar, replicated)
+    if not a.debug:
+        for entry in list(out["public"].values()) + list(out["internal"].values()):
+            entry.pop("help_expr", None)
+        for item in unresolved:
+            item.pop("expr", None)
     doc = {"ref": a.ref,
            "public": dict(sorted(out["public"].items())),
            "internal": dict(sorted(out["internal"].items())),
            "unresolved": unresolved}
     json.dump(doc, sys.stdout, indent=1, sort_keys=False)
     sys.stdout.write("\n")
+    for item in unresolved:
+        sys.stderr.write("unresolved: %s:%d make_%s: %s\n" % (item["file"], item["line"], item["kind"], item["reason"]))
+    if unresolved:
+        sys.stderr.write("error: %d registration(s) unresolved at %s\n" % (len(unresolved), a.ref))
+        return 3
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

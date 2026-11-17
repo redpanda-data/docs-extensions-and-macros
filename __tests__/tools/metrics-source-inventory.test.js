@@ -15,7 +15,13 @@
  *   assignment before the add_group call,
  * - helper types that Prometheus exposes as counter or gauge,
  * - a description built at run time,
- * - Seastar built-ins and the families copied to the public endpoint, and
+ * - Seastar built-ins and the families copied to the public endpoint, read
+ *   from the source at the ref,
+ * - definitions appended to a vector and registered by a later add_group,
+ * - a group created with the public handle,
+ * - a receiver whose endpoint cannot be determined: it must be reported as
+ *   unresolved, with exit code 3, and never guessed,
+ * - clear errors for a bad repository, ref, source tree or Seastar file, and
  * - the reconcile gate, with negative controls: a family dropped from the
  *   scrape, a family the extractor does not know, a changed type and an empty
  *   HELP line must each fail.
@@ -138,6 +144,95 @@ void t() { _metrics.add_group("test_only", {sm::make_gauge("ignored", [] { retur
 `
 }
 
+// A second tree for the paths that need more than a literal name inside an
+// enclosing add_group. One registration in it cannot be resolved on purpose.
+const EDGE_SOURCES = {
+  'src/v/metrics/metrics.h': SOURCES['src/v/metrics/metrics.h'],
+  'src/v/edge/vec_probe.cc': `
+#include "edge/vec_probe.h"
+namespace edge {
+void vec_probe::setup() {
+    namespace sm = ss::metrics;
+    std::vector<sm::metric_definition> defs;
+    defs.emplace_back(sm::make_counter("appended_total", [this] { return _n; }, sm::description("Items appended")));
+    std::vector<sm::metric_definition> other;
+    other.push_back(sm::make_gauge("other_depth", [this] { return _d; }, sm::description("Other depth")));
+    _metrics.add_group(prometheus_sanitize::metrics_name("edge:vec"), defs);
+    _public_metrics.add_group(prometheus_sanitize::metrics_name("edge:other"), other);
+}
+}
+`,
+  'src/v/edge/vec_probe.h': `
+#pragma once
+namespace edge {
+class vec_probe {
+    metrics::internal_metric_groups _metrics;
+    metrics::public_metric_groups _public_metrics;
+};
+}
+`,
+  'src/v/edge/handle_probe.cc': `
+#include "edge/handle_probe.h"
+namespace edge {
+void handle_probe::add_topic(const key& k) {
+    namespace sm = ss::metrics;
+    auto [it, inserted] = _per_topic.emplace(k, metrics::public_metrics_handle);
+    it->second.add_group(
+      prometheus_sanitize::metrics_name("edge:emplaced"),
+      {sm::make_gauge("replicas", [this] { return 3; }, sm::description("Replica count"))});
+}
+void handle_probe::setup_raw() {
+    namespace sm = ss::metrics;
+    _raw.add_group(
+      prometheus_sanitize::metrics_name("edge:constructed"),
+      {sm::make_gauge("handles", [this] { return 1; }, sm::description("Handle count"))});
+}
+void handle_probe::setup_lookup(const key& k) {
+    namespace sm = ss::metrics;
+    auto it = _things.find(k);
+    it->second.add_group(
+      prometheus_sanitize::metrics_name("edge:mystery"),
+      {sm::make_gauge("lost", [this] { return 0; }, sm::description("Cannot be placed"))});
+}
+}
+`,
+  'src/v/edge/handle_probe.h': `
+#pragma once
+namespace edge {
+class handle_probe {
+    std::map<key, thing> _per_topic;
+    std::map<key, thing> _things;
+    ss::metrics::metric_groups _raw{metrics::public_metrics_handle};
+};
+}
+`,
+  'src/v/edge/queue_probe.cc': `
+#include "edge/queue_probe.h"
+namespace edge {
+void queue_probe::setup() {
+    namespace sm = ss::metrics;
+    _metrics.add_group(
+      prometheus_sanitize::metrics_name("edge:queue"),
+      {sm::make_queue_length("pending", [this] { return _pending; }, sm::description("Items waiting"))});
+}
+}
+`,
+  'src/v/edge/queue_probe.h': `
+#pragma once
+namespace edge {
+class queue_probe { metrics::internal_metric_groups _metrics; };
+}
+`,
+  'src/v/redpanda/application.cc': `
+void application::setup_metrics() {
+    ss::metrics::replicate_metric_families(
+      ss::metrics::default_handle(),
+      {{"memory_free_memory", metrics::public_metrics_handle},
+       {"io_queue_total_read_ops", metrics::public_metrics_handle}});
+}
+`
+}
+
 const SEASTAR = [
   { group: 'reactor', name: 'aio_reads', type: 'counter', file: 'src/core/reactor.cc' },
   { group: 'memory', name: 'free_memory', type: 'current_bytes', file: 'src/core/reactor.cc' },
@@ -150,8 +245,9 @@ function git (cwd, ...args) {
   return result.stdout
 }
 
-function buildRepo (dir) {
-  for (const [file, content] of Object.entries(SOURCES)) {
+function buildRepo (dir, sources = SOURCES) {
+  fs.mkdirSync(dir, { recursive: true })
+  for (const [file, content] of Object.entries(sources)) {
     const target = path.join(dir, file)
     fs.mkdirSync(path.dirname(target), { recursive: true })
     fs.writeFileSync(target, content)
@@ -184,7 +280,6 @@ describeIfReady('metrics source inventory', () => {
   beforeAll(() => {
     workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'metrics-source-'))
     repoDir = path.join(workDir, 'repo')
-    fs.mkdirSync(repoDir)
     buildRepo(repoDir)
     seastarFile = path.join(workDir, 'seastar.json')
     fs.writeFileSync(seastarFile, JSON.stringify(SEASTAR))
@@ -234,7 +329,14 @@ describeIfReady('metrics source inventory', () => {
       const entry = inventory.public.redpanda_widget_active
       expect(entry.help).toBeNull()
       expect(entry.help_runtime).toBe(true)
-      expect(entry.help_expr).toContain('active widgets')
+    })
+
+    it('keeps source expressions out of the output unless --debug is given', () => {
+      expect(JSON.stringify(inventory)).not.toContain('help_expr')
+      expect(JSON.stringify(inventory)).not.toContain('sformat')
+      const result = run(EXTRACT, ['--repo', repoDir, '--ref', 'v0.0.1', '--debug'])
+      expect(result.status).toBe(0)
+      expect(JSON.parse(result.stdout).public.redpanda_widget_active.help_expr).toContain('active widgets')
     })
 
     it('resolves a group variable from the nearest assignment before add_group', () => {
@@ -266,10 +368,104 @@ describeIfReady('metrics source inventory', () => {
       expect(inventory.public.redpanda_memory_free_memory.type).toBe('gauge')
     })
 
-    it('fails clearly when the ref is not a Redpanda source tree', () => {
-      const result = run(EXTRACT, ['--repo', repoDir, '--ref', 'no-such-ref'])
-      expect(result.status).not.toBe(0)
-      expect(result.combined).toMatch(/metrics\.h not found/)
+    it('uses the built-in list of copied families when the source has none', () => {
+      const copied = Object.keys(inventory.public).filter((name) => inventory.public[name].origin === 'seastar-replicated')
+      expect(copied).toHaveLength(13)
+    })
+
+    describe('bad input', () => {
+      const expectError = (args, pattern) => {
+        const result = run(EXTRACT, args)
+        expect(result.status).toBe(2)
+        expect(result.stdout).toBe('')
+        expect(result.stderr).toMatch(pattern)
+        expect(result.stderr).not.toMatch(/Traceback/)
+      }
+
+      it('names a repository path that does not exist', () => {
+        expectError(['--repo', path.join(workDir, 'nowhere'), '--ref', 'v0.0.1'], /repository path .* does not exist/)
+      })
+
+      it('names a directory that is not a git repository', () => {
+        const plain = path.join(workDir, 'plain')
+        fs.mkdirSync(plain)
+        expectError(['--repo', plain, '--ref', 'v0.0.1'], /is not a git repository/)
+      })
+
+      it('names a ref that does not exist', () => {
+        expectError(['--repo', repoDir, '--ref', 'no-such-ref'], /ref no-such-ref not found/)
+      })
+
+      it('names a repository that is not a Redpanda source tree', () => {
+        const other = path.join(workDir, 'other')
+        buildRepo(other, { 'README.md': 'not Redpanda\n' })
+        expectError(['--repo', other, '--ref', 'v0.0.1'], /not a Redpanda source tree/)
+      })
+
+      it('names a --seastar-json file that cannot be read', () => {
+        expectError(['--repo', repoDir, '--ref', 'v0.0.1', '--seastar-json', path.join(workDir, 'missing.json')], /cannot read --seastar-json/)
+      })
+    })
+  })
+
+  describe('extract_source.py on registrations that need more than a literal', () => {
+    let edgeDir
+    let edgeRun
+    let edge
+
+    beforeAll(() => {
+      edgeDir = path.join(workDir, 'edge')
+      buildRepo(edgeDir, EDGE_SOURCES)
+      edgeRun = run(EXTRACT, ['--repo', edgeDir, '--ref', 'v0.0.1'])
+      edge = JSON.parse(edgeRun.stdout)
+    })
+
+    it('follows definitions appended to a vector to the add_group that registers it', () => {
+      expect(edge.internal.vectorized_edge_vec_appended_total).toMatchObject({ type: 'counter', help: 'Items appended' })
+      expect(edge.public.redpanda_edge_other_other_depth).toMatchObject({ type: 'gauge' })
+      expect(edge.public.redpanda_edge_other_appended_total).toBeUndefined()
+      expect(edge.internal.vectorized_edge_vec_other_depth).toBeUndefined()
+    })
+
+    it('puts a group emplaced with the public handle on the public endpoint only', () => {
+      expect(edge.public.redpanda_edge_emplaced_replicas).toMatchObject({ type: 'gauge', resolution: 'clean' })
+      expect(edge.internal.vectorized_edge_emplaced_replicas).toBeUndefined()
+    })
+
+    it('puts a group constructed with the public handle on the public endpoint only', () => {
+      expect(edge.public.redpanda_edge_constructed_handles).toBeDefined()
+      expect(edge.internal.vectorized_edge_constructed_handles).toBeUndefined()
+    })
+
+    it('reports a receiver with no known endpoint as unresolved, once, and does not guess', () => {
+      expect(edge.unresolved).toEqual([
+        { file: 'src/v/edge/handle_probe.cc', line: expect.any(Number), kind: 'gauge', reason: 'endpoint not resolvable' }
+      ])
+      const names = [...Object.keys(edge.internal), ...Object.keys(edge.public)]
+      expect(names.filter((name) => name.includes('mystery'))).toEqual([])
+    })
+
+    it('exits 3 and prints one line per unresolved registration on stderr', () => {
+      expect(edgeRun.status).toBe(3)
+      const lines = edgeRun.stderr.split('\n').filter((line) => line.startsWith('unresolved: '))
+      expect(lines).toHaveLength(1)
+      expect(lines[0]).toMatch(/^unresolved: src\/v\/edge\/handle_probe\.cc:\d+ make_gauge: endpoint not resolvable$/)
+    })
+
+    it('adds the unresolved expression only with --debug', () => {
+      const result = run(EXTRACT, ['--repo', edgeDir, '--ref', 'v0.0.1', '--debug'])
+      expect(result.status).toBe(3)
+      expect(JSON.parse(result.stdout).unresolved[0].expr).toBe('it->second')
+    })
+
+    it('reads the copied Seastar families from the source at the ref', () => {
+      const copied = Object.keys(edge.public).filter((name) => edge.public[name].origin === 'seastar-replicated')
+      expect(copied.sort()).toEqual(['redpanda_io_queue_total_read_ops', 'redpanda_memory_free_memory'])
+      expect(edge.public.redpanda_reactor_aio_reads).toBeUndefined()
+    })
+
+    it('scans a file that only uses make_queue_length and maps it to gauge', () => {
+      expect(edge.internal.vectorized_edge_queue_pending).toMatchObject({ type: 'gauge', help: 'Items waiting' })
     })
   })
 
