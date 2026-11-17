@@ -1,0 +1,95 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://docs.redpanda.com/schemas/metric-overrides.schema.json",
+  "title": "Metric overrides",
+  "description": "What writers add to the generated metrics data: reader text, sections, usage guidance, and the facts a scrape could not give for a metric the metrics cluster did not export. doc-tools generate metrics-docs --overrides merges this file into redpanda-metrics-<tag>.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["metrics"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "$comment": { "type": "string" },
+    "metrics": {
+      "type": "object",
+      "description": "Metric family name -> override.",
+      "propertyNames": { "pattern": "^[A-Za-z_:][A-Za-z0-9_:]*$" },
+      "additionalProperties": { "$ref": "#/definitions/override" }
+    }
+  },
+  "definitions": {
+    "override": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "_comment": { "type": "string", "description": "A note for other writers. Not copied into the data." },
+        "description": { "type": "string", "minLength": 1, "description": "Text for readers. Replaces the help string from Redpanda, which stays in the data as source_description. A wrong help string is better fixed in the Redpanda source." },
+        "unit": { "type": ["string", "null"], "description": "Unit of the value, when the name does not say it." },
+        "labels": {
+          "type": "array",
+          "description": "For a metric the cluster exported: a description and the complete values of labels it has. For a metric the cluster did not export: its labels, read from the source file the gap report names. Giving this list, even an empty one, is what covers that gap.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "description": { "type": "string", "minLength": 1 },
+              "values": {
+                "type": "array",
+                "description": "The complete set of values the label can take.",
+                "items": { "type": "string" },
+                "uniqueItems": true
+              }
+            }
+          }
+        },
+        "category": { "type": "string", "minLength": 1, "description": "Section on the reference page." },
+        "use_cases": {
+          "type": "array",
+          "description": "What a reader would use the metric for. Drives the catalog filter.",
+          "items": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+          "uniqueItems": true
+        },
+        "usage": { "type": "string", "minLength": 1, "description": "How to use the metric, as AsciiDoc." },
+        "availability": {
+          "type": "object",
+          "description": "Deployment -> whether the metric is available there.",
+          "additionalProperties": false,
+          "required": ["self_managed", "dedicated", "byoc", "serverless"],
+          "properties": {
+            "self_managed": { "type": "boolean" },
+            "dedicated": { "type": "boolean" },
+            "byoc": { "type": "boolean" },
+            "serverless": { "type": "boolean" }
+          }
+        },
+        "requires": {
+          "type": "array",
+          "description": "What a cluster needs before it exports the metric. Replaces the list from the tooling. Use it for a metric the tooling does not know about yet.",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["property"],
+                "properties": {
+                  "property": { "type": "string", "minLength": 1 },
+                  "value": {}
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["condition"],
+                "properties": { "condition": { "type": "string", "minLength": 1 } }
+              }
+            ]
+          }
+        },
+        "related_properties": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "related_topics": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    }
+  }
+}

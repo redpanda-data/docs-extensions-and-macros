@@ -22,7 +22,9 @@ import sys
 
 KINDS = ("not_scraped", "not_in_source", "type_mismatch", "empty_help", "unresolved")
 # Added later, so an older gaps file may not have it.
-OPTIONAL_KINDS = ("stale_requirements",)
+OPTIONAL_KINDS = ("stale_requirements", "stale_overrides", "override_disagrees")
+# Listed for the reader and not counted: a writer has completed these.
+INFO_KINDS = ("covered_by_override",)
 
 
 def load(path):
@@ -30,7 +32,7 @@ def load(path):
         gaps = json.load(handle)
     if not isinstance(gaps, dict) or any(not isinstance(gaps.get(kind), list) for kind in KINDS):
         raise ValueError("it is not a metrics-gaps.json file")
-    for kind in OPTIONAL_KINDS:
+    for kind in OPTIONAL_KINDS + INFO_KINDS:
         if not isinstance(gaps.get(kind), list):
             gaps[kind] = []
     return gaps
@@ -40,10 +42,26 @@ def render(gaps):
     """Markdown for the pull request body."""
     total = sum(len(gaps[kind]) for kind in KINDS + OPTIONAL_KINDS)
     lines = ["## Metrics check against source", ""]
+    covered = gaps["covered_by_override"]
+    covered_lines = []
+    if covered:
+        covered_lines = [
+            "### Documented from an override, not confirmed by a cluster (%d)" % len(covered),
+            "",
+            "The cluster did not export these. A writer gave their labels in `docs-data/metric-overrides.json`, "
+            "so the reference is complete. Nothing has checked those labels against a running broker. "
+            "When the metrics cluster exports a metric, the next run compares the two and the override can go.",
+            "",
+        ]
+        covered_lines += ["- `%s` (%s), registered in `%s`" % (g["name"], g["endpoint"], g.get("defined_in") or "unknown")
+                          for g in covered]
+        covered_lines.append("")
     if not total:
-        lines.append("Every metric the Redpanda source registers was exported by the cluster, "
-                     "or has a written reason. Nothing needs a person.")
-        return "\n".join(lines) + "\n"
+        lines.append("Every metric the Redpanda source registers was exported by the cluster, has a written reason, "
+                     "or is completed by an override. Nothing needs a person.")
+        if covered_lines:
+            lines += [""] + covered_lines
+        return "\n".join(lines).rstrip("\n") + "\n"
 
     lines += [
         "**%d %s a person before this merges.**" % (total, "gap needs" if total == 1 else "gaps need"),
@@ -66,7 +84,11 @@ def render(gaps):
                   for g in gaps["not_scraped"]]
         lines += [
             "",
-            "To close each one, do one of these in `docs-extensions-and-macros`:",
+            "To complete the reference now, add the metric to `docs-data/metric-overrides.json` in this "
+            "repository with its `labels`, read from the source file named above, and run this workflow again "
+            "for the tag. That covers the gap.",
+            "",
+            "To close it for good, do one of these in `docs-extensions-and-macros`:",
             "",
             "- Turn the feature on for the metrics cluster in `docker-compose/metrics/` (a property in "
             "`bootstrap-extra.yml`, a service in `metrics.overlay.yml`, or an action in "
@@ -117,6 +139,29 @@ def render(gaps):
         ]
         lines += ["- `%s`" % requirement for requirement in gaps["stale_requirements"]]
         lines.append("")
+    if gaps["stale_overrides"]:
+        lines += [
+            "### Overrides that match no metric (%d)" % len(gaps["stale_overrides"]),
+            "",
+            "These entries in `docs-data/metric-overrides.json` name metrics that are not in this release. "
+            "Remove them, or rename them if the metric was renamed.",
+            "",
+        ]
+        lines += ["- `%s`" % name for name in gaps["stale_overrides"]]
+        lines.append("")
+    if gaps["override_disagrees"]:
+        lines += [
+            "### Overrides that disagree with the cluster (%d)" % len(gaps["override_disagrees"]),
+            "",
+            "The cluster exports these metrics, and the override names labels the cluster does not have. "
+            "The cluster is right. Fix or remove the labels in `docs-data/metric-overrides.json`.",
+            "",
+        ]
+        lines += ["- `%s` (%s): %s" % (g["name"], g["endpoint"], ", ".join("`%s`" % label for label in g["labels_not_scraped"]))
+                  for g in gaps["override_disagrees"]]
+        lines.append("")
+    if covered_lines:
+        lines += covered_lines
     return "\n".join(lines).rstrip("\n") + "\n"
 
 

@@ -293,6 +293,73 @@ def apply_requirements(dataset, requirements):
     return stale
 
 
+# Override fields copied onto the metric as they are.
+OVERRIDE_FIELDS = ("description", "unit", "category", "use_cases", "usage", "availability",
+                   "requires", "related_properties", "related_topics")
+# Gap kinds that need a person. covered_by_override is listed and not counted.
+OPEN_GAP_KINDS = ("not_scraped", "not_in_source", "type_mismatch", "empty_help", "unresolved",
+                  "stale_requirements", "stale_overrides", "override_disagrees")
+
+
+def load_overrides(path):
+    """The metrics object of an overrides file, checked for shape."""
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    metrics = data.get("metrics") if isinstance(data, dict) else None
+    if not isinstance(metrics, dict):
+        raise ValueError("it has no metrics object")
+    for name, override in metrics.items():
+        if not isinstance(override, dict):
+            raise ValueError(f"the override for {name} is not an object")
+        labels = override.get("labels")
+        if labels is not None and not (isinstance(labels, list) and all(
+                isinstance(label, dict) and label.get("name") for label in labels)):
+            raise ValueError(f"the labels of {name} must be a list of objects with a name")
+    return metrics
+
+
+def apply_overrides(dataset, overrides):
+    """Merge what writers added into the dataset.
+
+    For a metric the cluster exported, the scrape decides which labels exist
+    and an override only describes them. For a metric the cluster did not
+    export, the override's labels are the labels, which is what lets the
+    reference be complete before the cluster setup catches up.
+
+    Returns {"stale": names not in the dataset, "covered": unscraped metrics
+    whose labels an override gives, "disagrees": exported metrics whose
+    override names a label the scrape does not have}.
+    """
+    result = {"stale": [], "covered": [], "disagrees": []}
+    for name in sorted(overrides):
+        override = overrides[name]
+        entry = dataset["metrics"].get(name)
+        if entry is None:
+            result["stale"].append(name)
+            continue
+        for field in OVERRIDE_FIELDS:
+            if field in override:
+                entry[field] = override[field]
+                entry["provenance"][field] = "override"
+        if "labels" not in override:
+            continue
+        wanted = [{key: label[key] for key in ("name", "description", "values") if key in label}
+                  for label in override["labels"]]
+        if not entry["observed"]:
+            entry["labels"] = wanted
+            entry["provenance"]["labels"] = "override"
+            result["covered"].append(name)
+            continue
+        scraped = {label["name"]: label for label in entry["labels"]}
+        unknown = [label["name"] for label in wanted if label["name"] not in scraped]
+        if unknown:
+            result["disagrees"].append({"name": name, "endpoint": entry["endpoint"], "labels_not_scraped": unknown})
+        for label in wanted:
+            if label["name"] in scraped:
+                scraped[label["name"]].update({key: value for key, value in label.items() if key != "name"})
+    return result
+
+
 def count_missing(inventory, public_texts, internal_texts, expected_absent):
     """How many source families are not in the scrape and have no written reason."""
     missing = 0
@@ -311,7 +378,8 @@ def check_completeness(inventory, public_texts, internal_texts, expected_absent)
     at a new metric for the first time.
     """
     gaps = {"count": 0, "not_scraped": [], "not_in_source": [], "type_mismatch": [], "empty_help": [],
-            "unresolved": [], "stale_requirements": []}
+            "unresolved": [], "stale_requirements": [], "stale_overrides": [], "override_disagrees": [],
+            "covered_by_override": []}
     for endpoint, texts in (("public", public_texts), ("internal", internal_texts)):
         source = inventory[endpoint]
         result = metrics_reconcile.reconcile_endpoint(
@@ -385,6 +453,10 @@ def parse_args(argv):
     parser.add_argument("--requirements", metavar="PATH",
                         help="JSON that says what a cluster needs before it exports each group of metrics "
                              "(docker-compose/metrics/requirements.json). Copied into the dataset as each metric's requires list")
+    parser.add_argument("--overrides", metavar="PATH",
+                        help="JSON of what writers add to the generated data (docs-data/metric-overrides.json): reader "
+                             "text, sections, usage, and the labels of a metric the cluster did not export. An override "
+                             "that gives the labels of such a metric covers its gap")
     parser.add_argument("--strict", action="store_true",
                         help="With --inventory, fail (exit 4) and write nothing when the scrape does not match the "
                              "inventory. Without this flag the gaps are reported in metrics-gaps.json and the output is "
@@ -478,10 +550,20 @@ def main(argv=None):
         except (OSError, ValueError) as e:
             logging.error(f"Cannot read the requirements file {args.requirements}: {e}. Exiting.")
             return EXIT_FAILURE
+    overrides = {}
+    if args.overrides:
+        try:
+            overrides = load_overrides(args.overrides)
+        except (OSError, ValueError) as e:
+            logging.error(f"Cannot read the overrides file {args.overrides}: {e}. Exiting.")
+            return EXIT_FAILURE
     gaps = None
     if inventory:
         gaps = check_completeness(inventory, public_texts, internal_texts, expected_absent)
-        if gaps["count"] and args.strict:
+        uncovered = [gap for gap in gaps["not_scraped"]
+                     if "labels" not in overrides.get(gap["name"], {})]
+        other = gaps["count"] - len(gaps["not_scraped"])
+        if (uncovered or other) and args.strict:
             logging.error("The scrape does not match the source inventory. Nothing was written.")
             return EXIT_INCOMPLETE
     generated_from = {"sources": len(public_sources)}
@@ -522,9 +604,26 @@ def main(argv=None):
         logging.warning(
             f"The requirement '{requirement_id}' in {args.requirements} matches no metric. "
             "Its metrics were renamed or removed, so the entry needs an update.")
+    overridden = apply_overrides(families, overrides)
+    for name in overridden["stale"]:
+        logging.warning(
+            f"The override for '{name}' in {args.overrides} matches no metric in this release. "
+            "The metric was renamed or removed, so the override needs an update.")
+    for item in overridden["disagrees"]:
+        logging.warning(
+            f"The override for '{item['name']}' names labels the cluster does not export: "
+            f"{', '.join(item['labels_not_scraped'])}. The scrape is right, so the override needs an update.")
     if gaps is not None:
         gaps["stale_requirements"] = stale_requirements
-        gaps["count"] += len(stale_requirements)
+        gaps["stale_overrides"] = overridden["stale"]
+        gaps["override_disagrees"] = overridden["disagrees"]
+        # A metric the cluster did not export is complete once a writer has
+        # given its labels. It stays listed, because nothing has confirmed
+        # those labels against a running broker yet.
+        covered = set(overridden["covered"])
+        gaps["covered_by_override"] = [gap for gap in gaps["not_scraped"] if gap["name"] in covered]
+        gaps["not_scraped"] = [gap for gap in gaps["not_scraped"] if gap["name"] not in covered]
+        gaps["count"] = sum(len(gaps[kind]) for kind in OPEN_GAP_KINDS)
     dataset_dir = output_dir
     if args.dataset_dir:
         if RELEASE_TAG_RE.match(tag_modified):

@@ -106,7 +106,13 @@ describeIfPython('metrics completeness gate', () => {
     })
 
     it('writes a gaps file that says there are none', () => {
-      expect(result.gaps).toEqual({ count: 0, not_scraped: [], not_in_source: [], type_mismatch: [], empty_help: [], unresolved: [], stale_requirements: [] })
+      // Every kind is present and empty, so a reader of the file never has to
+      // guess whether a missing key means "none" or "not checked".
+      expect(result.gaps.count).toBe(0)
+      for (const [kind, value] of Object.entries(result.gaps)) {
+        if (kind !== 'count') expect(value).toEqual([])
+      }
+      expect(Object.keys(result.gaps)).toEqual(expect.arrayContaining(['not_scraped', 'not_in_source', 'type_mismatch', 'empty_help', 'unresolved']))
     })
 
     it('lists a family no cluster exports under excluded, with its reason, and not as a metric', () => {
