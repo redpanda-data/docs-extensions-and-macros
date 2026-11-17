@@ -1,0 +1,17 @@
+# Overlay that `doc-tools generate metrics-docs` applies on top of the
+# quickstart compose file (through COMPOSE_FILE).
+#
+# It swaps each broker's bootstrap file for the quickstart one plus
+# metrics/bootstrap-extra.yml, so the features that register extra metric
+# families are on from the first boot. generate-cluster-docs.sh writes that
+# merged file and passes its path in METRICS_BOOTSTRAP_FILE.
+services:
+  redpanda-0:
+    volumes:
+      - ${METRICS_BOOTSTRAP_FILE:?set by generate-cluster-docs.sh}:/etc/redpanda/.bootstrap.yaml
+  redpanda-1:
+    volumes:
+      - ${METRICS_BOOTSTRAP_FILE:?set by generate-cluster-docs.sh}:/etc/redpanda/.bootstrap.yaml
+  redpanda-2:
+    volumes:
+      - ${METRICS_BOOTSTRAP_FILE:?set by generate-cluster-docs.sh}:/etc/redpanda/.bootstrap.yaml

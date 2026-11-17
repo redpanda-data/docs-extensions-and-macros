@@ -1,9 +1,9 @@
 'use strict';
 
-// The cluster scripts pick a quickstart bundle by tag: X.Y tags of 25.1 or
-// later use docker-compose/25.1, and everything else (dev, latest, --branch,
-// older tags) uses docker-compose/. MinIO images are gone from Docker Hub, so
-// no bundle either script can select may still pull one.
+// The cluster scripts pick a quickstart bundle by tag: X.Y tags older than
+// 25.1 use docker-compose/, and everything else (25.1 or later, dev, latest,
+// --branch) uses docker-compose/25.1. MinIO images are gone from Docker Hub,
+// so no bundle either script can select may still pull one.
 
 const fs = require('fs');
 const path = require('path');
