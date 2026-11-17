@@ -1530,12 +1530,17 @@ jobs:
           touch "$STATE_DIR/reviewed.txt" "$STATE_DIR/closed.txt"
           # Every declaration this run reviewed is closed for the life of
           # the PR, posted on or not.
+          closed_now='[]'
           if [ -n "${OUT:-}" ] && [ -s "$OUT/keys.txt" ]; then
             grep -E '^[0-9a-f]{16}$' "$OUT/keys.txt" >> "$STATE_DIR/closed.txt" || true
+            closed_now=$(jq -R -s 'split("\n") | map(select(length > 0))' "$OUT/keys.txt") || closed_now='[]'
           fi
           sort -u -o "$STATE_DIR/closed.txt" "$STATE_DIR/closed.txt"
           echo "Closed declarations now: $(grep -c . "$STATE_DIR/closed.txt" || true)"
-          jq -r '(.declarations // [])[].fingerprint, (.summary.removedDeclarations // [])[].fingerprint, (.summary.reviewerWrittenDeclarations // [])[].fingerprint' lint-findings.json \
+          # Only a declaration this run closed has its fingerprint recorded.
+          # One the model left out of `checked` stays open, so the next push
+          # reviews it again even when its text is unchanged.
+          jq -r --argjson closed "$closed_now" '((.declarations // [])[] | select(.key as $k | $closed | index($k)) | .fingerprint), (.summary.removedDeclarations // [])[].fingerprint, (.summary.reviewerWrittenDeclarations // [])[].fingerprint' lint-findings.json \
             | grep -E '^[0-9a-f]{16}$' >> "$STATE_DIR/reviewed.txt" || true
           sort -u -o "$STATE_DIR/reviewed.txt" "$STATE_DIR/reviewed.txt"
           echo "Reviewed fingerprints now: $(grep -c . "$STATE_DIR/reviewed.txt" || true)"

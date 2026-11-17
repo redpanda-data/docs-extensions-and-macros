@@ -2144,7 +2144,11 @@ exec node`)
       fs.writeFileSync(path.join(dir, 'closed.txt'), '1111111111111111\n')
       fs.writeFileSync(path.join(out, 'keys.txt'), '2222222222222222\n1111111111111111\n$(touch pwned2)\n')
       const lint = {
-        declarations: [{ fingerprint: 'bbbbbbbbbbbbbbbb' }, { fingerprint: 'aaaaaaaaaaaaaaaa' }, { fingerprint: '$(touch pwned)' }],
+        declarations: [
+          { key: '2222222222222222', fingerprint: 'bbbbbbbbbbbbbbbb' },
+          { key: '1111111111111111', fingerprint: 'aaaaaaaaaaaaaaaa' },
+          { key: '2222222222222222', fingerprint: '$(touch pwned)' }
+        ],
         summary: { removedDeclarations: [{ fingerprint: 'cccccccccccccccc' }], reviewerWrittenDeclarations: [{ fingerprint: 'dddddddddddddddd' }] }
       }
       const r = execRun(step, { env: { STATE_DIR: dir, OUT: out }, files: { 'lint-findings.json': JSON.stringify(lint) } })
@@ -2155,6 +2159,29 @@ exec node`)
         .toEqual(['1111111111111111', '2222222222222222'])
       expect(r.exists('pwned')).toBe(false)
       expect(r.exists('pwned2')).toBe(false)
+    })
+
+    test('a declaration this run left open is not recorded, so the next push reviews it again', () => {
+      const lint = {
+        declarations: [
+          { key: '2222222222222222', fingerprint: 'bbbbbbbbbbbbbbbb' },
+          { key: '3333333333333333', fingerprint: 'eeeeeeeeeeeeeeee' }
+        ],
+        summary: { removedDeclarations: [{ fingerprint: 'cccccccccccccccc' }] }
+      }
+      const record = (keys) => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-state-'))
+        const out = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-out-'))
+        if (keys !== null) fs.writeFileSync(path.join(out, 'keys.txt'), keys)
+        const r = execRun(step, { env: { STATE_DIR: dir, OUT: out }, files: { 'lint-findings.json': JSON.stringify(lint) } })
+        expect(r.status).toBe(0)
+        return fs.readFileSync(path.join(dir, 'reviewed.txt'), 'utf8').trim().split('\n')
+      }
+      // 3333... was reviewed but is not in keys.txt: the model left it out of `checked`.
+      expect(record('2222222222222222\n')).toEqual(['bbbbbbbbbbbbbbbb', 'cccccccccccccccc'])
+      // No keys at all: nothing closed, so only the removal is recorded.
+      expect(record('')).toEqual(['cccccccccccccccc'])
+      expect(record(null)).toEqual(['cccccccccccccccc'])
     })
   })
 

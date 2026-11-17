@@ -3330,7 +3330,7 @@ programCli
 programCli
   .command('build-review')
   .description('Build the doc-strings PR review (one comment per issue) from the review model\'s findings.json')
-  .requiredOption('--findings <file>', 'findings.json the review model wrote (absent means no issues)')
+  .requiredOption('--findings <file>', 'findings.json the review model wrote (a missing or unreadable file exits 1 and closes nothing)')
   .requiredOption('--lint <file>', 'lint-findings.json the review ran on (lint-strings --diff --format json)')
   .option('--repo <path>', 'Checkout the lint ran on', '.')
   .option('--closed <file>', 'Declaration keys already closed on the PR (its markers and the cached keys)')

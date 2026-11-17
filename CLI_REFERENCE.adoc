@@ -1261,6 +1261,7 @@ The tier decides where the doc-strings PR review puts a finding: `wrong` and `un
 
 |`unexplained-placeholder`
 |warning
+|unclear
 |Editable code-block placeholder that nothing near the block explains
 |The docs UI turns a <name> in a code block into a field the reader types into, so a reader left to guess what goes there copies a config that does not work. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#explaining-placeholders[Standard]
 
@@ -1469,7 +1470,7 @@ doc-tools build-review [options]
 *Options:*
 
 `--findings <file>`::
-findings.json the review model wrote (absent means no issues)
+findings.json the review model wrote (a missing or unreadable file exits 1 and closes nothing)
 
 `--lint <file>`::
 lint-findings.json the review ran on (lint-strings --diff --format json)
