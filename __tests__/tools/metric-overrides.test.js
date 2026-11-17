@@ -299,6 +299,17 @@ describeIfPython('metric overrides', () => {
       expect(entry.description_cloud_only).toEqual(['In Serverless, this counts your traffic only.'])
     })
 
+    it('deletes an override whose metric is not in the release, and it is no longer a gap', () => {
+      const gone = runRetiring({ redpanda_gone_total: { description: 'Gone.', category: 'Old metrics' }, redpanda_new_feature_lag: { labels: [] }, redpanda_other_feature_total: { labels: [] } }, ['--retire-overrides'])
+      expect(gone.after.redpanda_gone_total).toBeUndefined()
+      expect(gone.result.gaps.stale_overrides).toEqual([])
+      expect(gone.result.gaps.retired_overrides).toEqual([
+        { name: 'redpanda_gone_total', field: '', reason: 'no metric with this name is in this release' }
+      ])
+      expect(gone.result.gaps.count).toBe(0)
+      expect(gone.result.report.stdout).toContain('- `redpanda_gone_total`: no metric with this name is in this release')
+    })
+
     it('only reports, and changes nothing, without --retire-overrides', () => {
       const dry = runRetiring(OVERRIDES, [])
       expect(dry.after).toEqual(OVERRIDES)

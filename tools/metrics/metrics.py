@@ -476,6 +476,10 @@ def retire_overrides(path, redundant):
         if override is None:
             continue
         field = item["field"]
+        if not field:
+            # The whole override: its metric is not in this release.
+            del metrics[item["name"]]
+            continue
         if field.startswith("labels["):
             label_name = field[len("labels["):-1]
             override["labels"] = [label for label in override.get("labels", []) if label.get("name") != label_name]
@@ -766,7 +770,7 @@ def main(argv=None):
             f"{len(pending)} descriptions in {args.overrides} are marked retirement_pending. "
             "Run with --retire-overrides to delete them.")
     overridden = apply_overrides(families, overrides)
-    for name in overridden["stale"]:
+    for name in ([] if args.retire_overrides else overridden["stale"]):
         logging.warning(
             f"The override for '{name}' in {args.overrides} matches no metric in this release. "
             "The metric was renamed or removed, so the override needs an update.")
@@ -774,10 +778,19 @@ def main(argv=None):
         logging.warning(
             f"The override for '{item['name']}' names labels the cluster does not export: "
             f"{', '.join(item['labels_not_scraped'])}. The scrape is right, so the override needs an update.")
+    if args.retire_overrides and overridden["stale"]:
+        # An override for a metric that is not in the release has nothing to
+        # apply to. --retire-overrides is only passed for the newest release,
+        # so the metric was removed or renamed, and the override goes.
+        overridden["redundant"] += [
+            {"name": name, "field": "", "reason": "no metric with this name is in this release"}
+            for name in overridden["stale"]]
+        overridden["stale"] = []
     if overridden["redundant"] and args.retire_overrides:
         retire_overrides(args.overrides, overridden["redundant"])
         for item in overridden["redundant"]:
-            logging.info(f"Retired the override {item['name']}.{item['field']}: {item['reason']}.")
+            what = f"{item['name']}.{item['field']}" if item["field"] else item["name"]
+            logging.info(f"Retired the override {what}: {item['reason']}.")
         # A label the override wrongly named is gone from the file now, so it
         # is no longer something a person has to fix.
         overridden["disagrees"] = []
