@@ -26,7 +26,7 @@ function flagDefaultToShow (flag) {
   if (typeof value === 'string' && /^(?:~|\/root|\/home\/[^/]+|\/Users\/[^/]+|[A-Za-z]:\\Users\\[^\\]+)(?:[/\\]|$)/.test(value)) return undefined
   // A default with a line break (rpk topic produce --format is '%v\n') would
   // put the closing backtick of the rendered code span on its own line.
-  return helpers.formatDefault(value, flag.type).replace(/\n/g, '\\n').replace(/\t/g, '\\t')
+  return helpers.formatDefault(value, flag.type).replace(/\r/g, '\\r').replace(/\n/g, '\\n').replace(/\t/g, '\\t')
 }
 
 // Register Handlebars helpers
