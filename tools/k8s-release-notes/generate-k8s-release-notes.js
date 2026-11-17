@@ -79,9 +79,11 @@ async function waitForChart({ chart, version, fetchEntries, waitSeconds = 0, int
     const entries = await fetchEntries({ chart });
     const found = (entries || []).find((entry) => entry.version === version);
     if (found) return found;
-    if (Date.now() + intervalSeconds * 1000 > deadline) return null;
-    console.log(`${LOG_TAG} ${chart} ${version} is not in the Helm index yet; retrying in ${intervalSeconds}s.`);
-    await pause(intervalSeconds * 1000);
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) return null;
+    const waitMs = Math.min(intervalSeconds * 1000, remainingMs);
+    console.log(`${LOG_TAG} ${chart} ${version} is not in the Helm index yet; retrying in ${Math.round(waitMs / 1000)}s.`);
+    await pause(waitMs);
   }
 }
 

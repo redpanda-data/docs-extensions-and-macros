@@ -160,6 +160,13 @@ describe('parseChangieBody and renderCandidate', () => {
   });
 });
 
+describe('parseChangieBody list items', () => {
+  test('bold inside a list item keeps the list marker and the bold', () => {
+    const parsed = parseChangieBody('## [v1.2.3](https://example.com) - 2026-01-02\n### Fixed\n* A fix.\n\n  - Set **spec.mode** first\n  - Then restart\n');
+    expect(parsed.sections[0].entries[0].details).toEqual([['** Set *spec.mode* first', '** Then restart']]);
+  });
+});
+
 describe('parseCurated', () => {
   test('reads the summary, upgrade items, and categories in page order', () => {
     const parsed = parseCurated(CURATED);
@@ -378,6 +385,19 @@ describe('orchestration', () => {
     expect(found).toEqual({ version: '1.2.3', appVersion: 'v2' });
     expect(fetchEntries).toHaveBeenCalledTimes(3);
     expect(sleep).toHaveBeenCalledTimes(2);
+  });
+
+  test('waitForChart retries inside a wait shorter than the interval', async () => {
+    const answers = [[], [{ version: '1.2.3', appVersion: 'v2' }]];
+    const fetchEntries = jest.fn(async () => answers.shift());
+    const sleep = jest.fn(async () => {});
+    const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const found = await waitForChart({ chart: 'operator', version: '1.2.3', fetchEntries, waitSeconds: 10, sleep });
+    log.mockRestore();
+    expect(found).toEqual({ version: '1.2.3', appVersion: 'v2' });
+    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(sleep.mock.calls[0][0]).toBeGreaterThan(0);
+    expect(sleep.mock.calls[0][0]).toBeLessThanOrEqual(10000);
   });
 
   test('waitForChart gives up when there is no wait', async () => {

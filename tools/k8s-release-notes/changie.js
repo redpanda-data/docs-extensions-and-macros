@@ -183,6 +183,12 @@ function parseChangieBody(body) {
   closeParagraph();
 
   const clean = (text) => markdownInlineToAsciiDoc(stripPrivateReferences(text)).trim();
+  // unwrap() prefixes list items with "** ". Clean only the item text so the marker is not read as bold.
+  const cleanLine = (line) => {
+    if (!line.startsWith('** ')) return clean(line);
+    const text = clean(line.slice(3));
+    return text ? `** ${text}` : '';
+  };
   const sections = [];
   for (const [kind, title] of CATEGORIES) {
     const list = byKind.get(kind);
@@ -191,7 +197,7 @@ function parseChangieBody(body) {
       title,
       entries: list.map((e) => ({
         lead: clean(e.lead),
-        details: e.details.map((para) => (para[1] === '----' ? para : para.map(clean).filter(Boolean))).filter((para) => para.length),
+        details: e.details.map((para) => (para[1] === '----' ? para : para.map(cleanLine).filter(Boolean))).filter((para) => para.length),
       })),
     });
   }
