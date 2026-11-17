@@ -314,9 +314,8 @@ def main(argv=None):
         ensure_directory_exists(reference_pages_dir)
         output_asciidoc(public_metrics, os.path.join(reference_pages_dir, "public-metrics-reference.adoc"))
         output_asciidoc(internal_metrics, os.path.join(reference_pages_dir, "internal-metrics-reference.adoc"))
-
-    if not (args.write_pages and not args.skip_pages):
-        logging.info(f"Reference pages left unchanged; merge new metrics from {output_dir} by hand, or pass --write-pages to overwrite them")
+    else:
+        logging.info(f"Reference pages left unchanged; merge the new metrics from {output_dir} into them by hand, or pass --write-pages without --skip-pages to overwrite the pages")
     logging.info(f"✅ Generated {len(public_metrics)} public metrics and {len(internal_metrics)} internal metrics from {len(public_sources)} source(s)")
     return 0
 
