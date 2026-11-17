@@ -2,13 +2,14 @@
 
 /**
  * With --inventory, tools/metrics/metrics.py checks the scrape against the
- * source inventory before it writes anything. Redpanda exports a metric
- * family only when the feature behind it is on, so a short scrape looks fine
- * on its own. The gate is what makes a new metric with a new prerequisite
- * fail the run instead of going missing from the reference.
+ * source inventory. Redpanda exports a metric family only when the feature
+ * behind it is on, so a short scrape looks fine on its own. The check is what
+ * stops a new metric with a new prerequisite from going missing.
  *
- * Each failing case here is a negative control: the run must exit 4, name the
- * family, say what to do, and write nothing.
+ * By default a gap does not stop the run: the metric is documented from
+ * source, marked observed: false, and listed in metrics-gaps.json. With
+ * --strict the run exits 4 and writes nothing. Each strict case here is a
+ * negative control: the run must name the family and say what to do.
  */
 
 const fs = require('fs')
@@ -57,7 +58,8 @@ describeIfPython('metrics completeness gate', () => {
   let workDir
   let counter = 0
 
-  const run = ({ pub = PUBLIC, int = INTERNAL, inventory = INVENTORY, expectedAbsent = EXPECTED_ABSENT, extra = [] } = {}) => {
+  const run = ({ pub = PUBLIC, int = INTERNAL, inventory = INVENTORY, expectedAbsent = EXPECTED_ABSENT, strict = true } = {}) => {
+    const extra = strict ? ['--strict'] : []
     counter += 1
     const dir = path.join(workDir, `run-${counter}`)
     fs.mkdirSync(dir)
@@ -77,7 +79,10 @@ describeIfPython('metrics completeness gate', () => {
     const dataset = files.includes('redpanda-metrics-v0.0.1.json')
       ? JSON.parse(fs.readFileSync(path.join(out, 'redpanda-metrics-v0.0.1.json'), 'utf8'))
       : null
-    return { status: result.status, log: `${result.stdout || ''}${result.stderr || ''}`, files, dataset }
+    const gaps = files.includes('metrics-gaps.json')
+      ? JSON.parse(fs.readFileSync(path.join(out, 'metrics-gaps.json'), 'utf8'))
+      : null
+    return { status: result.status, log: `${result.stdout || ''}${result.stderr || ''}`, files, dataset, gaps }
   }
 
   beforeAll(() => {
@@ -97,7 +102,11 @@ describeIfPython('metrics completeness gate', () => {
 
     it('passes and writes the output', () => {
       expect(result.status).toBe(0)
-      expect(result.files.sort()).toEqual(['internal-metrics.adoc', 'metrics.adoc', 'metrics.json', 'redpanda-metrics-v0.0.1.json'])
+      expect(result.files.sort()).toEqual(['internal-metrics.adoc', 'metrics-gaps.json', 'metrics.adoc', 'metrics.json', 'redpanda-metrics-v0.0.1.json'])
+    })
+
+    it('writes a gaps file that says there are none', () => {
+      expect(result.gaps).toEqual({ count: 0, not_scraped: [], not_in_source: [], type_mismatch: [], empty_help: [], unresolved: [] })
     })
 
     it('lists a family no cluster exports under excluded, with its reason, and not as a metric', () => {
@@ -118,7 +127,7 @@ describeIfPython('metrics completeness gate', () => {
     })
   })
 
-  describe('a metric in source that the scrape misses', () => {
+  describe('a metric in source that the scrape misses, with --strict', () => {
     let result
 
     beforeAll(() => {
@@ -173,22 +182,49 @@ describeIfPython('metrics completeness gate', () => {
     expect(result.log).toMatch(/src\/v\/x\/probe\.cc:12 could not be resolved \(endpoint not resolvable\)/)
   })
 
-  describe('with --allow-incomplete', () => {
+  describe('a metric in source that the scrape misses, by default', () => {
     let result
 
     beforeAll(() => {
-      result = run({ pub: PUBLIC.slice(0, 1), extra: ['--allow-incomplete'] })
+      result = run({ pub: PUBLIC.slice(0, 1), strict: false })
     })
 
-    it('still reports the gap and writes the output', () => {
+    it('still writes the output', () => {
       expect(result.status).toBe(0)
-      expect(result.log).toMatch(/redpanda_kafka_records_produced_total \(public\) is registered in/)
       expect(result.files).toContain('redpanda-metrics-v0.0.1.json')
+      expect(result.files).toContain('metrics.json')
     })
 
-    it('keeps the unscraped family in the data, marked as not observed', () => {
-      expect(result.dataset.metrics.redpanda_kafka_records_produced_total.observed).toBe(false)
+    it('documents the metric from source and marks it as not observed', () => {
+      expect(result.dataset.metrics.redpanda_kafka_records_produced_total).toMatchObject({
+        endpoint: 'public',
+        type: 'counter',
+        description: 'Records',
+        labels: [],
+        observed: false,
+        defined_in: 'src/v/kafka/server/probe.cc'
+      })
+      expect(result.dataset.counts).toMatchObject({ public: 2, source_only: 1 })
     })
+
+    it('lists the gap in metrics-gaps.json', () => {
+      expect(result.gaps.count).toBe(1)
+      expect(result.gaps.not_scraped).toEqual([
+        { name: 'redpanda_kafka_records_produced_total', endpoint: 'public', defined_in: 'src/v/kafka/server/probe.cc' }
+      ])
+    })
+
+    it('names the family and what to do in the log', () => {
+      expect(result.log).toMatch(/redpanda_kafka_records_produced_total \(public\) is registered in/)
+      expect(result.log).toMatch(/1 gaps between the scrape and the source are listed in/)
+    })
+  })
+
+  it('lists a scraped family the inventory does not know as a gap, by default', () => {
+    const result = run({ int: [...INTERNAL, ['vectorized_brand_new_family', 'gauge']], strict: false })
+    expect(result.status).toBe(0)
+    expect(result.gaps.not_in_source).toEqual([{ name: 'vectorized_brand_new_family', endpoint: 'internal' }])
+    expect(result.dataset.metrics.vectorized_brand_new_family.observed).toBe(true)
   })
 
   it('rejects an expected-absent file that is not a JSON object', () => {

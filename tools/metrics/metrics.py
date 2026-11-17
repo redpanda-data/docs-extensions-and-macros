@@ -263,11 +263,11 @@ def count_missing(inventory, public_texts, internal_texts, expected_absent):
 def check_completeness(inventory, public_texts, internal_texts, expected_absent):
     """Compare the scrape with the source inventory and log every gap.
 
-    Returns True when they reconcile. Each message says what to do, because
-    the person reading it is usually looking at a new metric for the first
-    time.
+    Returns the gaps as data, with `count` 0 when the two reconcile. Each
+    message says what to do, because the person reading it is usually looking
+    at a new metric for the first time.
     """
-    ok = True
+    gaps = {"count": 0, "not_scraped": [], "not_in_source": [], "type_mismatch": [], "empty_help": [], "unresolved": []}
     for endpoint, texts in (("public", public_texts), ("internal", internal_texts)):
         source = inventory[endpoint]
         result = metrics_reconcile.reconcile_endpoint(
@@ -276,8 +276,8 @@ def check_completeness(inventory, public_texts, internal_texts, expected_absent)
             f"{endpoint}: {result['in_source']} families in source, {result['scraped']} scraped, "
             f"{len(result['missing_explained'])} not scraped with a written reason")
         for name in result["missing_unexplained"]:
-            ok = False
             where = source[name].get("defined_in") or "unknown file"
+            gaps["not_scraped"].append({"name": name, "endpoint": endpoint, "defined_in": where})
             logging.error(
                 f"{name} ({endpoint}) is registered in {where} and was not scraped. "
                 "Turn on the feature that exports it in docker-compose/metrics "
@@ -285,23 +285,24 @@ def check_completeness(inventory, public_texts, internal_texts, expected_absent)
                 "cli-utils/generate-cluster-docs.sh), or give the reason no cluster can export it in "
                 "docker-compose/metrics/expected-absent.json.")
         for name in result["scrape_only"]:
-            ok = False
+            gaps["not_in_source"].append({"name": name, "endpoint": endpoint})
             logging.error(
                 f"{name} ({endpoint}) was scraped and is not in the source inventory. "
                 "tools/metrics/extract_source.py missed its registration and needs a fix.")
         for item in result["type_mismatch"]:
-            ok = False
+            gaps["type_mismatch"].append(dict(item, endpoint=endpoint))
             logging.error(
                 f"{item['name']} ({endpoint}) is a {item['source']} in source and a {item['scrape']} in the scrape.")
         for name in result["empty_help"]:
-            ok = False
+            gaps["empty_help"].append({"name": name, "endpoint": endpoint})
             logging.error(f"{name} ({endpoint}) has an empty HELP line.")
     for site in inventory.get("unresolved") or []:
-        ok = False
+        gaps["unresolved"].append({"file": site.get("file"), "line": site.get("line"), "reason": site.get("reason")})
         logging.error(
             f"A metric registration in {site.get('file')}:{site.get('line')} could not be resolved "
             f"({site.get('reason')}). tools/metrics/extract_source.py needs a rule for it.")
-    return ok
+    gaps["count"] = sum(len(value) for key, value in gaps.items() if key != "count")
+    return gaps
 
 
 def parse_args(argv):
@@ -337,9 +338,10 @@ def parse_args(argv):
                         help="With --inventory, only compare the scrape with the inventory: print how many families are "
                              "missing, write nothing, and exit 0 when none are. The cluster script polls with this "
                              "until the cluster exports everything")
-    parser.add_argument("--allow-incomplete", action="store_true",
-                        help="With --inventory, report the families that are missing or unknown and write the output anyway. "
-                             "Without this flag the run fails and writes nothing")
+    parser.add_argument("--strict", action="store_true",
+                        help="With --inventory, fail (exit 4) and write nothing when the scrape does not match the "
+                             "inventory. Without this flag the gaps are reported in metrics-gaps.json and the output is "
+                             "still written, with each unscraped metric taken from source and marked observed: false")
     return parser.parse_args(argv)
 
 def main(argv=None):
@@ -422,9 +424,10 @@ def main(argv=None):
         missing = count_missing(inventory, public_texts, internal_texts, expected_absent)
         print(f"{missing} metric families in source are not exported yet")
         return 0 if missing == 0 else EXIT_INCOMPLETE
+    gaps = None
     if inventory:
-        complete = check_completeness(inventory, public_texts, internal_texts, expected_absent)
-        if not complete and not args.allow_incomplete:
+        gaps = check_completeness(inventory, public_texts, internal_texts, expected_absent)
+        if gaps["count"] and args.strict:
             logging.error("The scrape does not match the source inventory. Nothing was written.")
             return EXIT_INCOMPLETE
     generated_from = {"sources": len(public_sources)}
@@ -444,8 +447,9 @@ def main(argv=None):
     if inventory:
         # A family with a written reason is one no cluster exports, so it is
         # listed under excluded and not documented as a metric. A family that
-        # was not scraped and has no reason stays, marked observed: false,
-        # which only happens with --allow-incomplete.
+        # was not scraped and has no reason stays, from source and marked
+        # observed: false, so the reference never lacks a metric. It is also
+        # listed in metrics-gaps.json until the cluster exports it.
         for name in sorted(families["metrics"]):
             entry = families["metrics"][name]
             if entry["observed"]:
@@ -474,6 +478,17 @@ def main(argv=None):
         json.dump(families, f, indent=2)
         f.write("\n")
     logging.info(f"Dataset written to {dataset_file}")
+    if gaps is not None:
+        # Always written with an inventory, so a pull request check can read
+        # it: count 0 means the scrape and the source agree.
+        gaps_file = os.path.join(output_dir, "metrics-gaps.json")
+        with open(gaps_file, "w", encoding="utf-8") as f:
+            json.dump(gaps, f, indent=2)
+            f.write("\n")
+        if gaps["count"]:
+            logging.warning(
+                f"{gaps['count']} gaps between the scrape and the source are listed in {gaps_file}. "
+                "The output was written. Metrics that were not scraped come from source and have no labels.")
 
     merged_metrics = {
         "public": public_metrics,

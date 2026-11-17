@@ -441,7 +441,7 @@ if [[ "$MODE" == "metrics" ]]; then
     fi
     if (( SECONDS >= METRICS_SETTLE_MAX )); then
       if [[ -n "$METRICS_INVENTORY_FILE" ]] && (( METRICS_EXTRAS )); then
-        echo "⚠️  Not every metric family in source is exported after ${METRICS_SETTLE_MAX}s; the generator lists the ones that are missing."
+        echo "⚠️  Not every metric family in source is exported after ${METRICS_SETTLE_MAX}s; the generator lists the ones that are missing in metrics-gaps.json."
       else
         echo "⚠️  Metric set still changing after ${METRICS_SETTLE_MAX}s (${count} families); continuing with what is exposed now."
       fi
@@ -465,9 +465,11 @@ if [[ "$MODE" == "metrics" ]]; then
   for url in "${ADMIN_URLS[@]}"; do ADMIN_URL_ARGS+=(--admin-url "$url"); done
   if [[ -n "$METRICS_INVENTORY_FILE" ]]; then
     ADMIN_URL_ARGS+=(--inventory "$METRICS_INVENTORY_FILE" --expected-absent "$METRICS_DIR/expected-absent.json")
-    # A release that cannot take the extra features is expected to be short.
-    if (( ! METRICS_EXTRAS )); then
-      ADMIN_URL_ARGS+=(--allow-incomplete)
+    # METRICS_STRICT=1 fails the run on any gap. By default the gaps go to
+    # metrics-gaps.json and the output is still written. A release that cannot
+    # take the extra features is expected to be short, so it is never strict.
+    if [[ "${METRICS_STRICT:-0}" == "1" ]] && (( METRICS_EXTRAS )); then
+      ADMIN_URL_ARGS+=(--strict)
     fi
   fi
   "$PYTHON" "$SCRIPT_DIR/../tools/metrics/metrics.py" "$TAG" "${ADMIN_URL_ARGS[@]}" ${GENERATOR_ARGS[@]+"${GENERATOR_ARGS[@]}"}
