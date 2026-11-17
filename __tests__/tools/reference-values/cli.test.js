@@ -160,6 +160,14 @@ describe('doc-tools check-reference-values', () => {
     expect(r.stdout + r.stderr).toContain('1 deprecated name(s) acknowledged with deprecated=ok')
   })
 
+  test('deprecated=ok on one call does not acknowledge another call or a prose span on the same line', () => {
+    const dir = repo({ 'modules/x/pages/d.adoc': ['= D', '', 'Use rpkcmd:[rpk redpanda admin], `rpk redpanda admin`, or rpkcmd:[rpk redpanda admin,deprecated=ok].', ''].join('\n') })
+    const r = run(dir, ['--data-file', rpkData(dir)])
+    const deprecations = r.report.kinds.rpk.findings.filter((f) => /deprecat/.test(f.reason || ''))
+    expect(deprecations.map((f) => f.written)).toEqual(['rpkcmd:[rpk redpanda admin]', '`rpk redpanda admin`'])
+    expect(r.report.acknowledged).toBe(1)
+  })
+
   test('--write --fail-on any counts only the findings that remain', () => {
     const dir = repo({ 'modules/x/pages/e.adoc': EXACT })
     fs.mkdirSync(path.join(dir, 'modules/reference/attachments'), { recursive: true })

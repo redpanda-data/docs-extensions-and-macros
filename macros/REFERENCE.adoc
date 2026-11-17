@@ -256,7 +256,7 @@ Set to `ok` on a mention of a deprecated property that is deliberate, such as on
 === Configuration options
 
 property-validate::
-How to report a target that does not match any published property: `warn` (default) logs a build warning with the file path, the dataset the page was checked against, and close-match suggestions; `error` fails the build; and `off` disables validation and silences the unknown-name, unavailable-property, unpublished-property and missing-data warnings. Diagnostics about the build itself are not silenced by `off`, because they report a broken input rather than a questionable mention: unusable property JSON, a property claimed by two declared sources, and an index built after conversion started. When no property JSON is available in the build, the macro renders without validation and logs one warning per component version.
+How to report a target that does not match any published property: `warn` (default) logs a build warning with the file path, the dataset the page was checked against, and close-match suggestions; `error` fails the build; and `off` disables validation and silences the unknown-name, unavailable-property, unpublished-property, deprecated-property and missing-data warnings. Diagnostics about the build itself are not silenced by `off`, because they report a broken input rather than a questionable mention: unusable property JSON, a property claimed by two declared sources, and an index built after conversion started. When no property JSON is available in the build, the macro renders without validation and logs one warning per component version.
 
 [[prop-version-selection]]
 === Which property data a page validates against
@@ -1505,7 +1505,7 @@ bloblval:[meta(),description,deprecated=ok]
 With `deprecated=ok`:
 
 * The output is exactly what the call renders without it.
-* The deprecation warning is dropped, and a deprecated `rpk` command no longer fails the build with `rpk-validate: error`.
+* The deprecation warning is dropped, and a deprecated `rpk` command in `rpkcmd:` no longer fails the build with `rpk-validate: error`.
 * Every other check still runs: an unknown name, a typo, an alias or former name, a missing page, and a value the data does not have are reported as usual. An acknowledgement covers only the deprecation.
 * `check-reference-values` does not report the deprecated name in that call (<<check-reference-values>>), and counts it as acknowledged in its summary.
 

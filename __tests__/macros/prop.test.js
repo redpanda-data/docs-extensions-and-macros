@@ -318,6 +318,15 @@ describe('prop macro', () => {
         warn.mockRestore()
       })
 
+      test('with page=, the link renders and the warning does not say it renders without one', () => {
+        const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
+        const html = convert('prop:cloud_topics_enabled[link=true,page=properties/deprecated]', { catalog: fakeCatalog({ json: DEPRECATED_JSON }) })
+        expect(html).toContain('href')
+        expect(deprecationWarnings(warn)).toHaveLength(1)
+        expect(deprecationWarnings(warn)[0][0]).not.toContain('without a link')
+        warn.mockRestore()
+      })
+
       test('a current property does not warn', () => {
         const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
         convert('prop:admin[]', { catalog: fakeCatalog({ json: DEPRECATED_JSON }) })

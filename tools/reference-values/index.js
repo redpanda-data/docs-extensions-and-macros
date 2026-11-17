@@ -165,9 +165,11 @@ function failingFindings (result, level) {
 }
 
 /**
- * Drop the findings a `// value-check: ignore` comment suppresses.
+ * Drop the findings a `// value-check: ignore` comment suppresses, and the
+ * deprecation findings on macro calls that say deprecated=ok, counted in
+ * result.acknowledged.
  *
- * @returns {number} how many were dropped.
+ * @returns {number} how many the ignore comments dropped.
  */
 function applyIgnores (result, docsDir) {
   const cache = new Map()
@@ -186,10 +188,9 @@ function applyIgnores (result, docsDir) {
     if (!/deprecat/.test(String(f.reason || ''))) return false
     const calls = page(f.file).acknowledged.get(f.line)
     if (!calls) return false
-    const names = Object.entries(f)
-      .filter(([key, value]) => typeof value === 'string' && value.length > 1 && !['file', 'note', 'reason', 'status', 'severity', 'kind'].includes(key))
-      .map(([, value]) => value)
-    return calls.some((call) => names.some((name) => call.includes(name)))
+    // Only the call the finding came from: its written text is that call, so
+    // another call or a prose span on the same line is still reported.
+    return typeof f.written === 'string' && calls.includes(f.written)
   }
   let count = 0
   let acknowledgedCount = 0

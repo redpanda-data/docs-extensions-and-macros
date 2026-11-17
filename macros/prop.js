@@ -600,13 +600,13 @@ function reportUnavailableProperty ({ name, component, registry, mode, filePath 
  * always warns: the property data names no replacement, so the writer decides
  * whether the sentence still belongs on the page.
  */
-function reportDeprecatedProperty ({ name, registry, mode, filePath, linkRequested }) {
+function reportDeprecatedProperty ({ name, registry, mode, filePath, linkRequested, linked }) {
   if (mode === 'off') return
   const where = filePath ? ` in ${filePath}` : ''
   const call = linkRequested ? `prop:${name}[link=true]` : `prop:${name}[]`
   logger.warn(
     `${call}${where}: '${name}' is deprecated in ${describeDataset(registry)}. It renders as written` +
-    (linkRequested ? ', without a link, because the reference pages leave deprecated properties out' : '') +
+    (linkRequested && !linked ? ', without a link, because the reference pages leave deprecated properties out' : '') +
     '. Remove the mention or say that the property is deprecated, and name the property that replaces it if there is one.'
   )
 }
@@ -738,7 +738,7 @@ function propInlineMacro (config) {
       // command or Connect component, but every mention warns: with or without
       // link=true, a page that recommends it is out of date.
       const deprecated = entry.is_deprecated === true
-      if (deprecated && !deprecationAcknowledged(attributes)) reportDeprecatedProperty({ name, registry, mode, filePath, linkRequested })
+      const acknowledged = deprecated && deprecationAcknowledged(attributes)
 
       // Discover the page in THIS component that documents the property. A page
       // is never borrowed from another component, and never guessed from the
@@ -752,12 +752,13 @@ function propInlineMacro (config) {
         if (found) {
           discoveredPage = found.page
           discoveredUrl = found.url
-        } else if (linkRequested && !deprecated) {
+        } else if (linkRequested && (!deprecated || acknowledged)) {
           // A deprecated property is never on a reference page; its own
-          // warning above already says so, so it does not warn twice.
+          // warning below already says so, so it does not warn twice.
           reportUnpublishedProperty({ name, registry, mode, filePath })
         }
       }
+      if (deprecated && !acknowledged) reportDeprecatedProperty({ name, registry, mode, filePath, linkRequested, linked: Boolean(discoveredPage) })
 
       const content = buildPropContent({
         name,
@@ -801,6 +802,11 @@ function buildPropvalContent ({ name, field, text, html, unknown = false }) {
   return `<span class="${VALUE_ROLE}" ${attrs}>${html !== undefined ? html : escapeHtml(text)}</span>`
 }
 
+function suggestionHint (name, registry) {
+  const candidates = datasets.suggest(String(name).trim(), Object.keys(registry.properties))
+  return candidates.length ? ` Did you mean: ${candidates.join(', ')}?` : ''
+}
+
 /**
  * Resolve one propval: call to its value, or to the reason there is none.
  * Shares every decision with prop: -- the dataset (loadProperties), the
@@ -813,11 +819,6 @@ function buildPropvalContent ({ name, field, text, html, unknown = false }) {
  * @returns {{ok: true, text: string, html?: string, rich?: object, registry: object, field: string} |
  *           {ok: false, kind: string, message: string, registry?: object, field: string}}
  */
-function suggestionHint (name, registry) {
-  const candidates = datasets.suggest(String(name).trim(), Object.keys(registry.properties))
-  return candidates.length ? ` Did you mean: ${candidates.join(', ')}?` : ''
-}
-
 function resolvePropertyValue ({ registry, name, field: requested, format, component, filePath, block = false }) {
   const field = propertyValues.normalizeField(requested)
   const call = `propval${block ? '::' : ':'}${name}[${requested}]${filePath ? ` in ${filePath}` : ''}`
