@@ -76,6 +76,13 @@ function metricInlineMacro (config) {
       const where = src.path ? ` in ${src.path}` : ''
       const linkRequested = attributes.link === 'true' || attributes.link === true
       const call = `metric:${name}[${linkRequested ? 'link=true' : ''}]${where}`
+      // link takes true or false. Anything else is a typo that would
+      // silently render no link.
+      const bareLink = Array.isArray(attributes.$positional) && attributes.$positional.includes('link')
+      const linkWritten = bareLink ? 'link' : (attributes.link === undefined || linkRequested || attributes.link === 'false' ? undefined : `link=${attributes.link}`)
+      if (linkWritten && mode !== 'off') {
+        logger.warn(`metric:${name}[${linkWritten}]${where}: ${linkWritten} is not a value link accepts, so the metric renders without a link. Write link=true.`)
+      }
 
       // Anything the build could not verify renders as plain inline code: no
       // marker, so the docs UI adds no tooltip.
@@ -111,7 +118,7 @@ function metricInlineMacro (config) {
         logger.warn(`${call}: ${metricValues.deprecationSentence(resolved.family, resolved.entry)}`)
       }
       if (resolved.unavailable) {
-        return plain(`${call}: '${resolved.family}' is not for readers of this Cloud page: ${resolved.unavailable}. It renders as plain code, with no link and no tooltip. Put the sentence in an ifndef::env-cloud[] block.`, resolved.unavailableKind)
+        return plain(`${call}: '${resolved.family}' is not for readers of this Cloud page: ${resolved.unavailable}. It renders as plain code, with no link and no tooltip. ${metricValues.cloudAdvice(resolved.unavailable, resolved.unavailableKind, { page: true })}`, resolved.unavailableKind)
       }
 
       // page= overrides discovery and is not verified, as in prop:.

@@ -23,6 +23,11 @@ const { THROW_KINDS } = require('../../macros/metricval')
 const metricValues = require('../../extension-utils/metric-values')
 const { convertPageHtml } = require('../../extensions/convert-to-markdown')
 
+const fs = require('fs')
+const path = require('path')
+const REFERENCE = fs.readFileSync(path.join(__dirname, '..', '..', 'macros', 'REFERENCE.adoc'), 'utf8')
+const USER_GUIDE = fs.readFileSync(path.join(__dirname, '..', '..', 'macros', 'USER_GUIDE.adoc'), 'utf8')
+
 const warnings = () => jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
 const messages = (warn) => warn.mock.calls.map((call) => call[0])
 
@@ -196,13 +201,43 @@ describe('metricval macro', () => {
 
     test.each([
       [`metricval:${BROKERS}[unit]`, 'unit', 'a metric whose name states no unit'],
-      [`metricval:${BROKERS}[labels]`, 'labels', 'a metric with no labels'],
+      ['metricval:redpanda_cloud_storage_anomalies[labels]', 'labels', 'a metric the scrape did not see, whose labels are not known'],
       [`metricval:${BROKERS}[buckets]`, 'buckets', 'a metric that is not a histogram'],
       ['metricval:redpanda_cloud_storage_anomalies[description]', 'description', 'a metric the scrape did not see, whose description is empty'],
     ])('%s renders <unknown %s>: %s', (input, field) => {
       const warn = warnings()
       expect(render(input)).toBe(`<unknown ${field}>`)
       expect(warn).toHaveBeenCalledTimes(1)
+    })
+
+    test('labels of a metric the scrape saw with none is the fact none, not a placeholder', () => {
+      const warn = warnings()
+      expect(SAMPLE.metrics[BROKERS]).toMatchObject({ observed: true, labels: [] })
+      expect(convert(`metricval:${BROKERS}[labels]`, { catalog: streamingCatalog() })).toContain(`<span class="metric-value" data-metric="${BROKERS}" data-field="labels">none</span>`)
+      expect(render(`metricval:${BROKERS}[labels,format=raw]`)).toBe('[]')
+      expect(warn).not.toHaveBeenCalled()
+      expect(SAMPLE.metrics.redpanda_cloud_storage_anomalies).toMatchObject({ observed: false, labels: [] })
+      expect(render('metricval:redpanda_cloud_storage_anomalies[labels]')).toBe('<unknown labels>')
+      expect(messages(warn)).toEqual([expect.stringMatching(/The scrape did not see this metric, so its labels are not known\.$/)])
+    })
+
+    test('a missing field says where the field comes from', () => {
+      const warn = warnings()
+      render(`metricval:${BYTES}[category]`)
+      render(`metricval:${BYTES}[values,label=redpanda_request]`)
+      render(`metricval:${BROKERS}[unit]`)
+      const [curated, values, generated] = messages(warn)
+      expect(curated).toMatch(/renders <unknown category>\. The field is not in the data for this metric\. Curated fields come from docs-data\/metric-overrides\.json\.$/)
+      expect(values).toMatch(/Curated fields come from docs-data\/metric-overrides\.json\.$/)
+      expect(generated).toMatch(/renders <unknown unit>\. The field is not in the data for this metric\. The generator writes it only when the metric has one\.$/)
+      expect(generated).not.toContain('metric-overrides.json')
+    })
+
+    test('values on a metric with no labels says so, and suggests no label', () => {
+      const warn = warnings()
+      expect(render(`metricval:${BROKERS}[values]`)).toBe('<unknown values>')
+      expect(messages(warn)).toEqual([expect.stringContaining(`'${BROKERS}' has no labels in redpanda-metrics-v26.2.7.json from streaming@26.2, so it has no label values. Remove the call.`)])
+      expect(messages(warn)[0]).not.toContain('label=')
     })
 
     test('values needs label=, and the message names the labels', () => {
@@ -322,6 +357,22 @@ describe('metricval macro', () => {
       expect(valueOf(onCloud(`metricval:${LATENCY}[type]`, { attributes: { 'env-serverless': true } }))).toBe('histogram')
       expect(messages(warn)).toEqual([expect.stringContaining('says it is not on Serverless')])
     })
+
+    test('each warning ends with the fix for its cause', () => {
+      const warn = warnings()
+      onCloud('metricval:vectorized_alien_receive_batch_queue_length[type]')
+      onCloud(`metricval:${REFRESHES}[type]`)
+      onCloud(`metricval:${BROKERS}[type]`, { attributes: { 'env-serverless': true } })
+      onCloud('metricval:redpanda_kafka_consumer_group_lag_sum[type]')
+      const [internal, notCloud, notServerless, noPage] = messages(warn)
+      expect(internal).toMatch(/Put the sentence in an ifndef::env-cloud\[\] block\.$/)
+      expect(notCloud).toMatch(/Put the sentence in an ifndef::env-cloud\[\] block\.$/)
+      expect(notServerless).toMatch(/Put the sentence in an ifndef::env-serverless\[\] block, so that Dedicated and BYOC readers still see it\.$/)
+      expect(notServerless).not.toContain('env-cloud[]')
+      expect(noPage).toMatch(/If Redpanda Cloud has the metric, add its heading to the Cloud reference page\. If it does not, put the sentence in an ifndef::env-cloud\[\] block\.$/)
+      // metricval: has no page= attribute, so it never offers one.
+      expect(noPage).not.toContain('page=')
+    })
   })
 
   describe('deprecated metrics', () => {
@@ -340,11 +391,63 @@ describe('metricval macro', () => {
     })
   })
 
+  describe('the documents say which fields the generator writes', () => {
+    const generated = ['endpoint', 'type', 'unit', 'description', 'labels', 'buckets']
+    const fieldsIn = (sentence) => [...sentence.matchAll(/`([a-z-]+)`/g)].map((match) => match[1]).sort()
+
+    test('the code, REFERENCE.adoc and USER_GUIDE.adoc name the same generated fields', () => {
+      expect([...metricValues.GENERATED_FIELDS].sort()).toEqual([...generated].sort())
+      const reference = REFERENCE.match(/The generator writes the metric name, (.*?)\. Every other field, and the complete `values` of a label, comes from the metrics overrides file, `docs-data\/metric-overrides\.json`\./)
+      expect(fieldsIn(reference[1])).toEqual([...generated].sort())
+      const guide = USER_GUIDE.match(/The generator writes these `metricval:` fields, so they render for a metric that has them: (.*?)\./)
+      expect(fieldsIn(guide[1])).toEqual([...generated].sort())
+      expect(USER_GUIDE).toContain('comes from the overrides file `docs-data/metric-overrides.json`')
+    })
+
+    test('a field the guide says needs the overrides file renders the placeholder on an entry as the generator wrote it', () => {
+      warnings()
+      for (const field of ['usage', 'category', 'availability']) {
+        expect(USER_GUIDE).toContain(`\`${field}\``)
+        expect(metricValues.GENERATED_FIELDS).not.toContain(metricValues.normalizeField(field))
+        expect(render(`metricval:${BYTES}[${field}]`)).toBe(`<unknown ${metricValues.normalizeField(field)}>`)
+      }
+    })
+
+    test('the guide marks its values example as needing the overrides file', () => {
+      const line = USER_GUIDE.split('\n').find((text) => text.includes('[values,label=redpanda_request]'))
+      expect(line).toContain('renders `<unknown values>` until the list is there')
+    })
+  })
+
+  describe('schema_version', () => {
+    test.each([
+      ['another version', { ...SAMPLE, schema_version: 2 }, 'has schema_version 2'],
+      ['a version written as text', { ...SAMPLE, schema_version: '1' }, 'has schema_version "1"'],
+      ['no version', (({ schema_version: _dropped, ...rest }) => rest)(SAMPLE), 'has no schema_version'],
+    ])('a file with %s is unusable data: the placeholder, and one warning that names the file and the version', (_what, data, found) => {
+      const warn = warnings()
+      const catalog = catalogOf([attachment('streaming', '26.2', 'v26.2.7', JSON.stringify(data)), ...streamingFiles().slice(1)])
+      expect(SAMPLE.schema_version).toBe(1)
+      expect(render(`metricval:${BROKERS}[type]`, { catalog })).toBe('<unknown type>')
+      convert(`metric:${BROKERS}[]`, { catalog })
+      const named = messages(warn).filter((message) => message.includes('schema_version'))
+      expect(named).toEqual([`metric macro: redpanda-metrics-v26.2.7.json in streaming@26.2 ${found}, and this release of the metric macros reads schema_version 1, so it is ignored. Regenerate it with 'npx doc-tools generate metrics-docs'.`])
+    })
+  })
+
   describe('metric-validate', () => {
     const inMode = (mode, input, options = {}) => convert(input, { catalog: streamingCatalog(), attributes: { 'metric-validate': mode }, ...options })
 
     test('the throw kinds are the authoring errors', () => {
       expect(THROW_KINDS).toEqual(['unknown-metric', 'unsupported-field', 'removed-metric', 'label-required', 'needs-block', 'block-form-inline'])
+    })
+
+    test('REFERENCE.adoc lists exactly the kinds that fail the build in error mode', () => {
+      const section = REFERENCE.slice(REFERENCE.indexOf('\n== metricval\n'), REFERENCE.indexOf('[[value-fields]]'))
+      const sentence = section.match(/`error` fails the build on (.*?)\. `off`/)[1]
+      const kinds = [...sentence.matchAll(/`([a-z]+(?:-[a-z]+)+)`/g)].map((match) => match[1])
+      expect(kinds).toEqual(THROW_KINDS)
+      expect(section).toContain('`needs-block` depends on the data as well as the page')
     })
 
     test('warn is the default: every failure renders and warns', () => {

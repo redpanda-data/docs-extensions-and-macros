@@ -34,6 +34,19 @@ const $metricsSeriesGap = Symbol('$metricsSeriesGap')
 
 const NOT_OBJECT = "has no usable 'metrics' object"
 
+// The dataset layout these macros read. A file with another version may name
+// or shape its fields differently, so it is not read at all.
+const SCHEMA_VERSION = 1
+
+function validateDataset (data) {
+  if (!isPlainObject(data.metrics)) return NOT_OBJECT
+  if (data.schema_version !== SCHEMA_VERSION) {
+    const found = data.schema_version === undefined ? 'has no schema_version' : `has schema_version ${JSON.stringify(data.schema_version)}`
+    return `${found}, and this release of the metric macros reads schema_version ${SCHEMA_VERSION}`
+  }
+  return true
+}
+
 // The metrics dataset as the shared loader sees it.
 const METRICS_KIND = {
   name: 'metrics',
@@ -50,7 +63,7 @@ const METRICS_KIND = {
   invalidKey: 'nometrics',
   // Must be a plain object of name -> entry. A string, number, or array
   // parses fine and would then make every metric: target look like a typo.
-  validate: (data) => (isPlainObject(data.metrics) ? true : NOT_OBJECT),
+  validate: validateDataset,
   notObjectReason: NOT_OBJECT,
   decorate: (registry) => {
     registry.metrics = registry.data.metrics
@@ -130,6 +143,8 @@ function unresolvedSentence (registry, name, resolved) {
   return `'${name}' is not in the metrics data this page validates against (${describeDataset(registry)}). Either the name is misspelled or the metric does not exist in that release.${hint}`
 }
 
+const NOT_ON_SERVERLESS = 'its availability in the metrics data says it is not on Serverless, and this page sets env-serverless'
+
 /**
  * Why a metric is not for the readers of a Cloud page, or undefined when it
  * is, or when the page is not a Cloud page.
@@ -142,8 +157,24 @@ function cloudUnavailableReason (registry, entry, { serverless = false } = {}) {
   const availability = entry.availability
   if (!isPlainObject(availability)) return undefined
   if (['dedicated', 'byoc', 'serverless'].every((key) => availability[key] === false)) return 'its availability in the metrics data says it is not on Redpanda Cloud'
-  if (serverless && availability.serverless === false) return 'its availability in the metrics data says it is not on Serverless, and this page sets env-serverless'
+  if (serverless && availability.serverless === false) return NOT_ON_SERVERLESS
   return undefined
+}
+
+/**
+ * What to do about a metric that is not for a Cloud page's readers. The fix
+ * depends on the cause.
+ *
+ * @param {string} unavailable - The reason, from resolveMetric.
+ * @param {string} unavailableKind - 'unavailable' or 'cloud-no-page'.
+ * @param {boolean} [page] - The macro takes page=, as metric: does.
+ */
+function cloudAdvice (unavailable, unavailableKind, { page = false } = {}) {
+  if (unavailableKind === 'cloud-no-page') {
+    return `If Redpanda Cloud has the metric, add its heading to the Cloud reference page${page ? ', or set page=' : ''}. If it does not, put the sentence in an ifndef::env-cloud[] block.`
+  }
+  if (unavailable === NOT_ON_SERVERLESS) return 'Put the sentence in an ifndef::env-serverless[] block, so that Dedicated and BYOC readers still see it.'
+  return 'Put the sentence in an ifndef::env-cloud[] block.'
 }
 
 // Every field metricval: supports. `rich` marks text values (AsciiDoc),
@@ -173,6 +204,11 @@ const FIELD_SET = defineFields('metricval:', {
 })
 const { FIELDS } = FIELD_SET
 const normalizeField = FIELD_SET.normalizeField
+
+// The fields the generator writes. Every other field, and the complete list
+// of a label's values, is curated in the overrides file.
+const GENERATED_FIELDS = ['description', 'type', 'unit', 'labels', 'endpoint', 'buckets']
+const OVERRIDES_FILE = 'docs-data/metric-overrides.json'
 
 const ENDPOINT_PATHS = { public: '/public_metrics', internal: '/metrics' }
 const DEPLOYMENTS = [['self_managed', 'Self-Managed'], ['dedicated', 'Dedicated'], ['byoc', 'BYOC'], ['serverless', 'Serverless']]
@@ -219,7 +255,11 @@ function fieldValue (entry, field, { format = FORMAT_HUMAN, label, cloud = false
       return text(entry[name]) ? plain(text(entry[name])) : missing()
     case 'labels': {
       const names = labels.map((item) => item.name)
-      return names.length ? codeList(names, raw) : missing()
+      if (names.length) return codeList(names, raw)
+      // An empty list is a fact for a metric the scrape saw. For one it did
+      // not see, the labels are not known.
+      if (entry.observed === false) return missing()
+      return plain(raw ? '[]' : 'none')
     }
     case 'values': {
       // The complete list only. observed_values is what one scrape saw, so
@@ -322,13 +362,15 @@ function resolveMetricValue ({ registry, name, field: requested, format = FORMAT
     return { ok: false, kind: found.kind, field, message: `${call}: ${unresolvedSentence(registry, name, found)}` }
   }
   if (unavailable) {
-    return { ok: false, kind: unavailableKind, field, family: found.family, entry: found.entry, message: `${call}: '${found.family}' is not for readers of this Cloud page: ${unavailable}. No value is shown, so it renders <unknown ${field}>. Put the sentence in an ifndef::env-cloud[] block.` }
+    return { ok: false, kind: unavailableKind, field, family: found.family, entry: found.entry, message: `${call}: '${found.family}' is not for readers of this Cloud page: ${unavailable}. No value is shown, so it renders <unknown ${field}>. ${cloudAdvice(unavailable, unavailableKind)}` }
   }
   const value = fieldValue(found.entry, field, { format, label, cloud: registry.surface === SURFACE_CLOUD })
   const base = { field, family: found.family, entry: found.entry }
   if (!value.ok && value.reason === 'label-required') {
-    const labels = value.labels.length ? ` The labels of '${found.family}': ${value.labels.join(', ')}.` : ''
-    return { ok: false, kind: 'label-required', ...base, message: `${call}: the values field reads one label's values, so it needs label=<label name>, as in metricval:${name}[values,label=${value.labels[0] || 'redpanda_request'}].${labels}` }
+    if (!value.labels.length) {
+      return { ok: false, kind: 'label-required', ...base, message: `${call}: the values field reads one label's values, and '${found.family}' has no labels in ${describeDataset(registry)}, so it has no label values. Remove the call.` }
+    }
+    return { ok: false, kind: 'label-required', ...base, message: `${call}: the values field reads one label's values, so it needs label=<label name>, as in metricval:${name}[values,label=${value.labels[0]}]. The labels of '${found.family}': ${value.labels.join(', ')}.` }
   }
   if (!value.ok && value.reason === 'unknown-label') {
     const labels = value.labels.length ? `Its labels: ${value.labels.join(', ')}.` : 'It has no labels in the data.'
@@ -338,7 +380,11 @@ function resolveMetricValue ({ registry, name, field: requested, format = FORMAT
     const what = field === 'values'
       ? `no complete list of values for the label '${label}' (values seen in a scrape are not a complete list, so they are never rendered)`
       : `no ${field}`
-    return { ok: false, kind: 'missing-field', ...base, message: `${call}: '${found.family}' has ${what} in ${describeDataset(registry)}, so it renders <unknown ${field}>.` }
+    // Labels are missing only for a metric the scrape did not see.
+    const source = field === 'labels'
+      ? 'The scrape did not see this metric, so its labels are not known.'
+      : (GENERATED_FIELDS.includes(field) ? 'The generator writes it only when the metric has one.' : `Curated fields come from ${OVERRIDES_FILE}.`)
+    return { ok: false, kind: 'missing-field', ...base, message: `${call}: '${found.family}' has ${what} in ${describeDataset(registry)}, so it renders <unknown ${field}>. The field is not in the data for this metric. ${source}` }
   }
   return { ok: true, ...base, text: value.text, html: value.html, rich: value.rich, call }
 }
@@ -404,6 +450,8 @@ module.exports = {
   resolveMetricName,
   unresolvedSentence,
   cloudUnavailableReason,
+  cloudAdvice,
+  GENERATED_FIELDS,
   fieldValue,
   resolveMetricValue,
   isDeprecated,

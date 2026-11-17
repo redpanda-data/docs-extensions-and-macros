@@ -74,6 +74,27 @@ describe('metric macro', () => {
       expect(warn).not.toHaveBeenCalled()
     })
 
+    test.each([
+      ['link=yes', 'link=yes'],
+      ['link=True', 'link=True'],
+      ['link', 'link'],
+      ['link=', 'link='],
+    ])('%s is not link=true: no link, and one warning that names the accepted value', (written, named) => {
+      const warn = warnings()
+      const html = convert(`metric:redpanda_cluster_brokers[${written}]`, { catalog: streamingCatalog() })
+      expect(html).toContain(BROKERS)
+      expect(html).not.toContain('<a ')
+      expect(messages(warn)).toEqual([`metric:redpanda_cluster_brokers[${named}] in modules/manage/pages/example.adoc: ${named} is not a value link accepts, so the metric renders without a link. Write link=true.`])
+    })
+
+    test('link=true, link=false and no link at all do not warn', () => {
+      const warn = warnings()
+      convert('metric:redpanda_cluster_brokers[link=true] metric:redpanda_cluster_brokers[link=false] metric:redpanda_cluster_brokers[] metric:redpanda_cluster_brokers[text=link]', { catalog: streamingCatalog() })
+      expect(warn).not.toHaveBeenCalled()
+      convert('metric:redpanda_cluster_brokers[link=yes]', { catalog: streamingCatalog(), attributes: { 'metric-validate': 'off' } })
+      expect(warn).not.toHaveBeenCalled()
+    })
+
     test('link=true with no page that documents the metric keeps the tooltip, renders no link and warns (no-page)', () => {
       const warn = warnings()
       const html = convert('metric:redpanda_kafka_request_bytes_total[link=true]', { catalog: streamingCatalog() })
@@ -242,6 +263,20 @@ describe('metric macro', () => {
       expect(html).toContain('<code>redpanda_cluster_brokers</code>')
       expect(html).toContain('<code class="metric-ref" data-metric-name="redpanda_kafka_request_latency_seconds"')
       expect(messages(warn)).toEqual([expect.stringContaining('says it is not on Serverless, and this page sets env-serverless')])
+    })
+
+    test('each warning ends with the fix for its cause', () => {
+      const warn = warnings()
+      onCloud('metric:vectorized_alien_receive_batch_queue_length[]')
+      onCloud('metric:redpanda_cluster_health_refreshes_total[]')
+      onCloud('metric:redpanda_cluster_brokers[]', { attributes: { 'env-serverless': true } })
+      onCloud('metric:redpanda_kafka_consumer_group_lag_sum[]')
+      const [internal, notCloud, notServerless, noPage] = messages(warn)
+      expect(internal).toMatch(/Put the sentence in an ifndef::env-cloud\[\] block\.$/)
+      expect(notCloud).toMatch(/Put the sentence in an ifndef::env-cloud\[\] block\.$/)
+      expect(notServerless).toMatch(/Put the sentence in an ifndef::env-serverless\[\] block, so that Dedicated and BYOC readers still see it\.$/)
+      expect(notServerless).not.toContain('env-cloud[]')
+      expect(noPage).toMatch(/If Redpanda Cloud has the metric, add its heading to the Cloud reference page, or set page=\. If it does not, put the sentence in an ifndef::env-cloud\[\] block\.$/)
     })
 
     test('the index reads the stub\'s include by tag and the conditionals of the included page', () => {
