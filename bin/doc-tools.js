@@ -35,7 +35,7 @@ const {
 // Import other utilities
 const { determineDocsBranch } = require('../cli-utils/self-managed-docs-branch.js')
 const fetchFromGithub = require('../tools/fetch-from-github.js')
-const { getAntoraValue, setAntoraValue } = require('../cli-utils/antora-utils')
+const { getAntoraValue, setAntoraValue, setRedpandaTagAttributes } = require('../cli-utils/antora-utils')
 
 // --------------------------------------------------------------------
 // Main CLI Definition
@@ -1175,7 +1175,8 @@ automation
  * findings. Dry run by default, writing a JSON and a Markdown report; --write
  * applies only exact matches stated in the same sentence as their property,
  * never a mismatch, a table cell or example output. Skips prose inside code
- * blocks and generated content.
+ * blocks and generated content. `check-reference-values` runs these property
+ * checks together with rpk and Connect checks, and can fail CI.
  *
  * @example
  * # Report on a docs checkout
@@ -1484,12 +1485,9 @@ automation
     }
 
     if (!options.diff && !tagsAreSame) {
-      const tagSuccess = setAntoraValue('asciidoc.attributes.latest-redpanda-tag', newTag)
-      if (tagSuccess) console.log(`Done: Updated Antora latest-redpanda-tag to: ${newTag}`)
-
-      const versionWithoutV = newTag.startsWith('v') ? newTag.slice(1) : newTag
-      const versionSuccess = setAntoraValue('asciidoc.attributes.full-version', versionWithoutV)
-      if (versionSuccess) console.log(`Done: Updated Antora full-version to: ${versionWithoutV}`)
+      for (const name of setRedpandaTagAttributes(newTag)) {
+        console.log(`Done: Updated Antora ${name} for ${newTag}`)
+      }
 
       try {
         const jsonDir = path.resolve(outputDir, 'attachments')
@@ -1549,6 +1547,17 @@ automation
  * - Supports overrides.json for description improvements
  * - Generates versioned JSON files for downstream consumers (tooltips, etc.)
  * - Generates diffs between versions for release notes
+ * - Converts docs.redpanda.com URLs in rpk help text into xrefs
+ *
+ * Links: rpk help text links to docs.redpanda.com with absolute URLs. When the
+ * command runs inside a docs checkout (or is given --docs-root), every URL that
+ * matches a page of that checkout, directly or through a page alias, is
+ * rewritten as an xref before the page is written, so the committed pages keep
+ * one link form across regenerations. URLs that point at another component
+ * (Redpanda Connect, for example) are converted only when that component's
+ * checkout is passed with --lender; they then become component-qualified xrefs
+ * such as xref:connect:guides:bloblang/about.adoc[]. Every URL left as written
+ * is listed in the output and in the validation report, with the reason.
  *
  * @why
  * Building from source provides accurate platform detection by analyzing Go build tags
@@ -1570,6 +1579,12 @@ automation
  * # Use custom overrides file
  * npx doc-tools generate rpk-docs --ref dev --overrides custom-overrides.json
  *
+ * # Check every generated description and write violations to a report
+ * npx doc-tools generate rpk-docs --from-json docs-data/rpk-v26.2.2.json --check-output report.txt
+ *
+ * # Also convert links to Redpanda Connect pages (rp-connect-docs checked out beside docs)
+ * npx doc-tools generate rpk-docs --from-json docs-data/rpk-v26.2.2.json --lender ../rp-connect-docs
+ *
  * @requirements
  * - Go must be installed (https://go.dev/)
  * - Git must be installed (for cloning source)
@@ -1580,6 +1595,8 @@ automation
  *   is a published GA or RC tag: the rpk binary is downloaded from
  *   https://rpk.redpanda.com and checksum-verified. Go, Git and the token are
  *   only used as a fallback when the CDN has no build for that tag.
+ * - To convert links: a docs checkout with Antora installed (npm install in
+ *   redpanda-data/docs), plus a checkout of each --lender component
  */
 automation
   .command('rpk-docs')
@@ -1609,6 +1626,9 @@ automation
   .option('--print-summary', 'Print PR summary (for GitHub Actions)')
   .option('--summary-file <path>', 'Write PR summary to file (for GitHub Actions)')
   .option('--show-info', 'Include info-level validation messages')
+  .option('--check-output [report-file]', 'Check every generated command and flag description: the text matches its source and each code span covers a whole token. Exits 1 on any violation, and writes one line per violation to report-file when given')
+  .option('--docs-root <dir>', 'Docs checkout whose pages docs.redpanda.com URLs are converted into xrefs against (default: the current repo when it holds antora.yml)')
+  .option('--lender <path...>', 'Other component checkouts read into the same catalog, so URLs that point at their pages become component-qualified xrefs (for example ../rp-connect-docs)')
   .option('--target-branch <branch>', 'Docs branch the output is for. On beta, v/*, and v-WIP/* the rpk ai docs, which main owns, are left untouched. Defaults to GITHUB_BASE_REF, then the checked-out branch.')
   .action(async (options) => {
     try {
@@ -1647,6 +1667,9 @@ automation
         preserveFrom: options.preserveFrom,
         printSummary: options.printSummary,
         showInfo: options.showInfo,
+        checkOutput: options.checkOutput,
+        docsRoot: options.docsRoot,
+        lenders: (options.lender || []).map((dir) => path.resolve(dir)),
         targetBranch: options.targetBranch
       })
 
@@ -1666,6 +1689,11 @@ automation
         // Exit with warning if validation errors found
         if (result.validationResult?.summary?.totalErrors > 0) {
           console.error(`\n⚠ Validation found ${result.validationResult.summary.totalErrors} error(s)`)
+          process.exit(1)
+        }
+
+        if (result.outputCheck && !result.outputCheck.passed) {
+          console.error(`\n⚠ Output check found ${result.outputCheck.lines.length} problem(s)`)
           process.exit(1)
         }
 
@@ -1914,7 +1942,7 @@ automation
 automation
   .command('helm-spec')
   .description('Generate AsciiDoc documentation for Helm charts. Requires either --tag or --branch for GitHub URLs.')
-  .option('--chart-dir <dir|url>', 'Chart directory or GitHub URL', 'https://github.com/redpanda-data/redpanda-operator/charts')
+  .option('--chart-dir <dir|url>', 'Chart directory or GitHub URL', 'https://github.com/redpanda-data/operator-enterprise/charts')
   .option('-t, --tag <tag>', 'Git tag for released content')
   .option('-b, --branch <branch>', 'Branch name for in-progress content')
   .option('--readme <file>', 'Relative README.md path inside each chart dir', 'README.md')
@@ -1952,7 +1980,8 @@ automation
       const [owner, repo, ...sub] = parts
       const repoUrl = `https://${u.host}/${owner}/${repo}.git`
 
-      if (opts.tag && owner === 'redpanda-data' && repo === 'redpanda-operator') {
+      // redpanda-operator is the name the repo had before it was renamed.
+      if (opts.tag && owner === 'redpanda-data' && ['operator-enterprise', 'redpanda-operator'].includes(repo)) {
         if (!gitRef.startsWith('operator/')) {
           gitRef = `operator/${gitRef}`
           console.log(`ℹ️  Auto-prepending "operator/" to tag: ${gitRef}`)
@@ -2082,7 +2111,7 @@ automation
 
       // Same marker shape as every doc-tools generator; convert-to-markdown
       // reads it and reports the provenance in the Markdown twins.
-      const helmMarker = generatedMarker('helm-docs', `the ${name} chart's values.yaml and README in redpanda-data/redpanda-operator`) + '\n\n'
+      const helmMarker = generatedMarker('helm-docs', `the ${name} chart's values.yaml and README in redpanda-data/operator-enterprise`) + '\n\n'
       doc = helmMarker + doc
       fs.writeFileSync(outFile, doc, 'utf8')
 
@@ -2378,7 +2407,10 @@ automation
  * runs inside a docs checkout (or is given --docs-root), every URL that matches a page of that
  * checkout, directly or through a page alias, is rewritten as an xref so the committed page
  * keeps one link form across regenerations. URLs that match no page are left as written and
- * listed in the output.
+ * listed in the output. URLs that point at another component (Redpanda Connect, Cloud) are
+ * converted only when that component's checkout is passed with --lender; they then become
+ * component-qualified xrefs (connect:module:page, version-pinned when the URL names a version
+ * that is not the component's latest).
  *
  * @why
  * Kubernetes CRDs define complex APIs for deploying and managing Redpanda. The API schema
@@ -2404,6 +2436,9 @@ automation
  * # Generate from any custom branch
  * npx doc-tools generate crd-spec --branch dev
  *
+ * # Also convert links to Redpanda Connect pages
+ * npx doc-tools generate crd-spec --tag operator/v2.2.6-25.3.1 --lender ../rp-connect-docs
+ *
  * # Use custom templates and output location
  * npx doc-tools generate crd-spec \
  *   --tag operator/v2.2.6-25.3.1 \
@@ -2414,18 +2449,20 @@ automation
  * - For GitHub URLs: Git and internet connection
  * - crd-ref-docs tool (automatically installed if missing)
  * - Go toolchain for running crd-ref-docs
- * - To convert links: a docs checkout with Antora installed (npm install in redpanda-data/docs)
+ * - To convert links: a docs checkout with Antora installed (npm install in redpanda-data/docs),
+ *   plus a checkout of each --lender component
  */
 automation
   .command('crd-spec')
   .description('Generate Asciidoc documentation for Kubernetes CRD references. Requires either --tag or --branch.')
   .option('-t, --tag <operatorTag>', 'Operator release tag for GA/beta content')
   .option('-b, --branch <branch>', 'Branch name for in-progress content')
-  .option('-s, --source-path <src>', 'CRD Go types dir or GitHub URL', 'https://github.com/redpanda-data/redpanda-operator/operator/api/redpanda/v1alpha2')
+  .option('-s, --source-path <src>', 'CRD Go types dir or GitHub URL', 'https://github.com/redpanda-data/operator-enterprise/operator/api/redpanda/v1alpha2')
   .option('-d, --depth <n>', 'How many levels deep', '10')
   .option('--templates-dir <dir>', 'Asciidoctor templates dir', '.github/crd-config/templates/asciidoctor/operator')
   .option('--output <file>', 'Where to write the generated AsciiDoc file', 'modules/reference/pages/k-crd.adoc')
   .option('--docs-root <dir>', 'Docs checkout whose pages docs.redpanda.com URLs are converted into xrefs against (default: the current repo when run inside redpanda-data/docs)')
+  .option('--lender <path...>', 'Other component checkouts read into the same catalog, so URLs that point at their pages become component-qualified xrefs (for example ../rp-connect-docs)')
   .action(async (opts) => {
     verifyCrdDependencies()
 
@@ -2441,10 +2478,10 @@ automation
     let configRef = opts.branch || (opts.tag.startsWith('operator/') ? opts.tag : `operator/${opts.tag}`)
 
     const configTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'crd-config-'))
-    console.log(`Fetching crd-ref-docs-config.yaml from redpanda-operator@${configRef}…`)
+    console.log(`Fetching crd-ref-docs-config.yaml from operator-enterprise@${configRef}…`)
     await fetchFromGithub(
       'redpanda-data',
-      'redpanda-operator',
+      'operator-enterprise',
       'operator/crd-ref-docs-config.yaml',
       configTmp,
       'crd-ref-docs-config.yaml',
@@ -2542,17 +2579,22 @@ automation
     // left as written and listed; the url-to-xref extension still converts
     // cross-component URLs at site build time and warns about broken ones.
     const docsRoot = opts.docsRoot || (inDocs ? repoRoot : null)
+    const lenders = (opts.lender || []).map((dir) => path.resolve(dir))
+    if (!docsRoot && lenders.length) {
+      console.error('Error: --lender needs a docs checkout to convert against: run inside redpanda-data/docs or pass --docs-root')
+      process.exit(1)
+    }
     if (docsRoot) {
-      const { buildDocsResolverContext, convertDocsLinksInFile, formatDocsLinkReport } = require('../cli-utils/docs-links-to-xrefs.js')
+      const { buildDocsResolverContext, describeResolverContext, convertDocsLinksInFile, formatDocsLinkReport } = require('../cli-utils/docs-links-to-xrefs.js')
       let linkContext
       try {
-        linkContext = await buildDocsResolverContext(docsRoot)
+        linkContext = await buildDocsResolverContext(docsRoot, { lenders })
       } catch (err) {
         console.error(`Error: Cannot map docs URLs to xrefs: ${err.message}`)
         process.exit(1)
       }
-      console.log(`Mapping docs URLs against ${linkContext.pageCount} pages of the ${linkContext.component} component in ${docsRoot}`)
-      console.log(formatDocsLinkReport(convertDocsLinksInFile(opts.output, linkContext), opts.output))
+      console.log(describeResolverContext(linkContext, docsRoot))
+      console.log(formatDocsLinkReport(convertDocsLinksInFile(opts.output, linkContext), opts.output, linkContext))
     } else {
       console.warn('⚠️ No docs checkout to map against (pass --docs-root); docs.redpanda.com URLs are left as written.')
     }
@@ -2701,7 +2743,11 @@ automation
         console.log(`Updating to specified Connect version: ${version}`)
       } else {
         console.log('Fetching latest Connect version from GitHub...')
-        version = await GetLatestConnectTag()
+        const octokit = require('../cli-utils/octokit-client')
+        const tag = await GetLatestConnectTag(octokit, 'redpanda-data', 'connect')
+        // The fetcher logs and returns null on failure; never write that into antora.yml.
+        if (!tag) throw new Error('could not fetch the latest Connect release from GitHub')
+        version = String(tag).replace(/^v/, '')
         console.log(`Latest Connect version: ${version}`)
       }
 
@@ -3396,14 +3442,21 @@ programCli
  * directly above the claim it supports: `// Source: <ref>`, optionally
  * followed by a short exact quote in double quotes and nothing else. The
  * marker is case-insensitive and may carry a parenthesized aside before the
- * colon (`// Source (verified 2026-10-20): <ref>`). A ref is a file range
- * (`redpanda-data/<repo>[@<git-ref>]:<path>:<line>[-<line>]`, default ref is
- * the repo's default branch), a pull request or issue
+ * colon (`// Source (verified 2026-10-20): <ref>`). A ref is a symbol
+ * (`[redpanda-data/]<repo>[@<git-ref>]:<path>#<symbol> "<value>"`: the value
+ * must appear within 30 lines of the symbol), a file range
+ * (`redpanda-data/<repo>[@<git-ref>]:<path>:<line>[-<line>]`), a pull request or issue
  * (`redpanda-data/<repo>#<n>`), an uppercase Jira key, or an https:// URL. File refs are fetched from GitHub once per
  * repo, ref, and path: the cited lines must exist and the quote must appear
  * in them after whitespace is normalized (when it has moved, the message
  * says where it is now). PR and issue refs must exist; their state (merged,
- * open, closed) is info. Jira keys and URLs are checked for syntax only, unless
+ * open, closed) is info. A symbol or file ref without @<git-ref> is version-aware:
+ * it is checked at the release the page's component version (its antora.yml)
+ * documents, resolved like the build's latest-redpanda-tag,
+ * latest-console-tag, latest-operator-version, and latest-connect-tag
+ * (prerelease: redpanda-beta-tag; a v/* branch: its own antora.yml value or
+ * operator line); other repos use the default branch and are reported as
+ * unversioned. Jira keys and URLs are checked for syntax only, unless
  * --check-urls. Text after the marker that does not start with a ref (or
  * that is an https URL or a Jira-style key followed by prose, such as
  * `KIP-848 consumer group protocol`) is free-form provenance: an
@@ -3413,7 +3466,8 @@ programCli
  * classic token with the repo scope), line-out-of-range,
  * quote-not-found, pr-not-found, url-not-found. Warnings (exit 0):
  * unreachable (auth, rate-limit, timeout, or network failure, never a silent
- * pass) and no-claim (nothing directly below the comment). Exit 2: a --files
+ * pass), no-claim (nothing directly below the comment), and unresolved-version
+ * (no release could be resolved for an unpinned ref). symbol-not-found is an error. Exit 2: a --files
  * pattern that matches no .adoc file, or a --diff base git cannot resolve.
  * Fetches run concurrently, time out after 30 seconds, and retry transient
  * failures twice. Comments inside listing, literal,
@@ -3445,6 +3499,7 @@ programCli
   .option('--format <format>', 'Output format: human or json', 'human')
   .option('--output <path>', 'Also write the JSON result to this file')
   .option('--check-urls', 'HEAD-check https:// URL refs (default: syntax only)')
+  .option('--branch <name>', 'Docs branch the pages are on, for version-aware refs: a v/* branch is an older version (default: GITHUB_BASE_REF, GITHUB_REF_NAME, then the checked-out branch)')
   .action(async (options) => {
     const { runCli } = require('../tools/check-sources')
     await runCli(options)
@@ -3547,8 +3602,13 @@ programCli
  * component pages), each with a count, the lines, and a likely facet from a
  * cue word after it (a connector, database, format, or product word). Terms
  * in the terminology lists (--terminology, default the docs glossary in the
- * checkout), common English, and words the page also writes in lowercase are
- * dropped. --candidates-only skips the check and the suggestions and
+ * checkout or $REDPANDA_DOCS_PATH) are dropped, and so are stop words and
+ * common English, language keywords (NULL, GROUP BY), Kubernetes object kinds
+ * (Pods, PersistentVolumeClaim), terms only ever on sales or licensing lines
+ * (Redpanda Sales, Enterprise Edition), and words the page also writes in
+ * lowercase. The product's own name is stripped from the front of a term
+ * (Redpanda Terraform counts as Terraform) and alone is no term. Connect
+ * component xrefs count for inputs, outputs, and caches only. --candidates-only skips the check and the suggestions and
  * aggregates candidates across the pages: one entry per term, with the pages
  * it is on, leaving out terms on more than a fifth of the pages
  * (boilerplate).
@@ -3602,6 +3662,114 @@ programCli
   .action(async (paths, options) => {
     const { runCli } = require('../tools/check-metadata')
     await runCli(paths, options)
+  })
+
+/**
+ * check-reference-values
+ *
+ * @description
+ * Check a docs checkout for reference values and references that the
+ * propval:, rpkval:, connectval:, bloblval:, rpkcmd:, connect: and blobl:
+ * macros could render from the published data, and for references to things the data does not have. Three kinds run
+ * together, each selecting its dataset exactly as its macro does (from the
+ * repo and any --lender checkouts), unless --data-file names one:
+ * properties runs the migrate-property-values scan unchanged; rpk parses
+ * every rpk invocation in shell blocks and backticked prose (unknown-command,
+ * unknown-flag and deprecated-command, with "did you mean" suggestions) and
+ * compares flag defaults stated in prose and in Default table columns with
+ * the rpk data, and checks each hand-written xref to an rpk reference page as
+ * the scanned component renders it (broken-link when the page does not
+ * exist there, link-label-mismatch when the label names another command, and
+ * exact when the label is the command in backticks and rpkcmd: would link the
+ * same page); connect walks every pipeline config in YAML blocks and
+ * examples files (unknown-component, unknown-field, deprecated components and
+ * fields), compares YAML comments that state a default ("# Optional
+ * (default: ...)") and callouts and sentences that state one with the Connect
+ * data, and checks each hand-written xref to a Connect component page, field
+ * anchor or Bloblang page on every component that renders the file
+ * (broken-link, link-label-mismatch, and exact when the label is just the
+ * name and connect: or blobl: would link the same page and anchor). Statuses are propval's (exact, equivalent, mismatch, unset,
+ * unverifiable, example output) plus reference. Plugin flags scraped from
+ * --help never fail, and neither do findings in release notes, upgrade notes
+ * or Connect migration guides. A `// value-check: ignore` comment line
+ * suppresses findings on the next line or in the next block. Writes one JSON
+ * and one Markdown report. --write applies only exact matches in the same
+ * sentence (or a Connect callout) that name one target, never in a table,
+ * block or YAML, and only when the line renders the same visible text before
+ * and after through the real macros; an exact rpk xref, in prose or a table
+ * cell, becomes rpkcmd:[...], and an exact Connect xref connect:[...] or
+ * blobl:[...]. It also reports unlinked mentions: the first mention on a
+ * page, as it renders with its includes, of an rpk command in inline code
+ * (`rpk topic create`), a Connect component named with its type
+ * (`kafka_franz` input, kafka_franz input) or, in Connect content, a
+ * Bloblang call (`now()`, `.uppercase()`, `uppercase` method), when the page
+ * links it nowhere and rpkcmd:, connect: or blobl: would link it. A mention
+ * in a partial is reported at the partial when one page that includes it
+ * shows it that way, and a partial no loaded page includes is judged on its
+ * own. Never in blocks, headings, titles, table header rows, link
+ * labels, nav files, release, upgrade or migration notes, generated pages
+ * or the target's own page. They fail only at --fail-on links, and --write
+ * turns them into links only with --write-links, keeping the text as
+ * written. It also reports old names in macros and prose spans: an rpk
+ * command written with an alias (`rpk cluster status` for rpk cluster info)
+ * or a Connect component written with the name its page now aliases
+ * (outputs/kafka_migrator) is an alias warning, and a deprecated rpk
+ * command, Connect component or field, or Bloblang function or method is a
+ * deprecated reference warning that names the replacement the data names.
+ * Both fail only at --fail-on any or links. --write rewrites one to the
+ * main or replacement name, keeping the rest of the call, when the data
+ * names one replacement that has the same flag or field (and, for Connect,
+ * is the same type), the line is not about the name, the main name is not
+ * already written nearby, and the page does not use the old name elsewhere,
+ * such as in an example; the line must then render as before except where
+ * the name renders.
+ * Exit 0 when no finding is at or above
+ * --fail-on, 1 when one is, 2 when the check could not run (including
+ * --write-links without --write).
+ *
+ * @why
+ * Hand-typed defaults, flags and field names drift from the product with
+ * every release, and nothing notices until a reader runs the command. The
+ * value macros fix that for new prose; this finds the prose that needs them,
+ * and the references that are already wrong, in a form CI can fail on.
+ *
+ * @example
+ * # docs: rpk from the generator snapshot until the attachment is published
+ * npx doc-tools check-reference-values --docs-dir . --data-file docs-data/rpk-v26.2.2.json --lender ../rp-connect-docs --report-dir ./reference-values
+ *
+ * # cloud-docs borrows property and rpk data from docs, Connect data from rp-connect-docs
+ * npx doc-tools check-reference-values --docs-dir ../cloud-docs --lender ../docs ../rp-connect-docs --data-file ../docs/docs-data/rpk-v26.2.2.json
+ *
+ * # Only the files a pull request changed, with GitHub annotations
+ * npx doc-tools check-reference-values --files $(git diff --name-only origin/main -- '*.adoc') --annotations github
+ *
+ * # Apply the auto-safe exact matches, then fail on anything left
+ * npx doc-tools check-reference-values --write --fail-on mismatch
+ *
+ * # Also link the first unlinked mention of each command, component and call
+ * npx doc-tools check-reference-values --write --write-links --data-file docs-data/rpk-v26.2.2.json --lender ../rp-connect-docs
+ *
+ * @requirements
+ * - An Antora component checkout (antora.yml and modules/)
+ * - The data: redpanda-properties-<tag>.json and rpk-<version>.json attachments
+ *   in a reference module, connect-<version>.json in rp-connect-docs, or --data-file
+ */
+programCli
+  .command('check-reference-values')
+  .description('Check prose, shell blocks and YAML against the property, rpk and Connect data: report hand-written values the value macros could render, and unknown or deprecated commands, flags, components and fields')
+  .option('--docs-dir <path>', 'Root of the repo being scanned (antora.yml and modules/)', '.')
+  .option('--lender <path...>', 'Other component checkouts read into the same catalog, so data is selected exactly as the macros select it (for example ../docs ../rp-connect-docs)')
+  .option('--kinds <list>', 'Comma-separated kinds to run: properties, rpk, connect (default: all; a named kind with no data is a setup error)')
+  .option('--data-file <path...>', 'Dataset files that bypass selection, recognized by name: redpanda-properties-v<tag>.json, rpk-v<version>.json (the docs-data snapshot works), connect-<version>.json')
+  .option('--files <path...>', 'Scan only these files, relative to --docs-dir')
+  .option('--report-dir <path>', 'Where to write reference-values-report.json and reference-values-report.md', '.')
+  .option('--write', 'Apply auto-safe exact replacements with the value macros, and rewrite writable aliases and deprecated names to the main or replacement name')
+  .option('--write-links', 'With --write, also turn unlinked mentions into rpkcmd:, connect: and blobl: links, keeping the text as written')
+  .option('--fail-on <level>', 'none, mismatch (mismatches, reference errors, stale rpk and Connect examples), any (also exact, equivalent, unset, reference warnings such as deprecated names, and aliases) or links (also unlinked mentions)', 'mismatch')
+  .option('--annotations <format>', 'Also print GitHub workflow annotations: github')
+  .action((options) => {
+    const { runCli } = require('../tools/reference-values')
+    process.exitCode = runCli(options)
   })
 
 /**
@@ -3757,21 +3925,36 @@ const overridesGroup = new Command('overrides').description('Audit docs-side ove
  *   --extracted tools/property-extractor/gen/properties-output.json \
  *   --format human
  *
+ * # Audit the docs repo rpk overrides against the newest committed snapshot
+ * npx doc-tools overrides audit --surface rpk \
+ *   --overrides docs-data/rpk-overrides.json \
+ *   --extracted docs-data/rpk-v26.2.2.json \
+ *   --format human
+ *
+ * # Audit rpk overrides against rpk built from source, with source locations
+ * npx doc-tools overrides audit --surface rpk \
+ *   --overrides docs-data/rpk-overrides.json \
+ *   --repo ../streaming-enterprise/src/go/rpk
+ *
  * @requirements
- * The --extracted file must be the property extractor's RAW output (its
- * --output file, without overrides applied). The enhanced output and the
- * versioned redpanda-properties-<tag>.json attachments already have
+ * For properties, the --extracted file must be the property extractor's RAW
+ * output (its --output file, without overrides applied). The enhanced output
+ * and the versioned redpanda-properties-<tag>.json attachments already have
  * overrides applied, so auditing against them classifies everything
- * REDUNDANT.
+ * REDUNDANT. For rpk, --extracted is the newest docs-data/rpk-v<version>.json
+ * snapshot: the audit reads its raw_tree (what the binary printed) and
+ * refuses a file that only carries the override-merged tree. For rpk,
+ * --repo needs Go and a streaming-enterprise src/go/rpk checkout.
  */
 overridesGroup
   .command('audit')
   .description('Classify each override field as redundant, upstreamable, or keep against extracted source strings')
   .requiredOption('--overrides <path>', 'Path to the overrides JSON file (for example docs-data/property-overrides.json)')
-  .option('--extracted <path>', 'Path to the extracted source JSON (property extractor raw output; required for the properties surface)')
+  .option('--extracted <path>', 'Path to the extracted source JSON: the property extractor raw output (properties surface) or the newest docs-data/rpk-v<version>.json snapshot (rpk surface, compared against its raw_tree)')
   .addOption(new Option('--surface <surface>', 'Override surface to audit').choices(['properties', 'rpk']).default('properties'))
   .addOption(new Option('--format <format>', 'Output format').choices(['json', 'human']).default('json'))
-  .option('--repo <path>', 'Redpanda checkout to extract raw source strings from (alternative to --extracted)')
+  .option('--repo <path>', 'Alternative to --extracted. Properties: a redpanda checkout to extract raw source strings from. rpk: a streaming-enterprise src/go/rpk directory; without --extracted, the audit builds rpk there and reads its --print-tree output, and unless --locations is given it also locates each string so UPSTREAMABLE rows carry source_file/source_line. Run it on Linux, where the docs snapshot comes from')
+  .option('--locations <path>', 'rpk only: output of the locate-strings analyzer (tools/rpk-docs/scripts/locate-strings) to take source_file/source_line from, instead of running it through --repo')
   .option('--output <path>', 'Also write the JSON result to this file')
   .action((options) => {
     const { runAudit, formatHumanReport } = require('../tools/overrides-audit')
@@ -3862,10 +4045,10 @@ overridesGroup
   .command('report')
   .description('Build a plain-English markdown report section from triaged candidates')
   .requiredOption('--candidates <path>', 'Path to a JSON array of triaged candidate rows')
-  .addOption(new Option('--section <section>', 'Which report section to build').choices(['upstream', 'retirement', 'ambiguous']).makeOptionMandatory())
+  .addOption(new Option('--section <section>', 'Which report section to build').choices(['upstream', 'retirement', 'ambiguous', 'unlocatable']).makeOptionMandatory())
   .action((options) => {
-    const { buildUpstreamSection, buildRetirementSection, buildAmbiguousDigest } = require('../tools/overrides-audit/report')
-    const BUILDERS = { upstream: buildUpstreamSection, retirement: buildRetirementSection, ambiguous: buildAmbiguousDigest }
+    const { buildUpstreamSection, buildRetirementSection, buildAmbiguousDigest, buildUnlocatableSection } = require('../tools/overrides-audit/report')
+    const BUILDERS = { upstream: buildUpstreamSection, retirement: buildRetirementSection, ambiguous: buildAmbiguousDigest, unlocatable: buildUnlocatableSection }
     try {
       const candidates = JSON.parse(fs.readFileSync(path.resolve(options.candidates), 'utf8'))
       console.log(BUILDERS[options.section](candidates))

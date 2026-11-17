@@ -1,5 +1,86 @@
 # Changelog
 
+## [5.65.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.64.0...v5.65.0) (2026-11-16)
+
+
+### Features
+
+* add rpk, Connect and Bloblang value and link macros, and check-reference-values ([#458](https://github.com/redpanda-data/docs-extensions-and-macros/issues/458)) ([971723f](https://github.com/redpanda-data/docs-extensions-and-macros/commit/971723f9d174c0a8dc32f3fda24c28b0fb8ec703))
+* **component-catalog:** filter Connect components by use case and link matching Solutions ([#509](https://github.com/redpanda-data/docs-extensions-and-macros/issues/509)) ([f7505fd](https://github.com/redpanda-data/docs-extensions-and-macros/commit/f7505fdd10552f4d60461f9767f0a3792b8ef7ea))
+
+
+### Bug fixes
+
+* make extracted type definitions stable across runs ([#513](https://github.com/redpanda-data/docs-extensions-and-macros/issues/513)) ([45b3e98](https://github.com/redpanda-data/docs-extensions-and-macros/commit/45b3e988c87ad9d9da8dd000572643dbb831c00c))
+* read Helm chart versions from the public Helm repo index ([#508](https://github.com/redpanda-data/docs-extensions-and-macros/issues/508)) ([57b635d](https://github.com/redpanda-data/docs-extensions-and-macros/commit/57b635db81d89c431c9ad239b97d42c65d102bc7))
+
+
+### Reusable workflows and CI
+
+* move redpanda-operator doc-impact items out of the public repo ([#510](https://github.com/redpanda-data/docs-extensions-and-macros/issues/510)) ([4aa2947](https://github.com/redpanda-data/docs-extensions-and-macros/commit/4aa2947d9b2469adbbff61087a7f99e5858cf164))
+
+## [5.64.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.63.0...v5.64.0) (2026-11-12)
+
+
+### Features
+
+* **check-metadata:** report recommendation changes in the PR check ([#431](https://github.com/redpanda-data/docs-extensions-and-macros/issues/431)) ([f437aa3](https://github.com/redpanda-data/docs-extensions-and-macros/commit/f437aa33b6fdd3cda14d23e1d4103bea5d85043a))
+* **enterprise-gating:** report changes to the Community Edition core limit ([#476](https://github.com/redpanda-data/docs-extensions-and-macros/issues/476)) ([9bf416a](https://github.com/redpanda-data/docs-extensions-and-macros/commit/9bf416a43e0e7212dce3e5331db19c99b364a60e))
+* improve component catalog UX ([#169](https://github.com/redpanda-data/docs-extensions-and-macros/issues/169)) ([b708436](https://github.com/redpanda-data/docs-extensions-and-macros/commit/b708436b9c2b89e7877006d1e73a203806aabb9b))
+* **lint-strings:** warn on unexplained code-block placeholders in connect descriptions ([#469](https://github.com/redpanda-data/docs-extensions-and-macros/issues/469)) ([5ceb125](https://github.com/redpanda-data/docs-extensions-and-macros/commit/5ceb12537322d70e35dfda1ce3a48922dfbb4ead))
+* **overrides-audit:** classify rpk override prose against the raw snapshot ([#410](https://github.com/redpanda-data/docs-extensions-and-macros/issues/410)) ([ca9ba0f](https://github.com/redpanda-data/docs-extensions-and-macros/commit/ca9ba0f9952fab1757e7c3410a0f2b76a860f753))
+* **overrides-audit:** locate rpk source strings and self-extract rpk with --repo ([#507](https://github.com/redpanda-data/docs-extensions-and-macros/issues/507)) ([051c82b](https://github.com/redpanda-data/docs-extensions-and-macros/commit/051c82bb2b1d6f49bbe10d6b05023f4885f695e7))
+* **rpcn-docs:** read Cloud and cgo flags from the release docs asset ([#460](https://github.com/redpanda-data/docs-extensions-and-macros/issues/460)) ([5b80883](https://github.com/redpanda-data/docs-extensions-and-macros/commit/5b80883558d6b8ce63e527b014d5717975e236a9))
+* **rpk-docs:** check generated descriptions for lost text and broken code spans ([#471](https://github.com/redpanda-data/docs-extensions-and-macros/issues/471)) ([45fe058](https://github.com/redpanda-data/docs-extensions-and-macros/commit/45fe058c965e8f912f05f6e4d109aa58f5186a15))
+* **rpk-docs:** convert docs URLs to xrefs, with lender checkouts ([#466](https://github.com/redpanda-data/docs-extensions-and-macros/issues/466)) ([47d31f5](https://github.com/redpanda-data/docs-extensions-and-macros/commit/47d31f561076004a64ec501ce85552ba31d7f421))
+* **rpk-docs:** print flag defaults and required flags ([#503](https://github.com/redpanda-data/docs-extensions-and-macros/issues/503)) ([c281f37](https://github.com/redpanda-data/docs-extensions-and-macros/commit/c281f37c959e13ec97df45e241f364aee4f14b83))
+
+
+### Bug fixes
+
+* **check-metadata:** drop noise from candidate terms ([#428](https://github.com/redpanda-data/docs-extensions-and-macros/issues/428)) ([4f3e60e](https://github.com/redpanda-data/docs-extensions-and-macros/commit/4f3e60e84e9e0c172e90e139d03cd5a6611815da))
+* **convert-to-markdown:** keep formatting in table cells and put front matter first ([#416](https://github.com/redpanda-data/docs-extensions-and-macros/issues/416)) ([3543073](https://github.com/redpanda-data/docs-extensions-and-macros/commit/354307331e3072b6e26c8e676bb9b7e2a6d1693f))
+* **doc-tools:** update-connect-version fetches with a client and never writes null ([#493](https://github.com/redpanda-data/docs-extensions-and-macros/issues/493)) ([37d7db6](https://github.com/redpanda-data/docs-extensions-and-macros/commit/37d7db6a7510e4de58d3354ed99136b362ca345c))
+* label platform tabs in the Markdown export ([#505](https://github.com/redpanda-data/docs-extensions-and-macros/issues/505)) ([ae844df](https://github.com/redpanda-data/docs-extensions-and-macros/commit/ae844df3f0bd17859ea4e50eccfd4ba4e0efe074))
+* **markdown:** put every component bar badge in the Markdown front matter ([#500](https://github.com/redpanda-data/docs-extensions-and-macros/issues/500)) ([5de2ab2](https://github.com/redpanda-data/docs-extensions-and-macros/commit/5de2ab2eee9e8d406149156af7cab063b983e9e1))
+* **rpk-docs:** fix four rpk ai description formatting bugs (DOC-2686) ([#447](https://github.com/redpanda-data/docs-extensions-and-macros/issues/447)) ([0a3b863](https://github.com/redpanda-data/docs-extensions-and-macros/commit/0a3b863e2e73e2c0cc2f2694b03c29a625572fc5))
+
+## [5.63.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.62.0...v5.63.0) (2026-11-10)
+
+
+### Features
+
+* **check-sources:** version-aware symbol citations ([#433](https://github.com/redpanda-data/docs-extensions-and-macros/issues/433)) ([f067a4c](https://github.com/redpanda-data/docs-extensions-and-macros/commit/f067a4ce83c73e2c34302650cbb3deee1aedb0ee))
+
+
+### Bug fixes
+
+* **property-docs:** update redpanda-beta-tag on prerelease branches ([#501](https://github.com/redpanda-data/docs-extensions-and-macros/issues/501)) ([1f54d6c](https://github.com/redpanda-data/docs-extensions-and-macros/commit/1f54d6c3ae592e587116699d0378e66cbda5113a))
+
+
+### Reusable workflows and CI
+
+* **docs-pr-review:** pin claude-skill to [#486](https://github.com/redpanda-data/docs-extensions-and-macros/issues/486)'s merge SHA ([#495](https://github.com/redpanda-data/docs-extensions-and-macros/issues/495)) ([56964c2](https://github.com/redpanda-data/docs-extensions-and-macros/commit/56964c265add4efda545d013772ffde217e8da78))
+* re-pin the docs review to d-e-m[#495](https://github.com/redpanda-data/docs-extensions-and-macros/issues/495) ([#498](https://github.com/redpanda-data/docs-extensions-and-macros/issues/498)) ([c4e0454](https://github.com/redpanda-data/docs-extensions-and-macros/commit/c4e0454df22121d81069d2d09fc89eaa8ec8daf7))
+
+## [5.62.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.61.1...v5.62.0) (2026-11-06)
+
+
+### Features
+
+* **docs-pr-review:** read the docs App credential from Secrets Manager ([#486](https://github.com/redpanda-data/docs-extensions-and-macros/issues/486)) ([a241365](https://github.com/redpanda-data/docs-extensions-and-macros/commit/a2413654b2b4d1cd4ef4768d1f4a3e17f49216d2))
+
+
+### Bug fixes
+
+* **dispatch-graph:** match fan-out senders to their listeners ([#488](https://github.com/redpanda-data/docs-extensions-and-macros/issues/488)) ([6943a13](https://github.com/redpanda-data/docs-extensions-and-macros/commit/6943a1342a6518eea20e555d3f8342978cfb3d2c))
+* **doc-strings-review:** let API summaries drop articles ([#482](https://github.com/redpanda-data/docs-extensions-and-macros/issues/482)) ([997ba02](https://github.com/redpanda-data/docs-extensions-and-macros/commit/997ba02bd181116e3590ca24ed4373c444cb21e3))
+
+
+### Reusable workflows and CI
+
+* turn on the automated docs PR review ([#481](https://github.com/redpanda-data/docs-extensions-and-macros/issues/481)) ([b087de4](https://github.com/redpanda-data/docs-extensions-and-macros/commit/b087de4859b8970976b4286ca7d466adaaef347c))
+
 ## [5.61.1](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.61.0...v5.61.1) (2026-11-06)
 
 

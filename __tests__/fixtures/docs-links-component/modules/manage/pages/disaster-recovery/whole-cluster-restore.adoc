@@ -1,0 +1,4 @@
+= Whole Cluster Restore for Disaster Recovery
+:page-aliases: manage:whole-cluster-restore.adoc
+
+Text.

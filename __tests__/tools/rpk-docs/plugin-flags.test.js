@@ -47,6 +47,29 @@ describe('parseCobraFlags', () => {
     expect(flags.map(f => f.name)).not.toContain('verbose')
   })
 
+  test('drops a wrapped --help description instead of appending it to the flag before', () => {
+    // Shape of `rpai guardrail create --help`: when the flag column is too
+    // wide, pflag pads each name and moves every description, --help's
+    // included, to the next line at a 16-space indent (DOC-2686)
+    const wide = [
+      'Flags:',
+      '      --dry-run      ',
+      '                print the request that would be sent (with the computed update mask) and exit without calling the',
+      '                server',
+      '  -h, --help         ',
+      '                help for create',
+      '      --name string  ',
+      '                guardrail name',
+      ''
+    ].join('\n')
+    const flags = parseCobraFlags(wide)
+    expect(flags.find(f => f.name === 'dry-run').description).toBe(
+      'print the request that would be sent (with the computed update mask) and exit without calling the server'
+    )
+    expect(flags.find(f => f.name === 'name').description).toBe('guardrail name')
+    expect(flags.map(f => f.name)).not.toContain('help')
+  })
+
   test('returns empty for help without a Flags section', () => {
     expect(parseCobraFlags('Usage:\n  rpk ai\n\nUse "rpk ai --help".')).toEqual([])
     expect(parseCobraFlags('')).toEqual([])

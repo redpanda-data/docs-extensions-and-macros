@@ -1,0 +1,4 @@
+# Adds the docs taxonomy to the preview's shared component, which is where the
+# taxonomy loader looks for it (shared/modules/ROOT/attachments/taxonomy.yml).
+name: shared
+version: ~

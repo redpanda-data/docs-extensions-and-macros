@@ -9,6 +9,21 @@
       "type": "string",
       "description": "Reference to this schema file"
     },
+    "outputCheckExceptions": {
+      "type": "array",
+      "description": "Descriptions whose generated output is allowed to fail the rpk-docs output check (doc-tools generate rpk-docs --check-output), each with the reason it is intentional. Keep this list short: fix the help text, the override, or the generator instead where you can. An entry that no longer matches a violation fails the check, so stale entries cannot pile up.",
+      "items": {
+        "type": "object",
+        "required": ["command", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "command": { "type": "string", "description": "Full command path, for example 'rpk redpanda tune'. Use 'rpk' for global flags." },
+          "flag": { "type": "string", "description": "Flag with its dashes, for example '--dirs'. Omit for the command description." },
+          "invariant": { "type": "string", "enum": ["text-preserved", "whole-token-spans"], "description": "Limit the exception to one invariant. Omit to allow both." },
+          "reason": { "type": "string", "minLength": 1, "description": "Why the output is right even though the check flags it." }
+        }
+      }
+    },
     "textTransformations": {
       "type": "object",
       "description": "Global text transformation rules applied to all command descriptions during generation. Allows writers to define patterns that should be formatted as inline code or replaced consistently across all commands.",

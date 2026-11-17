@@ -653,6 +653,32 @@ Specify a time range.`
       expect(store[0]).not.toContain('\\ \\')
     })
 
+    test('keeps consecutive rpk commands as separate commands', () => {
+      // rpk cluster partitions move-status help: two examples, not one
+      // command continued onto a second line.
+      const input = 'Examples:\n\n    rpk cluster partitions move-status\n    rpk cluster partitions move-status foo bar kafka_internal/tx'
+      const store = []
+      convertIndentedCodeBlocksToAsciiDoc(input, store)
+
+      expect(store).toEqual(['\n[,bash]\n----\nrpk cluster partitions move-status\nrpk cluster partitions move-status foo bar kafka_internal/tx\n----\n'])
+    })
+
+    test('an rpk line after a backslash is still a continuation', () => {
+      const input = 'Example:\n\n  rpk topic produce \\\n  rpk-input.txt'
+      const store = []
+      convertIndentedCodeBlocksToAsciiDoc(input, store)
+
+      expect(store[0]).toContain('rpk topic produce \\\nrpk-input.txt')
+    })
+
+    test('flag lines still join to their command when the help left out the backslash', () => {
+      const input = 'Example:\n\n  rpk transform deploy --file a.wasm \\\n    --output-topic t2\n    --output-topic t3'
+      const store = []
+      convertIndentedCodeBlocksToAsciiDoc(input, store)
+
+      expect(store[0]).toContain('rpk transform deploy --file a.wasm \\\n--output-topic t2 \\\n--output-topic t3')
+    })
+
     test('detects indented YAML block', () => {
       const input = `Result:\n\n  - job_name: test\n    static_configs:\n      - targets: [localhost]\n        labels:\n          group: one`
       const store = []
@@ -704,6 +730,27 @@ Specify a time range.`
       const result = formatDescription(input)
       expect(result).toContain('`--format=json`')
       expect(result).not.toContain('`--format`=json')
+    })
+
+    test('a flag family glob is one span, as a passthrough', () => {
+      // rpk ai trigger help. Two plain spans holding * render the text
+      // between them in bold, and the old pattern left the * outside.
+      const result = formatDescription('The kind (--teams-* or\n--cron-*) is fixed at creation.')
+      expect(result).toBe('The kind (`+--teams-*+` or\n`+--cron-*+`) is fixed at creation.')
+    })
+
+    test('does not wrap rpk inside a dotted plugin prefix', () => {
+      // rpk plugin help: .rpk.ac- published as .`rpk`.ac-
+      const result = formatDescription('All plugins are prefixed with either .rpk- or .rpk.ac-. When rpk starts up, it searches.')
+      expect(result).toContain('.rpk.ac-.')
+      expect(result).toContain('When `rpk` starts up')
+    })
+
+    test('does not wrap the rpk in a dotted config key', () => {
+      // rpk redpanda admin config print --host in the v26.1.12 tree
+      const result = formatDescription('An index into rpk.admin_api.addresses to select hosts, as with rpk.')
+      expect(result).toContain('into rpk.admin_api.addresses to')
+      expect(result).toContain('as with `rpk`.')
     })
 
     test('handles complex flag=value patterns', () => {
@@ -1639,10 +1686,21 @@ describe('inline code for paths and URLs in help prose', () => {
 
   test('bare URLs are inline code, with sentence punctuation outside', () => {
     expect(formatDescription('Point it at http://127.0.0.1:8081.')).toBe('Point it at `http://127.0.0.1:8081`.')
-    expect(formatDescription('See https://docs.redpanda.com/current/get-started/ for details.'))
-      .toBe('See `https://docs.redpanda.com/current/get-started/` for details.')
-    expect(formatDescription('Read the guide (https://docs.redpanda.com/x/).')).toBe('Read the guide (`https://docs.redpanda.com/x/`).')
     expect(formatDescription('Query https://host/p?a=1&b=2, then stop.')).toBe('Query `https://host/p?a=1&b=2`, then stop.')
+  })
+
+  // A docs site URL is a link, not a code value: left bare, it is converted
+  // into an xref (by generateRpkDocs, or by the url-to-xref extension at
+  // build time); a code span would be neither converted nor linked.
+  test('docs site URLs stay bare links, still protected from the later passes', () => {
+    expect(formatDescription('See https://docs.redpanda.com/current/get-started/ for details.'))
+      .toBe('See https://docs.redpanda.com/current/get-started/ for details.')
+    expect(formatDescription('Read the guide (https://docs.redpanda.com/x/).')).toBe('Read the guide (https://docs.redpanda.com/x/).')
+    expect(formatDescription('visit https://docs.redpanda.com/current/manage/disaster-recovery/whole-cluster-restore/.'))
+      .toBe('visit https://docs.redpanda.com/current/manage/disaster-recovery/whole-cluster-restore/.')
+    expect(formatDescription('See https://docs.redpanda.com/foo-a/tmp/file#12345 now.')).toBe('See https://docs.redpanda.com/foo-a/tmp/file#12345 now.')
+    // Only the docs host: a look-alike host is still a code value.
+    expect(formatDescription('See https://docs.redpanda.com.example/x now.')).toBe('See `https://docs.redpanda.com.example/x` now.')
   })
 
   // Every later pass matches inside a URL it has not yet seen as one: the path

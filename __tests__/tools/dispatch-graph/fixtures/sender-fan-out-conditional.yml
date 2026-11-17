@@ -1,0 +1,18 @@
+# sender-fan-out.yml with the dispatch behind a step `if:`, so a run of the
+# workflow is not proof that it dispatched; the jobs API decides.
+name: Fan out
+on:
+  schedule:
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch
+        if: github.event_name == 'schedule'
+        run: |
+          REPO=$(cut -d/ -f3 <<< "$REF")
+          gh api "repos/redpanda-data/$REPO/dispatches" \
+            -f event_type=fan-out-request \
+            -F "client_payload[pr]=$NUM"
