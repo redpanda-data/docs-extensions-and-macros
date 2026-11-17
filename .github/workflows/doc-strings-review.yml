@@ -952,10 +952,15 @@ jobs:
       # env var is named after the JSON key, and this step derives the name
       # from adp_client_secret_id the way the mint step does. No key (plain-secret callers, gateway off, or
       # a secret without that key) builds today's anonymous config with no
-      # header. The config goes to GITHUB_ENV rather than a step output
-      # because the runner drops outputs that contain a masked value, and it
-      # must be inline JSON: claude-code-action merges inline --mcp-config
-      # values with its own, but a file path replaces them.
+      # header. The config must be inline JSON: claude-code-action merges
+      # inline --mcp-config values with its own, but a file path replaces
+      # them. Inline JSON is in the review's environment and arguments, which
+      # the model can read with cat, so the key never goes in it. The key goes
+      # in a file only root can read, and the config names a headersHelper
+      # that reads the file with sudo when Claude Code connects. The review
+      # runs with --permission-mode default, which denies sudo because no
+      # allow rule covers it. A helper that fails sends no header, which is
+      # the anonymous quota.
       - name: Build the docs MCP config
         if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0' || steps.notes.outputs.declared == '1')
         env:
@@ -967,11 +972,9 @@ jobs:
           key_var="${prefix}_DOCS_MCP_KEY"
           key="${!key_var:-}"
           if [ -n "$key" ]; then
-            echo "::add-mask::$key"
-            # The config is single-quoted inside claude_args and written as
-            # one GITHUB_ENV line, so refuse anything that could break out of
-            # either. Generated keys are hex. A case pattern, not grep, which
-            # would pass a multi-line value line by line.
+            # Refuse anything a client key cannot contain. Generated keys are
+            # hex. A case pattern, not grep, which would pass a multi-line
+            # value line by line.
             case "$key" in
               *[!A-Za-z0-9._~+/=:-]*)
                 echo "::warning::$key_var has characters a client key cannot contain; using the anonymous docs MCP quota."
@@ -979,8 +982,19 @@ jobs:
             esac
           fi
           if [ -n "$key" ]; then
-            config=$(jq -cn --arg url "$DOCS_MCP_URL" --arg key "$key" \
-              '{mcpServers: {"redpanda-docs": {type: "http", url: $url, headers: {"x-client-key": $key}}}}')
+            # Masked only once it is known to be one line: add-mask covers
+            # the first line of a value and would print the rest.
+            echo "::add-mask::$key"
+            headers_file="$RUNNER_TEMP/docs-mcp-headers.json"
+            if ! jq -cn --arg key "$key" '{"x-client-key": $key}' \
+                | sudo -n sh -c 'umask 077 && cat > "$1"' sh "$headers_file"; then
+              echo "::warning::Could not store the docs MCP client key; using the anonymous docs MCP quota."
+              key=""
+            fi
+          fi
+          if [ -n "$key" ]; then
+            config=$(jq -cn --arg url "$DOCS_MCP_URL" --arg helper "sudo -n cat $headers_file" \
+              '{mcpServers: {"redpanda-docs": {type: "http", url: $url, headersHelper: $helper}}}')
             echo "Docs MCP calls will send the trusted client key."
           else
             config=$(jq -cn --arg url "$DOCS_MCP_URL" \
@@ -1008,8 +1022,8 @@ jobs:
           # tokens must not be readable from the review's environment. Its
           # env names come from the secret id the same way the mint step
           # derives them, so a renamed secret is still scrubbed. The docs MCP
-          # key is blanked too: the review reaches it only through the
-          # DOCS_MCP_CONFIG its --mcp-config needs.
+          # key is blanked too: Claude Code reads it from the root-only file
+          # the build step wrote, through the headersHelper in DOCS_MCP_CONFIG.
           prefix=$(printf '%s' "$CLIENT_SECRET_ID" | awk -F/ '{print toupper($NF)}' | tr -c 'A-Za-z0-9_\n' '_')
           for v in ACTIONS_BOT_TOKEN "${prefix}_ID" "${prefix}_SECRET" "${prefix}_DOCS_MCP_KEY" AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_DEFAULT_REGION AWS_REGION; do
             echo "$v=" >> "$GITHUB_ENV"
@@ -1050,9 +1064,13 @@ jobs:
           # written for authors and conflict with this prompt (what to report,
           # where published impact goes). The settings input above writes
           # ~/.claude/settings.json, which is the user source, so it still
-          # applies.
+          # applies. The permission mode is pinned because the action defaults
+          # to auto mode, where a classifier can pass a call that no allow
+          # rule covers. In default mode such a call is denied, so the model
+          # cannot run the sudo that reads the docs MCP key file.
           claude_args: >
             --setting-sources user
+            --permission-mode default
             --model ${{ inputs.use_adp_gateway && inputs.gateway_model || 'sonnet' }}
             --max-turns 40
             --disallowed-tools "WebFetch,WebSearch,Edit,MultiEdit,NotebookEdit,Bash(git *)"
@@ -1430,8 +1448,6 @@ jobs:
         working-directory: ${{ runner.temp }}
         env:
           AWS_BEARER_TOKEN_BEDROCK: ''
-          # Holds the docs MCP client key, which the extractor never needs.
-          DOCS_MCP_CONFIG: ''
           PKG: ${{ steps.pkg.outputs.pkg }}
           EXECUTION_FILE: ${{ steps.review.outputs.execution_file }}
           REPO: ${{ github.repository }}

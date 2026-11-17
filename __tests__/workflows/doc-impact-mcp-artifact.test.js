@@ -99,9 +99,7 @@ describe('doc-impact MCP artifact: wiring', () => {
   test('the extract never sees the docs MCP client key', () => {
     // The recording becomes an artifact, and log masking does not cover
     // artifacts. The extractor only stores the URL; it never calls the server.
-    const step = stepNamed(EXTRACT)
-    expect(step.env).toHaveProperty('DOCS_MCP_CONFIG', '')
-    expect(JSON.stringify(step)).not.toMatch(/DOCS_MCP_KEY|x-client-key/)
+    expect(JSON.stringify(stepNamed(EXTRACT))).not.toMatch(/DOCS_MCP_KEY|x-client-key/)
   })
 
   test('uses the resolved doc-tools package, like the lint step', () => {
