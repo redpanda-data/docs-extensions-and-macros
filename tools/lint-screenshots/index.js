@@ -243,7 +243,9 @@ function lintScreenshots (options) {
           `Unquoted alt text contains a comma, which Asciidoctor splits into separate width/height attributes at render time. Wrap the alt text in double quotes or remove the comma: "${altText}"`)
       }
       if (altText.length > opts.maxAltLength) {
-        add('alt-too-long', 'error', ref, `Alt text is ${altText.length} chars (max ${opts.maxAltLength}): "${altText}"`)
+        // A warning, not an error: the limit is a convention, not a WCAG
+        // requirement, so it advises without blocking a PR.
+        add('alt-too-long', 'warning', ref, `Alt text is ${altText.length} chars (max ${opts.maxAltLength}). Keep alt text short and describe a complex image in the page text: "${altText}"`)
       }
       const lowerAlt = altText.toLowerCase()
       if (opts.bannedAltPrefixes.some((p) => lowerAlt.startsWith(p))) {

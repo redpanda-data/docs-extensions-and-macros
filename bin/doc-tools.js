@@ -3343,12 +3343,12 @@ programCli
  * @description
  * Deterministic checks from the docs screenshot standard, run against the
  * .adoc pages under modules/ in a docs repo: every image macro (block and
- * inline) has alt text, the alt text is at most 125 characters, does not
- * start with "screenshot of" / "image of" / "picture of", and has no
- * unquoted comma (Asciidoctor would split it into width/height); the
- * referenced image file exists and is at most 100KB. Those are errors and
- * exit 1. Warnings (exit 0 unless --warnings-as-errors) cover the rest of
- * the standard: images above the 50KB target, JPEG/WebP where PNG or SVG
+ * inline) has alt text, the alt text does not start with "screenshot of" /
+ * "image of" / "picture of", and has no unquoted comma (Asciidoctor would
+ * split it into width/height); the referenced image file exists and is at
+ * most 100KB. Those are errors and exit 1. Warnings (exit 0 unless
+ * --warnings-as-errors) cover the rest of the standard: alt text over 125
+ * characters, images above the 50KB target, JPEG/WebP where PNG or SVG
  * belongs, captures wider than 1920px, and - in --files mode - changed
  * images nothing references. Commented-out macros are skipped.
  *
