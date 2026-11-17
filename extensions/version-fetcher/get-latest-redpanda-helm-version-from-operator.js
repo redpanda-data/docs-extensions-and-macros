@@ -1,12 +1,12 @@
 /**
  * Fetches the latest Helm chart version for an operator release line from the
- * redpanda-operator repository.
+ * operator-enterprise repository.
  *
  * A chart version comes first from the public Helm repository index
  * (charts.redpanda.com), when the caller passes its versions in
  * `options.chartVersions`. The index lists the charts that were actually
  * published (what `helm search repo` reports) and needs no token. The
- * redpanda-operator repository is private, so the GitHub lookups below are
+ * operator-enterprise repository is private, so the GitHub lookups below are
  * fallbacks that only work with a token that can read it.
  *
  * On GitHub, a stable chart version comes from the newest stable
@@ -22,7 +22,7 @@
  *
  * @param {object} github - The GitHub API client.
  * @param {string} owner - The repository owner.
- * @param {string} repo - The repository name (redpanda-operator).
+ * @param {string} repo - The repository name (operator-enterprise).
  * @param {string} stableDockerTag - The stable docker tag in format v<major>.<minor>.<patch>.
  * @param {string} betaDockerTag - Optional beta docker tag in format v<major>.<minor>.<patch>-beta.
  * @param {Object} logger - Optional Antora logger instance for logging

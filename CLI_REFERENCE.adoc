@@ -2590,7 +2590,7 @@ doc-tools generate helm-spec [options]
 *Options:*
 
 `--chart-dir <dir|url>`::
-Chart directory or GitHub URL (default: "https://github.com/redpanda-data/redpanda-operator/charts")
+Chart directory or GitHub URL (default: "https://github.com/redpanda-data/operator-enterprise/charts")
 
 `-t, --tag <tag>`::
 Git tag for released content
@@ -2815,7 +2815,7 @@ Operator release tag for GA/beta content
 Branch name for in-progress content
 
 `-s, --source-path <src>`::
-CRD Go types dir or GitHub URL (default: "https://github.com/redpanda-data/redpanda-operator/operator/api/redpanda/v1alpha2")
+CRD Go types dir or GitHub URL (default: "https://github.com/redpanda-data/operator-enterprise/operator/api/redpanda/v1alpha2")
 
 `-d, --depth <n>`::
 How many levels deep (default: "10")

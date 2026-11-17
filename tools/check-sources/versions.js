@@ -19,10 +19,11 @@ const { latestStablePerLine, releaseLineOf, isOlderReleaseLine } = require('../.
  *                         RC) when the component version is a prerelease
  *   console               latest-console-tag: the newest stable release, for
  *                         every version
- *   redpanda-operator     latest-operator-version: the newest stable release,
+ *   operator-enterprise   latest-operator-version: the newest stable release,
  *                         or for an older version the newest release of its own
  *                         line, else its antora.yml value. The git tag is
- *                         `operator/<tag>` (older releases: `<tag>`)
+ *                         `operator/<tag>` (older releases: `<tag>`). The
+ *                         old name, redpanda-operator, resolves the same way
  *   connect               latest-connect-tag: the newest release, for every
  *                         version
  *
@@ -41,6 +42,8 @@ const { latestStablePerLine, releaseLineOf, isOlderReleaseLine } = require('../.
 const VERSIONED = Object.freeze({
   'streaming-enterprise': 'latest-redpanda-tag',
   console: 'latest-console-tag',
+  'operator-enterprise': 'latest-operator-version',
+  // The name operator-enterprise had before it was renamed.
   'redpanda-operator': 'latest-operator-version',
   connect: 'latest-connect-tag'
 })
@@ -168,7 +171,7 @@ function createVersionResolver ({ latest = fetchLatestReleases, root = process.c
       }
     } else if (repo === 'console') {
       pick = l.console ? { value: l.console, by: 'latest-console-tag (newest stable)' } : fromYml('latest-console-tag', 'live lookup failed') || mapVersion(fromYml('latest-console-version', 'live lookup failed'))
-    } else if (repo === 'redpanda-operator') {
+    } else if (key === 'latest-operator-version') {
       if (older) {
         const own = line && latestStablePerLine(l.operatorReleases).get(line)
         pick = own ? { value: own, by: `latest-operator-version (newest ${line} release)` } : fromYml('latest-operator-version', `no ${line} release found`)
@@ -179,7 +182,7 @@ function createVersionResolver ({ latest = fetchLatestReleases, root = process.c
     }
     if (!pick) return { error: `could not resolve ${key} for ${component.name || 'this component'} ${component.version || ''}`.trim() + ': the live lookup failed and its antora.yml sets no fallback' }
     const tag = withV(pick.value)
-    const refs = repo === 'redpanda-operator' ? [`operator/${tag}`, tag] : [tag]
+    const refs = key === 'latest-operator-version' ? [`operator/${tag}`, tag] : [tag]
     return { refs, by: pick.by, fallback: Boolean(pick.fallback) }
   }
 
