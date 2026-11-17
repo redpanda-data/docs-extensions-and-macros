@@ -921,6 +921,8 @@ automation
   .option('--skip-pages', 'Do not overwrite modules/reference/pages/*-metrics-reference.adoc (CI uses this because the committed pages are hand-curated)')
   .option('--ready-timeout <seconds>', 'Fail if the cluster is not healthy within this many seconds (default: CLUSTER_READY_TIMEOUT or 300)')
   .option('--settle-timeout <seconds>', 'Stop waiting for new metric families after this many seconds (default: METRICS_SETTLE_MAX or 300)')
+  .option('--inventory <path>', 'Source inventory from tools/metrics/extract_source.py. Adds the defining file to each metric in redpanda-metrics-<tag>.json, and the families the source registers that the scrape did not see')
+  .option('--dataset-dir <dir>', 'Write redpanda-metrics-<tag>.json here instead of the output directory. In a docs repository, pass modules/reference/attachments, where the metric macros read it. Used only when --tag is a release tag such as v26.2.7')
   .action((options) => {
     verifyMetricsDependencies()
 
@@ -958,7 +960,9 @@ automation
     console.log(`Generating metrics docs for new tag ${newTag}…`)
     const newArgs = options.outputDir
       ? [...generatorArgs, '--output-dir', path.resolve(options.outputDir)]
-      : generatorArgs
+      : [...generatorArgs]
+    if (options.inventory) newArgs.push('--inventory', path.resolve(options.inventory))
+    if (options.datasetDir) newArgs.push('--dataset-dir', path.resolve(options.datasetDir))
     runClusterDocs('metrics', newTag, options, newArgs, timing)
 
     if (oldTag) {

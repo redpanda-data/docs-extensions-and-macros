@@ -33,6 +33,14 @@ MAX_OBSERVED_VALUES = 12
 # Labels that carry series structure, not a dimension of the metric.
 STRUCTURAL_LABELS = ("le", "quantile")
 
+# The types the schema allows. Any other TYPE value is stored as null.
+METRIC_TYPES = ("counter", "gauge", "histogram", "summary", "untyped")
+
+_NAME_RE = re.compile(r"^[A-Za-z_:][A-Za-z0-9_:]*$")
+# An inventory name may also hold a placeholder such as <upstream>, for a
+# part of the name that is set at run time.
+_INVENTORY_NAME_RE = re.compile(r"^[A-Za-z_:][A-Za-z0-9_:<>]*$")
+
 _META_RE = re.compile(r"^# (HELP|TYPE|UNIT)\s+(\S+)(?:\s+(.*))?$")
 _SAMPLE_RE = re.compile(r"^([A-Za-z_:][A-Za-z0-9_:]*)(\{.*\})?\s+(\S+)(?:\s+\S+)?\s*$")
 
@@ -49,6 +57,13 @@ _UNIT_SUFFIXES = (
     ("_ms", "milliseconds"),
     ("_us", "microseconds"),
 )
+
+# A rate, not a duration, so the time suffix is not the unit.
+_RATE_SUFFIXES = ("_per_sec", "_per_second")
+
+
+class DatasetError(ValueError):
+    """The inputs cannot be turned into a dataset that can be trusted."""
 
 
 def parse_labels(text):
@@ -96,6 +111,8 @@ def parse_labels(text):
 def derive_unit(name):
     """The unit a metric name states, or None."""
     base = name[:-len("_total")] if name.endswith("_total") else name
+    if base.endswith(_RATE_SUFFIXES):
+        return None
     for suffix, unit in _UNIT_SUFFIXES:
         if base.endswith(suffix):
             return unit
@@ -125,11 +142,14 @@ def parse_exposition(text):
             if not match:
                 continue
             kind, name, value = match.group(1), match.group(2), (match.group(3) or "").strip()
+            if not _NAME_RE.match(name):
+                continue
             family = families.setdefault(name, _new_family())
             if kind == "HELP" and not family["help"]:
                 family["help"] = value
             elif kind == "TYPE" and family["type"] is None:
-                family["type"] = value.split()[0] if value else None
+                declared = value.split()[0] if value else None
+                family["type"] = declared if declared in METRIC_TYPES else None
             elif kind == "UNIT" and family["unit"] is None:
                 family["unit"] = value or None
             continue
@@ -254,22 +274,76 @@ def _source_only_entry(name, endpoint, source):
     return entry
 
 
+def check_inventory(inventory):
+    """Raise DatasetError unless the inventory has the shape extract_source.py writes."""
+    if not isinstance(inventory, dict):
+        raise DatasetError('the top level must be an object with "public" and "internal" objects')
+    if inventory.get("ref") is not None and not isinstance(inventory["ref"], str):
+        raise DatasetError('"ref" must be a string')
+    for endpoint in ("public", "internal"):
+        families = inventory.get(endpoint)
+        if not isinstance(families, dict):
+            raise DatasetError(f'"{endpoint}" must be an object of family name to entry')
+        for name, entry in families.items():
+            if not _INVENTORY_NAME_RE.match(name):
+                raise DatasetError(f'{endpoint} family "{name}" is not a metric name')
+            if not isinstance(entry, dict):
+                raise DatasetError(f"{endpoint} family {name} must be an object")
+            if entry.get("type") is not None and entry["type"] not in METRIC_TYPES:
+                raise DatasetError(f'{endpoint} family {name} has the type {entry["type"]!r}, expected one of {", ".join(METRIC_TYPES)}')
+            for field in ("help", "defined_in"):
+                if entry.get(field) is not None and not isinstance(entry[field], str):
+                    raise DatasetError(f'{endpoint} family {name} must have a string "{field}"')
+
+
+def _endpoint_conflicts(public, internal, inventory):
+    """Families that the scrape and the inventory put on both endpoints."""
+    sides = [(endpoint, families, inventory.get(endpoint, {}))
+             for endpoint, families in (("public", public), ("internal", internal))]
+    on_both = (set(public) | set(sides[0][2])) & (set(internal) | set(sides[1][2]))
+    conflicts = []
+    for name in sorted(on_both):
+        seen = []
+        for endpoint, families, source in sides:
+            if name in families:
+                seen.append(f"scraped on {endpoint}")
+            elif name in source:
+                seen.append(f"in the inventory under {endpoint}")
+        conflicts.append(f"{name} ({', '.join(seen)})")
+    return conflicts
+
+
 def build_dataset(version, public, internal, inventory=None, generated_from=None):
     """The dataset for one release.
 
     `public` and `internal` are merged families from parse_exposition. With an
     inventory, families only the source knows are added as observed: false,
-    except the ones the source marks as never registered, which are listed
-    under `excluded` with the reason.
+    except the ones the source marks as never registered and the ones whose
+    name holds a placeholder, which are listed under `excluded` with the
+    reason.
+
+    A family has one entry, keyed by its name, so a name on both endpoints
+    would lose one side. That raises DatasetError.
     """
+    inventory = inventory or {}
+    conflicts = _endpoint_conflicts(public, internal, inventory)
+    if conflicts:
+        raise DatasetError(
+            "A family must be on one endpoint, and the scrape and the source inventory must agree on it. "
+            "Check: " + "; ".join(conflicts)
+        )
+
     metrics = {}
     excluded = []
     for endpoint, families in (("public", public), ("internal", internal)):
-        source = (inventory or {}).get(endpoint, {})
+        source = inventory.get(endpoint, {})
         for name in sorted(families):
             metrics[name] = _entry(name, endpoint, families[name], source.get(name))
         for name in sorted(source):
             if name in families:
+                continue
+            if "<" in name or ">" in name:
+                excluded.append({"name": name, "endpoint": endpoint, "reason": "name depends on configuration"})
                 continue
             if source[name].get("condition") == "never":
                 excluded.append({"name": name, "endpoint": endpoint, "reason": "never registered"})

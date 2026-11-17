@@ -13,7 +13,10 @@
  * - the unit is read from the name,
  * - several brokers merge into one set, and
  * - a source inventory adds the defining file, the families the scrape did
- *   not see, and the exclusions.
+ *   not see, and the exclusions,
+ * - a family on both endpoints, or a malformed inventory, fails the run,
+ * - --dataset-dir writes a release's dataset where the macros read it, and
+ * - the schema accepts the curated fields the macros read.
  *
  * metrics.json must keep its shape, so that is asserted too.
  */
@@ -274,5 +277,274 @@ describeIfPython('redpanda-metrics-<version>.json', () => {
     const run = generate(['--inventory', path.join(workDir, 'missing.json')])
     expect(run.result.status).toBe(1)
     expect(run.combined).toMatch(/Cannot read the source inventory/)
+  })
+
+  const validates = (dataset) => {
+    const validate = new Ajv({ allErrors: true }).compile(SCHEMA)
+    const ok = validate(dataset)
+    return ok || validate.errors
+  }
+
+  describe('a family on both endpoints', () => {
+    it('fails when the inventory puts a scraped family on the other endpoint', () => {
+      const inventory = { public: {}, internal: { redpanda_cluster_brokers: { type: 'gauge', help: null } } }
+      const run = generate(['--inventory', file('inventory.json', JSON.stringify(inventory))])
+      expect(run.result.status).toBe(1)
+      expect(run.combined).toMatch(/redpanda_cluster_brokers \(scraped on public, in the inventory under internal\)/)
+      expect(run.combined).not.toMatch(/Traceback/)
+      expect(fs.existsSync(path.join(run.out, 'redpanda-metrics-v0.0.1.json'))).toBe(false)
+    })
+
+    it('fails when a family is scraped on both endpoints', () => {
+      const both = '# HELP redpanda_cluster_brokers Number of configured brokers in the cluster\n# TYPE redpanda_cluster_brokers gauge\nredpanda_cluster_brokers{} 3\n'
+      const run = generate(['--internal-file', file('int1.txt', both)])
+      expect(run.result.status).toBe(1)
+      expect(run.combined).toMatch(/redpanda_cluster_brokers \(scraped on public, scraped on internal\)/)
+      expect(fs.existsSync(path.join(run.out, 'redpanda-metrics-v0.0.1.json'))).toBe(false)
+    })
+  })
+
+  it('gives a per-second rate no time unit', () => {
+    const rates = `# HELP redpanda_instance_network_bytes_per_sec Host network bandwidth in bytes/sec
+# TYPE redpanda_instance_network_bytes_per_sec gauge
+redpanda_instance_network_bytes_per_sec{} 1
+# TYPE redpanda_example_ops_per_second_total counter
+redpanda_example_ops_per_second_total{} 1
+`
+    const run = generate(['--public-file', file('pub2.txt', rates)])
+    if (run.result.status !== 0) throw new Error(run.combined)
+    const dataset = read(run.out)
+    expect(dataset.metrics.redpanda_instance_network_bytes_per_sec.unit).toBeNull()
+    expect(dataset.metrics.redpanda_instance_network_bytes_per_sec.provenance.unit).toBeUndefined()
+    expect(dataset.metrics.redpanda_example_ops_per_second_total.unit).toBeNull()
+  })
+
+  describe('an inventory name with a placeholder', () => {
+    const placeholder = 'vectorized_cloud_roles__<upstream>_auth_refresh_fetch_errors'
+
+    it('is listed under excluded, not under metrics', () => {
+      const inventory = { public: {}, internal: { [placeholder]: { type: 'counter', help: null, defined_in: 'src/v/cloud_roles/probe.cc' } } }
+      const run = generate(['--inventory', file('inventory.json', JSON.stringify(inventory))])
+      if (run.result.status !== 0) throw new Error(run.combined)
+      const dataset = read(run.out)
+      expect(dataset.metrics[placeholder]).toBeUndefined()
+      expect(dataset.excluded).toEqual([{ name: placeholder, endpoint: 'internal', reason: 'name depends on configuration' }])
+      expect(dataset.counts).toMatchObject({ source_only: 0, excluded: 1 })
+      expect(validates(dataset)).toBe(true)
+    })
+
+    it('is not a metric name the schema accepts', () => {
+      const run = generate()
+      if (run.result.status !== 0) throw new Error(run.combined)
+      const dataset = read(run.out)
+      dataset.metrics[placeholder] = { ...dataset.metrics.vectorized_raft_leader_for, name: placeholder }
+      expect(validates(dataset)).not.toBe(true)
+    })
+  })
+
+  describe('a malformed inventory', () => {
+    it.each([
+      ['a list', [], /must be an object with "public" and "internal" objects/],
+      ['a list for an endpoint', { public: [], internal: {} }, /"public" must be an object/],
+      ['no internal object', { public: {} }, /"internal" must be an object/],
+      ['an entry that is not an object', { public: { redpanda_x_total: 'x' }, internal: {} }, /redpanda_x_total must be an object/],
+      ['a type the schema does not have', { public: { redpanda_x_total: { type: 'info' } }, internal: {} }, /redpanda_x_total has the type 'info'/],
+      ['a description that is not text', { public: { redpanda_x_total: { type: 'counter', help: 5 } }, internal: {} }, /must have a string "help"/],
+      ['a ref that is not text', { ref: 7, public: {}, internal: {} }, /"ref" must be a string/]
+    ])('fails with a message for %s', (_, inventory, message) => {
+      const run = generate(['--inventory', file('inventory.json', JSON.stringify(inventory))])
+      expect(run.result.status).toBe(1)
+      expect(run.combined).toMatch(/is not valid/)
+      expect(run.combined).toMatch(message)
+      expect(run.combined).not.toMatch(/Traceback/)
+      expect(fs.existsSync(path.join(run.out, 'redpanda-metrics-v0.0.1.json'))).toBe(false)
+    })
+  })
+
+  it('writes a valid dataset for a TYPE the schema does not have and a name that is not a metric name', () => {
+    const odd = `# TYPE redpanda_example_info unknown
+redpanda_example_info{} 1
+# HELP foo.bar dotted
+# TYPE foo.bar gauge
+`
+    const run = generate(['--public-file', file('pub2.txt', odd)])
+    if (run.result.status !== 0) throw new Error(run.combined)
+    const dataset = read(run.out)
+    expect(dataset.metrics.redpanda_example_info.type).toBeNull()
+    expect(dataset.metrics['foo.bar']).toBeUndefined()
+    expect(validates(dataset)).toBe(true)
+  })
+
+  describe('--dataset-dir', () => {
+    // The pattern the metric macros load attachments with.
+    const MACRO_FILE_RX = /^redpanda-metrics-(v\d+\.\d+\.\d+(?:-[\w.]+)?)\.json$/
+
+    const run = (version, extra = []) => {
+      const out = path.join(workDir, 'out')
+      const result = spawnSync(PYTHON, ['-I', SCRIPT, version, '--output-dir', out, '--skip-pages',
+        '--public-file', file('pub0.txt', PUBLIC_BROKER_0), '--internal-file', file('int0.txt', INTERNAL), ...extra],
+      { cwd: workDir, encoding: 'utf8' })
+      return { result, out, combined: `${result.stdout || ''}${result.stderr || ''}` }
+    }
+
+    it('writes the dataset to the output directory by default', () => {
+      const { result, out } = run('v26.2.7')
+      expect(result.status).toBe(0)
+      expect(fs.readdirSync(out).sort()).toEqual(['internal-metrics.adoc', 'metrics.adoc', 'metrics.json', 'redpanda-metrics-v26.2.7.json'])
+    })
+
+    it.each(['v26.2.7', 'v26.3.1-rc2'])('writes the dataset for %s there, under a name the macros load', (version) => {
+      const attachments = path.join(workDir, 'modules', 'reference', 'attachments')
+      const { result, out, combined } = run(version, ['--dataset-dir', attachments])
+      if (result.status !== 0) throw new Error(combined)
+      const written = fs.readdirSync(attachments)
+      expect(written).toEqual([`redpanda-metrics-${version}.json`])
+      expect(written[0]).toMatch(MACRO_FILE_RX)
+      expect(fs.readdirSync(out).sort()).toEqual(['internal-metrics.adoc', 'metrics.adoc', 'metrics.json'])
+      expect(validates(JSON.parse(fs.readFileSync(path.join(attachments, written[0]), 'utf8')))).toBe(true)
+    })
+
+    it.each(['dev', 'v26.2'])('does not write there for %s, which is not a release tag', (version) => {
+      const attachments = path.join(workDir, 'modules', 'reference', 'attachments')
+      const { result, out, combined } = run(version, ['--dataset-dir', attachments])
+      expect(result.status).toBe(0)
+      expect(combined).toMatch(new RegExp(`${version.replace('.', '\\.')} is not a release tag, so the dataset is not written to`))
+      expect(fs.existsSync(attachments)).toBe(false)
+      expect(fs.existsSync(path.join(out, `redpanda-metrics-${version}.json`))).toBe(true)
+    })
+  })
+})
+
+describe('the curated fields the metric macros read', () => {
+  // A subset of the fixture the metric: and metricval: macro tests use. The
+  // overrides merge supplies these fields, so the schema must accept them.
+  const base = { type: 'counter', unit: null, labels: [], histogram: null, observed: true }
+  const curated = () => ({
+    schema_version: 1,
+    redpanda_version: 'v26.2.7',
+    generated_from: { sources: 3, source_ref: 'v26.2.7' },
+    counts: { public: 4, internal: 0, observed: 3, source_only: 1, excluded: 0 },
+    metrics: {
+      redpanda_cluster_brokers: {
+        ...base,
+        name: 'redpanda_cluster_brokers',
+        endpoint: 'public',
+        type: 'gauge',
+        description: 'Number of configured brokers in the cluster',
+        source_description: 'Number of configured brokers in the cluster',
+        provenance: { type: 'scraped', source_description: 'scraped', description: 'scraped', labels: 'scraped', defined_in: 'source' },
+        defined_in: 'src/v/cluster/controller_probe.cc',
+        category: 'Cluster metrics',
+        use_cases: ['cluster-health', 'alerting'],
+        usage: 'Create an alert if this gauge falls below a steady-state threshold.',
+        availability: { self_managed: true, dedicated: true, byoc: true, serverless: false },
+        introduced: 'v22.1',
+        deprecated: null,
+        related_properties: ['health_monitor_metrics_enabled'],
+        related_topics: [
+          'xref:manage:monitoring.adoc[Monitor Redpanda]',
+          'self-managed-only: xref:manage:cluster-maintenance/cluster-diagnostics.adoc[Cluster diagnostics]'
+        ]
+      },
+      redpanda_kafka_request_latency_seconds: {
+        ...base,
+        name: 'redpanda_kafka_request_latency_seconds',
+        endpoint: 'public',
+        type: 'histogram',
+        unit: 'seconds',
+        description: 'Internal latency of kafka produce requests',
+        source_description: 'Internal latency of kafka produce requests',
+        labels: [{ name: 'redpanda_request', observed_values: ['consume', 'produce'], description: 'The kind of request.', values: ['consume', 'produce'] }],
+        histogram: { buckets: ['0.000255', '+Inf'], series: ['_bucket', '_count', '_sum'] },
+        provenance: { type: 'scraped', source_description: 'scraped', description: 'scraped', labels: 'scraped', unit: 'derived', histogram: 'scraped' },
+        usage: 'Watch the 99th percentile.\n\nA rising value means clients wait longer for produce and fetch requests.',
+        availability: { self_managed: true, dedicated: true, byoc: true, serverless: true }
+      },
+      redpanda_cluster_health_refreshes_total: {
+        ...base,
+        name: 'redpanda_cluster_health_refreshes_total',
+        endpoint: 'public',
+        description: 'Total successful health-report refreshes performed by this node since startup.',
+        source_description: 'Total successful health-report refreshes performed by this node since startup.',
+        observed: false,
+        provenance: { type: 'source', source_description: 'source', description: 'source' },
+        requires: [{ property: 'health_monitor_metrics_enabled', value: true }],
+        availability: { self_managed: true, dedicated: false, byoc: false, serverless: false }
+      },
+      redpanda_example_deprecated_total: {
+        ...base,
+        name: 'redpanda_example_deprecated_total',
+        endpoint: 'public',
+        description: 'A metric made up for the tests, marked deprecated.',
+        source_description: 'A metric made up for the tests, marked deprecated.',
+        deprecated: 'v26.1',
+        provenance: { type: 'scraped', description: 'scraped' }
+      }
+    },
+    removed: { redpanda_example_removed_total: { endpoint: 'public', introduced: 'v24.1', removed: 'v26.2' } },
+    excluded: []
+  })
+
+  const errors = (dataset) => {
+    const validate = new Ajv({ allErrors: true }).compile(SCHEMA)
+    return validate(dataset) ? [] : validate.errors.map((error) => `${error.instancePath} ${error.message}`)
+  }
+
+  it('validate against the schema', () => {
+    expect(errors(curated())).toEqual([])
+  })
+
+  it('validate with requires as text and a status', () => {
+    const dataset = curated()
+    dataset.metrics.redpanda_cluster_health_refreshes_total.requires = 'Exported when health metrics are on.'
+    dataset.metrics.redpanda_cluster_brokers.status = 'stable'
+    expect(errors(dataset)).toEqual([])
+  })
+
+  it.each([
+    ['an availability with an unknown deployment', (d) => { d.metrics.redpanda_cluster_brokers.availability.cloud = true }],
+    ['an availability that is not a boolean', (d) => { d.metrics.redpanda_cluster_brokers.availability.serverless = 'no' }],
+    ['a requirement with no property', (d) => { d.metrics.redpanda_cluster_health_refreshes_total.requires = [{ value: true }] }],
+    ['use cases that are not a list', (d) => { d.metrics.redpanda_cluster_brokers.use_cases = 'alerting' }],
+    ['a field the schema does not define', (d) => { d.metrics.redpanda_cluster_brokers.notes = 'x' }]
+  ])('still reject %s', (_, change) => {
+    const dataset = curated()
+    change(dataset)
+    expect(errors(dataset)).not.toEqual([])
+  })
+})
+
+describe('doc-tools generate metrics-docs', () => {
+  // Stand-ins for docker, bash and python3 on PATH, so the command runs
+  // without a cluster and records what it would pass to the generator.
+  const itOnPosix = process.platform === 'win32' ? it.skip : it
+
+  itOnPosix('forwards --inventory and --dataset-dir to the generator', () => {
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'metrics-cli-'))
+    try {
+      const bin = path.join(workDir, 'bin')
+      const argsFile = path.join(workDir, 'args.txt')
+      fs.mkdirSync(bin)
+      const stub = (name, body) => fs.writeFileSync(path.join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 })
+      stub('docker', 'exit 0')
+      stub('python3', 'echo "Python 3.12.0"')
+      stub('bash', `printf '%s\\n' "$@" > "${argsFile}"`)
+
+      const result = spawnSync(process.execPath, [path.join(REPO_ROOT, 'bin', 'doc-tools.js'), 'generate', 'metrics-docs',
+        '--tag', 'v26.2.7', '--skip-pages', '--inventory', 'inv.json', '--dataset-dir', 'modules/reference/attachments'],
+      { cwd: workDir, encoding: 'utf8', env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}` } })
+      if (result.status !== 0) throw new Error(`${result.stdout}${result.stderr}`)
+
+      const real = fs.realpathSync(workDir)
+      const args = fs.readFileSync(argsFile, 'utf8').trim().split('\n')
+      expect(args.slice(1, 3)).toEqual(['metrics', 'v26.2.7'])
+      expect(args.slice(-5)).toEqual([
+        '--skip-pages',
+        '--inventory', path.join(real, 'inv.json'),
+        '--dataset-dir', path.join(real, 'modules', 'reference', 'attachments')
+      ])
+    } finally {
+      fs.rmSync(workDir, { recursive: true, force: true })
+    }
   })
 })

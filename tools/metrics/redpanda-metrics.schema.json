@@ -33,8 +33,22 @@
     "metrics": {
       "type": "object",
       "description": "Metric family name -> metric.",
-      "propertyNames": { "pattern": "^[A-Za-z_:][A-Za-z0-9_:<>]*$" },
+      "propertyNames": { "pattern": "^[A-Za-z_:][A-Za-z0-9_:]*$" },
       "additionalProperties": { "$ref": "#/definitions/metric" }
+    },
+    "removed": {
+      "type": "object",
+      "description": "Metric family name -> a family an earlier release had and this one does not.",
+      "propertyNames": { "pattern": "^[A-Za-z_:][A-Za-z0-9_:]*$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "endpoint": { "$ref": "#/definitions/endpoint" },
+          "introduced": { "type": "string", "minLength": 1, "description": "Release the family first appeared in." },
+          "removed": { "type": "string", "minLength": 1, "description": "Release the family was removed in." }
+        }
+      }
     },
     "excluded": {
       "type": "array",
@@ -72,7 +86,35 @@
           "items": { "type": "string" },
           "minItems": 1,
           "uniqueItems": true
+        },
+        "description": { "type": "string", "description": "Text for readers. From the overrides file." },
+        "values": {
+          "type": "array",
+          "description": "The complete set of values the label can take. From the overrides file.",
+          "items": { "type": "string" },
+          "uniqueItems": true
         }
+      }
+    },
+    "availability": {
+      "type": "object",
+      "description": "Deployment -> whether the metric is available there.",
+      "additionalProperties": false,
+      "required": ["self_managed", "dedicated", "byoc", "serverless"],
+      "properties": {
+        "self_managed": { "type": "boolean" },
+        "dedicated": { "type": "boolean" },
+        "byoc": { "type": "boolean" },
+        "serverless": { "type": "boolean" }
+      }
+    },
+    "requirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["property"],
+      "properties": {
+        "property": { "type": "string", "minLength": 1, "description": "Name of a configuration property." },
+        "value": { "description": "The value the property must have." }
       }
     },
     "histogram": {
@@ -108,6 +150,36 @@
         "histogram": { "oneOf": [{ "type": "null" }, { "$ref": "#/definitions/histogram" }] },
         "observed": { "type": "boolean", "description": "false when the family comes from the source inventory and was not in the scrape." },
         "defined_in": { "type": "string", "description": "Source file that registers the family." },
+        "category": { "type": "string", "minLength": 1, "description": "Section on the reference page." },
+        "use_cases": {
+          "type": "array",
+          "description": "What a reader uses the metric for.",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "usage": { "type": "string", "description": "How to use the metric, as AsciiDoc." },
+        "availability": { "$ref": "#/definitions/availability" },
+        "requires": {
+          "description": "When the family is exported: the property values it needs, or text.",
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "array", "items": { "$ref": "#/definitions/requirement" } }
+          ]
+        },
+        "introduced": { "type": "string", "minLength": 1, "description": "Release the family first appeared in." },
+        "deprecated": { "type": ["string", "null"], "description": "Release the family was deprecated in, or a note. null when it is not deprecated." },
+        "status": { "type": "string", "minLength": 1 },
+        "related_properties": {
+          "type": "array",
+          "description": "Names of related configuration properties.",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "related_topics": {
+          "type": "array",
+          "description": "Xrefs to related pages, in the same form as the property overrides.",
+          "items": { "type": "string", "minLength": 1 }
+        },
         "provenance": {
           "type": "object",
           "description": "Field name -> where its value came from.",

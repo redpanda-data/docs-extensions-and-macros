@@ -37,6 +37,9 @@ DEFAULT_ADMIN_URL = "http://localhost:19644"
 EXIT_FAILURE = 1
 EXIT_NO_METRICS = 2
 
+# The macros load redpanda-metrics-<version>.json only for a release tag.
+RELEASE_TAG_RE = re.compile(r"^v\d+\.\d+\.\d+(?:-[\w.]+)?$")
+
 def generated_marker(generator, source, hint=""):
     """Same marker shape as cli-utils/generated-marker.js (no version, so a
     release does not rewrite every file); convert-to-markdown reads it."""
@@ -264,6 +267,10 @@ def parse_args(argv):
     parser.add_argument("--inventory", metavar="PATH",
                         help="Source inventory from extract_source.py. Adds the defining file to each metric in "
                              "redpanda-metrics-<version>.json, and the families the source registers that the scrape did not see")
+    parser.add_argument("--dataset-dir", metavar="DIR",
+                        help="Directory for redpanda-metrics-<version>.json (default: the output directory). "
+                             "In a docs repository, pass modules/reference/attachments, where the metric macros read it. "
+                             "Used only when the version is a release tag such as v26.2.7")
     return parser.parse_args(argv)
 
 def main(argv=None):
@@ -317,17 +324,36 @@ def main(argv=None):
         except (OSError, ValueError) as e:
             logging.error(f"Cannot read the source inventory {args.inventory}: {e}. Exiting.")
             return EXIT_FAILURE
+        try:
+            metrics_dataset.check_inventory(inventory)
+        except metrics_dataset.DatasetError as e:
+            logging.error(f"The source inventory {args.inventory} is not valid: {e}. Nothing was written.")
+            return EXIT_FAILURE
     generated_from = {"sources": len(public_sources)}
     if inventory and inventory.get("ref"):
         generated_from["source_ref"] = inventory["ref"]
-    families = metrics_dataset.build_dataset(
-        tag_modified,
-        metrics_dataset.merge_families([metrics_dataset.parse_exposition(t) for t in public_texts]),
-        metrics_dataset.merge_families([metrics_dataset.parse_exposition(t) for t in internal_texts]),
-        inventory=inventory,
-        generated_from=generated_from,
-    )
-    dataset_file = os.path.join(output_dir, f"redpanda-metrics-{tag_modified}.json")
+    try:
+        families = metrics_dataset.build_dataset(
+            tag_modified,
+            metrics_dataset.merge_families([metrics_dataset.parse_exposition(t) for t in public_texts]),
+            metrics_dataset.merge_families([metrics_dataset.parse_exposition(t) for t in internal_texts]),
+            inventory=inventory,
+            generated_from=generated_from,
+        )
+    except metrics_dataset.DatasetError as e:
+        logging.error(f"Cannot build the dataset. {e}. Nothing was written.")
+        return EXIT_FAILURE
+    dataset_dir = output_dir
+    if args.dataset_dir:
+        if RELEASE_TAG_RE.match(tag_modified):
+            dataset_dir = args.dataset_dir
+            ensure_directory_exists(dataset_dir)
+        else:
+            logging.info(
+                f"{tag_modified} is not a release tag, so the dataset is not written to {args.dataset_dir}. "
+                f"The macros only load files for a release tag. It is written to {output_dir}."
+            )
+    dataset_file = os.path.join(dataset_dir, f"redpanda-metrics-{tag_modified}.json")
     with open(dataset_file, "w", encoding="utf-8") as f:
         json.dump(families, f, indent=2)
         f.write("\n")
