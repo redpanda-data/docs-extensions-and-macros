@@ -1,0 +1,330 @@
+{
+  "schema_version": 1,
+  "redpanda_version": "v26.2.7",
+  "generated_from": {
+    "sources": 3,
+    "source_ref": "v26.2.7"
+  },
+  "counts": {
+    "public": 8,
+    "internal": 1,
+    "observed": 7,
+    "source_only": 2,
+    "excluded": 0
+  },
+  "metrics": {
+    "redpanda_cluster_brokers": {
+      "name": "redpanda_cluster_brokers",
+      "endpoint": "public",
+      "type": "gauge",
+      "unit": null,
+      "description": "Number of configured brokers in the cluster",
+      "source_description": "Number of configured brokers in the cluster",
+      "labels": [],
+      "histogram": null,
+      "observed": true,
+      "provenance": {
+        "type": "scraped",
+        "source_description": "scraped",
+        "description": "scraped",
+        "labels": "scraped",
+        "defined_in": "source"
+      },
+      "defined_in": "src/v/cluster/controller_probe.cc",
+      "category": "Cluster metrics",
+      "use_cases": [
+        "cluster-health",
+        "alerting"
+      ],
+      "usage": "Create an alert if this gauge falls below a steady-state threshold.",
+      "availability": {
+        "self_managed": true,
+        "dedicated": true,
+        "byoc": true,
+        "serverless": false
+      },
+      "introduced": "v22.1",
+      "deprecated": null,
+      "related_properties": [
+        "health_monitor_metrics_enabled"
+      ],
+      "related_topics": [
+        "xref:manage:monitoring.adoc[Monitor Redpanda]",
+        "self-managed-only: xref:manage:cluster-maintenance/cluster-diagnostics.adoc[Cluster diagnostics]"
+      ]
+    },
+    "redpanda_kafka_request_bytes_total": {
+      "name": "redpanda_kafka_request_bytes_total",
+      "endpoint": "public",
+      "type": "counter",
+      "unit": "bytes",
+      "description": "Total number of bytes read from or written to the partitions of a topic. The total may include fetched bytes that are not returned to the client.",
+      "source_description": "Total number of bytes read from or written to the partitions of a topic. The total may include fetched bytes that are not returned to the client.",
+      "labels": [
+        {
+          "name": "redpanda_namespace",
+          "observed_values": [
+            "kafka",
+            "kafka_internal",
+            "redpanda"
+          ]
+        },
+        {
+          "name": "redpanda_request",
+          "observed_values": [
+            "consume",
+            "follower_consume",
+            "produce"
+          ]
+        },
+        {
+          "name": "redpanda_topic"
+        }
+      ],
+      "histogram": null,
+      "observed": true,
+      "provenance": {
+        "type": "scraped",
+        "source_description": "scraped",
+        "description": "scraped",
+        "labels": "scraped",
+        "unit": "derived",
+        "defined_in": "source"
+      },
+      "defined_in": "src/v/cluster/partition_probe.cc"
+    },
+    "redpanda_kafka_request_latency_seconds": {
+      "name": "redpanda_kafka_request_latency_seconds",
+      "endpoint": "public",
+      "type": "histogram",
+      "unit": "seconds",
+      "description": "Internal latency of kafka produce requests",
+      "source_description": "Internal latency of kafka produce requests",
+      "labels": [
+        {
+          "name": "redpanda_request",
+          "observed_values": [
+            "consume",
+            "produce"
+          ],
+          "description": "The kind of request.",
+          "values": [
+            "consume",
+            "produce"
+          ]
+        }
+      ],
+      "histogram": {
+        "buckets": [
+          "0.000255",
+          "0.000511",
+          "0.001023",
+          "0.002047",
+          "0.004095",
+          "0.008191",
+          "0.016383",
+          "0.032767",
+          "0.065535",
+          "0.131071",
+          "0.262143",
+          "0.524287",
+          "1.048575",
+          "2.097151",
+          "4.194303",
+          "8.388607",
+          "16.777215",
+          "33.554431",
+          "+Inf"
+        ],
+        "series": [
+          "_bucket",
+          "_count",
+          "_sum"
+        ]
+      },
+      "observed": true,
+      "provenance": {
+        "type": "scraped",
+        "source_description": "scraped",
+        "description": "scraped",
+        "labels": "scraped",
+        "unit": "derived",
+        "histogram": "scraped",
+        "defined_in": "source"
+      },
+      "defined_in": "src/v/kafka/server/kafka_probe.h",
+      "usage": "Watch the 99th percentile.\n\nA rising value means clients wait longer for produce and fetch requests.",
+      "availability": {
+        "self_managed": true,
+        "dedicated": true,
+        "byoc": true,
+        "serverless": true
+      }
+    },
+    "redpanda_kafka_under_replicated_replicas": {
+      "name": "redpanda_kafka_under_replicated_replicas",
+      "endpoint": "public",
+      "type": "gauge",
+      "unit": null,
+      "description": "Number of under replicated replicas (i.e. replicas that are live, but not at the latest offest)",
+      "source_description": "Number of under replicated replicas (i.e. replicas that are live, but not at the latest offest)",
+      "labels": [
+        {
+          "name": "redpanda_namespace",
+          "observed_values": [
+            "kafka",
+            "kafka_internal",
+            "redpanda"
+          ]
+        },
+        {
+          "name": "redpanda_partition"
+        },
+        {
+          "name": "redpanda_topic"
+        },
+        {
+          "name": "shard",
+          "observed_values": [
+            "0"
+          ]
+        }
+      ],
+      "histogram": null,
+      "observed": true,
+      "provenance": {
+        "type": "scraped",
+        "source_description": "scraped",
+        "description": "scraped",
+        "labels": "scraped",
+        "defined_in": "source"
+      },
+      "defined_in": "src/v/cluster/partition_probe.cc"
+    },
+    "redpanda_kafka_consumer_group_lag_sum": {
+      "name": "redpanda_kafka_consumer_group_lag_sum",
+      "endpoint": "public",
+      "type": "gauge",
+      "unit": null,
+      "description": "Sum of consumer group lag for all topic-partitions",
+      "source_description": "Sum of consumer group lag for all topic-partitions",
+      "labels": [
+        {
+          "name": "redpanda_group",
+          "observed_values": [
+            "transactions-consumer"
+          ]
+        },
+        {
+          "name": "shard"
+        }
+      ],
+      "histogram": null,
+      "observed": true,
+      "provenance": {
+        "type": "scraped",
+        "source_description": "scraped",
+        "description": "scraped",
+        "labels": "scraped",
+        "defined_in": "source"
+      },
+      "defined_in": "src/v/kafka/server/group_probe.h"
+    },
+    "vectorized_alien_receive_batch_queue_length": {
+      "name": "vectorized_alien_receive_batch_queue_length",
+      "endpoint": "internal",
+      "type": "gauge",
+      "unit": null,
+      "description": "Current receive batch queue length",
+      "source_description": "Current receive batch queue length",
+      "labels": [
+        {
+          "name": "shard",
+          "observed_values": [
+            "0"
+          ]
+        }
+      ],
+      "histogram": null,
+      "observed": true,
+      "provenance": {
+        "type": "scraped",
+        "source_description": "scraped",
+        "description": "scraped",
+        "labels": "scraped",
+        "defined_in": "source"
+      },
+      "defined_in": "seastar:src/core/alien.cc"
+    },
+    "redpanda_cloud_storage_anomalies": {
+      "name": "redpanda_cloud_storage_anomalies",
+      "endpoint": "public",
+      "type": "gauge",
+      "unit": null,
+      "description": "",
+      "source_description": "",
+      "labels": [],
+      "histogram": null,
+      "observed": false,
+      "provenance": {
+        "type": "source",
+        "defined_in": "source"
+      },
+      "defined_in": "src/v/cluster/partition_probe.cc"
+    },
+    "redpanda_cluster_health_refreshes_total": {
+      "name": "redpanda_cluster_health_refreshes_total",
+      "endpoint": "public",
+      "type": "counter",
+      "unit": null,
+      "description": "Total successful health-report refreshes performed by this node since startup.",
+      "source_description": "Total successful health-report refreshes performed by this node since startup.",
+      "labels": [],
+      "histogram": null,
+      "observed": false,
+      "provenance": {
+        "type": "source",
+        "source_description": "source",
+        "description": "source",
+        "defined_in": "source"
+      },
+      "defined_in": "src/v/cluster/health_monitor_backend.cc",
+      "requires": [
+        {
+          "property": "health_monitor_metrics_enabled",
+          "value": true
+        }
+      ],
+      "availability": {
+        "self_managed": true,
+        "dedicated": false,
+        "byoc": false,
+        "serverless": false
+      }
+    },
+    "redpanda_example_deprecated_total": {
+      "name": "redpanda_example_deprecated_total",
+      "endpoint": "public",
+      "type": "counter",
+      "unit": null,
+      "description": "A metric made up for the tests, marked deprecated.",
+      "source_description": "A metric made up for the tests, marked deprecated.",
+      "labels": [],
+      "histogram": null,
+      "observed": true,
+      "deprecated": "v26.1",
+      "provenance": {
+        "type": "scraped",
+        "description": "scraped"
+      }
+    }
+  },
+  "removed": {
+    "redpanda_example_removed_total": {
+      "endpoint": "public",
+      "introduced": "v24.1",
+      "removed": "v26.2"
+    }
+  },
+  "excluded": []
+}
