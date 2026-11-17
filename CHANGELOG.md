@@ -1,5 +1,24 @@
 # Changelog
 
+## [5.65.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.64.0...v5.65.0) (2026-11-16)
+
+
+### Features
+
+* add rpk, Connect and Bloblang value and link macros, and check-reference-values ([#458](https://github.com/redpanda-data/docs-extensions-and-macros/issues/458)) ([971723f](https://github.com/redpanda-data/docs-extensions-and-macros/commit/971723f9d174c0a8dc32f3fda24c28b0fb8ec703))
+* **component-catalog:** filter Connect components by use case and link matching Solutions ([#509](https://github.com/redpanda-data/docs-extensions-and-macros/issues/509)) ([f7505fd](https://github.com/redpanda-data/docs-extensions-and-macros/commit/f7505fdd10552f4d60461f9767f0a3792b8ef7ea))
+
+
+### Bug fixes
+
+* make extracted type definitions stable across runs ([#513](https://github.com/redpanda-data/docs-extensions-and-macros/issues/513)) ([45b3e98](https://github.com/redpanda-data/docs-extensions-and-macros/commit/45b3e988c87ad9d9da8dd000572643dbb831c00c))
+* read Helm chart versions from the public Helm repo index ([#508](https://github.com/redpanda-data/docs-extensions-and-macros/issues/508)) ([57b635d](https://github.com/redpanda-data/docs-extensions-and-macros/commit/57b635db81d89c431c9ad239b97d42c65d102bc7))
+
+
+### Reusable workflows and CI
+
+* move redpanda-operator doc-impact items out of the public repo ([#510](https://github.com/redpanda-data/docs-extensions-and-macros/issues/510)) ([4aa2947](https://github.com/redpanda-data/docs-extensions-and-macros/commit/4aa2947d9b2469adbbff61087a7f99e5858cf164))
+
 ## [5.64.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.63.0...v5.64.0) (2026-11-12)
 
 
