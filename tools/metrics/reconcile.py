@@ -42,10 +42,19 @@ TYPE_RE = re.compile(r"^# TYPE\s+(\S+)\s+(\S+)")
 
 def parse_scrape(paths):
     """Union of the families in Prometheus text files: name -> {help, type}."""
-    families = {}
+    texts = []
     for path in paths:
         with open(path, encoding="utf-8", errors="replace") as handle:
-            for line in handle:
+            texts.append(handle.read())
+    return parse_scrape_texts(texts)
+
+
+def parse_scrape_texts(texts):
+    """Union of the families in Prometheus payloads: name -> {help, type}."""
+    families = {}
+    for text in texts:
+        if True:
+            for line in text.splitlines():
                 line = line.rstrip("\n")
                 match = HELP_RE.match(line)
                 if match:
@@ -66,6 +75,9 @@ def explain(name, entry, expected_absent):
     """The reason a source family may be absent from the scrape, or None."""
     if entry.get("condition") == "never":
         return "never registered"
+    if "<" in name:
+        # A placeholder such as <upstream>: the real name is set by configuration.
+        return "name depends on configuration"
     for pattern, reason in expected_absent.items():
         if name == pattern or fnmatch.fnmatchcase(name, pattern):
             return reason

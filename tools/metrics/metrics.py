@@ -9,6 +9,7 @@ import logging
 # sys.path, so add it before importing the sibling module.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dataset as metrics_dataset  # noqa: E402
+import reconcile as metrics_reconcile  # noqa: E402
 
 '''
 ## How it works
@@ -36,6 +37,10 @@ DEFAULT_ADMIN_URL = "http://localhost:19644"
 # exposed nothing worth documenting, which must never become an empty page.
 EXIT_FAILURE = 1
 EXIT_NO_METRICS = 2
+# The scrape and the source inventory disagree: a metric the source registers
+# was not scraped and has no written reason, or the scrape has one the
+# inventory does not know.
+EXIT_INCOMPLETE = 4
 
 # The macros load redpanda-metrics-<version>.json only for a release tag.
 RELEASE_TAG_RE = re.compile(r"^v\d+\.\d+\.\d+(?:-[\w.]+)?$")
@@ -245,6 +250,60 @@ def ensure_directory_exists(directory):
     if not os.path.exists(directory):
         os.makedirs(directory)
 
+def count_missing(inventory, public_texts, internal_texts, expected_absent):
+    """How many source families are not in the scrape and have no written reason."""
+    missing = 0
+    for endpoint, texts in (("public", public_texts), ("internal", internal_texts)):
+        result = metrics_reconcile.reconcile_endpoint(
+            inventory[endpoint], metrics_reconcile.parse_scrape_texts(texts), expected_absent)
+        missing += len(result["missing_unexplained"])
+    return missing
+
+
+def check_completeness(inventory, public_texts, internal_texts, expected_absent):
+    """Compare the scrape with the source inventory and log every gap.
+
+    Returns True when they reconcile. Each message says what to do, because
+    the person reading it is usually looking at a new metric for the first
+    time.
+    """
+    ok = True
+    for endpoint, texts in (("public", public_texts), ("internal", internal_texts)):
+        source = inventory[endpoint]
+        result = metrics_reconcile.reconcile_endpoint(
+            source, metrics_reconcile.parse_scrape_texts(texts), expected_absent)
+        logging.info(
+            f"{endpoint}: {result['in_source']} families in source, {result['scraped']} scraped, "
+            f"{len(result['missing_explained'])} not scraped with a written reason")
+        for name in result["missing_unexplained"]:
+            ok = False
+            where = source[name].get("defined_in") or "unknown file"
+            logging.error(
+                f"{name} ({endpoint}) is registered in {where} and was not scraped. "
+                "Turn on the feature that exports it in docker-compose/metrics "
+                "(a property in bootstrap-extra.yml, a service in metrics.overlay.yml, or an action in "
+                "cli-utils/generate-cluster-docs.sh), or give the reason no cluster can export it in "
+                "docker-compose/metrics/expected-absent.json.")
+        for name in result["scrape_only"]:
+            ok = False
+            logging.error(
+                f"{name} ({endpoint}) was scraped and is not in the source inventory. "
+                "tools/metrics/extract_source.py missed its registration and needs a fix.")
+        for item in result["type_mismatch"]:
+            ok = False
+            logging.error(
+                f"{item['name']} ({endpoint}) is a {item['source']} in source and a {item['scrape']} in the scrape.")
+        for name in result["empty_help"]:
+            ok = False
+            logging.error(f"{name} ({endpoint}) has an empty HELP line.")
+    for site in inventory.get("unresolved") or []:
+        ok = False
+        logging.error(
+            f"A metric registration in {site.get('file')}:{site.get('line')} could not be resolved "
+            f"({site.get('reason')}). tools/metrics/extract_source.py needs a rule for it.")
+    return ok
+
+
 def parse_args(argv):
     parser = argparse.ArgumentParser(
         description="Scrape /public_metrics and /metrics from a running Redpanda broker and write metrics.json and AsciiDoc."
@@ -271,10 +330,26 @@ def parse_args(argv):
                         help="Directory for redpanda-metrics-<version>.json (default: the output directory). "
                              "In a docs repository, pass modules/reference/attachments, where the metric macros read it. "
                              "Used only when the version is a release tag such as v26.2.7")
+    parser.add_argument("--expected-absent", metavar="PATH",
+                        help="JSON of metric family name or pattern -> reason, for families the cluster cannot export. "
+                             "Used with --inventory")
+    parser.add_argument("--check-only", action="store_true",
+                        help="With --inventory, only compare the scrape with the inventory: print how many families are "
+                             "missing, write nothing, and exit 0 when none are. The cluster script polls with this "
+                             "until the cluster exports everything")
+    parser.add_argument("--allow-incomplete", action="store_true",
+                        help="With --inventory, report the families that are missing or unknown and write the output anyway. "
+                             "Without this flag the run fails and writes nothing")
     return parser.parse_args(argv)
 
 def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else argv)
+    if args.check_only:
+        if not args.inventory:
+            logging.error("--check-only needs --inventory. Exiting.")
+            return EXIT_FAILURE
+        # One summary line per poll, not one line per missing family.
+        logging.getLogger().setLevel(logging.CRITICAL)
     tag_modified = args.version.strip()
     if not tag_modified:
         logging.error("Version must not be empty. Exiting.")
@@ -329,6 +404,29 @@ def main(argv=None):
         except metrics_dataset.DatasetError as e:
             logging.error(f"The source inventory {args.inventory} is not valid: {e}. Nothing was written.")
             return EXIT_FAILURE
+    # Completeness gate. Redpanda exports a family only when the feature behind
+    # it is on, so a scrape can be short without looking wrong. With an
+    # inventory, every family in source must be scraped or have a written
+    # reason, and the scrape must hold nothing the inventory lacks.
+    expected_absent = {}
+    if args.expected_absent:
+        try:
+            with open(args.expected_absent, encoding="utf-8") as f:
+                expected_absent = json.load(f)
+            if not isinstance(expected_absent, dict):
+                raise ValueError("it must be a JSON object of name -> reason")
+        except (OSError, ValueError) as e:
+            logging.error(f"Cannot read the expected-absent file {args.expected_absent}: {e}. Exiting.")
+            return EXIT_FAILURE
+    if inventory and args.check_only:
+        missing = count_missing(inventory, public_texts, internal_texts, expected_absent)
+        print(f"{missing} metric families in source are not exported yet")
+        return 0 if missing == 0 else EXIT_INCOMPLETE
+    if inventory:
+        complete = check_completeness(inventory, public_texts, internal_texts, expected_absent)
+        if not complete and not args.allow_incomplete:
+            logging.error("The scrape does not match the source inventory. Nothing was written.")
+            return EXIT_INCOMPLETE
     generated_from = {"sources": len(public_sources)}
     if inventory and inventory.get("ref"):
         generated_from["source_ref"] = inventory["ref"]
@@ -343,6 +441,24 @@ def main(argv=None):
     except metrics_dataset.DatasetError as e:
         logging.error(f"Cannot build the dataset. {e}. Nothing was written.")
         return EXIT_FAILURE
+    if inventory:
+        # A family with a written reason is one no cluster exports, so it is
+        # listed under excluded and not documented as a metric. A family that
+        # was not scraped and has no reason stays, marked observed: false,
+        # which only happens with --allow-incomplete.
+        for name in sorted(families["metrics"]):
+            entry = families["metrics"][name]
+            if entry["observed"]:
+                continue
+            reason = metrics_reconcile.explain(name, inventory[entry["endpoint"]].get(name, {}), expected_absent)
+            if not reason:
+                continue
+            del families["metrics"][name]
+            families["excluded"].append({"name": name, "endpoint": entry["endpoint"], "reason": reason})
+            families["counts"][entry["endpoint"]] -= 1
+            families["counts"]["source_only"] -= 1
+            families["counts"]["excluded"] += 1
+        families["excluded"].sort(key=lambda item: item["name"])
     dataset_dir = output_dir
     if args.dataset_dir:
         if RELEASE_TAG_RE.match(tag_modified):

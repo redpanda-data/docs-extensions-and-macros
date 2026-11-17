@@ -104,8 +104,12 @@ describeIfPython('redpanda-metrics-<version>.json', () => {
     return target
   }
 
-  const generate = (extra = []) => {
-    const out = path.join(workDir, `out-${extra.length}`)
+  // These tests feed small, partial inventories to check how the dataset is
+  // built, so they turn off the completeness gate, which has its own tests in
+  // metrics-completeness-gate.test.js.
+  const generate = (given = []) => {
+    const extra = given.includes('--inventory') ? [...given, '--allow-incomplete'] : given
+    const out = path.join(workDir, `out-${given.length}`)
     const result = spawnSync(PYTHON, ['-I', SCRIPT, 'v0.0.1', '--output-dir', out, '--skip-pages',
       '--public-file', file('pub0.txt', PUBLIC_BROKER_0), '--public-file', file('pub1.txt', PUBLIC_BROKER_1),
       '--internal-file', file('int0.txt', INTERNAL), ...extra], { cwd: workDir, encoding: 'utf8' })

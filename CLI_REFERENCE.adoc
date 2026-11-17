@@ -1941,6 +1941,9 @@ Fail if the cluster is not healthy within this many seconds (default: CLUSTER_RE
 `--settle-timeout <seconds>`::
 Stop waiting for new metric families after this many seconds (default: METRICS_SETTLE_MAX or 300)
 
+`--source-repo <path>`::
+Local clone of the Redpanda source that has the tag or branch. The run then lists every metric family the source registers and fails when the scrape misses one that has no written reason in docker-compose/metrics/expected-absent.json
+
 `--inventory <path>`::
 Source inventory from tools/metrics/extract_source.py. Adds the defining file to each metric in redpanda-metrics-<tag>.json, and the families the source registers that the scrape did not see
 

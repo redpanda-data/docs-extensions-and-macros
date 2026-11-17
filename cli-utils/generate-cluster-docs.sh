@@ -54,6 +54,8 @@ fi
 ORIGINAL_PWD="$(pwd)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_NAME="${PROJECT_NAME:-redpanda_quickstart}"
+# What metrics mode adds to the quickstart, and the reasons a family may be absent.
+METRICS_DIR="$(cd "$SCRIPT_DIR/../docker-compose/metrics" && pwd)"
 
 MODE="${1:-metrics}"
 TAG="${2:-latest}"
@@ -124,6 +126,7 @@ fi
 ###############################################################################
 METRICS_EXTRAS=0
 METRICS_BOOTSTRAP_FILE=""
+METRICS_INVENTORY_FILE=""
 if [[ "$MODE" == "metrics" && "$COMPOSE_DIR" == */25.1 ]]; then
   METRICS_EXTRAS=1
   if [[ "$MAJOR_MINOR" =~ ^([0-9]+)\.([0-9]+)$ ]] && (( BASH_REMATCH[1] == 25 && BASH_REMATCH[2] < 3 )); then
@@ -132,8 +135,15 @@ if [[ "$MODE" == "metrics" && "$COMPOSE_DIR" == */25.1 ]]; then
   fi
 fi
 
+# Set at the very end. bash 3.2 (macOS) runs the EXIT trap with $? of 0 when
+# set -u stops the script, which would turn that failure into a success.
+RUN_FINISHED=0
+
 teardown() {
   local rc=$?
+  if (( rc == 0 && ! RUN_FINISHED )); then
+    rc=1
+  fi
   if [[ "${KEEP_CLUSTER:-0}" == "1" ]]; then
     echo "ℹ️  KEEP_CLUSTER=1: leaving the cluster running (project $PROJECT_NAME)."
   elif [[ -d "$COMPOSE_DIR" ]]; then
@@ -146,6 +156,9 @@ teardown() {
     echo "🧹 Tearing down the cluster…"
     (cd "$COMPOSE_DIR" && docker compose -p "$PROJECT_NAME" down --volumes) || true
   fi
+  if [[ -n "${METRICS_INVENTORY_FILE:-}" ]]; then
+    rm -f "$METRICS_INVENTORY_FILE"
+  fi
   # A cluster that is left running still mounts the file.
   if [[ -n "$METRICS_BOOTSTRAP_FILE" && "${KEEP_CLUSTER:-0}" != "1" ]]; then
     rm -f "$METRICS_BOOTSTRAP_FILE"
@@ -156,13 +169,28 @@ teardown() {
 trap teardown EXIT
 
 if (( METRICS_EXTRAS )); then
-  METRICS_DIR="$(cd "$SCRIPT_DIR/../docker-compose/metrics" && pwd)"
   METRICS_BOOTSTRAP_FILE="$(mktemp "${TMPDIR:-/tmp}/metrics-bootstrap.XXXXXX")"
   cat "$COMPOSE_DIR/bootstrap.yml" "$METRICS_DIR/bootstrap-extra.yml" > "$METRICS_BOOTSTRAP_FILE"
   # mktemp creates the file 0600; the broker runs as another user in the container.
   chmod 644 "$METRICS_BOOTSTRAP_FILE"
   export METRICS_BOOTSTRAP_FILE
   export COMPOSE_FILE="docker-compose.yml:$METRICS_DIR/metrics.overlay.yml"
+fi
+
+###############################################################################
+# Metrics mode: list every metric family the source registers at this ref, so
+# the generator can fail when the scrape misses one. This runs before the
+# cluster starts because it is quick and its failures need no cluster.
+###############################################################################
+if [[ "$MODE" == "metrics" ]]; then
+  if [[ -n "${METRICS_SOURCE_REPO:-}" ]]; then
+    METRICS_INVENTORY_FILE="$(mktemp "${TMPDIR:-/tmp}/metrics-inventory.XXXXXX")"
+    echo "🔎 Listing the metric families in $METRICS_SOURCE_REPO at ${TAG}…"
+    "$PYTHON" "$SCRIPT_DIR/../tools/metrics/extract_source.py" \
+      --repo "$METRICS_SOURCE_REPO" --ref "$TAG" > "$METRICS_INVENTORY_FILE"
+  else
+    echo "⚠️  No Redpanda source given (--source-repo or METRICS_SOURCE_REPO), so the scrape is not checked against source. Metrics may be missing from the output."
+  fi
 fi
 
 ###############################################################################
@@ -287,6 +315,17 @@ run_metrics_actions() {
     echo "⚠️  Could not create a cloud topic; its metrics will be missing."
   fi
 
+  # Consumer group metrics need a group with a committed offset. The
+  # quickstart has a consumer, but it does not always commit before the scrape.
+  if docker exec redpanda-0 rpk topic create metrics-group-probe "${rpk_auth[@]}" \
+     && echo "metrics" | docker exec -i redpanda-0 rpk topic produce metrics-group-probe "${rpk_auth[@]}" >/dev/null \
+     && docker exec redpanda-0 timeout 60 rpk topic consume metrics-group-probe \
+          --group metrics-group-probe -n 1 "${rpk_auth[@]}" >/dev/null; then
+    :
+  else
+    echo "⚠️  Could not create a consumer group; its metrics may be missing."
+  fi
+
   # Shadow link metrics exist only while a link is running. The source broker
   # gets a topic, a record and a schema to shadow.
   if docker exec shadow-source rpk topic create metrics-shadow-src \
@@ -315,51 +354,62 @@ run_metrics_actions() {
 }
 
 ###############################################################################
-# Metrics that go away again. Per-entity quota series are dropped once the
-# client has been idle for a while, so this runs after the settle wait, right
-# before the scrape.
+# Per-entity quota metrics exist only for a named client that has a quota and
+# has been throttled, and they are dropped again once the client has been idle
+# for a while. setup_quota_probe runs once. throttle_quota_probe runs on every
+# settle poll and once more right before the scrape, so the series are there
+# when it counts.
 ###############################################################################
-run_short_lived_metrics_actions() {
+QUOTA_PROBE_CLIENT="metrics-quota-probe"
+QUOTA_PROBE_READY=0
+
+setup_quota_probe() {
   local rpk_auth=(-X "user=$ADMIN_USER" -X "pass=$ADMIN_PASS")
-  local probe_client="metrics-quota-probe"
-  local url
-  # Per-entity quota metrics exist only for a named client that has a quota
-  # and has been throttled. A default quota does not create them. The topic is
-  # created first: a produce that auto-creates its topic can fail before the
-  # partition has a leader. A new quota takes a moment to reach every broker,
-  # so produce until the metric shows up.
+  # The topic is created first: a produce that auto-creates its topic can fail
+  # before the partition has a leader.
   if docker exec redpanda-0 rpk topic create metrics-quota-probe "${rpk_auth[@]}" \
-     && docker exec redpanda-0 rpk cluster quotas alter --name "client-id=$probe_client" \
+     && docker exec redpanda-0 rpk cluster quotas alter --name "client-id=$QUOTA_PROBE_CLIENT" \
        --add producer_byte_rate=1024 "${rpk_auth[@]}"; then
-    local attempt throttled=0
-    for attempt in 1 2 3 4 5 6 7 8 9 10; do
-      # One record of random data is over the 1 KB/s quota; data that
-      # compresses well is not.
-      { head -c 3000 /dev/urandom | base64 | tr -d '\n'; echo; } \
-        | docker exec -i redpanda-0 rpk topic produce metrics-quota-probe \
-            -X "globals.kafka_protocol_request_client_id=$probe_client" "${rpk_auth[@]}" >/dev/null 2>&1 || true
-      for url in "${ADMIN_URLS[@]}"; do
-        # Not a pipe into grep -q: under pipefail, grep exiting early fails the pipeline.
-        if [[ "$(curl -sS --max-time 30 "$url/public_metrics/" 2>/dev/null || true)" == *redpanda_kafka_quotas_client_quota_throughput_by_entity* ]]; then
-          throttled=1
-          break
-        fi
-      done
-      (( throttled )) && break
-      sleep 3
-    done
-    (( throttled )) || echo "⚠️  The quota probe client was never throttled; per-entity quota metrics will be missing."
+    QUOTA_PROBE_READY=1
   else
     echo "⚠️  Could not set a client quota; per-entity quota metrics will be missing."
   fi
 }
 
+throttle_quota_probe() {
+  local rpk_auth=(-X "user=$ADMIN_USER" -X "pass=$ADMIN_PASS")
+  local attempt url throttled=0
+  (( QUOTA_PROBE_READY )) || return 0
+  # A new quota takes a moment to reach every broker, so produce until the
+  # metric shows up.
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    # One record of random data is over the 1 KB/s quota; data that
+    # compresses well is not.
+    { head -c 3000 /dev/urandom | base64 | tr -d '\n'; echo; } \
+      | docker exec -i redpanda-0 rpk topic produce metrics-quota-probe \
+          -X "globals.kafka_protocol_request_client_id=$QUOTA_PROBE_CLIENT" "${rpk_auth[@]}" >/dev/null 2>&1 || true
+    for url in "${ADMIN_URLS[@]}"; do
+      # Not a pipe into grep -q: under pipefail, grep exiting early fails the pipeline.
+      if [[ "$(curl -sS --max-time 30 "$url/public_metrics/" 2>/dev/null || true)" == *redpanda_kafka_quotas_client_quota_throughput_by_entity* ]]; then
+        throttled=1
+        break
+      fi
+    done
+    (( throttled )) && break
+    sleep 3
+  done
+  (( throttled )) || echo "⚠️  The quota probe client was never throttled; per-entity quota metrics will be missing."
+}
+
 if (( METRICS_EXTRAS )); then
   run_metrics_actions
+  setup_quota_probe
 fi
 
 if [[ "$MODE" == "metrics" ]]; then
   echo "⏳ Settling metrics (min ${METRICS_SETTLE_MIN}s, max ${METRICS_SETTLE_MAX}s, stable for ${METRICS_SETTLE_STABLE}s)…"
+  SETTLE_URL_ARGS=()
+  for url in "${ADMIN_URLS[@]}"; do SETTLE_URL_ARGS+=(--admin-url "$url"); done
   SECONDS=0
   last_count=-1
   stable_since=0
@@ -371,12 +421,30 @@ if [[ "$MODE" == "metrics" ]]; then
     stable_for=$(( SECONDS - stable_since ))
     echo "   ${SECONDS}s: ${count} metric families (unchanged for ${stable_for}s)"
     last_count="$count"
-    if (( SECONDS >= METRICS_SETTLE_MIN && stable_for >= METRICS_SETTLE_STABLE )); then
+    if (( METRICS_EXTRAS )); then
+      throttle_quota_probe
+    fi
+    if [[ -n "$METRICS_INVENTORY_FILE" ]] && (( METRICS_EXTRAS )); then
+      # With a source inventory, "settled" has a definition: every family the
+      # source registers is exported. Some appear only after an interval has
+      # fired (consumer group lag, a transform's first batch), so a stable
+      # count is not proof.
+      if missing="$("$PYTHON" "$SCRIPT_DIR/../tools/metrics/metrics.py" "$TAG" "${SETTLE_URL_ARGS[@]}" \
+           --inventory "$METRICS_INVENTORY_FILE" --expected-absent "$METRICS_DIR/expected-absent.json" --check-only 2>/dev/null)"; then
+        echo "✅ Every metric family in source is exported (${count} families) after ${SECONDS}s"
+        break
+      fi
+      echo "      ${missing:-could not compare with source}"
+    elif (( SECONDS >= METRICS_SETTLE_MIN && stable_for >= METRICS_SETTLE_STABLE )); then
       echo "✅ Metric set settled at ${count} families after ${SECONDS}s"
       break
     fi
     if (( SECONDS >= METRICS_SETTLE_MAX )); then
-      echo "⚠️  Metric set still changing after ${METRICS_SETTLE_MAX}s (${count} families); continuing with what is exposed now."
+      if [[ -n "$METRICS_INVENTORY_FILE" ]] && (( METRICS_EXTRAS )); then
+        echo "⚠️  Not every metric family in source is exported after ${METRICS_SETTLE_MAX}s; the generator lists the ones that are missing."
+      else
+        echo "⚠️  Metric set still changing after ${METRICS_SETTLE_MAX}s (${count} families); continuing with what is exposed now."
+      fi
       break
     fi
     sleep "$METRICS_POLL_INTERVAL"
@@ -387,7 +455,7 @@ fi
 # Run documentation generator
 ###############################################################################
 if (( METRICS_EXTRAS )); then
-  run_short_lived_metrics_actions
+  throttle_quota_probe
 fi
 
 # ${arr[@]+"${arr[@]}"} expands to nothing for an empty array; a bare
@@ -395,9 +463,17 @@ fi
 if [[ "$MODE" == "metrics" ]]; then
   ADMIN_URL_ARGS=()
   for url in "${ADMIN_URLS[@]}"; do ADMIN_URL_ARGS+=(--admin-url "$url"); done
+  if [[ -n "$METRICS_INVENTORY_FILE" ]]; then
+    ADMIN_URL_ARGS+=(--inventory "$METRICS_INVENTORY_FILE" --expected-absent "$METRICS_DIR/expected-absent.json")
+    # A release that cannot take the extra features is expected to be short.
+    if (( ! METRICS_EXTRAS )); then
+      ADMIN_URL_ARGS+=(--allow-incomplete)
+    fi
+  fi
   "$PYTHON" "$SCRIPT_DIR/../tools/metrics/metrics.py" "$TAG" "${ADMIN_URL_ARGS[@]}" ${GENERATOR_ARGS[@]+"${GENERATOR_ARGS[@]}"}
 else
   "$PYTHON" "$SCRIPT_DIR/../tools/gen-rpk-ascii.py" "$TAG" ${GENERATOR_ARGS[@]+"${GENERATOR_ARGS[@]}"}
 fi
 
 echo "✅ $MODE docs generated successfully!"
+RUN_FINISHED=1
