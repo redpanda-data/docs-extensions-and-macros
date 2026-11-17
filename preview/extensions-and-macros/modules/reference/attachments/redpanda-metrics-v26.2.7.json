@@ -292,7 +292,12 @@
       "requires": [
         {
           "property": "health_monitor_metrics_enabled",
-          "value": true
+          "value": true,
+          "evidence": "measured"
+        },
+        {
+          "condition": "The broker has refreshed its health report at least once.",
+          "evidence": "source"
         }
       ],
       "availability": {

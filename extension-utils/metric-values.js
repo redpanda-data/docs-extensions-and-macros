@@ -291,12 +291,19 @@ function fieldValue (entry, field, { format = FORMAT_HUMAN, label, cloud = false
       return plain(raw ? JSON.stringify(cases) : cases.join(', '))
     }
     case 'requires': {
-      // [{property, value}], or text.
+      // A list of {property, value} and {condition} items, or text. A
+      // condition is a sentence about cluster state that no property sets,
+      // such as "The cluster has a shadow link."
       if (text(entry.requires)) return richText(text(entry.requires))
-      const items = (Array.isArray(entry.requires) ? entry.requires : []).filter((item) => isPlainObject(item) && text(item.property))
+      const items = (Array.isArray(entry.requires) ? entry.requires : [])
+        .filter((item) => isPlainObject(item) && (text(item.property) || text(item.condition)))
       if (!items.length) return missing()
       if (raw) return plain(JSON.stringify(items))
-      return richList(items.map((item) => (item.value === undefined ? `prop:${item.property}[]` : `prop:${item.property}[] is \`${String(item.value)}\``)))
+      const property = (item) => (item.value === undefined ? `prop:${item.property}[]` : `prop:${item.property}[] is \`${String(item.value)}\``)
+      // Conditions are sentences, so with any of them the whole value reads
+      // as sentences. Property values alone stay a comma-separated list.
+      if (items.every((item) => text(item.property))) return richList(items.map(property))
+      return richText(items.map((item) => (text(item.property) ? `${property(item)}.` : text(item.condition))).join(' '))
     }
     case 'deprecated': {
       // A release or a note counts as deprecated. null says it is not.

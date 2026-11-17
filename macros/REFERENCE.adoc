@@ -1344,7 +1344,7 @@ The target is the metric name, resolved as `metric:` resolves it (<<metric>>): a
 |
 
 | `requires`
-| `requires`: text rendered as AsciiDoc, or each `{property, value}` as "prop:<property>[] is `<value>`"
+| `requires`: what a cluster needs before it exports the metric. Text is rendered as AsciiDoc. In a list, each `{property, value}` renders as "prop:<property>[] is `<value>`" and each `{condition}` as its sentence. A list with a condition reads as sentences. A metric with no `requires` renders the placeholder: the data does not say that it needs nothing
 |
 
 | `introduced` (aliases `since`, `version`)
