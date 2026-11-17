@@ -285,6 +285,33 @@ describe('metricval macro', () => {
       expect(warn).not.toHaveBeenCalled()
     })
 
+    describe('description text for one audience', () => {
+      const everyone = SAMPLE.metrics[LATENCY].description
+
+      test('a Self-Managed page gets the Self-Managed text and not the Cloud text', () => {
+        const html = convert(`metricval::${LATENCY}[description]`, { catalog: streamingCatalog() })
+        expect(html).toContain(`<p>${everyone} Check it during a rolling upgrade.</p>`)
+        expect(html).not.toContain('In Serverless')
+      })
+
+      test('a Cloud page gets the Cloud text and not the Self-Managed text', () => {
+        const html = onCloud(`metricval::${LATENCY}[description]`)
+        expect(html).toContain(`<p>${everyone} In Serverless, this covers your clients only.</p>`)
+        expect(html).not.toContain('rolling upgrade')
+      })
+
+      test('the inline form still works, because the audience text adds no paragraph', () => {
+        const warn = warnings()
+        expect(render(`metricval:${LATENCY}[description]`)).toBe(`${everyone} Check it during a rolling upgrade.`)
+        expect(warn).not.toHaveBeenCalled()
+      })
+
+      test('negative control: a metric with no audience text renders only its description', () => {
+        expect(SAMPLE.metrics[BROKERS].description_cloud_only).toBeUndefined()
+        expect(render(`metricval:${BROKERS}[description]`)).toBe(SAMPLE.metrics[BROKERS].description)
+      })
+    })
+
     test('a description renders as a block', () => {
       const html = convert(`metricval::${BROKERS}[description]`, { catalog: streamingCatalog() })
       expect(html).toContain('<div class="openblock metric-value metric-value-description">')

@@ -1304,7 +1304,7 @@ The target is the metric name, resolved as `metric:` resolves it (<<metric>>): a
 | Field | Source in the metrics data | Example (v26.2.7)
 
 | `description` (alias `desc`)
-| `description`, rendered as AsciiDoc (<<value-text>>)
+| `description`, rendered as AsciiDoc (<<value-text>>). On a Cloud page the text in `description_cloud_only` follows it, and on any other page the text in `description_self_managed_only`. That text continues the last paragraph
 | `redpanda_cluster_brokers`: "Number of configured brokers in the cluster"
 
 | `type`

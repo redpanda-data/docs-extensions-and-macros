@@ -246,7 +246,15 @@ function fieldValue (entry, field, { format = FORMAT_HUMAN, label, cloud = false
   const labels = (Array.isArray(entry.labels) ? entry.labels : []).filter((item) => isPlainObject(item) && text(item.name))
 
   switch (name) {
-    case 'description':
+    case 'description': {
+      // The text for every reader, then the text for this page's audience
+      // only: Cloud on a Cloud page, Self-Managed on any other. The audience
+      // text continues the last paragraph, so adding it to the data never
+      // turns a one-paragraph description into one that needs the block form.
+      const audience = strings(cloud ? entry.description_cloud_only : entry.description_self_managed_only)
+      const parts = [text(entry.description), ...audience.map(text)].filter(Boolean)
+      return parts.length ? richText(parts.join(' ')) : missing()
+    }
     case 'usage':
       return text(entry[name]) ? richText(text(entry[name])) : missing()
     case 'type':

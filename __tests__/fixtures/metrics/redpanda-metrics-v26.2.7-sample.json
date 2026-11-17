@@ -159,7 +159,13 @@
         "dedicated": true,
         "byoc": true,
         "serverless": true
-      }
+      },
+      "description_cloud_only": [
+        "In Serverless, this covers your clients only."
+      ],
+      "description_self_managed_only": [
+        "Check it during a rolling upgrade."
+      ]
     },
     "redpanda_kafka_under_replicated_replicas": {
       "name": "redpanda_kafka_under_replicated_replicas",
