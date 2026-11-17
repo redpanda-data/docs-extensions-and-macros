@@ -209,6 +209,8 @@ const normalizeField = FIELD_SET.normalizeField
 // of a label's values, is curated in the overrides file.
 const GENERATED_FIELDS = ['description', 'type', 'unit', 'labels', 'endpoint', 'buckets']
 const OVERRIDES_FILE = 'docs-data/metric-overrides.json'
+// Release history is worked out by comparing releases, never typed by hand.
+const HISTORY_FIELDS = ['introduced', 'deprecated', 'removed', 'status']
 
 const ENDPOINT_PATHS = { public: '/public_metrics', internal: '/metrics' }
 const DEPLOYMENTS = [['self_managed', 'Self-Managed'], ['dedicated', 'Dedicated'], ['byoc', 'BYOC'], ['serverless', 'Serverless']]
@@ -383,7 +385,11 @@ function resolveMetricValue ({ registry, name, field: requested, format = FORMAT
     // Labels are missing only for a metric the scrape did not see.
     const source = field === 'labels'
       ? 'The scrape did not see this metric, so its labels are not known.'
-      : (GENERATED_FIELDS.includes(field) ? 'The generator writes it only when the metric has one.' : `Curated fields come from ${OVERRIDES_FILE}.`)
+      : (GENERATED_FIELDS.includes(field)
+          ? 'The generator writes it only when the metric has one.'
+          : HISTORY_FIELDS.includes(field)
+            ? 'The generator works it out by comparing releases, and this data has no release history yet.'
+            : `Curated fields come from ${OVERRIDES_FILE}.`)
     return { ok: false, kind: 'missing-field', ...base, message: `${call}: '${found.family}' has ${what} in ${describeDataset(registry)}, so it renders <unknown ${field}>. The field is not in the data for this metric. ${source}` }
   }
   return { ok: true, ...base, text: value.text, html: value.html, rich: value.rich, call }
