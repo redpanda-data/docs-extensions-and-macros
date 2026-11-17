@@ -758,6 +758,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/style-lint"
           gh pr diff "$PR" --repo "$R" > "$RUNNER_TEMP/style-lint/pr.diff"
           gh pr diff "$PR" --repo "$R" --name-only > "$RUNNER_TEMP/style-lint/changed.txt"
+          : > "$RUNNER_TEMP/style-lint/fetch.ok"
 
       - name: Run the style lint on the lines this PR changed
         run: |
@@ -775,6 +776,7 @@ jobs:
           }
           [[ -d modules ]] || skip "no modules/ directory, so this isn't an Antora content repo"
           [[ -f .standards/scripts/style-lint.sh ]] || skip "the pinned docs-team-standards (plugin_ref) predates the style lint"
+          [[ -f "$OUT/fetch.ok" ]] || skip "the PR diff or changed-file list could not be fetched"
           [[ -s "$OUT/pr.diff" ]] || skip "the PR diff could not be fetched"
           FILES=()
           while IFS= read -r f; do FILES+=("$f"); done < <(grep '\.adoc$' "$OUT/changed.txt" || true)
