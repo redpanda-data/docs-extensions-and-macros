@@ -5,7 +5,8 @@
  * register extra metric families: it appends
  * docker-compose/metrics/bootstrap-extra.yml to the quickstart bootstrap file
  * and mounts the result over each broker's bootstrap file with
- * docker-compose/metrics/metrics.overlay.yml.
+ * docker-compose/metrics/metrics.overlay.yml. The overlay also adds a source
+ * broker to shadow and a stand-in for a cloud metadata service.
  *
  * A broker that the overlay misses starts without the extra properties, and
  * the scrape then silently lacks their metrics. These tests keep the overlay
@@ -40,8 +41,21 @@ describe('metrics overlay', () => {
     expect(brokers.length).toBeGreaterThanOrEqual(3)
   })
 
-  it('covers every broker that mounts a bootstrap file, and nothing else', () => {
-    expect(Object.keys(overlay.services).sort()).toEqual([...brokers].sort())
+  const added = Object.keys(overlay.services).filter((name) => !(name in compose.services))
+
+  it('covers every broker that mounts a bootstrap file', () => {
+    const changed = Object.keys(overlay.services).filter((name) => name in compose.services)
+    expect(changed.sort()).toEqual([...brokers].sort())
+  })
+
+  it('adds only the shadow source broker and the metadata stand-in', () => {
+    expect(added.sort()).toEqual(['imds-mock', 'shadow-source'])
+  })
+
+  // The script counts every redpanda-* service as a broker of the cluster and
+  // waits for that many to join.
+  it('gives no added service a name the script would count as a broker', () => {
+    expect(added.filter((name) => name.startsWith('redpanda-'))).toEqual([])
   })
 
   it.each(brokers)('%s mounts the merged bootstrap file at the same path', (broker) => {
@@ -50,8 +64,20 @@ describe('metrics overlay', () => {
     expect(volumes[0]).toMatch(/^\$\{METRICS_BOOTSTRAP_FILE[^}]*\}:\/etc\/redpanda\/\.bootstrap\.yaml$/)
   })
 
-  it('changes nothing but the volume', () => {
-    for (const broker of brokers) expect(Object.keys(overlay.services[broker])).toEqual(['volumes'])
+  it.each(brokers)('%s gets an instance type and the metadata stand-in address', (broker) => {
+    const environment = overlay.services[broker].environment
+    expect(environment.REDPANDA_INSTANCE_TYPE).toBeTruthy()
+    expect(environment.RP_SI_CREDS_API_ADDRESS).toBe('imds-mock:8080')
+  })
+
+  it('changes nothing on a broker but its environment and bootstrap volume', () => {
+    for (const broker of brokers) expect(Object.keys(overlay.services[broker]).sort()).toEqual(['environment', 'volumes'])
+  })
+
+  it('gives the metadata stand-in the keys of the object store', () => {
+    const environment = overlay.services['imds-mock'].environment
+    expect(environment.MOCK_ACCESS_KEY).toBe(bootstrap.cloud_storage_access_key)
+    expect(environment.MOCK_SECRET_KEY).toBe(bootstrap.cloud_storage_secret_key)
   })
 })
 
@@ -67,6 +93,30 @@ describe('extra bootstrap properties', () => {
   it('still parses once appended to the quickstart bootstrap file', () => {
     const merged = yaml.load(`${read(path.join(BUNDLE, 'bootstrap.yml'))}\n${read(path.join(METRICS, 'bootstrap-extra.yml'))}`)
     expect(merged).toMatchObject({ ...bootstrap, ...extra })
+  })
+})
+
+describe('shadow link and expected-absent files', () => {
+  const link = yaml.load(read(path.join(METRICS, 'shadow-link.yaml')))
+
+  it('the shadow link points at the source broker the overlay adds', () => {
+    expect(link.client_options.bootstrap_servers).toEqual(['shadow-source:9092'])
+    expect(link.schema_registry_sync_options.shadow_schema_registry_api.source_url).toBe('http://shadow-source:8081')
+    expect(overlay.services['shadow-source']).toBeDefined()
+  })
+
+  it('keeps shadowed schemas out of the default context', () => {
+    const { mappings } = link.schema_registry_sync_options.shadow_schema_registry_api.destination.exact
+    expect(mappings).toEqual([{ source: '.', destination: '.metrics-shadow' }])
+  })
+
+  it('every family the cluster cannot export has a written reason', () => {
+    const absent = JSON.parse(read(path.join(METRICS, 'expected-absent.json')))
+    expect(Object.keys(absent).length).toBeGreaterThan(0)
+    for (const [pattern, reason] of Object.entries(absent)) {
+      expect(pattern).toMatch(/^(redpanda|vectorized)_/)
+      expect(reason.length).toBeGreaterThan(20)
+    }
   })
 })
 

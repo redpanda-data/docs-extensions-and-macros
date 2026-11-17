@@ -276,7 +276,6 @@ count_families() {
 ###############################################################################
 run_metrics_actions() {
   local rpk_auth=(-X "user=$ADMIN_USER" -X "pass=$ADMIN_PASS")
-  local probe_client="metrics-quota-probe"
   local url moved=0
   echo "▶️  Turning on action-driven metrics…"
 
@@ -288,6 +287,42 @@ run_metrics_actions() {
     echo "⚠️  Could not create a cloud topic; its metrics will be missing."
   fi
 
+  # Shadow link metrics exist only while a link is running. The source broker
+  # gets a topic, a record and a schema to shadow.
+  if docker exec shadow-source rpk topic create metrics-shadow-src \
+     && echo '{"metrics":1}' | docker exec -i shadow-source rpk topic produce metrics-shadow-src >/dev/null \
+     && docker exec shadow-source curl -sSf -X POST -H 'Content-Type: application/vnd.schemaregistry.v1+json' \
+          --data '{"schema":"{\"type\":\"string\"}"}' \
+          http://localhost:8081/subjects/metrics-shadow-src-value/versions >/dev/null \
+     && docker exec -i redpanda-0 sh -c 'cat > /tmp/metrics-shadow-link.yaml' < "$METRICS_DIR/shadow-link.yaml" \
+     && docker exec redpanda-0 rpk shadow create -c /tmp/metrics-shadow-link.yaml --no-confirm "${rpk_auth[@]}"; then
+    :
+  else
+    echo "⚠️  Could not create a shadow link; its metrics will be missing."
+  fi
+
+  # Some controller metrics are registered only when a broker takes controller
+  # leadership after startup. Only the current leader accepts the request, so
+  # ask each broker until one does.
+  for url in "${ADMIN_URLS[@]}"; do
+    if curl -sSf --max-time 10 -u "$ADMIN_USER:$ADMIN_PASS" -X POST \
+         "$url/v1/partitions/redpanda/controller/0/transfer_leadership" >/dev/null 2>&1; then
+      moved=1
+      break
+    fi
+  done
+  (( moved )) || echo "⚠️  Could not transfer controller leadership."
+}
+
+###############################################################################
+# Metrics that go away again. Per-entity quota series are dropped once the
+# client has been idle for a while, so this runs after the settle wait, right
+# before the scrape.
+###############################################################################
+run_short_lived_metrics_actions() {
+  local rpk_auth=(-X "user=$ADMIN_USER" -X "pass=$ADMIN_PASS")
+  local probe_client="metrics-quota-probe"
+  local url
   # Per-entity quota metrics exist only for a named client that has a quota
   # and has been throttled. A default quota does not create them. The topic is
   # created first: a produce that auto-creates its topic can fail before the
@@ -317,18 +352,6 @@ run_metrics_actions() {
   else
     echo "⚠️  Could not set a client quota; per-entity quota metrics will be missing."
   fi
-
-  # Some controller metrics are registered only when a broker takes controller
-  # leadership after startup. Only the current leader accepts the request, so
-  # ask each broker until one does.
-  for url in "${ADMIN_URLS[@]}"; do
-    if curl -sSf --max-time 10 -u "$ADMIN_USER:$ADMIN_PASS" -X POST \
-         "$url/v1/partitions/redpanda/controller/0/transfer_leadership" >/dev/null 2>&1; then
-      moved=1
-      break
-    fi
-  done
-  (( moved )) || echo "⚠️  Could not transfer controller leadership."
 }
 
 if (( METRICS_EXTRAS )); then
@@ -363,6 +386,10 @@ fi
 ###############################################################################
 # Run documentation generator
 ###############################################################################
+if (( METRICS_EXTRAS )); then
+  run_short_lived_metrics_actions
+fi
+
 # ${arr[@]+"${arr[@]}"} expands to nothing for an empty array; a bare
 # "${arr[@]}" is an unbound-variable error under set -u on bash 3.2 (macOS).
 if [[ "$MODE" == "metrics" ]]; then
