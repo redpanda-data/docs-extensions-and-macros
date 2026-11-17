@@ -24,6 +24,11 @@ describe('flagDefaultToShow', () => {
     expect(flagDefaultToShow({ type: 'string', default: '""' })).toBeUndefined()
   })
 
+  test('shows a line break or tab in a default as an escape sequence', () => {
+    expect(flagDefaultToShow({ type: 'string', default: '%v\n' })).toBe('%v\\n')
+    expect(flagDefaultToShow({ type: 'string', default: 'a\tb' })).toBe('a\\tb')
+  })
+
   test('hides the default of a required flag', () => {
     expect(flagDefaultToShow({ type: 'int', default: 5, required: true })).toBeUndefined()
   })
