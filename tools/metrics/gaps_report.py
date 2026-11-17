@@ -174,10 +174,10 @@ def override_cleanup(gaps):
     lines = []
     for kind, title, intro in (
         ("retired_overrides", "Overrides retired by this run",
-         "These parts of `docs-data/metric-overrides.json` no longer changed anything, so this run deleted them. "
+         "These parts of `docs-data/metric-overrides.json` no longer changed anything, or a person approved retiring them, so this run deleted them. "
          "Nothing to do but check the diff."),
         ("redundant_overrides", "Overrides that can be retired",
-         "These parts of `docs-data/metric-overrides.json` no longer change anything. "
+         "These parts of `docs-data/metric-overrides.json` no longer change anything, or a person approved retiring them. "
          "Run `doc-tools generate metrics-docs` with `--retire-overrides` to delete them."),
     ):
         if gaps[kind]:

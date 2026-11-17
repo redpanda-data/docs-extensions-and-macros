@@ -347,9 +347,10 @@ def apply_overrides(dataset, overrides):
         if entry is None:
             result["stale"].append(name)
             continue
-        # What the tooling says without the override.
-        if isinstance(override.get("description"), str) and \
-                " ".join(override["description"].split()) == " ".join(entry["source_description"].split()):
+        # What the tooling says without the override. Audience paragraphs
+        # are enrichment, so only the text for everyone is compared.
+        shared_text = shared_description(override.get("description"))
+        if shared_text and " ".join(shared_text.split()) == " ".join(entry["source_description"].split()):
             redundant(name, "description", "the help string in Redpanda now says the same")
         if "unit" in override and override["unit"] == entry["unit"]:
             redundant(name, "unit", "the tooling gives the same unit")
@@ -416,6 +417,34 @@ def split_audiences(paragraphs):
     return groups
 
 
+def shared_description(description):
+    """The description text for every audience, or an empty string."""
+    if isinstance(description, str):
+        return description
+    if isinstance(description, list):
+        return "\n\n".join(split_audiences(description)[0])
+    return ""
+
+
+def pending_retirements(overrides):
+    """Descriptions a person approved for retirement, as [{name, field, reason}].
+
+    The weekly upstreaming workflow sets retirement_pending when the help
+    string in Redpanda has caught up with an override without matching it
+    word for word. Merging that pull request is the approval, so nothing is
+    compared again here.
+    """
+    pending = []
+    for name in sorted(overrides):
+        marker = overrides[name].get("retirement_pending")
+        if marker is None:
+            continue
+        reason = marker.get("reason") if isinstance(marker, dict) else None
+        pending.append({"name": name, "field": "description",
+                        "reason": "a person approved retiring it" + (f": {reason}" if reason else "")})
+    return pending
+
+
 def retire_overrides(path, redundant):
     """Delete the redundant parts of the overrides file, and say what went.
 
@@ -423,6 +452,10 @@ def retire_overrides(path, redundant):
     its job. Enrichment is never touched: a section, use cases, usage text,
     Cloud availability, related properties and topics, audience paragraphs,
     and the description or values of a label.
+
+    A description goes together with upstream_ref. When the override has
+    retirement_pending, that field and _comment go too. Of a description
+    given as paragraphs, only the ones for every audience are deleted.
     """
     with open(path, encoding="utf-8") as f:
         document = json.load(f)
@@ -435,11 +468,21 @@ def retire_overrides(path, redundant):
         if field.startswith("labels["):
             label_name = field[len("labels["):-1]
             override["labels"] = [label for label in override.get("labels", []) if label.get("name") != label_name]
-        else:
-            override.pop(field, None)
-        if field == "description":
+        elif field == "description":
+            audience = [paragraph for paragraph in override["description"]
+                        if str(paragraph).strip().startswith(tuple(prefix for prefix, _ in AUDIENCE_PREFIXES))
+                        ] if isinstance(override.get("description"), list) else []
+            if audience:
+                override["description"] = audience
+            else:
+                override.pop("description", None)
             # The note about where the fix was sent goes with the text it describes.
             override.pop("upstream_ref", None)
+            if "retirement_pending" in override:
+                override.pop("retirement_pending")
+                override.pop("_comment", None)
+        else:
+            override.pop(field, None)
         if not override.get("labels") and "labels" in override:
             del override["labels"]
         if not [key for key in override if key != "_comment"]:
@@ -550,7 +593,8 @@ def parse_args(argv):
                              "that gives the labels of such a metric covers its gap")
     parser.add_argument("--retire-overrides", action="store_true",
                         help="With --overrides, delete from that file every part that no longer changes anything: text "
-                             "that now matches Redpanda, and labels that stood in for a metric the cluster now exports")
+                             "that now matches Redpanda, text marked retirement_pending, and labels that stood in for a "
+                             "metric the cluster now exports")
     parser.add_argument("--strict", action="store_true",
                         help="With --inventory, fail (exit 4) and write nothing when the scrape does not match the "
                              "inventory. Without this flag the gaps are reported in metrics-gaps.json and the output is "
@@ -698,6 +742,18 @@ def main(argv=None):
         logging.warning(
             f"The requirement '{requirement_id}' in {args.requirements} matches no metric. "
             "Its metrics were renamed or removed, so the entry needs an update.")
+    # A description a person approved for retirement is deleted before the
+    # overrides are applied, so the data never carries text the file has lost.
+    pending = pending_retirements(overrides)
+    if pending and args.retire_overrides:
+        retire_overrides(args.overrides, pending)
+        overrides = load_overrides(args.overrides)
+        for item in pending:
+            logging.info(f"Retired the override {item['name']}.{item['field']}: {item['reason']}.")
+    elif pending:
+        logging.warning(
+            f"{len(pending)} descriptions in {args.overrides} are marked retirement_pending. "
+            "Run with --retire-overrides to delete them.")
     overridden = apply_overrides(families, overrides)
     for name in overridden["stale"]:
         logging.warning(
@@ -723,7 +779,10 @@ def main(argv=None):
         gaps["stale_overrides"] = overridden["stale"]
         gaps["override_disagrees"] = overridden["disagrees"]
         key = "retired_overrides" if args.retire_overrides else "redundant_overrides"
-        gaps[key] = overridden["redundant"]
+        # Listed once: an approved description that also matches is one retirement.
+        approved = {item["name"] for item in pending}
+        gaps[key] = pending + [item for item in overridden["redundant"]
+                               if not (item["field"] == "description" and item["name"] in approved)]
         # A metric the cluster did not export is complete once a writer has
         # given its labels. It stays listed, because nothing has confirmed
         # those labels against a running broker yet.

@@ -30,6 +30,15 @@
           ]
         },
         "upstream_ref": { "type": "string", "minLength": 1, "description": "The issue or pull request against the Redpanda source that will make the description override redundant, as 'redpanda-data/streaming-enterprise#12345' or a URL. Set it so the override has a way out. Deleted together with the description." },
+        "retirement_pending": {
+          "type": "object",
+          "description": "Set only by a person merging the weekly override triage pull request, never written by hand. It marks a description whose help string in Redpanda has caught up with it in substance without matching it word for word. A description that matches exactly is deleted without this field. The next release run with --retire-overrides acts on the presence of this field, not its content: it deletes 'description', 'upstream_ref', '_comment' and this field together, without comparing again, because merging the triage pull request was the approval. Audience paragraphs of the description are enrichment and stay. Only meaningful alongside 'description'.",
+          "additionalProperties": false,
+          "required": ["reason"],
+          "properties": {
+            "reason": { "type": "string", "minLength": 1, "description": "Why the help string is judged to have caught up, for the reviewer of the triage pull request." }
+          }
+        },
         "unit": { "type": ["string", "null"], "description": "Unit of the value, when the name does not say it. A stopgap: deleted when the tooling gives the same unit." },
         "labels": {
           "type": "array",

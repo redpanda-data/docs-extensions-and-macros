@@ -309,6 +309,117 @@ describeIfPython('metric overrides', () => {
     })
   })
 
+  describe('retiring a description a person approved', () => {
+    const PENDING = { reason: 'The help string now covers the same ground.' }
+    const OVERRIDES = {
+      // Differs from the help string, so only the approval retires it.
+      redpanda_cluster_brokers: {
+        _comment: 'Reworded for readers.',
+        description: 'How many brokers the cluster is configured with.',
+        upstream_ref: 'redpanda-data/streaming-enterprise#2',
+        retirement_pending: PENDING,
+        category: 'Cluster metrics'
+      },
+      redpanda_kafka_request_bytes_total: {
+        description: ['Bytes produced and consumed.', 'cloud-only: In Serverless, this counts your traffic only.', 'A second paragraph for everyone.'],
+        retirement_pending: PENDING
+      },
+      // Nothing else in the override: the entry goes.
+      vectorized_raft_leader_for: { description: 'Whether this broker leads the partition.', retirement_pending: PENDING, _comment: 'note' },
+      // No metric of this name in the release. Approved all the same.
+      redpanda_removed_total: { description: 'Gone.', retirement_pending: PENDING },
+      // Control: differs from the help string and nobody approved retiring it.
+      redpanda_new_feature_lag: { _comment: 'Keep me.', description: 'Lag of the new feature.', upstream_ref: 'redpanda-data/streaming-enterprise#3', labels: [] }
+    }
+    const runPending = (extra) => {
+      const result = run(OVERRIDES, extra)
+      return { result, after: JSON.parse(read(path.join(workDir, `run-${counter}`, 'overrides.json'))).metrics }
+    }
+    let result
+    let after
+
+    beforeAll(() => {
+      ({ result, after } = runPending(['--retire-overrides']))
+    })
+
+    it('the schema accepts retirement_pending with a reason, and rejects it without one', () => {
+      const validate = new Ajv({ allErrors: true }).compile(OVERRIDES_SCHEMA)
+      expect(validate({ metrics: OVERRIDES })).toBe(true)
+      expect(validate({ metrics: { redpanda_cluster_brokers: { description: 'Brokers.', retirement_pending: {} } } })).toBe(false)
+      expect(validate({ metrics: { redpanda_cluster_brokers: { description: 'Brokers.', retirement_pending: true } } })).toBe(false)
+    })
+
+    it('deletes description, upstream_ref, _comment and retirement_pending together, without comparing', () => {
+      expect(after.redpanda_cluster_brokers).toEqual({ category: 'Cluster metrics' })
+      expect(after.vectorized_raft_leader_for).toBeUndefined()
+      expect(after.redpanda_removed_total).toBeUndefined()
+    })
+
+    it('keeps the audience paragraphs of a description given as paragraphs', () => {
+      expect(after.redpanda_kafka_request_bytes_total).toEqual({
+        description: ['cloud-only: In Serverless, this counts your traffic only.']
+      })
+    })
+
+    it('control: leaves a description nobody approved, with its notes', () => {
+      expect(after.redpanda_new_feature_lag).toEqual(OVERRIDES.redpanda_new_feature_lag)
+    })
+
+    it('leaves a file that still matches the schema', () => {
+      const validate = new Ajv({ allErrors: true }).compile(OVERRIDES_SCHEMA)
+      expect(validate({ metrics: after })).toBe(true)
+    })
+
+    it('lists each one under retired_overrides with the reason', () => {
+      const retired = result.gaps.retired_overrides.filter((item) => item.field === 'description')
+      expect(retired.map((item) => item.name)).toEqual([
+        'redpanda_cluster_brokers', 'redpanda_kafka_request_bytes_total', 'redpanda_removed_total', 'vectorized_raft_leader_for'
+      ])
+      for (const item of retired) {
+        expect(item.reason).toBe('a person approved retiring it: The help string now covers the same ground.')
+      }
+      expect(result.report.stdout).toMatch(/a person approved retiring it/)
+    })
+
+    it('the data has the help string from Redpanda, and the audience paragraph', () => {
+      const brokers = result.dataset.metrics.redpanda_cluster_brokers
+      expect(brokers.description).toBe('Number of configured brokers in the cluster')
+      expect(brokers.category).toBe('Cluster metrics')
+      const bytes = result.dataset.metrics.redpanda_kafka_request_bytes_total
+      expect(bytes.description).toBe('Total number of bytes produced per topic')
+      expect(bytes.description_cloud_only).toEqual(['In Serverless, this counts your traffic only.'])
+    })
+
+    it('control: without --retire-overrides it only reports, and the override still applies', () => {
+      const dry = runPending([])
+      expect(dry.after).toEqual(OVERRIDES)
+      expect(dry.result.gaps.retired_overrides).toEqual([])
+      expect(dry.result.gaps.redundant_overrides.filter((item) => item.field === 'description').map((item) => item.name)).toEqual([
+        'redpanda_cluster_brokers', 'redpanda_kafka_request_bytes_total', 'redpanda_removed_total', 'vectorized_raft_leader_for'
+      ])
+      expect(dry.result.dataset.metrics.redpanda_cluster_brokers.description).toBe('How many brokers the cluster is configured with.')
+      expect(dry.result.log).toMatch(/4 descriptions in .* are marked retirement_pending/)
+    })
+  })
+
+  describe('a description given as paragraphs that now matches Redpanda', () => {
+    const OVERRIDES = {
+      redpanda_cluster_brokers: { description: ['Number of configured brokers in the cluster', 'cloud-only: Cloud sets this for you.'], upstream_ref: 'redpanda-data/streaming-enterprise#4' },
+      // Control: the text for everyone differs, so nothing is redundant.
+      redpanda_kafka_request_bytes_total: { description: ['Bytes produced and consumed.', 'cloud-only: In Serverless, this counts your traffic only.'] }
+    }
+
+    it('retires the text for everyone and keeps the audience paragraph', () => {
+      const result = run(OVERRIDES, ['--retire-overrides'])
+      const after = JSON.parse(read(path.join(workDir, `run-${counter}`, 'overrides.json'))).metrics
+      expect(after.redpanda_cluster_brokers).toEqual({ description: ['cloud-only: Cloud sets this for you.'] })
+      expect(after.redpanda_kafka_request_bytes_total).toEqual(OVERRIDES.redpanda_kafka_request_bytes_total)
+      expect(result.gaps.retired_overrides).toEqual([
+        { name: 'redpanda_cluster_brokers', field: 'description', reason: 'the help string in Redpanda now says the same' }
+      ])
+    })
+  })
+
   it('fails on an overrides file with the wrong shape', () => {
     expect(run('{"metrics": []}').status).toBe(1)
     expect(run({ redpanda_cluster_brokers: { labels: [{ description: 'no name' }] } }).status).toBe(1)
