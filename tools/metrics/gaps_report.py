@@ -147,7 +147,8 @@ def render(gaps):
             "### Overrides that match no metric (%d)" % len(gaps["stale_overrides"]),
             "",
             "These entries in `docs-data/metric-overrides.json` name metrics that are not in this release. "
-            "Remove them, or rename them if the metric was renamed.",
+            "Remove them, or rename them if the metric was renamed. The run for the newest release deletes "
+            "them by itself; this run was for an older one, so it left them.",
             "",
         ]
         lines += ["- `%s`" % name for name in gaps["stale_overrides"]]
@@ -182,7 +183,8 @@ def override_cleanup(gaps):
     ):
         if gaps[kind]:
             lines += ["### %s (%d)" % (title, len(gaps[kind])), "", intro, ""]
-            lines += ["- `%s.%s`: %s" % (g["name"], g["field"], g["reason"]) for g in gaps[kind]]
+            lines += ["- `%s`: %s" % ("%s.%s" % (g["name"], g["field"]) if g["field"] else g["name"], g["reason"])
+                      for g in gaps[kind]]
             lines.append("")
     return lines
 

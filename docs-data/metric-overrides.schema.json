@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://docs.redpanda.com/schemas/metric-overrides.schema.json",
   "title": "Metric overrides",
-  "description": "What writers add to the generated metrics data. An override is a stopgap or enrichment. A stopgap stands in for something the tooling should produce: a better description than the help string in Redpanda, or the labels of a metric the metrics cluster did not export. The release run deletes a stopgap as soon as the tooling produces the same thing. Enrichment is what no tool can produce: text for one audience, Cloud availability, links, sections and usage guidance. doc-tools generate metrics-docs --overrides merges this file into redpanda-metrics-<tag>.json.",
+  "description": "What writers add to the generated metrics data. An override is a stopgap or enrichment. A stopgap stands in for something the tooling should produce: a better description than the help string in Redpanda, or the labels of a metric the metrics cluster did not export. The release run deletes a stopgap as soon as the tooling produces the same thing. Enrichment is what no tool can produce: text for one audience, Cloud availability, links, sections and usage guidance. The release run also deletes an override whose metric is no longer in the newest release. doc-tools generate metrics-docs --overrides merges this file into redpanda-metrics-<tag>.json.",
   "type": "object",
   "additionalProperties": false,
   "required": ["metrics"],
