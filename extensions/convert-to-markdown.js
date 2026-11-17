@@ -517,7 +517,9 @@ function createEnterpriseFeatureRules () {
       if (inner.toLowerCase().endsWith(ENTERPRISE_MARKER)) return inner
 
       const sibling = nextElementSibling(node)
-      if (badgeMeaning(sibling) && badgeMeaning(sibling) !== ENTERPRISE_STATUS) {
+      // Defer only to a badge the status rule replaces. A linked use-case or
+      // neutral badge keeps its link and never emits the marker.
+      if (badgeMeaning(sibling) && badgeMeaning(sibling) !== ENTERPRISE_STATUS && betaBadge.filter(sibling)) {
         // The badge renders "(enterprise, beta)" for both of us.
         deferredToBadge.add(sibling)
         return inner

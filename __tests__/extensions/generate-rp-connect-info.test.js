@@ -275,6 +275,11 @@ describe('generate-rp-connect-info extractDescription', () => {
     expect(extractDescription(src)).toBe('Attribute description wins')
   })
 
+  test('skips a badge-only paragraph and uses the prose after it', () => {
+    const src = page('= Stream\n\ncomponent_type_dropdown::[]\n\nbadge::[label=Beta, tooltip={page-beta-text}]\n\nReads records from the configured stream.\n')
+    expect(extractDescription(src)).toBe('Reads records from the configured stream.')
+  })
+
   // The :description: attribute is AsciiDoc too, and it is the source almost
   // every card uses, so it needs the same cleaning as the body fallback.
   describe('the description attribute path', () => {

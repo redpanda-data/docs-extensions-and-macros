@@ -652,6 +652,11 @@ describe('combined status markers in Markdown', () => {
       expect(createTurndown().turndown(html)).toBe('See [Change data capture](catalog.html?usecase=cdc)')
     })
 
+    test.each(['use-case', 'neutral'])('an enterprise feature before a linked %s badge keeps its marker', (meaning) => {
+      const html = `<p><span class="enterprise-feature">Stretch Clusters</span> <a class="rp-badge rp-badge--${meaning}" href="catalog.html">Catalog</a></p>`
+      expect(createTurndown().turndown(html)).toBe(`Stretch Clusters ${ENTERPRISE_MARKER} [Catalog](catalog.html)`)
+    })
+
     test('badgeMeaning reads the class, legacy beta included', () => {
       const domino = require('@mixmark-io/domino')
       const el = (html) => domino.createDocument(html).body.firstChild

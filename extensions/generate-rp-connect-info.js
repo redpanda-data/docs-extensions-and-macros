@@ -864,7 +864,9 @@ function extractDescription (pageSrc) {
               !cleaned.startsWith('yml') &&
               !cleaned.startsWith('include::') &&
               !cleaned.match(/^(TIP|NOTE|WARNING|CAUTION|IMPORTANT):/) &&
-              cleaned.length > 20) {
+              cleaned.length > 20 &&
+              // A badge-only paragraph cleans to nothing: keep looking for prose
+              cleanDescription(cleaned, attributes)) {
             // Markup stripping and truncation happen once, on the way out
             description = cleaned
             break
