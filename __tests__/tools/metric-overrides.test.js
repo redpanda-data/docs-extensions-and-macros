@@ -394,10 +394,10 @@ describeIfPython('metric overrides', () => {
 
     it('the data has the help string from Redpanda, and the audience paragraph', () => {
       const brokers = result.dataset.metrics.redpanda_cluster_brokers
-      expect(brokers.description).toBe('Number of configured brokers in the cluster')
+      expect(brokers.description).toBe('Number of configured brokers in the cluster.')
       expect(brokers.category).toBe('Cluster metrics')
       const bytes = result.dataset.metrics.redpanda_kafka_request_bytes_total
-      expect(bytes.description).toBe('Total number of bytes produced per topic')
+      expect(bytes.description).toBe('Total number of bytes produced per topic.')
       expect(bytes.description_cloud_only).toEqual(['In Serverless, this counts your traffic only.'])
     })
 
@@ -436,6 +436,48 @@ describeIfPython('metric overrides', () => {
         { name: 'vectorized_raft_leader_for', field: 'description', reason: 'the help string in Redpanda now says the same' }
       ])
     })
+  })
+
+  describe('reader text ends as a sentence', () => {
+    let result
+
+    beforeAll(() => {
+      result = run({
+        redpanda_cluster_brokers: { description: 'How many brokers the cluster has' },
+        redpanda_kafka_request_bytes_total: { description: ['Bytes in and out.', 'For example: produce and fetch', 'cloud-only: Counts your traffic only'] },
+        redpanda_new_feature_lag: { labels: [] },
+        redpanda_other_feature_total: { labels: [] }
+      })
+    })
+
+    it('adds the period to an override that has none', () => {
+      expect(result.dataset.metrics.redpanda_cluster_brokers.description).toBe('How many brokers the cluster has.')
+    })
+
+    it('adds it to each paragraph, and to text for one audience', () => {
+      const entry = result.dataset.metrics.redpanda_kafka_request_bytes_total
+      expect(entry.description).toBe('Bytes in and out.\n\nFor example: produce and fetch.')
+      expect(entry.description_cloud_only).toEqual(['Counts your traffic only.'])
+    })
+
+    it('adds it to a help string, and leaves the help string itself alone', () => {
+      const entry = result.dataset.metrics.redpanda_new_feature_lag
+      expect(entry.description).toBe('From source.')
+      expect(entry.source_description).toBe('From source')
+    })
+
+    it('negative control: an override that only adds the period changes nothing, so it is retired', () => {
+      const retiring = run({ redpanda_cluster_brokers: { description: 'Number of configured brokers in the cluster.' }, redpanda_new_feature_lag: { labels: [] }, redpanda_other_feature_total: { labels: [] } }, ['--retire-overrides'])
+      expect(retiring.gaps.retired_overrides.map((item) => `${item.name}.${item.field}`)).toEqual(['redpanda_cluster_brokers.description'])
+      expect(retiring.dataset.metrics.redpanda_cluster_brokers.description).toBe('Number of configured brokers in the cluster.')
+    })
+  })
+
+  it('deletes the upstream_not_possible marker together with a description it retires', () => {
+    const overrides = { redpanda_cluster_brokers: { description: 'Number of configured brokers in the cluster', upstream_not_possible: 'Help is built at run time.', category: 'Cluster metrics' }, redpanda_new_feature_lag: { labels: [] }, redpanda_other_feature_total: { labels: [] } }
+    run(overrides, ['--retire-overrides'])
+    const after = JSON.parse(read(path.join(workDir, `run-${counter}`, 'overrides.json'))).metrics
+    expect(after.redpanda_cluster_brokers).toEqual({ category: 'Cluster metrics' })
   })
 
   it('fails on an overrides file with the wrong shape', () => {

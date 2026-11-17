@@ -3426,6 +3426,9 @@ Path to a JSON array of triaged candidate rows
 `--section <section>`::
 Which report section to build (choices: "upstream", "retirement", "ambiguous", "unlocatable")
 
+`--surface <surface>`::
+The surface the candidates came from, for the wording of the section. Needed only for a section with no candidates, because rows from the metrics surface carry it (choices: "properties", "rpk", "metrics")
+
 `-h, --help`::
 display help for command
 

@@ -365,14 +365,15 @@ def apply_overrides(dataset, overrides):
                 # Paragraphs, some for one audience only.
                 shared, cloud, self_managed = split_audiences(value)
                 if shared:
-                    entry["description"] = "\n\n".join(shared)
+                    entry["description"] = "\n\n".join(metrics_dataset.as_sentence(text) for text in shared)
                     entry["provenance"]["description"] = "override"
                 if cloud:
-                    entry["description_cloud_only"] = cloud
+                    entry["description_cloud_only"] = [metrics_dataset.as_sentence(text) for text in cloud]
                 if self_managed:
-                    entry["description_self_managed_only"] = self_managed
+                    entry["description_self_managed_only"] = [metrics_dataset.as_sentence(text) for text in self_managed]
                 continue
-            entry[field] = value
+            # Reader text ends as a sentence, whoever wrote it.
+            entry[field] = metrics_dataset.as_sentence(value) if field == "description" else value
             entry["provenance"][field] = "override"
         if "labels" not in override:
             continue
@@ -493,6 +494,7 @@ def retire_overrides(path, redundant):
                 override.pop("description", None)
             # The note about where the fix was sent goes with the text it describes.
             override.pop("upstream_ref", None)
+            override.pop("upstream_not_possible", None)
             if "retirement_pending" in override:
                 override.pop("retirement_pending")
                 override.pop("_comment", None)

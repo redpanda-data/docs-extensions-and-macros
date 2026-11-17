@@ -29,6 +29,7 @@
             { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
           ]
         },
+        "upstream_not_possible": { "type": "string", "minLength": 1, "description": "Why the description override cannot be moved into the Redpanda source: for example, the help string is built at run time, or the metric comes from Seastar. Set it so the weekly audit keeps the override without listing it for review every week. The audit says so if the source later gains a plain help string. Deleted together with the description." },
         "upstream_ref": { "type": "string", "minLength": 1, "description": "The issue or pull request against the Redpanda source that will make the description override redundant, as 'redpanda-data/streaming-enterprise#12345' or a URL. Set it so the override has a way out. Deleted together with the description." },
         "retirement_pending": {
           "type": "object",

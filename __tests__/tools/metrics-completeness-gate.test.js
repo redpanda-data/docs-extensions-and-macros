@@ -205,7 +205,7 @@ describeIfPython('metrics completeness gate', () => {
       expect(result.dataset.metrics.redpanda_kafka_records_produced_total).toMatchObject({
         endpoint: 'public',
         type: 'counter',
-        description: 'Records',
+        description: 'Records.',
         labels: [],
         observed: false,
         defined_in: 'src/v/kafka/server/probe.cc'

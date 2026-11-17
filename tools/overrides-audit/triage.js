@@ -21,6 +21,8 @@
 
 'use strict'
 
+const { vocabulary } = require('./vocabulary')
+
 const VERDICTS = Object.freeze({
   UPSTREAM_OVERRIDE: 'UPSTREAM_OVERRIDE',
   RETIRE_OVERRIDE: 'RETIRE_OVERRIDE',
@@ -68,11 +70,14 @@ function buildTriagePrompt (candidate) {
     ? `${candidate.source_file}${candidate.source_line !== undefined ? `:${candidate.source_line}` : ''}`
     : 'unknown location'
 
-  return `You are triaging one property description for a documentation team.
+  // Property wording unless the row names another surface. See vocabulary.js.
+  const words = vocabulary(candidate.surface)
 
-A documentation site publishes reference docs for a configuration property named "${candidate.name}". Its description currently comes from a manually written "override" that the docs team keeps because, at some point in the past, the engineering source code's own description of this property was missing, wrong, or worse than what the docs team wrote. Engineering source now defines its own description for the same property, at ${location}.
+  return `You are triaging one ${words.description} for a documentation team.
 
-Your job is to compare the two descriptions below and decide what should happen next.
+A documentation site publishes reference docs for a ${words.thing} named "${candidate.name}". Its description currently comes from a manually written "override" that the docs team keeps because, at some point in the past, the engineering source code's own description of this ${words.short} was missing, wrong, or worse than what the docs team wrote. Engineering source now defines its own description for the same ${words.short}, at ${location}.
+
+${words.triageNote}Your job is to compare the two descriptions below and decide what should happen next.
 
 OVERRIDE TEXT (currently shown to docs readers, and a candidate to copy into engineering source):
 """

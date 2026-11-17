@@ -108,6 +108,20 @@ def parse_labels(text):
     return pairs
 
 
+def as_sentence(text):
+    """Reader text for a description: the same words, ending as a sentence.
+
+    A help string in Redpanda takes no terminal period, and the docs print
+    full sentences. The period is added here, where the text is prepared for
+    readers, so nobody has to write an override for punctuation.
+    source_description keeps the help string exactly as Redpanda has it.
+    """
+    text = (text or "").strip()
+    if not text or text[-1] in ".!?:":
+        return text
+    return text + "."
+
+
 def derive_unit(name):
     """The unit a metric name states, or None."""
     base = name[:-len("_total")] if name.endswith("_total") else name
@@ -227,7 +241,7 @@ def _entry(name, endpoint, family, source):
         "endpoint": endpoint,
         "type": kind,
         "unit": unit,
-        "description": family["help"] or "",
+        "description": as_sentence(family["help"]),
         "source_description": family["help"] or "",
         "labels": _labels(family),
         "histogram": None,
@@ -261,7 +275,7 @@ def _source_only_entry(name, endpoint, source):
         "endpoint": endpoint,
         "type": source.get("type"),
         "unit": unit,
-        "description": source.get("help") or "",
+        "description": as_sentence(source.get("help")),
         "source_description": source.get("help") or "",
         "labels": [],
         "histogram": {"buckets": [], "series": list(SERIES_SUFFIXES)} if source.get("type") == "histogram" else None,

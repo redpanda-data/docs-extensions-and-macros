@@ -233,6 +233,43 @@ describe('overrides audit, metrics surface', () => {
   })
 
   describe('other entries', () => {
+    describe('an override that cannot be moved upstream', () => {
+      test('is listed for review once, with how to stop it being listed', () => {
+        const row = descriptionRow('redpanda_widget_built', 'Number of widgets built.')
+        expect(row.class).toBe(CLASSES.REVIEW)
+        expect(row.note).toMatch(/set upstream_not_possible on it with the reason/)
+      })
+
+      test('is kept, and not listed again, once a person has recorded why', () => {
+        const row = descriptionRow('redpanda_widget_built', 'Number of widgets built.', { upstream_not_possible: 'The help string is built from the widget name.' })
+        expect(row.class).toBe(CLASSES.KEEP)
+        expect(row.note).toMatch(/Marked upstream_not_possible: The help string is built from the widget name\./)
+        expect(row.upstream_candidate_text).toBeUndefined()
+      })
+
+      test('the same goes for a Seastar metric', () => {
+        const row = descriptionRow('redpanda_memory_free_memory', 'Free memory.', { upstream_not_possible: 'The metric comes from Seastar.' })
+        expect(row.class).toBe(CLASSES.KEEP)
+      })
+
+      test('negative control: the marker does not hide an override the source can take', () => {
+        const row = descriptionRow('redpanda_widget_active', 'How many widgets are active right now', { upstream_not_possible: 'Out of date.' })
+        expect(row.class).toBe(CLASSES.UPSTREAMABLE)
+        expect(row.note).toMatch(/Marked upstream_not_possible, but the source has a plain help string/)
+      })
+
+      test('negative control: an empty marker records nothing', () => {
+        const row = descriptionRow('redpanda_widget_built', 'Number of widgets built.', { upstream_not_possible: '  ' })
+        expect(row.class).toBe(CLASSES.REVIEW)
+      })
+    })
+
+    test('every row says which surface it came from, for the shared prompt and report', () => {
+      const result = audit({ redpanda_widget_active: { description: 'How many widgets are active right now', category: 'Widgets' } })
+      expect(result.manifest.length).toBeGreaterThan(0)
+      for (const row of result.manifest) expect(row.surface).toBe('metrics')
+    })
+
     test('a metric that is not in the inventory is REVIEW', () => {
       const row = descriptionRow('redpanda_gone_total', 'A metric that was removed.')
       expect(row.class).toBe(CLASSES.REVIEW)

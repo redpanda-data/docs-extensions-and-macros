@@ -4020,12 +4020,13 @@ overridesGroup
   .description('Build a plain-English markdown report section from triaged candidates')
   .requiredOption('--candidates <path>', 'Path to a JSON array of triaged candidate rows')
   .addOption(new Option('--section <section>', 'Which report section to build').choices(['upstream', 'retirement', 'ambiguous', 'unlocatable']).makeOptionMandatory())
+  .addOption(new Option('--surface <surface>', 'The surface the candidates came from, for the wording of the section. Needed only for a section with no candidates, because rows from the metrics surface carry it').choices(['properties', 'rpk', 'metrics']))
   .action((options) => {
     const { buildUpstreamSection, buildRetirementSection, buildAmbiguousDigest, buildUnlocatableSection } = require('../tools/overrides-audit/report')
     const BUILDERS = { upstream: buildUpstreamSection, retirement: buildRetirementSection, ambiguous: buildAmbiguousDigest, unlocatable: buildUnlocatableSection }
     try {
       const candidates = JSON.parse(fs.readFileSync(path.resolve(options.candidates), 'utf8'))
-      console.log(BUILDERS[options.section](candidates))
+      console.log(BUILDERS[options.section](candidates, { surface: options.surface }))
     } catch (err) {
       fail(err.message)
     }

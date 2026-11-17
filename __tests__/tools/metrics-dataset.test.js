@@ -204,8 +204,9 @@ describeIfPython('redpanda-metrics-<version>.json', () => {
 
     it('keeps the source text beside the description', () => {
       const entry = dataset.metrics.redpanda_cluster_brokers
-      expect(entry.description).toBe('Number of configured brokers in the cluster')
-      expect(entry.source_description).toBe(entry.description)
+      // Reader text ends as a sentence. The help string stays as Redpanda has it.
+      expect(entry.description).toBe('Number of configured brokers in the cluster.')
+      expect(entry.source_description).toBe('Number of configured brokers in the cluster')
       expect(entry.provenance.description).toBe('scraped')
     })
 
@@ -248,7 +249,7 @@ describeIfPython('redpanda-metrics-<version>.json', () => {
       expect(dataset.metrics.redpanda_cluster_health_refreshes_total).toMatchObject({
         endpoint: 'public',
         type: 'counter',
-        description: 'Total refreshes',
+        description: 'Total refreshes.',
         labels: [],
         observed: false
       })

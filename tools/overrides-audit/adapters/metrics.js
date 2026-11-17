@@ -146,8 +146,18 @@ function classifyMetricDescription (name, override, family) {
     })
   }
   const reason = noHelpReason(family)
+  const marked = typeof override.upstream_not_possible === 'string' && override.upstream_not_possible.trim()
+  if (reason && marked) {
+    // A person has recorded that this text cannot go upstream, so it is kept
+    // and not listed for review again.
+    return classify.row({ ...base, class: CLASSES.KEEP, note: `${reason} Marked upstream_not_possible: ${marked}` })
+  }
   if (reason) {
-    return classify.row({ ...base, class: CLASSES.REVIEW, note: reason })
+    return classify.row({
+      ...base,
+      class: CLASSES.REVIEW,
+      note: `${reason} If the override should stay, set upstream_not_possible on it with the reason, and it is not listed again.`
+    })
   }
 
   // The shared classifier, on the unprefixed text only.
@@ -177,6 +187,10 @@ function classifyMetricDescription (name, override, family) {
     }
   }
   result.note += audienceNote
+  if (marked) {
+    // The marker is out of date: there is a plain help string to rewrite now.
+    result.note += ' Marked upstream_not_possible, but the source has a plain help string for this metric now, so the marker no longer holds.'
+  }
   if (family.call_sites > 1 && result.upstream_candidate_text !== undefined) {
     result.note += ` The source registers this family at ${family.call_sites} call sites. The location is the first one.`
   }
@@ -272,6 +286,8 @@ function audit ({ overridesPath, extractedPath }) {
     }
   }
   mergeSharedSourceStrings(manifest)
+  // The shared triage prompt and report choose their wording by this.
+  for (const row of manifest) row.surface = 'metrics'
 
   return {
     surface: 'metrics',
