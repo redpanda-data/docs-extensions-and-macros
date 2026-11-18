@@ -316,6 +316,23 @@ features:
     expect(partial).toContain('| fips')
   })
 
+  // The table filter drops in-table: false entries, but the mapping must not:
+  // keeping the cluster_cores_over_limit row is why such an entry exists.
+  test('buildMappingPartial keeps an entry marked in-table: false', () => {
+    const yaml = `features:
+  - name: Community Edition Core Limit
+    scope: redpanda
+    xref: get-started:licensing/core-limit.adoc
+    in-table: false
+    description: x
+    source: {kind: core-enum, value: cluster_cores_over_limit}
+`
+    const { features } = lintRegistry(yaml)
+    const partial = buildMappingPartial(features, ['cluster_cores_over_limit'])
+    expect(partial).toContain('| cluster_cores_over_limit')
+    expect(partial).toContain('xref:get-started:licensing/core-limit.adoc[Community Edition Core Limit]')
+  })
+
   test('runChecks skips missing sources with info findings only', () => {
     const { findings } = runChecks({ registryYaml: REGISTRY })
     expect(findings.filter((f) => f.level === 'error' || f.level === 'needs-human')).toEqual([])

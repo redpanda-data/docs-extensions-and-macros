@@ -595,7 +595,8 @@ function buildFeatureTable (features, scope, opts = {}) {
       return status === STATUS_UNRELEASED || isFeatureShippedOnPage(feature, opts.config, report)
     })
     // `in-table: false` keeps an entry out of the licensing table while it
-    // still resolves for the inline macro and the rpk name mapping. For a
+    // still resolves for the inline macro, and an entry with a core-enum
+    // source keeps its row in the rpk name mapping. For a
     // licensed condition that is not a feature, such as the Community Edition
     // core limit (cluster_cores_over_limit), which pages describe in prose.
     // Applied after the status filter so a bad status is still reported.

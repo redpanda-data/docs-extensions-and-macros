@@ -62,8 +62,8 @@ function lintRegistry (source) {
     } else if (!feature.source.value || !String(feature.source.value).trim()) {
       findings.push(finding('error', 'registry-lint', `'${name}' has an empty source value; manual entries need a justification.`))
     }
-    // A string 'false' is truthy to the table filter, so the entry would stay
-    // in the table while the writer believed it was hidden.
+    // The table filter skips only the boolean false, so a string 'false' would
+    // leave the entry in the table while the writer believed it was hidden.
     if (feature['in-table'] !== undefined && typeof feature['in-table'] !== 'boolean') {
       findings.push(finding('error', 'registry-lint', `'${name}' has in-table '${feature['in-table']}', which must be true or false.`))
     }
