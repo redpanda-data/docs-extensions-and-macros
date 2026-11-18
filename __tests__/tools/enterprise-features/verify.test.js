@@ -214,6 +214,24 @@ features:
     expect(messages).not.toMatch(/'C' has since/)
   })
 
+  test('in-table must be a boolean', () => {
+    const yaml = `features:
+  - name: A
+    scope: redpanda
+    in-table: 'false'
+    description: x
+    source: {kind: manual, value: ok}
+  - name: B
+    scope: redpanda
+    in-table: false
+    description: x
+    source: {kind: manual, value: ok}
+`
+    const messages = lintRegistry(yaml).findings.map((f) => f.message).join('\n')
+    expect(messages).toMatch(/'A' has in-table 'false', which must be true or false/)
+    expect(messages).not.toMatch(/'B' has in-table/)
+  })
+
   test('a new core enum value is reported as needs-human', () => {
     const { features } = lintRegistry(REGISTRY)
     const findings = checkCoreEnum(features, ['audit_logging', 'cloud_storage', 'partition_auto_balancing_continuous', 'fips', 'quantum_topics'])
