@@ -212,6 +212,20 @@ Optional table title override. The default is scope-specific, for example `Enter
 heading::
 Optional third-column heading override. The default is `Behavior Upon Expiration` for the `redpanda` scope and `Restrictions Without Valid License` for the other scopes.
 
+To keep a registry entry out of the table, set `in-table: false` on it. Use this for something a license covers that isn't a feature, so pages describe it in prose instead. The `enterprise` inline macro still resolves the entry by its name and aliases. The generated `rpk cluster license info` name mapping still lists the entry if it has a `core-enum` source. The mapping builds its rows from `source.value`, not from `aliases`. The `in-table` value must be a boolean: `doc-tools validate enterprise-features` reports any other value as an error.
+
+[,yaml]
+----
+- name: Community Edition Core Limit
+  scope: redpanda
+  in-table: false
+  description: Runs a cluster with more than 50 cores in total.
+  aliases: [cluster_cores_over_limit]
+  source:
+    kind: core-enum
+    value: cluster_cores_over_limit
+----
+
 [[cloud-pages-block]]
 There is no `cloud` scope: Redpanda Cloud has no Enterprise Edition license, so there is no licensing table to generate for it (see <<cloud-pages>>). Calling this macro from a page in a Cloud component -- directly or through single-sourced self-managed content -- renders nothing: no table and no admonition. The diagnostic goes to the build log, reported according to `enterprise-validate` and naming the page, so it reaches the writer and never the reader.
 
