@@ -1,5 +1,17 @@
 # Changelog
 
+## [5.66.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.65.0...v5.66.0) (2026-11-18)
+
+
+### Features
+
+* let a registry entry stay out of the licensing table (in-table: false) ([#537](https://github.com/redpanda-data/docs-extensions-and-macros/issues/537)) ([1cf1905](https://github.com/redpanda-data/docs-extensions-and-macros/commit/1cf19053240de01a4aa8030386be985a5b8c3955))
+
+
+### Bug fixes
+
+* read the operator sources from operator-enterprise ([#521](https://github.com/redpanda-data/docs-extensions-and-macros/issues/521)) ([64876c8](https://github.com/redpanda-data/docs-extensions-and-macros/commit/64876c85d9a84d8cc360ce7bc70fdab80fda106d))
+
 ## [5.65.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.64.0...v5.65.0) (2026-11-16)
 
 
