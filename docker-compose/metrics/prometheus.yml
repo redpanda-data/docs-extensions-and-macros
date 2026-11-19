@@ -1,0 +1,28 @@
+# Prometheus configuration for `doc-tools check-queries --tag <tag>`.
+#
+# Each broker is scraped twice: /public_metrics and /metrics. Both jobs use
+# the same target address, so both give a broker's series the same `instance`
+# label (redpanda-0:9644). The documented joins use on(instance), and they
+# only match when one value names one broker on both endpoints.
+#
+# The interval is short so that a range such as [5m] holds enough samples
+# soon after the cluster starts.
+global:
+  scrape_interval: 5s
+  scrape_timeout: 4s
+  evaluation_interval: 5s
+scrape_configs:
+  - job_name: redpanda-public
+    metrics_path: /public_metrics
+    static_configs:
+      - targets:
+          - redpanda-0:9644
+          - redpanda-1:9644
+          - redpanda-2:9644
+  - job_name: redpanda-internal
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - redpanda-0:9644
+          - redpanda-1:9644
+          - redpanda-2:9644

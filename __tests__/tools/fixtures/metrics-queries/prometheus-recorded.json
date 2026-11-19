@@ -1,0 +1,3046 @@
+{
+ "recorded_from": "Prometheus v3.2.1 scraping a three-broker Redpanda v26.2.7 cluster started by generate-cluster-docs.sh in queries mode",
+ "ready": {
+  "scrapeInterval": 5,
+  "targets": 6,
+  "waited": 0,
+  "samples": 2
+ },
+ "responses": {
+  "GET /api/v1/targets?state=active": {
+   "status": "success",
+   "data": {
+    "activeTargets": [
+     {
+      "scrapePool": "redpanda-internal",
+      "scrapeUrl": "http://redpanda-0:9644/metrics",
+      "labels": {
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-internal"
+      },
+      "health": "up",
+      "lastError": "",
+      "scrapeInterval": "5s",
+      "scrapeTimeout": "4s"
+     },
+     {
+      "scrapePool": "redpanda-internal",
+      "scrapeUrl": "http://redpanda-1:9644/metrics",
+      "labels": {
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-internal"
+      },
+      "health": "up",
+      "lastError": "",
+      "scrapeInterval": "5s",
+      "scrapeTimeout": "4s"
+     },
+     {
+      "scrapePool": "redpanda-internal",
+      "scrapeUrl": "http://redpanda-2:9644/metrics",
+      "labels": {
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-internal"
+      },
+      "health": "up",
+      "lastError": "",
+      "scrapeInterval": "5s",
+      "scrapeTimeout": "4s"
+     },
+     {
+      "scrapePool": "redpanda-public",
+      "scrapeUrl": "http://redpanda-1:9644/public_metrics",
+      "labels": {
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public"
+      },
+      "health": "up",
+      "lastError": "",
+      "scrapeInterval": "5s",
+      "scrapeTimeout": "4s"
+     },
+     {
+      "scrapePool": "redpanda-public",
+      "scrapeUrl": "http://redpanda-2:9644/public_metrics",
+      "labels": {
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public"
+      },
+      "health": "up",
+      "lastError": "",
+      "scrapeInterval": "5s",
+      "scrapeTimeout": "4s"
+     },
+     {
+      "scrapePool": "redpanda-public",
+      "scrapeUrl": "http://redpanda-0:9644/public_metrics",
+      "labels": {
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public"
+      },
+      "health": "up",
+      "lastError": "",
+      "scrapeInterval": "5s",
+      "scrapeTimeout": "4s"
+     }
+    ]
+   }
+  },
+  "POST /api/v1/query query=min%28count_over_time%28up%5B10s%5D%29%29": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": [
+     {
+      "metric": {},
+      "value": [
+       1795099796.53,
+       "2"
+      ]
+     }
+    ]
+   }
+  },
+  "POST /api/v1/query query=redpanda_cluster_health_unhealthy_reasons%0A++and+on%28instance%29%0A++++redpanda_raft_leader_for%7Bredpanda_namespace%3D%22redpanda%22%2Credpanda_topic%3D%22controller%22%2Credpanda_partition%3D%220%22%7D+%3D%3D+1": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": [
+     {
+      "metric": {
+       "__name__": "redpanda_cluster_health_unhealthy_reasons",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public"
+      },
+      "value": [
+       1795099796.535,
+       "0"
+      ]
+     }
+    ]
+   }
+  },
+  "POST /api/v1/query query=redpanda_cluster_health_unhealthy_reasons%0A++and+on%28instance%29%0A++++redpanda_raft_leader_for%7Bnamespace%3D%22redpanda%22%2Ctopic%3D%22controller%22%2Cpartition%3D%220%22%7D+%3D%3D+1": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": []
+   }
+  },
+  "POST /api/v1/query query=redpanda_cluster_health_unhealthy_reasons": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": [
+     {
+      "metric": {
+       "__name__": "redpanda_cluster_health_unhealthy_reasons",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public"
+      },
+      "value": [
+       1795099796.546,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_cluster_health_unhealthy_reasons",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public"
+      },
+      "value": [
+       1795099796.546,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_cluster_health_unhealthy_reasons",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public"
+      },
+      "value": [
+       1795099796.546,
+       "0"
+      ]
+     }
+    ]
+   }
+  },
+  "POST /api/v1/query query=redpanda_raft_leader_for%7Bnamespace%3D%22redpanda%22%2Ctopic%3D%22controller%22%2Cpartition%3D%220%22%7D": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": []
+   }
+  },
+  "POST /api/v1/query query=redpanda_raft_leader_for": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": [
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leader_for",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "redpanda",
+       "redpanda_partition": "0",
+       "redpanda_topic": "controller"
+      },
+      "value": [
+       1795099796.647,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leader_for",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "redpanda",
+       "redpanda_partition": "0",
+       "redpanda_topic": "controller"
+      },
+      "value": [
+       1795099796.647,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leader_for",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "redpanda",
+       "redpanda_partition": "0",
+       "redpanda_topic": "controller"
+      },
+      "value": [
+       1795099796.647,
+       "0"
+      ]
+     }
+    ]
+   }
+  },
+  "POST /api/v1/query query=redpanda_raft_leader_for%7Bnamespace%3D%22redpanda%22%7D": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": []
+   }
+  },
+  "POST /api/v1/query query=redpanda_raft_leader_for%7Btopic%3D%22controller%22%7D": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": []
+   }
+  },
+  "POST /api/v1/query query=redpanda_raft_leader_for%7Bpartition%3D%220%22%7D": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": []
+   }
+  },
+  "POST /api/v1/query query=sum%28redpanda_raft_leader_for%7Bredpanda_namespace%3D%22redpanda%22%2Credpanda_topic%3D%22controller%22%2Credpanda_partition%3D%220%22%7D%29+%3D%3D+0": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": []
+   }
+  },
+  "POST /api/v1/query query=redpanda_raft_leader_for%7Bredpanda_namespace%3D%22redpanda%22%2Credpanda_topic%3D%22controller%22%2Credpanda_partition%3D%220%22%7D": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": [
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leader_for",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "redpanda",
+       "redpanda_partition": "0",
+       "redpanda_topic": "controller"
+      },
+      "value": [
+       1795099796.58,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leader_for",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "redpanda",
+       "redpanda_partition": "0",
+       "redpanda_topic": "controller"
+      },
+      "value": [
+       1795099796.58,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leader_for",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "redpanda",
+       "redpanda_partition": "0",
+       "redpanda_topic": "controller"
+      },
+      "value": [
+       1795099796.58,
+       "0"
+      ]
+     }
+    ]
+   }
+  },
+  "POST /api/v1/query query=sum%28redpanda_raft_leader_for%7Bnamespace%3D%22redpanda%22%2Ctopic%3D%22controller%22%2Cpartition%3D%220%22%7D%29+%3D%3D+0": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": []
+   }
+  },
+  "POST /api/v1/query query=redpanda_kafka_under_replicated_replicas+%3E+0": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": []
+   }
+  },
+  "POST /api/v1/query query=redpanda_kafka_under_replicated_replicas": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": [
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "0",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "0",
+       "redpanda_topic": "_redpanda.transform_logs",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "1",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "10",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "11",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "2",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "3",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "4",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "5",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "6",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "7",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "8",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "9",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "0",
+       "redpanda_topic": "ct_l1_domain",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "1",
+       "redpanda_topic": "ct_l1_domain",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "2",
+       "redpanda_topic": "ct_l1_domain",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "redpanda",
+       "redpanda_partition": "0",
+       "redpanda_topic": "controller",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "0",
+       "redpanda_topic": "_schemas",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "0",
+       "redpanda_topic": "ct_l1_domain",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "0",
+       "redpanda_topic": "datalake_coordinator",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "1",
+       "redpanda_topic": "ct_l1_domain",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "1",
+       "redpanda_topic": "datalake_coordinator",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "2",
+       "redpanda_topic": "ct_l1_domain",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "2",
+       "redpanda_topic": "datalake_coordinator",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "redpanda",
+       "redpanda_partition": "0",
+       "redpanda_topic": "controller",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "0",
+       "redpanda_topic": "_schemas",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "0",
+       "redpanda_topic": "transactions",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "0",
+       "redpanda_topic": "ct_l1_domain",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "0",
+       "redpanda_topic": "datalake_coordinator",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "1",
+       "redpanda_topic": "ct_l1_domain",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "1",
+       "redpanda_topic": "datalake_coordinator",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "2",
+       "redpanda_topic": "ct_l1_domain",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "2",
+       "redpanda_topic": "datalake_coordinator",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "redpanda",
+       "redpanda_partition": "0",
+       "redpanda_topic": "controller",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "0",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "0",
+       "redpanda_topic": "_schemas",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "1",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "10",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "11",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "12",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "13",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "14",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "15",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "2",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "3",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "4",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "5",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "6",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "7",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "8",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "9",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "0",
+       "redpanda_topic": "datalake_coordinator",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "0",
+       "redpanda_topic": "id_allocator",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "0",
+       "redpanda_topic": "wasm_binaries",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "1",
+       "redpanda_topic": "datalake_coordinator",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "2",
+       "redpanda_topic": "datalake_coordinator",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "0",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "0",
+       "redpanda_topic": "metrics-cloud-topic",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "0",
+       "redpanda_topic": "metrics-group-probe",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "1",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "10",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "11",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "12",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "13",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "14",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "15",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "2",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "3",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "4",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "5",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "6",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "7",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "8",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "9",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "0",
+       "redpanda_topic": "id_allocator",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "0",
+       "redpanda_topic": "wasm_binaries",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "0",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "1",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "10",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "11",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "12",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "13",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "14",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "15",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "2",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "3",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "4",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "5",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "6",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "7",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "8",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "9",
+       "redpanda_topic": "__consumer_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "0",
+       "redpanda_topic": "id_allocator",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "0",
+       "redpanda_topic": "wasm_binaries",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "0",
+       "redpanda_topic": "transform_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "0",
+       "redpanda_topic": "transform_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_partition": "0",
+       "redpanda_topic": "transform_offsets",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "0",
+       "redpanda_topic": "metrics-quota-probe",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "0",
+       "redpanda_topic": "metrics-shadow-src",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "0",
+       "redpanda_topic": "edu-filtered-domains",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "0",
+       "redpanda_topic": "logins",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "0",
+       "redpanda_topic": "_redpanda.transform_logs",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "1",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "4",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "7",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "8",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "11",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "3",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "6",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "9",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "0",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "10",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "11",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "2",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "3",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "5",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "6",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "9",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "0",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "1",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "10",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "2",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "4",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "5",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "7",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "8",
+       "redpanda_topic": "_redpanda.audit_log",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_kafka_under_replicated_replicas",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_partition": "0",
+       "redpanda_topic": "_redpanda.transform_logs",
+       "shard": "0"
+      },
+      "value": [
+       1795099796.617,
+       "0"
+      ]
+     }
+    ]
+   }
+  },
+  "POST /api/v1/query query=max%28redpanda_cluster_health_nodes_down%29": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": [
+     {
+      "metric": {},
+      "value": [
+       1795099796.664,
+       "0"
+      ]
+     }
+    ]
+   }
+  },
+  "POST /api/v1/query query=redpanda_cluster_health_nodes_down": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": [
+     {
+      "metric": {
+       "__name__": "redpanda_cluster_health_nodes_down",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public"
+      },
+      "value": [
+       1795099796.665,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_cluster_health_nodes_down",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public"
+      },
+      "value": [
+       1795099796.665,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_cluster_health_nodes_down",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public"
+      },
+      "value": [
+       1795099796.665,
+       "0"
+      ]
+     }
+    ]
+   }
+  },
+  "POST /api/v1/query query=redpanda_raft_leader_for%7Bredpanda_namespace%3D%22redpanda%22%2Credpanda_topic%3D%22controller%22%2Credpanda_partition%3D%227%22%7D": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": []
+   }
+  },
+  "POST /api/v1/query query=redpanda_raft_leader_for%7Bredpanda_namespace%3D%22redpanda%22%7D": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": [
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leader_for",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "redpanda",
+       "redpanda_partition": "0",
+       "redpanda_topic": "controller"
+      },
+      "value": [
+       1795099796.625,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leader_for",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "redpanda",
+       "redpanda_partition": "0",
+       "redpanda_topic": "controller"
+      },
+      "value": [
+       1795099796.625,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leader_for",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "redpanda",
+       "redpanda_partition": "0",
+       "redpanda_topic": "controller"
+      },
+      "value": [
+       1795099796.625,
+       "0"
+      ]
+     }
+    ]
+   }
+  },
+  "POST /api/v1/query query=redpanda_raft_leader_for%7Bredpanda_topic%3D%22controller%22%7D": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": [
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leader_for",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "redpanda",
+       "redpanda_partition": "0",
+       "redpanda_topic": "controller"
+      },
+      "value": [
+       1795099796.651,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leader_for",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "redpanda",
+       "redpanda_partition": "0",
+       "redpanda_topic": "controller"
+      },
+      "value": [
+       1795099796.651,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leader_for",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "redpanda",
+       "redpanda_partition": "0",
+       "redpanda_topic": "controller"
+      },
+      "value": [
+       1795099796.651,
+       "0"
+      ]
+     }
+    ]
+   }
+  },
+  "POST /api/v1/query query=redpanda_raft_leader_for%7Bredpanda_partition%3D%227%22%7D": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": []
+   }
+  },
+  "POST /api/v1/query query=redpanda_raft_leader_for%7Bredpanda_namespace%3D%22kafka%22%2Credpanda_topic%3D%22controller%22%7D": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": []
+   }
+  },
+  "POST /api/v1/query query=redpanda_raft_leader_for%7Bredpanda_namespace%3D%22kafka%22%7D": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": []
+   }
+  },
+  "POST /api/v1/query query=rate%28redpanda_uptime_seconds_total%5B5m%5D%29": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": []
+   }
+  },
+  "POST /api/v1/query query=redpanda_uptime_seconds_total": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": []
+   }
+  },
+  "POST /api/v1/query query=no_such_function%28redpanda_memory_allocated_memory%29": {
+   "status": "error",
+   "errorType": "bad_data",
+   "error": "invalid parameter \"query\": 1:1: parse error: unknown function with name \"no_such_function\""
+  },
+  "POST /api/v1/query query=scalar%28max%28redpanda_cluster_health_nodes_down%29%29": {
+   "status": "success",
+   "data": {
+    "resultType": "scalar",
+    "result": [
+     1795099796.662,
+     "0"
+    ]
+   }
+  },
+  "POST /api/v1/query query=sum%28rate%28redpanda_raft_leadership_changes%5B5s%5D%29%29": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": []
+   }
+  },
+  "POST /api/v1/query query=redpanda_raft_leadership_changes": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": [
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_topic": "_redpanda.audit_log"
+      },
+      "value": [
+       1795099796.667,
+       "4"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_topic": "_redpanda.transform_logs"
+      },
+      "value": [
+       1795099796.667,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_topic": "ct_l1_domain"
+      },
+      "value": [
+       1795099796.667,
+       "3"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "redpanda",
+       "redpanda_topic": "controller"
+      },
+      "value": [
+       1795099796.667,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_topic": "datalake_coordinator"
+      },
+      "value": [
+       1795099796.667,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_topic": "_schemas"
+      },
+      "value": [
+       1795099796.667,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_topic": "ct_l1_domain"
+      },
+      "value": [
+       1795099796.667,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_topic": "datalake_coordinator"
+      },
+      "value": [
+       1795099796.667,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "redpanda",
+       "redpanda_topic": "controller"
+      },
+      "value": [
+       1795099796.667,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_topic": "_schemas"
+      },
+      "value": [
+       1795099796.667,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_topic": "transactions"
+      },
+      "value": [
+       1795099796.667,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_topic": "ct_l1_domain"
+      },
+      "value": [
+       1795099796.667,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_topic": "datalake_coordinator"
+      },
+      "value": [
+       1795099796.667,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "redpanda",
+       "redpanda_topic": "controller"
+      },
+      "value": [
+       1795099796.667,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_topic": "__consumer_offsets"
+      },
+      "value": [
+       1795099796.667,
+       "6"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_topic": "_schemas"
+      },
+      "value": [
+       1795099796.667,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_topic": "id_allocator"
+      },
+      "value": [
+       1795099796.667,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_topic": "wasm_binaries"
+      },
+      "value": [
+       1795099796.667,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_topic": "__consumer_offsets"
+      },
+      "value": [
+       1795099796.667,
+       "7"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_topic": "metrics-cloud-topic"
+      },
+      "value": [
+       1795099796.667,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_topic": "metrics-group-probe"
+      },
+      "value": [
+       1795099796.667,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_topic": "id_allocator"
+      },
+      "value": [
+       1795099796.667,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_topic": "wasm_binaries"
+      },
+      "value": [
+       1795099796.667,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_topic": "__consumer_offsets"
+      },
+      "value": [
+       1795099796.667,
+       "5"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_topic": "id_allocator"
+      },
+      "value": [
+       1795099796.667,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_topic": "wasm_binaries"
+      },
+      "value": [
+       1795099796.667,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_topic": "transform_offsets"
+      },
+      "value": [
+       1795099796.667,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_topic": "transform_offsets"
+      },
+      "value": [
+       1795099796.667,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka_internal",
+       "redpanda_topic": "transform_offsets"
+      },
+      "value": [
+       1795099796.667,
+       "0"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_topic": "metrics-quota-probe"
+      },
+      "value": [
+       1795099796.667,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_topic": "metrics-shadow-src"
+      },
+      "value": [
+       1795099796.667,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_topic": "edu-filtered-domains"
+      },
+      "value": [
+       1795099796.667,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_topic": "logins"
+      },
+      "value": [
+       1795099796.667,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_topic": "_redpanda.transform_logs"
+      },
+      "value": [
+       1795099796.667,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_topic": "_redpanda.audit_log"
+      },
+      "value": [
+       1795099796.667,
+       "4"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_topic": "_redpanda.audit_log"
+      },
+      "value": [
+       1795099796.667,
+       "4"
+      ]
+     },
+     {
+      "metric": {
+       "__name__": "redpanda_raft_leadership_changes",
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public",
+       "redpanda_namespace": "kafka",
+       "redpanda_topic": "_redpanda.transform_logs"
+      },
+      "value": [
+       1795099796.667,
+       "0"
+      ]
+     }
+    ]
+   }
+  },
+  "POST /api/v1/query query=count+by+%28instance%29+%28redpanda_application_uptime_seconds_total%29+and+on%28instance%29+count+by+%28instance%29+%28vectorized_application_uptime%29": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": [
+     {
+      "metric": {
+       "instance": "redpanda-0:9644"
+      },
+      "value": [
+       1795099796.668,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "instance": "redpanda-1:9644"
+      },
+      "value": [
+       1795099796.668,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "instance": "redpanda-2:9644"
+      },
+      "value": [
+       1795099796.668,
+       "1"
+      ]
+     }
+    ]
+   }
+  },
+  "POST /api/v1/query query=count+by+%28job%2C+instance%29+%28up%29": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": [
+     {
+      "metric": {
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-internal"
+      },
+      "value": [
+       1795099796.669,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-public"
+      },
+      "value": [
+       1795099796.669,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "instance": "redpanda-1:9644",
+       "job": "redpanda-public"
+      },
+      "value": [
+       1795099796.669,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-public"
+      },
+      "value": [
+       1795099796.669,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "instance": "redpanda-2:9644",
+       "job": "redpanda-internal"
+      },
+      "value": [
+       1795099796.669,
+       "1"
+      ]
+     },
+     {
+      "metric": {
+       "instance": "redpanda-0:9644",
+       "job": "redpanda-internal"
+      },
+      "value": [
+       1795099796.669,
+       "1"
+      ]
+     }
+    ]
+   }
+  }
+ }
+}
