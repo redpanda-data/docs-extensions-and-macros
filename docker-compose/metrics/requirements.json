@@ -1,5 +1,5 @@
 {
-  "$comment": "What a cluster needs before it exports each group of metrics. doc-tools generate metrics-docs copies these into the dataset as each metric's requires list, and the docs print them. evidence is measured when the metrics were absent without the state and present with it on a real cluster, and source when it was read from the Redpanda source and not measured. When you add a property or an action to the metrics cluster so that it exports a new metric, add what that metric needs here.",
+  "$comment": "What a cluster needs before it exports each group of metrics. A property is always named so that the docs can link it: as a property item, or in a condition as prop:<name>[link=true], never in backticks. doc-tools generate metrics-docs copies these into the dataset as each metric's requires list, and the docs print them. evidence is measured when the metrics were absent without the state and present with it on a real cluster, and source when it was read from the Redpanda source and not measured. When you add a property or an action to the metrics cluster so that it exports a new metric, add what that metric needs here.",
   "requirements": [
     {
       "id": "health-monitor",
@@ -37,7 +37,7 @@
     {
       "id": "cloud-topic",
       "metrics": ["vectorized_cloud_topics_reconciler_pending_offset_lag"],
-      "requires": [{ "condition": "A topic with `redpanda.storage.mode` set to `cloud` exists." }],
+      "requires": [{ "condition": "A topic with prop:redpanda.storage.mode[link=true] set to `cloud` exists." }],
       "evidence": "measured"
     },
     {
@@ -58,7 +58,7 @@
     {
       "id": "oidc",
       "metrics": ["*_security_idp_*"],
-      "requires": [{ "condition": "OIDC authentication is on: `OAUTHBEARER` is in the `sasl_mechanisms` cluster property, and `oidc_discovery_url` is set." }],
+      "requires": [{ "condition": "OIDC authentication is on: `OAUTHBEARER` is in prop:sasl_mechanisms[link=true], and prop:oidc_discovery_url[link=true] is set." }],
       "evidence": "measured"
     },
     {
@@ -70,7 +70,7 @@
     {
       "id": "credential-refresh",
       "metrics": ["vectorized_cloud_roles__auth_refresh_*"],
-      "requires": [{ "condition": "Object storage credentials come from a cloud metadata service: `cloud_storage_credentials_source` is not `config_file`." }],
+      "requires": [{ "condition": "Object storage credentials come from a cloud metadata service: prop:cloud_storage_credentials_source[link=true] is not `config_file`." }],
       "evidence": "measured"
     },
     {
@@ -106,7 +106,7 @@
     {
       "id": "consumer-group-metrics-property",
       "metrics": ["redpanda_kafka_consumer_group_*"],
-      "requires": [{ "condition": "The `enable_consumer_group_metrics` cluster property includes the metric's group: `group`, `partition` or `consumer_lag`." }],
+      "requires": [{ "condition": "prop:enable_consumer_group_metrics[link=true] includes the metric's group: `group`, `partition` or `consumer_lag`." }],
       "evidence": "source"
     },
     {
