@@ -307,7 +307,10 @@ function fieldValue (entry, field, { format = FORMAT_HUMAN, label, cloud = false
         .filter((item) => isPlainObject(item) && (text(item.property) || text(item.condition)))
       if (!items.length) return missing()
       if (raw) return plain(JSON.stringify(items))
-      const property = (item) => (item.value === undefined ? `prop:${item.property}[]` : `prop:${item.property}[] is \`${String(item.value)}\``)
+      // A link, not only a tooltip: a reader who is missing the metric needs
+      // the property's page to turn it on. prop: checks the name against the
+      // property data for the page's release and finds the page.
+      const property = (item) => (item.value === undefined ? `prop:${item.property}[link=true]` : `prop:${item.property}[link=true] is \`${String(item.value)}\``)
       // Conditions are sentences, so with any of them the whole value reads
       // as sentences. Property values alone stay a comma-separated list.
       if (items.every((item) => text(item.property))) return richList(items.map(property))
@@ -325,7 +328,7 @@ function fieldValue (entry, field, { format = FORMAT_HUMAN, label, cloud = false
       return plain(entry.deprecated ? 'deprecated' : 'stable')
     }
     case 'see-also': {
-      const properties = strings(entry.related_properties).map((property) => `prop:${property}[]`)
+      const properties = strings(entry.related_properties).map((property) => `prop:${property}[link=true]`)
       const topics = normalizeSeeAlso(entry).filter((item) => (cloud ? !item.selfManagedOnly : !item.cloudOnly)).map((item) => item.content)
       const items = [...properties, ...topics]
       return items.length ? richList(items) : missing()

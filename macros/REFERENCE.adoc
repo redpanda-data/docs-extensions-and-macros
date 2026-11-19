@@ -1344,7 +1344,7 @@ The target is the metric name, resolved as `metric:` resolves it (<<metric>>): a
 |
 
 | `requires`
-| `requires`: what a cluster needs before it exports the metric. Text is rendered as AsciiDoc. In a list, each `{property, value}` renders as "prop:<property>[] is `<value>`" and each `{condition}` as its sentence. A list with a condition reads as sentences. A metric with no `requires` renders the placeholder: the data does not say that it needs nothing
+| `requires`: what a cluster needs before it exports the metric. Text is rendered as AsciiDoc. In a list, each `{property, value}` renders as "prop:<property>[link=true] is `<value>`", so the property links to its reference entry and each `{condition}` as its sentence. A list with a condition reads as sentences. A metric with no `requires` renders the placeholder: the data does not say that it needs nothing
 |
 
 | `introduced` (aliases `since`, `version`)
@@ -1364,7 +1364,7 @@ The target is the metric name, resolved as `metric:` resolves it (<<metric>>): a
 |
 
 | `see-also` (aliases `see_also`, `seeAlso`)
-| `related_properties`, each through `prop:`, then `related_topics`, as the property reference reads them. Rendered as AsciiDoc
+| `related_properties`, each as a `prop:` link to its reference entry, then `related_topics`, as the property reference reads them. Rendered as AsciiDoc
 |
 
 | `cloud-access` (aliases `availability`, `cloud`)

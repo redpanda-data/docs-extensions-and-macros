@@ -275,6 +275,54 @@ describe('metricval macro', () => {
     })
   })
 
+  describe('properties a metric needs are links', () => {
+    // The property data and the property page that prop: needs to make a link.
+    const withProperties = () => {
+      const properties = {
+        src: { component: 'streaming', version: '26.2', module: 'reference', family: 'attachment', relative: 'redpanda-properties-v26.2.7.json' },
+        contents: Buffer.from(JSON.stringify({
+          properties: {
+            health_monitor_metrics_enabled: { name: 'health_monitor_metrics_enabled', description: 'Enable health metrics.', type: 'boolean', default: false, config_scope: 'cluster' },
+            sasl_mechanisms: { name: 'sasl_mechanisms', description: 'SASL mechanisms.', type: 'array', config_scope: 'cluster' }
+          }
+        }))
+      }
+      const propertyPage = page('streaming', '26.2', 'properties/cluster-properties.adoc',
+        '= Cluster Properties\n\n=== health_monitor_metrics_enabled\n\nText.\n\n=== sasl_mechanisms\n\nText.\n',
+        '/current/reference/properties/cluster-properties/')
+      return catalogOf([...streamingFiles(), properties, propertyPage])
+    }
+    const LINK = '<a href="reference:properties/cluster-properties.html#health_monitor_metrics_enabled">health_monitor_metrics_enabled</a>'
+
+    test('a required property links to its entry on the property reference page', () => {
+      const html = convert(`metricval:${REFRESHES}[requires]`, { catalog: withProperties() })
+      expect(html).toContain(LINK)
+      expect(html).toContain('data-property-name="health_monitor_metrics_enabled"')
+    })
+
+    test('a related property under see-also links too', () => {
+      const html = convert(`metricval:${BROKERS}[see-also]`, { catalog: withProperties() })
+      expect(html).toContain(LINK)
+    })
+
+    test('a condition can name a property with prop:, and it links the same way', () => {
+      const sample = JSON.parse(SAMPLE_JSON)
+      sample.metrics[REFRESHES].requires = [{ condition: '`OAUTHBEARER` is in prop:sasl_mechanisms[link=true].', evidence: 'measured' }]
+      const files = withProperties().findBy({}).filter((file) => !file.src.relative.startsWith('redpanda-metrics-'))
+      const html = convert(`metricval:${REFRESHES}[requires]`, { catalog: catalogOf([attachment('streaming', '26.2', 'v26.2.7', JSON.stringify(sample)), ...files]) })
+      expect(html).toContain('<a href="reference:properties/cluster-properties.html#sasl_mechanisms">sasl_mechanisms</a>')
+      expect(html).toContain('<code>OAUTHBEARER</code>')
+    })
+
+    test('negative control: with no property data there is no link, only the name as code', () => {
+      const warn = warnings()
+      const html = convert(`metricval:${REFRESHES}[requires]`, { catalog: streamingCatalog() })
+      expect(html).toContain('health_monitor_metrics_enabled')
+      expect(html).not.toContain('<a href=')
+      expect(warn).toHaveBeenCalled()
+    })
+  })
+
   describe('block form', () => {
     test('a text value of several paragraphs is parsed into the page', () => {
       const warn = warnings()
