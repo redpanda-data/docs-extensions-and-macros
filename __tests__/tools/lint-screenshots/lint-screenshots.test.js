@@ -506,6 +506,19 @@ describe('lintScreenshots - diff scope (--diff, --diff-file)', () => {
     expect(byRule(result, 'image-missing')[0].preexisting).toBeUndefined()
   })
 
+  test('a rename blocks an untouched page that still uses the old name, with --files of the new name only', () => {
+    const root = makeRepo({
+      'modules/m/pages/other.adoc': 'image::old.png[Old]\n',
+      'modules/m/pages/p.adoc': 'image::new.png[New]\n',
+      'modules/m/images/new.png': pngBytes()
+    })
+    const changed = parseUnifiedDiff('diff --git a/modules/m/images/old.png b/modules/m/images/new.png\nsimilarity index 100%\nrename from modules/m/images/old.png\nrename to modules/m/images/new.png\n')
+    const result = lintScreenshots({ root, files: ['modules/m/images/new.png'], changedLines: changed })
+    const missing = byRule(result, 'image-missing')
+    expect(missing).toHaveLength(1)
+    expect(missing[0]).toMatchObject({ file: 'modules/m/pages/other.adoc', severity: 'error' })
+  })
+
   test('an empty diff is no diff, and a scoped file the diff misses counts as changed', () => {
     const root = repo()
     const empty = lintScreenshots({ root, files: ['modules/m/pages/p.adoc'], changedLines: new Map() })

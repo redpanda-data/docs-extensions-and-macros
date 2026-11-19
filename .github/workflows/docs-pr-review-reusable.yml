@@ -1587,8 +1587,9 @@ jobs:
           # those pages' old images. A file the API sends without a patch
           # (binary, or too large), or a new file, gets `--- /dev/null`, which
           # any unified-diff reader takes as changed throughout. A removed
-          # file, and the old path of a rename, get `+++ /dev/null`, so a page
-          # that still uses an image the PR deleted stays blocked.
+          # file, and the old path of a rename, get `+++ /dev/null`. The lint
+          # puts every path in the diff in scope, so a page that still uses an
+          # image the PR deleted or renamed stays blocked.
           gh api --paginate "repos/$R/pulls/$PR/files" \
             --jq '.[] | (if .status == "renamed" and .previous_filename then "diff --git a/\(.previous_filename) b/\(.previous_filename)\n--- a/\(.previous_filename)\n+++ /dev/null\n" else empty end), (if .status == "removed" then "diff --git a/\(.filename) b/\(.filename)\n--- a/\(.filename)\n+++ /dev/null\n" else "diff --git a/\(.filename) b/\(.filename)\n--- \(if .status == "added" or .patch == null then "/dev/null" else "a/\(.filename)" end)\n+++ b/\(.filename)\n\(.patch // "")" end)' > "$LINT_DIR/pr.diff"
           # Only a doc_tools_version that ships --diff-file gets it; an older

@@ -319,10 +319,15 @@ function lintScreenshots (options) {
   // An empty diff is no diff: demoting every finding because the diff could
   // not be read would turn a broken input into a passing gate.
   const changedLines = opts.changedLines instanceof Map && opts.changedLines.size > 0 ? new Map(opts.changedLines) : null
-  if (changedLines && !Array.isArray(opts.files)) opts.files = [...changedLines.keys()]
-  // A file in the --files scope that the diff does not cover counts as
-  // changed throughout, for the same reason.
-  if (changedLines) for (const f of opts.files) if (!changedLines.has(f)) changedLines.set(f, 'all')
+  if (changedLines) {
+    // Every path in the diff is in scope, with or without --files: the old
+    // path of a rename is in the diff but not in a file list built from the
+    // new names, and pages that still use it must be linted.
+    opts.files = [...new Set([...(Array.isArray(opts.files) ? opts.files : []), ...changedLines.keys()])]
+    // A file in the --files scope that the diff does not cover counts as
+    // changed throughout, for the same reason.
+    for (const f of opts.files) if (!changedLines.has(f)) changedLines.set(f, 'all')
+  }
   const scoped = Array.isArray(opts.files)
   const changedAdoc = new Set()
   const changedImages = new Set()
