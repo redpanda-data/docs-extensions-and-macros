@@ -382,10 +382,25 @@ describe('generateReleaseNotes guards', () => {
     expect(res.reason).toMatch(/GA/);
   });
 
-  it('skips a version at or below the floor', () => {
+  it('skips a version older than the floor', () => {
     const res = generateReleaseNotes({ body: BODY, tag: 'v26.2.1', date: '2026-09-15', pageContent: page() });
     expect(res.status).toBe('skipped');
     expect(res.reason).toMatch(/floor/);
+  });
+
+  it('inserts the floor version itself when the page has no section for it', () => {
+    // A fresh page for a new line: its floor is the line's first release.
+    const res = generateReleaseNotes({
+      body: BODY, tag: 'v26.2.2', date: '2026-08-21', pageContent: page({ withV2622: false }),
+    });
+    expect(res.status).toBe('ok');
+    expect(res.content).toMatch(/^== v26\.2\.2 \(2026-08-21\)$/m);
+  });
+
+  it('skips the floor version when the page already has its section', () => {
+    const res = generateReleaseNotes({ body: BODY, tag: 'v26.2.2', date: '2026-08-21', pageContent: page() });
+    expect(res.status).toBe('skipped');
+    expect(res.reason).toMatch(/already/);
   });
 
   it('skips a version already on the page (idempotent re-run)', () => {
@@ -444,9 +459,10 @@ describe('generateReleaseNotes phase 2 (insert a curated section)', () => {
     const res = generateReleaseNotes({
       section: '== v26.2.2 (2026-08-21)\n\n=== Features\n\nrpk:: x.\n',
       tag: 'v26.2.2',
-      pageContent: page({ floor: '26.2.2' }),
+      pageContent: page({ floor: '26.2.3', withV2622: false }),
     });
     expect(res.status).toBe('skipped');
+    expect(res.reason).toMatch(/floor/);
   });
 
   it('throws when both body and section are given', () => {
