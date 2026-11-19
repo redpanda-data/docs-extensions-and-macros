@@ -266,17 +266,51 @@ def load_requirements(path):
         for item in requirement["requires"]:
             if not (isinstance(item, dict) and (item.get("property") or item.get("condition"))):
                 raise ValueError(f"requirement {requirement['id']} has an item with no property and no condition")
+        releases = requirement.get("releases", {})
+        if not (isinstance(releases, dict) and set(releases) <= {"from", "before"}
+                and all(isinstance(value, str) and RELEASE_LINE.match(value) for value in releases.values())):
+            raise ValueError(
+                f"requirement {requirement['id']} has releases that are not {{from, before}} with values like 26.2")
     return requirements
 
 
-def apply_requirements(dataset, requirements):
+RELEASE_LINE = re.compile(r"^(\d+)\.(\d+)$")
+
+
+def release_line(version):
+    """(major, minor) of a release tag, or None for a branch such as dev."""
+    match = re.match(r"^v?(\d+)\.(\d+)(?:\.|$)", version.strip())
+    return (int(match.group(1)), int(match.group(2))) if match else None
+
+
+def requirement_applies(requirement, version):
+    """Whether a requirement holds for this release.
+
+    `releases` limits a requirement to release lines: `from` is the first line
+    it holds for and `before` is the first line it no longer holds for. A
+    branch that is not a release tag counts as newer than every release.
+    """
+    releases = requirement.get("releases") or {}
+    line = release_line(version)
+    bound = lambda key: tuple(int(part) for part in releases[key].split("."))
+    if "before" in releases and (line is None or line >= bound("before")):
+        return False
+    if "from" in releases and line is not None and line < bound("from"):
+        return False
+    return True
+
+
+def apply_requirements(dataset, requirements, version):
     """Give each metric the list of what a cluster needs before it exports it.
 
-    Returns the ids of requirements that match no metric in the dataset, which
+    A requirement that does not hold for this release is left out. Returns the
+    ids of the other requirements that match no metric in the dataset, which
     means the metric was renamed or removed and the entry is out of date.
     """
     stale = []
     for requirement in requirements:
+        if not requirement_applies(requirement, version):
+            continue
         matched = False
         for name, entry in dataset["metrics"].items():
             if not any(fnmatch.fnmatchcase(name, pattern) for pattern in requirement["metrics"]):
@@ -765,7 +799,7 @@ def main(argv=None):
             families["counts"]["source_only"] -= 1
             families["counts"]["excluded"] += 1
         families["excluded"].sort(key=lambda item: item["name"])
-    stale_requirements = apply_requirements(families, requirements)
+    stale_requirements = apply_requirements(families, requirements, args.version)
     for requirement_id in stale_requirements:
         logging.warning(
             f"The requirement '{requirement_id}' in {args.requirements} matches no metric. "

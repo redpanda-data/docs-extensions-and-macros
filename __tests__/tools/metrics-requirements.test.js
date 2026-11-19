@@ -179,6 +179,37 @@ describeIfPython('requirements in the dataset', () => {
     expect(result.gaps.count).toBe(1)
   })
 
+  describe('a requirement limited to some releases', () => {
+    const scoped = (releases) => ({ requirements: [{ ...DOC.requirements[0], releases }] })
+    const requiresOf = (result) => Object.values(result.dataset.metrics).filter((entry) => entry.requires).length
+
+    it('is applied inside its range and left out outside it', () => {
+      // run() generates for v0.0.1.
+      expect(requiresOf(run(scoped({ before: '0.1' })))).toBeGreaterThan(0)
+      expect(requiresOf(run(scoped({ from: '0.0' })))).toBeGreaterThan(0)
+      expect(requiresOf(run(scoped({ before: '0.0' })))).toBe(0)
+      expect(requiresOf(run(scoped({ from: '0.1' })))).toBe(0)
+      expect(requiresOf(run(scoped({ from: '0.0', before: '0.1' })))).toBeGreaterThan(0)
+    })
+
+    it('is not reported as out of date in a release outside its range', () => {
+      const gone = { id: 'gone', metrics: ['redpanda_removed_metric_*'], requires: [{ condition: 'Something is on.' }], evidence: 'source' }
+      const outside = run({ requirements: [...DOC.requirements, { ...gone, releases: { from: '0.1' } }] })
+      expect(outside.gaps.stale_requirements).toEqual([])
+      expect(outside.gaps.count).toBe(0)
+      const inside = run({ requirements: [...DOC.requirements, { ...gone, releases: { before: '0.1' } }] })
+      expect(inside.gaps.stale_requirements).toEqual(['gone'])
+    })
+
+    it('fails on a range that is not major.minor', () => {
+      for (const releases of [{ from: 'v26.2' }, { before: '26.2.1' }, { since: '26.2' }, '26.2']) {
+        const result = run(scoped(releases))
+        expect(result.status).toBe(1)
+        expect(result.log).toMatch(/has releases that are not/)
+      }
+    })
+  })
+
   it('fails on a requirements file with the wrong shape', () => {
     const result = run({ requirements: [{ id: 'bad', metrics: ['x'], requires: [{}], evidence: 'measured' }] })
     expect(result.status).toBe(1)
