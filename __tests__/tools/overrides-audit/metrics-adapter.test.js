@@ -247,6 +247,11 @@ describe('overrides audit, metrics surface', () => {
         expect(row.upstream_candidate_text).toBeUndefined()
       })
 
+      test('the marker is an annotation, so it gets no row of its own', () => {
+        const all = rows({ redpanda_widget_built: { description: 'Number of widgets built.', upstream_not_possible: 'The help string is built from the widget name.' } })
+        expect(Object.keys(all)).toEqual(['redpanda_widget_built|description'])
+      })
+
       test('the same goes for a Seastar metric', () => {
         const row = descriptionRow('redpanda_memory_free_memory', 'Free memory.', { upstream_not_possible: 'The metric comes from Seastar.' })
         expect(row.class).toBe(CLASSES.KEEP)
