@@ -48,6 +48,16 @@
               ]
             }
           },
+          "releases": {
+            "type": "object",
+            "description": "The release lines this requirement holds for. Leave it out when it holds for every release. A requirement outside its range is not written into that release's dataset and is not reported as out of date.",
+            "additionalProperties": false,
+            "minProperties": 1,
+            "properties": {
+              "from": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$", "description": "The first release line it holds for, as major.minor. For example 26.2." },
+              "before": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$", "description": "The first release line it no longer holds for, as major.minor." }
+            }
+          },
           "evidence": {
             "enum": ["measured", "source"],
             "description": "measured: the metrics were absent without this state and present with it on a real cluster. source: read from the Redpanda source, not measured."
