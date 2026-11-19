@@ -106,7 +106,7 @@
     {
       "id": "consumer-group-metrics-property",
       "metrics": ["redpanda_kafka_consumer_group_*"],
-      "requires": [{ "condition": "prop:enable_consumer_group_metrics[link=true] includes the metric's group: `group`, `partition` or `consumer_lag`." }],
+      "requires": [{ "condition": "The metric's group is in prop:enable_consumer_group_metrics[link=true]: `group`, `partition` or `consumer_lag`." }],
       "evidence": "source"
     },
     {
