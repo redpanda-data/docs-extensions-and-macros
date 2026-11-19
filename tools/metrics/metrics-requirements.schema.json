@@ -42,7 +42,7 @@
                   "additionalProperties": false,
                   "required": ["condition"],
                   "properties": {
-                    "condition": { "type": "string", "minLength": 1, "description": "A state the cluster must be in, as one plain sentence. AsciiDoc inline markup is allowed." }
+                    "condition": { "type": "string", "minLength": 1, "description": "A state the cluster must be in, as one plain sentence. AsciiDoc inline markup is allowed. Name a configuration property as prop:<name>[link=true], so the docs link it, never in backticks." }
                   }
                 }
               ]
