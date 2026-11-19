@@ -7,7 +7,8 @@
   "additionalProperties": false,
   "required": ["schema_version", "redpanda_version", "generated_from", "counts", "metrics", "excluded"],
   "properties": {
-    "schema_version": { "const": 1 },
+    "$schema": { "const": "https://docs.redpanda.com/schemas/redpanda-metrics.schema.json", "description": "Names this schema. It is an identifier, not a page that is served." },
+    "schema_version": { "const": 1, "description": "The shape of the file. Adding an optional field keeps the number. Anything a reader of the file could trip over raises it: removing or renaming a field, changing a field's type or meaning, or making a field required. The macros and the docs MCP server refuse a number they do not know, so a change to it ships together with theirs." },
     "redpanda_version": { "type": "string", "minLength": 1 },
     "generated_from": {
       "type": "object",

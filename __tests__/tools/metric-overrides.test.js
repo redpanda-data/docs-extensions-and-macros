@@ -25,7 +25,7 @@ const ROOT = path.join(__dirname, '..', '..')
 const SCRIPT = path.join(ROOT, 'tools', 'metrics', 'metrics.py')
 const REPORT = path.join(ROOT, 'tools', 'metrics', 'gaps_report.py')
 const read = (file) => fs.readFileSync(file, 'utf8')
-const DATASET_SCHEMA = JSON.parse(read(path.join(ROOT, 'tools', 'metrics', 'redpanda-metrics.schema.json')))
+const DATASET_SCHEMA = JSON.parse(read(path.join(ROOT, 'docs-data', 'redpanda-metrics.schema.json')))
 const OVERRIDES_SCHEMA = JSON.parse(read(path.join(ROOT, 'docs-data', 'metric-overrides.schema.json')))
 
 function pythonBinary () {

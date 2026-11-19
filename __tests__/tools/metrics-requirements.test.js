@@ -20,7 +20,7 @@ const SCRIPT = path.join(ROOT, 'tools', 'metrics', 'metrics.py')
 const read = (file) => fs.readFileSync(file, 'utf8')
 const requirementsFile = path.join(METRICS, 'requirements.json')
 const { requirements } = JSON.parse(read(requirementsFile))
-const DATASET_SCHEMA = JSON.parse(read(path.join(ROOT, 'tools', 'metrics', 'redpanda-metrics.schema.json')))
+const DATASET_SCHEMA = JSON.parse(read(path.join(ROOT, 'docs-data', 'redpanda-metrics.schema.json')))
 
 function pythonBinary () {
   for (const candidate of ['python3', 'python']) {

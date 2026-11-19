@@ -20,7 +20,7 @@ const Ajv = require('ajv')
 
 const REPO_ROOT = path.join(__dirname, '..', '..')
 const SCRIPT = path.join(REPO_ROOT, 'tools', 'metrics', 'metrics.py')
-const SCHEMA = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'tools', 'metrics', 'redpanda-metrics.schema.json'), 'utf8'))
+const SCHEMA = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'docs-data', 'redpanda-metrics.schema.json'), 'utf8'))
 
 function pythonBinary () {
   for (const candidate of ['python3', 'python']) {

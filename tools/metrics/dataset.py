@@ -21,7 +21,12 @@ dependencies.
 
 import re
 
+# The shape of the dataset, as docs-data/redpanda-metrics.schema.json defines
+# it. Adding an optional field keeps the number. Removing or renaming a field,
+# changing its type or meaning, or making it required raises it, together
+# with the const in the schema and the version the macros accept.
 SCHEMA_VERSION = 1
+SCHEMA_ID = "https://docs.redpanda.com/schemas/redpanda-metrics.schema.json"
 
 # The series a histogram or summary exposes beside its family name.
 SERIES_SUFFIXES = ("_bucket", "_count", "_sum")
@@ -370,6 +375,7 @@ def build_dataset(version, public, internal, inventory=None, generated_from=None
         counts["observed" if entry["observed"] else "source_only"] += 1
 
     return {
+        "$schema": SCHEMA_ID,
         "schema_version": SCHEMA_VERSION,
         "redpanda_version": version,
         "generated_from": generated_from or {},

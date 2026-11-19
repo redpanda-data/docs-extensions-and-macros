@@ -5,7 +5,7 @@
  * family-level dataset built by tools/metrics/dataset.py. These tests drive
  * the generator through its file inputs and check the dataset:
  *
- * - it validates against tools/metrics/redpanda-metrics.schema.json,
+ * - it validates against docs-data/redpanda-metrics.schema.json,
  * - a histogram is one family with buckets and series, not four entries,
  * - a gauge whose name ends in _sum or _count stays its own family,
  * - label values with commas and escaped quotes parse correctly,
@@ -29,7 +29,7 @@ const Ajv = require('ajv')
 
 const REPO_ROOT = path.join(__dirname, '..', '..')
 const SCRIPT = path.join(REPO_ROOT, 'tools', 'metrics', 'metrics.py')
-const SCHEMA = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'tools', 'metrics', 'redpanda-metrics.schema.json'), 'utf8'))
+const SCHEMA = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'docs-data', 'redpanda-metrics.schema.json'), 'utf8'))
 
 function pythonBinary () {
   for (const candidate of ['python3', 'python']) {
