@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.66.1](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.66.0...v5.66.1) (2026-11-18)
+
+
+### Reusable workflows and CI
+
+* pin the property extractor tests to ubuntu-24.04 ([#536](https://github.com/redpanda-data/docs-extensions-and-macros/issues/536)) ([9116451](https://github.com/redpanda-data/docs-extensions-and-macros/commit/9116451eadf5e20f29aed76a9038a8e86aa13d2a))
+
 ## [5.66.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.65.0...v5.66.0) (2026-11-18)
 
 
