@@ -950,7 +950,6 @@ automation
     if (options.readyTimeout !== undefined) timing.CLUSTER_READY_TIMEOUT = String(options.readyTimeout)
     if (options.settleTimeout !== undefined) timing.METRICS_SETTLE_MAX = String(options.settleTimeout)
     if (options.sourceRepo) timing.METRICS_SOURCE_REPO = path.resolve(options.sourceRepo)
-    else if (options.inventory) timing.METRICS_INVENTORY = path.resolve(options.inventory)
     if (options.strict) timing.METRICS_STRICT = '1'
 
     if (oldTag) {
@@ -967,7 +966,12 @@ automation
       ? [...generatorArgs, '--output-dir', path.resolve(options.outputDir)]
       : [...generatorArgs]
     if (options.datasetDir) newArgs.push('--dataset-dir', path.resolve(options.datasetDir))
-    runClusterDocs('metrics', newTag, options, newArgs, timing)
+    // An inventory file describes one ref, so only the new tag's run gets it.
+    // --source-repo is shared, because the script reads the source at each tag.
+    const newTiming = options.inventory && !options.sourceRepo
+      ? { ...timing, METRICS_INVENTORY: path.resolve(options.inventory) }
+      : timing
+    runClusterDocs('metrics', newTag, options, newArgs, newTiming)
 
     if (oldTag) {
       if (options.outputDir) {

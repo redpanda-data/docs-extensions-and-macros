@@ -65,7 +65,7 @@ def render(gaps):
             "",
             "- Turn the feature on for the metrics cluster in `docker-compose/metrics/` (a property in "
             "`bootstrap-extra.yml`, a service in `metrics.overlay.yml`, or an action in "
-            "`cli-utils/generate-cluster-docs.sh`), and record what the metric needs in `requirements.json`.",
+            "`cli-utils/generate-cluster-docs.sh`).",
             "- If no cluster can export it, give the reason in `docker-compose/metrics/expected-absent.json`.",
             "",
         ]

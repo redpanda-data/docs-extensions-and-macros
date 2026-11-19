@@ -73,7 +73,6 @@ describeIfPython('metrics gaps report', () => {
     it('says the metric is still documented and how to close the gap', () => {
       expect(result.stdout).toMatch(/documented from source, without labels/)
       expect(result.stdout).toContain('bootstrap-extra.yml')
-      expect(result.stdout).toContain('requirements.json')
       expect(result.stdout).toContain('expected-absent.json')
     })
   })
