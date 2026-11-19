@@ -149,9 +149,11 @@ def render(gaps):
         lines += [
             "### Overrides that match no metric (%d)" % len(gaps["stale_overrides"]),
             "",
-            "These entries in `docs-data/metric-overrides.json` name metrics that are not in this release. "
-            "Remove them, or rename them if the metric was renamed. The run for the newest release deletes "
-            "them by itself; this run was for an older one, so it left them.",
+            "These entries in `docs-data/metric-overrides.json` name metrics that this release does not "
+            "document. Remove them, or rename them if the metric was renamed. A run with "
+            "`--retire-overrides` deletes the ones whose metric the source no longer registers. This run "
+            "left these, either because it ran without that option or because the metric is still in source "
+            "and has a written reason for not being exported.",
             "",
         ]
         lines += ["- `%s`" % name for name in gaps["stale_overrides"]]
