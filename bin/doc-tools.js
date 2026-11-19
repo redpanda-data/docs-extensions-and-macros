@@ -950,6 +950,7 @@ automation
     if (options.readyTimeout !== undefined) timing.CLUSTER_READY_TIMEOUT = String(options.readyTimeout)
     if (options.settleTimeout !== undefined) timing.METRICS_SETTLE_MAX = String(options.settleTimeout)
     if (options.sourceRepo) timing.METRICS_SOURCE_REPO = path.resolve(options.sourceRepo)
+    else if (options.inventory) timing.METRICS_INVENTORY = path.resolve(options.inventory)
     if (options.strict) timing.METRICS_STRICT = '1'
 
     if (oldTag) {
@@ -965,7 +966,6 @@ automation
     const newArgs = options.outputDir
       ? [...generatorArgs, '--output-dir', path.resolve(options.outputDir)]
       : [...generatorArgs]
-    if (options.inventory) newArgs.push('--inventory', path.resolve(options.inventory))
     if (options.datasetDir) newArgs.push('--dataset-dir', path.resolve(options.datasetDir))
     runClusterDocs('metrics', newTag, options, newArgs, timing)
 
