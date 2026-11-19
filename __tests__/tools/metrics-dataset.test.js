@@ -530,7 +530,8 @@ describe('doc-tools generate metrics-docs', () => {
       stub('docker', 'exit 0')
       stub('python3', 'echo "Python 3.12.0"')
       const envFile = path.join(workDir, 'env.txt')
-      stub('bash', `printf '%s\\n' "$@" > "${argsFile}"; printf '%s' "$METRICS_INVENTORY" > "${envFile}"`)
+      const envLog = path.join(workDir, 'env-log.txt')
+      stub('bash', `printf '%s\\n' "$@" > "${argsFile}"; printf '%s' "$METRICS_INVENTORY" > "${envFile}"; printf '%s=%s\\n' "$3" "$METRICS_INVENTORY" >> "${envLog}"`)
 
       const result = spawnSync(process.execPath, [path.join(REPO_ROOT, 'bin', 'doc-tools.js'), 'generate', 'metrics-docs',
         '--tag', 'v26.2.7', '--skip-pages', '--inventory', 'inv.json', '--dataset-dir', 'modules/reference/attachments'],
@@ -547,6 +548,16 @@ describe('doc-tools generate metrics-docs', () => {
       // The inventory goes to the cluster script, which also gives the
       // generator the written reasons that belong with it.
       expect(fs.readFileSync(envFile, 'utf8')).toBe(path.join(real, 'inv.json'))
+
+      // With --diff, the old tag's run must not get the new tag's inventory.
+      fs.rmSync(envLog)
+      const diffed = spawnSync(process.execPath, [path.join(REPO_ROOT, 'bin', 'doc-tools.js'), 'generate', 'metrics-docs',
+        '--tag', 'v26.2.7', '--diff', 'v26.1.9', '--skip-pages', '--inventory', 'inv.json'],
+      { cwd: workDir, encoding: 'utf8', env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}` } })
+      const seen = fs.readFileSync(envLog, 'utf8').trim().split('\n')
+      expect(seen[0]).toBe('v26.1.9=')
+      expect(seen[1]).toBe(`v26.2.7=${path.join(real, 'inv.json')}`)
+      expect(diffed.error).toBeUndefined()
     } finally {
       fs.rmSync(workDir, { recursive: true, force: true })
     }
