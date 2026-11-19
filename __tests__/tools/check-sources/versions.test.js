@@ -162,15 +162,17 @@ describe('version-aware refs', () => {
   })
 
   test('the operator: an older line pins to its own newest release, and the git tag falls back from operator/<tag> to <tag>', async () => {
-    const page = '// source: redpanda-operator:operator/api/redpanda/v1alpha2/redpanda_types.go#Replicas "default=3"\nThe default is three brokers.\n'
-    const latest = await run(page, { files: { 'redpanda-operator@operator/v26.2.5:operator/api/redpanda/v1alpha2/redpanda_types.go': '// Replicas\n// +kubebuilder:default=3\n' } })
+    const page = '// source: operator-enterprise:operator/api/redpanda/v1alpha2/redpanda_types.go#Replicas "default=3"\nThe default is three brokers.\n'
+    const latest = await run(page, { files: { 'operator-enterprise@operator/v26.2.5:operator/api/redpanda/v1alpha2/redpanda_types.go': '// Replicas\n// +kubebuilder:default=3\n' } })
     expect(latest.rules).toEqual([])
     expect(latest.citation.ref).toBe('operator/v26.2.5')
+    const oldName = await run(page.replace('operator-enterprise:', 'redpanda-operator:'), { files: { 'redpanda-operator@operator/v26.2.5:operator/api/redpanda/v1alpha2/redpanda_types.go': '// Replicas\n// +kubebuilder:default=3\n' } })
+    expect(oldName.citation.ref).toBe('operator/v26.2.5')
     const yml = antoraYml({ version: '25.3' })
-    const older = await run(page, { yml, branch: 'v/25.3', files: { 'redpanda-operator@operator/v25.3.12': 'no-ref', 'redpanda-operator@v25.3.12:operator/api/redpanda/v1alpha2/redpanda_types.go': '// Replicas\n// +kubebuilder:default=3\n' } })
+    const older = await run(page, { yml, branch: 'v/25.3', files: { 'operator-enterprise@operator/v25.3.12': 'no-ref', 'operator-enterprise@v25.3.12:operator/api/redpanda/v1alpha2/redpanda_types.go': '// Replicas\n// +kubebuilder:default=3\n' } })
     expect(older.rules).toEqual([])
     expect(older.citation).toMatchObject({ ref: 'v25.3.12', resolvedBy: 'latest-operator-version (newest 25.3 release)' })
-    expect(older.client.calls).toEqual(['redpanda-operator@operator/v25.3.12:operator/api/redpanda/v1alpha2/redpanda_types.go', 'redpanda-operator@v25.3.12:operator/api/redpanda/v1alpha2/redpanda_types.go'])
+    expect(older.client.calls).toEqual(['operator-enterprise@operator/v25.3.12:operator/api/redpanda/v1alpha2/redpanda_types.go', 'operator-enterprise@v25.3.12:operator/api/redpanda/v1alpha2/redpanda_types.go'])
   })
 
   test('connect uses the newest release, not a stale antora.yml seed', async () => {

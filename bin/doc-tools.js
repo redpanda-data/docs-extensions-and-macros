@@ -1942,7 +1942,7 @@ automation
 automation
   .command('helm-spec')
   .description('Generate AsciiDoc documentation for Helm charts. Requires either --tag or --branch for GitHub URLs.')
-  .option('--chart-dir <dir|url>', 'Chart directory or GitHub URL', 'https://github.com/redpanda-data/redpanda-operator/charts')
+  .option('--chart-dir <dir|url>', 'Chart directory or GitHub URL', 'https://github.com/redpanda-data/operator-enterprise/charts')
   .option('-t, --tag <tag>', 'Git tag for released content')
   .option('-b, --branch <branch>', 'Branch name for in-progress content')
   .option('--readme <file>', 'Relative README.md path inside each chart dir', 'README.md')
@@ -1980,7 +1980,8 @@ automation
       const [owner, repo, ...sub] = parts
       const repoUrl = `https://${u.host}/${owner}/${repo}.git`
 
-      if (opts.tag && owner === 'redpanda-data' && repo === 'redpanda-operator') {
+      // redpanda-operator is the name the repo had before it was renamed.
+      if (opts.tag && owner === 'redpanda-data' && ['operator-enterprise', 'redpanda-operator'].includes(repo)) {
         if (!gitRef.startsWith('operator/')) {
           gitRef = `operator/${gitRef}`
           console.log(`ℹ️  Auto-prepending "operator/" to tag: ${gitRef}`)
@@ -2110,7 +2111,7 @@ automation
 
       // Same marker shape as every doc-tools generator; convert-to-markdown
       // reads it and reports the provenance in the Markdown twins.
-      const helmMarker = generatedMarker('helm-docs', `the ${name} chart's values.yaml and README in redpanda-data/redpanda-operator`) + '\n\n'
+      const helmMarker = generatedMarker('helm-docs', `the ${name} chart's values.yaml and README in redpanda-data/operator-enterprise`) + '\n\n'
       doc = helmMarker + doc
       fs.writeFileSync(outFile, doc, 'utf8')
 
@@ -2641,7 +2642,7 @@ automation
   .description('Generate Asciidoc documentation for Kubernetes CRD references. Requires either --tag or --branch.')
   .option('-t, --tag <operatorTag>', 'Operator release tag for GA/beta content')
   .option('-b, --branch <branch>', 'Branch name for in-progress content')
-  .option('-s, --source-path <src>', 'CRD Go types dir or GitHub URL', 'https://github.com/redpanda-data/redpanda-operator/operator/api/redpanda/v1alpha2')
+  .option('-s, --source-path <src>', 'CRD Go types dir or GitHub URL', 'https://github.com/redpanda-data/operator-enterprise/operator/api/redpanda/v1alpha2')
   .option('-d, --depth <n>', 'How many levels deep', '10')
   .option('--templates-dir <dir>', 'Asciidoctor templates dir', '.github/crd-config/templates/asciidoctor/operator')
   .option('--output <file>', 'Where to write the generated AsciiDoc file', 'modules/reference/pages/k-crd.adoc')
@@ -2662,10 +2663,10 @@ automation
     let configRef = opts.branch || (opts.tag.startsWith('operator/') ? opts.tag : `operator/${opts.tag}`)
 
     const configTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'crd-config-'))
-    console.log(`Fetching crd-ref-docs-config.yaml from redpanda-operator@${configRef}…`)
+    console.log(`Fetching crd-ref-docs-config.yaml from operator-enterprise@${configRef}…`)
     await fetchFromGithub(
       'redpanda-data',
-      'redpanda-operator',
+      'operator-enterprise',
       'operator/crd-ref-docs-config.yaml',
       configTmp,
       'crd-ref-docs-config.yaml',
