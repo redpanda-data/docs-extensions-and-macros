@@ -43,3 +43,19 @@ The dataset carries `schema_version`. The macros and the docs MCP server refuse 
 * Removing or renaming a field, changing its type or what it means, or making it required raises the number.
 
 To raise it, change `SCHEMA_VERSION` in `dataset.py` and the `const` in the schema together, and release the macros that accept the new number before a docs repository generates a dataset with it. A test fails when the two numbers differ.
+
+== Closing gaps with the gap loop
+
+A metric in `not_scraped` is a gap: the Redpanda source registers it and the metrics cluster did not export it. The workflow `.github/workflows/metrics-close-gaps.yml` asks a model for a change to the cluster setup that makes the cluster export it. It runs on manual dispatch only.
+
+The workflow drives the loop. For each attempt it builds the model's input, makes one model call that has no shell, applies the answer, runs the cluster, and keeps the change only when it closed a gap and lost no metric. After the loop it starts a fresh cluster, compares again, and opens a draft pull request with the result.
+
+The model only proposes. `tools/metrics/gap_loop.py` holds every rule, and `tools/metrics/gap_loop_run.sh` runs the cluster for it:
+
+* A gap is closed only when a cluster run exported the metric.
+* A change may touch `bootstrap-extra.yml`, `metrics.overlay.yml`, `requirements.json` (through added or replaced entries), new files in `docker-compose/metrics/`, and the bodies of `run_metrics_actions`, `setup_quota_probe` and `throttle_quota_probe` in `cli-utils/generate-cluster-docs.sh`.
+* `docker-compose/metrics/expected-absent.json` is never editable. An entry there hides a gap for good, so only a person adds one. The model's proposals go into the pull request body as text.
+* A requirement the model adds says `"evidence": "source"`. The workflow changes it to `measured` after its own run, when every metric the requirement matches is a gap that run closed.
+* The Redpanda source is private. A change that repeats a line of it is refused.
+
+`__tests__/tools/metrics-gap-loop.test.js` tests each rule.
