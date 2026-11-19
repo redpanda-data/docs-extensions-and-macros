@@ -519,7 +519,7 @@ describe('doc-tools generate metrics-docs', () => {
   // without a cluster and records what it would pass to the generator.
   const itOnPosix = process.platform === 'win32' ? it.skip : it
 
-  itOnPosix('forwards --inventory and --dataset-dir to the generator', () => {
+  itOnPosix('passes --inventory to the cluster script and --dataset-dir to the generator', () => {
     const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'metrics-cli-'))
     try {
       const bin = path.join(workDir, 'bin')
@@ -528,7 +528,8 @@ describe('doc-tools generate metrics-docs', () => {
       const stub = (name, body) => fs.writeFileSync(path.join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 })
       stub('docker', 'exit 0')
       stub('python3', 'echo "Python 3.12.0"')
-      stub('bash', `printf '%s\\n' "$@" > "${argsFile}"`)
+      const envFile = path.join(workDir, 'env.txt')
+      stub('bash', `printf '%s\\n' "$@" > "${argsFile}"; printf '%s' "$METRICS_INVENTORY" > "${envFile}"`)
 
       const result = spawnSync(process.execPath, [path.join(REPO_ROOT, 'bin', 'doc-tools.js'), 'generate', 'metrics-docs',
         '--tag', 'v26.2.7', '--skip-pages', '--inventory', 'inv.json', '--dataset-dir', 'modules/reference/attachments'],
@@ -538,11 +539,13 @@ describe('doc-tools generate metrics-docs', () => {
       const real = fs.realpathSync(workDir)
       const args = fs.readFileSync(argsFile, 'utf8').trim().split('\n')
       expect(args.slice(1, 3)).toEqual(['metrics', 'v26.2.7'])
-      expect(args.slice(-5)).toEqual([
+      expect(args.slice(-3)).toEqual([
         '--skip-pages',
-        '--inventory', path.join(real, 'inv.json'),
         '--dataset-dir', path.join(real, 'modules', 'reference', 'attachments')
       ])
+      // The inventory goes to the cluster script, which also gives the
+      // generator the written reasons that belong with it.
+      expect(fs.readFileSync(envFile, 'utf8')).toBe(path.join(real, 'inv.json'))
     } finally {
       fs.rmSync(workDir, { recursive: true, force: true })
     }

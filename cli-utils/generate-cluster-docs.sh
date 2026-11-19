@@ -127,6 +127,7 @@ fi
 METRICS_EXTRAS=0
 METRICS_BOOTSTRAP_FILE=""
 METRICS_INVENTORY_FILE=""
+METRICS_INVENTORY_KEEP=0
 if [[ "$MODE" == "metrics" && "$COMPOSE_DIR" == */25.1 ]]; then
   METRICS_EXTRAS=1
   if [[ "$MAJOR_MINOR" =~ ^([0-9]+)\.([0-9]+)$ ]] && (( BASH_REMATCH[1] == 25 && BASH_REMATCH[2] < 3 )); then
@@ -156,7 +157,7 @@ teardown() {
     echo "🧹 Tearing down the cluster…"
     (cd "$COMPOSE_DIR" && docker compose -p "$PROJECT_NAME" down --volumes) || true
   fi
-  if [[ -n "${METRICS_INVENTORY_FILE:-}" ]]; then
+  if [[ -n "${METRICS_INVENTORY_FILE:-}" && "${METRICS_INVENTORY_KEEP:-0}" != "1" ]]; then
     rm -f "$METRICS_INVENTORY_FILE"
   fi
   # A cluster that is left running still mounts the file.
@@ -186,10 +187,27 @@ if [[ "$MODE" == "metrics" ]]; then
   if [[ -n "${METRICS_SOURCE_REPO:-}" ]]; then
     METRICS_INVENTORY_FILE="$(mktemp "${TMPDIR:-/tmp}/metrics-inventory.XXXXXX")"
     echo "🔎 Listing the metric families in $METRICS_SOURCE_REPO at ${TAG}…"
+    # Exit 3 means some registrations could not be resolved. The inventory is
+    # still complete for the rest, and the generator lists the unresolved ones
+    # as gaps, so the run goes on.
+    extract_rc=0
     "$PYTHON" "$SCRIPT_DIR/../tools/metrics/extract_source.py" \
-      --repo "$METRICS_SOURCE_REPO" --ref "$TAG" > "$METRICS_INVENTORY_FILE"
+      --repo "$METRICS_SOURCE_REPO" --ref "$TAG" > "$METRICS_INVENTORY_FILE" || extract_rc=$?
+    if (( extract_rc != 0 && extract_rc != 3 )) || [[ ! -s "$METRICS_INVENTORY_FILE" ]]; then
+      echo "❌ Could not list the metric families in $METRICS_SOURCE_REPO at ${TAG} (exit $extract_rc)." >&2
+      exit "$(( extract_rc == 0 ? 1 : extract_rc ))"
+    fi
+  elif [[ -n "${METRICS_INVENTORY:-}" ]]; then
+    # An inventory made earlier with extract_source.py. It is the caller's
+    # file, so it is not removed on exit.
+    if [[ ! -s "$METRICS_INVENTORY" ]]; then
+      echo "❌ The inventory file $METRICS_INVENTORY is missing or empty." >&2
+      exit 1
+    fi
+    METRICS_INVENTORY_FILE="$METRICS_INVENTORY"
+    METRICS_INVENTORY_KEEP=1
   else
-    echo "⚠️  No Redpanda source given (--source-repo or METRICS_SOURCE_REPO), so the scrape is not checked against source. Metrics may be missing from the output."
+    echo "⚠️  No Redpanda source or inventory given (--source-repo or --inventory), so the scrape is not checked against source. Metrics may be missing from the output."
   fi
 fi
 
