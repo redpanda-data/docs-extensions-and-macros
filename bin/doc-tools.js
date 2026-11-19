@@ -3375,6 +3375,8 @@ programCli
   .description('Lint image macros and image files in a docs repo against the screenshot standard (alt text, size, format, width)')
   .option('--root <path>', 'Docs repo root, the directory that holds modules/ (default: current directory)')
   .option('--files <path>', 'Changed-files list (one repo-relative path per line, for example from `gh pr diff --name-only`): lint only listed .adoc files and pages that reference a listed image')
+  .option('--diff <base>', 'Only block on image macros the PR added or changed, and image files it changed, from `git diff <base>...HEAD`; findings already on <base> are warnings')
+  .option('--diff-file <path>', 'The same as --diff, from a unified diff file (for example the PR files API patches)')
   .option('--format <format>', 'Output format: human or json', 'human')
   .option('--output <path>', 'Also write the JSON result to this file')
   .option('--max-alt-length <n>', 'Alt text character limit', String(require('../tools/lint-screenshots').DEFAULTS.maxAltLength))
