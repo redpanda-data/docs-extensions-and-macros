@@ -57,9 +57,34 @@ describe('metric requirements file', () => {
   it('writes each condition as a sentence', () => {
     for (const requirement of requirements) {
       for (const item of requirement.requires) {
-        if (item.condition) expect(item.condition).toMatch(/^[A-Z].*\.$/)
+        if (item.condition) expect(item.condition).toMatch(/^([A-Z]|prop:).*\.$/)
       }
     }
+  })
+
+  // The docs link a property through prop:. A property in backticks is only
+  // text: the reader gets no link, and the build cannot check the name.
+  it('names a property in a condition with prop:, never in backticks', () => {
+    const known = new Set([
+      ...Object.keys(yaml.load(read(path.join(ROOT, 'docker-compose', '25.1', 'bootstrap.yml')))),
+      ...Object.keys(yaml.load(read(path.join(METRICS, 'bootstrap-extra.yml')))),
+      ...requirements.flatMap((requirement) => requirement.requires.map((item) => item.property).filter(Boolean))
+    ])
+    const inBackticks = []
+    for (const requirement of requirements) {
+      for (const item of requirement.requires) {
+        for (const [, word] of (item.condition || '').matchAll(/`([^`]+)`/g)) {
+          if (known.has(word)) inBackticks.push(`${requirement.id}: ${word}`)
+        }
+      }
+    }
+    expect(inBackticks).toEqual([])
+  })
+
+  it('links every property it names in a condition', () => {
+    const macros = requirements.flatMap((requirement) => requirement.requires.map((item) => item.condition || '')).join(' ').match(/prop:[^\s\[]+\[[^\]]*\]/g) || []
+    expect(macros.length).toBeGreaterThan(0)
+    for (const macro of macros) expect(macro).toMatch(/\[link=true\]$/)
   })
 })
 
