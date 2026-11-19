@@ -1316,7 +1316,11 @@ jobs:
             `openapiv2_operation` block is the exception: the summary
             usually drops its articles and matches the other summaries in
             its tag, and the description opens with an imperative verb and
-            keeps its articles. In Admin API v2 protos, the rpc's leading
+            keeps its articles. On this one point, this rule overrides the
+            quality-bar line in `embedded-reference-strings.md` that lists an
+            openapiv2 `summary` among the fragments that keep their articles;
+            that file's own openapiv2 example, "Create topic", drops them.
+            In Admin API v2 protos, the rpc's leading
             comment is its own name and then a third-person description
             ("Returns a single fixture."); leave that form as it is.
             Every flag, command, path and URL goes in inline code.
