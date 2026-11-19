@@ -1,0 +1,7 @@
+= Take it to production
+:page-layout: solution-production
+:description: What to change before the demo design carries production traffic.
+
+The demo runs on one broker with no authentication. Before you reuse the design in production, work through each topic on this page.
+
+include::partial$production/_all.adoc[leveloffset=-1]

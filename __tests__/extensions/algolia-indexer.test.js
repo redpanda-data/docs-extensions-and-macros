@@ -284,6 +284,21 @@ describe('algolia-indexer generate-index (Solutions records)', () => {
     expect(record.keywords).toEqual(['leaderboard', 'Event-driven microservices', 'Gaming'])
   })
 
+  test('the Take it to production page is not indexed as a second overview', () => {
+    const attrs = stepAttrs({ 'page-layout': 'solution-production' })
+    delete attrs['page-solution-step-id']
+    const [record] = runSolutions(solutionPage({
+      url: '/solutions/leaderboard/take-to-production/',
+      relative: 'take-to-production.adoc',
+      attrs,
+      html: stepHtml('Take it to production')
+    }))
+    expect(record.solutionId).toBe('leaderboard')
+    expect(record.stepId).toBe('take-to-production')
+    expect(record.duration).toBeNull()
+    expect(record.useCases).toBeUndefined()
+  })
+
   test('step records do not repeat the solution facets', () => {
     const [record] = runSolutions(solutionPage({
       url: '/solutions/leaderboard/start-environment/',
