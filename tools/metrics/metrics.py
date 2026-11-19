@@ -461,9 +461,11 @@ def retire_overrides(path, redundant):
     """Delete the redundant parts of the overrides file, and say what went.
 
     An override that stood in for something the tooling now produces has done
-    its job. Enrichment is never touched: a section, use cases, usage text,
-    Cloud availability, related properties and topics, audience paragraphs,
-    and the description or values of a label.
+    its job. Enrichment on a metric that is still in the release is never
+    touched: a section, use cases, usage text, Cloud availability, related
+    properties and topics, audience paragraphs, and the description or values
+    of a label. An override whose metric the source no longer registers goes
+    whole, enrichment included, because it has nothing to apply to.
 
     A description goes together with upstream_ref. When the override has
     retirement_pending, that field and _comment go too. Of a description
@@ -612,9 +614,10 @@ def parse_args(argv):
                              "text, sections, usage, and the labels of a metric the cluster did not export. An override "
                              "that gives the labels of such a metric covers its gap")
     parser.add_argument("--retire-overrides", action="store_true",
-                        help="With --overrides, delete from that file every part that no longer changes anything: text "
-                             "that now matches Redpanda, text marked retirement_pending, and labels that stood in for a "
-                             "metric the cluster now exports")
+                        help="With --overrides and --inventory, delete from that file every part that no longer changes "
+                             "anything: text that now matches Redpanda, text marked retirement_pending, labels that "
+                             "stood in for a metric the cluster now exports, and the whole override of a metric the "
+                             "source no longer registers")
     parser.add_argument("--strict", action="store_true",
                         help="With --inventory, fail (exit 4) and write nothing when the scrape does not match the "
                              "inventory. Without this flag the gaps are reported in metrics-gaps.json and the output is "
@@ -629,6 +632,11 @@ def main(argv=None):
             return EXIT_FAILURE
         # One summary line per poll, not one line per missing family.
         logging.getLogger().setLevel(logging.CRITICAL)
+    if args.retire_overrides and not args.inventory:
+        # Without the source inventory, a metric the cluster did not export
+        # looks like a metric that is gone, and its override would be deleted.
+        logging.error("--retire-overrides needs --inventory. Exiting.")
+        return EXIT_FAILURE
     tag_modified = args.version.strip()
     if not tag_modified:
         logging.error("Version must not be empty. Exiting.")
@@ -784,13 +792,21 @@ def main(argv=None):
             f"The override for '{item['name']}' names labels the cluster does not export: "
             f"{', '.join(item['labels_not_scraped'])}. The scrape is right, so the override needs an update.")
     if args.retire_overrides and overridden["stale"]:
-        # An override for a metric that is not in the release has nothing to
-        # apply to. --retire-overrides is only passed for the newest release,
-        # so the metric was removed or renamed, and the override goes.
+        # An override for a metric the source no longer registers has nothing
+        # to apply to: the metric was removed or renamed, and the override
+        # goes. A metric that is in source and is only missing from the
+        # dataset (it has a written reason for not being exported) is still
+        # in the release, so its override stays and is reported.
+        registered = set(inventory["public"]) | set(inventory["internal"])
+        gone = [name for name in overridden["stale"] if name not in registered]
         overridden["redundant"] += [
             {"name": name, "field": "", "reason": "no metric with this name is in this release"}
-            for name in overridden["stale"]]
-        overridden["stale"] = []
+            for name in gone]
+        overridden["stale"] = [name for name in overridden["stale"] if name in registered]
+        for name in overridden["stale"]:
+            logging.warning(
+                f"The override for '{name}' in {args.overrides} is for a metric that has a written reason for "
+                "not being exported, so it is not documented and the override has nothing to apply to.")
     if overridden["redundant"] and args.retire_overrides:
         retire_overrides(args.overrides, overridden["redundant"])
         for item in overridden["redundant"]:

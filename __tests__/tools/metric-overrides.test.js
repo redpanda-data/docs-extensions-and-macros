@@ -321,6 +321,52 @@ describeIfPython('metric overrides', () => {
       expect(second.gaps.covered_by_override.map((gap) => gap.name)).toContain('redpanda_new_feature_lag')
     })
 
+    describe('what a retiring run must not delete', () => {
+      // These runs build their own arguments, because run() always gives an inventory.
+      const raw = (name, overrides, args, files = {}) => {
+        const dir = path.join(workDir, name)
+        fs.mkdirSync(dir)
+        const write = (file, content) => {
+          fs.writeFileSync(path.join(dir, file), content)
+          return path.join(dir, file)
+        }
+        const overridesFile = write('overrides.json', JSON.stringify({ metrics: overrides }, null, 2))
+        const before = read(overridesFile)
+        const extra = Object.entries(files).flatMap(([flag, [file, content]]) => [flag, write(file, JSON.stringify(content))])
+        const result = spawnSync(PYTHON, ['-I', SCRIPT, 'v0.0.1', '--output-dir', path.join(dir, 'out'), '--skip-pages',
+          '--public-file', write('pub.txt', SCRAPED), '--internal-file', write('int.txt', INTERNAL),
+          '--overrides', overridesFile, ...extra, ...args], { cwd: dir, encoding: 'utf8' })
+        const gapsFile = path.join(dir, 'out', 'metrics-gaps.json')
+        return {
+          status: result.status,
+          log: `${result.stdout || ''}${result.stderr || ''}`,
+          unchanged: read(overridesFile) === before,
+          after: JSON.parse(read(overridesFile)).metrics,
+          gaps: fs.existsSync(gapsFile) ? JSON.parse(read(gapsFile)) : null
+        }
+      }
+      const COVERING = { redpanda_new_feature_lag: { labels: [{ name: 'link' }], category: 'New feature' } }
+
+      it('refuses to retire without a source inventory, and leaves the file alone', () => {
+        const result = raw('no-inventory', COVERING, ['--retire-overrides'])
+        expect(result.status).toBe(1)
+        expect(result.log).toMatch(/--retire-overrides needs --inventory/)
+        expect(result.unchanged).toBe(true)
+      })
+
+      it('keeps the override of a metric that is in source and has a written reason for not being exported', () => {
+        const result = raw('expected-absent', COVERING, ['--retire-overrides'], {
+          '--inventory': ['inventory.json', INVENTORY],
+          '--expected-absent': ['expected-absent.json', { redpanda_new_feature_lag: 'No cluster can export it.' }]
+        })
+        expect(result.status).toBe(0)
+        expect(result.after.redpanda_new_feature_lag).toEqual(COVERING.redpanda_new_feature_lag)
+        expect(result.gaps.retired_overrides).toEqual([])
+        expect(result.gaps.stale_overrides).toEqual(['redpanda_new_feature_lag'])
+        expect(result.log).toMatch(/has a written reason for not being exported/)
+      })
+    })
+
     it('only reports, and changes nothing, without --retire-overrides', () => {
       const dry = runRetiring(OVERRIDES, [])
       expect(dry.after).toEqual(OVERRIDES)
