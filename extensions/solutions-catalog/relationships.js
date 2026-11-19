@@ -323,7 +323,6 @@ function toRecommendation (solution, edge) {
     title: solution.title,
     url: solution.url,
     description: solution.description,
-    duration: Number(solution.duration),
     technologies: solution.technologies,
     provenance: edge.provenance,
     score: edge.score,
