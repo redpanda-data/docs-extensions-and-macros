@@ -310,6 +310,17 @@ describeIfPython('metric overrides', () => {
       expect(gone.result.report.stdout).toContain('- `redpanda_gone_total`: no metric with this name is in this release')
     })
 
+    it('keeps the empty labels list that covers an unexported metric when another part of the override retires', () => {
+      const overrides = { redpanda_new_feature_lag: { description: 'From source', labels: [] }, redpanda_other_feature_total: { labels: [] } }
+      const first = runRetiring(overrides, ['--retire-overrides'])
+      expect(first.after.redpanda_new_feature_lag).toEqual({ labels: [] })
+      expect(first.result.gaps.count).toBe(0)
+      // The next run reads the rewritten file, and the gap is still covered.
+      const second = run(first.after)
+      expect(second.gaps.not_scraped).toEqual([])
+      expect(second.gaps.covered_by_override.map((gap) => gap.name)).toContain('redpanda_new_feature_lag')
+    })
+
     it('only reports, and changes nothing, without --retire-overrides', () => {
       const dry = runRetiring(OVERRIDES, [])
       expect(dry.after).toEqual(OVERRIDES)
