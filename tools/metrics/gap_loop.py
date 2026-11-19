@@ -668,6 +668,7 @@ def cmd_apply(args):
     os.makedirs(directory, exist_ok=True)
     created_path = os.path.join(state, "created.json")
     created = read_json(created_path) if os.path.exists(created_path) else []
+    response = None
     try:
         try:
             response = read_json(args.response)
@@ -698,7 +699,12 @@ def cmd_apply(args):
     except Refused as error:
         save_summary(state, number, status="invalid", kept=False, error=str(error),
                      outcome="The response was refused and nothing was changed.")
-        sys.stderr.write("Refused: %s.\n" % error)
+        # The files it asked to see are still shown next time. Asking costs
+        # nothing, and losing the request would cost another attempt.
+        wanted = response.get("need_files") if isinstance(response, dict) else None
+        if isinstance(wanted, list) and all(isinstance(path, str) for path in wanted):
+            write_json(os.path.join(state, "need_files.json"), wanted)
+        sys.stderr.write("Refused: %s.\n" % str(error).rstrip("."))
         return EXIT_INVALID
 
     manifest, diff = [], []
