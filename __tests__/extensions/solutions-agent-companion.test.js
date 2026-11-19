@@ -19,6 +19,7 @@ const {
   findLeaks,
   partialResolver,
   selectTagged,
+  includeAttrs,
   MAX_INCLUDE_DEPTH,
 } = require('../../extensions/solutions-catalog/agent-companion')
 
@@ -609,6 +610,49 @@ describe('agent companion: single-sourced production content', () => {
     const inParts = r.parts.flatMap((p) => headings(p.markdown).filter((h) => /^## /.test(h)))
     expect(inParts).toEqual(['## Design contract', '## Production gaps', '## Reference build'])
     expect(r.markdown).not.toContain('## Production gaps')
+  })
+
+  // The current shape: the topics on take-to-production.adoc, which includes
+  // _all.adoc with leveloffset=-1, and a last step without the section.
+  const production = [
+    '= Take it to production',
+    ':page-layout: solution-production',
+    ':description: What to change.',
+    '',
+    'The local stack runs on one broker. Work through each topic on this page.',
+    '',
+    'include::partial$production/_all.adoc[leveloffset=-1]',
+  ].join('\n')
+  const lastNow = last.replace(/== Production considerations[\s\S]*?(?=== Clean up)/, '') +
+    '\n\nxref:take-to-production.adoc[] lists what to change before production.'
+  const allNow = { ...partials, 'production/_all.adoc': partials['production/_all.adoc'].replace(/^This solution runs[^\n]*\n\n/, '') }
+  const generateNow = () => generateAgentCompanion({
+    slug: 'tiny',
+    pages: { index, one: one.replace('xref:verify-end-to-end.adoc#prod-compaction[Production considerations: compaction]', 'xref:take-to-production.adoc#prod-compaction[]'), 'verify-end-to-end': lastNow, 'take-to-production': production },
+    resolveInclude: partialResolver(allNow, { module: 'tiny' }),
+  })
+
+  test('includeAttrs reads leveloffset=-1', () => {
+    expect(includeAttrs('leveloffset=-1')).toEqual({ leveloffset: '-1' })
+    expect(includeAttrs('tag=detail,leveloffset=-1')).toEqual({ tag: 'detail', leveloffset: '-1' })
+  })
+
+  test('the take-to-production page becomes Production gaps: its intro, then one h3 per topic', () => {
+    const r = generateNow()
+    expect(r.leaks).toEqual([])
+    const gaps = sectionOf(whole(r), '## Production gaps')
+    expect(gaps.trim().startsWith('The local stack runs on one broker. Work through each topic on this page.')).toBe(true)
+    expect(whole(r)).toContain('### Compaction\n\nIn this solution, segments roll every minute.')
+    expect(whole(r)).toContain('### Security\n\nIn this solution, nothing authenticates.\n\nIn production, enable SASL and TLS.')
+    const inParts = r.parts.flatMap((p) => headings(p.markdown).filter((h) => /^## /.test(h)))
+    expect(inParts).toEqual(['## Design contract', '## Production gaps', '## Reference build'])
+    // It is not a step: no Reference build entry of its own.
+    expect(whole(r)).not.toContain('#### Take it to production')
+  })
+
+  test('an empty xref to the production page is labeled with its title', () => {
+    const entry = sectionOf(whole(generateNow()), '### 1. Compact the board')
+    expect(entry).toContain('For the full picture, see [Take it to production](https://docs.redpanda.com/solutions/tiny/take-to-production/#prod-compaction).')
   })
 
   test('tag markers, anchors, and the Files for this step section never reach the Markdown', () => {

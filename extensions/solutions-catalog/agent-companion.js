@@ -19,8 +19,10 @@
  *                :page-solution-adapt:             -> Adapt, Design contract
  *                == Why this design (or the older == Why) / == Why Redpanda / == In production -> Design contract
  *                == Verify, prose after the expected output -> Reference build: failure modes
- *   last step    == Production considerations (one === per topic) -> Production gaps
- *                (an overview's == Production considerations table, for older content)
+ *   take-to-production.adoc  intro, then one === per topic from
+ *                partial$production/_all.adoc[leveloffset=-1]  -> Production gaps
+ *                (older content: the last step's, else the overview's,
+ *                == Production considerations)
  *   scripts/verify.sh  "# N." comments             -> Reference build: acceptance checks
  *
  * The core file, agent-companion.md, holds what the procedure needs to start.
@@ -60,6 +62,8 @@ const CORE_SIZE_WARNING = 28000
 const OUTCOMES_RX = /^After completing this solution, you will be able to:$/m
 const MAX_INCLUDE_DEPTH = 8
 const INCLUDE_RX = /^include::(\S+?)\[(.*)\]\s*$/
+// The page after the last step that holds the production topics.
+const PRODUCTION_ID = 'take-to-production'
 const TAG_MARKER_RX = /\b(tag|end)::([^[\s]+)\[\]/
 
 /**
@@ -588,7 +592,13 @@ function generateAgentCompanion ({ slug, pages, verifyScript, siteUrl = DEFAULT_
     if (!pages[id]) { missingSteps.push(id); continue }
     steps.push({ id, page: read(id) })
   }
+  // The production page is read like a step but is not one. Includes are
+  // spliced as written: leveloffset is not applied, so each topic of
+  // _all.adoc (included with leveloffset=-1) is still a `=== Topic` line
+  // after the page intro, the shape productionGaps reads.
+  const productionPage = pages[PRODUCTION_ID] ? read(PRODUCTION_ID) : null
   const titles = Object.fromEntries(steps.map((s) => [s.id, s.page.title]))
+  if (productionPage) titles[PRODUCTION_ID] = productionPage.title
   const ctx = { slug, siteUrl, titles, titleOf }
   const solutionUrl = `${siteUrl}/solutions/${slug}/`
   const stepUrl = (id) => `${solutionUrl}${id}/`
@@ -614,10 +624,13 @@ function generateAgentCompanion ({ slug, pages, verifyScript, siteUrl = DEFAULT_
   const [problem, outcomes] = pre.split(OUTCOMES_RX)
   const build = section(index, 'What you build')
   const arch = section(index, 'Architecture')
-  // The complete production section lives at the end of the last step; older
-  // content kept it on the overview.
+  // The production topics live on take-to-production.adoc, everything after
+  // its title and header (an authored == section counts as one more topic).
+  // Older content kept them in a == Production
+  // considerations section at the end of the last step, or on the overview.
   const lastStep = steps.find((s) => s.id === stepIds[stepIds.length - 1])
-  const prod = (lastStep && section(lastStep.page, 'Production considerations')) || section(index, 'Production considerations')
+  const prod = (productionPage && { lines: productionPage.sections.flatMap((sec, i) => (i === 0 ? sec.lines : [`=== ${sec.title}`, ...sec.lines])) }) ||
+    (lastStep && section(lastStep.page, 'Production considerations')) || section(index, 'Production considerations')
 
   const adapts = rules.filter((r) => r.adapt)
   const contract = steps.filter((s) => s.rule || s.adapt)
@@ -971,6 +984,7 @@ module.exports = {
   parsePartialTarget,
   expandIncludes,
   selectTagged,
+  includeAttrs,
   productionGaps,
   resourceUrl,
   attachmentRef,

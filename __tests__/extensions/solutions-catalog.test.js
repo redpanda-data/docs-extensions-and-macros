@@ -1745,6 +1745,8 @@ describe('solutions-catalog: agent companion', () => {
     expect(md).toContain('[offsets](https://docs.redpanda.com/streaming/current/develop/consume-data/consumer-offsets/)')
     expect(md).toContain('1. The board agrees with the database.')
     expect(md).toContain('#### Start')
+    // Production gaps come from the Take it to production page.
+    expect(md).toContain('## Production gaps\n\nThe demo runs on one broker.\n\n### Brokers\n\nRun three brokers.')
 
     const overview = pages.find((p) => p.src.module === 'leaderboard' && p.src.relative === 'index.adoc')
     expect(json(overview, 'page-solution').agentCompanion).toBe('/solutions/leaderboard/agent-companion.md')

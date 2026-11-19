@@ -1201,7 +1201,7 @@ A set of Markdown files per built solution, at `solutions/<slug>/agent-companion
 | One check per rule
 
 | Production gaps
-| The last step's `== Production considerations`: its intro, then each `=== Topic` as a Markdown h3 with its paragraphs. Content that still keeps the section on the overview falls back to the overview's section and its three-column table
+| `pages/take-to-production.adoc`: its intro, then each `=== Topic` of `partial$production/_all.adoc` as a Markdown h3 with its paragraphs. The include is spliced as written, without its `leveloffset=-1`, so the topics keep their `===` level here. Older content falls back to the last step's `== Production considerations`, then to the overview's section and its three-column table
 
 | Canonical docs
 | `page-solution-related-docs`
