@@ -83,13 +83,17 @@ const VERIFICATION_FIELDS = Object.freeze([
 
 // The extra platforms a solution can be verified on besides the base
 // self-managed run. The recorder writes each as <platform>_verify_script,
-// <platform>_run_at and <platform>_environment (what the run ran on, for
-// example { kind, kubernetes, redpanda_operator, redpanda }); they reach the
-// record as verified.runs[<platform>] = { verifyScript, runAt, environment }.
+// <platform>_run_at, <platform>_environment (what the run ran on, for
+// example { kind, kubernetes, redpanda_operator, redpanda }), and
+// <platform>_verify_skipped (the checks verify.sh skipped there, each as it
+// printed it, for example "compaction on game.leaderboard (Serverless rejects
+// segment.ms on a topic; ...)"); they reach the record as
+// verified.runs[<platform>] = { verifyScript, runAt, environment, skipped }.
 const PLATFORM_RUN_FIELDS = Object.freeze([
   ['verify_script', 'verifyScript'],
   ['run_at', 'runAt'],
   ['environment', 'environment'],
+  ['verify_skipped', 'skipped'],
 ])
 
 /**
@@ -123,6 +127,7 @@ function parseVerification (file) {
       const value = data[`${platform}_${from}`]
       if (value === undefined || value === null || value === '') continue
       if (from === 'environment' && (typeof value !== 'object' || Array.isArray(value))) continue
+      if (from === 'verify_skipped' && !(Array.isArray(value) && value.length && value.every((x) => typeof x === 'string' && x.trim()))) continue
       run[to] = value
     }
     if (Object.keys(run).length) runs[platform] = run

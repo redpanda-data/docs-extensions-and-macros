@@ -718,6 +718,9 @@ Base ref: changes in <base>...HEAD are inspected
 `--format <format>`::
 Output format: json or human (default: "json")
 
+`--exclude <file>`::
+File of already-dispatched findings, one "name change_kind" per line, to leave out of the report
+
 `-h, --help`::
 display help for command
 
