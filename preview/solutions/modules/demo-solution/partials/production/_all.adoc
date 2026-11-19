@@ -1,6 +1,5 @@
-// == Production considerations includes this file and nothing else.
-Before you reuse this design in production, work through each topic below.
-
+// Only pages/take-to-production.adoc includes this file, with leveloffset=-1, so
+// each [#prod-<topic>] === topic is an h2 section of that page.
 [#prod-brokers-and-replication]
 === Brokers and replication
 
