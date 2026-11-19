@@ -478,6 +478,17 @@ describe('lintScreenshots - diff scope (--diff, --diff-file)', () => {
     expect(result.summary.preexisting).toBe(0)
   })
 
+  test('an image replaced in place with no page change still blocks (positive control)', () => {
+    const root = repo()
+    const diffFile = path.join(root, 'pr.diff')
+    // The shape the docs-pr-review workflow builds for a binary file: no patch.
+    fs.writeFileSync(diffFile, 'diff --git a/modules/m/images/big.png b/modules/m/images/big.png\n--- /dev/null\n+++ b/modules/m/images/big.png\n\n')
+    const res = spawnSync('node', [BIN, 'lint-screenshots', '--root', root, '--diff-file', diffFile, '--format', 'json'], { encoding: 'utf8' })
+    expect(res.status).toBe(1)
+    const out = JSON.parse(res.stdout)
+    expect(out.findings.filter((f) => f.severity === 'error').map((f) => f.rule)).toEqual(['image-too-large'])
+  })
+
   test('the CLI reads --diff-file', () => {
     const root = repo()
     const diffFile = path.join(root, 'pr.diff')

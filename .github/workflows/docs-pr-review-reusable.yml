@@ -1585,9 +1585,10 @@ jobs:
           # What was already on the base branch comes back as a suggestion:
           # a PR that edits one header line on 200 pages is not blocked by
           # those pages' old images. A file the API sends without a patch
-          # (binary, or too large) counts as changed throughout.
+          # (binary, or too large), or a new file, gets `--- /dev/null`, which
+          # any unified-diff reader takes as changed throughout.
           gh api --paginate "repos/$R/pulls/$PR/files" \
-            --jq '.[] | select(.status != "removed") | "diff --git a/\(.filename) b/\(.filename)\n--- a/\(.filename)\n+++ b/\(.filename)\n\(.patch // "")"' > "$LINT_DIR/pr.diff"
+            --jq '.[] | select(.status != "removed") | "diff --git a/\(.filename) b/\(.filename)\n--- \(if .status == "added" or .patch == null then "/dev/null" else "a/\(.filename)" end)\n+++ b/\(.filename)\n\(.patch // "")"' > "$LINT_DIR/pr.diff"
           # Only a doc_tools_version that ships --diff-file gets it; an older
           # pin keeps the whole-page behavior instead of a usage error.
           DIFF_ARGS=()
