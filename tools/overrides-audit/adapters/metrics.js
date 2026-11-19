@@ -32,7 +32,7 @@ const { CLASSES } = classify
 const EXTRACTOR = path.join(__dirname, '..', '..', 'metrics', 'extract_source.py')
 
 // Annotations on an override. They are not override content.
-const META_FIELDS = ['upstream_ref', '_comment', 'retirement_pending']
+const META_FIELDS = ['upstream_ref', '_comment', 'retirement_pending', 'upstream_not_possible']
 // Stopgaps the release run compares with the scrape and the tooling.
 const RELEASE_RUN_FIELDS = ['unit', 'labels', 'requires']
 

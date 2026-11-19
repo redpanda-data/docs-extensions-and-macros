@@ -243,7 +243,7 @@ JSON (default): `{ surface, overrides_file, extracted_file, manifest, summary, c
 |Docs-layer enrichment.
 |===
 
-Audience paragraphs (array entries that start with `cloud-only:` or `self-managed-only:`) are ignored in the comparison. They are listed in `audience_scoped_text`, never put in a candidate, and never retired. `upstream_ref`, `_comment` and `retirement_pending` get no row.
+Audience paragraphs (array entries that start with `cloud-only:` or `self-managed-only:`) are ignored in the comparison. They are listed in `audience_scoped_text`, never put in a candidate, and never retired. `upstream_ref`, `_comment`, `retirement_pending` and `upstream_not_possible` get no row.
 
 A family registered at more than one call site says so in its note. The location is the first call site, so the other registrations need the same edit.
 
