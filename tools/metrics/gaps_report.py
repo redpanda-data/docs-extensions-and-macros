@@ -88,8 +88,10 @@ def render(gaps):
         lines += [
             "",
             "To complete the reference now, add the metric to `docs-data/metric-overrides.json` in this "
-            "repository with its `labels`, read from the source file named above, and run this workflow again "
-            "for the tag. That covers the gap.",
+            "repository with its `labels`, read from the source file named above. Merge that change into the "
+            "branch this pull request targets, in its own pull request, and then run this workflow again for "
+            "the tag. The run reads the overrides file from that branch and rebuilds this pull request, so a "
+            "commit pushed here is lost. That covers the gap.",
             "",
             "To close it for good, do one of these in `docs-extensions-and-macros`:",
             "",
