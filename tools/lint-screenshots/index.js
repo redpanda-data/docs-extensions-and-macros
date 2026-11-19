@@ -45,8 +45,18 @@ const INLINE_MACRO_RE = /(?<![\w:])image:(?!:)([^\[\]\s]+)\[([^\]]*)\]/g
 const NAMED_ATTR_RE = /^[a-zA-Z_:][a-zA-Z0-9_-]*\s*=/
 const BARE_DIMENSION_RE = /^\d+$/
 
+// A named alt attribute, quoted: alt="..." or alt='...'. Asciidoctor reads a
+// quoted value whole, commas included, and a named alt wins over the
+// positional one.
+const NAMED_QUOTED_ALT_RE = /(?:^|,)\s*alt\s*=\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')/
+
 function parseAltText (attrs) {
   const trimmed = attrs.trim()
+  const named = trimmed.match(NAMED_QUOTED_ALT_RE)
+  if (named) {
+    const value = named[1] !== undefined ? named[1] : named[2]
+    return { altText: value.replace(/\\(["'])/g, '$1'), hasUnquotedComma: false }
+  }
   if (trimmed.startsWith('"')) {
     const closingIdx = trimmed.indexOf('"', 1)
     if (closingIdx !== -1) {
@@ -54,6 +64,15 @@ function parseAltText (attrs) {
     }
   }
   const segments = trimmed.split(',').map((s) => s.trim())
+  // An unquoted named alt=: its value runs to the next comma, and any prose
+  // after that comma is split off, the same as for a positional alt.
+  const namedIdx = segments.findIndex((s) => /^alt\s*=/.test(s))
+  if (namedIdx !== -1) {
+    const altText = segments[namedIdx].replace(/^alt\s*=\s*/, '')
+    const rest = segments.filter((s, i) => i !== namedIdx && (i !== 0 || NAMED_ATTR_RE.test(s)))
+    const allRestAreAttrs = rest.every((s) => NAMED_ATTR_RE.test(s) || BARE_DIMENSION_RE.test(s))
+    return { altText, hasUnquotedComma: rest.length > 0 && !allRestAreAttrs }
+  }
   const [altText, ...rest] = segments
   const allRestAreAttrs = rest.every((s) => NAMED_ATTR_RE.test(s) || BARE_DIMENSION_RE.test(s))
   return { altText, hasUnquotedComma: rest.length > 0 && !allRestAreAttrs }

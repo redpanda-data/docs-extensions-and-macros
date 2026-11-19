@@ -62,6 +62,15 @@ describe('parseAltText', () => {
     expect(parseAltText('Console overview, width=600, role=x')).toEqual({ altText: 'Console overview', hasUnquotedComma: false })
     expect(parseAltText('Console overview,600,400')).toEqual({ altText: 'Console overview', hasUnquotedComma: false })
   })
+  test('a quoted named alt keeps its commas and is not a violation', () => {
+    expect(parseAltText('alt="Three clusters, each with an operator"')).toEqual({ altText: 'Three clusters, each with an operator', hasUnquotedComma: false })
+    expect(parseAltText("width=600,alt='A, B'")).toEqual({ altText: 'A, B', hasUnquotedComma: false })
+    expect(parseAltText('Positional,alt="Named, wins"')).toEqual({ altText: 'Named, wins', hasUnquotedComma: false })
+  })
+  test('an unquoted named alt is read up to the next comma', () => {
+    expect(parseAltText('alt=Console overview,width=600')).toEqual({ altText: 'Console overview', hasUnquotedComma: false })
+    expect(parseAltText('alt=Topics, partitions, and offsets').hasUnquotedComma).toBe(true)
+  })
   test('an unquoted comma inside prose is a violation, a quoted one is not', () => {
     expect(parseAltText('Topics, partitions, and offsets').hasUnquotedComma).toBe(true)
     expect(parseAltText('"Topics, partitions, and offsets",width=600')).toEqual({ altText: 'Topics, partitions, and offsets', hasUnquotedComma: false })
