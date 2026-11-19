@@ -35,3 +35,6 @@ enable_shadow_linking: true
 # vectorized_cloud_roles__auth_refresh_*: fetch object storage credentials
 # from the imds-mock service, not from the static keys.
 cloud_storage_credentials_source: aws_instance_metadata
+# *_cloud_topics_*: Redpanda 26.1 starts the cloud topics services only with
+# this on. Later releases start them without it.
+cloud_topics_enabled: true
