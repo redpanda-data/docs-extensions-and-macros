@@ -5,6 +5,7 @@
       "id": "health-monitor",
       "metrics": ["redpanda_cluster_health_*", "vectorized_cluster_health_*"],
       "requires": [{ "property": "health_monitor_metrics_enabled", "value": true }],
+      "releases": { "from": "26.2" },
       "evidence": "measured"
     },
     {
@@ -32,12 +33,20 @@
         { "property": "kafka_per_entity_quota_metrics", "value": true },
         { "condition": "A client that has a client quota has been throttled. The series are removed again after the client has been idle." }
       ],
+      "releases": { "from": "26.2" },
       "evidence": "measured"
     },
     {
       "id": "cloud-topic",
       "metrics": ["vectorized_cloud_topics_reconciler_pending_offset_lag"],
       "requires": [{ "condition": "A topic with prop:redpanda.storage.mode[link=true] set to `cloud` exists." }],
+      "evidence": "measured"
+    },
+    {
+      "id": "cloud-topics-enabled",
+      "metrics": ["redpanda_cloud_topics_*", "vectorized_cloud_topics_*"],
+      "requires": [{ "property": "cloud_topics_enabled", "value": true }],
+      "releases": { "before": "26.2" },
       "evidence": "measured"
     },
     {
@@ -53,6 +62,7 @@
         "*_instance_read_iops", "*_instance_vcpus", "*_instance_write_iops"
       ],
       "requires": [{ "condition": "The broker runs on a cloud instance type that Redpanda recognizes." }],
+      "releases": { "from": "26.2" },
       "evidence": "measured"
     },
     {
@@ -95,6 +105,7 @@
         { "property": "enable_shadow_linking", "value": true },
         { "condition": "The cluster has a shadow link that syncs Schema Registry through the source cluster's API." }
       ],
+      "releases": { "from": "26.2" },
       "evidence": "measured"
     },
     {
