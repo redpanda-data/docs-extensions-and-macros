@@ -21,7 +21,7 @@
 | `docs-data/metric-overrides.schema.json`
 
 | `docker-compose/metrics/requirements.json`
-| What a cluster needs before it exports each group of metrics.
+| What a cluster needs before it exports each group of metrics. A requirement can carry `releases` with `from` and `before` (release lines such as `26.2`) when it holds for some releases only.
 | `tools/metrics/metrics-requirements.schema.json`
 |===
 
