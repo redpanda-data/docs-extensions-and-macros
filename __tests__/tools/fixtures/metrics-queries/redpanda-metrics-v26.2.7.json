@@ -1,0 +1,714 @@
+{
+  "$schema": "https://docs.redpanda.com/schemas/redpanda-metrics.schema.json",
+  "schema_version": 1,
+  "redpanda_version": "v26.2.7",
+  "generated_from": {
+    "sources": 3,
+    "source_ref": "v26.2.7"
+  },
+  "counts": {
+    "public": 19,
+    "internal": 1,
+    "observed": 19,
+    "source_only": 1,
+    "excluded": 0
+  },
+  "excluded": [],
+  "metrics": {
+    "redpanda_application_uptime_seconds_total": {
+      "name": "redpanda_application_uptime_seconds_total",
+      "endpoint": "public",
+      "type": "gauge",
+      "unit": "seconds",
+      "description": "Redpanda uptime in seconds.",
+      "source_description": "Redpanda uptime in seconds",
+      "labels": [],
+      "histogram": null,
+      "observed": true,
+      "provenance": {
+        "type": "scraped",
+        "source_description": "scraped",
+        "description": "scraped",
+        "labels": "scraped",
+        "unit": "derived",
+        "defined_in": "source"
+      },
+      "defined_in": "src/v/redpanda/application.cc"
+    },
+    "redpanda_cloud_storage_cache_op_hit": {
+      "name": "redpanda_cloud_storage_cache_op_hit",
+      "endpoint": "public",
+      "type": "counter",
+      "unit": null,
+      "description": "Number of get requests for objects that are already in cache.",
+      "source_description": "Number of get requests for objects that are already in cache.",
+      "labels": [],
+      "histogram": null,
+      "observed": false,
+      "provenance": {
+        "type": "source",
+        "source_description": "source",
+        "description": "source"
+      }
+    },
+    "redpanda_cluster_health_unhealthy_reasons": {
+      "name": "redpanda_cluster_health_unhealthy_reasons",
+      "endpoint": "public",
+      "type": "gauge",
+      "unit": null,
+      "description": "Count of reasons the cluster is currently considered unhealthy. 0 if the cluster is healthy; equals the size of cluster_health_overview.unhealthy_reasons.",
+      "source_description": "Count of reasons the cluster is currently considered unhealthy. 0 if the cluster is healthy; equals the size of cluster_health_overview.unhealthy_reasons.",
+      "labels": [],
+      "histogram": null,
+      "observed": true,
+      "provenance": {
+        "type": "scraped",
+        "source_description": "scraped",
+        "description": "scraped",
+        "labels": "scraped",
+        "defined_in": "source",
+        "requires": "requirements"
+      },
+      "defined_in": "src/v/cluster/health_monitor_backend.cc",
+      "requires": [
+        {
+          "property": "health_monitor_metrics_enabled",
+          "value": true,
+          "evidence": "measured"
+        }
+      ]
+    },
+    "redpanda_cpu_busy_seconds_total": {
+      "name": "redpanda_cpu_busy_seconds_total",
+      "endpoint": "public",
+      "type": "gauge",
+      "unit": "seconds",
+      "description": "Total CPU busy time in seconds.",
+      "source_description": "Total CPU busy time in seconds",
+      "labels": [
+        {
+          "name": "shard",
+          "observed_values": [
+            "0"
+          ]
+        }
+      ],
+      "histogram": null,
+      "observed": true,
+      "provenance": {
+        "type": "scraped",
+        "source_description": "scraped",
+        "description": "scraped",
+        "labels": "scraped",
+        "unit": "derived",
+        "defined_in": "source"
+      },
+      "defined_in": "src/v/redpanda/application.cc"
+    },
+    "redpanda_kafka_consumer_group_committed_offset": {
+      "name": "redpanda_kafka_consumer_group_committed_offset",
+      "endpoint": "public",
+      "type": "gauge",
+      "unit": null,
+      "description": "Consumer group committed offset.",
+      "source_description": "Consumer group committed offset",
+      "labels": [
+        {
+          "name": "redpanda_group",
+          "observed_values": [
+            "transactions-consumer"
+          ]
+        },
+        {
+          "name": "redpanda_partition",
+          "observed_values": [
+            "0"
+          ]
+        },
+        {
+          "name": "redpanda_topic",
+          "observed_values": [
+            "transactions"
+          ]
+        },
+        {
+          "name": "shard",
+          "observed_values": [
+            "0"
+          ]
+        }
+      ],
+      "histogram": null,
+      "observed": true,
+      "provenance": {
+        "type": "scraped",
+        "source_description": "scraped",
+        "description": "scraped",
+        "labels": "scraped",
+        "defined_in": "source",
+        "requires": "requirements"
+      },
+      "defined_in": "src/v/kafka/server/group_probe.h",
+      "requires": [
+        {
+          "condition": "A consumer group has committed an offset.",
+          "evidence": "measured"
+        },
+        {
+          "condition": "prop:enable_consumer_group_metrics[link=true] includes the metric's group: `group`, `partition` or `consumer_lag`.",
+          "evidence": "source"
+        }
+      ]
+    },
+    "redpanda_kafka_consumer_group_lag_sum": {
+      "name": "redpanda_kafka_consumer_group_lag_sum",
+      "endpoint": "public",
+      "type": "gauge",
+      "unit": null,
+      "description": "Sum of consumer group lag for all topic-partitions.",
+      "source_description": "Sum of consumer group lag for all topic-partitions",
+      "labels": [
+        {
+          "name": "redpanda_group",
+          "observed_values": [
+            "transactions-consumer"
+          ]
+        },
+        {
+          "name": "shard"
+        }
+      ],
+      "histogram": null,
+      "observed": true,
+      "provenance": {
+        "type": "scraped",
+        "source_description": "scraped",
+        "description": "scraped",
+        "labels": "scraped",
+        "defined_in": "source",
+        "requires": "requirements"
+      },
+      "defined_in": "src/v/kafka/server/group_probe.h",
+      "requires": [
+        {
+          "condition": "A consumer group has committed an offset.",
+          "evidence": "measured"
+        },
+        {
+          "condition": "prop:enable_consumer_group_metrics[link=true] includes the metric's group: `group`, `partition` or `consumer_lag`.",
+          "evidence": "source"
+        }
+      ]
+    },
+    "redpanda_kafka_max_offset": {
+      "name": "redpanda_kafka_max_offset",
+      "endpoint": "public",
+      "type": "gauge",
+      "unit": null,
+      "description": "Latest readable offset of the partition (i.e. high watermark).",
+      "source_description": "Latest readable offset of the partition (i.e. high watermark)",
+      "labels": [
+        {
+          "name": "redpanda_namespace",
+          "observed_values": [
+            "kafka",
+            "kafka_internal",
+            "redpanda"
+          ]
+        },
+        {
+          "name": "redpanda_partition"
+        },
+        {
+          "name": "redpanda_topic"
+        },
+        {
+          "name": "shard",
+          "observed_values": [
+            "0"
+          ]
+        }
+      ],
+      "histogram": null,
+      "observed": true,
+      "provenance": {
+        "type": "scraped",
+        "source_description": "scraped",
+        "description": "scraped",
+        "labels": "scraped",
+        "defined_in": "source"
+      },
+      "defined_in": "src/v/cluster/partition_probe.cc"
+    },
+    "redpanda_kafka_quotas_client_quota_throughput_by_entity": {
+      "name": "redpanda_kafka_quotas_client_quota_throughput_by_entity",
+      "endpoint": "public",
+      "type": "counter",
+      "unit": null,
+      "description": "Per-entity quota throughput (bytes for produce/fetch, partition mutations for partition-mutation quotas).",
+      "source_description": "Per-entity quota throughput (bytes for produce/fetch, partition mutations for partition-mutation quotas)",
+      "labels": [
+        {
+          "name": "redpanda_quota_client_id",
+          "observed_values": [
+            "metrics-quota-probe"
+          ]
+        },
+        {
+          "name": "redpanda_quota_type",
+          "observed_values": [
+            "produce_quota"
+          ]
+        }
+      ],
+      "histogram": null,
+      "observed": true,
+      "provenance": {
+        "type": "scraped",
+        "source_description": "scraped",
+        "description": "scraped",
+        "labels": "scraped",
+        "defined_in": "source",
+        "requires": "requirements"
+      },
+      "defined_in": "src/v/kafka/server/quota_manager.cc",
+      "requires": [
+        {
+          "property": "kafka_per_entity_quota_metrics",
+          "value": true,
+          "evidence": "measured"
+        },
+        {
+          "condition": "A client that has a client quota has been throttled. The series are removed again after the client has been idle.",
+          "evidence": "measured"
+        }
+      ]
+    },
+    "redpanda_kafka_records_produced_total": {
+      "name": "redpanda_kafka_records_produced_total",
+      "endpoint": "public",
+      "type": "counter",
+      "unit": null,
+      "description": "Total number of records produced.",
+      "source_description": "Total number of records produced",
+      "labels": [
+        {
+          "name": "redpanda_namespace",
+          "observed_values": [
+            "kafka",
+            "kafka_internal",
+            "redpanda"
+          ]
+        },
+        {
+          "name": "redpanda_topic"
+        }
+      ],
+      "histogram": null,
+      "observed": true,
+      "provenance": {
+        "type": "scraped",
+        "source_description": "scraped",
+        "description": "scraped",
+        "labels": "scraped",
+        "defined_in": "source"
+      },
+      "defined_in": "src/v/cluster/partition_probe.cc"
+    },
+    "redpanda_kafka_request_bytes_total": {
+      "name": "redpanda_kafka_request_bytes_total",
+      "endpoint": "public",
+      "type": "counter",
+      "unit": "bytes",
+      "description": "Total number of bytes read from or written to the partitions of a topic. The total may include fetched bytes that are not returned to the client.",
+      "source_description": "Total number of bytes read from or written to the partitions of a topic. The total may include fetched bytes that are not returned to the client.",
+      "labels": [
+        {
+          "name": "redpanda_namespace",
+          "observed_values": [
+            "kafka",
+            "kafka_internal",
+            "redpanda"
+          ]
+        },
+        {
+          "name": "redpanda_request",
+          "observed_values": [
+            "consume",
+            "follower_consume",
+            "produce"
+          ]
+        },
+        {
+          "name": "redpanda_topic"
+        }
+      ],
+      "histogram": null,
+      "observed": true,
+      "provenance": {
+        "type": "scraped",
+        "source_description": "scraped",
+        "description": "scraped",
+        "labels": "scraped",
+        "unit": "derived",
+        "defined_in": "source"
+      },
+      "defined_in": "src/v/cluster/partition_probe.cc"
+    },
+    "redpanda_kafka_request_latency_seconds": {
+      "name": "redpanda_kafka_request_latency_seconds",
+      "endpoint": "public",
+      "type": "histogram",
+      "unit": "seconds",
+      "description": "Internal latency of kafka produce requests.",
+      "source_description": "Internal latency of kafka produce requests",
+      "labels": [
+        {
+          "name": "redpanda_request",
+          "observed_values": [
+            "consume",
+            "produce"
+          ],
+          "values": [
+            "produce",
+            "consume"
+          ]
+        }
+      ],
+      "histogram": {
+        "buckets": [
+          "0.000255",
+          "0.000511",
+          "0.001023",
+          "0.002047",
+          "0.004095",
+          "0.008191",
+          "0.016383",
+          "0.032767",
+          "0.065535",
+          "0.131071",
+          "0.262143",
+          "0.524287",
+          "1.048575",
+          "2.097151",
+          "4.194303",
+          "8.388607",
+          "16.777215",
+          "33.554431",
+          "+Inf"
+        ],
+        "series": [
+          "_bucket",
+          "_count",
+          "_sum"
+        ]
+      },
+      "observed": true,
+      "provenance": {
+        "type": "scraped",
+        "source_description": "scraped",
+        "description": "scraped",
+        "labels": "scraped",
+        "unit": "override",
+        "histogram": "scraped",
+        "defined_in": "source"
+      },
+      "defined_in": "src/v/kafka/server/kafka_probe.h"
+    },
+    "redpanda_kafka_under_replicated_replicas": {
+      "name": "redpanda_kafka_under_replicated_replicas",
+      "endpoint": "public",
+      "type": "gauge",
+      "unit": null,
+      "description": "Number of under replicated replicas (i.e. replicas that are live, but not at the latest offest).",
+      "source_description": "Number of under replicated replicas (i.e. replicas that are live, but not at the latest offest)",
+      "labels": [
+        {
+          "name": "redpanda_namespace",
+          "observed_values": [
+            "kafka",
+            "kafka_internal",
+            "redpanda"
+          ]
+        },
+        {
+          "name": "redpanda_partition"
+        },
+        {
+          "name": "redpanda_topic"
+        },
+        {
+          "name": "shard",
+          "observed_values": [
+            "0"
+          ]
+        }
+      ],
+      "histogram": null,
+      "observed": true,
+      "provenance": {
+        "type": "scraped",
+        "source_description": "scraped",
+        "description": "scraped",
+        "labels": "scraped",
+        "defined_in": "source"
+      },
+      "defined_in": "src/v/cluster/partition_probe.cc"
+    },
+    "redpanda_memory_allocated_memory": {
+      "name": "redpanda_memory_allocated_memory",
+      "endpoint": "public",
+      "type": "gauge",
+      "unit": null,
+      "description": "Allocated memory size in bytes.",
+      "source_description": "Allocated memory size in bytes",
+      "labels": [
+        {
+          "name": "shard",
+          "observed_values": [
+            "0"
+          ]
+        }
+      ],
+      "histogram": null,
+      "observed": true,
+      "provenance": {
+        "type": "scraped",
+        "source_description": "scraped",
+        "description": "scraped",
+        "labels": "scraped",
+        "defined_in": "source"
+      },
+      "defined_in": "src/v/redpanda/application.cc"
+    },
+    "redpanda_memory_available_memory": {
+      "name": "redpanda_memory_available_memory",
+      "endpoint": "public",
+      "type": "gauge",
+      "unit": null,
+      "description": "Total shard memory potentially available in bytes (free_memory plus reclaimable).",
+      "source_description": "Total shard memory potentially available in bytes (free_memory plus reclaimable)",
+      "labels": [
+        {
+          "name": "shard",
+          "observed_values": [
+            "0"
+          ]
+        }
+      ],
+      "histogram": null,
+      "observed": true,
+      "provenance": {
+        "type": "scraped",
+        "source_description": "scraped",
+        "description": "scraped",
+        "labels": "scraped",
+        "defined_in": "source"
+      },
+      "defined_in": "src/v/resource_mgmt/available_memory.cc"
+    },
+    "redpanda_raft_leader_for": {
+      "name": "redpanda_raft_leader_for",
+      "endpoint": "public",
+      "type": "gauge",
+      "unit": null,
+      "description": "Indicates if this node is the controller leader.",
+      "source_description": "Indicates if this node is the controller leader",
+      "labels": [
+        {
+          "name": "redpanda_namespace",
+          "observed_values": [
+            "redpanda"
+          ]
+        },
+        {
+          "name": "redpanda_partition",
+          "observed_values": [
+            "0"
+          ]
+        },
+        {
+          "name": "redpanda_topic",
+          "observed_values": [
+            "controller"
+          ]
+        }
+      ],
+      "histogram": null,
+      "observed": true,
+      "provenance": {
+        "type": "scraped",
+        "source_description": "scraped",
+        "description": "scraped",
+        "labels": "scraped",
+        "defined_in": "source"
+      },
+      "defined_in": "src/v/raft/consensus.cc"
+    },
+    "redpanda_rpc_received_bytes": {
+      "name": "redpanda_rpc_received_bytes",
+      "endpoint": "public",
+      "type": "counter",
+      "unit": "bytes",
+      "description": "internal: Number of bytes received from the clients in valid requests.",
+      "source_description": "internal: Number of bytes received from the clients in valid requests",
+      "labels": [
+        {
+          "name": "redpanda_server",
+          "observed_values": [
+            "internal",
+            "kafka"
+          ]
+        }
+      ],
+      "histogram": null,
+      "observed": true,
+      "provenance": {
+        "type": "scraped",
+        "source_description": "scraped",
+        "description": "scraped",
+        "labels": "scraped",
+        "unit": "derived",
+        "defined_in": "source"
+      },
+      "defined_in": "src/v/net/probes.cc"
+    },
+    "redpanda_schema_registry_cache_schema_count": {
+      "name": "redpanda_schema_registry_cache_schema_count",
+      "endpoint": "public",
+      "type": "gauge",
+      "unit": null,
+      "description": "The number of schemas in the store by type.",
+      "source_description": "The number of schemas in the store by type",
+      "labels": [
+        {
+          "name": "context",
+          "observed_values": [
+            ".",
+            ".metrics-shadow"
+          ]
+        },
+        {
+          "name": "type",
+          "observed_values": [
+            "AVRO",
+            "JSON",
+            "PROTOBUF"
+          ]
+        }
+      ],
+      "histogram": null,
+      "observed": true,
+      "provenance": {
+        "type": "scraped",
+        "source_description": "scraped",
+        "description": "scraped",
+        "labels": "scraped",
+        "defined_in": "source"
+      },
+      "defined_in": "src/v/pandaproxy/schema_registry/store.h"
+    },
+    "redpanda_schema_registry_request_errors_total": {
+      "name": "redpanda_schema_registry_request_errors_total",
+      "endpoint": "public",
+      "type": "counter",
+      "unit": null,
+      "description": "Total number of schema_registry server errors.",
+      "source_description": "Total number of schema_registry server errors",
+      "labels": [
+        {
+          "name": "redpanda_status",
+          "observed_values": [
+            "3xx",
+            "4xx",
+            "5xx"
+          ]
+        }
+      ],
+      "histogram": null,
+      "observed": true,
+      "provenance": {
+        "type": "scraped",
+        "source_description": "scraped",
+        "description": "scraped",
+        "labels": "scraped",
+        "defined_in": "source"
+      },
+      "defined_in": "src/v/pandaproxy/probe.cc"
+    },
+    "redpanda_schema_registry_request_latency_seconds": {
+      "name": "redpanda_schema_registry_request_latency_seconds",
+      "endpoint": "public",
+      "type": "histogram",
+      "unit": "seconds",
+      "description": "Internal latency of request for schema_registry.",
+      "source_description": "Internal latency of request for schema_registry",
+      "labels": [],
+      "histogram": {
+        "buckets": [
+          "0.000255",
+          "0.000511",
+          "0.001023",
+          "0.002047",
+          "0.004095",
+          "0.008191",
+          "0.016383",
+          "0.032767",
+          "0.065535",
+          "0.131071",
+          "0.262143",
+          "0.524287",
+          "1.048575",
+          "2.097151",
+          "4.194303",
+          "8.388607",
+          "16.777215",
+          "33.554431",
+          "+Inf"
+        ],
+        "series": [
+          "_bucket",
+          "_count",
+          "_sum"
+        ]
+      },
+      "observed": true,
+      "provenance": {
+        "type": "scraped",
+        "source_description": "scraped",
+        "description": "scraped",
+        "labels": "scraped",
+        "unit": "derived",
+        "histogram": "scraped",
+        "defined_in": "source"
+      },
+      "defined_in": "src/v/pandaproxy/probe.cc"
+    },
+    "vectorized_raft_group_count": {
+      "name": "vectorized_raft_group_count",
+      "endpoint": "internal",
+      "type": "gauge",
+      "unit": null,
+      "description": "Number of raft groups.",
+      "source_description": "Number of raft groups",
+      "labels": [
+        {
+          "name": "shard",
+          "observed_values": [
+            "0"
+          ]
+        }
+      ],
+      "histogram": null,
+      "observed": true,
+      "provenance": {
+        "type": "scraped",
+        "source_description": "scraped",
+        "description": "scraped",
+        "labels": "scraped",
+        "defined_in": "source"
+      },
+      "defined_in": "src/v/raft/group_manager.cc"
+    }
+  }
+}
