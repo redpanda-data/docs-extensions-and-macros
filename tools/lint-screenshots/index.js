@@ -148,23 +148,37 @@ function kb (bytes) {
  * added or changed on the new side. A file listed with no hunks (a binary
  * image, or a patch the files API left out because it is too large) maps to
  * 'all': every line counts as changed, which is the safe side for a gate.
- * A deleted file is not listed; the --files scope tracks deletions.
+ * A deleted file, and the old path of a rename, map to 'removed': the PR
+ * changed that path, so a page that still references it is the PR's
+ * problem, not one that was already on the base branch.
  */
 function parseUnifiedDiff (text) {
   const changed = new Map()
   let current = null
+  let oldPath = null
   let newLine = 0
   for (const line of text.split('\n')) {
     if (line.startsWith('diff --git ')) {
       const m = line.match(/^diff --git a\/(.+) b\/(.+)$/)
       current = m ? m[2] : null
+      oldPath = m ? m[1] : null
       if (current) changed.set(current, 'all')
+      continue
+    }
+    if (line.startsWith('rename from ')) {
+      changed.set(line.slice('rename from '.length).trim(), 'removed')
+      continue
+    }
+    if (line.startsWith('--- ')) {
+      const source = line.slice(4).trim()
+      if (source !== '/dev/null') oldPath = source.replace(/^a\//, '')
       continue
     }
     if (line.startsWith('+++ ')) {
       const target = line.slice(4).trim()
       if (target === '/dev/null') {
         if (current) changed.delete(current)
+        if (oldPath) changed.set(oldPath, 'removed')
         current = null
       } else {
         current = target.replace(/^b\//, '')
@@ -172,7 +186,7 @@ function parseUnifiedDiff (text) {
       }
       continue
     }
-    if (line.startsWith('--- ') || current === null) continue
+    if (current === null) continue
     const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/)
     if (hunk) {
       if (changed.get(current) === 'all') changed.set(current, new Set())
@@ -302,8 +316,13 @@ function lintScreenshots (options) {
     throw new Error(`No modules/ directory under ${root} - point --root at an Antora docs repo`)
   }
 
-  const changedLines = opts.changedLines instanceof Map ? opts.changedLines : null
+  // An empty diff is no diff: demoting every finding because the diff could
+  // not be read would turn a broken input into a passing gate.
+  const changedLines = opts.changedLines instanceof Map && opts.changedLines.size > 0 ? new Map(opts.changedLines) : null
   if (changedLines && !Array.isArray(opts.files)) opts.files = [...changedLines.keys()]
+  // A file in the --files scope that the diff does not cover counts as
+  // changed throughout, for the same reason.
+  if (changedLines) for (const f of opts.files) if (!changedLines.has(f)) changedLines.set(f, 'all')
   const scoped = Array.isArray(opts.files)
   const changedAdoc = new Set()
   const changedImages = new Set()
@@ -479,7 +498,7 @@ function readDiff (options) {
   if (options.diffFile) return parseUnifiedDiff(fs.readFileSync(path.resolve(options.diffFile), 'utf8'))
   if (options.diff) {
     const { execFileSync } = require('child_process')
-    const text = execFileSync('git', ['diff', '--no-color', '--no-ext-diff', '-U0', `${options.diff}...HEAD`],
+    const text = execFileSync('git', ['diff', '--no-color', '--no-ext-diff', '--no-renames', '-U0', `${options.diff}...HEAD`],
       { cwd: path.resolve(options.root || process.cwd()), encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 })
     return parseUnifiedDiff(text)
   }

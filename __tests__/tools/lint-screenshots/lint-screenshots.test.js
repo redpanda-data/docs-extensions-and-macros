@@ -432,7 +432,13 @@ describe('parseUnifiedDiff', () => {
     const changed = parseUnifiedDiff(diff)
     expect([...changed.get('modules/m/pages/a.adoc')]).toEqual([2, 11, 12])
     expect(changed.get('modules/m/images/new.png')).toBe('all')
-    expect(changed.has('modules/m/pages/gone.adoc')).toBe(false)
+    expect(changed.get('modules/m/pages/gone.adoc')).toBe('removed')
+  })
+
+  test('marks the old path of a rename as removed', () => {
+    const changed = parseUnifiedDiff('diff --git a/modules/m/images/old.png b/modules/m/images/new.png\nsimilarity index 100%\nrename from modules/m/images/old.png\nrename to modules/m/images/new.png\n')
+    expect(changed.get('modules/m/images/old.png')).toBe('removed')
+    expect(changed.get('modules/m/images/new.png')).toBe('all')
   })
 })
 
@@ -487,6 +493,27 @@ describe('lintScreenshots - diff scope (--diff, --diff-file)', () => {
     expect(res.status).toBe(1)
     const out = JSON.parse(res.stdout)
     expect(out.findings.filter((f) => f.severity === 'error').map((f) => f.rule)).toEqual(['image-too-large'])
+  })
+
+  test('a PR that deletes an image an untouched page still uses is blocked', () => {
+    const root = makeRepo({
+      'modules/m/pages/p.adoc': 'image::old.png[Old]\n',
+      'modules/m/images/keep.png': pngBytes()
+    })
+    const changed = parseUnifiedDiff('diff --git a/modules/m/images/old.png b/modules/m/images/old.png\n--- a/modules/m/images/old.png\n+++ /dev/null\n')
+    const result = lintScreenshots({ root, changedLines: changed })
+    expect(byRule(result, 'image-missing')[0]).toMatchObject({ severity: 'error' })
+    expect(byRule(result, 'image-missing')[0].preexisting).toBeUndefined()
+  })
+
+  test('an empty diff is no diff, and a scoped file the diff misses counts as changed', () => {
+    const root = repo()
+    const empty = lintScreenshots({ root, files: ['modules/m/pages/p.adoc'], changedLines: new Map() })
+    expect(empty.summary.errors).toBeGreaterThan(0)
+    expect(empty.summary.preexisting).toBeUndefined()
+    const missed = lintScreenshots({ root, files: ['modules/m/pages/p.adoc'], changedLines: lines({ 'modules/m/pages/other.adoc': [1] }) })
+    expect(missed.summary.errors).toBeGreaterThan(0)
+    expect(missed.summary.preexisting).toBe(0)
   })
 
   test('the CLI reads --diff-file', () => {
