@@ -349,7 +349,10 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
         indexItem._tags = ['Solutions']
         indexItem.breadcrumbs = breadcrumbs
         indexItem.solutionId = attrs['page-solution-id'] || ''
-        indexItem.stepId = attrs['page-solution-step-id'] || ''
+        // The Take it to production page is not a step, but it is not the
+        // overview either, so it gets its page name as stepId: no total
+        // duration and no solution facets on it.
+        indexItem.stepId = attrs['page-solution-step-id'] || (attrs['page-layout'] === 'solution-production' ? 'take-to-production' : '')
         // Step titles repeat across solutions ("Start the environment"), so
         // every record names the solution it belongs to.
         indexItem.solutionTitle = attrs['page-solution-title'] || (solution && solution.title) || ''

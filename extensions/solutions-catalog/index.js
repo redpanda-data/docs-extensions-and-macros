@@ -59,7 +59,7 @@ const EXCLUDED_DOC_COMPONENTS = ['solutions', 'home', 'shared', 'search', 'data-
 // recommendations on, and section indexes match broad categories by accident.
 const UMBRELLA_LAYOUTS = [
   'home', 'component-home-v3', 'data-platform', 'labs-home', 'labs-search', 'search', '404',
-  'index', 'index-list', 'solutions-home', 'solution', 'solution-step',
+  'index', 'index-list', 'solutions-home', 'solution', 'solution-step', 'solution-production',
 ]
 
 const DEFAULTS = Object.freeze({

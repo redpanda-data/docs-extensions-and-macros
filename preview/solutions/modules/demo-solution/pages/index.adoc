@@ -31,7 +31,7 @@ The producer writes to one topic; the consumer reads it with its own consumer gr
 * Docker and Docker Compose
 * Go 1.22 or later
 
-This demo runs on one broker with no authentication. The last step, xref:verify-end-to-end.adoc#production-considerations[], lists what changes for production.
+This demo runs on one broker with no authentication. xref:take-to-production.adoc[Take it to production] lists what changes for production.
 
 == Build-along files
 

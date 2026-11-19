@@ -15,8 +15,16 @@ const { decode } = require('html-entities')
 const COMPONENT = 'solutions'
 
 // Ids the docs-site function routes shadow (/solutions/progress, /solutions/download),
-// names Antora already gives meaning to, and the non-solution module below.
-const RESERVED_IDS = ['progress', 'download', 'api', 'index', 'examples']
+// names Antora already gives meaning to, the non-solution module below, and
+// the page name every solution uses for its production page.
+const RESERVED_IDS = ['progress', 'download', 'api', 'index', 'examples', 'take-to-production']
+
+// Every solution's "Take it to production" page: the complete production
+// topics, after the last step. It is not a step: it is not listed in
+// page-solution-steps, has no number and no progress tick, and is published
+// on the record as `production` rather than in `steps`.
+const PRODUCTION_PAGE = 'take-to-production.adoc'
+const PRODUCTION_ID = 'take-to-production'
 
 // Modules of the solutions component that are not solutions. ROOT holds the
 // landing page and relationships.yml; `examples` holds public tutorial code
@@ -28,6 +36,7 @@ const LAYOUTS = Object.freeze({
   home: 'solutions-home',
   overview: 'solution',
   step: 'solution-step',
+  production: 'solution-production',
 })
 
 const ENUMS = Object.freeze({
@@ -367,6 +376,19 @@ function resolveRelatedDocLines (record, pageByUrl) {
   return record.relatedDocLines
 }
 
+/**
+ * True for a solution's Take it to production page. The file name decides it,
+ * since page attributes are not read yet at contentClassified; a page that
+ * sets :page-layout: solution-production under another name counts too, so
+ * it is never validated as a step.
+ */
+function isProductionPage (page) {
+  if (!page || !page.src) return false
+  if (page.src.relative === PRODUCTION_PAGE) return true
+  const attrs = (page.asciidoc && page.asciidoc.attributes) || {}
+  return attrs['page-layout'] === LAYOUTS.production
+}
+
 /** Step id for a page of a solution module: the file stem relative to pages/. */
 function stepIdOf (page) {
   return String(page.src.relative || '').replace(/\.adoc$/, '')
@@ -426,8 +448,9 @@ function collectSolutions (contentCatalog, { component = COMPONENT } = {}) {
 
 function buildRecord (mod, modulePages, moduleAttachments, { version, moduleExamples = [] }) {
   const overview = modulePages.find((p) => p.src.relative === 'index.adoc')
+  const production = modulePages.find(isProductionPage)
   const stepPages = modulePages
-    .filter((p) => p !== overview)
+    .filter((p) => p !== overview && p !== production)
     .map((p) => ({ id: stepIdOf(p), page: p }))
     .sort((a, b) => a.id.localeCompare(b.id))
 
@@ -444,6 +467,8 @@ function buildRecord (mod, modulePages, moduleAttachments, { version, moduleExam
     componentVersion: version,
     overview,
     steps: stepPages,
+    // The Take it to production page, or null when the module has none.
+    production: production || null,
     layout: attrs['page-layout'],
     // At contentClassified pages have no asciidoc yet; only structure is read then.
     title: plainTitle(overview && overview.asciidoc && overview.asciidoc.doctitle) || (overview && overview.title) || mod,
@@ -473,7 +498,7 @@ function buildRecord (mod, modulePages, moduleAttachments, { version, moduleExam
     verifiedError,
     // The download allowlist and the list the rail's "All build-along files"
     // panel renders: every example file a page shows.
-    files: collectSnippetFiles([overview, ...stepPages.map((s) => s.page)]),
+    files: collectSnippetFiles([overview, ...stepPages.map((s) => s.page), production]),
     // Files a reader produces with a documented command rather than reading
     // on a page (go.sum, generated protobuf code), as repo paths.
     generatedFiles: parseList(attrs['page-solution-generated-files']).map((p) => p.replace(/^\.\//, '')),
@@ -579,6 +604,9 @@ function collectSingleSourcedTwins (contentCatalog, { skipComponent = COMPONENT 
 module.exports = {
   COMPONENT,
   RESERVED_IDS,
+  PRODUCTION_PAGE,
+  PRODUCTION_ID,
+  isProductionPage,
   NON_SOLUTION_MODULES,
   LAYOUTS,
   ENUMS,

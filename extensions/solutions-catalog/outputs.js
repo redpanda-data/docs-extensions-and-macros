@@ -28,6 +28,19 @@ function buildSteps (record) {
 }
 
 /**
+ * The Take it to production page as `{ title, url }`, or null when the
+ * solution has none.
+ */
+function buildProduction (record) {
+  const page = record.production
+  if (!page) return null
+  return {
+    title: plainTitle(page.asciidoc && page.asciidoc.doctitle) || page.title || 'Take it to production',
+    url: page.pub && page.pub.url,
+  }
+}
+
+/**
  * The public record for one solution. Same object feeds `page-solution` and
  * solutions.json.
  *
@@ -61,6 +74,9 @@ function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions 
     files: record.files || [],
     personas: record.personas,
     steps: steps || buildSteps(record),
+    // The page after the last step that holds the production topics. Not a
+    // step: no number, no progress tick, and not counted in steps.
+    production: buildProduction(record),
     relatedDocs,
     relatedSolutions,
     // Compatibility only: verification.json is a solution's only attachment
@@ -80,12 +96,14 @@ function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions 
   return publicRecord
 }
 
-/** Sidebar model: solutions home, overview, ordered steps. */
+/** Sidebar model: solutions home, overview, ordered steps, and the production page. */
 function buildNav (publicRecord, { homeUrl } = {}) {
+  const production = publicRecord.production
   return {
     home: { title: 'Solutions', url: homeUrl || null },
     overview: { title: publicRecord.title, url: publicRecord.url },
     steps: publicRecord.steps.map(({ id, title, url, order }) => ({ id, title, url, order })),
+    production: production ? { title: production.title, url: production.url } : null,
   }
 }
 
@@ -103,7 +121,8 @@ const SCALAR_MIRRORS = [
 ]
 
 /**
- * Write the derived attributes onto the overview and every step page.
+ * Write the derived attributes onto the overview, every step page, and the
+ * Take it to production page.
  *
  * Complex values are JSON strings (the UI reads them with parse-json); scalars
  * are plain strings so Handlebars can compare them directly.
@@ -112,7 +131,7 @@ function applyPageAttributes (record, publicRecord, nav) {
   const solutionJson = JSON.stringify(publicRecord)
   const navJson = JSON.stringify(nav)
   const count = publicRecord.steps.length
-  const pages = [record.overview, ...record.steps.map((s) => s.page)]
+  const pages = [record.overview, ...record.steps.map((s) => s.page), record.production]
 
   for (const page of pages) {
     if (!page || !page.asciidoc) continue
@@ -158,12 +177,21 @@ function applyPageAttributes (record, publicRecord, nav) {
     const prev = i === 0 ? { url: publicRecord.url, title: publicRecord.title } : publicRecord.steps[i - 1]
     attrs['page-solution-prev-url'] = prev.url
     attrs['page-solution-prev-title'] = prev.title
-    const next = publicRecord.steps[i + 1]
-    if (next) {
+    // The last step's next is the production page.
+    const next = publicRecord.steps[i + 1] || publicRecord.production
+    if (next && next.url) {
       attrs['page-solution-next-url'] = next.url
       attrs['page-solution-next-title'] = next.title
     }
   })
+
+  // Production page: after the last step, with no step id or index of its own.
+  if (record.production && record.production.asciidoc && publicRecord.production) {
+    const attrs = record.production.asciidoc.attributes
+    const last = publicRecord.steps[publicRecord.steps.length - 1] || { url: publicRecord.url, title: publicRecord.title }
+    attrs['page-solution-prev-url'] = last.url
+    attrs['page-solution-prev-title'] = last.title
+  }
 }
 
 /**
@@ -293,6 +321,7 @@ module.exports = {
   CATALOG_STATUSES,
   SCALAR_MIRRORS,
   buildSteps,
+  buildProduction,
   buildPublicRecord,
   buildNav,
   applyPageAttributes,

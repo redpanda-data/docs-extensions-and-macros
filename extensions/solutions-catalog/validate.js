@@ -12,6 +12,7 @@
 const { parse } = require('node-html-parser')
 const {
   RESERVED_IDS, LAYOUTS, ENUMS, SLUG_RX, VERSION_RX, VERIFICATION_FILE, ALLOWED_ATTACHMENTS, COMPONENT, stripVersion, pageKey,
+  PRODUCTION_PAGE, PRODUCTION_ID,
 } = require('./collect')
 const { isStepScaffolding } = require('../../asciidoc-extensions/add-solution-file-provenance')
 const { normalizeCategories, isLeafCategory } = require('../../extension-utils/categories')
@@ -30,8 +31,10 @@ const TECHNOLOGY_DENY_LIST = ['rpk', 'curl', 'docker', 'docker compose', 'redpan
 // category). Matches tools/check-metadata.sh in the solutions repository.
 const PRODUCT_TECHNOLOGIES = ['redpanda connect', 'redpanda migrator', 'redpanda operator']
 const REQUIRED_OVERVIEW_H2 = ['architecture', 'prerequisites']
-// The complete production section lives at the end of the last step, once the
-// reader has the whole stack running, with one h3 per topic.
+// The complete production topics live on pages/take-to-production.adoc, after
+// the last step, as h2 sections with ids prod-<topic> (the page includes
+// partial$production/_all.adoc with leveloffset=-1). The old home, an h2
+// "Production considerations" at the end of the last step, is a warning.
 const PRODUCTION_H2 = 'production considerations'
 const PRODUCTION_MIN_TOPICS = 5
 // A related doc must be a fully qualified page ID: component:module:path.adoc
@@ -86,6 +89,15 @@ function productionTopics (contents) {
     node = node.nextElementSibling
   }
   return topics
+}
+
+/**
+ * The h2 topics of the Take it to production page: every h2 whose id starts
+ * with `prod-`, as normalized text, in document order.
+ */
+function productionPageTopics (contents) {
+  const root = parseHtml(contents)
+  return root.querySelectorAll('h2').filter((h) => String(h.getAttribute('id') || '').startsWith('prod-')).map((h) => normalizeHeading(h.text))
 }
 
 /** Number of `.production-note` blocks on a page that contain no link. */
@@ -237,7 +249,7 @@ function isIsoTimestamp (value) {
 
 /** Latest page-git-modified-date across a solution's overview and steps. */
 function contentModifiedDate (record) {
-  const dates = [record.overview, ...(record.steps || []).map((s) => s.page)]
+  const dates = [record.overview, ...(record.steps || []).map((s) => s.page), record.production]
     .map((p) => p && p.asciidoc && p.asciidoc.attributes && p.asciidoc.attributes['page-git-modified-date'])
     .filter((d) => typeof d === 'string' && !Number.isNaN(Date.parse(d)))
   if (record.lastModified && !Number.isNaN(Date.parse(record.lastModified))) dates.push(String(record.lastModified))
@@ -470,10 +482,11 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
     if (listed.has(stepId)) err(`page-solution-steps lists "${stepId}" more than once`)
     listed.add(stepId)
     if (stepId === 'index') err('page-solution-steps must not list index')
+    if (stepId === PRODUCTION_ID) err(`page-solution-steps must not list ${PRODUCTION_ID}: the production page comes after the last step and is not a step`)
   }
   const present = new Set(record.steps.map((s) => s.id))
   for (const stepId of listed) {
-    if (stepId !== 'index' && !present.has(stepId)) err(`page-solution-steps lists "${stepId}" but pages/${stepId}.adoc does not exist`)
+    if (stepId !== 'index' && stepId !== PRODUCTION_ID && !present.has(stepId)) err(`page-solution-steps lists "${stepId}" but pages/${stepId}.adoc does not exist`)
   }
   for (const stepId of present) {
     if (!listed.has(stepId)) err(`pages/${stepId}.adoc exists but is not listed in page-solution-steps`)
@@ -550,32 +563,35 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
     }
   }
 
-  // Production considerations: the complete section is the last step's, and
-  // every in-context note on a step links to its topic there. Fatal once
-  // published, a warning while a draft.
+  // Take it to production: the complete production topics are on their own
+  // page after the last step, and every in-context note links to its topic
+  // there. Fatal once published, a warning while a draft.
   {
     const report = record.status === 'published' ? err : warn
-    const present = new Map(record.steps.map((s) => [s.id, s.page]))
-    const lastId = [...record.stepIds].reverse().find((sid) => present.has(sid))
-    if (lastId) {
-      const topics = productionTopics(present.get(lastId).contents)
-      if (topics === null) {
-        report(`last step ${lastId} needs an h2 "Production considerations" (include::partial$production/_all.adoc[])`)
-      } else if (topics.length < PRODUCTION_MIN_TOPICS) {
-        report(`last step ${lastId}: "Production considerations" has ${topics.length} topic${topics.length === 1 ? '' : 's'} (h3); it needs at least ${PRODUCTION_MIN_TOPICS}`)
+    const production = record.production
+    if (!production) {
+      report(`pages/${PRODUCTION_PAGE} is missing; it holds the production topics (:page-layout: ${LAYOUTS.production}, include::partial$production/_all.adoc[leveloffset=-1])`)
+    } else {
+      const attrs = (production.asciidoc && production.asciidoc.attributes) || {}
+      if (production.src.relative !== PRODUCTION_PAGE) {
+        err(`pages/${production.src.relative} sets :page-layout: ${LAYOUTS.production}; the production page must be pages/${PRODUCTION_PAGE}`)
+      } else if (attrs['page-layout'] !== LAYOUTS.production) {
+        err(`${PRODUCTION_PAGE} must set :page-layout: ${LAYOUTS.production} (found "${attrs['page-layout'] || ''}")`)
+      }
+      const topics = productionPageTopics(production.contents)
+      if (topics.length < PRODUCTION_MIN_TOPICS) {
+        report(`${PRODUCTION_PAGE} has ${topics.length} production topic${topics.length === 1 ? '' : 's'} (h2 with an id starting prod-); it needs at least ${PRODUCTION_MIN_TOPICS}`)
       }
     }
-    if (productionTopics(record.overview.contents) !== null) {
-      warn(`the overview has an h2 "Production considerations"; it belongs at the end of the last step${lastId ? ` (${lastId})` : ''}, with a pointer under Prerequisites`)
-    }
-    for (const step of record.steps) {
-      if (step.id !== lastId && productionTopics(step.page.contents) !== null) {
-        warn(`step ${step.id} has an h2 "Production considerations"; only the last step${lastId ? ` (${lastId})` : ''} carries the complete section`)
+    const pages = [{ id: 'index', page: record.overview }, ...record.steps, ...(production ? [{ id: PRODUCTION_ID, page: production }] : [])]
+    for (const { id: pageId, page } of pages) {
+      if (productionTopics(page.contents) !== null) {
+        warn(`${pageId}.adoc has an h2 "Production considerations"; the production topics belong on ${PRODUCTION_PAGE}, as h2 sections`)
       }
     }
     for (const { id: pageId, page } of [{ id: 'index', page: record.overview }, ...record.steps]) {
       const unlinked = unlinkedProductionNotes(page.contents)
-      if (unlinked) report(`${pageId}.adoc has ${unlinked} [.production-note] block${unlinked === 1 ? '' : 's'} with no link to the topic under Production considerations`)
+      if (unlinked) report(`${pageId}.adoc has ${unlinked} [.production-note] block${unlinked === 1 ? '' : 's'} with no link to its topic on ${PRODUCTION_PAGE}`)
     }
   }
 
@@ -588,7 +604,7 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
   // else under _attachments/ fails here as well.
   const attachmentNames = new Set(record.attachmentFiles || record.attachments.map((a) => a.name))
   const attachmentPrefix = attachmentPrefixOf(record.overview.pub && record.overview.pub.url)
-  const pagesToScan = [{ id: 'index', page: record.overview }, ...record.steps]
+  const pagesToScan = [{ id: 'index', page: record.overview }, ...record.steps, ...(record.production ? [{ id: PRODUCTION_ID, page: record.production }] : [])]
   for (const { id: pageId, page } of pagesToScan) {
     const pageUrl = (page.pub && page.pub.url) || attachmentPrefix
     for (const name of attachmentLinkTargets(page.contents, { pageUrl, attachmentPrefix })) {
@@ -755,6 +771,7 @@ module.exports = {
   REQUIRED_OVERVIEW_H2,
   PRODUCTION_MIN_TOPICS,
   productionTopics,
+  productionPageTopics,
   unlinkedProductionNotes,
   normalizeHeading,
   headingTexts,
