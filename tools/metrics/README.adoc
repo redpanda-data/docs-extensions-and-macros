@@ -43,3 +43,100 @@ The dataset carries `schema_version`. The macros and the docs MCP server refuse 
 * Removing or renaming a field, changing its type or what it means, or making it required raises the number.
 
 To raise it, change `SCHEMA_VERSION` in `dataset.py` and the `const` in the schema together, and release the macros that accept the new number before a docs repository generates a dataset with it. A test fails when the two numbers differ.
+
+== Example queries
+
+The docs show example PromQL queries. `doc-tools check-queries` checks them against the dataset and runs them on a real cluster, so a query with a wrong metric or label name fails a check before a reader copies it.
+
+=== The query file
+
+Each query lives in its own file with the extension `.promql`, in an Antora `examples` directory. The query sits inside a `query` tag, and a page includes only that tag:
+
+[source,asciidoc]
+....
+[,promql]
+----
+\include::manage:example$monitor/no-controller-leader.promql[tag=query]
+----
+....
+
+Lines outside the tag are PromQL comments that carry the test settings. Readers never see them.
+
+[source,promql]
+----
+# expect: empty
+# tag::query[]
+sum(redpanda_raft_leader_for{redpanda_namespace="redpanda",redpanda_topic="controller",redpanda_partition="0"}) == 0
+# end::query[]
+----
+
+[cols="1,3"]
+|===
+| Setting | Meaning
+
+| `expect: series`
+| The query returns at least one series on the test cluster. This is the default.
+
+| `expect: empty`
+| The query returns nothing on a healthy cluster, as an alert condition does. Each selector in the query must still match at least one series, so a wrong label cannot hide behind an empty result.
+
+| `expect: scalar`
+| The query returns a scalar.
+
+| `set: <placeholder>=value`
+| A value for a placeholder that a reader replaces, such as `<topic>`, `$__rate_interval`, `${interval}` or `[[interval]]`. One line for each placeholder. A placeholder with no `set` fails, and so does a `set` for a placeholder the query does not have.
+
+| `skip-run: reason`
+| Only the static check runs. For a query on a metric the test cluster cannot export. The reason is required.
+
+| `extra-labels: a, b`
+| Labels that the reader's Prometheus adds to every series and the dataset does not know, such as `namespace` and `pod` on Kubernetes. The static check accepts them anywhere in the file.
+|===
+
+A file fails when it has no `query` tag, more than one, an empty query, an unknown setting, a setting given twice, or any other text outside the tag. Comments inside the tag are part of the query that readers see.
+
+=== The static check
+
+The static check always runs and needs no cluster. It reads the query and compares it with the dataset:
+
+* Every metric exists. A name that ends in `_bucket`, `_count` or `_sum` is read as a histogram series only when the dataset has that histogram. Some gauges end in `_sum` or `_count`, and they are read as themselves.
+* Every label name is a label of the metric it applies to: in `{...}`, `by`, `without`, `on`, `ignoring`, `group_left`, `group_right`, `label_replace` and `label_join`. The check follows the labels through the query, so `by (x)` on the result of an aggregation that dropped `x` fails.
+* `rate`, `irate` and `increase` are applied to a counter or a histogram series, not a gauge.
+* `histogram_quantile` is applied to `_bucket` series that still have the `le` label.
+
+Prometheus adds `instance`, `job` and `__name__` to every series, `le` to `_bucket` series and `quantile` to summaries, so those are always accepted. So is `up`, which Prometheus writes for every target.
+
+A metric with `observed: false` in the dataset has no labels there. The check passes on its name and reports that its labels were not checked.
+
+The static check has its own small PromQL parser (`tools/metrics-queries/promql.js`), because no maintained one ships with this package. Its limits:
+
+* It does not check function names, the number of arguments to a function, or label values. Prometheus checks the first two in the live run.
+* It rejects a few forms that Prometheus accepts: a metric named like a keyword (`on`, `by`, `offset`), quoted UTF-8 names, a duration used as a number, and a recording rule name that starts with a colon.
+* A selector with no metric name, such as `{job="redpanda"}`, has unknown labels, so nothing after it is checked.
+* Without spaces, a comparison chain such as `a <b> c` reads as the placeholder `<b>`. Write spaces around comparison operators.
+
+=== The live run
+
+With `--tag`, the command starts the cluster that `generate metrics-docs` uses (`generate-cluster-docs.sh` in `queries` mode), with the same extra properties and actions, plus a Prometheus from `docker-compose/metrics/prometheus.overlay.yml`. It waits until Prometheus holds enough samples for the shortest range in the queries, runs each query through the Prometheus HTTP API, and tears everything down. `KEEP_CLUSTER=1` leaves the cluster running. `PROMETHEUS_PORT` changes the host port (default 19090).
+
+Prometheus scrapes `/public_metrics` and `/metrics` on every broker every five seconds. Both jobs use the broker's address as the target, so a broker's series have the same `instance` label on both endpoints, and a join with `on(instance)` matches.
+
+For each query the result is compared with `expect`. For `expect: empty`, and for any query that fails, each selector of the query is also run by itself. A selector that matches nothing fails the query, and the report names the matcher that matches nothing and the labels the metric has on the cluster.
+
+With `--prometheus-url`, the command runs the queries on a Prometheus that is already scraping a cluster, and starts nothing.
+
+[source,bash]
+----
+# Static check
+npx doc-tools check-queries modules --dataset modules/reference/attachments/redpanda-metrics-v26.2.7.json
+
+# Static check and a run on a real cluster
+npx doc-tools check-queries modules --tag v26.2.7
+
+# Results for a script
+npx doc-tools check-queries modules --tag v26.2.7 --json
+----
+
+Without `--dataset`, the command uses the dataset for `--tag` in `modules/reference/attachments`, or the newest one there.
+
+Exit codes: 0 when every query passed, 1 when a query failed, 2 for a usage or setup error such as a missing dataset or a cluster that did not start. With `--tag`, the progress of the cluster run goes to standard error, and the results go to standard output.
