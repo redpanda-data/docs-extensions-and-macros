@@ -77,6 +77,8 @@ describe('doc-tools check-queries, static', () => {
       expect: 'series',
       query: 'sum by (instance) (redpanda_memory_allocated_memory)',
       skip_run: null,
+      exporter: null,
+      syntax_only: false,
       format_errors: [],
       static: {
         problems: [],
@@ -88,6 +90,25 @@ describe('doc-tools check-queries, static', () => {
     expect(report.results[1].static.problems.map((problem) => [problem.rule, problem.label])).toEqual([
       ['unknown-label', 'namespace'], ['unknown-label', 'topic'], ['unknown-label', 'partition']
     ])
+  })
+
+  it('checks a file with exporter for syntax only, and counts it apart', () => {
+    write('a/memory.promql', GOOD)
+    write('a/operator.promql', ['# exporter: redpanda-operator', '# tag::query[]', 'count({__name__=~"operator_.*|controller_runtime_.*|workqueue_.*"})', '# end::query[]'])
+    const result = run(['a', '--dataset', FIXTURE_DATASET])
+    expect(result.status).toBe(0)
+    expect(result.stdout).toContain('PASS a/operator.promql (expect series; syntax only; needs the redpanda-operator exporter)')
+    expect(result.stdout).toContain('2 query files: 2 passed, 0 failed. 0 run on a cluster, 1 checked against the dataset only. 1 checked for syntax only (metrics from another exporter).')
+    const report = JSON.parse(run(['a', '--dataset', FIXTURE_DATASET, '--json']).stdout)
+    expect(report.summary).toEqual({ files: 2, passed: 2, failed: 0, run: 0, static_only: 1, syntax_only: 1 })
+    expect(report.results[1]).toMatchObject({ file: 'a/operator.promql', status: 'pass', exporter: 'redpanda-operator', syntax_only: true, live: null })
+
+    // The same file without the setting fails.
+    write('a/operator.promql', ['# tag::query[]', 'count({__name__=~"operator_.*|controller_runtime_.*|workqueue_.*"})', '# end::query[]'])
+    const without = run(['a', '--dataset', FIXTURE_DATASET])
+    expect(without.status).toBe(1)
+    expect(without.stdout).toContain('FAIL a/operator.promql (expect series; static only)')
+    expect(without.stdout).not.toContain('syntax only')
   })
 
   it('writes the results to --result-file and prints nothing, as the cluster run needs', () => {
@@ -231,6 +252,21 @@ describe('doc-tools check-queries --tag', () => {
     expect(result.stderr).toContain('No query can be run, so no cluster was started.')
     expect(result.stdout).toContain('PASS skipped.promql (expect series; not run: needs the operator)')
     expect(result.stdout).toContain('FAIL bad.promql')
+  })
+
+  itOnPosix('starts no cluster for files with exporter, and starts one when another file can run', () => {
+    write('connect.promql', ['# expect: empty', '# exporter: kafka-connect', '# tag::query[]', 'kafka_consumer_lag_max > 1000', '# end::query[]'])
+    const stub = standIn({ report: report(false) })
+    const result = run(['.', '--dataset', FIXTURE_DATASET, '--tag', 'v26.2.7'], stub.env)
+    expect(result.status).toBe(0)
+    expect(stub.ran()).toBe(false)
+    expect(result.stderr).toContain('No query can be run, so no cluster was started.')
+    expect(result.stdout).toContain('PASS connect.promql (expect empty; syntax only; needs the kafka-connect exporter)')
+    expect(result.stdout).toContain('1 query file: 1 passed, 0 failed. 0 run on a cluster, 0 checked against the dataset only. 1 checked for syntax only (metrics from another exporter).')
+
+    write('q.promql', GOOD)
+    expect(run(['.', '--dataset', FIXTURE_DATASET, '--tag', 'v26.2.7'], stub.env).status).toBe(0)
+    expect(stub.ran()).toBe(true)
   })
 })
 

@@ -91,9 +91,57 @@ sum(redpanda_raft_leader_for{redpanda_namespace="redpanda",redpanda_topic="contr
 
 | `extra-labels: a, b`
 | Labels that the reader's Prometheus adds to every series and the dataset does not know, such as `namespace` and `pod` on Kubernetes. The static check accepts them anywhere in the file.
+
+| `exporter: name`
+| The query uses metrics that Redpanda brokers do not export, such as the metrics of the Redpanda Operator or of Kafka Connect. The name says which exporter the query needs, for example `redpanda-operator` or `kafka-connect`. The file gets a syntax check only. See <<Metrics from other exporters>>.
 |===
 
-A file fails when it has no `query` tag, more than one, an empty query, an unknown setting, a setting given twice, or any other text outside the tag. Comments inside the tag are part of the query that readers see.
+A file fails when it has no `query` tag, more than one, an empty query, an unknown setting, a setting with a missing or malformed value, a setting given twice (only `set` repeats), or any other text outside the tag. Comments inside the tag are part of the query that readers see.
+
+=== Metrics from other exporters
+
+Some example queries use metrics that Redpanda brokers do not export. Redpanda Operator metrics (`operator_*`, `controller_runtime_*`, `workqueue_*`) and Kafka Connect metrics (`kafka_connect_*`, `kafka_consumer_*`, `kafka_producer_*`) are two cases. These metrics are not in the dataset and not on the test cluster. Mark such a file with the exporter it needs:
+
+[source,promql]
+----
+# expect: empty
+# exporter: kafka-connect
+# tag::query[]
+kafka_connect_connector_failed_task_count > 0
+# end::query[]
+----
+
+The name is one short identifier in lowercase letters, digits and hyphens.
+
+A file with `exporter` gets a syntax check only:
+
+* The static check reads the query, so a syntax error still fails. It does not look up metric names, label names or metric types in the dataset.
+* The file must not name a metric that the dataset has. Such a file mixes two sources, and nothing would check the Redpanda part. The check fails and says to split the query into one file for each source, or to drop the setting. This covers a `+__name__+` pattern that matches a Redpanda metric too. A selector with no metric name, such as `{job="redpanda-operator"}`, and the series that Prometheus writes for every target, such as `up`, are allowed.
+* A mistake that the query shows by itself still fails: `by (x)` on the result of an aggregation that dropped `x`, and `histogram_quantile` on an aggregation that dropped `le`.
+* The live run never runs the file.
+
+The result line names the exporter, for example `syntax only; needs the kafka-connect exporter`. The file counts as passed. The summary line and the `summary.syntax_only` field of `--json` count these files by themselves, so a pass here is not read as a run. In `--json`, each result has `exporter` (the name, or `null`) and `syntax_only`, and `live` is `null` for a file that was not run.
+
+`exporter` and `skip-run` differ in what is still checked:
+
+[cols="1,2,2"]
+|===
+| | `skip-run` | `exporter`
+
+| For
+| A Redpanda metric that the test cluster cannot export.
+| A metric from another exporter, which the dataset does not have.
+
+| Static check
+| Complete: metric names, labels and types against the dataset.
+| Syntax only.
+
+| Live run
+| Not run.
+| Not run.
+|===
+
+A file cannot have both. `extra-labels` has no effect with `exporter`, so that pair fails too.
 
 === The static check
 

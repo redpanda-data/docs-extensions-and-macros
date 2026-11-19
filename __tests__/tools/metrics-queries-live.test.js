@@ -252,7 +252,7 @@ describe('doc-tools check-queries --prometheus-url', () => {
     expect(code).toBe(0)
     const report = JSON.parse(out)
     expect(report.live).toEqual({ prometheus_url: URL_BASE, targets: 6, scrape_interval_seconds: 5, waited_seconds: 0 })
-    expect(report.summary).toEqual({ files: 2, passed: 2, failed: 0, run: 2, static_only: 0 })
+    expect(report.summary).toEqual({ files: 2, passed: 2, failed: 0, run: 2, static_only: 0, syntax_only: 0 })
     expect(report.results.map((entry) => [entry.file, entry.status, entry.expect, entry.live.got])).toEqual([
       ['join.promql', 'pass', 'series', '1 series'],
       ['no-leader.promql', 'pass', 'empty', 'no series']
@@ -277,6 +277,97 @@ describe('doc-tools check-queries --prometheus-url', () => {
     expect(out).toContain('PASS ok.promql (expect series; live: 6 series)')
     expect(out).toContain('FAIL skipped.promql (expect series; not run: the test cluster has no operator)')
     expect(out).toContain('static, unknown-metric: redpanda_uptime_seconds_total is not a metric in the dataset')
+  })
+
+  describe('a file with exporter', () => {
+    const OPERATOR = ['# exporter: redpanda-operator', '# tag::query[]', 'sum by (redpanda_k8s_cluster) (rate(controller_runtime_reconcile_total[5m]))', '# end::query[]']
+    // Every query sent to Prometheus, so a test can show a file was not run.
+    // The recorded cluster has no operator, so a query on its metrics returns nothing.
+    const recording = () => {
+      const sent = []
+      const inner = recordedFetch()
+      const fetch = async (url, request) => {
+        const query = request.body ? new URLSearchParams(request.body).get('query') : null
+        if (query) sent.push(query)
+        if (query && query.includes('controller_runtime')) {
+          return { status: 200, json: async () => ({ status: 'success', data: { resultType: 'vector', result: [] } }) }
+        }
+        return inner(url, request)
+      }
+      return { fetch, sent }
+    }
+
+    it('is not run, passes, and is counted apart from the files that ran', async () => {
+      write('ok.promql', '# tag::query[]', 'count by (job, instance) (up)', '# end::query[]')
+      write('operator.promql', ...OPERATOR)
+      const { fetch, sent } = recording()
+      const { code, out } = await cli({ fetch })
+      expect(code).toBe(0)
+      expect(out).toContain('PASS ok.promql (expect series; live: 6 series)')
+      expect(out).toContain('PASS operator.promql (expect series; syntax only; needs the redpanda-operator exporter)')
+      expect(out).toContain('2 query files: 2 passed, 0 failed. 1 run on a cluster, 0 checked against the dataset only. 1 checked for syntax only (metrics from another exporter).')
+      expect(sent).toContain('count by (job, instance) (up)')
+      expect(sent.filter((query) => query.includes('controller_runtime'))).toEqual([])
+    })
+
+    it('is run and fails without the setting: the cluster has no such metric', async () => {
+      // No range here: the recording has no sample count for a five minute window.
+      const query = 'sum by (redpanda_k8s_cluster) (controller_runtime_reconcile_total)'
+      write('operator.promql', '# tag::query[]', query, '# end::query[]')
+      const { fetch, sent } = recording()
+      const { code, out } = await cli({ fetch })
+      expect(code).toBe(1)
+      expect(out).toContain('FAIL operator.promql (expect series; live: no series)')
+      expect(out).toContain('static, unknown-metric: controller_runtime_reconcile_total is not a metric in the dataset')
+      expect(out).not.toContain('syntax only')
+      expect(sent).toContain(query)
+
+      // The same query with the setting is not sent.
+      write('operator.promql', '# exporter: redpanda-operator', '# tag::query[]', query, '# end::query[]')
+      const again = recording()
+      expect((await cli({ fetch: again.fetch })).code).toBe(0)
+      expect(again.sent).toEqual([])
+    })
+
+    it('carries the exporter in --json, and that it was not run', async () => {
+      write('ok.promql', '# tag::query[]', 'count by (job, instance) (up)', '# end::query[]')
+      write('operator.promql', ...OPERATOR)
+      const { code, out } = await cli({ json: true })
+      expect(code).toBe(0)
+      const report = JSON.parse(out)
+      expect(report.summary).toEqual({ files: 2, passed: 2, failed: 0, run: 1, static_only: 0, syntax_only: 1 })
+      expect(report.results.map((entry) => [entry.file, entry.status, entry.exporter, entry.syntax_only, entry.live === null])).toEqual([
+        ['ok.promql', 'pass', null, false, false],
+        ['operator.promql', 'pass', 'redpanda-operator', true, true]
+      ])
+      expect(report.results[1].static).toEqual({ problems: [], notes: [], selectors: [{ selector: 'controller_runtime_reconcile_total', metrics: [] }] })
+    })
+
+    it('does not ask Prometheus for anything when no other file can run', async () => {
+      write('operator.promql', ...OPERATOR)
+      const { fetch, sent } = recording()
+      let calls = 0
+      const { code, out } = await cli({ fetch: (url, request) => { calls += 1; return fetch(url, request) }, json: true })
+      expect(code).toBe(0)
+      expect(calls).toBe(0)
+      expect(sent).toEqual([])
+      expect(JSON.parse(out)).toMatchObject({ live: null, summary: { run: 0, static_only: 0, syntax_only: 1 } })
+    })
+
+    it('fails on a syntax error and on a Redpanda metric, and neither is run', async () => {
+      write('mixed.promql', '# exporter: kafka-connect', '# tag::query[]', 'kafka_consumer_lag_max and on() redpanda_memory_allocated_memory', '# end::query[]')
+      write('syntax.promql', '# exporter: kafka-connect', '# tag::query[]', 'rate(kafka_producer_record_send_total[5m]) < ', '# end::query[]')
+      write('ok.promql', '# tag::query[]', 'count by (job, instance) (up)', '# end::query[]')
+      const { fetch, sent } = recording()
+      const { code, out } = await cli({ fetch })
+      expect(code).toBe(1)
+      expect(out).toContain('FAIL mixed.promql (expect series; syntax only; needs the kafka-connect exporter)')
+      expect(out).toContain('  static, exporter-mixed: redpanda_memory_allocated_memory is a Redpanda metric in the dataset, and the file is marked exporter: kafka-connect')
+      expect(out).toContain('FAIL syntax.promql (expect series; syntax only; needs the kafka-connect exporter)')
+      expect(out).toContain('  static, syntax: not a PromQL expression')
+      expect(out).toContain('3 query files: 1 passed, 2 failed. 1 run on a cluster, 0 checked against the dataset only. 2 checked for syntax only (metrics from another exporter).')
+      expect(sent.filter((query) => query.includes('kafka_'))).toEqual([])
+    })
   })
 
   it('exits 2 when Prometheus does not answer', async () => {

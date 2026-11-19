@@ -10,16 +10,21 @@
  *   redpanda_kafka_under_replicated_replicas{redpanda_topic="<topic>"} > 0
  *   # end::query[]
  *
+ * `# exporter: <name>` marks a query on metrics that Redpanda brokers do not
+ * export. Such a file gets a syntax check only.
+ *
  * A page includes the file with `include::...[tag=query]`, so readers see
  * only the query.
  */
 
 const EXPECT_VALUES = ['series', 'empty', 'scalar']
-const SETTINGS = ['expect', 'set', 'skip-run', 'extra-labels']
+const SETTINGS = ['expect', 'set', 'skip-run', 'extra-labels', 'exporter']
 const TAG_START = /^#\s*tag::([A-Za-z0-9_-]+)\[\]\s*$/
 const TAG_END = /^#\s*end::([A-Za-z0-9_-]+)\[\]\s*$/
 const SETTING = /^#\s*([A-Za-z][A-Za-z0-9_-]*)\s*:(.*)$/
 const LABEL_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
+// A short lowercase identifier: redpanda-operator, kafka-connect.
+const EXPORTER_NAME = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/
 
 // What a reader is meant to replace: <topic>, $interval, ${interval}, $__rate_interval, [[interval]].
 const PLACEHOLDER = /<[A-Za-z][A-Za-z0-9_-]*>|\$\{[A-Za-z_][A-Za-z0-9_:.]*\}|\$[A-Za-z_][A-Za-z0-9_]*|\[\[[A-Za-z_][A-Za-z0-9_:.]*\]\]/g
@@ -61,7 +66,7 @@ function stripComment (line) {
  */
 function parseQueryFile (text) {
   const errors = []
-  const settings = { expect: 'series', set: {}, skipRun: null, extraLabels: [] }
+  const settings = { expect: 'series', set: {}, skipRun: null, extraLabels: [], exporter: null }
   const seen = new Set()
   const body = []
   let tags = 0
@@ -112,6 +117,10 @@ function parseQueryFile (text) {
       if (!labels.length) errors.push(`${at}: extra-labels needs at least one label name`)
       else if (bad.length) errors.push(`${at}: extra-labels has a name that is not a label name: ${bad.join(', ')}`)
       else settings.extraLabels = labels
+    } else if (name === 'exporter') {
+      if (!value) errors.push(`${at}: exporter needs a name, for example redpanda-operator`)
+      else if (!EXPORTER_NAME.test(value)) errors.push(`${at}: exporter must be one name in lowercase letters, digits and hyphens, for example redpanda-operator, got "${value}"`)
+      else settings.exporter = value
     } else {
       const equals = value.indexOf('=')
       const placeholder = equals === -1 ? '' : value.slice(0, equals).trim()
@@ -123,6 +132,12 @@ function parseQueryFile (text) {
       else settings.set[placeholder] = replacement
     }
   })
+
+  // A file with exporter is never run and its labels are never checked.
+  if (seen.has('exporter')) {
+    if (seen.has('skip-run')) errors.push('skip-run has no effect with exporter: a file with exporter is never run. Remove one of them')
+    if (seen.has('extra-labels')) errors.push('extra-labels has no effect with exporter: the labels of a file with exporter are not checked. Remove one of them')
+  }
 
   if (inside) errors.push('the query tag is not closed with # end::query[]')
   if (tags === 0) errors.push('no query tag. Put the query between # tag::query[] and # end::query[]')

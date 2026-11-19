@@ -13,6 +13,9 @@
  * - rate-on-gauge: rate, irate and increase take a counter or a histogram series.
  * - quantile-needs-bucket: histogram_quantile takes _bucket series that still
  *   carry the le label.
+ * - exporter-mixed: a file with the `exporter` setting names no metric that
+ *   the dataset has. Under that setting no other rule here runs, apart from
+ *   syntax.
  *
  * Limits: function names and argument counts are not checked here (Prometheus
  * checks them in the live layer), label values are not checked, and a selector
@@ -108,10 +111,14 @@ const list = (names) => names.length ? [...names].sort().join(', ') : 'none'
  * @param {object} index - From indexDataset.
  * @param {object} [options]
  * @param {string[]} [options.extraLabels] - Labels the reader's Prometheus adds to every series.
+ * @param {string} [options.exporter] - The file's `exporter` setting. The query is on metrics from
+ *   that exporter, which the dataset does not have, so only its syntax is checked. A selector for
+ *   a metric the dataset has fails: that part of the query would go unchecked.
  * @returns {{ ast: object|null, problems: object[], notes: string[], selectors: object[] }}
  */
 function checkQuery (query, index, options = {}) {
   const extraLabels = options.extraLabels || []
+  const exporter = options.exporter || null
   const problems = []
   const notes = []
   const note = (text) => { if (!notes.includes(text)) notes.push(text) }
@@ -155,17 +162,18 @@ function checkQuery (query, index, options = {}) {
     else if (named && named.op === '=~') {
       let pattern = null
       try { pattern = new RegExp(`^(?:${named.value})$`) } catch (_) {
-        note(`${text}: the __name__ pattern could not be read here, so the selector was not checked`)
+        if (!exporter) note(`${text}: the __name__ pattern could not be read here, so the selector was not checked`)
       }
       if (pattern) {
         names = [...index.series.keys(), ...PROMETHEUS_METRICS].filter((name) => pattern.test(name))
-        if (!names.length) {
+        if (!names.length && !exporter) {
           problem('unknown-metric', `${text} matches no metric in the dataset`, { metric: text })
           selectorInfo.set(node, { selector: text, metrics: [] })
           return unknown([text])
         }
       }
     }
+    if (exporter) return exporterSelectorValue(node, text, names)
     if (!names.length) {
       note(`${text}: no metric name, so its labels were not checked`)
       selectorInfo.set(node, { selector: text, metrics: [] })
@@ -226,6 +234,20 @@ function checkQuery (query, index, options = {}) {
     return value
   }
 
+  // Under the exporter setting a selector is not compared with the dataset.
+  // It only must not name a Redpanda metric: the file would mix two sources,
+  // and nothing would check the Redpanda part.
+  function exporterSelectorValue (node, text, names) {
+    const mixed = names.filter((name) => !PROMETHEUS_METRICS.includes(name) && (index.series.has(name) || index.families.has(name)))
+    if (mixed.length) {
+      const shown = mixed.slice(0, 3).join(', ') + (mixed.length > 3 ? ` and ${mixed.length - 3} more` : '')
+      const subject = node.name ? `${node.name} is a Redpanda metric in the dataset` : `${text} matches Redpanda metrics in the dataset (${shown})`
+      problem('exporter-mixed', `${subject}, and the file is marked exporter: ${exporter}, so nothing checks that part of the query. Split the query into one file for each source, or drop the exporter setting`, { metric: mixed[0] })
+    }
+    selectorInfo.set(node, { selector: text, metrics: [] })
+    return { ...unknown(), kind: node.range ? 'matrix' : 'vector' }
+  }
+
   const unwrap = (node) => node.type === 'paren' ? unwrap(node.expr) : node
   const stringArg = (node) => { const inner = node && unwrap(node); return inner && inner.type === 'string' ? inner.value : null }
   const withLabels = (value, change) => {
@@ -260,7 +282,12 @@ function checkQuery (query, index, options = {}) {
       const buckets = args[args.length - 1]
       if (!buckets || buckets.kind === 'scalar' || buckets.kind === 'string') return unknown()
       if (buckets.labels || buckets.sources.length) {
-        if (!buckets.bucket) {
+        if (exporter) {
+          // Whether the series are _bucket series is not known. That le is gone is.
+          if (buckets.labels && !buckets.labels.has('le')) {
+            problem('quantile-needs-bucket', `${node.name}() needs the le label, and the expression inside it aggregates le away. Add le to by (...)`)
+          }
+        } else if (!buckets.bucket) {
           const of = buckets.sources.length ? buckets.sources.join(', ') : 'an expression'
           problem('quantile-needs-bucket', `${node.name}() is applied to ${of}, which is not a _bucket series of a histogram`, { metric: buckets.sources[0] })
         } else if (buckets.labels && !buckets.labels.has('le')) {

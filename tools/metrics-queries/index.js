@@ -108,13 +108,15 @@ function checkFile (file, index, cwd) {
     expect: parsed.settings.expect,
     query: parsed.query,
     skip_run: parsed.settings.skipRun,
+    exporter: parsed.settings.exporter,
+    syntax_only: Boolean(parsed.settings.exporter),
     format_errors: parsed.errors,
     static: { problems: [], notes: [], selectors: [] },
     live: null
   }
   let ast = null
   if (parsed.resolved !== null) {
-    const result = checkQuery(parsed.resolved, index, { extraLabels: parsed.settings.extraLabels })
+    const result = checkQuery(parsed.resolved, index, { extraLabels: parsed.settings.extraLabels, exporter: parsed.settings.exporter })
     ast = result.ast
     entry.static = { problems: result.problems, notes: result.notes, selectors: result.selectors }
     if (ast && parsed.settings.expect === 'scalar' && result.kind !== 'scalar') {
@@ -128,8 +130,11 @@ function checkFile (file, index, cwd) {
   return { entry, ast, resolved: parsed.resolved }
 }
 
+// A file runs when its query parsed, it has no skip-run, and its metrics come from Redpanda.
+const canRun = (item) => Boolean(item.ast && !item.entry.skip_run && !item.entry.exporter)
+
 async function runLive (work, prometheusUrl, options, log) {
-  const runnable = work.filter((item) => item.ast && !item.entry.skip_run)
+  const runnable = work.filter(canRun)
   const client = prometheusClient(prometheusUrl, { fetch: options.fetch })
   let ready
   try {
@@ -164,16 +169,19 @@ function summarize (results) {
     passed: results.filter((entry) => entry.status === 'pass').length,
     failed: results.filter((entry) => entry.status === 'fail').length,
     run: results.filter((entry) => entry.live).length,
-    static_only: results.filter((entry) => !entry.live).length
+    static_only: results.filter((entry) => !entry.live && !entry.syntax_only).length,
+    syntax_only: results.filter((entry) => entry.syntax_only).length
   }
 }
 
 function renderText (report) {
   const lines = []
   for (const entry of report.results) {
-    const live = entry.live
-      ? `live: ${entry.live.got}`
-      : entry.skip_run ? `not run: ${entry.skip_run}` : report.live ? 'not run' : 'static only'
+    const live = entry.exporter
+      ? `syntax only; needs the ${entry.exporter} exporter`
+      : entry.live
+        ? `live: ${entry.live.got}`
+        : entry.skip_run ? `not run: ${entry.skip_run}` : report.live ? 'not run' : 'static only'
     lines.push(`${entry.status === 'pass' ? 'PASS' : 'FAIL'} ${entry.file} (expect ${entry.expect}; ${live})`)
     for (const error of entry.format_errors) lines.push(`  file: ${error}`)
     for (const problem of entry.static.problems) lines.push(`  static, ${problem.rule}: ${problem.message}`)
@@ -182,7 +190,9 @@ function renderText (report) {
   }
   const s = report.summary
   lines.push('')
-  lines.push(`${s.files} query file${s.files === 1 ? '' : 's'}: ${s.passed} passed, ${s.failed} failed. ${s.run} run on a cluster, ${s.static_only} checked against the dataset only.`)
+  // Files with the exporter setting pass without a run, so they get their own count.
+  const syntaxOnly = s.syntax_only ? ` ${s.syntax_only} checked for syntax only (metrics from another exporter).` : ''
+  lines.push(`${s.files} query file${s.files === 1 ? '' : 's'}: ${s.passed} passed, ${s.failed} failed. ${s.run} run on a cluster, ${s.static_only} checked against the dataset only.${syntaxOnly}`)
   return lines.join('\n')
 }
 
@@ -245,7 +255,7 @@ async function runCli (paths, options = {}) {
       // The static layer needs no cluster, so a file that cannot run does not start one.
       const index = loadDataset(datasetFile)
       const work = files.map((file) => checkFile(file, index, cwd))
-      if (work.some((item) => item.ast && !item.entry.skip_run)) {
+      if (work.some(canRun)) {
         report = runOnCluster(files, datasetFile, { ...options, waitCap })
       } else {
         err('No query can be run, so no cluster was started.')
@@ -255,7 +265,7 @@ async function runCli (paths, options = {}) {
       const index = loadDataset(datasetFile)
       const work = files.map((file) => checkFile(file, index, cwd))
       let live = null
-      if (options.prometheusUrl && work.some((item) => item.ast && !item.entry.skip_run)) {
+      if (options.prometheusUrl && work.some(canRun)) {
         live = await runLive(work, options.prometheusUrl, { ...options, waitCap }, err)
       }
       report = buildReport(work, datasetFile, index, live)

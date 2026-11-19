@@ -310,6 +310,84 @@ describe('a metric the cluster did not export (observed: false)', () => {
   })
 })
 
+describe('exporter: metrics that Redpanda brokers do not export', () => {
+  const operator = { exporter: 'redpanda-operator' }
+  const connect = { exporter: 'kafka-connect' }
+
+  it.each([
+    ['count({__name__=~"operator_.*|controller_runtime_.*|workqueue_.*"})', operator],
+    ['sum by (redpanda_k8s_cluster) (rate(controller_runtime_reconcile_total[5m]))', operator],
+    ['kafka_connect_connector_failed_task_count > 0', connect],
+    ['kafka_connect_connector_status{status!="running"}', connect],
+    ['kafka_consumer_lag_max > 1000', connect],
+    ['rate(kafka_producer_record_send_total[5m]) < 1', connect]
+  ])('passes the docs query %s, which fails without the setting', (query, options) => {
+    expect(check(query, options)).toMatchObject({ problems: [], notes: [] })
+    expect(rules(query)).toContain('unknown-metric')
+  })
+
+  it('skips the checks that need the dataset: labels, rate on a gauge, quantile on a bucket', () => {
+    const query = 'histogram_quantile(0.99, sum by (pod, le) (rate(workqueue_depth{namespace="redpanda"}[5m])))'
+    expect(check(query, operator)).toMatchObject({ problems: [], notes: [], kind: 'vector' })
+    expect(check(query, operator).selectors).toEqual([{ selector: 'workqueue_depth{namespace="redpanda"}', metrics: [] }])
+    expect(rules('histogram_quantile(0.99, workqueue_depth)', operator)).toEqual([])
+    // The same shape on a Redpanda gauge, with no setting, fails each of those checks.
+    const real = rules('histogram_quantile(0.99, sum by (pod, le) (rate(redpanda_memory_allocated_memory{namespace="redpanda"}[5m])))')
+    expect([...new Set(real)].sort()).toEqual(['quantile-needs-bucket', 'rate-on-gauge', 'unknown-label'])
+  })
+
+  it('still fails what the query shows by itself: a label that an aggregation dropped', () => {
+    expect(rules('sum by (pod) (sum by (controller) (workqueue_depth))', operator)).toEqual(['unknown-label'])
+    expect(rules('histogram_quantile(0.99, sum by (pod) (rate(workqueue_queue_duration_seconds_bucket[5m])))', operator)).toEqual(['quantile-needs-bucket'])
+    expect(rules('sum by (pod) (sum by (pod, controller) (workqueue_depth))', operator)).toEqual([])
+    expect(rules('histogram_quantile(0.99, sum by (pod, le) (rate(workqueue_queue_duration_seconds_bucket[5m])))', operator)).toEqual([])
+  })
+
+  it('still fails a syntax error', () => {
+    expect(rules('sum by (controller) (rate(controller_runtime_reconcile_total[5m])', operator)).toEqual(['syntax'])
+    expect(rules('rate(controller_runtime_reconcile_total)', operator)).toEqual(['syntax'])
+    // The same queries with the syntax fixed pass.
+    expect(rules('sum by (controller) (rate(controller_runtime_reconcile_total[5m]))', operator)).toEqual([])
+  })
+
+  it('fails a selector for a metric the dataset has, and says to split the query or drop the setting', () => {
+    const query = 'kafka_consumer_lag_max > on() group_left() sum(redpanda_kafka_max_offset{topic="orders"})'
+    expect(messages(query, connect)).toEqual([
+      'redpanda_kafka_max_offset is a Redpanda metric in the dataset, and the file is marked exporter: kafka-connect, so nothing checks that part of the query. Split the query into one file for each source, or drop the exporter setting'
+    ])
+    expect(rules(query, connect)).toEqual(['exporter-mixed'])
+    // Without the Redpanda selector the query passes. Without the setting the wrong label is found.
+    expect(rules('kafka_consumer_lag_max > 1000', connect)).toEqual([])
+    expect(rules('sum(redpanda_kafka_max_offset{topic="orders"})')).toEqual(['unknown-label'])
+  })
+
+  it('fails a Redpanda metric in every form a selector can name it', () => {
+    expect(rules('{__name__="redpanda_memory_allocated_memory"}', connect)).toEqual(['exporter-mixed'])
+    expect(rules('rate(redpanda_kafka_request_latency_seconds_bucket[5m])', connect)).toEqual(['exporter-mixed'])
+    // The family name of a histogram is not a series, and it is still a Redpanda metric.
+    expect(rules('redpanda_kafka_request_latency_seconds', connect)).toEqual(['exporter-mixed'])
+    expect(rules('kafka_consumer_lag_max + redpanda_memory_allocated_memory + redpanda_memory_available_memory', connect)).toEqual(['exporter-mixed', 'exporter-mixed'])
+  })
+
+  it('fails a __name__ pattern that matches a metric the dataset has', () => {
+    expect(messages('count({__name__=~"redpanda_memory_allocated_.*"})', operator)[0]).toMatch(/^\{__name__=~"redpanda_memory_allocated_\.\*"\} matches Redpanda metrics in the dataset \(redpanda_memory_allocated_memory\), and the file is marked exporter: redpanda-operator/)
+    expect(rules('count({__name__=~".+"})', operator)).toEqual(['exporter-mixed'])
+    // A pattern that matches no Redpanda metric passes, and fails without the setting.
+    expect(rules('count({__name__=~"operator_.*"})', operator)).toEqual([])
+    expect(rules('count({__name__=~"operator_.*"})')).toEqual(['unknown-metric'])
+  })
+
+  it('allows a selector with no metric name, and the series Prometheus writes for every target', () => {
+    expect(check('count({job="redpanda-operator"})', operator)).toMatchObject({ problems: [], notes: [] })
+    expect(rules('up{job="redpanda-operator"} == 0', operator)).toEqual([])
+  })
+
+  it('tells a scalar from a vector', () => {
+    expect(check('scalar(sum(workqueue_depth))', operator).kind).toBe('scalar')
+    expect(check('sum(workqueue_depth)', operator).kind).toBe('vector')
+  })
+})
+
 describe('what the static layer cannot check', () => {
   it('says so for a selector with no metric name', () => {
     const result = check('sum by (anything) ({job="redpanda"})')

@@ -29,7 +29,7 @@ describe('a good query file', () => {
       '    redpanda_raft_leader_for{redpanda_namespace="redpanda",redpanda_topic="controller",redpanda_partition="0"} == 1'
     ].join('\n'))
     expect(parsed.resolved).toBe(parsed.query)
-    expect(parsed.settings).toEqual({ expect: 'series', set: {}, skipRun: null, extraLabels: [] })
+    expect(parsed.settings).toEqual({ expect: 'series', set: {}, skipRun: null, extraLabels: [], exporter: null })
   })
 
   it('defaults expect to series', () => {
@@ -67,6 +67,18 @@ describe('a good query file', () => {
     expect(parsed.settings.skipRun).toBe('needs a Kubernetes cluster')
     expect(parsed.settings.extraLabels).toEqual(['namespace', 'pod'])
   })
+
+  it('reads exporter as a name, and has none by default', () => {
+    const parsed = parseQueryFile(file('# expect: empty', '# exporter: kafka-connect', '# tag::query[]', 'kafka_consumer_lag_max > 1000', '# end::query[]'))
+    expect(parsed.errors).toEqual([])
+    expect(parsed.settings.exporter).toBe('kafka-connect')
+    expect(parsed.settings.expect).toBe('empty')
+    expect(parseQueryFile(GOOD).settings.exporter).toBeNull()
+  })
+
+  it.each(['redpanda-operator', 'kafka-connect', 'node', 'k8s', 'exporter2'])('accepts the exporter name %s', (name) => {
+    expect(parseQueryFile(file(`# exporter: ${name}`, '# tag::query[]', 'up', '# end::query[]')).errors).toEqual([])
+  })
 })
 
 describe('a file that fails', () => {
@@ -89,7 +101,18 @@ describe('a file that fails', () => {
     ['expect given twice', file('# expect: series', '# expect: empty', '# tag::query[]', 'up', '# end::query[]'), /"expect" is given twice/],
     ['skip-run with no reason', file('# skip-run:', '# tag::query[]', 'up', '# end::query[]'), /skip-run needs a reason/],
     ['extra-labels with no label', file('# extra-labels:', '# tag::query[]', 'up', '# end::query[]'), /at least one label/],
-    ['extra-labels with a bad name', file('# extra-labels: pod name', '# tag::query[]', 'up', '# end::query[]'), /not a label name: pod name/]
+    ['extra-labels with a bad name', file('# extra-labels: pod name', '# tag::query[]', 'up', '# end::query[]'), /not a label name: pod name/],
+    ['exporter with no name', file('# exporter:', '# tag::query[]', 'up', '# end::query[]'), /exporter needs a name/],
+    ['exporter with capitals', file('# exporter: Kafka-Connect', '# tag::query[]', 'up', '# end::query[]'), /exporter must be one name in lowercase letters, digits and hyphens.*got "Kafka-Connect"/],
+    ['exporter with two names', file('# exporter: redpanda-operator, kafka-connect', '# tag::query[]', 'up', '# end::query[]'), /exporter must be one name/],
+    ['exporter with a space', file('# exporter: kafka connect', '# tag::query[]', 'up', '# end::query[]'), /exporter must be one name/],
+    ['exporter with an underscore', file('# exporter: kafka_connect', '# tag::query[]', 'up', '# end::query[]'), /exporter must be one name/],
+    ['exporter that starts with a digit', file('# exporter: 9operator', '# tag::query[]', 'up', '# end::query[]'), /exporter must be one name/],
+    ['exporter that ends in a hyphen', file('# exporter: kafka-', '# tag::query[]', 'up', '# end::query[]'), /exporter must be one name/],
+    ['exporter given twice', file('# exporter: kafka-connect', '# exporter: kafka-connect', '# tag::query[]', 'up', '# end::query[]'), /"exporter" is given twice/],
+    ['a setting named like exporter', file('# exporters: kafka-connect', '# tag::query[]', 'up', '# end::query[]'), /unknown setting "exporters". The settings are expect, set, skip-run, extra-labels, exporter/],
+    ['exporter with skip-run', file('# exporter: kafka-connect', '# skip-run: no Kafka Connect', '# tag::query[]', 'up', '# end::query[]'), /skip-run has no effect with exporter/],
+    ['exporter with extra-labels', file('# extra-labels: pod', '# exporter: kafka-connect', '# tag::query[]', 'up', '# end::query[]'), /extra-labels has no effect with exporter/]
   ])('%s', (_, text, message) => {
     const errors = errorsOf(text)
     expect(errors.join('\n')).toMatch(message)

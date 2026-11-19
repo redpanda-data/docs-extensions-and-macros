@@ -3770,8 +3770,10 @@ programCli
  * includes it with `include::...[tag=query]`. Comment lines outside the tag
  * carry the test settings: `expect` (series, empty or scalar), `set` (a value
  * for a placeholder such as `<topic>`), `skip-run` (a reason not to run the
- * query on the cluster) and `extra-labels` (labels the reader's Prometheus
- * adds, such as `namespace` and `pod`).
+ * query on the cluster), `extra-labels` (labels the reader's Prometheus
+ * adds, such as `namespace` and `pod`) and `exporter` (the exporter that a
+ * query on metrics Redpanda brokers do not export needs, such as
+ * `redpanda-operator`. Such a file gets a syntax check only and is never run).
  *
  * The static layer always runs and needs no cluster. It reads the query and
  * checks every metric name, every label name (in matchers, by, without, on,
