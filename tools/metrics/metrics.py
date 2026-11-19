@@ -439,13 +439,16 @@ def retire_overrides(path, redundant):
         if field.startswith("labels["):
             label_name = field[len("labels["):-1]
             override["labels"] = [label for label in override.get("labels", []) if label.get("name") != label_name]
+            # Only here: an empty list on another override is the writer's
+            # statement that an unexported metric has no labels, and it
+            # covers that gap.
+            if not override["labels"]:
+                del override["labels"]
         else:
             override.pop(field, None)
         if field == "description":
             # The note about where the fix was sent goes with the text it describes.
             override.pop("upstream_ref", None)
-        if not override.get("labels") and "labels" in override:
-            del override["labels"]
         if not [key for key in override if key != "_comment"]:
             del metrics[item["name"]]
     with open(path, "w", encoding="utf-8") as f:
