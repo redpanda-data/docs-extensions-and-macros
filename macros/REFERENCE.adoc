@@ -264,10 +264,13 @@ Set to `auto` to display the property as its Helm values path on pages rendered 
 text::
 Optional display text override. Wins over the Helm path display.
 
+deprecated::
+Set to `ok` on a mention of a deprecated property that is deliberate, such as on the deprecated features page or in release notes. The property renders the same, and the deprecation warning is dropped. Every other check still runs. See <<acknowledging-deprecated-names>>.
+
 === Configuration options
 
 property-validate::
-How to report a target that does not match any published property: `warn` (default) logs a build warning with the file path, the dataset the page was checked against, and close-match suggestions; `error` fails the build; and `off` disables validation and silences the unknown-name, unavailable-property, unpublished-property and missing-data warnings. Diagnostics about the build itself are not silenced by `off`, because they report a broken input rather than a questionable mention: unusable property JSON, a property claimed by two declared sources, and an index built after conversion started. When no property JSON is available in the build, the macro renders without validation and logs one warning per component version.
+How to report a target that does not match any published property: `warn` (default) logs a build warning with the file path, the dataset the page was checked against, and close-match suggestions; `error` fails the build; and `off` disables validation and silences the unknown-name, unavailable-property, unpublished-property, deprecated-property and missing-data warnings. Diagnostics about the build itself are not silenced by `off`, because they report a broken input rather than a questionable mention: unusable property JSON, a property claimed by two declared sources, and an index built after conversion started. When no property JSON is available in the build, the macro renders without validation and logs one warning per component version.
 
 [[prop-version-selection]]
 === Which property data a page validates against
@@ -311,7 +314,7 @@ When no dataset covers the component at all, the macro warns once per component 
 
 === Linking
 
-`link=true` links the property to its reference page, but only when a page *in the same component* documents it. Nothing is linked across components, and no target is guessed from the property's `config_scope`: a link the build cannot verify is a broken link. An available property that no page renders -- a deprecated property, or one held back by include tags -- keeps its tooltip and renders unlinked; `link=true` warns in that case. Use `page=` to set a target explicitly for one mention.
+`link=true` links the property to its reference page, but only when a page *in the same component* documents it. Nothing is linked across components, and no target is guessed from the property's `config_scope`: a link the build cannot verify is a broken link. An available property that no page renders, such as one held back by include tags, keeps its tooltip and renders unlinked; `link=true` warns in that case. A deprecated property is never on a reference page either, and every mention of one warns, with or without `link=true` (<<old-names>>). Use `page=` to set a target explicitly for one mention.
 
 [[prop-property-source]]
 ==== Declaring which page is the reference
@@ -1484,12 +1487,47 @@ The build never changes what you wrote. A macro that names something by an alias
 | Links its component's page with no anchor, and reads its value. Warning.
 | The one field its description names: "Deprecated: use `X` instead", "DEPRECATED: Use avro.raw_json instead", "Deprecated in favor of `address`", beside the field first. None when it names two (`regexp_topics`).
 
+| A deprecated configuration property (`cloud_topics_enabled`)
+| `prop:` renders it as written with its tooltip and no link, because the reference pages leave deprecated properties out. `propval:` reads its value. A warning on every mention, never an error. `propval:...[deprecated]` does not warn.
+| Nothing: the property data marks `is_deprecated` and names no replacement.
+
 | A deprecated Bloblang function or method (`meta()`)
 | Links its entry and reads its values. Warning.
 | Nothing: the data has no replacement field, and the descriptions name none.
 |===
 
 A replacement is a proposal, and it can be rewritten only when it fits the call: `rpkcmd:[rpk redpanda admin --hosts]` names `rpk cluster`, which has no `--hosts`, so the warning says to find the equivalent by hand. The same goes for a Connect field the replacement component does not have, and for a replacement of another type (the `jira` processor is deprecated for the `jira` input), where the sentence needs rewording.
+
+A deprecated name warns but never fails the build, with one exception: a deprecated `rpk` command is an error in `rpkcmd:` and `rpkval:` with `rpk-validate: error`.
+
+[[acknowledging-deprecated-names]]
+=== Acknowledging a deprecated name: deprecated=ok
+
+Some pages name deprecated things on purpose: the deprecated features page, release notes, and upgrade and migration guides. Add `deprecated=ok` to the call to say so. It works the same way in every reference macro:
+
+[source,asciidoc]
+----
+prop:cloud_topics_enabled[deprecated=ok]
+propval:cloud_topics_enabled[default,deprecated=ok]
+rpkcmd:[rpk redpanda admin,deprecated=ok]
+connect:[inputs/kafka_franz,deprecated=ok]
+connectval:[inputs/kafka_franz.topics,type,deprecated=ok]
+blobl:[meta(),deprecated=ok]
+bloblval:[meta(),description,deprecated=ok]
+----
+
+With `deprecated=ok`:
+
+* The output is exactly what the call renders without it.
+* The deprecation warning is dropped, and a deprecated `rpk` command in `rpkcmd:` no longer fails the build with `rpk-validate: error`.
+* Every other check still runs: an unknown name, a typo, an alias or former name, a missing page, and a value the data does not have are reported as usual. An acknowledgement covers only the deprecation.
+* `check-reference-values` does not report the deprecated name in that call (<<check-reference-values>>), and counts it as acknowledged in its summary.
+
+Only the value `ok` counts: `deprecated=true` or `deprecated=yes` is not an acknowledgement, so a typo never silences a warning.
+
+`rpkval:` is the exception. The rpk data has no entry for a deprecated command, so `rpkval:` cannot read a value for one and renders `<unknown FIELD>`. A placeholder is always reported, so `deprecated=ok` changes nothing there. Write the value by hand, or point the sentence at the replacement command.
+
+Use `deprecated=ok` only where the page is about the deprecation. Elsewhere, the warning means the page recommends something that is going away: reword it, or link the replacement.
 
 [[check-reference-values]]
 == Checking prose: check-reference-values
@@ -1538,7 +1576,7 @@ Each finding has the text written, the main or replacement name, and `proposed`,
 The note says which. The report lists the `alias` findings under "Aliases and former names" and counts them in `aliases`; the counts `deprecatedNames`, `namesWritable` and `namesApplied` cover both classes, in macros and spans.
 connect:: Every pipeline config in a YAML listing block or an examples file is walked from its root keys. An unknown component is `unknown-component`, an unknown field is `unknown-field`, and deprecated components and fields are warnings. A YAML comment that states a default ("# Optional (default: "benthos")") is example output that `matches` or is `stale`. A callout ("<3> ... The default is `1024`.") or a sentence that states a field's default is compared with what `connectval:` renders. A `connect:[...]` link names the component and field a stated default belongs to, and `bloblval:` and `connect:` values are macros, never hand-written values.
 
-Statuses are propval's, plus `reference` for a thing the data does not have. `--fail-on mismatch` (the default) fails on mismatches, reference errors, and stale rpk and Connect examples; `any` also fails on exact, equivalent and unset values, on reference warnings (deprecated names among them) and on `alias` findings, which catches every hand-written value a macro could render and every name the docs no longer use. An alias renders correctly, so it never fails at the default level, as a deprecated name never does. Unlinked mentions never fail at these levels: `links` fails on everything `any` does and on unlinked mentions. Plugin flags scraped from `--help` never fail, and neither do findings in release notes, upgrade notes or Connect migration guides. A `// value-check: ignore` comment line suppresses the findings on the next line, or in the block it sits directly above. Exit 0 means nothing failed, 1 that something did, and 2 that the check could not run.
+Statuses are propval's, plus `reference` for a thing the data does not have. `--fail-on mismatch` (the default) fails on mismatches, reference errors, and stale rpk and Connect examples; `any` also fails on exact, equivalent and unset values, on reference warnings (deprecated names among them) and on `alias` findings, which catches every hand-written value a macro could render and every name the docs no longer use. An alias renders correctly, so it never fails at the default level, as a deprecated name never does. Unlinked mentions never fail at these levels: `links` fails on everything `any` does and on unlinked mentions. Plugin flags scraped from `--help` never fail, and neither do findings in release notes, upgrade notes or Connect migration guides. A `// value-check: ignore` comment line suppresses the findings on the next line, or in the block it sits directly above. A deprecated name in a macro call that has `deprecated=ok` is not reported, and the summary counts it as acknowledged (<<acknowledging-deprecated-names>>). The acknowledgement applies to macro calls only: a deprecated name in backticked prose is still reported. Exit 0 means nothing failed, 1 that something did, and 2 that the check could not run.
 
 `--write` applies only exact matches in the same sentence (or a Connect callout) that name one target, never in a table, block or YAML, never a scraped plugin flag or an empty default, and never in a file that may be single-sourced into Cloud where the macro would render a placeholder. An exact `rpk` or Connect xref is replaced in prose or a table cell: `rpkcmd:`, `connect:` and `blobl:` link the same page from the page's own component, and on Cloud render plain code where the xref would be broken. Each replacement is kept only when the line renders the same visible text before and after, through the real macros.
 

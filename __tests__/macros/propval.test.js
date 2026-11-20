@@ -278,6 +278,19 @@ describe('propval macro', () => {
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('has no default'))
     })
 
+    test('a value read from a deprecated property renders and warns, unless the call asks whether it is deprecated', () => {
+      const warn = warnings()
+      const deprecationWarnings = () => warn.mock.calls.filter(([m]) => String(m).includes('is deprecated in'))
+      expect(valueOf(convert('propval:coproc_supervisor_server[type]', { catalog: streaming() }))).not.toMatch(/unknown/)
+      expect(deprecationWarnings()).toHaveLength(1)
+      expect(deprecationWarnings()[0][0]).toContain('propval:coproc_supervisor_server[type]')
+      convert('propval:coproc_supervisor_server[deprecated]', { catalog: streaming() })
+      expect(deprecationWarnings()).toHaveLength(1)
+      convert('propval:coproc_supervisor_server[type]', { catalog: streaming(), attributes: { 'property-validate': 'off' } })
+      expect(deprecationWarnings()).toHaveLength(1)
+      expect(() => convert('propval:coproc_supervisor_server[type]', { catalog: streaming(), attributes: { 'property-validate': 'error' } })).not.toThrow()
+    })
+
     test('an integer beyond the exact JavaScript range renders the placeholder', () => {
       const warn = warnings()
       expect(valueOf(convert('propval:virtual_cluster_min_producer_ids[]', { catalog: streaming() }))).toBe('<unknown default>')
