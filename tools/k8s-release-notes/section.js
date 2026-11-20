@@ -169,9 +169,9 @@ function findLeaks(text) {
 /**
  * Finds AsciiDoc in release-note text that would do more than format an
  * entry: includes, block and inline macros, passthroughs, attribute entries,
- * block attributes, and block types the section format does not use. Release
- * notes need only paragraphs, lists, code spans, listings, and a collapsed
- * details block. Also reports a block that is opened and never closed.
+ * unescaped attribute references outside code spans, block attributes, and
+ * block types the section format does not use. Release notes need only
+ * paragraphs, lists, code spans, listings, and a collapsed details block. Also reports a block that is opened and never closed.
  * Listing blocks are not scanned: their content is literal.
  *
  * @param {string} text - Curated release-note text, or one upgrade note.
@@ -197,6 +197,9 @@ function findMarkup(text) {
     outsideCode(line, (part) => {
       for (const m of part.match(/\b(?:image|video|audio|pass|link|xref|mailto|footnote|footnoteref|kbd|btn|menu|icon|stem|latexmath|asciimath|anchor|indexterm):[^\s[]*\[/g) || []) add('inline macro', m);
       for (const m of part.match(/<<[^>]*>>|\[\[[^\]]*\]\]/g) || []) add('cross reference or anchor', m);
+      // `{name}`, `{set:name}`, `{counter:name}`: an attribute reference or
+      // inline entry, unless escaped as `\{`.
+      for (const m of part.match(/(?<!\\)\{[\w-]+(?::[^{}\n]*)?\}/g) || []) add('attribute reference', m);
       return part;
     });
   });
@@ -257,22 +260,68 @@ function findUnsupported(curated, sourceText, version) {
 const sameItem = (line) => line.toLowerCase().replace(/[^a-z0-9]+/g, '');
 
 /**
+ * Splits a category into its top-level entries: each `* ` line outside any
+ * block, with the lines that follow it up to the next one.
+ *
+ * @param {string[]} lines - A category's lines.
+ * @return {string[]} One text per entry.
+ */
+function splitEntries(lines) {
+  let depth = 0;
+  let inListing = false;
+  const entries = [];
+  for (const line of lines) {
+    const listing = LISTING_RE.test(line);
+    if (listing) inListing = !inListing;
+    else if (!inListing && line.trim() === '====') depth = depth ? 0 : 1;
+    else if (!inListing && !depth && /^\* \S/.test(line)) { entries.push(line); continue; }
+    if (entries.length) entries[entries.length - 1] += `\n${line}`;
+  }
+  return entries;
+}
+
+/**
  * Counts the top-level entries of a category: `* ` lines outside any block.
  *
  * @param {string[]} lines - A category's lines.
  * @return {number} The number of entries.
  */
 function countEntries(lines) {
-  let depth = 0;
-  let inListing = false;
-  let count = 0;
-  for (const line of lines) {
-    if (LISTING_RE.test(line)) { inListing = !inListing; continue; }
-    if (inListing) continue;
-    if (line.trim() === '====') { depth = depth ? 0 : 1; continue; }
-    if (!depth && /^\* \S/.test(line)) count += 1;
+  return splitEntries(lines).length;
+}
+
+const STOP_WORDS = new Set('a an and are as at be by for from in is it no not now of on or that the this to was when with'.split(' '));
+const words = (text) => new Set((String(text).toLowerCase().match(/[a-z0-9][a-z0-9_.-]*[a-z0-9]|[a-z0-9]/g) || [])
+  .filter((w) => !STOP_WORDS.has(w)));
+
+/**
+ * Finds the changelog entries that have no bullet in the curated category.
+ * Each bullet belongs to the entry whose words it shares most of (Dice
+ * coefficient over the words that are not stop words), so a rephrased entry
+ * still finds its bullet, and a bullet kept for one entry cannot stand in for
+ * another that was dropped or merged into it.
+ *
+ * @param {string[]} lines - The curated category's lines.
+ * @param {Array<{text: string, isPublic: boolean}>} entries - The category's
+ *   published changelog entries, in changelog order.
+ * @return {string[]} The text of each declared-public entry with no bullet.
+ */
+function findDroppedPublic(lines, entries) {
+  const entryWords = entries.map((e) => words(e.text));
+  const kept = new Set();
+  for (const bullet of splitEntries(lines)) {
+    const b = words(bullet);
+    let best = 0;
+    const scores = entryWords.map((e) => {
+      let shared = 0;
+      for (const w of e) if (b.has(w)) shared += 1;
+      const score = e.size + b.size ? (2 * shared) / (e.size + b.size) : 0;
+      best = Math.max(best, score);
+      return score;
+    });
+    if (best > 0) scores.forEach((score, i) => { if (score === best) kept.add(i); });
   }
-  return count;
+  return entries.filter((e, i) => e.isPublic && !kept.has(i)).map((e) => e.text);
 }
 
 /**
@@ -287,22 +336,24 @@ function countEntries(lines) {
  * @param {string} [options.appVersion] - The application version the chart deploys by default.
  * @param {string} [options.date] - The release date. When given, the curated
  *   heading must carry it.
- * @param {{lines: string[], complete: boolean, text: string, publicCounts: Object<string, number>}} [options.declared] - From
+ * @param {{lines: string[], complete: boolean, text: string, publicCounts: Object<string, number>, entries: Object<string, Array<{text: string, isPublic: boolean}>>}} [options.declared] - From
  *   the release's structured entries: the upgrade notes they declare, whether
  *   every entry declares its upgrade effects, the published entries' text, and
- *   how many entries per category are declared public. Declared notes are
- *   written as given. When they are complete, the curated section's own
- *   upgrade items are dropped. Otherwise its items follow the declared ones.
+ *   how many entries per category are declared public, and each category's
+ *   published entries. Declared notes are written as given. When they are
+ *   complete, the curated section may not add an upgrade item of its own.
+ *   Otherwise its items follow the declared ones.
  *   The published entries' text, not the release body, is then what the
  *   curated section is checked against, so nothing from an internal entry can
- *   come back. A category may not have fewer entries than are declared public.
+ *   come back. A category may not have fewer entries than are declared public,
+ *   and each entry declared public must keep its own bullet.
  * @param {string} [options.sourceHash] - The hash recorded on the source line.
  *   Defaults to the hash of the release body.
  * @return {string} The section, ending in one newline.
  * @throws {Error} If the curated text is malformed, names a different version
  *   or date, points into private systems, uses markup beyond formatting,
- *   contains identifiers, versions, links, or code the source lacks, or drops
- *   an entry declared public.
+ *   contains identifiers, versions, links, or code the source lacks, drops
+ *   an entry declared public, or adds an upgrade item to a complete list.
  */
 function assembleSection({ curated, tag, version, project, sourceBody, appVersion, date, declared, sourceHash }) {
   const parsed = parseCurated(curated);
@@ -338,6 +389,20 @@ function assembleSection({ curated, tag, version, project, sourceBody, appVersio
       const found = category ? countEntries(category.lines) : 0;
       if (found < required) {
         throw new Error(`"=== ${title}" has ${found} entries, but ${required} changelog entries of that kind are declared public. Curation may not drop or merge them.`);
+      }
+    }
+    for (const [title, entries] of Object.entries(declared.entries || {})) {
+      const category = parsed.categories.find((c) => c.title === title);
+      const dropped = findDroppedPublic(category ? category.lines : [], entries);
+      if (dropped.length) {
+        throw new Error(`"=== ${title}" has no entry for ${dropped.map((t) => JSON.stringify(t.split('\n')[0])).join(', ')}, which ${dropped.length === 1 ? 'is' : 'are'} declared public. Curation may not drop or merge it.`);
+      }
+    }
+    if (declared.complete) {
+      const known = new Set(declared.lines.map(sameItem));
+      const extra = parsed.upgrade.filter((line) => !known.has(sameItem(line)));
+      if (extra.length) {
+        throw new Error(`The changelog entries declare every upgrade note, so the curated section may not add any: ${extra.map((l) => JSON.stringify(l)).join(', ')}. Report a missing note instead.`);
       }
     }
   }
@@ -384,5 +449,7 @@ module.exports = {
   findMarkup,
   findUnsupported,
   countEntries,
+  splitEntries,
+  findDroppedPublic,
   assembleSection,
 };

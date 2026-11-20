@@ -71,6 +71,10 @@ const CURATED = [
   '',
 ].join('\n');
 
+// The same section without its own upgrade items, as curation writes it when
+// the changelog entries declare every upgrade note.
+const NO_UPGRADE = CURATED.replace('=== Before you upgrade\n\n* Brokers restart once.\n\n', '');
+
 const PAGE = [
   '= Redpanda Operator Release Notes',
   ':page-toc-collapsible: true',
@@ -246,10 +250,11 @@ describe('assembleSection', () => {
       '  --namespace <namespace> \\',
       '  --create-namespace \\',
       '  --version 1.2.3 \\',
-      '  --set crds.enabled=true',
+      '  --set crds.enabled=true \\',
+      '  --values <values-file>',
       '----',
       '',
-      'Add your existing value overrides to the command. For the full procedure, see xref:upgrade:k-upgrade-operator.adoc[].',
+      'Replace `<values-file>` with the file that holds your overrides. For the full procedure, see xref:upgrade:k-upgrade-operator.adoc[].',
       '',
       '=== New features',
       '',
@@ -467,17 +472,17 @@ describe('structured entries (changes.json)', () => {
   });
   const callout = (section) => section.split('====')[1].trim().split('\n');
 
-  test('fully declared: the callout is the declared notes, whatever curation wrote', () => {
-    const result = publish(DECLARED, `// upgrade-notes: declared\n${CURATED}`);
+  test('fully declared: the callout is the declared notes', () => {
+    const result = publish(DECLARED, `// upgrade-notes: declared\n${NO_UPGRADE}`);
     expect(callout(result.section)).toEqual([NOTE]);
     expect(result.section).toContain(`sha256=${hashSource(BODY, DECLARED)} upgrade-notes=declared`);
     expect(result.section).not.toContain('// upgrade-notes:');
-    const marked = publish(DECLARED, CURATED.replace(/^\* /gm, '// declared-public\n* '));
+    const marked = publish(DECLARED, NO_UPGRADE.replace(/^\* /gm, '// declared-public\n* '));
     expect(marked.section).not.toContain('declared-public');
   });
 
   test('fully declared with no effects: no callout', () => {
-    const curated = CURATED.replace(/=== New features[^]*$/, '');
+    const curated = NO_UPGRADE.replace(/=== New features[^]*$/, '');
     expect(publish(doc([entry({})]), curated).section).not.toContain('[IMPORTANT]');
   });
 
@@ -487,19 +492,19 @@ describe('structured entries (changes.json)', () => {
   });
 
   test('identifiers in a curated section may come from the entries', () => {
-    const curated = CURATED.replace('every pool.', 'every pool. Set `image.tag` first.');
+    const curated = NO_UPGRADE.replace('every pool.', 'every pool. Set `image.tag` first.');
     expect(() => publish(undefined, curated)).toThrow(/not in the release body: `image.tag`/);
     expect(publish(DECLARED, curated).status).toBe('ok');
   });
 
   test('a changed changes.json rebuilds the section', () => {
-    const first = publish(DECLARED, CURATED);
+    const first = publish(DECLARED, NO_UPGRADE);
     const again = publishSection({
-      tag: 'operator/v1.2.3', curated: CURATED, sourceBody: BODY, changes: DECLARED, pageContent: first.content, chartEntry: { version: '1.2.3', appVersion: null },
+      tag: 'operator/v1.2.3', curated: NO_UPGRADE, sourceBody: BODY, changes: DECLARED, pageContent: first.content, chartEntry: { version: '1.2.3', appVersion: null },
     });
     expect(again.status).toBe('skipped');
     const changed = publishSection({
-      tag: 'operator/v1.2.3', curated: CURATED, sourceBody: BODY, changes: PARTIAL, pageContent: first.content, chartEntry: { version: '1.2.3', appVersion: null },
+      tag: 'operator/v1.2.3', curated: NO_UPGRADE, sourceBody: BODY, changes: PARTIAL, pageContent: first.content, chartEntry: { version: '1.2.3', appVersion: null },
     });
     expect(changed.action).toBe('replaced');
     expect(hashSource(BODY)).toBe(hashBody(BODY));
@@ -587,7 +592,7 @@ describe('checks added after review', () => {
   const publish = (changes, curated) => publishSection({
     tag: 'operator/v1.2.3', curated, sourceBody: BODY, changes, pageContent: PAGE, chartEntry: { version: '1.2.3', appVersion: null },
   });
-  const ONLY_FIXES = CURATED.replace(/=== New features[^]*$/, '');
+  const ONLY_FIXES = NO_UPGRADE.replace(/=== New features[^]*$/, '');
 
   test('an upgrade note that cannot be published as written fails', () => {
     const withNote = (note) => doc([entry({ upgrade: { note, action: null } })]);
@@ -612,6 +617,83 @@ describe('checks added after review', () => {
     expect(() => publish(changes, ONLY_FIXES)).toThrow(/"=== Bug fixes" has 1 entries, but 2 changelog entries of that kind are declared public/);
     const undeclared = doc([entry({}), entry({ audience: null, upgrade: null })]);
     expect(publish(undeclared, ONLY_FIXES).status).toBe('ok');
+  });
+
+  test('a private link matches in any case and on document and tracker hosts', () => {
+    for (const link of [
+      'HTTPS://GitHub.com/Redpanda-Data/redpanda-operator/pull/9',
+      'https://www.notion.so/acme/Plan-1',
+      'https://acme.notion.site/Plan-1',
+      'https://docs.google.com/document/d/1',
+      'https://drive.google.com/file/d/1',
+      'https://linear.app/acme/issue/A-1',
+      'https://ACME.atlassian.net/browse/A-1',
+      'https://acme.Slack.com/archives/C1',
+      'https://Buildkite.com/acme/x/builds/1',
+    ]) {
+      expect(findLeaks(`See ${link} now.`).map((f) => f.kind)).toContain('private link');
+      expect(stripPrivateReferences(`See ${link} now.`)).toBe('See now.');
+    }
+  });
+
+  test('links to the public redpanda and console repositories are not private', () => {
+    for (const text of [
+      'See https://github.com/redpanda-data/redpanda/issues/9 now.',
+      'See github.com/redpanda-data/console#readme now.',
+      'See https://github.com/redpanda-data/redpanda?tab=x now.',
+      '(https://github.com/redpanda-data/console)',
+      '[x](https://github.com/redpanda-data/redpanda)',
+      'Clone `github.com/redpanda-data/console`.',
+      'https://github.com/redpanda-data/redpanda',
+    ]) {
+      expect(findLeaks(text)).toEqual([]);
+      expect(stripPrivateReferences(text)).toBe(text);
+    }
+    for (const text of [
+      'See https://github.com/redpanda-data/redpanda-operator/pull/9 now.',
+      'See https://github.com/redpanda-data/console-private now.',
+      'See https://github.com/redpanda-data/redpanda.git now.',
+    ]) {
+      expect(findLeaks(text).map((f) => f.kind)).toContain('private link');
+    }
+  });
+
+  test.each([
+    ['an attribute reference', 'Set {some-attr} first.'],
+    ['an inline attribute entry', 'Text {set:sectnums} here.'],
+    ['a counter', 'Step {counter:step}.'],
+  ])('findMarkup flags %s', (_name, text) => {
+    expect(findMarkup(text).map((f) => f.kind)).toContain('attribute reference');
+  });
+
+  test('findMarkup leaves escaped, code, and listing braces alone', () => {
+    expect(findMarkup('Set \\{name} or `{name}` here.\n----\n{name}\n----')).toEqual([]);
+    expect(() => assemble(CURATED.replace('every pool.', 'every pool with {set:sectnums}.'))).toThrow(/attribute reference "\{set:sectnums\}"/);
+    expect(() => assemble(CURATED.replace('Adds a mode', 'Adds {product} a mode'))).toThrow(/attribute reference "\{product\}"/);
+  });
+
+  test('curation may not swap an entry declared public for an undeclared one', () => {
+    const changes = doc([
+      entry({}),
+      entry({ body: 'Brokers now restart in order after a `spec.mode` change.', audience: null, upgrade: null }),
+    ]);
+    const kept = ONLY_FIXES.replace('* The operator keeps the `app` label on every pool.', '* Brokers restart in order after a `spec.mode` change.');
+    expect(() => publish(changes, kept)).toThrow(/"=== Bug fixes" has no entry for "The operator keeps the `app` label\.", which is declared public/);
+    const both = ONLY_FIXES.replace('* The operator keeps', '* Brokers restart in order after a `spec.mode` change.\n* The operator keeps');
+    expect(publish(changes, both).status).toBe('ok');
+  });
+
+  test('fully declared: a curated upgrade item the entries do not declare fails', () => {
+    const changes = doc([entry({ upgrade: { note: 'The default mode changes.', action: null } })]);
+    const extra = CURATED.replace(/=== New features[^]*$/, '');
+    expect(() => publish(changes, extra)).toThrow(/declare every upgrade note, so the curated section may not add any: "\* Brokers restart once\."/);
+    const copied = extra.replace('* Brokers restart once.', '* The default mode changes.');
+    expect(publish(changes, copied).section.split('====')[1].trim().split('\n')).toEqual(['* The default mode changes.']);
+  });
+
+  test('the operator command takes a values file, like the chart commands', () => {
+    const section = assemble();
+    expect(section).toContain('  --set crds.enabled=true \\\n  --values <values-file>\n----\n\nReplace `<values-file>` with the file that holds your overrides. For the full procedure, see xref:upgrade:k-upgrade-operator.adoc[].');
   });
 
   test('a release whose entries are all internal has nothing to publish', () => {

@@ -153,6 +153,22 @@ function declaredPublicFlags(changes) {
 }
 
 /**
+ * Lists, per page category and in changelog order, the published entries'
+ * text and whether their engineers declared them public. The curated section
+ * must keep a bullet for each one declared public.
+ *
+ * @param {{entries: Array}} changes - A parsed document.
+ * @return {Object<string, Array<{text: string, isPublic: boolean}>>} Category title to entries.
+ */
+function declaredEntries(changes) {
+  const byTitle = {};
+  for (const entry of publishedEntries(changes)) {
+    (byTitle[TITLES[entry.kind]] = byTitle[TITLES[entry.kind]] || []).push({ text: entry.body, isPublic: entry.audience === 'public' });
+  }
+  return byTitle;
+}
+
+/**
  * Renders the published entries the way the changelog tool renders a release
  * body, so one parser reads both.
  *
@@ -197,6 +213,7 @@ module.exports = {
   declaredUpgradeNotes,
   declaredPublicCounts,
   declaredPublicFlags,
+  declaredEntries,
   changesToMarkdown,
   changesText,
 };

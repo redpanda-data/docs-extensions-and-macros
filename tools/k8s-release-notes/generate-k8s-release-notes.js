@@ -17,6 +17,7 @@ const {
   declaredUpgradeNotes,
   declaredPublicCounts,
   declaredPublicFlags,
+  declaredEntries,
   publishedEntries,
   changesToMarkdown,
   changesText,
@@ -121,6 +122,7 @@ function publishSection({ tag, curated, sourceBody, pageContent, chartEntry, cha
       complete: isFullyDeclared(doc),
       text: changesText(doc),
       publicCounts: declaredPublicCounts(doc),
+      entries: declaredEntries(doc),
     };
   }
   const sourceHash = hashSource(sourceBody, changes);

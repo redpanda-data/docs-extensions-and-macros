@@ -17,9 +17,10 @@ const PROJECTS = {
       '  --namespace <namespace> \\',
       '  --create-namespace \\',
       `  --version ${version} \\`,
-      '  --set crds.enabled=true',
+      '  --set crds.enabled=true \\',
+      '  --values <values-file>',
     ],
-    after: 'Add your existing value overrides to the command. For the full procedure, see xref:upgrade:k-upgrade-operator.adoc[].',
+    after: 'Replace `<values-file>` with the file that holds your overrides. For the full procedure, see xref:upgrade:k-upgrade-operator.adoc[].',
     appVersionLine: null,
   },
   'charts/redpanda': {

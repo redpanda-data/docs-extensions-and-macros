@@ -26,10 +26,13 @@ const PUBLIC_KEY_PREFIXES = new Set([
 const TICKET_KEY_RE = /\b([A-Z][A-Z0-9]{1,9})-\d+\b/g;
 
 // A link a reader outside the company cannot open: the redpanda-data GitHub
-// organization in any of its URL forms, and the issue tracker, chat, and CI
-// hosts. The scheme is optional, because a bare host is still a link.
-const PRIVATE_LINK = String.raw`(?:https?:\/\/|git@)?(?:(?:[\w-]+\.)?github(?:usercontent)?\.com[/:](?:repos\/)?redpanda-data\/|[\w-]+\.atlassian\.net\b|[\w-]+\.slack\.com\b|buildkite\.com\b)[^\s)\]>` + '`' + String.raw`]*`;
-const PRIVATE_LINK_RE = new RegExp(PRIVATE_LINK, 'g');
+// organization in any of its URL forms, and the issue tracker, chat, CI, and
+// shared-document hosts. The public `redpanda` and `console` repositories are
+// the exception. The scheme is optional, because a bare host is still a link,
+// and hosts match in any case.
+const PUBLIC_REPO = String.raw`(?:redpanda|console)(?=[/#?)\]>\s` + '`' + String.raw`]|$)`;
+const PRIVATE_LINK = String.raw`(?:https?:\/\/|git@)?(?:(?:[\w-]+\.)?github(?:usercontent)?\.com[/:](?:repos\/)?redpanda-data\/(?!` + PUBLIC_REPO + String.raw`)|[\w-]+\.atlassian\.net\b|[\w-]+\.slack\.com\b|buildkite\.com\b|(?:[\w-]+\.)?notion\.(?:so|site)\b|(?:docs|drive)\.google\.com\b|linear\.app\b)[^\s)\]>` + '`' + String.raw`]*`;
+const PRIVATE_LINK_RE = new RegExp(PRIVATE_LINK, 'gi');
 
 // An issue or pull request reference: a bare `#123`, a repository reference
 // such as `repo#123` or `org/repo#123` (repository names are lower case, which
@@ -62,7 +65,7 @@ function stripPrivateReferences(text) {
   const GONE = '\u0000';
   const marked = String(text)
     // A Markdown link to a private target keeps its text.
-    .replace(new RegExp(String.raw`\[([^\]]*)\]\(\s*` + PRIVATE_LINK + String.raw`\s*\)`, 'g'), `$1${GONE}`)
+    .replace(new RegExp(String.raw`\[([^\]]*)\]\(\s*` + PRIVATE_LINK + String.raw`\s*\)`, 'gi'), `$1${GONE}`)
     .replace(PRIVATE_LINK_RE, GONE);
   const stripped = outsideCode(marked, (part) => part
     .replace(ISSUE_REF_STRICT_RE, GONE)
