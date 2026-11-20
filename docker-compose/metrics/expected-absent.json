@@ -1,0 +1,4 @@
+{
+  "vectorized_smp_*": "Seastar registers its cross-shard queue metrics disabled, and Redpanda does not enable them, so they are never exported",
+  "vectorized_cloud_roles__<upstream>_auth_refresh_*": "The name contains the object storage upstream, which exists only for a bucket with its own endpoint, so the family has no fixed name"
+}

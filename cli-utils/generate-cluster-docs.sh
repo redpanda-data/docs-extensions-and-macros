@@ -19,6 +19,13 @@ IFS=$'\n\t'
 #   METRICS_SETTLE_STABLE  how long the metric-family count must stay unchanged to count as settled (default 60)
 #   METRICS_POLL_INTERVAL  seconds between polls (default 15)
 #   KEEP_CLUSTER=1         leave the cluster running after the generator finishes (or fails)
+#
+# In metrics mode the cluster also gets the properties in
+# docker-compose/metrics/bootstrap-extra.yml and a few actions once it is
+# healthy (see run_metrics_actions), because Redpanda exports a metric family
+# only when the feature behind it is on. This applies to Redpanda 25.3 and
+# later, and to dev, latest and branch runs. Earlier releases refuse to start
+# on a property they do not know, so they get the quickstart unchanged.
 
 ###############################################################################
 # Pre-flight: Ensure Docker is available and running
@@ -101,10 +108,27 @@ PYTHON="$SCRIPT_DIR/venv/bin/python"
 # Always tear the cluster down, including on failure, so a broken run does
 # not leave brokers holding the ports for the next one.
 ###############################################################################
-COMPOSE_DIR="$SCRIPT_DIR/../docker-compose"
+# dev, latest and branch names are newer than any release, so they use the
+# newest bundle. Only a release older than 25.1 uses the original one.
+COMPOSE_DIR="$SCRIPT_DIR/../docker-compose/25.1"
 if [[ "$MAJOR_MINOR" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
-  if (( BASH_REMATCH[1] > 25 )) || (( BASH_REMATCH[1] == 25 && BASH_REMATCH[2] >= 1 )); then
-    COMPOSE_DIR="$SCRIPT_DIR/../docker-compose/25.1"
+  if (( BASH_REMATCH[1] < 25 )) || (( BASH_REMATCH[1] == 25 && BASH_REMATCH[2] < 1 )); then
+    COMPOSE_DIR="$SCRIPT_DIR/../docker-compose"
+  fi
+fi
+
+###############################################################################
+# Metrics mode: turn on the features that register extra metric families.
+# COMPOSE_FILE makes every docker compose call in this script and in
+# start-cluster.sh see the same merged project, teardown included.
+###############################################################################
+METRICS_EXTRAS=0
+METRICS_BOOTSTRAP_FILE=""
+if [[ "$MODE" == "metrics" && "$COMPOSE_DIR" == */25.1 ]]; then
+  METRICS_EXTRAS=1
+  if [[ "$MAJOR_MINOR" =~ ^([0-9]+)\.([0-9]+)$ ]] && (( BASH_REMATCH[1] == 25 && BASH_REMATCH[2] < 3 )); then
+    METRICS_EXTRAS=0
+    echo "ℹ️  Redpanda $MAJOR_MINOR does not start with properties it does not know; scraping the quickstart as is."
   fi
 fi
 
@@ -122,10 +146,24 @@ teardown() {
     echo "🧹 Tearing down the cluster…"
     (cd "$COMPOSE_DIR" && docker compose -p "$PROJECT_NAME" down --volumes) || true
   fi
+  # A cluster that is left running still mounts the file.
+  if [[ -n "$METRICS_BOOTSTRAP_FILE" && "${KEEP_CLUSTER:-0}" != "1" ]]; then
+    rm -f "$METRICS_BOOTSTRAP_FILE"
+  fi
   cd "$ORIGINAL_PWD" || true
   exit "$rc"
 }
 trap teardown EXIT
+
+if (( METRICS_EXTRAS )); then
+  METRICS_DIR="$(cd "$SCRIPT_DIR/../docker-compose/metrics" && pwd)"
+  METRICS_BOOTSTRAP_FILE="$(mktemp "${TMPDIR:-/tmp}/metrics-bootstrap.XXXXXX")"
+  cat "$COMPOSE_DIR/bootstrap.yml" "$METRICS_DIR/bootstrap-extra.yml" > "$METRICS_BOOTSTRAP_FILE"
+  # mktemp creates the file 0600; the broker runs as another user in the container.
+  chmod 644 "$METRICS_BOOTSTRAP_FILE"
+  export METRICS_BOOTSTRAP_FILE
+  export COMPOSE_FILE="docker-compose.yml:$METRICS_DIR/metrics.overlay.yml"
+fi
 
 ###############################################################################
 # Start Redpanda cluster
@@ -232,6 +270,94 @@ count_families() {
   done | sort -u | grep -c . || true
 }
 
+###############################################################################
+# Metrics that need an action, not only a property. Each step is best effort:
+# a failure costs a few metric families and must not fail the run by itself.
+###############################################################################
+run_metrics_actions() {
+  local rpk_auth=(-X "user=$ADMIN_USER" -X "pass=$ADMIN_PASS")
+  local url moved=0
+  echo "▶️  Turning on action-driven metrics…"
+
+  # Cloud topics reconciler metrics are per partition of a cloud-mode topic.
+  if docker exec redpanda-0 rpk topic create metrics-cloud-topic -c redpanda.storage.mode=cloud "${rpk_auth[@]}"; then
+    echo "metrics" | docker exec -i redpanda-0 rpk topic produce metrics-cloud-topic "${rpk_auth[@]}" >/dev/null \
+      || echo "⚠️  Could not produce to the cloud topic."
+  else
+    echo "⚠️  Could not create a cloud topic; its metrics will be missing."
+  fi
+
+  # Shadow link metrics exist only while a link is running. The source broker
+  # gets a topic, a record and a schema to shadow.
+  if docker exec shadow-source rpk topic create metrics-shadow-src \
+     && echo '{"metrics":1}' | docker exec -i shadow-source rpk topic produce metrics-shadow-src >/dev/null \
+     && docker exec shadow-source curl -sSf -X POST -H 'Content-Type: application/vnd.schemaregistry.v1+json' \
+          --data '{"schema":"{\"type\":\"string\"}"}' \
+          http://localhost:8081/subjects/metrics-shadow-src-value/versions >/dev/null \
+     && docker exec -i redpanda-0 sh -c 'cat > /tmp/metrics-shadow-link.yaml' < "$METRICS_DIR/shadow-link.yaml" \
+     && docker exec redpanda-0 rpk shadow create -c /tmp/metrics-shadow-link.yaml --no-confirm "${rpk_auth[@]}"; then
+    :
+  else
+    echo "⚠️  Could not create a shadow link; its metrics will be missing."
+  fi
+
+  # Some controller metrics are registered only when a broker takes controller
+  # leadership after startup. Only the current leader accepts the request, so
+  # ask each broker until one does.
+  for url in "${ADMIN_URLS[@]}"; do
+    if curl -sSf --max-time 10 -u "$ADMIN_USER:$ADMIN_PASS" -X POST \
+         "$url/v1/partitions/redpanda/controller/0/transfer_leadership" >/dev/null 2>&1; then
+      moved=1
+      break
+    fi
+  done
+  (( moved )) || echo "⚠️  Could not transfer controller leadership."
+}
+
+###############################################################################
+# Metrics that go away again. Per-entity quota series are dropped once the
+# client has been idle for a while, so this runs after the settle wait, right
+# before the scrape.
+###############################################################################
+run_short_lived_metrics_actions() {
+  local rpk_auth=(-X "user=$ADMIN_USER" -X "pass=$ADMIN_PASS")
+  local probe_client="metrics-quota-probe"
+  local url
+  # Per-entity quota metrics exist only for a named client that has a quota
+  # and has been throttled. A default quota does not create them. The topic is
+  # created first: a produce that auto-creates its topic can fail before the
+  # partition has a leader. A new quota takes a moment to reach every broker,
+  # so produce until the metric shows up.
+  if docker exec redpanda-0 rpk topic create metrics-quota-probe "${rpk_auth[@]}" \
+     && docker exec redpanda-0 rpk cluster quotas alter --name "client-id=$probe_client" \
+       --add producer_byte_rate=1024 "${rpk_auth[@]}"; then
+    local attempt throttled=0
+    for attempt in 1 2 3 4 5 6 7 8 9 10; do
+      # One record of random data is over the 1 KB/s quota; data that
+      # compresses well is not.
+      { head -c 3000 /dev/urandom | base64 | tr -d '\n'; echo; } \
+        | docker exec -i redpanda-0 rpk topic produce metrics-quota-probe \
+            -X "globals.kafka_protocol_request_client_id=$probe_client" "${rpk_auth[@]}" >/dev/null 2>&1 || true
+      for url in "${ADMIN_URLS[@]}"; do
+        # Not a pipe into grep -q: under pipefail, grep exiting early fails the pipeline.
+        if [[ "$(curl -sS --max-time 30 "$url/public_metrics/" 2>/dev/null || true)" == *redpanda_kafka_quotas_client_quota_throughput_by_entity* ]]; then
+          throttled=1
+          break
+        fi
+      done
+      (( throttled )) && break
+      sleep 3
+    done
+    (( throttled )) || echo "⚠️  The quota probe client was never throttled; per-entity quota metrics will be missing."
+  else
+    echo "⚠️  Could not set a client quota; per-entity quota metrics will be missing."
+  fi
+}
+
+if (( METRICS_EXTRAS )); then
+  run_metrics_actions
+fi
+
 if [[ "$MODE" == "metrics" ]]; then
   echo "⏳ Settling metrics (min ${METRICS_SETTLE_MIN}s, max ${METRICS_SETTLE_MAX}s, stable for ${METRICS_SETTLE_STABLE}s)…"
   SECONDS=0
@@ -260,6 +386,10 @@ fi
 ###############################################################################
 # Run documentation generator
 ###############################################################################
+if (( METRICS_EXTRAS )); then
+  run_short_lived_metrics_actions
+fi
+
 # ${arr[@]+"${arr[@]}"} expands to nothing for an empty array; a bare
 # "${arr[@]}" is an unbound-variable error under set -u on bash 3.2 (macOS).
 if [[ "$MODE" == "metrics" ]]; then
