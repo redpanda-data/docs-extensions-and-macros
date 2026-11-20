@@ -387,8 +387,8 @@ const tools = [
         },
         surface: {
           type: 'string',
-          description: 'Which API surfaces to bundle (optional, defaults to "both")',
-          enum: ['admin', 'connect', 'both']
+          description: 'Which API surfaces to bundle (optional, defaults to "both", which means admin and connect)',
+          enum: ['admin', 'connect', 'schema-registry', 'http-proxy', 'both']
         },
         out_admin: {
           type: 'string',
@@ -397,6 +397,14 @@ const tools = [
         out_connect: {
           type: 'string',
           description: 'Output path for connect API (optional, defaults to "connect/redpanda-connect-api.yaml")'
+        },
+        out_schema_registry: {
+          type: 'string',
+          description: 'Output path for Schema Registry API (optional, defaults to "schema-registry/schema-registry.json")'
+        },
+        out_http_proxy: {
+          type: 'string',
+          description: 'Output path for HTTP Proxy API (optional, defaults to "http-proxy/http-proxy.json")'
         },
         admin_major: {
           type: 'string',

@@ -1889,7 +1889,7 @@ display help for command
 * `cloud-regions` - Generate Markdown table of cloud regions and tiers from GitHub YAML file
 * `redpanda-release-notes` - Generate a Self-Managed release-notes section from an rpchangelog release body
 * `crd-spec` - Generate Asciidoc documentation for Kubernetes CRD references. Requires either --tag or --branch.
-* `bundle-openapi` - Bundle Redpanda OpenAPI fragments for admin and connect APIs. Requires either --tag or --branch.
+* `bundle-openapi` - Bundle Redpanda OpenAPI fragments for the admin and connect APIs, or stitch the Swagger specs for the Schema Registry and HTTP Proxy APIs. Requires either --tag or --branch.
 * `update-connect-version` - Update the Redpanda Connect version in antora.yml
 * `kapa-source-groups` - Generate the docs version segment to Kapa source group mapping from Kapa's ingestion API
 * `help` - display help for command
@@ -2880,7 +2880,7 @@ npx doc-tools generate crd-spec \
 
 === generate bundle-openapi
 
-Bundles Redpanda's OpenAPI specification fragments into complete, usable OpenAPI 3.1 documents for both Admin API and Connect API. Clones the Redpanda repository at a specified version, collects OpenAPI fragments that are distributed throughout the codebase (alongside endpoint implementations), uses Buf and Redocly CLI to bundle and validate the specifications, and generates separate complete OpenAPI files for each API surface. The resulting specifications can be used for API documentation, client SDK generation, or API testing tools.
+Bundles Redpanda's OpenAPI specification fragments into complete, usable OpenAPI 3.1 documents for both Admin API and Connect API. Clones the Redpanda repository at a specified version, collects OpenAPI fragments that are distributed throughout the codebase (alongside endpoint implementations), uses Buf and Redocly CLI to bundle and validate the specifications, and generates separate complete OpenAPI files for each API surface. The resulting specifications can be used for API documentation, client SDK generation, or API testing tools. The Schema Registry and HTTP Proxy APIs have no protos. For the schema-registry and http-proxy surfaces, the command stitches the Swagger 2.0 JSON fragments in src/v/pandaproxy/api/api-doc/ into one spec, the same way the broker builds the document it serves at GET /v1. These surfaces do not need Buf or a bundler.
 
 *Why use it:*
 
@@ -2905,13 +2905,19 @@ Branch name for in-progress content
 Repository URL. The default is a private repo, so requires a GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order) (default: "https://github.com/redpanda-data/streaming-enterprise.git")
 
 `-s, --surface <surface>`::
-Which API surfaces to bundle (choices: "admin", "connect", "both")
+Which API surfaces to bundle ("both" means admin and connect) (choices: "admin", "connect", "schema-registry", "http-proxy", "both")
 
 `--out-admin <path>`::
 Output path for admin API (default: "admin/redpanda-admin-api.yaml")
 
 `--out-connect <path>`::
 Output path for connect API (default: "connect/redpanda-connect-api.yaml")
+
+`--out-schema-registry <path>`::
+Output path for Schema Registry API (default: "schema-registry/schema-registry.json")
+
+`--out-http-proxy <path>`::
+Output path for HTTP Proxy API (default: "http-proxy/http-proxy.json")
 
 `--admin-major <string>`::
 Admin API major version (default: "v2.0.0")
@@ -2952,6 +2958,12 @@ npx doc-tools generate bundle-openapi \
   --surface admin \
   --use-admin-major-version
 
+# Stitch the Schema Registry API spec
+npx doc-tools generate bundle-openapi \
+  --tag v26.3.1 \
+  --surface schema-registry \
+  --out-schema-registry schema-registry/schema-registry.json
+
 # Full workflow: generate API specs for new release
 VERSION=$(npx doc-tools get-redpanda-version)
 npx doc-tools generate bundle-openapi --tag $VERSION --surface both
@@ -2962,8 +2974,8 @@ npx doc-tools generate bundle-openapi --tag $VERSION --surface both
 - Git to clone the streaming-enterprise repository
 - A GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order) with
   access to redpanda-data/streaming-enterprise, which is private
-- Buf tool (automatically installed via npm)
-- Redocly CLI or vacuum for OpenAPI bundling (automatically detected)
+- Buf tool (automatically installed via npm), for the admin and connect surfaces only
+- Redocly CLI or vacuum for OpenAPI bundling (automatically detected), for the admin and connect surfaces only
 - Internet connection to clone repository
 - Sufficient disk space for repository clone (~2GB)
 
