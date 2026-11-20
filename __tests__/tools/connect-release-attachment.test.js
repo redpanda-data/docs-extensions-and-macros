@@ -84,6 +84,9 @@ beforeEach(() => {
   mockGetConnectorList.mockReset();
   logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
   jest.spyOn(console, 'warn').mockImplementation(() => {});
+  // No test reaches the GitHub API: a release lookup finds nothing unless a
+  // test says otherwise.
+  jest.spyOn(releaseAttachment, 'releaseState').mockResolvedValue(null);
 });
 
 afterEach(() => jest.restoreAllMocks());
@@ -133,6 +136,81 @@ describe('loadReleaseAttachment', () => {
     delete config.config[0].requiresCgo;
     expect(() => releaseAttachment.validateAttachment(config, VERSION)).toThrow(/has config without/);
     expect(releaseAttachment.validateAttachment(readFixture(), VERSION).version).toBe(VERSION);
+  });
+});
+
+describe('waitForReleaseAttachment', () => {
+  const PUBLISHED = Date.parse('2026-11-20T08:10:15Z');
+  const ATTACHED = { [releaseAttachment.attachmentPath(VERSION)]: fs.readFileSync(FIXTURE) };
+  // A clock that each sleep moves forward.
+  function clock (start) {
+    let t = start;
+    return { now: () => t, sleep: jest.fn(async (ms) => { t += ms; }) };
+  }
+
+  test('a fresh release waits for its docs asset, then reads it (the 4.119.0 race)', async () => {
+    const c = clock(PUBLISHED + 12 * 60000);
+    const states = [{ publishedAt: new Date(PUBLISHED), hasAsset: false }, { publishedAt: new Date(PUBLISHED), hasAsset: false }, { publishedAt: new Date(PUBLISHED), hasAsset: true }];
+    releaseAttachment.releaseState.mockImplementation(async () => states.shift());
+    const load = jest.spyOn(releaseAttachment, 'loadReleaseAttachment').mockResolvedValueOnce(null).mockResolvedValueOnce(readFixture());
+    const data = await releaseAttachment.waitForReleaseAttachment(VERSION, { ...c, token: null, logger: console, waitMs: 15 * 60000, freshMs: 120 * 60000, pollMs: 60000 });
+    expect(data).toEqual(readFixture());
+    expect(c.sleep).toHaveBeenCalledTimes(2);
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  test('gives up after the wait and returns null, so the binaries are compared', async () => {
+    const c = clock(PUBLISHED + 60000);
+    releaseAttachment.releaseState.mockResolvedValue({ publishedAt: new Date(PUBLISHED), hasAsset: false });
+    jest.spyOn(releaseAttachment, 'loadReleaseAttachment').mockResolvedValue(null);
+    const data = await releaseAttachment.waitForReleaseAttachment(VERSION, { ...c, token: null, logger: console, waitMs: 5 * 60000, freshMs: 120 * 60000, pollMs: 60000 });
+    expect(data).toBeNull();
+    expect(c.sleep).toHaveBeenCalledTimes(5);
+  });
+
+  test('an old release without the asset, or an attached asset without the file, does not wait', async () => {
+    jest.spyOn(releaseAttachment, 'loadReleaseAttachment').mockResolvedValue(null);
+    const old = clock(PUBLISHED + 3 * 3600000);
+    releaseAttachment.releaseState.mockResolvedValue({ publishedAt: new Date(PUBLISHED), hasAsset: false });
+    await expect(releaseAttachment.waitForReleaseAttachment(VERSION, { ...old, token: null, logger: console })).resolves.toBeNull();
+    expect(old.sleep).not.toHaveBeenCalled();
+    const attached = clock(PUBLISHED + 60000);
+    releaseAttachment.releaseState.mockResolvedValue({ publishedAt: new Date(PUBLISHED), hasAsset: true });
+    await expect(releaseAttachment.waitForReleaseAttachment(VERSION, { ...attached, token: null, logger: console })).resolves.toBeNull();
+    expect(attached.sleep).not.toHaveBeenCalled();
+  });
+
+  test('a wait of 0 turns it off, and an unreadable release does not wait', async () => {
+    jest.spyOn(releaseAttachment, 'loadReleaseAttachment').mockResolvedValue(null);
+    const c = clock(PUBLISHED + 60000);
+    await expect(releaseAttachment.waitForReleaseAttachment(VERSION, { ...c, token: null, logger: console, waitMs: 0 })).resolves.toBeNull();
+    expect(releaseAttachment.releaseState).not.toHaveBeenCalled();
+    await expect(releaseAttachment.waitForReleaseAttachment(VERSION, { ...c, token: null, logger: console })).resolves.toBeNull();
+    expect(c.sleep).not.toHaveBeenCalled();
+  });
+
+  test('findReleaseAttachmentWithSource waits through waitForReleaseAttachment', async () => {
+    const wait = jest.spyOn(releaseAttachment, 'waitForReleaseAttachment').mockResolvedValue(readFixture());
+    const { source } = await findReleaseAttachmentWithSource(VERSION, {});
+    expect(wait).toHaveBeenCalledWith(VERSION);
+    expect(source.reason).toBe('release-asset');
+  });
+});
+
+describe('Cloud flag of a new Bloblang component in the diff', () => {
+  const oldIndex = { inputs: [], 'bloblang-methods': [] };
+  const newIndex = { inputs: [], 'bloblang-methods': [{ name: 'prune_empty', status: 'experimental', version: '4.119.0' }] };
+
+  test('comes from the binary analysis when the binaries were compared', () => {
+    const binaryAnalysis = { comparison: { inCloud: [{ type: 'bloblang-methods', name: 'prune_empty' }], notInCloud: [], cloudOnly: [] }, cgoOnly: [] };
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, { oldVersion: '4.118.0', newVersion: '4.119.0', binaryAnalysis });
+    expect(diff.details.newComponents.find((c) => c.name === 'prune_empty').cloudSupported).toBe(true);
+  });
+
+  test('is null, not false, when the platform data does not cover Bloblang', () => {
+    const binaryAnalysis = { coveredTypes: ['inputs'], comparison: { inCloud: [], notInCloud: [], cloudOnly: [] }, cgoOnly: [] };
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, { oldVersion: '4.118.0', newVersion: '4.119.0', binaryAnalysis });
+    expect(diff.details.newComponents.find((c) => c.name === 'prune_empty').cloudSupported).toBeNull();
   });
 });
 
