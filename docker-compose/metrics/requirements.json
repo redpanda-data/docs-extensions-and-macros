@@ -46,7 +46,7 @@
       "id": "cloud-topics-enabled",
       "metrics": ["redpanda_cloud_topics_*", "vectorized_cloud_topics_*"],
       "requires": [{ "property": "cloud_topics_enabled", "value": true }],
-      "releases": { "before": "26.2" },
+      "releases": { "from": "26.1", "before": "26.2" },
       "evidence": "measured"
     },
     {
