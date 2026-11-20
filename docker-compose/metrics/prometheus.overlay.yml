@@ -1,0 +1,20 @@
+# Overlay that `doc-tools check-queries --tag <tag>` applies on top of the
+# quickstart compose file and metrics.overlay.yml (through COMPOSE_FILE).
+#
+# It adds a Prometheus that scrapes every broker, so the example queries in
+# the docs can be run on real series. The image tag is pinned: a new
+# Prometheus can change how a query is evaluated, and that should arrive in a
+# reviewed change, not by itself.
+services:
+  metrics-prometheus:
+    image: prom/prometheus:v3.2.1
+    container_name: metrics-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=2h
+    volumes:
+      - ../metrics/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - 127.0.0.1:${PROMETHEUS_PORT:-19090}:9090
+    networks:
+      - redpanda_network

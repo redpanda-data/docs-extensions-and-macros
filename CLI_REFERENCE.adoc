@@ -48,6 +48,7 @@ display help for command
 * `check-build-log` - Check an Antora JSON build log: fail on error or fatal records or too few pages, print a Markdown summary
 * `check-metadata` - Check page-categories and solution facet values in AsciiDoc page headers against the docs taxonomy
 * `check-reference-values` - Check prose, shell blocks and YAML against the property, rpk and Connect data: report hand-written values the value macros could render, and unknown or deprecated commands, flags, components and fields
+* `check-queries` - Check example PromQL query files (.promql) against the metrics dataset, and with --tag or --prometheus-url run them on a real cluster
 * `check-rendered-html` - Scan rendered Antora HTML for unconverted AsciiDoc (literal backticks, xref:, include::, attributes, tables, empty sections) and broken anchors and links
 * `connect-docs-diff` - Diff two generated Connect docs trees and map each changed partial or example to its published page
 * `preview-string` - Render one embedded doc string (property, rpk command/flag, metric, helm key, CRD field, connect field) as it will publish
@@ -1715,6 +1716,78 @@ npx doc-tools check-reference-values --write --write-links --data-file docs-data
 - An Antora component checkout (antora.yml and modules/)
 - The data: redpanda-properties-<tag>.json and rpk-<version>.json attachments
   in a reference module, connect-<version>.json in rp-connect-docs, or --data-file
+
+== check-queries
+
+Check example PromQL query files against the metrics dataset, and run them on a real Redpanda cluster. A query file has the extension `.promql` and holds one query between `# tag::query[]` and `# end::query[]`. A page includes it with `include::...[tag=query]`. Comment lines outside the tag carry the test settings: `expect` (series, empty or scalar), `set` (a value for a placeholder such as `<topic>`), `skip-run` (a reason not to run the query on the cluster), `extra-labels` (labels the reader's Prometheus adds, such as `namespace` and `pod`) and `exporter` (the exporter that a query on metrics Redpanda brokers do not export needs, such as `redpanda-operator`. Such a file gets a syntax check only and is never run). The static layer always runs and needs no cluster. It reads the query and checks every metric name, every label name (in matchers, by, without, on, ignoring, group_left and group_right), that rate, irate and increase are given a counter or a histogram series, and that histogram_quantile is given `_bucket` series. The live layer runs with --tag or --prometheus-url. With --tag it starts the cluster that `generate metrics-docs` uses, plus a Prometheus that scrapes every broker, runs each query, and tears the cluster down. A query passes when the result matches `expect`. For `expect: empty`, and for any query that fails, each selector of the query is also run by itself and must match at least one series. Exit codes: 0 every query passed, 1 a query failed, 2 usage or setup error.
+
+*Why use it:*
+
+A query with a wrong label name is valid PromQL and returns nothing. In an alert, that means the alert never fires. Only a check against the real labels, or a run on a real cluster, shows the difference.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools check-queries [options] <paths...>
+----
+
+*Options:*
+
+`--dataset <file>`::
+redpanda-metrics-<tag>.json to check against (default: the one for --tag in modules/reference/attachments, or the newest one there)
+
+`-t, --tag <tag>`::
+Start a Redpanda cluster at this tag with Prometheus, run the queries on it, and tear it down
+
+`--prometheus-url <url>`::
+Run the queries on this Prometheus instead of starting a cluster
+
+`--json`::
+Print the results as JSON
+
+`--wait-cap <seconds>`::
+Longest wait for Prometheus to hold enough samples for the ranges in the queries (default: 120)
+
+`--docker-repo <repo>`::
+With --tag, Docker repository to use (default: "redpanda")
+
+`--console-tag <tag>`::
+With --tag, Redpanda Console version to use (default: "latest")
+
+`--console-docker-repo <repo>`::
+With --tag, Docker repository for Console (default: "console")
+
+`--ready-timeout <seconds>`::
+With --tag, fail if the cluster is not healthy within this many seconds (default: CLUSTER_READY_TIMEOUT or 300)
+
+`--settle-timeout <seconds>`::
+With --tag, stop waiting for new metric families after this many seconds (default: METRICS_SETTLE_MAX or 300)
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Static check of every query file in a docs repository
+npx doc-tools check-queries modules
+
+# Against a named dataset
+npx doc-tools check-queries modules/manage/examples/monitor --dataset modules/reference/attachments/redpanda-metrics-v26.2.7.json
+
+# Run the queries on a real cluster
+npx doc-tools check-queries modules --tag v26.2.7
+
+# Run the queries on a Prometheus that is already scraping a cluster
+npx doc-tools check-queries modules --prometheus-url http://localhost:9090 --json
+----
+
+*Requirements:*
+
+- A dataset: redpanda-metrics-<tag>.json, from `generate metrics-docs`
+- With --tag: Docker, and free host ports for the quickstart and for Prometheus (19090, or PROMETHEUS_PORT)
 
 == check-rendered-html
 
