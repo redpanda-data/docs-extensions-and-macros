@@ -12,6 +12,7 @@ const PROJECTS = {
     chart: 'operator',
     page: 'modules/reference/pages/releases/operator.adoc',
     command: (version) => [
+      'helm repo add redpanda https://charts.redpanda.com',
       'helm repo update',
       'helm upgrade --install redpanda-controller redpanda/operator \\',
       '  --namespace <namespace> \\',
@@ -28,6 +29,7 @@ const PROJECTS = {
     chart: 'redpanda',
     page: 'modules/reference/pages/releases/redpanda-chart.adoc',
     command: (version) => [
+      'helm repo add redpanda https://charts.redpanda.com',
       'helm repo update',
       'helm upgrade --install redpanda redpanda/redpanda \\',
       '  --namespace <namespace> \\',
@@ -43,6 +45,7 @@ const PROJECTS = {
     chart: 'console',
     page: 'modules/reference/pages/releases/console-chart.adoc',
     command: (version) => [
+      'helm repo add redpanda https://charts.redpanda.com',
       'helm repo update',
       'helm upgrade --install redpanda-console redpanda/console \\',
       '  --namespace <namespace> \\',

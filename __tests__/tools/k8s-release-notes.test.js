@@ -245,6 +245,7 @@ describe('assembleSection', () => {
       '.Install or upgrade to this version',
       '[,bash]',
       '----',
+      'helm repo add redpanda https://charts.redpanda.com',
       'helm repo update',
       'helm upgrade --install redpanda-controller redpanda/operator \\',
       '  --namespace <namespace> \\',
@@ -734,3 +735,15 @@ describe('checks added after review', () => {
     expect(second.details[0]).toEqual(['** sub one', '** sub two']);
   });
 });
+
+describe('listing blocks close only on their own delimiter', () => {
+  const { findLeaks, findMarkup } = require('../../tools/k8s-release-notes/section')
+  it('keeps a .... line inside a ---- block as content', () => {
+    const text = ['[,bash]', '----', '....', '----', 'See @someone.'].join('\n')
+    expect(findLeaks(text).map(f => f.kind)).toContain('author handle')
+    expect(findMarkup(text).filter(f => f.kind === 'unclosed block')).toHaveLength(0)
+  })
+  it('reports a block left open with the delimiter that opened it', () => {
+    expect(findMarkup(['....', 'x'].join('\n'))).toContainEqual(expect.objectContaining({ kind: 'unclosed block', match: '....' }))
+  })
+})

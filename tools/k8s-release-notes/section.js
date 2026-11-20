@@ -136,6 +136,24 @@ function parseCurated(curated) {
 const LISTING_RE = /^(-{4,}|\.{4,})\s*$/;
 
 /**
+ * Steps a listing-block state over one line. A block closes only on the same
+ * delimiter that opened it, so a `....` line inside a `----` block is content.
+ *
+ * @param {string|null} fence - The delimiter of the open block, or null.
+ * @param {string} line - The line.
+ * @return {{delimiter: boolean, fence: (string|null)}} Whether the line opens
+ *   or closes a block, and the delimiter of the block open after it.
+ */
+function stepListing(fence, line) {
+  const m = LISTING_RE.exec(line);
+  if (!m) return { delimiter: false, fence };
+  const d = m[1];
+  if (fence === null) return { delimiter: true, fence: d };
+  if (d === fence) return { delimiter: true, fence: null };
+  return { delimiter: false, fence };
+}
+
+/**
  * Finds text that points into private systems: private links, issue or pull
  * request references, ticket keys, author handles, and compare links. A
  * private link is a leak anywhere, including code spans and listing blocks.
@@ -146,9 +164,12 @@ const LISTING_RE = /^(-{4,}|\.{4,})\s*$/;
  */
 function findLeaks(text) {
   const findings = [];
-  let inListing = false;
+  let fence = null;
   String(text).split('\n').forEach((line, i) => {
-    if (LISTING_RE.test(line)) { inListing = !inListing; return; }
+    const step = stepListing(fence, line);
+    fence = step.fence;
+    if (step.delimiter) return;
+    const inListing = fence !== null;
     if (!inListing && /^\/\//.test(line)) return;
     const add = (kind, match) => findings.push({ line: i + 1, kind, match });
     for (const m of line.match(PRIVATE_LINK_RE) || []) add('private link', m);
@@ -180,12 +201,14 @@ function findLeaks(text) {
 function findMarkup(text) {
   const findings = [];
   const open = { '====': 0, '--': 0 };
-  let inListing = false;
+  let fence = null;
   let listingStart = 0;
   String(text).split('\n').forEach((line, i) => {
     const add = (kind, match) => findings.push({ line: i + 1, kind, match });
-    if (LISTING_RE.test(line)) { inListing = !inListing; listingStart = i + 1; return; }
-    if (inListing) return;
+    const step = stepListing(fence, line);
+    fence = step.fence;
+    if (step.delimiter) { listingStart = i + 1; return; }
+    if (fence !== null) return;
     const trimmed = line.trim();
     if (trimmed === '====' || trimmed === '--') { open[trimmed] += 1; return; }
     if (/^(\*{4,}|_{4,}|\+{4,}|\/{4,}|={5,}|\|={3,}|`{3,})\s*$/.test(trimmed)) return add('block type', trimmed);
@@ -203,7 +226,7 @@ function findMarkup(text) {
       return part;
     });
   });
-  if (inListing) findings.push({ line: listingStart, kind: 'unclosed block', match: '----' });
+  if (fence !== null) findings.push({ line: listingStart, kind: 'unclosed block', match: fence });
   for (const [delimiter, count] of Object.entries(open)) {
     if (count % 2) findings.push({ line: 0, kind: 'unclosed block', match: delimiter });
   }
@@ -226,11 +249,13 @@ function findUnsupported(curated, sourceText, version) {
   const has = (text) => source.includes(text) || flat.includes(text.replace(/\s+/g, ' '));
   const invented = new Set();
   const prose = [];
-  let inListing = false;
+  let fence = null;
   for (const line of String(curated).split('\n')) {
-    if (LISTING_RE.test(line)) { inListing = !inListing; continue; }
+    const step = stepListing(fence, line);
+    fence = step.fence;
+    if (step.delimiter) continue;
     if (/^==\s/.test(line)) continue;
-    if (!inListing) { prose.push(line); continue; }
+    if (fence === null) { prose.push(line); continue; }
     const code = line.trim();
     if (code && !has(code)) invented.add(`listing line "${code}"`);
   }
@@ -268,13 +293,14 @@ const sameItem = (line) => line.toLowerCase().replace(/[^a-z0-9]+/g, '');
  */
 function splitEntries(lines) {
   let depth = 0;
-  let inListing = false;
+  let fence = null;
   const entries = [];
   for (const line of lines) {
-    const listing = LISTING_RE.test(line);
-    if (listing) inListing = !inListing;
-    else if (!inListing && line.trim() === '====') depth = depth ? 0 : 1;
-    else if (!inListing && !depth && /^\* \S/.test(line)) { entries.push(line); continue; }
+    const step = stepListing(fence, line);
+    fence = step.fence;
+    const prose = !step.delimiter && fence === null;
+    if (prose && line.trim() === '====') depth = depth ? 0 : 1;
+    else if (prose && !depth && /^\* \S/.test(line)) { entries.push(line); continue; }
     if (entries.length) entries[entries.length - 1] += `\n${line}`;
   }
   return entries;
