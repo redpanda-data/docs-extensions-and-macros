@@ -395,6 +395,132 @@ describe('review once (end-to-end, temp git repo)', () => {
     expect(third.declarations[0].fingerprint).not.toBe(pending.fingerprint)
   })
 
+  test('a declaration keeps its key when its text changes, so a closed key stops a second review', () => {
+    commitEdit('sm::description("start offset")', 'sm::description("start offset.")', 'first push')
+    const first = lintStrings({ repo, diffBase: 'base', log: () => {} })
+    const [pending] = first.declarations
+    expect(pending.key).toMatch(/^[0-9a-f]{16}$/)
+    expect(first.findings[0].key).toBe(pending.key)
+
+    // The author's fix after the review: new text, so a new fingerprint, but
+    // the same declaration, so the same key.
+    commitEdit('sm::description("start offset.")', 'sm::description("Offset of the first record")', 'fix')
+    const open = lintStrings({ repo, diffBase: 'base', reviewedFingerprints: new Set([pending.fingerprint]), log: () => {} })
+    expect(open.declarations[0].fingerprint).not.toBe(pending.fingerprint)
+    expect(open.declarations[0].key).toBe(pending.key)
+
+    const closed = lintStrings({ repo, diffBase: 'base', reviewedFingerprints: new Set([pending.fingerprint]), closedKeys: new Set([pending.key]), log: () => {} })
+    expect(closed.declarations).toEqual([])
+    expect(closed.findings).toHaveLength(0)
+    expect(closed.summary.totalDeclarations).toBe(0)
+    expect(closed.summary.closedChanged).toBe(1)
+    expect(closed.summary.closedChangedDeclarations.map((d) => [d.name, d.key])).toEqual([['start_offset', pending.key]])
+  })
+
+  test('an unchanged reviewed string counts as already reviewed, not as closed and changed', () => {
+    commitEdit('sm::description("start offset")', 'sm::description("start offset.")', 'first push')
+    const [pending] = lintStrings({ repo, diffBase: 'base', log: () => {} }).declarations
+    const again = lintStrings({ repo, diffBase: 'base', reviewedFingerprints: new Set([pending.fingerprint]), closedKeys: new Set([pending.key]), log: () => {} })
+    expect(again.summary.alreadyReviewed).toBe(1)
+    expect(again.summary.closedChanged).toBe(0)
+  })
+
+  test('a closed key closes only its own declaration', () => {
+    commitEdit('sm::description("start offset")', 'sm::description("start offset.")', 'first push')
+    const [pending] = lintStrings({ repo, diffBase: 'base', log: () => {} }).declarations
+    commitEdit('"records_produced"', '"records_written"', 'a second declaration')
+    const next = lintStrings({ repo, diffBase: 'base', closedKeys: new Set([pending.key]), log: () => {} })
+    expect(next.declarations.map((d) => d.name)).toEqual(['records_written'])
+    expect(next.summary.closedChangedDeclarations.map((d) => d.name)).toEqual(['start_offset'])
+  })
+
+  test('the key holds the file: the same identity in another file is another declaration', () => {
+    const { declKey, SURFACES } = require('../../../tools/lint-strings')
+    const decl = { surface: 'metrics', name: 'start_offset', file: 'src/v/a/probe.cc', meta: {} }
+    const moved = { ...decl, file: 'src/v/b/probe.cc' }
+    const reworded = { ...decl, string: 'other text' }
+    expect(declKey(SURFACES.metrics, decl)).toMatch(/^[0-9a-f]{16}$/)
+    expect(declKey(SURFACES.metrics, moved)).not.toBe(declKey(SURFACES.metrics, decl))
+    expect(declKey(SURFACES.metrics, reworded)).toBe(declKey(SURFACES.metrics, decl))
+  })
+
+  test('same-name declarations in one file get their own keys: nested fields by path, other repeats by order', () => {
+    // Two `username` fields under two object fields, and the summaries of
+    // an input and an output that share a name, in one connect file.
+    // Closing one of each pair leaves the other open.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-strings-keys-'))
+    const REL = 'internal/impl/thing/input_thing.go'
+    const src = (a, b, s1, s2) => `package thing
+
+import "github.com/redpanda-data/benthos/v4/public/service"
+
+func thingSpec() *service.ConfigSpec {
+	return service.NewConfigSpec().
+		Summary("${s1}").
+		Fields(
+			service.NewObjectField("basic_auth",
+				service.NewStringField("username").
+					Description("${a}"),
+			).Description("Basic authentication settings for the thing server."),
+			service.NewObjectField("sasl",
+				service.NewStringField("username").
+					Description("${b}"),
+			).Description("SASL authentication settings for the thing server."),
+		)
+}
+
+func otherSpec() *service.ConfigSpec {
+	return service.NewConfigSpec().
+		Summary("${s2}")
+}
+
+func init() {
+	_ = service.RegisterInput("thing", thingSpec(), nil)
+	_ = service.RegisterOutput("thing", otherSpec(), nil)
+}
+`
+    try {
+      fs.mkdirSync(path.join(dir, path.dirname(REL)), { recursive: true })
+      const git = (cmd) => execSync(cmd, { cwd: dir, stdio: 'pipe' })
+      fs.writeFileSync(path.join(dir, REL), src('The user name for basic authentication.', 'The user name for SASL authentication.', 'Reads things.', 'Writes things.'))
+      git('git init -q -b main && git config user.email t@e.invalid && git config user.name t && git add . && git commit -qm base && git tag base')
+      fs.writeFileSync(path.join(dir, REL), src('The basic auth user name used to log in to the thing server.', 'The SASL user name used to log in to the thing server.', 'Reads things from a thing server.', 'Writes things to a thing server.'))
+      git('git commit -qam reword')
+      const first = lintStrings({ repo: dir, diffBase: 'base', surfaces: ['connect'], log: () => {} })
+      const users = first.declarations.filter((d) => d.name === 'username')
+      const summaries = first.declarations.filter((d) => d.name === 'thing')
+      expect(users).toHaveLength(2)
+      expect(summaries).toHaveLength(2)
+      expect(new Set(first.declarations.map((d) => d.key)).size).toBe(first.declarations.length)
+      // A nested field is keyed by its path, so a new same-name field added
+      // above it cannot shift its key.
+      const scanned = require('../../../tools/lint-strings/surfaces/connect').scanFile(fs.readFileSync(path.join(dir, REL), 'utf8'), REL)
+      expect(scanned.filter((d) => d.name === 'username').map((d) => d.meta.parent)).toEqual(['basic_auth', 'sasl'])
+      const next = lintStrings({ repo: dir, diffBase: 'base', surfaces: ['connect'], closedKeys: new Set([users[0].key, summaries[0].key]), log: () => {} })
+      expect(next.declarations.map((d) => [d.name, d.line_start])).toEqual(expect.arrayContaining([['username', users[1].line_start], ['thing', summaries[1].line_start]]))
+      expect(next.summary.closedChangedDeclarations.map((d) => [d.name, d.line_start]).sort((a, b) => a[1] - b[1])).toEqual([['thing', summaries[0].line_start], ['username', users[0].line_start]])
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('the CLI reads --closed', () => {
+    commitEdit('sm::description("start offset")', 'sm::description("start offset.")', 'first push')
+    const [pending] = lintStrings({ repo, diffBase: 'base', log: () => {} }).declarations
+    commitEdit('sm::description("start offset.")', 'sm::description("Offset of the first record")', 'fix')
+    const closedFile = path.join(repo, '..', `closed-${path.basename(repo)}.txt`)
+    fs.writeFileSync(closedFile, `${pending.key}\nnot-a-key\n`)
+    try {
+      const bin = path.join(__dirname, '../../../bin/doc-tools.js')
+      const out = execSync(`node ${JSON.stringify(bin)} lint-strings --repo . --diff base --format json --closed ${JSON.stringify(closedFile)}`, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+      const result = JSON.parse(out)
+      expect(result.declarations).toEqual([])
+      expect(result.summary.closedChanged).toBe(1)
+    } finally {
+      fs.rmSync(closedFile, { force: true })
+    }
+  })
+
   test('a reviewed removal is not reported again', () => {
     commitEdit('"records_produced"', '"records_written"', 'rename')
     const first = lintStrings({ repo, diffBase: 'base', log: () => {} })

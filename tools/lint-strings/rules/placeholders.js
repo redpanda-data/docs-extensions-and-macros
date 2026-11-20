@@ -291,6 +291,7 @@ const PLACEHOLDER_RULE = {
   why: 'The docs UI turns a <name> in a code block into a field the reader types into, so a reader left to guess what goes there copies a config that does not work.',
   standard: STANDARD.placeholders,
   severity: 'warning',
+  tier: 'unclear',
   check: (decl) => {
     const text = decl.string || ''
     if (!text.includes('<') || (decl.convention && decl.convention.verbatim_asciidoc === false)) return []

@@ -437,6 +437,7 @@ const RULES = [
     why: 'helm-docs cannot attach a # -- marker buried inside a commented-out block, so the description silently never ships.',
     standard: STANDARD.helm,
     severity: 'error',
+    tier: 'unclear',
     runOnUnverifiable: true,
     check: (decl) => {
       if (decl.meta.kind !== 'dead-marker') return []
@@ -453,6 +454,7 @@ const RULES = [
     why: 'helm-docs attaches a # -- marker to the next real key below it, so this text is published as the description of a different key.',
     standard: STANDARD.helm,
     severity: 'error',
+    tier: 'unclear',
     runOnUnverifiable: true,
     check: (decl) => {
       if (!decl.meta.misattached_to) return []
@@ -471,6 +473,7 @@ const RULES = [
     why: 'A key with no # -- description renders as an empty row in the Helm chart reference.',
     standard: STANDARD.helm,
     severity: 'info',
+    tier: 'unclear',
     runOnUnverifiable: true,
     check: (decl) => {
       if (decl.meta.kind !== 'key' || !decl.meta.undocumented) return []

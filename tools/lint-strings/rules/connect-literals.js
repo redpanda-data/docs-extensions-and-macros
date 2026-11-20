@@ -110,6 +110,7 @@ const GO_SLICE_RULE = {
   why: 'The page shows the list as Go prints it, in brackets with no commas, instead of as a readable list of values.',
   standard: STANDARD.connect,
   severity: 'warning',
+  tier: 'unclear',
   // The slice is usually built at init time, so the string is
   // unverifiable; the finding comes from the source, not the text.
   runOnUnverifiable: true,
@@ -133,6 +134,7 @@ const QUOTED_FIELD_RULE = {
   why: 'Every other field name on the page is inline code, so a quoted one reads as an ordinary word and is harder to match to the config.',
   standard: STANDARD.qualityBar,
   severity: 'warning',
+  tier: 'style',
   check: (decl) => {
     if (!decl.string || notAsciiDoc(decl)) return []
     const fields = decl.meta && decl.meta.component_fields

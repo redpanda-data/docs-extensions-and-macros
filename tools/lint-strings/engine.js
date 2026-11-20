@@ -26,11 +26,32 @@
  *   }
  *
  * Severity levels: error | warning | info.
+ *
+ * Tiers (rule.tier), which decide where the PR review puts a finding:
+ *   wrong   - contradicts the code or a sibling string. Posted inline.
+ *   unclear - a reader would misconfigure from it, or the page renders
+ *             broken. Posted inline.
+ *   style   - a nit a reader is not misled by (sentence length, Latin
+ *             abbreviations, inline code). Never its own PR comment: it goes
+ *             to the job summary, or rides along inside another issue's
+ *             suggestion.
+ * An issue's tier is the rule's, except that an error-severity issue is
+ * never below unclear and an info-severity issue is always style
+ * (see issueTier).
  */
 
 const { wordLines, filterIssue } = require('./locate')
 
 const SEVERITIES = ['error', 'warning', 'info']
+const TIERS = ['wrong', 'unclear', 'style']
+
+/** The tier one issue of a rule lands in; see the header. */
+function issueTier (rule, severity) {
+  if (severity === 'info') return 'style'
+  const tier = TIERS.includes(rule.tier) ? rule.tier : 'unclear'
+  if (severity === 'error' && tier === 'style') return 'unclear'
+  return tier
+}
 
 /**
  * Run rules over a list of declarations.
@@ -76,10 +97,12 @@ function runRules (declarations, rules, options = {}) {
           const located = changedLines ? filterIssue(decl, raw, changedLines.get(decl.file), getWords) : null
           if (located && !located.keep) continue
           const issue = located ? { ...raw, message: located.message } : raw
-          const severity = issue.severity || rule.severity
+          const declared = issue.severity || rule.severity
+          const severity = SEVERITIES.includes(declared) ? declared : 'warning'
           issues.push({
             id: rule.name,
-            severity: SEVERITIES.includes(severity) ? severity : 'warning',
+            severity,
+            tier: issueTier(rule, severity),
             message: issue.message,
             why: rule.why,
             standard: rule.standard
@@ -90,6 +113,7 @@ function runRules (declarations, rules, options = {}) {
         issues.push({
           id: rule.name,
           severity: 'error',
+          tier: 'unclear',
           message: `Rule execution failed: ${err.message}`,
           why: rule.why,
           standard: rule.standard
@@ -109,7 +133,8 @@ function runRules (declarations, rules, options = {}) {
       declaration_text: decl.declaration_text,
       rules: issues,
       convention: decl.convention || {},
-      in_pr_diff: Boolean(decl.in_pr_diff)
+      in_pr_diff: Boolean(decl.in_pr_diff),
+      ...(decl.key ? { key: decl.key } : {})
     })
 
     tally(summary, decl.surface, issues)
@@ -189,4 +214,4 @@ function mergeResults (results) {
   return merged
 }
 
-module.exports = { runRules, mergeResults, SEVERITIES }
+module.exports = { runRules, mergeResults, issueTier, SEVERITIES, TIERS }
