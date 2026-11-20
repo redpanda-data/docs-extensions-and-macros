@@ -1941,6 +1941,12 @@ Fail if the cluster is not healthy within this many seconds (default: CLUSTER_RE
 `--settle-timeout <seconds>`::
 Stop waiting for new metric families after this many seconds (default: METRICS_SETTLE_MAX or 300)
 
+`--inventory <path>`::
+Source inventory from tools/metrics/extract_source.py. Adds the defining file to each metric in redpanda-metrics-<tag>.json, and the families the source registers that the scrape did not see
+
+`--dataset-dir <dir>`::
+Write redpanda-metrics-<tag>.json here instead of the output directory. In a docs repository, pass modules/reference/attachments, where the metric macros read it. Used only when --tag is a release tag such as v26.2.7
+
 `-h, --help`::
 display help for command
 
