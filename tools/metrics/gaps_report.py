@@ -151,9 +151,10 @@ def render(gaps):
             "",
             "These entries in `docs-data/metric-overrides.json` name metrics that this release does not "
             "document. Remove them, or rename them if the metric was renamed. A run with "
-            "`--retire-overrides` deletes the ones whose metric the source no longer registers. This run "
-            "left these, either because it ran without that option or because the metric is still in source "
-            "and has a written reason for not being exported.",
+            "`--retire-overrides` deletes an override only when an earlier release's dataset has its metric "
+            "and the source no longer registers it. This run left these for one of these reasons: it ran "
+            "without that option, the metric is still in source and has a written reason for not being "
+            "exported, or no earlier dataset has the metric, so it may belong to a newer release.",
             "",
         ]
         lines += ["- `%s`" % name for name in gaps["stale_overrides"]]

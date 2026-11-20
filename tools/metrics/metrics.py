@@ -455,11 +455,15 @@ def split_audiences(paragraphs):
 def same_help_text(text, help_text):
     """Whether an override says what the help string says.
 
-    Spacing does not count. Nor does one terminal period: a help string takes
-    none, so an override that was sent upstream would otherwise never match.
+    Spacing inside a paragraph does not count. Nor does one terminal period:
+    a help string takes none, so an override that was sent upstream would
+    otherwise never match. A paragraph break does count: text in two
+    paragraphs is not what a one-line help string says, and the overrides
+    audit offers it for upstreaming, so it must not be retired here.
     """
     def plain(value):
-        return re.sub(r"(?<!\.)\.$", "", " ".join(str(value).split()))
+        paragraphs = [" ".join(part.split()) for part in re.split(r"\n\s*\n", str(value).strip())]
+        return re.sub(r"(?<!\.)\.$", "", "\n\n".join(part for part in paragraphs if part))
     return plain(text) == plain(help_text)
 
 
@@ -491,6 +495,40 @@ def pending_retirements(overrides):
     return pending
 
 
+def release_order(tag):
+    """A sort key for a release tag, with a release candidate before its release. None for a branch."""
+    match = re.match(r"^v(\d+)\.(\d+)\.(\d+)(?:-rc(\d+))?$", tag.strip())
+    if not match:
+        return None
+    major, minor, patch, candidate = match.groups()
+    return (int(major), int(minor), int(patch), int(candidate) if candidate else float("inf"))
+
+
+def documented_before(dataset_dir, tag):
+    """Names of the metrics in the datasets of releases older than this one.
+
+    This is the proof that a metric was removed: an earlier release documented
+    it, and the source at this release no longer registers it. A metric that
+    no earlier dataset has may belong to a newer release, so its absence here
+    proves nothing.
+    """
+    current = release_order(tag)
+    names = set()
+    if current is None or not dataset_dir or not os.path.isdir(dataset_dir):
+        return names
+    for file_name in os.listdir(dataset_dir):
+        match = re.match(r"^redpanda-metrics-(v.+)\.json$", file_name)
+        other = release_order(match.group(1)) if match else None
+        if other is None or other >= current:
+            continue
+        try:
+            with open(os.path.join(dataset_dir, file_name), encoding="utf-8") as f:
+                names.update(json.load(f).get("metrics", {}))
+        except (OSError, ValueError):
+            logging.warning(f"Could not read {file_name} in {dataset_dir}, so it proves no metric was removed.")
+    return names
+
+
 def retire_overrides(path, redundant):
     """Delete the redundant parts of the overrides file, and say what went.
 
@@ -498,8 +536,9 @@ def retire_overrides(path, redundant):
     its job. Enrichment on a metric that is still in the release is never
     touched: a section, use cases, usage text, Cloud availability, related
     properties and topics, audience paragraphs, and the description or values
-    of a label. An override whose metric the source no longer registers goes
-    whole, enrichment included, because it has nothing to apply to.
+    of a label. An override whose metric an earlier release had and this
+    release does not goes whole, enrichment included, because it has nothing
+    to apply to.
 
     A description goes together with upstream_ref. When the override has
     retirement_pending, that field and _comment go too. Of a description
@@ -650,8 +689,8 @@ def parse_args(argv):
     parser.add_argument("--retire-overrides", action="store_true",
                         help="With --overrides and --inventory, delete from that file every part that no longer changes "
                              "anything: text that now matches Redpanda, text marked retirement_pending, labels that "
-                             "stood in for a metric the cluster now exports, and the whole override of a metric the "
-                             "source no longer registers")
+                             "stood in for a metric the cluster now exports, and the whole override of a metric that "
+                             "an earlier dataset in --dataset-dir has and the source no longer registers")
     parser.add_argument("--strict", action="store_true",
                         help="With --inventory, fail (exit 4) and write nothing when the scrape does not match the "
                              "inventory. Without this flag the gaps are reported in metrics-gaps.json and the output is "
@@ -826,21 +865,27 @@ def main(argv=None):
             f"The override for '{item['name']}' names labels the cluster does not export: "
             f"{', '.join(item['labels_not_scraped'])}. The scrape is right, so the override needs an update.")
     if args.retire_overrides and overridden["stale"]:
-        # An override for a metric the source no longer registers has nothing
-        # to apply to: the metric was removed or renamed, and the override
-        # goes. A metric that is in source and is only missing from the
-        # dataset (it has a written reason for not being exported) is still
-        # in the release, so its override stays and is reported.
+        # A whole override is deleted only on proof that its metric was
+        # removed: an earlier release's dataset documents it, and the source at
+        # this release no longer registers it. Every other stale override stays
+        # and is reported. Its metric may have a written reason for not being
+        # exported, or may belong to a newer release than the one generated.
         registered = set(inventory["public"]) | set(inventory["internal"])
-        gone = [name for name in overridden["stale"] if name not in registered]
+        earlier = documented_before(args.dataset_dir, tag_modified)
+        gone = [name for name in overridden["stale"] if name not in registered and name in earlier]
         overridden["redundant"] += [
-            {"name": name, "field": "", "reason": "no metric with this name is in this release"}
+            {"name": name, "field": "", "reason": "an earlier release had this metric and this release does not"}
             for name in gone]
-        overridden["stale"] = [name for name in overridden["stale"] if name in registered]
+        overridden["stale"] = [name for name in overridden["stale"] if name not in gone]
         for name in overridden["stale"]:
-            logging.warning(
-                f"The override for '{name}' in {args.overrides} is for a metric that has a written reason for "
-                "not being exported, so it is not documented and the override has nothing to apply to.")
+            if name in registered:
+                logging.warning(
+                    f"The override for '{name}' in {args.overrides} is for a metric that has a written reason for "
+                    "not being exported, so it is not documented and the override has nothing to apply to.")
+            else:
+                logging.warning(
+                    f"The override for '{name}' in {args.overrides} matches no metric in this release, and no "
+                    "earlier dataset has that metric, so it was not deleted. It may be for a newer release.")
     if overridden["redundant"] and args.retire_overrides:
         retire_overrides(args.overrides, overridden["redundant"])
         for item in overridden["redundant"]:
