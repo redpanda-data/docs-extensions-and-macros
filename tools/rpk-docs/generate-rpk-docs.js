@@ -1362,6 +1362,22 @@ function convertIndentedTablesToAsciiDoc(text, options = {}) {
           }
         }
 
+        // Three or more columns (rpk ai run opencode's wire API, upstream,
+        // package and path) do not fit a Value/Description table, and a
+        // wrapped cell cannot be told from its neighbor reliably. Keep the
+        // source alignment as a literal block instead.
+        if (parsedRows.length >= 2 && parsedRows.every(row => row.length > 2)) {
+          const indents = tableLines.filter(l => l.trim()).map(l => l.match(/^[ \t]*/)[0].length)
+          const strip = Math.min(...indents)
+          result.push('')
+          result.push('....')
+          for (const tableLine of tableLines) result.push(tableLine.slice(strip).replace(/[ \t]+$/, ''))
+          result.push('....')
+          result.push('')
+          i = j
+          continue
+        }
+
         if (parsedRows.length >= 2) {
           // Convert to AsciiDoc table
           result.push('')
@@ -2959,7 +2975,10 @@ async function generateRpkDocs(options = {}) {
     const { mainDescription, sections: rawSections } = parseDescriptionSections(mergedCommand.description || '')
 
     // Format description with backticks and ensure it ends with period
-    const formattedDescription = ensurePeriod(formatDescription(mainDescription, textTransformations))
+    // A command whose indented lists are not value tables (for example
+    // rpk ai skill init's list of coding agents) sets skipTableConversion.
+    const formatOptions = { skipTableConversion: commandOverride.skipTableConversion === true }
+    const formattedDescription = ensurePeriod(formatDescription(mainDescription, textTransformations, formatOptions))
 
     // Format section content with same formatting rules
     // BUT: Handle EXAMPLES sections specially to convert indented commands to code blocks
@@ -2976,7 +2995,7 @@ async function generateRpkDocs(options = {}) {
         examplesContent = applyTextTransformationsToExamples(examplesContent, textTransformations)
         sections[sectionName] = formatExamples(examplesContent)
       } else {
-        sections[sectionName] = formatDescription(sectionContent, textTransformations)
+        sections[sectionName] = formatDescription(sectionContent, textTransformations, formatOptions)
       }
     }
 

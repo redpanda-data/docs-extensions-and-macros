@@ -495,3 +495,26 @@ describe('unindented shell examples and colon-introduced code', () => {
     expect(store).toHaveLength(0)
   })
 })
+
+describe('Indented tables with three or more columns', () => {
+  it('keeps a multi-column table as a literal block instead of a Value/Description table', () => {
+    const input = `Each model uses the first supported wire API the server catalog declares:
+
+  openai_responses         direct           @opencode/ai/providers/openai/responses
+                                              {provider}/responses
+  anthropic_messages       direct           @opencode/ai/providers/anthropic
+                                              {provider}/v1/messages
+
+A model needs streaming.`
+    const result = convertIndentedTablesToAsciiDoc(input)
+    expect(result).not.toContain('|Value |Description')
+    expect(result).toContain('....\nopenai_responses         direct           @opencode/ai/providers/openai/responses\n                                            {provider}/responses\n')
+    expect(result).toContain('A model needs streaming.')
+  })
+
+  it('still converts a two-column value list', () => {
+    const result = convertIndentedTablesToAsciiDoc('Formats:\n\n    now          the current time\n    13 digits    parsed as a Unix millisecond\n')
+    expect(result).toContain('|Value |Description')
+    expect(result).toContain('|13 digits |parsed as a Unix millisecond')
+  })
+})
