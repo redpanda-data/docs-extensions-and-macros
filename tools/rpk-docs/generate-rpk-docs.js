@@ -1380,10 +1380,15 @@ function convertIndentedTablesToAsciiDoc(text, options = {}) {
 
         if (parsedRows.length >= 2) {
           // Convert to AsciiDoc table
+          // A command whose first column is not a value (for example the
+          // coding agents rpk ai skill init lists) names its own columns
+          // through the tableHeaders override, and its first column is not
+          // set in monospace.
+          const headers = Array.isArray(options.headers) && options.headers.length === 2 ? options.headers : null
           result.push('')
-          result.push('[cols="1m,1a"]')
+          result.push(headers ? '[cols="1,2a"]' : '[cols="1m,1a"]')
           result.push('|===')
-          result.push('|Value |Description')
+          result.push(headers ? `|${headers[0]} |${headers[1]}` : '|Value |Description')
           result.push('')
           for (const [value, ...descParts] of parsedRows) {
             // Remove trailing colon from value (e.g., "Organization:" -> "Organization")
@@ -1531,6 +1536,7 @@ function replaceOutsideCodeSpans(text, regex, replacement) {
  * @param {Object} [customTransformations] - Optional custom text transformations from overrides
  * @param {Object} [options] - Formatting options
  * @param {boolean} [options.skipTableConversion] - If true, skip automatic table conversion
+ * @param {string[]} [options.tableHeaders] - Column names for converted two-column tables instead of Value and Description
  * @param {boolean} [options.skipListConversion] - If true, skip automatic list conversion
  * @returns {string} Formatted description
  */
@@ -1674,7 +1680,7 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   preProcessed = convertBulletedDefinitionListsToAsciiDoc(preProcessed, { skip: options.skipListConversion })
 
   // Convert indented columnar text to AsciiDoc tables
-  preProcessed = convertIndentedTablesToAsciiDoc(preProcessed, { skip: options.skipTableConversion })
+  preProcessed = convertIndentedTablesToAsciiDoc(preProcessed, { skip: options.skipTableConversion, headers: options.tableHeaders })
 
   let protectedDesc = preProcessed
 
@@ -2975,9 +2981,10 @@ async function generateRpkDocs(options = {}) {
     const { mainDescription, sections: rawSections } = parseDescriptionSections(mergedCommand.description || '')
 
     // Format description with backticks and ensure it ends with period
-    // A command whose indented lists are not value tables (for example
-    // rpk ai skill init's list of coding agents) sets skipTableConversion.
-    const formatOptions = { skipTableConversion: commandOverride.skipTableConversion === true }
+    // A command whose two-column list is not a value table (for example
+    // rpk ai skill init's list of coding agents) names its columns with
+    // tableHeaders.
+    const formatOptions = { tableHeaders: commandOverride.tableHeaders }
     const formattedDescription = ensurePeriod(formatDescription(mainDescription, textTransformations, formatOptions))
 
     // Format section content with same formatting rules

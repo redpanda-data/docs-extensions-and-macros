@@ -133,9 +133,12 @@
           "type": "string",
           "description": "Content to append to the auto-generated description instead of replacing it."
         },
-        "skipTableConversion": {
-          "type": "boolean",
-          "description": "If true, indented two-column lists in this command's description and sections stay as written instead of becoming a Value/Description table. Use it when the first column is not a value, for example the coding agents rpk ai skill init lists."
+        "tableHeaders": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "Column names for the two-column tables built from this command's indented lists, for example [\"Coding agent\", \"What init adds\"]. Set it when the first column is not a value: the table then uses these names instead of Value and Description, and its first column is not monospace."
         },
         "descriptionScope": {
           "type": "string",

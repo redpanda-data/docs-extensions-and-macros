@@ -518,3 +518,14 @@ A model needs streaming.`
     expect(result).toContain('|13 digits |parsed as a Unix millisecond')
   })
 })
+
+describe('Named table columns', () => {
+  it('uses the given column names and no monospace for a list that is not values', () => {
+    const input = 'init installs a hook:\n\n  Claude Code   a SessionStart hook in settings.json\n  Codex         a SessionStart hook in hooks.json\n'
+    const result = convertIndentedTablesToAsciiDoc(input, { headers: ['Coding agent', 'What init adds'] })
+    expect(result).toContain('[cols="1,2a"]')
+    expect(result).toContain('|Coding agent |What init adds')
+    expect(result).not.toContain('|Value |Description')
+    expect(result).toContain('|Claude Code |a SessionStart hook in settings.json')
+  })
+})
