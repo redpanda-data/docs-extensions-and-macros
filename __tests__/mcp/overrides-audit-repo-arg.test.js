@@ -69,4 +69,21 @@ describe('auditOverrides --repo forwarding', () => {
     expect(cliArgs).toContain('--extracted')
     expect(cliArgs).toContain('--repo')
   })
+
+  test('forwards args.ref as --ref for the metrics surface, and omits it otherwise', () => {
+    mockSuccess({ surface: 'metrics', summary: { total: 0 } })
+
+    auditOverrides({
+      overrides: 'docs-data/metric-overrides.json',
+      repo: '/checkout/redpanda',
+      surface: 'metrics',
+      ref: 'v26.2.7'
+    })
+    const cliArgs = spawnSync.mock.calls[0][1]
+    expect(cliArgs[cliArgs.indexOf('--ref') + 1]).toBe('v26.2.7')
+    expect(cliArgs[cliArgs.indexOf('--surface') + 1]).toBe('metrics')
+
+    auditOverrides({ overrides: 'docs-data/metric-overrides.json', repo: '/checkout/redpanda', surface: 'metrics' })
+    expect(spawnSync.mock.calls[1][1]).not.toContain('--ref')
+  })
 })

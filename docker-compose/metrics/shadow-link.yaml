@@ -1,0 +1,27 @@
+# Shadow link that `doc-tools generate metrics-docs` creates on the metrics
+# cluster, so the shadow link metrics are exported. It shadows one topic and
+# the Schema Registry of the shadow-source broker. The schemas go to their own
+# context because the metrics cluster already has schemas in the default one.
+name: metrics-shadow-link
+client_options:
+  bootstrap_servers:
+  - shadow-source:9092
+topic_metadata_sync_options:
+  interval: 5s
+  auto_create_shadow_topic_filters:
+  - pattern_type: LITERAL
+    filter_type: INCLUDE
+    name: metrics-shadow-src
+  start_at_earliest: {}
+schema_registry_sync_options:
+  shadow_schema_registry_api:
+    source_url: http://shadow-source:8081
+    tail_interval: 5s
+    source_filter:
+      contexts:
+      - "."
+    destination:
+      exact:
+        mappings:
+        - source: "."
+          destination: ".metrics-shadow"

@@ -1,0 +1,126 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://docs.redpanda.com/schemas/metrics-gaps.schema.json",
+  "title": "Metrics gaps",
+  "description": "What differs between the metrics the Redpanda source registers and the metrics a cluster exported, written by doc-tools generate metrics-docs as metrics-gaps.json. The automated pull request prints it, and the Metrics gaps check fails while count is above 0.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["count", "not_scraped", "not_in_source", "type_mismatch", "empty_help", "unresolved", "stale_requirements", "stale_overrides", "override_disagrees", "covered_by_override", "redundant_overrides", "retired_overrides"],
+  "properties": {
+    "count": { "type": "integer", "minimum": 0, "description": "How many gaps need a person: every list below except covered_by_override, redundant_overrides and retired_overrides." },
+    "not_scraped": {
+      "type": "array",
+      "description": "In source, not exported by the cluster, with no written reason and no override. Documented from source, without labels.",
+      "items": { "$ref": "#/definitions/sourceMetric" }
+    },
+    "not_in_source": {
+      "type": "array",
+      "description": "Exported by the cluster and not in the source inventory. The source scan missed a registration.",
+      "items": { "$ref": "#/definitions/metric" }
+    },
+    "type_mismatch": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "endpoint", "source", "scrape"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "endpoint": { "$ref": "#/definitions/endpoint" },
+          "source": { "type": "string", "description": "Type in the source." },
+          "scrape": { "type": "string", "description": "Type the cluster reported." }
+        }
+      }
+    },
+    "empty_help": {
+      "type": "array",
+      "description": "Exported with no description.",
+      "items": { "$ref": "#/definitions/metric" }
+    },
+    "unresolved": {
+      "type": "array",
+      "description": "Metric registrations the source scan could not read. A metric may be missing from the reference.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file", "line", "reason"],
+        "properties": {
+          "file": { "type": ["string", "null"] },
+          "line": { "type": ["integer", "null"] },
+          "reason": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "stale_requirements": {
+      "type": "array",
+      "description": "Ids in the requirements file that match no metric in this release.",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "stale_overrides": {
+      "type": "array",
+      "description": "Names in the overrides file that are not metrics in this release.",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "override_disagrees": {
+      "type": "array",
+      "description": "Overrides that name a label the cluster does not export for a metric it does export.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "endpoint", "labels_not_scraped"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "endpoint": { "$ref": "#/definitions/endpoint" },
+          "labels_not_scraped": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 }
+        }
+      }
+    },
+    "covered_by_override": {
+      "type": "array",
+      "description": "Not exported by the cluster, and completed by an override. Not counted.",
+      "items": { "$ref": "#/definitions/sourceMetric" }
+    },
+    "redundant_overrides": {
+      "type": "array",
+      "description": "Parts of the overrides file that no longer change anything. Listed when the run did not retire them. Not counted.",
+      "items": { "$ref": "#/definitions/overridePart" }
+    },
+    "retired_overrides": {
+      "type": "array",
+      "description": "Parts of the overrides file this run deleted. Not counted.",
+      "items": { "$ref": "#/definitions/overridePart" }
+    }
+  },
+  "definitions": {
+    "endpoint": { "enum": ["public", "internal"] },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "endpoint"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "endpoint": { "$ref": "#/definitions/endpoint" }
+      }
+    },
+    "sourceMetric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "endpoint", "defined_in"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "endpoint": { "$ref": "#/definitions/endpoint" },
+        "defined_in": { "type": "string", "description": "Source file that registers the metric." }
+      }
+    },
+    "overridePart": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "field", "reason"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "field": { "type": "string", "description": "The field, or labels[<label>], or empty for the whole override." },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

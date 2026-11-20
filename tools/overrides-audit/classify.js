@@ -714,6 +714,7 @@ module.exports = {
   stripDocsMarkup,
   contentHash,
   deepEqual,
+  row,
   classifyDescription,
   classifyField,
   classifyPropertyEntry,
