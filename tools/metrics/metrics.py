@@ -353,7 +353,10 @@ def main(argv=None):
                 f"{tag_modified} is not a release tag, so the dataset is not written to {args.dataset_dir}. "
                 f"The macros only load files for a release tag. It is written to {output_dir}."
             )
-    dataset_file = os.path.join(dataset_dir, f"redpanda-metrics-{tag_modified}.json")
+    # A branch name such as feature/metrics would put a "/" in the filename.
+    # Release tags have none, so their filenames are unchanged.
+    dataset_name = re.sub(r"[^A-Za-z0-9._-]", "-", tag_modified)
+    dataset_file = os.path.join(dataset_dir, f"redpanda-metrics-{dataset_name}.json")
     with open(dataset_file, "w", encoding="utf-8") as f:
         json.dump(families, f, indent=2)
         f.write("\n")
