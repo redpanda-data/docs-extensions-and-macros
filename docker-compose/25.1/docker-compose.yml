@@ -346,8 +346,9 @@ services:
     depends_on:
       redpanda-0:
         condition: service_healthy
+      # Not just started: the transform's topics must exist before it deploys.
       createtopic:
-        condition: service_started
+        condition: service_completed_successfully
   ####################
   # RustFS for Tiered Storage #
   # See https://rustfs.com/

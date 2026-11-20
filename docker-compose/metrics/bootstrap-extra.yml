@@ -1,0 +1,41 @@
+# =================================================================
+# Extra cluster properties for `doc-tools generate metrics-docs`.
+#
+# Redpanda exports a metric family only when the feature that registers it is
+# on. These properties turn on features the quickstart leaves off, so the
+# scrape covers their metrics. generate-cluster-docs.sh appends this file to
+# the quickstart bootstrap.yml in metrics mode. It is not part of the
+# quickstart that readers download.
+#
+# Redpanda 25.3 and later log a warning for a property they do not know and
+# start anyway. Earlier releases refuse to start, so the script leaves this
+# file out for them.
+# =================================================================
+
+# redpanda_cluster_health_* and vectorized_cluster_health_*
+health_monitor_metrics_enabled: true
+# redpanda_kafka_quotas_client_quota_*_by_entity
+kafka_per_entity_quota_metrics: true
+# *_cluster_partition_schema_id_validation_records_failed
+enable_schema_id_validation: redpanda
+# vectorized_internal_rpc_latency
+enable_development_metrics: true
+# redpanda_cloud_storage_anomalies
+cloud_storage_enable_scrubbing: true
+# redpanda_security_idp_* and, through the HTTPS client it builds, redpanda_tls_*.
+# The broker reads the discovery URL as soon as OAUTHBEARER is allowed. The URL
+# points at a port that does not serve it, so every fetch fails: that is enough
+# to register the metrics, and no identity provider has to run.
+sasl_mechanisms:
+  - SCRAM
+  - OAUTHBEARER
+oidc_discovery_url: https://redpanda-0:9644/.well-known/openid-configuration
+# redpanda_shadow_link_*: lets the cluster shadow the shadow-source broker.
+enable_shadow_linking: true
+# vectorized_cloud_roles__auth_refresh_*: fetch object storage credentials
+# from the imds-mock service, not from the static keys.
+cloud_storage_credentials_source: aws_instance_metadata
+# *_cloud_topics_*: Redpanda 26.1 starts the cloud topics services only with
+# this on. Later releases start them without it. Releases before 26.1 do not
+# have the property.
+cloud_topics_enabled: true
