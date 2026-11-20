@@ -1316,9 +1316,10 @@ jobs:
             `openapiv2_operation` block is the exception: the summary
             usually drops its articles and matches the other summaries in
             its tag, and the description opens with an imperative verb and
-            keeps its articles. This is the same rule
-            `embedded-reference-strings.md` gives: its quality bar lets an
-            openapiv2 `summary` drop its articles ("Create topic").
+            keeps its articles. `embedded-reference-strings.md` makes the
+            same exception, in its "Terse, never telegraphic" rule and its
+            `summary` in an `openapiv2_operation` block section ("Create
+            topic").
             In Admin API v2 protos, the rpc's leading
             comment is its own name and then a third-person description
             ("Returns a single fixture."); leave that form as it is.
