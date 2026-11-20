@@ -1628,6 +1628,7 @@ describe('doc-strings-review workflow: docs MCP client key (executed)', () => {
     const args = stepNamed('Claude review with suggestions').with.claude_args
     expect(args).toContain('--permission-mode default')
     expect(args.match(/--allowed-tools "([^"]*)"/)[1]).not.toMatch(/sudo/)
+    expect(args.match(/--disallowed-tools "([^"]*)"/)[1].split(',')).toContain('Bash(sudo *)')
   })
 
   test('an empty key is the same as no key', () => {

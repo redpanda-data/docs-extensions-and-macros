@@ -958,8 +958,9 @@ jobs:
       # the model can read with cat, so the key never goes in it. The key goes
       # in a file only root can read, and the config names a headersHelper
       # that reads the file with sudo when Claude Code connects. The review
-      # runs with --permission-mode default, which denies sudo because no
-      # allow rule covers it. A helper that fails sends no header, which is
+      # denies sudo with a Bash(sudo *) rule in --disallowed-tools, and runs
+      # with --permission-mode default so nothing outside the allow list is
+      # passed by a classifier. A helper that fails sends no header, which is
       # the anonymous quota.
       - name: Build the docs MCP config
         if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0' || steps.notes.outputs.declared == '1')
@@ -1007,7 +1008,9 @@ jobs:
       # and the AWS session credentials from the job env, and do not write the
       # token anywhere. Scoping the review's Read rule to the workspace is not
       # enough on its own: Claude Code auto-approves read-only Bash commands
-      # such as cat, so any file on the runner is readable. The dispatch step
+      # such as cat, so any file the runner user can read is readable (sudo is
+      # not read-only, and the review denies it, so the root-only docs MCP key
+      # file is not). The dispatch step
       # fetches the token again after the review. Callers on the plain-secret
       # path are unaffected: this step only runs when the OIDC inputs are set.
       - name: Drop fetched credentials from the review's environment
@@ -1066,14 +1069,15 @@ jobs:
           # ~/.claude/settings.json, which is the user source, so it still
           # applies. The permission mode is pinned because the action defaults
           # to auto mode, where a classifier can pass a call that no allow
-          # rule covers. In default mode such a call is denied, so the model
-          # cannot run the sudo that reads the docs MCP key file.
+          # rule covers. In default mode such a call is denied, and the
+          # Bash(sudo *) deny rule blocks the sudo that reads the docs MCP key
+          # file even if an allow rule ever matched it.
           claude_args: >
             --setting-sources user
             --permission-mode default
             --model ${{ inputs.use_adp_gateway && inputs.gateway_model || 'sonnet' }}
             --max-turns 40
-            --disallowed-tools "WebFetch,WebSearch,Edit,MultiEdit,NotebookEdit,Bash(git *)"
+            --disallowed-tools "WebFetch,WebSearch,Edit,MultiEdit,NotebookEdit,Bash(git *),Bash(sudo *)"
             --mcp-config '${{ env.DOCS_MCP_CONFIG }}'
             --allowed-tools "
               mcp__github_inline_comment__create_inline_comment,
