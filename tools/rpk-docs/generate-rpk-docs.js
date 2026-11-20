@@ -1682,6 +1682,16 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   // Convert indented columnar text to AsciiDoc tables
   preProcessed = convertIndentedTablesToAsciiDoc(preProcessed, { skip: options.skipTableConversion, headers: options.tableHeaders })
 
+  // The table conversion can emit a literal block (....) for a table with
+  // three or more columns. It runs after the code-block protection above, so
+  // protect its literal blocks the same way: later prose passes would
+  // otherwise escape {provider} to \{provider} and add inline code inside it.
+  preProcessed = preProcessed.replace(/(^|\n)(\.\.\.\.\n[\s\S]*?\n\.\.\.\.)(?=\n|$)/g, (match, lead, block) => {
+    const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`
+    codeBlocks.push(block)
+    return lead + placeholder
+  })
+
   let protectedDesc = preProcessed
 
   // Apply custom inline code patterns (from overrides textTransformations.inlineCode)

@@ -2,7 +2,8 @@ const { describe, it, expect } = require('@jest/globals')
 const {
   convertNumberedListsToAsciiDoc,
   convertIndentedTablesToAsciiDoc,
-  capToTwoSentences
+  capToTwoSentences,
+  formatDescription
 } = require('../../../tools/rpk-docs/generate-rpk-docs')
 
 describe('Indented Table Conversion', () => {
@@ -527,5 +528,16 @@ describe('Named table columns', () => {
     expect(result).toContain('|Coding agent |What init adds')
     expect(result).not.toContain('|Value |Description')
     expect(result).toContain('|Claude Code |a SessionStart hook in settings.json')
+  })
+})
+
+describe('Literal blocks through the full description formatter', () => {
+  it('keeps a multi-column literal block verbatim, with no escaped braces or added inline code', () => {
+    const input = 'Each model uses the first supported wire API:\n\n  openai_responses         direct           @opencode/ai/providers/openai/responses\n                                              {provider}/responses\n  anthropic_messages       direct           @opencode/ai/providers/anthropic\n                                              {provider}/v1/messages\n\nA model needs streaming.'
+    const result = formatDescription(input, null)
+    expect(result).toContain('....\nopenai_responses')
+    expect(result).toContain('{provider}/responses')
+    expect(result).not.toContain('\\{provider}')
+    expect(result).not.toMatch(/`@opencode/)
   })
 })
