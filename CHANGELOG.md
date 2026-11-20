@@ -1,5 +1,20 @@
 # Changelog
 
+## [5.67.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.66.2...v5.67.0) (2026-11-20)
+
+
+### Features
+
+* add a source inventory and reconcile check for metrics ([#527](https://github.com/redpanda-data/docs-extensions-and-macros/issues/527)) ([0ee2f02](https://github.com/redpanda-data/docs-extensions-and-macros/commit/0ee2f021b7b97a1cad9e27914ead72877f170298))
+* generate release notes for the Redpanda Operator and Helm charts ([#519](https://github.com/redpanda-data/docs-extensions-and-macros/issues/519)) ([931107c](https://github.com/redpanda-data/docs-extensions-and-macros/commit/931107c7afe3ccd4585966857312f8ca5c3163cf))
+* warn on deprecated property mentions and add deprecated=ok to every reference macro ([#520](https://github.com/redpanda-data/docs-extensions-and-macros/issues/520)) ([cd8d1de](https://github.com/redpanda-data/docs-extensions-and-macros/commit/cd8d1de2ed2adc0bbf6a7ab67456a3a35a393825))
+* write a family-level metrics dataset ([#529](https://github.com/redpanda-data/docs-extensions-and-macros/issues/529)) ([5eeaecf](https://github.com/redpanda-data/docs-extensions-and-macros/commit/5eeaecfc5a5414ae6d4a0d64d4913fb2cb9ebee9))
+
+
+### Reusable workflows and CI
+
+* bump the docs-team-standards pin in docs-review ([#540](https://github.com/redpanda-data/docs-extensions-and-macros/issues/540)) ([a64d1e2](https://github.com/redpanda-data/docs-extensions-and-macros/commit/a64d1e270dd0607f1d85ad75983d4ad14ca3e6dd))
+
 ## [5.66.2](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.66.1...v5.66.2) (2026-11-20)
 
 
