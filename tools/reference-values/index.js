@@ -159,9 +159,31 @@ function failsAt (kind, f, level) {
 function failingFindings (result, level) {
   const out = []
   for (const [kind, r] of Object.entries(result.kinds)) {
-    for (const f of r.findings || []) if (failsAt(kind, f, level)) out.push({ kind, finding: f })
+    for (const f of r.findings || []) if (!f.preexisting && failsAt(kind, f, level)) out.push({ kind, finding: f })
   }
   return out
+}
+
+/**
+ * With --diff, mark the findings on lines the branch did not add or change as
+ * preexisting: they were already on the base branch, so they are reported but
+ * never fail the check. A file the diff does not cover counts as changed
+ * throughout, so nothing is excused by a diff that could not be read.
+ *
+ * @returns {number} how many findings were marked.
+ */
+function markPreexisting (result, changed) {
+  let marked = 0
+  for (const r of Object.values(result.kinds)) {
+    for (const f of r.findings || []) {
+      const lines = changed.get(f.file)
+      if (lines instanceof Set && !lines.has(f.line)) {
+        f.preexisting = true
+        marked++
+      }
+    }
+  }
+  return marked
 }
 
 /**
@@ -273,7 +295,7 @@ function recount (r) {
  *   mentions into rpkcmd:, connect: and blobl: links.
  * @param {string} [opts.failOn]
  */
-function scanAll ({ docsDir, lenderDirs = [], dataFiles = [], kinds = KINDS, kindsExplicit = false, files, write = false, writeLinks = false, failOn = 'mismatch' }) {
+function scanAll ({ docsDir, lenderDirs = [], dataFiles = [], kinds = KINDS, kindsExplicit = false, files, write = false, writeLinks = false, failOn = 'mismatch', changedLines }) {
   if (!LEVELS.includes(failOn)) throw new SetupError(`--fail-on ${failOn}: use one of ${LEVELS.join(', ')}`)
   if (writeLinks && !write) throw new SetupError('--write-links converts unlinked mentions only with --write')
   for (const kind of kinds) if (!KINDS.includes(kind)) throw new SetupError(`--kinds: '${kind}' is not a kind; use ${KINDS.join(', ')}`)
@@ -423,8 +445,9 @@ function scanAll ({ docsDir, lenderDirs = [], dataFiles = [], kinds = KINDS, kin
 
   if (!Object.keys(result.kinds).length) throw new SetupError(`no kind has data for ${where}: ${Object.entries(result.skipped).map(([k, v]) => `${k}: ${v}`).join('; ')}`)
   result.ignored = applyIgnores(result, docsDir)
+  if (changedLines instanceof Map) result.preexisting = markPreexisting(result, changedLines)
   for (const [kind, r] of Object.entries(result.kinds)) {
-    for (const f of r.findings) f.failing = failsAt(kind, f, failOn)
+    for (const f of r.findings) f.failing = !f.preexisting && failsAt(kind, f, failOn)
   }
   result.failing = failingFindings(result, failOn).length
   return result
@@ -451,7 +474,7 @@ function describe (kind, f) {
 function renderMarkdown (result) {
   const out = ['# Reference values report', '']
   out.push('Statuses: **reference** is a command, flag, component or field that does not exist in the data (error) or is deprecated (warning), or an xref to an rpk, Connect component or Bloblang page or anchor that does not exist (broken-link, error) or whose label names something else (link-label-mismatch, warning). **exact** is what the macro renders, or an xref rpkcmd:[...], connect:[...] or blobl:[...] would render the same; **auto-safe** is an exact match `--write` may apply. **equivalent** is the same value worded differently. **mismatch** differs from the data. **unset** states a value the data leaves empty. **unverifiable** could not be compared, with the reason. **example output** is a value in a block or YAML comment, never written: **stale** when it differs from the data. **unlinked mention** is the first mention on a page of an rpk command, Connect component or Bloblang call in inline code, on a page that links it nowhere, which rpkcmd:[...], connect:[...] or blobl:[...] would link; it fails only at --fail-on links, and --write converts it only with --write-links. **alias** is an rpk command written with an alias, or a Connect component written with the name its page now aliases, in a macro or a prose span: it renders and links correctly, fails only at --fail-on any or links, and `--write` rewrites it to the main name when it is writable, as it rewrites a deprecated name whose data names one replacement.', '')
-  out.push(`Checked ${result.component}@${result.version || 'unversioned'} at --fail-on ${result.failOn}: ${result.failing} failing finding(s), ${result.ignored} ignored by \`// value-check: ignore\`, ${result.acknowledged || 0} deprecated name(s) acknowledged with \`deprecated=ok\`.`, '')
+  out.push(`Checked ${result.component}@${result.version || 'unversioned'} at --fail-on ${result.failOn}: ${result.failing} failing finding(s), ${result.ignored} ignored by \`// value-check: ignore\`, ${result.acknowledged || 0} deprecated name(s) acknowledged with \`deprecated=ok\`.${result.preexisting ? ` ${result.preexisting} finding(s) are on lines this branch did not change, so they do not fail.` : ''}`, '')
   out.push('| Kind | Dataset | Surface | Files | Findings | Failing | Reference errors | Reference warnings | Mismatch | Exact (auto-safe) | Equivalent | Unset | Unverifiable | Example output (stale) | Unlinked mentions | Aliases |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|')
   for (const [kind, r] of Object.entries(result.kinds)) {
     const c = r.counts || {}
@@ -547,6 +570,7 @@ function annotations (result) {
   for (const [kind, r] of Object.entries(result.kinds)) {
     for (const f of r.findings) {
       if (f.failing) lines.push(`::error file=${f.file},line=${f.line}::${clean(`${kind} ${f.status}: ${describe(kind, f)}`)}`)
+      else if (f.preexisting && failsAt(kind, f, result.failOn)) lines.push(`::warning file=${f.file},line=${f.line}::${clean(`Already on the base branch, not failing: ${kind} ${f.status}: ${describe(kind, f)}`)}`)
       else if ((f.status === 'reference' && f.severity === 'warning') || f.status === oldNames.STATUS) lines.push(`::warning file=${f.file},line=${f.line}::${clean(`${kind} ${f.reason}: ${describe(kind, f)}`)}`)
     }
   }
@@ -581,6 +605,7 @@ function runCli (options, { log = console.log, error = console.error } = {}) {
       write: Boolean(options.write),
       writeLinks: Boolean(options.writeLinks),
       failOn: options.failOn || 'mismatch',
+      changedLines: options.diff ? require('../../cli-utils/unified-diff').changedLinesSince(options.diff, docsDir) : undefined,
     })
   } catch (e) {
     if (e instanceof SetupError) {
@@ -606,6 +631,7 @@ function runCli (options, { log = console.log, error = console.error } = {}) {
   for (const [kind, why] of Object.entries(result.skipped)) log(`${kind}: skipped (${why})`)
   if (result.ignored) log(`${result.ignored} finding(s) ignored by // value-check: ignore.`)
   if (result.acknowledged) log(`${result.acknowledged} deprecated name(s) acknowledged with deprecated=ok.`)
+  if (result.preexisting) log(`${result.preexisting} finding(s) on lines this branch did not change (--diff ${options.diff}), so they do not fail the check.`)
   for (const { kind, finding: f } of failingFindings(result, result.failOn)) {
     log(`  ${f.status === 'reference' ? f.reason.toUpperCase() : f.status.toUpperCase()} ${f.file}:${f.line} ${kind} ${describe(kind, f)}`)
   }
