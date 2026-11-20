@@ -385,6 +385,8 @@ function getConnectorList(binaryPath) {
 
     const output = result.stdout.toString();
     const connectors = JSON.parse(output);
+    // The written copies keep its int64 values exact (exact-json.js).
+    if (connectors && typeof connectors.version === 'string') require('./exact-json').remember(connectors.version, output);
 
     const typeCount = Object.keys(connectors).filter(k => Array.isArray(connectors[k])).length;
     console.log(`Done: Found ${typeCount} connector types in ${binaryName}`);
