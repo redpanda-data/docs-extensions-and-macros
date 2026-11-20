@@ -166,6 +166,31 @@ If the command doesn't exist in the rpk data, is deprecated, or has no page in t
 
 `check-reference-values` also checks hand-written xrefs to `rpk` pages: it reports links to pages that don't exist for the component (including targets missing the `.adoc` extension) and labels that name another command, and `--write` replaces each xref whose label is the command in backticks with `rpkcmd:[...]`, once the build publishes the `rpk-<version>.json` attachment that `rpkcmd:` links with.
 
+=== metric and metricval - Metric names and values
+
+Name a Redpanda metric in prose with `metric:`, and render one of its values with `metricval:`, from the published metrics data instead of typing them:
+
+[,asciidoc]
+----
+Watch metric:redpanda_cluster_brokers[].
+See metric:redpanda_kafka_request_latency_seconds[link=true], a metricval:redpanda_kafka_request_latency_seconds[type] in metricval:redpanda_kafka_request_latency_seconds[unit].
+----
+
+That renders both names as code, the second linked to its entry on the metrics reference page, followed by "a histogram in seconds".
+
+*Syntax:* `metric:name[link=true,text=display text]` and `metricval:name[field,format=raw]`
+
+* Write the metric name as the endpoint prints it. A histogram series name (`_bucket`, `_count`, `_sum`) renders as written, and reads and links its metric.
+* `link=true` links the reference page in the page's own component that has a heading for the metric. A cloud-docs page links the Cloud page. When Cloud has no page for a metric, or the metric is internal or not available on Cloud, the macro renders plain code and warns instead of linking self-managed docs.
+* Don't wrap `metric:` in backticks: it already renders code.
+* The generator writes these `metricval:` fields, so they render for a metric that has them: `type`, `endpoint`, `description`, `labels`, `unit` and `buckets`. Most metrics have no `unit`, and only a histogram has `buckets`.
+* Every other field, such as `usage`, `category` and `availability`, comes from the overrides file `docs-data/metric-overrides.json`. Until that file has the field for a metric, the macro renders a placeholder such as `<unknown usage>` and warns.
+* For a label's values, name the label: `metricval:redpanda_kafka_request_latency_seconds[values,label=redpanda_request]`. The complete list of values also comes from the overrides file. The macro never renders the values that one scrape saw, so this call renders `<unknown values>` until the list is there.
+* Text longer than one paragraph needs the block form, on a line of its own: `metricval::redpanda_cluster_brokers[description]`.
+* A deprecated metric warns on every mention. On a page that names it on purpose, add `deprecated=ok`.
+
+If a name isn't in the metrics data for the page's version, or was removed, `metric:` shows plain code and the build log says why. If a value can't be verified, `metricval:` shows a placeholder such as `<unknown type>`. Both come with `@redpanda-data/docs-extensions-and-macros/macros/prop`, and the `metric-validate` attribute (`warn`, `error` or `off`) sets how problems are reported. See link:REFERENCE.adoc#metric[the macros reference], and link:REFERENCE.adoc#value-fields[the table of every field].
+
 === connect and blobl - Linked Connect components and Bloblang calls
 
 Name a Redpanda Connect component, one of its fields, or a Bloblang function or method as inline code, linked to its reference entry, without writing the page path or the anchor:

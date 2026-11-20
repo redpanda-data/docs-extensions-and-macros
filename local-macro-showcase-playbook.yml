@@ -58,6 +58,7 @@ asciidoc:
     # everything still renders, and every problem still gets reported.
     property-validate: warn
     rpk-validate: warn
+    metric-validate: warn
     connect-validate: warn
     enterprise-validate: warn
     # The real licensing page lives on a real page in the streaming component.
