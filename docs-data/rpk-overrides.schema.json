@@ -138,7 +138,7 @@
           "items": { "type": "string" },
           "minItems": 2,
           "maxItems": 2,
-          "description": "Column names for the two-column tables built from this command's indented lists, for example [\"Coding agent\", \"What init adds\"]. Set it when the first column is not a value: the table then uses these names instead of Value and Description, and its first column is not monospace."
+          "description": "Column names for the two-column tables built from the indented lists in this command's main description (not its sections), for example [\"Coding agent\", \"What init adds\"]. Set it when the first column is not a value: the table then uses these names instead of Value and Description, and its first column is not monospace."
         },
         "descriptionScope": {
           "type": "string",

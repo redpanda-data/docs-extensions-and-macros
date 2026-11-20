@@ -3,7 +3,8 @@ const {
   convertNumberedListsToAsciiDoc,
   convertIndentedTablesToAsciiDoc,
   capToTwoSentences,
-  formatDescription
+  formatDescription,
+  ensurePeriod
 } = require('../../../tools/rpk-docs/generate-rpk-docs')
 
 describe('Indented Table Conversion', () => {
@@ -539,5 +540,43 @@ describe('Literal blocks through the full description formatter', () => {
     expect(result).toContain('{provider}/responses')
     expect(result).not.toContain('\\{provider}')
     expect(result).not.toMatch(/`@opencode/)
+  })
+})
+
+describe('Multi-column literal blocks through formatDescription', () => {
+  const literalBody = out => out.match(/\n\.\.\.\.\n([\s\S]*?)\n\.\.\.\.(?:\n|$)/)[1]
+
+  it('keeps the rows byte for byte, with inline code, xrefs and {word} untouched', () => {
+    const rows = [
+      'openai_responses   direct   `@opencode/ai/openai`   {provider}/responses',
+      'anthropic_v1       proxy    xref:a.adoc[A]          $HOME/.rpai -v #1234'
+    ]
+    const out = formatDescription('Each:\n\n' + rows.map(r => '  ' + r).join('\n') + '\n\nDone.', [])
+    expect(literalBody(out)).toBe(rows.join('\n'))
+  })
+
+  it('does not add periods inside a literal block that has blank lines', () => {
+    const out = ensurePeriod(formatDescription('Each:\n\n  aa   bb   cc\n\n  dd   ee   ff\n', []))
+    expect(literalBody(out)).toBe('aa   bb   cc\n\ndd   ee   ff')
+  })
+
+  it('treats a row with an empty cell as part of a three-column table', () => {
+    const out = formatDescription('Rows:\n\n  a   b   c\n  d       f\n', [])
+    expect(literalBody(out)).toBe('a   b   c\nd       f')
+  })
+
+  it('keeps a two-column value table when descriptions use two spaces after a period', () => {
+    const out = formatDescription('Values:\n\n    now          The current time.  Uses UTC.\n    13 digits    A Unix millisecond.  Parsed as UTC.\n', [])
+    expect(out).not.toContain('....')
+    expect(out).toContain('|now |The current time. Uses UTC.')
+  })
+})
+
+describe('tableHeaders', () => {
+  it('escapes | and {word} in header names and cells', () => {
+    const out = formatDescription('Agents:\n\n  claude   Adds a | b\n  codex    Adds {c}\n', [], { tableHeaders: ['A|B', '{word}'] })
+    expect(out).toContain('|A\\|B |\\{word}')
+    expect(out).toContain('|claude |Adds a \\| b')
+    expect(out).toContain('|codex |Adds \\{c}')
   })
 })
