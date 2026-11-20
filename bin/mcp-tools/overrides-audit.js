@@ -9,9 +9,10 @@ const { findRepoRoot, getDocToolsCommand, MAX_EXEC_BUFFER_SIZE, DEFAULT_COMMAND_
  * Audit docs-side override entries against extracted source strings
  * @param {Object} args - Arguments
  * @param {string} args.overrides - Path to the overrides JSON file (for example "docs-data/property-overrides.json")
- * @param {string} [args.extracted] - Path to the extracted source JSON (property extractor raw output for properties; the newest docs-data/rpk-v<version>.json snapshot for rpk)
- * @param {string} [args.repo] - Alternative to args.extracted: a redpanda checkout (properties) or a streaming-enterprise src/go/rpk directory (rpk)
- * @param {string} [args.surface] - Override surface: 'properties' or 'rpk'
+ * @param {string} [args.extracted] - Path to the extracted source JSON (property extractor raw output for properties; the newest docs-data/rpk-v<version>.json snapshot for rpk; the output of tools/metrics/extract_source.py for metrics)
+ * @param {string} [args.repo] - Alternative to args.extracted: a redpanda checkout (properties, metrics) or a streaming-enterprise src/go/rpk directory (rpk)
+ * @param {string} [args.ref] - metrics only: the git ref args.repo is read at (default HEAD)
+ * @param {string} [args.surface] - Override surface: 'properties', 'rpk' or 'metrics'
  * @param {string} [args.output] - Also write the JSON result to this file (relative to repo root)
  * @returns {Object} Audit results with manifest and per-class summary
  */
@@ -41,6 +42,11 @@ function auditOverrides(args = {}) {
     if (args.repo) {
       baseArgs.push('--repo');
       baseArgs.push(args.repo);
+    }
+
+    if (args.ref) {
+      baseArgs.push('--ref');
+      baseArgs.push(args.ref);
     }
 
     if (args.surface) {
@@ -90,7 +96,7 @@ function auditOverrides(args = {}) {
       stdout: err.stdout || '',
       stderr: err.stderr || '',
       exitCode: err.status,
-      suggestion: 'Check that the overrides file exists and that --extracted points to the property extractor\'s raw JSON output (properties) or the newest docs-data/rpk-v<version>.json snapshot (rpk)'
+      suggestion: 'Check that the overrides file exists and that --extracted points to the property extractor\'s raw JSON output (properties) the newest docs-data/rpk-v<version>.json snapshot (rpk), or the output of tools/metrics/extract_source.py (metrics)'
     };
   }
 }

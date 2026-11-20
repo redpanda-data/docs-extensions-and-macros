@@ -13,6 +13,8 @@
 
 'use strict'
 
+const { vocabulary } = require('./vocabulary')
+
 /**
  * Render one candidate's property name as a markdown subsection heading.
  *
@@ -48,6 +50,15 @@ function quotedBlock (label, text) {
  * @param {string} noun - What there was none of, e.g. "properties to upstream".
  * @returns {string} A one-line markdown message.
  */
+/**
+ * The words for the surface these candidates came from: the surface the
+ * caller names, else the one the rows carry, else the property wording.
+ */
+function wordsFor (candidates, options) {
+  const fromRows = (candidates || []).map((c) => c && c.surface).find(Boolean)
+  return vocabulary(options.surface || fromRows)
+}
+
 function nothingThisRun (noun) {
   return `Nothing to report: no ${noun} this run.`
 }
@@ -75,12 +86,13 @@ function triageSucceeded (row) {
  * @param {Object[]} candidates - Triaged rows (from triage.js's triageCandidate).
  * @returns {string} Markdown section, always non-empty.
  */
-function buildUpstreamSection (candidates) {
+function buildUpstreamSection (candidates, options = {}) {
+  const words = wordsFor(candidates, options)
   const rows = (candidates || []).filter((c) => c.agent_verdict === 'UPSTREAM_OVERRIDE' && triageSucceeded(c))
-  if (rows.length === 0) return nothingThisRun('property descriptions to upstream')
+  if (rows.length === 0) return nothingThisRun(`${words.descriptions} to upstream`)
 
   const parts = [
-    `Found ${rows.length} property description${rows.length === 1 ? '' : 's'} worth porting upstream into engineering source.`
+    `Found ${rows.length} ${rows.length === 1 ? words.description : words.descriptions} worth porting upstream into engineering source.`
   ]
   for (const row of rows) {
     parts.push([
@@ -143,12 +155,13 @@ function buildRetirementSection (candidates) {
  * @param {Object[]} candidates - Triaged rows (from triage.js's triageCandidate).
  * @returns {string} Markdown digest, always non-empty.
  */
-function buildAmbiguousDigest (candidates) {
+function buildAmbiguousDigest (candidates, options = {}) {
+  const words = wordsFor(candidates, options)
   const rows = (candidates || []).filter((c) => c.agent_verdict === 'AMBIGUOUS' || !triageSucceeded(c))
-  if (rows.length === 0) return nothingThisRun('ambiguous property descriptions')
+  if (rows.length === 0) return nothingThisRun(`ambiguous ${words.descriptions}`)
 
   const parts = [
-    `${rows.length} property description${rows.length === 1 ? '' : 's'} could not be confidently triaged and need a human call.`
+    `${rows.length} ${rows.length === 1 ? words.description : words.descriptions} could not be confidently triaged and need a human call.`
   ]
   for (const row of rows) {
     parts.push([
