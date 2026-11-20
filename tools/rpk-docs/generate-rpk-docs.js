@@ -24,7 +24,9 @@ function flagDefaultToShow (flag) {
   // A path under a home directory comes from the machine that saved the
   // snapshot (rpk plugin install --dir gave /root/.local/bin), not from rpk.
   if (typeof value === 'string' && /^(?:~|\/root|\/home\/[^/]+|\/Users\/[^/]+|[A-Za-z]:\\Users\\[^\\]+)(?:[/\\]|$)/.test(value)) return undefined
-  return helpers.formatDefault(value, flag.type)
+  // A default with a line break (rpk topic produce --format is '%v\n') would
+  // put the closing backtick of the rendered code span on its own line.
+  return helpers.formatDefault(value, flag.type).replace(/\r/g, '\\r').replace(/\n/g, '\\n').replace(/\t/g, '\\t')
 }
 
 // Register Handlebars helpers
