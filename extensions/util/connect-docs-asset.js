@@ -154,6 +154,31 @@ async function downloadAsset (tag, { fetchImpl = globalThis.fetch, logger, token
   throw lastError
 }
 
+/**
+ * When the release was published and whether its docs asset is attached yet,
+ * or null when the release can't be read (no such tag, no access, a network
+ * error). Connect attaches the docs asset some minutes after it publishes the
+ * release, so a run that starts right after publishing can find no asset yet.
+ *
+ * @returns {Promise<{publishedAt: Date|null, hasAsset: boolean}|null>}
+ */
+async function releaseState (tag, { fetchImpl = globalThis.fetch, token = null } = {}) {
+  const headers = { 'User-Agent': 'Redpanda Docs', Accept: 'application/vnd.github+json' }
+  if (token) headers.Authorization = `Bearer ${token}`
+  try {
+    const api = `https://api.github.com/repos/${OWNER}/${REPO}/releases/tags/${encodeURIComponent(tag)}`
+    const response = await fetchImpl(api, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS), headers })
+    if (!response.ok) return null
+    const release = await response.json()
+    return {
+      publishedAt: release.published_at ? new Date(release.published_at) : null,
+      hasAsset: (release.assets || []).some((a) => a.name === ASSET_NAME)
+    }
+  } catch (error) {
+    return null
+  }
+}
+
 function walk (dir, base, out) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const abs = path.join(dir, entry.name)
@@ -185,4 +210,4 @@ async function readLocal (location) {
 }
 
 // retryDelayMs is a property so tests can shorten the backoff.
-module.exports = { OWNER, REPO, ASSET_NAME, MODULE, retryDelayMs: 1000, maxUnpackedBytes: 512 * 1024 * 1024, assetUrl, toResource, readTarGz, downloadAsset, readLocal }
+module.exports = { OWNER, REPO, ASSET_NAME, MODULE, retryDelayMs: 1000, maxUnpackedBytes: 512 * 1024 * 1024, assetUrl, toResource, readTarGz, downloadAsset, releaseState, readLocal }

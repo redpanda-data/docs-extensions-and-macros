@@ -93,6 +93,57 @@ function clearAttachmentCache () {
   cache.clear()
 }
 
+const minutes = (name, fallback) => {
+  const n = Number(process.env[name])
+  return Number.isFinite(n) && n >= 0 ? n * 60000 : fallback
+}
+
+/**
+ * loadReleaseAttachment(), but for a release published in the last
+ * `freshMs` whose docs asset is not attached yet, it checks again every
+ * `pollMs` for up to `waitMs` before returning null. Connect attaches the
+ * asset some minutes after it publishes the release, and a docs run that
+ * starts in between would otherwise fall back to comparing the binaries.
+ * An older release, or one whose asset is attached but has no attachment
+ * file, returns null at once, as loadReleaseAttachment() does.
+ *
+ * RPCN_DOCS_ASSET_WAIT_MINUTES (default 15) and
+ * RPCN_DOCS_ASSET_FRESH_MINUTES (default 120) override the limits; a wait
+ * of 0 turns the wait off.
+ */
+async function waitForReleaseAttachment (version, {
+  fetchImpl,
+  token = getGitHubApiToken(),
+  logger = console,
+  waitMs = minutes('RPCN_DOCS_ASSET_WAIT_MINUTES', 15 * 60000),
+  freshMs = minutes('RPCN_DOCS_ASSET_FRESH_MINUTES', 120 * 60000),
+  pollMs = 60000,
+  now = () => Date.now(),
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+} = {}) {
+  // Through module.exports, so a test that stubs loadReleaseAttachment stubs this too.
+  const data = await module.exports.loadReleaseAttachment(version, { fetchImpl, token, logger })
+  if (data || waitMs <= 0) return data
+  const tag = `v${version}`
+  let state = await module.exports.releaseState(tag, { fetchImpl, token })
+  if (!state || state.hasAsset || !state.publishedAt) return null
+  // Kept from the first read: a later poll can fail and return null.
+  const publishedAt = state.publishedAt.getTime()
+  if (now() - publishedAt > freshMs) return null
+  const deadline = now() + waitMs
+  while (now() < deadline) {
+    logger.log(`ℹ️  ${tag} was published ${Math.round((now() - publishedAt) / 60000)} min ago and has no ${asset.ASSET_NAME} yet; checking again in ${Math.round(pollMs / 1000)}s (up to ${Math.round((deadline - now()) / 60000)} min more)`)
+    await sleep(pollMs)
+    state = await module.exports.releaseState(tag, { fetchImpl, token })
+    if (state && state.hasAsset) {
+      cache.delete(version)
+      return module.exports.loadReleaseAttachment(version, { fetchImpl, token, logger })
+    }
+  }
+  logger.log(`ℹ️  ${tag} still has no ${asset.ASSET_NAME} after ${Math.round(waitMs / 60000)} min`)
+  return null
+}
+
 const isExtra = (c) => c && (c.requiresCgo === true || c.cloudOnly === true)
 
 /**
@@ -211,6 +262,9 @@ module.exports = {
   attachmentFromFiles,
   validateAttachment,
   loadReleaseAttachment,
+  waitForReleaseAttachment,
+  // Re-exported so tests can stub the release lookup.
+  releaseState: (...args) => asset.releaseState(...args),
   clearAttachmentCache,
   ossIndexFromAttachment,
   binaryAnalysisFromAttachment

@@ -9,6 +9,20 @@ const { flattenConnectFields } = require('./helpers/flattenConnectFields');
  * @param {object} opts - { oldVersion, newVersion, timestamp, binaryAnalysis, oldBinaryAnalysis }
  * @returns {object} JSON diff report
  */
+// A component's Cloud flag in the diff. The docs asset flags every group
+// except Bloblang, by design, so a component without its own flag takes it
+// from the binary analysis's Cloud list. When that analysis is itself built
+// from the docs asset (coveredTypes), a group it does not cover is unknown:
+// null, never a false "not in Cloud".
+function cloudFlagFor(type, name, metadata, analysis) {
+  if (typeof metadata.cloudSupported === 'boolean') return metadata.cloudSupported;
+  const comparison = analysis && analysis.comparison;
+  if (!comparison) return null;
+  if (Array.isArray(analysis.coveredTypes) && !analysis.coveredTypes.includes(type)) return null;
+  const key = `${type}:${name}`;
+  return [...(comparison.inCloud || []), ...(comparison.cloudOnly || [])].some(c => `${c.type}:${c.name}` === key);
+}
+
 function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
   const oldMap = buildComponentMap(oldIndex);
   const newMap = buildComponentMap(newIndex);
@@ -28,7 +42,7 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
       description: raw.description || '',
       requiresCgo: metadata.requiresCgo || false,
       cloudOnly: metadata.cloudOnly || false,
-      cloudSupported: metadata.cloudSupported || false
+      cloudSupported: cloudFlagFor(type, name, metadata, opts.binaryAnalysis)
     };
   });
 
@@ -46,7 +60,7 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
       description: raw.description || '',
       requiresCgo: metadata.requiresCgo || false,
       cloudOnly: metadata.cloudOnly || false,
-      cloudSupported: metadata.cloudSupported || false
+      cloudSupported: cloudFlagFor(type, name, metadata, opts.oldBinaryAnalysis)
     };
   });
 
@@ -485,7 +499,9 @@ function buildComponentMap(indexObj) {
       // Preserve platform metadata for accurate diff comparison
       const metadata = {
         requiresCgo: component.requiresCgo || false,
-        cloudSupported: component.cloudSupported || false,
+        // Kept as given: undefined means the source has no Cloud flag for
+        // this component (Bloblang), which is not the same as false.
+        cloudSupported: component.cloudSupported,
         cloudOnly: component.cloudOnly || false
       };
 
