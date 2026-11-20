@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.66.2](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.66.1...v5.66.2) (2026-11-20)
+
+
+### Bug fixes
+
+* **release-notes:** insert the floor version on a page that lacks it ([#544](https://github.com/redpanda-data/docs-extensions-and-macros/issues/544)) ([0d2c7b0](https://github.com/redpanda-data/docs-extensions-and-macros/commit/0d2c7b09099286510ee90cd99fdd4213c6c7dd0b))
+
 ## [5.66.1](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.66.0...v5.66.1) (2026-11-18)
 
 
