@@ -1,5 +1,13 @@
 # Changelog
 
+## [5.67.1](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.67.0...v5.67.1) (2026-11-20)
+
+
+### Bug fixes
+
+* **rpk-docs:** keep multi-column help tables as written ([#549](https://github.com/redpanda-data/docs-extensions-and-macros/issues/549)) ([5264e6a](https://github.com/redpanda-data/docs-extensions-and-macros/commit/5264e6a15efdafcd25421c596a14b57a62300382))
+* **vendor:** sync Vale styles and page templates from docs-team-standards ([#475](https://github.com/redpanda-data/docs-extensions-and-macros/issues/475)) ([d99ca8f](https://github.com/redpanda-data/docs-extensions-and-macros/commit/d99ca8f743d46691005fa45c81ad2979fb5fb760))
+
 ## [5.67.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.66.2...v5.67.0) (2026-11-20)
 
 
