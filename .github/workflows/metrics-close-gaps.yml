@@ -353,6 +353,11 @@ jobs:
           done <<< "$ALLOWED_PATHS"
           python3 "$GAP_LOOP_PY" check-diff --base HEAD "${ALLOW[@]}" --allow-new "$ALLOWED_NEW"
           python3 "$GAP_LOOP_PY" check-leak --base HEAD --source "$SOURCE_DIR"
+          # The tree these checks passed, so the verify step can prove the
+          # fresh cluster run did not change it.
+          git add -A
+          echo "tree=$(git write-tree)" >> "$GITHUB_OUTPUT"
+          git reset -q
           if [ -z "$(git status --porcelain)" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
@@ -364,6 +369,7 @@ jobs:
         env:
           TAG: ${{ steps.inputs.outputs.tag }}
           CHANGED: ${{ steps.paths.outputs.changed }}
+          CHECKED_TREE: ${{ steps.paths.outputs.tree }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -uo pipefail
@@ -375,6 +381,18 @@ jobs:
             OUT="$VERIFY_DIR/out"
             if bash "$TRUSTED_DIR/gap_loop_run.sh" generate "$TAG" "$SOURCE_DIR" "$OUT"; then
               rc=0
+              # The run executes the model's function bodies, and check-diff
+              # ran before it. Anything it wrote or edited in the tree would
+              # reach the pull request unchecked, so the tree must be the one
+              # the path checks passed.
+              git add -A
+              now=$(git write-tree)
+              git reset -q
+              if [ "$now" != "$CHECKED_TREE" ]; then
+                echo "::error::The fresh cluster run changed the repository after the path checks:"
+                git diff --stat "$CHECKED_TREE" "$now"
+                exit 1
+              fi
               python3 "$GAP_LOOP_PY" compare --state "$VERIFY_DIR/state" --json \
                 --gaps "$OUT/metrics-gaps.json" --dataset "$OUT/redpanda-metrics-$TAG.json" > "$COMPARE" || rc=$?
             fi
