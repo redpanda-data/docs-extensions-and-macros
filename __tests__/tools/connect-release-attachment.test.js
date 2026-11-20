@@ -159,6 +159,16 @@ describe('waitForReleaseAttachment', () => {
     expect(load).toHaveBeenCalledTimes(2);
   });
 
+  test('a poll that cannot read the release keeps waiting instead of throwing', async () => {
+    const c = clock(PUBLISHED + 60000);
+    const states = [{ publishedAt: new Date(PUBLISHED), hasAsset: false }, null, { publishedAt: new Date(PUBLISHED), hasAsset: true }];
+    releaseAttachment.releaseState.mockImplementation(async () => states.shift());
+    jest.spyOn(releaseAttachment, 'loadReleaseAttachment').mockResolvedValueOnce(null).mockResolvedValueOnce(readFixture());
+    const data = await releaseAttachment.waitForReleaseAttachment(VERSION, { ...c, token: null, logger: { log: () => {} }, waitMs: 15 * 60000, freshMs: 120 * 60000, pollMs: 60000 });
+    expect(data).toEqual(readFixture());
+    expect(c.sleep).toHaveBeenCalledTimes(2);
+  });
+
   test('gives up after the wait and returns null, so the binaries are compared', async () => {
     const c = clock(PUBLISHED + 60000);
     releaseAttachment.releaseState.mockResolvedValue({ publishedAt: new Date(PUBLISHED), hasAsset: false });

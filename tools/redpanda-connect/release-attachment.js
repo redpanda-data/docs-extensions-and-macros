@@ -127,10 +127,12 @@ async function waitForReleaseAttachment (version, {
   const tag = `v${version}`
   let state = await module.exports.releaseState(tag, { fetchImpl, token })
   if (!state || state.hasAsset || !state.publishedAt) return null
-  if (now() - state.publishedAt.getTime() > freshMs) return null
+  // Kept from the first read: a later poll can fail and return null.
+  const publishedAt = state.publishedAt.getTime()
+  if (now() - publishedAt > freshMs) return null
   const deadline = now() + waitMs
   while (now() < deadline) {
-    logger.log(`ℹ️  ${tag} was published ${Math.round((now() - state.publishedAt.getTime()) / 60000)} min ago and has no ${asset.ASSET_NAME} yet; checking again in ${Math.round(pollMs / 1000)}s (up to ${Math.round((deadline - now()) / 60000)} min more)`)
+    logger.log(`ℹ️  ${tag} was published ${Math.round((now() - publishedAt) / 60000)} min ago and has no ${asset.ASSET_NAME} yet; checking again in ${Math.round(pollMs / 1000)}s (up to ${Math.round((deadline - now()) / 60000)} min more)`)
     await sleep(pollMs)
     state = await module.exports.releaseState(tag, { fetchImpl, token })
     if (state && state.hasAsset) {
