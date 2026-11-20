@@ -2382,7 +2382,7 @@ automation
 
       if (options.dryRun) {
         process.stdout.write(result.content)
-        console.log(`\nDone: (dry-run) updated page for ${options.tag} printed to stdout.`)
+        console.error(`\nDone: (dry-run) updated page for ${options.tag} printed to stdout.`)
       } else {
         fs.writeFileSync(pagePath, result.content, 'utf8')
         console.log(`Done: Inserted the ${options.tag} section into ${pagePath}`)

@@ -245,6 +245,7 @@ describe('assembleSection', () => {
       '.Install or upgrade to this version',
       '[,bash]',
       '----',
+      'helm repo add redpanda https://charts.redpanda.com',
       'helm repo update',
       'helm upgrade --install redpanda-controller redpanda/operator \\',
       '  --namespace <namespace> \\',
