@@ -206,6 +206,10 @@ JSON (default): `{ surface, overrides_file, extracted_file, manifest, summary, c
 |Global rewrite rules applied to every description on the way to AsciiDoc.
 |===
 
+=== rpk cross-check
+
+`cross_check` for rpk is the retirement safety property itself: every REDUNDANT prose field is deleted from a copy of the overrides, every command the generator writes a page for is rendered with the full and the pruned overrides, and `violations` lists any command whose output differs (expected empty). Two fields that are each redundant alone but not together would show up here.
+
 == Classification rules (metrics surface)
 
 `metric-overrides.json` (schema: `docs-data/metric-overrides.schema.json`) is audited against the source inventory. Only `description` is text that can go upstream: it stands in for the help string of the metric's registration. The description row is classified by the same code as a property description, with these rules for metrics.
@@ -250,10 +254,6 @@ A family registered at more than one call site says so in its note. The location
 === `retirement_pending` (metrics)
 
 A description whose help string has caught up in substance, without matching word for word, is retired through `retirement_pending: { "reason": "..." }`. The docs repo's weekly upstreaming workflow sets it in a pull request, and merging that pull request is the approval. The next `doc-tools generate metrics-docs --retire-overrides` run then deletes `description`, `upstream_ref`, `_comment` and `retirement_pending` together without comparing again, before it applies the overrides, and lists each one under `retired_overrides` in `metrics-gaps.json`. Of a description given as paragraphs, only the paragraphs for every audience are deleted.
-
-=== rpk cross-check
-
-`cross_check` for rpk is the retirement safety property itself: every REDUNDANT prose field is deleted from a copy of the overrides, every command the generator writes a page for is rendered with the full and the pruned overrides, and `violations` lists any command whose output differs (expected empty). Two fields that are each redundant alone but not together would show up here.
 
 == Surfaces
 
