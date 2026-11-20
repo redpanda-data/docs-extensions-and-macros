@@ -1,0 +1,8 @@
+# Checks: likely passive voice, such as 'is copied' or 'were created'
+extends: existence
+message: "'%s' looks passive. Say who does it: 'Redpanda copies the offsets', not 'the offsets are copied'."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#active-voice
+level: suggestion
+ignorecase: true
+tokens:
+  - '\b(?:am|is|are|was|were|be|been|being)\s+(?:\w+ly\s+)?(?:\w+ed|built|chosen|done|driven|found|given|held|hidden|kept|known|left|lost|made|meant|paid|read|run|seen|sent|set|shown|sold|split|spent|taken|told|thrown|understood|written)\b'
