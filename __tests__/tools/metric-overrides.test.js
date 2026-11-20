@@ -299,15 +299,38 @@ describeIfPython('metric overrides', () => {
       expect(entry.description_cloud_only).toEqual(['In Serverless, this counts your traffic only.'])
     })
 
-    it('deletes an override whose metric is not in the release, and it is no longer a gap', () => {
-      const gone = runRetiring({ redpanda_gone_total: { description: 'Gone.', category: 'Old metrics' }, redpanda_new_feature_lag: { labels: [] }, redpanda_other_feature_total: { labels: [] } }, ['--retire-overrides'])
-      expect(gone.after.redpanda_gone_total).toBeUndefined()
-      expect(gone.result.gaps.stale_overrides).toEqual([])
-      expect(gone.result.gaps.retired_overrides).toEqual([
-        { name: 'redpanda_gone_total', field: '', reason: 'no metric with this name is in this release' }
-      ])
-      expect(gone.result.gaps.count).toBe(0)
-      expect(gone.result.report.stdout).toContain('- `redpanda_gone_total`: no metric with this name is in this release')
+    describe('an override whose metric is not in the release', () => {
+      const GONE = { redpanda_gone_total: { description: 'Gone.', category: 'Old metrics' }, redpanda_new_feature_lag: { labels: [] }, redpanda_other_feature_total: { labels: [] } }
+      // A dataset directory that holds the dataset of another release, which documents the metric.
+      const datasetDirWith = (tag) => {
+        const dir = fs.mkdtempSync(path.join(workDir, 'attachments-'))
+        fs.writeFileSync(path.join(dir, `redpanda-metrics-${tag}.json`), JSON.stringify({ metrics: { redpanda_gone_total: {} } }))
+        return dir
+      }
+
+      it('is deleted when an earlier release had the metric, and it is no longer a gap', () => {
+        const gone = runRetiring(GONE, ['--retire-overrides', '--dataset-dir', datasetDirWith('v0.0.0')])
+        expect(gone.after.redpanda_gone_total).toBeUndefined()
+        expect(gone.result.gaps.stale_overrides).toEqual([])
+        expect(gone.result.gaps.retired_overrides).toEqual([
+          { name: 'redpanda_gone_total', field: '', reason: 'an earlier release had this metric and this release does not' }
+        ])
+        expect(gone.result.gaps.count).toBe(0)
+        expect(gone.result.report.stdout).toContain('- `redpanda_gone_total`: an earlier release had this metric and this release does not')
+      })
+
+      it.each([
+        ['no earlier dataset has the metric: it may be written ahead of a release', () => ['--retire-overrides']],
+        ['only a newer release has the metric: this run is for an older tag', () => ['--retire-overrides', '--dataset-dir', datasetDirWith('v0.0.2')]],
+        ['only a release candidate of a newer release has it', () => ['--retire-overrides', '--dataset-dir', datasetDirWith('v0.0.2-rc1')]]
+      ])('is kept and reported when %s', (_, args) => {
+        const kept = runRetiring(GONE, args())
+        expect(kept.after.redpanda_gone_total).toEqual(GONE.redpanda_gone_total)
+        expect(kept.result.gaps.retired_overrides).toEqual([])
+        expect(kept.result.gaps.stale_overrides).toEqual(['redpanda_gone_total'])
+        expect(kept.result.gaps.count).toBe(1)
+        expect(kept.result.log).toMatch(/no earlier dataset has that metric, so it was not deleted/)
+      })
     })
 
     it('keeps the empty labels list that covers an unexported metric when another part of the override retires', () => {
@@ -480,6 +503,19 @@ describeIfPython('metric overrides', () => {
       // Control: a period elsewhere is a difference.
       redpanda_new_feature_lag: { description: 'From. source' }
     }
+
+    it('keeps text that only matches the help string when its paragraphs are run together', () => {
+      // The audit offers this text for upstreaming, so the release run must not retire it.
+      const split = {
+        redpanda_cluster_brokers: { description: ['Number of configured', 'brokers in the cluster'] },
+        vectorized_raft_leader_for: { description: 'Leader\n\n.' }
+      }
+      const result = run(split, ['--retire-overrides'])
+      const after = JSON.parse(read(path.join(workDir, `run-${counter}`, 'overrides.json'))).metrics
+      expect(after.redpanda_cluster_brokers).toEqual(split.redpanda_cluster_brokers)
+      expect(result.gaps.retired_overrides).toEqual([])
+      expect(result.dataset.metrics.redpanda_cluster_brokers.description).toMatch(/Number of configured\.?\n\nbrokers in the cluster/)
+    })
 
     it('retires the text for everyone and keeps the audience paragraph', () => {
       const result = run(OVERRIDES, ['--retire-overrides'])
