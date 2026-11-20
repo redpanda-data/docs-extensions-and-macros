@@ -45,37 +45,59 @@ const INLINE_MACRO_RE = /(?<![\w:])image:(?!:)([^\[\]\s]+)\[([^\]]*)\]/g
 const NAMED_ATTR_RE = /^[a-zA-Z_:][a-zA-Z0-9_-]*\s*=/
 const BARE_DIMENSION_RE = /^\d+$/
 
-// A named alt attribute, quoted: alt="..." or alt='...'. Asciidoctor reads a
-// quoted value whole, commas included, and a named alt wins over the
-// positional one.
-const NAMED_QUOTED_ALT_RE = /(?:^|,)\s*alt\s*=\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')/
-
-function parseAltText (attrs) {
-  const trimmed = attrs.trim()
-  const named = trimmed.match(NAMED_QUOTED_ALT_RE)
-  if (named) {
-    const value = named[1] !== undefined ? named[1] : named[2]
-    return { altText: value.replace(/\\(["'])/g, '$1'), hasUnquotedComma: false }
-  }
-  if (trimmed.startsWith('"')) {
-    const closingIdx = trimmed.indexOf('"', 1)
-    if (closingIdx !== -1) {
-      return { altText: trimmed.slice(1, closingIdx), hasUnquotedComma: false }
+// Split an image macro's attribute list on the commas Asciidoctor splits on:
+// those outside a quoted value. A quote opens a value only at its start,
+// positionally or right after `name=`, so a comma or `alt=` inside quoted
+// text is part of that text. An unclosed quote falls back to a plain split.
+function splitAttrs (attrs) {
+  const segments = []
+  let cur = ''
+  let quote = null
+  for (let i = 0; i < attrs.length; i++) {
+    const ch = attrs[i]
+    if (quote) {
+      cur += ch
+      if (ch === '\\' && i + 1 < attrs.length) { cur += attrs[++i]; continue }
+      if (ch === quote) quote = null
+      continue
     }
+    if ((ch === '"' || ch === "'") && /^\s*(?:[a-zA-Z_:][a-zA-Z0-9_-]*\s*=\s*)?$/.test(cur)) {
+      quote = ch
+      cur += ch
+      continue
+    }
+    if (ch === ',') { segments.push(cur.trim()); cur = ''; continue }
+    cur += ch
   }
-  const segments = trimmed.split(',').map((s) => s.trim())
-  // An unquoted named alt=: its value runs to the next comma, and any prose
-  // after that comma is split off, the same as for a positional alt.
+  if (quote) return attrs.split(',').map((s) => s.trim())
+  segments.push(cur.trim())
+  return segments
+}
+
+const QUOTED_VALUE_RE = /^(["'])((?:\\.|(?!\1).)*)\1$/
+
+function unquote (value) {
+  const m = value.match(QUOTED_VALUE_RE)
+  return m ? { text: m[2].replace(/\\(["'])/g, '$1'), quoted: true } : { text: value, quoted: false }
+}
+
+// A named alt wins over the positional one, as in Asciidoctor. A quoted
+// value is read whole, commas included. An unquoted value runs to the next
+// comma, and prose after that comma is an unquoted-comma violation.
+function parseAltText (attrs) {
+  const segments = splitAttrs(attrs.trim())
+  const isAttr = (s) => NAMED_ATTR_RE.test(s) || BARE_DIMENSION_RE.test(s)
   const namedIdx = segments.findIndex((s) => /^alt\s*=/.test(s))
   if (namedIdx !== -1) {
-    const altText = segments[namedIdx].replace(/^alt\s*=\s*/, '')
+    const { text, quoted } = unquote(segments[namedIdx].replace(/^alt\s*=\s*/, ''))
+    if (quoted) return { altText: text, hasUnquotedComma: false }
     const rest = segments.filter((s, i) => i !== namedIdx && (i !== 0 || NAMED_ATTR_RE.test(s)))
-    const allRestAreAttrs = rest.every((s) => NAMED_ATTR_RE.test(s) || BARE_DIMENSION_RE.test(s))
-    return { altText, hasUnquotedComma: rest.length > 0 && !allRestAreAttrs }
+    return { altText: text, hasUnquotedComma: rest.length > 0 && !rest.every(isAttr) }
   }
-  const [altText, ...rest] = segments
-  const allRestAreAttrs = rest.every((s) => NAMED_ATTR_RE.test(s) || BARE_DIMENSION_RE.test(s))
-  return { altText, hasUnquotedComma: rest.length > 0 && !allRestAreAttrs }
+  const [first, ...rest] = segments
+  const { text, quoted } = unquote(first)
+  if (quoted) return { altText: text, hasUnquotedComma: false }
+  return { altText: first, hasUnquotedComma: rest.length > 0 && !rest.every(isAttr) }
 }
 
 function findAdocFiles (dir, out = []) {

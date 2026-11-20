@@ -68,6 +68,16 @@ describe('parseAltText', () => {
     expect(parseAltText("width=600,alt='A, B'")).toEqual({ altText: 'A, B', hasUnquotedComma: false })
     expect(parseAltText('Positional,alt="Named, wins"')).toEqual({ altText: 'Named, wins', hasUnquotedComma: false })
   })
+  test('attribute-like text inside a quoted value is part of the value', () => {
+    expect(parseAltText(`"A detailed diagram, alt='X'"`)).toEqual({ altText: "A detailed diagram, alt='X'", hasUnquotedComma: false })
+    expect(parseAltText('alt="One, alt=two",width=600')).toEqual({ altText: 'One, alt=two', hasUnquotedComma: false })
+  })
+  test('an unquoted named alt wins over a quoted positional one', () => {
+    expect(parseAltText('"A long positional description",alt=Short')).toEqual({ altText: 'Short', hasUnquotedComma: false })
+  })
+  test('an unclosed quote falls back to a plain comma split', () => {
+    expect(parseAltText('"Unclosed, comma').hasUnquotedComma).toBe(true)
+  })
   test('an unquoted named alt is read up to the next comma', () => {
     expect(parseAltText('alt=Console overview,width=600')).toEqual({ altText: 'Console overview', hasUnquotedComma: false })
     expect(parseAltText('alt=Topics, partitions, and offsets').hasUnquotedComma).toBe(true)
