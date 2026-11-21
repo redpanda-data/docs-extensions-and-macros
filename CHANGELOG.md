@@ -1,5 +1,13 @@
 # Changelog
 
+## [5.67.2](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.67.1...v5.67.2) (2026-11-21)
+
+
+### Bug fixes
+
+* resolve moved property anchors and quiet expected build warnings ([#556](https://github.com/redpanda-data/docs-extensions-and-macros/issues/556)) ([053abbb](https://github.com/redpanda-data/docs-extensions-and-macros/commit/053abbb6b88414300658c61aaad381f80a49b13b))
+* **vendor:** sync Vale styles and page templates from docs-team-standards ([#554](https://github.com/redpanda-data/docs-extensions-and-macros/issues/554)) ([9e4f7d9](https://github.com/redpanda-data/docs-extensions-and-macros/commit/9e4f7d9e44efb3f85f3811a18fd6f05f65c2b582))
+
 ## [5.67.1](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.67.0...v5.67.1) (2026-11-20)
 
 
