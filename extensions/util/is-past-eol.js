@@ -18,6 +18,8 @@ module.exports = function isPastEol (attributes, now = new Date()) {
   if (!attributes || typeof attributes !== 'object') return false
   const isTrue = (value) => value === true || value === 'true'
   if (isTrue(attributes['page-is-past-eol'])) return true
+  // compute-end-of-life decided it, so the date fallback must not overrule it
+  if (attributes['page-is-past-eol'] === false || attributes['page-is-past-eol'] === 'false') return false
   if (isTrue(attributes['page-eol'])) return true
   const releaseDate = attributes['page-release-date']
   if (!releaseDate) return false
