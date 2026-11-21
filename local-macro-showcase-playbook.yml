@@ -83,6 +83,7 @@ asciidoc:
   - './macros/badge'
   - './macros/enterprise'
   - './macros/prop'
+  - './macros/property-catalog'
   - './macros/helm-ref'
 antora:
   extensions:

@@ -1,0 +1,40 @@
+// Trimmed from modules/reference/pages/properties/topic-properties.adoc in redpanda-data/docs: the title, the declaration, and the
+// property partial includes, exactly as the real page writes them.
+= Topic Configuration Properties
+:page-property-source: topic-properties
+
+// The filter bar, as the docs pages place it: above the first section
+property_catalog::[mode=filter]
+
+== Retention and Compaction Properties
+
+include::reference:partial$properties/topic-properties.adoc[tags=category-retention-compaction;!deprecated;!exclude-from-docs]
+
+== Segment and Message Properties
+
+include::reference:partial$properties/topic-properties.adoc[tags=category-segment-message;!deprecated;!exclude-from-docs]
+
+== Performance and Cluster Properties
+
+include::reference:partial$properties/topic-properties.adoc[tags=category-performance-cluster;!deprecated;!exclude-from-docs]
+
+== Tiered Storage properties
+
+include::reference:partial$properties/topic-properties.adoc[tags=category-tiered-storage;!deprecated;!exclude-from-docs]
+
+== Remote Read Replica properties
+
+include::reference:partial$properties/topic-properties.adoc[tags=category-remote-read-replica;!deprecated;!exclude-from-docs]
+
+== Apache Iceberg integration properties
+
+include::reference:partial$properties/topic-properties.adoc[tags=category-iceberg-integration;!deprecated;!exclude-from-docs]
+
+== Schema Registry and validation properties
+
+include::reference:partial$properties/topic-properties.adoc[tags=category-schema-registry;!deprecated;!exclude-from-docs]
+
+== Other topic properties
+
+include::reference:partial$properties/topic-properties.adoc[tags=category-other;!deprecated;!exclude-from-docs]
+

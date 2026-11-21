@@ -1,0 +1,12 @@
+// Trimmed from modules/reference/pages/properties/object-storage-properties.adoc in redpanda-data/cloud-docs: the title, the declaration,
+// and the property partial includes, exactly as the real page writes them.
+= Object Storage Properties 
+:page-property-source: object-storage-properties
+
+// The filter bar, as the docs pages place it: above the first section
+property_catalog::[mode=filter]
+
+== Cluster configuration
+
+include::streaming:reference:partial$properties/object-storage-properties.adoc[tags=redpanda-cloud;!deprecated;!exclude-from-docs]
+

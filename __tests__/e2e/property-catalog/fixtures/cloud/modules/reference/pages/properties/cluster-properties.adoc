@@ -1,0 +1,12 @@
+// Trimmed from modules/reference/pages/properties/cluster-properties.adoc in redpanda-data/cloud-docs: the title, the declaration,
+// and the property partial includes, exactly as the real page writes them.
+= Cluster Configuration Properties 
+:page-property-source: cluster-properties
+
+// The filter bar, as the docs pages place it: above the first section
+property_catalog::[mode=filter]
+
+== Cluster configuration
+
+include::streaming:reference:partial$properties/cluster-properties.adoc[tags=redpanda-cloud;!deprecated;!exclude-from-docs]
+

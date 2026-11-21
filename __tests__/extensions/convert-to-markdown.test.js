@@ -850,3 +850,54 @@ describe('component bar facts in the front matter', () => {
     expect(yamlOf({ 'page-context-switcher': 'not json' })).not.toHaveProperty('page-context-switcher')
   })
 })
+
+describe('property catalog', () => {
+  const { cardModel, catalogHtml, filterBarHtml } = require('../../macros/property-catalog')
+  const entries = [
+    { name: 'retention_bytes', type: 'integer', config_scope: 'cluster', category: 'other', needs_restart: false, default: null, description: 'Default maximum number of bytes per partition. More text.' },
+    { name: 'cloud_storage_enabled', type: 'boolean', config_scope: 'cluster', category: 'other', needs_restart: true, default: false, is_enterprise: true, enterprise_constructor: 'restricted_only', enterprise_restricted_value: ['true'], description: 'Enable object storage.' },
+    { name: 'dashboard_dir', type: 'string', config_scope: 'broker', category: 'other', needs_restart: true, is_deprecated: true, description: 'No longer used.' },
+  ]
+  const cards = entries.map((e, i) => cardModel(e, { href: i === 0 ? '../cluster-properties/#retention_bytes' : undefined }))
+
+  test('renders the cards as a list, not the controls', () => {
+    const body = bodyOf(convert(`<h1 class="page">All properties</h1>${catalogHtml(cards)}`))
+    const items = body.split('\n').filter((l) => l.startsWith('- '))
+    expect(items).toEqual([
+      '- `retention_bytes` (integer): Cluster. Default maximum number of bytes per partition. Default: `null`. Set with `rpk cluster config set retention_bytes <value>`. [Full reference](https://docs.example.com/streaming/current/manage/cluster-properties/#retention_bytes)',
+      '- `cloud_storage_enabled` (boolean): Object storage, Restart required, Enterprise values (The value true requires an Enterprise Edition license). Enable object storage. Default: `false`. Set with `rpk cluster config set cloud_storage_enabled <value>`.',
+      '- `dashboard_dir` (string): Broker, Restart required, Deprecated. No longer used.',
+    ])
+    expect(body).not.toMatch(/Search properties|Clear filters|All selected|prop-catalog/)
+  })
+
+  test('the row markup (linked name with <wbr>, colored command, license values) exports the same line', () => {
+    const rows = [
+      cardModel({ name: 'sasl_mechanisms', type: 'array', config_scope: 'cluster', category: 'other', default: ['SCRAM'], is_enterprise: true, enterprise_constructor: 'restricted_only', enterprise_restricted_value: ['GSSAPI', 'OAUTHBEARER'], description: 'A list of supported SASL mechanisms.' }, { href: '../cluster-properties/#sasl_mechanisms' }),
+      cardModel({ name: 'retention.ms', type: 'integer', config_scope: 'topic', category: 'retention-compaction', default: 604800000, description: 'How long to keep data.' }, { href: '../topic-properties/#retention-ms' }),
+    ]
+    const html = catalogHtml(rows)
+    expect(html).toContain('<a class="prop-card-link" href="../topic-properties/#retention-ms" aria-label="retention.ms"><code class="prop-card-name">retention.<wbr>ms</code></a>')
+    expect(html).toContain('<span class="prop-card-fact-label">Needs a license</span> <code>GSSAPI</code>')
+    const items = bodyOf(convert(`<h1 class="page">All properties</h1>${html}`)).split('\n').filter((l) => l.startsWith('- '))
+    expect(items).toEqual([
+      '- `sasl_mechanisms` (array): Cluster, Enterprise values (The values GSSAPI or OAUTHBEARER require an Enterprise Edition license). A list of supported SASL mechanisms. Default: `[SCRAM]`. Set with `rpk cluster config set sasl_mechanisms <value>`. [Full reference](https://docs.example.com/streaming/current/manage/cluster-properties/#sasl_mechanisms)',
+      '- `retention.ms` (integer): Topic. How long to keep data. Default: `604800000`. Set with `rpk topic alter-config <topic> --set retention.ms=<value>`. [Full reference](https://docs.example.com/streaming/current/manage/topic-properties/#retention-ms)',
+    ])
+  })
+
+  test('an empty catalog exports a short message, not its styles, scripts, or controls', () => {
+    expect(bodyOf(convert(`<h1 class="page">All properties</h1>${catalogHtml([])}`))).toBe('No properties are listed.')
+  })
+
+  test('the no-data block exports its message', () => {
+    const html = '<div class="prop-catalog prop-catalog--no-data"><p>The property list is not available in this build.</p></div>'
+    expect(bodyOf(convert(`<h1 class="page">All properties</h1>${html}`))).toBe('The property list is not available in this build.')
+  })
+
+  test('a reference page\'s filter bar exports as nothing', () => {
+    const bar = filterBarHtml(cards.map((c) => ({ ...c, anchor: c.name })))
+    const body = bodyOf(convert(`<h1 class="page">Cluster</h1>${bar}<div class="sect2"><h3 id="retention_bytes">retention_bytes</h3><p>Entry.</p></div>`))
+    expect(body).toBe('### retention_bytes\n\nEntry.')
+  })
+})

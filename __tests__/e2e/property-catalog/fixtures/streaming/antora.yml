@@ -1,0 +1,6 @@
+# The self-managed component Cloud borrows its property data from. The e2e
+# stages ../reference (the real v26.2.6 JSON, partials, and trimmed pages from
+# redpanda-data/docs) into this component's reference module.
+name: streaming
+title: Streaming
+version: '26.2'
