@@ -252,6 +252,30 @@ describe('tables', () => {
     )
     expect(bodyOf(md)).toBe('> 📝 **NOTE**\n>\n> Use `rpk`.')
   })
+
+  test('reads the type of a font-icon admonition', () => {
+    const md = convert(
+      '<h1>T</h1><div class="admonitionblock warning"><table><tr><td class="icon"><i class="fa icon-warning" title="Warning"></i></td>' +
+      '<td class="content">Data loss.</td></tr></table></div>'
+    )
+    expect(bodyOf(md)).toBe('> ⚠️ **WARNING**\n>\n> Data loss.')
+  })
+
+  test('reads the type of an admonition built without font icons', () => {
+    const md = convert(
+      '<h1>T</h1><div class="admonitionblock warning"><table><tr><td class="icon"><div class="title">Warning</div></td>' +
+      '<td class="content">Data loss.</td></tr></table></div>'
+    )
+    expect(bodyOf(md)).toBe('> ⚠️ **WARNING**\n>\n> Data loss.')
+  })
+
+  test('keeps the custom title of an admonition built without font icons', () => {
+    const md = convert(
+      '<h1>T</h1><div class="admonitionblock tip"><table><tr><td class="icon"><div class="title">Tip</div></td>' +
+      '<td class="content"><div class="title">Faster restarts</div><div class="paragraph"><p>Body</p></div></td></tr></table></div>'
+    )
+    expect(bodyOf(md).split('\n')[0]).toBe('> 💡 **TIP: Faster restarts**')
+  })
 })
 
 describe('escaping', () => {
@@ -348,6 +372,19 @@ describe('inline code', () => {
   test('widens the delimiter when the code contains a backtick', () => {
     const md = convert('<h1>T</h1><p>Type <code>a ` b</code>.</p>')
     expect(bodyOf(md)).toBe('Type ``a ` b``.')
+  })
+
+  test('an Enterprise property-ref keeps its marker outside the code span', () => {
+    const { buildPropContent } = require('../../macros/prop')
+    const ref = buildPropContent({ name: 'audit_enabled', role: 'property-ref', enterprise: true })
+    expect(bodyOf(convert(`<h1>T</h1><p>Set ${ref} to true.</p>`))).toBe('Set `audit_enabled` (enterprise) to true.')
+    const linked = '<code class="property-ref is-enterprise-property" data-property-name="audit_enabled"><a href="x.html#audit_enabled">audit_enabled</a></code><span class="enterprise-feature-marker visually-hidden"> (Enterprise)</span>'
+    expect(bodyOf(convert(`<h1>T</h1><p>Set ${linked}.</p>`))).toBe('Set `audit_enabled` (enterprise).')
+  })
+
+  test('a property-ref without the marker gets no Enterprise word', () => {
+    const md = convert('<h1>T</h1><p>Set <code class="property-ref" data-property-name="x">x</code>.</p>')
+    expect(bodyOf(md)).toBe('Set `x`.')
   })
 })
 
@@ -542,6 +579,14 @@ describe('enterprise feature marker in Markdown', () => {
     const md = convert('<h1>T</h1><p>Use <span class="enterprise-feature">Tiered Storage</span>.</p>')
     expect(bodyOf(md)).toBe(`Use Tiered Storage ${ENTERPRISE_MARKER}.`)
   })
+
+  test('drops the macro\'s hidden text marker so the term is marked once', () => {
+    const hidden = '<span class="enterprise-feature-marker visually-hidden"> (Enterprise)</span>'
+    const md = convert(`<h1>T</h1><p>Use <span class="enterprise-feature" data-tooltip="x">Tiered Storage${hidden}</span>.</p>`)
+    expect(bodyOf(md)).toBe(`Use Tiered Storage ${ENTERPRISE_MARKER}.`)
+    const beta = convert(`<h1>T</h1><p><span class="enterprise-feature">Stretch Clusters${hidden}</span> <span class="rp-badge rp-badge--beta">Beta</span></p>`)
+    expect(bodyOf(beta)).toBe('Stretch Clusters (enterprise, beta)')
+  })
 })
 
 describe('combined status markers in Markdown', () => {
@@ -572,6 +617,53 @@ describe('combined status markers in Markdown', () => {
   test('an enterprise feature followed by other text keeps its own marker', () => {
     const html = '<p><span class="enterprise-feature">Tiered Storage</span> <em>note</em></p>'
     expect(createTurndown().turndown(html)).toBe(`Tiered Storage ${ENTERPRISE_MARKER} _note_`)
+  })
+
+  // The badge macro emits docs-ui meaning badges with no parentheses in the
+  // label, so the class carries the meaning into the Markdown.
+  describe('rp-badge meaning badges', () => {
+    const { buildBadgeHtml } = require('../../macros/badge')
+    const { badgeMeaning } = require('../../extensions/convert-to-markdown')
+
+    test.each([
+      ['beta', 'Shadowing (beta)'],
+      ['enterprise', 'Shadowing (enterprise)'],
+      ['deprecated', 'Shadowing (deprecated)'],
+      ['Since 25.1', 'Shadowing (since v25.1)'],
+      ['limited', 'Shadowing (limited availability)'],
+      ['BYOC', 'Shadowing (BYOC)'],
+      ['self-managed', 'Shadowing (self-managed)'],
+    ])('a %s badge keeps its meaning', (label, expected) => {
+      expect(createTurndown().turndown(`<p>Shadowing ${buildBadgeHtml({ label })}</p>`)).toBe(expected)
+    })
+
+    test('a beta enterprise feature gets one combined marker from rp-badge markup', () => {
+      const html = `<p><span class="enterprise-feature">Stretch Clusters</span> ${buildBadgeHtml({ label: 'beta' })}</p>`
+      expect(createTurndown().turndown(html)).toBe('Stretch Clusters (enterprise, beta)')
+    })
+
+    test('rp-badge--sm is a size, not a meaning', () => {
+      const html = '<p>X <span class="rp-badge rp-badge--sm rp-badge--new">New</span></p>'
+      expect(createTurndown().turndown(html)).toBe('X (new)')
+    })
+
+    test('a linked use-case badge keeps its link', () => {
+      const html = '<p>See <a class="rp-badge rp-badge--use-case" href="catalog.html?usecase=cdc">Change data capture</a></p>'
+      expect(createTurndown().turndown(html)).toBe('See [Change data capture](catalog.html?usecase=cdc)')
+    })
+
+    test.each(['use-case', 'neutral'])('an enterprise feature before a linked %s badge keeps its marker', (meaning) => {
+      const html = `<p><span class="enterprise-feature">Stretch Clusters</span> <a class="rp-badge rp-badge--${meaning}" href="catalog.html">Catalog</a></p>`
+      expect(createTurndown().turndown(html)).toBe(`Stretch Clusters ${ENTERPRISE_MARKER} [Catalog](catalog.html)`)
+    })
+
+    test('badgeMeaning reads the class, legacy beta included', () => {
+      const domino = require('@mixmark-io/domino')
+      const el = (html) => domino.createDocument(html).body.firstChild
+      expect(badgeMeaning(el('<span class="rp-badge rp-badge--eol">End of life</span>'))).toBe('eol')
+      expect(badgeMeaning(el('<span class="badge badge--beta">(beta)</span>'))).toBe('beta')
+      expect(badgeMeaning(el('<span class="badge badge--large">x</span>'))).toBe(null)
+    })
   })
 })
 

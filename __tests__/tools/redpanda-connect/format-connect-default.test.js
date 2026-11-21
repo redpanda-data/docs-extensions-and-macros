@@ -4,7 +4,8 @@
 // formatConnectDefault.js, which connectval: shares. This proves the refactor
 // changed no output: every component in a real Connect dataset renders
 // byte-identically with the pre-refactor function, kept here frozen as it was
-// on origin/main 328a2e4.
+// on origin/main 328a2e4, plus the meaning-badge change to the beta and
+// version lines, which is not part of that refactor.
 
 const fs = require('fs')
 const path = require('path')
@@ -96,7 +97,7 @@ const frozenRenderConnectFields = (() => {
       let desc = escapePlaceholderBraces(child.description || '');
       if (child.is_beta) {
         // Remove any leading "BETA:" label (case-insensitive, trims leading whitespace)
-        desc = 'badge::[label=Beta, size=large, tooltip={page-beta-text}]\n\n' + desc.replace(/^\s*BETA:\s*/i, '');
+        desc = 'badge::[label=Beta, tooltip={page-beta-text}]\n\n' + desc.replace(/^\s*BETA:\s*/i, '');
       }
   
       // --- Interpolation support notice ---
@@ -119,7 +120,7 @@ const frozenRenderConnectFields = (() => {
         block += `include::connect:components:partial$secret_warning.adoc[]\n\n`;
       }
       if (child.version) {
-        block += `ifndef::env-cloud[]\nRequires version ${child.version} or later.\nendif::[]\n\n`;
+        block += `ifndef::env-cloud[]\nbadge::[label=Since ${child.version}, product=Redpanda Connect]\nendif::[]\n\n`;
       }
   
       block += `*Type*: \`${displayType}\`\n\n`;

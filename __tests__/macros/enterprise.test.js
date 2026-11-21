@@ -421,8 +421,9 @@ features:
     test('links the feature name to the licensing page by default', () => {
       const html = buildEnterpriseContent({ ...defaults, feature: 'Continuous Data Balancing' })
       expect(html).toBe(
-        '<span class="enterprise-feature" title="Continuous Data Balancing requires an Enterprise Edition license.">' +
-        'xref:get-started:licensing/overview.adoc[Continuous Data Balancing]</span>'
+        '<span class="enterprise-feature" title="Requires an Enterprise Edition license.">' +
+        'xref:get-started:licensing/overview.adoc[Continuous Data Balancing]' +
+        '<span class="enterprise-feature-marker visually-hidden"> (Enterprise)</span></span>'
       )
     })
 
@@ -477,7 +478,17 @@ features:
     test('renders plain text without a link when links are disabled', () => {
       const html = buildEnterpriseContent({ ...defaults, feature: 'Shadowing', links: false })
       expect(html).not.toContain('xref:')
-      expect(html).toContain('>Shadowing</span>')
+      expect(html).toContain('>Shadowing<span class="enterprise-feature-marker visually-hidden"> (Enterprise)</span></span>')
+    })
+
+    test('says Enterprise in text, not only through the CSS lock and color', () => {
+      // Agents, search indexers, and screen readers read the text, not the style.
+      const linked = buildEnterpriseContent({ ...defaults, feature: 'Shadowing' })
+      const plain = buildEnterpriseContent({ ...defaults, feature: 'Shadowing', links: false })
+      for (const html of [linked, plain]) {
+        const text = html.replace(/<[^>]+>/g, '').replace(/xref:[^[]*\[([^\]]*)\]/g, '$1')
+        expect(text).toBe('Shadowing (Enterprise)')
+      }
     })
 
     test('omits the tooltip when disabled', () => {
@@ -488,7 +499,8 @@ features:
 
   describe('resolveTooltipAttribute', () => {
     test.each([
-      [undefined, 'title'],
+      [undefined, 'data-tooltip'],
+      ['', 'data-tooltip'],
       ['title', 'title'],
       ['true', 'data-enterprise-tooltip'],
       ['data-tooltip', 'data-tooltip'],
@@ -497,9 +509,9 @@ features:
       expect(resolveTooltipAttribute(input)).toBe(expected)
     })
 
-    test('falls back to title for invalid values', () => {
+    test('falls back to data-tooltip for invalid values', () => {
       const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
-      expect(resolveTooltipAttribute('sparkles')).toBe('title')
+      expect(resolveTooltipAttribute('sparkles')).toBe('data-tooltip')
       expect(warn).toHaveBeenCalled()
       warn.mockRestore()
     })
@@ -603,8 +615,8 @@ features:
     // depend on that registration.
     test('renders a beta badge for entries marked beta', () => {
       const table = buildFeatureTable(features, 'operator')
-      expect(table).toContain('pass:[<span class="badge badge--beta " data-tooltip=')
-      expect(table).toContain('>(beta)</span>]')
+      expect(table).toContain('pass:[<span class="rp-badge rp-badge--beta badge badge--beta" data-tooltip=')
+      expect(table).toContain('>Beta</span>]')
       expect(table).not.toContain('badge::[')
       expect(table).not.toContain('badge:[label')
     })
@@ -622,7 +634,7 @@ features:
       expect(withTag).toContain('&lt;img')
       // Ordinary labels are untouched.
       expect(buildBadgeHtml({ label: 'beta', tooltip: 'Beta feature' }))
-        .toBe('<span class="badge badge--beta " data-tooltip="Beta feature">(beta)</span>')
+        .toBe('<span class="rp-badge rp-badge--beta badge badge--beta" data-tooltip="Beta feature">Beta</span>')
     })
 
     // The badge carries a help cursor, so it must always have something to say.
@@ -645,10 +657,10 @@ features:
     // so label=constructor shipped 'function Object() { [native code] }' as hover
     // text. Escaping made it harmless but not sane.
     test.each(['constructor', '__proto__', 'toString', 'valueOf', 'ga'])(
-      'the label %s gets no default tooltip', (label) => {
+      'the label %s gets its own label as tooltip, never Object internals', (label) => {
         const { buildBadgeHtml } = require('../../macros/badge')
         const html = buildBadgeHtml({ label })
-        expect(html).not.toContain('data-tooltip')
+        expect(html).toContain(`data-tooltip="${label}"`)
         expect(html).not.toContain('native code')
       })
 
@@ -676,7 +688,7 @@ features:
       const table = buildFeatureTable(features, 'operator')
       expect(table).toContain(
         'xref:deploy:redpanda/kubernetes/k-stretch-clusters.adoc[Stretch Clusters] ' +
-        '(StretchCluster resource) pass:[<span class="badge badge--beta " data-tooltip='
+        '(StretchCluster resource) pass:[<span class="rp-badge rp-badge--beta badge badge--beta" data-tooltip='
       )
     })
 
@@ -711,8 +723,8 @@ features:
     test('adds the beta badge in prose for a feature marked beta', () => {
       const html = convert('enterprise:Stretch Clusters[]', { catalog: fakeCatalog() })
       expect(html).toContain('class="enterprise-feature"')
-      expect(html).toContain('class="badge badge--beta "')
-      expect(html).toContain('>(beta)</span>')
+      expect(html).toContain('class="rp-badge rp-badge--beta badge badge--beta"')
+      expect(html).toContain('>Beta</span>')
       // The badge must be real markup, never the escaped source of a macro call.
       expect(html).not.toContain('badge::[')
       expect(html).not.toContain('&lt;span')
@@ -734,7 +746,21 @@ features:
 
     test('canonicalizes case-insensitive spellings of the name', () => {
       const html = convert('enterprise:tiered storage[]', { catalog: fakeCatalog() })
-      expect(html).toContain('Tiered Storage requires an Enterprise Edition license.')
+      expect(html).toContain('>Tiered Storage</a>')
+    })
+
+    // The docs UI gives every [data-tooltip] a tippy tooltip on hover, focus,
+    // and tap; a native title shows on mouse hover only.
+    test('marks the term with data-tooltip and the standard text by default', () => {
+      const html = convert('enterprise:Tiered Storage[]', { catalog: fakeCatalog() })
+      expect(html).toContain('data-tooltip="Requires an Enterprise Edition license."')
+      expect(html).not.toContain('title=')
+    })
+
+    test('enterprise-tooltip=title still renders a title attribute', () => {
+      const html = convert('enterprise:Tiered Storage[]', { catalog: fakeCatalog(), attributes: { 'enterprise-tooltip': 'title' } })
+      expect(html).toContain('title="Requires an Enterprise Edition license."')
+      expect(html).not.toContain('data-tooltip=')
     })
 
     test('per-use xref overrides the registry xref', () => {

@@ -10,7 +10,10 @@
  *   enterprise:Iceberg Topics[tooltip=Iceberg Topics requires an Enterprise Edition license and object storage.]
  *
  * The feature name renders as a uniquely styled term with a tooltip that
- * explains the feature requires an Enterprise Edition license. The term
+ * explains the feature requires an Enterprise Edition license. The term also
+ * carries the words "(Enterprise)" as visually hidden text, so agents, search
+ * indexers, and screen readers, which never see the lock or the color, still
+ * read that the feature is Enterprise. The term
  * links to the feature's documentation when an xref attribute is given,
  * and otherwise to the licensing page, so readers can always reach an
  * explanation of what having (or not having) a license means.
@@ -56,9 +59,11 @@
  *                              (default: get-started:licensing/overview.adoc).
  *   enterprise-feature-role    CSS class applied to the wrapping span
  *                              (default: enterprise-feature).
- *   enterprise-tooltip         'title' (default), 'true' (renders
- *                              data-enterprise-tooltip), any attribute name
- *                              starting with 'data-', or 'false' to disable.
+ *   enterprise-tooltip         'data-tooltip' (default, the attribute the
+ *                              docs UI turns into a tooltip), 'title',
+ *                              'true' (renders data-enterprise-tooltip), any
+ *                              attribute name starting with 'data-', or
+ *                              'false' to disable.
  *   enterprise-links           'true' (default) to render the term as a link.
  *
  * Example use in a playbook:
@@ -93,6 +98,14 @@ function warnOnce (contentCatalog, key, message) {
 
 const DEFAULT_LICENSING_PAGE = 'get-started:licensing/overview.adoc'
 const DEFAULT_ROLE = 'enterprise-feature'
+// Text that carries the Enterprise meaning without CSS. visually-hidden is the
+// docs UI's screen-reader-only class, defined globally in its site.css (through
+// header.css and home.css); without it the words simply show.
+const ENTERPRISE_MARKER_CLASS = 'enterprise-feature-marker'
+const ENTERPRISE_TEXT_MARKER = `<span class="${ENTERPRISE_MARKER_CLASS} visually-hidden"> (Enterprise)</span>`
+// The attribute every docs UI tooltip reads. Meaning elements never use the
+// native title attribute, which shows only on mouse hover.
+const DEFAULT_TOOLTIP_ATTRIBUTE = 'data-tooltip'
 const BETA_LABEL = 'beta'
 const UNRELEASED_LABEL = 'unreleased'
 // The badge macro supplies the default hover text for these labels, so the same
@@ -515,11 +528,12 @@ function resolveEntryXref (entry, document) {
  */
 function resolveTooltipAttribute (raw) {
   if (raw === 'false') return undefined
-  if (raw === undefined || raw === 'title') return 'title'
+  if (raw === undefined || raw === '') return DEFAULT_TOOLTIP_ATTRIBUTE
+  if (raw === 'title') return 'title'
   if (raw === 'true') return 'data-enterprise-tooltip'
   if (raw.startsWith('data-')) return raw
-  logger.warn(`enterprise-tooltip attribute '${raw}' must be 'title', 'true', 'false', or start with 'data-'. Falling back to 'title'.`)
-  return 'title'
+  logger.warn(`enterprise-tooltip attribute '${raw}' must be 'title', 'true', 'false', or start with 'data-'. Falling back to '${DEFAULT_TOOLTIP_ATTRIBUTE}'.`)
+  return DEFAULT_TOOLTIP_ATTRIBUTE
 }
 
 /**
@@ -540,7 +554,7 @@ function resolveTooltipAttribute (raw) {
  */
 function buildEnterpriseContent ({ feature, text, xref, url, tooltip, licensingPage, role, tooltipAttr, links }) {
   const display = text || feature
-  const tooltipText = tooltip || `${feature} requires an Enterprise Edition license.`
+  const tooltipText = tooltip || DEFAULT_TOOLTIPS.enterprise
   // All four, matching badge.js. Escaping only the quote kept the attribute
   // intact but let < and > through from a registry tooltip field, which any
   // consumer that re-parses the page then reads as markup -- the docs UI
@@ -552,7 +566,10 @@ function buildEnterpriseContent ({ feature, text, xref, url, tooltip, licensingP
   if (links) {
     inner = xref ? `xref:${xref}[${display}]` : (url ? `link:${url}[${display}]` : `xref:${licensingPage}[${display}]`)
   }
-  return `<span class="${role}"${tooltipHtml}>${inner}</span>`
+  // The lock and the color are CSS, which an agent reading the HTML, a search
+  // indexer, and a screen reader never see. The marker says it in text, hidden
+  // only visually, so every reader of the page gets the meaning.
+  return `<span class="${role}"${tooltipHtml}>${inner}${ENTERPRISE_TEXT_MARKER}</span>`
 }
 
 /**

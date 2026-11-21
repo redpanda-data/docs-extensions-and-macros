@@ -78,8 +78,16 @@ function contentLines (lines) {
  * deleting published prose the generator does not know about.
  */
 function bodyCoversIntro (introLines, bodyLines) {
-  const body = new Set(contentLines(bodyLines));
+  const body = new Set(contentLines(bodyLines).map(sinceBadgeAsIntroLine));
   return contentLines(introLines).every((l) => body.has(l));
+}
+
+// Frozen pages say "Introduced in version 3.65.0." where the partial now
+// emits a Since badge for the same version, so the badge counts as that line.
+const SINCE_BADGE_LINE = /^badge::\[label=Since v?([^,\]\s]+)(?:,[^\]]*)?\]$/;
+function sinceBadgeAsIntroLine (line) {
+  const match = SINCE_BADGE_LINE.exec(line);
+  return match ? `Introduced in version ${match[1]}.` : line;
 }
 
 /**
