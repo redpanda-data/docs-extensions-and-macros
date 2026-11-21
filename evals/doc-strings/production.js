@@ -45,9 +45,10 @@ const STEP = 'Claude review with suggestions'
 const PRODUCTION_MODEL = 'claude-opus-5'
 
 // The files the workflow's "Fetch the writing standard" step downloads from
-// docs-team-standards main at run time (unpinned, an existing exception; see
-// CLAUDE.md). The eval fetches the same files the same way so it reviews with
-// what production reviews with today.
+// docs-team-standards at the commit in its STANDARDS_REF. The eval reads the
+// same files at the same commit, so it reviews with what production reviews
+// with.
+const FETCH_STEP = 'Fetch the writing standard'
 const FETCHED_STANDARDS = {
   'embedded-reference-strings.md': 'resources/writing-style/embedded-reference-strings.md',
   'terminology.md': 'resources/writing-style/terminology.md'
@@ -202,14 +203,24 @@ function renderPrompt (prompt, vars, { withoutStandards = false } = {}) {
   return withoutStandards ? stripStandardsInstructions(filled) : filled
 }
 
+/** The docs-team-standards commit the workflow pins its standards to. */
+function standardsRef () {
+  const wf = YAML.parse(fs.readFileSync(WORKFLOW, 'utf8'))
+  const step = wf.jobs['doc-strings-review'].steps.find((s) => s.name === FETCH_STEP)
+  const ref = step && step.env && step.env.STANDARDS_REF
+  if (!/^[0-9a-f]{40}$/.test(String(ref))) throw new Error(`"${FETCH_STEP}" has no 40-character STANDARDS_REF in doc-strings-review.yml`)
+  return ref
+}
+
 let standardsCache = null
 /** Download the standards the workflow fetches, once per run. */
 function fetchStandards () {
   if (standardsCache) return standardsCache
   const out = {}
+  const ref = standardsRef()
   for (const [name, repoPath] of Object.entries(FETCHED_STANDARDS)) {
-    const r = spawnSync('gh', ['api', `repos/redpanda-data/docs-team-standards/contents/${repoPath}`, '-H', 'Accept: application/vnd.github.raw'], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
-    if (r.status !== 0 || !r.stdout.trim()) throw new Error(`could not fetch ${repoPath} from docs-team-standards (gh exit ${r.status}): ${(r.stderr || '').slice(0, 200)}`)
+    const r = spawnSync('gh', ['api', `repos/redpanda-data/docs-team-standards/contents/${repoPath}?ref=${ref}`, '-H', 'Accept: application/vnd.github.raw'], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
+    if (r.status !== 0 || !r.stdout.trim()) throw new Error(`could not fetch ${repoPath} from docs-team-standards at ${ref} (gh exit ${r.status}): ${(r.stderr || '').slice(0, 200)}`)
     out[name] = r.stdout
   }
   standardsCache = out

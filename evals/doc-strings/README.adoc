@@ -139,9 +139,9 @@ nothing.
 suggest a rewrite that restores substance, and the applied result must still
 lint clean), `terminology-misuse` (a lint-clean, substantive description that
 lowercases the product name, which `terminology.md` names as incorrect: the
-model must suggest the canonical casing; it reads the live `terminology.md`
-from docs-team-standards main, as production does, so an upstream edit to
-that file can change its result). Both sabotage against the fully
+model must suggest the canonical casing; it reads `terminology.md` from docs-team-standards at the
+workflow's pinned `STANDARDS_REF`, as production does, so moving the pin
+can change its result). Both sabotage against the fully
 conforming rewording `negative-property-diff` uses, where staying silent is
 correct and so fails the must-suggest check.
 |===
