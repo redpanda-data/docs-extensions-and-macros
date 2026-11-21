@@ -32,6 +32,7 @@ const os = require('os')
 const path = require('path')
 const { spawnSync } = require('child_process')
 const YAML = require('yaml')
+const { resolveMcpConfig } = require('./mcp-config')
 
 const REPO_ROOT = path.resolve(__dirname, '../..')
 const WORKFLOW = path.join(REPO_ROOT, '.github', 'workflows', 'doc-strings-review.yml')
@@ -82,7 +83,7 @@ function parseClaudeArgs (claudeArgs) {
     allowed: grab('--allowed-tools'),
     disallowed: grab('--disallowed-tools'),
     maxTurns: turns ? turns[1] : null,
-    mcpServers: mcp ? JSON.parse(mcp[1]).mcpServers : {}
+    mcpServers: mcp ? resolveMcpConfig(mcp[1]).mcpServers : {}
   }
 }
 
