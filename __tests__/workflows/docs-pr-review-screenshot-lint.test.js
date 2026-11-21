@@ -67,11 +67,16 @@ for a in "$@"; do [ "$prev" = --output ] && out="$a"; prev="$a"; done
 echo '{"findings":[],"summary":{"errors":0,"warnings":0}}' > "$out"
 `
 
-function runLint ({ step = LINT, npx = NPX_PROBE, src = hostileCheckout() } = {}) {
+// The PR files API: the patches call (its --jq builds diff headers) gets a
+// unified diff, the file-list call gets the file names.
+const ADDED_LINE_DIFF = 'diff --git a/modules/manage/pages/a.adoc b/modules/manage/pages/a.adoc\n--- a/modules/manage/pages/a.adoc\n+++ b/modules/manage/pages/a.adoc\n@@ -1,0 +3,1 @@\n+image::missing.png[]\n'
+const ghStub = (diff) => `case "$*" in *'diff --git'*) printf '%s' '${diff}' ;; *) echo modules/manage/pages/a.adoc ;; esac`
+
+function runLint ({ step = LINT, npx = NPX_PROBE, src = hostileCheckout(), diff = ADDED_LINE_DIFF } = {}) {
   const runnerTemp = tmpdir()
   const r = execRun(step, {
     env: { RUNNER_TEMP: runnerTemp, GH_TOKEN: 'x', PR: '12', R: 'redpanda-data/docs', DOC_TOOLS_VERSION: '9.9.9', SRC: src },
-    stubs: { gh: 'echo modules/manage/pages/a.adoc', npx },
+    stubs: { gh: ghStub(diff), npx },
   })
   const log = fs.existsSync(path.join(runnerTemp, 'npx.log')) ? fs.readFileSync(path.join(runnerTemp, 'npx.log'), 'utf8').trim().split('\n').map((l) => l.split('|')) : []
   TEMP_DIRS.push(r.dir)
@@ -112,18 +117,23 @@ describe('docs PR review: the lint-screenshots step', () => {
   test('runs npx from RUNNER_TEMP with --root at the checkout, without GH_TOKEN', () => {
     const r = runLint()
     expect({ status: r.status, out: r.all }).toMatchObject({ status: 0 })
-    expect(r.log).toHaveLength(1)
-    const [cwd, token, , args] = r.log[0]
-    expect(cwd).toBe(r.runnerTemp)
-    expect(token).toBe('no-token')
-    expect(args).toBe(`--yes --package @redpanda-data/docs-extensions-and-macros@9.9.9 doc-tools lint-screenshots --root ${r.src} --files ${r.runnerTemp}/screenshot-lint/changed-files.txt --format json --output ${r.runnerTemp}/screenshot-lint/result.json`)
+    // Two npx runs: the --diff-file probe, then the lint. Both from
+    // RUNNER_TEMP without GH_TOKEN. The probe stub prints no help, so the
+    // lint runs without --diff-file, as with a release that predates it.
+    expect(r.log).toHaveLength(2)
+    for (const [cwd, token] of r.log) {
+      expect(cwd).toBe(r.runnerTemp)
+      expect(token).toBe('no-token')
+    }
+    expect(r.log[0][3]).toBe('--yes --package @redpanda-data/docs-extensions-and-macros@9.9.9 doc-tools lint-screenshots --help')
+    expect(r.log[1][3]).toBe(`--yes --package @redpanda-data/docs-extensions-and-macros@9.9.9 doc-tools lint-screenshots --root ${r.src} --files ${r.runnerTemp}/screenshot-lint/changed-files.txt --format json --output ${r.runnerTemp}/screenshot-lint/result.json`)
     expect(r.result).toEqual({ blocking: [], suggestions: [], verdict: 'pass' })
   })
 
   test('a hostile .npmrc in the checkout does not reach npm', () => {
     const r = runLint()
     expect({ status: r.status, out: r.all }).toMatchObject({ status: 0 })
-    expect(r.log[0][2]).not.toBe(HOSTILE_REGISTRY)
+    for (const entry of r.log) expect(entry[2]).not.toBe(HOSTILE_REGISTRY)
   })
 
   test('negative control: the same step run from the checkout picks up the hostile registry', () => {
@@ -152,6 +162,20 @@ exec node "${path.join(ROOT, 'bin', 'doc-tools.js')}" "$@"
     expect({ status: r.status, out: r.all }).toMatchObject({ status: 0 })
     expect(r.result.verdict).toBe('fail')
     expect(r.result.blocking.join('\n')).toMatch(/modules\/manage\/pages\/a\.adoc:3 .*missing\.png/)
+  })
+
+  test('with this repository\'s doc-tools, an image line the PR did not change is a suggestion', () => {
+    const npx = `#!/bin/bash
+while [ "$1" = --yes ] || [ "$1" = --package ]; do [ "$1" = --package ] && shift; shift; done
+[ "$1" = doc-tools ] && shift
+exec node "${path.join(ROOT, 'bin', 'doc-tools.js')}" "$@"
+`
+    const headerOnly = 'diff --git a/modules/manage/pages/a.adoc b/modules/manage/pages/a.adoc\n--- a/modules/manage/pages/a.adoc\n+++ b/modules/manage/pages/a.adoc\n@@ -1 +1 @@\n-= Old\n+= A\n'
+    const r = runLint({ npx, diff: headerOnly })
+    expect({ status: r.status, out: r.all }).toMatchObject({ status: 0 })
+    expect(r.result.verdict).toBe('pass')
+    expect(r.result.blocking).toEqual([])
+    expect(r.result.suggestions.join('\n')).toMatch(/a\.adoc:3 .*Already on the base branch.*missing\.png/)
   })
 })
 

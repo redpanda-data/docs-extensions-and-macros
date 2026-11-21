@@ -1415,6 +1415,12 @@ Docs repo root, the directory that holds modules/ (default: current directory)
 `--files <path>`::
 Changed-files list (one repo-relative path per line, for example from `gh pr diff --name-only`): lint only listed .adoc files and pages that reference a listed image
 
+`--diff <base>`::
+Only block on image macros the PR added or changed, and image files it changed, from `git diff <base>...HEAD`; findings already on <base> are warnings
+
+`--diff-file <path>`::
+The same as --diff, from a unified diff file (for example the PR files API patches)
+
 `--format <format>`::
 Output format: human or json (default: "human")
 

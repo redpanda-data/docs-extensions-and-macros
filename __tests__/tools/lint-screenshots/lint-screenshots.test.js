@@ -9,6 +9,7 @@ const {
   lintScreenshots,
   formatHuman,
   parseAltText,
+  parseUnifiedDiff,
   resolveImage,
   imageWidth,
   DEFAULTS
@@ -61,6 +62,25 @@ describe('parseAltText', () => {
   test('plain alt text with trailing attributes is not a comma violation', () => {
     expect(parseAltText('Console overview, width=600, role=x')).toEqual({ altText: 'Console overview', hasUnquotedComma: false })
     expect(parseAltText('Console overview,600,400')).toEqual({ altText: 'Console overview', hasUnquotedComma: false })
+  })
+  test('a quoted named alt keeps its commas and is not a violation', () => {
+    expect(parseAltText('alt="Three clusters, each with an operator"')).toEqual({ altText: 'Three clusters, each with an operator', hasUnquotedComma: false })
+    expect(parseAltText("width=600,alt='A, B'")).toEqual({ altText: 'A, B', hasUnquotedComma: false })
+    expect(parseAltText('Positional,alt="Named, wins"')).toEqual({ altText: 'Named, wins', hasUnquotedComma: false })
+  })
+  test('attribute-like text inside a quoted value is part of the value', () => {
+    expect(parseAltText(`"A detailed diagram, alt='X'"`)).toEqual({ altText: "A detailed diagram, alt='X'", hasUnquotedComma: false })
+    expect(parseAltText('alt="One, alt=two",width=600')).toEqual({ altText: 'One, alt=two', hasUnquotedComma: false })
+  })
+  test('an unquoted named alt wins over a quoted positional one', () => {
+    expect(parseAltText('"A long positional description",alt=Short')).toEqual({ altText: 'Short', hasUnquotedComma: false })
+  })
+  test('an unclosed quote falls back to a plain comma split', () => {
+    expect(parseAltText('"Unclosed, comma').hasUnquotedComma).toBe(true)
+  })
+  test('an unquoted named alt is read up to the next comma', () => {
+    expect(parseAltText('alt=Console overview,width=600')).toEqual({ altText: 'Console overview', hasUnquotedComma: false })
+    expect(parseAltText('alt=Topics, partitions, and offsets').hasUnquotedComma).toBe(true)
   })
   test('an unquoted comma inside prose is a violation, a quoted one is not', () => {
     expect(parseAltText('Topics, partitions, and offsets').hasUnquotedComma).toBe(true)
@@ -394,5 +414,167 @@ describe('doc-tools lint-screenshots (CLI)', () => {
     for (const flag of ['--root', '--files', '--format', '--output', '--warnings-as-errors']) {
       expect(r.stdout).toContain(flag)
     }
+  })
+})
+
+describe('parseUnifiedDiff', () => {
+  test('maps each file to the new-side lines it adds or changes', () => {
+    const diff = [
+      'diff --git a/modules/m/pages/a.adoc b/modules/m/pages/a.adoc',
+      '--- a/modules/m/pages/a.adoc',
+      '+++ b/modules/m/pages/a.adoc',
+      '@@ -1,3 +1,3 @@',
+      ' = Title',
+      '-:page-categories: Old',
+      '+:page-categories: New',
+      ' text',
+      '@@ -10,0 +11,2 @@',
+      '+image::new.png[]',
+      '+more',
+      'diff --git a/modules/m/images/new.png b/modules/m/images/new.png',
+      'Binary files differ',
+      'diff --git a/modules/m/pages/gone.adoc b/modules/m/pages/gone.adoc',
+      '--- a/modules/m/pages/gone.adoc',
+      '+++ /dev/null',
+      '@@ -1 +0,0 @@',
+      '-bye'
+    ].join('\n')
+    const changed = parseUnifiedDiff(diff)
+    expect([...changed.get('modules/m/pages/a.adoc')]).toEqual([2, 11, 12])
+    expect(changed.get('modules/m/images/new.png')).toBe('all')
+    expect(changed.get('modules/m/pages/gone.adoc')).toBe('removed')
+  })
+
+  test('marks the old path of a rename as removed', () => {
+    const changed = parseUnifiedDiff('diff --git a/modules/m/images/old.png b/modules/m/images/new.png\nsimilarity index 100%\nrename from modules/m/images/old.png\nrename to modules/m/images/new.png\n')
+    expect(changed.get('modules/m/images/old.png')).toBe('removed')
+    expect(changed.get('modules/m/images/new.png')).toBe('all')
+  })
+})
+
+describe('lintScreenshots - diff scope (--diff, --diff-file)', () => {
+  function repo () {
+    return makeRepo({
+      'modules/m/pages/p.adoc': ':page-categories: New\nimage::old.png[]\nimage::big.png[Big]\nimage::added.png[]\n',
+      'modules/m/images/old.png': pngBytes(),
+      'modules/m/images/big.png': pngBytes({ bytes: 200 * 1024 }),
+      'modules/m/images/added.png': pngBytes()
+    })
+  }
+  const lines = (map) => new Map(Object.entries(map).map(([k, v]) => [k, v === 'all' ? 'all' : new Set(v)]))
+
+  test('an error on a line the PR did not touch is a warning marked preexisting', () => {
+    const root = repo()
+    const result = lintScreenshots({ root, changedLines: lines({ 'modules/m/pages/p.adoc': [1] }) })
+    expect(result.summary.errors).toBe(0)
+    const old = byRule(result, 'alt-missing').find((f) => f.line === 2)
+    expect(old).toMatchObject({ severity: 'warning', preexisting: true })
+    expect(old.message).toMatch(/^Already on the base branch/)
+    expect(byRule(result, 'image-too-large')[0]).toMatchObject({ severity: 'warning', preexisting: true })
+  })
+
+  test('a line the PR added still blocks', () => {
+    const root = repo()
+    const result = lintScreenshots({ root, changedLines: lines({ 'modules/m/pages/p.adoc': [4] }) })
+    const added = byRule(result, 'alt-missing').find((f) => f.line === 4)
+    expect(added.severity).toBe('error')
+    expect(added.preexisting).toBeUndefined()
+  })
+
+  test('a changed image file blocks on its size even when the macro line did not change', () => {
+    const root = repo()
+    const result = lintScreenshots({ root, changedLines: lines({ 'modules/m/images/big.png': 'all' }) })
+    expect(byRule(result, 'image-too-large')[0].severity).toBe('error')
+  })
+
+  test('a file with no hunks counts as changed throughout', () => {
+    const root = repo()
+    const result = lintScreenshots({ root, changedLines: lines({ 'modules/m/pages/p.adoc': 'all' }) })
+    expect(result.summary.errors).toBeGreaterThan(0)
+    expect(result.summary.preexisting).toBe(0)
+  })
+
+  test('an image replaced in place with no page change still blocks (positive control)', () => {
+    const root = repo()
+    const diffFile = path.join(root, 'pr.diff')
+    // The shape the docs-pr-review workflow builds for a binary file: no patch.
+    fs.writeFileSync(diffFile, 'diff --git a/modules/m/images/big.png b/modules/m/images/big.png\n--- /dev/null\n+++ b/modules/m/images/big.png\n\n')
+    const res = spawnSync('node', [BIN, 'lint-screenshots', '--root', root, '--diff-file', diffFile, '--format', 'json'], { encoding: 'utf8' })
+    expect(res.status).toBe(1)
+    const out = JSON.parse(res.stdout)
+    expect(out.findings.filter((f) => f.severity === 'error').map((f) => f.rule)).toEqual(['image-too-large'])
+  })
+
+  test('a PR that deletes an image an untouched page still uses is blocked', () => {
+    const root = makeRepo({
+      'modules/m/pages/p.adoc': 'image::old.png[Old]\n',
+      'modules/m/images/keep.png': pngBytes()
+    })
+    const changed = parseUnifiedDiff('diff --git a/modules/m/images/old.png b/modules/m/images/old.png\n--- a/modules/m/images/old.png\n+++ /dev/null\n')
+    const result = lintScreenshots({ root, changedLines: changed })
+    expect(byRule(result, 'image-missing')[0]).toMatchObject({ severity: 'error' })
+    expect(byRule(result, 'image-missing')[0].preexisting).toBeUndefined()
+  })
+
+  test('a rename blocks an untouched page that still uses the old name, with --files of the new name only', () => {
+    const root = makeRepo({
+      'modules/m/pages/other.adoc': 'image::old.png[Old]\n',
+      'modules/m/pages/p.adoc': 'image::new.png[New]\n',
+      'modules/m/images/new.png': pngBytes()
+    })
+    const changed = parseUnifiedDiff('diff --git a/modules/m/images/old.png b/modules/m/images/new.png\nsimilarity index 100%\nrename from modules/m/images/old.png\nrename to modules/m/images/new.png\n')
+    const result = lintScreenshots({ root, files: ['modules/m/images/new.png'], changedLines: changed })
+    const missing = byRule(result, 'image-missing')
+    expect(missing).toHaveLength(1)
+    expect(missing[0]).toMatchObject({ file: 'modules/m/pages/other.adoc', severity: 'error' })
+  })
+
+  test('an empty diff is no diff, and a scoped file the diff misses counts as changed', () => {
+    const root = repo()
+    const empty = lintScreenshots({ root, files: ['modules/m/pages/p.adoc'], changedLines: new Map() })
+    expect(empty.summary.errors).toBeGreaterThan(0)
+    expect(empty.summary.preexisting).toBeUndefined()
+    const missed = lintScreenshots({ root, files: ['modules/m/pages/p.adoc'], changedLines: lines({ 'modules/m/pages/other.adoc': [1] }) })
+    expect(missed.summary.errors).toBeGreaterThan(0)
+    expect(missed.summary.preexisting).toBe(0)
+  })
+
+  test('the CLI reads --diff-file', () => {
+    const root = repo()
+    const diffFile = path.join(root, 'pr.diff')
+    fs.writeFileSync(diffFile, 'diff --git a/modules/m/pages/p.adoc b/modules/m/pages/p.adoc\n--- a/modules/m/pages/p.adoc\n+++ b/modules/m/pages/p.adoc\n@@ -1 +1 @@\n-:page-categories: Old\n+:page-categories: New\n')
+    const res = spawnSync('node', [BIN, 'lint-screenshots', '--root', root, '--diff-file', diffFile, '--format', 'json'], { encoding: 'utf8' })
+    expect(res.status).toBe(0)
+    const out = JSON.parse(res.stdout)
+    expect(out.summary.errors).toBe(0)
+    expect(out.summary.preexisting).toBeGreaterThan(0)
+  })
+})
+
+describe('lintScreenshots - Doc Detective baselines', () => {
+  test('a baseline over the ceiling is a warning that says not to quantize it', () => {
+    const root = makeRepo({
+      'modules/m/pages/p.adoc': 'image::base.png[Base]\nimage::plain.png[Plain]\n',
+      'modules/m/images/base.png': pngBytes({ bytes: 150 * 1024 }),
+      'modules/m/images/plain.png': pngBytes({ bytes: 150 * 1024 }),
+      'tests/doc-detective/specs/s.json': JSON.stringify({ tests: [{ steps: [{ screenshot: { path: 'modules/m/images/base.png', maxVariation: 0.1 } }] }] })
+    })
+    const result = lintScreenshots({ root })
+    const base = byRule(result, 'baseline-too-large')
+    expect(base).toHaveLength(1)
+    expect(base[0].severity).toBe('warning')
+    expect(base[0].message).toMatch(/do not quantize/)
+    expect(base[0].message).toMatch(/tests\/doc-detective\/specs\/s\.json/)
+    expect(byRule(result, 'image-too-large').map((f) => f.image)).toEqual(['plain.png'])
+  })
+
+  test('a string-form screenshot step and a spec that is not JSON are handled', () => {
+    const root = makeRepo({
+      'modules/m/pages/p.adoc': 'image::base.png[Base]\n',
+      'modules/m/images/base.png': pngBytes({ bytes: 150 * 1024 }),
+      'tests/a.json': JSON.stringify({ steps: [{ screenshot: 'modules/m/images/base.png' }] }),
+      'tests/broken.json': '{ not json'
+    })
+    expect(rules(lintScreenshots({ root }))).toEqual(['baseline-too-large'])
   })
 })
