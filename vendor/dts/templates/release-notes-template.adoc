@@ -11,7 +11,7 @@
 = Redpanda Release Notes
 :description: Detailed release notes for each Redpanda patch release, organized by version.
 :page-topic-type: reference
-// Floor version for the release-notes automation: only releases newer than this are added automatically.
+// Floor version: the first release this page lists, shown in the intro. The release-notes automation adds this release and newer ones, never older ones.
 :earliest-tracked-version: [X.Y.Z]
 
 // Intro: 1-2 sentences. What the page covers, and where the curated highlights live.
@@ -63,8 +63,11 @@ This page lists the changes in each Redpanda release from version {earliest-trac
 [Area]::
 * [Better behavior for an existing capability, in present tense.]
 
-// Footer: link releases before the floor to the public GitHub releases page, which
-// keeps hosting historical Redpanda releases.
+// Footer: point readers to the other places that have release notes. Each
+// line's page lists that line only, from its floor onward. Other lines' pages are
+// in their own doc versions. Public GitHub releases stop at each line's floor.
+// The text names no version, so it is correct on every branch. Keep the heading:
+// the release-notes generator finds the insertion point by it.
 == Release notes for older versions
 
-Release notes for versions before {earliest-tracked-version} are published on GitHub. See the https://github.com/redpanda-data/redpanda/releases[Redpanda releases page^].
+To find the release notes for another release line, select that version in the version selector. Release notes for releases that this documentation does not list are on the https://github.com/redpanda-data/redpanda/releases[Redpanda releases page^] on GitHub.
