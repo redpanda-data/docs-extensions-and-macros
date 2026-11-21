@@ -1027,6 +1027,21 @@ describe('meaning badges', () => {
     expect(cloud.slice(cloud.indexOf('id="badgeLegendModal"'))).not.toContain('rp-badge--enterprise')
   })
 
+  test('the legend defines each badge with the same text as its tooltip, and support levels as the Connect docs do', () => {
+    const { TYPE_TOOLTIPS, SUPPORT_LEVEL_DEFINITIONS } = require('../../macros/rp-connect-components')
+    const html = renderComponentTable({ csvData })
+    const legend = html.slice(html.indexOf('id="badgeLegendModal"'))
+    for (const [type, text] of Object.entries(TYPE_TOOLTIPS)) {
+      expect(legend).toContain(`data-tooltip="${text}">${typeLabel(type)}</span>\n                  <p>${text}</p>`)
+    }
+    expect(legend).toContain('<p>Splits a stream of bytes into messages.</p>')
+    expect(legend).toContain(`<p>${SUPPORT_LEVEL_DEFINITIONS.certified}</p>`)
+    expect(legend).toContain(`<p>${SUPPORT_LEVEL_DEFINITIONS.community}</p>`)
+    for (const old of ['Scans and processes messages based on patterns', 'guaranteed reliability', 'best-effort maintenance']) {
+      expect(legend).not.toContain(old)
+    }
+  })
+
   test('the legend is page HTML, not a string a script builds', () => {
     const html = renderComponentTable({ csvData })
     const scripts = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]).join('\n')
