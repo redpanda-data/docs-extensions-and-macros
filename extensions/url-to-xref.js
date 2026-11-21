@@ -42,6 +42,15 @@ const { raiseListenerLimit } = require('./util/raise-listener-limit')
  *   anchor does not stays a URL and is reported as a broken anchor, since an
  *   xref to it would pass Antora's page check and still land at the top of
  *   the page.
+ * - Property anchors are the exception. When the target is a property
+ *   reference page (one that declares :page-property-source: or includes a
+ *   generated partial$properties/ partial) and the anchor is not on it, the
+ *   other property reference pages in the same component version are
+ *   searched, because properties move between those pages (the
+ *   cloud_storage_* properties moved from Cluster Properties to Object
+ *   Storage Properties). Property names are unique, so when exactly one of
+ *   those pages has the anchor, the URL becomes an xref to that page. No
+ *   match, or more than one, is still reported.
  * - Targets in the latest version of a component emit an unversioned xref;
  *   targets pinned to an older version emit version@component:module:page.
  * - URLs pointing at a page's former path resolve through the page-aliases the
@@ -100,6 +109,7 @@ module.exports.register = function ({ config = {} }) {
     const withQueryString = new Set()
     const withoutLinkText = new Set()
     const missingAnchor = new Map()
+    const ambiguousAnchor = new Map()
     const files = contentCatalog
       .getPages((page) => page.out)
       .concat(contentCatalog.findBy({ family: 'partial' }))
@@ -120,6 +130,10 @@ module.exports.register = function ({ config = {} }) {
         if (!missingAnchor.has(url)) missingAnchor.set(url, new Set())
         missingAnchor.get(url).add(file.path)
       }
+      for (const { url, targets } of result.ambiguousAnchor) {
+        if (!ambiguousAnchor.has(url)) ambiguousAnchor.set(url, { targets, pages: new Set() })
+        ambiguousAnchor.get(url).pages.add(file.path)
+      }
     }
     if (logUnconverted) {
       for (const [url, pages] of unmapped) {
@@ -127,6 +141,12 @@ module.exports.register = function ({ config = {} }) {
       }
       for (const [url, pages] of missingAnchor) {
         logger.warn(`Anchor not found on the target page of ${url}; left as a URL (found in: ${[...pages].join(', ')})`)
+      }
+      for (const [url, { targets, pages }] of ambiguousAnchor) {
+        logger.warn(
+          `Anchor not found on the target page of ${url}, and more than one property page has it ` +
+            `(${targets.join(', ')}); left as a URL (found in: ${[...pages].join(', ')})`
+        )
       }
     }
     if (withQueryString.size) {
@@ -199,7 +219,49 @@ function buildUrlMap (contentCatalog) {
       if (!urls.has(key)) urls.set(key, toEntry(page.src, page))
     }
   }
-  return { urls, components }
+  const propertyPages = new Map()
+  for (const page of pages) {
+    if (!isPropertyPage(page)) continue
+    const key = componentVersionKey(page.src)
+    if (!propertyPages.has(key)) propertyPages.set(key, [])
+    propertyPages.get(key).push(toEntry(page.src, page))
+  }
+  return { urls, components, propertyPages }
+}
+
+// A property reference page either declares the collection it documents
+// (:page-property-source:, see the prop macro) or includes one of the
+// generated property partials. Docs branches that predate the attribute only
+// have the include.
+const PROPERTY_SOURCE_RX = /^:page-property-source:/m
+const PROPERTY_PARTIAL_INCLUDE_RX = /^include::[^[\s]*partial\$properties\//m
+
+/** Whether a page is a property reference page. */
+function isPropertyPage (page) {
+  const contents = page.contents && page.contents.toString()
+  return Boolean(contents) && (PROPERTY_SOURCE_RX.test(contents) || PROPERTY_PARTIAL_INCLUDE_RX.test(contents))
+}
+
+function componentVersionKey ({ component, version }) {
+  return `${version || ''}@${component}`
+}
+
+/**
+ * For an anchor that is not on its target page, finds the other property
+ * reference pages in the same component version that carry it. Applies only
+ * when the target is itself a property reference page. Returns the matching
+ * entries, which the caller uses only when there is exactly one.
+ */
+function propertyPagesWithAnchor (entry, id, resolverContext) {
+  const { propertyPages } = resolverContext
+  if (!propertyPages) return []
+  const siblings = propertyPages.get(componentVersionKey(entry))
+  if (!siblings || !siblings.some((sibling) => sibling.page === entry.page)) return []
+  return siblings.filter((sibling) => {
+    if (sibling.page === entry.page) return false
+    const anchors = pageAnchors(sibling.page, resolverContext.resolveInclude)
+    return Boolean(anchors) && anchors.has(id)
+  })
 }
 
 const PAGE_ALIASES_ATTRIBUTE = ':page-aliases:'
@@ -567,6 +629,7 @@ function convertContent (content, resolverContext) {
   const withQueryString = []
   const withoutLinkText = []
   const missingAnchor = []
+  const ambiguousAnchor = []
   for (const match of scanContentUrls(content)) {
     let url
     try {
@@ -589,7 +652,7 @@ function convertContent (content, resolverContext) {
       withQueryString.push(match.url)
       continue
     }
-    const entry = resolveUrlPath(url.pathname, resolverContext)
+    let entry = resolveUrlPath(url.pathname, resolverContext)
     if (!entry) {
       unmapped.push(match.url)
       continue
@@ -603,9 +666,19 @@ function convertContent (content, resolverContext) {
       // The page resolves but the anchor does not: an xref would pass
       // Antora's check and still land at the top of the page. Keep the URL,
       // which the site's broken-anchor checks can still see, and report it.
+      // A property anchor may have moved to another property page, which
+      // is used when it is the only one that has the anchor.
       if (!anchors.has(fragmentId(url.hash))) {
-        missingAnchor.push(match.url)
-        continue
+        const moved = propertyPagesWithAnchor(entry, fragmentId(url.hash), resolverContext)
+        if (moved.length > 1) {
+          ambiguousAnchor.push({ url: match.url, targets: moved.map((e) => `${e.module}:${e.relative}`) })
+          continue
+        }
+        if (!moved.length) {
+          missingAnchor.push(match.url)
+          continue
+        }
+        entry = moved[0]
       }
     }
     const label = linkTextFor(match.label, url.hash, entry.page, resolverContext.resolveInclude)
@@ -618,7 +691,7 @@ function convertContent (content, resolverContext) {
     converted++
   }
   result += content.slice(cursor)
-  return { content: result, converted, unmapped, withQueryString, withoutLinkText, missingAnchor }
+  return { content: result, converted, unmapped, withQueryString, withoutLinkText, missingAnchor, ambiguousAnchor }
 }
 
 module.exports.buildUrlMap = buildUrlMap
@@ -629,6 +702,7 @@ module.exports.targetComponentOf = targetComponentOf
 // conversion time, after this extension has run (extension-utils/rpk-links.js).
 module.exports.DEFAULT_IGNORE = DEFAULT_IGNORE
 module.exports.resolveUrlPath = resolveUrlPath
+module.exports.propertyPagesWithAnchor = propertyPagesWithAnchor
 module.exports.entryToXref = entryToXref
 module.exports.pageAnchors = pageAnchors
 module.exports.parseHeadingIds = parseHeadingIds
