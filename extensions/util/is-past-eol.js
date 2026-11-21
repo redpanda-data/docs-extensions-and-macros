@@ -25,6 +25,6 @@ module.exports = function isPastEol (attributes, now = new Date()) {
   if (isNaN(release.getTime())) return false
   const months = parseInt(attributes['page-support-months'], 10)
   const eol = new Date(release)
-  eol.setMonth(eol.getMonth() + (isNaN(months) ? 12 : months))
+  eol.setUTCMonth(eol.getUTCMonth() + (isNaN(months) ? 12 : months))
   return now >= eol
 }
