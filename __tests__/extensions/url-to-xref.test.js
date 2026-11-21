@@ -946,3 +946,41 @@ describe('include tag filtering for anchors', () => {
     expect(headings('leveloffset=+1,tag="category-b"')).toEqual(['=== kept_b'])
   })
 })
+
+describe('broken links in end-of-life versions', () => {
+  const extension = require('../../extensions/url-to-xref')
+  const run = (versions) => {
+    const pages = versions.map((version) => ({
+      src: { component: 'streaming', version, module: 'ROOT', family: 'page', relative: `p-${version}.adoc` },
+      path: `modules/ROOT/pages/p-${version}.adoc`,
+      out: { path: `p-${version}.html` },
+      pub: { url: `/streaming/${version}/p-${version}/` },
+      contents: Buffer.from('= P\n\nSee https://docs.redpanda.com/streaming/current/nowhere/.\n'),
+    }))
+    const eol = { '24.3': true, '26.3': false }
+    const catalog = {
+      getComponents: () => [{ name: 'streaming', latest: { version: '26.3' } }],
+      getComponentVersion: (c, v) => ({ asciidoc: { attributes: { 'page-is-past-eol': String(eol[v]) } } }),
+      getPages: (filter) => (filter ? pages.filter(filter) : pages),
+      findBy: () => [],
+      resolveResource: () => undefined,
+    }
+    const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }
+    extension.register.call(
+      { getLogger: () => logger, on: (event, handler) => event === 'contentClassified' && handler({ playbook: {}, contentCatalog: catalog }) },
+      { config: {} }
+    )
+    return logger
+  }
+  test('logs a link broken only in EOL versions at debug level', () => {
+    const logger = run(['24.3'])
+    expect(logger.warn).not.toHaveBeenCalled()
+    expect(logger.debug.mock.calls.some(([m]) => /No published page matches .*\[end-of-life versions\]/.test(m))).toBe(true)
+  })
+  test('still warns when a supported version has the same broken link', () => {
+    for (const order of [['24.3', '26.3'], ['26.3', '24.3']]) {
+      const logger = run(order)
+      expect(logger.warn).toHaveBeenCalledTimes(1)
+    }
+  })
+})

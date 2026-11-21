@@ -1,5 +1,7 @@
 'use strict'
 
+const isPastEol = require('./util/is-past-eol')
+
 const { scanContentUrls } = require('./util/scan-content-urls')
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
 
@@ -110,15 +112,31 @@ module.exports.register = function ({ config = {} }) {
     const withoutLinkText = new Set()
     const missingAnchor = new Map()
     const ambiguousAnchor = new Map()
+    // EOL docs are frozen, so their broken links are reported at debug level.
+    const eolCache = new Map()
+    const inEolVersion = ({ src = {} }) => {
+      const key = `${src.version || ''}@${src.component}`
+      if (!eolCache.has(key)) {
+        const componentVersion = src.component && typeof contentCatalog.getComponentVersion === 'function' && contentCatalog.getComponentVersion(src.component, src.version || '')
+        eolCache.set(key, Boolean(componentVersion) && isPastEol((componentVersion.asciidoc || {}).attributes))
+      }
+      return eolCache.get(key)
+    }
+    const eolUrls = new Set()
     const files = contentCatalog
       .getPages((page) => page.out)
       .concat(contentCatalog.findBy({ family: 'partial' }))
     for (const file of files) {
       if (!file.contents) continue
       const result = convertContent(file.contents.toString(), resolverContext)
+      const eol = inEolVersion(file)
       if (result.converted) {
         file.contents = Buffer.from(result.content)
         convertedCount += result.converted
+      }
+      for (const url of [...result.unmapped, ...result.missingAnchor, ...result.ambiguousAnchor.map((a) => a.url)]) {
+        // A URL is EOL-only until a supported version reports it too.
+        if (eol) { if (!(unmapped.has(url) || missingAnchor.has(url) || ambiguousAnchor.has(url)) || eolUrls.has(url)) eolUrls.add(url) } else eolUrls.delete(url)
       }
       for (const url of result.unmapped) {
         if (!unmapped.has(url)) unmapped.set(url, new Set())
@@ -136,14 +154,15 @@ module.exports.register = function ({ config = {} }) {
       }
     }
     if (logUnconverted) {
+      const report = (url) => (eolUrls.has(url) ? (message) => logger.debug(`${message} [end-of-life versions]`) : (message) => logger.warn(message))
       for (const [url, pages] of unmapped) {
-        logger.warn(`No published page matches ${url} (found in: ${[...pages].join(', ')})`)
+        report(url)(`No published page matches ${url} (found in: ${[...pages].join(', ')})`)
       }
       for (const [url, pages] of missingAnchor) {
-        logger.warn(`Anchor not found on the target page of ${url}; left as a URL (found in: ${[...pages].join(', ')})`)
+        report(url)(`Anchor not found on the target page of ${url}; left as a URL (found in: ${[...pages].join(', ')})`)
       }
       for (const [url, { targets, pages }] of ambiguousAnchor) {
-        logger.warn(
+        report(url)(
           `Anchor not found on the target page of ${url}, and more than one property page has it ` +
             `(${targets.join(', ')}); left as a URL (found in: ${[...pages].join(', ')})`
         )
