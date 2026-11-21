@@ -23,26 +23,12 @@
  *
  * Numbers inside the safe range are untouched and stay plain numbers.
  *
- * KNOWN LIMITATION: this is a regex over the raw text, not a real JSON scanner,
- * so it does not track string/escape state. A value that is legitimate JSON
- * text APPEARING INSIDE an escaped string -- for example a Bloblang example
- * embedded as an example value, `"{\"delay_for_ns\":110839937000000000}"` --
- * is indistinguishable from real JSON structure to this regex, which inserts a
- * quoted sentinel at that position and corrupts the document. This is confirmed
- * against the real, published Connect component attachment, not a theoretical
- * risk: parsing it throws "Expected ',' or ']' after array element". Do not
- * apply this module to Connect/Bloblang-shaped JSON, or to any JSON whose string
- * values may themselves contain escaped JSON-looking text. It has been checked
- * against every redpanda-properties-*.json and property-overrides.json this
- * repo could find (~50 files, every published version) with no false match, and
- * is applied only to property-shaped data for that reason -- not because the
- * risk is theoretical elsewhere.
+ * The integers are found by scanning the text the way a JSON parser does,
+ * tracking strings and escapes, so a digit run inside a string is never
+ * touched. That matters for Connect data, whose example values carry escaped
+ * JSON-looking text such as `"{\"delay_for_ns\":110839937000000000}"`.
  */
 
-// An integer literal too long to be safe, in JSON value position: after a colon,
-// an opening bracket or a comma, and followed by a delimiter. A digit run inside
-// a string cannot match, because a string value starts with a quote.
-const UNSAFE_INT_RX = /([:[,]\s*)(-?\d{16,})(?=\s*[,}\]])/g
 // Printable ASCII: a control character is not legal inside a JSON string, so a
 // sentinel containing one produces JSON that will not parse.
 const SENTINEL = '@@bigint:'
@@ -59,10 +45,43 @@ function isUnsafeInteger (digits) {
  * @param {string} text - JSON text.
  * @returns {*} The parsed value.
  */
+// The text with every unsafe integer literal outside a string replaced by a
+// quoted sentinel. Outside strings, JSON has digits only in numbers.
+function shield (text) {
+  let out = ''
+  let last = 0
+  let i = 0
+  const n = text.length
+  const isDigit = (c) => c >= '0' && c <= '9'
+  while (i < n) {
+    const c = text[i]
+    if (c === '"') {
+      i++
+      while (i < n && text[i] !== '"') i += text[i] === '\\' ? 2 : 1
+      i++
+      continue
+    }
+    if (c === '-' || isDigit(c)) {
+      let j = c === '-' ? i + 1 : i
+      while (j < n && isDigit(text[j])) j++
+      if (text[j] === '.' || text[j] === 'e' || text[j] === 'E') {
+        // A fraction or exponent: not an integer, leave it to JSON.parse.
+        j++
+        while (j < n && (isDigit(text[j]) || '+-eE.'.includes(text[j]))) j++
+      } else if (isUnsafeInteger(text.slice(i, j))) {
+        out += `${text.slice(last, i)}"${SENTINEL}${text.slice(i, j)}"`
+        last = j
+      }
+      i = j
+      continue
+    }
+    i++
+  }
+  return out + text.slice(last)
+}
+
 function parse (text) {
-  const shielded = String(text).replace(UNSAFE_INT_RX, (match, lead, digits) =>
-    isUnsafeInteger(digits) ? `${lead}"${SENTINEL}${digits}"` : match
-  )
+  const shielded = shield(String(text))
   return JSON.parse(shielded, (key, value) =>
     typeof value === 'string' && value.startsWith(SENTINEL) ? BigInt(value.slice(SENTINEL.length)) : value
   )

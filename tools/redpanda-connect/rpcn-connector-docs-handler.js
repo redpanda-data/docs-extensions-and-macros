@@ -8,6 +8,7 @@ const { getAntoraValue, setAntoraValue } = require('../../cli-utils/antora-utils
 const fetchFromGithub = require('../fetch-from-github.js')
 const { generateRpcnConnectorDocs } = require('./generate-rpcn-connector-docs.js')
 const { getRpkConnectVersion, printDeltaReport } = require('./report-delta')
+const exactJson = require('./exact-json')
 const { discoverIntermediateReleases, findCloudVersionForDate } = require('./github-release-utils')
 const { analyzeAllBinaries } = require('./connector-binary-analyzer.js')
 const releaseAttachment = require('./release-attachment.js')
@@ -965,7 +966,7 @@ function publishConnectorAttachment ({ newIndex, newVersion, overrides, fromRele
   }
 
   const destFile = path.join(attachmentsRoot, `connect-${newVersion}.json`)
-  fs.writeFileSync(destFile, JSON.stringify(mergedData, null, 2), 'utf8')
+  fs.writeFileSync(destFile, exactJson.stringify(mergedData, newVersion), 'utf8')
   console.log(`✓ Published merged version to: ${path.relative(root, destFile)}`)
   return destFile
 }
@@ -991,7 +992,7 @@ async function loadConnectorDataForVersion(version, dataDir, options = {}) {
   if (options.attachment) {
     const parsed = releaseAttachment.ossIndexFromAttachment(options.attachment);
     const tmpFile = path.join(dataDir, `connect-${version}.tmp.json`);
-    fs.writeFileSync(tmpFile, JSON.stringify(parsed, null, 2));
+    fs.writeFileSync(tmpFile, exactJson.stringify(parsed, version));
     fs.renameSync(tmpFile, dataFile);
     console.log(`✓ Connector data for ${version} from the release's docs asset`);
     return parsed;
@@ -1057,7 +1058,7 @@ async function loadConnectorDataForVersion(version, dataDir, options = {}) {
     // Write via a temp file so an interrupted run cannot leave a half-written
     // snapshot that the next run would happily reuse.
     const tmpFile = path.join(dataDir, `connect-${version}.tmp.json`);
-    fs.writeFileSync(tmpFile, JSON.stringify(parsed, null, 2));
+    fs.writeFileSync(tmpFile, exactJson.stringify(parsed, version));
     fs.renameSync(tmpFile, dataFile);
 
     console.log(`✓ Successfully fetched data for version ${version}`);
@@ -1131,17 +1132,11 @@ async function handleRpcnConnectorDocs (options) {
           fs.closeSync(fd)
 
           const rawJson = fs.readFileSync(tmpFile, 'utf8')
-          // Deliberately plain JSON.parse/stringify, not bigIntJson: this is connect
-          // data, which carries example config text as escaped JSON-shaped strings
-          // (e.g. bloblang examples), indistinguishable by regex from real JSON
-          // value position. bigIntJson's value-position regex matches inside such a
-          // string and inserts stray quotes -- confirmed to throw on the real,
-          // currently-published connect attachment, not merely round a number. A
-          // plain round trip still silently rounds int64 defaults past MaxInt64 (the
-          // pre-existing defect this file has always had), which is the safer
-          // failure mode until a real JSON scanner replaces the regex.
+          // Plain JSON.parse for the in-memory data, which stays on JS numbers.
+          // exactJson writes the int64 values past 2^53 exactly, from rawJson.
           const parsed = JSON.parse(rawJson)
-          fs.writeFileSync(finalFile, JSON.stringify(parsed, null, 2))
+          exactJson.remember(newVersion, rawJson)
+          fs.writeFileSync(finalFile, exactJson.stringify(parsed, newVersion))
           fs.unlinkSync(tmpFile)
         }
         dataFile = finalFile
@@ -1430,7 +1425,7 @@ async function handleRpcnConnectorDocs (options) {
               // Save augmented data back to file for subsequent iterations
               // This ensures the next version pair has consistent metadata when loading this version as oldData
               const augmentedDataPath = path.join(dataDir, `connect-${toVer}.json`)
-              fs.writeFileSync(augmentedDataPath, JSON.stringify(augmentedNewData, null, 2), 'utf8')
+              fs.writeFileSync(augmentedDataPath, exactJson.stringify(augmentedNewData, toVer), 'utf8')
               console.log(`✓ Augmented data saved: connect-${toVer}.json`)
 
               // Update what's-new if requested
@@ -1566,7 +1561,7 @@ async function handleRpcnConnectorDocs (options) {
   // Create clean version by removing augmented connectors
   const cleanData = buildCleanOssData(newIndex)
 
-  fs.writeFileSync(cleanOssDataPath, JSON.stringify(cleanData, null, 2), 'utf8')
+  fs.writeFileSync(cleanOssDataPath, exactJson.stringify(cleanData, newVersion), 'utf8')
 
   const versionsMatch = oldVersion && newVersion && oldVersion === newVersion
   if (versionsMatch) {
@@ -1691,7 +1686,7 @@ async function handleRpcnConnectorDocs (options) {
       const { augmentedData, augmentedCount, addedCgoCount, addedCloudOnlyCount } =
         augmentConnectorData(connectorData, binaryAnalysis)
 
-      fs.writeFileSync(dataFile, JSON.stringify(augmentedData, null, 2), 'utf8')
+      fs.writeFileSync(dataFile, exactJson.stringify(augmentedData, newVersion), 'utf8')
       console.log(`Done: Augmented ${augmentedCount} connectors with cloud/cgo fields`)
       if (addedCgoCount > 0) {
         console.log(`   • Added ${addedCgoCount} cgo-only connectors to data file`)
