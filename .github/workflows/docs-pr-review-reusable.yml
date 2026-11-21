@@ -919,9 +919,8 @@ jobs:
   # ──────────────────────────────────────────────────────────────────────
   metadata_check:
     needs: [gate, classify]
-    # Runs whenever adoc_review does (recheck_adoc included): its errors join
-    # that branch's verdict as check_blocking, which an incremental re-review
-    # treats as recomputed, so it must actually have re-run.
+    # Also on a recheck: --changed is PR-wide, so the check is recomputed
+    # every run and a fixed error is dropped as a check blocker.
     if: needs.classify.outputs.has_adoc == 'true' || needs.classify.outputs.recheck_adoc == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -929,15 +928,15 @@ jobs:
       pull-requests: read
     timeout-minutes: 15
     steps:
-      # Full history with blobs fetched on demand: --changed diffs against
-      # the merge base with the PR's base branch.
+      # Full history: --changed diffs against the merge base with the PR's
+      # base branch. No blob:none filter: rename detection reads old blobs,
+      # and a lazy fetch from a private repo has no credentials here.
       - name: Check out the PR head for check-metadata
         uses: actions/checkout@v4
         with:
           ref: refs/pull/${{ inputs.pr_number }}/head
           path: .metadata-check
           fetch-depth: 0
-          filter: blob:none
           persist-credentials: false
 
       - uses: actions/setup-node@v4
@@ -1101,55 +1100,70 @@ jobs:
           F=review-output/findings.md
           HAVE_VERDICT=false
           [[ -f "$V" ]] && jq -e 'type == "object"' "$V" > /dev/null 2>&1 && HAVE_VERDICT=true
+          # Never leave the model's verdict as it was when a merge fails: an
+          # error that should block would be silently dropped.
+          add_not_run() {
+            if ! { jq --arg r "Page metadata (doc-tools check-metadata): $1" \
+                '.not_run = (((.not_run // []) | if type == "array" then . else [.] end) + [$r])' "$V" > "$V.tmp" && mv "$V.tmp" "$V"; }; then
+              echo "::error::check-metadata: could not record a not_run entry in $V"; exit 1
+            fi
+          }
           if [[ "$STATE" == failed ]]; then
             [[ -n "$REASON" ]] || REASON=$(cat "$DIR/reason" 2> /dev/null || echo "no reason recorded")
-            if [[ "$HAVE_VERDICT" == true ]]; then
-              jq --arg r "Page metadata (doc-tools check-metadata): $REASON" \
-                '.not_run = (((.not_run // []) | if type == "array" then . else [.] end) + [$r])' "$V" > "$V.tmp" && mv "$V.tmp" "$V"
-            fi
+            [[ "$HAVE_VERDICT" == true ]] && add_not_run "$REASON"
             exit 0
           fi
           cp "$DIR/check-metadata.json" review-output/check-metadata.json
-          if [[ "$(jq '.findings | length' "$DIR/check-metadata.json")" -gt 0 ]]; then
+          # Where the taxonomy came from, relative to the PR checkout when it
+          # is the page's own repo copy (a PR can edit that file).
+          TAXONOMY=$(jq -r --arg root "$GITHUB_WORKSPACE/.metadata-check/" '.taxonomy.source // "unknown" | ltrimstr($root)' "$DIR/check-metadata.json")
+          echo "check-metadata: taxonomy from $TAXONOMY"
+          # Only into a findings.md the review wrote, or with a verdict: a
+          # file holding only these sections would read to ticket_delta as
+          # prose-review findings.
+          ADD_FINDINGS=false
+          [[ "$HAVE_VERDICT" == true || -f "$F" ]] && ADD_FINDINGS=true
+          if [[ "$ADD_FINDINGS" == true && "$(jq '.findings | length' "$DIR/check-metadata.json")" -gt 0 ]]; then
             {
               echo
               echo "### Page metadata (doc-tools check-metadata)"
               echo
-              jq -r 'def md: gsub("(?<c>[`\\[\\]<>\\\\])"; "\\\(.c)");
+              echo "Taxonomy from \`$TAXONOMY\`."
+              echo
+              jq -r 'def md: gsub("(?<c>[`\\[\\]<>\\\\])"; "\\\(.c)") | gsub("@"; "@\u200b");
                 .findings[] | "- \(.severity): `\(.file):\(.line)` \(.message | md)"' "$DIR/check-metadata.json"
             } >> "$F"
           fi
           # Suggestions (--suggest): taxonomy values a changed page's text
           # names at or above the default minimum score that its header does
           # not carry. Never blocking; a doc-tools without them adds none.
-          if [[ "$(jq '(.suggest.suggestions // []) | length' "$DIR/check-metadata.json")" -gt 0 ]]; then
+          if [[ "$ADD_FINDINGS" == true && "$(jq '(.suggest.suggestions // []) | length' "$DIR/check-metadata.json")" -gt 0 ]]; then
             {
               echo
               echo "### Suggested taxonomy values (doc-tools check-metadata --suggest)"
               echo
-              jq -r 'def md: gsub("(?<c>[`\\[\\]<>\\\\])"; "\\\(.c)");
+              jq -r 'def md: gsub("(?<c>[`\\[\\]<>\\\\])"; "\\\(.c)") | gsub("@"; "@\u200b");
                 .suggest.suggestions | sort_by(.file, -.score)[]
                 | "- `\(.file):\(.line // 1)`\(if .uncategorized then " (no page-categories yet)" else "" end): \(.label | md) (`\(.conceptId)`) in `:\(.attribute):`, score \(.score): \(.reason | md)"' "$DIR/check-metadata.json"
             } >> "$F"
           fi
-          if [[ "$HAVE_VERDICT" == true ]]; then
-            jq --slurpfile m "$DIR/check-metadata.json" '
-              def md: gsub("(?<c>[`\\[\\]<>\\\\])"; "\\\(.c)");
+          if [[ "$HAVE_VERDICT" == true ]] && ! { jq --slurpfile m "$DIR/check-metadata.json" '
+              def md: gsub("(?<c>[`\\[\\]<>\\\\])"; "\\\(.c)") | gsub("@"; "@\u200b");
               def line: "page metadata: `\(.file):\(.line)` \(.message | md)";
               def list(k): ((.[k] // []) | if type == "array" then . else [.] end);
               ($m[0].findings | map(select(.severity == "error") | line)) as $errors
               | ($m[0].findings | map(select(.severity != "error") | line)) as $warnings
               | .blocking = (list("blocking") + $errors)
-              # Deterministic: re-run on the whole PR every time, so an
-              # incremental re-review never carries these over (see
-              # aggregate-review.sh).
-              | if ($errors | length) > 0 then .check_blocking = (list("check_blocking") + $errors) else . end
+              | .check_blocking = (list("check_blocking") + $errors)
               | ((($m[0].suggest.suggestions // []) | sort_by(-.score)) as $s
                   | ($s[:10] | map("page metadata suggestion: `\(.file):\(.line // 1)` consider \(.label | md) (`\(.conceptId)`) in `:\(.attribute):`, score \(.score): \(.reason | md)"))
                     + (if ($s | length) > 10 then ["page metadata: \(($s | length) - 10) more suggestion(s) in check-metadata.json"] else [] end)) as $suggested
               | .suggestions = (list("suggestions") + $warnings + $suggested)
               | if ($errors | length) > 0 then .verdict = "fail" else . end
-              ' "$V" > "$V.tmp" && mv "$V.tmp" "$V"
+              ' "$V" > "$V.tmp" && mv "$V.tmp" "$V"; }; then
+            echo "::error::check-metadata: could not merge the result into $V"
+            add_not_run "the result could not be merged into the review (see the job log)"
+            exit 1
           fi
           jq -r '"check-metadata: added \(.summary.errors) error(s), \(.summary.warnings) warning(s), and \((.suggest.suggestions // []) | length) suggestion(s) to the review"' "$DIR/check-metadata.json"
       - uses: actions/upload-artifact@v4
@@ -1714,6 +1728,9 @@ jobs:
           # The vision pass ran (and must have a verdict) for a changed image
           # or a re-check.
           HAS_IMAGES: ${{ (needs.classify.outputs.has_images == 'true' || needs.classify.outputs.recheck_shots == 'true') && 'true' || 'false' }}
+          # A lint result counts only when screenshot_lint succeeded: a step
+          # that failed after it started writing can leave a partial or empty
+          # file, which the upload still ships.
           LINT_RESULT: ${{ needs.screenshot_lint.result }}
         run: |
           set -uo pipefail
@@ -1728,10 +1745,8 @@ jobs:
           # branch produced a verdict", so when a pass that was SUPPOSED to run
           # produced nothing, the only honest thing is to leave verdict.json
           # absent and let the aggregate say "automated review unavailable".
-          # A failed screenshot_lint can still upload a partial or empty
-          # file, so its job result decides, not the file alone.
           if [[ "${LINT_RESULT:-}" != "success" || ! -f "$LINT" ]]; then
-            echo "::warning::no deterministic lint result — leaving no verdict so the aggregate reports this branch unavailable"
+            echo "::warning::no deterministic lint result (screenshot_lint: ${LINT_RESULT:-unknown}), so leaving no verdict so the aggregate reports this branch unavailable"
             exit 0
           fi
           # check_blocking marks the blockers a deterministic check found.
@@ -1847,7 +1862,7 @@ jobs:
             ${{ env.NEEDS_HUMAN_PROMPT }}
             ${{ needs.classify.outputs.large == 'true' && format(env.LARGE_PR_PROMPT, 'file', 'files') || '' }}
       # This job has no Jira credential yet (DOCS_REVIEW_ROLLOUT.md, org
-      # setup item 6), so unless the PR body quotes the ticket, the delta
+      # setup item 5), so unless the PR body quotes the ticket, the delta
       # had nothing to compare against and its "pass" means nothing. Mark
       # that as a check that did not run, so the comment cannot show a bare
       # ✅. A missing or unrecognised ticket_source counts as "none".
