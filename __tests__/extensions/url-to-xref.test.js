@@ -315,7 +315,7 @@ describe('convertContent', () => {
       url: '/streaming/current/reference/properties/broker-properties/',
       contents: '= Broker Configuration Properties\n\ninclude::reference:partial$properties/broker.adoc[tags=redpanda]\n',
     })
-    const partial = { contents: Buffer.from('=== crash_loop_limit\n\nA property.\n') }
+    const partial = { contents: Buffer.from('// tag::redpanda[]\n=== crash_loop_limit\n\nA property.\n// end::redpanda[]\n') }
     const context = Object.assign(
       buildUrlMap({
         getComponents: () => [{ name: 'streaming', latest: { version: '25.3' } }],
@@ -914,5 +914,35 @@ describe('property anchors that moved to another property page', () => {
     )
     expect(logger.warn).toHaveBeenCalledTimes(1)
     expect(logger.warn.mock.calls[0][0]).toMatch(/more than one property page has it \(reference:properties\/a-properties\.adoc, reference:properties\/b-properties\.adoc\)/)
+  })
+})
+
+describe('include tag filtering for anchors', () => {
+  const { filterByTags, includeTags } = require('../../extensions/url-to-xref')
+  const partial = [
+    '// tag::category-a[]',
+    '=== kept_a',
+    '// tag::deprecated[]',
+    '=== old_a',
+    '// end::deprecated[]',
+    '// end::category-a[]',
+    '// tag::category-b[]',
+    '=== kept_b',
+    '// end::category-b[]',
+    '=== untagged',
+  ].join('\n')
+  const headings = (tags) => filterByTags(partial, includeTags(tags)).split('\n').filter((l) => l.startsWith('==='))
+
+  it('keeps everything without a tag selection', () => {
+    expect(headings('')).toEqual(['=== kept_a', '=== old_a', '=== kept_b', '=== untagged'])
+  })
+  it('keeps only the named tag and drops excluded nested regions', () => {
+    expect(headings('tags=category-a;!deprecated')).toEqual(['=== kept_a'])
+  })
+  it('with only exclusions, keeps untagged and other tagged lines', () => {
+    expect(headings('tags=!deprecated')).toEqual(['=== kept_a', '=== kept_b', '=== untagged'])
+  })
+  it('reads tag= and quoted values', () => {
+    expect(headings('leveloffset=+1,tag="category-b"')).toEqual(['=== kept_b'])
   })
 })

@@ -530,7 +530,7 @@ function pageHeadingIds (contents, page, resolveInclude) {
   const ids = parseHeadingIds(contents)
   if (!resolveInclude) return ids
   let searched = 0
-  for (const match of contents.matchAll(/^include::([^[\s]+)\[/gm)) {
+  for (const match of contents.matchAll(/^include::([^[\s]+)\[([^\]]*)\]/gm)) {
     if (++searched > MAX_INCLUDES_SEARCHED) break
     let included
     try {
@@ -539,11 +539,66 @@ function pageHeadingIds (contents, page, resolveInclude) {
       continue
     }
     if (!included || !included.contents) continue
-    for (const [id, text] of parseHeadingIds(included.contents.toString())) {
-      if (!ids.has(id)) ids.set(id, text)
+    const text = filterByTags(included.contents.toString(), includeTags(match[2]))
+    for (const [id, heading] of parseHeadingIds(text)) {
+      if (!ids.has(id)) ids.set(id, heading)
     }
   }
   return ids
+}
+
+/**
+ * The tag selection of an include's attributes (`tag=a` or `tags=a;!b`), or
+ * undefined when the include selects no tags. The generated property pages
+ * include their partial with tags such as `category-redpanda;!deprecated`, so
+ * an anchor in an excluded region is not on the page.
+ */
+function includeTags (attributes) {
+  const match = /(?:^|,)\s*tags?=("[^"]*"|[^,]*)/.exec(attributes || '')
+  if (!match) return undefined
+  const names = match[1].replace(/^"|"$/g, '').split(/[;,]/).map((name) => name.trim()).filter(Boolean)
+  if (!names.length) return undefined
+  const positive = new Set(names.filter((name) => !name.startsWith('!')))
+  const negative = new Set(names.filter((name) => name.startsWith('!')).map((name) => name.slice(1)))
+  return { positive, negative }
+}
+
+const TAG_DIRECTIVE_RX = /\b(tag|end)::(\S+?)\[\]\s*$/
+
+/**
+ * Keeps only the lines an include with these tags would render, following
+ * Asciidoctor's rules closely enough for anchors: the innermost tag that the
+ * selection names decides a line; `*` stands for any tag and `**` for every
+ * line; with no positive tag, lines outside excluded regions are kept.
+ */
+function filterByTags (text, tags) {
+  if (!tags) return text
+  const { positive, negative } = tags
+  const onlyNegative = positive.size === 0
+  const keepUntagged = onlyNegative || positive.has('**')
+  const stack = []
+  const kept = []
+  for (const line of text.split('\n')) {
+    const directive = TAG_DIRECTIVE_RX.exec(line)
+    if (directive) {
+      if (directive[1] === 'tag') stack.push(directive[2])
+      else if (stack.length && stack[stack.length - 1] === directive[2]) stack.pop()
+      continue
+    }
+    let selected
+    for (let index = stack.length - 1; index >= 0 && selected === undefined; index--) {
+      const name = stack[index]
+      if (negative.has(name)) selected = false
+      else if (positive.has(name)) selected = true
+    }
+    if (selected === undefined) {
+      if (!stack.length) selected = keepUntagged
+      else if (negative.has('*')) selected = false
+      else selected = onlyNegative || positive.has('*') || positive.has('**')
+    }
+    if (selected) kept.push(line)
+  }
+  return kept.join('\n')
 }
 
 /**
@@ -709,3 +764,5 @@ module.exports.parseHeadingIds = parseHeadingIds
 module.exports.fragmentId = fragmentId
 module.exports.documentTitle = documentTitle
 module.exports.sanitizeLinkText = sanitizeLinkText
+module.exports.filterByTags = filterByTags
+module.exports.includeTags = includeTags
