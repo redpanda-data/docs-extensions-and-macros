@@ -417,6 +417,13 @@ jobs:
           python3 "$GAP_LOOP_PY" upgrade-evidence --compare "$COMPARE" --base HEAD \
             --dataset "$OUT/redpanda-metrics-$TAG.json"
           python3 "$GAP_LOOP_PY" check-requirements --state "$VERIFY_DIR/state" --compare "$COMPARE" --base HEAD
+          # The path check again, on the tree as it will be committed. The
+          # cluster run and upgrade-evidence both ran after the first one.
+          ALLOW=()
+          while IFS= read -r path; do
+            [ -n "$path" ] && ALLOW+=(--allow "$path")
+          done <<< "$ALLOWED_PATHS"
+          python3 "$GAP_LOOP_PY" check-diff --base HEAD "${ALLOW[@]}" --allow-new "$ALLOWED_NEW"
           echo "closed=$(jq '.closed | length' "$COMPARE")" >> "$GITHUB_OUTPUT"
       - name: Test the cluster setup files
         if: steps.baseline.outputs.gaps != '0'
