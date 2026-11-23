@@ -2110,6 +2110,12 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   // Only consume trailing spaces, not newlines (to preserve paragraph breaks)
   result = result.replace(/^(`[^`]+`)\.[ \t]*$/gm, '$1')
 
+  // A possessive straight after a code span ("`rpk ai`'s credentials file")
+  // leaves a constrained span AsciiDoc does not close: the backtick is
+  // followed by a word character, so the text renders as "`rpk ai’s". The
+  // unconstrained form, double backticks, closes anywhere.
+  result = result.replace(/(?<![`\w])`([^`\n]+)`(?=['\u2019]s\b)/g, '``$1``')
+
   // A placeholder left in the output means a span was captured inside
   // another one and never restored, and the text around it is lost. Fail
   // the generation instead of publishing it.

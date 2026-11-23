@@ -14,8 +14,8 @@
  *    one). No internal placeholder (__INLINE_CODE_n__ and friends) survives.
  * 2. whole-token-spans: every inline code span covers a whole token. Before
  *    a span: the start, whitespace, or an opening bracket or quote. After it:
- *    the end, whitespace, or punctuation that is not followed by more of the
- *    same token (`--a`.b and `topic`:`oncall` fail).
+ *    the end, whitespace, a possessive 's, or punctuation that is not
+ *    followed by more of the same token (`--a`.b and `topic`:`oncall` fail).
  *
  * Both run on the HTML Asciidoctor produces, because that is what readers
  * see: a span can look fine in the AsciiDoc and still render broken.
@@ -239,6 +239,9 @@ function checkDescription(sourceText, generatedAdoc, options = {}) {
       }
     } else if (text[i] === CODE_CLOSE) {
       if (SEPARATORS.has(text[i + 1]) && text[i + 2] === CODE_OPEN) continue
+      // A possessive ends the token: `rpk ai`'s credentials file. The
+      // generator writes it as an unconstrained span, which renders whole.
+      if (["'", '\u2019'].includes(text[i + 1]) && text[i + 2] === 's' && !/\w/.test(text[i + 3] || '')) continue
       let j = i + 1
       while (j < text.length && CLOSERS.has(text[j])) j++
       if (j < text.length && !/\s/.test(text[j])) {

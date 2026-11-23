@@ -459,3 +459,25 @@ describe('dotfile names (rpk redpanda start)', () => {
     expect(out).toContain('file.`redpanda.yaml`')
   })
 })
+
+describe('a possessive after a code span', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  test('uses an unconstrained span, which AsciiDoc closes before \'s', () => {
+    // From the rpk ai run help: a constrained `rpk ai`'s span never closes.
+    const out = formatDescription('Stored next to `rpk ai`\'s credentials file.', { replacements: [] })
+    expect(out).toContain('``rpk ai``\'s credentials file')
+  })
+
+  test('handles a typographic apostrophe the same way', () => {
+    const out = formatDescription('Uses `rpk ai`’s login.', { replacements: [] })
+    expect(out).toContain('``rpk ai``’s login')
+  })
+
+  test('leaves spans that are not followed by a possessive, and words after a quote (control)', () => {
+    const out = formatDescription('Run `rpk ai auth login`, then `rpk ai status`. The `cluster`\'d form is rare.', { replacements: [] })
+    expect(out).toContain('`rpk ai auth login`')
+    expect(out).toContain('`rpk ai status`')
+    expect(out).not.toContain('``')
+  })
+})
