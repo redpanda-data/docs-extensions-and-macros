@@ -102,7 +102,7 @@ describe('perDeclaration', () => {
 })
 
 describe('formatMarkdown', () => {
-  it('states the rate over merged PRs only, and breaks it down by repo and surface', () => {
+  it('states the rate over merged PRs only, and breaks it down by surface and month', () => {
     const rows = [
       { repo: 'redpanda-data/streaming-enterprise', pr: 1, path: 'src/v/config/configuration.cc', surface: 'properties', decl: 'a', created: '2026-10-01T00:00:00Z', outcome: 'taken', replies: 0, url: 'u1' },
       { repo: 'redpanda-data/streaming-enterprise', pr: 1, path: 'src/v/config/configuration.cc', surface: 'properties', decl: 'b', created: '2026-10-01T00:00:00Z', outcome: 'declined', replies: 1, url: 'u2' },
@@ -110,10 +110,17 @@ describe('formatMarkdown', () => {
     ]
     const md = formatMarkdown(rows, { since: '2026-09-01', until: '2026-11-10' })
     expect(md).toMatch(/Of 2 suggestions on merged PRs, \*\*50% were taken or adapted\*\*/)
-    expect(md).toMatch(/## By repo[\s\S]*\| streaming-enterprise \| 2 \| 50% \|/)
-    expect(md).toMatch(/## By surface[\s\S]*\| properties \|/)
+    expect(md).toMatch(/## By surface[\s\S]*\| properties \| 2 \| 50% \|/)
     expect(md).toMatch(/\| connect \| 1 \| - \|/)
-    expect(md).toMatch(/\[streaming-enterprise#1\]\(u2\)/)
+    expect(md).toMatch(/## By month posted[\s\S]*\| 2026-10 \| 2 \|/)
+  })
+
+  it('names no repo, PR, path, or link: the summary is public and the callers are private', () => {
+    const rows = [
+      { repo: 'redpanda-data/streaming-enterprise', pr: 1, path: 'src/v/config/configuration.cc', surface: 'properties', decl: 'b', created: '2026-10-01T00:00:00Z', outcome: 'declined', replies: 1, url: 'https://github.com/redpanda-data/streaming-enterprise/pull/1#discussion_r2', author: 'someone' }
+    ]
+    const md = formatMarkdown(rows, { since: '2026-09-01', until: '2026-11-10' })
+    expect(md).not.toMatch(/streaming-enterprise|configuration\.cc|github\.com|someone|By repo/)
   })
 })
 
@@ -132,6 +139,13 @@ describe('formatSlack', () => {
     expect(p.blocks[1].text.text).toMatch(/• connect: no merged PRs yet/)
     expect(p.blocks[2].text.text).toMatch(/• properties: 50% of 2/)
     expect(p.blocks[3].elements[0].text).toMatch(/<https:\/\/github.com\/o\/r\/actions\/runs\/1\|Full report>$/)
+  })
+
+  it('lists declined suggestions that have a reply, with their links', () => {
+    const p = formatSlack([{ ...rows[1], replies: 2 }, rows[0]], { since: 's', until: 'u' })
+    expect(p.blocks[3].text.text).toMatch(/^\*Declined or rewritten with a reply\*/)
+    expect(p.blocks[3].text.text).toMatch(/• <u2\|streaming-enterprise#1> `src\/v\/config\/configuration.cc` \(declined\)/)
+    expect(p.blocks[4].type).toBe('context')
   })
 
   it('carries the channel for chat.postMessage when given one', () => {

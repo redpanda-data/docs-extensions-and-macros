@@ -144,7 +144,11 @@ function perDeclaration (rows) {
 
 const pct = (n, d) => (d ? `${Math.round((100 * n) / d)}%` : '-')
 
-/** The Markdown report. */
+/**
+ * The Markdown report. It goes to the run summary of this public repo, and
+ * the callers are private, so it carries aggregates only: no repo names, PR
+ * numbers, paths, or links. Those go to Slack (formatSlack).
+ */
 function formatMarkdown (rows, { since, until }) {
   const out = []
   const merged = rows.filter((r) => MERGED.includes(r.outcome))
@@ -176,20 +180,10 @@ function formatMarkdown (rows, { since, until }) {
     }
     out.push('')
   }
-  table('By repo', (r) => r.repo.replace(/^redpanda-data\//, ''))
   table('By surface', (r) => r.surface || 'other')
   table('By month posted', (r) => r.created.slice(0, 7))
-  const replied = rows.filter((r) => r.replies > 0 && ['declined', 'rewritten'].includes(r.outcome))
-  if (replied.length) {
-    out.push('## Declined or rewritten with a reply')
-    out.push('')
-    out.push('The reply usually says why. Newest first, up to 15:')
-    out.push('')
-    for (const r of replied.sort((a, b) => b.created.localeCompare(a.created)).slice(0, 15)) {
-      out.push(`- [${r.repo.replace(/^redpanda-data\//, '')}#${r.pr}](${r.url}) \`${r.path}\` (${r.outcome})`)
-    }
-    out.push('')
-  }
+  out.push('The rates by repo, and the declined suggestions with a reply, are in the Slack post.')
+  out.push('')
   return out.join('\n')
 }
 
@@ -223,6 +217,11 @@ function formatSlack (rows, { since, until, runUrl = '', channel }) {
       .map(([k, r]) => `• ${esc(k)}: ${r.line}`)
       .join('\n')
   }
+  // Newest first, up to 15. Slack only: the links name private repos.
+  const replied = rows
+    .filter((r) => r.replies > 0 && ['declined', 'rewritten'].includes(r.outcome))
+    .sort((a, b) => b.created.localeCompare(a.created))
+    .slice(0, 15)
   const title = `Doc-strings review suggestions taken, ${since} to ${until}`
   const headline = merged.length
     ? `*${pct(used, merged.length)}* of ${merged.length} suggestions on merged PRs were taken or adapted (${pct(c.taken, merged.length)} as written). ${pct(c.declined, merged.length)} were declined.`
@@ -234,6 +233,9 @@ function formatSlack (rows, { since, until, runUrl = '', channel }) {
       { type: 'section', text: { type: 'mrkdwn', text: `*${esc(title)}*\n\n${headline}` } },
       { type: 'section', text: { type: 'mrkdwn', text: `*By repo*\n${groupLines((r) => r.repo.replace(/^redpanda-data\//, ''))}` } },
       { type: 'section', text: { type: 'mrkdwn', text: `*By surface*\n${groupLines((r) => r.surface || 'other')}` } },
+      ...(replied.length
+        ? [{ type: 'section', text: { type: 'mrkdwn', text: `*Declined or rewritten with a reply* (the reply usually says why)\n${replied.map((r) => `• <${esc(r.url)}|${esc(r.repo.replace(/^redpanda-data\//, ''))}#${r.pr}> \`${esc(r.path)}\` (${r.outcome})`).join('\n')}` } }]
+        : []),
       {
         type: 'context',
         elements: [{
@@ -310,8 +312,8 @@ function rowsFor (repo, since) {
       pr: num,
       path: c.path,
       surface: routeFile(c.path),
-      // A digest, not the text: the rows are uploaded as an artifact in this
-      // public repo, and the line comes from a private caller's PR.
+      // A digest, not the text: the line comes from a private caller's PR,
+      // and --json may be shared. The workflow does not upload the rows.
       decl: crypto.createHash('sha256').update(firstQuoted).digest('hex').slice(0, 16),
       created: c.created_at,
       outcome,
