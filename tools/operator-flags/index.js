@@ -23,6 +23,7 @@ const os = require('os')
 const path = require('path')
 const { spawnSync } = require('child_process')
 const { renderPage } = require('./render-page')
+const { gitAuthEnv, redactCredentials } = require('../../cli-utils/git-credential-env')
 const { PAGE_MODULE, PAGE_RELATIVE } = require('../../extension-utils/operator-flags')
 
 const REPO = 'redpanda-data/operator-enterprise'
@@ -51,24 +52,19 @@ function token () {
 // Every error message passes through here, so the token never prints.
 function redact (text) {
   const auth = token()
-  return auth ? String(text).replaceAll(auth, '***') : String(text)
+  const out = redactCredentials(text)
+  return auth ? out.replaceAll(auth, '***') : out
 }
 
 /**
  * A shallow clone of the operator at ref, in a temporary directory. The
- * token goes to git as an HTTP header through GIT_CONFIG_* environment
- * variables, so it is in neither the process arguments nor the clone's
- * .git/config.
+ * token reaches git through gitAuthEnv's credential helper, so it is in
+ * neither the process arguments nor the clone's .git/config.
  */
 function cloneOperator (ref, log) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'operator-flags-'))
   const auth = token()
-  const env = { ...process.env }
-  if (auth) {
-    env.GIT_CONFIG_COUNT = '1'
-    env.GIT_CONFIG_KEY_0 = 'http.https://github.com/.extraheader'
-    env.GIT_CONFIG_VALUE_0 = `Authorization: Basic ${Buffer.from(`x-access-token:${auth}`).toString('base64')}`
-  }
+  const env = gitAuthEnv(auth || null, { ...process.env })
   log(`Cloning ${REPO}@${ref}...`)
   let clone
   try {
