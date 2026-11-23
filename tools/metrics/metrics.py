@@ -12,9 +12,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dataset as metrics_dataset  # noqa: E402
 import reconcile as metrics_reconcile  # noqa: E402
 
-# A release tag such as v26.2.7 or v26.2.1-rc1.
-RELEASE_TAG_RE = re.compile(r"^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$")
-
 '''
 ## How it works
 
