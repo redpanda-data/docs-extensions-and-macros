@@ -172,7 +172,9 @@ def parse_exposition(text):
             if key == "le" and suffix == "_bucket":
                 family["buckets"].add(value)
                 continue
-            if key in STRUCTURAL_LABELS:
+            # le and quantile carry a histogram's or a summary's series
+            # structure. On any other family they are ordinary labels.
+            if key in STRUCTURAL_LABELS and family["type"] in ("histogram", "summary"):
                 continue
             family["labels"].setdefault(key, set()).add(value)
     return families

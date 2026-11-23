@@ -319,6 +319,23 @@ redpanda_example_ops_per_second_total{} 1
     expect(dataset.metrics.redpanda_example_ops_per_second_total.unit).toBeNull()
   })
 
+  it('drops le and quantile only from a histogram or a summary, where they are series structure', () => {
+    const text = `# HELP redpanda_example_estimate An estimate per percentile
+# TYPE redpanda_example_estimate gauge
+redpanda_example_estimate{quantile="p95"} 1
+# HELP redpanda_example_duration_seconds A summary
+# TYPE redpanda_example_duration_seconds summary
+redpanda_example_duration_seconds{quantile="0.5",redpanda_request="produce"} 1
+redpanda_example_duration_seconds_sum{redpanda_request="produce"} 1
+redpanda_example_duration_seconds_count{redpanda_request="produce"} 1
+`
+    const run = generate(['--public-file', file('pub3.txt', text)])
+    if (run.result.status !== 0) throw new Error(run.combined)
+    const dataset = read(run.out)
+    expect(dataset.metrics.redpanda_example_estimate.labels.map((label) => label.name)).toEqual(['quantile'])
+    expect(dataset.metrics.redpanda_example_duration_seconds.labels.map((label) => label.name)).toEqual(['redpanda_request'])
+  })
+
   describe('an inventory name with a placeholder', () => {
     const placeholder = 'vectorized_cloud_roles__<upstream>_auth_refresh_fetch_errors'
 

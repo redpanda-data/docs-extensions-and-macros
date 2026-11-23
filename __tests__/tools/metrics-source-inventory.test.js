@@ -158,6 +158,7 @@ void probe::setup_second() {
 }
 void probe::setup_status() {
     namespace sm = ss::metrics;
+    vlog(logger.debug, "a string that names sm::make_gauge(name) is not a registration");
     _public_status.add_group(
       prometheus_sanitize::metrics_name("knob_status"),
       {sm::make_gauge("up", [this] { return 1; }, sm::description("Whether the knob is up"))});

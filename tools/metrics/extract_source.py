@@ -329,6 +329,41 @@ def strip_comments(src):
     return "".join(out)
 
 
+def mask_strings(src):
+    """Blank the inside of string literals, keeping offsets, so a call
+    written in a string is not found as a call. src has no comments."""
+    out = list(src)
+    i, n = 0, len(src)
+    while i < n:
+        if src[i] == '"':
+            if i > 0 and src[i - 1] == "R":
+                # R"delim( ... )delim"
+                op = src.find("(", i)
+                close = ")" + (src[i + 1:op] if op > 0 else "") + '"'
+                j = src.find(close, i)
+                j = n if j < 0 else j + len(close) - 1
+            else:
+                j = i + 1
+                while j < n and src[j] != '"':
+                    if src[j] == "\\":
+                        j += 1
+                    j += 1
+            for k in range(i + 1, min(j, n)):
+                if out[k] != "\n":
+                    out[k] = " "
+            i = j + 1
+        elif src[i] == "'" and i > 0 and not src[i - 1].isalnum():
+            j = i + 1
+            while j < n and src[j] != "'":
+                if src[j] == "\\":
+                    j += 1
+                j += 1
+            i = j + 1
+        else:
+            i += 1
+    return "".join(out)
+
+
 def match_bracket(s, i):
     """s[i] is an opening bracket; return index of its matching close."""
     d, n, j = 0, len(s), i
@@ -734,7 +769,11 @@ def extract(repo):
     for path in files:
         scan = FileScan(repo, path)
         s = scan.s
-        for m in MAKE_RE.finditer(s):
+        # Calls are found outside string literals; their arguments are read
+        # from s. Only in C++: a code generator such as rpc/rpc_compiler.py
+        # holds its real registrations in strings.
+        calls = mask_strings(s) if re.search(r"\.(cc|cpp|h|hh|hpp)$", path) else s
+        for m in MAKE_RE.finditer(calls):
             qual, kind = m.group(1), m.group(2)
             fn = "make_" + kind
             if not qual and fn in scan.local_makers:
