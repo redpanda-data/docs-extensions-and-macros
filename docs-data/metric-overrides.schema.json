@@ -43,7 +43,7 @@
         "unit": { "type": ["string", "null"], "description": "Unit of the value, when the name does not say it. A stopgap: deleted when the tooling gives the same unit." },
         "labels": {
           "type": "array",
-          "description": "For a metric the cluster exported: a description and the complete values of labels it has, which is enrichment and stays. For a metric the cluster did not export: its labels, read from the source file the gap report names. Giving this list, even an empty one, covers that gap. That part is a stopgap: once the cluster exports the metric, a label entry with only a name is deleted, and so is an entry for a label the cluster does not have.",
+          "description": "For a metric the cluster exported: a description and the complete values of labels it has, which is enrichment and stays. For a metric the cluster did not export: its labels, read from the source file the gap report names. Giving this list, even an empty one, covers that gap, unless the dataset of an earlier release in --dataset-dir has the metric as exported: then the scrape lost it, the run logs an error, and --strict fails. That part is a stopgap: once the cluster exports the metric, a label entry with only a name is deleted. An entry with a description for a label the cluster does not have is kept, and the run reports the disagreement.",
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -82,7 +82,7 @@
         },
         "requires": {
           "type": "array",
-          "description": "What a cluster needs before it exports the metric. A stopgap for a metric the tooling does not know about yet: it replaces the list from the tooling, and is deleted when the tooling gives the same list.",
+          "description": "What a cluster needs before it exports the metric. A stopgap for a metric the tooling does not know about yet: it replaces the list from the tooling, and is deleted when the tooling gives the same list. It is kept when a requirement with a releases list matches the metric, because that requirement may hold for one release and not another.",
           "minItems": 1,
           "items": {
             "oneOf": [
