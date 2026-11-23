@@ -11,7 +11,7 @@
  * what that release ships. The docs repo publishes it as
  * modules/reference/attachments/operator-flags-<version>.json:
  *
- *   {schema: 1, operator_version, generated_at, source: {repo, ref},
+ *   {schema: 1, operator_version, generated_at, source: {ref},
  *    command: 'run',
  *    flags: [{name, type, default, usage, deprecated?, hidden?}],
  *    global_flags: [...]}

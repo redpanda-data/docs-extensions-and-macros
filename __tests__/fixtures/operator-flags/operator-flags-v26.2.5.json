@@ -2,7 +2,7 @@
   "schema": 1,
   "operator_version": "v26.2.5",
   "generated_at": "2026-11-23T00:00:00.000Z",
-  "source": { "repo": "redpanda-data/operator-enterprise", "ref": "operator/v26.2.5" },
+  "source": { "ref": "operator/v26.2.5" },
   "command": "run",
   "flags": [
     { "name": "allow-pv-rebinding", "type": "bool", "default": "false", "usage": "Clear the freed PersistentVolume's claimRef after an unbind", "deprecated": "the PVCUnbinder's safety checks replace it", "hidden": true },

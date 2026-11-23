@@ -78,6 +78,29 @@ describe('operator rules', () => {
     expect(clean).toEqual([])
   })
 
+  test('a registration written one argument per line, with gofmt\'s trailing comma, is linted', () => {
+    const src = [
+      'package run',
+      '',
+      'func register(cmd *cobra.Command, o *options) {',
+      '\tcmd.Flags().StringVar(',
+      '\t\t&o.mode,',
+      '\t\t"multiline-mode",',
+      '\t\t"standard",',
+      '\t\t"bad usage.",',
+      '\t)',
+      '}',
+      ''
+    ].join('\n')
+    const decls = operator.scanFile(src, FILE)
+    const flag = decls.find((d) => d.name === '--multiline-mode')
+    expect(flag.string).toBe('bad usage.')
+    expect(flag.meta.default_text).toBe('"standard"')
+    expect(flag.meta.unverifiable).toBe(false)
+    const rules = findingsFor(decls).map((f) => f.rule).sort()
+    expect(rules).toEqual(['operator-terminal-period', 'starts-lowercase'])
+  })
+
   test('lowercase start and terminal period fire on usage strings only', () => {
     // The lowercase deprecation messages are correct: cobra prints them
     // after "Flag --x has been deprecated,".

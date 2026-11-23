@@ -75,6 +75,15 @@ const DURATION_UNITS = {
   Hour: 'h'
 }
 
+// A call written one argument per line ends with a comma, which gofmt
+// requires, and the split then has an empty last argument. The usage string
+// is the last real one.
+function callArgs (argText) {
+  const args = splitTopLevelArgs(argText)
+  if (args.length > 0 && args[args.length - 1].trim() === '') args.pop()
+  return args
+}
+
 /**
  * Best-effort literal value of a default argument, as the strings a usage
  * text might restate it with. `15*time.Second` -> ['15s'], `30*time.Minute`
@@ -129,7 +138,7 @@ function scanFile (content, file) {
     const openIndex = match.index + match[0].length - 1
     const closeIndex = findBalancedClose(masked, openIndex)
     if (closeIndex === -1) continue
-    const args = splitTopLevelArgs(masked.slice(openIndex + 1, closeIndex))
+    const args = callArgs(masked.slice(openIndex + 1, closeIndex))
     if (args.length === 0) continue
     const name = evalStringExpr(args[0], consts)
     if (!name.verifiable) continue
@@ -148,7 +157,7 @@ function scanFile (content, file) {
     const openIndex = match.index + match[0].length - 1
     const closeIndex = findBalancedClose(masked, openIndex)
     if (closeIndex === -1) continue
-    const args = splitTopLevelArgs(masked.slice(openIndex + 1, closeIndex))
+    const args = callArgs(masked.slice(openIndex + 1, closeIndex))
     if (args.length < 2) continue
 
     let flagName = null

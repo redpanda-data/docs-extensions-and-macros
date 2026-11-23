@@ -117,15 +117,10 @@ function dumpFlags (checkout, { version, log = () => {} } = {}) {
   }
 }
 
-function headCommit (checkout) {
-  const rev = run('git', ['-C', checkout, 'rev-parse', 'HEAD'])
-  return rev.status === 0 ? rev.stdout.trim() : undefined
-}
-
 /**
  * Build the published data from a dump.
  */
-function buildData (dump, { version, ref, commit, now = new Date() }) {
+function buildData (dump, { version, ref, now = new Date() }) {
   const clean = (flag) => {
     const out = { name: flag.name, type: flag.type, default: flag.default, usage: flag.usage }
     if (flag.shorthand) out.shorthand = flag.shorthand
@@ -137,7 +132,9 @@ function buildData (dump, { version, ref, commit, now = new Date() }) {
     schema: 1,
     operator_version: version,
     generated_at: now.toISOString(),
-    source: { repo: REPO, ref, ...(commit ? { commit } : {}) },
+    // The ref only. The file is a public attachment, and the repository and
+    // its commits are private.
+    source: { ref },
     command: dump.command || 'run',
     flags: dump.flags.map(clean).sort((a, b) => a.name.localeCompare(b.name)),
     global_flags: (dump.global_flags || []).map(clean).sort((a, b) => a.name.localeCompare(b.name)),
@@ -177,7 +174,7 @@ function generateOperatorFlags (opts = {}) {
   try {
     checkout = opts.sourceDir ? path.resolve(opts.sourceDir) : cloneOperator(ref, log)
     const dump = dumpFlags(checkout, { version, log })
-    const data = buildData(dump, { version, ref: ref || 'local checkout', commit: headCommit(checkout) })
+    const data = buildData(dump, { version, ref: ref || 'local checkout' })
     const attachments = path.join(docsDir, 'modules', PAGE_MODULE, 'attachments')
     fs.mkdirSync(attachments, { recursive: true })
     const dataPath = path.join(attachments, `operator-flags-${version}.json`)

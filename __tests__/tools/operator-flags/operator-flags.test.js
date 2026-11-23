@@ -33,12 +33,12 @@ describe('buildData', () => {
         { name: 'alpha', type: 'string', default: '', usage: 'A', deprecated: 'use beta', hidden: true },
       ],
       global_flags: [{ name: 'log-level', type: 'string', default: 'info', usage: 'L' }],
-    }, { version: 'v26.2.5', ref: 'operator/v26.2.5', commit: 'abc', now: new Date('2026-11-23T00:00:00Z') })
+    }, { version: 'v26.2.5', ref: 'operator/v26.2.5', now: new Date('2026-11-23T00:00:00Z') })
     expect(data).toEqual({
       schema: 1,
       operator_version: 'v26.2.5',
       generated_at: '2026-11-23T00:00:00.000Z',
-      source: { repo: 'redpanda-data/operator-enterprise', ref: 'operator/v26.2.5', commit: 'abc' },
+      source: { ref: 'operator/v26.2.5' },
       command: 'run',
       flags: [
         { name: 'alpha', type: 'string', default: '', usage: 'A', deprecated: 'use beta', hidden: true },
