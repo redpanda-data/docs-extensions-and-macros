@@ -39,6 +39,10 @@ const SURFACE_ROUTES = [
   // console) and charts/<name>/values.yaml (connectors).
   { surface: 'helm', pattern: /^charts\/[^/]+\/(chart\/)?values\.yaml$/ },
   { surface: 'crd', pattern: /^operator\/api\// },
+  // Redpanda Operator `run` command flags (redpanda-operator repo), published
+  // on the generated operator flags reference. Before connect, whose `cmd/`
+  // route is anchored at the repo root and so never sees operator/cmd/.
+  { surface: 'operator', pattern: /^operator\/cmd\/run\/(?!(?:.*\/)?testdata\/).*(?<!_test)\.go$/ },
   // Redpanda Connect publishes strings from component packages, the helper
   // packages they share (internal/httpclient, internal/retries, ...), the
   // public schema and the `rpk connect` CLI, plus config templates.

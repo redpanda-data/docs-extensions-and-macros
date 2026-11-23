@@ -29,7 +29,8 @@ const SURFACES = {
   helm: require('./surfaces/helm'),
   crd: require('./surfaces/crd'),
   connect: require('./surfaces/connect'),
-  api: require('./surfaces/api')
+  api: require('./surfaces/api'),
+  operator: require('./surfaces/operator')
 }
 
 /**

@@ -121,7 +121,7 @@ on:
   workflow_call:
     inputs:
       surfaces:
-        description: "Comma-separated lint surfaces (properties,rpk,metrics,helm,crd,connect). Empty = all."
+        description: "Comma-separated lint surfaces (properties,rpk,metrics,helm,crd,connect,api,operator). Empty = all."
         type: string
         default: ""
       dispatch_repo:
@@ -1030,8 +1030,8 @@ jobs:
             You are reviewing user-facing doc strings only: strings that doc
             generators publish verbatim (config property descriptions, metric
             help, rpk cobra help, Helm values comments, CRD field comments,
-            Redpanda Connect component specs, fields, Bloblang plugins and
-            `rpk connect` help). The PR's source diff is in pr-diff.patch
+            Redpanda Connect component specs, fields, Bloblang plugins,
+            `rpk connect` help, and Redpanda Operator `run` flag usage). The PR's source diff is in pr-diff.patch
             (generated docs, lockfiles and vendored code are left out; never
             use gh pr diff). Read it with the Read tool, and page through a
             large file with offset and limit until you reach the end:
@@ -1097,7 +1097,8 @@ jobs:
               ("Specifies ...", never the Go field name or the json: tag
               key) and keep +kubebuilder marker lines
               byte-identical; Helm comments keep the # -- marker conventions;
-              connect strings follow CONNECT STRINGS below.
+              connect strings follow CONNECT STRINGS below; operator flag
+              strings follow OPERATOR FLAGS below.
             - ends with this line, exactly, using the declaration's
               fingerprint from lint-findings.json:
               <sub>doc-strings-review:fp=FINGERPRINT</sub>
@@ -1152,6 +1153,27 @@ jobs:
             - CLI help (kinds cli-*) is `rpk connect` help: Usage is a
               one-line label with no terminal period, and Description is
               plain text, not AsciiDoc.
+
+            OPERATOR FLAGS (surface operator): pflag usage strings of the
+            Redpanda Operator `run` command, published on the generated
+            operator flags reference next to a Default column that is
+            rendered from the flag itself.
+            - A usage string is a one-line label: capitalized, no terminal
+              period, never echoing the flag name.
+            - Never restate the default ("Default 30m", "(default ...)").
+              The page renders it, and a restated one goes stale. Do
+              explain what a sentinel default means: `0`, a negative
+              duration, or an empty string ("`0` disables the PVCUnbinder").
+            - The page renders the string as written, with no formatter, so
+              flags, paths, resource fields and literal values need their
+              own backticks.
+            - A deprecated flag (kind deprecation) carries a MarkDeprecated
+              message that cobra prints after "Flag --x has been
+              deprecated,", so it stays a lowercase clause. It says what to
+              use instead, or that the flag has no effect and can be
+              removed. A usage that calls a flag deprecated when it is not
+              registered with MarkDeprecated is a finding: suggest the
+              MarkDeprecated call.
 
             REVIEW IN CONTEXT: judge each string as the reader of its page,
             not on its own. Read it together with its context entries and

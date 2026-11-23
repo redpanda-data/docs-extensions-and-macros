@@ -1,0 +1,52 @@
+// Written by doc-tools generate operator-flags into a temporary directory of
+// a redpanda-operator checkout, run once with `go run`, then deleted. It
+// builds the operator's own `run` command and the root command's persistent
+// logging flags exactly as cmd/main.go does, and prints every flag pflag
+// holds, deprecated and hidden ones included, as JSON on stdout.
+package main
+
+import (
+	"encoding/json"
+	"os"
+
+	"github.com/fluxcd/pkg/runtime/logger"
+	"github.com/spf13/pflag"
+
+	"github.com/redpanda-data/redpanda-operator/operator/cmd/run"
+)
+
+type flag struct {
+	Name       string `json:"name"`
+	Shorthand  string `json:"shorthand,omitempty"`
+	Type       string `json:"type"`
+	Default    string `json:"default"`
+	Usage      string `json:"usage"`
+	Deprecated string `json:"deprecated,omitempty"`
+	Hidden     bool   `json:"hidden,omitempty"`
+}
+
+func collect(fs *pflag.FlagSet) []flag {
+	out := []flag{}
+	fs.VisitAll(func(f *pflag.Flag) {
+		out = append(out, flag{f.Name, f.Shorthand, f.Value.Type(), f.DefValue, f.Usage, f.Deprecated, f.Hidden})
+	})
+	return out
+}
+
+func main() {
+	cmd := run.Command()
+	var logOptions logger.Options
+	global := pflag.NewFlagSet("global", pflag.ContinueOnError)
+	logOptions.BindFlags(global)
+
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(map[string]any{
+		"command":      cmd.Use,
+		"flags":        collect(cmd.Flags()),
+		"global_flags": collect(global),
+	}); err != nil {
+		os.Exit(1)
+	}
+}

@@ -111,7 +111,7 @@ describe('doc-tools check-reference-values', () => {
     expect(explicit.stderr).toContain('--kinds connect')
     const implicit = run(dir, ['--data-file', data])
     expect(implicit.code).toBe(0)
-    expect(Object.keys(implicit.report.skipped).sort()).toEqual(['connect', 'properties'])
+    expect(Object.keys(implicit.report.skipped).sort()).toEqual(['connect', 'operator', 'properties'])
   })
 
   test('--data-file accepts the raw docs-data snapshot, which has no schema key', () => {
