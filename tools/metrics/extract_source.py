@@ -625,14 +625,6 @@ class FileScan:
         key = (self.path, rn)
         if key in ENDPOINT_RULES:
             return ENDPOINT_RULES[key], "rule"
-        low = recv.lower()
-        # A name that says both (_public_and_internal) says nothing; its
-        # declaration decides.
-        named_both = "public" in low and "internal" in low
-        if not named_both and "public" in low:
-            return ["public"], "clean"
-        if not named_both and "internal" in low:
-            return ["internal"], "clean"
         # a group created in place by emplace(..., <handle>) and reached through the result
         root = re.match(r"[A-Za-z_]\w*", recv)
         if root:
@@ -666,6 +658,14 @@ class FileScan:
             return ["internal", "public"], "clean"
         if kind in ("internal", "public"):
             return [kind], "clean"
+        # Only when the type and the handle say nothing: the receiver's name.
+        # A name that says both (_public_and_internal) says nothing either.
+        low = recv.lower()
+        named_both = "public" in low and "internal" in low
+        if not named_both and "public" in low:
+            return ["public"], "clean"
+        if not named_both and "internal" in low:
+            return ["internal"], "clean"
         if kind == "base":
             return ["internal", "public"], "heuristic"
         return None, "unresolved"
