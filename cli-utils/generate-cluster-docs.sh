@@ -320,6 +320,20 @@ count_families() {
 # Metrics that need an action, not only a property. Each step is best effort:
 # a failure costs a few metric families and must not fail the run by itself.
 ###############################################################################
+# The shadow-source broker is not part of the cluster the health check above
+# waits for. Its Kafka API can still be starting when the actions run.
+wait_for_shadow_source() {
+  local tries=0
+  until docker exec shadow-source rpk cluster info >/dev/null 2>&1; do
+    tries=$(( tries + 1 ))
+    if (( tries >= 30 )); then
+      echo "⚠️  The shadow-source broker did not answer within about 60s."
+      return 1
+    fi
+    sleep 2
+  done
+}
+
 run_metrics_actions() {
   local rpk_auth=(-X "user=$ADMIN_USER" -X "pass=$ADMIN_PASS")
   local url moved=0
@@ -345,8 +359,10 @@ run_metrics_actions() {
   fi
 
   # Shadow link metrics exist only while a link is running. The source broker
-  # gets a topic, a record and a schema to shadow.
-  if docker exec shadow-source rpk topic create metrics-shadow-src \
+  # gets a topic, a record and a schema to shadow. The health wait above
+  # covers only the cluster's brokers, so wait for this one too.
+  if wait_for_shadow_source \
+     && docker exec shadow-source rpk topic create metrics-shadow-src \
      && echo '{"metrics":1}' | docker exec -i shadow-source rpk topic produce metrics-shadow-src >/dev/null \
      && docker exec shadow-source curl -sSf -X POST -H 'Content-Type: application/vnd.schemaregistry.v1+json' \
           --data '{"schema":"{\"type\":\"string\"}"}' \
@@ -448,7 +464,7 @@ if [[ "$MODE" == "metrics" ]]; then
       # fired (consumer group lag, a transform's first batch), so a stable
       # count is not proof.
       if missing="$("$PYTHON" "$SCRIPT_DIR/../tools/metrics/metrics.py" "$TAG" "${SETTLE_URL_ARGS[@]}" \
-           --inventory "$METRICS_INVENTORY_FILE" --expected-absent "$METRICS_DIR/expected-absent.json" --check-only 2>/dev/null)"; then
+           --inventory "$METRICS_INVENTORY_FILE" --expected-absent "$METRICS_DIR/expected-absent.json" --check-only)"; then
         echo "✅ Every metric family in source is exported (${count} families) after ${SECONDS}s"
         break
       fi
@@ -488,6 +504,8 @@ if [[ "$MODE" == "metrics" ]]; then
     # take the extra features is expected to be short, so it is never strict.
     if [[ "${METRICS_STRICT:-0}" == "1" ]] && (( METRICS_EXTRAS )); then
       ADMIN_URL_ARGS+=(--strict)
+    elif [[ "${METRICS_STRICT:-0}" == "1" ]]; then
+      echo "⚠️  --strict does not apply to Redpanda $MAJOR_MINOR: it cannot take the extra features, so its gaps are expected. They are listed in metrics-gaps.json and the output is written."
     fi
   fi
   "$PYTHON" "$SCRIPT_DIR/../tools/metrics/metrics.py" "$TAG" "${ADMIN_URL_ARGS[@]}" ${GENERATOR_ARGS[@]+"${GENERATOR_ARGS[@]}"}
