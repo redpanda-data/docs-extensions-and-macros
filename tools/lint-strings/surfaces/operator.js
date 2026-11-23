@@ -41,9 +41,13 @@ const CONVENTION = {
   case: 'sentence',
   terminal_period: false,
   verbatim_asciidoc: false,
-  // No transformer: the reference page renders the usage string as written,
-  // so flags, paths and other code values need their own backticks.
-  transformer: null
+  // No backticks, ever: pflag's UnquoteUsage takes the first `...` span of
+  // a usage string as the flag's value placeholder, prints it after the
+  // flag name in --help and drops the backticks. Code values are written
+  // bare (--namespace, kube-system, 0). The reference page formats the
+  // string instead: it puts every --flag in code and adds the closing
+  // period (tools/operator-flags/render-page.js).
+  transformer: 'renderPage'
 }
 
 const RUN_ROOT = path.join('operator', 'cmd', 'run')
@@ -252,16 +256,30 @@ function restatedDefault (text, forms) {
 
 const RULES = [
   {
+    name: 'operator-backtick',
+    description: 'Flag usage and deprecation strings contain no backticks',
+    why: 'pflag takes the first backtick-quoted span of a usage string as the flag\'s value placeholder: --help prints that text after the flag name and drops the backticks, so a bool flag can show as "--metrics-secure false", which reads as a value the flag does not take. The reference page puts every --flag in code itself, so write code values bare in both usage and deprecation strings.',
+    standard: STANDARD.rpk,
+    severity: 'error',
+    check: (decl) => {
+      if (decl.meta.kind !== 'flag' && decl.meta.kind !== 'deprecation') return []
+      const text = decl.string || ''
+      if (!text.includes('`')) return []
+      const span = text.match(/`[^`]*`?/)[0]
+      return [{ message: `${decl.meta.kind === 'flag' ? 'Flag usage' : 'Deprecation message'} contains a backtick (${span}). pflag shows the first backtick span in --help as the flag's value placeholder. Remove every backtick and write the value bare; the reference page formats --flags as code.` }]
+    }
+  },
+  {
     name: 'operator-terminal-period',
     description: 'Flag usage strings do not end with a period',
-    why: 'A flag usage string is a one-line label, not a sentence, so it takes no terminal period.',
+    why: 'Cobra prints the usage string in --help next to the flag and its default, where a closing period reads as clutter. The reference page renders the string as a paragraph and adds the period itself, so the source string never needs one.',
     standard: STANDARD.rpk,
     severity: 'warning',
     check: (decl) => {
       if (decl.meta.kind !== 'flag') return []
       const text = (decl.string || '').trim()
       if (/\.$/.test(text)) {
-        return [{ message: `Flag usage ends with a period: "...${text.slice(-50)}". Flag usage is a one-line label with no terminal period.` }]
+        return [{ message: `Flag usage ends with a period: "...${text.slice(-50)}". Remove it; the reference page adds the closing period.` }]
       }
       return []
     }
@@ -278,7 +296,7 @@ const RULES = [
       if (!text) return []
       const phrase = restatedDefault(text, decl.meta.default_forms || [])
       if (!phrase) return []
-      return [{ message: `Flag usage restates its default ("${phrase}"). The reference page renders the default; remove it from the string, and keep only what a sentinel value such as \`0\` or an empty string means.` }]
+      return [{ message: `Flag usage restates its default ("${phrase}"). The reference page renders the default; remove it from the string, and keep only what a sentinel value such as 0 or an empty string means.` }]
     }
   },
   {
@@ -327,7 +345,8 @@ module.exports = {
   defaultForms,
   restatedDefault,
   rules: RULES,
-  // Flag usage strings are one-line labels, so the generic too-short rule
-  // would fire on nearly every conforming string.
-  skipRules: ['too-short']
+  // Flag usage strings are short, so the generic too-short rule
+  // would fire on nearly every conforming string. missing-inline-code asks
+  // for backticks, which these strings must never hold (operator-backtick).
+  skipRules: ['too-short', 'missing-inline-code']
 }

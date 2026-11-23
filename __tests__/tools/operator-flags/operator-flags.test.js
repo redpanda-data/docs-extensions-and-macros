@@ -5,7 +5,11 @@ const os = require('os')
 const path = require('path')
 const { renderPage, escapeAttributes } = require('../../../tools/operator-flags/render-page')
 const { buildData, versionOfRef, dumpFlags } = require('../../../tools/operator-flags')
-const { scanOperator, yamlListItems } = require('../../../tools/reference-values/operator')
+const { spawnSync } = require('child_process')
+const { scanOperator, yamlListItems, flagsIn, stripYamlComment } = require('../../../tools/reference-values/operator')
+const { isOnPage, codeFlags } = require('../../../extension-utils/operator-flags')
+
+const BIN = path.join(__dirname, '..', '..', '..', 'bin', 'doc-tools.js')
 
 const SAMPLE = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'fixtures', 'operator-flags', 'operator-flags-v26.2.5.json'), 'utf8'))
 
@@ -52,6 +56,28 @@ describe('dumpFlags', () => {
   })
 })
 
+describe('generate operator-flags CLI', () => {
+  test('--operator-version with a space reaches the generator, not the root --version', () => {
+    const result = spawnSync(process.execPath, [BIN, 'generate', 'operator-flags', '--operator-version', 'v26.3.1', '--source-dir', '/nonexistent'], { encoding: 'utf8' })
+    expect(result.status).toBe(1)
+    expect(result.stderr).toMatch(/\/nonexistent has no operator\/go\.mod/)
+    expect(result.stdout).not.toContain(require('../../../package.json').version)
+  })
+})
+
+describe('isOnPage and codeFlags', () => {
+  test('every flag but a hidden-only one is on the page', () => {
+    expect(isOnPage({ name: 'a' })).toBe(true)
+    expect(isOnPage({ name: 'a', hidden: true })).toBe(false)
+    expect(isOnPage({ name: 'a', hidden: true, deprecated: 'use b' })).toBe(true)
+  })
+
+  test('puts --flags in code and leaves existing backtick spans alone', () => {
+    expect(codeFlags('Use --a, --b=x or (--c). Not -- or --d=y.')).toBe('Use `--a`, `--b=x` or (`--c`). Not -- or `--d=y`.')
+    expect(codeFlags('Keep `--a` and --b')).toBe('Keep `--a` and `--b`')
+  })
+})
+
 describe('renderPage', () => {
   const page = renderPage(SAMPLE)
 
@@ -74,9 +100,38 @@ describe('renderPage', () => {
     expect(page).toContain("IMPORTANT: This flag is deprecated. The PVCUnbinder's safety checks replace it.")
   })
 
-  test('renders type and default as literal code, and an empty default as None', () => {
-    expect(page).toContain('[[unbind-pvcs-after]]\n=== --unbind-pvcs-after\n\nHow long a broker Pod stays `Pending` before the PVCUnbinder unbinds its claims. `0` disables the PVCUnbinder\n\n[horizontal]\nType:: `+duration+`\nDefault:: `+0s+`\n')
-    expect(page).toMatch(/=== --namespace\n\n[^\n]+\n\n\[horizontal\]\nType:: `\+string\+`\nDefault:: None\n/)
+  test('renders type and default as literal code, and an empty default as ""', () => {
+    expect(page).toContain('[[unbind-pvcs-after]]\n=== --unbind-pvcs-after\n\nHow long a broker Pod stays Pending before the PVCUnbinder unbinds its claims. 0 disables the PVCUnbinder.\n\n[horizontal]\nType:: `+duration+`\nDefault:: `+0s+`\n')
+    expect(page).toMatch(/=== --namespace\n\n[^\n]+\n\n\[horizontal\]\nType:: `\+string\+`\nDefault:: `\+""\+`\n/)
+    expect(page).not.toContain('Default:: None')
+  })
+
+  test('formats --flags in usage as code and ends each usage paragraph with a period', () => {
+    expect(page).toContain("Kubernetes cluster domain, as set by the kubelet's `--cluster-domain`.\n")
+    const one = renderPage({ ...SAMPLE, flags: [{ name: 'a', type: 'bool', default: 'false', usage: 'Is it on?' }, { name: 'b', type: 'bool', default: 'false', usage: 'Done.' }], global_flags: [] })
+    expect(one).toContain('\nIs it on?\n')
+    expect(one).toContain('\nDone.\n')
+  })
+
+  test('a value with + renders through pass:c, never as {plus}', () => {
+    const one = renderPage({ ...SAMPLE, flags: [{ name: 'tz', type: 'string', default: '+00:00', usage: 'Offset' }], global_flags: [] })
+    expect(one).toContain('Default:: `pass:c[+00:00]`')
+    expect(one).not.toContain('{plus}')
+    const html = require('@asciidoctor/core')().convert(one)
+    expect(html).toContain('<code>+00:00</code>')
+  })
+
+  test('lists a deprecated global flag in the Deprecated flags section', () => {
+    const one = renderPage({ ...SAMPLE, global_flags: [...SAMPLE.global_flags, { name: 'log-encoding', type: 'string', default: 'json', usage: 'Log encoding', deprecated: 'use --log-format' }] })
+    const deprecatedAt = one.indexOf('== Deprecated flags')
+    expect(one.indexOf('[[log-encoding]]')).toBeGreaterThan(deprecatedAt)
+    expect(one).toContain('IMPORTANT: This flag is deprecated. Use `--log-format`.')
+  })
+
+  test('says defaults are the binary\'s, that the chart passes some flags, and scopes multicluster', () => {
+    expect(page).toContain("Each default is the operator binary's built-in default")
+    expect(page).toContain('xref:reference:k-operator-helm-spec.adoc[]')
+    expect(page).toContain('When `multicluster.enabled` is `true`, the chart runs the `redpanda-operator multicluster` command')
   })
 
   test('escapes attribute references in help text', () => {
@@ -101,6 +156,28 @@ describe('check-reference-values operator kind', () => {
       [5, 'warning', 'deprecated operator flag', '--allow-pv-rebinding'],
       [6, 'error', 'unknown operator flag', '--no-such-flag'],
     ])
+  })
+
+  test('checks the first item of an unquoted inline list, and keys with a comment or callout', () => {
+    expect(yamlListItems(['additionalCmdFlags: [--a, --b]']).map((i) => flagsIn(i.text))).toEqual([['--a', '--b']])
+    expect(yamlListItems(['additionalCmdFlags: ["--a", "--b"] # <1>']).map((i) => flagsIn(i.text))).toEqual([['--a', '--b']])
+    expect(yamlListItems(['additionalCmdFlags: ["--a"] <1>']).map((i) => flagsIn(i.text))).toEqual([['--a']])
+    expect(yamlListItems(['additionalCmdFlags: # flags', '  - --a']).map((i) => flagsIn(i.text))).toEqual([['--a']])
+    write(['additionalCmdFlags: [--bogus, --namespace=x]', "  --set additionalCmdFlags=\"{--nope,--namespace=y}\""].join('\n'))
+    expect(scan()).toEqual([
+      [2, 'error', 'unknown operator flag', '--nope'],
+      [1, 'error', 'unknown operator flag', '--bogus'],
+    ])
+  })
+
+  test('ignores flag-shaped words in YAML item comments', () => {
+    expect(stripYamlComment('--a # was --old-flag')).toBe('--a')
+    expect(stripYamlComment('"--a=#x" # c')).toBe('"--a=#x"')
+    expect(stripYamlComment('--a=b#c')).toBe('--a=b#c')
+    write(['additionalCmdFlags:', '  - --namespace=x # replaces --old-flag', '  - --allow-pv-rebinding'].join('\n'))
+    const findings = scanOperator({ docsDir: dir, registry }).findings
+    expect(findings.map((f) => f.written)).toEqual(['--allow-pv-rebinding'])
+    expect(findings[0].note).toMatch(/value-check: ignore above the block/)
   })
 
   test('checks a Helm --set value and an inline YAML list', () => {

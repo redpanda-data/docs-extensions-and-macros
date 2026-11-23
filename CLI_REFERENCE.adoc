@@ -1323,15 +1323,15 @@ Generated from `doc-tools lint-strings --list-rules`. Each rule links the sectio
 |Odd number of backticks ships broken markup
 |An odd number of backticks leaves an inline code span open, so the rest of the string renders as broken monospace. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
 
-|`missing-inline-code`
-|warning
-|Code value or field name in prose without inline code
-|Without inline code, a property name, flag or path reads as ordinary prose, so readers cannot tell it is a value to type exactly. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+|`operator-backtick`
+|error
+|Flag usage and deprecation strings contain no backticks
+|pflag takes the first backtick-quoted span of a usage string as the flag's value placeholder: --help prints that text after the flag name and drops the backticks, so a bool flag can show as "--metrics-secure false", which reads as a value the flag does not take. The reference page puts every --flag in code itself, so write code values bare in both usage and deprecation strings. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#rpk-commands-and-flags-transformed[Standard]
 
 |`operator-terminal-period`
 |warning
 |Flag usage strings do not end with a period
-|A flag usage string is a one-line label, not a sentence, so it takes no terminal period. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#rpk-commands-and-flags-transformed[Standard]
+|Cobra prints the usage string in --help next to the flag and its default, where a closing period reads as clutter. The reference page renders the string as a paragraph and adds the period itself, so the source string never needs one. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#rpk-commands-and-flags-transformed[Standard]
 
 |`operator-restated-default`
 |warning
@@ -2969,13 +2969,13 @@ doc-tools generate operator-flags [options]
 Operator release tag, such as operator/v26.2.5
 
 `-b, --branch <branch>`::
-Operator branch for in-progress content (requires --version)
+Operator branch for in-progress content (requires --operator-version)
 
-`--version <version>`::
+`--operator-version <version>`::
 The operator version the output is for, such as v26.3.1 (defaults to the tag)
 
 `--source-dir <dir>`::
-An existing redpanda-operator checkout to read instead of cloning
+An existing redpanda-operator checkout to read instead of cloning. With --tag, the tag is recorded as the source ref
 
 `--docs-dir <dir>`::
 The docs checkout to write into (default: ".")
@@ -2991,7 +2991,8 @@ display help for command
 [,bash]
 ----
 npx doc-tools generate operator-flags --tag operator/v26.2.5
-npx doc-tools generate operator-flags --source-dir ../redpanda-operator --version v26.3.1
+npx doc-tools generate operator-flags --tag operator/v26.3.1 --source-dir ../redpanda-operator
+npx doc-tools generate operator-flags --source-dir ../redpanda-operator --operator-version v26.3.1
 ----
 
 *Requirements:*

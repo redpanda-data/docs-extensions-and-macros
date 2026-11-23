@@ -38,6 +38,8 @@ describe('operator scanner (scanFile)', () => {
       '--configurator-base-image',
       '--debug',
       '--leader-election-lease-duration',
+      '--metrics-secure',
+      '--old-secure',
       '--post-restart-caught-up-percent',
       '--unbind-pvcs-after',
       '--unbinder-label-selector'
@@ -91,6 +93,25 @@ describe('operator rules', () => {
     ])
   })
 
+  test('any backtick in a usage or deprecation string is an error', () => {
+    expect(by('operator-backtick')).toEqual(['deprecation:--old-secure', 'flag:--metrics-secure'])
+    const rule = operator.rules.find((r) => r.name === 'operator-backtick')
+    expect(rule.severity).toBe('error')
+    expect(rule.why).toMatch(/value placeholder/)
+    expect(rule.standard).toBeTruthy()
+  })
+
+  test('never asks for backticks: missing-inline-code is skipped', () => {
+    expect(operator.skipRules).toContain('missing-inline-code')
+    expect(by('missing-inline-code')).toEqual([])
+  })
+
+  test('the terminal-period rule no longer calls the string a one-line label', () => {
+    const rule = operator.rules.find((r) => r.name === 'operator-terminal-period')
+    expect(rule.why).not.toMatch(/one-line label/)
+    expect(rule.why).toMatch(/adds the period/)
+  })
+
   test('deprecation hygiene', () => {
     expect(by('operator-unmarked-deprecation')).toEqual(['flag:--debug'])
     expect(by('operator-deprecation-no-alternative')).toEqual(['deprecation:--allow-pv-rebinding'])
@@ -109,11 +130,11 @@ describe('operator extract and routing', () => {
 
   test('whole-repo extract walks operator/cmd/run', () => {
     const decls = operator.extract({ repo: REPO })
-    expect(decls.filter((d) => d.meta.kind === 'flag')).toHaveLength(9)
+    expect(decls.filter((d) => d.meta.kind === 'flag')).toHaveLength(11)
     expect(decls.every((d) => d.declaration_text)).toBe(true)
   })
 
   test('diff-mode extract takes only the given files', () => {
-    expect(operator.extract({ repo: REPO, files: new Set([FILE, 'operator/cmd/run/run_test.go']) })).toHaveLength(11)
+    expect(operator.extract({ repo: REPO, files: new Set([FILE, 'operator/cmd/run/run_test.go']) })).toHaveLength(14)
   })
 })

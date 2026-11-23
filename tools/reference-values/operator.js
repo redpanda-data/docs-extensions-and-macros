@@ -20,7 +20,7 @@
  * Findings use the shared shape: status 'reference', severity 'error' for
  * a flag the operator does not have, 'warning' for a deprecated or hidden
  * one that is not acknowledged with deprecated=ok (macros only; a typed flag
- * is acknowledged with // value-check: ignore).
+ * is acknowledged with // value-check: ignore above its block).
  */
 
 const path = require('path')
@@ -28,8 +28,27 @@ const shared = require('./shared')
 const operatorFlags = require('../../extension-utils/operator-flags')
 
 const MACRO_RX = /\b(opflag|opflagval):\[((?:\\\]|[^\]])*)\]/g
-const SET_RX = /additionalCmdFlags(?:\[\d+\])?=\{?([^}'"\s]*(?:\{[^}]*\})?[^}'"\s]*)\}?/g
-const FLAG_TOKEN_RX = /(?:^|[\s,{'"=])(--[A-Za-z0-9][A-Za-z0-9-]*)(?:=[^\s,}'"]*)?/g
+const SET_RX = /additionalCmdFlags(?:\[\d+\])?=["']?\{?([^}'"\s]*(?:\{[^}]*\})?[^}'"\s]*)\}?/g
+const FLAG_TOKEN_RX = /(?:^|[\s,[{'"=])(--[A-Za-z0-9][A-Za-z0-9-]*)(?:=[^\s,}'"]*)?/g
+
+/**
+ * YAML text without a trailing # comment. A # inside quotes, or not after
+ * whitespace, is part of the value.
+ */
+function stripYamlComment (text) {
+  let quote = null
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (quote) {
+      if (c === quote) quote = null
+    } else if (c === '"' || c === "'") {
+      quote = c
+    } else if (c === '#' && (i === 0 || /\s/.test(text[i - 1]))) {
+      return text.slice(0, i).trimEnd()
+    }
+  }
+  return text
+}
 
 /**
  * The 1-based line numbers of the items of every `additionalCmdFlags:` list
@@ -38,7 +57,7 @@ const FLAG_TOKEN_RX = /(?:^|[\s,{'"=])(--[A-Za-z0-9][A-Za-z0-9-]*)(?:=[^\s,}'"]*
 function yamlListItems (lines) {
   const out = []
   for (let i = 0; i < lines.length; i++) {
-    const key = lines[i].match(/^(\s*)additionalCmdFlags:\s*(\[.*\])?\s*$/)
+    const key = lines[i].match(/^(\s*)additionalCmdFlags:\s*(\[.*\])?\s*(?:#.*|<\d+>)?\s*$/)
     if (!key) continue
     if (key[2]) {
       out.push({ line: i + 1, text: key[2] })
@@ -48,7 +67,7 @@ function yamlListItems (lines) {
     for (let j = i + 1; j < lines.length; j++) {
       const item = lines[j].match(/^(\s*)-\s+(.*?)\s*(?:<\d+>)?\s*$/)
       if (item && item[1].length >= indent) {
-        out.push({ line: j + 1, text: item[2].replace(/^["']|["']$/g, '') })
+        out.push({ line: j + 1, text: stripYamlComment(item[2]).replace(/^["']|["']$/g, '') })
         continue
       }
       if (!lines[j].trim() || /^\s*#/.test(lines[j])) continue
@@ -86,7 +105,7 @@ function scanOperator ({ docsDir, registry, files: only, readFile = shared.readT
     }
     const caution = operatorFlags.cautionOf(resolved.flag)
     if (caution && !acknowledged) {
-      findings.push({ file: relative, line, status: 'reference', severity: 'warning', check: macro ? 'macro' : 'typed', reason: caution.kind === 'deprecated-flag' ? 'deprecated operator flag' : 'hidden operator flag', written, target: `--${resolved.flag.name}`, note: `${caution.text}${macro ? '; add deprecated=ok if the mention is deliberate' : '; add // value-check: ignore above the line if the mention is deliberate'}` })
+      findings.push({ file: relative, line, status: 'reference', severity: 'warning', check: macro ? 'macro' : 'typed', reason: caution.kind === 'deprecated-flag' ? 'deprecated operator flag' : 'hidden operator flag', written, target: `--${resolved.flag.name}`, note: `${caution.text}${macro ? '; add deprecated=ok if the mention is deliberate' : '; add // value-check: ignore above the block if the mention is deliberate'}` })
     }
   }
 
@@ -116,4 +135,4 @@ function scanOperator ({ docsDir, registry, files: only, readFile = shared.readT
   return { files, skippedGenerated, skippedStubs, findings, counts, changedFiles: 0, operatorVersion: version, dataset }
 }
 
-module.exports = { scanOperator, yamlListItems, flagsIn }
+module.exports = { scanOperator, yamlListItems, flagsIn, stripYamlComment }

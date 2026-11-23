@@ -5,13 +5,13 @@
   "source": { "repo": "redpanda-data/operator-enterprise", "ref": "operator/v26.2.5" },
   "command": "run",
   "flags": [
-    { "name": "allow-pv-rebinding", "type": "bool", "default": "false", "usage": "Clear the freed PersistentVolume's `claimRef` after an unbind", "deprecated": "the PVCUnbinder's safety checks replace it", "hidden": true },
-    { "name": "cluster-domain", "type": "string", "default": "cluster.local", "usage": "Kubernetes cluster domain, as set by the kubelet's `--cluster-domain`" },
+    { "name": "allow-pv-rebinding", "type": "bool", "default": "false", "usage": "Clear the freed PersistentVolume's claimRef after an unbind", "deprecated": "the PVCUnbinder's safety checks replace it", "hidden": true },
+    { "name": "cluster-domain", "type": "string", "default": "cluster.local", "usage": "Kubernetes cluster domain, as set by the kubelet's --cluster-domain" },
     { "name": "namespace", "type": "string", "default": "", "usage": "Namespace the operator watches. Empty watches every namespace" },
-    { "name": "unbind-pvcs-after", "type": "duration", "default": "0s", "usage": "How long a broker Pod stays `Pending` before the PVCUnbinder unbinds its claims. `0` disables the PVCUnbinder" },
+    { "name": "unbind-pvcs-after", "type": "duration", "default": "0s", "usage": "How long a broker Pod stays Pending before the PVCUnbinder unbinds its claims. 0 disables the PVCUnbinder" },
     { "name": "unsafe-decommission-failed-brokers", "type": "bool", "default": "false", "usage": "Decommission brokers that are configured but missing from the StatefulSet", "hidden": true }
   ],
   "global_flags": [
-    { "name": "log-level", "type": "string", "default": "info", "usage": "Log verbosity: `trace`, `debug`, `info` or `error`" }
+    { "name": "log-level", "type": "string", "default": "info", "usage": "Log verbosity: trace, debug, info or error" }
   ]
 }

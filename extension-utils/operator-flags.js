@@ -96,7 +96,8 @@ const normalizeField = FIELD_SET.normalizeField
 
 /**
  * A flag as written in prose: `--name`, `--name=value` or `--name value`.
- * The leading dashes are optional, so opflag:[unbind-pvcs-after] still reads.
+ * The leading dashes are optional, so opflag:[unbind-pvcs-after] and
+ * opflag:[unbind-pvcs-after=60s] still read.
  */
 function parseFlagText (text) {
   const raw = String(text == null ? '' : text).trim()
@@ -125,6 +126,31 @@ function allFlagNames (registry) {
 
 function describeDataset (registry) {
   return datasets.describeDataset(registry)
+}
+
+/**
+ * Whether the reference page has an entry for a flag: every flag except one
+ * that is only hidden (MarkHidden, never deprecated). Deprecated flags, run
+ * and global alike, are listed in the Deprecated flags section. The page
+ * renderer and opflag: both use this, so a link always has an anchor.
+ */
+const isOnPage = (flag) => Boolean(flag) && (!flag.hidden || Boolean(flag.deprecated))
+
+// A long flag in help text, with an optional =value. A trailing sentence
+// mark after a value is not part of it.
+const FLAG_IN_TEXT_RX = /(^|[\s(,])(--[a-z0-9][a-z0-9-]*(?:=[^\s,)]*[^\s,).;:!?])?)/g
+
+/**
+ * Help text with every --flag token in inline code. Usage strings carry no
+ * backticks (pflag would read the first span as the value placeholder in
+ * --help), so the page adds the code formatting. Existing backtick spans
+ * are left alone.
+ */
+function codeFlags (text) {
+  return String(text == null ? '' : text)
+    .split(/(`[^`]*`)/)
+    .map((part, i) => (i % 2 ? part : part.replace(FLAG_IN_TEXT_RX, '$1`$2`')))
+    .join('')
 }
 
 /**
@@ -195,7 +221,8 @@ function fieldValue (flag, requested, { format = FORMAT_HUMAN, call } = {}) {
   // description
   const text = String(flag.usage || '').trim()
   if (!text) return { ok: false, kind: 'missing-field', field, message: `${call}: --${flag.name} has no help text.` }
-  return { ok: true, field, rich: { format: FORMAT_ASCIIDOC, text } }
+  // Formatted as the reference page formats it.
+  return { ok: true, field, rich: { format: FORMAT_ASCIIDOC, text: codeFlags(text) } }
 }
 
 /**
@@ -242,6 +269,8 @@ module.exports = {
   describeDataset,
   flagAnchor,
   formatDefault,
+  isOnPage,
+  codeFlags,
   resolveFlag,
   cautionOf,
   fieldValue,

@@ -12,7 +12,10 @@
  * opflag: links the flag's entry on the generated reference page
  * (reference:k-operator-flags.adoc, one anchor per flag) in the page's own
  * component version, and renders the text as written, so a value after = is
- * kept. opflagval: renders one field, named as every value macro names it
+ * kept, commas included (opflag:[--additional-controllers=a,b]). It reads
+ * the raw bracket text, not parsed attributes, so a comma or an = without
+ * leading dashes never splits the flag; a trailing deprecated=ok is the one
+ * named attribute. opflagval: renders one field, named as every value macro names it
  * (extension-utils/value-fields.js): default, type, description or
  * deprecated (format=raw gives true/false).
  *
@@ -72,15 +75,32 @@ function reportCaution (mode, call, flag, attributes) {
   report(mode, caution.kind, `${call}: ${caution.text}. Mention it only to say so, and add deprecated=ok to the call.`)
 }
 
+/**
+ * The flag text and named attributes of a raw opflag: bracket text. Only
+ * trailing deprecated=... parts are attributes; everything before them,
+ * commas included, is the flag.
+ */
+function splitOpflagText (raw) {
+  const parts = unescape(raw == null ? '' : raw).replace(/\\\]/g, ']').split(',')
+  const attributes = {}
+  while (parts.length > 1) {
+    const named = parts[parts.length - 1].match(/^\s*(deprecated)\s*=\s*(.*?)\s*$/)
+    if (!named) break
+    attributes[named[1]] = named[2]
+    parts.pop()
+  }
+  return { flag: parts.join(',').trim(), attributes }
+}
+
 function opflagInlineMacro (config) {
   return function () {
     const self = this
     self.named('opflag')
     self.option('format', 'short')
-    self.positionalAttributes(['flag'])
-    self.process(function (parent, target, attributes) {
+    self.option('content_model', 'text')
+    self.process(function (parent, target, raw) {
       const ctx = context(config, parent)
-      const line = unescape(attributes.flag == null ? '' : attributes.flag).trim()
+      const { flag: line, attributes } = splitOpflagText(raw.text)
       const call = `opflag:[${line}]${ctx.where}`
       const plain = (display) => self.createInline(parent, 'quoted', operatorFlags.buildFlagContent({ display, plain: true }))
       const resolved = operatorFlags.resolveFlag({ registry: ctx.registry, text: line, call })
@@ -94,7 +114,7 @@ function opflagInlineMacro (config) {
       const display = `--${name}${value !== undefined ? `${resolved.parsed.separator === '=' ? '=' : ' '}${value}` : ''}`
       // The reference page leaves out flags that are only hidden (internal),
       // so there is no entry to link.
-      if (resolved.flag.hidden && !resolved.flag.deprecated) return plain(display)
+      if (!operatorFlags.isOnPage(resolved.flag)) return plain(display)
       const page = operatorFlags.pickFlagPage(ctx.contentCatalog, { component: ctx.component, version: ctx.version })
       if (!page) {
         report(ctx.mode, 'no-page', `${call}: ${ctx.component || 'unknown component'}@${ctx.version || 'unversioned'} has no ${operatorFlags.PAGE_MODULE}:${operatorFlags.PAGE_RELATIVE}, so the flag renders as plain code with no link.`)
@@ -156,3 +176,4 @@ function opflagvalInlineMacro (config) {
 module.exports.opflagInlineMacro = opflagInlineMacro
 module.exports.opflagvalInlineMacro = opflagvalInlineMacro
 module.exports.THROW_KINDS = THROW_KINDS
+module.exports.splitOpflagText = splitOpflagText

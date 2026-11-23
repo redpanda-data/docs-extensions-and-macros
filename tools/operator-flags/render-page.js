@@ -4,11 +4,14 @@
  * that `doc-tools generate operator-flags` writes. One entry per flag, each
  * with an anchor named after the flag, so opflag:[--name] links straight to
  * it. Flags pflag hides only (MarkHidden, never deprecated) are internal and
- * left out; deprecated flags get their own section, so a reader who meets
- * one in an old values file can still look it up.
+ * left out; deprecated flags, run and global alike, get their own section,
+ * so a reader who meets one in an old values file can still look it up.
+ * isOnPage (extension-utils/operator-flags.js) decides, for this page and
+ * for opflag: links alike.
  */
 
 const { generatedMarker } = require('../../cli-utils/generated-marker')
+const { isOnPage, codeFlags } = require('../../extension-utils/operator-flags')
 
 // Help text is written for --help, so an undefined {name} would read as an
 // AsciiDoc attribute reference. Escape every one.
@@ -17,19 +20,29 @@ const escapeAttributes = (text) => String(text).replace(/(?<!\\)\{([A-Za-z0-9_][
 // A help string is one line; keep it one paragraph even if it wraps.
 const paragraph = (text) => escapeAttributes(String(text || '').trim().replace(/\s*\n\s*/g, ' '))
 
-const code = (value) => `\`+${String(value).replace(/\+/g, '{plus}')}+\``
-
-function defaultText (flag) {
-  if (flag.default === '') return 'None'
-  return code(flag.default)
+// Help text as a page paragraph: --flags in code, and a closing period,
+// since a usage string has none.
+const prose = (text) => {
+  const out = paragraph(codeFlags(text))
+  return out && !/[.!?]$/.test(out) ? `${out}.` : out
 }
+
+// A literal value. The +...+ passthrough cannot hold a +, and turns off
+// attribute substitution, so a value with a + uses pass:c[] instead.
+const code = (value) => {
+  const text = String(value)
+  return text.includes('+') ? `\`pass:c[${text.replace(/\]/g, '\\]')}]\`` : `\`+${text}+\``
+}
+
+// An empty default reads "", as opflagval: renders it.
+const defaultText = (flag) => code(flag.default === '' ? '""' : flag.default)
 
 function entry (flag, { deprecated = false } = {}) {
   const lines = [`[[${flag.name}]]`, `=== --${flag.name}`, '']
   if (deprecated) {
-    lines.push(`IMPORTANT: This flag is deprecated. ${paragraph(flag.deprecated).replace(/^(.)/, (c) => c.toUpperCase()).replace(/([^.])$/, '$1.')}`, '')
+    lines.push(`IMPORTANT: This flag is deprecated. ${prose(flag.deprecated).replace(/^(.)/, (c) => c.toUpperCase())}`, '')
   }
-  const usage = paragraph(flag.usage)
+  const usage = prose(flag.usage)
   if (usage) lines.push(usage, '')
   lines.push('[horizontal]')
   lines.push(`Type:: ${code(flag.type)}`)
@@ -47,9 +60,11 @@ const byName = (a, b) => a.name.localeCompare(b.name)
  */
 function renderPage (data) {
   const version = data.operator_version
-  const flags = data.flags.filter((flag) => !flag.deprecated && !flag.hidden).sort(byName)
-  const deprecated = data.flags.filter((flag) => flag.deprecated).sort(byName)
-  const global = (data.global_flags || []).filter((flag) => !flag.hidden && !flag.deprecated).sort(byName)
+  const globalFlags = data.global_flags || []
+  const current = (flag) => isOnPage(flag) && !flag.deprecated
+  const flags = data.flags.filter(current).sort(byName)
+  const global = globalFlags.filter(current).sort(byName)
+  const deprecated = [...data.flags, ...globalFlags].filter((flag) => isOnPage(flag) && flag.deprecated).sort(byName)
   const out = [
     generatedMarker('operator-flags', `the run command of redpanda-data/operator-enterprise at ${data.source && data.source.ref ? data.source.ref : version}`, 'To change a description, edit the flag\'s help text in operator/cmd/run/run.go.'),
     '= Redpanda Operator Flags',
@@ -63,7 +78,9 @@ function renderPage (data) {
     '  - --unbind-pvcs-after=60s',
     '----',
     '',
-    `This page lists the flags of Redpanda Operator ${version}. Each default is the value the operator uses when you do not pass the flag.`,
+    `This page lists the flags of Redpanda Operator ${version}. Each default is the operator binary's built-in default, which applies when nothing passes the flag. The operator Helm chart passes some flags itself, so the value in a Helm deployment can differ from the default listed here. A flag in \`additionalCmdFlags\` replaces the value the chart passes. For the chart's values, see xref:reference:k-operator-helm-spec.adoc[].`,
+    '',
+    'When `multicluster.enabled` is `true`, the chart runs the `redpanda-operator multicluster` command instead of `run`, and passes `additionalCmdFlags` to it. That command has its own flags, which this page does not list.',
     '',
     '== Flags',
     '',

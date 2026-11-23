@@ -2589,7 +2589,8 @@ automation
  *
  * @example
  * npx doc-tools generate operator-flags --tag operator/v26.2.5
- * npx doc-tools generate operator-flags --source-dir ../redpanda-operator --version v26.3.1
+ * npx doc-tools generate operator-flags --tag operator/v26.3.1 --source-dir ../redpanda-operator
+ * npx doc-tools generate operator-flags --source-dir ../redpanda-operator --operator-version v26.3.1
  *
  * @requirements
  * - Go toolchain
@@ -2599,9 +2600,9 @@ automation
   .command('operator-flags')
   .description('Generate the Redpanda Operator flag reference and its data from an operator release. Requires --tag, --branch or --source-dir.')
   .option('-t, --tag <operatorTag>', 'Operator release tag, such as operator/v26.2.5')
-  .option('-b, --branch <branch>', 'Operator branch for in-progress content (requires --version)')
-  .option('--version <version>', 'The operator version the output is for, such as v26.3.1 (defaults to the tag)')
-  .option('--source-dir <dir>', 'An existing redpanda-operator checkout to read instead of cloning')
+  .option('-b, --branch <branch>', 'Operator branch for in-progress content (requires --operator-version)')
+  .option('--operator-version <version>', 'The operator version the output is for, such as v26.3.1 (defaults to the tag)')
+  .option('--source-dir <dir>', 'An existing redpanda-operator checkout to read instead of cloning. With --tag, the tag is recorded as the source ref')
   .option('--docs-dir <dir>', 'The docs checkout to write into', '.')
   .option('--data-only', 'Write the JSON attachment only, not the reference page')
   .action((opts) => {
@@ -2610,7 +2611,7 @@ automation
       const result = generateOperatorFlags({
         tag: opts.tag,
         branch: opts.branch,
-        version: opts.version,
+        version: opts.operatorVersion,
         sourceDir: opts.sourceDir,
         docsDir: opts.docsDir,
         dataOnly: Boolean(opts.dataOnly),

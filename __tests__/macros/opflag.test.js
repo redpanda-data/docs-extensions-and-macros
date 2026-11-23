@@ -14,9 +14,9 @@ const operatorFlags = require('../../extension-utils/operator-flags')
 
 const SAMPLE = fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'operator-flags', 'operator-flags-v26.2.5.json'))
 
-function catalogOf ({ data = true, page = true, attributes = {} } = {}) {
+function catalogOf ({ data = true, page = true, attributes = {}, contents = SAMPLE } = {}) {
   const files = []
-  if (data) files.push({ src: { component: 'streaming', version: '26.2', module: 'reference', family: 'attachment', relative: 'operator-flags-v26.2.5.json' }, contents: SAMPLE })
+  if (data) files.push({ src: { component: 'streaming', version: '26.2', module: 'reference', family: 'attachment', relative: 'operator-flags-v26.2.5.json' }, contents })
   if (page) files.push({ src: { component: 'streaming', version: '26.2', module: 'reference', family: 'page', relative: 'k-operator-flags.adoc' } })
   const match = (query) => files.filter((file) => Object.entries(query).every(([key, value]) => file.src[key] === value))
   return {
@@ -48,6 +48,38 @@ describe('opflag:', () => {
 
   test('keeps a value written after =', () => {
     expect(convert('Pass opflag:[--unbind-pvcs-after=60s].')).toContain('>--unbind-pvcs-after=60s</code>')
+  })
+
+  test('keeps a value with commas, and warns about nothing', () => {
+    const warn = warnings()
+    expect(convert('Pass opflag:[--unbind-pvcs-after=a,b].')).toContain('>--unbind-pvcs-after=a,b</code>')
+    expect(convert('Pass opflag:[--unbind-pvcs-after=a=1,b=2].')).toContain('>--unbind-pvcs-after=a=1,b=2</code>')
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  test('a comma value still takes a trailing deprecated=ok', () => {
+    const warn = warnings()
+    const html = convert('opflag:[--allow-pv-rebinding=a,b,deprecated=ok]')
+    expect(html).toContain('>--allow-pv-rebinding=a,b</code>')
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  test('name=value without leading dashes renders the flag, not empty code', () => {
+    const warn = warnings()
+    const html = convert('Pass opflag:[unbind-pvcs-after=60s].')
+    expect(html).toContain('k-operator-flags.adoc#unbind-pvcs-after')
+    expect(html).toContain('>--unbind-pvcs-after=60s</code>')
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  test('a deprecated global flag links its entry, which the page lists under Deprecated flags', () => {
+    const data = JSON.parse(SAMPLE)
+    data.global_flags.push({ name: 'log-encoding', type: 'string', default: 'json', usage: 'Log encoding', deprecated: 'use --log-format' })
+    const contents = Buffer.from(JSON.stringify(data))
+    const html = convert('opflag:[--log-encoding,deprecated=ok]', { catalog: catalogOf({ contents }) })
+    expect(html).toContain('k-operator-flags.adoc#log-encoding')
+    const { renderPage } = require('../../tools/operator-flags/render-page')
+    expect(renderPage(data)).toContain('[[log-encoding]]')
   })
 
   test('accepts a global logging flag', () => {

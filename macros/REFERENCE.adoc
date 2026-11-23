@@ -822,7 +822,7 @@ Pass opflag:[--unbind-pvcs-after=60s] to enable the PVCUnbinder.
 The default of opflag:[--unbind-pvcs-after] is opflagval:[--unbind-pvcs-after], which disables it.
 ----
 
-`opflag:[--flag]` renders the flag as written, including a value after `=`, and links its anchor on the reference page of the page's own component version. The leading dashes are optional. A global logging flag, such as `--log-level`, is accepted too.
+`opflag:[--flag]` renders the flag as written, including a value after `=`, and links its anchor on the reference page of the page's own component version. A value can hold commas, as in `opflag:[--additional-controllers=nodeWatcher,decommission]`. The leading dashes are optional, with or without a value: `opflag:[unbind-pvcs-after=60s]` renders `--unbind-pvcs-after=60s`. A global logging flag, such as `--log-level`, is accepted too.
 
 `opflagval:[--flag,field]` renders one field. The field defaults to `default`.
 
@@ -840,8 +840,8 @@ The default of opflag:[--unbind-pvcs-after] is opflagval:[--unbind-pvcs-after], 
 | `duration`, `bool`, `stringToString`
 
 | `description`
-| `usage`, the help text, rendered as AsciiDoc
-| "How long a broker Pod stays `Pending` before ..."
+| `usage`, the help text, rendered as AsciiDoc with every `--flag` in code, as the reference page renders it
+| "How long a broker Pod stays Pending before ..."
 
 | `deprecated`
 | Whether `deprecated` is set. `format=raw` gives `true` or `false`
@@ -859,12 +859,12 @@ The link target is `reference:k-operator-flags.adoc` in the same component versi
 The `operator-validate` attribute sets how problems are reported: `warn` (default), `error` (fail the build), or `off`.
 
 * An unknown flag warns with the nearest flag names and renders plain code.
-* A deprecated flag warns with its deprecation message. A hidden flag warns, and renders plain code because the reference page leaves hidden flags out. Add `deprecated=ok` to a call that mentions one on purpose, such as a page that tells readers to remove it: `opflag:[--allow-pv-rebinding,deprecated=ok]`.
+* A deprecated flag warns with its deprecation message. A deprecated flag, hidden or not, links its entry in the Deprecated flags section of the reference page. A hidden flag that is not deprecated warns and renders plain code, because the reference page leaves it out. Add `deprecated=ok` to a call that mentions one on purpose, such as a page that tells readers to remove it: `opflag:[--allow-pv-rebinding,deprecated=ok]`.
 * An unsupported field lists the supported ones.
 
 === Checking prose with check-reference-values
 
-`doc-tools check-reference-values --kinds operator` checks `opflag:` and `opflagval:` calls, and the flags typed where the operator reads them: the items of an `additionalCmdFlags:` list in a YAML block, and `additionalCmdFlags={...}` or `additionalCmdFlags[n]=...` in a Helm `--set` argument. A flag the operator does not have is an error. A deprecated or hidden one is a warning, which `// value-check: ignore` above the line acknowledges. A bare `--flag` in a sentence is not checked, because rpk and the operator share flag-shaped names.
+`doc-tools check-reference-values --kinds operator` checks `opflag:` and `opflagval:` calls, and the flags typed where the operator reads them: the items of an `additionalCmdFlags:` list in a YAML block, and `additionalCmdFlags={...}` or `additionalCmdFlags[n]=...` in a Helm `--set` argument. A flag the operator does not have is an error. A deprecated or hidden one is a warning, which `// value-check: ignore` above the block acknowledges. A bare `--flag` in a sentence is not checked, because rpk and the operator share flag-shaped names.
 
 === Registration
 

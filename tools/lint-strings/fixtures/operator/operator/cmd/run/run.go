@@ -13,7 +13,7 @@ const defaultImage = "docker.redpanda.com/redpandadata/redpanda-operator"
 
 func bindFlags(cmd *cobra.Command, o *options) {
 	// Conforming: capitalized, no period, explains the sentinel.
-	cmd.Flags().DurationVar(&o.unbindAfter, "unbind-pvcs-after", 0, "How long a Pod must stay Pending before the PVCUnbinder unbinds its PVCs. `0` disables the PVCUnbinder")
+	cmd.Flags().DurationVar(&o.unbindAfter, "unbind-pvcs-after", 0, "How long a Pod must stay Pending before the PVCUnbinder unbinds its PVCs. 0 disables the PVCUnbinder")
 	// Plain (non-Var) form bound to a pointer.
 	o.lease = cmd.Flags().Duration("leader-election-lease-duration", 15*time.Second, "How long non-leader candidates wait before forcing acquisition of the leader election lease")
 	// Var form with no default argument; lowercase start and terminal period.
@@ -32,4 +32,8 @@ func bindFlags(cmd *cobra.Command, o *options) {
 	_ = cmd.Flags().MarkDeprecated("allow-pv-rebinding", "the PVCUnbinder's safety gates make it unsafe")
 	cmd.Flags().Bool("allow-pvc-deletion", false, "Has no effect")
 	_ = cmd.Flags().MarkDeprecated("allow-pvc-deletion", "it is ignored and can be removed")
+	// Backticks: pflag would show `false` as the value placeholder in --help.
+	cmd.Flags().BoolVar(&o.secure, "metrics-secure", true, "Serve metrics over HTTPS. `false` serves plain HTTP")
+	cmd.Flags().BoolVar(&o.old, "old-secure", false, "Serve metrics over HTTPS")
+	_ = cmd.Flags().MarkDeprecated("old-secure", "use `--metrics-secure` instead")
 }
