@@ -1594,6 +1594,27 @@ jobs:
             exit 0
           fi
           gh api --paginate "repos/$R/pulls/$PR/files" --jq '.[].filename' > "$LINT_DIR/changed-files.txt"   # files API: see classify
+          # The PR's patches as one unified diff, so the lint blocks only on
+          # image macros the PR added or changed and image files it changed.
+          # What was already on the base branch comes back as a suggestion:
+          # a PR that edits one header line on 200 pages is not blocked by
+          # those pages' old images. A file the API sends without a patch
+          # (binary, or too large), or a new file, gets `--- /dev/null`, which
+          # any unified-diff reader takes as changed throughout. A removed
+          # file, and the old path of a rename, get `+++ /dev/null`. The lint
+          # puts every path in the diff in scope, so a page that still uses an
+          # image the PR deleted or renamed stays blocked.
+          gh api --paginate "repos/$R/pulls/$PR/files" \
+            --jq '.[] | (if .status == "renamed" and .previous_filename then "diff --git a/\(.previous_filename) b/\(.previous_filename)\n--- a/\(.previous_filename)\n+++ /dev/null\n" else empty end), (if .status == "removed" then "diff --git a/\(.filename) b/\(.filename)\n--- a/\(.filename)\n+++ /dev/null\n" else "diff --git a/\(.filename) b/\(.filename)\n--- \(if .status == "added" or .patch == null then "/dev/null" else "a/\(.filename)" end)\n+++ b/\(.filename)\n\(.patch // "")" end)' > "$LINT_DIR/pr.diff"
+          # Only a doc_tools_version that ships --diff-file gets it; an older
+          # pin keeps the whole-page behavior instead of a usage error.
+          DIFF_ARGS=()
+          if ( cd "$RUNNER_TEMP" && env -u GH_TOKEN npx --yes --package "@redpanda-data/docs-extensions-and-macros@${DOC_TOOLS_VERSION}" \
+            doc-tools lint-screenshots --help ) 2>/dev/null | grep -q -- '--diff-file'; then
+            DIFF_ARGS=(--diff-file "$LINT_DIR/pr.diff")
+          else
+            echo "::notice::doc-tools ${DOC_TOOLS_VERSION} has no lint-screenshots --diff-file, so the lint blocks on every image on a changed page"
+          fi
           # --files: only pages changed in the PR plus pages that use a changed
           # image. A whole-repo scan would flag every pre-existing violation
           # in a repo that has never been linted (docs has dozens today).
@@ -1603,7 +1624,7 @@ jobs:
           # from the nearest directory with a package.json, and the PR head
           # has one. --root points the tool at the checkout instead.
           ( cd "$RUNNER_TEMP" && env -u GH_TOKEN npx --yes --package "@redpanda-data/docs-extensions-and-macros@${DOC_TOOLS_VERSION}" \
-            doc-tools lint-screenshots --root "$SRC" --files "$LINT_DIR/changed-files.txt" \
+            doc-tools lint-screenshots --root "$SRC" --files "$LINT_DIR/changed-files.txt" ${DIFF_ARGS[@]+"${DIFF_ARGS[@]}"} \
             --format json --output "$LINT_DIR/result.json" ) > /dev/null || [[ $? -eq 1 ]]
           # An unrecognized `lint-screenshots` subcommand (doc_tools_version
           # pinned to a release that predates it) also exits 1, the same code
