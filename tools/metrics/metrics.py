@@ -350,6 +350,12 @@ def load_overrides(path):
         if labels is not None and not (isinstance(labels, list) and all(
                 isinstance(label, dict) and label.get("name") for label in labels)):
             raise ValueError(f"the labels of {name} must be a list of objects with a name")
+        # The approval deletes text without comparing it, so it must be
+        # the marker the workflow writes, never a bare true.
+        marker = override.get("retirement_pending")
+        if marker is not None and not (isinstance(marker, dict) and isinstance(marker.get("reason"), str)
+                                       and marker["reason"].strip()):
+            raise ValueError(f"the retirement_pending of {name} must be an object with a reason")
     return metrics
 
 
@@ -429,7 +435,10 @@ def apply_overrides(dataset, overrides, keep_requires=frozenset()):
             result["disagrees"].append({"name": name, "endpoint": entry["endpoint"], "labels_not_scraped": unknown})
         for label in wanted:
             if label["name"] not in scraped:
-                redundant(name, f"labels[{label['name']}]", "the cluster exports this metric without that label")
+                # A label the writer described is enrichment: the
+                # disagreement stays open for a person, and it is not deleted.
+                if len(label) == 1:
+                    redundant(name, f"labels[{label['name']}]", "the cluster exports this metric without that label")
             elif len(label) == 1:
                 # Only a name: it stood in for the scrape, which now has it.
                 redundant(name, f"labels[{label['name']}]", "the cluster now exports this label")
@@ -528,7 +537,11 @@ def documented_before(dataset_dir, tag):
             continue
         try:
             with open(os.path.join(dataset_dir, file_name), encoding="utf-8") as f:
-                names.update(json.load(f).get("metrics", {}))
+                data = json.load(f)
+            metrics = data.get("metrics") if isinstance(data, dict) else None
+            if not isinstance(metrics, dict):
+                raise ValueError("it has no metrics object")
+            names.update(metrics)
         except (OSError, ValueError):
             logging.warning(f"Could not read {file_name} in {dataset_dir}, so it proves no metric was removed.")
     return names
@@ -621,9 +634,12 @@ def observed_before(dataset_dir, tag):
             continue
         try:
             with open(os.path.join(dataset_dir, file_name), encoding="utf-8") as f:
-                metrics = json.load(f).get("metrics", {})
+                data = json.load(f)
+            metrics = data.get("metrics") if isinstance(data, dict) else None
+            if not isinstance(metrics, dict):
+                raise ValueError("it has no metrics object")
             names.update(name for name, entry in metrics.items() if isinstance(entry, dict) and entry.get("observed"))
-        except (OSError, ValueError, AttributeError):
+        except (OSError, ValueError):
             logging.warning(f"Could not read {file_name} in {dataset_dir}.")
     return names
 
@@ -953,9 +969,14 @@ def main(argv=None):
     # a failed run leaves it as it was.
     retire_plan = (pending + overridden["redundant"]) if args.retire_overrides else []
     if retire_plan:
-        # A label the override wrongly named goes from the file with the
-        # plan, so it is not something a person has to fix.
-        overridden["disagrees"] = []
+        # A label the override only named goes from the file with the plan,
+        # so it is not something a person has to fix. One the writer
+        # described stays, and so does the disagreement.
+        retired = {(item["name"], item["field"]) for item in retire_plan}
+        overridden["disagrees"] = [
+            dict(item, labels_not_scraped=left) for item in overridden["disagrees"]
+            for left in [[label for label in item["labels_not_scraped"] if (item["name"], f"labels[{label}]") not in retired]]
+            if left]
     elif overridden["redundant"]:
         logging.warning(
             f"{len(overridden['redundant'])} parts of {args.overrides} no longer change anything. "

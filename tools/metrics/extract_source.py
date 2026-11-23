@@ -237,16 +237,26 @@ class InputError(Exception):
     """Bad input. main() prints the message and exits with code 2."""
 
 
+# Variables that point git at a repository. A hook or a caller's shell can
+# set them, and they win over -C, so they are cleared for every call.
+GIT_LOCATION_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                     "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_PREFIX")
+
+
 class Repo:
     def __init__(self, path, ref):
         self.path = path
         self.ref = ref
+        # The commit the ref names, fixed by check() so that a branch that
+        # moves during the run cannot mix two trees.
+        self.rev = ref
         self._cache = {}
 
     def _git(self, *args):
+        env = {k: v for k, v in os.environ.items() if k not in GIT_LOCATION_VARS}
         r = subprocess.run(["git", "-C", self.path] + list(args),
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                           universal_newlines=True)
+                           universal_newlines=True, env=env)
         self.err = r.stderr.strip()
         return r.returncode, r.stdout
 
@@ -257,27 +267,28 @@ class Repo:
         rc, _ = self._git("rev-parse", "--git-dir")
         if rc != 0:
             raise InputError("%s is not a git repository" % self.path)
-        rc, _ = self._git("rev-parse", "--verify", "--quiet", self.ref + "^{commit}")
+        rc, out = self._git("rev-parse", "--verify", "--quiet", self.ref + "^{commit}")
         if rc != 0:
             raise InputError("ref %s not found in %s" % (self.ref, self.path))
+        self.rev = out.strip()
         if self.show("src/v/metrics/metrics.h") is None:
             raise InputError("%s at %s is not a Redpanda source tree: src/v/metrics/metrics.h not found"
                              % (self.path, self.ref))
 
     def show(self, path):
         if path not in self._cache:
-            rc, out = self._git("show", "%s:%s" % (self.ref, path))
+            rc, out = self._git("show", "%s:%s" % (self.rev, path))
             self._cache[path] = out if rc == 0 else None
         return self._cache[path]
 
     def grep_files(self, pattern, pathspec="src/v"):
-        rc, out = self._git("grep", "-l", "-E", pattern, self.ref, "--", pathspec)
+        rc, out = self._git("grep", "-l", "-E", pattern, self.rev, "--", pathspec)
         if rc > 1:
             raise InputError("git grep failed in %s: %s" % (self.path, self.err))
         files = []
         for line in out.splitlines():
-            if line.startswith(self.ref + ":"):
-                line = line[len(self.ref) + 1:]
+            if line.startswith(self.rev + ":"):
+                line = line[len(self.rev) + 1:]
             files.append(line)
         return files
 

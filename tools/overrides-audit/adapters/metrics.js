@@ -209,14 +209,17 @@ function classifyMetricDescription (name, override, family) {
 function mergeSharedSourceStrings (manifest) {
   const groups = new Map()
   for (const row of manifest) {
-    if (row.field !== 'description' || row.upstream_candidate_text === undefined) continue
+    // A redundant override says what the help string says. It counts here,
+    // because a candidate for the same string would make the two disagree.
+    if (row.field !== 'description' || (row.upstream_candidate_text === undefined && row.class !== CLASSES.REDUNDANT)) continue
     const key = `${row.source_file}:${row.source_line}`
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key).push(row)
   }
   for (const [key, rows] of groups) {
-    if (rows.length < 2) continue
-    const texts = new Set(rows.map((row) => classify.normalizeText(row.upstream_candidate_text)))
+    if (rows.length < 2 || rows.every((row) => row.upstream_candidate_text === undefined)) continue
+    const texts = new Set(rows.map((row) => classify.normalizeText(
+      row.upstream_candidate_text !== undefined ? row.upstream_candidate_text : stripTerminalPeriod(row.source_text || ''))))
     if (texts.size > 1) {
       const names = rows.map((row) => row.name).join(', ')
       for (const row of rows) {

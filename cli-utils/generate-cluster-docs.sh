@@ -139,6 +139,9 @@ fi
 # Set at the very end. bash 3.2 (macOS) runs the EXIT trap with $? of 0 when
 # set -u stops the script, which would turn that failure into a success.
 RUN_FINISHED=0
+# Set just before the cluster starts. A run that fails before then must not
+# tear down a cluster of the same project that an earlier run left running.
+CLUSTER_STARTING=0
 
 teardown() {
   local rc=$?
@@ -147,7 +150,7 @@ teardown() {
   fi
   if [[ "${KEEP_CLUSTER:-0}" == "1" ]]; then
     echo "ℹ️  KEEP_CLUSTER=1: leaving the cluster running (project $PROJECT_NAME)."
-  elif [[ -d "$COMPOSE_DIR" ]]; then
+  elif [[ -d "$COMPOSE_DIR" ]] && (( CLUSTER_STARTING )); then
     if (( rc != 0 )); then
       echo "---- docker compose ps (run failed with exit code $rc) ----"
       (cd "$COMPOSE_DIR" && docker compose -p "$PROJECT_NAME" ps -a) || true
@@ -214,6 +217,7 @@ fi
 ###############################################################################
 # Start Redpanda cluster
 ###############################################################################
+CLUSTER_STARTING=1
 "$SCRIPT_DIR/start-cluster.sh" "$TAG"
 
 ###############################################################################
@@ -411,12 +415,17 @@ setup_quota_probe() {
 }
 
 throttle_quota_probe() {
+  # $1: the most seconds this call may take, so the settle loop keeps to
+  # --settle-timeout.
+  local budget="${1:-60}" started=$SECONDS left
   local rpk_auth=(-X "user=$ADMIN_USER" -X "pass=$ADMIN_PASS")
   local attempt url throttled=0
   (( QUOTA_PROBE_READY )) || return 0
   # A new quota takes a moment to reach every broker, so produce until the
   # metric shows up.
   for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    left=$(( budget - (SECONDS - started) ))
+    (( left > 0 )) || break
     # One record of random data is over the 1 KB/s quota; data that
     # compresses well is not.
     { head -c 3000 /dev/urandom | base64 | tr -d '\n'; echo; } \
@@ -424,7 +433,9 @@ throttle_quota_probe() {
           -X "globals.kafka_protocol_request_client_id=$QUOTA_PROBE_CLIENT" "${rpk_auth[@]}" >/dev/null 2>&1 || true
     for url in "${ADMIN_URLS[@]}"; do
       # Not a pipe into grep -q: under pipefail, grep exiting early fails the pipeline.
-      if [[ "$(curl -sS --max-time 30 "$url/public_metrics/" 2>/dev/null || true)" == *redpanda_kafka_quotas_client_quota_throughput_by_entity* ]]; then
+      left=$(( budget - (SECONDS - started) ))
+      (( left > 0 )) || break
+      if [[ "$(curl -sS --max-time "$(( left < 30 ? left : 30 ))" "$url/public_metrics/" 2>/dev/null || true)" == *redpanda_kafka_quotas_client_quota_throughput_by_entity* ]]; then
         throttled=1
         break
       fi
@@ -456,7 +467,8 @@ if [[ "$MODE" == "metrics" ]]; then
     echo "   ${SECONDS}s: ${count} metric families (unchanged for ${stable_for}s)"
     last_count="$count"
     if (( METRICS_EXTRAS )); then
-      throttle_quota_probe
+      # Never past the settle deadline.
+      throttle_quota_probe "$(( METRICS_SETTLE_MAX > SECONDS ? METRICS_SETTLE_MAX - SECONDS : 0 ))"
     fi
     if [[ -n "$METRICS_INVENTORY_FILE" ]] && (( METRICS_EXTRAS )); then
       # With a source inventory, "settled" has a definition: every family the
@@ -489,7 +501,8 @@ fi
 # Run documentation generator
 ###############################################################################
 if (( METRICS_EXTRAS )); then
-  throttle_quota_probe
+  # A last refresh so the series are there for the scrape: short.
+  throttle_quota_probe 20
 fi
 
 # ${arr[@]+"${arr[@]}"} expands to nothing for an empty array; a bare

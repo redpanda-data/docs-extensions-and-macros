@@ -253,7 +253,7 @@ A family registered at more than one call site says so in its note. The location
 
 === `retirement_pending` (metrics)
 
-A description whose help string has caught up in substance, without matching word for word, is retired through `retirement_pending: { "reason": "..." }`. The docs repo's weekly upstreaming workflow sets it in a pull request, and merging that pull request is the approval. The next `doc-tools generate metrics-docs --retire-overrides` run then deletes `description`, `upstream_ref`, `_comment` and `retirement_pending` together without comparing again, before it applies the overrides, and lists each one under `retired_overrides` in `metrics-gaps.json`. Of a description given as paragraphs, only the paragraphs for every audience are deleted.
+A description whose help string has caught up in substance, without matching word for word, is retired through `retirement_pending: { "reason": "..." }`. The docs repo's weekly upstreaming workflow sets it in a pull request, and merging that pull request is the approval. The next `doc-tools generate metrics-docs --retire-overrides` run then deletes `description`, `upstream_ref`, `_comment` and `retirement_pending` together without comparing again, before it applies the overrides, and lists each one under `retired_overrides` in `metrics-gaps.json`. It rewrites the file once every output is written, so a failed run leaves the approval in place. Of a description given as paragraphs, only the paragraphs for every audience are deleted.
 
 == Surfaces
 

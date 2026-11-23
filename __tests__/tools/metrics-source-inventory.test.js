@@ -293,8 +293,13 @@ const SEASTAR = [
   { group: 'execution_stages', name: 'tasks_scheduled', type: 'counter', file: 'src/core/execution_stage.cc', condition: 'never' }
 ]
 
+// A git hook can set GIT_DIR and friends, which point git at the calling
+// repository whatever cwd says. The fixtures and the extractor run without them.
+const GIT_LOCATION_VARS = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_COMMON_DIR', 'GIT_NAMESPACE', 'GIT_PREFIX']
+const CLEAN_ENV = Object.fromEntries(Object.entries(process.env).filter(([key]) => !GIT_LOCATION_VARS.includes(key)))
+
 function git (cwd, ...args) {
-  const result = spawnSync('git', args, { cwd, encoding: 'utf8' })
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8', env: CLEAN_ENV })
   if (result.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr}`)
   return result.stdout
 }
@@ -314,7 +319,7 @@ function buildRepo (dir, sources = SOURCES) {
 
 function run (script, args) {
   // -I: isolated mode, so nothing in a fixture directory can shadow stdlib imports.
-  const result = spawnSync(PYTHON, ['-I', script, ...args], { encoding: 'utf8' })
+  const result = spawnSync(PYTHON, ['-I', script, ...args], { encoding: 'utf8', env: CLEAN_ENV })
   return { ...result, combined: `${result.stdout || ''}${result.stderr || ''}` }
 }
 
@@ -349,6 +354,16 @@ describeIfReady('metrics source inventory', () => {
   })
 
   describe('extract_source.py', () => {
+    it('reads the repository it is given even when GIT_DIR names another one, as in a git hook', () => {
+      const other = path.join(workDir, 'other')
+      fs.mkdirSync(other)
+      git(other, 'init', '-q')
+      const result = spawnSync(PYTHON, ['-I', EXTRACT, '--repo', repoDir, '--ref', 'v0.0.1', '--seastar-json', seastarFile],
+        { encoding: 'utf8', env: { ...CLEAN_ENV, GIT_DIR: path.join(other, '.git') } })
+      expect(result.status).toBe(0)
+      expect(JSON.parse(result.stdout)).toEqual(inventory)
+    })
+
     it('records the ref and resolves every registration', () => {
       expect(inventory.ref).toBe('v0.0.1')
       expect(inventory.unresolved).toEqual([])

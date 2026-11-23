@@ -639,6 +639,37 @@ describeIfPython('metric overrides', () => {
     expect(run(overrides, ['--dataset-dir', dir, '--strict']).status).toBe(4)
   })
 
+  it('keeps a label the writer described when the cluster does not export it, and the disagreement stays open', () => {
+    const overrides = {
+      redpanda_kafka_request_bytes_total: { labels: [{ name: 'wrong_name', description: 'What the writer meant.' }, { name: 'not_a_label' }] },
+      redpanda_new_feature_lag: { labels: [] },
+      redpanda_other_feature_total: { labels: [] }
+    }
+    const result = run(overrides, ['--retire-overrides'])
+    const after = JSON.parse(read(path.join(workDir, `run-${counter}`, 'overrides.json'))).metrics
+    expect(after.redpanda_kafka_request_bytes_total.labels).toEqual([{ name: 'wrong_name', description: 'What the writer meant.' }])
+    expect(result.gaps.override_disagrees).toEqual([{ name: 'redpanda_kafka_request_bytes_total', endpoint: 'public', labels_not_scraped: ['wrong_name'] }])
+  })
+
+  it('refuses a retirement_pending that is not the workflow\'s marker, and changes nothing', () => {
+    const overrides = { redpanda_cluster_brokers: { description: 'Reworded.', retirement_pending: true } }
+    const result = run(overrides, ['--retire-overrides'])
+    const after = JSON.parse(read(path.join(workDir, `run-${counter}`, 'overrides.json'))).metrics
+    expect(result.status).toBe(1)
+    expect(result.log).toMatch(/the retirement_pending of redpanda_cluster_brokers must be an object with a reason/)
+    expect(after).toEqual(overrides)
+  })
+
+  it('takes an earlier dataset as proof only when it has a metrics object', () => {
+    const dir = fs.mkdtempSync(path.join(workDir, 'list-dataset-'))
+    fs.writeFileSync(path.join(dir, 'redpanda-metrics-v0.0.0.json'), JSON.stringify({ metrics: ['redpanda_gone_total'] }))
+    const overrides = { redpanda_gone_total: { category: 'Old' }, redpanda_new_feature_lag: { labels: [] }, redpanda_other_feature_total: { labels: [] } }
+    const result = run(overrides, ['--retire-overrides', '--dataset-dir', dir])
+    const after = JSON.parse(read(path.join(workDir, `run-${counter}`, 'overrides.json'))).metrics
+    expect(after.redpanda_gone_total).toEqual({ category: 'Old' })
+    expect(result.log).toMatch(/Could not read redpanda-metrics-v0\.0\.0\.json/)
+  })
+
   it('fails on an overrides file with the wrong shape', () => {
     expect(run('{"metrics": []}').status).toBe(1)
     expect(run({ redpanda_cluster_brokers: { labels: [{ description: 'no name' }] } }).status).toBe(1)
