@@ -481,3 +481,20 @@ describe('a possessive after a code span', () => {
     expect(out).not.toContain('``')
   })
 })
+
+describe('a plugin named before a noun', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+  const transforms = { replacements: [{ pattern: '(?<![\\w.~/-])rpai(?![\\w-])', replacement: 'rpk ai', flags: 'g', applyToCode: true }] }
+
+  test('wraps the whole plugin name, not rpk alone (the rpk ai run help)', () => {
+    const out = formatDescription('for the current rpai environment. rpai points ANTHROPIC_BASE_URL at the gateway.', transforms)
+    expect(out).toContain('for the current `rpk ai` environment.')
+    expect(out).toContain('`rpk ai` points ANTHROPIC_BASE_URL')
+    expect(out).not.toContain('`rpk` ai')
+  })
+
+  test('a core subcommand before a noun still wraps rpk alone (control)', () => {
+    expect(formatDescription('Manage rpk cloud authentications for details.', { replacements: [] }))
+      .toBe('Manage `rpk` cloud authentications for details.')
+  })
+})

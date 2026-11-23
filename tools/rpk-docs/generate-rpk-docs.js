@@ -1928,6 +1928,13 @@ function formatDescription(desc, customTransformations = null, options = {}) {
         // Words ending in common noun suffixes are likely prose, not commands
         // e.g., "authentications", "clusters", "configurations", "settings"
         if (/(?:tions?|ments?|ings?|ers?|ors?|ies|s)$/i.test(nextWord) && !rpkSubcommands.has(nextWord)) {
+          // A plugin is named as a noun, so "the rpk ai environment" and
+          // "rpk ai points ..." name the plugin: wrapping rpk alone splits it
+          // into `rpk` ai. A core subcommand before a noun can be an
+          // adjective ("rpk cloud authentications"), so it keeps the rule below.
+          if (KNOWN_PLUGINS.includes(lowerWord)) {
+            return '`rpk ' + word + '`' + (match.endsWith(word) ? '' : match.slice(match.lastIndexOf(word) + word.length))
+          }
           // It's prose like "rpk cloud authentications" - just wrap rpk
           return '`rpk`' + space + word + (match.endsWith(word) ? '' : match.slice(match.lastIndexOf(word) + word.length))
         }
