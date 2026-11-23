@@ -74,12 +74,16 @@ function maskNonProse (text) {
 
 /**
  * Like maskNonProse, but blanks whole constructs a formatter must never
- * touch: code blocks (fenced, ----, ....), and links with their labels.
+ * touch: code blocks (fenced, ----, ....), tables (|===), and links with
+ * their labels.
  * URLs are left in, so the url kind can find them.
  */
 function maskForFormatting (text) {
   let out = String(text || '')
   out = out.replace(/^(```|-{4,}|\.{4,})[^\n]*$[\s\S]*?^\1[ \t]*$/gm, blank)
+  // AsciiDoc tables: their column styles (cols="1m,...") already set the
+  // formatting, so a span inside a cell would style one row unlike the rest.
+  out = out.replace(/^\|={3,}[ \t]*$[\s\S]*?^\|={3,}[ \t]*$/gm, blank)
   out = out.replace(/`[^`]*`/g, blank)
   out = out.replace(/\[[^\]]*\]\([^)]*\)/g, blank)
   // AsciiDoc url[text] and macro[text] links, label included.
@@ -170,6 +174,10 @@ function codeSpans (text, kinds) {
         // mark does not.
         const value = proseOnly.slice(end).match(/^=[^\s)`]*[^\s)`,.;:!?]/)
         if (value) end += value[0].length
+        // A wildcard family (--cloud-secrets-*) is one token.
+        if (proseOnly.startsWith('-*', end)) end += 2
+        // The flag must end the token, or the span would cover half of it.
+        if (end < source.length && !/[\s.,;:!?)\]}'"]/.test(source[end])) continue
       } else if (!isWholeToken(source, start, end)) {
         continue
       }

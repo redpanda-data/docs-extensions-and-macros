@@ -9,6 +9,16 @@ describe('formatInlineCode', () => {
     expect(CODE_TOKEN_PATTERNS.map((p) => p.id)).toEqual(['identifier', 'flag', 'path'])
   })
 
+  test('a flag wildcard is one span, and a flag inside a longer token is left alone', () => {
+    expect(formatInlineCode('Choose the store with the --cloud-secrets-* flags')).toBe('Choose the store with the `--cloud-secrets-*` flags')
+    expect(formatInlineCode('Pass --a/--b or --c.')).toBe('Pass --a/--b or `--c`.')
+  })
+
+  test('leaves AsciiDoc tables alone, whose column styles set the formatting', () => {
+    const table = '[cols="1m,1a"]\n|===\n|Value |Description\n\n|in_progress |The balancer runs.\n|===\n'
+    expect(formatInlineCode(`Before in_progress.\n\n${table}\nAfter in_progress.`)).toBe(`Before \`in_progress\`.\n\n${table}\nAfter \`in_progress\`.`)
+  })
+
   test('wraps each token kind', () => {
     expect(formatInlineCode('Defaults to default_topic_partitions.')).toBe('Defaults to `default_topic_partitions`.')
     expect(formatInlineCode('Pass --tolerate-data-loss to continue.')).toBe('Pass `--tolerate-data-loss` to continue.')
