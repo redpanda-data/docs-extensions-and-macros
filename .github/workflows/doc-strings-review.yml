@@ -1153,6 +1153,12 @@ jobs:
             - CLI help (kinds cli-*) is `rpk connect` help: Usage is a
               one-line label with no terminal period, and Description is
               plain text, not AsciiDoc.
+            - CLI help text contains no backticks. urfave/cli takes the
+              first backtick span of a flag Usage as the --help value
+              placeholder and drops the backticks, and command help prints
+              backticks literally. Write code values bare; the generator puts
+              flags, snake_case names, paths and URLs in inline code. Never
+              suggest adding backticks; a string that has them is a finding.
 
             OPERATOR FLAGS (surface operator): pflag usage strings of the
             Redpanda Operator `run` command, published on the generated
@@ -1165,14 +1171,14 @@ jobs:
               The page renders it, and a restated one goes stale. Do
               explain what a sentinel default means: 0, a negative
               duration, or an empty string ("0 disables the PVCUnbinder").
-            - Usage and deprecation strings contain no backticks at all.
-              pflag takes the first backtick span of a usage string as the
-              flag's value placeholder: --help prints it after the flag
-              name and drops the backticks, so a bool flag can show as
-              "--metrics-secure false". Write code values bare (--namespace,
-              kube-system, 0, Pending, claimRef). The page puts every --flag
-              in code itself. Never suggest adding backticks; a string that
-              has them is a finding.
+            - CLI help text contains no backticks, in usage and deprecation
+              strings alike. pflag takes the first backtick span of a usage
+              string as the flag's value placeholder: --help prints it after
+              the flag name and drops the backticks, so a bool flag can show
+              as "--metrics-secure false". Write code values bare (--namespace,
+              kube-system, 0, Pending, claimRef); the generator puts flags,
+              snake_case names, paths and URLs in inline code. Never suggest
+              adding backticks; a string that has them is a finding.
             - A deprecated flag (kind deprecation) carries a MarkDeprecated
               message that cobra prints after "Flag --x has been
               deprecated,", so it stays a lowercase clause. It says what to
@@ -1236,9 +1242,15 @@ jobs:
             comment is its own name and then a third-person description
             ("Returns a single fixture."); leave that form as it is.
             Every flag, command, path and URL goes in inline code.
-            In rpk strings write them bare, never in single or double
-            quotes: the generator formats them, and a Long is a Go raw
-            string that cannot hold a backtick. The rendered page builds its "Default:"
+            In rpk strings write them bare, never in backticks or in single
+            or double quotes: CLI help text contains no backticks. pflag takes
+            the first backtick span of a flag usage as the --help value
+            placeholder and drops the backticks, and cobra prints Short and
+            Long backticks literally (a Long is a Go raw string that cannot
+            hold one anyway). The generator puts flags, snake_case names,
+            paths and URLs in inline code. Never suggest adding backticks to
+            an rpk Short, Long or flag usage; a string that has them is a
+            finding. The rendered page builds its "Default:"
             row from structured data, so do not ask for a concrete default
             to be restated in prose; only a sentinel default (null, 0, -1,
             empty) needs its meaning explained. State only behavior the diff

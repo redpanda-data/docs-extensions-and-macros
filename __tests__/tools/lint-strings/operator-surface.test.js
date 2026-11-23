@@ -93,16 +93,17 @@ describe('operator rules', () => {
     ])
   })
 
-  test('any backtick in a usage or deprecation string is an error', () => {
-    expect(by('operator-backtick')).toEqual(['deprecation:--old-secure', 'flag:--metrics-secure'])
-    const rule = operator.rules.find((r) => r.name === 'operator-backtick')
+  test('any backtick in a usage or deprecation string is an error (cli-backtick)', () => {
+    expect(by('cli-backtick')).toEqual(['deprecation:--old-secure', 'flag:--metrics-secure'])
+    const rule = rulesFor(operator).find((r) => r.name === 'cli-backtick')
     expect(rule.severity).toBe('error')
     expect(rule.why).toMatch(/value placeholder/)
     expect(rule.standard).toBeTruthy()
+    expect(operator.rules.find((r) => r.name === 'operator-backtick')).toBeUndefined()
   })
 
-  test('never asks for backticks: missing-inline-code is skipped', () => {
-    expect(operator.skipRules).toContain('missing-inline-code')
+  test('never asks for backticks: the page formats every code token kind', () => {
+    expect(operator.convention.auto_inline_code.kinds).toEqual(['identifier', 'flag', 'path'])
     expect(by('missing-inline-code')).toEqual([])
   })
 

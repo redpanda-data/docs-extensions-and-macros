@@ -7,7 +7,8 @@ const { renderPage, escapeAttributes } = require('../../../tools/operator-flags/
 const { buildData, versionOfRef, dumpFlags } = require('../../../tools/operator-flags')
 const { spawnSync } = require('child_process')
 const { scanOperator, yamlListItems, flagsIn, stripYamlComment } = require('../../../tools/reference-values/operator')
-const { isOnPage, codeFlags } = require('../../../extension-utils/operator-flags')
+const { isOnPage } = require('../../../extension-utils/operator-flags')
+const { formatInlineCode } = require('../../../extension-utils/inline-code')
 
 const BIN = path.join(__dirname, '..', '..', '..', 'bin', 'doc-tools.js')
 
@@ -65,7 +66,7 @@ describe('generate operator-flags CLI', () => {
   })
 })
 
-describe('isOnPage and codeFlags', () => {
+describe('isOnPage and formatInlineCode', () => {
   test('every flag but a hidden-only one is on the page', () => {
     expect(isOnPage({ name: 'a' })).toBe(true)
     expect(isOnPage({ name: 'a', hidden: true })).toBe(false)
@@ -73,8 +74,12 @@ describe('isOnPage and codeFlags', () => {
   })
 
   test('puts --flags in code and leaves existing backtick spans alone', () => {
-    expect(codeFlags('Use --a, --b=x or (--c). Not -- or --d=y.')).toBe('Use `--a`, `--b=x` or (`--c`). Not -- or `--d=y`.')
-    expect(codeFlags('Keep `--a` and --b')).toBe('Keep `--a` and `--b`')
+    expect(formatInlineCode('Use --a, --b=x or (--c). Not -- or --d=y.')).toBe('Use `--a`, `--b=x` or (`--c`). Not -- or `--d=y`.')
+    expect(formatInlineCode('Keep `--a` and --b')).toBe('Keep `--a` and `--b`')
+  })
+
+  test('a comma inside a --flag=value does not end the span', () => {
+    expect(formatInlineCode('Pass --additional-controllers=a,b, then restart.')).toBe('Pass `--additional-controllers=a,b`, then restart.')
   })
 })
 
@@ -111,6 +116,11 @@ describe('renderPage', () => {
     const one = renderPage({ ...SAMPLE, flags: [{ name: 'a', type: 'bool', default: 'false', usage: 'Is it on?' }, { name: 'b', type: 'bool', default: 'false', usage: 'Done.' }], global_flags: [] })
     expect(one).toContain('\nIs it on?\n')
     expect(one).toContain('\nDone.\n')
+  })
+
+  test('formats snake_case names, paths and URLs in usage as code', () => {
+    const one = renderPage({ ...SAMPLE, flags: [{ name: 'a', type: 'string', default: '', usage: 'Sets default_topic_partitions from /etc/redpanda/redpanda.yaml; see https://example.com/x' }], global_flags: [] })
+    expect(one).toContain('\nSets `default_topic_partitions` from `/etc/redpanda/redpanda.yaml`; see `https://example.com/x`.\n')
   })
 
   test('a value with + renders through pass:c, never as {plus}', () => {

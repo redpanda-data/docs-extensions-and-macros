@@ -5,6 +5,7 @@ const path = require('path')
 
 const { SourceCache } = require('../source-text')
 const { STANDARD } = require('../standards')
+const { CLI_BACKTICK_RULE } = require('../rules/common')
 const {
   maskComments,
   findBalancedClose,
@@ -40,11 +41,13 @@ const CONVENTION = {
   verbatim_asciidoc: false,
   transformer: 'formatDescription',
   // Code values formatDescription wraps in inline code by itself, so a bare
-  // one in the source is not a finding. Long is a Go raw string and cannot
-  // hold a backtick at all, which is why the generator does this. Keep in
-  // step with the auto-backtick passes in tools/rpk-docs/generate-rpk-docs.js.
+  // one in the source is not a finding. CLI help text holds no backticks
+  // (the common cli-backtick rule), and Long is a Go raw string that cannot
+  // hold one anyway, which is why the generator does this: its own passes
+  // format flags and the path prefixes below, and formatInlineCode
+  // (extension-utils/inline-code.js) formats snake_case names and paths.
   auto_inline_code: {
-    kinds: ['flag'],
+    kinds: ['identifier', 'flag', 'path'],
     path_prefixes: ['/etc/', '/var/', '/usr/', '/home/', '/tmp/', '~/.']
   }
 }
@@ -309,6 +312,8 @@ function isHeadingLine (lines, i) {
 
 /** Surface-specific convention rules. */
 const RULES = [
+  // No backticks in CLI help text (shared with the other CLI surfaces).
+  CLI_BACKTICK_RULE,
   {
     name: 'rpk-short-multiline',
     description: 'Short must be a single line',

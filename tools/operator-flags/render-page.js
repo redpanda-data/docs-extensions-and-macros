@@ -11,7 +11,8 @@
  */
 
 const { generatedMarker } = require('../../cli-utils/generated-marker')
-const { isOnPage, codeFlags } = require('../../extension-utils/operator-flags')
+const { isOnPage } = require('../../extension-utils/operator-flags')
+const { formatInlineCode } = require('../../extension-utils/inline-code')
 
 // Help text is written for --help, so an undefined {name} would read as an
 // AsciiDoc attribute reference. Escape every one.
@@ -20,10 +21,11 @@ const escapeAttributes = (text) => String(text).replace(/(?<!\\)\{([A-Za-z0-9_][
 // A help string is one line; keep it one paragraph even if it wraps.
 const paragraph = (text) => escapeAttributes(String(text || '').trim().replace(/\s*\n\s*/g, ' '))
 
-// Help text as a page paragraph: --flags in code, and a closing period,
-// since a usage string has none.
+// Help text as a page paragraph: flags, snake_case names, paths and URLs
+// in code (usage strings hold no backticks, so the page adds them), and a
+// closing period, since a usage string has none.
 const prose = (text) => {
-  const out = paragraph(codeFlags(text))
+  const out = paragraph(formatInlineCode(text))
   return out && !/[.!?]$/.test(out) ? `${out}.` : out
 }
 

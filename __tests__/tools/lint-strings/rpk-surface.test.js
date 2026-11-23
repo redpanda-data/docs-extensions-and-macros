@@ -163,9 +163,10 @@ describe('missing-inline-code on rpk strings', () => {
     expect(ids('The --regex flag reads /etc/redpanda/redpanda.yaml and ~/.config/rpk/rpk.yaml.')).toEqual([])
   })
 
-  test('code values the generator leaves alone still are', () => {
-    const [finding] = ids('Defaults to default_topic_partitions, served from /v1/brokers.')
-    expect(finding.rules[0].message).toMatch(/`default_topic_partitions`/)
-    expect(finding.rules[0].message).toMatch(/`\/v1\/brokers`/)
+  test('snake_case names and other paths are formatted by the generator too', () => {
+    // CLI help holds no backticks (cli-backtick), so formatDescription puts
+    // every kind the rule detects in code.
+    expect(SURFACES.rpk.convention.auto_inline_code.kinds).toEqual(['identifier', 'flag', 'path'])
+    expect(ids('Defaults to default_topic_partitions, served from /v1/brokers.')).toEqual([])
   })
 })

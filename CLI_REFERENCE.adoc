@@ -923,6 +923,11 @@ Generated from `doc-tools lint-strings --list-rules`. Each rule links the sectio
 |Code value or field name in prose without inline code
 |Without inline code, a property name, flag or path reads as ordinary prose, so readers cannot tell it is a value to type exactly. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
 
+|`cli-backtick`
+|error
+|CLI help text contains no backticks
+|CLI help text is printed in the terminal, not rendered. pflag (rpk, the Redpanda Operator) and urfave/cli (Redpanda Connect) take the first backtick span of a flag usage string as the flag's value placeholder: --help prints that text after the flag name and drops the backticks, so a bool flag can show as "--metrics-secure false", a value the flag does not take. Command help prints backticks literally. Write code values bare: the docs generators put flags, snake_case names, paths and URLs in inline code. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#rpk-commands-and-flags-transformed[Standard]
+
 |`rpk-short-multiline`
 |warning
 |Short must be a single line
@@ -1154,6 +1159,11 @@ Generated from `doc-tools lint-strings --list-rules`. Each rule links the sectio
 |xref:/glossterm:/config_ref: macro with unbalanced brackets
 |A macro with unbalanced brackets does not resolve, so the page shows the raw macro text instead of a link. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
 
+|`cli-backtick`
+|error
+|CLI help text contains no backticks
+|CLI help text is printed in the terminal, not rendered. pflag (rpk, the Redpanda Operator) and urfave/cli (Redpanda Connect) take the first backtick span of a flag usage string as the flag's value placeholder: --help prints that text after the flag name and drops the backticks, so a bool flag can show as "--metrics-secure false", a value the flag does not take. Command help prints backticks literally. Write code values bare: the docs generators put flags, snake_case names, paths and URLs in inline code. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#rpk-commands-and-flags-transformed[Standard]
+
 |`missing-field-description`
 |warning
 |Config field constructed with no .Description()
@@ -1323,10 +1333,15 @@ Generated from `doc-tools lint-strings --list-rules`. Each rule links the sectio
 |Odd number of backticks ships broken markup
 |An odd number of backticks leaves an inline code span open, so the rest of the string renders as broken monospace. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
 
-|`operator-backtick`
+|`missing-inline-code`
+|warning
+|Code value or field name in prose without inline code
+|Without inline code, a property name, flag or path reads as ordinary prose, so readers cannot tell it is a value to type exactly. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`cli-backtick`
 |error
-|Flag usage and deprecation strings contain no backticks
-|pflag takes the first backtick-quoted span of a usage string as the flag's value placeholder: --help prints that text after the flag name and drops the backticks, so a bool flag can show as "--metrics-secure false", which reads as a value the flag does not take. The reference page puts every --flag in code itself, so write code values bare in both usage and deprecation strings. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#rpk-commands-and-flags-transformed[Standard]
+|CLI help text contains no backticks
+|CLI help text is printed in the terminal, not rendered. pflag (rpk, the Redpanda Operator) and urfave/cli (Redpanda Connect) take the first backtick span of a flag usage string as the flag's value placeholder: --help prints that text after the flag name and drops the backticks, so a bool flag can show as "--metrics-secure false", a value the flag does not take. Command help prints backticks literally. Write code values bare: the docs generators put flags, snake_case names, paths and URLs in inline code. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#rpk-commands-and-flags-transformed[Standard]
 
 |`operator-terminal-period`
 |warning

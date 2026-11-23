@@ -5,6 +5,7 @@ const path = require('path')
 
 const { SourceCache } = require('../source-text')
 const { STANDARD } = require('../standards')
+const { CLI_BACKTICK_RULE } = require('../rules/common')
 const {
   maskComments,
   findBalancedClose,
@@ -41,13 +42,19 @@ const CONVENTION = {
   case: 'sentence',
   terminal_period: false,
   verbatim_asciidoc: false,
-  // No backticks, ever: pflag's UnquoteUsage takes the first `...` span of
-  // a usage string as the flag's value placeholder, prints it after the
-  // flag name in --help and drops the backticks. Code values are written
-  // bare (--namespace, kube-system, 0). The reference page formats the
-  // string instead: it puts every --flag in code and adds the closing
-  // period (tools/operator-flags/render-page.js).
-  transformer: 'renderPage'
+  // No backticks, ever (the common cli-backtick rule): pflag's UnquoteUsage
+  // takes the first `...` span of a usage string as the flag's value
+  // placeholder, prints it after the flag name in --help and drops the
+  // backticks. Code values are written bare (--namespace, kube-system, 0).
+  // The reference page formats the string instead: it puts flags,
+  // snake_case names, paths and URLs in code with formatInlineCode and adds
+  // the closing period (tools/operator-flags/render-page.js), so a bare one
+  // is never a missing-inline-code finding.
+  transformer: 'renderPage',
+  auto_inline_code: {
+    kinds: ['identifier', 'flag', 'path'],
+    path_prefixes: []
+  }
 }
 
 const RUN_ROOT = path.join('operator', 'cmd', 'run')
@@ -255,20 +262,8 @@ function restatedDefault (text, forms) {
 }
 
 const RULES = [
-  {
-    name: 'operator-backtick',
-    description: 'Flag usage and deprecation strings contain no backticks',
-    why: 'pflag takes the first backtick-quoted span of a usage string as the flag\'s value placeholder: --help prints that text after the flag name and drops the backticks, so a bool flag can show as "--metrics-secure false", which reads as a value the flag does not take. The reference page puts every --flag in code itself, so write code values bare in both usage and deprecation strings.',
-    standard: STANDARD.rpk,
-    severity: 'error',
-    check: (decl) => {
-      if (decl.meta.kind !== 'flag' && decl.meta.kind !== 'deprecation') return []
-      const text = decl.string || ''
-      if (!text.includes('`')) return []
-      const span = text.match(/`[^`]*`?/)[0]
-      return [{ message: `${decl.meta.kind === 'flag' ? 'Flag usage' : 'Deprecation message'} contains a backtick (${span}). pflag shows the first backtick span in --help as the flag's value placeholder. Remove every backtick and write the value bare; the reference page formats --flags as code.` }]
-    }
-  },
+  // No backticks in CLI help text (shared with the other CLI surfaces).
+  CLI_BACKTICK_RULE,
   {
     name: 'operator-terminal-period',
     description: 'Flag usage strings do not end with a period',
@@ -346,7 +341,6 @@ module.exports = {
   restatedDefault,
   rules: RULES,
   // Flag usage strings are short, so the generic too-short rule
-  // would fire on nearly every conforming string. missing-inline-code asks
-  // for backticks, which these strings must never hold (operator-backtick).
-  skipRules: ['too-short', 'missing-inline-code']
+  // would fire on nearly every conforming string.
+  skipRules: ['too-short']
 }

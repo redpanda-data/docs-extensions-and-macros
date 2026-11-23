@@ -11,6 +11,7 @@ const { parseLiteralFields } = require('./rpk')
 const { CONDITIONAL_RULE } = require('../rules/verbatim-asciidoc')
 const { PLACEHOLDER_RULE } = require('../rules/placeholders')
 const { STANDARD } = require('../standards')
+const { CLI_BACKTICK_RULE } = require('../rules/common')
 
 /**
  * Connect surface: every published string a Redpanda Connect build defines.
@@ -67,13 +68,15 @@ const CONVENTION = {
   verbatim_asciidoc: true
 }
 
+// CLI help holds no backticks (the common cli-backtick rule); rpk-docs
+// formatDescription puts flags, snake_case names and paths in code itself.
 const CLI_CONVENTION = {
   case: 'sentence',
   terminal_period: false,
   verbatim_asciidoc: false,
   transformer: 'formatDescription',
   auto_inline_code: {
-    kinds: ['flag'],
+    kinds: ['identifier', 'flag', 'path'],
     path_prefixes: ['/etc/', '/var/', '/usr/', '/home/', '/tmp/', '~/.']
   }
 }
@@ -1688,6 +1691,8 @@ const { GO_SLICE_RULE, QUOTED_FIELD_RULE } = require('../rules/connect-literals'
 
 /** Surface-specific convention rules. */
 const RULES = [
+  // No backticks in CLI help text (shared with the other CLI surfaces).
+  CLI_BACKTICK_RULE,
   {
     name: 'missing-field-description',
     description: 'Config field constructed with no .Description()',
@@ -1806,6 +1811,8 @@ function reviewContext (decl) {
 module.exports = {
   name: 'connect',
   convention: CONVENTION,
+  // The convention of urfave/cli Command and Flag strings (kinds cli-*).
+  cliConvention: CLI_CONVENTION,
   extract,
   scanFile,
   identity,

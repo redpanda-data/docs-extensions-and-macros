@@ -23,6 +23,7 @@
  */
 
 const { escapeHtml } = require('./html-utils')
+const { formatInlineCode } = require('./inline-code')
 const datasets = require('./attachment-datasets')
 const { defineFields } = require('./value-fields')
 const { FORMAT_ASCIIDOC } = require('./value-descriptions')
@@ -136,23 +137,6 @@ function describeDataset (registry) {
  */
 const isOnPage = (flag) => Boolean(flag) && (!flag.hidden || Boolean(flag.deprecated))
 
-// A long flag in help text, with an optional =value. A trailing sentence
-// mark after a value is not part of it.
-const FLAG_IN_TEXT_RX = /(^|[\s(,])(--[a-z0-9][a-z0-9-]*(?:=[^\s,)]*[^\s,).;:!?])?)/g
-
-/**
- * Help text with every --flag token in inline code. Usage strings carry no
- * backticks (pflag would read the first span as the value placeholder in
- * --help), so the page adds the code formatting. Existing backtick spans
- * are left alone.
- */
-function codeFlags (text) {
-  return String(text == null ? '' : text)
-    .split(/(`[^`]*`)/)
-    .map((part, i) => (i % 2 ? part : part.replace(FLAG_IN_TEXT_RX, '$1`$2`')))
-    .join('')
-}
-
 /**
  * The anchor of a flag on the reference page. Flag names are already
  * lowercase and hyphenated, which AsciiDoc accepts as an id.
@@ -221,8 +205,10 @@ function fieldValue (flag, requested, { format = FORMAT_HUMAN, call } = {}) {
   // description
   const text = String(flag.usage || '').trim()
   if (!text) return { ok: false, kind: 'missing-field', field, message: `${call}: --${flag.name} has no help text.` }
-  // Formatted as the reference page formats it.
-  return { ok: true, field, rich: { format: FORMAT_ASCIIDOC, text: codeFlags(text) } }
+  // Formatted as the reference page formats it. Usage strings carry no
+  // backticks (pflag reads the first span as the --help value placeholder),
+  // so code values are put in inline code here.
+  return { ok: true, field, rich: { format: FORMAT_ASCIIDOC, text: formatInlineCode(text) } }
 }
 
 /**
@@ -270,7 +256,6 @@ module.exports = {
   flagAnchor,
   formatDefault,
   isOnPage,
-  codeFlags,
   resolveFlag,
   cautionOf,
   fieldValue,

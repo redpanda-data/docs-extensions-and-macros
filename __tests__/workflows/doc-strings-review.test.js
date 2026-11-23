@@ -2057,6 +2057,16 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(review.with.prompt).toMatch(/still ends with the changed declaration's\s+fingerprint footer/)
     })
 
+    test('rpk, Connect CLI and operator guidance state one no-backticks rule', () => {
+      const prompt = review.with.prompt
+      // Each CLI section says CLI help holds no backticks, why, and that the
+      // generator formats the same token kinds the lint detects.
+      expect(prompt.match(/CLI help text contains no backticks/g)).toHaveLength(3)
+      expect(prompt.match(/the generator puts\s+flags,\s+snake_case\s+names,\s+paths\s+and\s+URLs\s+in\s+inline\s+code/gi)).toHaveLength(3)
+      expect(prompt.match(/value\s+placeholder/g).length).toBeGreaterThanOrEqual(3)
+      expect(prompt).not.toMatch(/The page puts every --flag/)
+    })
+
     // connect#4860: the lint used to report per declaration, and the prompt
     // told the review to fix a finding on any line, so it commented on lines
     // the PR never touched. The lint now reports only findings on changed
