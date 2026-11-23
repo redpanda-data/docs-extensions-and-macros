@@ -92,6 +92,13 @@ describeIfPython('metrics gaps report', () => {
     expect(result.stdout).toContain('- `redpanda_c` (public): gauge in source, counter in the scrape')
     expect(result.stdout).toContain('- `redpanda_d` (public)')
     expect(result.stdout).toContain('- `src/v/e.cc:7`: endpoint not resolvable')
+    expect(result.stdout).toMatch(/The reference may be missing metrics/)
+    expect(result.stdout).not.toMatch(/The reference is complete/)
+  })
+
+  it('says the reference is complete only when every registration was read', () => {
+    const result = report({ ...NONE, count: 1, empty_help: [{ name: 'redpanda_d', endpoint: 'public' }] })
+    expect(result.stdout).toMatch(/The reference is complete/)
   })
 
   it('counts the gaps itself and does not trust the count field', () => {
