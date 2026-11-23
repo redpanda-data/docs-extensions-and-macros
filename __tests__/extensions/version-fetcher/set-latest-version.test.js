@@ -335,6 +335,50 @@ describe('operator and Helm chart versions per docs version', () => {
     expect(warnings[1]).toMatch(/No Redpanda Helm chart release found for the 24\.3 line, so ROOT 24\.3 keeps latest-redpanda-helm-chart-version/)
   })
 
+  // EOL lines get no more releases and their docs are frozen, so keeping the
+  // antora.yml value is expected there and is logged at info level.
+  it.each([
+    ['page-is-past-eol (compute-end-of-life)', { 'page-is-past-eol': 'true' }],
+    ['page-eol (antora.yml)', { 'page-eol': true }],
+    ['page-release-date older than the support window', { 'page-release-date': '2024-12-03' }],
+  ])('logs at info, not warn, when an EOL line keeps its antora.yml values: %s', (_, eolAttributes) => {
+    const { attributesByVersion, warnings, infos } = runExtension(scenario({
+      versions: ['26.2', '24.3'],
+      attributesForVersion: {
+        '24.3': { 'latest-operator-version': 'v2.3.8-24.3.6', 'latest-redpanda-helm-chart-version': '5.10.1', ...eolAttributes },
+      },
+    }))
+
+    expect(attributesByVersion['24.3']['latest-operator-version']).toBe('v2.3.8-24.3.6')
+    expect(attributesByVersion['24.3']['latest-redpanda-helm-chart-version']).toBe('5.10.1')
+    expect(warnings).toEqual([])
+    expect(infos).toEqual(expect.arrayContaining([
+      expect.stringMatching(/No stable Redpanda Operator release found for the 24\.3 line, so ROOT 24\.3 keeps latest-operator-version/),
+      expect.stringMatching(/No Redpanda Helm chart release found for the 24\.3 line, so ROOT 24\.3 keeps latest-redpanda-helm-chart-version/),
+    ]))
+  })
+
+  it('still warns for a supported line that keeps its antora.yml values', () => {
+    const { warnings } = runExtension(scenario({
+      versions: ['26.2', '24.3'],
+      attributesForVersion: {
+        '24.3': { 'latest-operator-version': 'v2.3.8-24.3.6', 'latest-redpanda-helm-chart-version': '5.10.1', 'page-is-past-eol': 'false', 'page-release-date': '2999-01-01' },
+      },
+    }))
+
+    expect(warnings).toHaveLength(2)
+  })
+
+  it('still warns for an EOL line that falls back to the newest release', () => {
+    const { warnings } = runExtension(scenario({
+      versions: ['26.2', '24.3'],
+      attributesForVersion: { '24.3': { 'latest-redpanda-helm-chart-version': '', 'page-is-past-eol': 'true' } },
+    }))
+
+    expect(warnings).toHaveLength(2)
+    expect(warnings[0]).toMatch(/uses the newest release/)
+  })
+
   it('falls back to the newest release when a line has no release and antora.yml sets nothing', () => {
     const { attributesByVersion, warnings } = runExtension(scenario({
       versions: ['26.2', '24.3'],
