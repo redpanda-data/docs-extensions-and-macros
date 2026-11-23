@@ -156,6 +156,12 @@ void probe::setup_second() {
       prometheus_sanitize::metrics_name("knob_second"),
       {sm::make_counter("turns_total", [this] { return _turns; }, help)});
 }
+void probe::setup_status() {
+    namespace sm = ss::metrics;
+    _public_status.add_group(
+      prometheus_sanitize::metrics_name("knob_status"),
+      {sm::make_gauge("up", [this] { return 1; }, sm::description("Whether the knob is up"))});
+}
 }
 `,
   'src/v/knob/probe.h': `
@@ -164,6 +170,7 @@ namespace knob {
 class probe {
     metrics::all_metrics_groups _public_and_internal;
     metrics::internal_metric_groups _metrics;
+    metrics::internal_metric_groups _public_status;
 };
 }
 `,
@@ -361,6 +368,11 @@ describeIfReady('metrics source inventory', () => {
     it('reads the endpoint from the declaration when the receiver name says both', () => {
       expect(inventory.public.redpanda_knob_first_turns_total).toBeDefined()
       expect(inventory.internal.vectorized_knob_first_turns_total).toBeDefined()
+    })
+
+    it('reads the endpoint from the declaration before the receiver name', () => {
+      expect(inventory.internal.vectorized_knob_status_up).toBeDefined()
+      expect(inventory.public.redpanda_knob_status_up).toBeUndefined()
     })
 
     it('takes a description variable from the function that registers with it', () => {
