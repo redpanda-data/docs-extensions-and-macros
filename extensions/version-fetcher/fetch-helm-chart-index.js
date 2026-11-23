@@ -15,7 +15,7 @@
  * @param {Object} [options.logger] - Optional Antora logger instance
  * @returns {Promise<string[]|null>} Every published version of the chart, or null when the index cannot be read
  */
-module.exports = async ({
+const fetchChartEntries = async ({
   url = 'https://charts.redpanda.com/index.yaml',
   chart = 'redpanda',
   timeoutMs = 30000,
@@ -35,9 +35,25 @@ module.exports = async ({
       warn(`The Helm chart index at ${url} has no "${chart}" chart`)
       return null
     }
-    return entries.map((entry) => entry?.version).filter((version) => typeof version === 'string')
+    return entries
+      .filter((entry) => typeof entry?.version === 'string')
+      .map((entry) => ({ version: entry.version, appVersion: entry.appVersion == null ? null : String(entry.appVersion) }))
   } catch (error) {
     warn(`Could not read the Helm chart index at ${url}: ${error.message || error}`)
     return null
   }
 }
+
+module.exports = async (options = {}) => {
+  const entries = await fetchChartEntries(options)
+  return entries ? entries.map((entry) => entry.version) : null
+}
+
+/**
+ * Fetches the published entries of a chart from the Helm repository index,
+ * with the application version each chart version deploys by default.
+ *
+ * @param {Object} [options] - The same options as the default export
+ * @returns {Promise<Array<{version: string, appVersion: string|null}>|null>} Every published entry of the chart, or null when the index cannot be read
+ */
+module.exports.fetchChartEntries = fetchChartEntries

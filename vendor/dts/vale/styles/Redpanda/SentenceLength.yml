@@ -1,0 +1,16 @@
+# Checks: sentences longer than 25 words
+extends: existence
+message: "Split this sentence: it runs past 25 words."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/plain-english.md#sentences
+level: warning
+nonword: true
+scope: [paragraph, list, table.cell, heading]
+# A word is any run of non-space characters, and inline code counts as one
+# word. A sentence ends at a word that ends in . ! or ?, so a dot inside a
+# word (1.5, file.adoc) doesn't end one, and a word that ends in a dot (e.g.,
+# a final 1.5.) does. The match is only the 26th word of a sentence: Vale
+# drops a match it can't map back to the source, and a whole-sentence match
+# fails to map whenever the sentence holds markup. If the 26th word is itself
+# inside inline code or link text, the finding is still lost.
+tokens:
+  - '(?<=(?:\A|[.!?]\s+)(?:[^\s]*[^\s.!?]\s+){25})[^\s]+'

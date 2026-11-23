@@ -26,6 +26,7 @@
  * Registered by macros/prop, so every playbook that registers prop: has it.
  */
 
+const { deprecationAcknowledged } = require('../extension-utils/deprecation-ack')
 const rpkLinks = require('../extension-utils/rpk-links')
 const datasets = require('../extension-utils/attachment-datasets')
 const { escapeHtml } = require('../extension-utils/html-utils')
@@ -74,7 +75,11 @@ function rpkcmdInlineMacro (config) {
       const parsed = rpkValues.parseCommandLine(line)
       const display = [['rpk', ...parsed.tokens].join(' '), ...(parsed.flag ? [parsed.flag] : []), ...parsed.extra].join(' ')
 
+      const acknowledged = deprecationAcknowledged(attributes)
       const plain = (message, kind) => {
+        // deprecated=ok: a deprecated command renders plain code, as always,
+        // with no warning and no error.
+        if (kind === 'deprecated-command' && acknowledged) return self.createInline(parent, 'quoted', buildRpkcmdContent({ display, text, plain: true }))
         if (mode === 'error' && THROW_KINDS.includes(kind)) throw new Error(message)
         if (mode !== 'off') logger.warn(message)
         return self.createInline(parent, 'quoted', buildRpkcmdContent({ display, text, plain: true }))

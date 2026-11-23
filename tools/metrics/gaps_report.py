@@ -48,8 +48,11 @@ def render(gaps):
     lines += [
         "**%d %s a person before this merges.**" % (total, "gap needs" if total == 1 else "gaps need"),
         "",
-        "The reference is complete: each metric below is in the data. What is listed here could not be "
-        "confirmed against a running cluster.",
+        ("The reference may be missing metrics: the source scan could not read some registrations (listed "
+         "last). Each metric listed by name is in the data, but could not be confirmed against a running cluster."
+         if gaps["unresolved"] else
+         "The reference is complete: each metric below is in the data. What is listed here could not be "
+         "confirmed against a running cluster."),
         "",
     ]
     if gaps["not_scraped"]:
