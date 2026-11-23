@@ -115,6 +115,19 @@ describeIfPython('metric overrides', () => {
     expect(validate({ metrics: { redpanda_cluster_brokers: { type: 'counter' } } })).toBe(false)
   })
 
+  it('the CLI checks a file against the schema before it starts a cluster', () => {
+    const { validateMetricOverrides } = require('../../tools/metrics/validate-overrides')
+    const file = path.join(workDir, 'metric-overrides.json')
+    fs.writeFileSync(file, JSON.stringify({ metrics: { redpanda_cluster_brokers: { type: 'counter' } } }))
+    expect(validateMetricOverrides(file)).toEqual(['/metrics/redpanda_cluster_brokers must NOT have additional properties'])
+    fs.writeFileSync(file, JSON.stringify({ metrics: { redpanda_cluster_brokers: { usage: 'Alert on it.' } } }))
+    expect(validateMetricOverrides(file)).toEqual([])
+    // A schema next to the file wins over the package's copy.
+    fs.writeFileSync(path.join(workDir, 'metric-overrides.schema.json'), JSON.stringify({ type: 'object', required: ['other'] }))
+    expect(validateMetricOverrides(file)).toEqual(["/ must have required property 'other'"])
+    fs.rmSync(path.join(workDir, 'metric-overrides.schema.json'))
+  })
+
   describe('a metric the cluster did not export', () => {
     let covered
 
@@ -377,6 +390,48 @@ describeIfPython('metric overrides', () => {
         expect(result.unchanged).toBe(true)
       })
 
+      const GONE_ONLY = { redpanda_gone_total: { description: 'Gone.', category: 'Old metrics' } }
+      const EARLIER = ['redpanda-metrics-v0.0.0.json', { metrics: { redpanda_gone_total: {} } }]
+
+      it.each([
+        ['has registrations it could not read', { ...INVENTORY, unresolved: [{ file: 'src/v/x.cc', line: 3, reason: 'group not resolvable' }] }],
+        ['is for a commit, not this release', { ...INVENTORY, ref: '0123abcd' }]
+      ])('deletes no override whole when the inventory %s', (_, inventory) => {
+        const dir = fs.mkdtempSync(path.join(workDir, 'earlier-'))
+        fs.writeFileSync(path.join(dir, EARLIER[0]), JSON.stringify(EARLIER[1]))
+        const result = raw(`no-proof-${inventory.ref}-${inventory.unresolved.length}`, GONE_ONLY, ['--retire-overrides', '--dataset-dir', dir], {
+          '--inventory': ['inventory.json', inventory]
+        })
+        expect(result.after.redpanda_gone_total).toEqual(GONE_ONLY.redpanda_gone_total)
+        expect(result.gaps.retired_overrides).toEqual([])
+        expect(result.log).toMatch(/cannot prove a metric was removed in v0\.0\.1/)
+      })
+
+      it('leaves the file unchanged when the run fails after planning what to retire', () => {
+        // The dataset directory is a file, so the dataset cannot be written.
+        const notADir = path.join(workDir, 'not-a-directory')
+        fs.writeFileSync(notADir, '')
+        const result = raw('fails-late', { redpanda_cluster_brokers: { description: 'Number of configured brokers in the cluster' } }, ['--retire-overrides', '--dataset-dir', notADir], {
+          '--inventory': ['inventory.json', INVENTORY]
+        })
+        expect(result.status).not.toBe(0)
+        expect(result.unchanged).toBe(true)
+      })
+
+      it.each([
+        ['keeps', { from: '0.0' }, { property: 'p', value: true }],
+        ['retires', undefined, undefined]
+      ])('%s a requires override that the tooling gives when its requirement is limited to some releases', (verb, releases) => {
+        const requirement = { id: 'p-on', metrics: ['redpanda_cluster_brokers'], requires: [{ property: 'p', value: true }], evidence: 'source', ...(releases ? { releases } : {}) }
+        const result = raw(`requires-${verb}`, { redpanda_cluster_brokers: { requires: [{ property: 'p', value: true }] } }, ['--retire-overrides'], {
+          '--inventory': ['inventory.json', INVENTORY],
+          '--requirements': ['requirements.json', { requirements: [requirement] }]
+        })
+        expect(result.status).toBe(0)
+        if (verb === 'keeps') expect(result.after.redpanda_cluster_brokers).toEqual({ requires: [{ property: 'p', value: true }] })
+        else expect(result.after.redpanda_cluster_brokers).toBeUndefined()
+      })
+
       it('keeps the override of a metric that is in source and has a written reason for not being exported', () => {
         const result = raw('expected-absent', COVERING, ['--retire-overrides'], {
           '--inventory': ['inventory.json', INVENTORY],
@@ -571,6 +626,17 @@ describeIfPython('metric overrides', () => {
     run(overrides, ['--retire-overrides'])
     const after = JSON.parse(read(path.join(workDir, `run-${counter}`, 'overrides.json'))).metrics
     expect(after.redpanda_cluster_brokers).toEqual({ category: 'Cluster metrics' })
+  })
+
+  it('does not count labels as cover for a metric an earlier release\'s cluster exported', () => {
+    const dir = fs.mkdtempSync(path.join(workDir, 'scraped-before-'))
+    fs.writeFileSync(path.join(dir, 'redpanda-metrics-v0.0.0.json'), JSON.stringify({ metrics: { redpanda_new_feature_lag: { observed: true } } }))
+    const overrides = { redpanda_new_feature_lag: { labels: [{ name: 'link' }] }, redpanda_other_feature_total: { labels: [] } }
+    const lost = run(overrides, ['--dataset-dir', dir])
+    expect(lost.gaps.not_scraped.map((gap) => gap.name)).toEqual(['redpanda_new_feature_lag'])
+    expect(lost.gaps.covered_by_override.map((gap) => gap.name)).toEqual(['redpanda_other_feature_total'])
+    expect(lost.log).toMatch(/redpanda_new_feature_lag was exported by an earlier release's cluster and not by this one/)
+    expect(run(overrides, ['--dataset-dir', dir, '--strict']).status).toBe(4)
   })
 
   it('fails on an overrides file with the wrong shape', () => {

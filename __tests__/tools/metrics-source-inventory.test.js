@@ -139,6 +139,60 @@ class second_probe { metrics::internal_metric_groups _metrics; };
 class shared_probe { metrics::all_metrics_groups _all; };
 }
 `,
+  'src/v/knob/probe.cc': `
+#include "knob/probe.h"
+namespace knob {
+void probe::setup_first() {
+    namespace sm = ss::metrics;
+    sm::description help("Turns of the first knob");
+    _public_and_internal.add_group(
+      prometheus_sanitize::metrics_name("knob_first"),
+      {sm::make_counter("turns_total", [this] { return _turns; }, help)});
+}
+void probe::setup_second() {
+    namespace sm = ss::metrics;
+    sm::description help("Turns of the second knob");
+    _metrics.add_group(
+      prometheus_sanitize::metrics_name("knob_second"),
+      {sm::make_counter("turns_total", [this] { return _turns; }, help)});
+}
+void probe::setup_status() {
+    namespace sm = ss::metrics;
+    vlog(logger.debug, "a string that names sm::make_gauge(name) is not a registration");
+    _public_status.add_group(
+      prometheus_sanitize::metrics_name("knob_status"),
+      {sm::make_gauge("up", [this] { return 1; }, sm::description("Whether the knob is up"))});
+}
+}
+`,
+  'src/v/knob/probe.h': `
+#pragma once
+namespace knob {
+class probe {
+    metrics::all_metrics_groups _public_and_internal;
+    metrics::internal_metric_groups _metrics;
+    metrics::internal_metric_groups _public_status;
+};
+}
+`,
+  'src/v/knob/wrapped.cc': `
+#include "knob/probe.h"
+namespace knob {
+void wrapped::setup() {
+    namespace sm = ss::metrics;
+    _metrics.add_group(
+      prometheus_sanitize::metrics_name("knob_wrapped"),
+      {sm::make_gauge
+        ("depth", [this] { return _depth; }, sm::description("Depth of the wrapped knob"))});
+}
+}
+`,
+  'src/v/knob/wrapped.h': `
+#pragma once
+namespace knob {
+class wrapped { metrics::internal_metric_groups _metrics; };
+}
+`,
   'src/v/gadget/tests/probe_test.cc': `
 void t() { _metrics.add_group("test_only", {sm::make_gauge("ignored", [] { return 0; }, sm::description("x"))}); }
 `
@@ -310,6 +364,25 @@ describeIfReady('metrics source inventory', () => {
         origin: 'src/v'
       })
       expect(inventory.public.redpanda_widget_cache_hits).toBeUndefined()
+    })
+
+    it('reads the endpoint from the declaration when the receiver name says both', () => {
+      expect(inventory.public.redpanda_knob_first_turns_total).toBeDefined()
+      expect(inventory.internal.vectorized_knob_first_turns_total).toBeDefined()
+    })
+
+    it('reads the endpoint from the declaration before the receiver name', () => {
+      expect(inventory.internal.vectorized_knob_status_up).toBeDefined()
+      expect(inventory.public.redpanda_knob_status_up).toBeUndefined()
+    })
+
+    it('takes a description variable from the function that registers with it', () => {
+      expect(inventory.public.redpanda_knob_first_turns_total.help).toBe('Turns of the first knob')
+      expect(inventory.internal.vectorized_knob_second_turns_total.help).toBe('Turns of the second knob')
+    })
+
+    it('finds a registration whose "(" is on the next line', () => {
+      expect(inventory.internal.vectorized_knob_wrapped_depth).toMatchObject({ type: 'gauge', help: 'Depth of the wrapped knob' })
     })
 
     it('maps byte helpers to the type Prometheus exposes', () => {
@@ -542,6 +615,38 @@ describeIfReady('metrics source inventory', () => {
       const report = JSON.parse(result.stdout)
       expect(result.status).toBe(1)
       expect(report.public.type_mismatch).toEqual([{ name: 'redpanda_widget_active', source: 'gauge', scrape: 'counter' }])
+    })
+
+    it('fails when one broker of several reports another type, whichever comes first', () => {
+      const changed = publicFamilies.map(([name, type]) => (name === 'redpanda_widget_active' ? [name, 'counter'] : [name, type]))
+      const good = write('pub-type-a.txt', publicFamilies)
+      const bad = write('pub-type-b.txt', changed)
+      for (const order of [[good, bad], [bad, good]]) {
+        const result = run(RECONCILE, ['--inventory', inventoryFile, '--public-file', order[0], '--public-file', order[1],
+          '--internal-file', write('int-ok7.txt', internalFamilies), '--json'])
+        const report = JSON.parse(result.stdout)
+        expect(result.status).toBe(1)
+        expect(report.public.type_mismatch).toEqual([{ name: 'redpanda_widget_active', source: 'gauge', scrape: 'counter, gauge' }])
+      }
+    })
+
+    it('fails when a scraped family has no TYPE line: it is untyped', () => {
+      const text = exposition(publicFamilies).replace(/^# TYPE redpanda_widget_active .*\n/m, '')
+      const file = path.join(workDir, 'pub-untyped.txt')
+      fs.writeFileSync(file, text)
+      const result = reconcile(file, write('int-ok8.txt', internalFamilies))
+      const report = JSON.parse(result.stdout)
+      expect(result.status).toBe(1)
+      expect(report.public.type_mismatch).toEqual([{ name: 'redpanda_widget_active', source: 'gauge', scrape: 'untyped' }])
+    })
+
+    it('fails on a family that has samples and no HELP or TYPE line', () => {
+      const file = path.join(workDir, 'int-sample-only.txt')
+      fs.writeFileSync(file, exposition(internalFamilies) + 'vectorized_sample_only{shard="0"} 1\n')
+      const result = reconcile(write('pub-ok9.txt', publicFamilies), file)
+      const report = JSON.parse(result.stdout)
+      expect(result.status).toBe(1)
+      expect(report.internal.scrape_only).toEqual(['vectorized_sample_only'])
     })
 
     it('fails when a scraped family has an empty HELP line', () => {

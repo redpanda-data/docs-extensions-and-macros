@@ -32,6 +32,7 @@
  * Registered by macros/prop, so every playbook that registers prop: has it.
  */
 
+const { deprecationAcknowledged } = require('../extension-utils/deprecation-ack')
 const connectLinks = require('../extension-utils/connect-links')
 const connectValues = require('../extension-utils/connect-values')
 const datasets = require('../extension-utils/attachment-datasets')
@@ -113,7 +114,9 @@ function connectInlineMacro (config) {
         return plain(`${call}: ${resolved.message} in ${dataset}, so it renders as plain code with no link.${hint}${was}`, resolved.kind, typeOf())
       }
       // A deprecated field's sentence joins the no-anchor warning below.
-      if (advice && advice.kind !== 'deprecated-field' && mode !== 'off') logger.warn(`${call}: ${connectLinks.adviceSentence(advice, { written, dataset, suggest })}`)
+      const acknowledged = deprecationAcknowledged(attributes)
+      const deprecation = advice && (advice.kind === 'deprecated-component' || advice.kind === 'deprecated-field')
+      if (advice && advice.kind !== 'deprecated-field' && mode !== 'off' && !(deprecation && acknowledged)) logger.warn(`${call}: ${connectLinks.adviceSentence(advice, { written, dataset, suggest })}`)
 
       const component = `${connectLinks.typeDir(resolved.key)}/${resolved.name}`
       const relative = connectLinks.componentPagePath(resolved.key, resolved.name)
@@ -139,7 +142,7 @@ function connectInlineMacro (config) {
       if (resolved.path) {
         const anchor = connectLinks.fieldAnchor({ resolved, catalog: contentCatalog, format: connectValues.docsFormat(registry.data) })
         if (anchor.anchor) fragment = anchor.anchor
-        else if (mode !== 'off') {
+        else if (mode !== 'off' && !acknowledged) {
           const field = advice && advice.kind === 'deprecated-field'
             ? (advice.field ? ` Its replacement is ${advice.field}: write ${suggest(advice.ref)}.` : ` ${advice.why.replace(/^./, (c) => c.toUpperCase())}.`)
             : ''

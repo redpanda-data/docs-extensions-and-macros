@@ -1,0 +1,44 @@
+= Macro parity test
+
+Each row exercises the same scenario with every link macro.
+
+== Known name
+
+* prop: prop:admin[link=true]
+* rpk: rpkcmd:[rpk topic create]
+* Connect: connect:[inputs/kafka_franz]
+* Bloblang: blobl:[now()]
+
+== Unknown name
+
+* prop: prop:admn[link=true]
+* rpk: rpkcmd:[rpk topik create]
+* Connect: connect:[inputs/kafka_frnz]
+* Bloblang: blobl:[noww()]
+
+== Deprecated name
+
+* prop: prop:cloud_storage_max_partition_readers_per_shard[]
+* prop with link: prop:cloud_storage_max_partition_readers_per_shard[link=true]
+* rpk: rpkcmd:[rpk redpanda admin]
+* Connect: connect:[inputs/kafka]
+* Bloblang: blobl:[meta()]
+
+== Alias or former name
+
+* rpk: rpkcmd:[rpk cluster status]
+* Connect: connect:[outputs/kafka_migrator]
+
+== Value from a deprecated item
+
+* prop: propval:cloud_storage_max_partition_readers_per_shard[type]
+* Connect: connectval:[inputs/kafka.addresses,type]
+* Bloblang: bloblval:[meta(),description]
+
+== Deprecated name, acknowledged with deprecated=ok
+
+* prop: prop:cloud_storage_max_partition_readers_per_shard[deprecated=ok]
+* rpk: rpkcmd:[rpk redpanda admin,deprecated=ok]
+* Connect: connect:[inputs/kafka,deprecated=ok]
+* Bloblang: blobl:[meta(),deprecated=ok]
+* Connect value: connectval:[inputs/kafka.addresses,type,deprecated=ok]
