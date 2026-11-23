@@ -164,9 +164,31 @@ describe('waitForReleaseAttachment', () => {
     const states = [{ publishedAt: new Date(PUBLISHED), hasAsset: false }, null, { publishedAt: new Date(PUBLISHED), hasAsset: true }];
     releaseAttachment.releaseState.mockImplementation(async () => states.shift());
     jest.spyOn(releaseAttachment, 'loadReleaseAttachment').mockResolvedValueOnce(null).mockResolvedValueOnce(readFixture());
-    const data = await releaseAttachment.waitForReleaseAttachment(VERSION, { ...c, token: null, logger: { log: () => {} }, waitMs: 15 * 60000, freshMs: 120 * 60000, pollMs: 60000 });
+    const data = await releaseAttachment.waitForReleaseAttachment(VERSION, { ...c, token: null, logger: console, waitMs: 15 * 60000, freshMs: 120 * 60000, pollMs: 60000 });
     expect(data).toEqual(readFixture());
     expect(c.sleep).toHaveBeenCalledTimes(2);
+  });
+
+  test('an asset attached between the download and the release lookup is read at once', async () => {
+    const archive = docsAsset(ATTACHED);
+    let calls = 0;
+    // The first download finds no asset; by the time the release is looked up, it is there.
+    const fetchImpl = jest.fn(async () => (calls++ === 0
+      ? { ok: false, status: 404, statusText: 'Not Found' }
+      : { ok: true, status: 200, arrayBuffer: async () => archive }));
+    releaseAttachment.releaseState.mockResolvedValue({ publishedAt: new Date(PUBLISHED), hasAsset: true });
+    const c = clock(PUBLISHED + 60000);
+    const data = await releaseAttachment.waitForReleaseAttachment(VERSION, { ...c, fetchImpl, token: null, logger: console });
+    expect(data).toEqual(readFixture());
+    expect(c.sleep).not.toHaveBeenCalled();
+  });
+
+  test('control: an attached asset without the file falls back at once, with no second download', async () => {
+    const fetchImpl = serving(docsAsset(PARTIAL));
+    releaseAttachment.releaseState.mockResolvedValue({ publishedAt: new Date(PUBLISHED), hasAsset: true });
+    const c = clock(PUBLISHED + 60000);
+    await expect(releaseAttachment.waitForReleaseAttachment(VERSION, { ...c, fetchImpl, token: null, logger: console })).resolves.toBeNull();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   test('gives up after the wait and returns null, so the binaries are compared', async () => {

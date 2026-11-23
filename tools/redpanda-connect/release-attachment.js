@@ -62,6 +62,9 @@ function attachmentFromFiles (files, version) {
 }
 
 const cache = new Map()
+// Versions whose cached null means the release had no docs asset at all, as
+// opposed to an asset without the attachment file.
+const noAsset = new Set()
 
 /**
  * Downloads the v<version> docs asset and returns its connect-<version>.json,
@@ -79,7 +82,11 @@ function loadReleaseAttachment (version, { fetchImpl, token = getGitHubApiToken(
   if (!cache.has(version)) {
     const pending = (async () => {
       const archive = await asset.downloadAsset(`v${version}`, { fetchImpl, token, logger })
-      if (!archive) return null
+      if (!archive) {
+        noAsset.add(version)
+        return null
+      }
+      noAsset.delete(version)
       return attachmentFromFiles(await asset.readTarGz(archive), version)
     })()
     // A failed download is not cached, so a later call can retry it.
@@ -91,6 +98,7 @@ function loadReleaseAttachment (version, { fetchImpl, token = getGitHubApiToken(
 
 function clearAttachmentCache () {
   cache.clear()
+  noAsset.clear()
 }
 
 const minutes = (name, fallback) => {
@@ -126,6 +134,12 @@ async function waitForReleaseAttachment (version, {
   if (data || waitMs <= 0) return data
   const tag = `v${version}`
   let state = await module.exports.releaseState(tag, { fetchImpl, token })
+  if (state && state.hasAsset && noAsset.has(version)) {
+    // Attached between the download and this lookup: read it now. An asset
+    // that was there and lacks the file still falls back at once.
+    cache.delete(version)
+    return module.exports.loadReleaseAttachment(version, { fetchImpl, token, logger })
+  }
   if (!state || state.hasAsset || !state.publishedAt) return null
   // Kept from the first read: a later poll can fail and return null.
   const publishedAt = state.publishedAt.getTime()
