@@ -1206,7 +1206,7 @@ Optional reference page, without `.adoc`, instead of the one the build finds. It
 deprecated::
 Set to `ok` on a page that names a deprecated metric on purpose. See <<metric-failures>>.
 
-The output is `<code class="metric-ref">` with `data-metric-name` (the family), `data-metric-series` (the suffix, for a series name) and `data-doc-url` (the published URL of the entry, when the build found the page). With a link, the link wraps the code element. Don't wrap the macro in backticks: it already renders code.
+The output is `<code class="metric-ref">` with `data-metric-name` (the family), `data-metric-series` (the suffix, for a series name) and `data-doc-url` (the published URL of the entry, when the build found the page and the call does not set `page=`). With a link, the link wraps the code element. Don't wrap the macro in backticks: it already renders code.
 
 === Which metrics data a page reads
 
@@ -1321,7 +1321,7 @@ The target is the metric name, resolved as `metric:` resolves it (<<metric>>): a
 
 | `values` (aliases `options`, `enum`, `accepted-values`, `annotated_options`)
 | The `values` of the label that `label=` names: the complete list. It never renders `observed_values`, which is what one scrape saw
-| With `label=redpanda_request`: `consume`, `produce`, once the data has the complete list
+| With `label=redpanda_request`: `consume`, `produce`, when the data has the complete list
 
 | `endpoint`
 | `endpoint`, as the path, in code. `format=raw` gives `public` or `internal`
@@ -1352,7 +1352,7 @@ The target is the metric name, resolved as `metric:` resolves it (<<metric>>): a
 |
 
 | `deprecated` (alias `is_deprecated`)
-| `deprecated`: `yes` when it is set to a release, a note or `true`, `no` when it is `null` or `false`. `format=raw` gives the stored value
+| `deprecated`: `yes` when it is set to a release, a note or `true`, `no` when it is `null` or `false`. `format=raw` gives the stored value, and `false` for `null`
 |
 
 | `removed`
@@ -1372,13 +1372,13 @@ The target is the metric name, resolved as `metric:` resolves it (<<metric>>): a
 |
 |===
 
-The generator writes the metric name, `endpoint`, `type`, `unit`, `description`, `labels` and `buckets`. Every other field, and the complete `values` of a label, comes from the metrics overrides file, `docs-data/metric-overrides.json`. Until that file exists and the data has the field for a metric, the field is a `missing-field`: the macro renders the placeholder and warns, and the warning says where the field comes from. `introduced` and `removed` are release history, not curated text, so do not type them into the overrides file.
+The generator writes the metric name, `endpoint`, `type`, `unit`, `description`, `labels` and `buckets`. Every other field, and the complete `values` of a label, comes from the metrics overrides file, `docs-data/metric-overrides.json`. Until that file exists and the data has the field for a metric, the field is a `missing-field`: the macro renders the placeholder and warns, and the warning says where the field comes from. `introduced`, `deprecated`, `removed` and `status` are release history, not curated text, so do not type them into the overrides file.
 
 label::
 The label whose values the `values` field renders. Required for `values`.
 
 format::
-`human` (default) or `raw`. `raw` gives `labels`, `values`, `buckets` and `use-cases` as a JSON array, `endpoint` as `public` or `internal`, `deprecated` as the stored value, and `requires` and `cloud-access` as stored JSON. Any other value warns and renders the human form.
+`human` (default) or `raw`. `raw` gives `labels`, `values`, `buckets` and `use-cases` as a JSON array, `endpoint` as `public` or `internal`, `deprecated` as the stored value, and `cloud-access` and a list `requires` as stored JSON (a text `requires` renders as text). Any other value warns and renders the human form.
 
 deprecated::
 Set to `ok` to silence the warning for a deprecated metric, as in `metric:`.
@@ -1736,7 +1736,7 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 [[value-text]]
 === Descriptions and other text values
 
-`description`, `summary`, `examples` and `see-also` are text, rendered from its source format:
+`description`, `summary`, `examples` and `see-also` are text, and so are a metric's `usage` and `requires`, rendered from its source format:
 
 [cols="1,2"]
 |===
@@ -1753,9 +1753,12 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 
 | rpk examples
 | Literally, as cobra prints them: paragraphs, with each indented run, and each listing between `----` lines, as a literal block. Backticks and asterisks render as written
+
+| Metric strings
+| AsciiDoc: the `description`, `usage`, `requires` and `see-also` values in the metrics data (<<metricval-fields>>)
 |===
 
-The inline form renders a text value only when it is one paragraph. Anything longer (a blank line, a list, a listing, a heading, a conditional) renders `<unknown FIELD>` with a `needs-block` warning that names the block form: the same macro with two colons, on a line of its own, such as `propval::cleanup.policy[description]`, `rpkval::[rpk topic create,description]` or `connectval::[inputs/kafka_franz.consumer_group,description]`. The block form parses the text into the page. A heading in the text renders as a discrete heading, because a section cannot open inside a block. Written inside a sentence, the block form is a `block-form-inline` error.
+The inline form renders a text value only when it is one paragraph. Anything longer (a blank line, a list, a listing, a heading, a conditional) renders `<unknown FIELD>` with a `needs-block` warning that names the block form: the same macro with two colons, on a line of its own, such as `propval::cleanup.policy[description]`, `rpkval::[rpk topic create,description]`, `connectval::[inputs/kafka_franz.consumer_group,description]` or `metricval::redpanda_cluster_brokers[description]`. The block form parses the text into the page. A heading in the text renders as a discrete heading, because a section cannot open inside a block. Written inside a sentence, the block form is a `block-form-inline` error.
 
 A Connect string was written for its component's page in `connect:components`, so a link in it is relative to that page. When the string renders anywhere else, its links are rewritten:
 

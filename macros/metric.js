@@ -50,7 +50,8 @@ const ROLE = 'metric-ref'
  * @param {string} [opts.family] - The metric family the name resolved to.
  * @param {string} [opts.series] - The histogram series suffix, when the name
  *   is a series name.
- * @param {string} [opts.text] - Display text override, already escaped.
+ * @param {string} [opts.text] - Display text override, rendered as written
+ *   (not escaped, as in buildPropContent).
  * @param {string} [opts.docUrl] - The published URL of the reference entry.
  * @param {boolean} [opts.plain] - Render unmarked code: no tooltip, no link.
  */

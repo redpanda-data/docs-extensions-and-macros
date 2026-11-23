@@ -289,6 +289,32 @@ describe('metric macro', () => {
       expect(streaming.get('vectorized_alien_receive_batch_queue_length').page).toBe('internal-metrics-reference')
     })
 
+    test('a conditional that wraps one fence of a block stays in step with the block', () => {
+      // One opening fence per audience and a shared closing fence. The
+      // preprocessor reads conditionals inside blocks too, so the self-managed
+      // page closes the block at the last fence and renders the heading.
+      const source = [
+        '= Monitoring',
+        '',
+        'ifndef::env-cloud[]',
+        '[source,bash]',
+        '----',
+        'curl http://localhost:9644/public_metrics',
+        'endif::[]',
+        'ifdef::env-cloud[]',
+        '[source,bash]',
+        '----',
+        'curl https://example.com/public_metrics',
+        'endif::[]',
+        '----',
+        '',
+        '== redpanda_cluster_brokers',
+        '',
+      ].join('\n')
+      const catalog = catalogOf([page('streaming', '26.2', 'monitoring.adoc', source)], { streaming: {} })
+      expect([...buildMetricPageIndex(catalog, 'streaming', SAMPLE.metrics, '26.2').keys()]).toEqual(['redpanda_cluster_brokers'])
+    })
+
     test('a stub that includes another tag indexes nothing', () => {
       const files = [...streamingFiles(), page('cloud', '', 'public-metrics-reference.adoc', '= Public Metrics\n\ninclude::streaming:reference:public-metrics-reference.adoc[tag=other]\n')]
       const catalog = catalogOf(files, { cloud: { 'env-cloud': true } })

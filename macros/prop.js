@@ -482,7 +482,10 @@ function buildPageIndex (contentCatalog, component, properties, version, kind = 
     const conditions = []
     let inDelimitedBlock = false
     for (const line of source.split('\n')) {
-      if (attributes && !inDelimitedBlock) {
+      // Inside delimited blocks too: the preprocessor reads conditionals
+      // before blocks are parsed, so one that wraps a single fence decides
+      // where the block ends.
+      if (attributes) {
         if (trackConditional(line, conditions)) continue
         if (!conditionsHold(conditions, attributes)) continue
       }
