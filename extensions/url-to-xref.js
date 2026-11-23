@@ -1,5 +1,7 @@
 'use strict'
 
+const isPastEol = require('./util/is-past-eol')
+
 const { scanContentUrls } = require('./util/scan-content-urls')
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
 
@@ -42,6 +44,15 @@ const { raiseListenerLimit } = require('./util/raise-listener-limit')
  *   anchor does not stays a URL and is reported as a broken anchor, since an
  *   xref to it would pass Antora's page check and still land at the top of
  *   the page.
+ * - Property anchors are the exception. When the target is a property
+ *   reference page (one that declares :page-property-source: or includes a
+ *   generated partial$properties/ partial) and the anchor is not on it, the
+ *   other property reference pages in the same component version are
+ *   searched, because properties move between those pages (the
+ *   cloud_storage_* properties moved from Cluster Properties to Object
+ *   Storage Properties). Property names are unique, so when exactly one of
+ *   those pages has the anchor, the URL becomes an xref to that page. No
+ *   match, or more than one, is still reported.
  * - Targets in the latest version of a component emit an unversioned xref;
  *   targets pinned to an older version emit version@component:module:page.
  * - URLs pointing at a page's former path resolve through the page-aliases the
@@ -100,15 +111,32 @@ module.exports.register = function ({ config = {} }) {
     const withQueryString = new Set()
     const withoutLinkText = new Set()
     const missingAnchor = new Map()
+    const ambiguousAnchor = new Map()
+    // EOL docs are frozen, so their broken links are reported at debug level.
+    const eolCache = new Map()
+    const inEolVersion = ({ src = {} }) => {
+      const key = `${src.version || ''}@${src.component}`
+      if (!eolCache.has(key)) {
+        const componentVersion = src.component && typeof contentCatalog.getComponentVersion === 'function' && contentCatalog.getComponentVersion(src.component, src.version || '')
+        eolCache.set(key, Boolean(componentVersion) && isPastEol((componentVersion.asciidoc || {}).attributes))
+      }
+      return eolCache.get(key)
+    }
+    const eolUrls = new Set()
     const files = contentCatalog
       .getPages((page) => page.out)
       .concat(contentCatalog.findBy({ family: 'partial' }))
     for (const file of files) {
       if (!file.contents) continue
       const result = convertContent(file.contents.toString(), resolverContext)
+      const eol = inEolVersion(file)
       if (result.converted) {
         file.contents = Buffer.from(result.content)
         convertedCount += result.converted
+      }
+      for (const url of [...result.unmapped, ...result.missingAnchor, ...result.ambiguousAnchor.map((a) => a.url)]) {
+        // A URL is EOL-only until a supported version reports it too.
+        if (eol) { if (!(unmapped.has(url) || missingAnchor.has(url) || ambiguousAnchor.has(url)) || eolUrls.has(url)) eolUrls.add(url) } else eolUrls.delete(url)
       }
       for (const url of result.unmapped) {
         if (!unmapped.has(url)) unmapped.set(url, new Set())
@@ -120,13 +148,24 @@ module.exports.register = function ({ config = {} }) {
         if (!missingAnchor.has(url)) missingAnchor.set(url, new Set())
         missingAnchor.get(url).add(file.path)
       }
+      for (const { url, targets } of result.ambiguousAnchor) {
+        if (!ambiguousAnchor.has(url)) ambiguousAnchor.set(url, { targets, pages: new Set() })
+        ambiguousAnchor.get(url).pages.add(file.path)
+      }
     }
     if (logUnconverted) {
+      const report = (url) => (eolUrls.has(url) ? (message) => logger.debug(`${message} [end-of-life versions]`) : (message) => logger.warn(message))
       for (const [url, pages] of unmapped) {
-        logger.warn(`No published page matches ${url} (found in: ${[...pages].join(', ')})`)
+        report(url)(`No published page matches ${url} (found in: ${[...pages].join(', ')})`)
       }
       for (const [url, pages] of missingAnchor) {
-        logger.warn(`Anchor not found on the target page of ${url}; left as a URL (found in: ${[...pages].join(', ')})`)
+        report(url)(`Anchor not found on the target page of ${url}; left as a URL (found in: ${[...pages].join(', ')})`)
+      }
+      for (const [url, { targets, pages }] of ambiguousAnchor) {
+        report(url)(
+          `Anchor not found on the target page of ${url}, and more than one property page has it ` +
+            `(${targets.join(', ')}); left as a URL (found in: ${[...pages].join(', ')})`
+        )
       }
     }
     if (withQueryString.size) {
@@ -199,7 +238,49 @@ function buildUrlMap (contentCatalog) {
       if (!urls.has(key)) urls.set(key, toEntry(page.src, page))
     }
   }
-  return { urls, components }
+  const propertyPages = new Map()
+  for (const page of pages) {
+    if (!isPropertyPage(page)) continue
+    const key = componentVersionKey(page.src)
+    if (!propertyPages.has(key)) propertyPages.set(key, [])
+    propertyPages.get(key).push(toEntry(page.src, page))
+  }
+  return { urls, components, propertyPages }
+}
+
+// A property reference page either declares the collection it documents
+// (:page-property-source:, see the prop macro) or includes one of the
+// generated property partials. Docs branches that predate the attribute only
+// have the include.
+const PROPERTY_SOURCE_RX = /^:page-property-source:/m
+const PROPERTY_PARTIAL_INCLUDE_RX = /^include::[^[\s]*partial\$properties\//m
+
+/** Whether a page is a property reference page. */
+function isPropertyPage (page) {
+  const contents = page.contents && page.contents.toString()
+  return Boolean(contents) && (PROPERTY_SOURCE_RX.test(contents) || PROPERTY_PARTIAL_INCLUDE_RX.test(contents))
+}
+
+function componentVersionKey ({ component, version }) {
+  return `${version || ''}@${component}`
+}
+
+/**
+ * For an anchor that is not on its target page, finds the other property
+ * reference pages in the same component version that carry it. Applies only
+ * when the target is itself a property reference page. Returns the matching
+ * entries, which the caller uses only when there is exactly one.
+ */
+function propertyPagesWithAnchor (entry, id, resolverContext) {
+  const { propertyPages } = resolverContext
+  if (!propertyPages) return []
+  const siblings = propertyPages.get(componentVersionKey(entry))
+  if (!siblings || !siblings.some((sibling) => sibling.page === entry.page)) return []
+  return siblings.filter((sibling) => {
+    if (sibling.page === entry.page) return false
+    const anchors = pageAnchors(sibling.page, resolverContext.resolveInclude)
+    return Boolean(anchors) && anchors.has(id)
+  })
 }
 
 const PAGE_ALIASES_ATTRIBUTE = ':page-aliases:'
@@ -468,7 +549,7 @@ function pageHeadingIds (contents, page, resolveInclude) {
   const ids = parseHeadingIds(contents)
   if (!resolveInclude) return ids
   let searched = 0
-  for (const match of contents.matchAll(/^include::([^[\s]+)\[/gm)) {
+  for (const match of contents.matchAll(/^include::([^[\s]+)\[([^\]]*)\]/gm)) {
     if (++searched > MAX_INCLUDES_SEARCHED) break
     let included
     try {
@@ -477,11 +558,66 @@ function pageHeadingIds (contents, page, resolveInclude) {
       continue
     }
     if (!included || !included.contents) continue
-    for (const [id, text] of parseHeadingIds(included.contents.toString())) {
-      if (!ids.has(id)) ids.set(id, text)
+    const text = filterByTags(included.contents.toString(), includeTags(match[2]))
+    for (const [id, heading] of parseHeadingIds(text)) {
+      if (!ids.has(id)) ids.set(id, heading)
     }
   }
   return ids
+}
+
+/**
+ * The tag selection of an include's attributes (`tag=a` or `tags=a;!b`), or
+ * undefined when the include selects no tags. The generated property pages
+ * include their partial with tags such as `category-redpanda;!deprecated`, so
+ * an anchor in an excluded region is not on the page.
+ */
+function includeTags (attributes) {
+  const match = /(?:^|,)\s*tags?=("[^"]*"|[^,]*)/.exec(attributes || '')
+  if (!match) return undefined
+  const names = match[1].replace(/^"|"$/g, '').split(/[;,]/).map((name) => name.trim()).filter(Boolean)
+  if (!names.length) return undefined
+  const positive = new Set(names.filter((name) => !name.startsWith('!')))
+  const negative = new Set(names.filter((name) => name.startsWith('!')).map((name) => name.slice(1)))
+  return { positive, negative }
+}
+
+const TAG_DIRECTIVE_RX = /\b(tag|end)::(\S+?)\[\]\s*$/
+
+/**
+ * Keeps only the lines an include with these tags would render, following
+ * Asciidoctor's rules closely enough for anchors: the innermost tag that the
+ * selection names decides a line; `*` stands for any tag and `**` for every
+ * line; with no positive tag, lines outside excluded regions are kept.
+ */
+function filterByTags (text, tags) {
+  if (!tags) return text
+  const { positive, negative } = tags
+  const onlyNegative = positive.size === 0
+  const keepUntagged = onlyNegative || positive.has('**')
+  const stack = []
+  const kept = []
+  for (const line of text.split('\n')) {
+    const directive = TAG_DIRECTIVE_RX.exec(line)
+    if (directive) {
+      if (directive[1] === 'tag') stack.push(directive[2])
+      else if (stack.length && stack[stack.length - 1] === directive[2]) stack.pop()
+      continue
+    }
+    let selected
+    for (let index = stack.length - 1; index >= 0 && selected === undefined; index--) {
+      const name = stack[index]
+      if (negative.has(name)) selected = false
+      else if (positive.has(name)) selected = true
+    }
+    if (selected === undefined) {
+      if (!stack.length) selected = keepUntagged
+      else if (negative.has('*')) selected = false
+      else selected = onlyNegative || positive.has('*') || positive.has('**')
+    }
+    if (selected) kept.push(line)
+  }
+  return kept.join('\n')
 }
 
 /**
@@ -567,6 +703,7 @@ function convertContent (content, resolverContext) {
   const withQueryString = []
   const withoutLinkText = []
   const missingAnchor = []
+  const ambiguousAnchor = []
   for (const match of scanContentUrls(content)) {
     let url
     try {
@@ -589,7 +726,7 @@ function convertContent (content, resolverContext) {
       withQueryString.push(match.url)
       continue
     }
-    const entry = resolveUrlPath(url.pathname, resolverContext)
+    let entry = resolveUrlPath(url.pathname, resolverContext)
     if (!entry) {
       unmapped.push(match.url)
       continue
@@ -603,9 +740,19 @@ function convertContent (content, resolverContext) {
       // The page resolves but the anchor does not: an xref would pass
       // Antora's check and still land at the top of the page. Keep the URL,
       // which the site's broken-anchor checks can still see, and report it.
+      // A property anchor may have moved to another property page, which
+      // is used when it is the only one that has the anchor.
       if (!anchors.has(fragmentId(url.hash))) {
-        missingAnchor.push(match.url)
-        continue
+        const moved = propertyPagesWithAnchor(entry, fragmentId(url.hash), resolverContext)
+        if (moved.length > 1) {
+          ambiguousAnchor.push({ url: match.url, targets: moved.map((e) => `${e.module}:${e.relative}`) })
+          continue
+        }
+        if (!moved.length) {
+          missingAnchor.push(match.url)
+          continue
+        }
+        entry = moved[0]
       }
     }
     const label = linkTextFor(match.label, url.hash, entry.page, resolverContext.resolveInclude)
@@ -618,7 +765,7 @@ function convertContent (content, resolverContext) {
     converted++
   }
   result += content.slice(cursor)
-  return { content: result, converted, unmapped, withQueryString, withoutLinkText, missingAnchor }
+  return { content: result, converted, unmapped, withQueryString, withoutLinkText, missingAnchor, ambiguousAnchor }
 }
 
 module.exports.buildUrlMap = buildUrlMap
@@ -629,9 +776,12 @@ module.exports.targetComponentOf = targetComponentOf
 // conversion time, after this extension has run (extension-utils/rpk-links.js).
 module.exports.DEFAULT_IGNORE = DEFAULT_IGNORE
 module.exports.resolveUrlPath = resolveUrlPath
+module.exports.propertyPagesWithAnchor = propertyPagesWithAnchor
 module.exports.entryToXref = entryToXref
 module.exports.pageAnchors = pageAnchors
 module.exports.parseHeadingIds = parseHeadingIds
 module.exports.fragmentId = fragmentId
 module.exports.documentTitle = documentTitle
 module.exports.sanitizeLinkText = sanitizeLinkText
+module.exports.filterByTags = filterByTags
+module.exports.includeTags = includeTags

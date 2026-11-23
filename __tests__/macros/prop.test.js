@@ -234,6 +234,15 @@ describe('prop macro', () => {
       warn.mockRestore()
     })
 
+    test('suggests names the same way the rpk and Connect macros do, catching a dropped letter', () => {
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
+      convert('prop:admn[]', { catalog: fakeCatalog() })
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('Did you mean: admin?'))
+      convert('propval:admn[type]', { catalog: fakeCatalog() })
+      expect(warn.mock.calls.some(([m]) => String(m).includes('propval:admn[type]') && String(m).includes('Did you mean: admin?'))).toBe(true)
+      warn.mockRestore()
+    })
+
     test('fails the conversion in error mode', () => {
       expect(() => convert('prop:not_a_property[]', {
         catalog: fakeCatalog(),
@@ -258,6 +267,72 @@ describe('prop macro', () => {
       expect(html).toContain('data-property-name="fips_mode"')
       expect(html).not.toContain('href')
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('no reference page in this component'))
+    })
+
+    describe('deprecated properties', () => {
+      const DEPRECATED_JSON = JSON.stringify({
+        properties: {
+          cloud_topics_enabled: { name: 'cloud_topics_enabled', config_scope: 'cluster', cloud_supported: false, is_deprecated: true },
+          admin: { name: 'admin', config_scope: 'broker', cloud_supported: false },
+        },
+      })
+      const deprecationWarnings = (warn) => warn.mock.calls.filter(([m]) => String(m).includes('is deprecated in'))
+
+      test('every mention warns and still renders as written, with or without link=true', () => {
+        const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
+        const plain = convert('prop:cloud_topics_enabled[]', { catalog: fakeCatalog({ json: DEPRECATED_JSON }) })
+        expect(plain).toContain('data-property-name="cloud_topics_enabled"')
+        expect(deprecationWarnings(warn)).toHaveLength(1)
+        expect(deprecationWarnings(warn)[0][0]).toContain('prop:cloud_topics_enabled[] in modules/manage/pages/example.adoc')
+        const linked = convert('prop:cloud_topics_enabled[link=true]', { catalog: fakeCatalog({ json: DEPRECATED_JSON }) })
+        expect(linked).not.toContain('href')
+        expect(deprecationWarnings(warn)).toHaveLength(2)
+        expect(deprecationWarnings(warn)[1][0]).toContain('without a link')
+        // One warning per mention: the unpublished-property warning is not added on top
+        expect(warn.mock.calls.some(([m]) => String(m).includes('no reference page in this component'))).toBe(false)
+        warn.mockRestore()
+      })
+
+      test('never fails the build, even in error mode, and is silent in off mode', () => {
+        const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
+        expect(() => convert('prop:cloud_topics_enabled[]', { catalog: fakeCatalog({ json: DEPRECATED_JSON }), attributes: { 'property-validate': 'error' } })).not.toThrow()
+        expect(deprecationWarnings(warn)).toHaveLength(1)
+        convert('prop:cloud_topics_enabled[]', { catalog: fakeCatalog({ json: DEPRECATED_JSON }), attributes: { 'property-validate': 'off' } })
+        expect(deprecationWarnings(warn)).toHaveLength(1)
+        warn.mockRestore()
+      })
+
+      test('deprecated=ok renders the same, with no deprecation warning, for prop: and propval:', () => {
+        const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
+        const catalog = () => fakeCatalog({ json: DEPRECATED_JSON })
+        const expected = convert('prop:cloud_topics_enabled[]', { catalog: catalog() })
+        expect(convert('prop:cloud_topics_enabled[deprecated=ok]', { catalog: catalog() })).toBe(expected)
+        expect(convert('prop:cloud_topics_enabled[link=true,deprecated=ok]', { catalog: catalog() })).not.toContain('href')
+        warn.mockClear()
+        convert('prop:cloud_topics_enabled[deprecated=ok]', { catalog: catalog() })
+        convert('prop:cloud_topics_enabled[link=true,deprecated=ok]', { catalog: catalog() })
+        convert('propval:cloud_topics_enabled[scope,deprecated=ok]', { catalog: catalog() })
+        expect(deprecationWarnings(warn)).toHaveLength(0)
+        convert('prop:cloud_topics_enabled[deprecated=yes]', { catalog: catalog() })
+        expect(deprecationWarnings(warn)).toHaveLength(1)
+        warn.mockRestore()
+      })
+
+      test('with page=, the link renders and the warning does not say it renders without one', () => {
+        const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
+        const html = convert('prop:cloud_topics_enabled[link=true,page=properties/deprecated]', { catalog: fakeCatalog({ json: DEPRECATED_JSON }) })
+        expect(html).toContain('href')
+        expect(deprecationWarnings(warn)).toHaveLength(1)
+        expect(deprecationWarnings(warn)[0][0]).not.toContain('without a link')
+        warn.mockRestore()
+      })
+
+      test('a current property does not warn', () => {
+        const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
+        convert('prop:admin[]', { catalog: fakeCatalog({ json: DEPRECATED_JSON }) })
+        expect(deprecationWarnings(warn)).toHaveLength(0)
+        warn.mockRestore()
+      })
     })
 
     test('supports dotted topic property names', () => {

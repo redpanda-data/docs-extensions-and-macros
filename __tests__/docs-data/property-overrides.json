@@ -502,7 +502,10 @@
       "description": "Validation performed before recovering a topic from object storage. In case of failure, the reason for the failure appears as `ERROR` lines in the Redpanda application log. For each topic, this reports errors for all partitions, but for each partition, only the first error is reported.\n\nThis property accepts the following parameters:\n\n- `no_check`: Skips the checks for topic recovery.\n- `check_manifest_existence`:  Runs an existence check on each `partition_manifest`. Fails if there are connection issues to the object storage.\n- `check_manifest_and_segment_metadata`: Downloads the manifest and runs a consistency check, comparing the metadata with the cloud storage objects. The process fails if metadata references any missing cloud storage objects.\n\nExample: Redpanda validates the topic `kafka/panda-topic-recovery-NOT-OK` and stops due to a fatal error on partition 0:\n\n```bash\nERROR 2024-04-24 21:29:08,166 [shard 1:main] cluster - [fiber11|0|299996ms recovery validation of {kafka/panda-topic-recovery-NOT-OK/0}/24] - manifest metadata check: missing segment, validation not ok\nERROR 2024-04-24 21:29:08,166 [shard 1:main] cluster - topics_frontend.cc:519 - Stopping recovery of {kafka/panda-topic-recovery-NOT-OK} due to validation error\n```\n\nEach failing partition error message has the following format:\n\n```bash\nERROR .... [... recovery validation of {<namespace/topic/partition>}...] - <failure-reason>, validation not ok\n```\n\nAt the end of the process, Redpanda outputs a final ERROR message: \n\n```bash\nERROR ... ... - Stopping recovery of {<namespace/topic>} due to validation error\n```"
     },
     "cloud_storage_scrubbing_interval_jitter_ms": {
-      "description": "Jitter applied to the object storage scrubbing interval."
+      "description": "Jitter applied to the object storage scrubbing interval.",
+      "retirement_pending": {
+        "reason": "The two descriptions say the same thing; the only difference is \"object storage\" versus \"cloud storage\", neither of which is flagged as wrong by the terminology list. Since the source text is now just as good as the override, the override can be retired without touching engineering source."
+      }
     },
     "cloud_storage_segment_max_upload_interval_sec": {
       "description": "Time that a segment can be kept locally without uploading it to the object storage, in seconds."
@@ -520,7 +523,10 @@
       "description": "Maximum number of segments in the spillover manifest that can be offloaded to the object storage. This setting serves as a threshold for triggering data offload based on the number of segments, rather than the total size of the manifest. It is designed for use in testing environments to control the offload behavior more granularly. In production settings, manage offloads based on the manifest size through `cloud_storage_spillover_manifest_size` for more predictable outcomes."
     },
     "cloud_storage_spillover_manifest_size": {
-      "description": "The size of the manifest which can be offloaded to the cloud. If the size of the local manifest stored in Redpanda exceeds `cloud_storage_spillover_manifest_size` by two times the spillover mechanism will split the manifest into two parts and one will be uploaded to object storage."
+      "description": "The size of the manifest which can be offloaded to the cloud. If the size of the local manifest stored in Redpanda exceeds `cloud_storage_spillover_manifest_size` by two times the spillover mechanism will split the manifest into two parts and one will be uploaded to object storage.",
+      "retirement_pending": {
+        "reason": "The two descriptions are identical except that the source text adds a comma after the introductory clause, which is the grammatically correct choice the override is missing. Since the source text is now at least as good as the override, the override can be retired without changing engineering source."
+      }
     },
     "cloud_storage_throughput_limit_percent": {
       "description": "Maximum throughput used by Tiered Storage per broker expressed as a percentage of the disk bandwidth. If the server has several disks, Redpanda uses the one that stores the Tiered Storage cache. Even if Tiered Storage is allowed to use the full bandwidth of the disk (100%), it won't necessarily use it in full. The actual usage depends on your workload and the state of the Tiered Storage cache. This setting is a safeguard that prevents Tiered Storage from using too many system resources: it is not a performance tuning knob."
@@ -1431,6 +1437,13 @@
       "config_scope": "cluster"
     },
     "kafka_api": {
+      "description": "IP address and port of the Kafka API endpoint that handles requests. Supports multiple listeners with different configurations. Each listener's optional `authentication_method` field sets how clients authenticate on that listener: `none` (no authentication), `sasl` (SASL authentication), or `mtls_identity` (the client's principal is derived from its TLS certificate using the `kafka_mtls_principal_mapping_rules` cluster property). A listener that uses `mtls_identity` needs a `kafka_api_tls` entry with the same `name` that enables TLS and sets `require_client_auth: true`. If `authentication_method` is not set, the listener uses `sasl` when `enable_sasl` is `true` and `kafka_enable_authorization` is `null`, and `none` otherwise. Values are case-sensitive, and an unrecognized value is treated as `none`.",
+      "links": {
+        "`kafka_mtls_principal_mapping_rules`": "#kafka_mtls_principal_mapping_rules",
+        "`kafka_api_tls`": "#kafka_api_tls",
+        "`enable_sasl`": "#enable_sasl",
+        "`kafka_enable_authorization`": "#kafka_enable_authorization"
+      },
       "example": [
         ".Basic example",
         "[,yaml]",
@@ -3045,6 +3058,10 @@
         "false",
         "disabled"
       ]
+    },
+    "compaction_ctrl_backlog_size": {
+      "description": "Target amount of data, in bytes, waiting to be compacted on each shard. When the backlog grows past this size, Redpanda gives compaction more CPU time. If not set, Redpanda takes 10% of the free space in the data directory at startup and splits it evenly across shards.",
+      "upstream_ref": "redpanda-data/streaming-enterprise#1402"
     }
   }
 }

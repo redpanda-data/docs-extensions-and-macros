@@ -113,7 +113,7 @@ jobs:
       # this repo. REQUIRED — the reusable workflow has no usable default and
       # holds every PR pending until a full 40-hex SHA is passed. Bump it
       # deliberately; it is the rollback unit for review behaviour.
-      plugin_ref: 6d0553e668aabe1f6bf2c7807aaca320607d492a # docs-team-standards main, includes #2998 + #3031
+      plugin_ref: 5cd6a8ab51fe8f17a6205f7ef769466312ccd233 # docs-team-standards main, includes #3033
 
       # ── PER-REPO ─────────────────────────────────────────────────────
       # Nothing by default. Scope, exemptions and approval are in

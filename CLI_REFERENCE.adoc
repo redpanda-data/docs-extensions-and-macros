@@ -1888,6 +1888,7 @@ display help for command
 * `helm-spec` - Generate AsciiDoc documentation for Helm charts. Requires either --tag or --branch for GitHub URLs.
 * `cloud-regions` - Generate Markdown table of cloud regions and tiers from GitHub YAML file
 * `redpanda-release-notes` - Generate a Self-Managed release-notes section from an rpchangelog release body
+* `k8s-release-notes` - Generate release notes for the Redpanda Operator and Helm charts from a changelog release body
 * `crd-spec` - Generate Asciidoc documentation for Kubernetes CRD references. Requires either --tag or --branch.
 * `bundle-openapi` - Bundle Redpanda OpenAPI fragments for admin and connect APIs. Requires either --tag or --branch.
 * `update-connect-version` - Update the Redpanda Connect version in antora.yml
@@ -2802,6 +2803,87 @@ npx doc-tools generate redpanda-release-notes \
 - Phase 1 needs --body (+ --date); phase 2 needs --section-file. Fetching the
   body from the private streaming-enterprise release, and running the curation
   skill between the two phases, are wired by the docs-repo workflow, not here.
+
+=== generate k8s-release-notes
+
+Builds release notes for the Redpanda Operator and the Helm charts from the operator repository's changelog (the body of each GitHub Release there). The tag picks the project and the target page: `operator/vX.Y.Z`, `charts/redpanda/vX.Y.Z`, or `charts/console/vX.Y.Z`. Any other tag, including a prerelease, is a no-op. Phase 1 (--body --section-only) prints a candidate section: Markdown converted to AsciiDoc, hard-wrapped paragraphs joined, and issue numbers, ticket keys, and links into the redpanda-data GitHub organization removed. Phase 2 (--section-file --source-body) takes the curated section and checks it: its headings, that nothing in it points into private systems, and that every code span and version number in it also appears in the release body. It then adds the anchor, the source hash line, the "Before you upgrade" callout, and a pinned upgrade command, puts the section into the page in version order, and rebuilds the summary table at the top of the page. The chart version must be listed in the public Helm index, so the command works. A page that already holds the version from the same body is left alone; a changed body replaces the section. --changes gives both phases the release's changes.json: its changelog entries as data, with the audience and upgrade effects the engineers declared on each one. Entries declared internal are left out. The upgrade notes the entries declare become "Before you upgrade" exactly as written. When every entry declares its upgrade effects, nothing else is added to that list. The curated section is then checked against the published entries only, and may not have fewer entries of a kind than are declared public. If every entry is internal, phase 1 prints nothing and exits 0. A release without changes.json works as before. Phase 2 also rejects markup that release notes do not need (includes, macros, passthroughs, attribute entries), links and listing lines that the source does not have, and a block that is never closed. --lint checks a whole page for text that points into private systems and exits 1 if it finds any.
+
+*Why use it:*
+
+The operator repository is private, so its changelogs and releases are not readable by customers. The changelog is engineer-authored prose, so the deterministic part (parsing, removing private references, the checks, the command, insertion) is split from the editorial part, which a curation step does between the two phases.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools generate k8s-release-notes [options]
+----
+
+*Options:*
+
+`--tag <tag>`::
+GA release tag, such as operator/v26.2.6 or charts/redpanda/v26.2.6
+
+`--body <file>`::
+Phase 1: release body markdown to build a candidate from (relative to repo root, must stay inside the repository)
+
+`--date <date>`::
+Release date as YYYY-MM-DD. Required in phase 1. In phase 2, the curated section must carry it
+
+`--public-body <file>`::
+Phase 1 with --changes: also write the published entries as Markdown to this file (relative to repo root, must stay inside the repository). Give the curation step this file in place of the release body, which still has the entries declared internal
+
+`--section-only`::
+Phase 1: print the candidate section
+
+`--section-file <file>`::
+Phase 2: the curated section to check and insert (relative to repo root, must stay inside the repository)
+
+`--source-body <file>`::
+Phase 2: the release body the curated section came from (relative to repo root, must stay inside the repository)
+
+`--changes <file>`::
+Both phases: the release's changes.json, its changelog entries as data (relative to repo root, must stay inside the repository). Entries declared internal are left out, and the upgrade notes the entries declare are used as written
+
+`--page <file>`::
+Target page (relative to repo root, must stay inside the repository). Default: the page for the tag's project
+
+`--index-url <url>`::
+Helm repository index to check the chart version against (default: "https://charts.redpanda.com/index.yaml")
+
+`--wait <seconds>`::
+Phase 2: keep retrying this long for the chart version to appear in the Helm index (default: "0")
+
+`--lint`::
+Check --page for text that points into private systems
+
+`--dry-run`::
+Print the updated page to stdout instead of writing it
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Phase 1: build the candidate
+npx doc-tools generate k8s-release-notes \
+  --tag operator/v26.2.6 --date 2026-11-11 --body docs-data/body.md --section-only > candidate.adoc
+
+# Phase 2: check and insert the curated section
+npx doc-tools generate k8s-release-notes \
+  --tag operator/v26.2.6 --section-file curated.adoc --source-body docs-data/body.md --wait 900
+
+# Check a page
+npx doc-tools generate k8s-release-notes --lint --page modules/reference/pages/releases/operator.adoc
+----
+
+*Requirements:*
+
+- Fetching the release body from the private operator repository and running
+  the curation step are wired by the docs-repo workflow, not here.
+- Phase 2 reads https://charts.redpanda.com/index.yaml.
 
 === generate crd-spec
 

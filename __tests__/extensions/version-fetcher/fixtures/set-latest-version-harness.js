@@ -10,7 +10,7 @@
 //
 // Usage: node set-latest-version-harness.js '<scenario JSON>'
 // Prints a JSON result: { versionAttributes, latestAttributes, attributesByVersion,
-// errors, warnings, requires, helmChartLookups, helmChartIndexPassed }
+// errors, warnings, infos, requires, helmChartLookups, helmChartIndexPassed }
 //
 // The component has one version (26.2) unless the scenario lists `versions`,
 // in which case `latestVersion` names the component's latest. Set
@@ -78,8 +78,9 @@ Module._load = function (request, ...rest) {
 
 const errors = [];
 const warnings = [];
+const infos = [];
 const logger = {
-  info: () => {},
+  info: (message) => infos.push(String(message)),
   debug: () => {},
   warn: (message) => warnings.push(String(message)),
   error: (message) => errors.push(String(message)),
@@ -118,6 +119,7 @@ const contentCatalog = { getComponents: async () => [component] };
     attributesByVersion: Object.fromEntries(versionEntries.map((entry) => [String(entry.version), entry.asciidoc.attributes])),
     errors,
     warnings,
+    infos,
     requires,
     helmChartLookups,
     helmChartIndexPassed,
