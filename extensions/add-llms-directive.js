@@ -15,13 +15,14 @@ const { raiseListenerLimit } = require('./util/raise-listener-limit')
  * @see https://agentdocsspec.com/spec/#llms-txt-directive
  */
 
-const { formatLlmsDirective } = require('../extension-utils/llms-utils')
+const { formatLlmsDirective, getLlmsAskPath } = require('../extension-utils/llms-utils')
 
 module.exports.register = function () {
   raiseListenerLimit(this)
   const logger = this.getLogger('add-llms-directive-extension')
 
-  this.on('pagesComposed', ({ contentCatalog }) => {
+  this.on('pagesComposed', ({ playbook, contentCatalog }) => {
+    const askPath = getLlmsAskPath(playbook)
     const pages = contentCatalog.getPages()
     let processedCount = 0
 
@@ -49,7 +50,7 @@ module.exports.register = function () {
         const componentName = page.src?.component || ''
 
         // Generate the directive in markdown blockquote format
-        const directiveMarkdown = formatLlmsDirective(componentName)
+        const directiveMarkdown = formatLlmsDirective(componentName, askPath)
 
         // Convert markdown blockquote to HTML blockquote
         // Remove leading '> ' from each line and convert markdown links to HTML
@@ -70,7 +71,7 @@ module.exports.register = function () {
         directiveText = directiveText.replace(/`([^`]+)`/g, '<code>$1</code>')
 
         // Add tabindex="-1" and aria-hidden="true" to blockquote to fully hide from assistive tech
-        const directiveHtml = `\n<blockquote class="llms-directive" tabindex="-1" aria-hidden="true">\n<p>${directiveText}</p>\n</blockquote>\n`
+        const directiveHtml = `\n<blockquote class="llms-directive" tabindex="-1" aria-hidden="true" data-nosnippet>\n<p>${directiveText}</p>\n</blockquote>\n`
 
         // Inject the directive immediately after the <body> tag
         let newHtml = html.replace(bodyTag, bodyTag + directiveHtml)

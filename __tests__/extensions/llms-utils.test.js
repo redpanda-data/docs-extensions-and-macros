@@ -101,6 +101,14 @@ describe('buildPageIndexes', () => {
     page('connect', 'master', '/connect/guides/bloblang/', 'Bloblang'),
   ]
 
+  it('names the ask endpoint in section indexes only when configured', () => {
+    const withAsk = buildPageIndexes({ pages, components, siteUrl, toMarkdownUrl, askPath: '/mcp/ask' })
+    const without = buildPageIndexes({ pages, components, siteUrl, toMarkdownUrl })
+    expect(withAsk.length).toBeGreaterThan(0)
+    withAsk.forEach((index) => expect(index.contents).toContain('https://docs.example.com/mcp/ask?q=how+do+I+create+a+topic'))
+    without.forEach((index) => expect(index.contents).not.toContain('/mcp/ask'))
+  })
+
   it('derives the version root from the module and relative path, even when every page shares a deeper directory', () => {
     const only = [page('streaming', '26.1', '/streaming/26.1/manage/tiered-storage/', 'Tiered Storage')]
     const [index] = buildPageIndexes({ pages: only, components, siteUrl, toMarkdownUrl })
@@ -268,4 +276,35 @@ describe('unlinkSelfReferences', () => {
     const text = '[full](https://docs.example.com/llms-full.txt) [index](https://docs.example.com/streaming/current/llms.txt)'
     expect(unlinkSelfReferences(text, siteUrl)).toBe(text)
   })
+})
+
+describe('llms ask endpoint', () => {
+  const { formatLlmsDirective, getLlmsAskPath, stripMarkdownMetadata, buildPageIndexes } = require('../../extension-utils/llms-utils')
+
+  it('reads a root-relative path from site.keys.llms-ask-path', () => {
+    expect(getLlmsAskPath({ site: { keys: { 'llms-ask-path': '/mcp/ask/' } } })).toBe('/mcp/ask')
+    expect(getLlmsAskPath({ site: { keys: { 'llms-ask-path': 'https://x.test/ask' } } })).toBe('')
+    expect(getLlmsAskPath({ site: { keys: { 'llms-ask-path': '/ask?q=1' } } })).toBe('')
+    expect(getLlmsAskPath({ site: {} })).toBe('')
+    expect(getLlmsAskPath(undefined)).toBe('')
+  })
+
+  it('leaves the directive unchanged without an ask path', () => {
+    expect(formatLlmsDirective('streaming', '')).toBe(formatLlmsDirective('streaming'))
+    expect(formatLlmsDirective('streaming')).not.toContain('/mcp/ask')
+  })
+
+  it('adds the ask endpoint to the directive on one line', () => {
+    const directive = formatLlmsDirective('streaming', '/mcp/ask')
+    expect(directive).toContain('[/mcp/ask?q=how+do+I+create+a+topic](/mcp/ask?q=how+do+I+create+a+topic)')
+    expect(directive).not.toContain('\n')
+    expect(formatLlmsDirective('', '/mcp/ask')).toContain('/mcp/ask?q=')
+  })
+
+  it('still strips the directive when it carries the ask endpoint', () => {
+    expect(stripMarkdownMetadata(`${formatLlmsDirective('streaming', '/mcp/ask')}\n\nBody`)).toBe('Body')
+    const absolute = formatLlmsDirective('streaming', '/mcp/ask').replace(/\]\(\//g, '](https://docs.example.com/')
+    expect(stripMarkdownMetadata(`${absolute}\n\nBody`)).toBe('Body')
+  })
+
 })

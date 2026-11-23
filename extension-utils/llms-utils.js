@@ -14,16 +14,43 @@ const { decode } = require('html-entities');
 const LLMS_DIRECTIVE_BASE = 'For the complete documentation index, see [llms.txt](/llms.txt)';
 
 /**
+ * Example query used wherever the ask endpoint is advertised.
+ */
+const LLMS_ASK_EXAMPLE_QUERY = 'q=how+do+I+create+a+topic';
+
+/**
+ * Read the optional ask endpoint path from the playbook (`site.keys.llms-ask-path`).
+ * When set, the llms directive and the per-section llms.txt indexes tell agents
+ * they can send a question to this path with a GET request. Returns '' when the
+ * key is unset or isn't a root-relative path.
+ *
+ * @param {object} playbook - Antora playbook
+ * @returns {string} Root-relative path such as '/mcp/ask', or ''
+ */
+function getLlmsAskPath(playbook) {
+  const value = playbook && playbook.site && playbook.site.keys && playbook.site.keys['llms-ask-path'];
+  if (typeof value !== 'string') return '';
+  const path = value.trim().replace(/\/+$/, '');
+  return /^\/[^\s?#]*$/.test(path) ? path : '';
+}
+
+/**
  * Format the llms directive blockquote for a page.
+ * The directive stays on one line so LLMS_DIRECTIVE_REGEX can strip it from exports.
  * @param {string} componentName - Optional component name for component-specific link
+ * @param {string} [askPath] - Optional ask endpoint path (see getLlmsAskPath)
  * @returns {string} Formatted markdown blockquote directive
  */
-function formatLlmsDirective(componentName) {
-
+function formatLlmsDirective(componentName, askPath) {
+  let directive = `> ${LLMS_DIRECTIVE_BASE}`;
   if (componentName) {
-    return `> ${LLMS_DIRECTIVE_BASE}. Component-specific: [${componentName}-full.txt](/${componentName}-full.txt)`;
+    directive += `. Component-specific: [${componentName}-full.txt](/${componentName}-full.txt)`;
   }
-  return `> ${LLMS_DIRECTIVE_BASE}`;
+  if (askPath) {
+    const askUrl = `${askPath}?${LLMS_ASK_EXAMPLE_QUERY}`;
+    directive += `. To ask these docs a question, send a GET request with the question in \`q\`: [${askUrl}](${askUrl})`;
+  }
+  return directive;
 }
 
 /**
@@ -312,7 +339,7 @@ function chunkEntries(entries, overhead, maxChars) {
  * @returns {Array<{path: string, url: string, title: string, component: string,
  *   version: string, isLatest: boolean, pageCount: number, contents: string}>}
  */
-function buildPageIndexes({ pages, components, siteUrl, toMarkdownUrl, maxChars = MAX_INDEX_CHARS }) {
+function buildPageIndexes({ pages, components, siteUrl, toMarkdownUrl, askPath = '', maxChars = MAX_INDEX_CHARS }) {
   const componentsByName = new Map((components || []).map((c) => [c.name, c]));
   const groups = new Map();
 
@@ -362,6 +389,9 @@ function buildPageIndexes({ pages, components, siteUrl, toMarkdownUrl, maxChars 
         lines.push(`This is version ${displayVersion}. The latest version is ${latest.displayVersion || latest.version}.`);
       }
       lines.push(`For the full documentation index, see ${siteUrl}/llms.txt`);
+      if (askPath) {
+        lines.push(`To ask these docs a question, send a GET request with the question in \`q\`: ${siteUrl}${askPath}?${LLMS_ASK_EXAMPLE_QUERY}`);
+      }
       return lines;
     };
 
@@ -481,6 +511,7 @@ module.exports = {
   FRONTMATTER_REGEX,
   MAX_INDEX_CHARS,
   formatLlmsDirective,
+  getLlmsAskPath,
   linkDestination,
   stripMarkdownMetadata,
   transformOutsideFences,

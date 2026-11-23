@@ -3,7 +3,7 @@ const os = require('os')
 const { decode } = require('html-entities')
 const yaml = require('js-yaml')
 const { toMarkdownUrl } = require('../extension-utils/url-utils')
-const { formatLlmsDirective, transformOutsideFences } = require('../extension-utils/llms-utils')
+const { formatLlmsDirective, getLlmsAskPath, transformOutsideFences } = require('../extension-utils/llms-utils')
 const TurndownService = require('turndown')
 const turndownPluginGfm = require('turndown-plugin-gfm')
 const { gfm } = turndownPluginGfm
@@ -1259,7 +1259,7 @@ const noopLogger = { info () {}, warn () {}, debug () {}, error () {} }
  * @param {Object} [options.logger] - Antora logger.
  * @returns {string} Markdown, or an empty string when the page has no article.
  */
-function convertPageHtml ({ html, page, siteUrl = '', logger = noopLogger }) {
+function convertPageHtml ({ html, page, siteUrl = '', askPath = '', logger = noopLogger }) {
   const trimmed = (html || '').toString().trim()
   if (!trimmed) return ''
 
@@ -1306,7 +1306,7 @@ function convertPageHtml ({ html, page, siteUrl = '', logger = noopLogger }) {
       restOfMarkdown = markdown.substring(h1Match[0].length).trimStart()
     }
 
-    const llmsDirective = formatLlmsDirective(canonicalUrl ? page.src?.component || '' : undefined)
+    const llmsDirective = formatLlmsDirective(canonicalUrl ? page.src?.component || '' : undefined, canonicalUrl ? askPath : '')
     const sourceComment = canonicalUrl ? `<!-- Source: ${canonicalUrl} -->\n\n` : ''
     markdown = `${frontmatter}${h1Heading}\n${llmsDirective}\n\n${sourceComment}${restOfMarkdown}`
   }
@@ -1405,6 +1405,7 @@ module.exports.register = function () {
   // Conversion pipeline
   this.on('pagesComposed', async ({ playbook, contentCatalog }) => {
     const siteUrl = playbook.site?.url || ''
+    const askPath = getLlmsAskPath(playbook)
     const pages = contentCatalog.getPages()
     logger.info(`Converting ${pages.length} pages to Markdown${siteUrl ? ` (site.url=${siteUrl})` : ''}...`)
 
@@ -1418,7 +1419,7 @@ module.exports.register = function () {
         if (!page?.contents) continue
 
         try {
-          const markdown = convertPageHtml({ html: page.contents.toString(), page, siteUrl, logger })
+          const markdown = convertPageHtml({ html: page.contents.toString(), page, siteUrl, askPath, logger })
           if (markdown) {
             page.markdownContents = Buffer.from(markdown, 'utf8')
             convertedCount++

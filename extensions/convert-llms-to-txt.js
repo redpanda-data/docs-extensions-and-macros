@@ -7,6 +7,7 @@ const {
   stripMarkdownMetadata,
   componentsWithExports,
   buildPageIndexes,
+  getLlmsAskPath,
   renderPageIndexSection,
   unlinkSelfReferences,
 } = require('../extension-utils/llms-utils');
@@ -34,6 +35,7 @@ module.exports.register = function () {
   raiseListenerLimit(this)
   const logger = this.getLogger('convert-llms-to-txt-extension');
   let siteUrl = '';
+  let askPath = '';
 
   // Add site-url attribute to home component
   this.on('playbookBuilt', ({ playbook }) => {
@@ -47,6 +49,7 @@ module.exports.register = function () {
     }
     // Normalize: strip trailing slashes to avoid double slashes in URL concatenation
     siteUrl = siteUrl.replace(/\/+$/, '');
+    askPath = getLlmsAskPath(playbook);
   });
 
   this.on('contentClassified', ({ contentCatalog }) => {
@@ -306,6 +309,7 @@ module.exports.register = function () {
       components,
       siteUrl,
       toMarkdownUrl,
+      askPath,
     });
     pageIndexes.forEach((index) => {
       siteCatalog.addFile({
