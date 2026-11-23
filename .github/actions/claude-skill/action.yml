@@ -154,6 +154,16 @@ inputs:
       claude_failed=true and the aggregate sees no verdict at all.
     required: false
     default: '20'
+  trace:
+    description: >
+      "true" also saves every tool call of the run and the reply it got to
+      <output_dir>/claude-trace.jsonl, for finding out why a call was
+      refused. The summary in claude-run.json names a refused call but not
+      the reason. The trace holds what the run read and wrote, which can be
+      private: upload it as an artifact of a private repository only, and
+      never print it to the job log.
+    required: false
+    default: 'false'
 
 outputs:
   claude_failed:
@@ -861,6 +871,7 @@ runs:
         PROMPT: ${{ inputs.prompt }}
         OUTPUT_DIR: ${{ inputs.output_dir }}
         TIMEOUT_MIN: ${{ inputs.timeout_minutes }}
+        TRACE: ${{ inputs.trace }}
       run: |
         set -u
         export PATH="$GH_READONLY_SHIM:$PATH"
@@ -933,7 +944,8 @@ runs:
         # CLI's own claude-run.json stays: it is the debugging record of a
         # failed attempt, the aggregate never renders it, and each attempt
         # overwrites it.
-        clear_output() { find "$OUTPUT_DIR" -mindepth 1 ! -name claude-run.json -delete 2>/dev/null || true; }
+        # The trace of a traced run stays for the same reason.
+        clear_output() { find "$OUTPUT_DIR" -mindepth 1 ! -name claude-run.json ! -name claude-trace.jsonl -delete 2>/dev/null || true; }
         soft_fail() {
           clear_output
           echo "claude_failed=true" >> "$GITHUB_OUTPUT"
@@ -954,6 +966,20 @@ runs:
           clear_output
           local budget; budget=$(remaining)
           (( budget > 0 )) || return 124
+          if [[ "${TRACE:-false}" == "true" ]]; then
+            # Every event of the run, one JSON object per line. The last
+            # result event is the same object --output-format json prints,
+            # so claude-run.json keeps its shape for everything that reads it.
+            local rc=0
+            timeout "${budget}s" claude -p "$PROMPT" \
+              --plugin-dir "$PWD/.docs-team-standards-plugin" \
+              --output-format stream-json --verbose \
+              --allowedTools "$ALLOWED" \
+              --max-turns 100 > "$OUTPUT_DIR/claude-trace.jsonl" || rc=$?
+            jq -c 'select(.type == "result")' "$OUTPUT_DIR/claude-trace.jsonl" 2>/dev/null \
+              | tail -n 1 > "$OUTPUT_DIR/claude-run.json" || true
+            return "$rc"
+          fi
           timeout "${budget}s" claude -p "$PROMPT" \
             --plugin-dir "$PWD/.docs-team-standards-plugin" \
             --output-format json \
