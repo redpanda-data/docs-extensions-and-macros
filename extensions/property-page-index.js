@@ -20,6 +20,8 @@
  */
 
 const { buildPageIndex, loadPropertiesFor } = require('../macros/prop')
+const { loadMetricsFor } = require('../extension-utils/metric-values')
+const { buildMetricPageIndex } = require('../extension-utils/metric-links')
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
 
 module.exports.register = function () {
@@ -30,6 +32,9 @@ module.exports.register = function () {
     let indexed = 0
     for (const component of contentCatalog.getComponents()) {
       for (const componentVersion of component.versions) {
+        // The metric: macro's index of metric headings, for the same reason.
+        const metrics = loadMetricsFor(contentCatalog, component.name, componentVersion.version)
+        if (metrics) buildMetricPageIndex(contentCatalog, component.name, metrics.metrics, componentVersion.version)
         const registry = loadPropertiesFor(contentCatalog, component.name, componentVersion.version)
         if (!registry) continue
         const index = buildPageIndex(contentCatalog, component.name, registry.properties, componentVersion.version)

@@ -1,0 +1,4 @@
+= Public Metrics
+:description: Cloud stub for the public metrics reference page.
+
+include::streaming:reference:public-metrics-reference.adoc[tag=single-source]

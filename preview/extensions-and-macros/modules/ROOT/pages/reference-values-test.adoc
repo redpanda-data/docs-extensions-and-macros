@@ -262,3 +262,55 @@ reports the same calls, and `--write` rewrites the ones it can.
 ** You should see `regexp_topics` linked to the `kafka_franz` page with no anchor, and a warning that the field is deprecated and the data names no single replacement.
 * blobl:[meta()]
 ** You should see `meta()` linked to `#meta` on the functions page, and a warning that it is deprecated with no replacement in the data.
+
+[[metric-names-and-values]]
+== Metric names and values
+
+`metric:` and `metricval:` read this component's `redpanda-metrics-v26.2.7.json`
+fixture: a few real entries from a v26.2.7 dataset, with the fields the
+overrides file will supply added by hand to some of them, and two made-up
+entries (`redpanda_example_deprecated_total`, and
+`redpanda_example_removed_total` in the `removed` map).
+
+* metric:redpanda_cluster_brokers[]
+** You should see `redpanda_cluster_brokers` as code with no link.
+* metric:redpanda_cluster_brokers[link=true]
+** You should see the same name linked to `#redpanda_cluster_brokers` on the
+   xref:reference:public-metrics-reference.adoc[stand-in metrics page].
+* metric:redpanda_kafka_request_latency_seconds_bucket[link=true]
+** You should see the series name as written, linked to
+   `#redpanda_kafka_request_latency_seconds`, the family's entry.
+* metric:redpanda_kafka_consumer_group_lag_sum[link=true]
+** You should see the name linked to its own entry: it is a gauge whose name
+   ends in `_sum`, not a histogram series.
+* metric:redpanda_cluster_brokers[link=true,text=broker count]
+** You should see "broker count" in code, linked to the same entry.
+* Must read histogram: metricval:redpanda_kafka_request_latency_seconds[type]
+* Must read seconds: metricval:redpanda_kafka_request_latency_seconds[unit]
+* Must read `redpanda_request`: metricval:redpanda_kafka_request_latency_seconds[labels]
+* Must read `consume`, `produce`: metricval:redpanda_kafka_request_latency_seconds[values,label=redpanda_request]
+* Must read `/public_metrics`: metricval:redpanda_cluster_brokers[endpoint]
+* Must read public: metricval:redpanda_cluster_brokers[endpoint,format=raw]
+* Must read Self-Managed, Dedicated, BYOC: metricval:redpanda_cluster_brokers[availability]
+
+The block form below must render two paragraphs:
+
+metricval::redpanda_kafka_request_latency_seconds[usage]
+
+== Metric placeholders
+
+* metric:redpanda_cluster_broker[]
+** You should see plain code, and an `unknown-metric` warning that suggests
+   `redpanda_cluster_brokers`.
+* metric:redpanda_example_removed_total[]
+** You should see plain code, and a warning that it was removed in v26.2.
+* metric:redpanda_example_deprecated_total[link=true]
+** You should see the name linked, and a warning that it is deprecated.
+* metric:redpanda_example_deprecated_total[deprecated=ok]
+** You should see the name as code, and no warning.
+* metric:redpanda_kafka_request_bytes_total[link=true]
+** You should see the name as code with no link, and a warning that no
+   reference page has a heading for it.
+* Must read "<unknown category>", because the generator writes no category: metricval:redpanda_kafka_request_bytes_total[category]
+* Must read "<unknown values>", because values seen in a scrape are not a complete list: metricval:redpanda_kafka_request_bytes_total[values,label=redpanda_request]
+* Must read "<unknown colour>", with a warning that lists the fields: metricval:redpanda_cluster_brokers[colour]
