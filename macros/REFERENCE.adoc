@@ -237,7 +237,7 @@ Registered together with the `enterprise` inline macro.
 
 This inline macro references a Redpanda configuration property in prose. The property renders as a marked `<code>` element (`property-ref` class plus a `data-property-name` attribute) that the docs UI decorates with a hover-documentation tooltip. Marking is opt-in: only properties referenced through this macro get tooltips, so ambiguous words such as `admin` or `rack` in unrelated contexts (Helm values, feature settings) are never decorated by mistake.
 
-The macro checks that a property is actually available to the audience reading the page, and links it only where a page documents it. It validates against the published property data: a `redpanda-properties-<tag>.json` attachment in the `reference` module, the same data the tooltips fetch at runtime. See <<prop-availability>> for which properties each doc set may reference and <<prop-version-selection>> for which file a given page uses. To migrate existing plain-backtick property mentions, use `doc-tools generate migrate-property-refs`. To render a property's value (its default, minimum, unit, and so on) rather than its name, use <<propval>>. For `rpk` flag and Connect field values, see <<rpkval>> and <<connectval>>; for a linked `rpk` command, see <<rpkcmd>>.
+The macro checks that a property is actually available to the audience reading the page, and links it only where a page documents it. It validates against the published property data: a `redpanda-properties-<tag>.json` attachment in the `reference` module, the same data the tooltips fetch at runtime. See <<prop-availability>> for which properties each doc set may reference and <<prop-version-selection>> for which file a given page uses. To migrate existing plain-backtick property mentions, use `doc-tools generate migrate-property-refs`. To render a property's value (its default, minimum, unit, and so on) rather than its name, use <<propval>>. For `rpk` flag and Connect field values, see <<rpkval>> and <<connectval>>; for a linked `rpk` command, see <<rpkcmd>>. For metric names and values, see <<metric>> and <<metricval>>.
 
 === Usage
 
@@ -362,7 +362,7 @@ The exact default is `propval:log_segment_ms[default,format=raw]`.
 
 Rendered against `redpanda-properties-v26.2.4.json`, those lines read: "defaults to 2 weeks", "The minimum is 1 minute", "requires a restart: yes", and "The exact default is `1209600000`".
 
-`propval:` is registered by the `prop` macro's extension, so a playbook that registers `macros/prop` has both, along with <<rpkval>>, <<connectval>> and <<rpkcmd>>. It shares every data decision with `prop:` rather than copying them: the same dataset for the page's version (<<prop-version-selection>>), the same `property-validate` modes, the same Cloud availability gate (<<prop-availability>>), and the same refusal to use a neighbouring release's data when a version has none.
+`propval:` is registered by the `prop` macro's extension, so a playbook that registers `macros/prop` has both, along with <<rpkval>>, <<connectval>>, <<rpkcmd>>, <<metric>> and <<metricval>>. It shares every data decision with `prop:` rather than copying them: the same dataset for the page's version (<<prop-version-selection>>), the same `property-validate` modes, the same Cloud availability gate (<<prop-availability>>), and the same refusal to use a neighbouring release's data when a version has none.
 
 === Usage
 
@@ -731,7 +731,7 @@ A flag is scraped when its command is under one of those plugins, the snapshot's
 
 === Registration
 
-Registered by the `prop` macro's extension, so a playbook that registers `macros/prop` has `prop:`, `propval:`, `rpkval:`, `connectval:` and `rpkcmd:`:
+Registered by the `prop` macro's extension, so a playbook that registers `macros/prop` has `prop:`, `propval:`, `rpkval:`, `connectval:`, `rpkcmd:`, `connect:`, `blobl:`, `bloblval:`, `metric:` and `metricval:`:
 
 [,yaml]
 ----
@@ -1180,17 +1180,278 @@ connect-validate::
 
 Registered by the `prop` macro's extension (see <<rpkval>>).
 
+[[metric]]
+== metric
+
+This inline macro names a Redpanda metric in prose. The metric renders as a marked `<code>` element (`metric-ref` class plus a `data-metric-name` attribute) that the docs UI can decorate with a tooltip, and with `link=true` it links to the metric's entry on the reference page. The name is checked against the published metrics data, so a typo or a metric that a release removed is caught at build time.
+
+[,asciidoc]
+----
+Watch metric:redpanda_cluster_brokers[].
+See metric:redpanda_kafka_request_latency_seconds[link=true].
+The metric:redpanda_kafka_request_latency_seconds_bucket[link=true] series holds the buckets.
+Alert on the metric:redpanda_cluster_brokers[text=broker count].
+----
+
+To render a metric's value (its type, unit, labels, and so on) instead of its name, use <<metricval>>.
+
+=== Usage
+
+[,asciidoc]
+----
+metric:<name>[link=true,text=<display text>,page=<page>,deprecated=ok]
+----
+
+The target is the metric name as the endpoint prints it. A name resolves in this order:
+
+. The exact name of a metric family in the data.
+. A histogram series name: a name that ends in `_bucket`, `_count` or `_sum`, when the name without the suffix is a family that has a histogram in the data. The name renders as written, and reads and links its family.
+. A name in the data's `removed` map: a `removed-metric` warning that names the release it was removed in.
+. Anything else: an `unknown-metric` warning with close matches.
+
+The suffix alone never decides. `redpanda_kafka_consumer_group_lag_sum` is a gauge family of its own, so it matches exactly, and `redpanda_cluster_brokers_count` is unknown because `redpanda_cluster_brokers` is not a histogram.
+
+link::
+Set to `true` to link the metric to its entry on the reference page (<<metric-page>>). Without it, or with `link=false`, the metric renders as code with tooltip data and no link. Any other value, such as `link=True`, `link=yes` or a bare `link`, renders no link and warns.
+
+text::
+Optional display text, instead of the name.
+
+page::
+Optional reference page, without `.adoc`, instead of the one the build finds. It takes the same forms as `prop:` (<<prop>>): a bare name (`public-metrics-reference`) is in the `reference` module of the current component, and `module:page` or `component:module:page` points elsewhere. The build does not verify it.
+
+deprecated::
+Set to `ok` on a page that names a deprecated metric on purpose. See <<metric-failures>>.
+
+The output is `<code class="metric-ref">` with `data-metric-name` (the family), `data-metric-series` (the suffix, for a series name) and `data-doc-url` (the published URL of the entry, when the build found the page and the call does not set `page=`). With a link, the link wraps the code element. Don't wrap the macro in backticks: it already renders code.
+
+=== Which metrics data a page reads
+
+The data is a `redpanda-metrics-<tag>.json` attachment in a `reference` module, such as `redpanda-metrics-v26.2.7.json`, written by `doc-tools generate metrics-docs`. The macros read a file whose `schema_version` is `1`. A file with another version, or none, is ignored with a warning that names the file and the version, as a file that is not valid is. Selection follows `prop:` exactly (<<prop-version-selection>>):
+
+[cols="1,2,2"]
+|===
+| Page | Dataset | When there is none
+
+| `streaming` at a release series (26.2)
+| Its own `redpanda-metrics-v26.2.x.json`: the page's version first, then the newest in the 26.2 series
+| Plain code and the series warning. It never borrows another release's data
+
+| cloud-docs (`env-cloud`)
+| The newest GA `streaming` file, then `ROOT`. Release candidates are ignored
+| Plain code, and a prerelease-only or no-data warning
+
+| Any other component
+| None, never inferred
+| Plain code and the no-data warning
+|===
+
+[[metric-page]]
+=== Which page it links
+
+`link=true` links the page in the `reference` module of the page's own component and version that has a heading for the metric, such as `=== redpanda_cluster_brokers`. The anchor is the family name, which is the ID Asciidoctor gives that heading when `idprefix` is empty, as the docs set it.
+
+The page is found with the index `prop:` uses for property headings. It reads the headings of each reference page, and of each page or partial the page includes, with the include's `tag=` or `tags=` filter applied. So a Cloud page that includes the self-managed page by tag is the Cloud page for every metric in that tag. A heading inside an `ifdef` or `ifndef` block counts only when the block renders for the indexed page, with the attributes of its component version and the attributes the page sets itself. So a metric that the self-managed page wraps in `ifndef::env-cloud[]` has no Cloud page.
+
+Nothing is linked across components. When no page in the component has the heading, `link=true` logs a `no-page` warning, and the metric keeps its tooltip data and renders without a link.
+
+The `property-page-index` Antora extension builds this index before conversion starts, as it does for `prop:`.
+
+=== Cloud
+
+On a page whose component version sets `env-cloud`, these metrics render as plain code with a warning, with no link and no tooltip data:
+
+* An internal metric (`endpoint` is `internal`), because Redpanda Cloud does not expose the `/metrics` endpoint.
+* A metric whose `availability` in the data is `false` for `dedicated`, `byoc` and `serverless`.
+* On a page that also sets `env-serverless`, a metric whose `availability.serverless` is `false`.
+* A metric with no reference page in the Cloud component (`cloud-no-page`), unless the call sets `page=`. A Cloud page never links the self-managed docs.
+
+The warning names the fix for its cause:
+
+* An internal metric, or one that is not on Cloud: put the sentence in an `ifndef::env-cloud[]` block.
+* A metric that is not on Serverless: put the sentence in an `ifndef::env-serverless[]` block, so that Dedicated and BYOC readers still see it.
+* `cloud-no-page`: when Cloud has the metric, add its heading to the Cloud reference page, or set `page=`. When it does not, put the sentence in an `ifndef::env-cloud[]` block.
+
+[[metric-failures]]
+=== Failures and validation modes
+
+Whenever the name can't be verified, `metric:` renders it as plain code (`<code>`), with no link and no `metric-ref` class, and logs why, naming the macro call, the dataset and the file.
+
+metric-validate::
+`warn` (default) logs each problem. `error` fails the build on `unknown-metric` and `removed-metric`. `off` silences every `metric:` warning, because plain code still reads correctly.
+
+These never fail the build: no metrics data for the page (`no-data`), `no-page`, and a metric that is not for a Cloud page's readers.
+
+A metric whose `deprecated` field is set in the data warns on every mention, and still renders and links. Add `deprecated=ok` on a page that names it on purpose, such as release notes. Only the exact value `ok` counts. The warning never fails the build.
+
+=== Markdown output
+
+In the Markdown export of a page, `metric:` is the name in backticks, and with a link it is a link around the backticked name.
+
+=== Registration
+
+Registered by the `prop` macro's extension (see <<rpkval>>).
+
+[[metricval]]
+== metricval
+
+This inline macro renders one value of a metric from the published metrics data, so a sentence such as "a histogram in seconds" comes from the same data as the name check instead of being typed by hand.
+
+[,asciidoc]
+----
+metric:redpanda_kafka_request_latency_seconds[] is a metricval:redpanda_kafka_request_latency_seconds[type] in metricval:redpanda_kafka_request_latency_seconds[unit].
+Its labels are metricval:redpanda_kafka_request_latency_seconds[labels].
+Scrape it from metricval:redpanda_cluster_brokers[endpoint].
+----
+
+Rendered against `redpanda-metrics-v26.2.7.json`, those lines read: "is a histogram in seconds", "Its labels are `redpanda_request`", and "Scrape it from `/public_metrics`".
+
+=== Usage
+
+[,asciidoc]
+----
+metricval:<name>[<field>,label=<label name>,format=human|raw,deprecated=ok]
+----
+
+The target is the metric name, resolved as `metric:` resolves it (<<metric>>): a histogram series name reads its family. The first positional attribute (or `field=`) names the field. There is no default field. Every value macro shares one set of field names (<<value-fields>>).
+
+[[metricval-fields]]
+[cols="1,2,2"]
+|===
+| Field | Source in the metrics data | Example (v26.2.7)
+
+| `description` (alias `desc`)
+| `description`, rendered as AsciiDoc (<<value-text>>). On a Cloud page the text in `description_cloud_only` follows it, and on any other page the text in `description_self_managed_only`. That text continues the last paragraph
+| `redpanda_cluster_brokers`: "Number of configured brokers in the cluster"
+
+| `type`
+| `type`
+| `gauge`, `counter`, `histogram`
+
+| `unit` (alias `units`)
+| `unit`. Missing when the name states no unit, which is most metrics
+| `redpanda_kafka_request_latency_seconds`: `seconds`
+
+| `labels`
+| The `name` of each entry of `labels`, each as code, comma-separated. `none` for a metric with no labels (`format=raw` gives `[]`). Missing for a metric with no labels that the scrape did not see (`observed` is `false`), because its labels are not known
+| `redpanda_kafka_request_latency_seconds`: `redpanda_request`
+
+| `values` (aliases `options`, `enum`, `accepted-values`, `annotated_options`)
+| The `values` of the label that `label=` names: the complete list. It never renders `observed_values`, which is what one scrape saw
+| With `label=redpanda_request`: `consume`, `produce`, when the data has the complete list
+
+| `endpoint`
+| `endpoint`, as the path, in code. `format=raw` gives `public` or `internal`
+| `/public_metrics`, `/metrics`
+
+| `buckets`
+| `histogram.buckets`, comma-separated. Missing for a metric that is not a histogram
+| `0.000255, 0.000511, ..., +Inf`
+
+| `category` (alias `categories`)
+| `category`
+|
+
+| `use-cases` (alias `use_cases`)
+| `use_cases`, comma-separated
+|
+
+| `usage`
+| `usage`, rendered as AsciiDoc
+|
+
+| `requires`
+| `requires`: what a cluster needs before it exports the metric. Text is rendered as AsciiDoc. In a list, each `{property, value}` renders as "prop:<property>[link=true] is `<value>`", so the property links to its reference entry and each `{condition}` as its sentence. A list with a condition reads as sentences. A metric with no `requires` renders the placeholder: the data does not say that it needs nothing
+|
+
+| `introduced` (aliases `since`, `version`)
+| `introduced`
+|
+
+| `deprecated` (alias `is_deprecated`)
+| `deprecated`: `yes` when it is set to a release, a note or `true`, `no` when it is `null` or `false`. `format=raw` gives the stored value, and `false` for `null`
+|
+
+| `removed`
+| `removed`. For a name in the data's `removed` map, the release it was removed in
+|
+
+| `status`
+| `status` when the data has it. Otherwise, when the data has `deprecated`: `deprecated` or `stable`
+|
+
+| `see-also` (aliases `see_also`, `seeAlso`)
+| `related_properties`, each as a `prop:` link to its reference entry, then `related_topics`, as the property reference reads them. Rendered as AsciiDoc
+|
+
+| `cloud-access` (aliases `availability`, `cloud`)
+| `availability`: the deployments it is `true` for, from Self-Managed, Dedicated, BYOC and Serverless, or `not available`
+|
+|===
+
+The generator writes the metric name, `endpoint`, `type`, `unit`, `description`, `labels` and `buckets`. Every other field, and the complete `values` of a label, comes from the metrics overrides file, `docs-data/metric-overrides.json`. Until that file exists and the data has the field for a metric, the field is a `missing-field`: the macro renders the placeholder and warns, and the warning says where the field comes from. `introduced`, `deprecated`, `removed` and `status` are release history, not curated text, so do not type them into the overrides file.
+
+label::
+The label whose values the `values` field renders. Required for `values`.
+
+format::
+`human` (default) or `raw`. `raw` gives `labels`, `values`, `buckets` and `use-cases` as a JSON array, `endpoint` as `public` or `internal`, `deprecated` as the stored value, and `cloud-access` and a list `requires` as stored JSON (a text `requires` renders as text). Any other value warns and renders the human form.
+
+deprecated::
+Set to `ok` to silence the warning for a deprecated metric, as in `metric:`.
+
+The output is a `<span class="metric-value">` with `data-metric` (the family) and `data-field` (the canonical field). The macro works inside backticks.
+
+Text longer than one paragraph has no inline form. Write the block form on a line of its own:
+
+[,asciidoc]
+----
+metricval::redpanda_cluster_brokers[description]
+metricval::redpanda_kafka_request_latency_seconds[usage]
+----
+
+It renders an open block with the roles `metric-value` and `metric-value-<field>`, with the text parsed as AsciiDoc. Any other value renders as a paragraph of its own.
+
+=== Which metrics data a page reads
+
+The same data as `metric:`, selected the same way (<<metric>>). A page reads its own release series, Cloud reads the newest GA file, and no page reads another release's data.
+
+=== Cloud
+
+A metric that `metric:` renders as plain code on a Cloud page (<<metric>>) has no value there either: an internal metric, one whose `availability` says it is not on Cloud or not on Serverless, and one with no reference page in the Cloud component. `metricval:` renders the placeholder and warns, with the same fix for each cause as `metric:` names. `metricval:` has no `page=` attribute, so for a metric with no Cloud reference page the fix is to add its heading to that page. On a Cloud page, `see-also` leaves out the topics marked for self-managed only.
+
+=== Failures and validation modes
+
+Whenever no verified value exists, `metricval:` renders `<unknown FIELD>` (class `metric-value metric-value-unknown`), the placeholder `propval:` uses, and logs why, naming the macro call, the field, the dataset and the file. It never renders a guessed value.
+
+metric-validate::
+The same attribute as `metric:`. `warn` (default) logs each problem. `error` fails the build on `unknown-metric`, `unsupported-field` (a field `metricval:` does not have, or no field), `removed-metric`, `label-required` (`values` with no `label=`, or on a metric with no labels), `needs-block` (text longer than one paragraph in the inline form) and `block-form-inline` (`metricval::` inside a sentence). `off` silences warnings for values that render. A placeholder is still reported, because a value has no safe fallback.
+
+These render a placeholder and warn, and never fail the build: `no-data`, `missing-field`, `unknown-label` (the metric has no label by that name in the data), and a metric that is not for a Cloud page's readers.
+
+`needs-block` depends on the data as well as the page: when a text value in the data grows to a second paragraph, every inline call that reads it fails the build in `error` mode. `propval:`, `rpkval:` and `connectval:` behave the same way.
+
+A value of a deprecated metric warns as `metric:` warns, and still renders.
+
+=== Markdown output
+
+In the Markdown export of a page, `metricval:` is the resolved value as plain text.
+
+=== Registration
+
+Registered by the `prop` macro's extension (see <<rpkval>>).
+
 [[value-fields]]
 == Fields of the value macros
 
-`propval:`, `rpkval:`, `connectval:` and `bloblval:` share one set of field names: a field means the same thing in every macro that has it, and its aliases (the JSON key names, and older spellings) work everywhere the field exists. The first rows are the shared fields; the rest belong to one source. A cell names where a macro has the field: `yes`, or a flag or command for `rpkval:`, a config field or component for `connectval:`, a function, method or parameter for `bloblval:`. An inverted alias gives the opposite value: `optional` is `yes` where `required` is `no`.
+`propval:`, `rpkval:`, `connectval:`, `bloblval:` and `metricval:` share one set of field names: a field means the same thing in every macro that has it, and its aliases (the JSON key names, and older spellings) work everywhere the field exists. The first rows are the shared fields; the rest belong to one source. A cell names where a macro has the field: `yes`, or a flag or command for `rpkval:`, a config field or component for `connectval:`, a function, method or parameter for `bloblval:`. An inverted alias gives the opposite value: `optional` is `yes` where `required` is `no`.
 
 A field name a macro does not support is a warning (an error in `error` mode) that lists the fields it does. A test in this repository fails when this table and the macros disagree.
 
 [[value-fields-table]]
-[cols="2,3,1,2,2,2"]
+[cols="2,3,1,2,2,2,1"]
 |===
-| Field | Aliases | propval | rpkval | connectval | bloblval
+| Field | Aliases | propval | rpkval | connectval | bloblval | metricval
 
 | `default`
 |
@@ -1198,6 +1459,7 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | flag
 | field
 | parameter
+|
 
 | `type`
 |
@@ -1205,6 +1467,7 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | flag
 | field
 | parameter
+| yes
 
 | `description`
 | `desc`
@@ -1212,12 +1475,14 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | flag, command
 | field, component
 | function, method, parameter
+| yes
 
 | `summary`
 | `short_description`
 |
 |
 | field, component
+|
 |
 
 | `values`
@@ -1226,6 +1491,7 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 | field
 |
+| yes
 
 | `introduced`
 | `introducedInVersion`, `since`, `version`
@@ -1233,6 +1499,7 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | flag, command
 | field, component
 | function, method
+| yes
 
 | `deprecated`
 | `is_deprecated`
@@ -1240,6 +1507,7 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 | field, component
 | function, method
+| yes
 
 | `status`
 |
@@ -1247,6 +1515,7 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 | component
 | function, method
+| yes
 
 | `required`
 | `optional` (inverted)
@@ -1254,6 +1523,7 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | flag
 | field
 | parameter
+|
 
 | `examples`
 | `example`
@@ -1261,12 +1531,14 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | command
 | field
 | function, method
+|
 
 | `advanced`
 | `is_advanced`
 |
 |
 | field
+|
 |
 
 | `secret`
@@ -1275,10 +1547,12 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 | field
 |
+|
 
 | `enterprise`
 | `is_enterprise`
 | yes
+|
 |
 |
 |
@@ -1289,11 +1563,13 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 | component
 | function, method
+| yes
 
 | `aliases`
 |
 | yes
 | command
+|
 |
 |
 
@@ -1303,13 +1579,15 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 |
 |
+| yes
 
 | `cloud-access`
-| `cloud`
+| `availability`, `cloud`
 | yes
 |
 |
 |
+| yes
 
 | `unit`
 | `units`
@@ -1317,10 +1595,12 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 |
 |
+| yes
 
 | `min`
 | `minimum`
 | yes
+|
 |
 |
 |
@@ -1331,10 +1611,12 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 |
 |
+|
 
 | `restart`
 | `needs_restart`, `requires-restart`
 | yes
+|
 |
 |
 |
@@ -1345,10 +1627,12 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 |
 |
+|
 
 | `scope`
 | `config_scope`
 | yes
+|
 |
 |
 |
@@ -1359,10 +1643,12 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 |
 |
+|
 
 | `restored`
 | `gets_restored`
 | yes
+|
 |
 |
 |
@@ -1373,6 +1659,7 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | flag
 |
 |
+|
 
 | `usage`
 |
@@ -1380,11 +1667,13 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | command
 |
 |
+| yes
 
 | `platforms`
 |
 |
 | command
+|
 |
 |
 
@@ -1394,12 +1683,14 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | command
 |
 |
+|
 
 | `interpolated`
 | `is_interpolated`
 |
 |
 | field
+|
 |
 
 | `impure`
@@ -1408,12 +1699,61 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 |
 | function, method
+|
+
+| `labels`
+|
+|
+|
+|
+|
+| yes
+
+| `endpoint`
+|
+|
+|
+|
+|
+| yes
+
+| `buckets`
+|
+|
+|
+|
+|
+| yes
+
+| `use-cases`
+| `use_cases`
+|
+|
+|
+|
+| yes
+
+| `requires`
+|
+|
+|
+|
+|
+| yes
+
+| `removed`
+|
+|
+|
+|
+|
+| yes
 |===
 
 [[value-text]]
 === Descriptions and other text values
 
-`description`, `summary`, `examples` and `see-also` are text, rendered from its source format:
+`description`, `summary`, `examples` and `see-also` are text, and so are a metric's `usage` and `requires`, rendered from its source format:
 
 [cols="1,2"]
 |===
@@ -1430,9 +1770,12 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 
 | rpk examples
 | Literally, as cobra prints them: paragraphs, with each indented run, and each listing between `----` lines, as a literal block. Backticks and asterisks render as written
+
+| Metric strings
+| AsciiDoc: the `description`, `usage`, `requires` and `see-also` values in the metrics data (<<metricval-fields>>)
 |===
 
-The inline form renders a text value only when it is one paragraph. Anything longer (a blank line, a list, a listing, a heading, a conditional) renders `<unknown FIELD>` with a `needs-block` warning that names the block form: the same macro with two colons, on a line of its own, such as `propval::cleanup.policy[description]`, `rpkval::[rpk topic create,description]` or `connectval::[inputs/kafka_franz.consumer_group,description]`. The block form parses the text into the page. A heading in the text renders as a discrete heading, because a section cannot open inside a block. Written inside a sentence, the block form is a `block-form-inline` error.
+The inline form renders a text value only when it is one paragraph. Anything longer (a blank line, a list, a listing, a heading, a conditional) renders `<unknown FIELD>` with a `needs-block` warning that names the block form: the same macro with two colons, on a line of its own, such as `propval::cleanup.policy[description]`, `rpkval::[rpk topic create,description]`, `connectval::[inputs/kafka_franz.consumer_group,description]` or `metricval::redpanda_cluster_brokers[description]`. The block form parses the text into the page. A heading in the text renders as a discrete heading, because a section cannot open inside a block. Written inside a sentence, the block form is a `block-form-inline` error.
 
 A Connect string was written for its component's page in `connect:components`, so a link in it is relative to that page. When the string renders anywhere else, its links are rewritten:
 
