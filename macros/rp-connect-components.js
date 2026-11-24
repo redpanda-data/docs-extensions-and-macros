@@ -257,6 +257,13 @@ const MEANING_TOOLTIPS = {
   enterprise: 'Requires an Enterprise Edition license.'
 }
 
+// What each support level means, for the badge legend. Same wording as the
+// Support levels section of rp-connect-docs components/about.adoc.
+const SUPPORT_LEVEL_DEFINITIONS = {
+  certified: 'Production-ready, with Redpanda support available to purchase.',
+  community: 'Not considered production-ready. Support comes from the Redpanda community on GitHub.'
+}
+
 /**
  * One meaning badge, styled by docs-ui (.rp-badge, .rp-badge--NAME). The label
  * carries the meaning; data-tooltip adds detail through docs-ui's tippy setup.
@@ -331,6 +338,7 @@ module.exports.typeTooltip = typeTooltip
 module.exports.TYPE_TOOLTIPS = TYPE_TOOLTIPS
 module.exports.breakableName = breakableName
 module.exports.MEANING_TOOLTIPS = MEANING_TOOLTIPS
+module.exports.SUPPORT_LEVEL_DEFINITIONS = SUPPORT_LEVEL_DEFINITIONS
 module.exports.statusBadge = statusBadge
 module.exports.STATUS_BADGES = STATUS_BADGES
 
@@ -2164,54 +2172,18 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
             </div>
             <div class="badge-legend-body">
               <div class="badge-legend-section">
-                <h4>Component Types</h4>
+                <h4>Component Types</h4>${Object.keys(TYPE_TOOLTIPS).map(type => `
                 <div class="badge-legend-item">
-                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('input'))}">Input</span>
-                  <p>Receives data from external sources into the pipeline</p>
-                </div>
-                <div class="badge-legend-item">
-                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('output'))}">Output</span>
-                  <p>Sends data from the pipeline to external destinations</p>
-                </div>
-                <div class="badge-legend-item">
-                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('processor'))}">Processor</span>
-                  <p>Transforms or filters data as it flows through the pipeline</p>
-                </div>
-                <div class="badge-legend-item">
-                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('cache'))}">Cache</span>
-                  <p>Stores data temporarily for faster access</p>
-                </div>
-                <div class="badge-legend-item">
-                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('buffer'))}">Buffer</span>
-                  <p>Temporarily holds messages to manage throughput</p>
-                </div>
-                <div class="badge-legend-item">
-                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('metric'))}">Metric</span>
-                  <p>Collects and exports metrics about pipeline performance</p>
-                </div>
-                <div class="badge-legend-item">
-                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('scanner'))}">Scanner</span>
-                  <p>Scans and processes messages based on patterns</p>
-                </div>
-                <div class="badge-legend-item">
-                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('rate_limit'))}">Rate Limit</span>
-                  <p>Controls the rate of message processing</p>
-                </div>
-                <div class="badge-legend-item">
-                  <span class="rp-badge rp-badge--sm rp-badge--neutral" data-tooltip="${escapeHtml(typeTooltip('tracer'))}">Tracer</span>
-                  <p>Tracks and traces message flow through the pipeline</p>
-                </div>
+                  ${meaningBadge('neutral', typeLabel(type), { tooltip: typeTooltip(type) })}
+                  <p>${escapeHtml(typeTooltip(type))}</p>
+                </div>`).join('')}
               </div>
               <div class="badge-legend-section">
-                <h4>Support Levels</h4>
+                <h4>Support Levels</h4>${['certified', 'community'].map(level => `
                 <div class="badge-legend-item">
-                  <span class="rp-badge rp-badge--sm rp-badge--certified" data-tooltip="${MEANING_TOOLTIPS.certified}">Certified</span>
-                  <p>Fully supported and tested by Redpanda with guaranteed reliability</p>
-                </div>
-                <div class="badge-legend-item">
-                  <span class="rp-badge rp-badge--sm rp-badge--community" data-tooltip="${MEANING_TOOLTIPS.community}">Community</span>
-                  <p>Community-supported connector with best-effort maintenance</p>
-                </div>
+                  ${meaningBadge(level, typeLabel(level), { tooltip: MEANING_TOOLTIPS[level] })}
+                  <p>${escapeHtml(SUPPORT_LEVEL_DEFINITIONS[level])}</p>
+                </div>`).join('')}
               </div>
               ${useCaseOptions.length ? `
               <div class="badge-legend-section">
@@ -2227,11 +2199,11 @@ ${filterGroupHtml({ id: 'typeFilter', label: 'Type', value: 'All Types Selected'
                 <h4>Availability</h4>
                 <div class="badge-legend-item">
                   <span class="rp-badge rp-badge--sm rp-badge--cloud" data-tooltip="${MEANING_TOOLTIPS.cloud}">Cloud</span>
-                  <p>Available in Redpanda Cloud managed service</p>
+                  <p>Available in Redpanda Cloud.</p>
                 </div>
                 <div class="badge-legend-item">
                   <span class="rp-badge rp-badge--sm rp-badge--enterprise" data-tooltip="${MEANING_TOOLTIPS.enterprise}">Enterprise</span>
-                  <p>Requires an Enterprise Edition license</p>
+                  <p>Requires an Enterprise Edition license.</p>
                 </div>
               </div>
               ` : ''}
