@@ -680,6 +680,20 @@ features:
       )
     })
 
+    test('leaves out entries marked in-table: false, but still resolves them inline', () => {
+      const yaml = 'features:\n' +
+        '  - name: Shown\n    scope: redpanda\n    description: d\n' +
+        '  - name: Core Limit\n    scope: redpanda\n    in-table: false\n    description: d\n    aliases: [cluster_cores_over_limit]\n'
+      const table = buildFeatureTable(parseRegistry(yaml).features, 'redpanda')
+      expect(table).toContain('| Shown')
+      expect(table).not.toContain('Core Limit')
+      const html = convert('enterprise:cluster_cores_over_limit[]', {
+        catalog: catalogWithVersions(yaml, VERSIONS), component: 'streaming', version: '26.2',
+      })
+      expect(html).toContain('Core Limit')
+      expect(html).toContain('class="enterprise-feature"')
+    })
+
     test('omits the badge for entries that are not beta', () => {
       const table = buildFeatureTable(features, 'connect')
       expect(table).not.toContain('badge--beta')

@@ -162,6 +162,9 @@ QUERIES_CHECKED=0
 # Set at the very end. bash 3.2 (macOS) runs the EXIT trap with $? of 0 when
 # set -u stops the script, which would turn that failure into a success.
 RUN_FINISHED=0
+# Set just before the cluster starts. A run that fails before then must not
+# tear down a cluster of the same project that an earlier run left running.
+CLUSTER_STARTING=0
 
 teardown() {
   local rc=$?
@@ -173,7 +176,7 @@ teardown() {
   fi
   if [[ "${KEEP_CLUSTER:-0}" == "1" ]]; then
     echo "ℹ️  KEEP_CLUSTER=1: leaving the cluster running (project $PROJECT_NAME)."
-  elif [[ -d "$COMPOSE_DIR" ]]; then
+  elif [[ -d "$COMPOSE_DIR" ]] && (( CLUSTER_STARTING )); then
     # A failed query is not a failed cluster, so it prints no cluster state.
     if (( rc != 0 )) && ! [[ "$MODE" == "queries" && "$rc" == "1" ]]; then
       echo "---- docker compose ps (run failed with exit code $rc) ----"
@@ -245,6 +248,7 @@ fi
 ###############################################################################
 # Start Redpanda cluster
 ###############################################################################
+CLUSTER_STARTING=1
 "$SCRIPT_DIR/start-cluster.sh" "$TAG"
 
 ###############################################################################
@@ -351,6 +355,20 @@ count_families() {
 # Metrics that need an action, not only a property. Each step is best effort:
 # a failure costs a few metric families and must not fail the run by itself.
 ###############################################################################
+# The shadow-source broker is not part of the cluster the health check above
+# waits for. Its Kafka API can still be starting when the actions run.
+wait_for_shadow_source() {
+  local tries=0
+  until docker exec shadow-source rpk cluster info >/dev/null 2>&1; do
+    tries=$(( tries + 1 ))
+    if (( tries >= 30 )); then
+      echo "⚠️  The shadow-source broker did not answer within about 60s."
+      return 1
+    fi
+    sleep 2
+  done
+}
+
 run_metrics_actions() {
   local rpk_auth=(-X "user=$ADMIN_USER" -X "pass=$ADMIN_PASS")
   local url moved=0
@@ -376,8 +394,10 @@ run_metrics_actions() {
   fi
 
   # Shadow link metrics exist only while a link is running. The source broker
-  # gets a topic, a record and a schema to shadow.
-  if docker exec shadow-source rpk topic create metrics-shadow-src \
+  # gets a topic, a record and a schema to shadow. The health wait above
+  # covers only the cluster's brokers, so wait for this one too.
+  if wait_for_shadow_source \
+     && docker exec shadow-source rpk topic create metrics-shadow-src \
      && echo '{"metrics":1}' | docker exec -i shadow-source rpk topic produce metrics-shadow-src >/dev/null \
      && docker exec shadow-source curl -sSf -X POST -H 'Content-Type: application/vnd.schemaregistry.v1+json' \
           --data '{"schema":"{\"type\":\"string\"}"}' \
@@ -426,12 +446,17 @@ setup_quota_probe() {
 }
 
 throttle_quota_probe() {
+  # $1: the most seconds this call may take, so the settle loop keeps to
+  # --settle-timeout.
+  local budget="${1:-60}" started=$SECONDS left
   local rpk_auth=(-X "user=$ADMIN_USER" -X "pass=$ADMIN_PASS")
   local attempt url throttled=0
   (( QUOTA_PROBE_READY )) || return 0
   # A new quota takes a moment to reach every broker, so produce until the
   # metric shows up.
   for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    left=$(( budget - (SECONDS - started) ))
+    (( left > 0 )) || break
     # One record of random data is over the 1 KB/s quota; data that
     # compresses well is not.
     { head -c 3000 /dev/urandom | base64 | tr -d '\n'; echo; } \
@@ -439,7 +464,9 @@ throttle_quota_probe() {
           -X "globals.kafka_protocol_request_client_id=$QUOTA_PROBE_CLIENT" "${rpk_auth[@]}" >/dev/null 2>&1 || true
     for url in "${ADMIN_URLS[@]}"; do
       # Not a pipe into grep -q: under pipefail, grep exiting early fails the pipeline.
-      if [[ "$(curl -sS --max-time 30 "$url/public_metrics/" 2>/dev/null || true)" == *redpanda_kafka_quotas_client_quota_throughput_by_entity* ]]; then
+      left=$(( budget - (SECONDS - started) ))
+      (( left > 0 )) || break
+      if [[ "$(curl -sS --max-time "$(( left < 30 ? left : 30 ))" "$url/public_metrics/" 2>/dev/null || true)" == *redpanda_kafka_quotas_client_quota_throughput_by_entity* ]]; then
         throttled=1
         break
       fi
@@ -471,7 +498,8 @@ if (( METRICS_CLUSTER )); then
     echo "   ${SECONDS}s: ${count} metric families (unchanged for ${stable_for}s)"
     last_count="$count"
     if (( METRICS_EXTRAS )); then
-      throttle_quota_probe
+      # Never past the settle deadline.
+      throttle_quota_probe "$(( METRICS_SETTLE_MAX > SECONDS ? METRICS_SETTLE_MAX - SECONDS : 0 ))"
     fi
     if [[ -n "$METRICS_INVENTORY_FILE" ]] && (( METRICS_EXTRAS )); then
       # With a source inventory, "settled" has a definition: every family the
@@ -479,7 +507,7 @@ if (( METRICS_CLUSTER )); then
       # fired (consumer group lag, a transform's first batch), so a stable
       # count is not proof.
       if missing="$("$PYTHON" "$SCRIPT_DIR/../tools/metrics/metrics.py" "$TAG" "${SETTLE_URL_ARGS[@]}" \
-           --inventory "$METRICS_INVENTORY_FILE" --expected-absent "$METRICS_DIR/expected-absent.json" --check-only 2>/dev/null)"; then
+           --inventory "$METRICS_INVENTORY_FILE" --expected-absent "$METRICS_DIR/expected-absent.json" --check-only)"; then
         echo "✅ Every metric family in source is exported (${count} families) after ${SECONDS}s"
         break
       fi
@@ -504,7 +532,8 @@ fi
 # Run documentation generator
 ###############################################################################
 if (( METRICS_EXTRAS )); then
-  throttle_quota_probe
+  # A last refresh so the series are there for the scrape: short.
+  throttle_quota_probe 20
 fi
 
 # ${arr[@]+"${arr[@]}"} expands to nothing for an empty array; a bare
@@ -521,6 +550,8 @@ if [[ "$MODE" == "metrics" ]]; then
     # take the extra features is expected to be short, so it is never strict.
     if [[ "${METRICS_STRICT:-0}" == "1" ]] && (( METRICS_EXTRAS )); then
       ADMIN_URL_ARGS+=(--strict)
+    elif [[ "${METRICS_STRICT:-0}" == "1" ]]; then
+      echo "⚠️  --strict does not apply to Redpanda $MAJOR_MINOR: it cannot take the extra features, so its gaps are expected. They are listed in metrics-gaps.json and the output is written."
     fi
   fi
   "$PYTHON" "$SCRIPT_DIR/../tools/metrics/metrics.py" "$TAG" "${ADMIN_URL_ARGS[@]}" ${GENERATOR_ARGS[@]+"${GENERATOR_ARGS[@]}"}

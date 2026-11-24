@@ -87,6 +87,16 @@
         "Documentation (26.1)"
       ]
     },
+    "26.2": {
+      "group_id": "71250295-9296-401e-8187-fcb339d70691",
+      "group_name": "26.2",
+      "source_ids": [
+        "1f30a103-d179-403c-ac89-e643ab199f63"
+      ],
+      "source_names": [
+        "Documentation (26.2)"
+      ]
+    },
     "current": {
       "group_id": "35567e94-30c7-4608-ab5d-1ff982339d05",
       "group_name": "current",

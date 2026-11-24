@@ -2,7 +2,9 @@ const { describe, it, expect } = require('@jest/globals')
 const {
   convertNumberedListsToAsciiDoc,
   convertIndentedTablesToAsciiDoc,
-  capToTwoSentences
+  capToTwoSentences,
+  formatDescription,
+  ensurePeriod
 } = require('../../../tools/rpk-docs/generate-rpk-docs')
 
 describe('Indented Table Conversion', () => {
@@ -493,5 +495,88 @@ describe('unindented shell examples and colon-introduced code', () => {
 
     convertIndentedCodeBlocksToAsciiDoc(input, store)
     expect(store).toHaveLength(0)
+  })
+})
+
+describe('Indented tables with three or more columns', () => {
+  it('keeps a multi-column table as a literal block instead of a Value/Description table', () => {
+    const input = `Each model uses the first supported wire API the server catalog declares:
+
+  openai_responses         direct           @opencode/ai/providers/openai/responses
+                                              {provider}/responses
+  anthropic_messages       direct           @opencode/ai/providers/anthropic
+                                              {provider}/v1/messages
+
+A model needs streaming.`
+    const result = convertIndentedTablesToAsciiDoc(input)
+    expect(result).not.toContain('|Value |Description')
+    expect(result).toContain('....\nopenai_responses         direct           @opencode/ai/providers/openai/responses\n                                            {provider}/responses\n')
+    expect(result).toContain('A model needs streaming.')
+  })
+
+  it('still converts a two-column value list', () => {
+    const result = convertIndentedTablesToAsciiDoc('Formats:\n\n    now          the current time\n    13 digits    parsed as a Unix millisecond\n')
+    expect(result).toContain('|Value |Description')
+    expect(result).toContain('|13 digits |parsed as a Unix millisecond')
+  })
+})
+
+describe('Named table columns', () => {
+  it('uses the given column names and no monospace for a list that is not values', () => {
+    const input = 'init installs a hook:\n\n  Claude Code   a SessionStart hook in settings.json\n  Codex         a SessionStart hook in hooks.json\n'
+    const result = convertIndentedTablesToAsciiDoc(input, { headers: ['Coding agent', 'What init adds'] })
+    expect(result).toContain('[cols="1,2a"]')
+    expect(result).toContain('|Coding agent |What init adds')
+    expect(result).not.toContain('|Value |Description')
+    expect(result).toContain('|Claude Code |a SessionStart hook in settings.json')
+  })
+})
+
+describe('Literal blocks through the full description formatter', () => {
+  it('keeps a multi-column literal block verbatim, with no escaped braces or added inline code', () => {
+    const input = 'Each model uses the first supported wire API:\n\n  openai_responses         direct           @opencode/ai/providers/openai/responses\n                                              {provider}/responses\n  anthropic_messages       direct           @opencode/ai/providers/anthropic\n                                              {provider}/v1/messages\n\nA model needs streaming.'
+    const result = formatDescription(input, null)
+    expect(result).toContain('....\nopenai_responses')
+    expect(result).toContain('{provider}/responses')
+    expect(result).not.toContain('\\{provider}')
+    expect(result).not.toMatch(/`@opencode/)
+  })
+})
+
+describe('Multi-column literal blocks through formatDescription', () => {
+  const literalBody = out => out.match(/\n\.\.\.\.\n([\s\S]*?)\n\.\.\.\.(?:\n|$)/)[1]
+
+  it('keeps the rows byte for byte, with inline code, xrefs and {word} untouched', () => {
+    const rows = [
+      'openai_responses   direct   `@opencode/ai/openai`   {provider}/responses',
+      'anthropic_v1       proxy    xref:a.adoc[A]          $HOME/.rpai -v #1234'
+    ]
+    const out = formatDescription('Each:\n\n' + rows.map(r => '  ' + r).join('\n') + '\n\nDone.', [])
+    expect(literalBody(out)).toBe(rows.join('\n'))
+  })
+
+  it('does not add periods inside a literal block that has blank lines', () => {
+    const out = ensurePeriod(formatDescription('Each:\n\n  aa   bb   cc\n\n  dd   ee   ff\n', []))
+    expect(literalBody(out)).toBe('aa   bb   cc\n\ndd   ee   ff')
+  })
+
+  it('treats a row with an empty cell as part of a three-column table', () => {
+    const out = formatDescription('Rows:\n\n  a   b   c\n  d       f\n', [])
+    expect(literalBody(out)).toBe('a   b   c\nd       f')
+  })
+
+  it('keeps a two-column value table when descriptions use two spaces after a period', () => {
+    const out = formatDescription('Values:\n\n    now          The current time.  Uses UTC.\n    13 digits    A Unix millisecond.  Parsed as UTC.\n', [])
+    expect(out).not.toContain('....')
+    expect(out).toContain('|now |The current time. Uses UTC.')
+  })
+})
+
+describe('tableHeaders', () => {
+  it('escapes | and {word} in header names and cells', () => {
+    const out = formatDescription('Agents:\n\n  claude   Adds a | b\n  codex    Adds {c}\n', [], { tableHeaders: ['A|B', '{word}'] })
+    expect(out).toContain('|A\\|B |\\{word}')
+    expect(out).toContain('|claude |Adds a \\| b')
+    expect(out).toContain('|codex |Adds \\{c}')
   })
 })

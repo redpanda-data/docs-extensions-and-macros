@@ -17,7 +17,7 @@ const { spawnSync } = require('child_process')
 const { runAudit, formatHumanReport } = require('../../../tools/overrides-audit')
 const { CLASSES } = require('../../../tools/overrides-audit/classify')
 const { stripTerminalPeriod } = require('../../../tools/overrides-audit/adapters/metrics')
-const { buildTriagePrompt } = require('../../../tools/overrides-audit/triage')
+const { buildTriagePrompt, triageCandidate } = require('../../../tools/overrides-audit/triage')
 
 const family = (help, file, line, extra = {}) => ({
   type: 'gauge', help, help_runtime: false, defined_in: file, line, group: 'g', resolution: 'clean', call_sites: 1, origin: 'src/v', ...extra
@@ -181,6 +181,28 @@ describe('overrides audit, metrics surface', () => {
       }
     })
 
+    test('an override that matches the help string and one that does not give no candidate', () => {
+      const result = rows({
+        redpanda_gadget_up: { description: 'Whether the gadget is up.' },
+        vectorized_gadget_up: { description: 'Whether the gadget is running.' }
+      })
+      for (const name of ['redpanda_gadget_up', 'vectorized_gadget_up']) {
+        const row = result[`${name}|description`]
+        expect(row.class).toBe(CLASSES.REVIEW)
+        expect(row.upstream_candidate_text).toBeUndefined()
+        expect(row.note).toMatch(/different text for the one help string at src\/v\/gadget\/probes\.cc:40/)
+      }
+    })
+
+    test('control: two overrides that both match the help string stay redundant', () => {
+      const result = rows({
+        redpanda_gadget_up: { description: 'Whether the gadget is up.' },
+        vectorized_gadget_up: { description: 'Whether the gadget is up' }
+      })
+      expect(result['redpanda_gadget_up|description'].class).toBe(CLASSES.REDUNDANT)
+      expect(result['vectorized_gadget_up|description'].class).toBe(CLASSES.REDUNDANT)
+    })
+
     test('an override on one name only is a plain candidate', () => {
       const row = descriptionRow('vectorized_gadget_up', 'Whether the gadget accepts requests.')
       expect(row.class).toBe(CLASSES.UPSTREAMABLE)
@@ -205,12 +227,24 @@ describe('overrides audit, metrics surface', () => {
   describe('audience paragraphs', () => {
     const CLOUD = 'cloud-only: In Serverless, this counts your widgets only.'
 
-    test('only the unprefixed text is the candidate', () => {
+    test('only the unprefixed text is the candidate, and the override stays (SPLIT)', () => {
       const row = descriptionRow('redpanda_widget_active', ['Number of widgets that are serving requests.', CLOUD])
-      expect(row.class).toBe(CLASSES.UPSTREAMABLE)
+      expect(row.class).toBe(CLASSES.KEEP_UNTIL_UPSTREAMED)
+      expect(row.note).toMatch(/^SPLIT: /)
       expect(row.upstream_candidate_text).toBe('Number of widgets that are serving requests')
       expect(row.audience_scoped_text).toEqual([CLOUD])
       expect(row.note).toMatch(/1 audience paragraph\(s\) stay/)
+    })
+
+    test('triage cannot retire an override that carries audience paragraphs', () => {
+      const row = descriptionRow('redpanda_widget_active', ['Number of widgets that are serving requests.', CLOUD])
+      const triaged = triageCandidate(row, JSON.stringify({ verdict: 'RETIRE_OVERRIDE', reason: 'Source says the same.' }))
+      expect(triaged.agent_verdict).toBe('AMBIGUOUS')
+    })
+
+    test('control: plain prose with no audience paragraphs stays UPSTREAMABLE', () => {
+      const row = descriptionRow('redpanda_widget_active', 'Number of widgets that are serving requests.')
+      expect(row.class).toBe(CLASSES.UPSTREAMABLE)
     })
 
     test('unprefixed text that matches the help string is REDUNDANT whatever the audience paragraphs say', () => {

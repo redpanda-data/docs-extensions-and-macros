@@ -139,10 +139,10 @@ describeIfPython('redpanda-metrics-<version>.json', () => {
       expect(validate.errors).toBeNull()
     })
 
-    it('records the version, the number of sources and the counts', () => {
+    it('records the version, the number of sources per endpoint and the counts', () => {
       expect(dataset.schema_version).toBe(1)
       expect(dataset.redpanda_version).toBe('v0.0.1')
-      expect(dataset.generated_from).toEqual({ sources: 2 })
+      expect(dataset.generated_from).toEqual({ sources: 2, internal_sources: 1 })
       expect(dataset.counts).toEqual({ public: 5, internal: 2, observed: 7, source_only: 0, excluded: 0 })
     })
 
@@ -237,7 +237,7 @@ describeIfPython('redpanda-metrics-<version>.json', () => {
     })
 
     it('records the source ref', () => {
-      expect(dataset.generated_from).toEqual({ sources: 2, source_ref: 'v0.0.1' })
+      expect(dataset.generated_from).toEqual({ sources: 2, internal_sources: 1, source_ref: 'v0.0.1' })
     })
 
     it('adds the defining file to a scraped family', () => {
@@ -318,6 +318,23 @@ redpanda_example_ops_per_second_total{} 1
     expect(dataset.metrics.redpanda_instance_network_bytes_per_sec.unit).toBeNull()
     expect(dataset.metrics.redpanda_instance_network_bytes_per_sec.provenance.unit).toBeUndefined()
     expect(dataset.metrics.redpanda_example_ops_per_second_total.unit).toBeNull()
+  })
+
+  it('drops le and quantile only from a histogram or a summary, where they are series structure', () => {
+    const text = `# HELP redpanda_example_estimate An estimate per percentile
+# TYPE redpanda_example_estimate gauge
+redpanda_example_estimate{quantile="p95"} 1
+# HELP redpanda_example_duration_seconds A summary
+# TYPE redpanda_example_duration_seconds summary
+redpanda_example_duration_seconds{quantile="0.5",redpanda_request="produce"} 1
+redpanda_example_duration_seconds_sum{redpanda_request="produce"} 1
+redpanda_example_duration_seconds_count{redpanda_request="produce"} 1
+`
+    const run = generate(['--public-file', file('pub3.txt', text)])
+    if (run.result.status !== 0) throw new Error(run.combined)
+    const dataset = read(run.out)
+    expect(dataset.metrics.redpanda_example_estimate.labels.map((label) => label.name)).toEqual(['quantile'])
+    expect(dataset.metrics.redpanda_example_duration_seconds.labels.map((label) => label.name)).toEqual(['redpanda_request'])
   })
 
   describe('an inventory name with a placeholder', () => {

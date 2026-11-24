@@ -186,6 +186,13 @@ function classifyMetricDescription (name, override, family) {
       }
     }
   }
+  if (scoped > 0 && result.class === CLASSES.UPSTREAMABLE) {
+    // The override has to stay for its audience paragraphs, which is the
+    // shared classifier's SPLIT case. That class also keeps triage from
+    // retiring the whole override.
+    result.class = CLASSES.KEEP_UNTIL_UPSTREAMED
+    result.note = `SPLIT: ${result.note}`
+  }
   result.note += audienceNote
   if (marked) {
     // The marker is out of date: there is a plain help string to rewrite now.
@@ -209,14 +216,17 @@ function classifyMetricDescription (name, override, family) {
 function mergeSharedSourceStrings (manifest) {
   const groups = new Map()
   for (const row of manifest) {
-    if (row.field !== 'description' || row.upstream_candidate_text === undefined) continue
+    // A redundant override says what the help string says. It counts here,
+    // because a candidate for the same string would make the two disagree.
+    if (row.field !== 'description' || (row.upstream_candidate_text === undefined && row.class !== CLASSES.REDUNDANT)) continue
     const key = `${row.source_file}:${row.source_line}`
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key).push(row)
   }
   for (const [key, rows] of groups) {
-    if (rows.length < 2) continue
-    const texts = new Set(rows.map((row) => classify.normalizeText(row.upstream_candidate_text)))
+    if (rows.length < 2 || rows.every((row) => row.upstream_candidate_text === undefined)) continue
+    const texts = new Set(rows.map((row) => classify.normalizeText(
+      row.upstream_candidate_text !== undefined ? row.upstream_candidate_text : stripTerminalPeriod(row.source_text || ''))))
     if (texts.size > 1) {
       const names = rows.map((row) => row.name).join(', ')
       for (const row of rows) {
