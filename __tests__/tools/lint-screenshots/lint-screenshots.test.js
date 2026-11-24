@@ -136,13 +136,15 @@ describe('lintScreenshots - the rules the cloud-docs script enforced (errors)', 
     expect(rules(result).sort()).toEqual([
       'alt-banned-prefix', 'alt-banned-prefix', 'alt-missing', 'alt-too-long', 'alt-unquoted-comma', 'image-missing', 'image-too-large'
     ])
-    expect(result.findings.every((f) => f.severity === 'error')).toBe(true)
+    // Alt length is a convention, not a WCAG requirement, so it only warns.
+    expect(result.findings.filter((f) => f.severity === 'warning').map((f) => f.rule)).toEqual(['alt-too-long'])
     expect(byRule(result, 'alt-missing')[0]).toMatchObject({ file: 'modules/manage/pages/a.adoc', line: 2, image: 'ok.png' })
     expect(byRule(result, 'image-missing')[0].message).toContain('modules/manage/images/nope.png')
     // cloud-docs' PR workflow greps this exact phrase to decide whether to
     // post the fix-oversized-image instructions - keep it stable.
     expect(byRule(result, 'image-too-large')[0].message).toMatch(/over the 100KB ceiling/)
-    expect(result.summary.errors).toBe(7)
+    expect(result.summary.errors).toBe(6)
+    expect(result.summary.warnings).toBe(1)
   })
 
   test('module-qualified references resolve across modules', () => {
