@@ -1,0 +1,59 @@
+# Reusable advisory check of the external URLs a PR adds in doc-string
+# sources (non-test Go files and .adoc files), for repos that don't run
+# connect-docs-check.yml, such as benthos. It runs the same script as that
+# workflow's link-check step (tools/connect-docs/check-pr-links.js): 404 and
+# 410 get a ::warning annotation at the file and line, and 401, 403, 429,
+# 5xx, and timeouts are listed as couldn't check. Results go to the job
+# summary. It never fails the job, needs no secrets, and posts no comment.
+#
+#   jobs:
+#     link-check:
+#       if: github.event_name == 'pull_request'
+#       permissions:
+#         contents: read
+#         pull-requests: read
+#       uses: redpanda-data/docs-extensions-and-macros/.github/workflows/pr-link-check.yml@<commit-sha> # v<version>
+name: pr-link-check (reusable)
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  link-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # gh pr diff.
+      pull-requests: read
+    steps:
+      - name: Check out docs-extensions-and-macros at this workflow's commit
+        uses: actions/checkout@v4
+        with:
+          repository: redpanda-data/docs-extensions-and-macros
+          ref: ${{ job.workflow_sha || github.workflow_sha }}
+          path: dem
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check the external links the PR adds (advisory)
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          WORK: ${{ runner.temp }}
+        run: |
+          set -uo pipefail
+          if ! gh pr diff "$PR_NUMBER" --repo "$REPO" > "$WORK/pr.diff"; then
+            echo "::notice::Could not fetch the PR diff, so the links it adds were not checked."
+            exit 0
+          fi
+          node "$GITHUB_WORKSPACE/dem/tools/connect-docs/check-pr-links.js" --diff "$WORK/pr.diff" \
+            --summary "$WORK/link-check.md" || echo "::notice::The link check did not complete."
+          cat "$WORK/link-check.md" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          exit 0

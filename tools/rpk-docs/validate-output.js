@@ -2,6 +2,13 @@
 
 const fs = require('fs')
 const path = require('path')
+const { explainRawDocsUrl } = require('../../cli-utils/docs-links-to-xrefs')
+
+// The same URL shape and trailing-punctuation rule as the URL scanner the
+// converter uses (extensions/util/scan-content-urls.js), so a URL found here
+// is spelled exactly as the conversion result lists it.
+const DOCS_URL_RX = /https?:\/\/docs\.redpanda\.com(?:[/?#][^\s\][)"'<>]*)?/g
+const TRAILING_PUNCT_RX = /[.,;:!?*_]+$/
 
 /**
  * Validation rules for generated rpk documentation
@@ -10,28 +17,27 @@ const path = require('path')
 const VALIDATION_RULES = [
   {
     name: 'raw-external-urls',
-    description: 'Raw external URLs that should be links or removed',
+    description: 'docs.redpanda.com URLs still raw after link conversion',
     severity: 'warning',
-    // Allow certain external URLs that are intentional
-    allowlist: [
-      'https://github.com/redpanda-data/', // GitHub links are OK as links
-    ],
-    check: (content, filePath) => {
+    // The generator converts docs URLs that match a page of the loaded
+    // components into xrefs before writing (see options.docsLinks), so any
+    // docs URL still in a page was left as written for a reason. Report each
+    // with that reason: a warning when the loaded components lack the page or
+    // anchor (a likely broken link), info otherwise (a component that was not
+    // loaded, a query string, an API reference path, a code block, or no
+    // conversion at all).
+    check: (content, filePath, options = {}) => {
       const issues = []
-      // Match URLs not inside link:[] or xref:[]
-      const urlPattern = /(?<!link:)(?<!xref:)(https?:\/\/[^\s\[\]]+)/g
+      DOCS_URL_RX.lastIndex = 0
       let match
-      while ((match = urlPattern.exec(content)) !== null) {
-        const url = match[1]
-        // docs.redpanda.com URLs are converted to xrefs at site build time
-        // by the url-to-xref Antora extension, so a raw one is informational
-        if (url.includes('docs.redpanda.com')) {
-          issues.push({
-            line: getLineNumber(content, match.index),
-            message: `Raw docs.redpanda.com URL (converted to an xref by the url-to-xref extension at build time): ${url}`,
-            severity: 'info'
-          })
-        }
+      while ((match = DOCS_URL_RX.exec(content)) !== null) {
+        const url = match[0].replace(TRAILING_PUNCT_RX, '')
+        const { reason, severity } = explainRawDocsUrl(url, options.docsLinks)
+        issues.push({
+          line: getLineNumber(content, match.index),
+          message: `Raw docs.redpanda.com URL left as written (${reason}): ${url}`,
+          severity
+        })
       }
       return issues
     }
@@ -220,7 +226,9 @@ function getLineNumber(content, index) {
 /**
  * Validate a single file
  * @param {string} filePath - Path to the file
- * @param {Object} options - Validation options
+ * @param {Object} options - Validation options. options.docsLinks is the
+ *   docs link conversion that produced the file, as {result, context} (see
+ *   cli-utils/docs-links-to-xrefs.js), used to explain raw docs URLs.
  * @returns {Object} Validation result
  */
 function validateFile(filePath, options = {}) {
@@ -240,7 +248,7 @@ function validateFile(filePath, options = {}) {
     if (options.onlyRules && !options.onlyRules.includes(rule.name)) continue
 
     try {
-      const issues = rule.check(content, filePath)
+      const issues = rule.check(content, filePath, options)
       for (const issue of issues) {
         const entry = {
           rule: rule.name,

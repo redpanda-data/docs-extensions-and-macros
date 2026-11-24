@@ -1,0 +1,9 @@
+# Checks: xrefs without a module
+extends: existence
+message: "Include the module in the xref ('%s'): xref:module:path/page.adoc[]."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#internal-links-xref
+level: error
+scope: raw
+nonword: true
+tokens:
+  - '(?m)(?<!^//[^\n]*)(?<=xref:)(?![.{])[^:\[\s#]+\.adoc(?=[#\[])'

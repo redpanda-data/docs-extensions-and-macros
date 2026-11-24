@@ -95,7 +95,7 @@ add_topic_config_if_requested(
     if (fs.existsSync(outputJson)) fs.unlinkSync(outputJson);
     if (fs.existsSync(outputAdoc)) fs.unlinkSync(outputAdoc);
     if (fs.existsSync(clusterPropsJson)) fs.unlinkSync(clusterPropsJson);
-    fs.rmdirSync(mockSourcePath, { recursive: true });
+    fs.rmSync(mockSourcePath, { recursive: true, force: true });
   });
 
   it('extracts topic properties and generates JSON', () => {

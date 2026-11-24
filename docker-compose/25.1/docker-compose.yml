@@ -6,7 +6,7 @@ volumes:
   redpanda-0: null
   redpanda-1: null
   redpanda-2: null
-  minio: null
+  rustfs: null
 services:
   ##################
   # Redpanda Brokers #
@@ -56,8 +56,10 @@ services:
       timeout: 15s
       retries: 10
     depends_on:
-      minio:
-        condition: service_healthy
+      # Not just rustfs healthy: Redpanda checks the bucket at startup and
+      # aborts if it does not exist yet.
+      createbucket:
+        condition: service_completed_successfully
   redpanda-1:
     command:
       - redpanda
@@ -89,7 +91,7 @@ services:
       - 29644:9644
     depends_on:
       - redpanda-0
-      - minio
+      - rustfs
   redpanda-2:
     command:
       - redpanda
@@ -121,7 +123,7 @@ services:
       - 39644:9644
     depends_on:
       - redpanda-0
-      - minio
+      - rustfs
   ####################
   # Redpanda Console #
   ####################
@@ -161,8 +163,11 @@ services:
         console:
           # Configures Redpanda Console to fetch topic documentation from GitHub and display it in the UI.
           # See https://docs.redpanda.com/current/console/config/topic-documentation/
+          # Disabled by default: redpanda-data/docs is private, so with topic
+          # docs enabled and no token Console fails cloning the repo and never
+          # binds :8080. Set REDPANDA_TOPIC_DOCS_ENABLED=true to turn it on.
           topicDocumentation:
-            enabled: true
+            enabled: ${REDPANDA_TOPIC_DOCS_ENABLED:-false}
             git:
               enabled: true
               repository:
@@ -344,57 +349,62 @@ services:
       createtopic:
         condition: service_started
   ####################
-  # MinIO for Tiered Storage #
-  # See https://min.io/
+  # RustFS for Tiered Storage #
+  # See https://rustfs.com/
   #
-  # NOTE: MinIO is included in this quickstart for development and evaluation purposes only.
+  # NOTE: RustFS is included in this quickstart for development and evaluation purposes only.
   # It is not supported for production deployments of Redpanda.
   #
   # For production environments, use one of the supported object storage providers:
   # https://docs.redpanda.com/current/deploy/deployment-option/self-hosted/manual/production/requirements/#object-storage-providers-for-tiered-storage
   ####################
-  minio:
-    container_name: minio
-    image: minio/minio
-    command: server --console-address ":9001" /data
+  rustfs:
+    container_name: rustfs
+    image: rustfs/rustfs:1.0.0
     ports:
       - 9000:9000
       - 9001:9001
     environment:
-      MINIO_ROOT_USER: minio
-      MINIO_ROOT_PASSWORD: redpandaTieredStorage7
-      MINIO_SERVER_URL: "http://minio:9000"
-      MINIO_REGION_NAME: local
-      MINIO_DOMAIN: minio
+      RUSTFS_ACCESS_KEY: rustfs
+      RUSTFS_SECRET_KEY: redpandaTieredStorage7
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_REGION: local
+      # Lets Redpanda address the bucket virtual-host style, as redpanda.rustfs.
+      RUSTFS_SERVER_DOMAINS: rustfs
     volumes:
-      - minio:/data
+      - rustfs:/data
     networks:
       redpanda_network:
         aliases:
-          - redpanda.minio
+          - redpanda.rustfs
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/ready"]
-      interval: 10s
+      # /health/ready, not /health: /health returns 200 before storage and IAM
+      # are up, and the bucket create fails in that window.
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health/ready"]
+      interval: 5s
       timeout: 5s
-      retries: 3
-  mc:
+      retries: 12
+      start_period: 10s
+  # Creates the bucket Redpanda offloads to, then exits. Skips the create when
+  # the bucket survives a restart with the volumes kept. Reuses the RustFS
+  # image, whose curl signs S3 requests itself, so there is no extra image.
+  createbucket:
     depends_on:
-      minio:
+      rustfs:
         condition: service_healthy
-    image: minio/mc
-    container_name: mc
+    image: rustfs/rustfs:1.0.0
+    container_name: createbucket
     networks:
       - redpanda_network
-    environment:
-      - AWS_ACCESS_KEY_ID=minio
-      - AWS_SECRET_ACCESS_KEY=redpandaTieredStorage7
-      - AWS_REGION=local
     entrypoint: >
       /bin/sh -c "
-      until (/usr/bin/mc config host add minio http://minio:9000 minio redpandaTieredStorage7) do echo '...waiting...' && sleep 1; done;
-      /usr/bin/mc mb minio/redpanda;
-      /usr/bin/mc policy set public minio/redpanda;
-      tail -f /dev/null
+      S='--aws-sigv4 aws:amz:local:s3 --user rustfs:redpandaTieredStorage7';
+      for i in 1 2 3 4 5 6 7 8 9 10; do
+      curl -sf -o /dev/null -I $$S http://rustfs:9000/redpanda && exit 0;
+      curl -sf -X PUT $$S http://rustfs:9000/redpanda && exit 0;
+      sleep 3;
+      done;
+      exit 1
       "
   catalog:
     image: tabulario/iceberg-rest
@@ -402,13 +412,13 @@ services:
     networks:
       - redpanda_network
     depends_on:
-      - minio
+      - rustfs
     ports:
       - 8181:8181
     environment:
-      - AWS_ACCESS_KEY_ID=minio
+      - AWS_ACCESS_KEY_ID=rustfs
       - AWS_SECRET_ACCESS_KEY=redpandaTieredStorage7
       - AWS_REGION=local
       - CATALOG_WAREHOUSE=s3://redpanda/
       - CATALOG_IO__IMPL=org.apache.iceberg.aws.s3.S3FileIO
-      - CATALOG_S3_ENDPOINT=http://minio:9000
+      - CATALOG_S3_ENDPOINT=http://rustfs:9000

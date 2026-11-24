@@ -117,6 +117,16 @@ describe('path -> surface routing', () => {
     expect(routeFile('src/v/raft/BUILD')).toBeNull()
   })
 
+  test('rpk ai commands in cloudv2 route to rpk', () => {
+    expect(routeFile('apps/rpai/internal/cmd/mcp/google_identity.go')).toBe('rpk')
+    expect(routeFile('apps/rpai/main.go')).toBe('rpk')
+    expect(routeFile('apps/rpai/internal/cmd/mcp/google_identity_test.go')).toBeNull()
+    expect(routeFile('apps/rpai/internal/cmd/testdata/fixture.go')).toBeNull()
+    expect(routeFile('apps/rpai/README.md')).toBeNull()
+    // Other cloudv2 apps are not rpk ai.
+    expect(routeFile('apps/aigw/internal/server/google_id_token.go')).toBeNull()
+  })
+
   test('classifyDiff groups changed files by surface', () => {
     const changed = new Map([
       ['src/v/config/configuration.cc', new Set([10])],
@@ -180,8 +190,9 @@ describe('declaration-anchored diff mode (end-to-end, temp git repo)', () => {
     expect(finding.name).toBe('committed_offset')
     expect(finding.surface).toBe('metrics')
     expect(finding.in_pr_diff).toBe(true)
-    // The fixture's description also spells its aside as "i.e.".
-    expect(finding.rules.map((r) => r.id).sort()).toEqual(['latin-abbreviation', 'trailing-period'])
+    // The fixture's description also spells its aside as "i.e.", but on the
+    // first literal, which this PR did not change, so it is not reported.
+    expect(finding.rules.map((r) => r.id).sort()).toEqual(['trailing-period'])
 
     // Full-span anchoring: the finding covers the whole sm::description(...)
     // call, not just the edited line.

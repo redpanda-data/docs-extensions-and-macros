@@ -1,0 +1,13 @@
+# HELP redpanda_application_uptime_seconds_total Redpanda uptime in seconds
+# TYPE redpanda_application_uptime_seconds_total gauge
+redpanda_application_uptime_seconds_total{redpanda_revision="abc123",redpanda_version="v26.2.5"} 910.000000
+# HELP redpanda_cluster_brokers Number of configured, fully commissioned brokers in the cluster
+# TYPE redpanda_cluster_brokers gauge
+redpanda_cluster_brokers{} 3.000000
+# HELP redpanda_kafka_consumer_group_lag_max Maximum lag of a consumer group
+# TYPE redpanda_kafka_consumer_group_lag_max gauge
+redpanda_kafka_consumer_group_lag_max{redpanda_group="transactions-consumer",redpanda_topic="transactions"} 0
+# HELP redpanda_storage_disk_free_bytes Disk storage bytes free
+# TYPE redpanda_storage_disk_free_bytes gauge
+# UNIT redpanda_storage_disk_free_bytes bytes
+redpanda_storage_disk_free_bytes{redpanda_disk="data"} 5000000

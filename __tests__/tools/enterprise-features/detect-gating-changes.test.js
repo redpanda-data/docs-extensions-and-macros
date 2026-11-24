@@ -119,6 +119,90 @@ describe('detectGatingChanges: license_required_feature enum', () => {
   })
 })
 
+describe('detectGatingChanges: Community Edition core limit', () => {
+  // The limit is a constant in the enum header, outside the enum, so the
+  // weekly registry check and the enum scan never see it change.
+  const limitDiff = (hunkLines) => [
+    `diff --git a/${ENUM_HEADER} b/${ENUM_HEADER}`,
+    `--- a/${ENUM_HEADER}`,
+    `+++ b/${ENUM_HEADER}`,
+    '@@ -128,6 +128,6 @@ class enterprise_feature_report {',
+    ...hunkLines,
+    ''
+  ].join('\n')
+  const kinds = (diff) => detectGatingChanges(diff).map((f) => [f.change_kind, f.name])
+
+  test('a changed limit yields one finding that names the old and new values', () => {
+    const findings = detectGatingChanges(limitDiff([
+      ' /// shard, summed over every member broker.',
+      '-inline constexpr uint32_t community_core_limit = 50;',
+      '+inline constexpr uint32_t community_core_limit = 64;'
+    ]))
+    expect(findings).toEqual([expect.objectContaining({
+      surface: 'enterprise-feature',
+      name: 'community_core_limit',
+      change_kind: 'community-core-limit-changed'
+    })])
+    expect(findings[0].affected_pages).toHaveLength(1)
+    expect(findings[0].summary).toMatch(/changed from 50 to 64/)
+    expect(findings[0].summary).toMatch(/cluster_cores_over_limit/)
+    expect(findings[0].summary).toMatch(/enterprise-features\.yml/)
+  })
+
+  test('the PR that introduced the limit (streaming-enterprise 928) reports the feature and the limit', () => {
+    // The shape of the PR: a new enum member and, further down, the constant.
+    const diff = [
+      `diff --git a/${ENUM_HEADER} b/${ENUM_HEADER}`,
+      `--- a/${ENUM_HEADER}`,
+      `+++ b/${ENUM_HEADER}`,
+      '@@ -37,6 +42,9 @@ enum class license_required_feature {',
+      '     manual_finalization,',
+      '+    cluster_cores_over_limit,',
+      ' };',
+      '@@ -116,6 +128,52 @@ class enterprise_feature_report {',
+      ' };',
+      '+inline constexpr uint32_t community_core_limit = 50;',
+      '+uint32_t get_community_core_limit();',
+      ''
+    ].join('\n')
+    const findings = detectGatingChanges(diff)
+    expect(findings.map((f) => [f.change_kind, f.name])).toEqual([
+      ['enterprise-feature-added', 'cluster_cores_over_limit'],
+      ['community-core-limit-changed', 'community_core_limit']
+    ])
+    expect(findings[1].summary).toMatch(/was set to 50/)
+  })
+
+  test('a removed limit is reported, with a prompt to check whether it moved', () => {
+    const findings = detectGatingChanges(limitDiff(['-inline constexpr uint32_t community_core_limit = 50;']))
+    expect(findings.map((f) => f.change_kind)).toEqual(['community-core-limit-changed'])
+    expect(findings[0].summary).toMatch(/\(50\) was removed/)
+    expect(findings[0].summary).toMatch(/moved/)
+  })
+
+  test('reformatting the declaration without changing the value is not reported', () => {
+    expect(kinds(limitDiff([
+      '-inline constexpr uint32_t community_core_limit = 50;',
+      '+inline constexpr std::uint32_t community_core_limit = 50; // shards'
+    ]))).toEqual([])
+  })
+
+  test('a use of the name is not a declaration', () => {
+    expect(kinds(limitDiff([
+      '-        && limit <= community_core_limit,',
+      '+        && limit < community_core_limit,',
+      '-/// count at or below community_core_limit fails an assertion and aborts the',
+      '+/// count below community_core_limit fails an assertion and aborts the'
+    ]))).toEqual([])
+  })
+
+  test('a limit declared in another file is not read', () => {
+    const diff = limitDiff(['-inline constexpr uint32_t community_core_limit = 50;', '+inline constexpr uint32_t community_core_limit = 64;'])
+      .split(ENUM_HEADER).join('src/v/features/enterprise_features.cc')
+    expect(kinds(diff)).toEqual([])
+  })
+})
+
 describe('detectGatingChanges: config::enterprise<> wrappers', () => {
   test('the commit that gated features_auto_finalization yields one gate-added finding', () => {
     const findings = detectGatingChanges(fixture('se-property-gate-added.patch'))

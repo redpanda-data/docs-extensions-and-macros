@@ -4,6 +4,7 @@ const fs = require('fs')
 const path = require('path')
 
 const { SourceCache } = require('../source-text')
+const { STANDARD } = require('../standards')
 const {
   maskComments,
   findBalancedClose,
@@ -311,6 +312,8 @@ const RULES = [
   {
     name: 'rpk-short-multiline',
     description: 'Short must be a single line',
+    why: 'A Short is the one-line summary in command lists and the page description, so a second line breaks that summary.',
+    standard: STANDARD.rpk,
     severity: 'warning',
     check: (decl) => {
       if (decl.meta.kind !== 'short') return []
@@ -324,6 +327,8 @@ const RULES = [
   {
     name: 'rpk-terminal-period',
     description: 'Short and flag usage strings do not end with a period',
+    why: 'Short and flag usage strings are labels, not sentences, and the rpk docs formatter adds punctuation where the page needs it.',
+    standard: STANDARD.rpk,
     severity: 'warning',
     check: (decl) => {
       if (decl.meta.kind !== 'short' && decl.meta.kind !== 'flag') return []
@@ -339,6 +344,8 @@ const RULES = [
   {
     name: 'rpk-long-allcaps-heading',
     description: 'ALLCAPS line in Long becomes a === heading in the docs',
+    why: 'The rpk docs formatter turns an ALLCAPS line in Long into a section heading, so ALLCAPS used for emphasis becomes an unintended heading.',
+    standard: STANDARD.rpk,
     severity: 'info',
     check: (decl) => {
       if (decl.meta.kind !== 'long' || !decl.string) return []
@@ -355,6 +362,8 @@ const RULES = [
   {
     name: 'rpk-long-block-delimiter',
     description: 'A standalone ==== or ---- line in Long breaks AsciiDoc blocks',
+    why: 'A line of ==== or ---- in Long becomes an AsciiDoc block delimiter with nothing to close it, which breaks the rest of the generated page.',
+    standard: STANDARD.rpk,
     severity: 'warning',
     check: (decl) => {
       if (decl.meta.kind !== 'long' || !decl.string) return []

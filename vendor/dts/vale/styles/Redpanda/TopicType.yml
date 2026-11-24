@@ -1,0 +1,9 @@
+# Checks: an invalid :page-topic-type:
+extends: existence
+message: "'%s' is not a topic type. Use overview, concepts, tutorial, how-to, best-practices, reference, cookbook, troubleshooting, or lab."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/content-architecture.md#topic-types
+level: error
+scope: raw
+nonword: true
+tokens:
+  - '(?m)(?<=^:page-topic-type:[ \t]*)(?!(?:overview|concepts?|tutorial|how-to|best-practices|reference|cookbook|troubleshooting|lab)[ \t]*$)[^\s][^\n]*'
