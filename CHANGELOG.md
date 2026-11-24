@@ -1,5 +1,24 @@
 # Changelog
 
+## [5.68.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.67.2...v5.68.0) (2026-11-24)
+
+
+### Features
+
+* add metric: and metricval: macros ([#530](https://github.com/redpanda-data/docs-extensions-and-macros/issues/530)) ([956c14d](https://github.com/redpanda-data/docs-extensions-and-macros/commit/956c14d224ffbb269d6be466f8e58a10590afc1d))
+
+
+### Bug fixes
+
+* **docs-pr-review:** port the check-metadata hardening from docs-team-standards ([#528](https://github.com/redpanda-data/docs-extensions-and-macros/issues/528)) ([4daa8d5](https://github.com/redpanda-data/docs-extensions-and-macros/commit/4daa8d5035bd61a5b6fde6d251e1e578b618d9dc))
+* **k8s-release-notes:** add the Helm repository before updating it ([#551](https://github.com/redpanda-data/docs-extensions-and-macros/issues/551)) ([a88f88c](https://github.com/redpanda-data/docs-extensions-and-macros/commit/a88f88cc14a9d8754a9814f95883c3d235941279))
+
+
+### Reusable workflows and CI
+
+* add an optional tool trace to the claude-skill action ([#557](https://github.com/redpanda-data/docs-extensions-and-macros/issues/557)) ([c023218](https://github.com/redpanda-data/docs-extensions-and-macros/commit/c0232184ff3942fff16bd67522ffd9e94bb6cb21))
+* weekly report of how often doc-strings review suggestions are taken ([#504](https://github.com/redpanda-data/docs-extensions-and-macros/issues/504)) ([d3cb0d3](https://github.com/redpanda-data/docs-extensions-and-macros/commit/d3cb0d3a85e98d33522abdc26aa5e2b909c8526e))
+
 ## [5.67.2](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.67.1...v5.67.2) (2026-11-21)
 
 
