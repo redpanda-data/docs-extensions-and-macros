@@ -139,10 +139,10 @@ describeIfPython('redpanda-metrics-<version>.json', () => {
       expect(validate.errors).toBeNull()
     })
 
-    it('records the version, the number of sources and the counts', () => {
+    it('records the version, the number of sources per endpoint and the counts', () => {
       expect(dataset.schema_version).toBe(1)
       expect(dataset.redpanda_version).toBe('v0.0.1')
-      expect(dataset.generated_from).toEqual({ sources: 2 })
+      expect(dataset.generated_from).toEqual({ sources: 2, internal_sources: 1 })
       expect(dataset.counts).toEqual({ public: 5, internal: 2, observed: 7, source_only: 0, excluded: 0 })
     })
 
@@ -237,7 +237,7 @@ describeIfPython('redpanda-metrics-<version>.json', () => {
     })
 
     it('records the source ref', () => {
-      expect(dataset.generated_from).toEqual({ sources: 2, source_ref: 'v0.0.1' })
+      expect(dataset.generated_from).toEqual({ sources: 2, internal_sources: 1, source_ref: 'v0.0.1' })
     })
 
     it('adds the defining file to a scraped family', () => {

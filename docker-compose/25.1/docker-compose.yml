@@ -263,15 +263,13 @@ services:
   # See https://docs.redpanda.com/current/reference/rpk/rpk-topic/rpk-topic-create/
   ####################
   createtopic:
-    command:
-      - topic
-      - create
-      - edu-filtered-domains
-      - -X user=superuser
-      - -X pass=secretpassword
-      - -X brokers=redpanda-0:9092
-      - --topic-config
-      - redpanda.iceberg.mode=key_value
+    # deploytransform waits for this to exit 0, so a topic kept from an
+    # earlier run counts as success. rpk before 25.3 has no --if-not-exists.
+    entrypoint: /bin/sh
+    command: >
+      -c 'X="-X user=superuser -X pass=secretpassword -X brokers=redpanda-0:9092";
+      rpk topic create edu-filtered-domains $$X --topic-config redpanda.iceberg.mode=key_value
+      || rpk topic describe edu-filtered-domains $$X > /dev/null'
     image: docker.redpanda.com/redpandadata/${REDPANDA_DOCKER_REPO:-redpanda}:${REDPANDA_VERSION:-latest}
     networks:
       - redpanda_network
