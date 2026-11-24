@@ -1832,8 +1832,10 @@ function formatDescription(desc, customTransformations = null, options = {}) {
     // Fix fragmented backticks like `rpk` `--version` → rpk --version
     .replace(/`rpk`\s*`(--?[a-z][-a-z0-9]*)`/gi, 'rpk $1')
     // Remove single quotes around flags: '--flag' → --flag (backticks added later)
-    // Also handles '--flag/-f', '--flag help', and similar patterns
-    .replace(/'(--[a-z][-a-z0-9]*(?:\/-[a-z])?(?:\s+\w+)?)'/gi, '$1')
+    // Also handles '--flag/-f', '--flag help', '--flag=value', and similar
+    // patterns. Without =value, '--update-default=false' kept its quotes
+    // and the flag span swallowed the closing one.
+    .replace(/'(--[a-z][-a-z0-9]*(?:\/-[a-z])?(?:=[^\s']+|\s+\w+)?)'/gi, '$1')
     .replace(/'(-[a-z])'/gi, '$1')
     // Single-quoted constants are code: state and enum names such as
     // 'FAILED_OVER' or 'ACTIVE' (rpk shadow failover). Uppercase only, so
@@ -2006,6 +2008,14 @@ function formatDescription(desc, customTransformations = null, options = {}) {
 
   // Add backticks around home directory paths (~/.bashrc, ~/.zshrc, ~/.config/...)
   result = result.replace(/(?<![`\w])(~\/\.(?:[^\s,;:)`]*[^\s,;:)`.!?])?)/g, '`$1`')
+
+  // Add backticks around relative paths under a dot folder (.claude/skills,
+  // .redpanda/skills.yaml). Bare, such a path at the start of a table cell
+  // or line is an AsciiDoc block title, and Asciidoctor drops it (rpk ai
+  // skill sync). Prose segments only, so paths already in a span are kept.
+  result = result.split(/(`[^`]*`)/).map((segment, idx) =>
+    idx % 2 === 1 ? segment : segment.replace(/(?<![\w/~.$\\-])(\.[a-z][\w-]*\/(?:[^\s,;:)`]*[^\s,;:)`.!?])?)/gi, '`$1`')
+  ).join('')
 
   // Add backticks around common package names
   result = result.replace(/(?<![`\w-])(bash-completion)(?![`\w-])/g, '`$1`')
@@ -3612,6 +3622,7 @@ module.exports = {
   convertNumberedListsToAsciiDoc,
   convertIndentedTablesToAsciiDoc,
   convertIndentedCodeBlocksToAsciiDoc,
+  isListItemContinuation,
   decodeHtmlEntities,
   parseDescriptionSections,
   ensurePeriod,
