@@ -3825,7 +3825,8 @@ programCli
  * exact when the label is the command in backticks and rpkcmd: would link the
  * same page); connect walks every pipeline config in YAML blocks and
  * examples files (unknown-component, unknown-field, deprecated components and
- * fields), compares YAML comments that state a default ("# Optional
+ * fields, and on a Cloud checkout cloud-unavailable-component for a
+ * component Cloud does not offer), compares YAML comments that state a default ("# Optional
  * (default: ...)") and callouts and sentences that state one with the Connect
  * data, and checks each hand-written xref to a Connect component page, field
  * anchor or Bloblang page on every component that renders the file

@@ -321,3 +321,40 @@ describe('Connect prose', () => {
     expect(f).toMatchObject({ status: 'unverifiable', reason: 'cloud-unavailable' })
   })
 })
+
+// A Cloud example that uses a component Cloud does not offer. Cloud offers a
+// component when the Connect data says so, or when Cloud has a page for it
+// (ollama_chat: cloudSupported is false in the data, and cloud-docs has
+// modules/develop/pages/connect/components/processors/ollama_chat.adoc).
+describe('components a Cloud example cannot run', () => {
+  const unavailable = (files, opts) => findings(files, opts).filter((f) => f.reason === 'cloud-unavailable-component')
+  const file = 'modules/develop/pages/connect/x.adoc'
+  const STDOUT = page(yaml('input:', '  generate:', '    mapping: root = {}', 'output:', '  stdout: {}'))
+
+  test('an output with cloudSupported: false and no Cloud page is an error on Cloud', () => {
+    const [f, ...rest] = unavailable({ [file]: STDOUT }, CLOUD)
+    expect(rest).toEqual([])
+    expect(f).toMatchObject({ status: 'reference', severity: 'error', componentType: 'output', component: 'stdout', line: 9, failing: true })
+    expect(f.note).toContain("output 'stdout' is not available in Redpanda Cloud")
+  })
+
+  test('a component Cloud has a page for is not reported, whatever the data says', () => {
+    const files = {
+      [file]: page(yaml('input:', '  generate:', '    mapping: root = {}', 'pipeline:', '  processors:', '    - ollama_chat:', '        model: llama3', 'output:', '  drop: {}')),
+    }
+    expect(unavailable(files, CLOUD).map((f) => f.component)).toEqual(['ollama_chat'])
+    files['modules/develop/pages/connect/components/processors/ollama_chat.adoc'] = page('Generated.')
+    expect(unavailable(files, CLOUD)).toEqual([])
+  })
+
+  test('the same example is not reported outside Cloud', () => {
+    expect(unavailable({ 'modules/guides/pages/x.adoc': STDOUT })).toEqual([])
+  })
+
+  test('an examples file on Cloud is checked too', () => {
+    const example = 'modules/develop/examples/connect/x.yaml'
+    expect(unavailable({ [example]: ['input:', '  stdin: {}', 'output:', '  drop: {}', ''].join('\n') }, CLOUD)).toEqual([
+      expect.objectContaining({ file: example, componentType: 'input', component: 'stdin', severity: 'error', line: 2 }),
+    ])
+  })
+})
