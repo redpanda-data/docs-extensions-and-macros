@@ -91,6 +91,61 @@ describe('doc-tools check-reference-values', () => {
     expect(run(dir, ['--data-file', rpkData(dir), '--fail-on', 'any']).code).toBe(1)
   })
 
+  describe('--diff', () => {
+    // A repo whose base branch already has the mismatch on line 10.
+    function gitRepo () {
+      const dir = repo({ 'modules/x/pages/m.adoc': MISMATCH })
+      const git = (...args) => spawnSync('git', args, { cwd: dir, encoding: 'utf8' })
+      git('init', '-q', '-b', 'main')
+      git('-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '-A')
+      git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'base')
+      git('checkout', '-q', '-b', 'pr')
+      const commit = () => {
+        git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qam', 'pr')
+      }
+      return { dir, git, commit }
+    }
+
+    test('a finding on a line the branch did not change does not fail, and is annotated as a warning', () => {
+      const { dir, commit } = gitRepo()
+      const page = path.join(dir, 'modules/x/pages/m.adoc')
+      fs.writeFileSync(page, fs.readFileSync(page, 'utf8').replace('= M', '= M2'))
+      commit()
+      const r = run(dir, ['--data-file', rpkData(dir), '--files', 'modules/x/pages/m.adoc', '--diff', 'main', '--annotations', 'github'])
+      expect(r.code).toBe(0)
+      expect(r.report).toMatchObject({ failing: 0, preexisting: 1 })
+      expect(r.stdout).toContain('::warning file=modules/x/pages/m.adoc,line=10::Already on the base branch, not failing: rpk mismatch')
+      // Without --diff the same scan fails, so the old finding is still real.
+      expect(run(dir, ['--data-file', rpkData(dir), '--files', 'modules/x/pages/m.adoc']).code).toBe(1)
+    })
+
+    test('a finding on a line the branch changed still fails', () => {
+      const { dir, commit } = gitRepo()
+      const page = path.join(dir, 'modules/x/pages/m.adoc')
+      fs.writeFileSync(page, fs.readFileSync(page, 'utf8').replace('defaults to 3.', 'defaults to 3 partitions.'))
+      commit()
+      const r = run(dir, ['--data-file', rpkData(dir), '--files', 'modules/x/pages/m.adoc', '--diff', 'main'])
+      expect(r.code).toBe(1)
+      expect(r.report.preexisting).toBe(0)
+    })
+
+    test('a base git cannot diff against is a setup error (exit 2), not a failed check', () => {
+      const { dir } = gitRepo()
+      const r = run(dir, ['--data-file', rpkData(dir), '--files', 'modules/x/pages/m.adoc', '--diff', 'origin/no-such-branch'])
+      expect(r.code).toBe(2)
+      expect(r.stderr).toContain('Error: --diff origin/no-such-branch: git diff failed')
+    })
+
+    test('a new file counts as changed throughout', () => {
+      const { dir, git } = gitRepo()
+      fs.writeFileSync(path.join(dir, 'modules/x/pages/n.adoc'), MISMATCH)
+      git('add', '-A')
+      git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'new page')
+      const r = run(dir, ['--data-file', rpkData(dir), '--files', 'modules/x/pages/n.adoc', '--diff', 'main'])
+      expect(r.code).toBe(1)
+    })
+  })
+
   test('exit 2 on setup errors', () => {
     const noAntora = repo({}, null)
     expect(run(noAntora, []).code).toBe(2)

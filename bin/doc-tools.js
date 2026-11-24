@@ -3904,6 +3904,7 @@ programCli
   .option('--kinds <list>', 'Comma-separated kinds to run: properties, rpk, connect (default: all; a named kind with no data is a setup error)')
   .option('--data-file <path...>', 'Dataset files that bypass selection, recognized by name: redpanda-properties-v<tag>.json, rpk-v<version>.json (the docs-data snapshot works), connect-<version>.json')
   .option('--files <path...>', 'Scan only these files, relative to --docs-dir')
+  .option('--diff <base>', 'Fail only on findings on lines added or changed since <base> (git diff <base>...HEAD); findings on other lines are reported as already on the base branch')
   .option('--report-dir <path>', 'Where to write reference-values-report.json and reference-values-report.md', '.')
   .option('--write', 'Apply auto-safe exact replacements with the value macros, and rewrite writable aliases and deprecated names to the main or replacement name')
   .option('--write-links', 'With --write, also turn unlinked mentions into rpkcmd:, connect: and blobl: links, keeping the text as written')

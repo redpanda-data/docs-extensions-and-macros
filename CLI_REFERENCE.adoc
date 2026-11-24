@@ -1672,6 +1672,9 @@ Dataset files that bypass selection, recognized by name: redpanda-properties-v<t
 `--files <path...>`::
 Scan only these files, relative to --docs-dir
 
+`--diff <base>`::
+Fail only on findings on lines added or changed since <base> (git diff <base>...HEAD); findings on other lines are reported as already on the base branch
+
 `--report-dir <path>`::
 Where to write reference-values-report.json and reference-values-report.md (default: ".")
 
