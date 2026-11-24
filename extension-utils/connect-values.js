@@ -468,7 +468,7 @@ function resolveConnectValue ({ registry, component, path: target, field: reques
     }
   }
   if (cloud && FIELDS[fieldName].cloudHidden) {
-    return { ok: false, kind: 'cloud-hidden', field, registry, message: `${call}: the Connect reference does not state '${field}' for Cloud (it renders "Requires version" only outside env-cloud), so this Cloud page renders <unknown ${field}>. Put the sentence in an ifndef::env-cloud[] block.` }
+    return { ok: false, kind: 'cloud-hidden', field, registry, message: `${call}: the Connect reference does not state '${field}' for Cloud (it shows the Since badge only outside env-cloud), so this Cloud page renders <unknown ${field}>. Put the sentence in an ifndef::env-cloud[] block.` }
   }
   if (entryField && entryField.is_deprecated === true) {
     warnings.push({ kind: 'deprecated-field', message: `${call}: '${rawTarget}' is deprecated in ${dataset}; the Connect reference does not list deprecated fields.` })

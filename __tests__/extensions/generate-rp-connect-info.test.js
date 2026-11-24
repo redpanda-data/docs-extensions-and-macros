@@ -275,6 +275,11 @@ describe('generate-rp-connect-info extractDescription', () => {
     expect(extractDescription(src)).toBe('Attribute description wins')
   })
 
+  test('skips a badge-only paragraph and uses the prose after it', () => {
+    const src = page('= Stream\n\ncomponent_type_dropdown::[]\n\nbadge::[label=Beta, tooltip={page-beta-text}]\n\nReads records from the configured stream.\n')
+    expect(extractDescription(src)).toBe('Reads records from the configured stream.')
+  })
+
   // The :description: attribute is AsciiDoc too, and it is the source almost
   // every card uses, so it needs the same cleaning as the body fallback.
   describe('the description attribute path', () => {
@@ -401,6 +406,11 @@ describe('generate-rp-connect-info extractDescription', () => {
   test('drops the "Introduced in version" suffix', () => {
     const src = page('= Kafka\n\ncomponent_type_dropdown::[]\n\nDoes something useful with streams. Introduced in version 4.53.0.\n')
     expect(extractDescription(src)).toBe('Does something useful with streams.')
+  })
+
+  test('drops badge macros such as the Since badge', () => {
+    expect(ext.cleanDescription('Does something useful. badge::[label=Since 4.53.0]')).toBe('Does something useful.')
+    expect(ext.cleanDescription('badge::[label=Beta, tooltip={page-beta-text}] Reads streams.')).toBe('Reads streams.')
   })
 
   test('keeps decimals inside the first sentence when truncating', () => {

@@ -122,6 +122,56 @@ describe('migrateDescriptionsToPartials', () => {
     expect(run({ write: true }).headers).toEqual([]);
   });
 
+  test('a frozen "Introduced in version" line is covered by the partial\'s Since badge', () => {
+    writePage('outputs', 'sql_raw', [
+      '= sql_raw',
+      '// tag::meta[]',
+      ':description: Executes a query.',
+      '// end::meta[]',
+      '',
+      'component_type_dropdown::[]',
+      '',
+      'Executes a query.',
+      '',
+      'Introduced in version 3.65.0.',
+      '',
+      'include::connect:components:partial$fields/outputs/sql_raw.adoc[]',
+      '',
+    ]);
+    writePartial('outputs', 'sql_raw', partial({
+      description: 'Executes a query.',
+      body: [
+        'Executes a query.',
+        '',
+        'ifndef::env-cloud[]',
+        'badge::[label=Since 3.65.0, product=Redpanda Connect]',
+        'endif::[]',
+      ].join('\n'),
+    }));
+
+    expect(run({ write: true }).bodies).toEqual(['outputs/sql_raw']);
+    expect(readPage('outputs', 'sql_raw')).not.toContain('Introduced in version');
+  });
+
+  test('a Since badge for a different version does not cover the frozen line', () => {
+    writePage('outputs', 'sql_raw', [
+      '= sql_raw',
+      '',
+      'component_type_dropdown::[]',
+      '',
+      'Introduced in version 3.65.0.',
+      '',
+      'include::connect:components:partial$fields/outputs/sql_raw.adoc[]',
+      '',
+    ]);
+    writePartial('outputs', 'sql_raw', partial({
+      description: 'Executes a query.',
+      body: 'badge::[label=Since 4.0.0, product=Redpanda Connect]',
+    }));
+
+    expect(run({ write: true }).bodies).toEqual([]);
+  });
+
   test('refuses the body rewire when the page intro carries prose the partial does not', () => {
     writePage('processors', 'branch', [
       '= branch',

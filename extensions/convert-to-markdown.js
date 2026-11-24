@@ -372,13 +372,22 @@ function generateFrontmatter(page, siteUrl) {
 // macro lets a playbook override it via the enterprise-feature-role document
 // attribute, so match on a substring rather than the exact value.
 const ENTERPRISE_FEATURE_CLASS = 'enterprise-feature'
+// The hidden text marker inside that span (macros/enterprise.js).
+const ENTERPRISE_MARKER_CLASS = 'enterprise-feature-marker'
 
 // Status words collected into the single trailing parenthetical.
 const ENTERPRISE_STATUS = 'enterprise'
 const BETA_STATUS = 'beta'
 
-// Class the badge macro puts on a beta badge.
+// Class older badge macro output puts on a beta badge (still emitted beside
+// the meaning class, and still present on pages built before it).
 const BETA_BADGE_CLASS = 'badge--beta'
+
+// The docs-ui meaning badge: `rp-badge rp-badge--NAME`, with the meaning in
+// the class and the label as text.
+const MEANING_BADGE_PATTERN = /(?:^|\s)rp-badge--([a-z][a-z-]*)(?:\s|$)/
+// Modifier classes that share the prefix but name no meaning.
+const BADGE_MODIFIERS = new Set(['sm'])
 
 // Explicit textual marker for enterprise features in Markdown output.
 const ENTERPRISE_MARKER = `(${ENTERPRISE_STATUS})`
@@ -397,10 +406,48 @@ function formatStatusMarker (statuses) {
   return words.length ? `(${words.join(', ')})` : ''
 }
 
+/**
+ * The meaning a docs-ui badge marks (`beta` for `rp-badge rp-badge--beta`), or
+ * `beta` for an older `badge badge--beta`, or null for anything else.
+ */
+function badgeMeaning (node) {
+  if (!node || (node.nodeName !== 'SPAN' && node.nodeName !== 'A')) return null
+  const classAttr = node.getAttribute?.('class') || node.className || ''
+  if (typeof classAttr !== 'string') return null
+  const names = classAttr.split(/\s+/)
+    .map((c) => (c.startsWith('rp-badge--') ? c.slice('rp-badge--'.length) : null))
+    .filter((name) => name && !BADGE_MODIFIERS.has(name) && MEANING_BADGE_PATTERN.test(`rp-badge--${name}`))
+  if (names.length) return names[0]
+  if (node.nodeName === 'SPAN' && classAttr.split(/\s+/).includes(BETA_BADGE_CLASS)) return BETA_STATUS
+  return null
+}
+
+/**
+ * The word a badge contributes to the trailing parenthetical: its label, with
+ * ordinary words lowercased ("Limited availability" -> "limited availability",
+ * "Since v25.1" -> "since v25.1") and acronyms such as BYOC kept as they are.
+ */
+function badgeStatusWord (node) {
+  const label = (node.textContent || '').replace(/[()]/g, '').replace(/\s+/g, ' ').trim()
+  if (!label) return badgeMeaning(node)
+  return label.split(' ')
+    .map((word) => (word.length > 1 && word === word.toUpperCase() && /[A-Z]/.test(word) ? word : word.toLowerCase()))
+    .join(' ')
+}
+
 function hasClass (node, className) {
   if (!node || node.nodeName !== 'SPAN') return false
   const classAttr = node.getAttribute?.('class') || node.className || ''
   return typeof classAttr === 'string' && classAttr.includes(className)
+}
+
+/** The previous sibling element, skipping whitespace text nodes. */
+function previousElementSibling (node) {
+  let sibling = node && node.previousSibling
+  while (sibling && sibling.nodeType === 3 && !(sibling.textContent || '').trim()) {
+    sibling = sibling.previousSibling
+  }
+  return sibling && sibling.nodeType === 1 ? sibling : null
 }
 
 /**
@@ -416,7 +463,11 @@ function nextElementSibling (node) {
 }
 
 /**
- * Turndown rules that keep the enterprise and beta signals in Markdown output.
+ * Turndown rules that keep the enterprise and badge meanings in Markdown output.
+ *
+ * Meaning badges (`rp-badge rp-badge--NAME`, and the older `badge--beta`)
+ * become one parenthetical each, such as "(beta)", "(deprecated)", or
+ * "(since v25.1)", so the meaning survives without its CSS.
  *
  * In HTML both signals are carried by things Turndown discards. The enterprise
  * badge is drawn by CSS from the span's class and explained by a title tooltip,
@@ -444,8 +495,20 @@ function createEnterpriseFeatureRules () {
   // Scoped per call so each converter tracks its own deferred markers.
   const deferredToBadge = new WeakSet()
 
+  // The macro's hidden "(Enterprise)" text. The Markdown output has its own
+  // marker, merged with any badge after the term, so this one is dropped.
+  // After a prop: mention's <code> it is the only marker, so it becomes the
+  // Markdown one: `audit_enabled` (enterprise).
+  const enterpriseMarker = {
+    filter: (node) => hasClass(node, ENTERPRISE_MARKER_CLASS),
+    replacement: (_, node) => {
+      const previous = previousElementSibling(node)
+      return previous && previous.nodeName === 'CODE' ? ENTERPRISE_MARKER : ''
+    },
+  }
+
   const enterpriseFeature = {
-    filter: (node) => hasClass(node, ENTERPRISE_FEATURE_CLASS),
+    filter: (node) => hasClass(node, ENTERPRISE_FEATURE_CLASS) && !hasClass(node, ENTERPRISE_MARKER_CLASS),
     replacement: (content, node) => {
       const inner = (content || '').trim()
       // An empty span carries no feature to mark.
@@ -454,7 +517,9 @@ function createEnterpriseFeatureRules () {
       if (inner.toLowerCase().endsWith(ENTERPRISE_MARKER)) return inner
 
       const sibling = nextElementSibling(node)
-      if (hasClass(sibling, BETA_BADGE_CLASS)) {
+      // Defer only to a badge the status rule replaces. A linked use-case or
+      // neutral badge keeps its link and never emits the marker.
+      if (badgeMeaning(sibling) && badgeMeaning(sibling) !== ENTERPRISE_STATUS && betaBadge.filter(sibling)) {
         // The badge renders "(enterprise, beta)" for both of us.
         deferredToBadge.add(sibling)
         return inner
@@ -463,20 +528,31 @@ function createEnterpriseFeatureRules () {
     },
   }
 
+  // Every meaning badge, not only beta: `rp-badge rp-badge--deprecated` reads
+  // "(deprecated)", `rp-badge--since` "(since v25.1)". A use-case or neutral
+  // badge that links somewhere keeps its link, since the link is the content.
   const betaBadge = {
-    filter: (node) => hasClass(node, BETA_BADGE_CLASS),
-    replacement: (content, node) =>
-      deferredToBadge.has(node)
-        ? formatStatusMarker([ENTERPRISE_STATUS, BETA_STATUS])
-        : formatStatusMarker([BETA_STATUS]),
+    filter: (node) => {
+      const meaning = badgeMeaning(node)
+      if (meaning === null) return false
+      return !(node.nodeName === 'A' && (meaning === 'use-case' || meaning === 'neutral'))
+    },
+    replacement: (content, node) => {
+      const meaning = badgeMeaning(node)
+      const word = meaning === BETA_STATUS ? BETA_STATUS : meaning === ENTERPRISE_STATUS ? ENTERPRISE_STATUS : badgeStatusWord(node)
+      return deferredToBadge.has(node)
+        ? formatStatusMarker([ENTERPRISE_STATUS, word])
+        : formatStatusMarker([word])
+    },
   }
 
-  return { enterpriseFeature, betaBadge }
+  return { enterpriseMarker, enterpriseFeature, betaBadge }
 }
 
 module.exports.createEnterpriseFeatureRules = createEnterpriseFeatureRules
 module.exports.generateFrontmatter = generateFrontmatter
 module.exports.formatStatusMarker = formatStatusMarker
+module.exports.badgeMeaning = badgeMeaning
 module.exports.ENTERPRISE_MARKER = ENTERPRISE_MARKER
 module.exports.readGeneratedMarker = readGeneratedMarker
 module.exports.findIncludeTargets = findIncludeTargets
@@ -1018,10 +1094,22 @@ function createTurndownForPage ({ pageUrl, logger }) {
         const contentCell = node.querySelector('td.content')
         if (!iconCell || !contentCell) return ''
 
+        // The type comes from the block's own class (admonitionblock warning),
+        // which Asciidoctor emits with or without font icons. With font icons
+        // the cell holds <i class="fa icon-warning">; without them it holds
+        // <div class="title">Warning</div>, which is a label, not a custom title.
         const iconEl = iconCell.querySelector('i')
-        const classAttr = iconEl?.className || ''
-        const match = classAttr.match(/icon-([a-z]+)/i)
-        const type = match ? match[1].toUpperCase() : 'NOTE'
+        const ADMONITION_TYPES = ['note', 'tip', 'important', 'caution', 'warning']
+        const block = node.parentNode
+        const blockClasses = ((block && block.getAttribute && block.getAttribute('class')) || '').split(/\s+/)
+        const iconMatch = (iconEl?.className || '').match(/icon-([a-z]+)/i)
+        const labelText = iconCell.textContent.trim().toLowerCase()
+        const type = (
+          (blockClasses.includes('admonitionblock') && blockClasses.find((c) => ADMONITION_TYPES.includes(c))) ||
+          (iconMatch && iconMatch[1]) ||
+          (ADMONITION_TYPES.includes(labelText) ? labelText : null) ||
+          'note'
+        ).toUpperCase()
 
         const titleEl =
           // Only the admonition's own title, not one of a block nested in it.
@@ -1060,6 +1148,7 @@ function createTurndownForPage ({ pageUrl, logger }) {
 
     // Keep the enterprise-license signal, which is otherwise CSS-only.
     const enterpriseRules = createEnterpriseFeatureRules()
+    turndownInstance.addRule('enterprise-feature-marker', enterpriseRules.enterpriseMarker)
     turndownInstance.addRule('enterprise-feature', enterpriseRules.enterpriseFeature)
     turndownInstance.addRule('beta-badge', enterpriseRules.betaBadge)
 
