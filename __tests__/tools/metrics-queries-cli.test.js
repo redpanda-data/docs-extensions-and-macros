@@ -385,6 +385,8 @@ describe('queries mode in generate-cluster-docs.sh', () => {
       `export KEEP_CLUSTER=${keep}`,
       'QUERIES_CHECKED=0',
       'RUN_FINISHED=0',
+      // These runs got as far as starting the cluster.
+      'CLUSTER_STARTING=1',
       slice('teardown() {', 'if (( METRICS_EXTRAS )); then'),
       `QUERIES_CHECKED=${checked}`,
       ending
