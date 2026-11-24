@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://docs.redpanda.com/schemas/metric-overrides.schema.json",
   "title": "Metric overrides",
-  "description": "What writers add to the generated metrics data. An override is a stopgap or enrichment. A stopgap stands in for something the tooling should produce: a better description than the help string in Redpanda, or the labels of a metric the metrics cluster did not export. The release run deletes a stopgap as soon as the tooling produces the same thing. Enrichment is what no tool can produce: text for one audience, Cloud availability, links, sections and usage guidance. A run with --retire-overrides also deletes an override whole when the source at the release being generated no longer registers its metric and the dataset of an earlier release in --dataset-dir has it. Without such a dataset the override is kept and reported, because its metric may be for a release that is not out yet. An override for a metric that is still in source and has a written reason for not being exported is kept and reported too. doc-tools generate metrics-docs --overrides merges this file into redpanda-metrics-<tag>.json.",
+  "description": "What writers add to the generated metrics data. An override is a stopgap or enrichment. A stopgap stands in for something the tooling should produce: a better description than the help string in Redpanda, or the labels of a metric the metrics cluster did not export. The release run deletes a stopgap as soon as the tooling produces the same thing. Enrichment is what no tool can produce: text for one audience, Cloud availability, links, sections and usage guidance. A run with --retire-overrides also deletes an override whole when the source at the release being generated no longer registers its metric and the dataset of an earlier release in --dataset-dir has it. That needs an inventory of the release being generated in which every registration was read; with any other inventory no override is deleted whole. The file is rewritten only after every output is written. Without such a dataset the override is kept and reported, because its metric may be for a release that is not out yet. An override for a metric that is still in source and has a written reason for not being exported is kept and reported too. doc-tools generate metrics-docs --overrides merges this file into redpanda-metrics-<tag>.json.",
   "type": "object",
   "additionalProperties": false,
   "required": ["metrics"],
@@ -43,7 +43,7 @@
         "unit": { "type": ["string", "null"], "description": "Unit of the value, when the name does not say it. A stopgap: deleted when the tooling gives the same unit." },
         "labels": {
           "type": "array",
-          "description": "For a metric the cluster exported: a description and the complete values of labels it has, which is enrichment and stays. For a metric the cluster did not export: its labels, read from the source file the gap report names. Giving this list, even an empty one, covers that gap. That part is a stopgap: once the cluster exports the metric, a label entry with only a name is deleted, and so is an entry for a label the cluster does not have.",
+          "description": "For a metric the cluster exported: a description and the complete values of labels it has, which is enrichment and stays. For a metric the cluster did not export: its labels, read from the source file the gap report names. Giving this list, even an empty one, covers that gap, unless the dataset of an earlier release in --dataset-dir has the metric as exported: then the scrape lost it, the run logs an error, and --strict fails. That part is a stopgap: once the cluster exports the metric, a label entry with only a name is deleted. An entry with a description for a label the cluster does not have is kept, and the run reports the disagreement.",
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -82,7 +82,7 @@
         },
         "requires": {
           "type": "array",
-          "description": "What a cluster needs before it exports the metric. A stopgap for a metric the tooling does not know about yet: it replaces the list from the tooling, and is deleted when the tooling gives the same list.",
+          "description": "What a cluster needs before it exports the metric. A stopgap for a metric the tooling does not know about yet: it replaces the list from the tooling, and is deleted when the tooling gives the same list. It is kept when a requirement with a releases list matches the metric, because that requirement may hold for one release and not another.",
           "minItems": 1,
           "items": {
             "oneOf": [

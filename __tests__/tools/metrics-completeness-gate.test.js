@@ -58,8 +58,8 @@ describeIfPython('metrics completeness gate', () => {
   let workDir
   let counter = 0
 
-  const run = ({ pub = PUBLIC, int = INTERNAL, inventory = INVENTORY, expectedAbsent = EXPECTED_ABSENT, strict = true } = {}) => {
-    const extra = strict ? ['--strict'] : []
+  const run = ({ pub = PUBLIC, int = INTERNAL, inventory = INVENTORY, inventoryFile, expectedAbsent = EXPECTED_ABSENT, strict = true, more = [] } = {}) => {
+    const extra = [...(strict ? ['--strict'] : []), ...more]
     counter += 1
     const dir = path.join(workDir, `run-${counter}`)
     fs.mkdirSync(dir)
@@ -72,7 +72,7 @@ describeIfPython('metrics completeness gate', () => {
     const args = ['-I', SCRIPT, 'v0.0.1', '--output-dir', out, '--skip-pages',
       '--public-file', write('pub.txt', pub.map((f) => family(...f)).join('')),
       '--internal-file', write('int.txt', int.map((f) => family(...f)).join('')),
-      '--inventory', write('inventory.json', JSON.stringify(inventory))]
+      '--inventory', inventoryFile || write('inventory.json', JSON.stringify(inventory))]
     if (expectedAbsent) args.push('--expected-absent', write('expected-absent.json', JSON.stringify(expectedAbsent)))
     const result = spawnSync(PYTHON, [...args, ...extra], { cwd: dir, encoding: 'utf8' })
     const files = fs.existsSync(out) ? fs.readdirSync(out) : []
@@ -82,7 +82,7 @@ describeIfPython('metrics completeness gate', () => {
     const gaps = files.includes('metrics-gaps.json')
       ? JSON.parse(fs.readFileSync(path.join(out, 'metrics-gaps.json'), 'utf8'))
       : null
-    return { status: result.status, log: `${result.stdout || ''}${result.stderr || ''}`, files, dataset, gaps }
+    return { status: result.status, log: `${result.stdout || ''}${result.stderr || ''}`, files, outExists: fs.existsSync(out), dataset, gaps }
   }
 
   beforeAll(() => {
@@ -237,5 +237,44 @@ describeIfPython('metrics completeness gate', () => {
     const result = run({ expectedAbsent: ['vectorized_smp_*'] })
     expect(result.status).toBe(1)
     expect(result.log).toMatch(/Cannot read the expected-absent file/)
+  })
+
+  it('rejects an expected-absent reason that is not a written string', () => {
+    const result = run({ expectedAbsent: { 'vectorized_smp_*': 5 } })
+    expect(result.status).toBe(1)
+    expect(result.log).toMatch(/the reason for vectorized_smp_\* must be a non-empty string/)
+    expect(result.files).toEqual([])
+  })
+
+  it('rejects an inventory of another release, and writes nothing', () => {
+    const result = run({ inventory: { ...INVENTORY, ref: 'v0.0.2' } })
+    expect(result.status).toBe(1)
+    expect(result.log).toMatch(/is for v0\.0\.2, not v0\.0\.1/)
+    expect(result.outExists).toBe(false)
+  })
+
+  it('accepts an inventory whose ref is a commit or branch, not a release', () => {
+    expect(run({ inventory: { ...INVENTORY, ref: 'dev' } }).status).toBe(0)
+  })
+
+  it('rejects an inventory whose unresolved list holds something other than registrations', () => {
+    const result = run({ inventory: { ...INVENTORY, unresolved: [null] } })
+    expect(result.status).toBe(1)
+    expect(result.log).toMatch(/is not valid: each "unresolved" item must be an object/)
+  })
+
+  describe('--check-only', () => {
+    it('prints the missing count, and creates no output directory', () => {
+      const result = run({ pub: PUBLIC.slice(0, 1), strict: false, more: ['--check-only'] })
+      expect(result.status).toBe(4)
+      expect(result.log).toMatch(/1 metric families in source are not exported yet/)
+      expect(result.outExists).toBe(false)
+    })
+
+    it('still says why when the inventory cannot be read', () => {
+      const result = run({ inventoryFile: path.join(workDir, 'no-such-inventory.json'), strict: false, more: ['--check-only'] })
+      expect(result.status).toBe(1)
+      expect(result.log).toMatch(/Cannot read the source inventory .*no-such-inventory\.json/)
+    })
   })
 })

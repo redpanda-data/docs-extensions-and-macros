@@ -29,6 +29,7 @@
  * Registered by macros/prop, so every playbook that registers prop: has it.
  */
 
+const { deprecationAcknowledged } = require('../extension-utils/deprecation-ack')
 const bloblang = require('../extension-utils/bloblang-values')
 const connectLinks = require('../extension-utils/connect-links')
 const connectValues = require('../extension-utils/connect-values')
@@ -83,7 +84,9 @@ function bloblvalCall (config, parent, target, attributes, { block = false } = {
     if (registry) categoryOrder = connectLinks.categoryOrder(contentCatalog, registry.data)
   }
   const result = bloblang.resolveBloblValue({ registry, call: written, field: requested, format, cloud, category, categoryOrder, filePath: src.path, macro })
-  if (mode !== 'off') for (const warning of result.warnings || []) logger.warn(warning.message)
+  const acknowledged = deprecationAcknowledged(attributes)
+  // deprecated=ok: the call says it names a deprecated function or method on purpose.
+  if (mode !== 'off') for (const warning of result.warnings || []) if (!(acknowledged && warning.kind === 'deprecated-entry')) logger.warn(warning.message)
   // The strings are written for the functions or methods page: off it,
   // their links are rewritten as connectval: rewrites a component's.
   if (result.ok && result.rich && result.rich.format === 'asciidoc') {

@@ -315,7 +315,7 @@ describe('convertContent', () => {
       url: '/streaming/current/reference/properties/broker-properties/',
       contents: '= Broker Configuration Properties\n\ninclude::reference:partial$properties/broker.adoc[tags=redpanda]\n',
     })
-    const partial = { contents: Buffer.from('=== crash_loop_limit\n\nA property.\n') }
+    const partial = { contents: Buffer.from('// tag::redpanda[]\n=== crash_loop_limit\n\nA property.\n// end::redpanda[]\n') }
     const context = Object.assign(
       buildUrlMap({
         getComponents: () => [{ name: 'streaming', latest: { version: '25.3' } }],
@@ -716,5 +716,271 @@ describe('register', () => {
     catalog.pages[0].contents = Buffer.from('Broken: https://docs.redpanda.com/gone/page/')
     const logger = run(catalog, { logUnconverted: false })
     expect(logger.warn).not.toHaveBeenCalled()
+  })
+})
+
+describe('property anchors that moved to another property page', () => {
+  // Mirrors the streaming reference: the generated specs still point
+  // cloud_storage_* properties at Cluster Properties (through its
+  // reference:cluster-properties.adoc alias), but they live on Object Storage
+  // Properties now.
+  function makePropertyContext ({ extraPages = [] } = {}) {
+    const propertyPage = (relative, title, alias, headings) =>
+      makePage({
+        component: 'streaming',
+        version: '26.3',
+        module: 'reference',
+        relative,
+        url: `/streaming/current/reference/${relative.replace(/\.adoc$/, '')}/`,
+        contents:
+          `= ${title}\n:page-aliases: ${alias}\n:page-property-source: ${relative.split('/').pop().replace(/\.adoc$/, '')}\n\n` +
+          headings.map((h) => `=== ${h}\n\nA property.\n`).join('\n'),
+      })
+    const pages = [
+      propertyPage('properties/cluster-properties.adoc', 'Cluster Configuration Properties',
+        'reference:tunable-properties.adoc, reference:cluster-properties.adoc', ['log_segment_size_min']),
+      propertyPage('properties/object-storage-properties.adoc', 'Object Storage Properties',
+        'reference:object-storage-properties.adoc', ['cloud_storage_secret_key']),
+      propertyPage('properties/topic-properties.adoc', 'Topic Configuration Properties',
+        'reference:topic-properties.adoc', ['retention.ms']),
+      makePage({
+        component: 'streaming',
+        version: '26.3',
+        module: 'manage',
+        relative: 'kubernetes/k-manage-resources.adoc',
+        url: '/streaming/current/manage/kubernetes/k-manage-resources/',
+        contents: '= Manage Pod Resources\n:page-aliases: manage:kubernetes/manage-resources.adoc\n\n== Overview\n',
+      }),
+      ...extraPages,
+    ]
+    return Object.assign(
+      buildUrlMap({
+        getComponents: () => [{ name: 'streaming', latest: { version: '26.3' } }],
+        getPages: (filter) => (filter ? pages.filter(filter) : pages),
+        findBy: () => [],
+      }),
+      { hostnames: new Set(['docs.redpanda.com']), ignore: [], latestVersionSegment: 'current' }
+    )
+  }
+
+  test.each([
+    'https://docs.redpanda.com/docs/reference/cluster-properties/#cloud_storage_secret_key',
+    'https://docs.redpanda.com/current/reference/tunable-properties/#cloud_storage_secret_key',
+  ])('converts %s to an xref to the page that has the anchor', (url) => {
+    const { content, missingAnchor, ambiguousAnchor } = convertContent(url, makePropertyContext())
+    expect(content).toBe(
+      'xref:streaming:reference:properties/object-storage-properties.adoc#cloud_storage_secret_key[cloud_storage_secret_key]'
+    )
+    expect(missingAnchor).toEqual([])
+    expect(ambiguousAnchor).toEqual([])
+  })
+
+  test('keeps a link label', () => {
+    const url = 'https://docs.redpanda.com/docs/reference/cluster-properties/#cloud_storage_secret_key[secret key]'
+    expect(convertContent(url, makePropertyContext()).content).toBe(
+      'xref:streaming:reference:properties/object-storage-properties.adoc#cloud_storage_secret_key[secret key]'
+    )
+  })
+
+  test('reports an anchor that no property page has', () => {
+    const url = 'https://docs.redpanda.com/current/reference/tunable-properties/#cloud_storage_reconciliation_interval_ms'
+    const { content, missingAnchor } = convertContent(url, makePropertyContext())
+    expect(content).toBe(url)
+    expect(missingAnchor).toEqual([url])
+  })
+
+  test('reports an anchor that more than one other property page has', () => {
+    const duplicate = makePage({
+      component: 'streaming',
+      version: '26.3',
+      module: 'reference',
+      relative: 'properties/broker-properties.adoc',
+      url: '/streaming/current/reference/properties/broker-properties/',
+      contents: '= Broker Properties\n:page-property-source: broker-properties\n\n=== cloud_storage_secret_key\n',
+    })
+    const url = 'https://docs.redpanda.com/docs/reference/cluster-properties/#cloud_storage_secret_key'
+    const { content, missingAnchor, ambiguousAnchor } = convertContent(url, makePropertyContext({ extraPages: [duplicate] }))
+    expect(content).toBe(url)
+    expect(missingAnchor).toEqual([])
+    expect(ambiguousAnchor).toEqual([
+      {
+        url,
+        targets: expect.arrayContaining([
+          'reference:properties/object-storage-properties.adoc',
+          'reference:properties/broker-properties.adoc',
+        ]),
+      },
+    ])
+  })
+
+  // Docs branches older than :page-property-source: identify their property
+  // pages only by the generated partial they include.
+  test('recognizes a property page by its generated partial include', () => {
+    const partials = new Map([
+      ['cluster', '=== log_segment_size_min\n\nA property.\n'],
+      ['object-storage', '=== cloud_storage_region\n\nA property.\n'],
+    ])
+    const page = (relative, partial, title) =>
+      makePage({
+        component: 'streaming',
+        version: '26.1',
+        module: 'reference',
+        relative,
+        url: `/streaming/26.1/reference/${relative.replace(/\.adoc$/, '')}/`,
+        contents: `= ${title}\n:page-aliases: reference:${relative.split('/').pop()}\n\n` +
+          `include::reference:partial$properties/${partial}-properties.adoc[tags=!deprecated]\n`,
+      })
+    const pages = [
+      page('properties/cluster-properties.adoc', 'cluster', 'Cluster Configuration Properties'),
+      page('properties/object-storage-properties.adoc', 'object-storage', 'Object Storage Properties'),
+    ]
+    const context = Object.assign(
+      buildUrlMap({
+        getComponents: () => [{ name: 'streaming', latest: { version: '26.3' } }],
+        getPages: (filter) => (filter ? pages.filter(filter) : pages),
+        findBy: () => [],
+      }),
+      {
+        hostnames: new Set(['docs.redpanda.com']),
+        ignore: [],
+        latestVersionSegment: 'current',
+        resolveInclude: (spec) => {
+          const name = /properties\/(.+)-properties\.adoc/.exec(spec)[1]
+          return { contents: Buffer.from(partials.get(name)) }
+        },
+      }
+    )
+    const url = 'https://docs.redpanda.com/streaming/26.1/reference/cluster-properties/#cloud_storage_region'
+    expect(convertContent(url, context).content).toBe(
+      'xref:26.1@streaming:reference:properties/object-storage-properties.adoc#cloud_storage_region[cloud_storage_region]'
+    )
+  })
+
+  test('does not look on property pages in another version', () => {
+    const otherVersion = makePage({
+      component: 'streaming',
+      version: '26.2',
+      module: 'reference',
+      relative: 'properties/object-storage-properties.adoc',
+      url: '/streaming/26.2/reference/properties/object-storage-properties/',
+      contents: '= Object Storage Properties\n:page-property-source: object-storage-properties\n\n=== cloud_storage_region\n',
+    })
+    const url = 'https://docs.redpanda.com/docs/reference/cluster-properties/#cloud_storage_region'
+    const { missingAnchor } = convertContent(url, makePropertyContext({ extraPages: [otherVersion] }))
+    expect(missingAnchor).toEqual([url])
+  })
+
+  test('does not search property pages for an anchor missing from an ordinary page', () => {
+    const url = 'https://docs.redpanda.com/docs/manage/kubernetes/manage-resources/#cloud_storage_secret_key'
+    const { content, missingAnchor } = convertContent(url, makePropertyContext())
+    expect(content).toBe(url)
+    expect(missingAnchor).toEqual([url])
+  })
+
+  test('register warns about an ambiguous anchor and names the candidate pages', () => {
+    const pages = [
+      makePage({
+        component: 'streaming', version: '26.3', module: 'reference',
+        relative: 'properties/cluster-properties.adoc',
+        url: '/streaming/current/reference/properties/cluster-properties/',
+        contents: '= Cluster\n:page-property-source: cluster-properties\n\nhttps://docs.redpanda.com/streaming/current/reference/properties/cluster-properties/#dup_prop\n',
+      }),
+      makePage({
+        component: 'streaming', version: '26.3', module: 'reference',
+        relative: 'properties/a-properties.adoc',
+        url: '/streaming/current/reference/properties/a-properties/',
+        contents: '= A\n:page-property-source: a\n\n=== dup_prop\n',
+      }),
+      makePage({
+        component: 'streaming', version: '26.3', module: 'reference',
+        relative: 'properties/b-properties.adoc',
+        url: '/streaming/current/reference/properties/b-properties/',
+        contents: '= B\n:page-property-source: b\n\n=== dup_prop\n',
+      }),
+    ]
+    const catalog = {
+      getComponents: () => [{ name: 'streaming', latest: { version: '26.3' } }],
+      getPages: (filter) => (filter ? pages.filter(filter) : pages),
+      findBy: () => [],
+      resolveResource: () => undefined,
+    }
+    const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() }
+    extension.register.call(
+      {
+        getLogger: () => logger,
+        on: (event, handler) => event === 'contentClassified' && handler({ playbook: {}, contentCatalog: catalog }),
+      },
+      { config: {} }
+    )
+    expect(logger.warn).toHaveBeenCalledTimes(1)
+    expect(logger.warn.mock.calls[0][0]).toMatch(/more than one property page has it \(reference:properties\/a-properties\.adoc, reference:properties\/b-properties\.adoc\)/)
+  })
+})
+
+describe('include tag filtering for anchors', () => {
+  const { filterByTags, includeTags } = require('../../extensions/url-to-xref')
+  const partial = [
+    '// tag::category-a[]',
+    '=== kept_a',
+    '// tag::deprecated[]',
+    '=== old_a',
+    '// end::deprecated[]',
+    '// end::category-a[]',
+    '// tag::category-b[]',
+    '=== kept_b',
+    '// end::category-b[]',
+    '=== untagged',
+  ].join('\n')
+  const headings = (tags) => filterByTags(partial, includeTags(tags)).split('\n').filter((l) => l.startsWith('==='))
+
+  it('keeps everything without a tag selection', () => {
+    expect(headings('')).toEqual(['=== kept_a', '=== old_a', '=== kept_b', '=== untagged'])
+  })
+  it('keeps only the named tag and drops excluded nested regions', () => {
+    expect(headings('tags=category-a;!deprecated')).toEqual(['=== kept_a'])
+  })
+  it('with only exclusions, keeps untagged and other tagged lines', () => {
+    expect(headings('tags=!deprecated')).toEqual(['=== kept_a', '=== kept_b', '=== untagged'])
+  })
+  it('reads tag= and quoted values', () => {
+    expect(headings('leveloffset=+1,tag="category-b"')).toEqual(['=== kept_b'])
+  })
+})
+
+describe('broken links in end-of-life versions', () => {
+  const extension = require('../../extensions/url-to-xref')
+  const run = (versions) => {
+    const pages = versions.map((version) => ({
+      src: { component: 'streaming', version, module: 'ROOT', family: 'page', relative: `p-${version}.adoc` },
+      path: `modules/ROOT/pages/p-${version}.adoc`,
+      out: { path: `p-${version}.html` },
+      pub: { url: `/streaming/${version}/p-${version}/` },
+      contents: Buffer.from('= P\n\nSee https://docs.redpanda.com/streaming/current/nowhere/.\n'),
+    }))
+    const eol = { '24.3': true, '26.3': false }
+    const catalog = {
+      getComponents: () => [{ name: 'streaming', latest: { version: '26.3' } }],
+      getComponentVersion: (c, v) => ({ asciidoc: { attributes: { 'page-is-past-eol': String(eol[v]) } } }),
+      getPages: (filter) => (filter ? pages.filter(filter) : pages),
+      findBy: () => [],
+      resolveResource: () => undefined,
+    }
+    const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }
+    extension.register.call(
+      { getLogger: () => logger, on: (event, handler) => event === 'contentClassified' && handler({ playbook: {}, contentCatalog: catalog }) },
+      { config: {} }
+    )
+    return logger
+  }
+  test('logs a link broken only in EOL versions at debug level', () => {
+    const logger = run(['24.3'])
+    expect(logger.warn).not.toHaveBeenCalled()
+    expect(logger.debug.mock.calls.some(([m]) => /No published page matches .*\[end-of-life versions\]/.test(m))).toBe(true)
+  })
+  test('still warns when a supported version has the same broken link', () => {
+    for (const order of [['24.3', '26.3'], ['26.3', '24.3']]) {
+      const logger = run(order)
+      expect(logger.warn).toHaveBeenCalledTimes(1)
+    }
   })
 })

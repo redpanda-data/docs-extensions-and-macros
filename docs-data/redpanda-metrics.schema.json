@@ -15,7 +15,8 @@
       "description": "What the dataset was built from.",
       "additionalProperties": false,
       "properties": {
-        "sources": { "type": "integer", "minimum": 1, "description": "Number of brokers or files scraped per endpoint." },
+        "sources": { "type": "integer", "minimum": 1, "description": "Number of brokers or files scraped for the public endpoint, and for the internal endpoint unless internal_sources is set." },
+        "internal_sources": { "type": "integer", "minimum": 1, "description": "Number of files scraped for the internal endpoint, when it differs from sources." },
         "source_ref": { "type": "string", "description": "Git ref of the source inventory, when one was used." }
       }
     },

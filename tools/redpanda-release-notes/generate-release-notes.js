@@ -361,8 +361,13 @@ function generateReleaseNotes({ body, section, tag, date, pageContent, propertyN
   const version = normalizeVersion(tag);
 
   const floor = readFloor(pageContent);
-  if (floor && compareVersions(version, floor) <= 0) {
-    return { status: 'skipped', reason: `version ${version} is not newer than the floor ${floor}` };
+  // The floor is the first release the page lists, and the intro shows it
+  // ("from version {earliest-tracked-version} onward"). So the floor version
+  // itself is inserted: a fresh page for a new line has the line's first
+  // release (X.Y.1) as its floor. Only an older version is skipped. A re-run
+  // for a version already on the page is skipped by the check below.
+  if (floor && compareVersions(version, floor) < 0) {
+    return { status: 'skipped', reason: `version ${version} is older than the floor ${floor}` };
   }
 
   if (hasVersionSection(pageContent, version)) {

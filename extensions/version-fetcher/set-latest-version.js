@@ -10,6 +10,7 @@ module.exports.register = function ({ config }) {
   const FetchHelmChartIndex = require('./fetch-helm-chart-index');
   const GetLatestConnectVersion = require('./get-latest-connect');
   const { latestStablePerLine, releaseLineOf, isOlderReleaseLine } = require('./release-lines');
+  const isPastEol = require('../util/is-past-eol');
   const logger = this.getLogger('set-latest-version-extension');
 
   const { getGitHubApiToken } = require('../../cli-utils/github-token');
@@ -162,7 +163,11 @@ module.exports.register = function ({ config }) {
             const keepOrNewest = (key, newest, what) => {
               const own = asciidoc.attributes[key];
               if (own) {
-                logger.warn(`No ${what} release found for the ${line} line, so ${name} ${version} keeps ${key} from its antora.yml (${own}).`);
+                // A line past its end of life gets no more releases and its
+                // docs are frozen, so keeping the antora.yml value is the
+                // expected outcome there, not a problem to fix.
+                const log = isPastEol(asciidoc.attributes) ? logger.info : logger.warn;
+                log.call(logger, `No ${what} release found for the ${line} line, so ${name} ${version} keeps ${key} from its antora.yml (${own}).`);
                 return own;
               }
               logger.warn(`No ${what} release found for the ${line} line and its antora.yml sets no ${key}, so ${name} ${version} uses the newest release (${newest || 'unknown'}).`);

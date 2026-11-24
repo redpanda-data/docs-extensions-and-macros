@@ -29,6 +29,7 @@
  * Registered by macros/prop, so every playbook that registers prop: has it.
  */
 
+const { deprecationAcknowledged } = require('../extension-utils/deprecation-ack')
 const connectLinks = require('../extension-utils/connect-links')
 const connectValues = require('../extension-utils/connect-values')
 const bloblang = require('../extension-utils/bloblang-values')
@@ -108,7 +109,7 @@ function bloblInlineMacro (config) {
       }
       // A deprecated function or method is still on its page, so it links;
       // the Connect data names no replacement for any of them.
-      if (entry.status === 'deprecated' && mode !== 'off') logger.warn(`${call}: ${bloblang.deprecationNote(kind, entry, dataset)}`)
+      if (entry.status === 'deprecated' && mode !== 'off' && !deprecationAcknowledged(attributes)) logger.warn(`${call}: ${bloblang.deprecationNote(kind, entry, dataset)}`)
       const fragment = connectLinks.bloblangAnchor(entry, picked)
       const content = buildBloblContent({ written, name: entry.name, kind, text })
       return self.createInline(parent, 'anchor', content, {
