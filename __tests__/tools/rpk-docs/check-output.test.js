@@ -67,7 +67,8 @@ describe('checkDescription: ordinary output passes', () => {
     ['flag alternatives', 'Use --wait/-w', 'Use `--wait`/`-w`.'],
     ['e.g. rewrite', 'A filter, e.g. foo', 'A filter, for example, foo.'],
     ['product capitalization', 'when redpanda starts', 'when Redpanda starts.'],
-    ['typographic apostrophe', "the trace's start", "the trace's start."]
+    ['typographic apostrophe', "the trace's start", "the trace's start."],
+    ['possessive after a span', "next to rpk topic's output", "next to ``rpk topic``'s output."]
   ])('%s', (_, source, output) => {
     expect(checkDescription(source, output)).toEqual([])
   })
@@ -97,6 +98,15 @@ describe('checkDescription: other span breakage', () => {
   test('a span Asciidoctor cannot render prints its backticks', () => {
     const found = checkDescription('name:"web"', 'name:`web`.')
     expect(found).toEqual([{ invariant: 'whole-token-spans', reason: 'unrendered code span: "name:`web`."' }])
+  })
+
+  test("a constrained span before 's still fails, because it does not render", () => {
+    const found = checkDescription("next to rpk topic's output", "next to `rpk topic`'s output.")
+    expect(invariants(found)).toEqual(['whole-token-spans'])
+  })
+
+  test("a span followed by 's and more of the word still fails", () => {
+    expect(invariants(checkDescription("rpk topic'sx output", "``rpk topic``'sx output."))).toEqual(['whole-token-spans'])
   })
 
   test('text added to the output', () => {

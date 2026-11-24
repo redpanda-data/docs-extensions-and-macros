@@ -1928,6 +1928,13 @@ function formatDescription(desc, customTransformations = null, options = {}) {
         // Words ending in common noun suffixes are likely prose, not commands
         // e.g., "authentications", "clusters", "configurations", "settings"
         if (/(?:tions?|ments?|ings?|ers?|ors?|ies|s)$/i.test(nextWord) && !rpkSubcommands.has(nextWord)) {
+          // A plugin is named as a noun, so "the rpk ai environment" and
+          // "rpk ai points ..." name the plugin: wrapping rpk alone splits it
+          // into `rpk` ai. A core subcommand before a noun can be an
+          // adjective ("rpk cloud authentications"), so it keeps the rule below.
+          if (KNOWN_PLUGINS.includes(lowerWord)) {
+            return '`rpk ' + word + '`' + (match.endsWith(word) ? '' : match.slice(match.lastIndexOf(word) + word.length))
+          }
           // It's prose like "rpk cloud authentications" - just wrap rpk
           return '`rpk`' + space + word + (match.endsWith(word) ? '' : match.slice(match.lastIndexOf(word) + word.length))
         }
@@ -2109,6 +2116,12 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   // e.g., "`rpk cluster status`." → "`rpk cluster status`"
   // Only consume trailing spaces, not newlines (to preserve paragraph breaks)
   result = result.replace(/^(`[^`]+`)\.[ \t]*$/gm, '$1')
+
+  // A possessive straight after a code span ("`rpk ai`'s credentials file")
+  // leaves a constrained span AsciiDoc does not close: the backtick is
+  // followed by a word character, so the text renders as "`rpk ai’s". The
+  // unconstrained form, double backticks, closes anywhere.
+  result = result.replace(/(?<![`\w])`([^`\n]+)`(?=['\u2019]s\b)/g, '``$1``')
 
   // A placeholder left in the output means a span was captured inside
   // another one and never restored, and the text around it is lost. Fail

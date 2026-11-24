@@ -459,3 +459,42 @@ describe('dotfile names (rpk redpanda start)', () => {
     expect(out).toContain('file.`redpanda.yaml`')
   })
 })
+
+describe('a possessive after a code span', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  test('uses an unconstrained span, which AsciiDoc closes before \'s', () => {
+    // From the rpk ai run help: a constrained `rpk ai`'s span never closes.
+    const out = formatDescription('Stored next to `rpk ai`\'s credentials file.', { replacements: [] })
+    expect(out).toContain('``rpk ai``\'s credentials file')
+  })
+
+  test('handles a typographic apostrophe the same way', () => {
+    const out = formatDescription('Uses `rpk ai`’s login.', { replacements: [] })
+    expect(out).toContain('``rpk ai``’s login')
+  })
+
+  test('leaves spans that are not followed by a possessive, and words after a quote (control)', () => {
+    const out = formatDescription('Run `rpk ai auth login`, then `rpk ai status`. The `cluster`\'d form is rare.', { replacements: [] })
+    expect(out).toContain('`rpk ai auth login`')
+    expect(out).toContain('`rpk ai status`')
+    expect(out).not.toContain('``')
+  })
+})
+
+describe('a plugin named before a noun', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+  const transforms = { replacements: [{ pattern: '(?<![\\w.~/-])rpai(?![\\w-])', replacement: 'rpk ai', flags: 'g', applyToCode: true }] }
+
+  test('wraps the whole plugin name, not rpk alone (the rpk ai run help)', () => {
+    const out = formatDescription('for the current rpai environment. rpai points ANTHROPIC_BASE_URL at the gateway.', transforms)
+    expect(out).toContain('for the current `rpk ai` environment.')
+    expect(out).toContain('`rpk ai` points ANTHROPIC_BASE_URL')
+    expect(out).not.toContain('`rpk` ai')
+  })
+
+  test('a core subcommand before a noun still wraps rpk alone (control)', () => {
+    expect(formatDescription('Manage rpk cloud authentications for details.', { replacements: [] }))
+      .toBe('Manage `rpk` cloud authentications for details.')
+  })
+})
