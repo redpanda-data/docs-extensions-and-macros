@@ -2,6 +2,7 @@
 
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
 const _ = require('lodash');
+const { getDeploymentType } = require('../extension-utils/deployment-type');
 
 module.exports.register = function ({ config }) {
   raiseListenerLimit(this)
@@ -184,13 +185,3 @@ function createIndexFile(data, siteCatalog, outputFile, logger) {
   logger.info(`Created "${outputFile}" with indexed data.`);
 }
 
-/**
- * Determine the deployment type from AsciiDoc attributes.
- */
-function getDeploymentType(attributes) {
-  return attributes['env-kubernetes'] ? 'Kubernetes'
-    : attributes['env-linux'] ? 'Linux'
-      : attributes['env-docker'] ? 'Docker'
-        : attributes['env-cloud'] ? 'Redpanda Cloud'
-          : attributes['page-cloud'] ? 'Redpanda Cloud' : '';
-}

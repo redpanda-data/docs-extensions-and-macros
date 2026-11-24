@@ -1,0 +1,4 @@
+relationships:
+  - solution: leaderboard
+    doc: streaming:develop:consumer-offsets.adoc
+    status: maybe

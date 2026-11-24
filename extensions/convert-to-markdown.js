@@ -115,6 +115,134 @@ function decodeHtmlEntities (str) {
 }
 
 /**
+ * Solution metadata for the `.md` twin of a solution page.
+ *
+ * Agents and LLMs read the Markdown, not the rendered page, so the solution
+ * facts have to travel with it. This is a shaped projection of the
+ * `page-solution` record that the solutions-catalog extension already builds,
+ * which is the single source for every value here. The raw JSON attributes
+ * stay blocked from the frontmatter: this is a projection, not a dump.
+ *
+ * Field names are chosen to line up with the docmeta metadata vocabularies
+ * proposal (hawkeyexl/manni proposal 0023). Nothing in that proposal is
+ * registered yet, so nothing here claims conformance; the shape is chosen so
+ * that adopting those vocabularies later is a change to this emitter alone.
+ * Two of its principles this already follows: one value is a string and many
+ * values are a list, and metadata claims content rather than rendering, which
+ * is why `page-layout` and featured placement stay out of the block.
+ *
+ * A field whose value cannot be sourced truthfully is left out rather than
+ * guessed, so a reader can treat every key present as a claim.
+ */
+const SOLUTIONS_COMPONENT = 'solutions'
+
+/** A value worth emitting: not undefined, null, '' or an empty list. */
+function hasValue(value) {
+  if (value === undefined || value === null || value === '') return false
+  if (Array.isArray(value)) return value.length > 0
+  return true
+}
+
+/** Assign only the keys whose values are worth emitting. */
+function assignPresent(target, entries) {
+  for (const [key, value] of Object.entries(entries)) {
+    if (hasValue(value)) target[key] = value
+  }
+  return target
+}
+
+function buildSolutionMetadata(page) {
+  if (page.src?.component !== SOLUTIONS_COMPONENT) return null
+  const attrs = page.asciidoc?.attributes || {}
+  const raw = attrs['page-solution']
+  if (!raw) return null
+
+  let record
+  try {
+    record = typeof raw === 'string' ? JSON.parse(raw) : raw
+  } catch {
+    return null
+  }
+  if (!record || !record.id) return null
+
+  const steps = Array.isArray(record.steps) ? record.steps : []
+  const stepId = attrs['page-solution-step-id']
+  const duration = Number(record.duration)
+
+  const block = assignPresent({}, {
+    id: record.id,
+    version: record.version,
+    status: record.status,
+    duration_minutes: Number.isFinite(duration) ? duration : undefined,
+    technologies: record.technologies,
+    platforms: record.platforms,
+    categories: record.categories,
+    use_cases: record.useCases,
+    // Both facet axes, so an agent reading the .md can filter on the same two
+    // the landing page does. industries is optional and usually absent, and an
+    // empty list is dropped like every other empty value.
+    industries: record.industries,
+    // The files an agent may fetch: the same allowlist the download endpoint
+    // enforces, so reading the .md is enough to know what is available.
+    files: record.files,
+  })
+
+  if (stepId) {
+    // A step page describes its own position instead of relisting the steps.
+    const index = steps.findIndex((s) => s.id === stepId) + 1
+    block.step = assignPresent({}, {
+      id: stepId,
+      index: index > 0 ? index : undefined,
+      of: steps.length || undefined,
+    })
+  } else if (steps.length) {
+    block.steps = steps.map((s) => assignPresent({}, { id: s.id, title: s.title, url: s.url }))
+  }
+
+  const relatedDocs = (Array.isArray(record.relatedDocs) ? record.relatedDocs : [])
+    .map((d) => assignPresent({}, { title: d.title, url: d.url }))
+    .filter((d) => Object.keys(d).length > 0)
+  if (relatedDocs.length) block.related_docs = relatedDocs
+
+  // `repo` is owner/name; GitHub is the host the release and asset lookups
+  // already assume. `ref` is the release tag that exists, <id>/<version>, not
+  // the bare version, so a consumer can check the ref out. The catalog only
+  // publishes `repo` when the repository is public (solutions-catalog
+  // `public_repo`), and without it neither the URL nor the ref is emitted:
+  // both would send an agent to a private repository that returns 404. The
+  // download mode stays, and `files` names what the download serves.
+  const repository = assignPresent({}, {
+    url: record.repo ? `https://github.com/${record.repo}` : undefined,
+    ref: record.repo ? record.tag : undefined,
+    download: record.download,
+  })
+  if (Object.keys(repository).length) block.repository = repository
+
+  // Doc Detective evidence, when the solution ships a verification manifest.
+  // Projected with the manifest's own key names, so the block and the file it
+  // came from read the same way. Absent manifest, absent key.
+  if (record.verified) {
+    const verified = assignPresent({}, {
+      suite: record.verified.suite,
+      specs: record.verified.specs,
+      steps: record.verified.steps,
+      commands: record.verified.commands,
+      checks: record.verified.checks,
+      media: record.verified.media,
+      verify_script: record.verified.verifyScript,
+      redpanda_version: record.verified.redpandaVersion,
+      run_at: record.verified.runAt,
+      platforms: record.verified.platforms,
+      content_rev: record.verified.contentRev,
+      stack_sha256: record.verified.stackSha256,
+    })
+    if (Object.keys(verified).length) block.verified = verified
+  }
+
+  return Object.keys(block).length ? block : null
+}
+
+/**
  * Converts AsciiDoc page attributes to YAML frontmatter
  * @param {Object} page - The page object with asciidoc attributes
  * @returns {string} YAML frontmatter string or empty string if no attributes
@@ -210,6 +338,13 @@ function generateFrontmatter(page, siteUrl) {
     'cacheSupportData',  // Cache support matrix
     'csvData',  // Raw CSV data from generate-rp-connect-info
     'commercialNamesMap',  // Commercial names mapping
+    // Solution records, nav, and recommendations: large JSON strings. The
+    // solution facts reach the Markdown through the shaped `solution` block
+    // below instead. These are already outside the allowlist; naming them here
+    // keeps a later allowlist edit from leaking a raw dump.
+    'page-solution',
+    'page-solution-nav',
+    'page-related-solutions',
   ]
 
   // Add allowed page attributes to frontmatter
@@ -224,6 +359,11 @@ function generateFrontmatter(page, siteUrl) {
 
     // Only include attributes in our allowlist or learning objectives
     if (!allowedAttributes.includes(key) && !isLearningObjective) return
+
+    // The edit link of a page from a private repository is a 404 for every
+    // reader. The default UI hides it for the same reason, and the same
+    // variable that forces it back on there forces it back on here.
+    if (key === 'page-edit-url' && page.src?.origin?.private && !process.env.FORCE_SHOW_EDIT_PAGE_LINK) return
 
     // A badge's text only travels with its badge: page-beta-text needs
     // page-beta, page-preview-text needs page-preview, and so on.
@@ -330,6 +470,12 @@ function generateFrontmatter(page, siteUrl) {
     }
     frontmatter['release-status'] = betaStatus
   }
+
+  // Solution pages carry their metadata as one structured block, since the
+  // consumer is a machine. Derived from the page-solution record, so there is
+  // one source for the facts.
+  const solution = buildSolutionMetadata(page)
+  if (solution) frontmatter.solution = solution
 
   // Return empty string if no frontmatter
   if (Object.keys(frontmatter).length === 0) return ''
@@ -474,8 +620,10 @@ function createEnterpriseFeatureRules () {
   return { enterpriseFeature, betaBadge }
 }
 
-module.exports.createEnterpriseFeatureRules = createEnterpriseFeatureRules
 module.exports.generateFrontmatter = generateFrontmatter
+module.exports.isUnwantedNode = isUnwantedNode
+module.exports.buildSolutionMetadata = buildSolutionMetadata
+module.exports.createEnterpriseFeatureRules = createEnterpriseFeatureRules
 module.exports.formatStatusMarker = formatStatusMarker
 module.exports.ENTERPRISE_MARKER = ENTERPRISE_MARKER
 module.exports.readGeneratedMarker = readGeneratedMarker
@@ -821,6 +969,7 @@ const UNWANTED_FRAGMENTS = [
   'breadcrumb',              // Breadcrumb navigation
   'chat-panel',              // AI chat interface
   'kapa',                    // Kapa AI widget
+  'sol-filters',             // Solutions landing filter form and facet counts
 ]
 
 function createTurndownBase () {
@@ -848,24 +997,34 @@ function isTrackingImage (node) {
  */
 function addRemoveUnwantedRule (td) {
   td.addRule('remove-unwanted', {
-    filter: (node) => {
-      if (!node || !node.getAttribute) return false
-
-      const classAttr = (node.getAttribute('class') || '').toLowerCase()
-      const idAttr = (node.getAttribute('id') || '').toLowerCase()
-      const tag = node.nodeName.toLowerCase()
-
-      if (['script', 'style', 'footer', 'nav'].includes(tag)) return true
-
-      // Tracking or hidden images
-      if (tag === 'img' && isTrackingImage(node)) return true
-
-      // A heading's id comes from its title (`_pagination`), not from chrome.
-      const checkId = !/^h[1-6]$/.test(tag)
-      return UNWANTED_FRAGMENTS.some((x) => classAttr.includes(x) || (checkId && idAttr.includes(x)))
-    },
+    filter: isUnwantedNode,
     replacement: () => '',
   })
+}
+
+/**
+ * True for elements the Markdown twin drops: site chrome, tracking images,
+ * and anything the page renders with the `hidden` attribute. A hidden element
+ * is UI waiting for script (an empty state, a resume prompt, a filter chip),
+ * not content the reader sees.
+ */
+function isUnwantedNode (node) {
+  if (!node || !node.getAttribute) return false
+
+  const classAttr = (node.getAttribute('class') || '').toLowerCase()
+  const idAttr = (node.getAttribute('id') || '').toLowerCase()
+  const tag = node.nodeName.toLowerCase()
+
+  if (typeof node.hasAttribute === 'function' && node.hasAttribute('hidden')) return true
+
+  if (['script', 'style', 'footer', 'nav'].includes(tag)) return true
+
+  // Tracking or hidden images
+  if (tag === 'img' && isTrackingImage(node)) return true
+
+  // A heading's id comes from its title (`_pagination`), not from chrome.
+  const checkId = !/^h[1-6]$/.test(tag)
+  return UNWANTED_FRAGMENTS.some((x) => classAttr.includes(x) || (checkId && idAttr.includes(x)))
 }
 
 /**

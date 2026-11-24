@@ -1,0 +1,5 @@
+= Redpanda Solutions
+:page-layout: solutions-home
+:description: Runnable, end-to-end reference implementations built on Redpanda.
+
+The landing page body is rendered by the UI from the `solutions-catalog` component attribute.

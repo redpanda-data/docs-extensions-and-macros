@@ -1,0 +1,9 @@
+// Production topic: Consumer scaling. No headings or anchors here; _all.adoc adds them.
+// tag::summary[]
+Run one consumer instance per partition at most, and scale by adding instances to the group rather than threads to one instance.
+// end::summary[]
+// tag::detail[]
+In this solution: This demo runs one consumer, which owns every partition.
+
+In production: Run one consumer instance per partition at most, and scale by adding instances to the group rather than threads to one instance. See xref:preview:ROOT:test.adoc[].
+// end::detail[]

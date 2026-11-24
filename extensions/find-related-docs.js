@@ -1,12 +1,17 @@
 'use strict';
 
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
+const { getDeploymentType } = require('../extension-utils/deployment-type')
 
 module.exports.register = function ({ config }) {
   raiseListenerLimit(this)
   const logger = this.getLogger('related-docs-extension');
 
   this.on('documentsConverted', async ({ contentCatalog, siteCatalog }) => {
+    // Labs are being replaced by solutions. Solution overviews carry their
+    // related docs in page-solution (see solutions-catalog); this extension
+    // goes away in the next major version.
+    logger.warn('find-related-docs is deprecated and will be removed in 6.0. Use solutions-catalog (page-solution.relatedDocs) instead.');
     // Find the latest version of each component
     const latestVersions = {};
     contentCatalog.getComponents().forEach(component => {
@@ -77,14 +82,6 @@ function findRelated(docPage, sourceCategoryList, sourceDeploymentType, logger) 
     };
   }
   return null;
-}
-
-function getDeploymentType(attributes) {
-  return attributes['env-kubernetes'] ? 'Kubernetes'
-    : attributes['env-linux'] ? 'Linux'
-      : attributes['env-docker'] ? 'Docker'
-        : attributes.cloud ? 'Redpanda Cloud'
-        : '';
 }
 
 function hasMatchingCategory(sourcePageCategories, targetPageCategories) {

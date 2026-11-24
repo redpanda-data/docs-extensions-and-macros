@@ -1,0 +1,10 @@
+= Solutions recommendations test
+:description: Fixture page with valid categories and a Docker marker, so solutions-catalog computes a category edge to the demo solution.
+:page-categories: Stream Processing, Clients
+:env-docker: true
+
+This page shares the `Stream Processing` and `Clients` categories with the
+demo solution fixture and is not listed in its `page-solution-related-docs`,
+so the `page-related-solutions` attribute it receives has `category`
+provenance. Compare with xref:preview:ROOT:test.adoc[the main test page], which
+is listed explicitly and has an invalid category, so its edge is `explicit`.
