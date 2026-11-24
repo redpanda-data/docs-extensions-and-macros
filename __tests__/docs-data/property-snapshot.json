@@ -1,6 +1,6 @@
 {
  "_comment": "Reduced mirror of modules/reference/attachments/redpanda-properties-<tag>.json from the docs repo: every property, with only the fields the rendering and link layers read. Taken from the highest-tag attachment on docs main, the same source the README recipe and property-corpus-drift.sh use. cloud_supported is what makes the 'no Cloud link to a property Cloud does not publish' assertion real rather than assumed. Refresh per tools/property-extractor/README.adoc.",
- "source_tag": "v26.2.6",
+ "source_tag": "v26.3.1",
  "properties": {
   "abort_index_segment_size": {
    "name": "abort_index_segment_size",
@@ -312,6 +312,17 @@
    "is_deprecated": false,
    "nullable": false
   },
+  "cloud_migration_retain_tsv1_segments_until_migration_complete": {
+   "name": "cloud_migration_retain_tsv1_segments_until_migration_complete",
+   "config_scope": "cluster",
+   "type": "boolean",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
   "cloud_storage_access_key": {
    "name": "cloud_storage_access_key",
    "config_scope": "cluster",
@@ -376,7 +387,8 @@
    "cloud_readonly": false,
    "cloud_byoc_only": false,
    "is_deprecated": false,
-   "nullable": true
+   "nullable": true,
+   "description": "Azure Data Lake Storage v2 port override. See also: `cloud_storage_azure_adls_endpoint`. Use when hierarchical namespaces are enabled on your storage account and you have set up a custom endpoint."
   },
   "cloud_storage_azure_container": {
    "name": "cloud_storage_azure_container",
@@ -387,7 +399,8 @@
    "cloud_readonly": true,
    "cloud_byoc_only": false,
    "is_deprecated": false,
-   "nullable": true
+   "nullable": true,
+   "description": "The name of the Azure container to use with Tiered Storage. If `null`, the property is disabled. The container must belong to `cloud_storage_azure_storage_account`."
   },
   "cloud_storage_azure_hierarchical_namespace_enabled": {
    "name": "cloud_storage_azure_hierarchical_namespace_enabled",
@@ -544,7 +557,7 @@
   "cloud_storage_cache_trim_carryover_bytes": {
    "name": "cloud_storage_cache_trim_carryover_bytes",
    "config_scope": "cluster",
-   "type": "integer",
+   "type": "object",
    "cloud_supported": false,
    "cloud_editable": false,
    "cloud_readonly": false,
@@ -584,6 +597,17 @@
    "cloud_byoc_only": false,
    "is_deprecated": false,
    "nullable": false
+  },
+  "cloud_storage_canary_check_interval_sec": {
+   "name": "cloud_storage_canary_check_interval_sec",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": true
   },
   "cloud_storage_chunk_eviction_strategy": {
    "name": "cloud_storage_chunk_eviction_strategy",
@@ -682,7 +706,8 @@
    "cloud_readonly": false,
    "cloud_byoc_only": false,
    "is_deprecated": false,
-   "nullable": true
+   "nullable": true,
+   "description": "The hostname to connect to for retrieving role based credentials. Derived from `cloud_storage_credentials_source` if not set. Only required when using IAM role based access. To authenticate using access keys, see `cloud_storage_access_key`."
   },
   "cloud_storage_credentials_source": {
    "name": "cloud_storage_credentials_source",
@@ -870,7 +895,8 @@
    "cloud_readonly": false,
    "cloud_byoc_only": false,
    "is_deprecated": false,
-   "nullable": false
+   "nullable": false,
+   "description": "Controls the upload of log segments to Tiered Storage. If set to `false`, this property temporarily pauses all log segment uploads from the Redpanda cluster. When the uploads are paused, the `cloud_storage_enable_remote_allow_gaps` cluster configuration and `redpanda.remote.allowgaps` topic properties control local retention behavior."
   },
   "cloud_storage_enabled": {
    "name": "cloud_storage_enabled",
@@ -914,7 +940,8 @@
    "cloud_readonly": false,
    "cloud_byoc_only": false,
    "is_deprecated": false,
-   "nullable": false
+   "nullable": false,
+   "description": "Maximum number of log segments to delete from object storage during each housekeeping run. This limits the rate of object deletions to prevent overwhelming the object storage API. Each segment requires 2-3 object storage delete operations (for the data file, index file, and optionally a transaction manifest), plus one more per spillover manifest, so this value directly controls API request rate. For example, a value of `300` produces 600 to 900 deletes, plus one per spillover manifest."
   },
   "cloud_storage_graceful_transfer_timeout_ms": {
    "name": "cloud_storage_graceful_transfer_timeout_ms",
@@ -1430,6 +1457,17 @@
    "is_deprecated": false,
    "nullable": true
   },
+  "cloud_storage_trust_legacy_index_timestamps": {
+   "name": "cloud_storage_trust_legacy_index_timestamps",
+   "config_scope": "cluster",
+   "type": "boolean",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
   "cloud_storage_upload_ctrl_d_coeff": {
    "name": "cloud_storage_upload_ctrl_d_coeff",
    "config_scope": "cluster",
@@ -1529,6 +1567,28 @@
    "is_deprecated": false,
    "nullable": false
   },
+  "cloud_topics_az_client_id_token_enabled": {
+   "name": "cloud_topics_az_client_id_token_enabled",
+   "config_scope": "cluster",
+   "type": "boolean",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "cloud_topics_compaction_commit_interval_bytes": {
+   "name": "cloud_topics_compaction_commit_interval_bytes",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
   "cloud_topics_compaction_disabled": {
    "name": "cloud_topics_compaction_disabled",
    "config_scope": "cluster",
@@ -1586,6 +1646,17 @@
   },
   "cloud_topics_disable_metastore_flush_loop_for_tests": {
    "name": "cloud_topics_disable_metastore_flush_loop_for_tests",
+   "config_scope": "cluster",
+   "type": "boolean",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "cloud_topics_disable_migration_cutover_for_tests": {
+   "name": "cloud_topics_disable_migration_cutover_for_tests",
    "config_scope": "cluster",
    "type": "boolean",
    "cloud_supported": false,
@@ -1716,6 +1787,39 @@
    "is_deprecated": false,
    "nullable": false
   },
+  "cloud_topics_leaderless_enabled": {
+   "name": "cloud_topics_leaderless_enabled",
+   "config_scope": "cluster",
+   "type": "boolean",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "cloud_topics_leaderless_rpc_timeout_ms": {
+   "name": "cloud_topics_leaderless_rpc_timeout_ms",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "cloud_topics_leveling_commit_interval_bytes": {
+   "name": "cloud_topics_leveling_commit_interval_bytes",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
   "cloud_topics_leveling_disabled": {
    "name": "cloud_topics_leveling_disabled",
    "config_scope": "cluster",
@@ -1764,6 +1868,17 @@
    "name": "cloud_topics_leveling_min_extent_size_ratio",
    "config_scope": "cluster",
    "type": "number",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "cloud_topics_leveling_rewrite_imported": {
+   "name": "cloud_topics_leveling_rewrite_imported",
+   "config_scope": "cluster",
+   "type": "boolean",
    "cloud_supported": false,
    "cloud_editable": false,
    "cloud_readonly": false,
@@ -2103,6 +2218,83 @@
   },
   "cloud_topics_upload_part_size": {
    "name": "cloud_topics_upload_part_size",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "cluster_fence_kafka_acl_error_code": {
+   "name": "cluster_fence_kafka_acl_error_code",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "cluster_fence_kafka_fetch_error_code": {
+   "name": "cluster_fence_kafka_fetch_error_code",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "cluster_fence_kafka_group_error_code": {
+   "name": "cluster_fence_kafka_group_error_code",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "cluster_fence_kafka_produce_error_code": {
+   "name": "cluster_fence_kafka_produce_error_code",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "cluster_fence_kafka_refusal_throttle_ms": {
+   "name": "cluster_fence_kafka_refusal_throttle_ms",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "cluster_fence_kafka_topic_error_code": {
+   "name": "cluster_fence_kafka_topic_error_code",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "cluster_fence_kafka_transaction_error_code": {
+   "name": "cluster_fence_kafka_transaction_error_code",
    "config_scope": "cluster",
    "type": "integer",
    "cloud_supported": false,
@@ -2807,6 +2999,17 @@
    "is_deprecated": false,
    "nullable": true
   },
+  "debug_bundle_dry_run_timeout_seconds": {
+   "name": "debug_bundle_dry_run_timeout_seconds",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
   "debug_bundle_storage_dir": {
    "name": "debug_bundle_storage_dir",
    "config_scope": "cluster",
@@ -3194,6 +3397,17 @@
    "is_deprecated": false,
    "nullable": false
   },
+  "enable_topic_storage_mode_migration": {
+   "name": "enable_topic_storage_mode_migration",
+   "config_scope": "cluster",
+   "type": "boolean",
+   "cloud_supported": true,
+   "cloud_editable": true,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
   "enable_transactions": {
    "name": "enable_transactions",
    "config_scope": "cluster",
@@ -3366,6 +3580,160 @@
    "config_scope": "topic",
    "type": "integer",
    "is_deprecated": false
+  },
+  "group_consumer_assignment_interval_ms": {
+   "name": "group_consumer_assignment_interval_ms",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "group_consumer_assignors": {
+   "name": "group_consumer_assignors",
+   "config_scope": "cluster",
+   "type": "array",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "group_consumer_heartbeat_interval_ms": {
+   "name": "group_consumer_heartbeat_interval_ms",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "group_consumer_max_assignment_interval_ms": {
+   "name": "group_consumer_max_assignment_interval_ms",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "group_consumer_max_heartbeat_interval_ms": {
+   "name": "group_consumer_max_heartbeat_interval_ms",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "group_consumer_max_session_timeout_ms": {
+   "name": "group_consumer_max_session_timeout_ms",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "group_consumer_max_size": {
+   "name": "group_consumer_max_size",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "group_consumer_min_assignment_interval_ms": {
+   "name": "group_consumer_min_assignment_interval_ms",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "group_consumer_min_heartbeat_interval_ms": {
+   "name": "group_consumer_min_heartbeat_interval_ms",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "group_consumer_min_session_timeout_ms": {
+   "name": "group_consumer_min_session_timeout_ms",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "group_consumer_protocol_enabled": {
+   "name": "group_consumer_protocol_enabled",
+   "config_scope": "cluster",
+   "type": "boolean",
+   "cloud_supported": true,
+   "cloud_editable": true,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "group_consumer_session_timeout_ms": {
+   "name": "group_consumer_session_timeout_ms",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "group_consumer_write_timeout_ms": {
+   "name": "group_consumer_write_timeout_ms",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "group_coordinator_append_linger_ms": {
+   "name": "group_coordinator_append_linger_ms",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
   },
   "group_initial_rebalance_delay": {
    "name": "group_initial_rebalance_delay",
@@ -4186,6 +4554,17 @@
    "is_deprecated": false,
    "nullable": false
   },
+  "kafka_leader_hint_wait_ms": {
+   "name": "kafka_leader_hint_wait_ms",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
   "kafka_max_bytes_per_fetch": {
    "name": "kafka_max_bytes_per_fetch",
    "config_scope": "cluster",
@@ -4269,6 +4648,17 @@
    "type": "string",
    "cloud_supported": false,
    "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "kafka_produce_enable_batch_compression": {
+   "name": "kafka_produce_enable_batch_compression",
+   "config_scope": "cluster",
+   "type": "boolean",
+   "cloud_supported": true,
+   "cloud_editable": true,
    "cloud_readonly": false,
    "cloud_byoc_only": false,
    "is_deprecated": false,
@@ -4694,12 +5084,12 @@
   "log_compaction_max_priority_wait_ms": {
    "name": "log_compaction_max_priority_wait_ms",
    "config_scope": "cluster",
-   "type": "integer",
+   "type": "object",
    "cloud_supported": false,
    "cloud_editable": false,
    "cloud_readonly": false,
    "cloud_byoc_only": false,
-   "is_deprecated": false,
+   "is_deprecated": true,
    "nullable": false
   },
   "log_compaction_merge_max_ranges": {
@@ -4761,8 +5151,8 @@
    "name": "log_compression_type",
    "config_scope": "cluster",
    "type": "string",
-   "cloud_supported": false,
-   "cloud_editable": false,
+   "cloud_supported": true,
+   "cloud_editable": true,
    "cloud_readonly": false,
    "cloud_byoc_only": false,
    "is_deprecated": false,
@@ -5333,6 +5723,17 @@
    "is_deprecated": false,
    "nullable": false
   },
+  "oidc_rsa_default_algorithm": {
+   "name": "oidc_rsa_default_algorithm",
+   "config_scope": "cluster",
+   "type": "string",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
   "oidc_token_audience": {
    "name": "oidc_token_audience",
    "config_scope": "cluster",
@@ -5546,6 +5947,17 @@
    "is_deprecated": false,
    "nullable": false
   },
+  "protected_mode": {
+   "name": "protected_mode",
+   "config_scope": "cluster",
+   "type": "boolean",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": true
+  },
   "quota_manager_gc_sec": {
    "name": "quota_manager_gc_sec",
    "config_scope": "cluster",
@@ -5561,6 +5973,17 @@
    "name": "rack",
    "config_scope": "broker",
    "type": "string",
+   "is_deprecated": false,
+   "nullable": true
+  },
+  "raft_eager_heartbeat_batch_us": {
+   "name": "raft_eager_heartbeat_batch_us",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
    "is_deprecated": false,
    "nullable": true
   },
@@ -5741,6 +6164,28 @@
    "is_deprecated": false,
    "nullable": false
   },
+  "raft_replicate_batcher_latency_target_us": {
+   "name": "raft_replicate_batcher_latency_target_us",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "raft_replicate_batcher_mode": {
+   "name": "raft_replicate_batcher_mode",
+   "config_scope": "cluster",
+   "type": "string",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
   "raft_smp_max_non_local_requests": {
    "name": "raft_smp_max_non_local_requests",
    "config_scope": "cluster",
@@ -5751,6 +6196,17 @@
    "cloud_byoc_only": false,
    "is_deprecated": false,
    "nullable": true
+  },
+  "raft_stm_apply_delay_on_start_for_tests": {
+   "name": "raft_stm_apply_delay_on_start_for_tests",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
   },
   "raft_timeout_now_timeout_ms": {
    "name": "raft_timeout_now_timeout_ms",
@@ -5885,6 +6341,18 @@
   },
   "redpanda.iceberg.partition.spec": {
    "name": "redpanda.iceberg.partition.spec",
+   "config_scope": "topic",
+   "type": "string",
+   "is_deprecated": false
+  },
+  "redpanda.iceberg.table.name": {
+   "name": "redpanda.iceberg.table.name",
+   "config_scope": "topic",
+   "type": "string",
+   "is_deprecated": false
+  },
+  "redpanda.iceberg.table.namespace": {
+   "name": "redpanda.iceberg.table.namespace",
    "config_scope": "topic",
    "type": "string",
    "is_deprecated": false
@@ -6394,6 +6862,17 @@
    "is_deprecated": true,
    "nullable": false
   },
+  "schema_registry_canonicalize_on_consume": {
+   "name": "schema_registry_canonicalize_on_consume",
+   "config_scope": "cluster",
+   "type": "array",
+   "cloud_supported": true,
+   "cloud_editable": true,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
   "schema_registry_deferred_recovery": {
    "name": "schema_registry_deferred_recovery",
    "config_scope": "cluster",
@@ -6478,6 +6957,17 @@
    "is_deprecated": false,
    "nullable": false
   },
+  "scram_credential_cache_enabled": {
+   "name": "scram_credential_cache_enabled",
+   "config_scope": "cluster",
+   "type": "boolean",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
   "scram_password": {
    "name": "scram_password",
    "config_scope": "broker",
@@ -6544,6 +7034,17 @@
    "is_deprecated": false,
    "nullable": false
   },
+  "shadow_link_failover_timeout": {
+   "name": "shadow_link_failover_timeout",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
   "space_management_enable": {
    "name": "space_management_enable",
    "config_scope": "cluster",
@@ -6588,6 +7089,13 @@
    "is_deprecated": false,
    "nullable": false
   },
+  "storage_abort_on_corrupt_segment": {
+   "name": "storage_abort_on_corrupt_segment",
+   "config_scope": "broker",
+   "type": "boolean",
+   "is_deprecated": false,
+   "nullable": false
+  },
   "storage_compaction_index_memory": {
    "name": "storage_compaction_index_memory",
    "config_scope": "cluster",
@@ -6615,6 +7123,17 @@
    "name": "storage_compaction_key_map_memory_limit_percent",
    "config_scope": "cluster",
    "type": "number",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "storage_compaction_priority_key_map_memory": {
+   "name": "storage_compaction_priority_key_map_memory",
+   "config_scope": "cluster",
+   "type": "integer",
    "cloud_supported": false,
    "cloud_editable": false,
    "cloud_readonly": false,
@@ -6891,6 +7410,28 @@
   },
   "topic_partitions_reserve_shard0": {
    "name": "topic_partitions_reserve_shard0",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "topic_storage_mode_migration_error_backoff_timeout": {
+   "name": "topic_storage_mode_migration_error_backoff_timeout",
+   "config_scope": "cluster",
+   "type": "integer",
+   "cloud_supported": false,
+   "cloud_editable": false,
+   "cloud_readonly": false,
+   "cloud_byoc_only": false,
+   "is_deprecated": false,
+   "nullable": false
+  },
+  "topic_storage_mode_migration_max_concurrent_partitions": {
+   "name": "topic_storage_mode_migration_max_concurrent_partitions",
    "config_scope": "cluster",
    "type": "integer",
    "cloud_supported": false,

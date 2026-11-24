@@ -1,7 +1,6 @@
 {
   "properties": {
     "abort_index_segment_size": {
-      "description": "Capacity (in number of transactions) of an abort index segment. Each partition tracks the aborted transaction offset ranges to help service client requests. If the number of transactions increases beyond this threshold, they are flushed to disk to ease memory pressure. Then they're loaded on demand.",
       "config_scope": "cluster"
     },
     "admin": {
@@ -21,7 +20,6 @@
         "* `<external-broker-hostname>`: The externally accessible hostname or IP address that clients use to connect to this broker",
         "* `<admin-api-port>`: The port number for the Admin API endpoint"
       ],
-      "description": "Network address for the Admin API server.",
       "links": {
         "`admin_api_tls`": "#admin_api_tls",
         "Admin API": "glossterm"
@@ -127,7 +125,6 @@
       "config_scope": "cluster"
     },
     "audit_use_rpc": {
-      "description": "Use Redpanda's internal communication system to write audit logs. When disabled, Redpanda uses a Kafka client to write audit logs instead.",
       "config_scope": "cluster"
     },
     "auto_create_topics_enabled": {
@@ -210,17 +207,14 @@
       }
     },
     "cloud_storage_azure_adls_port": {
-      "description": "Azure Data Lake Storage v2 port override. See also: `cloud_storage_azure_adls_endpoint`. Use when hierarchical namespaces are enabled on your storage account and you have set up a custom endpoint.",
       "links": {
         "`cloud_storage_azure_adls_endpoint`": "#cloud_storage_azure_adls_endpoint"
       }
     },
     "cloud_storage_azure_container": {
-      "description": "The name of the Azure container to use with Tiered Storage. If `null`, the property is disabled. The container must belong to `cloud_storage_azure_storage_account`.",
       "links": {
         "`cloud_storage_azure_storage_account`": "#cloud_storage_azure_storage_account"
-      },
-      "upstream_ref": "redpanda-data/streaming-enterprise#549"
+      }
     },
     "cloud_storage_azure_hierarchical_namespace_enabled": {
       "description": "Force Redpanda to use or not use an Azure Data Lake Storage (ADLS) Gen2 hierarchical namespace-compliant client in `cloud_storage_azure_storage_account`. \n\nWhen this property is not set, `cloud_storage_azure_shared_key` must be set, and each broker checks at startup if a hierarchical namespace is enabled. \n\nWhen set to `true`, this property disables the check and assumes a hierarchical namespace is enabled. \n\nWhen set to `false`, this property disables the check and assumes a hierarchical namespace is not enabled. \n\nThis setting should be used only in emergencies where Redpanda fails to detect the correct a hierarchical namespace status.",
@@ -240,7 +234,6 @@
     },
     "cloud_storage_azure_shared_key": {
       "config_scope": "cluster",
-      "description": "The account access key to be used for Azure Shared Key authentication with the Azure storage account configured by `cloud_storage_azure_storage_account`. If `null`, the property is disabled.",
       "links": {
         "`cloud_storage_azure_storage_account`": "#cloud_storage_azure_storage_account"
       },
@@ -252,17 +245,14 @@
       ]
     },
     "cloud_storage_bucket": {
-      "description": "Name of the AWS or GCP bucket that Redpanda uses to store object storage data. Must be set when object storage is enabled: if `null`, Redpanda cannot configure object storage. For Azure, set `cloud_storage_azure_container` instead.",
       "admonitions": [
         {
           "type": "warning",
           "text": "Modifying this property after writing data to a bucket could cause data loss."
         }
-      ],
-      "upstream_ref": "redpanda-data/streaming-enterprise#406"
+      ]
     },
     "cloud_storage_cache_directory": {
-      "description": "Directory for the object storage cache. Set this when the `cloud_storage_enabled` cluster property is enabled. If not set, Redpanda uses `cloud_storage_cache` inside the directory given by `data_directory`.",
       "example": [
         "[,yaml]",
         "----",
@@ -276,8 +266,7 @@
       "category": "redpanda",
       "see_also": [
         "xref:reference:properties/object-storage-properties.adoc#cloud_storage_enabled[`cloud_storage_enabled`]"
-      ],
-      "upstream_ref": "redpanda-data/streaming-enterprise#406"
+      ]
     },
     "cloud_storage_cache_max_objects": {
       "links": {
@@ -307,18 +296,12 @@
       ]
     },
     "cloud_storage_cache_trim_threshold_percent_objects": {
-      "description": "Cache trimming is triggered when the number of objects in the cache reaches this percentage relative to its maximum object count. If unset, the default behavior is to start trimming when the cache is full.",
       "version": "24.1.10"
     },
     "cloud_storage_cache_trim_threshold_percent_size": {
-      "description": "Cache trimming is triggered when the cache size reaches this percentage relative to its maximum capacity. If unset, the default behavior is to start trimming when the cache is full.",
       "version": "24.1.10"
     },
-    "cloud_storage_cache_trim_walk_concurrency": {
-      "description": "The maximum number of concurrent tasks launched for traversing the directory structure during cache trimming. A higher number allows cache trimming to run faster but can cause latency spikes due to increased pressure on I/O subsystem and syscall threads."
-    },
     "cloud_storage_client_lease_timeout_ms": {
-      "description": "The maximum time Redpanda holds a connection to object storage before closing it. After this timeout, any active connection is immediately closed and must be re-established for subsequent operations.",
       "config_scope": "cluster"
     },
     "cloud_storage_cluster_name": {
@@ -329,7 +312,6 @@
       ]
     },
     "cloud_storage_credentials_host": {
-      "description": "The hostname to connect to for retrieving role based credentials. Derived from `cloud_storage_credentials_source` if not set. Only required when using IAM role based access. To authenticate using access keys, see `cloud_storage_access_key`.",
       "links": {
         "`cloud_storage_credentials_source`": "#cloud_storage_credentials_source",
         "`cloud_storage_access_key`": "#cloud_storage_access_key"
@@ -354,33 +336,14 @@
         "`cloud_storage_trust_file`": "#cloud_storage_trust_file"
       }
     },
-    "cloud_storage_disable_archival_stm_rw_fence": {
-      "description": "Disables the concurrency control mechanism in Tiered Storage. This safety feature keeps data organized and correct when multiple processes access it simultaneously. Disabling it can cause data consistency problems, so use this setting only for testing, never in production systems."
-    },
     "cloud_storage_disable_archiver_manager": {
       "config_scope": "cluster"
     },
-    "cloud_storage_disable_read_replica_loop_for_tests": {
-      "description": "Prevents the read replica sync loop from starting in topic partitions with Tiered Storage enabled. This property exists to simplify testing and must not be set in production.",
-      "upstream_ref": "redpanda-data/streaming-enterprise#406"
-    },
     "cloud_storage_disable_remote_labels_for_tests": {
-      "description": "If `true`, Redpanda disables remote labels and falls back on the hash-based object naming scheme for new topics. This property exists to simplify testing and must not be set in production.",
-      "config_scope": "cluster",
-      "upstream_ref": "redpanda-data/streaming-enterprise#406"
-    },
-    "cloud_storage_disable_upload_consistency_checks": {
-      "description": "Disable all upload consistency checks to allow Redpanda to upload logs with gaps and replicate metadata with consistency violations. Do not change the default value unless requested by Redpanda Support."
-    },
-    "cloud_storage_disable_upload_loop_for_tests": {
-      "description": "Prevents the upload loop from starting in topic partitions with Tiered Storage enabled. This property exists to simplify testing and must not be set in production.",
-      "upstream_ref": "redpanda-data/streaming-enterprise#406"
+      "config_scope": "cluster"
     },
     "cloud_storage_enable_compacted_topic_reupload": {
       "description": "Enable re-uploading data for compacted topics.\nWhen set to `true`, Redpanda can re-upload data for compacted topics to object storage, ensuring that the most current state of compacted topics is available in the cloud. Disabling this property (`false`) may reduce storage and network overhead but at the risk of not having the latest compacted data state in object storage."
-    },
-    "cloud_storage_enable_remote_allow_gaps": {
-      "description": "Controls the eviction of locally stored log segments when Tiered Storage uploads are paused. Set to `false` to only evict data that has already been uploaded to object storage. If the retained data fills the local volume, Redpanda throttles producers. Set to `true` to allow the eviction of locally stored log segments, which may create gaps in offsets."
     },
     "cloud_storage_enable_remote_read": {
       "description": "Default remote read setting for new topics.\n\nWhen set to `true`, new topics are by default configured to allow reading data directly from object storage, facilitating access to older data that might have been offloaded as part of Tiered Storage. With the default set to `false`, remote reads must be explicitly enabled at the topic level."
@@ -388,16 +351,12 @@
     "cloud_storage_enable_remote_write": {
       "description": "Default remote write setting for new topics.\n\nWhen set to `true`, new topics are by default configured to upload data to object storage. With the default set to `false`, remote write must be explicitly enabled at the topic level."
     },
-    "cloud_storage_enable_scrubbing": {
-      "description": "Enable routine checks (scrubbing) of object storage partitions. The scrubber validates the integrity of data and metadata uploaded to object storage."
-    },
     "cloud_storage_enable_segment_merging": {
       "see_also": [
         "xref:manage:tiered-storage.adoc#object-storage-housekeeping[Object storage housekeeping]"
       ]
     },
     "cloud_storage_enable_segment_uploads": {
-      "description": "Controls the upload of log segments to Tiered Storage. If set to `false`, this property temporarily pauses all log segment uploads from the Redpanda cluster. When the uploads are paused, the `cloud_storage_enable_remote_allow_gaps` cluster configuration and `redpanda.remote.allowgaps` topic properties control local retention behavior.",
       "see_also": [
         "xref:reference:properties/topic-properties.adoc#redpanda-remote-allowgaps[`redpanda.remote.allowgaps`]"
       ],
@@ -405,11 +364,7 @@
         "`cloud_storage_enable_remote_allow_gaps`": "#cloud_storage_enable_remote_allow_gaps"
       }
     },
-    "cloud_storage_full_scrub_interval_ms": {
-      "description": "Interval, in milliseconds, between a final scrub and the next scrub."
-    },
     "cloud_storage_gc_max_segments_per_run": {
-      "description": "Maximum number of log segments to delete from object storage during each housekeeping run. This limits the rate of object deletions to prevent overwhelming the object storage API. Each segment requires 2-3 object storage delete operations (for the data file, index file, and optionally a transaction manifest), plus one more per spillover manifest, so this value directly controls API request rate. For example, a value of `300` produces 600 to 900 deletes, plus one per spillover manifest.",
       "see_also": [
         {
           "content": "xref:manage:tiered-storage.adoc#object-storage-housekeeping[Object storage housekeeping]",
@@ -419,23 +374,10 @@
       "links": {
         "housekeeping run": "self-managed-only: xref:manage:tiered-storage.adoc#object-storage-housekeeping"
       },
-      "version": "v25.3.11",
-      "upstream_ref": "redpanda-data/streaming-enterprise#549"
-    },
-    "cloud_storage_graceful_transfer_timeout_ms": {
-      "description": "Time limit on waiting for uploads to complete before a leadership transfer.  If this is `null`, leadership transfers proceed without waiting."
-    },
-    "cloud_storage_housekeeping_interval_ms": {
-      "description": "Interval, in milliseconds, between object storage housekeeping tasks."
+      "version": "v25.3.11"
     },
     "cloud_storage_hydrated_chunks_per_segment_ratio": {
       "description": "The maximum number of chunks per segment that can be hydrated at a time. Above this number, unused chunks are trimmed.\n\nA segment is divided into chunks. Chunk hydration means downloading the chunk (which is a small part of a full segment) from cloud storage and placing it in the local disk cache. Redpanda periodically removes old, unused chunks from your local disk. This process is called chunk eviction. This property  controls how many chunks can be present for a given segment in local disk at a time, before eviction is triggered, removing the oldest ones from disk. Note that this property is not used for the default eviction strategy which simply removes all unused chunks."
-    },
-    "cloud_storage_idle_threshold_rps": {
-      "description": "The object storage request rate threshold for idle state detection. If the average request rate for the configured period is lower than this threshold, the object storage is considered idle."
-    },
-    "cloud_storage_idle_timeout_ms": {
-      "description": "The timeout, in milliseconds, used to detect the idle state of the object storage API. If the average object storage request rate is below this threshold for a configured amount of time, the object storage is considered idle and the housekeeping jobs are started."
     },
     "cloud_storage_inventory_hash_path_directory": {
       "example": [
@@ -450,27 +392,11 @@
       "config_scope": "broker",
       "category": "redpanda"
     },
-    "cloud_storage_inventory_max_hash_size_during_parse": {
-      "description": "Maximum bytes of hashes held in memory before writing data to disk during inventory report parsing. This affects the number of files written to disk during inventory report parsing. When this limit is reached, new files are written to disk."
-    },
-    "cloud_storage_manifest_max_upload_interval_sec": {
-      "description": "Minimum interval, in seconds, between partition manifest uploads. Actual time between uploads may be greater than this interval. If this is `null`, metadata is updated after each segment upload."
-    },
-    "cloud_storage_manifest_upload_timeout_ms": {
-      "description": "Maximum time, in milliseconds, that Redpanda spends on each manifest upload to or download from object storage, including retries. Redpanda also uses this value as the deadline for replicating archival metadata updates to the partition's replicas. Increase this value for object storage with high or variable latency.",
-      "upstream_ref": "redpanda-data/streaming-enterprise#549"
-    },
     "cloud_storage_materialized_manifest_ttl_ms": {
-      "description": "The interval, in milliseconds, that determines how long the materialized manifest can stay in the cache under contention. This setting is used for performance tuning. When the spillover manifest is materialized and stored in the cache, and the cache needs to evict it, it uses this value as a timeout. The cursor that uses the spillover manifest uses this value as a TTL interval, after which it stops referencing the manifest, making it available for eviction. This only affects spillover manifests under contention.",
-      "config_scope": "cluster",
-      "upstream_ref": "redpanda-data/streaming-enterprise#549"
+      "config_scope": "cluster"
     },
     "cloud_storage_max_connection_idle_time_ms": {
       "description": "Defines the maximum duration an HTTPS connection to object storage can stay idle, in milliseconds, before being terminated.\nThis setting reduces resource utilization by closing inactive connections. Adjust this property to balance keeping connections ready for subsequent requests and freeing resources associated with idle connections."
-    },
-    "cloud_storage_max_segment_readers_per_shard": {
-      "description": "Maximum concurrent I/O cursors of materialized remote segments per CPU core. If unset, Redpanda uses the value of `topic_partitions_per_shard`, which allows one segment reader per partition when the shard is at its maximum partition capacity. These readers are cached across Kafka consume requests and store a readahead buffer.",
-      "upstream_ref": "redpanda-data/streaming-enterprise#549"
     },
     "cloud_storage_max_segments_pending_deletion_per_partition": {
       "description": "The per-partition limit for the number of segments pending deletion from the cloud. Segments can be deleted due to retention or compaction. If this limit is breached and deletion fails, then segments are orphaned in the cloud and must be removed manually. Applies only to the in-memory manifest; spillover manifests are not affected by this limit."
@@ -501,12 +427,6 @@
     "cloud_storage_recovery_topic_validation_mode": {
       "description": "Validation performed before recovering a topic from object storage. In case of failure, the reason for the failure appears as `ERROR` lines in the Redpanda application log. For each topic, this reports errors for all partitions, but for each partition, only the first error is reported.\n\nThis property accepts the following parameters:\n\n- `no_check`: Skips the checks for topic recovery.\n- `check_manifest_existence`:  Runs an existence check on each `partition_manifest`. Fails if there are connection issues to the object storage.\n- `check_manifest_and_segment_metadata`: Downloads the manifest and runs a consistency check, comparing the metadata with the cloud storage objects. The process fails if metadata references any missing cloud storage objects.\n\nExample: Redpanda validates the topic `kafka/panda-topic-recovery-NOT-OK` and stops due to a fatal error on partition 0:\n\n```bash\nERROR 2024-04-24 21:29:08,166 [shard 1:main] cluster - [fiber11|0|299996ms recovery validation of {kafka/panda-topic-recovery-NOT-OK/0}/24] - manifest metadata check: missing segment, validation not ok\nERROR 2024-04-24 21:29:08,166 [shard 1:main] cluster - topics_frontend.cc:519 - Stopping recovery of {kafka/panda-topic-recovery-NOT-OK} due to validation error\n```\n\nEach failing partition error message has the following format:\n\n```bash\nERROR .... [... recovery validation of {<namespace/topic/partition>}...] - <failure-reason>, validation not ok\n```\n\nAt the end of the process, Redpanda outputs a final ERROR message: \n\n```bash\nERROR ... ... - Stopping recovery of {<namespace/topic>} due to validation error\n```"
     },
-    "cloud_storage_scrubbing_interval_jitter_ms": {
-      "description": "Jitter applied to the object storage scrubbing interval.",
-      "retirement_pending": {
-        "reason": "The two descriptions say the same thing; the only difference is \"object storage\" versus \"cloud storage\", neither of which is flagged as wrong by the terminology list. Since the source text is now just as good as the override, the override can be retired without touching engineering source."
-      }
-    },
     "cloud_storage_segment_max_upload_interval_sec": {
       "description": "Time that a segment can be kept locally without uploading it to the object storage, in seconds."
     },
@@ -521,12 +441,6 @@
     },
     "cloud_storage_spillover_manifest_max_segments": {
       "description": "Maximum number of segments in the spillover manifest that can be offloaded to the object storage. This setting serves as a threshold for triggering data offload based on the number of segments, rather than the total size of the manifest. It is designed for use in testing environments to control the offload behavior more granularly. In production settings, manage offloads based on the manifest size through `cloud_storage_spillover_manifest_size` for more predictable outcomes."
-    },
-    "cloud_storage_spillover_manifest_size": {
-      "description": "The size of the manifest which can be offloaded to the cloud. If the size of the local manifest stored in Redpanda exceeds `cloud_storage_spillover_manifest_size` by two times the spillover mechanism will split the manifest into two parts and one will be uploaded to object storage.",
-      "retirement_pending": {
-        "reason": "The two descriptions are identical except that the source text adds a comma after the introductory clause, which is the grammatically correct choice the override is missing. Since the source text is now at least as good as the override, the override can be retired without changing engineering source."
-      }
     },
     "cloud_storage_throughput_limit_percent": {
       "description": "Maximum throughput used by Tiered Storage per broker expressed as a percentage of the disk bandwidth. If the server has several disks, Redpanda uses the one that stores the Tiered Storage cache. Even if Tiered Storage is allowed to use the full bandwidth of the disk (100%), it won't necessarily use it in full. The actual usage depends on your workload and the state of the Tiered Storage cache. This setting is a safeguard that prevents Tiered Storage from using too many system resources: it is not a performance tuning knob."
@@ -569,6 +483,13 @@
     },
     "cloud_topics_allow_materialization_failure": {
       "version": "v26.1.1"
+    },
+    "cloud_topics_az_client_id_token_enabled": {
+      "description": "Enables Redpanda to read a client's availability zone (AZ) from a `zone_id={<az-id>}` token in the client's `client.id`. Leaderless Cloud Topics uses the client's AZ to choose which replica to advertise as the partition leader. Redpanda takes each broker's AZ from its `rack` property, so the token value must match one of those rack IDs. When this property is `false`, Redpanda ignores the token and can't determine any client's AZ.\n\nTo use leaderless Cloud Topics, enable both this property and `cloud_topics_leaderless_enabled`.",
+      "links": {
+        "`cloud_topics_leaderless_enabled`": "#cloud_topics_leaderless_enabled"
+      },
+      "upstream_ref": "redpanda-data/streaming-enterprise#1738"
     },
     "cloud_topics_compaction_disabled": {
       "version": "v26.2.1"
@@ -634,6 +555,9 @@
     },
     "cloud_topics_leveling_min_extent_size_ratio": {
       "version": "v26.2.1"
+    },
+    "cloud_topics_leveling_rewrite_imported": {
+      "version": "v26.3.1"
     },
     "cloud_topics_long_term_file_deletion_delay": {
       "version": "v26.1.1"
@@ -731,6 +655,27 @@
     "cloud_topics_upload_part_size": {
       "version": "v26.1.1"
     },
+    "cluster_fence_kafka_acl_error_code": {
+      "version": "v26.3.1"
+    },
+    "cluster_fence_kafka_fetch_error_code": {
+      "version": "v26.3.1"
+    },
+    "cluster_fence_kafka_group_error_code": {
+      "version": "v26.3.1"
+    },
+    "cluster_fence_kafka_produce_error_code": {
+      "version": "v26.3.1"
+    },
+    "cluster_fence_kafka_refusal_throttle_ms": {
+      "version": "v26.3.1"
+    },
+    "cluster_fence_kafka_topic_error_code": {
+      "version": "v26.3.1"
+    },
+    "cluster_fence_kafka_transaction_error_code": {
+      "version": "v26.3.1"
+    },
     "cluster_id": {
       "config_scope": "cluster"
     },
@@ -746,16 +691,25 @@
       "config_scope": "cluster"
     },
     "compression.type": {
-      "description": "Redpanda ignores this property and always uses producer compression semantics. If producers send compressed data, Redpanda stores and serves it as-is. If producers send uncompressed data, Redpanda stores it uncompressed.\n\nThis property exists for Apache Kafka compatibility. Configure compression in your producers instead of using this topic property.\n\nCompression reduces message size and improves throughput, but increases CPU utilization. Enable producer batching to increase compression efficiency.\n\nWhen set, this property overrides the cluster property `log_compression_type` for the topic.",
+      "description": "The compression type that the broker applies to batches produced to the topic. With the default value, `producer`, Redpanda stores each batch with the codec the producer set. With any other value, the broker decompresses each batch whose codec differs and recompresses it with this codec before replicating and storing it. With `none`, the broker stores batches uncompressed.\n\nUse broker-side compression when you can't change the compression settings of every producer. Recompression uses broker CPU. If a recompressed batch exceeds `max.message.bytes`, the broker rejects it with a `MESSAGE_TOO_LARGE` error.\n\nBroker-side compression applies only when the cluster property `kafka_produce_enable_batch_compression` is `true`.\n\nWhen set, this property overrides the cluster property `log_compression_type` for the topic.",
       "config_scope": "topic",
       "see_also": [
+        {
+          "content": "xref:develop:produce-data/configure-producers.adoc#broker-side-compression[Broker-side compression]",
+          "self_managed_only": true
+        },
         {
           "content": "xref:reference:properties/cluster-properties.adoc#log_compression_type[`log_compression_type`]",
           "self_managed_only": true
         },
         "xref:develop:produce-data/configure-producers.adoc#message-batching[Message batching]",
         "xref:develop:produce-data/configure-producers.adoc#commonly-used-producer-configuration-options[Common producer configuration options]"
-      ]
+      ],
+      "links": {
+        "`max.message.bytes`": "#max.message.bytes",
+        "`kafka_produce_enable_batch_compression`": "#kafka_produce_enable_batch_compression",
+        "`log_compression_type`": "self-managed-only: #log_compression_type"
+      }
     },
     "confluent.key.schema.validation": {
       "description": "Enable validation of the schema ID for keys on a record. This is a compatibility alias for `redpanda.key.schema.id.validation`. When enabled, Redpanda validates that the schema ID encoded in the record's key is registered in the Schema Registry according to the configured subject name strategy.",
@@ -960,7 +914,12 @@
       "config_scope": "cluster"
     },
     "default_redpanda_storage_mode_tiered_impl": {
-      "description": "Default implementation of the `tiered` storage mode for newly created topics. When the `redpanda.storage.mode` topic property is set to `tiered`, this property determines whether the topic uses Tiered Storage v1 (`tiered_v1`) or Tiered Storage v2 (`tiered_v2`). The implementation of each topic is reported by the read-only `redpanda.storage.mode.impl` topic property.\n\nChanging this property affects only topics created after the change. Existing topics keep the Tiered Storage version they were created with.",
+      "description": [
+        "Default implementation of the `tiered` storage mode. When a topic uses the `tiered` storage mode, set explicitly or inherited from `default_redpanda_storage_mode`, this property determines whether the topic uses Tiered Storage v1 (`tiered_v1`) or Tiered Storage v2 (`tiered_v2`). The implementation of each topic is reported by the `redpanda.storage.mode.impl` topic property.",
+        "Changing this property doesn't change the Tiered Storage version of existing tiered topics.",
+        "self-managed-only: It applies to topics created after the change, and to existing topics that you alter to `tiered` from a storage mode that isn't tiered. When this property is `tiered_v2`, altering a `local` or `unset` topic to `tiered` migrates the topic to Tiered Storage v2, so it also requires `enable_topic_storage_mode_migration`.",
+        "cloud-only: It applies only to topics created after the change."
+      ],
       "accepted_values": [
         "tiered_v1",
         "tiered_v2"
@@ -1171,6 +1130,15 @@
       "see_also": [
         "xref:develop:produce-data/configure-producers.adoc[]"
       ]
+    },
+    "group_consumer_max_assignment_interval_ms": {
+      "version": "v26.3.1"
+    },
+    "group_consumer_min_assignment_interval_ms": {
+      "version": "v26.3.1"
+    },
+    "group_coordinator_append_linger_ms": {
+      "version": "v26.3.1"
     },
     "health_monitor_metrics_enabled": {
       "version": "v26.2.1"
@@ -1586,6 +1554,9 @@
     "kafka_handler_latency_all": {
       "version": "v26.2.1"
     },
+    "kafka_leader_hint_wait_ms": {
+      "version": "v26.3.1"
+    },
     "kafka_max_message_size_upper_limit_bytes": {
       "description": "The maximum value you can set for the `max.message.bytes` topic property. When set to `null`, no limit is enforced.",
       "config_scope": "cluster",
@@ -1605,6 +1576,20 @@
     },
     "kafka_produce_batch_validation": {
       "config_scope": "cluster"
+    },
+    "kafka_produce_enable_batch_compression": {
+      "admonitions": [
+        {
+          "type": "important",
+          "text": "Clusters originally created on Redpanda 26.2 or earlier default to `false`, so they keep storing every batch with the producer's codec after an upgrade. Clusters created on Redpanda 26.3 or later default to `true`. Before 26.3, the broker ignored `compression.type` and `log_compression_type`. Before you set this property to `true` on an older cluster, check those properties for values other than `producer`, which take effect when you enable it."
+        }
+      ],
+      "see_also": [
+        {
+          "content": "xref:develop:produce-data/configure-producers.adoc#broker-side-compression[Broker-side compression]",
+          "self_managed_only": true
+        }
+      ]
     },
     "kafka_qdc_max_depth": {
       "description": "Maximum queue depth used in Kafka queue depth control.",
@@ -1705,17 +1690,16 @@
       "config_scope": "cluster"
     },
     "log_compression_type": {
-      "description": "Default for the Kafka-compatible compression.type property. Redpanda does not recompress data.\n\nThe topic property `compression.type` overrides the value of `log_compression_type` at the topic level.",
+      "description": "Default compression type that the broker applies to produced batches, for topics that don't set `compression.type`. With the default value, `producer`, Redpanda stores each batch with the codec the producer set. With any other value, the broker recompresses batches whose codec differs, or stores them uncompressed for `none`.\n\nBroker-side compression applies only when `kafka_produce_enable_batch_compression` is `true`.",
       "config_scope": "cluster",
-      "admonitions": [
-        {
-          "type": "important",
-          "text": "This property is ignored regardless of the value specified. The behavior is always the same as the `producer` value. Redpanda brokers do not compress or recompress data based on this property. If producers send compressed data, Redpanda stores it as-is; if producers send uncompressed data, Redpanda stores it uncompressed. Other listed values are accepted for Apache Kafka compatibility but are ignored by the broker. This property may appear in Admin API and `rpk topic describe` outputs for compatibility."
-        }
-      ],
       "see_also": [
-        "xref:reference:properties/topic-properties.adoc#compression-type[`compression.type`]"
-      ]
+        "xref:reference:properties/topic-properties.adoc#compression-type[`compression.type`]",
+        "xref:develop:produce-data/configure-producers.adoc#broker-side-compression[Broker-side compression]"
+      ],
+      "links": {
+        "`compression.type`": "#compression.type",
+        "`kafka_produce_enable_batch_compression`": "#kafka_produce_enable_batch_compression"
+      }
     },
     "log_eviction_exempt_topics": {
       "version": "v26.2.2"
@@ -2123,6 +2107,9 @@
         "xref:reference:properties/cluster-properties.adoc#enable_rack_awareness[`enable_rack_awareness`]"
       ]
     },
+    "raft_eager_heartbeat_batch_us": {
+      "version": "v26.3.1"
+    },
     "raft_max_buffered_follower_append_entries_bytes_per_shard": {
       "description": "The total size of append entry requests that may be cached per shard, using the Raft-buffered protocol. When an entry is cached, the leader can continue serving requests because the ordering of the cached requests cannot change. When the total size of cached requests reaches the set limit, back pressure is applied to throttle producers.",
       "config_scope": "cluster"
@@ -2139,6 +2126,9 @@
     },
     "raft_smp_max_non_local_requests": {
       "config_scope": "cluster"
+    },
+    "raft_stm_apply_delay_on_start_for_tests": {
+      "version": "v26.3.1"
     },
     "reclaim_stable_window": {
       "links": {
@@ -2190,6 +2180,10 @@
       "config_scope": "topic",
       "see_also": [
         "xref:manage:iceberg/iceberg-troubleshooting.adoc[Troubleshoot Iceberg Topics]"
+      ],
+      "accepted_values": [
+        "drop",
+        "dlq_table"
       ]
     },
     "redpanda.iceberg.mode": {
@@ -2204,6 +2198,28 @@
       "config_scope": "topic",
       "see_also": [
         "xref:manage:iceberg/iceberg-performance-tuning.adoc#use-custom-partitioning[Use custom partitioning]"
+      ]
+    },
+    "redpanda.iceberg.table.name": {
+      "description": "The name of the Iceberg table that Redpanda writes this topic to. When unset, Redpanda derives the table name from the topic name. The value cannot be empty.",
+      "config_scope": "topic",
+      "category": "iceberg-integration",
+      "admonitions": [
+        {
+          "type": "important",
+          "text": "Set this property before Redpanda writes data from the topic to Iceberg, and do not change it afterward."
+        }
+      ]
+    },
+    "redpanda.iceberg.table.namespace": {
+      "description": "The namespace of the Iceberg table that Redpanda writes this topic to, as dot-separated elements such as `org.db`. When unset, Redpanda uses the namespace in the `iceberg_default_catalog_namespace` cluster property. The value and each element cannot be empty.",
+      "config_scope": "topic",
+      "category": "iceberg-integration",
+      "admonitions": [
+        {
+          "type": "important",
+          "text": "Set this property before Redpanda writes data from the topic to Iceberg, and do not change it afterward."
+        }
       ]
     },
     "redpanda.iceberg.target.lag.ms": {
@@ -2339,7 +2355,14 @@
       "default": "."
     },
     "redpanda.storage.mode": {
-      "description": "The storage mode for a topic. Determines how topic data is stored and whether it is eligible for upload to object storage.\n\nAccepted values:\n\n* `local`: Topic data is stored only on the broker's local disk. Object storage upload is disabled for the topic, regardless of cluster-level Tiered Storage settings.\n* `tiered`: Topic data is stored on local disk and also uploaded to object storage. Enables Tiered Storage for the topic.\n* `cloud`: Topic data is stored in object storage using the Cloud Topics architecture. Local storage is used only as a write buffer.\n* `unset`: Specifies that the topic's storage mode is unset, regardless of the cluster default. The topic may still have Tiered Storage enabled through the legacy properties `redpanda.remote.read` and `redpanda.remote.write`.\n\nStarting in Redpanda v26.2, the `tiered` value is an alias that resolves to Tiered Storage v1 or v2 when the topic is created, according to the `default_redpanda_storage_mode_tiered_impl` cluster property. The resolved version is reported by the read-only `redpanda.storage.mode.impl` property, and the storage mode of a topic displays as `tiered` for both versions.\n\nThis property overrides the cluster-wide `default_redpanda_storage_mode` setting for individual topics.",
+      "description": [
+        "The storage mode for a topic. Determines how topic data is stored and whether it is eligible for upload to object storage.",
+        "Accepted values:",
+        "* `local`: Topic data is stored only on the broker's local disk. Object storage upload is disabled for the topic, regardless of cluster-level Tiered Storage settings.\n* `tiered`: Topic data is stored on local disk and also uploaded to object storage. Enables Tiered Storage for the topic.\n* `cloud`: Topic data is stored in object storage using the Cloud Topics architecture. Local storage is used only as a write buffer.\n* `unset`: Specifies that the topic's storage mode is unset, regardless of the cluster default. The topic may still have Tiered Storage enabled through the legacy properties `redpanda.remote.read` and `redpanda.remote.write`.",
+        "Starting in Redpanda v26.2, the `tiered` value is an alias that resolves to Tiered Storage v1 or v2, according to the `default_redpanda_storage_mode_tiered_impl` cluster property. The resolved version is reported by the `redpanda.storage.mode.impl` property, and the storage mode of a topic displays as `tiered` for both versions.",
+        "self-managed-only: Starting in Redpanda v26.3, when storage mode migration is enabled, changing a `local`, `unset`, or Tiered Storage v1 topic to `cloud` migrates the topic in place. Changing a `local` or `unset` topic to `tiered` also migrates it when `tiered` resolves to Tiered Storage v2. Setting `tiered` on a topic that already uses Tiered Storage keeps its version, so to migrate a Tiered Storage v1 topic to v2, set `redpanda.storage.mode.impl` to `tiered_v2`. The migration can't be reversed.",
+        "This property overrides the cluster-wide `default_redpanda_storage_mode` setting for individual topics."
+      ],
       "see_also": [
         {
           "content": "xref:manage:tiered-storage.adoc[Tiered Storage]",
@@ -2364,7 +2387,13 @@
       "config_scope": "topic"
     },
     "redpanda.storage.mode.impl": {
-      "description": "The exact implementation of the topic's storage mode. Topics with the `tiered` storage mode report `tiered_v1` (Tiered Storage v1) or `tiered_v2` (Tiered Storage v2); topics with other storage modes mirror the value of `redpanda.storage.mode`.\n\nThis property is read-only after topic creation. To select the Tiered Storage version for a topic explicitly, set this property together with a matching `redpanda.storage.mode` value when you create the topic (both `tiered_v1` and `tiered_v2` correspond to the `tiered` mode). You can omit `redpanda.storage.mode` only if this property matches the version selected by the cluster default. To change a topic's storage mode after creation, alter `redpanda.storage.mode` instead.\n\nIf this property is not set at topic creation, the `tiered` storage mode resolves to the version selected by the `default_redpanda_storage_mode_tiered_impl` cluster property.",
+      "description": [
+        "The exact implementation of the topic's storage mode. Topics with the `tiered` storage mode report `tiered_v1` (Tiered Storage v1) or `tiered_v2` (Tiered Storage v2); topics with other storage modes mirror the value of `redpanda.storage.mode`.",
+        "To select the Tiered Storage version for a topic explicitly, set this property together with a matching `redpanda.storage.mode` value when you create the topic (both `tiered_v1` and `tiered_v2` correspond to the `tiered` mode). You can omit `redpanda.storage.mode` only if this property matches the version selected by the cluster default.",
+        "self-managed-only: Starting in Redpanda v26.3, you can also alter this property on an existing topic when storage mode migration is enabled. Changing a `local`, `unset`, or `tiered_v1` topic to `cloud` or `tiered_v2` migrates the topic in place, and the migration can't be reversed. If you alter both this property and `redpanda.storage.mode` in the same request, their values must agree. You can't remove this property from a topic.",
+        "cloud-only: This property is read-only after topic creation. To change a topic's storage mode after creation, alter `redpanda.storage.mode` instead.",
+        "If this property is not set at topic creation, the `tiered` storage mode resolves to the version selected by the `default_redpanda_storage_mode_tiered_impl` cluster property."
+      ],
       "see_also": [
         {
           "content": "xref:manage:tiered-storage.adoc#tiered-storage-versions[Tiered Storage versions]",
@@ -2854,6 +2883,9 @@
     "shadow_link_failover_batch_size": {
       "version": "v26.2.1"
     },
+    "storage_abort_on_corrupt_segment": {
+      "category": "redpanda"
+    },
     "storage_compaction_key_map_memory": {
       "links": {
         "`log_compaction_use_sliding_window`": "#log_compaction_use_sliding_window"
@@ -2966,6 +2998,11 @@
       },
       "config_scope": "cluster"
     },
+    "topic_storage_mode_migration_error_backoff_timeout": {
+      "version": "v26.3.1",
+      "description": "How long, in milliseconds, a migrating partition can go without progress before its migration backs off. Applies to partitions migrating from `local` or `tiered_v1` to `cloud` or `tiered_v2`. A partition pauses its uploads to object storage while it migrates. A partition that backs off resumes uploads and keeps its original storage mode. To restart the migration, run `rpk topic storage mode-migration retry` or call the Admin API. Until you do, no more of the topic's partitions start migrating. A backed-off partition doesn't count toward `topic_storage_mode_migration_max_concurrent_partitions`. This timeout doesn't apply to a partition that has already switched to the new storage mode.",
+      "upstream_ref": "redpanda-data/streaming-enterprise#1663"
+    },
     "transaction_coordinator_cleanup_policy": {
       "config_scope": "cluster",
       "accepted_values": [
@@ -3062,6 +3099,10 @@
     "compaction_ctrl_backlog_size": {
       "description": "Target amount of data, in bytes, waiting to be compacted on each shard. When the backlog grows past this size, Redpanda gives compaction more CPU time. If not set, Redpanda takes 10% of the free space in the data directory at startup and splits it evenly across shards.",
       "upstream_ref": "redpanda-data/streaming-enterprise#1402"
+    },
+    "cloud_migration_retain_tsv1_segments_until_migration_complete": {
+      "description": "Keeps a topic's `tiered_v1` data in object storage until every partition of the topic has migrated to `cloud` or `tiered_v2`. If a migration fails, you can back out of it by deleting the topic and then recovering it as a `tiered_v1` topic with `redpanda.remote.recovery`. You can back out only while Redpanda retains the data. Recovery restores only the data that each partition had in object storage when its migration began, so you lose anything written after that. Back out only as an emergency measure for a problem that the migration caused. Redpanda never deletes the `tiered_v1` data that a partition stops using after it finishes migrating but before every partition of the topic has migrated. This data continues to accrue storage costs, and Redpanda doesn't provide a way to identify or remove it. If you don't need a way to back out of a migration, disable this property before you start the migration. Applies only to partitions that start migrating after you enable this property.",
+      "upstream_ref": "redpanda-data/streaming-enterprise#1663"
     }
   }
 }
