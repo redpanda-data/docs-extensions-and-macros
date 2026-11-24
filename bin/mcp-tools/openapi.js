@@ -16,9 +16,11 @@ const { getAntoraStructure } = require('./antora');
  * @param {string} [args.tag] - Git tag for released content (for example, "v24.3.2" or "24.3.2")
  * @param {string} [args.branch] - Branch name for in-progress content (for example, "dev", "main")
  * @param {string} [args.repo] - Repository URL
- * @param {string} [args.surface] - Which API surfaces to bundle: 'admin', 'connect', or 'both'
+ * @param {string} [args.surface] - Which API surfaces to bundle: 'admin', 'connect', 'schema-registry', 'http-proxy', or 'both' (admin and connect)
  * @param {string} [args.out_admin] - Output path for admin API
  * @param {string} [args.out_connect] - Output path for connect API
+ * @param {string} [args.out_schema_registry] - Output path for Schema Registry API
+ * @param {string} [args.out_http_proxy] - Output path for HTTP Proxy API
  * @param {string} [args.admin_major] - Admin API major version
  * @param {boolean} [args.use_admin_major_version] - Use admin major version for info.version
  * @param {boolean} [args.quiet] - Suppress logs
@@ -95,6 +97,16 @@ function generateBundleOpenApi(args) {
       cmdArgs.push(args.out_connect);
     }
 
+    if (args.out_schema_registry) {
+      cmdArgs.push('--out-schema-registry');
+      cmdArgs.push(args.out_schema_registry);
+    }
+
+    if (args.out_http_proxy) {
+      cmdArgs.push('--out-http-proxy');
+      cmdArgs.push(args.out_http_proxy);
+    }
+
     if (args.admin_major) {
       cmdArgs.push('--admin-major');
       cmdArgs.push(args.admin_major);
@@ -147,6 +159,14 @@ function generateBundleOpenApi(args) {
 
     if (surface === 'connect' || surface === 'both') {
       filesGenerated.push(args.out_connect || 'connect/redpanda-connect-api.yaml');
+    }
+
+    if (surface === 'schema-registry') {
+      filesGenerated.push(args.out_schema_registry || 'schema-registry/schema-registry.json');
+    }
+
+    if (surface === 'http-proxy') {
+      filesGenerated.push(args.out_http_proxy || 'http-proxy/http-proxy.json');
     }
 
     return {

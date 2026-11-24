@@ -251,9 +251,11 @@ npx doc-tools generate bundle-openapi --tag <version> [options]
 *Optional flags:*
 
 --repo:: Repository to fetch from
---surface:: API surface to bundle (admin, connect, or both)
+--surface:: API surface to bundle (admin, connect, schema-registry, http-proxy, or both for admin and connect)
 --out-admin:: Output path for admin API bundle
 --out-connect:: Output path for connect API bundle
+--out-schema-registry:: Output path for Schema Registry API spec
+--out-http-proxy:: Output path for HTTP Proxy API spec
 --admin-major:: Major version for admin API
 --use-admin-major-version:: Use major version in admin API bundle
 --quiet:: Suppress output messages

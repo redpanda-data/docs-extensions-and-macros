@@ -18,7 +18,10 @@ const {
   createEntrypoint,
   runBundler,
   postProcessBundle,
-  bundleOpenAPI
+  bundleOpenAPI,
+  stitchSwaggerSpec,
+  findUnresolvedDefinitionRefs,
+  SWAGGER_SURFACES
 } = require('../../tools/bundle-openapi.js');
 
 describe('OpenAPI Bundle Tool - Production Test Suite', () => {
@@ -719,5 +722,146 @@ describe('bundleOpenAPI repository resolution and auth', () => {
     const [, args] = execFileSync.mock.calls[0];
     expect(args.some((a) => a.includes('extraheader'))).toBe(false);
     expect(args).toEqual(expect.arrayContaining(['https://internal.example/mirror.git']));
+  });
+});
+
+describe('Swagger surfaces (schema-registry, http-proxy)', () => {
+  // Fragments shaped like src/v/pandaproxy/api/api-doc/: the header ends with
+  // an open "paths" object, and the paths and definitions files are bare
+  // object members that only parse once stitched.
+  const HEADER = '{\n  "swagger": "2.0",\n  "info": {\n    "title": "Redpanda Schema Registry API",\n    "version": "1.2.0"\n  },\n  "host": "{{Host}}",\n  "basePath": "/",\n  "schemes": [\n    "http"\n  ],\n  "paths": {\n';
+  const PATHS = '\n    "/subjects": {\n      "get": {\n        "summary": "List subjects.",\n        "responses": {\n          "500": {\n            "description": "Internal Server Error",\n            "schema": {\n              "$ref": "#/definitions/error_body"\n            }\n          }\n        }\n      }\n    },\n    "/mode": {\n      "get": {\n        "summary": "Get the mode.",\n        "responses": {}\n      }\n    }\n';
+  const DEFINITIONS = '\n    "error_body": {\n      "type": "object"\n    }\n';
+
+  let repoDir;
+
+  const writeFragments = (dir, surface, { header = HEADER, paths = PATHS, definitions = DEFINITIONS } = {}) => {
+    const config = SWAGGER_SURFACES[surface];
+    const files = [[config.header, header], [config.paths[0], paths], [config.definitions[0], definitions]];
+    for (const [rel, content] of files) {
+      if (content === null) continue;
+      fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+      fs.writeFileSync(path.join(dir, rel), content);
+    }
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    repoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'swagger-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  });
+
+  describe('stitchSwaggerSpec', () => {
+    test('stitches header, paths, and definitions into one Swagger 2.0 document', () => {
+      writeFragments(repoDir, 'schema-registry');
+
+      const { spec, fragmentFiles } = stitchSwaggerSpec(repoDir, 'schema-registry');
+
+      expect(spec.swagger).toBe('2.0');
+      expect(spec.info.title).toBe('Redpanda Schema Registry API');
+      expect(spec.definitions).toEqual({ error_body: { type: 'object' } });
+      expect(fragmentFiles).toHaveLength(3);
+    });
+
+    test('keeps the source order of paths', () => {
+      writeFragments(repoDir, 'schema-registry');
+
+      const { spec } = stitchSwaggerSpec(repoDir, 'schema-registry');
+
+      expect(Object.keys(spec.paths)).toEqual(['/subjects', '/mode']);
+    });
+
+    test('uses the HTTP Proxy fragment files for the http-proxy surface', () => {
+      writeFragments(repoDir, 'http-proxy');
+
+      const { fragmentFiles } = stitchSwaggerSpec(repoDir, 'http-proxy');
+
+      expect(fragmentFiles.map(f => path.basename(f))).toEqual(['header.json', 'rest.json', 'definitions.def.json']);
+    });
+
+    test('rejects an unknown surface', () => {
+      expect(() => stitchSwaggerSpec(repoDir, 'admin')).toThrow('Invalid API surface');
+    });
+
+    test('names the missing fragment when a file does not exist', () => {
+      writeFragments(repoDir, 'schema-registry', { definitions: null });
+
+      expect(() => stitchSwaggerSpec(repoDir, 'schema-registry'))
+        .toThrow(/schema_registry_definitions\.def\.json/);
+    });
+
+    test('fails when the stitched text is not valid JSON', () => {
+      writeFragments(repoDir, 'schema-registry', { paths: PATHS + ',' });
+
+      expect(() => stitchSwaggerSpec(repoDir, 'schema-registry')).toThrow(/is not valid JSON/);
+    });
+
+    test('fails when the header is not Swagger 2.0', () => {
+      writeFragments(repoDir, 'schema-registry', { header: HEADER.replace('"2.0"', '"1.2"') });
+
+      expect(() => stitchSwaggerSpec(repoDir, 'schema-registry')).toThrow(/is not Swagger 2\.0/);
+    });
+
+    test('fails when a path references a missing definition', () => {
+      writeFragments(repoDir, 'schema-registry', { definitions: '\n    "other": {\n      "type": "object"\n    }\n' });
+
+      expect(() => stitchSwaggerSpec(repoDir, 'schema-registry')).toThrow(/missing definitions: error_body/);
+    });
+  });
+
+  describe('findUnresolvedDefinitionRefs', () => {
+    test('ignores refs that resolve and refs outside #/definitions/', () => {
+      const spec = {
+        paths: { '/a': { get: { responses: { 200: { schema: { $ref: '#/definitions/a' } } } } } },
+        definitions: { a: { properties: { b: { $ref: 'other.json#/b' } } } }
+      };
+      expect(findUnresolvedDefinitionRefs(spec)).toEqual([]);
+    });
+
+    test('finds missing refs inside arrays and definitions, once each', () => {
+      const spec = {
+        paths: { '/a': { get: { parameters: [{ schema: { $ref: '#/definitions/x' } }, { schema: { $ref: '#/definitions/x' } }] } } },
+        definitions: { a: { items: { $ref: '#/definitions/y' } } }
+      };
+      expect(findUnresolvedDefinitionRefs(spec)).toEqual(['x', 'y']);
+    });
+  });
+
+  describe('bundleOpenAPI with a Swagger surface', () => {
+    const savedToken = process.env.GH_TOKEN;
+
+    beforeEach(() => {
+      process.env.GH_TOKEN = 'test-token-123';
+      // Fake the clone: write the fragments where bundleOpenAPI expects the checkout.
+      execFileSync.mockImplementation((cmd, args, options) => {
+        writeFragments(path.join(options.cwd, args[args.length - 1]), 'schema-registry');
+        return '';
+      });
+    });
+
+    afterEach(() => {
+      if (savedToken === undefined) delete process.env.GH_TOKEN;
+      else process.env.GH_TOKEN = savedToken;
+    });
+
+    test('writes 2-space JSON with a trailing newline and skips buf', async () => {
+      const outFile = path.join(repoDir, 'out', 'schema-registry.json');
+
+      const result = await bundleOpenAPI({ tag: 'v26.3.1', surface: 'schema-registry', outSchemaRegistry: outFile, quiet: true });
+
+      expect(result).toEqual({ surface: 'schema-registry', outputPath: outFile, fragmentCount: 3, bundler: 'stitch' });
+      const text = fs.readFileSync(outFile, 'utf8');
+      expect(text).toBe(JSON.stringify(JSON.parse(text), null, 2) + '\n');
+      expect(execSync).not.toHaveBeenCalled();
+    });
+
+    test('rejects an unknown surface before cloning', async () => {
+      await expect(bundleOpenAPI({ tag: 'v26.3.1', surface: 'pandaproxy' }))
+        .rejects.toThrow(/API surface must be one of/);
+      expect(execFileSync).not.toHaveBeenCalled();
+    });
   });
 });
