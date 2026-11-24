@@ -165,29 +165,48 @@ function failingFindings (result, level) {
 }
 
 /**
- * Drop the findings a `// value-check: ignore` comment suppresses.
+ * Drop the findings a `// value-check: ignore` comment suppresses, and the
+ * deprecation findings on macro calls that say deprecated=ok, counted in
+ * result.acknowledged.
  *
- * @returns {number} how many were dropped.
+ * @returns {number} how many the ignore comments dropped.
  */
 function applyIgnores (result, docsDir) {
   const cache = new Map()
-  const ignored = (file, line) => {
+  const page = (file) => {
     if (!cache.has(file)) {
       const full = path.join(docsDir, file)
-      cache.set(file, fs.existsSync(full) ? shared.ignoredLines(fs.readFileSync(full, 'utf8')) : new Set())
+      const content = fs.existsSync(full) ? fs.readFileSync(full, 'utf8') : ''
+      cache.set(file, { ignored: shared.ignoredLines(content), acknowledged: shared.acknowledgedCalls(content) })
     }
-    return cache.get(file).has(line)
+    return cache.get(file)
+  }
+  const ignored = (file, line) => page(file).ignored.has(line)
+  // A deprecation finding on a macro call that says deprecated=ok, the same
+  // acknowledgement the macros honor: the call names the item on purpose.
+  const acknowledged = (f) => {
+    if (!/deprecat/.test(String(f.reason || ''))) return false
+    const calls = page(f.file).acknowledged.get(f.line)
+    if (!calls) return false
+    // Only the call the finding came from: its written text is that call, so
+    // another call or a prose span on the same line is still reported.
+    return typeof f.written === 'string' && calls.includes(f.written)
   }
   let count = 0
+  let acknowledgedCount = 0
   for (const r of Object.values(result.kinds)) {
     if (!Array.isArray(r.findings)) continue
-    const kept = r.findings.filter((f) => !ignored(f.file, f.line))
-    count += r.findings.length - kept.length
+    const kept = r.findings.filter((f) => {
+      if (ignored(f.file, f.line)) { count++; return false }
+      if (acknowledged(f)) { acknowledgedCount++; return false }
+      return true
+    })
     if (kept.length !== r.findings.length) {
       r.findings = kept
       r.counts = recount(r)
     }
   }
+  result.acknowledged = acknowledgedCount
   return count
 }
 
@@ -432,7 +451,7 @@ function describe (kind, f) {
 function renderMarkdown (result) {
   const out = ['# Reference values report', '']
   out.push('Statuses: **reference** is a command, flag, component or field that does not exist in the data (error) or is deprecated (warning), or an xref to an rpk, Connect component or Bloblang page or anchor that does not exist (broken-link, error) or whose label names something else (link-label-mismatch, warning). **exact** is what the macro renders, or an xref rpkcmd:[...], connect:[...] or blobl:[...] would render the same; **auto-safe** is an exact match `--write` may apply. **equivalent** is the same value worded differently. **mismatch** differs from the data. **unset** states a value the data leaves empty. **unverifiable** could not be compared, with the reason. **example output** is a value in a block or YAML comment, never written: **stale** when it differs from the data. **unlinked mention** is the first mention on a page of an rpk command, Connect component or Bloblang call in inline code, on a page that links it nowhere, which rpkcmd:[...], connect:[...] or blobl:[...] would link; it fails only at --fail-on links, and --write converts it only with --write-links. **alias** is an rpk command written with an alias, or a Connect component written with the name its page now aliases, in a macro or a prose span: it renders and links correctly, fails only at --fail-on any or links, and `--write` rewrites it to the main name when it is writable, as it rewrites a deprecated name whose data names one replacement.', '')
-  out.push(`Checked ${result.component}@${result.version || 'unversioned'} at --fail-on ${result.failOn}: ${result.failing} failing finding(s), ${result.ignored} ignored by \`// value-check: ignore\`.`, '')
+  out.push(`Checked ${result.component}@${result.version || 'unversioned'} at --fail-on ${result.failOn}: ${result.failing} failing finding(s), ${result.ignored} ignored by \`// value-check: ignore\`, ${result.acknowledged || 0} deprecated name(s) acknowledged with \`deprecated=ok\`.`, '')
   out.push('| Kind | Dataset | Surface | Files | Findings | Failing | Reference errors | Reference warnings | Mismatch | Exact (auto-safe) | Equivalent | Unset | Unverifiable | Example output (stale) | Unlinked mentions | Aliases |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|')
   for (const [kind, r] of Object.entries(result.kinds)) {
     const c = r.counts || {}
@@ -586,6 +605,7 @@ function runCli (options, { log = console.log, error = console.error } = {}) {
   }
   for (const [kind, why] of Object.entries(result.skipped)) log(`${kind}: skipped (${why})`)
   if (result.ignored) log(`${result.ignored} finding(s) ignored by // value-check: ignore.`)
+  if (result.acknowledged) log(`${result.acknowledged} deprecated name(s) acknowledged with deprecated=ok.`)
   for (const { kind, finding: f } of failingFindings(result, result.failOn)) {
     log(`  ${f.status === 'reference' ? f.reason.toUpperCase() : f.status.toUpperCase()} ${f.file}:${f.line} ${kind} ${describe(kind, f)}`)
   }

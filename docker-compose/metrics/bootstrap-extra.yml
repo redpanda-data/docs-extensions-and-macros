@@ -37,5 +37,5 @@ enable_shadow_linking: true
 cloud_storage_credentials_source: aws_instance_metadata
 # *_cloud_topics_*: Redpanda 26.1 starts the cloud topics services only with
 # this on. Later releases start them without it. Releases before 26.1 do not
-# have the property.
+# have the property: 25.3 has unstable_beta_feature_cloud_topics_enabled.
 cloud_topics_enabled: true

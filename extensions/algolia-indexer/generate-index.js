@@ -61,11 +61,20 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
   let algoliaCount = 0
 
   for (const page of pages) {
+    // Setting blockTextElements replaces the parser's defaults, so script,
+    // style, and noscript have to be listed again. Without them the parser
+    // reads inline script source as markup, and a script whose text looks
+    // like an unclosed tag (the Bloblang Playground's mentions
+    // connect-<version>.json) breaks the tree, so article.doc is not found
+    // and the page is skipped as "not an article".
     const root = parse(
       page.contents,
       {
         blockTextElements: {
-          code: true
+          code: true,
+          script: true,
+          style: true,
+          noscript: true,
         }
       }
     )
@@ -120,7 +129,14 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
                             ['home', 'component-home-v3', 'data-platform'].includes(pageLayout)
 
       if (!isUmbrellaPage) {
-        logger.warn(`Page is not an article...skipping ${page.pub.url}`)
+        // A page that picks its own layout (search, labs-home, and the like)
+        // has no article on purpose. A page on the default layout should
+        // have one, so its absence is worth a warning.
+        if (pageLayout && pageLayout !== 'default') {
+          logger.debug(`Page uses the ${pageLayout} layout, which is not an article...skipping ${page.pub.url}`)
+        } else {
+          logger.warn(`Page is not an article...skipping ${page.pub.url}`)
+        }
         continue
       }
 

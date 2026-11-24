@@ -118,6 +118,7 @@ const { escapeHtml } = require('../extension-utils/html-utils')
 const propertyValues = require('../extension-utils/property-values')
 const valueDescriptions = require('../extension-utils/value-descriptions')
 const datasets = require('../extension-utils/attachment-datasets')
+const { deprecationAcknowledged } = require('../extension-utils/deprecation-ack')
 const { noteIncludes } = require('../extension-utils/connect-links')
 const { rpkvalInlineMacro, rpkvalBlockMacro } = require('./rpkval')
 const { connectvalInlineMacro, connectvalBlockMacro } = require('./connectval')
@@ -125,6 +126,8 @@ const { rpkcmdInlineMacro } = require('./rpkcmd')
 const { connectInlineMacro } = require('./connect')
 const { bloblInlineMacro } = require('./blobl')
 const { bloblvalInlineMacro, bloblvalBlockMacro } = require('./bloblval')
+const { metricInlineMacro } = require('./metric')
+const { metricvalInlineMacro, metricvalBlockMacro } = require('./metricval')
 const logger = require('@antora/logger')('prop-macro')
 
 const {
@@ -201,6 +204,25 @@ const CLAIM_DECLARED = 3
 // Delimited block fences: listing, literal, example, sidebar, quote, comment.
 const DELIMITER_RX = /^(-{4,}|\.{4,}|={4,}|\*{4,}|_{4,}|\/{4,})$/
 
+// What buildPageIndex indexes. prop: indexes property headings; metric:
+// passes its own kind (extension-utils/metric-links.js) to index metric
+// headings with the same scan.
+//
+//   symbol        Where the per-catalog index cache lives.
+//   sourceRx      The page attribute that declares a page the reference.
+//   pageIncludes  Also follow includes of whole pages, as a Cloud stub
+//                 includes the page it single-sources.
+//   conditionals  Skip headings inside ifdef/ifndef blocks that do not
+//                 render for the indexed page.
+const PROPERTY_PAGES = {
+  symbol: $propertyPageIndex,
+  log: 'prop macro',
+  noun: 'property',
+  plural: 'properties',
+  sourceRx: PROPERTY_SOURCE_RX,
+  logger,
+}
+
 /**
  * Extract property-style headings from AsciiDoc source together with the
  * include tags that enclose them.
@@ -211,7 +233,9 @@ const DELIMITER_RX = /^(-{4,}|\.{4,}|={4,}|\*{4,}|_{4,}|\/{4,})$/
 function extractHeadingsWithTags (source) {
   const headings = []
   const open = []
+  const conditions = []
   for (const line of source.split('\n')) {
+    if (trackConditional(line, conditions)) continue
     const marker = line.match(TAG_MARKER_RX)
     if (marker) {
       if (marker[1] === 'tag') open.push(marker[2])
@@ -222,9 +246,80 @@ function extractHeadingsWithTags (source) {
       continue
     }
     const heading = line.match(HEADING_RX)
-    if (heading) headings.push({ name: heading[1], tags: [...open] })
+    if (heading) {
+      const entry = { name: heading[1], tags: [...open] }
+      if (conditions.length) entry.conditions = [...conditions]
+      headings.push(entry)
+    }
   }
   return headings
+}
+
+// ifdef::env-cloud[], ifndef::a,b[], ifeval::[...] and endif::[] on a line of
+// their own. The single-line form (ifdef::x[text]) opens nothing.
+const CONDITIONAL_RX = /^(ifdef|ifndef|ifeval|endif)::([^[]*)\[(.*)\]\s*$/
+
+/**
+ * Keep a stack of the preprocessor conditionals open at a line. Returns true
+ * when the line is a conditional directive.
+ *
+ * @param {string} line
+ * @param {object[]} stack - Mutated: {negate, names, all}, or {unknown: true}
+ *   for ifeval, which is never evaluated and counts as true.
+ */
+function trackConditional (line, stack) {
+  const match = line.match(CONDITIONAL_RX)
+  if (!match) return false
+  const [, directive, target, content] = match
+  if (directive === 'endif') stack.pop()
+  else if (directive === 'ifeval') stack.push({ unknown: true })
+  else if (!content.trim()) {
+    const all = target.includes('+')
+    stack.push({ negate: directive === 'ifndef', all, names: target.split(all ? '+' : ',').map((name) => name.trim()).filter(Boolean) })
+  }
+  return true
+}
+
+/**
+ * Whether content inside these conditionals renders with these attributes.
+ */
+function conditionsHold (conditions, attributes) {
+  return (conditions || []).every((condition) => {
+    if (condition.unknown) return true
+    const set = (name) => isAttributeSet(attributes[name])
+    const defined = condition.all ? condition.names.every(set) : condition.names.some(set)
+    return condition.negate ? !defined : defined
+  })
+}
+
+// Attribute entries a page sets for itself (:env-serverless: true), over its
+// component version's attributes.
+function pageAttributes (source, componentAttributes) {
+  const attributes = { ...componentAttributes }
+  for (const match of source.matchAll(/^:(!?)([\w-]+)(!?):[ \t]*(.*)$/gm)) {
+    if (match[1] || match[3]) delete attributes[match[2]]
+    else attributes[match[2]] = match[4].trim()
+  }
+  return attributes
+}
+
+/**
+ * Resolve an include target that names a page, such as
+ * 'streaming:reference:public-metrics-reference.adoc' or
+ * 'reference:page$public-metrics-reference.adoc', the way a Cloud stub
+ * includes the page it single-sources.
+ */
+function parsePageTarget (target, pageSrc) {
+  if (!/\.adoc$/.test(target) || /^[./]/.test(target)) return undefined
+  const parts = target.replace(/^[^@:$]+@/, '').split(':')
+  let relative = parts.pop()
+  if (relative.includes('$')) {
+    if (!relative.startsWith('page$')) return undefined
+    relative = relative.slice('page$'.length)
+  }
+  if (parts.length > 2) return undefined
+  const module = parts.pop() || pageSrc.module
+  return { component: parts.pop() || pageSrc.component, module, relative }
 }
 
 /**
@@ -284,8 +379,8 @@ function parsePartialTarget (target, pageSrc) {
  * @param {object} properties - Known property names from the published JSON.
  * @returns {Map<string, string>} property name -> page path without .adoc
  */
-function buildPageIndex (contentCatalog, component, properties, version) {
-  const cache = contentCatalog[$propertyPageIndex] || (contentCatalog[$propertyPageIndex] = {})
+function buildPageIndex (contentCatalog, component, properties, version, kind = PROPERTY_PAGES) {
+  const cache = contentCatalog[kind.symbol] || (contentCatalog[kind.symbol] = {})
   const cacheKey = `${component}@${version || ''}`
   if (cache[cacheKey]) return cache[cacheKey]
   const index = new Map()
@@ -316,7 +411,7 @@ function buildPageIndex (contentCatalog, component, properties, version) {
     return head.startsWith('<') && !head.startsWith('<<') && /^<[a-zA-Z!/]/.test(head)
   }
   if (pages.some(looksConverted)) {
-    logger.warn(`prop macro: building the property page index for ${component}@${version || 'any'} after conversion started; some pages are already HTML and their properties may not be indexed. Register '@redpanda-data/docs-extensions-and-macros/extensions/property-page-index' under antora.extensions to build the index up front.`)
+    kind.logger.warn(`${kind.log}: building the ${kind.noun} page index for ${component}@${version || 'any'} after conversion started; some pages are already HTML and their ${kind.plural} may not be indexed. Register '@redpanda-data/docs-extensions-and-macros/extensions/property-page-index' under antora.extensions to build the index up front.`)
   }
   // A page can declare that it is the reference for a named collection of
   // properties:
@@ -331,7 +426,7 @@ function buildPageIndex (contentCatalog, component, properties, version) {
   // that both surface a property used to resolve by aggregation order, which is
   // stable for one checkout but not meaningful.
   const declarationOf = (page) => {
-    const match = sourceOf(page).match(PROPERTY_SOURCE_RX)
+    const match = kind.sourceRx && sourceOf(page).match(kind.sourceRx)
     return match ? match[1].trim() : undefined
   }
   const ordered = pages
@@ -380,8 +475,21 @@ function buildPageIndex (contentCatalog, component, properties, version) {
       claims.set(name, { page: pagePath, declared, rank })
       index.set(name, entry)
     }
+    // Only a kind that asks for it reads preprocessor conditionals, with the
+    // attributes of the page that renders the heading.
+    const attributes = kind.conditionals
+      ? pageAttributes(source, datasets.componentAttributes(contentCatalog, component, page.src.version))
+      : undefined
+    const conditions = []
     let inDelimitedBlock = false
     for (const line of source.split('\n')) {
+      // Inside delimited blocks too: the preprocessor reads conditionals
+      // before blocks are parsed, so one that wraps a single fence decides
+      // where the block ends.
+      if (attributes) {
+        if (trackConditional(line, conditions)) continue
+        if (!conditionsHold(conditions, attributes)) continue
+      }
       // A property name inside a listing, literal, or comment block is sample
       // text, not documentation of that property. Indexing it handed the
       // property to a page that renders no anchor for it.
@@ -402,7 +510,12 @@ function buildPageIndex (contentCatalog, component, properties, version) {
       }
       const include = line.match(INCLUDE_RX)
       if (!include) continue
-      const partialRef = parsePartialTarget(include[1].trim(), page.src)
+      let family = 'partial'
+      let partialRef = parsePartialTarget(include[1].trim(), page.src)
+      if (!partialRef && kind.pageIncludes) {
+        family = 'page'
+        partialRef = parsePageTarget(include[1].trim(), page.src)
+      }
       if (!partialRef) continue
       // Match a quoted value first. An unquoted value ends at the next comma
       // because the attrlist is comma-separated -- but a quoted one may contain
@@ -413,7 +526,7 @@ function buildPageIndex (contentCatalog, component, properties, version) {
       // disappeared. Asciidoctor honours the quoted form, so the index has to.
       const tagsMatch = include[2].match(/tags?=("[^"]*"|'[^']*'|[^,\]]*)/)
       const expression = tagsMatch && tagsMatch[1]
-      const partials = contentCatalog.findBy({ component: partialRef.component, module: partialRef.module, family: 'partial' }) || []
+      const partials = contentCatalog.findBy({ component: partialRef.component, module: partialRef.module, family }) || []
       const matching = partials.filter((candidate) => candidate.src.relative === partialRef.relative)
       // Same-component includes resolve within the page's version; for
       // cross-component includes take whichever version the catalog has.
@@ -436,6 +549,7 @@ function buildPageIndex (contentCatalog, component, properties, version) {
       for (const entry of headingsFor(partial)) {
         if (!Object.prototype.hasOwnProperty.call(properties, entry.name)) continue
         if (!evaluateTagExpression(entry.tags, expression)) continue
+        if (attributes && !conditionsHold(entry.conditions, attributes)) continue
         claim(entry.name, { page: pagePath, url: pageUrl }, CLAIM_PARTIAL)
       }
     }
@@ -556,18 +670,9 @@ function warnNoPropertyData (contentCatalog, component, version) {
  */
 function reportUnknownProperty ({ name, mode, registry, filePath }) {
   if (mode === 'off') return
-  const fragment = name.trim().toLowerCase()
-  const commonPrefix = (a, b) => {
-    let i = 0
-    while (i < a.length && i < b.length && a[i] === b[i]) i++
-    return i
-  }
-  const candidates = Object.keys(registry.properties)
-    .map((candidate) => ({ candidate, shared: commonPrefix(candidate.toLowerCase(), fragment) }))
-    .filter((scored) => scored.shared >= Math.min(6, fragment.length))
-    .sort((a, b) => b.shared - a.shared)
-    .slice(0, 3)
-    .map((scored) => scored.candidate)
+  // The same suggestions rpkcmd:, connect: and blobl: give: prefix matches,
+  // then names within a small edit distance, so a dropped letter is caught too.
+  const candidates = datasets.suggest(name.trim(), Object.keys(registry.properties))
   const hint = candidates.length ? ` Did you mean: ${candidates.join(', ')}?` : ''
   const where = filePath ? ` in ${filePath}` : ''
   const message = `prop:${name}[]${where}: '${name}' is not in the property data this page validates against (${describeDataset(registry)}). ` +
@@ -599,6 +704,23 @@ function reportUnavailableProperty ({ name, component, registry, mode, filePath 
     `prop:${name}[]${where}: '${name}' is not available in the ${which} component, so it renders as plain code -- no link, and no tooltip. ` +
     `${describeDataset(registry)} marks it cloud_supported: false, meaning Redpanda has the property but this audience cannot set it. ` +
     'If that is wrong, fix cloud_supported in the property extractor; if it is right, reword the sentence and drop the macro.'
+  )
+}
+
+/**
+ * Report a mention of a deprecated property. Like a deprecated rpk command or
+ * Connect component, it renders as written and never fails the build, but it
+ * always warns: the property data names no replacement, so the writer decides
+ * whether the sentence still belongs on the page.
+ */
+function reportDeprecatedProperty ({ name, registry, mode, filePath, linkRequested, linked }) {
+  if (mode === 'off') return
+  const where = filePath ? ` in ${filePath}` : ''
+  const call = linkRequested ? `prop:${name}[link=true]` : `prop:${name}[]`
+  logger.warn(
+    `${call}${where}: '${name}' is deprecated in ${describeDataset(registry)}. It renders as written` +
+    (linkRequested && !linked ? ', without a link, because the reference pages leave deprecated properties out' : '') +
+    '. Remove the mention or say that the property is deprecated, and name the property that replaces it if there is one.'
   )
 }
 
@@ -725,6 +847,11 @@ function propInlineMacro (config) {
         reportUnavailableProperty({ name, component, registry, mode, filePath })
         return plain()
       }
+      // A deprecated property still renders as written, like a deprecated rpk
+      // command or Connect component, but every mention warns: with or without
+      // link=true, a page that recommends it is out of date.
+      const deprecated = entry.is_deprecated === true
+      const acknowledged = deprecated && deprecationAcknowledged(attributes)
 
       // Discover the page in THIS component that documents the property. A page
       // is never borrowed from another component, and never guessed from the
@@ -738,10 +865,13 @@ function propInlineMacro (config) {
         if (found) {
           discoveredPage = found.page
           discoveredUrl = found.url
-        } else if (linkRequested) {
+        } else if (linkRequested && (!deprecated || acknowledged)) {
+          // A deprecated property is never on a reference page; its own
+          // warning below already says so, so it does not warn twice.
           reportUnpublishedProperty({ name, registry, mode, filePath })
         }
       }
+      if (deprecated && !acknowledged) reportDeprecatedProperty({ name, registry, mode, filePath, linkRequested, linked: Boolean(discoveredPage) })
 
       const content = buildPropContent({
         name,
@@ -785,6 +915,11 @@ function buildPropvalContent ({ name, field, text, html, unknown = false }) {
   return `<span class="${VALUE_ROLE}" ${attrs}>${html !== undefined ? html : escapeHtml(text)}</span>`
 }
 
+function suggestionHint (name, registry) {
+  const candidates = datasets.suggest(String(name).trim(), Object.keys(registry.properties))
+  return candidates.length ? ` Did you mean: ${candidates.join(', ')}?` : ''
+}
+
 /**
  * Resolve one propval: call to its value, or to the reason there is none.
  * Shares every decision with prop: -- the dataset (loadProperties), the
@@ -808,7 +943,7 @@ function resolvePropertyValue ({ registry, name, field: requested, format, compo
   }
   const entry = Object.prototype.hasOwnProperty.call(registry.properties, name) ? registry.properties[name] : undefined
   if (!entry || typeof entry !== 'object') {
-    return { ok: false, kind: 'unknown-property', field, registry, message: `${call}: '${name}' is not in the property data this page validates against (${describeDataset(registry)}). Either the name is misspelled or the property does not exist in that release.` }
+    return { ok: false, kind: 'unknown-property', field, registry, message: `${call}: '${name}' is not in the property data this page validates against (${describeDataset(registry)}). Either the name is misspelled or the property does not exist in that release.${suggestionHint(name, registry)}` }
   }
   if (!isAvailable(registry, entry)) {
     return { ok: false, kind: 'unavailable', field, registry, message: `${call}: '${name}' is not available in the ${component || 'this'} component: ${describeDataset(registry)} marks it cloud_supported: false, so no value is shown to readers who cannot set it.` }
@@ -863,7 +998,17 @@ function propvalCall (config, parent, target, attributes, { block = false } = {}
     // The same once-per-component-version diagnostic prop: emits.
     if (!warnSeriesMissing(contentCatalog, component, version)) warnNoPropertyData(contentCatalog, component, version)
   }
-  return { mode, name, result: resolvePropertyValue({ registry, name, field: requested, format, component, filePath, block }) }
+  const result = resolvePropertyValue({ registry, name, field: requested, format, component, filePath, block })
+  // A value read from a deprecated property still renders, as connectval:
+  // does for a deprecated component or field, but warns unless the call asks
+  // whether it is deprecated.
+  if (result.ok && mode !== 'off' && result.field !== 'deprecated' && !deprecationAcknowledged(attributes)) {
+    const entry = registry.properties[name]
+    if (entry && entry.is_deprecated === true) {
+      logger.warn(`${result.call}: '${name}' is deprecated in ${describeDataset(registry)}. The value renders, but a page that states it is out of date. Remove the sentence or say that the property is deprecated, and name the property that replaces it if there is one.`)
+    }
+  }
+  return { mode, name, result }
 }
 
 // A placeholder is reported even in off mode: off means "do not check
@@ -946,10 +1091,13 @@ function register (registry, config = {}) {
       this.inlineMacro(connectInlineMacro(config))
       this.inlineMacro(bloblInlineMacro(config))
       this.inlineMacro(bloblvalInlineMacro(config))
+      this.inlineMacro(metricInlineMacro(config))
+      this.inlineMacro(metricvalInlineMacro(config))
       this.blockMacro(propvalBlockMacro(config))
       this.blockMacro(rpkvalBlockMacro(config))
       this.blockMacro(connectvalBlockMacro(config))
       this.blockMacro(bloblvalBlockMacro(config))
+      this.blockMacro(metricvalBlockMacro(config))
     })
   } else if (typeof registry.inlineMacro === 'function') {
     registry.inlineMacro(propInlineMacro(config))
@@ -960,11 +1108,14 @@ function register (registry, config = {}) {
     registry.inlineMacro(connectInlineMacro(config))
     registry.inlineMacro(bloblInlineMacro(config))
     registry.inlineMacro(bloblvalInlineMacro(config))
+    registry.inlineMacro(metricInlineMacro(config))
+    registry.inlineMacro(metricvalInlineMacro(config))
     if (typeof registry.blockMacro === 'function') {
       registry.blockMacro(propvalBlockMacro(config))
       registry.blockMacro(rpkvalBlockMacro(config))
       registry.blockMacro(connectvalBlockMacro(config))
       registry.blockMacro(bloblvalBlockMacro(config))
+      registry.blockMacro(metricvalBlockMacro(config))
     }
   } else {
     logger.warn("no 'inlineMacro' method on alleged registry")

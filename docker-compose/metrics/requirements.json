@@ -40,6 +40,7 @@
       "id": "cloud-topic",
       "metrics": ["vectorized_cloud_topics_reconciler_pending_offset_lag"],
       "requires": [{ "condition": "A topic with prop:redpanda.storage.mode[link=true] set to `cloud` exists." }],
+      "releases": { "from": "26.1" },
       "evidence": "measured"
     },
     {

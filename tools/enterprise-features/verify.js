@@ -62,6 +62,11 @@ function lintRegistry (source) {
     } else if (!feature.source.value || !String(feature.source.value).trim()) {
       findings.push(finding('error', 'registry-lint', `'${name}' has an empty source value; manual entries need a justification.`))
     }
+    // The table filter skips only the boolean false, so a string 'false' would
+    // leave the entry in the table while the writer believed it was hidden.
+    if (feature['in-table'] !== undefined && typeof feature['in-table'] !== 'boolean') {
+      findings.push(finding('error', 'registry-lint', `'${name}' has in-table '${feature['in-table']}', which must be true or false.`))
+    }
     if (feature.since !== undefined && feature.since !== null && String(feature.since).trim() !== '') {
       const since = String(feature.since).trim()
       // Lenient the same way the enterprise macro's own coerceVersion is:

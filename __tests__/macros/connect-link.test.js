@@ -301,5 +301,35 @@ describe('former and deprecated names', () => {
       convert('bloblval:[meta(),description]')
       expect(warn.mock.calls[0][0]).toContain('the function meta() is deprecated in connect-4.115.1.json from connect@unversioned; the Connect data names no replacement.')
     })
+
+  describe('deprecated=ok', () => {
+    test.each([
+      ['connect:[inputs/kafka_franz,deprecated=ok]', 'connect:[inputs/kafka_franz]'],
+      ['connect:[inputs/kafka_franz.regexp_topics,deprecated=ok]', 'connect:[inputs/kafka_franz.regexp_topics]'],
+      ['connectval:[inputs/kafka_franz.topics,type,deprecated=ok]', 'connectval:[inputs/kafka_franz.topics,type]'],
+      ['connectval:[processors/schema_registry_encode.avro_raw_json,default,deprecated=ok]', 'connectval:[processors/schema_registry_encode.avro_raw_json,default]'],
+      ['blobl:[meta(),deprecated=ok]', 'blobl:[meta()]'],
+      ['bloblval:[meta(),description,deprecated=ok]', 'bloblval:[meta(),description]'],
+    ])('%s renders the same as without it, with no deprecation warning', (acknowledged, plain) => {
+      const warn = warnings()
+      const expected = convert(plain)
+      expect(warn.mock.calls.some(([m]) => /deprecated/.test(String(m)))).toBe(true)
+      warn.mockClear()
+      expect(convert(acknowledged)).toBe(expected)
+      expect(warn.mock.calls.filter(([m]) => /deprecated/.test(String(m)))).toEqual([])
+    })
+
+    test('it acknowledges only a deprecation: a former name still warns', () => {
+      const warn = warnings()
+      convert('connect:[outputs/kafka_migrator,deprecated=ok]')
+      expect(warn.mock.calls[0][0]).toContain("is now outputs/redpanda_migrator")
+    })
+
+    test('only the value ok counts', () => {
+      const warn = warnings()
+      convert('blobl:[meta(),deprecated=true]')
+      expect(warn.mock.calls[0][0]).toContain('is deprecated')
+    })
+  })
   })
 })

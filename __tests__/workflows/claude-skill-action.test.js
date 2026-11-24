@@ -195,7 +195,10 @@ describe('Run skill retry', () => {
       'n=$(( $(cat count 2>/dev/null || echo 0) + 1 )); echo "$n" > count',
       'outcome=$(echo "$PLAN" | cut -d" " -f"$n")',
       '[ "$outcome" = killed ] && exit 124',
-      'echo "{\\"subtype\\":\\"success\\",\\"is_error\\":false,\\"num_turns\\":$n,\\"duration_ms\\":1,\\"result\\":\\"SECRET\\"}"',
+      // With --output-format stream-json the CLI prints one event per line
+      // and ends with the result event. With json it prints that object only.
+      'case " $* " in *" stream-json "*) echo "{\\"type\\":\\"user\\",\\"message\\":{\\"content\\":[{\\"type\\":\\"tool_result\\",\\"is_error\\":true,\\"content\\":\\"REFUSED\\"}]}}" ;; esac',
+      'echo "{\\"type\\":\\"result\\",\\"subtype\\":\\"success\\",\\"is_error\\":false,\\"num_turns\\":$n,\\"duration_ms\\":1,\\"result\\":\\"SECRET\\"}"',
       'case "$outcome" in',
       '  verdict) echo "{}" > "$OUTPUT_DIR/verdict.json" ;;',
       '  report) echo "notes" > "$OUTPUT_DIR/report.md" ;;',
@@ -205,11 +208,12 @@ describe('Run skill retry', () => {
     ].join('\n')
   }
 
-  function run (plan, timeoutMin = '20') {
+  function run (plan, timeoutMin = '20', extraEnv = {}) {
     return execRun(runStep, {
       stubs,
       files: { 'out/.keep': '' },
       env: {
+        ...extraEnv,
         PLAN: plan,
         OUTPUT_DIR: 'out',
         TIMEOUT_MIN: timeoutMin,
@@ -283,5 +287,43 @@ describe('Run skill retry', () => {
     expect(r.outputs.claude_failed).toBe('true')
     expect(r.all).toMatch(new RegExp(`Claude run ${why} and under 300s .* not retrying`))
     expect(r.exists('out/report.md')).toBe(kept)
+  })
+
+  describe('with trace on', () => {
+    const traced = (plan) => run(plan, '20', { TRACE: 'true' })
+
+    it('saves every event and keeps claude-run.json in its usual shape', () => {
+      const r = traced('verdict')
+      expect(r.outputs.claude_failed).toBe('false')
+      const events = r.read('out/claude-trace.jsonl').trim().split('\n').map((line) => JSON.parse(line))
+      expect(events.map((event) => event.type)).toEqual(['user', 'result'])
+      expect(events[0].message.content[0].content).toBe('REFUSED')
+      const summary = JSON.parse(r.read('out/claude-run.json'))
+      expect(summary.type).toBe('result')
+      expect(summary.num_turns).toBe(1)
+    })
+
+    it('keeps the trace of an attempt that wrote nothing, which is the run it is for', () => {
+      const r = traced('none none')
+      expect(r.outputs.claude_failed).toBe('true')
+      expect(r.exists('out/claude-trace.jsonl')).toBe(true)
+      expect(JSON.parse(r.read('out/claude-run.json')).num_turns).toBe(2)
+    })
+
+    it('still fails and retries on a failed exit', () => {
+      const r = traced('fail verdict')
+      expect(r.read('count').trim()).toBe('2')
+      expect(r.outputs.claude_failed).toBe('false')
+    })
+
+    it('never prints the trace to the log', () => {
+      const r = traced('none none')
+      expect(r.all).not.toMatch(/REFUSED|SECRET/)
+    })
+  })
+
+  it('writes no trace unless asked', () => {
+    const r = run('verdict')
+    expect(r.exists('out/claude-trace.jsonl')).toBe(false)
   })
 })
