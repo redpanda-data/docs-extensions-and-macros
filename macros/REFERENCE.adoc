@@ -1959,6 +1959,8 @@ The term to be defined.
 definition (optional)::
 The definition of the term. If the term is defined in the https://github.com/redpanda-data/docs-site[`shared` component] or the `local-terms` object of the `antora.yml` file, you can omit the definition as it will always be replaced by those definitions.
 
+The term can be the `term-name` of a term file, in any case, or one of its `alt-labels`. A term with no glossary entry and no inline definition renders as plain text with a "<term> not yet defined" tooltip, and the build logs a warning with the page, once per term per page. `doc-tools check-metadata` reports the same targets on the pages a pull request changes.
+
 === Configuration options
 
 glossary-log-terms (optional)::

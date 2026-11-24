@@ -464,3 +464,55 @@ describe('check-metadata candidates', () => {
     }
   })
 })
+
+describe('check-metadata glossterm targets', () => {
+  const TERM = '=== broker\n:term-name: broker\n:hover-text: About brokers.\n:category: Redpanda core\n:alt-labels: Redpanda broker\n'
+  const PAGE = `= Brokers
+:page-topic-type: concept
+
+A glossterm:broker[], a glossterm:Redpanda broker[], and a glossterm:widgetron[].
+An inline one: glossterm:gizmo[A small part.]
+// glossterm:commented[]
+////
+glossterm:blockcommented[]
+////
+`
+
+  test('warns on each target that is neither a term nor an alt label, with its line', async () => {
+    const root = makeRepo({ 'shared/modules/terms/partials/broker.adoc': TERM, 'modules/x/pages/p.adoc': PAGE })
+    const { result, stdout, code } = await cli(['modules'], { root, taxonomy: TAXONOMY })
+    const terms = result.findings.filter((f) => f.rule === 'unknown-glossary-term')
+    expect(terms.map((f) => [f.value, f.line, f.severity])).toEqual([['widgetron', 4, 'warning']])
+    expect(result.glossary.source).toBe(path.join(root, 'shared/modules/terms/partials'))
+    expect(stdout).toMatch(/modules\/x\/pages\/p.adoc:4 \[unknown-glossary-term\] glossterm:widgetron\[\]/)
+    expect(code).toBe(0)
+  })
+
+  test('is an error with --strict', async () => {
+    const root = makeRepo({ 'shared/modules/terms/partials/broker.adoc': TERM, 'modules/x/pages/p.adoc': PAGE })
+    const { code } = await cli(['modules'], { root, taxonomy: TAXONOMY, strict: true })
+    expect(code).toBe(1)
+  })
+
+  test('reads a terms.json from --glossary, and --no-glossary skips the check', async () => {
+    const json = { schema: 1, terms: [{ id: 'widgetron', term: 'widgetron', definition: 'x', altLabels: [], doNotUse: [] }] }
+    const root = makeRepo({ 'terms.json': JSON.stringify(json), 'modules/x/pages/p.adoc': PAGE })
+    const withJson = await cli(['modules'], { root, taxonomy: TAXONOMY, glossary: 'terms.json' })
+    expect(withJson.result.findings.filter((f) => f.rule === 'unknown-glossary-term').map((f) => f.value)).toEqual(['broker', 'Redpanda broker'])
+    const off = await cli(['modules'], { root, taxonomy: TAXONOMY, glossary: false })
+    expect(off.result.findings.filter((f) => f.rule === 'unknown-glossary-term')).toEqual([])
+  })
+
+  test('with no glossary and a local taxonomy, it notes the skip and fetches nothing', async () => {
+    const root = makeRepo({ 'modules/x/pages/p.adoc': PAGE })
+    const fetch = jest.fn()
+    const { result, stdout } = await (async () => {
+      const out = []
+      const log = jest.spyOn(console, 'log').mockImplementation((m) => out.push(String(m)))
+      try { return { result: await runCli(['modules'], { root, taxonomy: TAXONOMY }, { fetch }), stdout: out.join('\n') } } finally { log.mockRestore(); process.exitCode = 0 }
+    })()
+    expect(fetch).not.toHaveBeenCalled()
+    expect(result.glossary.source).toBeNull()
+    expect(stdout).toMatch(/note: no glossary found .*glossterm targets were not checked/)
+  })
+})
