@@ -1773,8 +1773,10 @@ automation
  * against the rpk plugin partials generated in the docs repo. Run from the
  * consumer repo root (for example, adp-docs for rpk ai). Creates stubs for
  * new partials, deletes managed stubs whose partial is gone, rebuilds the
- * plugin's nav block, and proposes page aliases for likely renames.
- * Full reconcile, so it is idempotent and heals pre-existing drift.
+ * plugin's nav block, and proposes page aliases for likely renames. The
+ * summary lists each new command group first, so a reviewer checks that
+ * the feature is available before merging. Full reconcile, so it is
+ * idempotent and heals pre-existing drift.
  */
 automation
   .command('rpk-plugin-stubs')
@@ -1836,6 +1838,16 @@ automation
       lines.push('')
       if (result.created.length + result.deleted.length === 0 && !result.navUpdated) {
         lines.push('No changes: stubs and nav already match the partials.')
+      }
+      if (result.newCommandGroups.length > 0) {
+        lines.push('### New command groups: check availability before merging')
+        lines.push('')
+        lines.push('Confirm each feature is on in production before merging. If it is not, mark its pages Preview or hold this PR.')
+        lines.push('')
+        for (const g of result.newCommandGroups) {
+          lines.push(`- \`${g.title}\` (${g.pages} ${g.pages === 1 ? 'page' : 'pages'}, starting at \`${g.file}\`)`)
+        }
+        lines.push('')
       }
       if (result.created.length > 0) {
         lines.push(`### New stubs (${result.created.length})`)

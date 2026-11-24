@@ -2532,7 +2532,7 @@ npx doc-tools generate rpk-env-partial --from-json docs-data/rpk-v26.2.1.json --
 
 === generate rpk-plugin-stubs
 
-Reconciles a consumer repo's single-source stub pages and nav section against the rpk plugin partials generated in the docs repo. Run from the consumer repo root (for example, adp-docs for rpk ai). Creates stubs for new partials, deletes managed stubs whose partial is gone, rebuilds the plugin's nav block, and proposes page aliases for likely renames. Full reconcile, so it is idempotent and heals pre-existing drift.
+Reconciles a consumer repo's single-source stub pages and nav section against the rpk plugin partials generated in the docs repo. Run from the consumer repo root (for example, adp-docs for rpk ai). Creates stubs for new partials, deletes managed stubs whose partial is gone, rebuilds the plugin's nav block, and proposes page aliases for likely renames. The summary lists each new command group first, so a reviewer checks that the feature is available before merging. Full reconcile, so it is idempotent and heals pre-existing drift.
 
 *Usage:*
 
