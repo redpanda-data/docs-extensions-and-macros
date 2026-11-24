@@ -85,24 +85,31 @@ describe('big-int-json', () => {
   // A peer's review of a sibling PR's own lossless-JSON module named this class
   // of defect for a regex-based approach; testing it against this module found
   // it is not theoretical here either.
-  describe('known limitation: JSON-shaped text inside an escaped string', () => {
-    test('a Bloblang example value with an escaped colon-number-brace corrupts the document', () => {
+  describe('JSON-shaped text inside an escaped string', () => {
+    test('a Bloblang example value with an escaped colon-number-brace is left alone', () => {
       // The real, published shape: a string field whose value is itself an
-      // escaped JSON snippet used as a config example.
-      const text = '{"example":"{\\"delay_for_ns\\":110839937000000000}"}'
-      // Confirms the shape is legal JSON to begin with.
-      expect(() => JSON.parse(text)).not.toThrow()
-      expect(() => bigIntJson.parse(text)).toThrow()
+      // escaped JSON snippet used as a config example. The regex this module
+      // used to have inserted a sentinel inside the string and corrupted it.
+      const text = '{"example":"{\\"delay_for_ns\\":110839937000000000}","max":9223372036854775807}'
+      expect(bigIntJson.parse(text)).toEqual({ example: '{"delay_for_ns":110839937000000000}', max: 9223372036854775807n })
+      expect(bigIntJson.stringify(bigIntJson.parse(text))).toBe(text)
     })
 
-    test('the real, published Connect attachment reproduces it', () => {
+    test('escaped quotes and backslashes do not end a string early', () => {
+      const text = '{"a":"x\\\\","b":"\\" 9223372036854775807 \\"","c":-9223372036854775808}'
+      expect(bigIntJson.parse(text)).toEqual({ a: 'x\\', b: '" 9223372036854775807 "', c: -9223372036854775808n })
+    })
+
+    test('fractions and exponents stay plain numbers', () => {
+      expect(bigIntJson.parse('[12345678901234567.5,1e30,-2E+20]')).toEqual([12345678901234567.5, 1e30, -2e20])
+    })
+
+    test('a real Connect attachment fixture round-trips unchanged', () => {
       const fs = require('fs')
       const path = require('path')
-      const file = path.join(__dirname, '../../preview/redpanda-connect/docs-data/connect-latest.json')
-      if (!fs.existsSync(file)) return // environment-dependent fixture; skip if absent
+      const file = path.join(__dirname, '../fixtures/connect-release-attachment/connect-4.115.1.json')
       const raw = fs.readFileSync(file, 'utf8')
-      expect(() => JSON.parse(raw)).not.toThrow()
-      expect(() => bigIntJson.parse(raw)).toThrow()
+      expect(JSON.parse(bigIntJson.stringify(bigIntJson.parse(raw)))).toEqual(JSON.parse(raw))
     })
   })
 

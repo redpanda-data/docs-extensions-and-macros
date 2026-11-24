@@ -53,11 +53,14 @@ function attachmentFromFiles (files, version) {
   const file = files.find((f) => String(f.path).replace(/^(\.\/)+/, '') === wanted)
   if (!file) return null
   let data
+  const text = Buffer.from(file.contents).toString('utf8')
   try {
-    data = JSON.parse(Buffer.from(file.contents).toString('utf8'))
+    data = JSON.parse(text)
   } catch (error) {
     throw new Error(`${wanted} in the v${version} ${asset.ASSET_NAME} is not valid JSON: ${error.message}`)
   }
+  // The written copies keep its int64 values exact (exact-json.js).
+  require('./exact-json').remember(version, text)
   return validateAttachment(data, version)
 }
 
