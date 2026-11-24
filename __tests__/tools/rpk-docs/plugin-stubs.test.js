@@ -3,11 +3,13 @@
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
+const { spawnSync } = require('child_process')
 
 const {
   readPartialTitles,
   inferIncludePrefix,
   renderStub,
+  findNewCommandGroups,
   reconcileStubs
 } = require('../../../tools/rpk-docs/generate-plugin-stubs.js')
 
@@ -206,6 +208,99 @@ describe('plugin stub reconciler', () => {
     expect(result.created).toEqual(['rpk-ai.adoc'])
     expect(fs.existsSync(path.join(stubDir, 'rpk-ai.adoc'))).toBe(false)
   })
+
+  // The shape of redpanda-data/adp-docs#601: two new command groups, a new
+  // subcommand under an existing group, and a new leaf under rpk ai run.
+  const seed601 = () => {
+    writePartial('rpk-ai.adoc', 'rpk ai')
+    writePartial('rpk-ai-run.adoc', 'rpk ai run')
+    writePartial('rpk-ai-agent-network.adoc', 'rpk ai agent-network')
+    for (const f of ['rpk-ai.adoc', 'rpk-ai-run.adoc', 'rpk-ai-agent-network.adoc']) {
+      writeStub(f, readPartialTitles(partialsDir).find(p => p.file === f).title)
+    }
+    writePartial('rpk-ai-run-opencode.adoc', 'rpk ai run opencode')
+    writePartial('rpk-ai-agent-network-group-failovers.adoc', 'rpk ai agent-network group-failovers')
+    writePartial('rpk-ai-skill.adoc', 'rpk ai skill')
+    for (const sub of ['add', 'init', 'publish']) writePartial(`rpk-ai-skill-${sub}.adoc`, `rpk ai skill ${sub}`)
+    writePartial('rpk-ai-service-account.adoc', 'rpk ai service-account')
+    writePartial('rpk-ai-service-account-create.adoc', 'rpk ai service-account create')
+  }
+
+  test('reports each new command subtree once, by its root, with its page count', () => {
+    seed601()
+
+    const result = run()
+
+    expect(result.created).toHaveLength(8)
+    expect(result.newCommandGroups).toEqual([
+      { title: 'rpk ai agent-network group-failovers', file: 'rpk-ai-agent-network-group-failovers.adoc', pages: 1 },
+      { title: 'rpk ai run opencode', file: 'rpk-ai-run-opencode.adoc', pages: 1 },
+      { title: 'rpk ai service-account', file: 'rpk-ai-service-account.adoc', pages: 2 },
+      { title: 'rpk ai skill', file: 'rpk-ai-skill.adoc', pages: 4 }
+    ])
+  })
+
+  test('a new subcommand under a group that already had a stub is not a new group of its own', () => {
+    seed601()
+    run()
+    writePartial('rpk-ai-skill-sync.adoc', 'rpk ai skill sync')
+
+    const result = run()
+
+    expect(result.created).toEqual(['rpk-ai-skill-sync.adoc'])
+    expect(result.newCommandGroups).toEqual([
+      { title: 'rpk ai skill sync', file: 'rpk-ai-skill-sync.adoc', pages: 1 }
+    ])
+  })
+
+  test('no created stubs means no new command groups', () => {
+    seed601()
+    run()
+    expect(run().newCommandGroups).toEqual([])
+    expect(findNewCommandGroups([], readPartialTitles(partialsDir))).toEqual([])
+  })
+
+  test('a word prefix is not an ancestor: rpk ai skill does not own rpk ai skills', () => {
+    const partials = [
+      { file: 'rpk-ai-skill.adoc', title: 'rpk ai skill' },
+      { file: 'rpk-ai-skills.adoc', title: 'rpk ai skills' }
+    ]
+    expect(findNewCommandGroups(['rpk-ai-skill.adoc', 'rpk-ai-skills.adoc'], partials).map(g => g.pages)).toEqual([1, 1])
+  })
+
+  test('the PR summary lists new command groups under an availability heading', () => {
+    seed601()
+    const summaryFile = path.join(dir, 'summary.md')
+    const cli = path.join(__dirname, '../../../bin/doc-tools.js')
+
+    const proc = spawnSync(process.execPath, [cli, 'generate', 'rpk-plugin-stubs',
+      '--plugin', 'ai',
+      '--partials-dir', partialsDir,
+      '--stub-dir', stubDir,
+      '--nav-file', navFile,
+      '--include-prefix', 'streaming:reference:partial$rpk-ai/',
+      '--summary-file', summaryFile
+    ], { encoding: 'utf8', cwd: dir })
+
+    expect(proc.status).toBe(0)
+    const summary = fs.readFileSync(summaryFile, 'utf8')
+    const section = summary.split('### New command groups: check availability before merging\n')[1].split('\n### ')[0]
+    expect(section).toContain('Confirm each feature is on in production before merging.')
+    expect(section).toContain('- `rpk ai skill` (4 pages, starting at `rpk-ai-skill.adoc`)')
+    expect(section).toContain('- `rpk ai service-account` (2 pages, starting at `rpk-ai-service-account.adoc`)')
+    expect(section).toContain('- `rpk ai agent-network group-failovers` (1 page, starting at `rpk-ai-agent-network-group-failovers.adoc`)')
+    expect(section).not.toContain('rpk ai skill add')
+    // Listed ahead of the full stub list, so it is the first thing a reviewer reads.
+    expect(summary.indexOf('### New command groups')).toBeLessThan(summary.indexOf('### New stubs'))
+
+    // A run with no new stubs has no such section.
+    const again = spawnSync(process.execPath, [cli, 'generate', 'rpk-plugin-stubs',
+      '--plugin', 'ai', '--partials-dir', partialsDir, '--stub-dir', stubDir, '--nav-file', navFile,
+      '--include-prefix', 'streaming:reference:partial$rpk-ai/', '--summary-file', summaryFile
+    ], { encoding: 'utf8', cwd: dir })
+    expect(again.status).toBe(0)
+    expect(fs.readFileSync(summaryFile, 'utf8')).not.toContain('New command groups')
+  })
 })
 
 describe('alias-collision guard', () => {
@@ -373,4 +468,5 @@ describe('existing-stub upgrade to the meta include', () => {
     expect(content).not.toContain(':description: Stale backfilled copy.')
     expect(content.split('\n')[1]).toBe(`include::${prefix}rpk-ai-run.adoc[tag=meta]`)
   })
+
 })

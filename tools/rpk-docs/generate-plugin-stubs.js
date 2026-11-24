@@ -169,6 +169,30 @@ function renderStub({ title, file, description, includePrefix, attributes, hasMe
 }
 
 /**
+ * Find the roots of the command subtrees a reconcile run added: each created
+ * stub whose command has no created ancestor. A new command group (for
+ * example `rpk ai skill` and its eight subcommands) is reported once, by its
+ * root, with the number of pages it adds. New features often ship behind a
+ * gate, so these are what a reviewer checks for availability before merging.
+ * @param {Array<string>} created - Created stub filenames
+ * @param {Array<{file: string, title: string}>} partials
+ * @returns {Array<{title: string, file: string, pages: number}>} In command order
+ */
+function findNewCommandGroups(created, partials) {
+  const titleByFile = new Map(partials.map(p => [p.file, p.title]))
+  const titles = created.map(f => titleByFile.get(f)).filter(Boolean)
+  const isUnder = (title, root) => title.startsWith(`${root} `)
+  return created
+    .map(file => ({ file, title: titleByFile.get(file) }))
+    .filter(({ title }) => title && !titles.some(t => isUnder(title, t)))
+    .map(({ file, title }) => ({
+      title,
+      file,
+      pages: titles.filter(t => t === title || isUnder(t, title)).length
+    }))
+}
+
+/**
  * Reconcile a consumer repo's stub pages and nav section against the
  * current set of generated partials.
  * @param {Object} params
@@ -181,7 +205,7 @@ function renderStub({ title, file, description, includePrefix, attributes, hasMe
  *   Defaults to none: a page's maturity is a documentation-team decision, so
  *   a consumer that wants a label on new stubs passes it with --attribute.
  * @param {boolean} [params.dryRun]
- * @returns {Object} { created, deleted, keptNonStub, navUpdated, renameCandidates }
+ * @returns {Object} { created, deleted, keptNonStub, navUpdated, renameCandidates, newCommandGroups }
  */
 function reconcileStubs({
   partials,
@@ -350,7 +374,9 @@ function reconcileStubs({
     }
   }
 
-  return { created, upgraded: upgraded_, deleted, keptNonStub, navUpdated, renameCandidates, skippedAliasTargets }
+  const newCommandGroups = findNewCommandGroups(created, partials)
+
+  return { created, upgraded: upgraded_, deleted, keptNonStub, navUpdated, renameCandidates, skippedAliasTargets, newCommandGroups }
 }
 
 module.exports = {
@@ -358,5 +384,6 @@ module.exports = {
   fetchPartialsDir,
   inferIncludePrefix,
   renderStub,
+  findNewCommandGroups,
   reconcileStubs
 }
