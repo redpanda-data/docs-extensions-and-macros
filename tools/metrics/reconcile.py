@@ -33,39 +33,62 @@ Standard library only; Python 3.9+.
 import argparse
 import fnmatch
 import json
-import re
+import os
 import sys
 
-HELP_RE = re.compile(r"^# HELP\s+(\S+)(?:\s+(.*))?$")
-TYPE_RE = re.compile(r"^# TYPE\s+(\S+)\s+(\S+)")
+# Run as a script, Python puts this directory on sys.path; imported from
+# elsewhere it may not be.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import dataset as metrics_dataset  # noqa: E402
 
 
 def parse_scrape(paths):
-    """Union of the families in Prometheus text files: name -> {help, type}."""
-    families = {}
+    """Union of the families in Prometheus text files: name -> {help, type, types}."""
+    texts = []
     for path in paths:
         with open(path, encoding="utf-8", errors="replace") as handle:
-            for line in handle:
-                line = line.rstrip("\n")
-                match = HELP_RE.match(line)
-                if match:
-                    entry = families.setdefault(match.group(1), {"help": None, "type": None})
-                    text = (match.group(2) or "").strip()
-                    if entry["help"] is None or (not entry["help"] and text):
-                        entry["help"] = text
-                    continue
-                match = TYPE_RE.match(line)
-                if match:
-                    entry = families.setdefault(match.group(1), {"help": None, "type": None})
-                    if entry["type"] is None:
-                        entry["type"] = match.group(2)
+            texts.append(handle.read())
+    return parse_scrape_texts(texts)
+
+
+def parse_scrape_texts(texts):
+    """Union of the families in Prometheus payloads: name -> {help, type, types}.
+
+    Families are found the way the dataset finds them (dataset.py
+    parse_exposition), so a sample with no HELP or TYPE line is a family too,
+    and a histogram's _bucket, _count and _sum belong to it. `types` holds the
+    type every payload declared, with "untyped" for one that has no TYPE line.
+    `type` is that type when all agree, else None.
+    """
+    families = {}
+    for text in texts:
+        for name, family in metrics_dataset.parse_exposition(text).items():
+            entry = families.setdefault(name, {"help": None, "type": None, "types": set()})
+            help_text = family["help"]
+            if entry["help"] is None or (not entry["help"] and help_text):
+                entry["help"] = help_text
+            entry["types"].add(family["type"] or "untyped")
+    for entry in families.values():
+        entry["type"] = next(iter(entry["types"])) if len(entry["types"]) == 1 else None
     return families
+
+
+def check_expected_absent(expected_absent):
+    """Raise ValueError unless every entry maps a name to a written reason."""
+    if not isinstance(expected_absent, dict):
+        raise ValueError("it must be a JSON object of name -> reason")
+    for name, reason in expected_absent.items():
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("the reason for %s must be a non-empty string" % name)
 
 
 def explain(name, entry, expected_absent):
     """The reason a source family may be absent from the scrape, or None."""
     if entry.get("condition") == "never":
         return "never registered"
+    if "<" in name:
+        # A placeholder such as <upstream>: the real name is set by configuration.
+        return "name depends on configuration"
     for pattern, reason in expected_absent.items():
         if name == pattern or fnmatch.fnmatchcase(name, pattern):
             return reason
@@ -88,10 +111,12 @@ def reconcile_endpoint(source, scraped, expected_absent):
             result["scrape_only"].append(name)
             continue
         result["in_both"] += 1
+        # Every broker's TYPE must match, and no TYPE line is "untyped",
+        # which matches no typed source family.
         want = source[name].get("type")
-        got = scraped[name]["type"]
-        if want and got and want != got:
-            result["type_mismatch"].append({"name": name, "source": want, "scrape": got})
+        got = sorted(scraped[name].get("types") or {scraped[name]["type"] or "untyped"})
+        if want and got != [want]:
+            result["type_mismatch"].append({"name": name, "source": want, "scrape": ", ".join(got)})
         if not scraped[name]["help"]:
             result["empty_help"].append(name)
     for name in sorted(source):
@@ -154,8 +179,10 @@ def main(argv=None):
     if not isinstance(inventory.get("public"), dict) or not isinstance(inventory.get("internal"), dict):
         sys.stderr.write("error: %s has no public and internal family maps\n" % args.inventory)
         return 2
-    if not isinstance(expected_absent, dict):
-        sys.stderr.write("error: %s must be a JSON object of name -> reason\n" % args.expected_absent)
+    try:
+        check_expected_absent(expected_absent)
+    except ValueError as error:
+        sys.stderr.write("error: %s: %s\n" % (args.expected_absent, error))
         return 2
 
     report = {endpoint: reconcile_endpoint(inventory[endpoint], scraped[endpoint], expected_absent)

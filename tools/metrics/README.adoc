@@ -1,0 +1,45 @@
+= Metrics reference data
+
+`doc-tools generate metrics-docs` builds the data behind the Redpanda metrics reference. This page lists the files it reads and writes, the schema for each, and the rule for changing the dataset's shape.
+
+== Files and their schemas
+
+[cols="2,3,2"]
+|===
+| File | What it is | Schema
+
+| `redpanda-metrics-<tag>.json`
+| The dataset: one entry per metric for a release. The `metric:` and `metricval:` macros and the docs MCP server read it. In a docs repository it lives in `modules/reference/attachments/`.
+| `docs-data/redpanda-metrics.schema.json`
+
+| `metrics-gaps.json`
+| What differs between the metrics in the Redpanda source and the metrics the cluster exported. The automated pull request prints it, and the Metrics gaps check reads it. In a docs repository it lives in `docs-data/`.
+| `docs-data/metrics-gaps.schema.json`
+
+| `docs-data/metric-overrides.json`
+| What writers add in a docs repository: stopgaps and enrichment.
+| `docs-data/metric-overrides.schema.json`
+
+| `docker-compose/metrics/requirements.json`
+| What a cluster needs before it exports each group of metrics. A requirement can carry `releases` with `from` and `before` (release lines such as `26.2`) when it holds for some releases only.
+| `tools/metrics/metrics-requirements.schema.json`
+|===
+
+The three schemas in `docs-data/` ship with the package, and `doc-tools sync-schemas` copies them into a docs repository that already has them. The requirements file never leaves this repository, so its schema stays here.
+
+The source inventory that `extract_source.py` prints has no schema. It is passed from one script to the next inside a run and is never stored.
+
+== Where each schema is enforced
+
+* The dataset and the gaps file: `doc-tools generate metrics-docs` validates both after the generator finishes (`validate-output.js`). A file that does not match is deleted and the run fails. The generator is a Python script with no dependencies, so it cannot validate its own output.
+* The overrides file: the generator checks its shape when it loads it. A docs repository validates it against the schema on every pull request.
+* The requirements file: a test validates it, and the generator checks its shape when it loads it.
+
+== Changing the shape of the dataset
+
+The dataset carries `schema_version`. The macros and the docs MCP server refuse a number they do not know.
+
+* Adding an optional field keeps the number. Add the field to the schema in the same change.
+* Removing or renaming a field, changing its type or what it means, or making it required raises the number.
+
+To raise it, change `SCHEMA_VERSION` in `dataset.py` and the `const` in the schema together, and release the macros that accept the new number before a docs repository generates a dataset with it. A test fails when the two numbers differ.

@@ -22,7 +22,7 @@ npx doc-tools overrides audit \
   --format human
 
 # Standalone
-node tools/overrides-audit/index.js --overrides <path> --extracted <path> [--surface properties|rpk] [--format json|human] [--output <file>]
+node tools/overrides-audit/index.js --overrides <path> --extracted <path> [--surface properties|rpk|metrics] [--format json|human] [--output <file>]
 ----
 
 IMPORTANT: For the properties surface, `--extracted` must be the property extractor's *raw* output (the `--output` file), never the enhanced output (`--enhanced-output`) or the versioned `redpanda-properties-<tag>.json` attachments: those already have overrides applied, so every override would classify as REDUNDANT. For the rpk surface, `--extracted` is the newest `docs-data/rpk-v<version>.json` snapshot: it carries two trees, and the audit reads only `raw_tree` (what `rpk --print-tree` printed) and refuses a file that has only the override-merged `tree`, or a bare `{ name, commands }` tree (`jq .tree` of a snapshot has that shape).
@@ -59,6 +59,21 @@ tmp/redpanda-property-extractor-venv/bin/python -W ignore property_extractor.py 
   --recursive --path <path-to-redpanda-checkout> \
   --output gen/source-properties.json
 ----
+
+[,bash]
+----
+# metrics surface, from a Redpanda checkout
+npx doc-tools overrides audit --surface metrics \
+  --overrides docs-data/metric-overrides.json \
+  --repo <streaming-enterprise>
+
+# metrics surface, from an inventory made earlier
+npx doc-tools overrides audit --surface metrics \
+  --overrides docs-data/metric-overrides.json \
+  --extracted inventory.json
+----
+
+For metrics, `--extracted` takes the output of `tools/metrics/extract_source.py`, which lists every metric family the Redpanda source registers with its help string, file and line. `--repo` takes a streaming-enterprise checkout and runs the extractor there at `HEAD`, or at the ref `--ref` names. The extractor reads the git ref and never the working tree, so an edit must be committed before the audit sees it. It needs `python3` and `git`. When the extractor cannot resolve a registration it exits 3 and still lists the rest: the audit warns on stderr and continues.
 
 == Classification rules (properties surface)
 
@@ -141,7 +156,7 @@ The audit carries `upstream_ref` from the override entry into the manifest row f
 
 == Output
 
-JSON (default): `{ surface, overrides_file, extracted_file, manifest, summary, cross_check }`. rpk adds `snapshot_version` and `locations_file` (the locator output used, or `null`).
+JSON (default): `{ surface, overrides_file, extracted_file, manifest, summary, cross_check }`. rpk adds `snapshot_version` and `locations_file` (the locator output used, or `null`). metrics has no `cross_check` and adds `source_ref` (the git ref the inventory was read at).
 
 * `manifest`: one row per classified field: `{ name, field, class, upstream_candidate_text?, upstream_ref?, content_hash?, source_file?, source_line?, note }`.
 ** `content_hash` is a stable 16-hex-char digest of `(name, normalized override description)`. The docs-repo upstreaming workflow keeps a manifest of already-PRed hashes, so re-runs skip candidates whose hash is unchanged and re-draft when the override text moved.
@@ -195,10 +210,56 @@ JSON (default): `{ surface, overrides_file, extracted_file, manifest, summary, c
 
 `cross_check` for rpk is the retirement safety property itself: every REDUNDANT prose field is deleted from a copy of the overrides, every command the generator writes a page for is rendered with the full and the pruned overrides, and `violations` lists any command whose output differs (expected empty). Two fields that are each redundant alone but not together would show up here.
 
+== Classification rules (metrics surface)
+
+`metric-overrides.json` (schema: `docs-data/metric-overrides.schema.json`) is audited against the source inventory. Only `description` is text that can go upstream: it stands in for the help string of the metric's registration. The description row is classified by the same code as a property description, with these rules for metrics.
+
+[cols="1,1,3"]
+|===
+|Field |Class |Rule
+
+|`description`
+|`REDUNDANT`
+|The text for every audience equals the help string after normalization. One terminal period is not a difference: a help string takes none, so an override would otherwise never match the string it was upstreamed as. The release run makes the same comparison and deletes the text (`doc-tools generate metrics-docs --retire-overrides`).
+
+|`description`
+|`UPSTREAMABLE`
+|Differs from the help string and has no docs-only markup. `upstream_candidate_text` is the text with its terminal period removed, because a metric help string takes none. `source_file` and `source_line` are the file and the line of the registration (the `make_*` call).
+
+|`description`
+|`KEEP_UNTIL_UPSTREAMED`
+|Differs and has docs-only markup, or has audience paragraphs that must stay in the override (the SPLIT case, note starting `SPLIT:`): `upstream_candidate_text` is the stripped text. Also a row whose note names another metric: one registration can export several families (`redpanda_x` and `vectorized_x`, or one family per group), which share one help string. When their overrides have the same text, the first row carries the candidate and lists the others in `shared_with`, and each other row has `same_source_as` and no candidate.
+
+|`description`
+|`KEEP`
+|Nothing to upstream: the description is only audience paragraphs, it differs from the help string only by docs markup, or it is marked `retirement_pending`.
+
+|`description`
+|`REVIEW`
+|No automated rewrite is possible. The help string is built at run time (`help_runtime` in the inventory), so there is no single string to rewrite. The family comes from Seastar or its registration has no help string. The metric is not in the inventory (renamed, removed, or not resolved by the extractor). Overrides for one shared help string give different text: none of them is a candidate until they agree. Or a plain string carries an audience prefix or a conditional.
+
+|`unit`, `labels`, `requires`
+|`KEEP`
+|Stopgaps the release run compares with the scrape and the tooling, and retires. The help string cannot carry them.
+
+|`category`, `use_cases`, `usage`, `availability`, `related_properties`, `related_topics`
+|`KEEP`
+|Docs-layer enrichment.
+|===
+
+Audience paragraphs (array entries that start with `cloud-only:` or `self-managed-only:`) are ignored in the comparison. They are listed in `audience_scoped_text`, never put in a candidate, and never retired. `upstream_ref`, `_comment`, `retirement_pending` and `upstream_not_possible` get no row.
+
+A family registered at more than one call site says so in its note. The location is the first call site, so the other registrations need the same edit.
+
+=== `retirement_pending` (metrics)
+
+A description whose help string has caught up in substance, without matching word for word, is retired through `retirement_pending: { "reason": "..." }`. The docs repo's weekly upstreaming workflow sets it in a pull request, and merging that pull request is the approval. The next `doc-tools generate metrics-docs --retire-overrides` run then deletes `description`, `upstream_ref`, `_comment` and `retirement_pending` together without comparing again, before it applies the overrides, and lists each one under `retired_overrides` in `metrics-gaps.json`. It rewrites the file once every output is written, so a failed run leaves the approval in place. Of a description given as paragraphs, only the paragraphs for every audience are deleted.
+
 == Surfaces
 
 * `properties` (complete): `property-overrides.json` vs the property extractor's raw JSON.
 * `rpk` (complete): `rpk-overrides.json` vs the `raw_tree` of the newest `rpk-v<version>.json` snapshot, rendered through the generator's own formatting.
+* `metrics` (complete): `metric-overrides.json` vs the help strings in the source inventory from `tools/metrics/extract_source.py`.
 
 == Golden run (local checkouts required)
 

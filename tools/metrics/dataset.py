@@ -21,7 +21,12 @@ dependencies.
 
 import re
 
+# The shape of the dataset, as docs-data/redpanda-metrics.schema.json defines
+# it. Adding an optional field keeps the number. Removing or renaming a field,
+# changing its type or meaning, or making it required raises it, together
+# with the const in the schema and the version the macros accept.
 SCHEMA_VERSION = 1
+SCHEMA_ID = "https://docs.redpanda.com/schemas/redpanda-metrics.schema.json"
 
 # The series a histogram or summary exposes beside its family name.
 SERIES_SUFFIXES = ("_bucket", "_count", "_sum")
@@ -108,6 +113,20 @@ def parse_labels(text):
     return pairs
 
 
+def as_sentence(text):
+    """Reader text for a description: the same words, ending as a sentence.
+
+    A help string in Redpanda takes no terminal period, and the docs print
+    full sentences. The period is added here, where the text is prepared for
+    readers, so nobody has to write an override for punctuation.
+    source_description keeps the help string exactly as Redpanda has it.
+    """
+    text = (text or "").strip()
+    if not text or text[-1] in ".!?:":
+        return text
+    return text + "."
+
+
 def derive_unit(name):
     """The unit a metric name states, or None."""
     base = name[:-len("_total")] if name.endswith("_total") else name
@@ -172,7 +191,9 @@ def parse_exposition(text):
             if key == "le" and suffix == "_bucket":
                 family["buckets"].add(value)
                 continue
-            if key in STRUCTURAL_LABELS:
+            # le and quantile carry a histogram's or a summary's series
+            # structure. On any other family they are ordinary labels.
+            if key in STRUCTURAL_LABELS and family["type"] in ("histogram", "summary"):
                 continue
             family["labels"].setdefault(key, set()).add(value)
     return families
@@ -227,7 +248,7 @@ def _entry(name, endpoint, family, source):
         "endpoint": endpoint,
         "type": kind,
         "unit": unit,
-        "description": family["help"] or "",
+        "description": as_sentence(family["help"]),
         "source_description": family["help"] or "",
         "labels": _labels(family),
         "histogram": None,
@@ -261,7 +282,7 @@ def _source_only_entry(name, endpoint, source):
         "endpoint": endpoint,
         "type": source.get("type"),
         "unit": unit,
-        "description": source.get("help") or "",
+        "description": as_sentence(source.get("help")),
         "source_description": source.get("help") or "",
         "labels": [],
         "histogram": {"buckets": [], "series": list(SERIES_SUFFIXES)} if source.get("type") == "histogram" else None,
@@ -294,6 +315,16 @@ def check_inventory(inventory):
             for field in ("help", "defined_in"):
                 if entry.get(field) is not None and not isinstance(entry[field], str):
                     raise DatasetError(f'{endpoint} family {name} must have a string "{field}"')
+    unresolved = inventory.get("unresolved")
+    if unresolved is not None:
+        if not isinstance(unresolved, list):
+            raise DatasetError('"unresolved" must be a list of registrations')
+        for site in unresolved:
+            if not isinstance(site, dict):
+                raise DatasetError('each "unresolved" item must be an object with "file", "line" and "reason"')
+            for field, kinds in (("file", str), ("line", int), ("reason", str)):
+                if site.get(field) is not None and not isinstance(site[field], kinds):
+                    raise DatasetError(f'an "unresolved" item has a "{field}" that is not a {kinds.__name__}')
 
 
 def _endpoint_conflicts(public, internal, inventory):
@@ -356,6 +387,7 @@ def build_dataset(version, public, internal, inventory=None, generated_from=None
         counts["observed" if entry["observed"] else "source_only"] += 1
 
     return {
+        "$schema": SCHEMA_ID,
         "schema_version": SCHEMA_VERSION,
         "redpanda_version": version,
         "generated_from": generated_from or {},
