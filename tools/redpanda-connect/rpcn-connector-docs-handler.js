@@ -828,7 +828,7 @@ async function findReleaseAttachmentWithSource (version, options = {}) {
     return { attachment: null, source: source('override', requested) }
   }
   try {
-    const data = await releaseAttachment.loadReleaseAttachment(version)
+    const data = await releaseAttachment.waitForReleaseAttachment(version)
     if (data) {
       console.log(`✓ Using ${file} from the v${version} docs asset: no binary downloads needed`)
       return { attachment: data, source: source('release-asset') }
