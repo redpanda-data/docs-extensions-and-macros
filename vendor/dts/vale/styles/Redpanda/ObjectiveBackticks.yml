@@ -1,0 +1,9 @@
+# Checks: backticks in a learning objective that render literally without pass:q[...]
+extends: existence
+message: "Wrap this objective in pass:q[...]: backticks in an attribute value render literally where {learning-objective-N} is used."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/content-architecture.md#page-metadata
+level: error
+scope: raw
+nonword: true
+tokens:
+  - '(?m)^:learning-objective-\d+:[ \t]*(?![ \t]|pass:)[^\n]*\x60[^\x60\n]+\x60'

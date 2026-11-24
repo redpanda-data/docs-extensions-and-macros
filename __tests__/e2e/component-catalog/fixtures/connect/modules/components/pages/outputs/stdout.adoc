@@ -1,0 +1,4 @@
+= stdout
+:description: Fixture page for the stdout component.
+
+Fixture page.

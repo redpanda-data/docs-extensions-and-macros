@@ -1,0 +1,7 @@
+# Lender fixture for __tests__/cli-utils/docs-links-to-xrefs.test.js: an
+# unversioned component shaped like redpanda-data/rp-connect-docs, holding the
+# pages that rpk connect's help links to.
+name: connect
+title: Connect
+version: ~
+start_page: home:index.adoc

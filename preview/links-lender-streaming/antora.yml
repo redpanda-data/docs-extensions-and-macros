@@ -1,0 +1,10 @@
+# For the showcase build: stand-in pages of the self-managed docs component,
+# the targets of the docs.redpanda.com URLs in rpk help text, so the xrefs
+# that `doc-tools generate rpk-docs` writes have real pages to resolve to
+# (see preview/extensions-and-macros/modules/ROOT/pages/rpk-links-test.adoc).
+# Adds pages to the same component version as preview/streaming-ga-lender.
+# No nav. local-macro-test-playbook.yml pulls the real docs repo instead, so
+# it must not include this component.
+name: streaming
+title: Streaming
+version: '26.2'

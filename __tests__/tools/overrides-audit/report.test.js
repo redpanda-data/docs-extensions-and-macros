@@ -228,3 +228,33 @@ describe('buildAmbiguousDigest', () => {
     expect(out).toContain('oddly_labeled_prop')
   })
 })
+
+describe('buildUnlocatableSection', () => {
+  test('empty input produces a non-empty "nothing this run" string', () => {
+    const out = report.buildUnlocatableSection([])
+    expect(out.length).toBeGreaterThan(0)
+    expect(out.toLowerCase()).toMatch(/nothing/)
+  })
+
+  test('lists an UPSTREAM_OVERRIDE row with no source_file, with its texts', () => {
+    const row = triaged({ name: 'rpk cloud login', agent_verdict: 'UPSTREAM_OVERRIDE', agent_reason: 'Source text is thin.', source_file: undefined })
+    const out = report.buildUnlocatableSection([row])
+    expect(out).toContain('## rpk cloud login')
+    expect(out).toContain('Source text is thin.')
+    expect(out).toContain('> How long to retain data, in milliseconds.')
+    expect(out).toContain('> Retention period.')
+    expect(out).toContain('by hand')
+    expect(out).toMatch(/^1 candidate worth upstreaming/)
+  })
+
+  test('leaves out located rows, other verdicts, and failed triage', () => {
+    const out = report.buildUnlocatableSection([
+      triaged({ name: 'located', agent_verdict: 'UPSTREAM_OVERRIDE' }),
+      triaged({ name: 'retire_me', agent_verdict: 'RETIRE_OVERRIDE', source_file: undefined }),
+      triaged({ name: 'ambiguous_one', agent_verdict: 'AMBIGUOUS', source_file: undefined }),
+      triaged({ name: 'failed_one', agent_verdict: 'UPSTREAM_OVERRIDE', triage_failed: true, source_file: undefined })
+    ])
+    expect(out.toLowerCase()).toMatch(/nothing/)
+    for (const name of ['located', 'retire_me', 'ambiguous_one', 'failed_one']) expect(out).not.toContain(name)
+  })
+})

@@ -1,0 +1,48 @@
+// Concepts Template
+// Use for pages that build mental models and explain how things work.
+// Reader question: "How does this work?"
+
+= About [Topic]
+:description: [One sentence describing what concepts this page explains.]
+:page-topic-type: concept
+:learning-objective-1: Explain [core concept 1]
+:learning-objective-2: Describe [core concept 2]
+:learning-objective-3: Differentiate between [concept A] and [concept B]
+
+// Intro: 4-5 sentences, ~100 words. Structure: What capability → How it works → Scope → Outcomes → Technical foundation.
+// Lead with what you can accomplish, not implementation details.
+[What does Redpanda provide? How does the mechanism work in accessible terms? What is the scope (specific examples)? What outcomes do organizations gain? What technical standards underpin it?]
+
+After reading this page, you will be able to:
+
+* [ ] {learning-objective-1}
+* [ ] {learning-objective-2}
+* [ ] {learning-objective-3}
+
+== [Core concept 1]
+
+[Explanation of the concept. Use analogies where helpful.]
+
+== [Core concept 2]
+
+[Explanation of the second major concept.]
+
+== [Concept A] vs [Concept B]
+
+[cols="1,1,1"]
+|===
+| Aspect | [Concept A] | [Concept B]
+
+| Purpose
+| [Description]
+| [Description]
+
+| When to use
+| [Scenario]
+| [Scenario]
+|===
+
+== Next steps
+
+* xref:create-x.adoc[]
+* xref:best-practices.adoc[]

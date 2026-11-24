@@ -1,0 +1,10 @@
+= Bloblang
+
+Stand-in for the page of the same name in redpanda-data/rp-connect-docs.
+
+// The live site sets idprefix to empty, so this heading's id is assignment
+// there; this preview build keeps the default _ prefix, so set the id.
+[#assignment]
+== Assignment
+
+A Bloblang mapping assigns values to fields of a new document.

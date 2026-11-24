@@ -1,0 +1,8 @@
+# Checks: 'once' meaning 'after'
+extends: existence
+message: "If '%s' means 'as soon as', use 'after'."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/terminology.md#do-not-use-word-list
+level: warning
+ignorecase: true
+tokens:
+  - '(?<!\b(?:only|exactly|least|most|than|just|more|all at)\s)\bonce\b(?!\s+(?:per|a|an|every|more|again|or)\b)'

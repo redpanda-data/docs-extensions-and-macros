@@ -6,6 +6,7 @@ const yaml = require('js-yaml')
 
 const { SourceCache } = require('../source-text')
 const { parseValuesFile: parseSharedValuesFile, PATTERNS } = require('../../../cli-utils/helm-commented-values')
+const { STANDARD } = require('../standards')
 
 /**
  * Helm surface: helm-docs description comments in chart values.yaml files
@@ -433,6 +434,8 @@ const RULES = [
   {
     name: 'dead-marker',
     description: 'A # -- marker no docs pipeline can attach to any key',
+    why: 'helm-docs cannot attach a # -- marker buried inside a commented-out block, so the description silently never ships.',
+    standard: STANDARD.helm,
     severity: 'error',
     runOnUnverifiable: true,
     check: (decl) => {
@@ -447,6 +450,8 @@ const RULES = [
   {
     name: 'misattached-marker',
     description: 'One # -- marker is published under two different keys',
+    why: 'helm-docs attaches a # -- marker to the next real key below it, so this text is published as the description of a different key.',
+    standard: STANDARD.helm,
     severity: 'error',
     runOnUnverifiable: true,
     check: (decl) => {
@@ -463,6 +468,8 @@ const RULES = [
   {
     name: 'undocumented-key',
     description: 'Key helm-docs publishes with an empty description',
+    why: 'A key with no # -- description renders as an empty row in the Helm chart reference.',
+    standard: STANDARD.helm,
     severity: 'info',
     runOnUnverifiable: true,
     check: (decl) => {

@@ -79,6 +79,18 @@ describe('production workflow extraction', () => {
     expect(lib.validateImpact('not json', filter).valid).toBe(false)
   })
 
+  test('the dispatch filter is read from a schema= assignment used by jq -e', () => {
+    const step = "schema='\n  .findings | length > 0\n'\nif ! jq -e \"$schema\" \"$model\"; then exit 1; fi"
+    expect(lib.extractDispatchFilter(step)).toBe('\n  .findings | length > 0\n')
+    expect(() => lib.extractDispatchFilter(step.replace('jq -e "$schema"', 'jq -e "$other"'))).toThrow(/never runs jq -e/)
+  })
+
+  test('the dispatch filter is read from the older inline jq -e form', () => {
+    const step = "jq -e '.findings | length > 0' doc-impact.json >/dev/null || exit 1"
+    expect(lib.extractDispatchFilter(step)).toBe('.findings | length > 0')
+    expect(() => lib.extractDispatchFilter('echo none')).toThrow(/schema='\.\.\.' assignment/)
+  })
+
   test('the built prompt carries both production sections and the PR number', () => {
     const p = lib.extractImpactPrompt(wf.prompt)
     const text = lib.buildPrompt(p, item('x', 'no_change', { repo: 'redpanda-data/streaming-enterprise', pr_url: 'https://github.com/redpanda-data/streaming-enterprise/pull/123' }))
@@ -426,6 +438,18 @@ describe('seeding and freezing', () => {
       const ev = runItem(seItem('gate', 'no_change'), ctx())
       expect(ev.status).toBe('GATE_CLOSED')
       expect(lib.score([{ item: seItem('gate', 'no_change'), ...ev }]).abstention_recall).toBeNull()
+    })
+
+    test('a description that declares a change opens the gate, as the workflow does', () => {
+      // Same frozen lint input as above: no declarations. The workflow opens
+      // the review for the declared change, so the item goes on to the pass
+      // (here it stops at the missing recording, past the gate).
+      const declared = { ...seItem('gate', 'needs_docs'), body: '## UX Changes\n\nClusters over 50 cores need a license.\n' }
+      const ev = runItem(declared, ctx())
+      expect(ev.status).toBe('HARNESS_ERROR')
+      expect(ev.notes[0]).toMatch(/no recording at/)
+      const bugOnly = { ...seItem('gate', 'needs_docs'), body: '## Release Notes\n\n### Bug Fixes\n\n* Fixed a crash.\n' }
+      expect(runItem(bugOnly, ctx()).status).toBe('GATE_CLOSED')
     })
 
     test('a recording that holds a quota refusal is a harness error in replay', () => {
