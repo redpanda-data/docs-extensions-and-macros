@@ -1631,6 +1631,25 @@ An index that would exceed 45,000 characters is split by URL directory, for exam
 
 The root `llms.txt` links to every page index in a *Page indexes* section. The index list is never truncated, because an index missing from the root leaves its pages unreachable from `llms.txt`. Page indexes do not link to other page indexes, so every page is one hop from the root.
 
+=== Ask endpoint
+
+If your site serves an endpoint that answers a question sent with a GET request, set its root-relative path in `site.keys.llms-ask-path`:
+
+[,yaml]
+----
+site:
+  keys:
+    llms-ask-path: /mcp/ask
+----
+
+When the key is set, three outputs tell agents about the endpoint, with an example query such as `/mcp/ask?q=how+do+I+create+a+topic`:
+
+- The llms.txt directive that `add-llms-directive` adds to every HTML page.
+- The directive that `convert-to-markdown` adds to every Markdown export.
+- The header of every page index.
+
+Without the key, these outputs don't mention an endpoint. The value must start with a single `/` and use only letters, digits, and `/`, `-`, `.`, `_`, `~`, or `%`, so it has no query string. Any other value is ignored. The page indexes resolve the path from the host of `site.url`.
+
 === Attributes
 
 The extension replaces `{site-url}` attribute with:
