@@ -214,6 +214,24 @@ features:
     expect(messages).not.toMatch(/'C' has since/)
   })
 
+  test('in-table must be a boolean', () => {
+    const yaml = `features:
+  - name: A
+    scope: redpanda
+    in-table: 'false'
+    description: x
+    source: {kind: manual, value: ok}
+  - name: B
+    scope: redpanda
+    in-table: false
+    description: x
+    source: {kind: manual, value: ok}
+`
+    const messages = lintRegistry(yaml).findings.map((f) => f.message).join('\n')
+    expect(messages).toMatch(/'A' has in-table 'false', which must be true or false/)
+    expect(messages).not.toMatch(/'B' has in-table/)
+  })
+
   test('a new core enum value is reported as needs-human', () => {
     const { features } = lintRegistry(REGISTRY)
     const findings = checkCoreEnum(features, ['audit_logging', 'cloud_storage', 'partition_auto_balancing_continuous', 'fips', 'quantum_topics'])
@@ -355,6 +373,23 @@ features:
 `
     const { findings } = runChecks({ registryYaml: registry, configurationHeader: CONFIGURATION_HEADER })
     expect(findings.filter((f) => f.check === 'manual-property')).toEqual([])
+  })
+
+  // The table filter drops in-table: false entries, but the mapping must not:
+  // keeping the cluster_cores_over_limit row is why such an entry exists.
+  test('buildMappingPartial keeps an entry marked in-table: false', () => {
+    const yaml = `features:
+  - name: Community Edition Core Limit
+    scope: redpanda
+    xref: get-started:licensing/core-limit.adoc
+    in-table: false
+    description: x
+    source: {kind: core-enum, value: cluster_cores_over_limit}
+`
+    const { features } = lintRegistry(yaml)
+    const partial = buildMappingPartial(features, ['cluster_cores_over_limit'])
+    expect(partial).toContain('| cluster_cores_over_limit')
+    expect(partial).toContain('xref:get-started:licensing/core-limit.adoc[Community Edition Core Limit]')
   })
 
   test('runChecks skips missing sources with info findings only', () => {

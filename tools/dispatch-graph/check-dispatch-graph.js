@@ -62,7 +62,7 @@ const DEFAULT_REPOS = [
   { repo: 'redpanda-data/streaming-enterprise', role: 'engineering' },
   { repo: 'redpanda-data/redpanda', role: 'engineering' },
   { repo: 'redpanda-data/cloudv2', role: 'engineering' },
-  { repo: 'redpanda-data/redpanda-operator', role: 'engineering' },
+  { repo: 'redpanda-data/operator-enterprise', role: 'engineering' },
   { repo: 'redpanda-data/connect', role: 'engineering' },
   { repo: 'redpanda-data/console', role: 'engineering' },
   { repo: 'redpanda-data/helm-charts', role: 'engineering' },

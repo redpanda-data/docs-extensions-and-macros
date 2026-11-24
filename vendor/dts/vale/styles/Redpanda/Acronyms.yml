@@ -1,0 +1,54 @@
+# Checks: acronyms a page never spells out, as in 'change data capture (CDC)'
+extends: conditional
+message: "Spell out '%s' the first time the page uses it, with the acronym in parentheses."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/plain-english.md#words
+level: warning
+ignorecase: false
+# The match leaves off a plural s, so 'ACLs' needs '(ACL)' or '(ACLs)'.
+first: '\b(?:[A-Z]{2,}|IdP)(?=s?\b)'
+second: '\(((?:[A-Z]{2,}|IdP))s?\)'
+# Acronyms readers know without a definition. Add one only when it is more
+# familiar than its expansion.
+exceptions:
+  # Never spelled out as 'Agentic Data Plane (ADP)'; Redpanda.ADP flags it.
+  - ADP
+  - AI
+  - API
+  - CLI
+  - CPU
+  - CSS
+  - CSV
+  - DELETE
+  - DNS
+  - GB
+  - GET
+  - HTML
+  - HTTP
+  - HTTPS
+  - ID
+  - IP
+  - JSON
+  - KB
+  - MB
+  - OK
+  - OS
+  - PATCH
+  - PDF
+  - POST
+  - PUT
+  - RAM
+  - REST
+  - SDK
+  - SQL
+  - SSH
+  - TB
+  - TCP
+  - UI
+  - URI
+  - URL
+  - US
+  - UTC
+  - UTF
+  - UUID
+  - XML
+  - YAML

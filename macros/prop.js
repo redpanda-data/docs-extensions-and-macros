@@ -101,6 +101,12 @@
  * renders a visible placeholder such as <unknown default> and reports why,
  * because unlike a property name, a value has no safe fallback.
  *
+ * Text values (description, examples, see-also) render inline only when they
+ * are one paragraph. Anything longer takes the block form, on a line of its
+ * own, which parses the AsciiDoc into the page:
+ *
+ *   propval::cleanup.policy[description]
+ *
  * Example use in a playbook:
  *
  *   asciidoc:
@@ -108,10 +114,29 @@
  *     - '@redpanda-data/docs-extensions-and-macros/macros/prop'
  */
 
-const semver = require('semver')
 const { escapeHtml } = require('../extension-utils/html-utils')
 const propertyValues = require('../extension-utils/property-values')
+const valueDescriptions = require('../extension-utils/value-descriptions')
+const datasets = require('../extension-utils/attachment-datasets')
+const { deprecationAcknowledged } = require('../extension-utils/deprecation-ack')
+const { noteIncludes } = require('../extension-utils/connect-links')
+const { rpkvalInlineMacro, rpkvalBlockMacro } = require('./rpkval')
+const { connectvalInlineMacro, connectvalBlockMacro } = require('./connectval')
+const { rpkcmdInlineMacro } = require('./rpkcmd')
+const { connectInlineMacro } = require('./connect')
+const { bloblInlineMacro } = require('./blobl')
+const { bloblvalInlineMacro, bloblvalBlockMacro } = require('./bloblval')
+const { metricInlineMacro } = require('./metric')
+const { metricvalInlineMacro, metricvalBlockMacro } = require('./metricval')
 const logger = require('@antora/logger')('prop-macro')
+
+const {
+  SURFACE_CLOUD,
+  compareTags,
+  isPrerelease,
+  releaseSeries,
+  isAttributeSet,
+} = datasets
 
 const $propertyRegistry = Symbol('$propertyRegistry')
 // Release series a component version has no property data for, recorded at
@@ -119,10 +144,48 @@ const $propertyRegistry = Symbol('$propertyRegistry')
 const $propertySeriesGap = Symbol('$propertySeriesGap')
 
 const DEFAULT_ROLE = 'property-ref'
-// Which slice of a dataset a component may reference.
-const SURFACE_ALL = 'all'
-const SURFACE_CLOUD = 'cloud'
 const PROPERTIES_JSON_RX = /^redpanda-properties-(v\d+\.\d+\.\d+(?:-[\w.]+)?)\.json$/
+
+// The properties dataset as the shared loader sees it. The cache and gap
+// Symbols are the ones prop: has always used, so the property-page-index
+// extension sees the same cache layout, and every message is the wording
+// prop: has always printed.
+const PROPERTIES_KIND = {
+  name: 'properties',
+  module: 'reference',
+  rx: PROPERTIES_JSON_RX,
+  filePrefix: 'redpanda-properties-',
+  label: 'property data',
+  regenerate: "'npx doc-tools generate property-docs'",
+  borrowWhen: ['env-cloud'],
+  lenders: ['streaming', 'ROOT'],
+  cacheSymbol: $propertyRegistry,
+  gapSymbol: $propertySeriesGap,
+  keyPrefix: '',
+  invalidKey: 'noprops',
+  // Must be a plain object of name -> entry. A string, number, or array parses
+  // fine and would then make every prop: target look like a typo.
+  validate: (data) => {
+    const properties = data.properties
+    return properties && typeof properties === 'object' && !Array.isArray(properties)
+      ? true
+      : "has no usable 'properties' object"
+  },
+  notObjectReason: "has no usable 'properties' object",
+  decorate: (registry) => { registry.properties = registry.data.properties },
+  logger,
+  text: {
+    log: 'prop macro',
+    macro: 'prop:',
+    attachment: 'property attachment',
+    releaseNoun: 'properties',
+    effect: (where) => `prop: targets${where} are therefore not validated and their tooltips carry no data`,
+    generateSeries: (series) => `'npx doc-tools generate property-docs --tag v${series}.<patch>'`,
+    noData: (component, version) =>
+      `prop macro: no redpanda-properties-<tag>.json attachment found in any component's reference module for ${component || 'unknown component'}@${version || 'unversioned'}; ` +
+      'prop: targets are not validated and their tooltips carry no data. Publish the property JSON as a reference-module attachment in this component or in streaming.',
+  },
+}
 
 const $propertyPageIndex = Symbol('$propertyPageIndex')
 // Two or more '=': a level-0 heading is the page title, which generates no
@@ -141,6 +204,25 @@ const CLAIM_DECLARED = 3
 // Delimited block fences: listing, literal, example, sidebar, quote, comment.
 const DELIMITER_RX = /^(-{4,}|\.{4,}|={4,}|\*{4,}|_{4,}|\/{4,})$/
 
+// What buildPageIndex indexes. prop: indexes property headings; metric:
+// passes its own kind (extension-utils/metric-links.js) to index metric
+// headings with the same scan.
+//
+//   symbol        Where the per-catalog index cache lives.
+//   sourceRx      The page attribute that declares a page the reference.
+//   pageIncludes  Also follow includes of whole pages, as a Cloud stub
+//                 includes the page it single-sources.
+//   conditionals  Skip headings inside ifdef/ifndef blocks that do not
+//                 render for the indexed page.
+const PROPERTY_PAGES = {
+  symbol: $propertyPageIndex,
+  log: 'prop macro',
+  noun: 'property',
+  plural: 'properties',
+  sourceRx: PROPERTY_SOURCE_RX,
+  logger,
+}
+
 /**
  * Extract property-style headings from AsciiDoc source together with the
  * include tags that enclose them.
@@ -151,7 +233,9 @@ const DELIMITER_RX = /^(-{4,}|\.{4,}|={4,}|\*{4,}|_{4,}|\/{4,})$/
 function extractHeadingsWithTags (source) {
   const headings = []
   const open = []
+  const conditions = []
   for (const line of source.split('\n')) {
+    if (trackConditional(line, conditions)) continue
     const marker = line.match(TAG_MARKER_RX)
     if (marker) {
       if (marker[1] === 'tag') open.push(marker[2])
@@ -162,9 +246,80 @@ function extractHeadingsWithTags (source) {
       continue
     }
     const heading = line.match(HEADING_RX)
-    if (heading) headings.push({ name: heading[1], tags: [...open] })
+    if (heading) {
+      const entry = { name: heading[1], tags: [...open] }
+      if (conditions.length) entry.conditions = [...conditions]
+      headings.push(entry)
+    }
   }
   return headings
+}
+
+// ifdef::env-cloud[], ifndef::a,b[], ifeval::[...] and endif::[] on a line of
+// their own. The single-line form (ifdef::x[text]) opens nothing.
+const CONDITIONAL_RX = /^(ifdef|ifndef|ifeval|endif)::([^[]*)\[(.*)\]\s*$/
+
+/**
+ * Keep a stack of the preprocessor conditionals open at a line. Returns true
+ * when the line is a conditional directive.
+ *
+ * @param {string} line
+ * @param {object[]} stack - Mutated: {negate, names, all}, or {unknown: true}
+ *   for ifeval, which is never evaluated and counts as true.
+ */
+function trackConditional (line, stack) {
+  const match = line.match(CONDITIONAL_RX)
+  if (!match) return false
+  const [, directive, target, content] = match
+  if (directive === 'endif') stack.pop()
+  else if (directive === 'ifeval') stack.push({ unknown: true })
+  else if (!content.trim()) {
+    const all = target.includes('+')
+    stack.push({ negate: directive === 'ifndef', all, names: target.split(all ? '+' : ',').map((name) => name.trim()).filter(Boolean) })
+  }
+  return true
+}
+
+/**
+ * Whether content inside these conditionals renders with these attributes.
+ */
+function conditionsHold (conditions, attributes) {
+  return (conditions || []).every((condition) => {
+    if (condition.unknown) return true
+    const set = (name) => isAttributeSet(attributes[name])
+    const defined = condition.all ? condition.names.every(set) : condition.names.some(set)
+    return condition.negate ? !defined : defined
+  })
+}
+
+// Attribute entries a page sets for itself (:env-serverless: true), over its
+// component version's attributes.
+function pageAttributes (source, componentAttributes) {
+  const attributes = { ...componentAttributes }
+  for (const match of source.matchAll(/^:(!?)([\w-]+)(!?):[ \t]*(.*)$/gm)) {
+    if (match[1] || match[3]) delete attributes[match[2]]
+    else attributes[match[2]] = match[4].trim()
+  }
+  return attributes
+}
+
+/**
+ * Resolve an include target that names a page, such as
+ * 'streaming:reference:public-metrics-reference.adoc' or
+ * 'reference:page$public-metrics-reference.adoc', the way a Cloud stub
+ * includes the page it single-sources.
+ */
+function parsePageTarget (target, pageSrc) {
+  if (!/\.adoc$/.test(target) || /^[./]/.test(target)) return undefined
+  const parts = target.replace(/^[^@:$]+@/, '').split(':')
+  let relative = parts.pop()
+  if (relative.includes('$')) {
+    if (!relative.startsWith('page$')) return undefined
+    relative = relative.slice('page$'.length)
+  }
+  if (parts.length > 2) return undefined
+  const module = parts.pop() || pageSrc.module
+  return { component: parts.pop() || pageSrc.component, module, relative }
 }
 
 /**
@@ -224,8 +379,8 @@ function parsePartialTarget (target, pageSrc) {
  * @param {object} properties - Known property names from the published JSON.
  * @returns {Map<string, string>} property name -> page path without .adoc
  */
-function buildPageIndex (contentCatalog, component, properties, version) {
-  const cache = contentCatalog[$propertyPageIndex] || (contentCatalog[$propertyPageIndex] = {})
+function buildPageIndex (contentCatalog, component, properties, version, kind = PROPERTY_PAGES) {
+  const cache = contentCatalog[kind.symbol] || (contentCatalog[kind.symbol] = {})
   const cacheKey = `${component}@${version || ''}`
   if (cache[cacheKey]) return cache[cacheKey]
   const index = new Map()
@@ -256,7 +411,7 @@ function buildPageIndex (contentCatalog, component, properties, version) {
     return head.startsWith('<') && !head.startsWith('<<') && /^<[a-zA-Z!/]/.test(head)
   }
   if (pages.some(looksConverted)) {
-    logger.warn(`prop macro: building the property page index for ${component}@${version || 'any'} after conversion started; some pages are already HTML and their properties may not be indexed. Register '@redpanda-data/docs-extensions-and-macros/extensions/property-page-index' under antora.extensions to build the index up front.`)
+    kind.logger.warn(`${kind.log}: building the ${kind.noun} page index for ${component}@${version || 'any'} after conversion started; some pages are already HTML and their ${kind.plural} may not be indexed. Register '@redpanda-data/docs-extensions-and-macros/extensions/property-page-index' under antora.extensions to build the index up front.`)
   }
   // A page can declare that it is the reference for a named collection of
   // properties:
@@ -271,7 +426,7 @@ function buildPageIndex (contentCatalog, component, properties, version) {
   // that both surface a property used to resolve by aggregation order, which is
   // stable for one checkout but not meaningful.
   const declarationOf = (page) => {
-    const match = sourceOf(page).match(PROPERTY_SOURCE_RX)
+    const match = kind.sourceRx && sourceOf(page).match(kind.sourceRx)
     return match ? match[1].trim() : undefined
   }
   const ordered = pages
@@ -320,8 +475,21 @@ function buildPageIndex (contentCatalog, component, properties, version) {
       claims.set(name, { page: pagePath, declared, rank })
       index.set(name, entry)
     }
+    // Only a kind that asks for it reads preprocessor conditionals, with the
+    // attributes of the page that renders the heading.
+    const attributes = kind.conditionals
+      ? pageAttributes(source, datasets.componentAttributes(contentCatalog, component, page.src.version))
+      : undefined
+    const conditions = []
     let inDelimitedBlock = false
     for (const line of source.split('\n')) {
+      // Inside delimited blocks too: the preprocessor reads conditionals
+      // before blocks are parsed, so one that wraps a single fence decides
+      // where the block ends.
+      if (attributes) {
+        if (trackConditional(line, conditions)) continue
+        if (!conditionsHold(conditions, attributes)) continue
+      }
       // A property name inside a listing, literal, or comment block is sample
       // text, not documentation of that property. Indexing it handed the
       // property to a page that renders no anchor for it.
@@ -342,7 +510,12 @@ function buildPageIndex (contentCatalog, component, properties, version) {
       }
       const include = line.match(INCLUDE_RX)
       if (!include) continue
-      const partialRef = parsePartialTarget(include[1].trim(), page.src)
+      let family = 'partial'
+      let partialRef = parsePartialTarget(include[1].trim(), page.src)
+      if (!partialRef && kind.pageIncludes) {
+        family = 'page'
+        partialRef = parsePageTarget(include[1].trim(), page.src)
+      }
       if (!partialRef) continue
       // Match a quoted value first. An unquoted value ends at the next comma
       // because the attrlist is comma-separated -- but a quoted one may contain
@@ -353,7 +526,7 @@ function buildPageIndex (contentCatalog, component, properties, version) {
       // disappeared. Asciidoctor honours the quoted form, so the index has to.
       const tagsMatch = include[2].match(/tags?=("[^"]*"|'[^']*'|[^,\]]*)/)
       const expression = tagsMatch && tagsMatch[1]
-      const partials = contentCatalog.findBy({ component: partialRef.component, module: partialRef.module, family: 'partial' }) || []
+      const partials = contentCatalog.findBy({ component: partialRef.component, module: partialRef.module, family }) || []
       const matching = partials.filter((candidate) => candidate.src.relative === partialRef.relative)
       // Same-component includes resolve within the page's version; for
       // cross-component includes take whichever version the catalog has.
@@ -376,6 +549,7 @@ function buildPageIndex (contentCatalog, component, properties, version) {
       for (const entry of headingsFor(partial)) {
         if (!Object.prototype.hasOwnProperty.call(properties, entry.name)) continue
         if (!evaluateTagExpression(entry.tags, expression)) continue
+        if (attributes && !conditionsHold(entry.conditions, attributes)) continue
         claim(entry.name, { page: pagePath, url: pageUrl }, CLAIM_PARTIAL)
       }
     }
@@ -413,123 +587,11 @@ function helmValuesPath (name, scope) {
   return `config.cluster.${name}`
 }
 
-// Warnings are deduplicated per build. Antora's watch mode (gulp/npm start)
-// reuses one process across many builds, so a module-level guard would report
-// each problem only on a session's first build and stay silent afterwards --
-// exactly when a writer is iterating and most wants to see it. The content
-// catalog is rebuilt per build, so keying off it scopes the guard correctly.
-const $warned = Symbol('$warned')
-
+// Deduplicated per build on the content catalog (see warnOnce in
+// extension-utils/attachment-datasets.js), through prop:'s own logger.
 function warnOnce (contentCatalog, key, message) {
-  const seen = contentCatalog[$warned] || (contentCatalog[$warned] = new Set())
-  if (seen.has(key)) return false
-  seen.add(key)
-  logger.warn(message)
-  return true
+  return datasets.warnOnce(contentCatalog, key, message, logger)
 }
-
-/**
- * Compare two property tags by release precedence, newest last.
- *
- * Prereleases matter here: a release cycle publishes v26.3.1-rc1, then rc2,
- * then the GA v26.3.1, and the beta branch has to land on the newest of them
- * deterministically. A numeric-only comparison rates all three equal, leaving
- * the winner to catalog iteration order -- so rc1 could beat rc2, or an RC
- * could beat its own GA.
- *
- * Redpanda tags spell prereleases as one identifier (-rc2, not -rc.2), which
- * the semver spec compares as a string: 'rc10' would sort below 'rc2'. Split
- * the trailing digits into their own identifier first so they compare
- * numerically.
- */
-function compareTags (a, b) {
-  const normalize = (tag) => String(tag).replace(/^v/, '').replace(/-([a-z]+)(\d+)/gi, '-$1.$2')
-  const left = semver.valid(normalize(a))
-  const right = semver.valid(normalize(b))
-  if (left && right) return semver.compare(left, right)
-  // Not semver (a hand-named file, say): fall back to numeric release order.
-  const parse = (tag) => String(tag).replace(/^v/, '').split('-')[0].split('.').map(Number)
-  const [a1, a2, a3] = parse(a)
-  const [b1, b2, b3] = parse(b)
-  return (a1 - b1) || (a2 - b2) || (a3 - b3) || 0
-}
-
-/**
- * Whether a tag names a prerelease (an RC or beta build).
- */
-function isPrerelease (tag) {
-  const normalized = String(tag).replace(/^v/, '')
-  const valid = semver.valid(normalized)
-  return valid ? Boolean(semver.prerelease(valid)) : /-/.test(normalized)
-}
-
-/**
- * The release series ('26.2') of a component version ('26.2', '25.3.1') or a
- * properties tag ('v26.2.1', 'v26.3.1-rc1'). Undefined when the value names no
- * numeric series.
- */
-function releaseSeries (value) {
-  const match = String(value == null ? '' : value).replace(/^v/, '').match(/^(\d+)\.(\d+)/)
-  return match ? `${match[1]}.${match[2]}` : undefined
-}
-
-/**
- * Whether an Antora attribute counts as declared.
- *
- * Antora keeps a component version's antora.yml attributes verbatim, and
- * setting one to false is how a maintainer turns it off: the key stays present.
- * A bare `!== undefined` test therefore reads `env-cloud: false` as "this is
- * Cloud", the opposite of what was written. Sibling readers of this attribute
- * in this repo use truthiness, so match them, while still honouring AsciiDoc's
- * set-but-empty convention.
- */
-function isAttributeSet (value) {
-  if (value === undefined || value === null || value === false) return false
-  return String(value).toLowerCase() !== 'false'
-}
-
-/**
- * The asciidoc attributes declared for one component version, which is where
- * env-cloud lives. Read from the catalog rather than the converting document
- * so the property-page-index extension resolves surfaces identically.
- */
-function componentAttributes (contentCatalog, component, version) {
-  if (typeof contentCatalog.getComponent !== 'function') return {}
-  const found = contentCatalog.getComponent(component)
-  if (!found) return {}
-  const versions = found.versions || []
-  const match = versions.find((entry) => entry.version === version) || found.latest || versions[0]
-  return (match && match.asciidoc && match.asciidoc.attributes) || {}
-}
-
-/**
- * Every properties JSON in the build, as {tag, file, component, version}.
- */
-function propertyDatasets (contentCatalog) {
-  const found = []
-  for (const attachment of contentCatalog.findBy({ family: 'attachment' }) || []) {
-    if (attachment.src.module !== 'reference') continue
-    const match = attachment.src.relative.split('/').pop().match(PROPERTIES_JSON_RX)
-    if (!match) continue
-    found.push({ tag: match[1], file: attachment, component: attachment.src.component, version: attachment.src.version })
-  }
-  return found
-}
-
-/**
- * The newest dataset in a list, with ties broken on a stable identity rather
- * than on catalog iteration order: two attachments can carry the same tag, and
- * picking whichever the catalog happened to yield first made the chosen
- * property data differ between builds of identical content.
- */
-const newestDataset = (list) =>
-  list.reduce((best, entry) => {
-    if (!best) return entry
-    const byTag = compareTags(entry.tag, best.tag)
-    if (byTag > 0) return entry
-    if (byTag < 0) return best
-    return stableKey(entry) < stableKey(best) ? entry : best
-  }, null)
 
 /**
  * Load and cache the property data for one page's component and version, plus
@@ -567,156 +629,7 @@ function loadProperties (config) {
  * property-page-index extension can warm the caches before conversion.
  */
 function loadPropertiesFor (contentCatalog, pageComponent, pageVersion) {
-  const cacheKey = `${pageComponent}@${pageVersion}`
-  const cache = contentCatalog[$propertyRegistry] || (contentCatalog[$propertyRegistry] = {})
-  if (cache[cacheKey] !== undefined) return cache[cacheKey] || undefined
-
-  const datasets = propertyDatasets(contentCatalog)
-  const own = datasets.filter((d) => d.component === pageComponent)
-  let pick
-  let surface
-  // The candidates the corrupt-file fallback may fall back TO. It has to be the
-  // same filtered set `pick` was chosen from, not everything the component
-  // publishes: falling back across release series would validate a 25.3 page
-  // against 25.2 data, which is exactly the borrowing this function refuses to
-  // do on the primary path.
-  let pool
-
-  // Cloud is decided first, and deliberately outranks the component's own
-  // attachments. The property extractor writes
-  // modules/reference/attachments/redpanda-properties-<tag>.json into whatever
-  // repo it runs in, so running it inside cloud-docs would otherwise flip that
-  // component to the unfiltered surface and switch off cloud_supported gating
-  // site-wide, with no warning anywhere.
-  if (isAttributeSet(componentAttributes(contentCatalog, pageComponent, pageVersion)['env-cloud'])) {
-    surface = SURFACE_CLOUD
-    // GA only: Cloud runs released Redpanda, so an RC published on the beta
-    // branch must not become the dataset Cloud pages validate against.
-    // Only streaming/ROOT count as lenders -- another component's product
-    // version is not a Redpanda release candidate.
-    const lenders = datasets.filter((d) => d.component === 'streaming' || d.component === 'ROOT')
-    const released = lenders.filter((d) => !isPrerelease(d.tag))
-    pool = released
-    pick =
-      newestDataset(released.filter((d) => d.component === 'streaming')) ||
-      newestDataset(released.filter((d) => d.component === 'ROOT'))
-    if (!pick && lenders.length) {
-      // Self-managed data exists but all of it is a prerelease. Say that
-      // specifically rather than claiming no property data was found.
-      const gaps = contentCatalog[$propertySeriesGap] || (contentCatalog[$propertySeriesGap] = {})
-      gaps[cacheKey] = {
-        kind: 'cloud-prerelease-only',
-        component: pageComponent,
-        version: pageVersion,
-        have: [...new Set(lenders.map((d) => d.tag))].sort(compareTags),
-      }
-      cache[cacheKey] = null
-      return undefined
-    }
-  } else if (own.length) {
-    surface = SURFACE_ALL
-    const series = releaseSeries(pageVersion)
-    if (series) {
-      const inSeries = own.filter((d) => releaseSeries(d.tag) === series)
-      pool = inSeries
-      pick = newestDataset(inSeries.filter((d) => d.version === pageVersion)) || newestDataset(inSeries)
-      if (!pick) {
-        // Record the gap rather than reporting it here: this also runs from the
-        // property-page-index extension, once per component version in the
-        // build, so warning now would report versions no page of which uses the
-        // macro. The macro reports it on first actual use.
-        const gaps = contentCatalog[$propertySeriesGap] || (contentCatalog[$propertySeriesGap] = {})
-        gaps[cacheKey] = {
-          kind: 'series',
-          component: pageComponent,
-          version: pageVersion,
-          series,
-          have: [...new Set(own.map((d) => d.tag))].sort(compareTags),
-        }
-        cache[cacheKey] = null
-        return undefined
-      }
-    } else {
-      pool = own
-      pick = newestDataset(own.filter((d) => d.version === pageVersion)) || newestDataset(own)
-    }
-  }
-
-  // A corrupt or half-written attachment must not take the whole build down,
-  // and must not mask a good file: try candidates newest-first and use the
-  // first one that actually carries properties, reporting each one skipped.
-  let registry = null
-  const candidates = orderedCandidates(pick, pool)
-  for (const candidate of candidates) {
-    const properties = readProperties(candidate, contentCatalog)
-    if (!properties) continue
-    registry = { tag: candidate.tag, properties, component: candidate.component, version: candidate.version, surface }
-    break
-  }
-  if (!registry && candidates.length) {
-    // Every candidate was unusable. Record that, because the caller's fallback
-    // diagnostic says no attachment exists anywhere -- which contradicts the
-    // per-file warning readProperties just emitted and sends the writer looking
-    // for a file that is sitting right there.
-    const gaps = contentCatalog[$propertySeriesGap] || (contentCatalog[$propertySeriesGap] = {})
-    gaps[cacheKey] = {
-      kind: 'unusable',
-      component: pageComponent,
-      version: pageVersion,
-      have: [...new Set(candidates.map((d) => d.tag))].sort(compareTags),
-    }
-  }
-  // Cache null too, so a missing dataset is only searched for once per build.
-  cache[cacheKey] = registry
-  return registry || undefined
-}
-
-/**
- * The chosen dataset first, then the remaining candidates from the same pool in
- * descending release order, so an unusable file falls through to the next best
- * rather than voiding the component's data entirely.
- */
-function orderedCandidates (pick, pool) {
-  if (!pick) return []
-  const rest = (pool || [])
-    .filter((d) => d !== pick)
-    .sort((a, b) => compareTags(b.tag, a.tag) || stableKey(a).localeCompare(stableKey(b)))
-  return [pick, ...rest]
-}
-
-/**
- * Parse one properties attachment, or report why it is unusable and return
- * undefined. A JSON syntax error used to escape as an unhandled exception that
- * named no file, so a single bad attachment failed the build with no way to tell
- * which of them was at fault.
- */
-function readProperties (candidate, contentCatalog) {
-  const where = `${candidate.component}@${candidate.version || 'unversioned'}`
-  let data
-  try {
-    data = JSON.parse(candidate.file.contents.toString())
-  } catch (error) {
-    warnOnce(contentCatalog, `badjson:${where}:${candidate.tag}`,
-      `prop macro: redpanda-properties-${candidate.tag}.json in ${where} is not valid JSON (${error.message}), so it is ignored. Regenerate it with 'npx doc-tools generate property-docs'.`)
-    return undefined
-  }
-  const properties = data && data.properties
-  // Must be a plain object of name -> entry. A string, number, or array parses
-  // fine and would then make every prop: target look like a typo.
-  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) {
-    warnOnce(contentCatalog, `noprops:${where}:${candidate.tag}`,
-      `prop macro: redpanda-properties-${candidate.tag}.json in ${where} has no usable 'properties' object, so it is ignored. Regenerate it with 'npx doc-tools generate property-docs'.`)
-    return undefined
-  }
-  return properties
-}
-
-/**
- * A stable identity for an attachment, so two files carrying the same tag are
- * resolved the same way on every build instead of by catalog iteration order.
- */
-function stableKey (candidate) {
-  return `${candidate.component}\u0000${candidate.version}\u0000${candidate.file.src.relative}`
+  return datasets.loadDatasetFor(contentCatalog, pageComponent, pageVersion, PROPERTIES_KIND)
 }
 
 /**
@@ -744,32 +657,12 @@ function isAvailable (registry, entry) {
 
 function warnSeriesMissing (contentCatalog, pageComponent, pageVersion) {
   const gaps = contentCatalog[$propertySeriesGap]
-  const gap = gaps && gaps[`${pageComponent}@${pageVersion}`]
-  if (!gap) return false
-  const have = gap.have.join(', ')
-  if (gap.kind === 'unusable') {
-    warnOnce(contentCatalog, `unusable:${gap.component}@${gap.version}`,
-      `prop macro: every property attachment for ${gap.component}@${gap.version} is unusable (${have}); see the per-file warning above for why. ` +
-      'prop: targets are therefore not validated and their tooltips carry no data. Regenerate the file with \'npx doc-tools generate property-docs\' rather than treating this as missing data.')
-    return true
-  }
-  if (gap.kind === 'cloud-prerelease-only') {
-    warnOnce(contentCatalog, `cloudpre:${gap.component}@${gap.version}`,
-      `prop macro: ${gap.component} found only prerelease property data (${have}). Cloud runs released Redpanda, so it uses GA property data and will not validate against a release candidate. ` +
-      'prop: targets on Cloud pages are therefore not validated and their tooltips carry no data. Include a GA self-managed branch in the build, or leave prop: out of Cloud content until the release ships.')
-    return true
-  }
-  warnOnce(contentCatalog, `series:${gap.component}@${gap.version}`,
-    `prop macro: ${gap.component}@${gap.version} publishes no redpanda-properties-v${gap.series}.*.json attachment in its reference module (found for other series: ${have}). ` +
-    `prop: targets on ${gap.version} pages are therefore not validated and their tooltips carry no data, rather than being checked against another release's properties. ` +
-    `Generate it with 'npx doc-tools generate property-docs --tag v${gap.series}.<patch>' on that branch, or leave prop: out of ${gap.version} content.`)
-  return true
+  if (!(gaps && gaps[`${pageComponent}@${pageVersion}`])) return false
+  return datasets.warnDatasetMissing(contentCatalog, pageComponent, pageVersion, PROPERTIES_KIND)
 }
 
 function warnNoPropertyData (contentCatalog, component, version) {
-  warnOnce(contentCatalog, `nodata:${component}@${version}`,
-    `prop macro: no redpanda-properties-<tag>.json attachment found in any component's reference module for ${component || 'unknown component'}@${version || 'unversioned'}; ` +
-    'prop: targets are not validated and their tooltips carry no data. Publish the property JSON as a reference-module attachment in this component or in streaming.')
+  warnOnce(contentCatalog, `nodata:${component}@${version}`, PROPERTIES_KIND.text.noData(component, version))
 }
 
 /**
@@ -777,18 +670,9 @@ function warnNoPropertyData (contentCatalog, component, version) {
  */
 function reportUnknownProperty ({ name, mode, registry, filePath }) {
   if (mode === 'off') return
-  const fragment = name.trim().toLowerCase()
-  const commonPrefix = (a, b) => {
-    let i = 0
-    while (i < a.length && i < b.length && a[i] === b[i]) i++
-    return i
-  }
-  const candidates = Object.keys(registry.properties)
-    .map((candidate) => ({ candidate, shared: commonPrefix(candidate.toLowerCase(), fragment) }))
-    .filter((scored) => scored.shared >= Math.min(6, fragment.length))
-    .sort((a, b) => b.shared - a.shared)
-    .slice(0, 3)
-    .map((scored) => scored.candidate)
+  // The same suggestions rpkcmd:, connect: and blobl: give: prefix matches,
+  // then names within a small edit distance, so a dropped letter is caught too.
+  const candidates = datasets.suggest(name.trim(), Object.keys(registry.properties))
   const hint = candidates.length ? ` Did you mean: ${candidates.join(', ')}?` : ''
   const where = filePath ? ` in ${filePath}` : ''
   const message = `prop:${name}[]${where}: '${name}' is not in the property data this page validates against (${describeDataset(registry)}). ` +
@@ -803,10 +687,7 @@ function reportUnknownProperty ({ name, mode, registry, filePath }) {
  * the same name can be valid in one series and absent from another.
  */
 function describeDataset (registry) {
-  const from = registry.component
-    ? `${registry.component}@${registry.version || 'unversioned'}`
-    : 'unknown component'
-  return `redpanda-properties-${registry.tag}.json from ${from}`
+  return datasets.describeDataset({ kind: PROPERTIES_KIND, ...registry })
 }
 
 /**
@@ -823,6 +704,23 @@ function reportUnavailableProperty ({ name, component, registry, mode, filePath 
     `prop:${name}[]${where}: '${name}' is not available in the ${which} component, so it renders as plain code -- no link, and no tooltip. ` +
     `${describeDataset(registry)} marks it cloud_supported: false, meaning Redpanda has the property but this audience cannot set it. ` +
     'If that is wrong, fix cloud_supported in the property extractor; if it is right, reword the sentence and drop the macro.'
+  )
+}
+
+/**
+ * Report a mention of a deprecated property. Like a deprecated rpk command or
+ * Connect component, it renders as written and never fails the build, but it
+ * always warns: the property data names no replacement, so the writer decides
+ * whether the sentence still belongs on the page.
+ */
+function reportDeprecatedProperty ({ name, registry, mode, filePath, linkRequested, linked }) {
+  if (mode === 'off') return
+  const where = filePath ? ` in ${filePath}` : ''
+  const call = linkRequested ? `prop:${name}[link=true]` : `prop:${name}[]`
+  logger.warn(
+    `${call}${where}: '${name}' is deprecated in ${describeDataset(registry)}. It renders as written` +
+    (linkRequested && !linked ? ', without a link, because the reference pages leave deprecated properties out' : '') +
+    '. Remove the mention or say that the property is deprecated, and name the property that replaces it if there is one.'
   )
 }
 
@@ -949,6 +847,11 @@ function propInlineMacro (config) {
         reportUnavailableProperty({ name, component, registry, mode, filePath })
         return plain()
       }
+      // A deprecated property still renders as written, like a deprecated rpk
+      // command or Connect component, but every mention warns: with or without
+      // link=true, a page that recommends it is out of date.
+      const deprecated = entry.is_deprecated === true
+      const acknowledged = deprecated && deprecationAcknowledged(attributes)
 
       // Discover the page in THIS component that documents the property. A page
       // is never borrowed from another component, and never guessed from the
@@ -962,10 +865,13 @@ function propInlineMacro (config) {
         if (found) {
           discoveredPage = found.page
           discoveredUrl = found.url
-        } else if (linkRequested) {
+        } else if (linkRequested && (!deprecated || acknowledged)) {
+          // A deprecated property is never on a reference page; its own
+          // warning below already says so, so it does not warn twice.
           reportUnpublishedProperty({ name, registry, mode, filePath })
         }
       }
+      if (deprecated && !acknowledged) reportDeprecatedProperty({ name, registry, mode, filePath, linkRequested, linked: Boolean(discoveredPage) })
 
       const content = buildPropContent({
         name,
@@ -1009,6 +915,11 @@ function buildPropvalContent ({ name, field, text, html, unknown = false }) {
   return `<span class="${VALUE_ROLE}" ${attrs}>${html !== undefined ? html : escapeHtml(text)}</span>`
 }
 
+function suggestionHint (name, registry) {
+  const candidates = datasets.suggest(String(name).trim(), Object.keys(registry.properties))
+  return candidates.length ? ` Did you mean: ${candidates.join(', ')}?` : ''
+}
+
 /**
  * Resolve one propval: call to its value, or to the reason there is none.
  * Shares every decision with prop: -- the dataset (loadProperties), the
@@ -1017,22 +928,22 @@ function buildPropvalContent ({ name, field, text, html, unknown = false }) {
  * the migrate-property-values report.
  *
  * @param {string} [opts.filePath] - Named in the message, when known.
- * @returns {{ok: true, text: string, html?: string, registry: object, field: string} |
+ * @param {boolean} [opts.block] - The call is the block form, propval::.
+ * @returns {{ok: true, text: string, html?: string, rich?: object, registry: object, field: string} |
  *           {ok: false, kind: string, message: string, registry?: object, field: string}}
  */
-function resolvePropertyValue ({ registry, name, field: requested, format, component, filePath }) {
+function resolvePropertyValue ({ registry, name, field: requested, format, component, filePath, block = false }) {
   const field = propertyValues.normalizeField(requested)
-  const call = `propval:${name}[${requested}]${filePath ? ` in ${filePath}` : ''}`
+  const call = `propval${block ? '::' : ':'}${name}[${requested}]${filePath ? ` in ${filePath}` : ''}`
   if (!field) {
-    const supported = Object.keys(propertyValues.FIELDS).join(', ')
-    return { ok: false, kind: 'unsupported-field', field: requested, message: `${call}: '${requested}' is not a field propval: supports. Supported fields: ${supported}.` }
+    return { ok: false, kind: 'unsupported-field', field: requested, message: propertyValues.FIELD_SET.unsupportedMessage(call, requested) }
   }
   if (!registry) {
     return { ok: false, kind: 'no-data', field, message: `${call}: this page has no property data to read '${field}' from (see the prop macro warning for this component version), so it renders <unknown ${field}> rather than a value from another release.` }
   }
   const entry = Object.prototype.hasOwnProperty.call(registry.properties, name) ? registry.properties[name] : undefined
   if (!entry || typeof entry !== 'object') {
-    return { ok: false, kind: 'unknown-property', field, registry, message: `${call}: '${name}' is not in the property data this page validates against (${describeDataset(registry)}). Either the name is misspelled or the property does not exist in that release.` }
+    return { ok: false, kind: 'unknown-property', field, registry, message: `${call}: '${name}' is not in the property data this page validates against (${describeDataset(registry)}). Either the name is misspelled or the property does not exist in that release.${suggestionHint(name, registry)}` }
   }
   if (!isAvailable(registry, entry)) {
     return { ok: false, kind: 'unavailable', field, registry, message: `${call}: '${name}' is not available in the ${component || 'this'} component: ${describeDataset(registry)} marks it cloud_supported: false, so no value is shown to readers who cannot set it.` }
@@ -1040,14 +951,72 @@ function resolvePropertyValue ({ registry, name, field: requested, format, compo
   if (registry.surface === SURFACE_CLOUD && propertyValues.FIELDS[field].cloudHidden) {
     return { ok: false, kind: 'cloud-hidden', field, registry, message: `${call}: the property reference does not state '${field}' for Cloud (Cloud configures it, and the reference renders it only outside env-cloud), so this Cloud page renders <unknown ${field}>. Put the sentence in an ifndef::env-cloud[] block, or use a field the Cloud reference shows, such as cloud-access.` }
   }
-  const value = propertyValues.fieldValue(entry, field, { format })
+  const value = propertyValues.fieldValue(entry, field, { format, cloud: registry.surface === SURFACE_CLOUD })
   if (!value.ok && value.reason === 'imprecise') {
     return { ok: false, kind: 'imprecise', field, registry, message: `${call}: the ${field} of '${name}' in ${describeDataset(registry)} is an integer larger than JavaScript represents exactly, so the build cannot render it without changing digits and renders <unknown ${field}>. State the value in prose by hand.` }
   }
   if (!value.ok) {
     return { ok: false, kind: 'missing-field', field, registry, message: `${call}: '${name}' has no ${field} in ${describeDataset(registry)}, so it renders <unknown ${field}>.` }
   }
-  return { ok: true, field, registry, text: value.text, html: value.html }
+  return { ok: true, field, registry, text: value.text, html: value.html, rich: value.rich, call }
+}
+
+// Kinds that fail the build in error mode, like an unknown prop: name. So do
+// cloud-hidden and unavailable: they appear only in the Cloud build of
+// single-sourced prose, where a warning alone would let the placeholder ship.
+// Everything else is reported and rendered as the placeholder.
+const PROPVAL_THROW_KINDS = ['unknown-property', 'missing-field', 'unsupported-field', 'cloud-hidden', 'unavailable', 'needs-block', 'block-form-inline']
+
+/**
+ * Resolve one propval: or propval:: call on a page: its dataset, format and
+ * value, which the inline and block forms share.
+ */
+function propvalCall (config, parent, target, attributes, { block = false } = {}) {
+  const document = parent.getDocument()
+  const name = String(target).trim()
+  const mode = document.getAttribute('property-validate', 'warn')
+  const filePath = config && config.file && config.file.src && config.file.src.path
+  const component = (config && config.file && config.file.src && config.file.src.component) || ''
+  const version = (config && config.file && config.file.src && config.file.src.version) || ''
+  const requested = String(attributes.field || 'default').trim()
+  let format = String(attributes.format || propertyValues.FORMAT_HUMAN).trim().toLowerCase()
+  const where = filePath ? ` in ${filePath}` : ''
+  if (format !== propertyValues.FORMAT_HUMAN && format !== propertyValues.FORMAT_RAW) {
+    logger.warn(`propval:${name}[${requested}]${where}: format=${format} is not supported; use format=raw for the exact value. Rendering the human-readable value.`)
+    format = propertyValues.FORMAT_HUMAN
+  }
+  // propval::x[] inside a sentence reaches the inline macro with the second
+  // colon at the start of the target.
+  if (!block && name.startsWith(':')) {
+    const field = propertyValues.normalizeField(requested) || requested
+    return { mode, name: name.slice(1), result: { ok: false, kind: 'block-form-inline', field, message: `propval:${name}[${requested}]${where}: propval:: is the block form, which renders only on a line of its own. In a sentence, write propval:${name.slice(1)}[${requested}].` } }
+  }
+
+  const contentCatalog = config && config.contentCatalog
+  const registry = contentCatalog ? loadProperties(config) : undefined
+  if (!registry && contentCatalog && mode !== 'off') {
+    // The same once-per-component-version diagnostic prop: emits.
+    if (!warnSeriesMissing(contentCatalog, component, version)) warnNoPropertyData(contentCatalog, component, version)
+  }
+  const result = resolvePropertyValue({ registry, name, field: requested, format, component, filePath, block })
+  // A value read from a deprecated property still renders, as connectval:
+  // does for a deprecated component or field, but warns unless the call asks
+  // whether it is deprecated.
+  if (result.ok && mode !== 'off' && result.field !== 'deprecated' && !deprecationAcknowledged(attributes)) {
+    const entry = registry.properties[name]
+    if (entry && entry.is_deprecated === true) {
+      logger.warn(`${result.call}: '${name}' is deprecated in ${describeDataset(registry)}. The value renders, but a page that states it is out of date. Remove the sentence or say that the property is deprecated, and name the property that replaces it if there is one.`)
+    }
+  }
+  return { mode, name, result }
+}
+
+// A placeholder is reported even in off mode: off means "do not check
+// names", but a value cannot fall back to anything, and a silent
+// <unknown default> would reach readers unnoticed.
+function reportPropval (mode, result) {
+  if (mode === 'error' && PROPVAL_THROW_KINDS.includes(result.kind)) throw new Error(result.message)
+  logger.warn(result.message)
 }
 
 function propvalInlineMacro (config) {
@@ -1056,43 +1025,39 @@ function propvalInlineMacro (config) {
     self.named('propval')
     self.positionalAttributes(['field'])
     self.process(function (parent, target, attributes) {
-      const document = parent.getDocument()
-      const name = target.trim()
-      const mode = document.getAttribute('property-validate', 'warn')
-      const filePath = config && config.file && config.file.src && config.file.src.path
-      const component = (config && config.file && config.file.src && config.file.src.component) || ''
-      const version = (config && config.file && config.file.src && config.file.src.version) || ''
-      const requested = String(attributes.field || 'default').trim()
-      let format = String(attributes.format || propertyValues.FORMAT_HUMAN).trim().toLowerCase()
-      const where = filePath ? ` in ${filePath}` : ''
-      if (format !== propertyValues.FORMAT_HUMAN && format !== propertyValues.FORMAT_RAW) {
-        logger.warn(`propval:${name}[${requested}]${where}: format=${format} is not supported; use format=raw for the exact value. Rendering the human-readable value.`)
-        format = propertyValues.FORMAT_HUMAN
+      const { mode, name, result } = propvalCall(config, parent, target, attributes)
+      if (result.ok && result.rich) {
+        // A text value renders inline only when it is one paragraph.
+        const html = valueDescriptions.richInlineHtml(parent, result.rich)
+        if (html !== undefined) return self.createInline(parent, 'quoted', buildPropvalContent({ name, field: result.field, html }))
+        reportPropval(mode, { kind: 'needs-block', message: `${result.call}: the ${result.field} value of '${name}' is more than one paragraph, which has no inline form, so it renders <unknown ${result.field}>. Use the block form on a line of its own: propval::${name}[${result.field}].` })
+        return self.createInline(parent, 'quoted', buildPropvalContent({ name, field: result.field, unknown: true }))
       }
-
-      const contentCatalog = config && config.contentCatalog
-      const registry = contentCatalog ? loadProperties(config) : undefined
-      if (!registry && contentCatalog && mode !== 'off') {
-        // The same once-per-component-version diagnostic prop: emits.
-        if (!warnSeriesMissing(contentCatalog, component, version)) warnNoPropertyData(contentCatalog, component, version)
-      }
-      const result = resolvePropertyValue({ registry, name, field: requested, format, component, filePath })
       if (result.ok) {
         return self.createInline(parent, 'quoted', buildPropvalContent({ name, field: result.field, text: result.text, html: result.html }))
       }
-      // Authoring errors fail the build in error mode, like an unknown prop:
-      // name. So do cloud-hidden and unavailable: they appear only in the
-      // Cloud build of single-sourced prose, where a warning alone would let
-      // the placeholder ship. Everything else is reported and rendered as the
-      // placeholder. A placeholder is reported even in off mode: off means
-      // "do not check names", but a value cannot fall back to anything, and a
-      // silent <unknown default> would reach readers unnoticed.
-      const { message } = result
-      if (mode === 'error' && ['unknown-property', 'missing-field', 'unsupported-field', 'cloud-hidden', 'unavailable'].includes(result.kind)) {
-        throw new Error(message)
-      }
-      logger.warn(message)
+      reportPropval(mode, result)
       return self.createInline(parent, 'quoted', buildPropvalContent({ name, field: result.field, unknown: true }))
+    })
+  }
+}
+
+/**
+ * propval::<name>[<field>], the block form, for a value longer than one
+ * paragraph such as a description. A text value is parsed into the page as
+ * AsciiDoc; any other value renders as a paragraph of its own.
+ */
+function propvalBlockMacro (config) {
+  return function () {
+    const self = this
+    self.named('propval')
+    self.positionalAttributes(['field'])
+    self.process(function (parent, target, attributes) {
+      const { mode, name, result } = propvalCall(config, parent, target, attributes, { block: true })
+      if (result.ok && result.rich) return valueDescriptions.richBlock(self, parent, result.rich, `${VALUE_ROLE} ${VALUE_ROLE}-${result.field}`)
+      if (result.ok) return valueDescriptions.htmlParagraph(self, parent, buildPropvalContent({ name, field: result.field, text: result.text, html: result.html }))
+      reportPropval(mode, result)
+      return valueDescriptions.htmlParagraph(self, parent, buildPropvalContent({ name, field: result.field, unknown: true }))
     })
   }
 }
@@ -1112,14 +1077,46 @@ function helmPathRequested (attributes, document) {
 }
 
 function register (registry, config = {}) {
+  // Antora registers extensions for each page before converting it: keep
+  // the connect pages a Cloud stub includes before its source becomes HTML,
+  // so connect: and blobl: can find the stub from a page converted later.
+  noteIncludes(config && config.file)
   if (typeof registry.register === 'function') {
     registry.register(function () {
       this.inlineMacro(propInlineMacro(config))
       this.inlineMacro(propvalInlineMacro(config))
+      this.inlineMacro(rpkvalInlineMacro(config))
+      this.inlineMacro(connectvalInlineMacro(config))
+      this.inlineMacro(rpkcmdInlineMacro(config))
+      this.inlineMacro(connectInlineMacro(config))
+      this.inlineMacro(bloblInlineMacro(config))
+      this.inlineMacro(bloblvalInlineMacro(config))
+      this.inlineMacro(metricInlineMacro(config))
+      this.inlineMacro(metricvalInlineMacro(config))
+      this.blockMacro(propvalBlockMacro(config))
+      this.blockMacro(rpkvalBlockMacro(config))
+      this.blockMacro(connectvalBlockMacro(config))
+      this.blockMacro(bloblvalBlockMacro(config))
+      this.blockMacro(metricvalBlockMacro(config))
     })
   } else if (typeof registry.inlineMacro === 'function') {
     registry.inlineMacro(propInlineMacro(config))
     registry.inlineMacro(propvalInlineMacro(config))
+    registry.inlineMacro(rpkvalInlineMacro(config))
+    registry.inlineMacro(connectvalInlineMacro(config))
+    registry.inlineMacro(rpkcmdInlineMacro(config))
+    registry.inlineMacro(connectInlineMacro(config))
+    registry.inlineMacro(bloblInlineMacro(config))
+    registry.inlineMacro(bloblvalInlineMacro(config))
+    registry.inlineMacro(metricInlineMacro(config))
+    registry.inlineMacro(metricvalInlineMacro(config))
+    if (typeof registry.blockMacro === 'function') {
+      registry.blockMacro(propvalBlockMacro(config))
+      registry.blockMacro(rpkvalBlockMacro(config))
+      registry.blockMacro(connectvalBlockMacro(config))
+      registry.blockMacro(bloblvalBlockMacro(config))
+      registry.blockMacro(metricvalBlockMacro(config))
+    }
   } else {
     logger.warn("no 'inlineMacro' method on alleged registry")
   }
@@ -1143,3 +1140,5 @@ module.exports.isAvailable = isAvailable
 module.exports.describeDataset = describeDataset
 module.exports.buildPropvalContent = buildPropvalContent
 module.exports.resolvePropertyValue = resolvePropertyValue
+module.exports.PROPERTIES_KIND = PROPERTIES_KIND
+module.exports.PROPERTIES_JSON_RX = PROPERTIES_JSON_RX

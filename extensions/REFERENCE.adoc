@@ -546,7 +546,9 @@ An operator or Helm chart release supports its own Redpanda version and one mino
 
 The release lines come from the fetched operator tags, so no version map needs updating when a line ships. The extension reads up to three pages (300 tags) of the operator's Docker Hub tags, newest pushes first.
 
-The chart version of a line is the newest stable `charts/redpanda/v<major>.<minor>.*` tag in the redpanda-operator repository, which marks a published chart (what `helm search repo` reports). A release branch's `Chart.yaml` can be ahead of the published chart, so the extension reads it only when the line has no chart tag, trying each path the chart has used in order: `charts/redpanda/chart/Chart.yaml`, then `charts/redpanda/Chart.yaml` (the layout of `release/v25.1.x`).
+The chart version of a line is the newest version of the line in the public Helm repository index (`\https://charts.redpanda.com/index.yaml`), which lists the published charts (what `helm search repo` reports). The index needs no token. For a beta operator release, the extension takes the newest prerelease chart of the line from the index.
+
+The operator-enterprise repository is private, so the extension asks it only when the index has no version for the line, and only a token that can read the repository gets an answer. It then takes the newest stable `charts/redpanda/v<major>.<minor>.*` tag. A release branch's `Chart.yaml` can be ahead of the published chart, so the extension reads it only when the line has no chart tag, trying each path the chart has used in order: `charts/redpanda/chart/Chart.yaml`, then `charts/redpanda/Chart.yaml` (the layout of `release/v25.1.x`).
 
 ==== Seed a fallback in antora.yml
 
@@ -951,7 +953,7 @@ The metadata rules live in `extension-utils/metadata-check.js` (`checkPageMetada
 
 Suggestions live in `extension-utils/metadata-suggest.js` (`suggestForPage`), which `doc-tools check-metadata --suggest` runs. It matches every live concept's labels against a page's title, description, path, headings, and body, deterministically and with no model, and returns up to a few concepts per facet that the page does not carry yet, each with a score and the evidence for it. It honors the facet cardinalities in the taxonomy, `implies`, and `broader`, and never suggests a deprecated concept. Another tool that tags content against the taxonomy should call it rather than match labels itself, so every tagger agrees.
 
-`extension-utils/metadata-candidates.js` finds the other side: frequent, distinctive terms on a page that no concept's label matches (`pageCandidates`), and the same across a repository with the pages each is on (`aggregateCandidates`). `doc-tools check-metadata --suggest` lists them per page and `--candidates-only` aggregates them. They are evidence for proposing a new concept or altLabel, deterministic like the suggestions.
+`extension-utils/metadata-candidates.js` finds the other side: frequent, distinctive terms on a page that no concept's label matches (`pageCandidates`), and the same across a repository with the pages each is on (`aggregateCandidates`). `doc-tools check-metadata --suggest` lists them per page and `--candidates-only` aggregates them. They are evidence for proposing a new concept or altLabel, deterministic like the suggestions. Stop words, language keywords, Kubernetes object kinds, the product's own name, and terms that only appear on sales or licensing lines are never candidates.
 
 
 This extension collects Asciidoc attributes from the https://github.com/redpanda-data/docs-site[`shared` component] or a local YAML file and makes them available to all component versions. Having global attributes is useful for consistent configuration of local and production builds.
@@ -1550,7 +1552,7 @@ The extension replaces Turndown's defaults where Asciidoctor's HTML would otherw
 |A blockquote led by the type and any custom title.
 
 |Tabs
-|One heading per tab, one level below the surrounding heading.
+|One heading per tab, one level below the surrounding heading. The exception is a Solutions platform tab set, where each tab is labeled Docker Compose, Kubernetes, or Redpanda Cloud. Each of its tabs becomes an `+**On <platform>:**+` paragraph, and the set is wrapped in `+<!-- platform tabs: ... -->+` and `+<!-- /platform tabs -->+` comments, so a numbered step stays whole. A tab set nested in a platform tab gets headings one level below the heading around the platform set.
 
 |Literal and plain listing blocks (`<pre>` without `<code>`)
 |A fenced code block. Turndown only fences `<pre><code>`, so these were escaped as prose.

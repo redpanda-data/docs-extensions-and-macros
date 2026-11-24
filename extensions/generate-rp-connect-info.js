@@ -5,6 +5,7 @@ const fs = require('fs')
 const path = require('path')
 const Papa = require('papaparse')
 const catalogUtil = require('./util/connect-catalog')
+const { getTaxonomy } = require('../extension-utils/taxonomy')
 
 // Default configuration - can be overridden via playbook config
 const DEFAULTS = {
@@ -115,9 +116,9 @@ module.exports.register = function ({ config }) {
   let translatedRows = null
 
   // Use 'on' and return the promise so Antora waits for async completion
-  this.on('contentClassified', ({ contentCatalog, playbook }) => {
+  this.on('contentClassified', ({ contentCatalog, playbook, siteCatalog }) => {
     assertConnectReferencePresent(contentCatalog, { connectSources: connectSourcesOf(playbook) })
-    return processContent(contentCatalog)
+    return processContent(contentCatalog, siteCatalog)
   })
 
   // Set sticky-bar page attributes (type context switcher and availability badges) so the UI
@@ -131,7 +132,7 @@ module.exports.register = function ({ config }) {
     setStickyBarPageAttributes(contentCatalog, translatedRows, logger)
   })
 
-  async function processContent (contentCatalog) {
+  async function processContent (contentCatalog, siteCatalog) {
     const redpandaConnect = contentCatalog.getComponents().find(component => component.name === 'connect')
     const redpandaCloud = contentCatalog.getComponents().find(component => component.name === 'cloud-data-platform')
     const preview = contentCatalog.getComponents().find(component => component.name === 'preview')
@@ -149,6 +150,13 @@ module.exports.register = function ({ config }) {
       const enrichedData = translateCsvData(parsedData, pages, logger)
       parsedData.data = enrichedData
       translatedRows = enrichedData
+      // The use cases the catalog's Use case filter offers, as
+      // { id, label, definition, altLabels }.
+      // Only resolved when some row has use cases, so a build of an older
+      // Connect release does not look for the taxonomy at all.
+      parsedData.useCases = enrichedData.some((row) => row.use_cases.length)
+        ? resolveUseCases(enrichedData, getTaxonomy({ contentCatalog, siteCatalog, logger }), logger)
+        : []
 
       // Set csvData on all relevant components
       const componentsToEnrich = [redpandaConnect, redpandaCloud, preview].filter(Boolean)
@@ -212,6 +220,18 @@ module.exports.register = function ({ config }) {
       logger.warn(`Could not fetch info.csv for the SQL driver rows, so the SQL driver support list is empty: ${error.message}`)
     }
     if (!catalogRows) return csvRows
+    // A catalog.json without a use_cases field (a Connect release older than
+    // the field) takes each component's use cases from info.csv instead.
+    const csvUseCases = new Map()
+    for (const row of csvRows) {
+      if (row.use_cases === undefined) continue
+      csvUseCases.set(`${String(row.name || '').trim()}:${String(row.type || '').trim()}`, row.use_cases)
+    }
+    if (csvUseCases.size) {
+      for (const row of catalogRows) {
+        if (row.use_cases === undefined) row.use_cases = csvUseCases.get(`${row.name}:${row.type}`) || ''
+      }
+    }
     const isDriver = (row) => String(row.type || '').trim().toLowerCase() === 'sql_driver'
     return [...catalogRows, ...csvRows.filter(isDriver)]
   }
@@ -375,6 +395,15 @@ module.exports.register = function ({ config }) {
       const redpandaConnectUrl = connectPage?.pub?.url || ''
       const redpandaCloudUrl = cloudPage?.pub?.url || ''
 
+      // catalog.json rows carry a plain-text summary for every component. Page
+      // scraping is the info.csv fallback only: this runs before conversion, so
+      // pages have no parsed attributes yet, and connector pages pull their
+      // :description: and summary paragraph from includes the scan cannot follow.
+      const pageSrc = connectPage || cloudPage
+      const description = trimmedRow.summary
+        ? cleanDescription(trimmedRow.summary)
+        : extractDescription(pageSrc)
+
       // Warn about missing docs (but not for deprecated or SQL drivers)
       if (deprecated !== 'y' && !connector.includes('sql_driver')) {
         // Check if this is a cloud-only connector (plugin)
@@ -410,8 +439,11 @@ module.exports.register = function ({ config }) {
         categories: Array.isArray(trimmedRow.categories) ? trimmedRow.categories : undefined,
         commercial_names: Array.isArray(trimmedRow.commercial_names) ? trimmedRow.commercial_names : undefined,
         cgo_only: trimmedRow.cgo_only === 'y' ? 'y' : 'n',
+        // Raw IDs here; resolveUseCases checks them against the taxonomy
+        use_cases: catalogUtil.parseUseCases(trimmedRow.use_cases),
         redpandaConnectUrl,
-        redpandaCloudUrl
+        redpandaCloudUrl,
+        description
       }
     })
   }
@@ -612,3 +644,259 @@ module.exports.register = function ({ config }) {
     return JSON.stringify(items)
   }
 }
+
+const USE_CASE_SCHEME = 'use-case'
+
+/**
+ * Checks each row's use-case IDs against the use-case scheme of the docs
+ * taxonomy (shared/modules/ROOT/attachments/taxonomy.yml). A known ID stays; a
+ * deprecated one becomes its replacement; anything else is dropped with a
+ * warning that names the component and the ID. Without the taxonomy there are
+ * no labels to show, so every row loses its use cases and the catalog has no
+ * Use case filter. Mutates `row.use_cases`. Exported for unit testing.
+ *
+ * @param {Array<Object>} rows - translated rows, `use_cases` holding raw IDs
+ * @param {Object|null} taxonomy - from extension-utils/taxonomy getTaxonomy
+ * @param {Object} logger
+ * @returns {Array<{id: string, label: string, definition: string, altLabels: Array<string>}>}
+ *   the use cases any component has, in taxonomy order: the concept's
+ *   prefLabel, definition (option and chip tooltips, the badge legend), and
+ *   altLabels (search, and matching Solutions that author labels)
+ */
+function resolveUseCases (rows, taxonomy, logger) {
+  if (!taxonomy) {
+    logger.warn('Redpanda Connect use cases are ignored: the docs taxonomy (shared/modules/ROOT/attachments/taxonomy.yml) is not in this build, so the component catalog has no Use case filter')
+    for (const row of rows) row.use_cases = []
+    return []
+  }
+  const warned = new Set()
+  const warnOnce = (key, message) => {
+    if (warned.has(key)) return
+    warned.add(key)
+    logger.warn(message)
+  }
+  const used = new Set()
+  for (const row of rows) {
+    const ids = []
+    for (const value of row.use_cases) {
+      const hit = taxonomy.resolve(value, { schemes: [USE_CASE_SCHEME], prefer: 'id' })
+      // IDs only: a label that happens to match is still not the contract
+      if (!hit || hit.via !== 'id') {
+        warnOnce(`${row.connector}:${value}`, `Unknown use case "${value}" on Redpanda Connect component ${row.connector}, dropped: use-case IDs must come from the use-case scheme of the docs taxonomy`)
+        continue
+      }
+      if (hit.deprecated) {
+        warnOnce(`${row.connector}:${value}`, `Use case "${value}" on Redpanda Connect component ${row.connector} is deprecated${hit.ids.length ? `, so ${hit.ids.join(', ')} is used instead` : ' and has no replacement, dropped'}`)
+      }
+      for (const id of hit.ids) if (!ids.includes(id)) ids.push(id)
+    }
+    row.use_cases = ids
+    if (String(row.type || '').toLowerCase() !== 'sql_driver') ids.forEach((id) => used.add(id))
+  }
+  return taxonomy.conceptIds(USE_CASE_SCHEME)
+    .filter((id) => used.has(id))
+    .map((id) => {
+      const concept = taxonomy.get(id)
+      return { id, label: concept.prefLabel, definition: concept.definition || '', altLabels: [...(concept.altLabels || [])] }
+    })
+}
+
+const DESCRIPTION_MAX_LENGTH = 150
+
+/**
+ * Turns one line of AsciiDoc into the plain text a card can show: inline macros
+ * become their link text, formatting is dropped, attribute references
+ * substitute their real value when it's known (from the same page attributes
+ * extractDescription already reads for :description:) and are dropped only
+ * when it isn't, and the result is cut back to DESCRIPTION_MAX_LENGTH at a
+ * sentence or word boundary. Applied to every source, since a page's
+ * :description: attribute is AsciiDoc too and carries the same macros as the
+ * body. Exported for unit testing.
+ *
+ * @param {string} text
+ * @param {Object.<string,*>} [attributes] - the page's asciidoc attributes
+ *   (pageSrc.asciidoc.attributes), used to resolve {attr-name} references.
+ */
+function cleanDescription (text, attributes = {}) {
+  if (!text) return ''
+
+  let description = String(text)
+    // Convert xref links: xref:path[text] -> text
+    .replace(/xref:[^[]+\[(.*?)\]/g, '$1')
+    // Convert link macros and HTTP links: link:https://url[text^] -> text
+    .replace(/(?:link:)?https?:\/\/[^[\s]+\[(.*?)(?:\^)?\]/g, '$1')
+    // Convert cross references: <<anchor,text>> -> text, <<anchor>> -> anchor
+    .replace(/<<([^,>]+)(?:,\s*([^>]+))?>>/g, (_, anchor, label) => (label || anchor).trim())
+    // Remove "Introduced in version X.X.X" suffix, keeping the sentence's period
+    .replace(/\.\s*Introduced in version[\s\d.]+\.?$/i, '.')
+    // Substitute attribute references when the value is known ({max-batch} ->
+    // 100msgs); only drop the ones this page's attributes don't define.
+    .replace(/\{([a-zA-Z][\w-]*)\}/g, (match, name) =>
+      Object.prototype.hasOwnProperty.call(attributes, name) ? String(attributes[name]) : ''
+    )
+    // Remove code backticks: `code`
+    .replace(/`([^`]+)`/g, '$1')
+    // Remove bold and emphasis, but only around whole words, so that connector
+    // names such as redpanda_migrator_offsets survive intact
+    .replace(/(^|[\s([])\*\*(\S(?:[^*]*\S)?)\*\*(?=[\s.,;:)\]!?]|$)/g, '$1$2')
+    .replace(/(^|[\s([])\*(\S(?:[^*]*\S)?)\*(?=[\s.,;:)\]!?]|$)/g, '$1$2')
+    .replace(/(^|[\s([])_(\S(?:[^_]*\S)?)_(?=[\s.,;:)\]!?]|$)/g, '$1$2')
+    // Escaped braces are literal text: \{api_version\} -> {api_version}
+    .replace(/\\([{}])/g, '$1')
+    // Normalize whitespace, including the gap a removed attribute reference
+    // leaves in front of punctuation
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([.,;:!?])/g, '$1')
+    .trim()
+
+  if (description.length > DESCRIPTION_MAX_LENGTH) {
+    // A sentence ends at punctuation followed by whitespace, so "Kafka 2.8"
+    // stays whole, and not after an abbreviation such as "e.g."
+    const firstSentence = description.split(/(?<=[.!?])(?<!\b(?:e\.g|i\.e|vs|cf)\.)\s+/i)[0].trim()
+    if (firstSentence && firstSentence.length <= DESCRIPTION_MAX_LENGTH) {
+      description = firstSentence
+    } else {
+      // One long sentence: cut at the last word boundary inside the budget,
+      // leaving room for the ellipsis so the result still fits the cap
+      const head = description.substring(0, DESCRIPTION_MAX_LENGTH - 3)
+      const lastSpace = head.lastIndexOf(' ')
+      description = (lastSpace > 0 ? head.substring(0, lastSpace) : head).trim() + '...'
+    }
+  }
+
+  return description
+}
+
+/**
+ * Extracts a short plain-text description for a connector from its documentation page.
+ * Prefers the page's :description: attribute, then falls back to the first meaningful
+ * paragraph after component_type_dropdown::[]. Whichever source wins goes through
+ * cleanDescription, so no card can ship raw AsciiDoc or an untruncated paragraph.
+ * Exported for unit testing.
+ */
+function extractDescription (pageSrc) {
+  if (!pageSrc) return ''
+
+  // This runs during contentClassified, before Antora parses the page, so
+  // asciidoc.attributes is usually unset: read the header attributes from the
+  // source instead, as the page-commercial-names fallback does. Component and
+  // built-in attributes are not resolved this way.
+  const attributes = pageSrc.asciidoc?.attributes ||
+    parseHeaderAttributes(pageSrc.contents ? pageSrc.contents.toString('utf8') : '')
+  let description = attributes.description || ''
+
+  // Fallback: extract first paragraph from page body
+  if (!description && pageSrc.contents) {
+    const fileContents = pageSrc.contents.toString('utf8')
+
+    // First try explicit :description: attribute
+    const descAttrMatch = fileContents.match(/:description:\s*(.+)/)
+    if (descAttrMatch) {
+      description = descAttrMatch[1].trim()
+    } else {
+      // Extract first paragraph after component_type_dropdown or after header
+      // Pattern: Find text after component_type_dropdown::[] or after attributes block
+      const afterDropdown = fileContents.split('component_type_dropdown::[]')[1]
+      if (afterDropdown) {
+        // Remove various AsciiDoc blocks and markup that shouldn't be in descriptions
+        let cleanContent = afterDropdown
+          // Remove admonition blocks: [WARNING]\n.Title\n====\nContent\n====
+          .replace(/\[(WARNING|NOTE|TIP|CAUTION|IMPORTANT)\][^\n]*\n(?:\..*?\n)?====[\s\S]*?====\n*/g, '')
+          // Drop self-managed-only blocks whole: the card text is shared with Cloud
+          .replace(/^ifndef::env-cloud\[\][\s\S]*?^endif::[^\n]*\n?/gm, '')
+          // Remove the remaining conditional directive lines, keeping their content
+          .replace(/^(ifndef|ifdef|ifeval|endif)::[^\n]*\n?/gm, '')
+          // Remove code blocks: ```yml ... ``` or ---- ... ----
+          .replace(/```[\s\S]*?```/g, '')
+          .replace(/^----[\s\S]*?^----/gm, '')
+          // Remove include directives
+          .replace(/^include::[^\n]+\n?/gm, '')
+          // Remove comments
+          .replace(/\/\/ .*$/gm, '')
+          // Remove tabs section and everything after
+          .replace(/\[tabs\][\s\S]*$/, '')
+          // Remove tag directives
+          .replace(/^\/\/ (tag|end)::[^\n]+\n?/gm, '')
+
+        // Join continuation lines (lines that don't end with punctuation or blank line)
+        // This handles links and text that span multiple lines
+        cleanContent = cleanContent
+          .split('\n')
+          .reduce((acc, line) => {
+            const trimmed = line.trim()
+            if (trimmed === '') {
+              acc.push('') // Keep paragraph breaks
+            } else if (acc.length > 0 && acc[acc.length - 1] !== '' &&
+                       !acc[acc.length - 1].match(/[.!?:]$/) &&
+                       !trimmed.match(/^[=\[\-`]/) &&
+                       !trimmed.startsWith('//')) {
+              // Continue previous line
+              acc[acc.length - 1] += ' ' + trimmed
+            } else {
+              acc.push(trimmed)
+            }
+            return acc
+          }, [])
+          .join('\n')
+
+        // Get first non-empty paragraph
+        const paragraphs = cleanContent.split('\n\n')
+        for (const para of paragraphs) {
+          let cleaned = para.trim()
+
+          // Stop at first heading (cut off everything after ==)
+          const headingMatch = cleaned.match(/^(.*?)\s*==/)
+          if (headingMatch) {
+            cleaned = headingMatch[1].trim()
+          }
+
+          if (cleaned &&
+              !cleaned.startsWith('[') &&
+              !cleaned.startsWith('```') &&
+              !cleaned.startsWith('=') &&
+              !cleaned.startsWith('--') &&
+              !cleaned.startsWith('tag::') &&
+              !cleaned.startsWith('endif::') &&
+              !cleaned.startsWith('ifdef::') &&
+              !cleaned.startsWith('ifndef::') &&
+              !cleaned.startsWith('yml') &&
+              !cleaned.startsWith('include::') &&
+              !cleaned.match(/^(TIP|NOTE|WARNING|CAUTION|IMPORTANT):/) &&
+              cleaned.length > 20) {
+            // Markup stripping and truncation happen once, on the way out
+            description = cleaned
+            break
+          }
+        }
+      }
+    }
+  }
+
+  return cleanDescription(description, attributes)
+}
+
+/**
+ * The single-line attribute entries (:name: value) of an AsciiDoc document
+ * header, which ends at the first blank line after it starts.
+ *
+ * @param {string} contents - the page source
+ * @returns {Object.<string,string>}
+ */
+function parseHeaderAttributes (contents) {
+  const attributes = {}
+  let started = false
+  for (const line of contents.split(/\r?\n/)) {
+    if (line.trim() === '') {
+      if (started) break
+      continue
+    }
+    started = true
+    const match = line.match(/^:([\w][\w-]*):[ \t]*(.*)$/)
+    if (match) attributes[match[1]] = match[2].trim()
+  }
+  return attributes
+}
+
+module.exports.resolveUseCases = resolveUseCases
+module.exports.extractDescription = extractDescription
+module.exports.cleanDescription = cleanDescription

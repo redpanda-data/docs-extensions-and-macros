@@ -5,6 +5,28 @@ const path = require('path')
 const handlebars = require('handlebars')
 const helpers = require('./helpers')
 
+/**
+ * The default to print in a flag's row, or undefined to print none. Follows
+ * cobra's --help: zero values ("", 0, false, [], 0s) are not shown. A
+ * required flag's default is never used, a description that already
+ * states its default is left alone, and a path under a home directory is
+ * not shown.
+ */
+function flagDefaultToShow (flag) {
+  if (!flag || flag.required === true) return undefined
+  let value = flag.default
+  // Plugin flags scraped from --help keep cobra's quotes ("ask").
+  if (typeof value === 'string' && /^".*"$/.test(value)) value = value.slice(1, -1)
+  if (value === undefined || value === null || value === '' || value === false || value === 0) return undefined
+  if (Array.isArray(value) && value.length === 0) return undefined
+  if (typeof value === 'string' && /^(0|0s|\[\]|false|<nil>)$/.test(value)) return undefined
+  if (/\(default\b|\bdefault:|\bdefaults? (?:to|is)\b/i.test(flag.description || '')) return undefined
+  // A path under a home directory comes from the machine that saved the
+  // snapshot (rpk plugin install --dir gave /root/.local/bin), not from rpk.
+  if (typeof value === 'string' && /^(?:~|\/root|\/home\/[^/]+|\/Users\/[^/]+|[A-Za-z]:\\Users\\[^\\]+)(?:[/\\]|$)/.test(value)) return undefined
+  return helpers.formatDefault(value, flag.type)
+}
+
 // Register Handlebars helpers
 Object.entries(helpers).forEach(([name, fn]) => {
   if (typeof fn === 'function') {
@@ -919,17 +941,26 @@ function convertIndentedCodeBlocksToAsciiDoc(text, codeBlockStore = []) {
       // Strip trailing backslashes as we'll add them during join
       // Also strip leading "$ " shell prompt if present
       const codeLines = [line.trim().replace(/^\$\s+/, '').replace(/\s*\\$/, '')]
+      // A line that starts with rpk or a prompt is the next command, unless
+      // the line before it ends in a backslash. Joining it would publish two
+      // examples as one broken command (rpk a \ rpk b).
+      const startsCommand = []
+      let continued = /\\\s*$/.test(line)
       let j = i + 1
       while (j < lines.length && /^[ ]{2,}\S/.test(lines[j]) && !/^[ ]{2,}-\s+[A-Z]/.test(lines[j])) {
         // Continue if indented and not a markdown list item (dash followed by capital letter = prose)
-        codeLines.push(lines[j].trim().replace(/\s*\\$/, ''))
+        const newCommand = !continued && /^[ ]{2,}(rpk\s|\$\s)/.test(lines[j])
+        startsCommand[codeLines.length] = newCommand
+        const codeLine = lines[j].trim().replace(/\s*\\$/, '')
+        codeLines.push(newCommand ? codeLine.replace(/^\$\s+/, '') : codeLine)
+        continued = /\\\s*$/.test(lines[j])
         j++
       }
 
-      // Create code block - join with backslash continuation if multi-line
-      const joinedCode = codeLines.length > 1
-        ? codeLines.join(' \\\n')
-        : codeLines[0]
+      // Create code block - join continuation lines with a backslash
+      const joinedCode = codeLines
+        .map((codeLine, k) => k === 0 ? codeLine : (startsCommand[k] ? '\n' : ' \\\n') + codeLine)
+        .join('')
       const codeBlock = `\n[,bash]\n----\n${joinedCode}\n----\n`
       const placeholder = `__EARLY_CODE_BLOCK_${codeBlockStore.length}__`
       codeBlockStore.push(codeBlock)
@@ -1308,6 +1339,7 @@ function convertIndentedTablesToAsciiDoc(text, options = {}) {
       if (tableLines.length >= 2) {
         // Parse the table rows
         const parsedRows = []
+        const columnStarts = []
         let currentRow = null
 
         for (const tableLine of tableLines) {
@@ -1327,25 +1359,74 @@ function convertIndentedTablesToAsciiDoc(text, options = {}) {
             if (columns.length >= 2) {
               currentRow = columns
               parsedRows.push(currentRow)
+              // Where each column after the first starts in the source line
+              const starts = []
+              // Measured on the source text: a placeholder for inline code
+              // is not as long as the code it stands for.
+              const source = (options.expand ? options.expand(tableLine) : tableLine).trimEnd()
+              const indent = source.search(/[^ \t]/)
+              const re = / {2,}(?=[^ \t])/g
+              let m
+              while ((m = re.exec(source))) {
+                if (m.index > indent) starts.push(m.index + m[0].length)
+              }
+              columnStarts.push(starts)
             }
           }
         }
 
+        // Three or more columns (rpk ai run opencode's wire API, upstream,
+        // package and path) do not fit a Value/Description table, and a
+        // wrapped cell cannot be told from its neighbor reliably. Keep the
+        // source alignment as a literal block instead.
+        //
+        // A table has three or more columns when at least two column
+        // positions after the first are each shared by two or more rows and
+        // by at least half of them, or when
+        // a row's second column starts at a shared position other rows use
+        // for a later column (an empty cell). Two spaces after a period
+        // inside a description start at a different position on each row,
+        // so a two-column value table stays one.
+        const startCounts = new Map()
+        for (const starts of columnStarts) for (const c of new Set(starts)) startCounts.set(c, (startCounts.get(c) || 0) + 1)
+        // Half the rows: a few descriptions padded to line up a remark, such
+        // as rpk topic consume's int16  ("half word"), are not a column.
+        const alignedColumns = [...startCounts.values()].filter(n => n >= 2 && n * 2 >= columnStarts.length).length
+        const secondStarts = new Set(columnStarts.map(starts => starts[0]))
+        const multiColumn = alignedColumns >= 2 || (alignedColumns >= 1 && secondStarts.size > 1)
+        if (parsedRows.length >= 2 && multiColumn) {
+          const indents = tableLines.filter(l => l.trim()).map(l => l.match(/^[ \t]*/)[0].length)
+          const strip = Math.min(...indents)
+          result.push('')
+          result.push('....')
+          for (const tableLine of tableLines) result.push(tableLine.slice(strip).replace(/[ \t]+$/, ''))
+          result.push('....')
+          result.push('')
+          i = j
+          continue
+        }
+
         if (parsedRows.length >= 2) {
           // Convert to AsciiDoc table
+          // A command whose first column is not a value (for example the
+          // coding agents rpk ai skill init lists) names its own columns
+          // through the tableHeaders override, and its first column is not
+          // set in monospace.
+          const headers = Array.isArray(options.headers) && options.headers.length === 2 ? options.headers : null
+          // Escape {word} (no hyphens) in table cells — CLI format specifiers like {hex}, {json}
+          // are not AsciiDoc attribute refs and must be escaped to prevent substitution.
+          // A | would start a new cell.
+          const escapeCell = s => s.replace(/\{([a-z_][a-z0-9_]*)\}/g, '\\{$1}').replace(/\|/g, '\\|')
           result.push('')
-          result.push('[cols="1m,1a"]')
+          result.push(headers ? '[cols="1,2a"]' : '[cols="1m,1a"]')
           result.push('|===')
-          result.push('|Value |Description')
+          result.push(headers ? `|${escapeCell(headers[0])} |${escapeCell(headers[1])}` : '|Value |Description')
           result.push('')
           for (const [value, ...descParts] of parsedRows) {
             // Remove trailing colon from value (e.g., "Organization:" -> "Organization")
             const cleanValue = value.replace(/:$/, '')
             const desc = descParts.join(' ')
-            // Escape {word} (no hyphens) in table cells — CLI format specifiers like {hex}, {json}
-            // are not AsciiDoc attribute refs and must be escaped to prevent substitution.
-            const escapeAttrs = s => s.replace(/\{([a-z_][a-z0-9_]*)\}/g, '\\{$1}')
-            result.push(`|${escapeAttrs(cleanValue)} |${escapeAttrs(desc)}`)
+            result.push(`|${escapeCell(cleanValue)} |${escapeCell(desc)}`)
           }
           result.push('|===')
           result.push('')
@@ -1484,6 +1565,7 @@ function replaceOutsideCodeSpans(text, regex, replacement) {
  * @param {Object} [customTransformations] - Optional custom text transformations from overrides
  * @param {Object} [options] - Formatting options
  * @param {boolean} [options.skipTableConversion] - If true, skip automatic table conversion
+ * @param {string[]} [options.tableHeaders] - Column names for converted two-column tables instead of Value and Description
  * @param {boolean} [options.skipListConversion] - If true, skip automatic list conversion
  * @returns {string} Formatted description
  */
@@ -1627,7 +1709,31 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   preProcessed = convertBulletedDefinitionListsToAsciiDoc(preProcessed, { skip: options.skipListConversion })
 
   // Convert indented columnar text to AsciiDoc tables
-  preProcessed = convertIndentedTablesToAsciiDoc(preProcessed, { skip: options.skipTableConversion })
+  const expandPlaceholders = line => line
+    .replace(/__INLINE_CODE_(\d+)__/g, (m, n) => inlineCode[n])
+    .replace(/__XREF_(\d+)__/g, (m, n) => xrefs[n])
+  preProcessed = convertIndentedTablesToAsciiDoc(preProcessed, { skip: options.skipTableConversion, headers: options.tableHeaders, expand: expandPlaceholders })
+
+  // The table conversion can emit a literal block (....) for a table with
+  // three or more columns. It runs after the code-block protection above, so
+  // protect its literal blocks the same way: later prose passes would
+  // otherwise escape {provider} to \{provider} and add inline code inside it.
+  // Its rows were already through step 2, so put back the inline code and
+  // xrefs they held, as the source wrote them: a literal block shows text
+  // verbatim and never needs the \{word} escape.
+  preProcessed = preProcessed.replace(/(^|\n)(\.\.\.\.\n[\s\S]*?\n\.\.\.\.)(?=\n|$)/g, (match, lead, block) => {
+    const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`
+    const restored = block
+      .replace(/__INLINE_CODE_(\d+)__/g, (m, n) => {
+        const code = inlineCode[n]
+        // The JSON passthrough wrapper was added above, not by the source
+        if (code.startsWith('`+\'') && code.endsWith('\'+`')) return code.slice(2, -2)
+        return code.replace(/\\\{/g, '{')
+      })
+      .replace(/__XREF_(\d+)__/g, (m, n) => xrefs[n])
+    codeBlocks.push(restored)
+    return lead + placeholder
+  })
 
   let protectedDesc = preProcessed
 
@@ -1852,8 +1958,11 @@ function formatDescription(desc, customTransformations = null, options = {}) {
     if (i % 2 === 0) {
       // Outside backticks - apply flag wrapping
       // Include =value when present (e.g., --format=json, --var=KEY=VALUE),
-      // and every segment of a dotted name (--local-config.a.b=false)
-      return part.replace(/(?<!rpk\s)(--[a-z][-a-z0-9]*(?:\.[a-z][-a-z0-9]*)*(?:=[^\s,;.)\]]+)?)/gi, '`$1`')
+      // and every segment of a dotted name (--local-config.a.b=false).
+      // A flag family glob (--teams-*) is one span too, as a passthrough:
+      // two plain spans holding * render the text between them in bold.
+      return part.replace(/(?<!rpk\s)(--[a-z][-a-z0-9]*(?:\.[a-z][-a-z0-9]*)*(?:=[^\s,;.)\]]+)?)(?<=-)(\*)|(?<!rpk\s)(--[a-z][-a-z0-9]*(?:\.[a-z][-a-z0-9]*)*(?:=[^\s,;.)\]]+)?)/gi,
+        (match, globFlag, star, flag) => globFlag ? `\`+${globFlag}*+\`` : `\`${flag}\``)
     } else {
       // Inside backticks - don't modify
       return part
@@ -1910,8 +2019,10 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   result = result.replace(/(?<![`\w/])(_redpanda(?:\.[a-z_]+)+)(?!`)/g, '`$1`')
 
   // Add backticks around standalone "rpk" (at end of phrase, before punctuation)
-  // Also exclude rpk inside paths (preceded by /)
-  result = result.replace(/(?<![`\w/])rpk(?=[\s]*[.,;:!?)'"}\]]|[\s]*$)/g, '`rpk`')
+  // Also exclude rpk inside paths (preceded by /) and inside a dotted name
+  // (preceded by .), like the .rpk.ac- plugin prefix. The punctuation must
+  // end the token: rpk.admin_api is a config key, not the binary.
+  result = result.replace(/(?<![`\w/.])rpk(?=\s*[.,;:!?)'"}\]]+(?:\s|$)|\s*$)/g, '`rpk`')
 
   // Convert GitHub issue/PR references to clickable links
   // Pattern: #NNNN (4+ digits) when not inside backticks or code
@@ -2282,6 +2393,16 @@ function ensurePeriod(desc) {
   const trimmed = desc.trim()
   if (!trimmed) return ''
 
+  // A literal block (....) can hold blank lines. Leave it whole and add
+  // periods only to the text around it.
+  if (/^\.\.\.\.$/m.test(trimmed)) {
+    return trimmed
+      .split(/(^\.\.\.\.\n[\s\S]*?\n\.\.\.\.$)/m)
+      .map((part, i) => (i % 2 ? part : ensurePeriod(part)))
+      .filter(Boolean)
+      .join('\n\n')
+  }
+
   // Handle multi-paragraph descriptions - ensure each paragraph ends with punctuation
   // Split on double newlines (paragraph breaks)
   const paragraphs = trimmed.split(/\n\s*\n/)
@@ -2583,20 +2704,8 @@ function findTopLevelWithSubcommands(tree) {
   return result
 }
 
-/**
- * Known rpk plugins that are managed separately from rpk core (they have
- * install/uninstall/upgrade shim commands, and their real command tree only
- * appears when the plugin binary is installed in the generation environment).
- * Shared with rpk-docs-handler.js, which iterates this list to install each
- * plugin before running --print-tree.
- */
-const KNOWN_PLUGINS = ['ai', 'check', 'connect', 'k8s', 'oxla']
-
-/**
- * Subcommands that rpk core ships as a built-in shim for managed plugins,
- * present even when the plugin binary itself is not installed.
- */
-const PLUGIN_SHIM_COMMANDS = new Set(['install', 'uninstall', 'upgrade'])
+// KNOWN_PLUGINS and PLUGIN_SHIM_COMMANDS: see known-plugins.js.
+const { KNOWN_PLUGINS, PLUGIN_SHIM_COMMANDS } = require('./known-plugins')
 
 /**
  * Managed plugins that run from their root command and have no subcommands:
@@ -2935,7 +3044,11 @@ async function generateRpkDocs(options = {}) {
     const { mainDescription, sections: rawSections } = parseDescriptionSections(mergedCommand.description || '')
 
     // Format description with backticks and ensure it ends with period
-    const formattedDescription = ensurePeriod(formatDescription(mainDescription, textTransformations))
+    // A command whose two-column list is not a value table (for example
+    // rpk ai skill init's list of coding agents) names its columns with
+    // tableHeaders.
+    const formatOptions = { tableHeaders: commandOverride.tableHeaders }
+    const formattedDescription = ensurePeriod(formatDescription(mainDescription, textTransformations, formatOptions))
 
     // Format section content with same formatting rules
     // BUT: Handle EXAMPLES sections specially to convert indented commands to code blocks
@@ -3148,6 +3261,9 @@ async function generateRpkDocs(options = {}) {
         name: flag.shorthand ? `-${flag.shorthand}, --${flag.name}` : `--${flag.name}`,
         type: flag.type || '-',
         description: ensurePeriod(formatDescription(flag.description || '', textTransformations)),
+        // rpk --help prints these, so the reference does too.
+        required: flag.required === true,
+        defaultValue: flagDefaultToShow(flag),
         // --print-tree gives pflag's deprecation message as the deprecated
         // value itself; overrides give deprecated: true plus a message
         deprecated: Boolean(flag.deprecated),
@@ -3499,6 +3615,7 @@ module.exports = {
   decodeHtmlEntities,
   parseDescriptionSections,
   ensurePeriod,
+  flagDefaultToShow,
   dashify,
   capToTwoSentences,
   flattenCommands,
@@ -3511,6 +3628,7 @@ module.exports = {
   updateNavFile,
   KNOWN_PLUGINS,
   ROOT_ONLY_PLUGINS,
+  PLUGIN_SHIM_COMMANDS,
   detectProtectedPlugins,
   getCommandMetadata,
   processContentArray,
