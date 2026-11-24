@@ -57,6 +57,7 @@ const VERBATIM_ASCIIDOC_RULES = [
     why: 'These strings render inside AsciiDoc table cells, where a bare | starts a new cell and breaks the table.',
     standard: STANDARD.properties,
     severity: 'error',
+    tier: 'unclear',
     check: (decl) => {
       const text = decl.string || ''
       if (!text.includes('|')) return []
@@ -73,6 +74,7 @@ const VERBATIM_ASCIIDOC_RULES = [
     why: 'An attribute the docs site does not define is not substituted, so readers see the raw {name} text or the page build warns about it.',
     standard: STANDARD.properties,
     severity: 'warning',
+    tier: 'unclear',
     check: (decl) => {
       const text = decl.string || ''
       const issues = []
@@ -95,6 +97,7 @@ const VERBATIM_ASCIIDOC_RULES = [
     why: 'A macro with unbalanced brackets does not resolve, so the page shows the raw macro text instead of a link.',
     standard: STANDARD.qualityBar,
     severity: 'error',
+    tier: 'unclear',
     check: (decl) => {
       const text = decl.string || ''
       const issues = []
@@ -183,6 +186,7 @@ const CONDITIONAL_RULE = {
   why: 'The same Connect string renders on the self-managed docs, the Cloud docs and in the Connect binaries, so a malformed env-cloud block shows text to the wrong audience or hides it from both.',
   standard: STANDARD.connect,
   severity: 'warning',
+  tier: 'unclear',
   check: (decl) => {
     const text = decl.string || ''
     if (!text || !CONDITIONAL_TOKEN.test(text)) return []

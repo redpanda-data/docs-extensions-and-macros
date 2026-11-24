@@ -70,6 +70,17 @@ const SURFACE_LAYOUT = {
     files: [{ from: path.join(EVAL_FIXTURES, 'rpk-pr461', 'delete.base.go'), to: 'src/go/rpk/pkg/cli/topic/delete.go' }],
     target: 'src/go/rpk/pkg/cli/topic/delete.go',
     surface: 'rpk'
+  },
+  // redpanda-data/benthos PR 551: insert_part and select_parts at the PR's
+  // base. The one-pass cases commit one review round's text on top.
+  'benthos-551': {
+    tree: CONNECT_TREE,
+    files: [
+      { from: path.join(EVAL_FIXTURES, 'benthos-551', 'processor_insert_part.base.go'), to: 'internal/impl/pure/processor_insert_part.go' },
+      { from: path.join(EVAL_FIXTURES, 'benthos-551', 'processor_select_parts.base.go'), to: 'internal/impl/pure/processor_select_parts.go' }
+    ],
+    target: 'internal/impl/pure/processor_insert_part.go',
+    surface: 'connect'
   }
 }
 
@@ -241,17 +252,22 @@ function parseFences (output, tag) {
 /**
  * The unchanged lines a suggestion on a declaration dropped, reworded or
  * moved: for every recorded comment whose range overlaps the declaration's
- * span, each ```suggestion block must contain `keep`, the declaration's
- * unchanged lines including blank ones, in order, as whole lines (trailing
- * whitespace aside). New lines may sit between them, since that is where the
- * changed lines go, but an unchanged line that is reworded, missing, out of
- * order or a collapsed blank line fails. Comments without a suggestion block
- * change nothing and are not judged. Paths compare without a leading `./`,
- * as checkSuggestionComment does.
+ * span, each ```suggestion block must contain the declaration's unchanged
+ * lines that fall inside the comment's own range, blank ones included, in
+ * order, as whole lines (trailing whitespace aside). A suggestion replaces
+ * only the lines it is posted on, so an unchanged line outside that range
+ * is kept by GitHub and is not the block's to carry. New lines may sit
+ * between the kept ones, since that is where the changed lines go, but an
+ * unchanged line that is reworded, missing, out of order or a collapsed
+ * blank line fails. Comments without a suggestion block change nothing and
+ * are not judged. Paths compare without a leading `./`, as
+ * checkSuggestionComment does.
  *
  * @param {Array<{path, body, line, startLine}>} comments - recorded inline comments
  * @param {{file: string, line_start: number, line_end: number}} decl
- * @param {string[]} keep - exact text of the unchanged lines, in file order
+ * @param {Array<{line: number, text: string}|string>} keep - the unchanged
+ *   lines, in file order. A bare string has no line number, so it is judged
+ *   against every block on the declaration.
  * @returns {{pass: boolean, judged: number, dropped: string[]}}
  */
 function linesKept (comments, decl, keep) {
@@ -264,11 +280,13 @@ function linesKept (comments, decl, keep) {
     const end = Number(comment.line)
     const start = Number(comment.startLine || comment.line)
     if (!(start <= decl.line_end && end >= decl.line_start)) continue
+    const inRange = keep.filter((k) => typeof k === 'string' || (k.line >= start && k.line <= end))
+      .map((k) => (typeof k === 'string' ? k : k.text))
     for (const body of parseFences(comment.body || '', 'suggestion')) {
       judged++
       const lines = body.split('\n').map(rtrim)
       let at = 0
-      for (const want of keep) {
+      for (const want of inRange) {
         const i = lines.indexOf(rtrim(want), at)
         if (i === -1) dropped.add(want)
         else at = i + 1
@@ -494,41 +512,71 @@ function dispatchAccepts (docImpactText) {
 }
 
 /**
- * Check the inline comment that carries a suggestion against the declaration
- * it should replace. Production posts the comment on the lines it names and
- * GitHub applies the suggestion to exactly those lines, so a correct
- * replacement on the wrong file or range is a wrong review. The footer is how
- * a later push recovers which declarations were reviewed.
+ * Check the inline comments that carry a suggestion against the declaration
+ * they should change. Production posts each comment on the lines it names
+ * and GitHub applies the suggestion to exactly those lines, so a correct
+ * replacement on the wrong file or outside the declaration is a wrong
+ * review. A suggestion replaces only the lines its issue needs, so any span
+ * inside the declaration is fine, and a declaration may draw more than one.
+ * Each must carry the declaration's key marker, which is how a later push
+ * knows the declaration was reviewed. `fingerprint` checks the footer a
+ * legacy workflow had the model post instead.
  *
  * @param {Array<{path:string, line?:number, startLine?:number, body:string}>} comments
- * @param {{file:string, lineStart:number, lineEnd:number, fingerprint?:string}} target
- * @returns {{problems:string[], comment:object|null, start:number, end:number}}
+ * @param {{file:string, lineStart:number, lineEnd:number, key?:string, fingerprint?:string}} target
+ * @returns {{problems:string[], suggestions:Array<{comment, start, end, replacement}>, comment:object|null, start:number, end:number}}
  */
 function checkSuggestionComment (comments, target) {
   const withSuggestion = (comments || []).filter((c) => parseFences(c.body || '', 'suggestion').length > 0)
-  if (withSuggestion.length !== 1) {
-    return { problems: [`expected one comment with a suggestion, found ${withSuggestion.length}`], comment: null, start: 0, end: 0 }
+  if (withSuggestion.length === 0) {
+    return { problems: ['expected a comment with a suggestion, found none'], suggestions: [], comment: null, start: 0, end: 0 }
   }
-  const c = withSuggestion[0]
   const problems = []
   const norm = (p) => String(p || '').replace(/^\.\//, '')
-  if (norm(c.path) !== norm(target.file)) problems.push(`posted on ${c.path}, expected ${target.file}`)
-  if (!Number.isInteger(c.line)) problems.push('comment has no line')
-  const end = Number.isInteger(c.line) ? c.line : 0
-  const start = Number.isInteger(c.startLine) ? c.startLine : end
-  if (end && (start !== target.lineStart || end !== target.lineEnd)) {
-    problems.push(`posted on lines ${start}-${end}, expected ${target.lineStart}-${target.lineEnd}`)
+  const suggestions = []
+  for (const c of withSuggestion) {
+    if (norm(c.path) !== norm(target.file)) { problems.push(`posted on ${c.path}, expected ${target.file}`); continue }
+    if (!Number.isInteger(c.line)) { problems.push('comment has no line'); continue }
+    const end = c.line
+    const start = Number.isInteger(c.startLine) ? c.startLine : end
+    if (start < target.lineStart || end > target.lineEnd) {
+      problems.push(`posted on lines ${start}-${end}, outside the declaration's ${target.lineStart}-${target.lineEnd}`)
+    }
+    if (target.key && !String(c.body).includes(`<!-- doc-strings-review:key=${target.key} `)) problems.push(`body lacks the key marker for ${target.key}`)
+    if (target.fingerprint) {
+      const footer = `<sub>doc-strings-review:fp=${target.fingerprint}</sub>`
+      if (!String(c.body).includes(footer)) problems.push(`body lacks the footer ${footer}`)
+    }
+    suggestions.push({ comment: c, start, end, replacement: parseFences(c.body || '', 'suggestion').pop() })
   }
-  if (target.fingerprint) {
-    const footer = `<sub>doc-strings-review:fp=${target.fingerprint}</sub>`
-    if (!String(c.body).includes(footer)) problems.push(`body lacks the footer ${footer}`)
+  const first = suggestions[0] || { comment: null, start: 0, end: 0 }
+  return { problems, suggestions, comment: first.comment, start: first.start, end: first.end }
+}
+
+/**
+ * Apply suggestions to a file's text the way GitHub commits a batch of them:
+ * each replaces its own lines, bottom-up so earlier spans keep their
+ * numbers. Overlapping spans cannot be committed together and throw.
+ */
+function applySuggestions (text, suggestions) {
+  const sorted = [...suggestions].sort((a, b) => b.start - a.start)
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].end >= sorted[i - 1].start) throw new Error(`suggestions on lines ${sorted[i].start}-${sorted[i].end} and ${sorted[i - 1].start}-${sorted[i - 1].end} overlap`)
   }
-  return { problems, comment: c, start, end }
+  let out = text
+  let delta = 0
+  for (const sgg of sorted) {
+    const r = replaceSpan(out, sgg.start, sgg.end, sgg.replacement)
+    out = r.text
+    delta += r.replacementLines.length - (sgg.end - sgg.start + 1)
+  }
+  return { text: out, delta }
 }
 
 module.exports = {
   TEMPLATE_MODEL,
   checkSuggestionComment,
+  applySuggestions,
   dispatchAccepts,
   linesKept,
   changedLines,
