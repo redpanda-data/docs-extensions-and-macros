@@ -31,7 +31,22 @@ function getLlmsAskPath(playbook) {
   const value = playbook && playbook.site && playbook.site.keys && playbook.site.keys['llms-ask-path'];
   if (typeof value !== 'string') return '';
   const path = value.trim().replace(/\/+$/, '');
-  return /^\/[^\s?#]*$/.test(path) ? path : '';
+  // One leading slash (not a //host reference), and only characters that need
+  // no escaping in a Markdown link destination.
+  return /^\/(?!\/)[A-Za-z0-9._~%\/-]*$/.test(path) ? path : '';
+}
+
+/**
+ * The ask path resolved from the host root of siteUrl, as a browser resolves
+ * the root-relative link in a page: https://x.com/docs + /mcp/ask is
+ * https://x.com/mcp/ask.
+ */
+function askEndpoint(siteUrl, askPath) {
+  try {
+    return new URL(askPath, siteUrl).toString();
+  } catch {
+    return `${siteUrl}${askPath}`;
+  }
 }
 
 /**
@@ -390,7 +405,7 @@ function buildPageIndexes({ pages, components, siteUrl, toMarkdownUrl, askPath =
       }
       lines.push(`For the full documentation index, see ${siteUrl}/llms.txt`);
       if (askPath) {
-        lines.push(`To ask these docs a question, send a GET request with the question in \`q\`: ${siteUrl}${askPath}?${LLMS_ASK_EXAMPLE_QUERY}`);
+        lines.push(`To ask these docs a question, send a GET request with the question in \`q\`: ${askEndpoint(siteUrl, askPath)}?${LLMS_ASK_EXAMPLE_QUERY}`);
       }
       return lines;
     };

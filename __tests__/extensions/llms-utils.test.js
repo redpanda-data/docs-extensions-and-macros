@@ -109,6 +109,15 @@ describe('buildPageIndexes', () => {
     without.forEach((index) => expect(index.contents).not.toContain('/mcp/ask'))
   })
 
+  it('resolves the ask endpoint from the host root when the site URL has a path', () => {
+    const indexes = buildPageIndexes({ pages, components, siteUrl: 'https://docs.example.com/docs', toMarkdownUrl, askPath: '/mcp/ask' })
+    expect(indexes.length).toBeGreaterThan(0)
+    indexes.forEach((index) => {
+      expect(index.contents).toContain('send a GET request with the question in `q`: https://docs.example.com/mcp/ask?q=')
+      expect(index.contents).not.toContain('/docs/mcp/ask')
+    })
+  })
+
   it('derives the version root from the module and relative path, even when every page shares a deeper directory', () => {
     const only = [page('streaming', '26.1', '/streaming/26.1/manage/tiered-storage/', 'Tiered Storage')]
     const [index] = buildPageIndexes({ pages: only, components, siteUrl, toMarkdownUrl })
@@ -285,6 +294,10 @@ describe('llms ask endpoint', () => {
     expect(getLlmsAskPath({ site: { keys: { 'llms-ask-path': '/mcp/ask/' } } })).toBe('/mcp/ask')
     expect(getLlmsAskPath({ site: { keys: { 'llms-ask-path': 'https://x.test/ask' } } })).toBe('')
     expect(getLlmsAskPath({ site: { keys: { 'llms-ask-path': '/ask?q=1' } } })).toBe('')
+    // A network-path reference names another host.
+    expect(getLlmsAskPath({ site: { keys: { 'llms-ask-path': '//x.test/ask' } } })).toBe('')
+    // A parenthesis would end the Markdown link destination early.
+    expect(getLlmsAskPath({ site: { keys: { 'llms-ask-path': '/ask(v1)' } } })).toBe('')
     expect(getLlmsAskPath({ site: {} })).toBe('')
     expect(getLlmsAskPath(undefined)).toBe('')
   })
