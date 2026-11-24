@@ -166,6 +166,31 @@ If the command doesn't exist in the rpk data, is deprecated, or has no page in t
 
 `check-reference-values` also checks hand-written xrefs to `rpk` pages: it reports links to pages that don't exist for the component (including targets missing the `.adoc` extension) and labels that name another command, and `--write` replaces each xref whose label is the command in backticks with `rpkcmd:[...]`, once the build publishes the `rpk-<version>.json` attachment that `rpkcmd:` links with.
 
+=== metric and metricval - Metric names and values
+
+Name a Redpanda metric in prose with `metric:`, and render one of its values with `metricval:`, from the published metrics data instead of typing them:
+
+[,asciidoc]
+----
+Watch metric:redpanda_cluster_brokers[].
+See metric:redpanda_kafka_request_latency_seconds[link=true], a metricval:redpanda_kafka_request_latency_seconds[type] in metricval:redpanda_kafka_request_latency_seconds[unit].
+----
+
+That renders both names as code, the second linked to its entry on the metrics reference page, followed by "a histogram in seconds".
+
+*Syntax:* `metric:name[link=true,text=display text]` and `metricval:name[field,format=raw]`
+
+* Write the metric name as the endpoint prints it. A histogram series name (`_bucket`, `_count`, `_sum`) renders as written, and reads and links its metric.
+* `link=true` links the reference page in the page's own component that has a heading for the metric. A cloud-docs page links the Cloud page. When Cloud has no page for a metric, or the metric is internal or not available on Cloud, the macro renders plain code and warns instead of linking self-managed docs.
+* Don't wrap `metric:` in backticks: it already renders code.
+* The generator writes these `metricval:` fields, so they render for a metric that has them: `type`, `endpoint`, `description`, `labels`, `unit` and `buckets`. Most metrics have no `unit`, and only a histogram has `buckets`.
+* Every other field, such as `usage`, `category` and `availability`, comes from the overrides file `docs-data/metric-overrides.json`. Until that file has the field for a metric, the macro renders a placeholder such as `<unknown usage>` and warns.
+* For a label's values, name the label: `metricval:redpanda_kafka_request_latency_seconds[values,label=redpanda_request]`. The complete list of values also comes from the overrides file. The macro never renders the values that one scrape saw, so this call renders `<unknown values>` until the list is there.
+* Text longer than one paragraph needs the block form, on a line of its own: `metricval::redpanda_cluster_brokers[description]`.
+* A deprecated metric warns on every mention. On a page that names it on purpose, add `deprecated=ok`.
+
+If a name isn't in the metrics data for the page's version, or was removed, `metric:` shows plain code and the build log says why. If a value can't be verified, `metricval:` shows a placeholder such as `<unknown type>`. Both come with `@redpanda-data/docs-extensions-and-macros/macros/prop`, and the `metric-validate` attribute (`warn`, `error` or `off`) sets how problems are reported. See link:REFERENCE.adoc#metric[the macros reference], and link:REFERENCE.adoc#value-fields[the table of every field].
+
 === connect and blobl - Linked Connect components and Bloblang calls
 
 Name a Redpanda Connect component, one of its fields, or a Bloblang function or method as inline code, linked to its reference entry, without writing the page path or the anchor:
@@ -203,6 +228,11 @@ The macros render what you wrote, but the build log tells you when you used a na
 * A former Connect component name, such as `connect:[outputs/kafka_migrator]`, renders as written and links the component its page now belongs to, `redpanda_migrator`, with a warning.
 * A deprecated Connect component, such as `connect:[inputs/kafka_franz]`, still links its own page, and the warning names the replacement its description gives, `inputs/redpanda`. A deprecated field links its component's page with no anchor, and the warning names a replacement field when the data gives exactly one.
 * A deprecated Bloblang function or method, such as `blobl:[meta()]`, still links its entry. The data names no replacement, so the warning says only that it is deprecated.
+* A deprecated property, such as `prop:cloud_topics_enabled[]`, renders as written with its tooltip and no link, because the reference pages leave deprecated properties out. The data names no replacement.
+
+A deprecated name only warns, except that a deprecated `rpk` command fails the build with `rpk-validate: error`.
+
+When a page names something deprecated on purpose, such as the deprecated features page, release notes, or an upgrade guide, add `deprecated=ok` to the call: `prop:cloud_topics_enabled[deprecated=ok]`, `rpkcmd:[rpk redpanda admin,deprecated=ok]`, `connect:[inputs/kafka_franz,deprecated=ok]`, `blobl:[meta(),deprecated=ok]`. The output doesn't change. The deprecation warning goes away, and `check-reference-values` no longer reports it. Typos, aliases, missing pages and missing values are still reported. Only `ok` counts. `rpkval:` can't read a deprecated command at all, so it still reports a placeholder. See link:REFERENCE.adoc#acknowledging-deprecated-names[the macros reference].
 
 `check-reference-values` reports the same names in macros and in backticked prose, and `--write` changes them to the main or replacement name when it is safe: the replacement has the same flag or field, the sentence isn't about the name itself ("is an alias of", "deprecated", "use ... instead"), the new name isn't already written nearby, and the page doesn't use the old name elsewhere, such as in an example. Everything else in the call stays as you wrote it. These findings fail the check only with `--fail-on any` or `--fail-on links`, never at the default level. See link:REFERENCE.adoc#old-names[the macros reference].
 

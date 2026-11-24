@@ -40,6 +40,7 @@
  * Registered by macros/prop, so every playbook that registers prop: has it.
  */
 
+const { deprecationAcknowledged } = require('../extension-utils/deprecation-ack')
 const connectValues = require('../extension-utils/connect-values')
 const connectLinks = require('../extension-utils/connect-links')
 const datasets = require('../extension-utils/attachment-datasets')
@@ -136,7 +137,8 @@ function connectvalCall (config, parent, target, attributes, { block = false } =
   }
   // The error about a former name's field says which component it read.
   if (renamed && malformed) result.message += ` ${connectLinks.adviceSentence(advice, { written, dataset: datasets.describeDataset(registry), suggest }).replace(/^./, (c) => c.toUpperCase())}`
-  if (advice && !malformed && mode !== 'off') {
+  const acknowledged = deprecationAcknowledged(attributes)
+  if (advice && !malformed && mode !== 'off' && !(acknowledged && (advice.kind === 'deprecated-component' || advice.kind === 'deprecated-field'))) {
     const call = `${macro || `connectval:${path}[${requested},component=${componentText}]`}${where}`
     // A deprecated field is already in resolveConnectValue's warnings, and a
     // call that asks whether something is deprecated knows.
@@ -151,6 +153,8 @@ function connectvalCall (config, parent, target, attributes, { block = false } =
   }
   if (mode !== 'off') {
     for (const warning of result.warnings || []) {
+      // deprecated=ok: the call says it names something deprecated on purpose.
+      if (acknowledged && /^deprecated-/.test(warning.kind || '')) continue
       if (warning.kind === 'cloud-unknown') datasets.warnOnce(contentCatalog, `connect:cloudunknown:${componentText}`, warning.message, logger)
       else logger.warn(warning.message)
     }

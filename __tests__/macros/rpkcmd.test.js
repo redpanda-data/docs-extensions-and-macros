@@ -228,6 +228,24 @@ describe('rpkcmd macro', () => {
     })
   })
 
+  describe('deprecated=ok', () => {
+    test('a deprecated command renders plain code with no warning, and never fails the build', () => {
+      const warn = warnings()
+      expect(linkOf(convert('rpkcmd:[rpk redpanda admin,deprecated=ok]'))).toEqual({ plain: 'rpk redpanda admin' })
+      expect(() => convert('rpkcmd:[rpk redpanda admin,deprecated=ok]', { attributes: { 'rpk-validate': 'error' } })).not.toThrow()
+      expect(warn).not.toHaveBeenCalled()
+      // Without it, error mode fails the build
+      expect(() => convert('rpkcmd:[rpk redpanda admin]', { attributes: { 'rpk-validate': 'error' } })).toThrow(/deprecated/)
+    })
+
+    test('an unknown command still warns and still fails in error mode', () => {
+      const warn = warnings()
+      convert('rpkcmd:[rpk topic make,deprecated=ok]')
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(() => convert('rpkcmd:[rpk topic make,deprecated=ok]', { attributes: { 'rpk-validate': 'error' } })).toThrow(/is not a command/)
+    })
+  })
+
   describe('not linked', () => {
     test.each([
       ['rpk topic make', 'unknown-command', "'rpk topic make' is not a command in rpk-v26.2.2.json from streaming@26.2: rpk topic has no subcommand 'make'."],

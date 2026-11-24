@@ -117,27 +117,37 @@ describe('docs PR review: the lint-screenshots step', () => {
   test('runs npx from RUNNER_TEMP with --root at the checkout, without GH_TOKEN', () => {
     const r = runLint()
     expect({ status: r.status, out: r.all }).toMatchObject({ status: 0 })
-    // Two npx runs: the --diff-file probe, then the lint. Both from
-    // RUNNER_TEMP without GH_TOKEN. The probe stub prints no help, so the
-    // lint runs without --diff-file, as with a release that predates it.
+    // The --help probe for --diff-file, then the lint itself.
     expect(r.log).toHaveLength(2)
     for (const [cwd, token] of r.log) {
       expect(cwd).toBe(r.runnerTemp)
       expect(token).toBe('no-token')
     }
     expect(r.log[0][3]).toBe('--yes --package @redpanda-data/docs-extensions-and-macros@9.9.9 doc-tools lint-screenshots --help')
+    // This npx's --help names no --diff-file, so the lint runs without it.
     expect(r.log[1][3]).toBe(`--yes --package @redpanda-data/docs-extensions-and-macros@9.9.9 doc-tools lint-screenshots --root ${r.src} --files ${r.runnerTemp}/screenshot-lint/changed-files.txt --format json --output ${r.runnerTemp}/screenshot-lint/result.json`)
+    expect(r.all).toMatch(/has no lint-screenshots --diff-file/)
     expect(r.result).toEqual({ blocking: [], suggestions: [], verdict: 'pass' })
+  })
+
+  test('passes the PR diff with --diff-file when the pinned doc-tools supports it', () => {
+    const npx = NPX_PROBE.replace('#!/bin/bash\n', '#!/bin/bash\ncase " $* " in *" --help "*) echo "$PWD|${GH_TOKEN:-no-token}|-|$*" >> "$RUNNER_TEMP/npx.log"; echo "  --diff-file <file>  only block on changed lines"; exit 0;; esac\n')
+    const r = runLint({ npx })
+    expect({ status: r.status, out: r.all }).toMatchObject({ status: 0 })
+    expect(r.log).toHaveLength(2)
+    expect(r.log[1][3]).toBe(`--yes --package @redpanda-data/docs-extensions-and-macros@9.9.9 doc-tools lint-screenshots --root ${r.src} --files ${r.runnerTemp}/screenshot-lint/changed-files.txt --diff-file ${r.runnerTemp}/screenshot-lint/pr.diff --format json --output ${r.runnerTemp}/screenshot-lint/result.json`)
+    expect(fs.existsSync(path.join(r.runnerTemp, 'screenshot-lint', 'pr.diff'))).toBe(true)
   })
 
   test('a hostile .npmrc in the checkout does not reach npm', () => {
     const r = runLint()
     expect({ status: r.status, out: r.all }).toMatchObject({ status: 0 })
+    expect(r.log).toHaveLength(2)
     for (const entry of r.log) expect(entry[2]).not.toBe(HOSTILE_REGISTRY)
   })
 
   test('negative control: the same step run from the checkout picks up the hostile registry', () => {
-    const fromCheckout = { ...LINT, run: LINT.run.replace('cd "$RUNNER_TEMP" &&', 'cd "$SRC" &&') }
+    const fromCheckout = { ...LINT, run: LINT.run.replaceAll('cd "$RUNNER_TEMP" &&', 'cd "$SRC" &&') }
     expect(fromCheckout.run).not.toBe(LINT.run)
     const r = runLint({ step: fromCheckout })
     expect({ status: r.status, out: r.all }).toMatchObject({ status: 0 })
