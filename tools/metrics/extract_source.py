@@ -625,13 +625,6 @@ class FileScan:
         key = (self.path, rn)
         if key in ENDPOINT_RULES:
             return ENDPOINT_RULES[key], "rule"
-        low = recv.lower()
-        if rn == "groups" and "public" in low:
-            return ["public"], "clean"
-        if "public" in low:
-            return ["public"], "clean"
-        if "internal" in low:
-            return ["internal"], "clean"
         # a group created in place by emplace(..., <handle>) and reached through the result
         root = re.match(r"[A-Za-z_]\w*", recv)
         if root:
@@ -665,6 +658,14 @@ class FileScan:
             return ["internal", "public"], "clean"
         if kind in ("internal", "public"):
             return [kind], "clean"
+        # Only when the type and the handle say nothing: the receiver's name.
+        # A name that says both (_public_and_internal) says nothing either.
+        low = recv.lower()
+        named_both = "public" in low and "internal" in low
+        if not named_both and "public" in low:
+            return ["public"], "clean"
+        if not named_both and "internal" in low:
+            return ["internal"], "clean"
         if kind == "base":
             return ["internal", "public"], "heuristic"
         return None, "unresolved"
@@ -702,6 +703,13 @@ def describe(scan, args, pos):
             for t in [scan.s] + scan.ctx:
                 dm = [x for x in re.finditer(
                     r"(?:(?:sm|ss::metrics|seastar::metrics)::)?description\s+" + re.escape(a) + r"\s*[({]", t)]
+                if t is scan.s and len(dm) > 1:
+                    # Several functions can each declare a description with
+                    # this name. Take the one in the registration's function,
+                    # else the nearest before it.
+                    func = max(t.rfind("\n}", 0, pos), 0)
+                    dm = ([x for x in dm if func <= x.start() < pos]
+                          or [x for x in dm if x.start() < pos] or dm)
                 if dm:
                     body = t[dm[-1].end() - 1:match_bracket(t, dm[-1].end() - 1) + 1]
                     lit = literal(body[1:-1])
@@ -719,7 +727,8 @@ def describe(scan, args, pos):
 
 
 def extract(repo):
-    files = repo.grep_files(r"make_(" + MAKE_KINDS + r")[ (<]")
+    # A line may end at the helper's name, with its "(" on the next line.
+    files = repo.grep_files(r"make_(" + MAKE_KINDS + r")([ (<]|$)")
     files = [f for f in files if not re.search(r"(/tests?/|_test\.cc$|/bench)", f)]
     sites, unresolved = [], []
     for path in files:

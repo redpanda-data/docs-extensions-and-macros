@@ -139,10 +139,10 @@ describeIfPython('redpanda-metrics-<version>.json', () => {
       expect(validate.errors).toBeNull()
     })
 
-    it('records the version, the number of sources and the counts', () => {
+    it('records the version, the number of sources per endpoint and the counts', () => {
       expect(dataset.schema_version).toBe(1)
       expect(dataset.redpanda_version).toBe('v0.0.1')
-      expect(dataset.generated_from).toEqual({ sources: 2 })
+      expect(dataset.generated_from).toEqual({ sources: 2, internal_sources: 1 })
       expect(dataset.counts).toEqual({ public: 5, internal: 2, observed: 7, source_only: 0, excluded: 0 })
     })
 
@@ -236,7 +236,7 @@ describeIfPython('redpanda-metrics-<version>.json', () => {
     })
 
     it('records the source ref', () => {
-      expect(dataset.generated_from).toEqual({ sources: 2, source_ref: 'v0.0.1' })
+      expect(dataset.generated_from).toEqual({ sources: 2, internal_sources: 1, source_ref: 'v0.0.1' })
     })
 
     it('adds the defining file to a scraped family', () => {
@@ -519,7 +519,7 @@ describe('doc-tools generate metrics-docs', () => {
   // without a cluster and records what it would pass to the generator.
   const itOnPosix = process.platform === 'win32' ? it.skip : it
 
-  itOnPosix('forwards --inventory and --dataset-dir to the generator', () => {
+  itOnPosix('passes --inventory to the cluster script and --dataset-dir to the generator', () => {
     const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'metrics-cli-'))
     try {
       const bin = path.join(workDir, 'bin')
@@ -528,7 +528,9 @@ describe('doc-tools generate metrics-docs', () => {
       const stub = (name, body) => fs.writeFileSync(path.join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 })
       stub('docker', 'exit 0')
       stub('python3', 'echo "Python 3.12.0"')
-      stub('bash', `printf '%s\\n' "$@" > "${argsFile}"`)
+      const envFile = path.join(workDir, 'env.txt')
+      const envLog = path.join(workDir, 'env-log.txt')
+      stub('bash', `printf '%s\\n' "$@" > "${argsFile}"; printf '%s' "$METRICS_INVENTORY" > "${envFile}"; printf '%s=%s\\n' "$3" "$METRICS_INVENTORY" >> "${envLog}"`)
 
       const result = spawnSync(process.execPath, [path.join(REPO_ROOT, 'bin', 'doc-tools.js'), 'generate', 'metrics-docs',
         '--tag', 'v26.2.7', '--skip-pages', '--inventory', 'inv.json', '--dataset-dir', 'modules/reference/attachments'],
@@ -538,11 +540,23 @@ describe('doc-tools generate metrics-docs', () => {
       const real = fs.realpathSync(workDir)
       const args = fs.readFileSync(argsFile, 'utf8').trim().split('\n')
       expect(args.slice(1, 3)).toEqual(['metrics', 'v26.2.7'])
-      expect(args.slice(-5)).toEqual([
+      expect(args.slice(-3)).toEqual([
         '--skip-pages',
-        '--inventory', path.join(real, 'inv.json'),
         '--dataset-dir', path.join(real, 'modules', 'reference', 'attachments')
       ])
+      // The inventory goes to the cluster script, which also gives the
+      // generator the written reasons that belong with it.
+      expect(fs.readFileSync(envFile, 'utf8')).toBe(path.join(real, 'inv.json'))
+
+      // With --diff, the old tag's run must not get the new tag's inventory.
+      fs.rmSync(envLog)
+      const diffed = spawnSync(process.execPath, [path.join(REPO_ROOT, 'bin', 'doc-tools.js'), 'generate', 'metrics-docs',
+        '--tag', 'v26.2.7', '--diff', 'v26.1.9', '--skip-pages', '--inventory', 'inv.json'],
+      { cwd: workDir, encoding: 'utf8', env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}` } })
+      const seen = fs.readFileSync(envLog, 'utf8').trim().split('\n')
+      expect(seen[0]).toBe('v26.1.9=')
+      expect(seen[1]).toBe(`v26.2.7=${path.join(real, 'inv.json')}`)
+      expect(diffed.error).toBeUndefined()
     } finally {
       fs.rmSync(workDir, { recursive: true, force: true })
     }

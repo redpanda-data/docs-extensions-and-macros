@@ -1,0 +1,70 @@
+# Overlay that `doc-tools generate metrics-docs` applies on top of the
+# quickstart compose file (through COMPOSE_FILE).
+#
+# It swaps each broker's bootstrap file for the quickstart one plus
+# metrics/bootstrap-extra.yml, so the features that register extra metric
+# families are on from the first boot. generate-cluster-docs.sh writes that
+# merged file and passes its path in METRICS_BOOTSTRAP_FILE.
+services:
+  redpanda-0:
+    environment:
+      # Stands in for cloud instance detection, which only works on a cloud VM.
+      # Any instance type Redpanda knows gives the redpanda_instance_* gauges.
+      REDPANDA_INSTANCE_TYPE: m6id.4xlarge
+      # Where to fetch object storage credentials (see imds-mock.py).
+      RP_SI_CREDS_API_ADDRESS: imds-mock:8080
+    volumes:
+      - ${METRICS_BOOTSTRAP_FILE:?set by generate-cluster-docs.sh}:/etc/redpanda/.bootstrap.yaml
+  redpanda-1:
+    environment:
+      # Stands in for cloud instance detection, which only works on a cloud VM.
+      # Any instance type Redpanda knows gives the redpanda_instance_* gauges.
+      REDPANDA_INSTANCE_TYPE: m6id.4xlarge
+      # Where to fetch object storage credentials (see imds-mock.py).
+      RP_SI_CREDS_API_ADDRESS: imds-mock:8080
+    volumes:
+      - ${METRICS_BOOTSTRAP_FILE:?set by generate-cluster-docs.sh}:/etc/redpanda/.bootstrap.yaml
+  redpanda-2:
+    environment:
+      # Stands in for cloud instance detection, which only works on a cloud VM.
+      # Any instance type Redpanda knows gives the redpanda_instance_* gauges.
+      REDPANDA_INSTANCE_TYPE: m6id.4xlarge
+      # Where to fetch object storage credentials (see imds-mock.py).
+      RP_SI_CREDS_API_ADDRESS: imds-mock:8080
+    volumes:
+      - ${METRICS_BOOTSTRAP_FILE:?set by generate-cluster-docs.sh}:/etc/redpanda/.bootstrap.yaml
+  # A one-broker cluster for the metrics cluster to shadow. Shadow link metrics
+  # exist only while a link to another cluster is running.
+  shadow-source:
+    image: docker.redpanda.com/redpandadata/${REDPANDA_DOCKER_REPO:-redpanda}:${REDPANDA_VERSION:-latest}
+    container_name: shadow-source
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092
+      - --advertise-kafka-addr internal://shadow-source:9092
+      - --schema-registry-addr internal://0.0.0.0:8081
+      - --rpc-addr shadow-source:33145
+      - --advertise-rpc-addr shadow-source:33145
+      - --mode dev-container
+      - --smp 1
+      - --default-log-level=info
+    networks:
+      - redpanda_network
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "info"]
+      interval: 10s
+      timeout: 15s
+      retries: 10
+  # Hands out object storage credentials the way a cloud metadata service does.
+  imds-mock:
+    image: python:3.12-alpine
+    container_name: imds-mock
+    command: ["python", "/imds-mock.py"]
+    environment:
+      MOCK_ACCESS_KEY: rustfs
+      MOCK_SECRET_KEY: redpandaTieredStorage7
+    volumes:
+      - ../metrics/imds-mock.py:/imds-mock.py:ro
+    networks:
+      - redpanda_network
