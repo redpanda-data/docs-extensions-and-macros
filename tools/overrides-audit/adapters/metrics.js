@@ -186,6 +186,13 @@ function classifyMetricDescription (name, override, family) {
       }
     }
   }
+  if (scoped > 0 && result.class === CLASSES.UPSTREAMABLE) {
+    // The override has to stay for its audience paragraphs, which is the
+    // shared classifier's SPLIT case. That class also keeps triage from
+    // retiring the whole override.
+    result.class = CLASSES.KEEP_UNTIL_UPSTREAMED
+    result.note = `SPLIT: ${result.note}`
+  }
   result.note += audienceNote
   if (marked) {
     // The marker is out of date: there is a plain help string to rewrite now.

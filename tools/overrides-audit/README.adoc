@@ -228,7 +228,7 @@ JSON (default): `{ surface, overrides_file, extracted_file, manifest, summary, c
 
 |`description`
 |`KEEP_UNTIL_UPSTREAMED`
-|Differs and has docs-only markup (the SPLIT case, note starting `SPLIT:`): `upstream_candidate_text` is the stripped text. Also a row whose note names another metric: one registration can export several families (`redpanda_x` and `vectorized_x`, or one family per group), which share one help string. When their overrides have the same text, the first row carries the candidate and lists the others in `shared_with`, and each other row has `same_source_as` and no candidate.
+|Differs and has docs-only markup, or has audience paragraphs that must stay in the override (the SPLIT case, note starting `SPLIT:`): `upstream_candidate_text` is the stripped text. Also a row whose note names another metric: one registration can export several families (`redpanda_x` and `vectorized_x`, or one family per group), which share one help string. When their overrides have the same text, the first row carries the candidate and lists the others in `shared_with`, and each other row has `same_source_as` and no candidate.
 
 |`description`
 |`KEEP`
