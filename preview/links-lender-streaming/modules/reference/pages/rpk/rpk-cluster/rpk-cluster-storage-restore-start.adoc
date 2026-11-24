@@ -1,0 +1,16 @@
+= rpk cluster storage restore start
+:description: Stand-in for a generated rpk page, holding the same-component cases of the rpk docs links test.
+
+The same-component cases of xref:preview:ROOT:rpk-links-test.adoc[], written as `doc-tools generate rpk-docs` writes them on a page in the `streaming` component, where a `module:page` xref resolves.
+
+[[same-component-url]]
+Same-component URL, which must open the Whole Cluster Restore page: xref:manage:disaster-recovery/whole-cluster-restore.adoc[]
+
+[[versioned-url]]
+URL naming the latest version (26.2), which must open the same page: xref:manage:disaster-recovery/whole-cluster-restore.adoc[]
+
+[[trailing-period]]
+The real `rpk cluster storage restore start` help sentence, which must end with a period after the link:
+
+Use `--cluster-uuid-override` if you want to specify an explicit cluster UUID
+to restore from. For more information, visit xref:manage:disaster-recovery/whole-cluster-restore.adoc[].

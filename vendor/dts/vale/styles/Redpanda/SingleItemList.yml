@@ -1,0 +1,78 @@
+# Checks: single-item lists, including lists split by an unattached block
+extends: script
+message: "This list has one item. If it belongs to a list next to it, attach the block between them with +; otherwise write it as a sentence."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#lists
+level: warning
+scope: raw
+script: |
+  text := import("text")
+  matches := []
+  pos := 0
+  skip := ""
+  marker := ""
+  count := 0
+  first := 0
+  firstlen := 0
+  blank := false
+  attached := false
+  close := func() {
+    if marker != "" && count == 1 {
+      matches = append(matches, {begin: first, end: first + firstlen})
+    }
+    marker = ""
+    count = 0
+  }
+  for l in text.split(scope, "\n") {
+    t := text.trim_space(l)
+    if skip != "" {
+      if t == skip { skip = "" }
+      pos += len(l) + 1
+      continue
+    }
+    if text.re_match(`^(-{2}|-{4,}|\.{4,}|/{4,}|\+{4,}|_{4,}|\*{4,}|={4,}|\x60{3}.*)$`, t) {
+      closing := t
+      if text.has_prefix(t, "```") { closing = "```" }
+      if attached {
+        // A block attached to an item with + belongs to that item.
+        skip = closing
+      } else {
+        close()
+        if !text.re_match(`^(={4,}|-{2})$`, t) { skip = closing }
+      }
+      attached = false
+      blank = false
+      pos += len(l) + 1
+      continue
+    }
+    m := text.re_find(`^(\*+|\.+|-)\s+\S`, l)
+    if m != undefined {
+      mk := m[0][1].text
+      if marker == "" {
+        marker = mk
+        count = 1
+        first = pos
+        firstlen = len(l)
+        if text.contains(l, "{learning-objective-") { count = 2 }
+      } else if mk == marker {
+        count += 1
+      }
+    } else if t == "+" {
+      attached = true
+      pos += len(l) + 1
+      continue
+    } else if text.re_match(`^=+ \S`, l) {
+      close()
+    } else if text.re_match(`^(ifn?def|endif|ifeval)::|^//|^\[.*\]$|^include::|^\.[^.\s]`, t) {
+      // Neutral: conditionals, comments, attribute lines, includes and
+      // block titles (.Title) neither continue nor end a list, and keep a
+      // pending + attachment.
+      pos += len(l) + 1
+      continue
+    } else if t != "" && blank && !attached {
+      close()
+    }
+    blank = t == ""
+    attached = false
+    pos += len(l) + 1
+  }
+  close()

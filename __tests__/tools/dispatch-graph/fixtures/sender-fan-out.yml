@@ -1,0 +1,19 @@
+# The shape of docs-team-standards' slack-review-scan.yml: the target repo is
+# read from a message at run time, so only the owner and the event type are
+# literal. The second dispatch has no literal owner and stays unresolved.
+name: Fan out
+on:
+  schedule:
+    - cron: '0 9 * * *'
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          REPO=$(cut -d/ -f3 <<< "$REF")
+          if gh api "repos/redpanda-data/$REPO/dispatches" \
+               -f event_type=fan-out-request \
+               -F "client_payload[pr]=$NUM"; then
+            echo ok
+          fi
+          gh api "repos/$FULL/dispatches" -f event_type=other-request

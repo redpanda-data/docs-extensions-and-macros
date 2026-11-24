@@ -10,6 +10,7 @@ const { raiseListenerLimit } = require('./util/raise-listener-limit')
 const { createCategoryMap, normalizeCategories } = require('../extension-utils/categories')
 const { getTaxonomy } = require('../extension-utils/taxonomy')
 const { checkTaxonomy, createTaxonomyReport, logTaxonomyReport } = require('../extension-utils/taxonomy-categories')
+const isPastEol = require('./util/is-past-eol')
 
 module.exports.register = function ({ config }) {
   raiseListenerLimit(this)
@@ -25,6 +26,9 @@ module.exports.register = function ({ config }) {
     // docs repo has it; null keeps the valid-categories-only behavior.
     const taxonomy = getTaxonomy({ contentCatalog, siteCatalog, logger });
     const report = createTaxonomyReport();
+    // Pages in end-of-life versions are frozen and never get their metadata
+    // updated, so their findings are logged at debug level instead.
+    const eolReport = createTaxonomyReport();
     const pages = contentCatalog.findBy({ family: 'page' });
     pages.forEach((page) => {
       let pageCategories = page.asciidoc.attributes['page-categories'];
@@ -36,12 +40,16 @@ module.exports.register = function ({ config }) {
       }
       let pageCategoryList = pageCategories.split(',').map(c => c.trim());
       const pageInfo = page.asciidoc.attributes['page-relative-src-path'];
-      if (taxonomy) pageCategoryList = checkTaxonomy(pageCategoryList, { taxonomy, categoryMap, page, report });
+      const pageReport = isPastEol(page.asciidoc.attributes) ? eolReport : report;
+      if (taxonomy) pageCategoryList = checkTaxonomy(pageCategoryList, { taxonomy, categoryMap, page, report: pageReport });
       const validatedCategories = validateCategories(pageCategoryList, pageInfo, categoryMap, logger);
       page.asciidoc.attributes['page-categories'] = validatedCategories
       processEnvironmentAttributes(page, logger);
     })
-    if (taxonomy) logTaxonomyReport(report, logger);
+    if (taxonomy) {
+      logTaxonomyReport(report, logger);
+      logTaxonomyReport(eolReport, { warn: (message) => logger.debug(`${message} [end-of-life versions]`) });
+    }
   })
 }
 

@@ -1,0 +1,11 @@
+# Checks: directional references such as 'described above' and 'the diagram below'
+extends: existence
+message: "Don't use directional references ('%s'). Name the section or link to it."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#no-directional-references
+level: warning
+ignorecase: true
+tokens:
+  - '\b(?:see|shown|described|mentioned|listed|explained|noted)\s+(?:above|below|earlier|previously)\b'
+  - '\bthe\s+(?:above|preceding)\s+(?:section|step|example|command|table|list|output|configuration|procedure|code)\b'
+  - '\b(?:as|like)\s+(?:above|below)\b'
+  - '\bthe\s+(?:diagram|figure|image|screenshot|table|example|command|output|code|list|steps?)\s+(?:above|below)\b'

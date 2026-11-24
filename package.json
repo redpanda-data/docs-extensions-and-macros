@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "5.56.0",
+  "version": "5.68.0",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -26,6 +26,7 @@
     "test": "jest",
     "test:unit": "jest --config jest.unit.config.js",
     "test:e2e": "jest __tests__/e2e/",
+    "test:catalog-e2e": "node __tests__/e2e/component-catalog/run.js",
     "test:mcp": "jest __tests__/mcp/",
     "test:mcp:integration": "jest __tests__/mcp/integration.test.js",
     "test:mcp:contract": "jest __tests__/mcp/cli-contract.test.js",
@@ -92,9 +93,18 @@
     "./macros/badge": "./macros/badge.js",
     "./macros/enterprise": "./macros/enterprise.js",
     "./macros/prop": "./macros/prop.js",
+    "./macros/rpkval": "./macros/rpkval.js",
+    "./macros/connectval": "./macros/connectval.js",
+    "./macros/rpkcmd": "./macros/rpkcmd.js",
+    "./macros/metric": "./macros/metric.js",
+    "./macros/metricval": "./macros/metricval.js",
+    "./macros/connect": "./macros/connect.js",
+    "./macros/blobl": "./macros/blobl.js",
+    "./macros/bloblval": "./macros/bloblval.js",
     "./extensions/property-page-index": "./extensions/property-page-index.js",
     "./extensions/render-property-descriptions": "./extensions/render-property-descriptions.js",
     "./extensions/kapa-source-groups": "./extensions/kapa-source-groups.js",
+    "./extensions/xref-index": "./extensions/xref-index.js",
     "./docs-data/kapa-source-groups.json": "./docs-data/kapa-source-groups.json",
     "./asciidoc-extensions/add-solution-file-provenance": {
       "require": "./asciidoc-extensions/add-solution-file-provenance.js"
@@ -105,7 +115,8 @@
     "./extension-utils/categories": "./extension-utils/categories.js",
     "./docs-data/solutions-relationships.schema.json": "./docs-data/solutions-relationships.schema.json",
     "./macros/iceberg-explorer": "./macros/iceberg-explorer.js",
-    "./macros/iceberg-explorer.js": "./macros/iceberg-explorer.js"
+    "./macros/iceberg-explorer.js": "./macros/iceberg-explorer.js",
+    "./vendor/dts/manifest.json": "./vendor/dts/manifest.json"
   },
   "files": [
     "extensions",
@@ -118,7 +129,8 @@
     "docker-compose",
     "mcp",
     "docs-data/*.schema.json",
-    "docs-data/kapa-source-groups.json"
+    "docs-data/kapa-source-groups.json",
+    "vendor/dts"
   ],
   "license": "ISC",
   "engines": {
@@ -131,6 +143,7 @@
   "dependencies": {
     "@asciidoctor/tabs": "^1.0.0-beta.6",
     "@bufbuild/buf": "^1.28.1",
+    "@mixmark-io/domino": "^2.2.0",
     "@modelcontextprotocol/sdk": "^1.0.4",
     "@octokit/core": "^6.1.2",
     "@octokit/plugin-retry": "^7.1.1",

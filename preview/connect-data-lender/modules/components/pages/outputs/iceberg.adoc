@@ -1,0 +1,172 @@
+= iceberg
+// Stand-in page for the showcase build: the headings the generated page has,
+// so connect: and blobl: links land on real anchors. Generated from
+// connect-4.114.0.json in this component.
+
+The iceberg output.
+
+== Fields
+
+=== `batching`
+
+=== `batching.byte_size`
+
+=== `batching.check`
+
+=== `batching.count`
+
+=== `batching.period`
+
+=== `batching.processors[]`
+
+=== `case_sensitive_columns`
+
+=== `catalog`
+
+=== `catalog.auth`
+
+=== `catalog.auth.aws_sigv4`
+
+=== `catalog.auth.aws_sigv4.credentials`
+
+=== `catalog.auth.aws_sigv4.credentials.from_ec2_role`
+
+=== `catalog.auth.aws_sigv4.credentials.id`
+
+=== `catalog.auth.aws_sigv4.credentials.profile`
+
+=== `catalog.auth.aws_sigv4.credentials.role`
+
+=== `catalog.auth.aws_sigv4.credentials.role_external_id`
+
+=== `catalog.auth.aws_sigv4.credentials.secret`
+
+=== `catalog.auth.aws_sigv4.credentials.token`
+
+=== `catalog.auth.aws_sigv4.endpoint`
+
+=== `catalog.auth.aws_sigv4.region`
+
+=== `catalog.auth.aws_sigv4.service`
+
+=== `catalog.auth.aws_sigv4.tcp`
+
+=== `catalog.auth.aws_sigv4.tcp.connect_timeout`
+
+=== `catalog.auth.aws_sigv4.tcp.keep_alive`
+
+=== `catalog.auth.aws_sigv4.tcp.keep_alive.count`
+
+=== `catalog.auth.aws_sigv4.tcp.keep_alive.idle`
+
+=== `catalog.auth.aws_sigv4.tcp.keep_alive.interval`
+
+=== `catalog.auth.aws_sigv4.tcp.tcp_user_timeout`
+
+=== `catalog.auth.bearer`
+
+=== `catalog.auth.oauth2`
+
+=== `catalog.auth.oauth2.client_id`
+
+=== `catalog.auth.oauth2.client_secret`
+
+=== `catalog.auth.oauth2.scope`
+
+=== `catalog.auth.oauth2.server_uri`
+
+=== `catalog.headers`
+
+=== `catalog.tls_skip_verify`
+
+=== `catalog.url`
+
+=== `catalog.warehouse`
+
+=== `commit`
+
+=== `commit.cleanup_on_failure`
+
+=== `commit.manifest_merge_enabled`
+
+=== `commit.max_retries`
+
+=== `commit.max_snapshot_age`
+
+=== `identifier_fields[]`
+
+=== `max_in_flight`
+
+=== `merge_strategy`
+
+=== `namespace`
+
+=== `parquet`
+
+=== `parquet.compression`
+
+=== `parquet.string_encoding`
+
+=== `row_operation`
+
+=== `schema_evolution`
+
+=== `schema_evolution.enabled`
+
+=== `schema_evolution.new_column_type_mapping`
+
+=== `schema_evolution.partition_spec`
+
+=== `schema_evolution.require_schema_metadata`
+
+=== `schema_evolution.schema_metadata`
+
+=== `schema_evolution.table_location`
+
+=== `storage`
+
+=== `storage.aws_s3`
+
+=== `storage.aws_s3.bucket`
+
+=== `storage.aws_s3.credentials`
+
+=== `storage.aws_s3.credentials.id`
+
+=== `storage.aws_s3.credentials.secret`
+
+=== `storage.aws_s3.credentials.token`
+
+=== `storage.aws_s3.endpoint`
+
+=== `storage.aws_s3.force_path_style_urls`
+
+=== `storage.aws_s3.region`
+
+=== `storage.azure_blob_storage`
+
+=== `storage.azure_blob_storage.container`
+
+=== `storage.azure_blob_storage.endpoint`
+
+=== `storage.azure_blob_storage.storage_access_key`
+
+=== `storage.azure_blob_storage.storage_account`
+
+=== `storage.azure_blob_storage.storage_connection_string`
+
+=== `storage.azure_blob_storage.storage_sas_token`
+
+=== `storage.gcp_cloud_storage`
+
+=== `storage.gcp_cloud_storage.bucket`
+
+=== `storage.gcp_cloud_storage.credentials_file`
+
+=== `storage.gcp_cloud_storage.credentials_json`
+
+=== `storage.gcp_cloud_storage.credentials_type`
+
+=== `storage.gcp_cloud_storage.endpoint`
+
+=== `table`

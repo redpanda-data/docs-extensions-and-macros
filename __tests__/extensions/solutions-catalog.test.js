@@ -106,15 +106,25 @@ const OVERVIEW_HTML = (title, extra = '') =>
 const STEP_HTML = (title, verify = '<h2 id="verify">Verify the result</h2><p>rpk topic list</p>') =>
   `<article class="doc"><h1>${title}</h1><p>Do the thing.</p>${verify}</article>`
 
-// The complete production section as Asciidoctor renders it on the last step.
+// The old home of the production topics: an h2 "Production considerations"
+// with one h3 per topic, at the end of the last step. Now only a warning.
 const PRODUCTION_TOPICS = ['Brokers and replication', 'Security', 'Partitions', 'Consumer scaling', 'Data retention']
+const prodId = (t) => `prod-${t.toLowerCase().replace(/\W+/g, '-')}`
 const PRODUCTION_SECTION = (topics = PRODUCTION_TOPICS) =>
   '<div class="sect1"><h2 id="production-considerations">Production considerations</h2><div class="sectionbody">' +
   '<div class="paragraph"><p>This solution runs on a single broker.</p></div>' +
-  topics.map((t) => `<div class="sect2"><h3 id="prod-${t.toLowerCase().replace(/\W+/g, '-')}">${t}</h3><div class="paragraph"><p>Detail.</p></div></div>`).join('') +
+  topics.map((t) => `<div class="sect2"><h3 id="${prodId(t)}">${t}</h3><div class="paragraph"><p>Detail.</p></div></div>`).join('') +
   '</div></div>'
-const LAST_STEP_HTML = (title, production = PRODUCTION_SECTION()) =>
-  `<article class="doc"><h1>${title}</h1><p>Do the thing.</p><h2 id="verify">Verify the result</h2><p>rpk topic list</p>${production}</article>`
+const LAST_STEP_HTML = (title, extra = '') =>
+  `<article class="doc"><h1>${title}</h1><p>Do the thing.</p><h2 id="verify">Verify the result</h2><p>rpk topic list</p>${extra}` +
+  '<p><a href="../take-to-production/" class="xref page">Take it to production</a> lists what to change.</p></article>'
+// pages/take-to-production.adoc as Asciidoctor renders it: an intro, then
+// partial$production/_all.adoc included with leveloffset=-1, so every
+// [#prod-<topic>] === Topic is an h2 section.
+const PRODUCTION_PAGE_HTML = (topics = PRODUCTION_TOPICS) =>
+  '<article class="doc"><h1>Take it to production</h1><div class="paragraph"><p>The local stack runs on a single broker.</p></div>' +
+  topics.map((t) => `<div class="sect1"><h2 id="${prodId(t)}">${t}</h2><div class="sectionbody"><div class="paragraph"><p>Detail.</p></div></div></div>`).join('') +
+  '</article>'
 
 const OVERVIEW_ATTRS = {
   'page-layout': 'solution',
@@ -140,7 +150,7 @@ const OVERVIEW_ATTRS = {
  * overview shows in full, and verification.json as its only attachment.
  * `mutate` can edit the overview attrs / html / steps before pages are built.
  */
-function makeSolution (id, { attrs = {}, steps, overviewHtml, stepHtml, title, verification = JSON.stringify(MANIFEST), examples = ['docker-compose.yml'], attachments = [] } = {}) {
+function makeSolution (id, { attrs = {}, steps, overviewHtml, stepHtml, productionHtml = PRODUCTION_PAGE_HTML(), production = true, title, verification = JSON.stringify(MANIFEST), examples = ['docker-compose.yml'], attachments = [] } = {}) {
   const overviewAttrs = { ...OVERVIEW_ATTRS, ...attrs }
   const stepIds = steps || collect.parseList(overviewAttrs['page-solution-steps'])
   const overview = makePage({
@@ -157,8 +167,16 @@ function makeSolution (id, { attrs = {}, steps, overviewHtml, stepHtml, title, v
     attrs: { 'page-layout': 'solution-step', description: `Step ${stepId}`, },
     html: (stepHtml && stepHtml[stepId]) || (i === stepIds.length - 1 ? LAST_STEP_HTML(`Step ${stepId}`) : STEP_HTML(`Step ${stepId}`)),
   }))
+  // The Take it to production page, last so pages.slice(1, -1) are the steps.
+  const productionPage = production && makePage({
+    module: id,
+    relative: 'take-to-production.adoc',
+    title: 'Take it to production',
+    attrs: { 'page-layout': 'solution-production', description: 'What to change before production.' },
+    html: productionHtml,
+  })
   return {
-    pages: [overview, ...stepPages],
+    pages: [overview, ...stepPages, ...(productionPage ? [productionPage] : [])],
     attachments: [
       ...attachments.map((relative) => makeAttachment({ module: id, relative })),
       ...(verification === null ? [] : [makeAttachment({ module: id, relative: 'verification.json', text: verification })]),
@@ -317,7 +335,7 @@ describe('solutions-catalog: happy path', () => {
   beforeAll(async () => {
     result = await run()
     overview = result.solutions[0].pages[0]
-    steps = result.solutions[0].pages.slice(1)
+    steps = result.solutions[0].pages.slice(1, -1)
     doc = result.docs[0]
   })
 
@@ -398,7 +416,8 @@ describe('solutions-catalog: happy path', () => {
     expect(attr(byId['build-leaderboard'], 'page-solution-step-index')).toBe('2')
     expect(attr(byId['verify-end-to-end'], 'page-solution-step-index')).toBe('3')
     expect(attr(byId['verify-end-to-end'], 'page-solution-prev-url')).toBe('/solutions/leaderboard/build-leaderboard/')
-    expect(attr(byId['verify-end-to-end'], 'page-solution-next-url')).toBeUndefined()
+    // The last step's next is the Take it to production page.
+    expect(attr(byId['verify-end-to-end'], 'page-solution-next-url')).toBe('/solutions/leaderboard/take-to-production/')
     expect(json(byId['verify-end-to-end'], 'page-solution-nav')).toEqual(nav)
   })
 
@@ -627,7 +646,7 @@ describe('solutions-catalog: metadata fatals (documentsConverted)', () => {
     ['deprecated without superseded-by', { 'page-solution-status': 'deprecated' }, /page-solution-superseded-by is required when status is deprecated/],
     ['overview layout', { 'page-layout': 'default' }, /pages\/index\.adoc must set :page-layout: solution/],
     ['related doc not fully qualified', { 'page-solution-related-docs': 'consumer-offsets.adoc' }, /must be a fully qualified page ID/],
-    ['related doc unresolved', { 'page-solution-related-docs': 'streaming:develop:nope.adoc' }, /does not resolve to a page/],
+    ['related doc in the component unresolved', { 'page-solution-related-docs': 'solutions:ROOT:nope.adoc' }, /does not resolve to a page/],
     ['related solution unknown', { 'page-solution-related-solutions': 'ghost' }, /page-solution-related-solutions entry "ghost" is not a solution/],
     ['related solution is itself', { 'page-solution-related-solutions': 'leaderboard' }, /must not list the solution itself/],
     ['steps missing', { 'page-solution-steps': undefined }, /page-solution-steps is required/],
@@ -641,6 +660,14 @@ describe('solutions-catalog: metadata fatals (documentsConverted)', () => {
     // undefined attrs must actually be absent, not the string "undefined"
     for (const [k, v] of Object.entries(attrs)) if (v === undefined) delete solution.pages[0].asciidoc.attributes[k]
     await expect(run({ solutions: [solution] })).rejects.toThrow(rx)
+  })
+
+  test('an unresolved Product Docs related doc warns by default and is fatal with strict', async () => {
+    const solution = () => makeSolution('leaderboard', { attrs: { 'page-solution-related-docs': 'streaming:develop:nope.adoc' } })
+    const result = await run({ solutions: [solution()] })
+    expect(result.logger.warn.mock.calls.map((c) => c[0]).join('\n')).toMatch(/leaderboard: page-solution-related-docs entry "streaming:develop:nope\.adoc" does not resolve to a page/)
+    await expect(run({ solutions: [solution()], config: { strict: true } })).rejects.toThrow(/streaming:develop:nope\.adoc" does not resolve to a page/)
+    await expect(run({ solutions: [solution()], env: { SOLUTIONS_STRICT: 'true' } })).rejects.toThrow(/does not resolve to a page/)
   })
 
   test('step layout must be solution-step', async () => {
@@ -762,40 +789,61 @@ describe('solutions-catalog: section checks on converted HTML', () => {
   })
 })
 
-describe('solutions-catalog: production considerations', () => {
+describe('solutions-catalog: Take it to production', () => {
   const warningsOf = (result) => result.logger.warn.mock.calls.map((c) => c[0]).join('\n')
-  const NOTE = (link = '<a href="../verify-end-to-end/#prod-security" class="xref page">Production considerations: security</a>') =>
+  const NOTE = (link = '<a href="../take-to-production/#prod-security" class="xref page">Take it to production: security</a>') =>
     '<h2 id="in-production">In production</h2><div class="openblock production-note"><div class="title">In production</div>' +
     `<div class="content"><div class="paragraph"><p>Turn on SASL. For the full picture, see ${link}.</p></div></div></div>`
 
-  test('the overview no longer needs the section', async () => {
+  test('the overview and the last step no longer need a Production considerations section', async () => {
     await expect(run()).resolves.toBeTruthy()
     expect(validate.REQUIRED_OVERVIEW_H2).toEqual(['architecture', 'prerequisites'])
   })
 
-  test('a published last step without the section is fatal', async () => {
-    const solution = makeSolution('leaderboard', { stepHtml: { 'verify-end-to-end': STEP_HTML('v') } })
-    await expect(run({ solutions: [solution] })).rejects.toThrow(/last step verify-end-to-end needs an h2 "Production considerations"/)
+  test('the production page is not a step and needs no place in page-solution-steps', async () => {
+    const result = await run()
+    const record = json(result.solutions[0].pages[0], 'page-solution')
+    expect(record.steps.map((s) => s.id)).toEqual(['start-environment', 'build-leaderboard', 'verify-end-to-end'])
+    expect(record.production).toEqual({ title: 'Take it to production', url: '/solutions/leaderboard/take-to-production/' })
+    const collected = collect.collectSolutions(result.catalog)
+    expect(collected.solutions[0].production.src.relative).toBe('take-to-production.adoc')
+    expect(collected.solutions[0].steps.map((s) => s.id)).not.toContain('take-to-production')
   })
 
-  test('the last step follows page-solution-steps, not the alphabet', async () => {
-    // verify-end-to-end sorts last alphabetically but is listed first here.
+  test('listing the production page in page-solution-steps is fatal', async () => {
     const solution = makeSolution('leaderboard', {
-      attrs: { 'page-solution-steps': 'verify-end-to-end, build-leaderboard, start-environment' },
-      steps: ['verify-end-to-end', 'build-leaderboard', 'start-environment'],
+      attrs: { 'page-solution-steps': 'start-environment, build-leaderboard, verify-end-to-end, take-to-production' },
+      steps: ['start-environment', 'build-leaderboard', 'verify-end-to-end'],
     })
-    await expect(run({ solutions: [solution] })).resolves.toBeTruthy()
-    const misplaced = makeSolution('leaderboard', {
-      attrs: { 'page-solution-steps': 'verify-end-to-end, build-leaderboard, start-environment' },
-      steps: ['verify-end-to-end', 'build-leaderboard', 'start-environment'],
-      stepHtml: { 'verify-end-to-end': LAST_STEP_HTML('v'), 'start-environment': STEP_HTML('s') },
-    })
-    await expect(run({ solutions: [misplaced] })).rejects.toThrow(/last step start-environment needs an h2/)
+    await expect(run({ solutions: [solution] })).rejects.toThrow(/page-solution-steps must not list take-to-production/)
   })
 
-  test('fewer than five topics is fatal once published', async () => {
-    const solution = makeSolution('leaderboard', { stepHtml: { 'verify-end-to-end': LAST_STEP_HTML('v', PRODUCTION_SECTION(PRODUCTION_TOPICS.slice(0, 4))) } })
-    await expect(run({ solutions: [solution] })).rejects.toThrow(/"Production considerations" has 4 topics \(h3\); it needs at least 5/)
+  test('a published solution without the production page is fatal', async () => {
+    const solution = makeSolution('leaderboard', { production: false })
+    await expect(run({ solutions: [solution] })).rejects.toThrow(/pages\/take-to-production\.adoc is missing/)
+  })
+
+  test('the production page must set its layout', async () => {
+    const solution = makeSolution('leaderboard')
+    solution.pages[solution.pages.length - 1].asciidoc.attributes['page-layout'] = 'solution-step'
+    await expect(run({ solutions: [solution] })).rejects.toThrow(/take-to-production\.adoc must set :page-layout: solution-production \(found "solution-step"\)/)
+  })
+
+  test('a page with the production layout under another name is fatal', async () => {
+    const solution = makeSolution('leaderboard', { production: false })
+    solution.pages.push(makePage({ module: 'leaderboard', relative: 'production.adoc', attrs: { 'page-layout': 'solution-production' }, html: PRODUCTION_PAGE_HTML() }))
+    await expect(run({ solutions: [solution] })).rejects.toThrow(/pages\/production\.adoc sets :page-layout: solution-production; the production page must be pages\/take-to-production\.adoc/)
+  })
+
+  test('fewer than five prod- topics is fatal once published', async () => {
+    const solution = makeSolution('leaderboard', { productionHtml: PRODUCTION_PAGE_HTML(PRODUCTION_TOPICS.slice(0, 4)) })
+    await expect(run({ solutions: [solution] })).rejects.toThrow(/take-to-production\.adoc has 4 production topics \(h2 with an id starting prod-\); it needs at least 5/)
+  })
+
+  test('productionPageTopics counts h2 sections whose id starts with prod-', () => {
+    const html = '<h2 id="prod-a">A</h2><div><h2 id="prod-b">B</h2></div><h2 id="related">Related</h2><h3 id="prod-c">not a topic</h3>'
+    expect(validate.productionPageTopics(html)).toEqual(['a', 'b'])
+    expect(validate.productionPageTopics('<h2>Verify</h2>')).toEqual([])
   })
 
   test('without the .sect1 wrapper the h3s up to the next h2 count', () => {
@@ -807,11 +855,12 @@ describe('solutions-catalog: production considerations', () => {
   test('a draft gets warnings, and the build goes on', async () => {
     const draft = makeSolution('sandbox', {
       attrs: { 'page-solution-status': 'draft' },
-      stepHtml: { 'verify-end-to-end': STEP_HTML('v'), 'build-leaderboard': STEP_HTML('b', NOTE('nowhere')) },
+      production: false,
+      stepHtml: { 'build-leaderboard': STEP_HTML('b', NOTE('nowhere')) },
     })
     const result = await run({ solutions: [makeSolution('live'), draft], config: { include_drafts: true } })
-    expect(warningsOf(result)).toMatch(/sandbox: last step verify-end-to-end needs an h2 "Production considerations"/)
-    expect(warningsOf(result)).toMatch(/sandbox: build-leaderboard\.adoc has 1 \[\.production-note\] block with no link/)
+    expect(warningsOf(result)).toMatch(/sandbox: pages\/take-to-production\.adoc is missing/)
+    expect(warningsOf(result)).toMatch(/sandbox: build-leaderboard\.adoc has 1 \[\.production-note\] block with no link to its topic on take-to-production\.adoc/)
   })
 
   test('a production note must link to its topic', async () => {
@@ -821,14 +870,66 @@ describe('solutions-catalog: production considerations', () => {
     await expect(run({ solutions: [unlinked] })).rejects.toThrow(/build-leaderboard\.adoc has 1 \[\.production-note\] block with no link/)
   })
 
-  test('the section on the overview or an earlier step is a warning pointing at the last step', async () => {
+  test('an h2 Production considerations anywhere is a warning pointing at the production page', async () => {
     const solution = makeSolution('leaderboard', {
       overviewHtml: OVERVIEW_HTML('x', PRODUCTION_SECTION()),
-      stepHtml: { 'build-leaderboard': STEP_HTML('b') + PRODUCTION_SECTION() },
+      stepHtml: {
+        'build-leaderboard': STEP_HTML('b') + PRODUCTION_SECTION(),
+        'verify-end-to-end': LAST_STEP_HTML('v', PRODUCTION_SECTION()),
+      },
+      productionHtml: PRODUCTION_PAGE_HTML().replace('</article>', PRODUCTION_SECTION() + '</article>'),
     })
     const result = await run({ solutions: [solution] })
-    expect(warningsOf(result)).toMatch(/leaderboard: the overview has an h2 "Production considerations"; it belongs at the end of the last step \(verify-end-to-end\)/)
-    expect(warningsOf(result)).toMatch(/leaderboard: step build-leaderboard has an h2 "Production considerations"; only the last step \(verify-end-to-end\)/)
+    for (const pageId of ['index', 'build-leaderboard', 'verify-end-to-end', 'take-to-production']) {
+      expect(warningsOf(result)).toContain(`leaderboard: ${pageId}.adoc has an h2 "Production considerations"; the production topics belong on take-to-production.adoc, as h2 sections`)
+    }
+  })
+
+  test('the production page gets the solution attributes, and sits after the last step', async () => {
+    const result = await run()
+    const pages = result.solutions[0].pages
+    const production = pages[pages.length - 1]
+    const last = pages[pages.length - 2]
+    expect(json(production, 'page-solution').id).toBe('leaderboard')
+    expect(json(production, 'page-solution-nav')).toEqual(json(pages[0], 'page-solution-nav'))
+    expect(json(production, 'page-solution-nav').production).toEqual({ title: 'Take it to production', url: '/solutions/leaderboard/take-to-production/' })
+    expect(attr(production, 'page-solution-step-count')).toBe('3')
+    expect(attr(production, 'page-solution-id')).toBe('leaderboard')
+    expect(attr(production, 'page-solution-step-id')).toBeUndefined()
+    expect(attr(production, 'page-solution-step-index')).toBeUndefined()
+    expect(attr(production, 'page-solution-prev-url')).toBe('/solutions/leaderboard/verify-end-to-end/')
+    expect(attr(production, 'page-solution-prev-title')).toBe('Step verify-end-to-end')
+    expect(attr(production, 'page-solution-next-url')).toBeUndefined()
+    expect(attr(last, 'page-solution-next-url')).toBe('/solutions/leaderboard/take-to-production/')
+    expect(attr(last, 'page-solution-next-title')).toBe('Take it to production')
+    // It keeps its own description.
+    expect(attr(production, 'description')).toBe('What to change before production.')
+  })
+
+  test('without a production page the last step has no next and nav.production is null', async () => {
+    const draft = makeSolution('sandbox', { attrs: { 'page-solution-status': 'draft' }, production: false })
+    await run({ solutions: [makeSolution('live'), draft], config: { include_drafts: true } })
+    const last = draft.pages[draft.pages.length - 1]
+    expect(attr(last, 'page-solution-next-url')).toBeUndefined()
+    expect(json(last, 'page-solution').production).toBeNull()
+    expect(json(last, 'page-solution-nav').production).toBeNull()
+  })
+
+  test('the production page is a draft\'s page too, and is unpublished with it', async () => {
+    const draft = makeSolution('sandbox', { attrs: { 'page-solution-status': 'draft' } })
+    delete draft.pages[0].asciidoc.attributes['page-solution-related-docs']
+    await run({ solutions: [makeSolution('live'), draft] })
+    expect(draft.pages[draft.pages.length - 1].src.relative).toBe('take-to-production.adoc')
+    expect(draft.pages[draft.pages.length - 1].out).toBeUndefined()
+  })
+
+  test('take-to-production is a reserved module name', () => {
+    expect(collect.RESERVED_IDS).toContain('take-to-production')
+    expect(collect.LAYOUTS.production).toBe('solution-production')
+  })
+
+  test('the production page is an umbrella layout, so it never gets recommendations', () => {
+    expect(extension.UMBRELLA_LAYOUTS).toContain('solution-production')
   })
 })
 
@@ -1514,6 +1615,8 @@ describe('solutions-catalog: verification manifest', () => {
       kubernetes_environment: { kind: 'v0.32.0', kubernetes: 'v1.35.0', redpanda_operator: 'v26.2.3', redpanda: 'v26.2.2' },
       cloud_verify_script: 'PASS (9/9)',
       cloud_environment: 'not an object',
+      cloud_verify_skipped: ['compaction on game.leaderboard (Serverless rejects segment.ms on a topic)'],
+      kubernetes_verify_skipped: 'not a list',
       self_managed_verify_script: 'ignored',
     }
     const { verified } = collect.parseVerification({ contents: Buffer.from(JSON.stringify(manifest)) })
@@ -1523,7 +1626,7 @@ describe('solutions-catalog: verification manifest', () => {
         runAt: '2026-10-13T18:00:00Z',
         environment: { kind: 'v0.32.0', kubernetes: 'v1.35.0', redpanda_operator: 'v26.2.3', redpanda: 'v26.2.2' },
       },
-      cloud: { verifyScript: 'PASS (9/9)' },
+      cloud: { verifyScript: 'PASS (9/9)', skipped: ['compaction on game.leaderboard (Serverless rejects segment.ms on a topic)'] },
     })
   })
 
@@ -1643,6 +1746,7 @@ describe('solutions-catalog: agent companion', () => {
       'A total is a fact. See xref:streaming:develop:consume-data/consumer-offsets.adoc[offsets].',
     ].join('\n'),
     'verify-end-to-end': '= Verify\n:page-layout: solution-step\n\n== Why\n\nIt agrees.\n',
+    'take-to-production': '= Take it to production\n:page-layout: solution-production\n\nThe demo runs on one broker.\n\n[#prod-brokers]\n=== Brokers\n\nRun three brokers.\n',
   }
 
   function withSources (solution, id) {
@@ -1664,23 +1768,41 @@ describe('solutions-catalog: agent companion', () => {
   }
 
   const companionCall = (siteCatalog) => siteCatalog.addFile.mock.calls.map(([f]) => f).find((f) => f.out.path.endsWith('agent-companion.md'))
+  const partCalls = (siteCatalog) => siteCatalog.addFile.mock.calls.map(([f]) => f).filter((f) => /agent-companion-part-\d+\.md$/.test(f.out.path))
+  // The core file and its parts, in order: the whole companion an agent downloads.
+  const companionText = (siteCatalog) => [companionCall(siteCatalog), ...partCalls(siteCatalog)].map((f) => f.contents.toString('utf8')).join('\n')
 
   test('publishes solutions/<slug>/agent-companion.md from the pages and verify.sh, and links it from the record', async () => {
     const { solution, convert } = withSources(makeSolution('leaderboard'), 'leaderboard')
     const { siteCatalog, pages } = await run({ solutions: [solution], afterContentClassified: convert })
     const file = companionCall(siteCatalog)
     expect(file.out.path).toBe('solutions/leaderboard/agent-companion.md')
-    const md = file.contents.toString('utf8')
+    const md = companionText(siteCatalog)
     expect(md).toMatch(/^# Agent companion: Solution leaderboard\n/)
     expect(md).toContain('## Rules\n\nEvery rule must hold in the target system.\n\n1. Publish absolute state, never deltas. (from [Build the leaderboard](https://docs.redpanda.com/solutions/leaderboard/build-leaderboard/))')
     expect(md).toContain('- [ ] Rule 1: Find consumers that aggregate.')
     expect(md).toContain('[offsets](https://docs.redpanda.com/streaming/current/develop/consume-data/consumer-offsets/)')
     expect(md).toContain('1. The board agrees with the database.')
     expect(md).toContain('#### Start')
+    // Production gaps come from the Take it to production page.
+    expect(md).toContain('## Production gaps\n\nThe demo runs on one broker.\n\n### Brokers\n\nRun three brokers.')
 
     const overview = pages.find((p) => p.src.module === 'leaderboard' && p.src.relative === 'index.adoc')
     expect(json(overview, 'page-solution').agentCompanion).toBe('/solutions/leaderboard/agent-companion.md')
     expect(addedFile(siteCatalog, 'solutions.json').solutions[0].agentCompanion).toBe('/solutions/leaderboard/agent-companion.md')
+  })
+
+  test('publishes each part beside the core file, at the URL the core file lists', async () => {
+    const { solution, convert } = withSources(makeSolution('leaderboard'), 'leaderboard')
+    const { siteCatalog } = await run({ solutions: [solution], afterContentClassified: convert })
+    const parts = partCalls(siteCatalog)
+    expect(parts.map((f) => f.out.path)).toEqual(['solutions/leaderboard/agent-companion-part-1.md'])
+    const part = parts[0].contents.toString('utf8')
+    expect(part).toMatch(/^# Agent companion part 1 of 1: Solution leaderboard\n/)
+    expect(part).toContain('## Design contract')
+    const core = companionCall(siteCatalog).contents.toString('utf8')
+    expect(core).not.toContain('## Design contract')
+    expect(core).toContain('`curl -sf https://docs.redpanda.com/solutions/leaderboard/agent-companion-part-1.md`')
   })
 
   test('a draft that is not built gets no companion', async () => {
@@ -1740,7 +1862,7 @@ describe('solutions-catalog: agent companion', () => {
       afterContentClassified: prepared.convert,
       docs: [makeDoc({ title: 'Consumer <code>offsets</code> &amp; groups' })],
     })
-    const md = companionCall(siteCatalog).contents.toString('utf8')
+    const md = companionText(siteCatalog)
     expect(md).toContain('[Consumer offsets & groups](https://docs.redpanda.com/streaming/current/develop/consumer-offsets/)')
     expect(md).not.toContain('[consumer offsets]')
   })
@@ -1756,7 +1878,7 @@ describe('solutions-catalog: agent companion', () => {
       text: '// tag::summary[]\nKeep publishing absolute totals.\n// end::summary[]\n// tag::detail[]\nDetail.\n// end::detail[]\n',
     }))
     const { siteCatalog, logger } = await run({ solutions: [prepared.solution], afterContentClassified: prepared.convert })
-    const md = companionCall(siteCatalog).contents.toString('utf8')
+    const md = companionText(siteCatalog)
     expect(md).toContain('**In production:** Keep publishing absolute totals.')
     expect(md).not.toContain('Detail.')
     expect(logger.warn.mock.calls.map((c) => c[0]).join('\n')).toContain(
@@ -1764,9 +1886,22 @@ describe('solutions-catalog: agent companion', () => {
     )
   })
 
+  test('a subsection too big for one part is published whole, with a build warning', async () => {
+    const saved = SOURCES['build-leaderboard']
+    SOURCES['build-leaderboard'] = saved + ' ' + 'A long reason. '.repeat(2000)
+    let prepared
+    try { prepared = withSources(makeSolution('leaderboard'), 'leaderboard') } finally { SOURCES['build-leaderboard'] = saved }
+    const { siteCatalog, logger } = await run({ solutions: [prepared.solution], afterContentClassified: prepared.convert })
+    expect(logger.warn.mock.calls.map((c) => c[0]).join('\n')).toMatch(
+      /solutions-catalog: leaderboard: agent companion part 1: subsection "1\. Build the leaderboard" of Design contract is \d+ characters, over the 24000-character part budget/
+    )
+    expect(partCalls(siteCatalog)[0].contents.toString('utf8')).toContain('A long reason. '.repeat(2000).trim())
+  })
+
   test('pages that are no longer AsciiDoc at contentClassified yield no companion and no link', async () => {
     const { siteCatalog, pages } = await run()
     expect(companionCall(siteCatalog)).toBeUndefined()
+    expect(partCalls(siteCatalog)).toEqual([])
     const overview = pages.find((p) => p.src.module === 'leaderboard' && p.src.relative === 'index.adoc')
     expect(json(overview, 'page-solution')).not.toHaveProperty('agentCompanion')
   })
@@ -1816,10 +1951,12 @@ describe('solutions-catalog: pure helpers', () => {
   })
 
   test('resolveConfig accepts camelCase and snake_case, with defaults and env', () => {
-    expect(extension.resolveConfig({}, {})).toEqual({ maxRelated: 3, minScore: 0.6, networkChecks: 'auto', includeDrafts: false, draftDownloads: false, publicRepo: false, agentCompanion: true })
-    expect(extension.resolveConfig({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: 'true', publicRepo: true }, {})).toEqual({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: true, draftDownloads: false, publicRepo: true, agentCompanion: true })
-    expect(extension.resolveConfig({ max_related: '2', network_checks: 'false', public_repo: 'true' }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' })).toEqual({ maxRelated: 2, minScore: 0.6, networkChecks: false, includeDrafts: true, draftDownloads: false, publicRepo: true, agentCompanion: true })
+    expect(extension.resolveConfig({}, {})).toEqual({ maxRelated: 3, minScore: 0.6, networkChecks: 'auto', includeDrafts: false, draftDownloads: false, publicRepo: false, agentCompanion: true, strict: false })
+    expect(extension.resolveConfig({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: 'true', publicRepo: true }, {})).toEqual({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: true, draftDownloads: false, publicRepo: true, agentCompanion: true, strict: false })
+    expect(extension.resolveConfig({ max_related: '2', network_checks: 'false', public_repo: 'true' }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' })).toEqual({ maxRelated: 2, minScore: 0.6, networkChecks: false, includeDrafts: true, draftDownloads: false, publicRepo: true, agentCompanion: true, strict: false })
     expect(extension.resolveConfig({ include_drafts: false }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' }).includeDrafts).toBe(false)
+    expect(extension.resolveConfig({}, { SOLUTIONS_STRICT: 'true' }).strict).toBe(true)
+    expect(extension.resolveConfig({ strict: false }, { SOLUTIONS_STRICT: 'true' }).strict).toBe(false)
     expect(extension.resolveConfig({ max_related: 'lots' }, {}).maxRelated).toBe(3)
   })
 
@@ -2056,25 +2193,37 @@ describe('solutions-catalog: link fragments', () => {
   const warnings = (result) => result.logger.warn.mock.calls.map((c) => c[0]).join('\n')
 
   test('a published fragment that matches no id is fatal, with the site-style id as the fix', async () => {
-    await expect(run({ solutions: [withLink('../verify-end-to-end/#_production_considerations')] })).rejects.toThrow(
-      /build-leaderboard\.adoc links to \/solutions\/leaderboard\/verify-end-to-end\/#_production_considerations, but that page has no id "_production_considerations"; use #production-considerations/
+    await expect(run({ solutions: [withLink('../take-to-production/#_prod_security')] })).rejects.toThrow(
+      /build-leaderboard\.adoc links to \/solutions\/leaderboard\/take-to-production\/#_prod_security, but that page has no id "_prod_security"; use #prod-security/
     )
   })
 
   test('a draft gets the same finding as a warning, and the build goes on', async () => {
-    const result = await run({ solutions: [makeSolution('live'), withLink('../verify-end-to-end/#_production_considerations', 'draft')] })
-    expect(warnings(result)).toMatch(/leaderboard: build-leaderboard\.adoc links to \/solutions\/leaderboard\/verify-end-to-end\/#_production_considerations.*use #production-considerations/)
+    const result = await run({ solutions: [makeSolution('live'), withLink('../take-to-production/#_prod_security', 'draft')] })
+    expect(warnings(result)).toMatch(/leaderboard: build-leaderboard\.adoc links to \/solutions\/leaderboard\/take-to-production\/#_prod_security.*use #prod-security/)
   })
 
   test('a fragment that matches a section id passes', async () => {
-    const result = await run({ solutions: [withLink('../verify-end-to-end/#production-considerations')] })
+    const result = await run({ solutions: [withLink('../take-to-production/#prod-security')] })
     expect(warnings(result)).not.toMatch(/has no id/)
+  })
+
+  test('fragments on the production page are checked too', async () => {
+    const solution = makeSolution('leaderboard', { productionHtml: PRODUCTION_PAGE_HTML().replace('</article>', '<a href="../verify-end-to-end/#nowhere">x</a></article>') })
+    await expect(run({ solutions: [solution] })).rejects.toThrow(/take-to-production\.adoc links to \/solutions\/leaderboard\/verify-end-to-end\/#nowhere/)
   })
 
   test('same-page fragments and other pages in the build are checked too', async () => {
     await expect(run({ solutions: [withLink('#nowhere')] })).rejects.toThrow(/links to \/solutions\/leaderboard\/build-leaderboard\/#nowhere/)
     await expect(run({ solutions: [withLink('#verify')] })).resolves.toBeTruthy()
-    await expect(run({ solutions: [withLink('/streaming/26.2/develop/consumer-offsets/#gone')] })).rejects.toThrow(/links to \/streaming\/26.2\/develop\/consumer-offsets\/#gone/)
+  })
+
+  test('a fragment into a Product Docs page warns by default and is fatal with strict', async () => {
+    const link = '/streaming/26.2/develop/consumer-offsets/#gone'
+    const result = await run({ solutions: [withLink(link)] })
+    expect(warnings(result)).toMatch(/links to \/streaming\/26.2\/develop\/consumer-offsets\/#gone, but that page has no id "gone"/)
+    await expect(run({ solutions: [withLink(link)], config: { strict: true } })).rejects.toThrow(/links to \/streaming\/26.2\/develop\/consumer-offsets\/#gone/)
+    await expect(run({ solutions: [withLink(link)], env: { SOLUTIONS_STRICT: 'true' } })).rejects.toThrow(/#gone/)
   })
 
   test('links that do not land on a page in this build are not checked', async () => {
@@ -2087,7 +2236,7 @@ describe('solutions-catalog: link fragments', () => {
     const target = { pub: { url: '/t/' }, contents: Buffer.from('<h2 id="metrics">Metrics</h2><a id="anchor"></a>') }
     const page = { pub: { url: '/p/' }, contents: Buffer.from('<a href="../t/#metrics">a</a><a href="../t/#anchor">b</a><a href="../t/#_metrics">c</a>') }
     const found = validate.brokenFragments(page, (u) => (u === '/t/' ? target : null))
-    expect(found).toEqual([{ href: '../t/#_metrics', fragment: '_metrics', target: '/t/', suggestion: 'metrics' }])
+    expect(found).toEqual([{ href: '../t/#_metrics', fragment: '_metrics', target: '/t/', component: null, suggestion: 'metrics' }])
   })
 })
 

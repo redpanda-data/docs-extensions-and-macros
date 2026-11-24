@@ -226,8 +226,8 @@ describe('linkable predicate coverage', () => {
   })
 })
 
-describe('filterDiffForWhatsNew (rpk ai exclusion)', () => {
-  const { filterDiffForWhatsNew } = require('../../../tools/rpk-docs/rpk-docs-handler.js')
+describe('filterDiffForWhatsNew (plugin subtree exclusion)', () => {
+  const { filterDiffForWhatsNew, WHATS_NEW_EXCLUDED_SUBTREES } = require('../../../tools/rpk-docs/rpk-docs-handler.js')
 
   const diff = {
     summary: {},
@@ -235,6 +235,7 @@ describe('filterDiffForWhatsNew (rpk ai exclusion)', () => {
       newCommands: [
         { path: 'rpk ai llm-provider create', name: 'create', description: 'x' },
         { path: 'rpk check install', name: 'install', description: 'y' },
+        { path: 'rpk topic analyze', name: 'analyze', description: 'core command' },
       ],
       removedCommands: [
         { path: 'rpk ai llm', name: 'llm', description: 'x' },
@@ -243,6 +244,12 @@ describe('filterDiffForWhatsNew (rpk ai exclusion)', () => {
       newFlags: [
         { commandPath: 'rpk ai auth login', flagName: 'no-browser' },
         { commandPath: 'rpk cluster info', flagName: 'detailed' },
+        { commandPath: 'rpk connect lint', flagName: 'secrets' },
+        { commandPath: 'rpk k8s multicluster bootstrap', flagName: 'context' },
+      ],
+      removedFlags: [
+        { commandPath: 'rpk connect streams', flagName: 'no-api' },
+        { commandPath: 'rpk connectx', flagName: 'kept', description: 'prefix must respect word boundary' },
       ],
       changedDefaults: [
         { commandPath: 'rpk container start', flagName: 'console-image', oldDefault: 'a', newDefault: 'b' },
@@ -250,19 +257,24 @@ describe('filterDiffForWhatsNew (rpk ai exclusion)', () => {
     },
   }
 
-  test('drops rpk ai entries from every category and keeps the rest', () => {
+  test('a full regen drops every independently released plugin and keeps core commands', () => {
     const out = filterDiffForWhatsNew(diff)
-    expect(out.details.newCommands.map(c => c.path)).toEqual(['rpk check install'])
+    expect(out.details.newCommands.map(c => c.path)).toEqual(['rpk topic analyze'])
     expect(out.details.removedCommands.map(c => c.path)).toEqual(['rpk aim'])
     expect(out.details.newFlags.map(f => f.commandPath)).toEqual(['rpk cluster info'])
+    expect(out.details.removedFlags.map(f => f.commandPath)).toEqual(['rpk connectx'])
     expect(out.details.changedDefaults).toHaveLength(1)
     // Input untouched
-    expect(diff.details.newCommands).toHaveLength(2)
+    expect(diff.details.newCommands).toHaveLength(3)
+  })
+
+  test('plugin-release runs still publish connect, k8s, and check; only rpk ai is skipped', () => {
+    expect(WHATS_NEW_EXCLUDED_SUBTREES).toEqual(['rpk ai'])
   })
 
   test('custom exclusion list is honored', () => {
     const out = filterDiffForWhatsNew(diff, ['rpk check'])
-    expect(out.details.newCommands.map(c => c.path)).toEqual(['rpk ai llm-provider create'])
+    expect(out.details.newCommands.map(c => c.path)).toEqual(['rpk ai llm-provider create', 'rpk topic analyze'])
   })
 
   test('drops asPartial subtrees from the overrides and keeps the rest', () => {
@@ -285,5 +297,60 @@ describe('filterDiffForWhatsNew (rpk ai exclusion)', () => {
     const out = filterDiffForWhatsNew(sqlDiff, [], overrides)
     expect(out.details.newCommands.map(c => c.path)).toEqual(['rpk sqlx', 'rpk cloud byoc install'])
     expect(out.details.newFlags.map(f => f.commandPath)).toEqual(['rpk topic produce'])
+  })
+})
+
+describe('dropExcludedFromDiff (exclude: true and excludeFlags)', () => {
+  const { dropExcludedFromDiff } = require('../../../tools/rpk-docs/rpk-docs-handler.js')
+  const { generateRpkDiff } = require('../../../tools/rpk-docs/report-delta.js')
+
+  const tree = (children) => ({ name: 'rpk', path: 'rpk', commands: children })
+  const oxla = { name: 'oxla', path: 'rpk oxla', description: 'Redpanda Oxla - Coming Soon', commands: [] }
+  const topic = (flags) => ({ name: 'topic', path: 'rpk topic', description: 'Topics', flags, commands: [] })
+  const flag = (name) => ({ name, type: 'bool', description: name })
+
+  const overrides = {
+    commands: {
+      'rpk oxla': { exclude: true },
+      'rpk topic': { excludeFlags: ['internal'] }
+    }
+  }
+
+  test('an excluded command that leaves the tree is not reported as removed', () => {
+    const diff = generateRpkDiff(
+      tree([oxla, topic([flag('verbose')])]),
+      tree([topic([flag('verbose')])]),
+      { oldVersion: 'v1', newVersion: 'v2' }
+    )
+    expect(diff.details.removedCommands.map(c => c.path)).toEqual(['rpk oxla'])
+
+    const out = dropExcludedFromDiff(diff, overrides)
+    expect(out.details.removedCommands).toEqual([])
+    expect(out.summary.removedCommands).toBe(0)
+  })
+
+  test('an excluded command that enters the tree is not reported as new', () => {
+    const diff = generateRpkDiff(tree([topic([])]), tree([oxla, topic([])]), {})
+    const out = dropExcludedFromDiff(diff, overrides)
+    expect(out.details.newCommands).toEqual([])
+    expect(out.summary.newCommands).toBe(0)
+  })
+
+  test('excludeFlags entries are not reported as new or removed flags', () => {
+    const diff = generateRpkDiff(
+      tree([topic([flag('verbose'), flag('gone')])]),
+      tree([topic([flag('verbose'), flag('internal')])]),
+      {}
+    )
+    const out = dropExcludedFromDiff(diff, overrides)
+    expect(out.details.newFlags).toEqual([])
+    expect(out.details.removedFlags.map(f => f.flagName)).toEqual(['gone'])
+    expect(out.summary.newFlags).toBe(0)
+    expect(out.summary.removedFlags).toBe(1)
+  })
+
+  test('without overrides the diff passes through unchanged', () => {
+    const diff = generateRpkDiff(tree([oxla]), tree([]), {})
+    expect(dropExcludedFromDiff(diff, null)).toBe(diff)
   })
 })

@@ -1,0 +1,10 @@
+# Checks: 'here' or 'click here' as link text
+extends: existence
+message: "Use link text that says where the link goes, not '%s'."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#internal-links-xref
+level: error
+scope: raw
+ignorecase: true
+nonword: true
+tokens:
+  - '(?m)(?<!^//[^\n]*)\[(?:click\s+)?here\^?\]'

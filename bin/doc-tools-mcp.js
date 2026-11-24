@@ -264,7 +264,7 @@ const tools = [
         },
         tag: {
           type: 'string',
-          description: 'Git tag for released content when using GitHub URL (for example "25.1.2" or "v25.1.2"). Auto-prepends "v" if not present. For redpanda-operator repository, also auto-prepends "operator/".'
+          description: 'Git tag for released content when using GitHub URL (for example "25.1.2" or "v25.1.2"). Auto-prepends "v" if not present. For the operator-enterprise repository, also auto-prepends "operator/".'
         },
         branch: {
           type: 'string',
@@ -341,7 +341,7 @@ const tools = [
       properties: {
         tag: {
           type: 'string',
-          description: 'Operator release tag (for example "operator/v25.1.2", "25.1.2", or "v25.1.2"). Auto-prepends "operator/" for redpanda-operator repository.'
+          description: 'Operator release tag (for example "operator/v25.1.2", "25.1.2", or "v25.1.2"). Auto-prepends "operator/" for the operator-enterprise repository.'
         },
         branch: {
           type: 'string',
@@ -506,11 +506,11 @@ const tools = [
         },
         extracted: {
           type: 'string',
-          description: 'Path to the extracted source JSON: the property extractor\'s RAW --output file, without overrides applied (required for the properties surface, alternative to "repo")'
+          description: 'Path to the extracted source JSON. Properties: the property extractor\'s RAW --output file, without overrides applied (alternative to "repo"). rpk: the newest docs-data/rpk-v<version>.json snapshot; the audit compares against its raw_tree (pre-override help text)'
         },
         repo: {
           type: 'string',
-          description: 'Redpanda checkout to extract raw source strings from (properties surface only, alternative to "extracted")'
+          description: 'Alternative to "extracted". Properties: a redpanda checkout to extract raw source strings from. rpk: a streaming-enterprise src/go/rpk directory to build rpk in and read --print-tree from; UPSTREAMABLE rows also get source_file/source_line'
         },
         surface: {
           type: 'string',

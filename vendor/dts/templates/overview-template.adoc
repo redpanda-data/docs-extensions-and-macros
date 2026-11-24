@@ -1,0 +1,48 @@
+// Overview Template
+// Use for pages that help readers evaluate and decide whether to use a feature.
+// Reader question: "Should I use this?"
+
+= [Feature] Overview
+:description: [One sentence describing what this feature does and its primary benefit.]
+:page-topic-type: overview
+:learning-objective-1: Explain what [feature] is and its primary use cases
+:learning-objective-2: Identify the benefits of using [feature]
+:learning-objective-3: Determine whether [feature] fits your requirements
+
+// Intro: 2 paragraphs, ~80-100 words. First paragraph states the problem.
+// Second paragraph states how the feature solves it. Lead with outcomes.
+[First paragraph: What challenges do teams face without this feature?]
+
+[Second paragraph: How does [feature] solve these problems? What capabilities does it provide?]
+
+After reading this page, you will be able to:
+
+* [ ] {learning-objective-1}
+* [ ] {learning-objective-2}
+* [ ] {learning-objective-3}
+
+== What is [feature]?
+
+[2-3 paragraphs explaining what the feature is.]
+
+== Key benefits
+
+* **[Benefit 1]**: [One sentence explanation]
+* **[Benefit 2]**: [One sentence explanation]
+
+== Use cases
+
+[Feature] is ideal for:
+
+* **[Use case 1]**: [Brief description]
+* **[Use case 2]**: [Brief description]
+
+== Limitations
+
+* [Limitation 1]
+* [Limitation 2]
+
+== Next steps
+
+* xref:quickstart.adoc[]
+* xref:concepts.adoc[]
