@@ -1,4 +1,6 @@
 import argparse
+import copy
+import fnmatch
 import os
 import sys
 import re
@@ -9,6 +11,7 @@ import logging
 # sys.path, so add it before importing the sibling module.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dataset as metrics_dataset  # noqa: E402
+import reconcile as metrics_reconcile  # noqa: E402
 
 '''
 ## How it works
@@ -36,6 +39,10 @@ DEFAULT_ADMIN_URL = "http://localhost:19644"
 # exposed nothing worth documenting, which must never become an empty page.
 EXIT_FAILURE = 1
 EXIT_NO_METRICS = 2
+# The scrape and the source inventory disagree: a metric the source registers
+# was not scraped and has no written reason, or the scrape has one the
+# inventory does not know.
+EXIT_INCOMPLETE = 4
 
 # The macros load redpanda-metrics-<version>.json only for a release tag.
 RELEASE_TAG_RE = re.compile(r"^v\d+\.\d+\.\d+(?:-[\w.]+)?$")
@@ -245,6 +252,455 @@ def ensure_directory_exists(directory):
     if not os.path.exists(directory):
         os.makedirs(directory)
 
+def load_requirements(path):
+    """The requirements list from a requirements file, checked for shape."""
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    requirements = data.get("requirements") if isinstance(data, dict) else None
+    if not isinstance(requirements, list):
+        raise ValueError("it has no requirements list")
+    for requirement in requirements:
+        if not (isinstance(requirement, dict) and requirement.get("id")
+                and isinstance(requirement.get("metrics"), list) and isinstance(requirement.get("requires"), list)
+                and requirement.get("evidence") in ("measured", "source")):
+            raise ValueError("each requirement needs an id, a metrics list, a requires list and evidence")
+        for item in requirement["requires"]:
+            if not (isinstance(item, dict) and (item.get("property") or item.get("condition"))):
+                raise ValueError(f"requirement {requirement['id']} has an item with no property and no condition")
+        releases = requirement.get("releases", {})
+        if not (isinstance(releases, dict) and set(releases) <= {"from", "before"}
+                and all(isinstance(value, str) and RELEASE_LINE.match(value) for value in releases.values())):
+            raise ValueError(
+                f"requirement {requirement['id']} has releases that are not {{from, before}} with values like 26.2")
+    return requirements
+
+
+RELEASE_LINE = re.compile(r"^(\d+)\.(\d+)$")
+
+
+def release_line(version):
+    """(major, minor) of a release tag, or None for a branch such as dev."""
+    match = re.match(r"^v?(\d+)\.(\d+)(?:\.|$)", version.strip())
+    return (int(match.group(1)), int(match.group(2))) if match else None
+
+
+def requirement_applies(requirement, version):
+    """Whether a requirement holds for this release.
+
+    `releases` limits a requirement to release lines: `from` is the first line
+    it holds for and `before` is the first line it no longer holds for. A
+    branch that is not a release tag counts as newer than every release.
+    """
+    releases = requirement.get("releases") or {}
+    line = release_line(version)
+    bound = lambda key: tuple(int(part) for part in releases[key].split("."))
+    if "before" in releases and (line is None or line >= bound("before")):
+        return False
+    if "from" in releases and line is not None and line < bound("from"):
+        return False
+    return True
+
+
+def apply_requirements(dataset, requirements, version):
+    """Give each metric the list of what a cluster needs before it exports it.
+
+    A requirement that does not hold for this release is left out. Returns the
+    ids of the other requirements that match no metric in the dataset, which
+    means the metric was renamed or removed and the entry is out of date.
+    """
+    stale = []
+    for requirement in requirements:
+        if not requirement_applies(requirement, version):
+            continue
+        matched = False
+        for name, entry in dataset["metrics"].items():
+            if not any(fnmatch.fnmatchcase(name, pattern) for pattern in requirement["metrics"]):
+                continue
+            matched = True
+            requires = entry.setdefault("requires", [])
+            for item in requirement["requires"]:
+                merged = dict(item, evidence=requirement["evidence"])
+                if merged not in requires:
+                    requires.append(merged)
+            entry["provenance"]["requires"] = "requirements"
+        if not matched:
+            stale.append(requirement["id"])
+    return stale
+
+
+# Override fields copied onto the metric as they are.
+OVERRIDE_FIELDS = ("description", "unit", "category", "use_cases", "usage", "availability",
+                   "requires", "related_properties", "related_topics")
+# Gap kinds that need a person. covered_by_override is listed and not counted.
+OPEN_GAP_KINDS = ("not_scraped", "not_in_source", "type_mismatch", "empty_help", "unresolved",
+                  "stale_requirements", "stale_overrides", "override_disagrees")
+
+
+def load_overrides(path):
+    """The metrics object of an overrides file, checked for shape."""
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    metrics = data.get("metrics") if isinstance(data, dict) else None
+    if not isinstance(metrics, dict):
+        raise ValueError("it has no metrics object")
+    for name, override in metrics.items():
+        if not isinstance(override, dict):
+            raise ValueError(f"the override for {name} is not an object")
+        labels = override.get("labels")
+        if labels is not None and not (isinstance(labels, list) and all(
+                isinstance(label, dict) and label.get("name") for label in labels)):
+            raise ValueError(f"the labels of {name} must be a list of objects with a name")
+        # The approval deletes text without comparing it, so it must be
+        # the marker the workflow writes, never a bare true.
+        marker = override.get("retirement_pending")
+        if marker is not None and not (isinstance(marker, dict) and isinstance(marker.get("reason"), str)
+                                       and marker["reason"].strip()):
+            raise ValueError(f"the retirement_pending of {name} must be an object with a reason")
+    return metrics
+
+
+def apply_overrides(dataset, overrides, keep_requires=frozenset()):
+    """Merge what writers added into the dataset.
+
+    For a metric the cluster exported, the scrape decides which labels exist
+    and an override only describes them. For a metric the cluster did not
+    export, the override's labels are the labels, which is what lets the
+    reference be complete before the cluster setup catches up.
+
+    An override is a stopgap or enrichment. The stopgap parts are compared
+    with what the tooling produced by itself, before the override is applied,
+    and every part that no longer changes anything is listed as redundant so
+    it can be deleted (see retire_overrides).
+
+    keep_requires names the metrics whose tooling requirements hold only for
+    some releases: their `requires` override may still be what another
+    release reads, so it is never redundant.
+
+    Returns {"stale": names not in the dataset, "covered": unscraped metrics
+    whose labels an override gives, "disagrees": exported metrics whose
+    override names a label the scrape does not have, "redundant": [{name,
+    field, reason}]}.
+    """
+    result = {"stale": [], "covered": [], "disagrees": [], "redundant": []}
+
+    def redundant(name, field, reason):
+        result["redundant"].append({"name": name, "field": field, "reason": reason})
+
+    for name in sorted(overrides):
+        override = overrides[name]
+        entry = dataset["metrics"].get(name)
+        if entry is None:
+            result["stale"].append(name)
+            continue
+        # What the tooling says without the override. Audience paragraphs
+        # are enrichment, so only the text for everyone is compared.
+        shared_text = shared_description(override.get("description"))
+        if shared_text and same_help_text(shared_text, entry["source_description"]):
+            redundant(name, "description", "the help string in Redpanda now says the same")
+        if "unit" in override and override["unit"] == entry["unit"]:
+            redundant(name, "unit", "the tooling gives the same unit")
+        if "requires" in override and name not in keep_requires and override["requires"] == [
+                {key: value for key, value in item.items() if key != "evidence"} for item in entry.get("requires", [])]:
+            redundant(name, "requires", "the tooling gives the same requirements")
+        for field in OVERRIDE_FIELDS:
+            if field not in override:
+                continue
+            value = override[field]
+            if field == "description" and isinstance(value, list):
+                # Paragraphs, some for one audience only.
+                shared, cloud, self_managed = split_audiences(value)
+                if shared:
+                    entry["description"] = "\n\n".join(metrics_dataset.as_sentence(text) for text in shared)
+                    entry["provenance"]["description"] = "override"
+                if cloud:
+                    entry["description_cloud_only"] = [metrics_dataset.as_sentence(text) for text in cloud]
+                if self_managed:
+                    entry["description_self_managed_only"] = [metrics_dataset.as_sentence(text) for text in self_managed]
+                continue
+            # Reader text ends as a sentence, whoever wrote it.
+            entry[field] = metrics_dataset.as_sentence(value) if field == "description" else value
+            entry["provenance"][field] = "override"
+        if "labels" not in override:
+            continue
+        wanted = [{key: label[key] for key in ("name", "description", "values") if key in label}
+                  for label in override["labels"]]
+        if not entry["observed"]:
+            entry["labels"] = wanted
+            entry["provenance"]["labels"] = "override"
+            result["covered"].append(name)
+            continue
+        scraped = {label["name"]: label for label in entry["labels"]}
+        unknown = [label["name"] for label in wanted if label["name"] not in scraped]
+        if unknown:
+            result["disagrees"].append({"name": name, "endpoint": entry["endpoint"], "labels_not_scraped": unknown})
+        for label in wanted:
+            if label["name"] not in scraped:
+                # A label the writer described is enrichment: the
+                # disagreement stays open for a person, and it is not deleted.
+                if len(label) == 1:
+                    redundant(name, f"labels[{label['name']}]", "the cluster exports this metric without that label")
+            elif len(label) == 1:
+                # Only a name: it stood in for the scrape, which now has it.
+                redundant(name, f"labels[{label['name']}]", "the cluster now exports this label")
+            else:
+                scraped[label["name"]].update({key: value for key, value in label.items() if key != "name"})
+        if not wanted:
+            redundant(name, "labels", "the cluster now exports this metric")
+    return result
+
+
+AUDIENCE_PREFIXES = (("cloud-only:", 1), ("self-managed-only:", 2))
+
+
+def split_audiences(paragraphs):
+    """Split description paragraphs into (for everyone, Cloud only, Self-Managed only)."""
+    groups = ([], [], [])
+    for paragraph in paragraphs:
+        text = str(paragraph).strip()
+        for prefix, index in AUDIENCE_PREFIXES:
+            if text.startswith(prefix):
+                groups[index].append(text[len(prefix):].strip())
+                break
+        else:
+            groups[0].append(text)
+    return groups
+
+
+def same_help_text(text, help_text):
+    """Whether an override says what the help string says.
+
+    Spacing inside a paragraph does not count. Nor does one terminal period:
+    a help string takes none, so an override that was sent upstream would
+    otherwise never match. A paragraph break does count: text in two
+    paragraphs is not what a one-line help string says, and the overrides
+    audit offers it for upstreaming, so it must not be retired here.
+    """
+    def plain(value):
+        paragraphs = [" ".join(part.split()) for part in re.split(r"\n\s*\n", str(value).strip())]
+        return re.sub(r"(?<!\.)\.$", "", "\n\n".join(part for part in paragraphs if part))
+    return plain(text) == plain(help_text)
+
+
+def shared_description(description):
+    """The description text for every audience, or an empty string."""
+    if isinstance(description, str):
+        return description
+    if isinstance(description, list):
+        return "\n\n".join(split_audiences(description)[0])
+    return ""
+
+
+def pending_retirements(overrides):
+    """Descriptions a person approved for retirement, as [{name, field, reason}].
+
+    The weekly upstreaming workflow sets retirement_pending when the help
+    string in Redpanda has caught up with an override without matching it
+    word for word. Merging that pull request is the approval, so nothing is
+    compared again here.
+    """
+    pending = []
+    for name in sorted(overrides):
+        marker = overrides[name].get("retirement_pending")
+        if marker is None:
+            continue
+        reason = marker.get("reason") if isinstance(marker, dict) else None
+        pending.append({"name": name, "field": "description",
+                        "reason": "a person approved retiring it" + (f": {reason}" if reason else "")})
+    return pending
+
+
+def release_order(tag):
+    """A sort key for a release tag, with a release candidate before its release. None for a branch."""
+    match = re.match(r"^v(\d+)\.(\d+)\.(\d+)(?:-rc(\d+))?$", tag.strip())
+    if not match:
+        return None
+    major, minor, patch, candidate = match.groups()
+    return (int(major), int(minor), int(patch), int(candidate) if candidate else float("inf"))
+
+
+def documented_before(dataset_dir, tag):
+    """Names of the metrics in the datasets of releases older than this one.
+
+    This is the proof that a metric was removed: an earlier release documented
+    it, and the source at this release no longer registers it. A metric that
+    no earlier dataset has may belong to a newer release, so its absence here
+    proves nothing.
+    """
+    current = release_order(tag)
+    names = set()
+    if current is None or not dataset_dir or not os.path.isdir(dataset_dir):
+        return names
+    for file_name in os.listdir(dataset_dir):
+        match = re.match(r"^redpanda-metrics-(v.+)\.json$", file_name)
+        other = release_order(match.group(1)) if match else None
+        if other is None or other >= current:
+            continue
+        try:
+            with open(os.path.join(dataset_dir, file_name), encoding="utf-8") as f:
+                data = json.load(f)
+            metrics = data.get("metrics") if isinstance(data, dict) else None
+            if not isinstance(metrics, dict):
+                raise ValueError("it has no metrics object")
+            names.update(metrics)
+        except (OSError, ValueError):
+            logging.warning(f"Could not read {file_name} in {dataset_dir}, so it proves no metric was removed.")
+    return names
+
+
+def retire_overrides(path, redundant):
+    """Delete the redundant parts of the overrides file, and say what went.
+
+    An override that stood in for something the tooling now produces has done
+    its job. Enrichment on a metric that is still in the release is never
+    touched: a section, use cases, usage text, Cloud availability, related
+    properties and topics, audience paragraphs, and the description or values
+    of a label. An override whose metric an earlier release had and this
+    release does not goes whole, enrichment included, because it has nothing
+    to apply to.
+
+    A description goes together with upstream_ref. When the override has
+    retirement_pending, that field and _comment go too. Of a description
+    given as paragraphs, only the ones for every audience are deleted.
+    """
+    with open(path, encoding="utf-8") as f:
+        document = json.load(f)
+    retire_in(document["metrics"], redundant)
+    # A temp file and a rename, so a failed write never leaves half a file.
+    tmp = f"{path}.tmp-{os.getpid()}"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(document, f, indent=2)
+            f.write("\n")
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
+def retire_in(metrics, redundant):
+    """Delete the redundant parts from an overrides metrics object, in place."""
+    for item in redundant:
+        override = metrics.get(item["name"])
+        if override is None:
+            continue
+        field = item["field"]
+        if not field:
+            # The whole override: its metric is not in this release.
+            del metrics[item["name"]]
+            continue
+        if field.startswith("labels["):
+            label_name = field[len("labels["):-1]
+            override["labels"] = [label for label in override.get("labels", []) if label.get("name") != label_name]
+            # Only here: an empty list on another override is the writer's
+            # statement that an unexported metric has no labels, and it
+            # covers that gap.
+            if not override["labels"]:
+                del override["labels"]
+        elif field == "description":
+            audience = [paragraph for paragraph in override["description"]
+                        if str(paragraph).strip().startswith(tuple(prefix for prefix, _ in AUDIENCE_PREFIXES))
+                        ] if isinstance(override.get("description"), list) else []
+            if audience:
+                override["description"] = audience
+            else:
+                override.pop("description", None)
+            # The note about where the fix was sent goes with the text it describes.
+            override.pop("upstream_ref", None)
+            override.pop("upstream_not_possible", None)
+            if "retirement_pending" in override:
+                override.pop("retirement_pending")
+                override.pop("_comment", None)
+        else:
+            override.pop(field, None)
+        if not [key for key in override if key != "_comment"]:
+            del metrics[item["name"]]
+
+
+def observed_before(dataset_dir, tag):
+    """Names of the metrics an earlier release's dataset has as scraped.
+
+    An override's labels cover a metric the cluster has never exported. For
+    one an earlier release's cluster did export, they would hide that the
+    scrape lost it.
+    """
+    current = release_order(tag)
+    names = set()
+    if current is None or not dataset_dir or not os.path.isdir(dataset_dir):
+        return names
+    for file_name in os.listdir(dataset_dir):
+        match = re.match(r"^redpanda-metrics-(v.+)\.json$", file_name)
+        other = release_order(match.group(1)) if match else None
+        if other is None or other >= current:
+            continue
+        try:
+            with open(os.path.join(dataset_dir, file_name), encoding="utf-8") as f:
+                data = json.load(f)
+            metrics = data.get("metrics") if isinstance(data, dict) else None
+            if not isinstance(metrics, dict):
+                raise ValueError("it has no metrics object")
+            names.update(name for name, entry in metrics.items() if isinstance(entry, dict) and entry.get("observed"))
+        except (OSError, ValueError):
+            logging.warning(f"Could not read {file_name} in {dataset_dir}.")
+    return names
+
+
+def count_missing(inventory, public_texts, internal_texts, expected_absent):
+    """How many source families are not in the scrape and have no written reason."""
+    missing = 0
+    for endpoint, texts in (("public", public_texts), ("internal", internal_texts)):
+        result = metrics_reconcile.reconcile_endpoint(
+            inventory[endpoint], metrics_reconcile.parse_scrape_texts(texts), expected_absent)
+        missing += len(result["missing_unexplained"])
+    return missing
+
+
+def check_completeness(inventory, public_texts, internal_texts, expected_absent):
+    """Compare the scrape with the source inventory and log every gap.
+
+    Returns the gaps as data, with `count` 0 when the two reconcile. Each
+    message says what to do, because the person reading it is usually looking
+    at a new metric for the first time.
+    """
+    gaps = {"count": 0, "not_scraped": [], "not_in_source": [], "type_mismatch": [], "empty_help": [],
+            "unresolved": [], "stale_requirements": [], "stale_overrides": [], "override_disagrees": [],
+            "covered_by_override": [], "redundant_overrides": [], "retired_overrides": []}
+    for endpoint, texts in (("public", public_texts), ("internal", internal_texts)):
+        source = inventory[endpoint]
+        result = metrics_reconcile.reconcile_endpoint(
+            source, metrics_reconcile.parse_scrape_texts(texts), expected_absent)
+        logging.info(
+            f"{endpoint}: {result['in_source']} families in source, {result['scraped']} scraped, "
+            f"{len(result['missing_explained'])} not scraped with a written reason")
+        for name in result["missing_unexplained"]:
+            where = source[name].get("defined_in") or "unknown file"
+            gaps["not_scraped"].append({"name": name, "endpoint": endpoint, "defined_in": where})
+            logging.error(
+                f"{name} ({endpoint}) is registered in {where} and was not scraped. "
+                "Turn on the feature that exports it in docker-compose/metrics "
+                "(a property in bootstrap-extra.yml, a service in metrics.overlay.yml, or an action in "
+                "cli-utils/generate-cluster-docs.sh), or give the reason no cluster can export it in "
+                "docker-compose/metrics/expected-absent.json.")
+        for name in result["scrape_only"]:
+            gaps["not_in_source"].append({"name": name, "endpoint": endpoint})
+            logging.error(
+                f"{name} ({endpoint}) was scraped and is not in the source inventory. "
+                "tools/metrics/extract_source.py missed its registration and needs a fix.")
+        for item in result["type_mismatch"]:
+            gaps["type_mismatch"].append(dict(item, endpoint=endpoint))
+            logging.error(
+                f"{item['name']} ({endpoint}) is a {item['source']} in source and a {item['scrape']} in the scrape.")
+        for name in result["empty_help"]:
+            gaps["empty_help"].append({"name": name, "endpoint": endpoint})
+            logging.error(f"{name} ({endpoint}) has an empty HELP line.")
+    for site in inventory.get("unresolved") or []:
+        gaps["unresolved"].append({"file": site.get("file"), "line": site.get("line"), "reason": site.get("reason")})
+        logging.error(
+            f"A metric registration in {site.get('file')}:{site.get('line')} could not be resolved "
+            f"({site.get('reason')}). tools/metrics/extract_source.py needs a rule for it.")
+    gaps["count"] = sum(len(value) for key, value in gaps.items() if key != "count")
+    return gaps
+
+
 def parse_args(argv):
     parser = argparse.ArgumentParser(
         description="Scrape /public_metrics and /metrics from a running Redpanda broker and write metrics.json and AsciiDoc."
@@ -271,10 +727,45 @@ def parse_args(argv):
                         help="Directory for redpanda-metrics-<version>.json (default: the output directory). "
                              "In a docs repository, pass modules/reference/attachments, where the metric macros read it. "
                              "Used only when the version is a release tag such as v26.2.7")
+    parser.add_argument("--expected-absent", metavar="PATH",
+                        help="JSON of metric family name or pattern -> reason, for families the cluster cannot export. "
+                             "Used with --inventory")
+    parser.add_argument("--check-only", action="store_true",
+                        help="With --inventory, only compare the scrape with the inventory: print how many families are "
+                             "missing, write nothing, and exit 0 when none are. The cluster script polls with this "
+                             "until the cluster exports everything")
+    parser.add_argument("--requirements", metavar="PATH",
+                        help="JSON that says what a cluster needs before it exports each group of metrics "
+                             "(docker-compose/metrics/requirements.json). Copied into the dataset as each metric's requires list")
+    parser.add_argument("--overrides", metavar="PATH",
+                        help="JSON of what writers add to the generated data (docs-data/metric-overrides.json): reader "
+                             "text, sections, usage, and the labels of a metric the cluster did not export. An override "
+                             "that gives the labels of such a metric covers its gap")
+    parser.add_argument("--retire-overrides", action="store_true",
+                        help="With --overrides and --inventory, delete from that file every part that no longer changes "
+                             "anything: text that now matches Redpanda, text marked retirement_pending, labels that "
+                             "stood in for a metric the cluster now exports, and the whole override of a metric that "
+                             "an earlier dataset in --dataset-dir has and the source no longer registers")
+    parser.add_argument("--strict", action="store_true",
+                        help="With --inventory, fail (exit 4) and write nothing when the scrape does not match the "
+                             "inventory. Without this flag the gaps are reported in metrics-gaps.json and the output is "
+                             "still written, with each unscraped metric taken from source and marked observed: false")
     return parser.parse_args(argv)
 
 def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else argv)
+    if args.check_only:
+        if not args.inventory:
+            logging.error("--check-only needs --inventory. Exiting.")
+            return EXIT_FAILURE
+        # One summary line per poll, not one line per missing family. Errors
+        # still show, so an unreadable input says which and why.
+        logging.getLogger().setLevel(logging.ERROR)
+    if args.retire_overrides and not args.inventory:
+        # Without the source inventory, a metric the cluster did not export
+        # looks like a metric that is gone, and its override would be deleted.
+        logging.error("--retire-overrides needs --inventory. Exiting.")
+        return EXIT_FAILURE
     tag_modified = args.version.strip()
     if not tag_modified:
         logging.error("Version must not be empty. Exiting.")
@@ -310,9 +801,9 @@ def main(argv=None):
         )
         return EXIT_NO_METRICS
 
-    # Versioned output for diffing between releases.
+    # Versioned output for diffing between releases. Created once the run
+    # knows it will write: --check-only and a strict failure write nothing.
     output_dir = args.output_dir or os.path.join(repo_root, "autogenerated", tag_modified, "metrics")
-    ensure_directory_exists(output_dir)
 
     # The family-level dataset the macros and the docs MCP server read.
     # metrics.json keeps its shape for the tools that already read it.
@@ -329,7 +820,62 @@ def main(argv=None):
         except metrics_dataset.DatasetError as e:
             logging.error(f"The source inventory {args.inventory} is not valid: {e}. Nothing was written.")
             return EXIT_FAILURE
+        # An inventory of another release would turn families that release
+        # did not have into source-only entries. A commit or branch ref is
+        # provenance, not a release, so only two release tags are compared.
+        source_ref = inventory.get("ref")
+        if source_ref and RELEASE_TAG_RE.match(source_ref) and RELEASE_TAG_RE.match(tag_modified) \
+                and source_ref.lstrip("v") != tag_modified.lstrip("v"):
+            logging.error(f"The source inventory {args.inventory} is for {source_ref}, not {tag_modified}. Nothing was written.")
+            return EXIT_FAILURE
+    # Completeness gate. Redpanda exports a family only when the feature behind
+    # it is on, so a scrape can be short without looking wrong. With an
+    # inventory, every family in source must be scraped or have a written
+    # reason, and the scrape must hold nothing the inventory lacks.
+    expected_absent = {}
+    if args.expected_absent:
+        try:
+            with open(args.expected_absent, encoding="utf-8") as f:
+                expected_absent = json.load(f)
+            metrics_reconcile.check_expected_absent(expected_absent)
+        except (OSError, ValueError) as e:
+            logging.error(f"Cannot read the expected-absent file {args.expected_absent}: {e}. Exiting.")
+            return EXIT_FAILURE
+    if inventory and args.check_only:
+        missing = count_missing(inventory, public_texts, internal_texts, expected_absent)
+        print(f"{missing} metric families in source are not exported yet")
+        return 0 if missing == 0 else EXIT_INCOMPLETE
+    requirements = []
+    if args.requirements:
+        try:
+            requirements = load_requirements(args.requirements)
+        except (OSError, ValueError) as e:
+            logging.error(f"Cannot read the requirements file {args.requirements}: {e}. Exiting.")
+            return EXIT_FAILURE
+    overrides = {}
+    if args.overrides:
+        try:
+            overrides = load_overrides(args.overrides)
+        except (OSError, ValueError) as e:
+            logging.error(f"Cannot read the overrides file {args.overrides}: {e}. Exiting.")
+            return EXIT_FAILURE
+    gaps = None
+    if inventory:
+        gaps = check_completeness(inventory, public_texts, internal_texts, expected_absent)
+        # Labels cover only a metric no earlier release's cluster exported.
+        # One an earlier cluster did export is a scrape that lost it.
+        seen_before = observed_before(args.dataset_dir, tag_modified)
+        uncovered = [gap for gap in gaps["not_scraped"]
+                     if "labels" not in overrides.get(gap["name"], {}) or gap["name"] in seen_before]
+        other = gaps["count"] - len(gaps["not_scraped"])
+        if (uncovered or other) and args.strict:
+            logging.error("The scrape does not match the source inventory. Nothing was written.")
+            return EXIT_INCOMPLETE
     generated_from = {"sources": len(public_sources)}
+    # The two endpoints are scraped from the same brokers unless files are
+    # given per endpoint, and those counts can differ.
+    if len(internal_sources) != len(public_sources):
+        generated_from["internal_sources"] = len(internal_sources)
     if inventory and inventory.get("ref"):
         generated_from["source_ref"] = inventory["ref"]
     try:
@@ -343,6 +889,122 @@ def main(argv=None):
     except metrics_dataset.DatasetError as e:
         logging.error(f"Cannot build the dataset. {e}. Nothing was written.")
         return EXIT_FAILURE
+    ensure_directory_exists(output_dir)
+    if inventory:
+        # A family with a written reason is one no cluster exports, so it is
+        # listed under excluded and not documented as a metric. A family that
+        # was not scraped and has no reason stays, from source and marked
+        # observed: false, so the reference never lacks a metric. It is also
+        # listed in metrics-gaps.json until the cluster exports it.
+        for name in sorted(families["metrics"]):
+            entry = families["metrics"][name]
+            if entry["observed"]:
+                continue
+            reason = metrics_reconcile.explain(name, inventory[entry["endpoint"]].get(name, {}), expected_absent)
+            if not reason:
+                continue
+            del families["metrics"][name]
+            families["excluded"].append({"name": name, "endpoint": entry["endpoint"], "reason": reason})
+            families["counts"][entry["endpoint"]] -= 1
+            families["counts"]["source_only"] -= 1
+            families["counts"]["excluded"] += 1
+        families["excluded"].sort(key=lambda item: item["name"])
+    stale_requirements = apply_requirements(families, requirements, args.version)
+    for requirement_id in stale_requirements:
+        logging.warning(
+            f"The requirement '{requirement_id}' in {args.requirements} matches no metric. "
+            "Its metrics were renamed or removed, so the entry needs an update.")
+    # A description a person approved for retirement is taken out of the
+    # overrides here, in memory, so the data never carries text the file is
+    # about to lose. The file itself is rewritten last.
+    pending = pending_retirements(overrides)
+    if pending and args.retire_overrides:
+        overrides = copy.deepcopy(overrides)
+        retire_in(overrides, pending)
+    elif pending:
+        logging.warning(
+            f"{len(pending)} descriptions in {args.overrides} are marked retirement_pending. "
+            "Run with --retire-overrides to delete them.")
+    # A requirement limited to some releases may be in the dataset of one
+    # release and not another, so a requires override for its metrics stays.
+    bounded = {name for name in families["metrics"] for requirement in requirements
+               if requirement.get("releases")
+               and any(fnmatch.fnmatchcase(name, pattern) for pattern in requirement["metrics"])}
+    overridden = apply_overrides(families, overrides, keep_requires=bounded)
+    for name in ([] if args.retire_overrides else overridden["stale"]):
+        logging.warning(
+            f"The override for '{name}' in {args.overrides} matches no metric in this release. "
+            "The metric was renamed or removed, so the override needs an update.")
+    for item in overridden["disagrees"]:
+        logging.warning(
+            f"The override for '{item['name']}' names labels the cluster does not export: "
+            f"{', '.join(item['labels_not_scraped'])}. The scrape is right, so the override needs an update.")
+    if args.retire_overrides and overridden["stale"]:
+        # A whole override is deleted only on proof that its metric was
+        # removed: an earlier release's dataset documents it, and the source at
+        # this release no longer registers it. Every other stale override stays
+        # and is reported. Its metric may have a written reason for not being
+        # exported, or may belong to a newer release than the one generated.
+        registered = set(inventory["public"]) | set(inventory["internal"])
+        earlier = documented_before(args.dataset_dir, tag_modified)
+        # The source proves a metric gone only when it is the source of this
+        # release and every registration in it was read.
+        proof = (inventory.get("ref") or "").lstrip("v") == tag_modified.lstrip("v") and not inventory.get("unresolved")
+        if not proof:
+            logging.warning(
+                f"The source inventory is for {inventory.get('ref') or 'an unknown ref'} or has registrations "
+                f"it could not read, so it cannot prove a metric was removed in {tag_modified}. "
+                "No override is deleted whole.")
+        gone = [name for name in overridden["stale"] if proof and name not in registered and name in earlier]
+        overridden["redundant"] += [
+            {"name": name, "field": "", "reason": "an earlier release had this metric and this release does not"}
+            for name in gone]
+        overridden["stale"] = [name for name in overridden["stale"] if name not in gone]
+        for name in overridden["stale"]:
+            if name in registered:
+                logging.warning(
+                    f"The override for '{name}' in {args.overrides} is for a metric that has a written reason for "
+                    "not being exported, so it is not documented and the override has nothing to apply to.")
+            else:
+                logging.warning(
+                    f"The override for '{name}' in {args.overrides} matches no metric in this release, and no "
+                    "earlier dataset has that metric, so it was not deleted. It may be for a newer release.")
+    # The overrides file is rewritten last, once every output is written, so
+    # a failed run leaves it as it was.
+    retire_plan = (pending + overridden["redundant"]) if args.retire_overrides else []
+    if retire_plan:
+        # A label the override only named goes from the file with the plan,
+        # so it is not something a person has to fix. One the writer
+        # described stays, and so does the disagreement.
+        retired = {(item["name"], item["field"]) for item in retire_plan}
+        overridden["disagrees"] = [
+            dict(item, labels_not_scraped=left) for item in overridden["disagrees"]
+            for left in [[label for label in item["labels_not_scraped"] if (item["name"], f"labels[{label}]") not in retired]]
+            if left]
+    elif overridden["redundant"]:
+        logging.warning(
+            f"{len(overridden['redundant'])} parts of {args.overrides} no longer change anything. "
+            "Run with --retire-overrides to delete them.")
+    if gaps is not None:
+        gaps["stale_requirements"] = stale_requirements
+        gaps["stale_overrides"] = overridden["stale"]
+        gaps["override_disagrees"] = overridden["disagrees"]
+        key = "retired_overrides" if args.retire_overrides else "redundant_overrides"
+        # Listed once: an approved description that also matches is one retirement.
+        approved = {item["name"] for item in pending}
+        gaps[key] = pending + [item for item in overridden["redundant"]
+                               if not (item["field"] == "description" and item["name"] in approved)]
+        # A metric the cluster did not export is complete once a writer has
+        # given its labels. It stays listed, because nothing has confirmed
+        # those labels against a running broker yet.
+        covered = set(overridden["covered"]) - seen_before
+        for name in sorted(set(overridden["covered"]) & seen_before):
+            logging.error(
+                f"{name} was exported by an earlier release's cluster and not by this one. The labels in "
+                f"{args.overrides} do not cover that: the cluster setup lost the feature that exports it.")
+        gaps["covered_by_override"] = [gap for gap in gaps["not_scraped"] if gap["name"] in covered]
+        gaps["not_scraped"] = [gap for gap in gaps["not_scraped"] if gap["name"] not in covered]
+        gaps["count"] = sum(len(gaps[kind]) for kind in OPEN_GAP_KINDS)
     dataset_dir = output_dir
     if args.dataset_dir:
         if RELEASE_TAG_RE.match(tag_modified):
@@ -361,6 +1023,17 @@ def main(argv=None):
         json.dump(families, f, indent=2)
         f.write("\n")
     logging.info(f"Dataset written to {dataset_file}")
+    if gaps is not None:
+        # Always written with an inventory, so a pull request check can read
+        # it: count 0 means the scrape and the source agree.
+        gaps_file = os.path.join(output_dir, "metrics-gaps.json")
+        with open(gaps_file, "w", encoding="utf-8") as f:
+            json.dump(gaps, f, indent=2)
+            f.write("\n")
+        if gaps["count"]:
+            logging.warning(
+                f"{gaps['count']} gaps between the scrape and the source are listed in {gaps_file}. "
+                "The output was written. Metrics that were not scraped come from source and have no labels.")
 
     merged_metrics = {
         "public": public_metrics,
@@ -379,6 +1052,15 @@ def main(argv=None):
         output_asciidoc(public_metrics, os.path.join(reference_pages_dir, "public-metrics-reference.adoc"))
         output_asciidoc(internal_metrics, os.path.join(reference_pages_dir, "internal-metrics-reference.adoc"))
 
+    if retire_plan:
+        try:
+            retire_overrides(args.overrides, retire_plan)
+        except (OSError, ValueError) as e:
+            logging.error(f"Could not rewrite {args.overrides}: {e}. It is unchanged.")
+            return EXIT_FAILURE
+        for item in retire_plan:
+            what = f"{item['name']}.{item['field']}" if item["field"] else item["name"]
+            logging.info(f"Retired the override {what}: {item['reason']}.")
     logging.info(f"✅ Generated {len(public_metrics)} public metrics and {len(internal_metrics)} internal metrics from {len(public_sources)} source(s)")
     return 0
 

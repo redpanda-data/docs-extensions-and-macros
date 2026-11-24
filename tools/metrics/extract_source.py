@@ -237,16 +237,26 @@ class InputError(Exception):
     """Bad input. main() prints the message and exits with code 2."""
 
 
+# Variables that point git at a repository. A hook or a caller's shell can
+# set them, and they win over -C, so they are cleared for every call.
+GIT_LOCATION_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                     "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_PREFIX")
+
+
 class Repo:
     def __init__(self, path, ref):
         self.path = path
         self.ref = ref
+        # The commit the ref names, fixed by check() so that a branch that
+        # moves during the run cannot mix two trees.
+        self.rev = ref
         self._cache = {}
 
     def _git(self, *args):
+        env = {k: v for k, v in os.environ.items() if k not in GIT_LOCATION_VARS}
         r = subprocess.run(["git", "-C", self.path] + list(args),
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                           universal_newlines=True)
+                           universal_newlines=True, env=env)
         self.err = r.stderr.strip()
         return r.returncode, r.stdout
 
@@ -257,27 +267,28 @@ class Repo:
         rc, _ = self._git("rev-parse", "--git-dir")
         if rc != 0:
             raise InputError("%s is not a git repository" % self.path)
-        rc, _ = self._git("rev-parse", "--verify", "--quiet", self.ref + "^{commit}")
+        rc, out = self._git("rev-parse", "--verify", "--quiet", self.ref + "^{commit}")
         if rc != 0:
             raise InputError("ref %s not found in %s" % (self.ref, self.path))
+        self.rev = out.strip()
         if self.show("src/v/metrics/metrics.h") is None:
             raise InputError("%s at %s is not a Redpanda source tree: src/v/metrics/metrics.h not found"
                              % (self.path, self.ref))
 
     def show(self, path):
         if path not in self._cache:
-            rc, out = self._git("show", "%s:%s" % (self.ref, path))
+            rc, out = self._git("show", "%s:%s" % (self.rev, path))
             self._cache[path] = out if rc == 0 else None
         return self._cache[path]
 
     def grep_files(self, pattern, pathspec="src/v"):
-        rc, out = self._git("grep", "-l", "-E", pattern, self.ref, "--", pathspec)
+        rc, out = self._git("grep", "-l", "-E", pattern, self.rev, "--", pathspec)
         if rc > 1:
             raise InputError("git grep failed in %s: %s" % (self.path, self.err))
         files = []
         for line in out.splitlines():
-            if line.startswith(self.ref + ":"):
-                line = line[len(self.ref) + 1:]
+            if line.startswith(self.rev + ":"):
+                line = line[len(self.rev) + 1:]
             files.append(line)
         return files
 
@@ -318,6 +329,41 @@ def strip_comments(src):
                 j += 1
             i = j + 1
         elif c == "'" and i > 0 and not src[i - 1].isalnum():
+            j = i + 1
+            while j < n and src[j] != "'":
+                if src[j] == "\\":
+                    j += 1
+                j += 1
+            i = j + 1
+        else:
+            i += 1
+    return "".join(out)
+
+
+def mask_strings(src):
+    """Blank the inside of string literals, keeping offsets, so a call
+    written in a string is not found as a call. src has no comments."""
+    out = list(src)
+    i, n = 0, len(src)
+    while i < n:
+        if src[i] == '"':
+            if i > 0 and src[i - 1] == "R":
+                # R"delim( ... )delim"
+                op = src.find("(", i)
+                close = ")" + (src[i + 1:op] if op > 0 else "") + '"'
+                j = src.find(close, i)
+                j = n if j < 0 else j + len(close) - 1
+            else:
+                j = i + 1
+                while j < n and src[j] != '"':
+                    if src[j] == "\\":
+                        j += 1
+                    j += 1
+            for k in range(i + 1, min(j, n)):
+                if out[k] != "\n":
+                    out[k] = " "
+            i = j + 1
+        elif src[i] == "'" and i > 0 and not src[i - 1].isalnum():
             j = i + 1
             while j < n and src[j] != "'":
                 if src[j] == "\\":
@@ -625,13 +671,6 @@ class FileScan:
         key = (self.path, rn)
         if key in ENDPOINT_RULES:
             return ENDPOINT_RULES[key], "rule"
-        low = recv.lower()
-        if rn == "groups" and "public" in low:
-            return ["public"], "clean"
-        if "public" in low:
-            return ["public"], "clean"
-        if "internal" in low:
-            return ["internal"], "clean"
         # a group created in place by emplace(..., <handle>) and reached through the result
         root = re.match(r"[A-Za-z_]\w*", recv)
         if root:
@@ -665,6 +704,14 @@ class FileScan:
             return ["internal", "public"], "clean"
         if kind in ("internal", "public"):
             return [kind], "clean"
+        # Only when the type and the handle say nothing: the receiver's name.
+        # A name that says both (_public_and_internal) says nothing either.
+        low = recv.lower()
+        named_both = "public" in low and "internal" in low
+        if not named_both and "public" in low:
+            return ["public"], "clean"
+        if not named_both and "internal" in low:
+            return ["internal"], "clean"
         if kind == "base":
             return ["internal", "public"], "heuristic"
         return None, "unresolved"
@@ -702,6 +749,13 @@ def describe(scan, args, pos):
             for t in [scan.s] + scan.ctx:
                 dm = [x for x in re.finditer(
                     r"(?:(?:sm|ss::metrics|seastar::metrics)::)?description\s+" + re.escape(a) + r"\s*[({]", t)]
+                if t is scan.s and len(dm) > 1:
+                    # Several functions can each declare a description with
+                    # this name. Take the one in the registration's function,
+                    # else the nearest before it.
+                    func = max(t.rfind("\n}", 0, pos), 0)
+                    dm = ([x for x in dm if func <= x.start() < pos]
+                          or [x for x in dm if x.start() < pos] or dm)
                 if dm:
                     body = t[dm[-1].end() - 1:match_bracket(t, dm[-1].end() - 1) + 1]
                     lit = literal(body[1:-1])
@@ -719,13 +773,18 @@ def describe(scan, args, pos):
 
 
 def extract(repo):
-    files = repo.grep_files(r"make_(" + MAKE_KINDS + r")[ (<]")
+    # A line may end at the helper's name, with its "(" on the next line.
+    files = repo.grep_files(r"make_(" + MAKE_KINDS + r")([ (<]|$)")
     files = [f for f in files if not re.search(r"(/tests?/|_test\.cc$|/bench)", f)]
     sites, unresolved = [], []
     for path in files:
         scan = FileScan(repo, path)
         s = scan.s
-        for m in MAKE_RE.finditer(s):
+        # Calls are found outside string literals; their arguments are read
+        # from s. Only in C++: a code generator such as rpc/rpc_compiler.py
+        # holds its real registrations in strings.
+        calls = mask_strings(s) if re.search(r"\.(cc|cpp|h|hh|hpp)$", path) else s
+        for m in MAKE_RE.finditer(calls):
             qual, kind = m.group(1), m.group(2)
             fn = "make_" + kind
             if not qual and fn in scan.local_makers:

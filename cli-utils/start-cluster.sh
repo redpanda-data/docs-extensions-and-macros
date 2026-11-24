@@ -31,7 +31,9 @@ PROJECT_NAME="${PROJECT_NAME:-redpanda_quickstart}"
 ###############################################################################
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-QUICKSTART_DIR="$PACKAGE_ROOT/docker-compose"
+# dev, latest and branch names are newer than any release, so they use the
+# newest bundle. Only a release older than 25.1 uses the original one.
+QUICKSTART_DIR="$PACKAGE_ROOT/docker-compose/25.1"
 CALLER_PWD="$(pwd)"
 
 ###############################################################################
@@ -45,8 +47,8 @@ fi
 if [[ "$MAJOR_MINOR" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
   major="${BASH_REMATCH[1]}"
   minor="${BASH_REMATCH[2]}"
-  if (( major > 25 )) || (( major == 25 && minor >= 1 )); then
-    QUICKSTART_DIR="$PACKAGE_ROOT/docker-compose/25.1"
+  if (( major < 25 )) || (( major == 25 && minor < 1 )); then
+    QUICKSTART_DIR="$PACKAGE_ROOT/docker-compose"
   fi
 fi
 

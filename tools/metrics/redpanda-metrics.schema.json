@@ -14,7 +14,8 @@
       "description": "What the dataset was built from.",
       "additionalProperties": false,
       "properties": {
-        "sources": { "type": "integer", "minimum": 1, "description": "Number of brokers or files scraped per endpoint." },
+        "sources": { "type": "integer", "minimum": 1, "description": "Number of brokers or files scraped for the public endpoint, and for the internal endpoint unless internal_sources is set." },
+        "internal_sources": { "type": "integer", "minimum": 1, "description": "Number of files scraped for the internal endpoint, when it differs from sources." },
         "source_ref": { "type": "string", "description": "Git ref of the source inventory, when one was used." }
       }
     },
@@ -71,8 +72,8 @@
       "description": "public is /public_metrics, internal is /metrics."
     },
     "provenance": {
-      "enum": ["scraped", "source", "derived", "override", "curated"],
-      "description": "scraped: read from a running broker. source: read from the Redpanda source. derived: computed from another field. override: from the overrides file. curated: an entry that exists only in the overrides file."
+      "enum": ["scraped", "source", "derived", "override", "curated", "requirements"],
+      "description": "scraped: read from a running broker. source: read from the Redpanda source. derived: computed from another field. override: from the overrides file. curated: an entry that exists only in the overrides file. requirements: from the metric requirements file."
     },
     "label": {
       "type": "object",
@@ -109,13 +110,32 @@
       }
     },
     "requirement": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["property"],
-      "properties": {
-        "property": { "type": "string", "minLength": 1, "description": "Name of a configuration property." },
-        "value": { "description": "The value the property must have." }
-      }
+      "description": "One thing the cluster needs before it exports the family: a property value, or a state described in a sentence.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["property"],
+          "properties": {
+            "property": { "type": "string", "minLength": 1, "description": "Name of a configuration property." },
+            "value": { "description": "The value the property must have." },
+            "evidence": { "$ref": "#/definitions/evidence" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["condition"],
+          "properties": {
+            "condition": { "type": "string", "minLength": 1, "description": "A state the cluster must be in, as one plain sentence." },
+            "evidence": { "$ref": "#/definitions/evidence" }
+          }
+        }
+      ]
+    },
+    "evidence": {
+      "enum": ["measured", "source"],
+      "description": "measured: the family was absent without this and present with it on a real cluster. source: read from the Redpanda source, not measured."
     },
     "histogram": {
       "type": "object",
@@ -150,6 +170,8 @@
         "histogram": { "oneOf": [{ "type": "null" }, { "$ref": "#/definitions/histogram" }] },
         "observed": { "type": "boolean", "description": "false when the family comes from the source inventory and was not in the scrape." },
         "defined_in": { "type": "string", "description": "Source file that registers the family." },
+        "description_cloud_only": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Extra description paragraphs for Cloud docs only. From the overrides file." },
+        "description_self_managed_only": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Extra description paragraphs for Self-Managed docs only. From the overrides file." },
         "category": { "type": "string", "minLength": 1, "description": "Section on the reference page." },
         "use_cases": {
           "type": "array",

@@ -506,16 +506,20 @@ const tools = [
         },
         extracted: {
           type: 'string',
-          description: 'Path to the extracted source JSON. Properties: the property extractor\'s RAW --output file, without overrides applied (alternative to "repo"). rpk: the newest docs-data/rpk-v<version>.json snapshot; the audit compares against its raw_tree (pre-override help text)'
+          description: 'Path to the extracted source JSON. Properties: the property extractor\'s RAW --output file, without overrides applied (alternative to "repo"). rpk: the newest docs-data/rpk-v<version>.json snapshot; the audit compares against its raw_tree (pre-override help text). metrics: the output of tools/metrics/extract_source.py'
         },
         repo: {
           type: 'string',
-          description: 'Alternative to "extracted". Properties: a redpanda checkout to extract raw source strings from. rpk: a streaming-enterprise src/go/rpk directory to build rpk in and read --print-tree from; UPSTREAMABLE rows also get source_file/source_line'
+          description: 'Alternative to "extracted". Properties: a redpanda checkout to extract raw source strings from. rpk: a streaming-enterprise src/go/rpk directory to build rpk in and read --print-tree from; UPSTREAMABLE rows also get source_file/source_line. metrics: a streaming-enterprise checkout, read at HEAD or at "ref"'
+        },
+        ref: {
+          type: 'string',
+          description: 'metrics only: the git ref "repo" is read at (optional, defaults to HEAD)'
         },
         surface: {
           type: 'string',
           description: 'Override surface to audit (optional, defaults to "properties")',
-          enum: ['properties', 'rpk']
+          enum: ['properties', 'rpk', 'metrics']
         },
         output: {
           type: 'string',
