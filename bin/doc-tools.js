@@ -2567,7 +2567,7 @@ automation
       }
       if (options.dryRun) {
         process.stdout.write(result.content)
-        console.log(`\nDone: (dry-run) ${result.action} the ${options.tag} section; page printed to stdout.`)
+        console.error(`\nDone: (dry-run) ${result.action} the ${options.tag} section; page printed to stdout.`)
       } else {
         fs.writeFileSync(pagePath, result.content, 'utf8')
         console.log(`Done: ${result.action} the ${options.tag} section in ${pagePath}`)
