@@ -7,7 +7,12 @@
  *   Reference: every pipeline config in a YAML listing block or an examples
  *   file is walked from its root keys. A component name the data does not
  *   have is unknown-component, a field the component does not have is
- *   unknown-field, and deprecated components and fields are warnings.
+ *   unknown-field, and deprecated components and fields are warnings. On
+ *   the Cloud surface, a component that the data marks cloudSupported: false
+ *   and that has no component page in the scanned checkout is
+ *   cloud-unavailable-component, an error: a Cloud reader cannot run the
+ *   example. The page test keeps components that Cloud offers outside the
+ *   standard build, which the data marks false and Cloud documents.
  *
  *   Comment defaults: a YAML comment that states a field's default
  *   ("# Optional (default: \"benthos\")") is compared with the default the
@@ -149,7 +154,7 @@ function fieldPaths (children, prefix = '', out = []) {
  * @param {Set<string>} [opts.definedComponents] - Collects the <type>/<name>
  *   of each template or plugin definition, and is read for unknown names.
  */
-function walkYamlDocument (doc, lineCounter, lines, { data, index, cloudSurface, report, noteLine, usedComponents, connectContext = false, definedComponents }) {
+function walkYamlDocument (doc, lineCounter, lines, { data, index, cloudSurface, cloudPages, report, noteLine, usedComponents, connectContext = false, definedComponents }) {
   const root = doc.contents
   if (!root || !YAML.isMap(root)) return
   const rootFields = Array.isArray(data.config) ? data.config : []
@@ -266,6 +271,9 @@ function walkYamlDocument (doc, lineCounter, lines, { data, index, cloudSurface,
     if (entry.status === 'deprecated') {
       report({ line, status: 'reference', reason: 'deprecated-component', severity: 'warning', ...compInfo, note: `${type} '${name}' is deprecated in the Connect data` })
     }
+    if (cloudSurface && cloudPages && entry.cloudSupported === false && !cloudPages.has(`${connectLinkUtils.typeDir(typeKey)}/${name}`)) {
+      report({ line, status: 'reference', reason: 'cloud-unavailable-component', severity: 'error', ...compInfo, note: `${type} '${name}' is not available in Redpanda Cloud: the Connect data has cloudSupported: false and this checkout has no component page for it` })
+    }
     const children = entry.config && Array.isArray(entry.config.children) ? entry.config.children : undefined
     if (children) walkChildren(pair.value, children, { ...compInfo, fieldPath: '' })
   }
@@ -368,6 +376,7 @@ function scanYaml (entries, ctx) {
       data: ctx.data,
       index: ctx.index,
       cloudSurface: ctx.cloudSurface,
+      cloudPages: ctx.cloudPages,
       usedComponents: ctx.usedComponents,
       connectContext: ctx.connectContext,
       definedComponents: ctx.definedComponents,
@@ -397,6 +406,21 @@ function targetOf (f) {
 /**
  * The Connect engine. Scans one checkout against one Connect registry.
  */
+/**
+ * The components that have a page in a checkout: every
+ * .../components/<type dir>/<name>.adoc under modules/.
+ *
+ * @returns {Set<string>} <type dir>/<name>
+ */
+function componentPages (docsDir) {
+  const pages = new Set()
+  for (const relative of shared.walkFiles(docsDir)) {
+    const m = relative.match(/\/components\/([a-z_]+)\/([^/]+)\.adoc$/)
+    if (m) pages.add(`${m[1]}/${m[2]}`)
+  }
+  return pages
+}
+
 function scanConnect ({ docsDir, registry, files: only, write = false, writeLinks = false, cloudSurface = false, renderGuard, component: ownComponent, links }) {
   const data = registry.data
   const types = {}
@@ -421,6 +445,9 @@ function scanConnect ({ docsDir, registry, files: only, write = false, writeLink
     seen.add(key)
     findings.push(f)
   }
+  // The component pages of the scanned checkout, as <type dir>/<name>. On the
+  // Cloud surface a page is how Cloud says it offers a component.
+  const cloudPages = cloudSurface ? componentPages(docsDir) : undefined
   const isHistorical = (relative) => HISTORICAL_RX.test(relative) || shared.RELEASES_RX.test(relative) || HISTORICAL_CONNECT_RX.test(relative)
 
   // The components and Bloblang calls a line of a file names: Bloblang calls
@@ -463,7 +490,7 @@ function scanConnect ({ docsDir, registry, files: only, write = false, writeLink
     files++
     const text = fs.readFileSync(path.join(docsDir, relative), 'utf8')
     const entries = text.split('\n').map((t, i) => ({ text: t, file: relative, line: i }))
-    scanYaml(entries, { data, index: cindex, cloudSurface, counts, report, usedComponents: new Set(), connectContext: ownComponent === 'connect' || /(?:^|\/)(?:connect|rpcn|redpanda-connect)[^/]*\//.test(relative) })
+    scanYaml(entries, { data, index: cindex, cloudSurface, cloudPages, counts, report, usedComponents: new Set(), connectContext: ownComponent === 'connect' || /(?:^|\/)(?:connect|rpcn|redpanda-connect)[^/]*\//.test(relative) })
   }
 
   for (const relative of shared.walkFiles(docsDir, { exclude: CONNECT_EXCLUDE, only })) {
@@ -483,7 +510,7 @@ function scanConnect ({ docsDir, registry, files: only, write = false, writeLink
     // First pass: the components the page's YAML uses, for prose context.
     let callouts = {}
     const pageFindings = []
-    const ctx = { data, index: cindex, cloudSurface, counts, usedComponents, definedComponents: new Set(), report: (f) => pageFindings.push(f), connectContext: ownComponent === 'connect' || /(?:^|\/)(?:connect|rpcn|redpanda-connect)[^/]*\//.test(relative) }
+    const ctx = { data, index: cindex, cloudSurface, cloudPages, counts, usedComponents, definedComponents: new Set(), report: (f) => pageFindings.push(f), connectContext: ownComponent === 'connect' || /(?:^|\/)(?:connect|rpcn|redpanda-connect)[^/]*\//.test(relative) }
     const blocks = []
     walkAdoc(original, { onBlock: (b) => blocks.push(b) }, { cloudSurface })
     for (const b of blocks) {
