@@ -21,6 +21,7 @@
     "install-test-dependencies": "doc-tools install-test-dependencies",
     "get-redpanda-version": "doc-tools get-redpanda-version",
     "get-console-version": "doc-tools get-console-version",
+    "get-connect-version": "doc-tools get-connect-version",
     "build": "antora --to-dir docs --fetch local-antora-playbook.yml",
     "serve": "wds --node-resolve --open preview/test/ --watch --root-dir docs",
     "test": "jest",

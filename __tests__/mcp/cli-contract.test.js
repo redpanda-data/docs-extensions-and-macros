@@ -51,6 +51,11 @@ describe('CLI Contract Tests', () => {
       expect(result.success).toBe(true);
     });
 
+    test('get-connect-version command exists', () => {
+      const result = executeCLI('get-connect-version --help');
+      expect(result.success).toBe(true);
+    });
+
     test('lint-strings command exists with the flags the MCP wrapper passes', () => {
       const result = executeCLI('lint-strings --help');
       expect(result.success).toBe(true);
@@ -182,6 +187,18 @@ describe('CLI Contract Tests', () => {
       if (result.success) {
         // Should output CONSOLE_VERSION= format
         expect(result.output).toMatch(/CONSOLE_VERSION=v?\d+\.\d+\.\d+/);
+      } else {
+        // Network errors are acceptable
+        expect(result.stderr || result.error).toBeDefined();
+      }
+    });
+
+    test('get-connect-version prints only the version', () => {
+      const result = executeCLI('get-connect-version');
+
+      if (result.success) {
+        // A bare version with no leading v, as update-connect-version writes it
+        expect(result.output.trim()).toMatch(/^\d+\.\d+\.\d+$/);
       } else {
         // Network errors are acceptable
         expect(result.stderr || result.error).toBeDefined();
