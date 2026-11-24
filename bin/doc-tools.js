@@ -3961,6 +3961,79 @@ programCli
   })
 
 /**
+ * check-queries
+ *
+ * @description
+ * Check example PromQL query files against the metrics dataset, and run them
+ * on a real Redpanda cluster. A query file has the extension `.promql` and
+ * holds one query between `# tag::query[]` and `# end::query[]`. A page
+ * includes it with `include::...[tag=query]`. Comment lines outside the tag
+ * carry the test settings: `expect` (series, empty or scalar), `set` (a value
+ * for a placeholder such as `<topic>`), `skip-run` (a reason not to run the
+ * query on the cluster), `extra-labels` (labels the reader's Prometheus
+ * adds, such as `namespace` and `pod`) and `exporter` (the exporter that a
+ * query on metrics Redpanda brokers do not export needs, such as
+ * `redpanda-operator`. Such a file gets a syntax check only and is never run).
+ *
+ * The static layer always runs and needs no cluster. It reads the query and
+ * checks every metric name, every label name (in matchers, by, without, on,
+ * ignoring, group_left and group_right), that rate, irate and increase are
+ * given a counter or a histogram series, and that histogram_quantile is given
+ * `_bucket` series.
+ *
+ * The live layer runs with --tag or --prometheus-url. With --tag it starts
+ * the cluster that `generate metrics-docs` uses, plus a Prometheus that
+ * scrapes every broker, runs each query, and tears the cluster down. A query
+ * passes when the result matches `expect`. For `expect: empty`, and for any
+ * query that fails, each selector of the query is also run by itself and must
+ * match at least one series.
+ *
+ * Exit codes: 0 every query passed, 1 a query failed, 2 usage or setup error.
+ *
+ * @why
+ * A query with a wrong label name is valid PromQL and returns nothing. In an
+ * alert, that means the alert never fires. Only a check against the real
+ * labels, or a run on a real cluster, shows the difference.
+ *
+ * @example
+ * # Static check of every query file in a docs repository
+ * npx doc-tools check-queries modules
+ *
+ * # Against a named dataset
+ * npx doc-tools check-queries modules/manage/examples/monitor --dataset modules/reference/attachments/redpanda-metrics-v26.2.7.json
+ *
+ * # Run the queries on a real cluster
+ * npx doc-tools check-queries modules --tag v26.2.7
+ *
+ * # Run the queries on a Prometheus that is already scraping a cluster
+ * npx doc-tools check-queries modules --prometheus-url http://localhost:9090 --json
+ *
+ * @requirements
+ * - A dataset: redpanda-metrics-<tag>.json, from `generate metrics-docs`
+ * - With --tag: Docker, and free host ports for the quickstart and for Prometheus (19090, or PROMETHEUS_PORT)
+ */
+programCli
+  .command('check-queries')
+  .description('Check example PromQL query files (.promql) against the metrics dataset, and with --tag or --prometheus-url run them on a real cluster')
+  .argument('<paths...>', 'Query files, or directories to search for .promql files')
+  .option('--dataset <file>', 'redpanda-metrics-<tag>.json to check against (default: the one for --tag in modules/reference/attachments, or the newest one there)')
+  .option('-t, --tag <tag>', 'Start a Redpanda cluster at this tag with Prometheus, run the queries on it, and tear it down')
+  .option('--prometheus-url <url>', 'Run the queries on this Prometheus instead of starting a cluster')
+  .option('--json', 'Print the results as JSON')
+  .option('--wait-cap <seconds>', 'Longest wait for Prometheus to hold enough samples for the ranges in the queries (default: 120)')
+  .option('--docker-repo <repo>', 'With --tag, Docker repository to use', commonOptions.dockerRepo)
+  .option('--console-tag <tag>', 'With --tag, Redpanda Console version to use', commonOptions.consoleTag)
+  .option('--console-docker-repo <repo>', 'With --tag, Docker repository for Console', commonOptions.consoleDockerRepo)
+  .option('--ready-timeout <seconds>', 'With --tag, fail if the cluster is not healthy within this many seconds (default: CLUSTER_READY_TIMEOUT or 300)')
+  .option('--settle-timeout <seconds>', 'With --tag, stop waiting for new metric families after this many seconds (default: METRICS_SETTLE_MAX or 300)')
+  .addOption(new Option('--result-file <file>', 'Write the JSON results here and print nothing (used by the cluster run)').hideHelp())
+  .addOption(new Option('--min-targets <n>', 'Fewest scrape targets that must be up (used by the cluster run)').hideHelp())
+  .action(async (paths, options) => {
+    const { runCli } = require('../tools/metrics-queries')
+    process.exitCode = await runCli(paths, options)
+  })
+
+/**
  * check-rendered-html
  *
  * @description

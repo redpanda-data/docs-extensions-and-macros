@@ -2,7 +2,7 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-# Usage: generate-cluster-docs.sh [MODE] [TAG] [DOCKER_REPO] [CONSOLE_TAG] [CONSOLE_REPO] [generator args...]
+# Usage: generate-cluster-docs.sh [MODE: metrics|rpk|queries] [TAG] [DOCKER_REPO] [CONSOLE_TAG] [CONSOLE_REPO] [generator args...]
 #
 # Starts the Docker Compose cluster for TAG, waits for it to become healthy,
 # lets the metrics settle, runs the generator, and tears the cluster down.
@@ -26,6 +26,14 @@ IFS=$'\n\t'
 # only when the feature behind it is on. This applies to Redpanda 25.3 and
 # later, and to dev, latest and branch runs. Earlier releases refuse to start
 # on a property they do not know, so they get the quickstart unchanged.
+#
+# Mode "queries" starts the same cluster as metrics mode, plus a Prometheus
+# that scrapes every broker (docker-compose/metrics/prometheus.overlay.yml),
+# and runs `doc-tools check-queries` against it instead of the generator. The
+# arguments after the fifth positional go to that command. The script exits
+# with its code (0 every query passed, 1 a query failed), and with 2 when the
+# run fails before the queries are checked.
+#   PROMETHEUS_PORT        host port for Prometheus in queries mode (default 19090)
 
 ###############################################################################
 # Pre-flight: Ensure Docker is available and running
@@ -74,6 +82,7 @@ METRICS_SETTLE_MIN="${METRICS_SETTLE_MIN:-120}"
 METRICS_SETTLE_MAX="${METRICS_SETTLE_MAX:-300}"
 METRICS_SETTLE_STABLE="${METRICS_SETTLE_STABLE:-60}"
 METRICS_POLL_INTERVAL="${METRICS_POLL_INTERVAL:-15}"
+export PROMETHEUS_PORT="${PROMETHEUS_PORT:-19090}"
 # A settle cap below the floor would always end with the "still changing" warning.
 if (( METRICS_SETTLE_MIN > METRICS_SETTLE_MAX )); then
   METRICS_SETTLE_MIN="$METRICS_SETTLE_MAX"
@@ -124,17 +133,31 @@ fi
 # COMPOSE_FILE makes every docker compose call in this script and in
 # start-cluster.sh see the same merged project, teardown included.
 ###############################################################################
+# Queries mode uses the metrics cluster: its properties, its actions and its settle wait.
+METRICS_CLUSTER=0
+if [[ "$MODE" == "metrics" || "$MODE" == "queries" ]]; then
+  METRICS_CLUSTER=1
+fi
 METRICS_EXTRAS=0
 METRICS_BOOTSTRAP_FILE=""
 METRICS_INVENTORY_FILE=""
 METRICS_INVENTORY_KEEP=0
-if [[ "$MODE" == "metrics" && "$COMPOSE_DIR" == */25.1 ]]; then
+if (( METRICS_CLUSTER )) && [[ "$COMPOSE_DIR" == */25.1 ]]; then
   METRICS_EXTRAS=1
   if [[ "$MAJOR_MINOR" =~ ^([0-9]+)\.([0-9]+)$ ]] && (( BASH_REMATCH[1] == 25 && BASH_REMATCH[2] < 3 )); then
     METRICS_EXTRAS=0
     echo "ℹ️  Redpanda $MAJOR_MINOR does not start with properties it does not know; scraping the quickstart as is."
   fi
 fi
+
+if [[ "$MODE" == "queries" && "$COMPOSE_DIR" != */25.1 ]]; then
+  echo "❌ Queries mode needs Redpanda 25.1 or later: the Prometheus overlay is written for that quickstart." >&2
+  exit 2
+fi
+
+# Set once the queries are being checked. Before that, a failure in queries
+# mode is a setup error (exit 2), not a failed query (exit 1).
+QUERIES_CHECKED=0
 
 # Set at the very end. bash 3.2 (macOS) runs the EXIT trap with $? of 0 when
 # set -u stops the script, which would turn that failure into a success.
@@ -148,10 +171,14 @@ teardown() {
   if (( rc == 0 && ! RUN_FINISHED )); then
     rc=1
   fi
+  if [[ "$MODE" == "queries" ]] && (( rc != 0 && ! QUERIES_CHECKED )); then
+    rc=2
+  fi
   if [[ "${KEEP_CLUSTER:-0}" == "1" ]]; then
     echo "ℹ️  KEEP_CLUSTER=1: leaving the cluster running (project $PROJECT_NAME)."
   elif [[ -d "$COMPOSE_DIR" ]] && (( CLUSTER_STARTING )); then
-    if (( rc != 0 )); then
+    # A failed query is not a failed cluster, so it prints no cluster state.
+    if (( rc != 0 )) && ! [[ "$MODE" == "queries" && "$rc" == "1" ]]; then
       echo "---- docker compose ps (run failed with exit code $rc) ----"
       (cd "$COMPOSE_DIR" && docker compose -p "$PROJECT_NAME" ps -a) || true
       echo "---- last broker log lines ----"
@@ -179,6 +206,10 @@ if (( METRICS_EXTRAS )); then
   chmod 644 "$METRICS_BOOTSTRAP_FILE"
   export METRICS_BOOTSTRAP_FILE
   export COMPOSE_FILE="docker-compose.yml:$METRICS_DIR/metrics.overlay.yml"
+fi
+if [[ "$MODE" == "queries" ]]; then
+  # The config file is mounted read only; the container runs as another user.
+  export COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}:$METRICS_DIR/prometheus.overlay.yml"
 fi
 
 ###############################################################################
@@ -451,7 +482,7 @@ if (( METRICS_EXTRAS )); then
   setup_quota_probe
 fi
 
-if [[ "$MODE" == "metrics" ]]; then
+if (( METRICS_CLUSTER )); then
   echo "⏳ Settling metrics (min ${METRICS_SETTLE_MIN}s, max ${METRICS_SETTLE_MAX}s, stable for ${METRICS_SETTLE_STABLE}s)…"
   SETTLE_URL_ARGS=()
   for url in "${ADMIN_URLS[@]}"; do SETTLE_URL_ARGS+=(--admin-url "$url"); done
@@ -524,9 +555,19 @@ if [[ "$MODE" == "metrics" ]]; then
     fi
   fi
   "$PYTHON" "$SCRIPT_DIR/../tools/metrics/metrics.py" "$TAG" "${ADMIN_URL_ARGS[@]}" ${GENERATOR_ARGS[@]+"${GENERATOR_ARGS[@]}"}
+elif [[ "$MODE" == "queries" ]]; then
+  # Two scrape targets for each broker: /public_metrics and /metrics.
+  QUERIES_CHECKED=1
+  "${NODE:-node}" "$SCRIPT_DIR/../bin/doc-tools.js" check-queries \
+    --prometheus-url "http://localhost:$PROMETHEUS_PORT" --min-targets "$(( EXPECTED_BROKERS * 2 ))" \
+    ${GENERATOR_ARGS[@]+"${GENERATOR_ARGS[@]}"}
 else
   "$PYTHON" "$SCRIPT_DIR/../tools/gen-rpk-ascii.py" "$TAG" ${GENERATOR_ARGS[@]+"${GENERATOR_ARGS[@]}"}
 fi
 
-echo "✅ $MODE docs generated successfully!"
+if [[ "$MODE" == "queries" ]]; then
+  echo "✅ Every query passed."
+else
+  echo "✅ $MODE docs generated successfully!"
+fi
 RUN_FINISHED=1
