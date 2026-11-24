@@ -67,11 +67,16 @@ for a in "$@"; do [ "$prev" = --output ] && out="$a"; prev="$a"; done
 echo '{"findings":[],"summary":{"errors":0,"warnings":0}}' > "$out"
 `
 
-function runLint ({ step = LINT, npx = NPX_PROBE, src = hostileCheckout() } = {}) {
+// The PR files API: the patches call (its --jq builds diff headers) gets a
+// unified diff, the file-list call gets the file names.
+const ADDED_LINE_DIFF = 'diff --git a/modules/manage/pages/a.adoc b/modules/manage/pages/a.adoc\n--- a/modules/manage/pages/a.adoc\n+++ b/modules/manage/pages/a.adoc\n@@ -1,0 +3,1 @@\n+image::missing.png[]\n'
+const ghStub = (diff) => `case "$*" in *'diff --git'*) printf '%s' '${diff}' ;; *) echo modules/manage/pages/a.adoc ;; esac`
+
+function runLint ({ step = LINT, npx = NPX_PROBE, src = hostileCheckout(), diff = ADDED_LINE_DIFF } = {}) {
   const runnerTemp = tmpdir()
   const r = execRun(step, {
     env: { RUNNER_TEMP: runnerTemp, GH_TOKEN: 'x', PR: '12', R: 'redpanda-data/docs', DOC_TOOLS_VERSION: '9.9.9', SRC: src },
-    stubs: { gh: 'echo modules/manage/pages/a.adoc', npx },
+    stubs: { gh: ghStub(diff), npx },
   })
   const log = fs.existsSync(path.join(runnerTemp, 'npx.log')) ? fs.readFileSync(path.join(runnerTemp, 'npx.log'), 'utf8').trim().split('\n').map((l) => l.split('|')) : []
   TEMP_DIRS.push(r.dir)
@@ -167,6 +172,20 @@ exec node "${path.join(ROOT, 'bin', 'doc-tools.js')}" "$@"
     expect({ status: r.status, out: r.all }).toMatchObject({ status: 0 })
     expect(r.result.verdict).toBe('fail')
     expect(r.result.blocking.join('\n')).toMatch(/modules\/manage\/pages\/a\.adoc:3 .*missing\.png/)
+  })
+
+  test('with this repository\'s doc-tools, an image line the PR did not change is a suggestion', () => {
+    const npx = `#!/bin/bash
+while [ "$1" = --yes ] || [ "$1" = --package ]; do [ "$1" = --package ] && shift; shift; done
+[ "$1" = doc-tools ] && shift
+exec node "${path.join(ROOT, 'bin', 'doc-tools.js')}" "$@"
+`
+    const headerOnly = 'diff --git a/modules/manage/pages/a.adoc b/modules/manage/pages/a.adoc\n--- a/modules/manage/pages/a.adoc\n+++ b/modules/manage/pages/a.adoc\n@@ -1 +1 @@\n-= Old\n+= A\n'
+    const r = runLint({ npx, diff: headerOnly })
+    expect({ status: r.status, out: r.all }).toMatchObject({ status: 0 })
+    expect(r.result.verdict).toBe('pass')
+    expect(r.result.blocking).toEqual([])
+    expect(r.result.suggestions.join('\n')).toMatch(/a\.adoc:3 .*Already on the base branch.*missing\.png/)
   })
 })
 
