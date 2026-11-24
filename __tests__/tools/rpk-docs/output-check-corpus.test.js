@@ -30,7 +30,7 @@ describe('rpk-docs output check on the real corpus', () => {
     expect(result.checked).toBeGreaterThan(2000)
   })
 
-  test('every generated description passes both invariants', () => {
+  test('every generated description passes every invariant', () => {
     // On failure the diff lists one line per violation: command, flag,
     // invariant, reason, source, output.
     expect(reportLines(result)).toEqual([])

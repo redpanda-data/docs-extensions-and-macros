@@ -415,6 +415,43 @@ Specify a time range.`
       expect(result).toBe('First paragraph.\n\nSecond paragraph:\n\nThird paragraph.')
     })
 
+    test('adds no period mid-sentence in a paragraph that mixes prose and list items', () => {
+      // From `rpk topic storage mode-migration migrate-tiered` (v26.3.1).
+      // Wrapped prose lines and wrapped list items sit with no blank line
+      // between them, so only the last line of each prose run ends a sentence.
+      const input = [
+        "The '--update-default' flag makes new tiered topics use 'tiered_v2', and",
+        "updates the default to 'tiered_v2' if it was previously 'tiered_v1':",
+        "  * It sets 'default_redpanda_storage_mode_tiered_impl' to 'tiered_v2'.",
+        "  * If 'default_redpanda_storage_mode' is 'unset' and",
+        "    'cloud_storage_enable_remote_write' is enabled, it also sets",
+        "    'default_redpanda_storage_mode' to 'tiered'.",
+        'The command waits for every broker to apply the new defaults before it',
+        'migrates any topic, and fails if one does not within 30 seconds. Use',
+        "'--update-default=false' to keep the cluster defaults"
+      ].join('\n')
+      const lines = input.split('\n')
+      const expected = [...lines.slice(0, -1), lines[lines.length - 1] + '.'].join('\n')
+      expect(ensurePeriod(input)).toBe(expected)
+    })
+
+    test('ends a prose run that leads into a list item', () => {
+      const input = 'Intro line\n  * First item\n  * Second item\nOutro wraps\nonto here'
+      expect(ensurePeriod(input)).toBe('Intro line.\n  * First item\n  * Second item\nOutro wraps\nonto here.')
+    })
+
+    test('adds no period to a sentence that continues after a code block', () => {
+      // From `rpk cluster logdirs describe`
+      const input = 'The partition data lives in\n\n[,text]\n----\nkafka/{topic}/{partition}_{revision}/\n----\n\nwhere revision is internal'
+      expect(ensurePeriod(input)).toBe('The partition data lives in\n\n[,text]\n----\nkafka/{topic}/{partition}_{revision}/\n----\n\nwhere revision is internal.')
+      expect(ensurePeriod('Run this\n\n[,bash]\n----\nrpk topic list\n----\n\nThen check it')).toBe('Run this.\n\n[,bash]\n----\nrpk topic list\n----\n\nThen check it.')
+    })
+
+    test('adds no period after a closing brace', () => {
+      // From `rpk plugin`, whose Go struct is left as text
+      expect(ensurePeriod('type T struct {\n  Path string\n}\n\nwhere path is a path')).toBe('type T struct {\n  Path string\n}\n\nwhere path is a path.')
+    })
+
     test('handles empty string', () => {
       expect(ensurePeriod('')).toBe('')
     })
