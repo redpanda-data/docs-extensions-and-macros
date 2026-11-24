@@ -70,6 +70,7 @@ asciidoc:
   - './macros/badge'
   - './macros/enterprise'
   - './macros/prop'
+  - './macros/property-catalog'
   - './macros/helm-ref'
   - './macros/rp-connect-components'
   - './macros/iceberg-explorer'

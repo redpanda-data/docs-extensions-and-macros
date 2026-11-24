@@ -1,0 +1,8 @@
+# A Cloud component, like cloud-docs: env-cloud makes the property data come
+# from the newest GA streaming file, filtered to what Cloud readers can use.
+name: cloud-fixture
+title: Cloud fixture
+version: ~
+asciidoc:
+  attributes:
+    env-cloud: true

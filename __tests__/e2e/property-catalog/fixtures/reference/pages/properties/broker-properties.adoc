@@ -1,0 +1,24 @@
+// Trimmed from modules/reference/pages/properties/broker-properties.adoc in redpanda-data/docs: the title, the declaration, and the
+// property partial includes, exactly as the real page writes them.
+= Broker Configuration Properties
+:page-property-source: broker-properties
+
+// The filter bar, as the docs pages place it: above the first section
+property_catalog::[mode=filter]
+
+== Redpanda
+
+include::reference:partial$properties/broker-properties.adoc[tags=category-redpanda;!deprecated;!exclude-from-docs]
+
+== Schema Registry
+
+include::reference:partial$properties/broker-properties.adoc[tags=category-schema-registry;!deprecated;!exclude-from-docs]
+
+== HTTP Proxy
+
+include::reference:partial$properties/broker-properties.adoc[tags=category-pandaproxy;!deprecated;!exclude-from-docs]
+
+== HTTP Proxy client
+
+include::reference:partial$properties/broker-properties.adoc[tags=category-pandaproxy-client;!deprecated;!exclude-from-docs]
+
