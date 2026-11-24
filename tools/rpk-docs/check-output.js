@@ -41,6 +41,7 @@ const {
   flattenCommands,
   shouldExcludeCommand,
   registerKnownCommandPaths,
+  isListItemContinuation,
   decodeHtmlEntities
 } = require('./generate-rpk-docs')
 
@@ -99,6 +100,11 @@ function applySourceRewrites(text, textTransformations) {
   // (rpai -> rpk ai, Note: -> NOTE:, [X] -> <X>), so the expected text has
   // them applied. Indented lines become code blocks, which only applyToCode
   // rules touch, the same split applyTextTransformationsToExamples makes.
+  // An indented list item, and the wrapped lines that continue it, is prose
+  // that convertMarkdownLists turns into a list, so every rule applies
+  // ("  - managed: ... prints\n    the stored ADP API key", rpk ai run
+  // claude). A line inside a code chunk stays code, even when it starts
+  // with a bullet (a YAML list under "skills:").
   const rules = textTransformations?.replacements || []
   const applyRules = (line, codeOnly) => rules.reduce((out, rule) => {
     if (codeOnly && !rule.applyToCode) return out
@@ -109,7 +115,18 @@ function applySourceRewrites(text, textTransformations) {
     }
   }, line)
   const codeLines = []
-  const masked = text.replace(/^[ ]{2,}\S.*$/gm, line => `\u0003${codeLines.push(line) - 1}\u0003`)
+  const lines = text.split('\n')
+  let inCode = false
+  const masked = lines.map((line, i) => {
+    if (!/^[ ]{2,}\S/.test(line)) {
+      inCode = false
+      return line
+    }
+    const listProse = !inCode && (/^\s*(?:[-*]|\d+[.)])\s+/.test(line) || isListItemContinuation(lines, i))
+    if (listProse) return line
+    inCode = true
+    return `\u0003${codeLines.push(line) - 1}\u0003`
+  }).join('\n')
   const out = applyRules(masked, false).replace(/\u0003(\d+)\u0003/g, (_, n) => applyRules(codeLines[n], true))
 
   return decodeHtmlEntities(out)

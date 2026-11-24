@@ -1,6 +1,7 @@
 'use strict'
 
 const { checkDescription, checkTree, reportLines } = require('../../../tools/rpk-docs/check-output')
+const { formatDescription, ensurePeriod } = require('../../../tools/rpk-docs/generate-rpk-docs')
 
 const invariants = (violations) => violations.map(v => v.invariant)
 
@@ -86,6 +87,47 @@ describe('checkDescription: ordinary output passes', () => {
   test('override replacement rules count as intended rewrites', () => {
     const textTransformations = { replacements: [{ pattern: '\\brpai\\b', replacement: 'rpk ai', applyToCode: true }] }
     expect(checkDescription('Run rpai auth login', 'Run `rpk ai auth login`.', { textTransformations })).toEqual([])
+  })
+})
+
+describe('generator output for valid help text (docs#2322 findings)', () => {
+  const generate = (source, textTransformations) => ensurePeriod(formatDescription(source, textTransformations))
+
+  test('a quoted flag with a value loses its quotes and becomes one span', () => {
+    const source = 'Use\n\'--update-default=false\' to keep the cluster defaults.'
+    const output = generate(source)
+    expect(output).toContain('`--update-default=false` to keep')
+    expect(checkDescription(source, output)).toEqual([])
+  })
+
+  test('a relative path under a dot folder is code, so a table cell keeps it', () => {
+    const source = 'Its skills go in these folders:\n\n  Claude Code   .claude/skills\n  Codex         .agents/skills\n\nThe manifest is .redpanda/skills.yaml.'
+    const output = generate(source)
+    expect(output).toContain('`.claude/skills`')
+    expect(output).toContain('`.redpanda/skills.yaml`.')
+    expect(checkDescription(source, output)).toEqual([])
+  })
+
+  test('a path already in a span or under ~/ is not wrapped again', () => {
+    const output = generate('Edit ~/.claude/skills or `.agents/skills`.')
+    expect(output).toContain('`~/.claude/skills`')
+    expect(output).not.toContain('``')
+  })
+
+  test('replacement rules count as applied in an indented list item', () => {
+    const textTransformations = { replacements: [{ pattern: '\\bADP\\b', replacement: 'Agentic Data Plane', flags: 'g' }] }
+    const source = 'Both modes:\n\n  - managed: the helper prints\n    the stored ADP API key.\n  - passthrough: ADP is not used.'
+    const output = generate(source, textTransformations)
+    expect(output).toContain('Agentic Data Plane API key')
+    expect(checkDescription(source, output, { textTransformations })).toEqual([])
+  })
+
+  test('replacement rules still skip a YAML list inside a code chunk', () => {
+    const textTransformations = { replacements: [{ pattern: '\\bADP\\b', replacement: 'Agentic Data Plane', flags: 'g' }] }
+    const source = 'The file looks like this:\n\n  skills:\n    - name: ADP'
+    const output = generate(source, textTransformations)
+    expect(output).toContain('- name: ADP')
+    expect(checkDescription(source, output, { textTransformations })).toEqual([])
   })
 })
 
