@@ -104,6 +104,52 @@ describe('checkDescription: other span breakage', () => {
   })
 })
 
+describe('checkDescription: periods added mid-sentence', () => {
+  // From `rpk topic storage mode-migration migrate-tiered` (v26.3.1): a
+  // paragraph that mixes wrapped prose and list items with no blank line.
+  const source = [
+    "The '--update-default' flag makes new tiered topics use 'tiered_v2', and",
+    "updates the default to 'tiered_v2':",
+    "  * If 'default_redpanda_storage_mode' is 'unset', it also sets",
+    "    'default_redpanda_storage_mode' to 'tiered'.",
+    'The command waits before it',
+    'migrates any topic. Use',
+    "'--update-default=false' to keep the cluster defaults"
+  ].join('\n')
+
+  test('a period before a lowercase word, a flag, or a code span is flagged', () => {
+    const broken = [
+      'The `--update-default` flag makes new tiered topics use `tiered_v2`, and.',
+      'updates the default to `tiered_v2`:',
+      '  * If `default_redpanda_storage_mode` is `unset`, it also sets.',
+      '    `default_redpanda_storage_mode` to `tiered`.',
+      'The command waits before it.',
+      'migrates any topic. Use.',
+      '`--update-default=false` to keep the cluster defaults.'
+    ].join('\n')
+    expect(checkDescription(source, broken).map(v => v.reason)).toEqual([
+      'period added mid-sentence: "and. updates"',
+      'period added mid-sentence: "sets. default_redpanda_storage_mode"',
+      'period added mid-sentence: "it. migrates"',
+      'period added mid-sentence: "Use. --update-default=false"'
+    ])
+  })
+
+  test('periods that end a sentence pass', () => {
+    const fixed = [
+      'The `--update-default` flag makes new tiered topics use `tiered_v2`, and',
+      'updates the default to `tiered_v2`:',
+      '  * If `default_redpanda_storage_mode` is `unset`, it also sets',
+      '    `default_redpanda_storage_mode` to `tiered`.',
+      'The command waits before it',
+      'migrates any topic. Use',
+      '`--update-default=false` to keep the cluster defaults.'
+    ].join('\n')
+    expect(checkDescription(source, fixed)).toEqual([])
+    expect(checkDescription('First paragraph\n\nSecond paragraph', 'First paragraph.\n\nSecond paragraph.')).toEqual([])
+  })
+})
+
 describe('checkTree', () => {
   const tree = {
     name: 'rpk',

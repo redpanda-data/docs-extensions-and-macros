@@ -19,7 +19,7 @@
         "properties": {
           "command": { "type": "string", "description": "Full command path, for example 'rpk redpanda tune'. Use 'rpk' for global flags." },
           "flag": { "type": "string", "description": "Flag with its dashes, for example '--dirs'. Omit for the command description." },
-          "invariant": { "type": "string", "enum": ["text-preserved", "whole-token-spans"], "description": "Limit the exception to one invariant. Omit to allow both." },
+          "invariant": { "type": "string", "enum": ["text-preserved", "whole-token-spans", "no-added-period"], "description": "Limit the exception to one invariant. Omit to allow all of them." },
           "reason": { "type": "string", "minLength": 1, "description": "Why the output is right even though the check flags it." }
         }
       }

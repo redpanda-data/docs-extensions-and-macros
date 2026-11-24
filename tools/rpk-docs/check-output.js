@@ -5,7 +5,7 @@
  * Deterministic output check for the rpk-docs generator.
  *
  * Every command and flag description goes through formatDescription, which
- * adds code spans and rewrites some text. Two invariants must hold for each
+ * adds code spans and rewrites some text. Three invariants must hold for each
  * one, whatever the help text looks like:
  *
  * 1. text-preserved: the rendered output says the same words, in the same
@@ -16,8 +16,12 @@
  *    a span: the start, whitespace, or an opening bracket or quote. After it:
  *    the end, whitespace, or punctuation that is not followed by more of the
  *    same token (`--a`.b and `topic`:`oncall` fail).
+ * 3. no-added-period: a period the output has and the source does not is
+ *    not followed by a word that starts with anything but an uppercase
+ *    letter or a digit. That word shows the sentence went on ("use `tiered_v2`,
+ *    and. updates the default"). It runs only when text-preserved passes.
  *
- * Both run on the HTML Asciidoctor produces, because that is what readers
+ * All run on the HTML Asciidoctor produces, because that is what readers
  * see: a span can look fine in the AsciiDoc and still render broken.
  *
  * Library: checkDescription(sourceText, generatedAdoc, options)
@@ -128,8 +132,8 @@ function applySourceRewrites(text, textTransformations) {
  * Normalize text to a comparable word sequence. Each rule is a change the
  * generator or Asciidoctor makes by design.
  */
-function normalizeWords(text) {
-  return text
+function normalizeWords(text, { keepPeriods = false } = {}) {
+  const words = text
     // Asciidoctor's typographic replacements, mapped back to their source.
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/[\u201c\u201d]/g, '"')
@@ -160,21 +164,43 @@ function normalizeWords(text) {
     .replace(/\s+\)/g, ')')
     // ensurePeriod adds a closing period; formatDescription drops one after a
     // span alone on its line; convertIndentedTablesToAsciiDoc drops the colon
-    // after a table's value column.
-    .replace(/[.:](?=\s|$)/g, '')
-    // Case: formatDescription capitalizes "redpanda" (the product) and
-    // "Redpanda Cloud"; admonition labels change case.
-    .toLowerCase()
+    // after a table's value column. keepPeriods keeps sentence periods so
+    // that checkAddedPeriods can compare them.
+    .replace(keepPeriods ? /:(?=\s|$)/g : /[.:](?=\s|$)/g, '')
+  // Case: formatDescription capitalizes "redpanda" (the product) and
+  // "Redpanda Cloud"; admonition labels change case. keepPeriods keeps case
+  // too, since checkAddedPeriods reads it.
+  return (keepPeriods ? words : words.toLowerCase())
     .split(/\s+/)
     .filter(Boolean)
 }
 
-function sourceWords(sourceText, options) {
+/**
+ * Find periods the generator added in the middle of a sentence. ensurePeriod
+ * adds a period where it judges a sentence ends; when the next word starts
+ * with anything but an uppercase letter or a digit (a lowercase word or a
+ * flag), the sentence went on and the period is stray ("use tiered_v2, and.
+ * updates the default").
+ * Runs only when the word sequences already match, so word i of one is word
+ * i of the other.
+ */
+function checkAddedPeriods(expected, actual) {
+  const found = []
+  if (expected.length !== actual.length) return found
+  for (let i = 0; i < actual.length - 1; i++) {
+    if (actual[i].endsWith('.') && !expected[i].endsWith('.') && !/^[A-Z0-9]/.test(expected[i + 1])) {
+      found.push(`${actual[i]} ${expected[i + 1]}`)
+    }
+  }
+  return found
+}
+
+function sourceWords(sourceText, options, normalizeOptions) {
   const rewritten = applySourceRewrites(sourceText, options.textTransformations)
   // Override text is AsciiDoc its author wrote (xrefs, bold, lists), so it
   // is rendered the same way as the output. Raw help is plain text: it is
   // compared as written, so markup it accidentally triggers is caught.
-  return normalizeWords(options.sourceIsAsciiDoc ? renderedText(rewritten) : rewritten)
+  return normalizeWords(options.sourceIsAsciiDoc ? renderedText(rewritten) : rewritten, normalizeOptions)
 }
 
 function firstDifference(a, b) {
@@ -216,6 +242,11 @@ function checkDescription(sourceText, generatedAdoc, options = {}) {
       invariant: 'text-preserved',
       reason: `text differs at word ${d.index + 1}: expected "${d.expected}", got "${d.actual}"`
     })
+  } else if (!leak) {
+    const stray = checkAddedPeriods(sourceWords(sourceText || '', options, { keepPeriods: true }), normalizeWords(text, { keepPeriods: true }))
+    for (const at of stray) {
+      violations.push({ invariant: 'no-added-period', reason: `period added mid-sentence: "${at}"` })
+    }
   }
 
   // A span next to a word character is not a constrained span, so

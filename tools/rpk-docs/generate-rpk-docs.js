@@ -2406,7 +2406,8 @@ function ensurePeriod(desc) {
   // Handle multi-paragraph descriptions - ensure each paragraph ends with punctuation
   // Split on double newlines (paragraph breaks)
   const paragraphs = trimmed.split(/\n\s*\n/)
-  const fixedParagraphs = paragraphs.map(p => {
+  const isListing = p => /^(?:----|\[,)/.test((p || '').trim())
+  const fixedParagraphs = paragraphs.map((p, idx) => {
     const trimmedP = p.trim()
     if (!trimmedP) return ''
     // Don't modify code blocks or their delimiters
@@ -2422,17 +2423,33 @@ function ensurePeriod(desc) {
     // Check if paragraph contains list items - if so, process line by line
     if (/\n\s*[-*]\s+/.test(trimmedP)) {
       const lines = trimmedP.split('\n')
-      const fixedLines = lines.map(line => {
+      const isListItem = l => /^\s*[-*]\s+/.test(l)
+      // Indent of the bullet of the list item being read, or -1 outside one
+      let itemIndent = -1
+      const fixedLines = lines.map((line, idx) => {
         const trimmedLine = line.trim()
-        // Skip list items
-        if (/^[-*]\s+/.test(trimmedLine)) {
-          return line
-        }
         // Skip empty lines
         if (!trimmedLine) {
           return line
         }
-        // For non-list lines, add period if needed
+        const indent = line.length - line.trimStart().length
+        // Skip list items
+        if (isListItem(line)) {
+          itemIndent = indent
+          return line
+        }
+        // Skip wrapped lines of a list item: they are indented past its bullet
+        if (itemIndent >= 0 && indent > itemIndent) {
+          return line
+        }
+        itemIndent = -1
+        // A prose line that wraps onto the next prose line is mid-sentence.
+        // Only the last line before a list item, or of the paragraph, ends one.
+        const next = lines[idx + 1]
+        if (next !== undefined && next.trim() && !isListItem(next)) {
+          return line
+        }
+        // For the last prose line, add period if needed
         if (!/[.!?:;]$/.test(trimmedLine)) {
           return line + '.'
         }
@@ -2448,6 +2465,15 @@ function ensurePeriod(desc) {
       // Special case: if the entire paragraph is just a backticked command (starts and ends with `),
       // don't add a period - it's a command reference, not a sentence
       if (/^`[^`]+`$/.test(trimmedP)) {
+        return trimmedP
+      }
+      // A closing brace ends code the generator left as text, not a sentence
+      if (trimmedP.endsWith('}')) {
+        return trimmedP
+      }
+      // A sentence that runs through a code block ("lives in", code block,
+      // "where revision is ...") continues after it, so it has not ended
+      if (isListing(paragraphs[idx + 1]) && /^[a-z]/.test((paragraphs[idx + 2] || '').trim())) {
         return trimmedP
       }
       return trimmedP + '.'
