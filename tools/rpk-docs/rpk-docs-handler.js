@@ -396,6 +396,17 @@ function ensureGoAvailable (sourcePath, log = console.log) {
   )
 }
 
+// How long a `go run` of rpk or of the source-string locator may take. On a
+// machine with an empty module cache, such as a CI runner, Go downloads every
+// dependency before it compiles, which alone can take more than two minutes.
+const GO_RUN_TIMEOUT_MS = 15 * 60 * 1000
+
+// spawnSync reports a timeout as error.code ETIMEDOUT, with a null status.
+const timedOut = (result) => Boolean(result.error && result.error.code === 'ETIMEDOUT')
+
+// Go's module download progress is not part of an error.
+const withoutDownloadLines = (stderr) => String(stderr || '').split('\n').filter((l) => !/^go: downloading /.test(l)).join('\n').trim()
+
 /**
  * Fetch rpk tree by running from Go source code
  * Useful for pre-releases before Docker images are published
@@ -431,12 +442,22 @@ function fetchRpkTreeFromSource(sourcePath, log = console.log) {
   const result = spawnSync('go', ['run', 'cmd/rpk/main.go', '--print-tree'], {
     cwd: sourcePath,
     encoding: 'utf8',
-    timeout: 120000, // 2 minutes (includes build time)
+    timeout: GO_RUN_TIMEOUT_MS, // includes the module download and the build
     maxBuffer: 50 * 1024 * 1024
   })
 
+  if (timedOut(result)) {
+    throw new Error(
+      `Building and running rpk from source did not finish within ${GO_RUN_TIMEOUT_MS / 60000} minutes, so it was stopped.\n` +
+      'On a machine with an empty Go module cache most of that time is the dependency download. ' +
+      'Run "go mod download" in the source directory first, or check the network.'
+    )
+  }
+  if (result.error) {
+    throw new Error(`Failed to build/run rpk from source: ${result.error.message}`)
+  }
   if (result.status !== 0) {
-    const stderr = result.stderr || ''
+    const stderr = withoutDownloadLines(result.stderr)
     if (stderr.includes('unknown flag')) {
       throw new Error(
         `rpk source does not support --print-tree flag.\n` +
@@ -494,9 +515,12 @@ function locateRpkSourceStrings (sourcePath, log = console.log) {
   const result = spawnSync('go', ['run', '.', '--repo', path.resolve(sourcePath)], {
     cwd: analyzerDir,
     encoding: 'utf8',
-    timeout: 120000,
+    timeout: GO_RUN_TIMEOUT_MS,
     maxBuffer: 50 * 1024 * 1024
   })
+  if (timedOut(result)) {
+    throw new Error(`The rpk source-string locator did not finish within ${GO_RUN_TIMEOUT_MS / 60000} minutes, so it was stopped.`)
+  }
   if (result.error) {
     throw new Error(`Failed to run the rpk source-string locator: ${result.error.message}`)
   }
