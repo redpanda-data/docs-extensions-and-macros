@@ -791,6 +791,10 @@ def main(argv=None):
             logging.error("The scrape does not match the source inventory. Nothing was written.")
             return EXIT_INCOMPLETE
     generated_from = {"sources": len(public_sources)}
+    # The two endpoints are scraped from the same brokers unless files are
+    # given per endpoint, and those counts can differ.
+    if len(internal_sources) != len(public_sources):
+        generated_from["internal_sources"] = len(internal_sources)
     if inventory and inventory.get("ref"):
         generated_from["source_ref"] = inventory["ref"]
     try:
