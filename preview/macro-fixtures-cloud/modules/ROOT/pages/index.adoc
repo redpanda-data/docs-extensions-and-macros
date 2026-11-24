@@ -124,3 +124,25 @@ stub for the `generate` input or the Bloblang pages.
 * bloblval:[env(name),type] must read "<unknown type>" and log unavailable,
   for the same reason.
 
+
+[[metrics-on-cloud]]
+== Metric names and values on Cloud
+
+`metric:` and `metricval:` borrow the GA metrics data from
+`streaming-ga-lender`. Build with `local-macro-showcase-playbook.yml` to see
+these: the full test playbook pulls the real docs repo, which publishes no
+metrics attachment yet. This component has a stub page that includes the
+`streaming-ga-lender` metrics page by tag, as the cloud-docs stub does.
+
+* metric:redpanda_cluster_brokers[link=true] must link this component's stub
+  page, not the `streaming` page.
+* metricval:redpanda_cluster_brokers[type] must read "gauge".
+* metric:vectorized_alien_receive_batch_queue_length[] must render as plain
+  code, and the log must say it is an internal metric.
+* metric:redpanda_cluster_health_refreshes_total[] must render as plain code,
+  and the log must say its availability is not on Redpanda Cloud.
+* metric:redpanda_kafka_consumer_group_lag_sum[link=true] must render as
+  plain code with no link: its heading is inside `ifndef::env-cloud[]` on the
+  included page, so this component has no page for it.
+* metricval:redpanda_kafka_consumer_group_lag_sum[type] must read
+  "<unknown type>", for the same reason.

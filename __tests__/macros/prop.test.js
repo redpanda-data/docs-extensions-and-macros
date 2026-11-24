@@ -1255,10 +1255,11 @@ describe('prop macro', () => {
       const blockMacro = jest.fn()
       register({ inlineMacro, blockMacro })
       // One registration each: prop:, propval:, rpkval:, connectval:,
-      // rpkcmd:, connect:, blobl:, bloblval:, opflag: and opflagval:, and
-      // the block forms propval::, rpkval::, connectval:: and bloblval::.
-      expect(inlineMacro).toHaveBeenCalledTimes(10)
-      expect(blockMacro).toHaveBeenCalledTimes(4)
+      // rpkcmd:, connect:, blobl:, bloblval:, opflag:, opflagval:, metric: and
+      // metricval:, and the block forms propval::, rpkval::, connectval::,
+      // bloblval:: and metricval::.
+      expect(inlineMacro).toHaveBeenCalledTimes(12)
+      expect(blockMacro).toHaveBeenCalledTimes(5)
     })
   })
 })

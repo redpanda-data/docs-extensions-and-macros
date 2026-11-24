@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "5.67.2",
+  "version": "5.68.0",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -97,6 +97,8 @@
     "./macros/connectval": "./macros/connectval.js",
     "./macros/rpkcmd": "./macros/rpkcmd.js",
     "./macros/opflag": "./macros/opflag.js",
+    "./macros/metric": "./macros/metric.js",
+    "./macros/metricval": "./macros/metricval.js",
     "./macros/connect": "./macros/connect.js",
     "./macros/blobl": "./macros/blobl.js",
     "./macros/bloblval": "./macros/bloblval.js",
