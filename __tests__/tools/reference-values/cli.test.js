@@ -129,6 +129,13 @@ describe('doc-tools check-reference-values', () => {
       expect(r.report.preexisting).toBe(0)
     })
 
+    test('a base git cannot diff against is a setup error (exit 2), not a failed check', () => {
+      const { dir } = gitRepo()
+      const r = run(dir, ['--data-file', rpkData(dir), '--files', 'modules/x/pages/m.adoc', '--diff', 'origin/no-such-branch'])
+      expect(r.code).toBe(2)
+      expect(r.stderr).toContain('Error: --diff origin/no-such-branch: git diff failed')
+    })
+
     test('a new file counts as changed throughout', () => {
       const { dir, git } = gitRepo()
       fs.writeFileSync(path.join(dir, 'modules/x/pages/n.adoc'), MISMATCH)

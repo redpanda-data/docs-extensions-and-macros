@@ -15,14 +15,18 @@ function changedLines (text) {
   const changed = new Map()
   let current = null
   let newLine = 0
+  // "--- " and "+++ " are file headers only before a file's first hunk. In a
+  // hunk, an added line whose text starts with "++ " also reads "+++ ".
+  let inHeader = false
   for (const line of String(text).split('\n')) {
     if (line.startsWith('diff --git ')) {
       const m = line.match(/^diff --git a\/(.+) b\/(.+)$/)
       current = m ? m[2] : null
       if (current) changed.set(current, 'all')
+      inHeader = true
       continue
     }
-    if (line.startsWith('+++ ')) {
+    if (inHeader && line.startsWith('+++ ')) {
       const target = line.slice(4).trim()
       if (target === '/dev/null') {
         if (current) changed.delete(current)
@@ -33,9 +37,10 @@ function changedLines (text) {
       }
       continue
     }
-    if (line.startsWith('--- ') || current === null) continue
+    if ((inHeader && line.startsWith('--- ')) || current === null) continue
     const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/)
     if (hunk) {
+      inHeader = false
       if (changed.get(current) === 'all') changed.set(current, new Set())
       newLine = Number(hunk[1])
       continue

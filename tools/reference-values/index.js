@@ -53,6 +53,17 @@ const HISTORICAL_CONNECT_RX = /(?:^|\/)migration\//
  */
 class SetupError extends Error {}
 
+// A base git cannot diff against (absent in a shallow checkout, or mistyped)
+// means the check could not run, not that a finding failed it.
+function diffSince (base, docsDir) {
+  try {
+    return require('../../cli-utils/unified-diff').changedLinesSince(base, docsDir)
+  } catch (error) {
+    const detail = String(error.stderr || error.message || '').trim().split('\n')[0]
+    throw new SetupError(`--diff ${base}: git diff failed${detail ? ` (${detail})` : ''}`)
+  }
+}
+
 const kindOfFile = (file) => {
   const base = path.basename(file)
   if (PROPERTIES_JSON_RX.test(base)) return { name: 'properties', kind: PROPERTIES_KIND, tag: base.match(PROPERTIES_JSON_RX)[1] }
@@ -605,7 +616,7 @@ function runCli (options, { log = console.log, error = console.error } = {}) {
       write: Boolean(options.write),
       writeLinks: Boolean(options.writeLinks),
       failOn: options.failOn || 'mismatch',
-      changedLines: options.diff ? require('../../cli-utils/unified-diff').changedLinesSince(options.diff, docsDir) : undefined,
+      changedLines: options.diff ? diffSince(options.diff, docsDir) : undefined,
     })
   } catch (e) {
     if (e instanceof SetupError) {
