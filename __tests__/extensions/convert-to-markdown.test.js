@@ -935,6 +935,16 @@ describe('solutionDownloadNote', () => {
     expect(solutionDownloadNote(page(BASE, 'streaming'), SITE)).toBe('')
     expect(solutionDownloadNote({ src: { component: 'solutions' }, asciidoc: { attributes: { 'page-solution': '{' } } }, SITE)).toBe('')
   })
+
+  test('opens the twin body, after the source comment', () => {
+    const md = convert('<h1>Guide</h1><p>First step.</p>', {
+      src: { component: 'solutions', version: '', path: 'modules/ROOT/pages/g.adoc' },
+      pub: { url: '/solutions/g/' },
+      asciidoc: { doctitle: 'Guide', attributes: { 'page-solution': JSON.stringify(BASE) } },
+    })
+    expect(md).toMatch(/<!-- Source: [^\n]+ -->\n\nSigned-in readers can download this solution/)
+    expect(bodyOf(md)).toMatch(/point them to the download\.\n\n[\s\S]*First step\./)
+  })
 })
 
 describe('generated content provenance', () => {
