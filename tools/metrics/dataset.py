@@ -294,6 +294,16 @@ def check_inventory(inventory):
             for field in ("help", "defined_in"):
                 if entry.get(field) is not None and not isinstance(entry[field], str):
                     raise DatasetError(f'{endpoint} family {name} must have a string "{field}"')
+    unresolved = inventory.get("unresolved")
+    if unresolved is not None:
+        if not isinstance(unresolved, list):
+            raise DatasetError('"unresolved" must be a list of registrations')
+        for site in unresolved:
+            if not isinstance(site, dict):
+                raise DatasetError('each "unresolved" item must be an object with "file", "line" and "reason"')
+            for field, kinds in (("file", str), ("line", int), ("reason", str)):
+                if site.get(field) is not None and not isinstance(site[field], kinds):
+                    raise DatasetError(f'an "unresolved" item has a "{field}" that is not a {kinds.__name__}')
 
 
 def _endpoint_conflicts(public, internal, inventory):

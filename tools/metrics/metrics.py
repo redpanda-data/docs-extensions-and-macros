@@ -9,6 +9,7 @@ import logging
 # sys.path, so add it before importing the sibling module.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dataset as metrics_dataset  # noqa: E402
+import reconcile as metrics_reconcile  # noqa: E402
 
 '''
 ## How it works
@@ -36,6 +37,10 @@ DEFAULT_ADMIN_URL = "http://localhost:19644"
 # exposed nothing worth documenting, which must never become an empty page.
 EXIT_FAILURE = 1
 EXIT_NO_METRICS = 2
+# The scrape and the source inventory disagree: a metric the source registers
+# was not scraped and has no written reason, or the scrape has one the
+# inventory does not know.
+EXIT_INCOMPLETE = 4
 
 # The macros load redpanda-metrics-<version>.json only for a release tag.
 RELEASE_TAG_RE = re.compile(r"^v\d+\.\d+\.\d+(?:-[\w.]+)?$")
@@ -245,6 +250,61 @@ def ensure_directory_exists(directory):
     if not os.path.exists(directory):
         os.makedirs(directory)
 
+def count_missing(inventory, public_texts, internal_texts, expected_absent):
+    """How many source families are not in the scrape and have no written reason."""
+    missing = 0
+    for endpoint, texts in (("public", public_texts), ("internal", internal_texts)):
+        result = metrics_reconcile.reconcile_endpoint(
+            inventory[endpoint], metrics_reconcile.parse_scrape_texts(texts), expected_absent)
+        missing += len(result["missing_unexplained"])
+    return missing
+
+
+def check_completeness(inventory, public_texts, internal_texts, expected_absent):
+    """Compare the scrape with the source inventory and log every gap.
+
+    Returns the gaps as data, with `count` 0 when the two reconcile. Each
+    message says what to do, because the person reading it is usually looking
+    at a new metric for the first time.
+    """
+    gaps = {"count": 0, "not_scraped": [], "not_in_source": [], "type_mismatch": [], "empty_help": [], "unresolved": []}
+    for endpoint, texts in (("public", public_texts), ("internal", internal_texts)):
+        source = inventory[endpoint]
+        result = metrics_reconcile.reconcile_endpoint(
+            source, metrics_reconcile.parse_scrape_texts(texts), expected_absent)
+        logging.info(
+            f"{endpoint}: {result['in_source']} families in source, {result['scraped']} scraped, "
+            f"{len(result['missing_explained'])} not scraped with a written reason")
+        for name in result["missing_unexplained"]:
+            where = source[name].get("defined_in") or "unknown file"
+            gaps["not_scraped"].append({"name": name, "endpoint": endpoint, "defined_in": where})
+            logging.error(
+                f"{name} ({endpoint}) is registered in {where} and was not scraped. "
+                "Turn on the feature that exports it in docker-compose/metrics "
+                "(a property in bootstrap-extra.yml, a service in metrics.overlay.yml, or an action in "
+                "cli-utils/generate-cluster-docs.sh), or give the reason no cluster can export it in "
+                "docker-compose/metrics/expected-absent.json.")
+        for name in result["scrape_only"]:
+            gaps["not_in_source"].append({"name": name, "endpoint": endpoint})
+            logging.error(
+                f"{name} ({endpoint}) was scraped and is not in the source inventory. "
+                "tools/metrics/extract_source.py missed its registration and needs a fix.")
+        for item in result["type_mismatch"]:
+            gaps["type_mismatch"].append(dict(item, endpoint=endpoint))
+            logging.error(
+                f"{item['name']} ({endpoint}) is a {item['source']} in source and a {item['scrape']} in the scrape.")
+        for name in result["empty_help"]:
+            gaps["empty_help"].append({"name": name, "endpoint": endpoint})
+            logging.error(f"{name} ({endpoint}) has an empty HELP line.")
+    for site in inventory.get("unresolved") or []:
+        gaps["unresolved"].append({"file": site.get("file"), "line": site.get("line"), "reason": site.get("reason")})
+        logging.error(
+            f"A metric registration in {site.get('file')}:{site.get('line')} could not be resolved "
+            f"({site.get('reason')}). tools/metrics/extract_source.py needs a rule for it.")
+    gaps["count"] = sum(len(value) for key, value in gaps.items() if key != "count")
+    return gaps
+
+
 def parse_args(argv):
     parser = argparse.ArgumentParser(
         description="Scrape /public_metrics and /metrics from a running Redpanda broker and write metrics.json and AsciiDoc."
@@ -271,10 +331,28 @@ def parse_args(argv):
                         help="Directory for redpanda-metrics-<version>.json (default: the output directory). "
                              "In a docs repository, pass modules/reference/attachments, where the metric macros read it. "
                              "Used only when the version is a release tag such as v26.2.7")
+    parser.add_argument("--expected-absent", metavar="PATH",
+                        help="JSON of metric family name or pattern -> reason, for families the cluster cannot export. "
+                             "Used with --inventory")
+    parser.add_argument("--check-only", action="store_true",
+                        help="With --inventory, only compare the scrape with the inventory: print how many families are "
+                             "missing, write nothing, and exit 0 when none are. The cluster script polls with this "
+                             "until the cluster exports everything")
+    parser.add_argument("--strict", action="store_true",
+                        help="With --inventory, fail (exit 4) and write nothing when the scrape does not match the "
+                             "inventory. Without this flag the gaps are reported in metrics-gaps.json and the output is "
+                             "still written, with each unscraped metric taken from source and marked observed: false")
     return parser.parse_args(argv)
 
 def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else argv)
+    if args.check_only:
+        if not args.inventory:
+            logging.error("--check-only needs --inventory. Exiting.")
+            return EXIT_FAILURE
+        # One summary line per poll, not one line per missing family. Errors
+        # still show, so an unreadable input says which and why.
+        logging.getLogger().setLevel(logging.ERROR)
     tag_modified = args.version.strip()
     if not tag_modified:
         logging.error("Version must not be empty. Exiting.")
@@ -310,9 +388,9 @@ def main(argv=None):
         )
         return EXIT_NO_METRICS
 
-    # Versioned output for diffing between releases.
+    # Versioned output for diffing between releases. Created once the run
+    # knows it will write: --check-only and a strict failure write nothing.
     output_dir = args.output_dir or os.path.join(repo_root, "autogenerated", tag_modified, "metrics")
-    ensure_directory_exists(output_dir)
 
     # The family-level dataset the macros and the docs MCP server read.
     # metrics.json keeps its shape for the tools that already read it.
@@ -329,7 +407,42 @@ def main(argv=None):
         except metrics_dataset.DatasetError as e:
             logging.error(f"The source inventory {args.inventory} is not valid: {e}. Nothing was written.")
             return EXIT_FAILURE
+        # An inventory of another release would turn families that release
+        # did not have into source-only entries. A commit or branch ref is
+        # provenance, not a release, so only two release tags are compared.
+        source_ref = inventory.get("ref")
+        if source_ref and RELEASE_TAG_RE.match(source_ref) and RELEASE_TAG_RE.match(tag_modified) \
+                and source_ref.lstrip("v") != tag_modified.lstrip("v"):
+            logging.error(f"The source inventory {args.inventory} is for {source_ref}, not {tag_modified}. Nothing was written.")
+            return EXIT_FAILURE
+    # Completeness gate. Redpanda exports a family only when the feature behind
+    # it is on, so a scrape can be short without looking wrong. With an
+    # inventory, every family in source must be scraped or have a written
+    # reason, and the scrape must hold nothing the inventory lacks.
+    expected_absent = {}
+    if args.expected_absent:
+        try:
+            with open(args.expected_absent, encoding="utf-8") as f:
+                expected_absent = json.load(f)
+            metrics_reconcile.check_expected_absent(expected_absent)
+        except (OSError, ValueError) as e:
+            logging.error(f"Cannot read the expected-absent file {args.expected_absent}: {e}. Exiting.")
+            return EXIT_FAILURE
+    if inventory and args.check_only:
+        missing = count_missing(inventory, public_texts, internal_texts, expected_absent)
+        print(f"{missing} metric families in source are not exported yet")
+        return 0 if missing == 0 else EXIT_INCOMPLETE
+    gaps = None
+    if inventory:
+        gaps = check_completeness(inventory, public_texts, internal_texts, expected_absent)
+        if gaps["count"] and args.strict:
+            logging.error("The scrape does not match the source inventory. Nothing was written.")
+            return EXIT_INCOMPLETE
     generated_from = {"sources": len(public_sources)}
+    # The two endpoints are scraped from the same brokers unless files are
+    # given per endpoint, and those counts can differ.
+    if len(internal_sources) != len(public_sources):
+        generated_from["internal_sources"] = len(internal_sources)
     if inventory and inventory.get("ref"):
         generated_from["source_ref"] = inventory["ref"]
     try:
@@ -343,6 +456,26 @@ def main(argv=None):
     except metrics_dataset.DatasetError as e:
         logging.error(f"Cannot build the dataset. {e}. Nothing was written.")
         return EXIT_FAILURE
+    ensure_directory_exists(output_dir)
+    if inventory:
+        # A family with a written reason is one no cluster exports, so it is
+        # listed under excluded and not documented as a metric. A family that
+        # was not scraped and has no reason stays, from source and marked
+        # observed: false, so the reference never lacks a metric. It is also
+        # listed in metrics-gaps.json until the cluster exports it.
+        for name in sorted(families["metrics"]):
+            entry = families["metrics"][name]
+            if entry["observed"]:
+                continue
+            reason = metrics_reconcile.explain(name, inventory[entry["endpoint"]].get(name, {}), expected_absent)
+            if not reason:
+                continue
+            del families["metrics"][name]
+            families["excluded"].append({"name": name, "endpoint": entry["endpoint"], "reason": reason})
+            families["counts"][entry["endpoint"]] -= 1
+            families["counts"]["source_only"] -= 1
+            families["counts"]["excluded"] += 1
+        families["excluded"].sort(key=lambda item: item["name"])
     dataset_dir = output_dir
     if args.dataset_dir:
         if RELEASE_TAG_RE.match(tag_modified):
@@ -361,6 +494,17 @@ def main(argv=None):
         json.dump(families, f, indent=2)
         f.write("\n")
     logging.info(f"Dataset written to {dataset_file}")
+    if gaps is not None:
+        # Always written with an inventory, so a pull request check can read
+        # it: count 0 means the scrape and the source agree.
+        gaps_file = os.path.join(output_dir, "metrics-gaps.json")
+        with open(gaps_file, "w", encoding="utf-8") as f:
+            json.dump(gaps, f, indent=2)
+            f.write("\n")
+        if gaps["count"]:
+            logging.warning(
+                f"{gaps['count']} gaps between the scrape and the source are listed in {gaps_file}. "
+                "The output was written. Metrics that were not scraped come from source and have no labels.")
 
     merged_metrics = {
         "public": public_metrics,
