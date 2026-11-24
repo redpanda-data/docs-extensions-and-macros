@@ -8,6 +8,7 @@ An LSP server for AsciiDoc pages in Redpanda docs repositories. It checks a page
 * Hover with a property's description, type, default, limits and enterprise status; the value a `propval:` renders; and a category's definition and replacement.
 * Diagnostics for an unknown or Cloud-unavailable `prop:` name, a `propval:` that would render `<unknown ...>`, and an unknown, deprecated, or untaxonomized `:page-categories:` value. `:property-validate:` in the page header is honored.
 * A quick fix that rewrites a deprecated category the way `doc-tools check-metadata --fix` does.
+* For `glossterm:`: completion of term names and alt labels, hover with the definition, other names and forms to avoid, a warning for a target with no glossary entry (it would render "not yet defined"), and a warning with a quick fix for a target that is a `do-not-use` form.
 
 == Where the data comes from
 
@@ -23,6 +24,9 @@ An LSP server for AsciiDoc pages in Redpanda docs repositories. It checks a page
 
 |Legacy categories
 |`loadLegacyCategories` in `tools/check-metadata`.
+
+|Glossary
+|`loadTermsFromDir` in `extension-utils/glossary-terms.js` (the parser the `glossterm` macro and `aggregate-terms` use): the checkout's `shared/modules/terms/partials/`, then `$REDPANDA_DOCS_PATH`, then the published `terms.json`. Without any of them, `glossterm:` is not checked and the server says so in its notes.
 |===
 
 A Cloud component (`env-cloud`) has no property data of its own. Set `REDPANDA_DOCS_PATH` to a local checkout of `redpanda-data/docs` and the server reads its property JSON as the streaming component, as the build does.
@@ -39,6 +43,7 @@ language-server/
   lib/lsp.js         SEVERITY, COMPLETION_KIND, SOURCE, diagnostic(), markdownHover()
   features/
     index.js         the only registry, alphabetical, one line per module
+    glossary.js      glossterm:
     metadata.js      :page-categories: and :page-topic-type:
     properties.js    prop: and propval:
 ----

@@ -159,3 +159,22 @@ const REAL = process.env.DOCS_LS_REAL_DOCS
     }
   })
 })
+
+;(REAL ? describe : describe.skip)('glossary against a real docs checkout (DOCS_LS_REAL_DOCS)', () => {
+  test('real terms resolve, an unknown target and an avoided form are reported', async () => {
+    const root = path.resolve(REAL)
+    const text = '= Glossary probe\n:page-topic-type: concept\n\nA glossterm:broker[] and glossterm:Schema Registry[] and glossterm:widgetron[] and glossterm:Bring your own cloud[].\n'
+    const s = await session(root, 'modules/manage/pages/language-server-glossary-probe.adoc', text)
+    try {
+      const diags = (await s.diagnosticsFor(s.uri)).filter((d) => /glossary/.test(String(d.code)))
+      const byCode = Object.fromEntries(diags.map((d) => [d.code, d]))
+      // The avoided-form check needs a BYOC term with do-not-use (docs PR 2582).
+      const hasAvoid = fs.readFileSync(path.join(root, 'shared/modules/terms/partials/byoc.adoc'), 'utf8').includes(':do-not-use:')
+      expect(Object.keys(byCode).sort()).toEqual(hasAvoid ? ['avoided-glossary-form', 'unknown-glossary-term'] : ['unknown-glossary-term'])
+      expect(diags.filter((d) => d.code === 'unknown-glossary-term')).toHaveLength(1)
+      expect(byCode['unknown-glossary-term'].message).toMatch(/glossterm:widgetron\[\]/)
+    } finally {
+      await s.stop()
+    }
+  })
+})

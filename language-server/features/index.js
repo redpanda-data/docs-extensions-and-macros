@@ -7,6 +7,7 @@
  */
 
 module.exports = [
+  require('./glossary'),
   require('./metadata'),
   require('./properties'),
 ]
