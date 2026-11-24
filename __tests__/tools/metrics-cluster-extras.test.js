@@ -81,6 +81,34 @@ describe('metrics overlay', () => {
   })
 })
 
+describe('topic creation in the quickstart bundle', () => {
+  // deploytransform waits for createtopic to exit 0, so run its shell with a
+  // stand-in rpk that reports whether the topic already exists.
+  const run = (createRc, describeRc) => {
+    const script = String(compose.services.createtopic.command).trim().match(/^-c '([\s\S]*)'$/)[1].replace(/\$\$/g, '$')
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'fake-rpk-'))
+    try {
+      fs.writeFileSync(path.join(dir, 'rpk'), `#!/bin/sh\ncase "$2" in create) exit ${createRc};; describe) exit ${describeRc};; esac\nexit 9\n`, { mode: 0o755 })
+      return spawnSync('/bin/sh', ['-c', script], { env: { ...process.env, PATH: `${dir}:${process.env.PATH}` } }).status
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  }
+
+  it('deploytransform waits for createtopic to succeed', () => {
+    expect(compose.services.deploytransform.depends_on.createtopic.condition).toBe('service_completed_successfully')
+  })
+
+  it('succeeds when it creates the topic or the topic already exists', () => {
+    expect(run(0, 1)).toBe(0)
+    expect(run(1, 0)).toBe(0)
+  })
+
+  it('fails when the topic is neither created nor found', () => {
+    expect(run(1, 1)).not.toBe(0)
+  })
+})
+
 describe('extra bootstrap properties', () => {
   it('has at least one property', () => {
     expect(Object.keys(extra).length).toBeGreaterThan(0)
