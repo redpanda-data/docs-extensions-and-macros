@@ -1,0 +1,456 @@
+---
+# Closes metrics gaps: metrics the Redpanda source registers that the metrics
+# cluster does not export (not_scraped in metrics-gaps.json).
+#
+# Manual dispatch only. There is no schedule and no dispatch from another
+# workflow, so nothing here runs unattended until the owner adds a trigger.
+#
+# The workflow drives a loop and a model only proposes:
+#   1. Start the cluster from this branch and record the gaps (the baseline).
+#   2. Up to max_attempts times: build the input with a script, make one
+#      model call that has no shell, check and apply the answer with a
+#      script, run the cluster, and keep the change only when it closed a gap
+#      and lost no metric. Anything else is reverted.
+#   3. With no trust in what happened in the loop: check which paths changed,
+#      start a fresh cluster, compare with the baseline, check the
+#      requirements, and run the tests for the cluster setup files.
+#   4. Open a draft pull request with the verified result. A person reviews
+#      and merges.
+#
+# The model cannot edit docker-compose/metrics/expected-absent.json and never
+# decides whether a gap closed. tools/metrics/gap_loop.py does the judging.
+#
+# The model reads Redpanda source, which is private, and this repository is
+# public. The source and the model's input are never printed or uploaded, and
+# a change that repeats a line of the source is refused.
+name: Close metrics gaps
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Redpanda release tag, for example v26.2.7 or v26.3.1-rc2"
+        required: true
+        type: string
+      max_attempts:
+        description: "Most model calls and cluster runs in the loop (1 to 6)"
+        default: "4"
+        type: string
+      metrics:
+        description: "Optional: comma-separated metric names to limit the run to"
+        default: ""
+        type: string
+# Two runs would start two clusters on the same ports.
+concurrency:
+  group: metrics-close-gaps
+  cancel-in-progress: false
+permissions:
+  contents: read
+env:
+  # Must be in the ADP provider's model allowlist. doc-strings-review.yml
+  # uses the same id as its default.
+  MODEL: us.anthropic.claude-sonnet-5
+  # The ADP agent credential for this workload. Its own agent, so its spend
+  # is not merged with another workload's.
+  ADP_CLIENT_SECRET_ID: sdlc/prod/github/docs_metrics_gaps_client
+  ADP_TOKEN_URL: https://aigw.d6kjl4h19241bg3ek3h0.clusters.rdpa.co/oauth/idp/token
+  ADP_GATEWAY_BASE_URL: https://aigw.d6kjl4h19241bg3ek3h0.clusters.rdpa.co/llm/v1/providers/claude-code-provider-adp
+  # The paths a change may touch. expected-absent.json is refused by
+  # gap_loop.py whatever is listed here.
+  ALLOWED_PATHS: |
+    docker-compose/metrics/bootstrap-extra.yml
+    docker-compose/metrics/metrics.overlay.yml
+    docker-compose/metrics/requirements.json
+    cli-utils/generate-cluster-docs.sh
+  # New files only. A file that exists there cannot change.
+  ALLOWED_NEW: docker-compose/metrics/*
+  # The prompt for each model call. It stays in this file (see CLAUDE.md,
+  # "Automation prompts stay in this repository"). The action adds the two
+  # file paths below it.
+  PROMPT: |
+    You are helping to close gaps in the Redpanda metrics reference. A gap is a metric that the Redpanda source registers and that a test cluster did not export. Redpanda exports a metric only when the feature behind it is on, so each gap means the cluster setup is missing something.
+
+    This is one turn of a loop that a script runs. You have no shell. Do exactly this:
+
+    1. Read the file named as CONTEXT_FILE below, in full.
+    2. Write one JSON object to the file named as RESPONSE_FILE below. Write nothing else, and no other file.
+
+    After your answer, the script applies your change, starts a fresh cluster, and checks which metrics it exports. You do not judge the result. The next turn shows you what happened. The number of turns is capped, and a refused answer uses one up.
+
+    The goal: make the cluster export each open gap, by the smallest change to the cluster setup.
+
+    How to find out what a metric needs: the context shows the source file that registers each gap. Find the registration and what guards it. That is usually one of: a configuration property, a feature flag, an object that must exist (a topic, a consumer group, a link, a quota), or traffic that must happen. If the guard is in another file, ask for that file in need_files and you get it next turn.
+
+    A change can go in three places:
+    - A cluster property, in docker-compose/metrics/bootstrap-extra.yml.
+    - An environment variable, in docker-compose/metrics/metrics.overlay.yml. Every broker must get the same environment, and nothing else on a broker may change. A test allows only the services the overlay has now, so a new service cannot pass verification. If a gap needs one, say so in a note and do not add it.
+    - An action, in a function of cli-utils/generate-cluster-docs.sh. Use run_metrics_actions for something done once after the cluster is healthy. Use throttle_quota_probe, which runs on every settle poll and once more right before the scrape, for something that fades and must be refreshed. Each step in a function is best effort: on failure print a warning and go on.
+
+    For every change, record what the metric needs in the requirements list: a property item, or a condition that is one plain sentence. Every property you add to bootstrap-extra.yml must be named by a requirement. In a condition, name a property as prop:<name>[link=true], never in backticks. Do not write "evidence": "measured". The script writes "source", and the workflow changes it to "measured" only after its own cluster run proves it. A requirement in the file that is marked "measured" cannot be replaced: give yours a new id.
+
+    Rules:
+    - Never edit expected-absent.json, the generator, the tests, or any path the context does not list as one you can change. Such an answer is refused.
+    - A property you add must exist in the Redpanda version named in the context. Redpanda 25.1 and 25.2 refuse to start on a property they do not know, and the script skips the extra properties for them.
+    - When the last turn was reverted, the files are back as they were. Send the whole change again if you still want it.
+    - Leave out anything that did not help. Keep comments short and factual.
+    - The source in the context is private. Never copy a line of it into your answer. Name files, metrics and properties in your own words.
+    - For every gap you did not close, add a note with what you tried and what you saw.
+    - When you conclude that no cluster can export a metric, add it to not_exportable with the reason and what you tried. A person decides. You cannot mark it yourself.
+    - Set done to true when every gap is closed or you have nothing more to try.
+jobs:
+  close-gaps:
+    runs-on: ubuntu-24.04
+    # A baseline run, up to six attempts and a verification run, each a
+    # cluster start and a settle of up to five minutes.
+    timeout-minutes: 150
+    permissions:
+      # OIDC: assume this repository's AWS role for the bot token and the ADP credential.
+      id-token: write
+      contents: read
+    steps:
+      - name: Check the inputs
+        id: inputs
+        # Dispatch values go through env so the shell never parses them as script.
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_MAX: ${{ inputs.max_attempts }}
+          INPUT_METRICS: ${{ inputs.metrics }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$INPUT_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$ ]]; then
+            echo "::error::'$INPUT_TAG' is not a release or RC tag (expected vX.Y.Z or vX.Y.Z-rcN)."
+            exit 1
+          fi
+          # Six is the number of attempt steps below.
+          if ! [[ "$INPUT_MAX" =~ ^[1-6]$ ]]; then
+            echo "::error::max_attempts must be a number from 1 to 6."
+            exit 1
+          fi
+          if ! [[ "$INPUT_METRICS" =~ ^[A-Za-z0-9_:,\ ]*$ ]]; then
+            echo "::error::metrics must be metric names separated by commas."
+            exit 1
+          fi
+          {
+            echo "tag=$INPUT_TAG"
+            echo "max=$INPUT_MAX"
+            echo "metrics=${INPUT_METRICS// /}"
+          } >> "$GITHUB_OUTPUT"
+          # An RC image is in another repository.
+          if [[ "$INPUT_TAG" =~ -rc[0-9]+$ ]]; then
+            echo "image_repo=redpanda-unstable" >> "$GITHUB_OUTPUT"
+          else
+            echo "image_repo=redpanda" >> "$GITHUB_OUTPUT"
+          fi
+          {
+            echo "STATE_DIR=$RUNNER_TEMP/gap-loop/state"
+            echo "TRUSTED_DIR=$RUNNER_TEMP/gap-loop/trusted"
+            echo "WORK_DIR=$RUNNER_TEMP/gap-loop/work"
+            echo "VERIFY_DIR=$RUNNER_TEMP/gap-loop/verify"
+            echo "SOURCE_DIR=$RUNNER_TEMP/redpanda-source"
+          } >> "$GITHUB_ENV"
+      - name: Assume the AWS role
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ vars.RP_AWS_CRED_REGION }}
+          role-to-assume: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
+      - name: Fetch the bot token
+        uses: aws-actions/aws-secretsmanager-get-secrets@v3
+        with:
+          secret-ids: |
+            ,sdlc/prod/github/actions_bot_token
+          parse-json-secrets: true
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # The source is private. It is checked out beside the tree, not inside
+      # it, so it can never be committed. The token goes through a credential
+      # helper, never a URL or an argument.
+      - name: Check out the Redpanda source at the tag
+        env:
+          SOURCE_CLONE_TOKEN: ${{ env.ACTIONS_BOT_TOKEN }}
+          TAG: ${{ steps.inputs.outputs.tag }}
+        run: |
+          set -euo pipefail
+          export GIT_CONFIG_COUNT=2
+          export GIT_CONFIG_KEY_0=credential.helper
+          export GIT_CONFIG_VALUE_0=
+          export GIT_CONFIG_KEY_1=credential.https://github.com.helper
+          # shellcheck disable=SC2016  # git runs the helper, which expands the variable
+          export GIT_CONFIG_VALUE_1='!f() { echo "username=x-access-token"; echo "password=$SOURCE_CLONE_TOKEN"; }; f'
+          git clone --quiet --depth 1 --branch "$TAG" \
+            https://github.com/redpanda-data/streaming-enterprise.git "$SOURCE_DIR"
+          # The source scan reads the tag by name.
+          git -C "$SOURCE_DIR" rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null \
+            || git -C "$SOURCE_DIR" tag "$TAG" HEAD
+      # From here on, shell that a model wrote runs on this runner. The bot
+      # token comes back only after the verification, for the pull request.
+      - name: Drop the bot token and the AWS credentials
+        run: |
+          set -euo pipefail
+          for v in ACTIONS_BOT_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_DEFAULT_REGION AWS_REGION; do
+            echo "$v=" >> "$GITHUB_ENV"
+          done
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      # The judge runs from a copy outside the tree, so nothing that changes
+      # the tree can change the judge.
+      - name: Copy the judge out of the tree
+        run: |
+          set -euo pipefail
+          mkdir -p "$TRUSTED_DIR" "$WORK_DIR"
+          cp tools/metrics/gap_loop.py tools/metrics/gap_loop_run.sh "$TRUSTED_DIR/"
+          echo "GAP_LOOP_PY=$TRUSTED_DIR/gap_loop.py" >> "$GITHUB_ENV"
+      # docker.redpanda.com resets connections from GitHub runners. Pull from
+      # Docker Hub and give the images the names the Compose files use.
+      - name: Pull the images from Docker Hub
+        env:
+          TAG: ${{ steps.inputs.outputs.tag }}
+          IMAGE_REPO: ${{ steps.inputs.outputs.image_repo }}
+        run: |
+          set -euo pipefail
+          for image in "${IMAGE_REPO}:${TAG}" console:latest connect:latest; do
+            docker pull --quiet "docker.io/redpandadata/${image}"
+            docker tag "docker.io/redpandadata/${image}" "docker.redpanda.com/redpandadata/${image}"
+          done
+      - name: Run the cluster as it is and record the gaps
+        id: baseline
+        env:
+          TAG: ${{ steps.inputs.outputs.tag }}
+          ONLY: ${{ steps.inputs.outputs.metrics }}
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/gap-loop/baseline-out"
+          bash "$TRUSTED_DIR/gap_loop_run.sh" generate "$TAG" "$SOURCE_DIR" "$OUT"
+          python3 "$GAP_LOOP_PY" baseline --state "$STATE_DIR" --only "$ONLY" \
+            --gaps "$OUT/metrics-gaps.json" --dataset "$OUT/redpanda-metrics-$TAG.json"
+          # The verification compares with this copy, not with the loop's state.
+          mkdir -p "$VERIFY_DIR/state"
+          cp "$STATE_DIR/baseline.json" "$VERIFY_DIR/state/baseline.json"
+          GAPS="$(jq '.gaps | length' "$STATE_DIR/baseline.json")"
+          echo "gaps=$GAPS" >> "$GITHUB_OUTPUT"
+          if [ "$GAPS" = 0 ]; then
+            echo "::notice::The cluster exports every metric in question for $TAG. There is no gap to close."
+            # shellcheck disable=SC2016  # the backticks are Markdown, not a command
+            printf '## Close metrics gaps\n\nNo gap to close for `%s`.\n' "$TAG" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      # Six attempts, because a shell loop cannot wrap an action. Each one
+      # does nothing once the loop has stopped or max_attempts is reached.
+      - name: Attempt 1
+        if: steps.baseline.outputs.gaps != '0'
+        uses: ./.github/actions/metrics-gap-attempt
+        with:
+          prompt: ${{ env.PROMPT }}
+          model: ${{ env.MODEL }}
+          tag: ${{ steps.inputs.outputs.tag }}
+          max_attempts: ${{ steps.inputs.outputs.max }}
+          state_dir: ${{ env.STATE_DIR }}
+          source_dir: ${{ env.SOURCE_DIR }}
+          trusted_dir: ${{ env.TRUSTED_DIR }}
+          work_dir: ${{ env.WORK_DIR }}
+          aws_region: ${{ vars.RP_AWS_CRED_REGION }}
+          aws_role_arn: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
+          adp_client_secret_id: ${{ env.ADP_CLIENT_SECRET_ID }}
+          adp_token_url: ${{ env.ADP_TOKEN_URL }}
+          adp_gateway_base_url: ${{ env.ADP_GATEWAY_BASE_URL }}
+      - name: Attempt 2
+        if: steps.baseline.outputs.gaps != '0'
+        uses: ./.github/actions/metrics-gap-attempt
+        with:
+          prompt: ${{ env.PROMPT }}
+          model: ${{ env.MODEL }}
+          tag: ${{ steps.inputs.outputs.tag }}
+          max_attempts: ${{ steps.inputs.outputs.max }}
+          state_dir: ${{ env.STATE_DIR }}
+          source_dir: ${{ env.SOURCE_DIR }}
+          trusted_dir: ${{ env.TRUSTED_DIR }}
+          work_dir: ${{ env.WORK_DIR }}
+          aws_region: ${{ vars.RP_AWS_CRED_REGION }}
+          aws_role_arn: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
+          adp_client_secret_id: ${{ env.ADP_CLIENT_SECRET_ID }}
+          adp_token_url: ${{ env.ADP_TOKEN_URL }}
+          adp_gateway_base_url: ${{ env.ADP_GATEWAY_BASE_URL }}
+      - name: Attempt 3
+        if: steps.baseline.outputs.gaps != '0'
+        uses: ./.github/actions/metrics-gap-attempt
+        with:
+          prompt: ${{ env.PROMPT }}
+          model: ${{ env.MODEL }}
+          tag: ${{ steps.inputs.outputs.tag }}
+          max_attempts: ${{ steps.inputs.outputs.max }}
+          state_dir: ${{ env.STATE_DIR }}
+          source_dir: ${{ env.SOURCE_DIR }}
+          trusted_dir: ${{ env.TRUSTED_DIR }}
+          work_dir: ${{ env.WORK_DIR }}
+          aws_region: ${{ vars.RP_AWS_CRED_REGION }}
+          aws_role_arn: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
+          adp_client_secret_id: ${{ env.ADP_CLIENT_SECRET_ID }}
+          adp_token_url: ${{ env.ADP_TOKEN_URL }}
+          adp_gateway_base_url: ${{ env.ADP_GATEWAY_BASE_URL }}
+      - name: Attempt 4
+        if: steps.baseline.outputs.gaps != '0'
+        uses: ./.github/actions/metrics-gap-attempt
+        with:
+          prompt: ${{ env.PROMPT }}
+          model: ${{ env.MODEL }}
+          tag: ${{ steps.inputs.outputs.tag }}
+          max_attempts: ${{ steps.inputs.outputs.max }}
+          state_dir: ${{ env.STATE_DIR }}
+          source_dir: ${{ env.SOURCE_DIR }}
+          trusted_dir: ${{ env.TRUSTED_DIR }}
+          work_dir: ${{ env.WORK_DIR }}
+          aws_region: ${{ vars.RP_AWS_CRED_REGION }}
+          aws_role_arn: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
+          adp_client_secret_id: ${{ env.ADP_CLIENT_SECRET_ID }}
+          adp_token_url: ${{ env.ADP_TOKEN_URL }}
+          adp_gateway_base_url: ${{ env.ADP_GATEWAY_BASE_URL }}
+      - name: Attempt 5
+        if: steps.baseline.outputs.gaps != '0'
+        uses: ./.github/actions/metrics-gap-attempt
+        with:
+          prompt: ${{ env.PROMPT }}
+          model: ${{ env.MODEL }}
+          tag: ${{ steps.inputs.outputs.tag }}
+          max_attempts: ${{ steps.inputs.outputs.max }}
+          state_dir: ${{ env.STATE_DIR }}
+          source_dir: ${{ env.SOURCE_DIR }}
+          trusted_dir: ${{ env.TRUSTED_DIR }}
+          work_dir: ${{ env.WORK_DIR }}
+          aws_region: ${{ vars.RP_AWS_CRED_REGION }}
+          aws_role_arn: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
+          adp_client_secret_id: ${{ env.ADP_CLIENT_SECRET_ID }}
+          adp_token_url: ${{ env.ADP_TOKEN_URL }}
+          adp_gateway_base_url: ${{ env.ADP_GATEWAY_BASE_URL }}
+      - name: Attempt 6
+        if: steps.baseline.outputs.gaps != '0'
+        uses: ./.github/actions/metrics-gap-attempt
+        with:
+          prompt: ${{ env.PROMPT }}
+          model: ${{ env.MODEL }}
+          tag: ${{ steps.inputs.outputs.tag }}
+          max_attempts: ${{ steps.inputs.outputs.max }}
+          state_dir: ${{ env.STATE_DIR }}
+          source_dir: ${{ env.SOURCE_DIR }}
+          trusted_dir: ${{ env.TRUSTED_DIR }}
+          work_dir: ${{ env.WORK_DIR }}
+          aws_region: ${{ vars.RP_AWS_CRED_REGION }}
+          aws_role_arn: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
+          adp_client_secret_id: ${{ env.ADP_CLIENT_SECRET_ID }}
+          adp_token_url: ${{ env.ADP_TOKEN_URL }}
+          adp_gateway_base_url: ${{ env.ADP_GATEWAY_BASE_URL }}
+      # Nothing below trusts the loop. It reads the tree as it is now, and
+      # the baseline copy taken before the loop.
+      - name: Check which paths changed
+        id: paths
+        if: steps.baseline.outputs.gaps != '0'
+        run: |
+          set -euo pipefail
+          ALLOW=()
+          while IFS= read -r path; do
+            [ -n "$path" ] && ALLOW+=(--allow "$path")
+          done <<< "$ALLOWED_PATHS"
+          python3 "$GAP_LOOP_PY" check-diff --base HEAD "${ALLOW[@]}" --allow-new "$ALLOWED_NEW"
+          python3 "$GAP_LOOP_PY" check-leak --base HEAD --source "$SOURCE_DIR"
+          # The tree these checks passed, so the verify step can prove the
+          # fresh cluster run did not change it.
+          git add -A
+          echo "tree=$(git write-tree)" >> "$GITHUB_OUTPUT"
+          git reset -q
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Verify with a fresh cluster
+        id: verify
+        if: steps.baseline.outputs.gaps != '0'
+        env:
+          TAG: ${{ steps.inputs.outputs.tag }}
+          CHANGED: ${{ steps.paths.outputs.changed }}
+          CHECKED_TREE: ${{ steps.paths.outputs.tree }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -uo pipefail
+          COMPARE="$VERIFY_DIR/compare.json"
+          BODY="$VERIFY_DIR/pr-body.md"
+          NOTES="$STATE_DIR/notes.json"
+          rc=1
+          if [ "$CHANGED" = true ]; then
+            OUT="$VERIFY_DIR/out"
+            if bash "$TRUSTED_DIR/gap_loop_run.sh" generate "$TAG" "$SOURCE_DIR" "$OUT"; then
+              rc=0
+              # The run executes the model's function bodies, and check-diff
+              # ran before it. Anything it wrote or edited in the tree would
+              # reach the pull request unchecked, so the tree must be the one
+              # the path checks passed.
+              git add -A
+              now=$(git write-tree)
+              git reset -q
+              if [ "$now" != "$CHECKED_TREE" ]; then
+                echo "::error::The fresh cluster run changed the repository after the path checks:"
+                git diff --stat "$CHECKED_TREE" "$now"
+                exit 1
+              fi
+              python3 "$GAP_LOOP_PY" compare --state "$VERIFY_DIR/state" --json \
+                --gaps "$OUT/metrics-gaps.json" --dataset "$OUT/redpanda-metrics-$TAG.json" > "$COMPARE" || rc=$?
+            fi
+          else
+            echo "The loop kept no change, so there is nothing to verify."
+          fi
+          if [ ! -s "$COMPARE" ]; then
+            # No run to report: every gap is still open.
+            jq '{closed: [], remaining: [.gaps[] + {listed: true}], lost: []}' "$VERIFY_DIR/state/baseline.json" > "$COMPARE"
+          fi
+          python3 "$GAP_LOOP_PY" report --state "$VERIFY_DIR/state" --compare "$COMPARE" --notes "$NOTES" --run-url "$RUN_URL" > "$BODY"
+          cat "$BODY" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$rc" != 0 ]; then
+            echo "::error::The fresh cluster run closed no gap, lost a metric, or failed (exit code $rc). No pull request."
+            exit 1
+          fi
+          set -e
+          # The model's notes go into the pull request body, which is public.
+          python3 "$GAP_LOOP_PY" check-leak --base HEAD --source "$SOURCE_DIR" --text "$BODY"
+          # A requirement may say measured only for a gap this run closed.
+          python3 "$GAP_LOOP_PY" check-requirements --state "$VERIFY_DIR/state" --compare "$COMPARE" --base HEAD
+          python3 "$GAP_LOOP_PY" upgrade-evidence --compare "$COMPARE" --base HEAD \
+            --dataset "$OUT/redpanda-metrics-$TAG.json"
+          python3 "$GAP_LOOP_PY" check-requirements --state "$VERIFY_DIR/state" --compare "$COMPARE" --base HEAD
+          # The path check again, on the tree as it will be committed. The
+          # cluster run and upgrade-evidence both ran after the first one.
+          ALLOW=()
+          while IFS= read -r path; do
+            [ -n "$path" ] && ALLOW+=(--allow "$path")
+          done <<< "$ALLOWED_PATHS"
+          python3 "$GAP_LOOP_PY" check-diff --base HEAD "${ALLOW[@]}" --allow-new "$ALLOWED_NEW"
+          echo "closed=$(jq '.closed | length' "$COMPARE")" >> "$GITHUB_OUTPUT"
+      - name: Test the cluster setup files
+        if: steps.baseline.outputs.gaps != '0'
+        run: npx jest __tests__/tools/metrics-cluster-extras.test.js __tests__/tools/metrics-requirements.test.js
+      - name: Assume the AWS role for the pull request
+        if: steps.baseline.outputs.gaps != '0'
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ vars.RP_AWS_CRED_REGION }}
+          role-to-assume: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
+      - name: Fetch the bot token for the pull request
+        if: steps.baseline.outputs.gaps != '0'
+        uses: aws-actions/aws-secretsmanager-get-secrets@v3
+        with:
+          secret-ids: |
+            ,sdlc/prod/github/actions_bot_token
+          parse-json-secrets: true
+      - name: Open a draft pull request
+        if: steps.baseline.outputs.gaps != '0'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ env.ACTIONS_BOT_TOKEN }}
+          add-paths: |
+            docker-compose/metrics/
+            cli-utils/generate-cluster-docs.sh
+          commit-message: "fix: export ${{ steps.verify.outputs.closed }} more metrics from the metrics cluster"
+          branch: metrics-close-gaps-${{ steps.inputs.outputs.tag }}
+          title: "fix: export ${{ steps.verify.outputs.closed }} more metrics from the metrics cluster"
+          body-path: ${{ runner.temp }}/gap-loop/verify/pr-body.md
+          draft: true

@@ -1,0 +1,210 @@
+name: metrics-gap-attempt
+description: >
+  One attempt of the metrics gap loop in .github/workflows/metrics-close-gaps.yml:
+  build the input, make one model call with no shell, apply the answer, run
+  the cluster, and keep or revert the change. The workflow calls this a fixed
+  number of times, because a shell loop cannot wrap an action. An attempt
+  that is not needed (the loop has stopped, or the cap is reached) does
+  nothing.
+
+  Model auth is the ADP AI Gateway, set up as doc-strings-review.yml sets it
+  up: a client credential from Secrets Manager, a short-lived bearer in
+  AWS_BEARER_TOKEN_BEDROCK, and anthropics/claude-code-action in Bedrock
+  mode. The token is minted for each attempt, because a cluster run between
+  two calls can outlast it.
+
+inputs:
+  prompt:
+    description: The prompt, from the workflow file. This action adds the two file paths.
+    required: true
+  model:
+    description: Bedrock-style model id in the ADP provider's allowlist.
+    required: true
+  tag:
+    description: Redpanda release tag.
+    required: true
+  max_attempts:
+    description: Cap on attempts in this run.
+    required: true
+  state_dir:
+    description: The loop's state directory, outside the checkout.
+    required: true
+  source_dir:
+    description: Checkout of the Redpanda source at the tag, outside the checkout.
+    required: true
+  trusted_dir:
+    description: Copies of gap_loop.py and gap_loop_run.sh taken before the loop, outside the checkout.
+    required: true
+  work_dir:
+    description: Directory outside the checkout for the model's input and its answer.
+    required: true
+  aws_region:
+    description: Region of the role and the secret.
+    required: true
+  aws_role_arn:
+    description: Role that can read the ADP client credential.
+    required: true
+  adp_client_secret_id:
+    description: Secrets Manager id of the ADP client credential for this workload.
+    required: true
+  adp_token_url:
+    description: OAuth token endpoint of the gateway.
+    required: true
+  adp_gateway_base_url:
+    description: Bedrock-compatible base URL of the gateway.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Build the input for this attempt
+      id: gate
+      shell: bash
+      env:
+        STATE_DIR: ${{ inputs.state_dir }}
+        SOURCE_DIR: ${{ inputs.source_dir }}
+        TRUSTED_DIR: ${{ inputs.trusted_dir }}
+        WORK_DIR: ${{ inputs.work_dir }}
+        MAX_ATTEMPTS: ${{ inputs.max_attempts }}
+      run: |
+        set -euo pipefail
+        if ! python3 "$TRUSTED_DIR/gap_loop.py" status --state "$STATE_DIR" --max "$MAX_ATTEMPTS"; then
+          echo "go=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        mkdir -p "$WORK_DIR"
+        rm -f "$WORK_DIR/response.json"
+        # The context holds Redpanda source. It is never printed or uploaded.
+        python3 "$TRUSTED_DIR/gap_loop.py" context --state "$STATE_DIR" \
+          --source "$SOURCE_DIR" --out "$WORK_DIR/context.md"
+        echo "go=true" >> "$GITHUB_OUTPUT"
+    - name: Assume the AWS role
+      if: steps.gate.outputs.go == 'true'
+      uses: aws-actions/configure-aws-credentials@v6
+      with:
+        aws-region: ${{ inputs.aws_region }}
+        role-to-assume: ${{ inputs.aws_role_arn }}
+    - name: Fetch the ADP client credential
+      if: steps.gate.outputs.go == 'true'
+      uses: aws-actions/aws-secretsmanager-get-secrets@v3
+      with:
+        secret-ids: |
+          ,${{ inputs.adp_client_secret_id }}
+        parse-json-secrets: true
+    # Same contract as the mint step in doc-strings-review.yml: the secret
+    # goes through stdin, https only, and a token with whitespace is refused
+    # because it could add variables to GITHUB_ENV.
+    - name: Mint the ADP gateway token
+      if: steps.gate.outputs.go == 'true'
+      shell: bash
+      env:
+        TOKEN_URL: ${{ inputs.adp_token_url }}
+        CLIENT_SECRET_ID: ${{ inputs.adp_client_secret_id }}
+      run: |
+        set -euo pipefail
+        # The env names follow the last segment of the secret id.
+        prefix=$(printf '%s' "$CLIENT_SECRET_ID" | awk -F/ '{print toupper($NF)}' | tr -c 'A-Za-z0-9_\n' '_')
+        id_var="${prefix}_ID"
+        secret_var="${prefix}_SECRET"
+        client_id="${!id_var:-}"
+        client_secret="${!secret_var:-}"
+        if [ -z "$client_id" ] || [ -z "$client_secret" ]; then
+          echo "::error::ADP client credential missing from env ($id_var, $secret_var)."
+          exit 1
+        fi
+        case "$TOKEN_URL" in
+          https://*) ;;
+          *) echo "::error::adp_token_url must be https."; exit 1 ;;
+        esac
+        status=$(printf '%s' "$client_secret" | curl -sS --request POST \
+          --connect-timeout 10 --max-time 30 \
+          --retry 3 --retry-all-errors --retry-delay 2 \
+          --output "$RUNNER_TEMP/adp_token.json" --write-out '%{http_code}' \
+          --url "$TOKEN_URL" \
+          --header 'content-type: application/x-www-form-urlencoded' \
+          --data grant_type=client_credentials \
+          --data-urlencode client_id="$client_id" \
+          --data-urlencode client_secret@-) || status=000
+        token=$(jq -r '.access_token // empty' "$RUNNER_TEMP/adp_token.json" 2>/dev/null || true)
+        rm -f "$RUNNER_TEMP/adp_token.json"
+        if [ -z "$token" ]; then
+          echo "::error::failed to mint the ADP gateway token (HTTP $status)."
+          exit 1
+        fi
+        case "$token" in *[[:space:][:cntrl:]]*)
+          echo "::error::minted token contains whitespace or control characters."
+          exit 1 ;;
+        esac
+        echo "::add-mask::$token"
+        echo "AWS_BEARER_TOKEN_BEDROCK=$token" >> "$GITHUB_ENV"
+    # The model reads Redpanda source and its answer becomes shell that runs
+    # on this runner. Only the short-lived bearer may exist from here on.
+    - name: Drop the long-lived credentials
+      if: always() && steps.gate.outputs.go == 'true'
+      shell: bash
+      env:
+        CLIENT_SECRET_ID: ${{ inputs.adp_client_secret_id }}
+      run: |
+        set -euo pipefail
+        prefix=$(printf '%s' "$CLIENT_SECRET_ID" | awk -F/ '{print toupper($NF)}' | tr -c 'A-Za-z0-9_\n' '_')
+        for v in "${prefix}_ID" "${prefix}_SECRET" AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_DEFAULT_REGION AWS_REGION; do
+          echo "$v=" >> "$GITHUB_ENV"
+        done
+    # One call, no shell. The model reads one file and writes one file. A
+    # failed call leaves no answer, which the next step counts as an attempt.
+    - name: Ask the model for a change
+      id: model
+      if: steps.gate.outputs.go == 'true'
+      continue-on-error: true
+      uses: anthropics/claude-code-action@v1
+      env:
+        # Required by the action's env validator in Bedrock mode. The gateway ignores it.
+        AWS_REGION: us-west-2
+        ANTHROPIC_BEDROCK_BASE_URL: ${{ inputs.adp_gateway_base_url }}
+        # Background tasks go to Haiku, not to the primary model.
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: us.anthropic.claude-haiku-4-5-20251001-v1:0
+      with:
+        use_bedrock: true
+        # Not on the action's env-forwarding allowlist, so it goes through settings.
+        settings: '{"env":{"CLAUDE_CODE_SKIP_BEDROCK_AUTH":"1"}}'
+        # The job token is enough: this step only writes a local file.
+        github_token: ${{ github.token }}
+        show_full_output: false
+        track_progress: false
+        use_commit_signing: false
+        prompt: |
+          ${{ inputs.prompt }}
+
+          CONTEXT_FILE: ${{ inputs.work_dir }}/context.md
+          RESPONSE_FILE: ${{ inputs.work_dir }}/response.json
+        # File writes are governed by Edit(path) rules. With bare Edit denied,
+        # the Write tool can create the response file and nothing else.
+        claude_args: >
+          --setting-sources user
+          --model ${{ inputs.model }}
+          --max-turns 6
+          --add-dir ${{ inputs.work_dir }}
+          --disallowed-tools "WebFetch,WebSearch,Bash,Edit,MultiEdit,NotebookEdit,Grep,Glob"
+          --allowed-tools "Read(/${{ inputs.work_dir }}/context.md),Edit(/${{ inputs.work_dir }}/response.json)"
+    # The answer becomes shell in the cluster script, so the bearer goes
+    # before anything from the model runs.
+    - name: Drop the gateway token
+      if: always() && steps.gate.outputs.go == 'true'
+      shell: bash
+      run: echo "AWS_BEARER_TOKEN_BEDROCK=" >> "$GITHUB_ENV"
+    - name: Apply the answer, run the cluster, keep or revert
+      if: steps.gate.outputs.go == 'true'
+      shell: bash
+      env:
+        TAG: ${{ inputs.tag }}
+        STATE_DIR: ${{ inputs.state_dir }}
+        SOURCE_DIR: ${{ inputs.source_dir }}
+        TRUSTED_DIR: ${{ inputs.trusted_dir }}
+        WORK_DIR: ${{ inputs.work_dir }}
+        MAX_ATTEMPTS: ${{ inputs.max_attempts }}
+        GAP_LOOP_PY: ${{ inputs.trusted_dir }}/gap_loop.py
+      run: |
+        set -euo pipefail
+        bash "$TRUSTED_DIR/gap_loop_run.sh" attempt "$TAG" "$SOURCE_DIR" "$STATE_DIR" "$MAX_ATTEMPTS" "$WORK_DIR/response.json"
+        # The input holds Redpanda source, so it does not outlive the attempt.
+        rm -f "$WORK_DIR/context.md"
