@@ -594,6 +594,45 @@ describe('rpk Docs Handler', () => {
       expect(lines.some((l) => l.includes('go1.27.1'))).toBe(true)
     })
 
+    // docs run 45128503124 (2026-11-23): on a fresh runner the build was
+    // stopped after two minutes while Go was still downloading modules, and
+    // the error was 170 "go: downloading" lines with no reason.
+    test('the build gets long enough for a cold module download', () => {
+      spawnSync.mockImplementation((cmd, args, opts) => {
+        if (isBareVersionCheck(cmd, args, opts)) return { status: 0, stdout: 'go version go1.27.1 linux/amd64\n', stderr: '' }
+        if (isPrintTreeRun(cmd, args)) return { status: 0, stdout: tree, stderr: '' }
+        throw new Error(`unexpected spawnSync call: ${cmd} ${args.join(' ')}`)
+      })
+      fetchRpkTreeFromSource(tempDir, () => {})
+      const [, , opts] = spawnSync.mock.calls.find(([cmd, args]) => isPrintTreeRun(cmd, args))
+      expect(opts.timeout).toBeGreaterThanOrEqual(10 * 60 * 1000)
+    })
+
+    test('a build that is stopped at the timeout says so, without the download log', () => {
+      spawnSync.mockImplementation((cmd, args, opts) => {
+        if (isBareVersionCheck(cmd, args, opts)) return { status: 0, stdout: 'go version go1.27.1 linux/amd64\n', stderr: '' }
+        if (isPrintTreeRun(cmd, args)) return { status: null, signal: 'SIGTERM', stdout: '', stderr: 'go: downloading github.com/fatih/color v1.18.0\n', error: Object.assign(new Error('spawnSync go ETIMEDOUT'), { code: 'ETIMEDOUT' }) }
+        throw new Error(`unexpected spawnSync call: ${cmd} ${args.join(' ')}`)
+      })
+      let message
+      try { fetchRpkTreeFromSource(tempDir, () => {}) } catch (err) { message = err.message }
+      expect(message).toMatch(/did not finish within 15 minutes/)
+      expect(message).not.toMatch(/go: downloading/)
+      expect(message).not.toMatch(/Common fixes/)
+    })
+
+    test('a failed build reports the compiler error, not the download log', () => {
+      spawnSync.mockImplementation((cmd, args, opts) => {
+        if (isBareVersionCheck(cmd, args, opts)) return { status: 0, stdout: 'go version go1.27.1 linux/amd64\n', stderr: '' }
+        if (isPrintTreeRun(cmd, args)) return { status: 1, stdout: '', stderr: 'go: downloading github.com/fatih/color v1.18.0\ncmd/rpk/main.go:3:1: syntax error\n' }
+        throw new Error(`unexpected spawnSync call: ${cmd} ${args.join(' ')}`)
+      })
+      let message
+      try { fetchRpkTreeFromSource(tempDir, () => {}) } catch (err) { message = err.message }
+      expect(message).toMatch(/syntax error/)
+      expect(message).not.toMatch(/go: downloading/)
+    })
+
     test('a sufficient installed Go never runs the toolchain check', () => {
       spawnSync.mockImplementation((cmd, args, opts) => {
         if (isBareVersionCheck(cmd, args, opts)) return { status: 0, stdout: 'go version go1.27.1 linux/amd64\n', stderr: '' }
