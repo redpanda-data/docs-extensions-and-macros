@@ -1,0 +1,10 @@
+# Checks: on-screen locations such as 'top-right corner' and 'left sidebar'
+extends: existence
+message: "Don't describe where a control sits on screen ('%s'). Name the page, pane, or menu instead."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#referring-to-ui-elements
+level: warning
+ignorecase: true
+tokens:
+  - '\b(?:top|bottom|upper|lower)[- ](?:left|right)(?:[- ]hand)?(?:\s+(?:corner|side))?\b'
+  - '\b(?:left|right)[- ]hand\s+(?:side|menu|pane|panel|sidebar)\b'
+  - '\b(?:left|right)\s+(?:sidebar|pane|panel)\b'

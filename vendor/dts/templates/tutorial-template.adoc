@@ -1,0 +1,50 @@
+// Tutorial Template
+// Use for guided, hands-on learning experiences (first-time users).
+// Reader question: "Show me how to get started"
+
+= Build [Your First X] or Create [a Learning Project]
+:description: [One sentence describing what the reader will build/accomplish.]
+:page-topic-type: tutorial
+:learning-objective-1: Create [specific thing]
+:learning-objective-2: Configure [specific aspect]
+:learning-objective-3: Test [specific functionality]
+
+// Intro: 1-2 sentences, ~25-40 words. State what you'll build or learn. Self-referential phrasing okay (e.g., "This quickstart helps you...").
+[What will you build or learn in this tutorial, and what skill does it teach?]
+
+After reading this page, you will be able to:
+
+* [ ] {learning-objective-1}
+* [ ] {learning-objective-2}
+* [ ] {learning-objective-3}
+
+== Prerequisites
+
+* [Prerequisite 1 - be specific about versions]
+* [Prerequisite 2]
+
+== What you'll build
+
+[Brief description of the end result.]
+
+== [Action phrase]
+
+. [Specific instruction]
++
+[,bash]
+----
+# Command or code
+----
+
+. [Next instruction]
+
+== Verify your work
+
+[,bash]
+----
+# Verification command
+----
+
+== Next steps
+
+* xref:create-x.adoc[]

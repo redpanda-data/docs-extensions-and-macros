@@ -6,6 +6,7 @@ const path = require('path')
 const { spawnSync } = require('child_process')
 
 const { SourceCache } = require('../source-text')
+const { STANDARD } = require('../standards')
 
 /**
  * Properties surface: cluster/node configuration properties declared in
@@ -179,6 +180,8 @@ const RULES = [
   {
     name: 'missing-terminal-period',
     description: 'Property descriptions are complete sentences ending in a period',
+    why: 'A property description reads as complete sentences on the page, so one with no final period looks cut off.',
+    standard: STANDARD.qualityBar,
     severity: 'warning',
     check: (decl) => {
       const text = (decl.string || '').trim()
@@ -192,6 +195,8 @@ const RULES = [
   {
     name: 'sentinel-default-unexplained',
     description: 'Property defaults to a sentinel whose meaning the description never explains',
+    why: 'The page shows a sentinel default such as null, 0 or -1 as a bare value, so only the description can tell readers whether it disables the property, means unlimited, or leaves it unset.',
+    standard: STANDARD.properties,
     severity: 'info',
     // The rendered page already carries a "Default:" row built from the
     // extractor's own `default` field, so asking the prose to restate a

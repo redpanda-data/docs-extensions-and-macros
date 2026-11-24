@@ -1,5 +1,7 @@
 'use strict'
 
+const { STANDARD } = require('../standards')
+
 /**
  * Rules that apply to every doc-string surface.
  *
@@ -118,9 +120,17 @@ const CODE_TOKEN_PATTERNS = Object.freeze([
  * Exported for tests and for the surfaces that scope the rule differently.
  */
 function findBareCodeTokens (text, name = null) {
+  return scanBareCodeTokens(text, name).map(({ token, kind }) => ({ token, kind }))
+}
+
+/**
+ * findBareCodeTokens with the offset of every bare occurrence of each token
+ * (`indices`), so diff mode can tell which occurrences a PR changed.
+ */
+function scanBareCodeTokens (text, name = null) {
   const masked = maskNonProse(String(text || ''))
   const found = []
-  const seen = new Set()
+  const byToken = new Map()
   for (const { id, re } of CODE_TOKEN_PATTERNS) {
     re.lastIndex = 0
     let match
@@ -129,12 +139,61 @@ function findBareCodeTokens (text, name = null) {
       // The declaration's own name restating itself is name-echo's finding,
       // not a markup one.
       if (name && token === name) continue
-      if (seen.has(token)) continue
-      seen.add(token)
-      found.push({ token, kind: id })
+      if (byToken.has(token)) {
+        const entry = byToken.get(token)
+        if (!entry.indices.includes(match.index)) entry.indices.push(match.index)
+        continue
+      }
+      const entry = { token, kind: id, indices: [match.index] }
+      byToken.set(token, entry)
+      found.push(entry)
     }
   }
   return found
+}
+
+/**
+ * Offsets of every match of a global regex in `text`, as issue.at entries
+ * (see ../locate.js). `group` names a capture group to skip over, for
+ * patterns that match a boundary character before the text itself.
+ */
+function offsetsOf (text, re, group = null) {
+  const at = []
+  re.lastIndex = 0
+  let match
+  while ((match = re.exec(text)) !== null) {
+    const skip = group != null ? (match[group] || '').length : 0
+    at.push({ index: match.index + skip, length: match[0].length - skip })
+    if (match[0].length === 0) re.lastIndex++
+  }
+  return at
+}
+
+/**
+ * Where a sentence that findLongSentences reported sits in the original
+ * text. Its words are matched in order across any whitespace, line breaks
+ * and indentation; a CODE or URL placeholder matches the span it replaced.
+ * Null when the sentence cannot be found, which keeps the finding.
+ */
+function locateSentence (text, sentence) {
+  const parts = sentence.split(/\s+/).filter(Boolean).map((word) =>
+    word.split(/(CODE|URL)/).map((piece) =>
+      piece === 'CODE' ? '(?:`[^`]*`|CODE)'
+        : piece === 'URL' ? '\\S*?'
+          : piece.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join(''))
+  if (parts.length === 0) return null
+  const match = new RegExp(parts.join('\\s+')).exec(String(text || ''))
+  return match ? { index: match.index, length: match[0].length } : null
+}
+
+/**
+ * A short window of `text` around offset `at`, for messages that name the
+ * occurrence a diff kept rather than the first one.
+ */
+function excerptAt (text, at, width = 60) {
+  const start = Math.max(0, at - Math.floor(width / 2))
+  const slice = text.slice(start, start + width)
+  return `${start > 0 ? '...' : ''}${slice}${start + width < text.length ? '...' : ''}`
 }
 
 /**
@@ -149,10 +208,70 @@ function excerpt (text, needle, width = 60) {
   return `${start > 0 ? '...' : ''}${slice}${start + width < text.length ? '...' : ''}`
 }
 
+/**
+ * Word count above which a sentence is a finding. The writing standard asks
+ * for about 25 words, and the model review judges the borderline cases; this
+ * ceiling is set higher so the deterministic rule fires only on sentences no
+ * reader would call short.
+ */
+const MAX_SENTENCE_WORDS = 30
+
+/**
+ * Sentences in a description longer than `max` words, as { sentence, words }.
+ *
+ * Paragraphs split on blank lines, and source line wraps inside a paragraph
+ * are joined, because rpk `Long` text and clang-format-wrapped literals break
+ * lines mid-sentence. Indented lines and list items are not prose sentences
+ * (rpk-docs turns indented lines into code blocks), so each list item counts
+ * on its own and indented lines are skipped. A paragraph that opens with a
+ * `$ ` prompt is a shell transcript (some rpk `Long` text shows command
+ * output unindented), so it is skipped too, and so are AsciiDoc listing,
+ * literal, and table blocks (`----`, `....`, `|===`) and block attribute
+ * lines (`[source,yaml]`, `[%header]`, `[#anchor]`), which connector
+ * descriptions carry unindented. A backticked span or a URL counts as one
+ * word, however many tokens it holds.
+ */
+function findLongSentences (text, max = MAX_SENTENCE_WORDS) {
+  const long = []
+  const prose = String(text || '')
+    .replace(/^(-{4,}|\.{4,}|\|={3,})[ \t]*$[\s\S]*?^\1[ \t]*$/gm, '')
+    .replace(/^\[[^\]\n]*\][ \t]*$/gm, '')
+  for (const paragraph of prose.split(/\n\s*\n/)) {
+    if (/^\s*\$ /.test(paragraph)) continue
+    const segments = []
+    let current = []
+    for (const line of paragraph.split('\n')) {
+      if (/^(?:\t| {2,})/.test(line)) continue
+      if (/^\s*(?:[-*]|\d+\.)\s/.test(line) && current.length) {
+        segments.push(current.join(' '))
+        current = []
+      }
+      current.push(line.trim())
+    }
+    if (current.length) segments.push(current.join(' '))
+    for (const segment of segments) {
+      const masked = segment
+        .replace(/`[^`]*`/g, 'CODE')
+        // Keep the punctuation after a URL, so "https://)." still ends a
+        // sentence.
+        .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S*?([).,;:!?]*)(?=\s|$)/gi, 'URL$1')
+      // A closing quote or bracket may follow the full stop: `."` and `.)`
+      // still end the sentence.
+      for (const sentence of masked.split(/(?<=[.!?]["'”’)\]]*)\s+/)) {
+        const words = sentence.split(/\s+/).filter((w) => /[A-Za-z0-9]/.test(w)).length
+        if (words > max) long.push({ sentence: sentence.trim(), words })
+      }
+    }
+  }
+  return long
+}
+
 const COMMON_RULES = [
   {
     name: 'empty-description',
     description: 'Declaration ships with no doc string at all',
+    why: 'A declaration with no string publishes as a blank entry, so readers get a name and nothing about what it does.',
+    standard: STANDARD.reviewingADiff,
     severity: 'error',
     check: (decl) => {
       if (decl.string == null || decl.string.trim() === '') {
@@ -164,6 +283,8 @@ const COMMON_RULES = [
   {
     name: 'starts-lowercase',
     description: 'Description starts with a lowercase letter',
+    why: 'Published strings are sentences in sentence case, so one that opens in lowercase reads as a fragment or a typo on the page.',
+    standard: STANDARD.qualityBar,
     severity: 'warning',
     check: (decl) => {
       const text = (decl.string || '').trim()
@@ -177,7 +298,8 @@ const COMMON_RULES = [
         // written; only all-lowercase first words are capitalization drift.
         const firstWord = text.split(/\s/, 1)[0]
         if (/[A-Z]/.test(firstWord)) return []
-        return [{ message: `Description starts with a lowercase letter: "${text.slice(0, 60)}"` }]
+        const lead = (decl.string || '').length - (decl.string || '').trimStart().length
+        return [{ message: `Description starts with a lowercase letter: "${text.slice(0, 60)}"`, at: [{ index: lead, length: firstWord.length }] }]
       }
       return []
     }
@@ -185,6 +307,8 @@ const COMMON_RULES = [
   {
     name: 'name-echo',
     description: 'Description merely restates the declared name (tautology)',
+    why: 'A description that only restates the name tells readers nothing they could not already read from the name.',
+    standard: STANDARD.qualityBar,
     severity: 'warning',
     check: (decl) => {
       const text = (decl.string || '').trim()
@@ -198,6 +322,8 @@ const COMMON_RULES = [
   {
     name: 'too-short',
     description: 'Description is under 20 characters',
+    why: 'A string this short cannot say what the setting does, its unit, or what changes when you set it, so readers are left guessing.',
+    standard: STANDARD.qualityBar,
     severity: 'warning',
     check: (decl) => {
       const text = (decl.string || '').trim()
@@ -211,6 +337,8 @@ const COMMON_RULES = [
   {
     name: 'unexpanded-jargon',
     description: 'Internal jargon that ships to users unexpanded',
+    why: 'Internal terms such as NTP, seastar or nullopt mean nothing to the operators who read the reference page.',
+    standard: STANDARD.qualityBar,
     severity: 'warning',
     check: (decl) => {
       const text = decl.string || ''
@@ -219,7 +347,10 @@ const COMMON_RULES = [
       for (const term of JARGON_TERMS) {
         const pattern = new RegExp(`\\b${term}\\b`, 'i')
         if (pattern.test(text)) {
-          issues.push({ message: `Contains internal jargon "${term}". Expand or replace it; users do not know this term.` })
+          issues.push({
+            message: `Contains internal jargon "${term}". Expand or replace it; users do not know this term.`,
+            at: offsetsOf(text, new RegExp(`\\b${term}\\b`, 'gi'))
+          })
         }
       }
       return issues
@@ -228,6 +359,8 @@ const COMMON_RULES = [
   {
     name: 'em-dash',
     description: 'Em dash in prose that ships to docs.redpanda.com',
+    why: 'The docs style avoids em dashes, and this string is published as written, so a fix made in the generated page is undone at the next regeneration.',
+    standard: STANDARD.styleFormatting,
     severity: 'warning',
     check: (decl) => {
       const text = decl.string || ''
@@ -238,14 +371,19 @@ const COMMON_RULES = [
       // correcting it in the generated partial is undone by the next
       // regeneration.
       const count = (text.match(/\u2014/g) || []).length
+      const say = (n, at) => `Contains ${n} em dash${n === 1 ? '' : 'es'}. Use a comma, parentheses, or a separate sentence: "${at}"`
       return [{
-        message: `Contains ${count} em dash${count === 1 ? '' : 'es'}. Use a comma, parentheses, or a separate sentence: "${excerpt(text, '\u2014')}"`
+        message: say(count, excerpt(text, '\u2014')),
+        at: offsetsOf(text, /\u2014/g),
+        messageFor: (kept) => say(kept.length, excerptAt(text, kept[0].index))
       }]
     }
   },
   {
     name: 'latin-abbreviation',
     description: 'Latin abbreviation instead of plain English',
+    why: 'The docs word list replaces e.g. and i.e. with plain English, and this string is published as written, so the abbreviation reaches the page.',
+    standard: STANDARD.doNotUseWords,
     severity: 'warning',
     check: (decl) => {
       const text = decl.string || ''
@@ -260,8 +398,11 @@ const COMMON_RULES = [
         // (https://e.g.example/path) is left alone.
         const pattern = new RegExp(`(^|[^\\w.])${abbr.replace(/\./g, '\\.')}(?=$|[^\\w])`, 'i')
         if (pattern.test(text)) {
+          const say = (at) => `Uses "${abbr}". Write ${replacement} instead: "${at}"`
           issues.push({
-            message: `Uses "${abbr}". Write ${replacement} instead: "${excerpt(text, abbr)}"`
+            message: say(excerpt(text, abbr)),
+            at: offsetsOf(text, new RegExp(pattern.source, 'gi'), 1),
+            messageFor: (kept) => say(excerptAt(text, kept[0].index))
           })
         }
       }
@@ -269,8 +410,28 @@ const COMMON_RULES = [
     }
   },
   {
+    name: 'long-sentence',
+    description: `Sentence longer than ${MAX_SENTENCE_WORDS} words`,
+    why: 'A sentence this long usually carries more than one idea, so readers have to read it twice to follow it.',
+    standard: STANDARD.qualityBar,
+    severity: 'warning',
+    check: (decl) => {
+      // The standard asks for one idea per sentence. A sentence this long
+      // usually chains clauses a reader has to parse twice.
+      return findLongSentences(decl.string).map(({ sentence, words }) => {
+        const where = locateSentence(decl.string, sentence)
+        return {
+          message: `Sentence has ${words} words. Split it into shorter sentences with one idea each: "${sentence.slice(0, 80)}${sentence.length > 80 ? '...' : ''}"`,
+          ...(where ? { at: [where] } : {})
+        }
+      })
+    }
+  },
+  {
     name: 'unbalanced-backticks',
     description: 'Odd number of backticks ships broken markup',
+    why: 'An odd number of backticks leaves an inline code span open, so the rest of the string renders as broken monospace.',
+    standard: STANDARD.qualityBar,
     severity: 'error',
     check: (decl) => {
       const text = decl.string || ''
@@ -284,21 +445,30 @@ const COMMON_RULES = [
   {
     name: 'missing-inline-code',
     description: 'Code value or field name in prose without inline code',
+    why: 'Without inline code, a property name, flag or path reads as ordinary prose, so readers cannot tell it is a value to type exactly.',
+    standard: STANDARD.qualityBar,
     severity: 'warning',
     check: (decl) => {
+      // A plain-text string (convention.plain_text), such as a connect
+      // ShortDescription, cannot hold inline code: backticks show literally.
+      if (decl.convention && decl.convention.plain_text) return []
       // A surface whose generator formats some code values itself declares
       // which (convention.auto_inline_code); those are not findings there.
       const auto = (decl.convention && decl.convention.auto_inline_code) || null
-      const bare = findBareCodeTokens(decl.string, decl.name).filter((b) => !auto ||
+      const bare = scanBareCodeTokens(decl.string, decl.name).filter((b) => !auto ||
         !((auto.kinds || []).includes(b.kind) ||
           (b.kind === 'path' && (auto.path_prefixes || []).some((prefix) => b.token.startsWith(prefix)))))
       if (bare.length === 0) return []
-      const list = bare.map((b) => `\`${b.token}\``).join(', ')
+      const say = (tokens) => `Code values and field names belong in inline code: ${tokens.map((t) => `\`${t}\``).join(', ')}. Wrap each in backticks, which render as inline code in both AsciiDoc and Markdown.`
       return [{
-        message: `Code values and field names belong in inline code: ${list}. Wrap each in backticks, which render as inline code in both AsciiDoc and Markdown.`
+        message: say(bare.map((b) => b.token)),
+        // Every bare occurrence, so diff mode names only the tokens on lines
+        // the PR changed.
+        at: bare.flatMap((b) => b.indices.map((index) => ({ index, length: b.token.length, label: b.token }))),
+        messageFor: (kept) => say([...new Set(kept.map((k) => k.label))])
       }]
     }
   }
 ]
 
-module.exports = { COMMON_RULES, JARGON_TERMS, isNameEcho, tokenize, findBareCodeTokens, maskNonProse }
+module.exports = { COMMON_RULES, JARGON_TERMS, MAX_SENTENCE_WORDS, isNameEcho, tokenize, findBareCodeTokens, scanBareCodeTokens, findLongSentences, locateSentence, maskNonProse }

@@ -1,0 +1,34 @@
+= Public Metrics
+:description: Stand-in for the public metrics reference page.
+
+// tag::single-source[]
+A stand-in for the metrics reference page, so the showcase build has a page
+with a heading per metric for `metric:` to link. The headings inside
+`ifndef::env-cloud[]` are the ones a Cloud page does not have.
+
+== Cluster metrics
+
+=== redpanda_cluster_brokers
+
+Number of configured brokers in the cluster.
+
+ifndef::env-cloud[]
+=== redpanda_cluster_health_refreshes_total
+
+Total successful health-report refreshes.
+
+=== redpanda_kafka_consumer_group_lag_sum
+
+Sum of consumer group lag for all topic-partitions.
+endif::[]
+
+== Kafka metrics
+
+=== redpanda_kafka_request_latency_seconds
+
+Latency of produce and fetch requests.
+
+=== redpanda_example_deprecated_total
+
+A metric made up for the fixtures, marked deprecated.
+// end::single-source[]

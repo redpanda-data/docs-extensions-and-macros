@@ -129,6 +129,22 @@ describe('enterprise-features parsers', () => {
       { feature: 'Tiered Storage', properties: ['cloud_storage_enabled'] },
     ])
   })
+
+  test('parseDisableTable takes the property from a dotted broker config key', () => {
+    const page = `|===
+| Feature | Action
+
+| xref:manage:security/fips-compliance.adoc[FIPS Compliance]
+|
+Set the broker property prop:fips_mode[] to \`disabled\`:
+
+rpk redpanda config set redpanda.fips_mode disabled
+|===
+`
+    expect(parseDisableTable(page)).toEqual([
+      { feature: 'FIPS Compliance', properties: ['fips_mode'] },
+    ])
+  })
 })
 
 describe('enterprise-features checks', () => {
@@ -196,6 +212,24 @@ features:
     expect(messages).toMatch(/'A' has since 'not-a-version', which is not a parsable version/)
     expect(messages).not.toMatch(/'B' has since/)
     expect(messages).not.toMatch(/'C' has since/)
+  })
+
+  test('in-table must be a boolean', () => {
+    const yaml = `features:
+  - name: A
+    scope: redpanda
+    in-table: 'false'
+    description: x
+    source: {kind: manual, value: ok}
+  - name: B
+    scope: redpanda
+    in-table: false
+    description: x
+    source: {kind: manual, value: ok}
+`
+    const messages = lintRegistry(yaml).findings.map((f) => f.message).join('\n')
+    expect(messages).toMatch(/'A' has in-table 'false', which must be true or false/)
+    expect(messages).not.toMatch(/'B' has in-table/)
   })
 
   test('a new core enum value is reported as needs-human', () => {
@@ -280,6 +314,23 @@ features:
     expect(partial).toContain('xref:manage:remote-read-replicas.adoc[Remote Read Replicas]')
     expect(partial.indexOf('audit_logging')).toBeLessThan(partial.indexOf('cloud_storage'))
     expect(partial).toContain('| fips')
+  })
+
+  // The table filter drops in-table: false entries, but the mapping must not:
+  // keeping the cluster_cores_over_limit row is why such an entry exists.
+  test('buildMappingPartial keeps an entry marked in-table: false', () => {
+    const yaml = `features:
+  - name: Community Edition Core Limit
+    scope: redpanda
+    xref: get-started:licensing/core-limit.adoc
+    in-table: false
+    description: x
+    source: {kind: core-enum, value: cluster_cores_over_limit}
+`
+    const { features } = lintRegistry(yaml)
+    const partial = buildMappingPartial(features, ['cluster_cores_over_limit'])
+    expect(partial).toContain('| cluster_cores_over_limit')
+    expect(partial).toContain('xref:get-started:licensing/core-limit.adoc[Community Edition Core Limit]')
   })
 
   test('runChecks skips missing sources with info findings only', () => {

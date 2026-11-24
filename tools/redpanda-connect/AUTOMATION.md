@@ -169,7 +169,8 @@ For each version pair `(oldVersion → newVersion)`:
     "removedFields": 2,       // Breaking changes!
     "deprecatedComponents": 0,
     "deprecatedFields": 1,
-    "changedDefaults": 0
+    "changedDefaults": 0,     // A default changed or was removed (breaking)
+    "documentedDefaults": 0   // A field with no default now states one (informational)
   },
   "details": {
     "newComponents": [
@@ -385,7 +386,8 @@ Changes between two consecutive versions:
     "newFields": [...],
     "removedFields": [...],
     "deprecatedFields": [...],
-    "changedDefaults": [...]
+    "changedDefaults": [...],
+    "documentedDefaults": [...]
   },
   "binaryAnalysis": {
     "versions": {

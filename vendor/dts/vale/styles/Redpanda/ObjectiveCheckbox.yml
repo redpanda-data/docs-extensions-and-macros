@@ -1,0 +1,9 @@
+# Checks: learning objectives not shown as checkboxes
+extends: existence
+message: "Display learning objectives as checkboxes: '* [ ] {learning-objective-N}'."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/content-architecture.md#displaying-learning-objectives
+level: error
+scope: raw
+nonword: true
+tokens:
+  - '(?m)^\*[ \t]+\{learning-objective-\d+\}'

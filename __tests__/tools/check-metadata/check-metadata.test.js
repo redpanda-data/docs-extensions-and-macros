@@ -379,6 +379,34 @@ include::manage:partial$tiered.adoc[]
     expect((await cli([], { root: root2, taxonomy: TAXONOMY, suggest: true, suggestEmptyOnly: true })).result.suggest.suggestions).toHaveLength(0)
   })
 
+  test('each suggestion carries the line it belongs on and whether the page has categories', async () => {
+    const root = makeRepo({
+      'modules/a/pages/bare.adoc': TIERED.replace('include::manage:partial$tiered.adoc[]', 'Tiered Storage.'),
+      'modules/a/pages/tagged.adoc': '= Replication\n:description: Replication.\n:page-categories: Security\n\nx\n',
+      'modules/a/pages/plain.adoc': '= Plain\n\nNothing to see.\n',
+    })
+    const { result, stdout } = await cli([], { root, taxonomy: TAXONOMY, suggest: true, format: 'text' })
+    expect(result.suggest.suggestions.map((x) => `${x.file}:${x.line} ${x.conceptId} ${x.uncategorized}`)).toEqual([
+      'modules/a/pages/bare.adoc:1 tiered-storage true',
+      'modules/a/pages/tagged.adoc:3 replication false',
+    ])
+    expect(result.suggest.uncategorized).toEqual([
+      { file: 'modules/a/pages/bare.adoc', kind: 'docs', suggestions: 1 },
+      { file: 'modules/a/pages/plain.adoc', kind: 'docs', suggestions: 0 },
+    ])
+    expect(result.findings).toEqual([])
+    expect(stdout).toMatch(/^SUGGEST modules\/a\/pages\/bare\.adoc \(no page-categories yet\)$/m)
+    expect(stdout).toMatch(/^SUGGEST modules\/a\/pages\/tagged\.adoc$/m)
+    expect(stdout).toMatch(/^NONE    modules\/a\/pages\/plain\.adoc has no page-categories, and its text names no concept above the minimum score$/m)
+  })
+
+  test('suggestions never change the exit code, even with --strict', async () => {
+    const { result, code } = await cli([], { root: repo(), taxonomy: TAXONOMY, suggest: true, strict: true })
+    expect(result.suggest.suggestions.length).toBeGreaterThan(0)
+    expect(result.summary).toEqual({ errors: 0, warnings: 0 })
+    expect(code).toBe(0)
+  })
+
   test('without --suggest there is no suggest block', async () => {
     const { result } = await cli([], { root: repo(), taxonomy: TAXONOMY })
     expect(result.suggest).toBeUndefined()

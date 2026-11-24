@@ -4,6 +4,16 @@
  */
 
 /**
+ * Format a field default for the Markdown PR summary. A field with no default
+ * is `undefined`; a declared null default (Default(nil)) is a value.
+ * @param {*} value - The default, or undefined when the field has none
+ * @returns {string} Inline code, or `_no default_`
+ */
+function formatDefault(value) {
+  return value === undefined ? '_no default_' : `\`${JSON.stringify(value)}\``;
+}
+
+/**
  * Render Bloblang changes section for PR summary
  * @param {object} data - Bloblang change data
  * @param {array} data.newMethods - Array of new methods (with .name and optional .version)
@@ -139,6 +149,101 @@ function renderDescriptionReports(reports) {
 }
 
 /**
+ * Render the components the release ships that Connect's docs_gen does not
+ * document (the attachment's `undocumented` list), so a writer sees on the PR
+ * that they have no docs page.
+ * @param {Array<{type: string, name: string, builds: string[]}>} entries
+ * @returns {string[]} lines (empty when there is nothing to report)
+ */
+function renderUndocumentedComponents(entries) {
+  if (!Array.isArray(entries) || entries.length === 0) return [];
+  const lines = [];
+  lines.push('### Undocumented components');
+  lines.push('');
+  lines.push('These ship in a Connect release build but Connect\'s docs_gen doesn\'t document them, so they have no docs page. Add each package to `cmd/tools/docs_gen/allcomponents` in redpanda-data/connect.');
+  lines.push('');
+  for (const e of entries) {
+    lines.push(`- \`${e.type}/${e.name}\` (builds: ${e.builds.join(', ')})`);
+  }
+  lines.push('');
+  return lines;
+}
+
+/**
+ * What --cloud-version and --cgo-version asked for, such as "Cloud v4.114.0
+ * and cgo v4.114.0 were requested".
+ * @param {{cloudVersion?: string|null, cgoVersion?: string|null}} source
+ * @returns {string}
+ */
+function overrideRequestText({ cloudVersion, cgoVersion }) {
+  const parts = [];
+  if (cloudVersion) parts.push(`Cloud v${cloudVersion}`);
+  if (cgoVersion) parts.push(`cgo v${cgoVersion}`);
+  return `${parts.join(' and ')} ${parts.length > 1 ? 'were' : 'was'} requested`;
+}
+
+/**
+ * Where a release's Cloud and cgo platform data came from, for the summary
+ * header. Takes the `source` that findReleaseAttachmentWithSource() returns.
+ * @param {{reason: string, version: string, file: string, error?: string}|null} source
+ * @returns {string|null}
+ */
+function platformSourceText(source) {
+  if (!source) return null;
+  switch (source.reason) {
+    case 'release-asset':
+      return 'release asset';
+    case 'asset-missing-file':
+      return `binaries (the v${source.version} docs asset has no ${source.file})`;
+    case 'asset-unreadable':
+      return `binaries (couldn't read the v${source.version} docs asset: ${source.error})`;
+    case 'override':
+      return `binaries (${overrideRequestText(source)}, so the v${source.version} docs asset's flags don't apply)`;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Header lines naming the platform data source: one for the release the PR
+ * targets and, in a multi-release run, one per earlier release whose source
+ * differs from it.
+ * @param {object|null} source - Source for the target release
+ * @param {object[]} [releaseSources] - Sources for the earlier releases
+ * @returns {string[]}
+ */
+function renderPlatformSource(source, releaseSources = []) {
+  const main = platformSourceText(source);
+  if (!main) return [];
+  const lines = [`**Platform data:** ${main}`];
+  for (const s of releaseSources || []) {
+    const text = platformSourceText(s);
+    if (text && text !== main && s.version !== source.version) lines.push(`**Platform data (${s.version}):** ${text}`);
+  }
+  return lines;
+}
+
+/**
+ * The unexpected-fallback message, shared by the console warning and the PR
+ * summary block.
+ * @param {{version: string, previousVersion: string}} warning
+ * @returns {string}
+ */
+function unexpectedFallbackMessage({ version, previousVersion }) {
+  return `v${previousVersion} shipped connect-${previousVersion}.json but v${version} doesn't, so this run compared binaries instead. Check redpanda-data/connect's release docs step (docs_gen -version).`;
+}
+
+/**
+ * Render the unexpected-fallback warning block.
+ * @param {{version: string, previousVersion: string}|null} warning
+ * @returns {string[]} lines (empty when there is nothing to warn about)
+ */
+function renderPlatformFallbackWarning(warning) {
+  if (!warning) return [];
+  return ['> [!WARNING]', `> ${unexpectedFallbackMessage(warning)}`, ''];
+}
+
+/**
  * Generate PR summary for multiple releases
  * @param {object} masterDiff - Master diff with releases array
  * @param {object} binaryAnalysis - Cloud support data (from latest release)
@@ -198,9 +303,11 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
 
   lines.push('<!-- PR_SUMMARY_START -->');
   lines.push('');
+  lines.push(...renderPlatformFallbackWarning(masterDiff?.platformFallbackWarning));
   lines.push(...renderLostSectionWarnings(masterDiff?.lostSectionWarnings));
   lines.push(...renderStyleRegressionWarnings(masterDiff?.styleRegressionWarnings));
   lines.push(...renderDescriptionReports(masterDiff?.descriptionReports));
+  lines.push(...renderUndocumentedComponents(masterDiff?.undocumentedComponents));
   lines.push('## Redpanda Connect Documentation Update');
   lines.push('');
   lines.push(`**Multi-Release Update:** ${startVersion} → ${endVersion}`);
@@ -209,6 +316,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
   if (binaryAnalysis) {
     lines.push(`**Cloud Version:** ${binaryAnalysis.cloudVersion}`);
   }
+  lines.push(...renderPlatformSource(masterDiff?.platformSource, masterDiff?.releasePlatformSources));
 
   lines.push('');
 
@@ -237,6 +345,9 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
   }
   if (total.changedDefaults > 0) {
     lines.push(`- **${total.changedDefaults}** changed default values`);
+  }
+  if (total.documentedDefaults > 0) {
+    lines.push(`- **${total.documentedDefaults}** newly stated default values`);
   }
   if (total.newBloblangMethods > 0) {
     lines.push(`- **${total.newBloblangMethods}** new Bloblang methods`);
@@ -375,9 +486,22 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
       lines.push('| Component | Field | Old Default | New Default |');
       lines.push('|-----------|-------|-------------|-------------|');
       changedDefaults.forEach(change => {
-        const oldVal = change.oldDefault !== undefined ? `\`${JSON.stringify(change.oldDefault)}\`` : '_none_';
-        const newVal = change.newDefault !== undefined ? `\`${JSON.stringify(change.newDefault)}\`` : '_none_';
+        const oldVal = formatDefault(change.oldDefault);
+        const newVal = formatDefault(change.newDefault);
         lines.push(`| \`${change.component}\` | \`${change.field}\` | ${oldVal} | ${newVal} |`);
+      });
+      lines.push('');
+    }
+
+    // Fields that gained a stated default
+    const documentedDefaults = details.documentedDefaults || [];
+    if (documentedDefaults.length > 0) {
+      lines.push(`**Newly Stated Defaults (${documentedDefaults.length}):**`);
+      lines.push('');
+      lines.push("_These fields now state a default. They usually behaved this way already, so they are not listed as changes in What's new. Check that none of them changed behavior._");
+      lines.push('');
+      documentedDefaults.forEach(change => {
+        lines.push(`- \`${change.component}.${change.field}\`: ${formatDefault(change.newDefault)}`);
       });
       lines.push('');
     }
@@ -558,9 +682,9 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
     lines.push('**Review Changed Defaults for Breaking Changes:**');
     lines.push('');
     allChangedDefaults.forEach(change => {
-      const oldVal = change.oldDefault !== undefined ? JSON.stringify(change.oldDefault) : 'none';
-      const newVal = change.newDefault !== undefined ? JSON.stringify(change.newDefault) : 'none';
-      lines.push(`- [ ] \`${change.component}.${change.field}\`: \`${oldVal}\` → \`${newVal}\` — changed in **${change.version}**`);
+      const oldVal = formatDefault(change.oldDefault);
+      const newVal = formatDefault(change.newDefault);
+      lines.push(`- [ ] \`${change.component}.${change.field}\`: ${oldVal} → ${newVal} — changed in **${change.version}**`);
     });
     lines.push('');
   }
@@ -608,9 +732,11 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   // Header with delimiters for GitHub Action parsing
   lines.push('<!-- PR_SUMMARY_START -->');
   lines.push('');
+  lines.push(...renderPlatformFallbackWarning(diffData.platformFallbackWarning));
   lines.push(...renderLostSectionWarnings(diffData.lostSectionWarnings));
   lines.push(...renderStyleRegressionWarnings(diffData.styleRegressionWarnings));
   lines.push(...renderDescriptionReports(diffData.descriptionReports));
+  lines.push(...renderUndocumentedComponents(diffData.undocumentedComponents));
 
   // Detect if this is a master diff
   if (!isMultiVersion && diffData.releases && diffData.totalSummary) {
@@ -631,6 +757,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   if (binaryAnalysis) {
     lines.push(`**Cloud Version:** ${binaryAnalysis.cloudVersion}`);
   }
+  lines.push(...renderPlatformSource(diffData.platformSource));
 
   lines.push('');
 
@@ -715,6 +842,10 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
 
   if (stats.changedDefaults > 0) {
     lines.push(`- **${stats.changedDefaults}** default value change${stats.changedDefaults !== 1 ? 's' : ''}`);
+  }
+
+  if (stats.documentedDefaults > 0) {
+    lines.push(`- **${stats.documentedDefaults}** newly stated default value${stats.documentedDefaults !== 1 ? 's' : ''} (no behavior change expected)`);
   }
 
   lines.push('');
@@ -1233,12 +1364,23 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
       const [type, name] = component.split(':');
       lines.push(`**${type}/${name}:**`);
       changes.forEach(c => {
-        const oldStr = JSON.stringify(c.oldDefault);
-        const newStr = JSON.stringify(c.newDefault);
-        lines.push(`- \`${c.field}\`: ${oldStr} → ${newStr}`);
+        lines.push(`- \`${c.field}\`: ${formatDefault(c.oldDefault)} → ${formatDefault(c.newDefault)}`);
       });
       lines.push('');
     });
+  }
+
+  // Newly stated defaults
+  const documentedDefaults = diffData.details.documentedDefaults || [];
+  if (documentedDefaults.length > 0) {
+    lines.push('#### Newly Stated Defaults');
+    lines.push('');
+    lines.push("_These fields now state a default. They usually behaved this way already, so they are not listed as changes in What's new. Check that none of them changed behavior._");
+    lines.push('');
+    documentedDefaults.forEach(c => {
+      lines.push(`- \`${c.component}.${c.field}\`: ${formatDefault(c.newDefault)}`);
+    });
+    lines.push('');
   }
 
   // New Bloblang Methods
@@ -1409,9 +1551,15 @@ module.exports = {
   collectGeneratorReports,
   generatePRSummary,
   generateMultiVersionPRSummary,
+  overrideRequestText,
+  platformSourceText,
   printPRSummary,
   renderDescriptionReports,
+  renderPlatformFallbackWarning,
+  renderPlatformSource,
   renderLostSectionWarnings,
   renderStyleRegressionWarnings,
-  truncateToSentence
+  renderUndocumentedComponents,
+  truncateToSentence,
+  unexpectedFallbackMessage
 };

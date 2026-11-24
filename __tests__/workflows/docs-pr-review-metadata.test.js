@@ -59,6 +59,10 @@ function runCheck ({ npx, gh = GH, src } = {}) {
   return { ...r, runnerTemp, srcDir, readOut: read, state: (read('state') || '').trim(), npxLog: () => fs.readFileSync(path.join(runnerTemp, 'npx.log'), 'utf8') }
 }
 
+// The runner sets it; the merge step makes the taxonomy path relative to the
+// PR checkout under it.
+const WORKSPACE = '/home/runner/work/docs/docs'
+
 function runMerge ({ state, json, reason, verdict, findingsMd, jobResult = 'success' } = {}) {
   const runnerTemp = tmpdir()
   const dir = path.join(runnerTemp, 'metadata-check')
@@ -69,7 +73,7 @@ function runMerge ({ state, json, reason, verdict, findingsMd, jobResult = 'succ
   const files = {}
   if (verdict !== undefined) files['review-output/verdict.json'] = typeof verdict === 'string' ? verdict : JSON.stringify(verdict)
   if (findingsMd) files['review-output/findings.md'] = findingsMd
-  const r = execRun(MERGE, { env: { RUNNER_TEMP: runnerTemp, METADATA_CHECK_RESULT: jobResult }, files })
+  const r = execRun(MERGE, { env: { RUNNER_TEMP: runnerTemp, METADATA_CHECK_RESULT: jobResult, GITHUB_WORKSPACE: WORKSPACE }, files })
   const v = r.read('review-output/verdict.json')
   return { ...r, verdict: v && (() => { try { return JSON.parse(v) } catch { return v } })(), findings: r.read('review-output/findings.md') }
 }
@@ -139,8 +143,11 @@ describe('docs PR review: adding check-metadata to the review', () => {
       verdict: 'fail',
       blocking: ["page metadata: `modules/manage/pages/a.adoc:2` page-solution-use-cases value 'Data mesh' is not in the taxonomy"],
       suggestions: ['prose', "page metadata: `modules/manage/pages/a.adoc:2` page-categories value 'Iceberg' is deprecated; use 'Iceberg Topics' instead"],
+      // Deterministic: an incremental re-review recomputes these instead of
+      // carrying them over (docs-team-standards' aggregate-review.sh).
+      check_blocking: ["page metadata: `modules/manage/pages/a.adoc:2` page-solution-use-cases value 'Data mesh' is not in the taxonomy"],
     })
-    expect(r.findings).toMatch(/^# Review\n\n### Page metadata \(doc-tools check-metadata\)\n\n- error: `modules\/manage\/pages\/a\.adoc:2` page-solution-use-cases/)
+    expect(r.findings).toMatch(/^# Review\n\n### Page metadata \(doc-tools check-metadata\)\n\nTaxonomy from `unknown`\.\n\n- error: `modules\/manage\/pages\/a\.adoc:2` page-solution-use-cases/)
     expect(r.exists('review-output/check-metadata.json')).toBe(true)
   })
 
@@ -148,6 +155,9 @@ describe('docs PR review: adding check-metadata to the review', () => {
     const r = runMerge({ state: 'ran', json: result([findings[1]]), verdict: { verdict: 'pass', blocking: [], suggestions: [] } })
     expect(r.verdict.verdict).toBe('pass')
     expect(r.verdict.suggestions).toHaveLength(1)
+    // Always written, empty included: an incremental re-review then sees the
+    // check as recomputed and drops an error that has been fixed.
+    expect(r.verdict.check_blocking).toEqual([])
   })
 
   test('a model-written verdict of the wrong shape is coerced, not crashed on', () => {
@@ -157,10 +167,15 @@ describe('docs PR review: adding check-metadata to the review', () => {
     expect(r.verdict.suggestions).toEqual([expect.stringMatching(/Iceberg/)])
   })
 
-  test('without a review verdict the branch stays unavailable, and findings.md still lists the findings', () => {
+  test('without a review verdict the branch stays unavailable, and no findings.md is created', () => {
+    // A findings.md holding only these sections would read to ticket_delta
+    // as prose-review findings.
     const r = runMerge({ state: 'ran', json: result(findings) })
+    expect({ status: r.status, out: r.all }).toMatchObject({ status: 0 })
     expect(r.exists('review-output/verdict.json')).toBe(false)
-    expect(r.findings).toMatch(/### Page metadata/)
+    expect(r.findings).toBeNull()
+    const written = runMerge({ state: 'ran', json: result(findings), findingsMd: '# Review\n' })
+    expect(written.findings).toMatch(/^# Review\n\n### Page metadata/)
     const garbled = runMerge({ state: 'ran', json: result(findings), verdict: '["not an object"]' })
     expect(garbled.verdict).toEqual(['not an object'])
   })
@@ -187,6 +202,19 @@ describe('docs PR review: adding check-metadata to the review', () => {
     expect(r.findings).toContain("- error: `modules/manage/pages/a.adoc:2` page-categories value 'a \\`b\\` \\[c\\](d) \\<e\\>' is not in the taxonomy")
   })
 
+  test('an @ in a finding message cannot mention anyone', () => {
+    const r = runMerge({ state: 'ran', json: result([finding('error', "page-categories value '@redpanda-data/documentation' is not in the taxonomy")]), verdict: { verdict: 'pass', blocking: [], suggestions: [] }, findingsMd: '# Review\n' })
+    expect(r.verdict.blocking[0]).toContain('@\u200bredpanda-data/documentation')
+    expect(r.findings).toContain('@\u200bredpanda-data/documentation')
+    expect(r.findings).not.toContain("'@redpanda-data")
+  })
+
+  test('findings.md names the taxonomy, relative to the PR checkout when it is the repo copy', () => {
+    const json = { ...result(findings), taxonomy: { source: `${WORKSPACE}/.metadata-check/shared/modules/ROOT/attachments/taxonomy.yml` } }
+    const r = runMerge({ state: 'ran', json, verdict: { verdict: 'pass', blocking: [], suggestions: [] }, findingsMd: '# Review\n' })
+    expect(r.findings).toContain('Taxonomy from `shared/modules/ROOT/attachments/taxonomy.yml`.')
+  })
+
   const suggestion = (over = {}) => ({ file: 'modules/manage/pages/a.adoc', kind: 'docs', line: 1, uncategorized: true, facet: 'topic', attribute: 'page-categories', conceptId: 'tiered-storage', label: 'Tiered Storage', score: 14, reason: 'named in the title', implies: [], evidence: [], ...over })
   const withSuggestions = (findingsList, suggestions) => ({ ...result(findingsList), suggest: { minScore: { docs: 5, solution: 3 }, suggestions, needs: [], candidates: [], uncategorized: [] } })
 
@@ -201,6 +229,7 @@ describe('docs PR review: adding check-metadata to the review', () => {
     expect(r.verdict).toEqual({
       verdict: 'pass',
       blocking: [],
+      check_blocking: [],
       suggestions: [
         'prose',
         "page metadata: `modules/manage/pages/a.adoc:2` page-categories value 'Iceberg' is deprecated; use 'Iceberg Topics' instead",
@@ -225,7 +254,7 @@ describe('docs PR review: adding check-metadata to the review', () => {
 
   test('a result without suggestions (an older doc-tools) adds none', () => {
     const r = runMerge({ state: 'ran', json: result([]), verdict: { verdict: 'pass', blocking: [], suggestions: [] }, findingsMd: '# Review\n' })
-    expect(r.verdict).toEqual({ verdict: 'pass', blocking: [], suggestions: [] })
+    expect(r.verdict).toEqual({ verdict: 'pass', blocking: [], check_blocking: [], suggestions: [] })
     expect(r.findings).toBe('# Review\n')
   })
 

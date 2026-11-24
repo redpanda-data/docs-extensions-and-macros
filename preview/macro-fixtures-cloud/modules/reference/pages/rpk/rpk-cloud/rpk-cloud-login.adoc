@@ -1,0 +1,5 @@
+= rpk cloud login
+:description: Stand-in for the rpk cloud login reference page, which only Cloud publishes.
+
+A stand-in for the generated reference page, so a page in another component
+links here for `rpk cloud login`.
